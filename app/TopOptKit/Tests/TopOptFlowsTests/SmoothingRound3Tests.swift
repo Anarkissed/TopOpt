@@ -108,13 +108,19 @@ final class SmoothingRound3Tests: XCTestCase {
         XCTAssertTrue(b.isEmpty)
     }
 
-    /// DARKER TINT = MORE SMOOTHING, which is the whole of U1's readout. Both
-    /// channels move: the tint gets more opaque AND darker in value, because an
-    /// opacity difference alone disappears over a light patch of the model.
-    func testTheTintDarkensWithEachStroke() {
+    /// STRONGER TINT = MORE SMOOTHING, which is the whole of U1's readout.
+    ///
+    /// TASK 2026-08-05 (bar D4) MOVED WHICH CHANNEL CARRIES IT, by instruction.
+    /// Round 3 encoded the rung half in opacity and half in VALUE (the tint
+    /// darkened toward black). The maintainer has since specified the readout
+    /// exactly — "ORANGE, 10% OPACITY PER STROKE… strokes layer" — so opacity is
+    /// the channel and the hue and value are constant. The invariant this test
+    /// exists for is unchanged and still asserted: a further pass must always
+    /// read as more than the pass before it.
+    func testTheTintStrengthensWithEachStroke() {
         var b = brush()
         var previousAlpha: Float = 0
-        var previousValue: Float = .greatestFiniteMagnitude
+        let hue = SmoothBrushModel.paintTint
 
         for rung in 1...SmoothBrushModel.levels.count {
             b.beginStroke(); b.brush(.paint, triangles: [0]); b.endStroke()
@@ -122,10 +128,11 @@ final class SmoothingRound3Tests: XCTestCase {
             let t = b.vertexTints()[0]
             XCTAssertGreaterThan(t.w, previousAlpha,
                                  "rung \(rung) is more opaque than rung \(rung - 1)")
-            XCTAssertLessThan(t.x + t.y + t.z, previousValue,
-                              "rung \(rung) is DARKER than rung \(rung - 1)")
+            XCTAssertEqual(t.w, SmoothBrushModel.tintPerPass * Float(rung),
+                           accuracy: 1e-6, "…by exactly 10 % a pass")
+            XCTAssertEqual(SIMD3<Float>(t.x, t.y, t.z), hue,
+                           "one orange, at every rung")
             previousAlpha = t.w
-            previousValue = t.x + t.y + t.z
         }
     }
 
@@ -186,8 +193,8 @@ final class SmoothingRound3Tests: XCTestCase {
         // The three controls the task names, and nothing standing beside them.
         let tools = try XCTUnwrap(page.range(of: "private var toolsSection"))
         let section = String(page[tools.lowerBound...].prefix(1400))
-        XCTAssertTrue(section.contains("SmoothBrushTools.Mode.allCases"),
-                      "paint/erase toggle")
+        XCTAssertTrue(section.contains("ForEach(tools.availableModes)"),
+                      "paint/erase (and, when it is needed, orbit) toggle")
         XCTAssertTrue(section.contains("brushFootprint"), "the size, shown as a disc")
         XCTAssertTrue(section.contains("pencilOnlyRow"), "pencil only")
     }
@@ -221,13 +228,19 @@ final class SmoothingRound3Tests: XCTestCase {
         XCTAssertTrue(t.fingerOrbits, "one-finger drag ALWAYS orbits")
         XCTAssertTrue(t.paints(from: .pencil), "and the pencil ALWAYS paints")
 
-        // In both modes, and at every brush mode — the toggle is about the
-        // CONTACT, not about what the brush does when it lands.
-        for m in SmoothBrushTools.Mode.allCases {
+        // In every mode the page OFFERS while this is on — the toggle is about
+        // the CONTACT, not about what the brush does when it lands.
+        //
+        // TASK 2026-08-05 (bar D2): `availableModes`, not `allCases`. Orbit is
+        // not offered while Pencil only is on, and Orbit is not a contact-kind
+        // rule at all — it is the brush being put down, for both contacts. The
+        // assertion is unchanged over the states it was written about.
+        for m in t.availableModes {
             t.mode = m
             XCTAssertTrue(t.paints(from: .pencil))
             XCTAssertFalse(t.paints(from: .finger))
         }
+        XCTAssertEqual(t.availableModes, [.paint, .erase])
     }
 
     /// …AND THE GESTURE LAYER HONOURS IT. A value type that says the right thing
@@ -243,16 +256,24 @@ final class SmoothingRound3Tests: XCTestCase {
                       + "are what make the contact kind a fact rather than a guess")
         XCTAssertTrue(view.contains("view.addGestureRecognizer(pencilPan)"),
                       "and it is actually mounted")
-        XCTAssertTrue(view.contains("if paintActive, !brushRequiresPencil {"),
+        // TASK 2026-08-05 (bar D1): the two-flag branch is now ONE routing
+        // value, asked by both recognizers — the fact asserted is the same
+        // (a finger drag the brush will not take falls through to the camera),
+        // and it is asserted on the value in
+        // `SmoothingRound4Tests.testTheGateRoutesEveryOtherDragToTheCamera`.
+        XCTAssertTrue(view.contains("switch gesture.route(.finger, touches: g.numberOfTouches)"),
                       "a finger drag skips the paint branch when the brush belongs "
                       + "to the pencil, and falls through to the orbit gestures")
         XCTAssertTrue(view.contains("onBrush?(loc, .began, .pencil)"),
                       "the pencil reports itself")
 
         let ws = try codeOnly(sourceURL("WorkspacePlaceholder.swift"))
-        XCTAssertTrue(ws.contains("brushRequiresPencil: showSmoothingPage\n                                               && smoothTools.pencilOnly"),
+        XCTAssertTrue(ws.contains("brushRequiresPencil: brushGesture.requiresPencil"),
                       "and the flag is fed from the page's own toggle, only while "
                       + "that page is up — the TO page's paint gesture is untouched")
+        XCTAssertTrue(ws.contains("showSmoothingPage ? .smoothingPage(smoothTools)\n                          : .workspacePaint(active: paintActive)"),
+                      "…which is what `.workspacePaint` states: off this page the "
+                      + "finger is never withheld")
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -267,13 +288,20 @@ final class SmoothingRound3Tests: XCTestCase {
         let cluster = try XCTUnwrap(Self.declaration(named: "bottomRightCluster",
                                                      in: page))
 
-        let discard = try XCTUnwrap(cluster.range(of: "a.discard"))
-        let lattice = try XCTUnwrap(cluster.range(of: "a.sendToLattice"))
-        let recert = try XCTUnwrap(cluster.range(of: "a.recertify"))
-        XCTAssertLessThan(discard.lowerBound, recert.lowerBound,
-                          "U3: Discard is ABOVE Re-certify")
-        XCTAssertLessThan(lattice.lowerBound, recert.lowerBound,
-                          "U3: Lattice this is ABOVE Re-certify")
+        // TASK 2026-08-05 (bar D5b) MADE THE CLUSTER ONE COLUMN, so the order is
+        // a VALUE rather than a shape in the body — and U3's fact is asserted on
+        // that value here, and measured off the rendered layout in
+        // `SmoothingRound4Tests.testTheActionColumnIsOrderedByWidth`.
+        XCTAssertTrue(cluster.contains("ForEach(SmoothPageActions.columnOrder"),
+                      "the cluster is built from the one order")
+        let order = SmoothPageActions.columnOrder
+        let discard = try XCTUnwrap(order.firstIndex(of: .discard))
+        let lattice = try XCTUnwrap(order.firstIndex(of: .lattice))
+        let recert = try XCTUnwrap(order.firstIndex(of: .recertify))
+        XCTAssertLessThan(discard, recert, "U3: Discard is ABOVE Re-certify")
+        XCTAssertLessThan(lattice, recert, "U3: Lattice this is ABOVE Re-certify")
+        XCTAssertEqual(recert, order.count - 1,
+                       "D5b: and Apply & certify is at the foot of the column")
 
         XCTAssertFalse(page.contains("onKeep"),
                        "U3: 'Keep smoothing' is DELETED — they just keep smoothing "
@@ -312,9 +340,11 @@ final class SmoothingRound3Tests: XCTestCase {
         XCTAssertTrue(cluster.contains("page.receiptOpen"),
                       "the drawer is gated on its own state")
         let drawer = try XCTUnwrap(cluster.range(of: "receiptCard"))
-        let recert = try XCTUnwrap(cluster.range(of: "a.recertify"))
-        XCTAssertLessThan(drawer.lowerBound, recert.lowerBound,
-                          "U4: the drawer opens ABOVE Re-certify")
+        let buttons = try XCTUnwrap(cluster.range(of: "SmoothPageActions.columnOrder"))
+        XCTAssertLessThan(drawer.lowerBound, buttons.lowerBound,
+                          "U4: the drawer opens ABOVE the action column")
+        XCTAssertEqual(SmoothPageActions.columnOrder.last, .recertify,
+                       "…and Re-certify is the bottom of that column (D5b)")
         // It is not in the left panel any more.
         let pane = try XCTUnwrap(page.range(of: "private var paneContent"))
         XCTAssertFalse(String(page[pane.lowerBound...].prefix(400))
@@ -342,12 +372,19 @@ final class SmoothingRound3Tests: XCTestCase {
         }
         XCTAssertEqual(t.text, "hello")
 
-        // A SECOND note replaces the first — it does not stack.
+        // A SECOND note does not stack. TASK 2026-08-05 (bar D5c) changed what
+        // happens to it instead: round 3 REPLACED the visible note, which loses
+        // it; the maintainer asked for a queue, so it waits its turn. Either way
+        // exactly one is on screen — which is what this test is about — and the
+        // queue is the version that does not throw news away.
         p.post(note: "goodbye")
         guard case .transient(let t2) = try XCTUnwrap(p.topNote) else {
             return XCTFail("expected the transient note")
         }
-        XCTAssertEqual(t2.text, "goodbye")
+        XCTAssertEqual(t2.text, "hello", "still exactly one, and it is the first")
+        XCTAssertEqual(p.queuedNoteCount, 1, "the second is queued, not stacked")
+        p.dismissNote()
+        XCTAssertEqual(p.note?.text, "goodbye", "…and it gets its turn")
 
         // A failure OUTRANKS a note, and there is still exactly ONE thing —
         // which is the case round 2 got wrong: it drew the failure banner
@@ -551,7 +588,8 @@ final class SmoothingRound3Tests: XCTestCase {
         let atRest: [(String, Int)] = [
             ("topLeftColumn", 1), ("workingOnBar", 1), ("loadCaseBar", 1),
             ("topRightColumn", 1), ("panelHeader", 1), ("toolsSection", 1),
-            ("modeTab", SmoothBrushTools.Mode.allCases.count), ("sizeButton", 2),
+            ("modeTab", SmoothBrushTools.modes(pencilOnly: false).count),
+            ("sizeButton", 2),
             ("brushFootprint", 1), ("pencilOnlyRow", 1), ("receiptToggle", 1),
             ("actionButton", 3), ("entryNotice", 1),
         ]
@@ -571,9 +609,19 @@ final class SmoothingRound3Tests: XCTestCase {
                                  "U7: standing prose is \(prose) characters; "
                                  + "round 2 shipped 998 at rest and 1225 after a "
                                  + "stroke")
-        XCTAssertLessThanOrEqual(controls, 11,
+        // TASK 2026-08-05 RAISED THIS BY ONE, BY INSTRUCTION, AND SAYS SO.
+        //
+        // Bar D2 restored the Orbit tab — conditionally, so the count is 12 with
+        // "Pencil only" OFF and 11 with it ON. Round 2 had 11 at rest and 13
+        // after a stroke, so the page is still at or below where it started in
+        // both states, and a stroke still adds nothing. The ceiling is not a
+        // number to be nudged whenever something is added: it moved because the
+        // maintainer asked for a control back, and the accounting is here.
+        XCTAssertLessThanOrEqual(controls, 12,
                                  "U7: \(controls) controls at rest; round 2 had "
                                  + "11 at rest and 13 after a stroke")
+        XCTAssertEqual(SmoothBrushTools.modes(pencilOnly: true).count, 2,
+                       "…and with Pencil only ON it is 11, as round 3 shipped")
         // A page with NO text would pass the bar above and be unusable, so the
         // floor is asserted too.
         XCTAssertGreaterThan(prose, 100)
@@ -607,13 +655,19 @@ final class SmoothingRound3Tests: XCTestCase {
     /// assumed a ONE-ROW action cluster, and U3 made this page's cluster two rows
     /// — so in portrait the brush panel ran underneath Discard and Lattice this.
     /// The clearance now takes the row count, and the page states its own.
-    func testThePortraitPanelClearsTheTwoRowActionCluster() {
-        XCTAssertEqual(SmoothingPage.actionRows, 2,
-                       "Discard + Lattice this, then Receipt + Re-certify")
+    /// TASK 2026-08-05 (bar D5b): the cluster is ONE COLUMN of four now, so the
+    /// row count this test exists to protect is four. The lesson is unchanged and
+    /// is exactly why the constant was made a parameter: a clearance that assumes
+    /// a row count stops being one the moment a page rearranges its buttons.
+    func testThePortraitPanelClearsTheActionCluster() {
+        XCTAssertEqual(SmoothingPage.actionRows, 4,
+                       "Receipt, Discard, Lattice this, Apply & certify — one column")
 
         let canvas = CGSize(width: 1024, height: 1366)
         let clearance = PageChrome.panelBottomClearance(
             actionRows: SmoothingPage.actionRows)
+        // The panel HUGS its content now (bar D3), so 0.46 × the canvas is an
+        // over-estimate of its height and this stays the conservative case.
         let panelHeight = canvas.height * 0.46
         let panel = CGRect(x: DS.Space.l,
                            y: canvas.height - clearance - panelHeight,

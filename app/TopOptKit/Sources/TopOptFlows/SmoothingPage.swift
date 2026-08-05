@@ -81,6 +81,44 @@ public struct SmoothingPage: View {
     /// TEST SEAM for the offscreen evidence captures (the LatticePage convention):
     /// ImageRenderer does not render platform-backed containers.
     let staticRender: Bool
+    /// TEST SEAM reporting EVERY PIECE OF CHROME'S OWN LAID-OUT RECT, by name, in
+    /// this page's coordinate space (task 2026-08-05, bars R7/R8).
+    ///
+    /// WHY A SEAM RATHER THAN COMPUTED RECTS. Round 3's layout assertions all
+    /// build rectangles out of the chrome tokens and check they cannot intersect
+    /// — and the panel passed every one of them while covering the identity bars
+    /// on the maintainer's screen, because the rect the test built was not the
+    /// rect SwiftUI laid out: the panel's background stretched to the ceiling it
+    /// was handed instead of hugging its content. A test that computes the
+    /// geometry it is checking cannot see that class of defect, and this page has
+    /// now shipped three rounds of overlaps behind exactly that kind of test.
+    ///
+    /// This reports what the layout system actually produced, so R8's "no two
+    /// pieces of chrome may overlap" is measured on the shipping view rather than
+    /// on a model of it. nil in the app: no closure, no work.
+    let onChromeFrame: ((String, CGRect) -> Void)?
+
+    /// The page's own coordinate space, so the seam above reports rects in PAGE
+    /// points rather than screen points.
+    static let pageSpace = "SmoothingPage"
+
+    /// The names the seam reports, so tests and view code cannot drift apart.
+    public enum Chrome {
+        /// The identity stack is probed ROW BY ROW, not as one box: its rows are
+        /// different widths, so a union rect reports an overlap the user cannot
+        /// see (the long load-case row reaching under the stage tabs two rows
+        /// above it) and hides the ones they can.
+        public static let titleBar = "titleBar"
+        public static let workingOn = "workingOn"
+        public static let loadCase = "loadCase"
+        public static let stageTabs = "stageTabs"
+        public static let note = "note"
+        public static let panel = "panel"
+        public static let receiptDrawer = "receiptDrawer"
+        public static let entryNotice = "entryNotice"
+        /// One per action button, suffixed with its label.
+        public static func action(_ label: String) -> String { "action:" + label }
+    }
 
     public init(project: ProjectModel, page: SmoothingPageModel,
                 brush: Binding<SmoothBrushModel>,
@@ -90,7 +128,8 @@ public struct SmoothingPage: View {
                 onDiscard: @escaping () -> Void,
                 onSendToLattice: @escaping () -> Void,
                 onClose: @escaping () -> Void,
-                staticRender: Bool = false) {
+                staticRender: Bool = false,
+                onChromeFrame: ((String, CGRect) -> Void)? = nil) {
         self.project = project
         self.page = page
         self._brush = brush
@@ -101,6 +140,23 @@ public struct SmoothingPage: View {
         self.onSendToLattice = onSendToLattice
         self.onClose = onClose
         self.staticRender = staticRender
+        self.onChromeFrame = onChromeFrame
+    }
+
+    /// Report this view's laid-out rect under `name` (the seam above).
+    func chromeProbe(_ name: String) -> some ViewModifier {
+        ChromeProbe(name: name, report: onChromeFrame)
+    }
+
+    private struct ChromeProbe: ViewModifier {
+        let name: String
+        let report: ((String, CGRect) -> Void)?
+        func body(content: Content) -> some View {
+            content.background(GeometryReader { proxy -> Color in
+                report?(name, proxy.frame(in: .named(SmoothingPage.pageSpace)))
+                return Color.clear
+            })
+        }
     }
 
     private var context: SmoothVariantContext { page.context }
@@ -143,9 +199,29 @@ public struct SmoothingPage: View {
                         .padding(.bottom, PageChrome.panelBottomClearance(
                             actionRows: Self.actionRows))
                 } else if !portrait {
-                    panelView(maxHeight: geo.size.height - 200)
+                    // CENTRED ON THE LEFT, INSIDE THE BAND — AND NOTHING MORE
+                    // (bar D3, task 2026-08-05).
+                    //
+                    // Two defects lived in the three lines this replaces. The
+                    // panel was handed `height − 200` as a ceiling and its
+                    // ScrollView took every point of it, so four controls drew as
+                    // a ~700 pt slab; and the slab was then centred in the FULL
+                    // height, which put its top edge above the identity bars and
+                    // covered the run identity — the thing that says WHICH
+                    // variant is being painted.
+                    //
+                    // Now: the panel hugs its content (`panelView`), and it is
+                    // centred inside the band BELOW the identity rows and ABOVE
+                    // the bottom edge. `PageChrome.sidePanelBand` is that band,
+                    // derived from the same tokens the rows are built from, and
+                    // the ceiling is the band — so even a panel that outgrew the
+                    // band would scroll inside it instead of climbing out.
+                    panelView(maxHeight: PageChrome.sidePanelBand(
+                        canvasHeight: geo.size.height))
                         .frame(width: PageChrome.panelWidth)
                         .frame(maxHeight: .infinity, alignment: .center)
+                        .padding(.top, PageChrome.noteTop)
+                        .padding(.bottom, PageChrome.edge)
                         .padding(.leading, PageChrome.edge)
                 }
                 bottomRightCluster(
@@ -156,6 +232,7 @@ public struct SmoothingPage: View {
                 if let why = context.unavailable { gateOverlay(why) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .coordinateSpace(name: Self.pageSpace)
         }
     }
 
@@ -177,8 +254,9 @@ public struct SmoothingPage: View {
                 .background(Capsule().fill(DS.Surface.bar.color)
                     .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             }
-            workingOnBar
-            loadCaseBar
+            .modifier(chromeProbe(Chrome.titleBar))
+            workingOnBar.modifier(chromeProbe(Chrome.workingOn))
+            loadCaseBar.modifier(chromeProbe(Chrome.loadCase))
         }
         .padding(.leading, PageChrome.edge).padding(.top, PageChrome.topInset)
     }
@@ -276,16 +354,18 @@ public struct SmoothingPage: View {
                 .fill(DS.Surface.panel.color)
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
                     .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
-            // BAR C1: the toggle must never offer a comparison it cannot make.
-            // The model owns the sentence, because whether the two sides differ is
-            // a fact about the preview, not about the layout.
-            if let note = page.smoothedSideNote {
-                Text(note)
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 236, alignment: .trailing)
-            }
+            .modifier(chromeProbe(Chrome.stageTabs))
+            // BAR D5c (task 2026-08-05) TOOK THE SENTENCE OUT OF THIS COLUMN.
+            //
+            // Bar C1's fact — what the Smoothed side is actually showing — is
+            // unchanged and still stated; what changed is WHERE. A four-line
+            // paragraph pinned under the tabs is a NOTE that is not at the top
+            // centre, and on the maintainer's own screenshots it sat across the
+            // top-centre note while a third line ran under the panel. His rule is
+            // that notes live in exactly one place and appear one at a time, so
+            // this one goes through `SmoothingPageModel.noteQueue` like every
+            // other note on the page (`syncSideNote`), and this column is the
+            // two stage tabs and nothing else.
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.trailing, PageChrome.edge + PageChrome.gizmoClearance)
@@ -329,29 +409,48 @@ public struct SmoothingPage: View {
     /// the clearance assertion has something to check against.
     static let noteMaxWidth: CGFloat = 620
 
-    /// How many rows the bottom-right action cluster occupies (bar U3: Discard +
-    /// Lattice this, then Receipt + Re-certify). Named so the panel's clearance
-    /// is derived from it rather than assuming one.
-    static let actionRows = 2
+    /// How many rows the bottom-right action cluster occupies. ONE COLUMN of four
+    /// (bar D5b, task 2026-08-05): Receipt, Discard, Lattice this, then Apply &
+    /// certify at the bottom in every state. Named so the panel's clearance is
+    /// derived from it rather than assuming a row count.
+    static var actionRows: Int { SmoothPageActions.columnOrder.count }
 
     @ViewBuilder private func topCentreColumn(width: CGFloat) -> some View {
         if let n = page.topNote {
             noteView(n, width: PageChrome.noteWidth(for: width,
                                                     cap: Self.noteMaxWidth))
+                .modifier(chromeProbe(Chrome.note))
                 .frame(maxWidth: .infinity, alignment: .top)
                 .padding(.top, PageChrome.noteTop)
                 // The 60 s ceiling, ticked while the page is up. `tick` is a pure
-                // clock read, so tests drive it directly.
+                // clock read, so tests drive it directly. A note that expires
+                // hands the band to the next one QUEUED behind it (bar D5c).
                 .onReceive(Timer.publish(every: 1, on: .main, in: .common)
                     .autoconnect()) { _ in page.tick() }
         }
+    }
+
+    /// THE DISMISS CONTROL (bar D5c): every note carries an ✕, whatever kind it
+    /// is. Round 3 gave only the transient note a tap-to-dismiss, which is both
+    /// invisible and absent from the two kinds a user most wants gone.
+    private func noteCloseButton() -> some View {
+        Button { page.dismissNote() } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Dismiss this message")
     }
 
     @ViewBuilder private func noteView(_ n: SmoothingPageModel.TopNote,
                                        width: CGFloat) -> some View {
         switch n {
         case .failure(let f):
-            failureBanner(f).frame(maxWidth: width)
+            HStack(spacing: 0) { failureBanner(f); noteCloseButton() }
+                .frame(maxWidth: width)
         case .transient(let t):
             noteBanner(t.text, warn: false, width: width)
                 .onTapGesture { page.dismissNote() }
@@ -361,6 +460,11 @@ public struct SmoothingPage: View {
                 Text(s).dsStyle(DS.TypeScale.callout)
                     .foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(2).multilineTextAlignment(.center)
+                // NO ✕ HERE, and that is deliberate (bar D5c). This one is a
+                // LIVE STATUS, not a note: the work is still running, and a
+                // dismiss control that cannot stop it — or that hides the fact
+                // that it is running — is worse than none. It goes when the work
+                // does, which is the only honest moment.
             }
             .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
             .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
@@ -374,9 +478,12 @@ public struct SmoothingPage: View {
 
     private func noteBanner(_ text: String, warn: Bool,
                             width: CGFloat) -> some View {
-        Text(text).dsStyle(DS.TypeScale.callout)
-            .foregroundStyle(DS.Color.textSecondary.color)
-            .lineLimit(3).multilineTextAlignment(.center)
+        HStack(spacing: DS.Space.s) {
+            Text(text).dsStyle(DS.TypeScale.callout)
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .lineLimit(3).multilineTextAlignment(.center)
+            noteCloseButton()
+        }
             .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
             .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
                 .fill(DS.Surface.sheet.color)
@@ -429,7 +536,15 @@ public struct SmoothingPage: View {
                     VStack(spacing: DS.Space.s) { paneContent }
                         .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.m)
                 }
+                // `maxHeight` IS A CEILING, NOT A HEIGHT (bar D3). A ScrollView
+                // is greedy: handed a 634 pt ceiling it takes 634 pt, which is
+                // how five controls came to draw as a full-height slab. The
+                // `fixedSize` makes it report its CONTENT's height instead, and
+                // the frame above then clamps that to the ceiling — so the panel
+                // is as short as its contents and still scrolls if they ever
+                // outgrow the band. Measured: 694 pt → 380 pt at 1194 × 834.
                 .frame(maxHeight: max(maxHeight, 1))
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity)
@@ -438,6 +553,7 @@ public struct SmoothingPage: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+        .modifier(chromeProbe(Chrome.panel))
     }
 
     private var panelHeader: some View {
@@ -473,8 +589,14 @@ public struct SmoothingPage: View {
 
     private var toolsSection: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
+            // PAINT / ERASE / ORBIT — AND ORBIT ONLY WHEN IT IS NEEDED (bar D2,
+            // task 2026-08-05). With "Pencil only" OFF the brush claims the
+            // one-finger drag, so a mode that releases it is the only way to turn
+            // the part around; with it ON a finger already always orbits, so a
+            // third tab would be a control that does nothing new. The tools value
+            // decides — the view just renders what it offers.
             HStack(spacing: 0) {
-                ForEach(SmoothBrushTools.Mode.allCases) { m in
+                ForEach(tools.availableModes) { m in
                     modeTab(m)
                 }
             }
@@ -520,7 +642,13 @@ public struct SmoothingPage: View {
                 .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
                 .foregroundStyle(DS.Color.textPrimary.color)
         }
-        .frame(height: CGFloat(SmoothBrushTools.maxRadius) * 2)
+        // THE ROW IS THE SIZE OF THE DISC, not of the biggest disc there could
+        // be (bar D3: "as short as possible"). Reserving the maximum footprint
+        // cost 76 pt of empty panel at the default radius — a quarter of what
+        // the whole panel should be — to avoid a 6 pt shift when the stepper is
+        // tapped. The +/− buttons are centred in this row, so they do not move
+        // when it grows; only the two rows below it shift, by half a step.
+        .frame(height: CGFloat(tools.radiusPoints) * 2)
         .frame(maxWidth: .infinity)
         .accessibilityLabel("Brush size \(Int(tools.radiusPoints)) points")
     }
@@ -529,7 +657,7 @@ public struct SmoothingPage: View {
     /// pencil always paints — so turning the part around never costs a mode
     /// switch, which is what round 2's Orbit tab made it cost.
     private var pencilOnlyRow: some View {
-        Button { tools.pencilOnly.toggle() } label: {
+        Button { tools.setPencilOnly(!tools.pencilOnly) } label: {
             HStack(spacing: DS.Space.sm) {
                 Image(systemName: tools.pencilOnly
                       ? "checkmark.square.fill" : "square")
@@ -539,9 +667,10 @@ public struct SmoothingPage: View {
                 Text("Pencil only").dsStyle(DS.TypeScale.callout)
                     .foregroundStyle(DS.Color.textPrimary.color)
                 Spacer()
-                Image(systemName: "hand.draw")
-                    .font(.system(size: 13, weight: .semibold))
+                Text(pencilOnlyCaption)
+                    .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(DS.Color.textQuaternary.color)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
             .padding(.horizontal, DS.Space.m)
             .frame(height: PageChrome.compactButton)
@@ -554,6 +683,16 @@ public struct SmoothingPage: View {
         .accessibilityLabel("Pencil only")
         .accessibilityValue(tools.pencilOnly ? "on" : "off")
         .accessibilityHint("One-finger drag orbits; the pencil paints")
+    }
+
+    /// WHAT THE PENCIL-ONLY ROW MEANS, IN ONE LINE (bar D1b). The maintainer
+    /// checked a box called "Pencil only" and everything stopped painting,
+    /// including the pencil, with nothing on screen saying why. The gate defect
+    /// is fixed; this is the other half — the control now states which contact it
+    /// is withholding, at the control, before a drag is tried.
+    private var pencilOnlyCaption: String {
+        tools.pencilOnly ? "the pencil paints · a finger orbits"
+                         : "finger or pencil paints"
     }
 
     private func modeTab(_ m: SmoothBrushTools.Mode) -> some View {
@@ -569,7 +708,12 @@ public struct SmoothingPage: View {
                 .fill(on ? DS.Color.fillSelected.color : Color.clear))
         }
         .buttonStyle(.plain)
-        .disabled(!brush.canPaint)
+        // ORBIT IS NEVER GATED ON THE FREEZE MASK. The other two tabs are: until
+        // core has said which surfaces are protected the brush must not paint at
+        // all. Orbit does not paint, so disabling it while the mask is in flight
+        // would take away the one thing a user CAN do while waiting — turn the
+        // part around and look at it.
+        .disabled(!brush.canPaint && m != .orbit)
         .accessibilityLabel(m.label)
     }
 
@@ -684,7 +828,6 @@ public struct SmoothingPage: View {
     // rather than over the model or the brush panel.
 
     private func bottomRightCluster(maxDrawerHeight: CGFloat) -> some View {
-        let a = actions
         return VStack(alignment: .trailing, spacing: PageChrome.gap) {
             if page.receiptOpen, let r = page.receipt ?? page.staleReceipt {
                 // CAPPED AND SCROLLABLE. The receipt grows with its footnotes,
@@ -702,18 +845,37 @@ public struct SmoothingPage: View {
                     }
                 }
                 .frame(width: PageChrome.receiptDrawerWidth)
+                .modifier(chromeProbe(Chrome.receiptDrawer))
             }
-            HStack(spacing: PageChrome.gap) {
-                actionButton(a.discard, action: onDiscard)
-                actionButton(a.sendToLattice, action: onSendToLattice)
-            }
-            HStack(spacing: PageChrome.gap) {
-                receiptToggle
-                actionButton(a.recertify, action: onRecertify)
+            // ONE COLUMN, NARROWEST AT THE TOP, APPLY & CERTIFY ALWAYS LAST
+            // (bar D5b, task 2026-08-05).
+            //
+            // The order is a CONSTANT (`SmoothPageActions.columnOrder`), not a
+            // sort of the current labels: every one of these buttons is as wide
+            // as its own caption, and the captions change with the page's state,
+            // so a sort would re-order the column under the user's thumb the
+            // moment a certification finished. The constant was measured once —
+            // `SmoothingRound4Tests.testTheActionColumnIsOrderedByWidth` pins it
+            // against the rendered widths — and Apply & certify is pinned last
+            // whatever it measures, because it is the button the whole page
+            // exists to press.
+            ForEach(SmoothPageActions.columnOrder, id: \.self) { kind in
+                actionSlot(kind)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, PageChrome.edge).padding(.bottom, PageChrome.edge)
+    }
+
+    /// One slot of the action column — the button `kind` names, in the one order
+    /// `SmoothPageActions.columnOrder` states.
+    @ViewBuilder private func actionSlot(_ kind: SmoothPageActions.Kind) -> some View {
+        switch kind {
+        case .receipt: receiptToggle
+        case .discard: actionButton(actions.discard, action: onDiscard)
+        case .lattice: actionButton(actions.sendToLattice, action: onSendToLattice)
+        case .recertify: actionButton(actions.recertify, action: onRecertify)
+        }
     }
 
     /// The drawer's handle. Disabled with a reason when there is no receipt to
@@ -744,6 +906,7 @@ public struct SmoothingPage: View {
         .disabled(!has)
         .accessibilityLabel("Receipt")
         .accessibilityValue(page.receiptOpen ? "open" : "closed")
+        .modifier(chromeProbe(Chrome.action("Receipt")))
     }
 
     /// THE ONE STANDING NOTICE (bar U6). Shown on entry, dismissed with OK, and
@@ -775,6 +938,7 @@ public struct SmoothingPage: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+        .modifier(chromeProbe(Chrome.entryNotice))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -803,6 +967,7 @@ public struct SmoothingPage: View {
         .disabled(!a.enabled)
         .accessibilityLabel(a.label)
         .accessibilityHint(a.sub)
+        .modifier(chromeProbe(Chrome.action(a.label)))
     }
 
     // MARK: the entry gate — states WHY, never a mute disabled button

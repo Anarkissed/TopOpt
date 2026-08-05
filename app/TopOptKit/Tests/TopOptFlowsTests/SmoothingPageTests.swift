@@ -210,24 +210,29 @@ final class SmoothingPageTests: XCTestCase {
         XCTAssertEqual(tints[0], .zero, "an unpainted free vertex is clear")
     }
 
-    func testPaintedRegionsTintByTheirOwnStrengthAndFrozenStillWins() {
+    /// TASK 2026-08-05 (bar D4) RE-POINTED THIS AT THE MAINTAINER'S OWN SPEC.
+    ///
+    /// Round 1 tinted by the REGION'S STRENGTH, including a floor so a
+    /// strength-0 region still read as painted — a state that stopped existing
+    /// when round 3 deleted the per-region slider (there is no way to set a
+    /// region to 0 any more; a stroke IS a rung). His instruction is now
+    /// explicit: orange, +10 % per pass, layering. So the assertion is that the
+    /// tint tracks the PASSES, and the frozen half — the part this test shares
+    /// with the freeze guarantee — is unchanged.
+    func testPaintedAreasTintByTheirPassCountAndFrozenStillWins() {
         var b = brush(frozen: [false, false, false, true])
-        let soft = b.addRegion(strength: 0.0)
-        b.paint(.add, triangles: [0], into: soft)
-        var tints = b.vertexTints()
-        XCTAssertGreaterThan(tints[0].w, 0,
-                             "a strength-0 region is still visibly painted — "
-                             + "'I brushed here and turned it off' is a visible state")
+        b.beginStroke(); b.brush(.paint, triangles: [0]); b.endStroke()
+        let first = b.vertexTints()
+        XCTAssertEqual(first[0].w, 0.10, accuracy: 1e-6,
+                       "one pass = 10 % orange, visible immediately")
 
-        b.setStrength(soft, 1.0)
-        let strong = b.vertexTints()
-        XCTAssertGreaterThan(strong[0].w, tints[0].w,
-                             "opacity rises with the region's strength")
+        b.beginStroke(); b.brush(.paint, triangles: [0]); b.endStroke()
+        XCTAssertGreaterThan(b.vertexTints()[0].w, first[0].w,
+                             "opacity rises with every pass over the same area")
 
         // Triangle 1 touches the frozen vertex 3; the frozen tint wins there.
-        b.paint(.add, triangles: [1], into: soft)
-        tints = b.vertexTints()
-        XCTAssertEqual(tints[3].w, 0.34, accuracy: 1e-6,
+        b.beginStroke(); b.brush(.paint, triangles: [1]); b.endStroke()
+        XCTAssertEqual(b.vertexTints()[3].w, 0.34, accuracy: 1e-6,
                        "frozen wins over a stroke that touched it")
     }
 

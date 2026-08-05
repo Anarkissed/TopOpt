@@ -415,10 +415,19 @@ final class SmoothingPageRound2Tests: XCTestCase {
     /// The page's own brush must not depend on the chrome that is now hidden.
     func testTheSmoothingPageOwnsItsBrushGestureRatherThanBorrowingIt() throws {
         let ws = try codeOnly(sourceURL("WorkspacePlaceholder.swift"))
+        // TASK 2026-08-05, BAR D1: this used to pin the expression
+        // `showSmoothingPage ? smoothTools.paints : paintActive` — and that
+        // expression WAS the defect. `paints` answered "does a FINGER paint?",
+        // so checking "Pencil only" disarmed the whole gesture and the pencil
+        // stopped painting too. The fact this test exists to protect is
+        // unchanged (the page's own tools arm the gesture, never the hidden TO
+        // toggle); what it pins is now the value that cannot be misread.
         XCTAssertTrue(
-            ws.contains("showSmoothingPage ? smoothTools.paints : paintActive"),
+            ws.contains("showSmoothingPage ? .smoothingPage(smoothTools)"),
             "the page's own tools arm the gesture — the TO page's Paint toggle is "
             + "hidden, so depending on it would leave the brush dead")
+        XCTAssertFalse(ws.contains("smoothTools.paints "),
+                       "and no site reads a finger-only property as the master gate")
         // Anchor on `handleBrush` itself — `if showSmoothingPage {` appears in
         // several routers, and the first one is not this branch.
         let fn = try XCTUnwrap(ws.range(of: "private func handleBrush"))
@@ -437,8 +446,10 @@ final class SmoothingPageRound2Tests: XCTestCase {
         // is now on the mode itself — same fact, one fewer translation.
         XCTAssertTrue(branch.contains("smoothTools.mode"),
                       "the paint/erase mode comes from the page's tools")
-        XCTAssertTrue(branch.contains("smoothTools.paints(from: input)"),
-                      "and so does whether this contact paints at all (bar U2)")
+        XCTAssertTrue(branch.contains("brushGesture.admits(input)"),
+                      "and so does whether this contact paints at all (bar U2) — "
+                      + "through the SAME gate the recognizer routes on (bar D1), "
+                      + "so the page and the viewer cannot disagree")
         for borrowed in ["brushRadiusPoints", "paintErasing"] {
             XCTAssertFalse(branch.contains(borrowed),
                            "the smoothing branch still reads \(borrowed) from the "
@@ -486,25 +497,27 @@ final class SmoothingPageRound2Tests: XCTestCase {
     func testBrushToolsAreAValueWithTheRulesTheGestureObeys() {
         var t = SmoothBrushTools()
         XCTAssertEqual(t.mode, .paint)
-        XCTAssertTrue(t.paints); XCTAssertFalse(t.erases)
+        XCTAssertTrue(t.fingerPaints); XCTAssertFalse(t.erases)
 
         t.mode = .erase
-        XCTAssertTrue(t.paints, "erasing is still a painting drag")
+        XCTAssertTrue(t.fingerPaints, "erasing is still a painting drag")
         XCTAssertTrue(t.erases)
 
         // ROUND 3 (task 2026-08-04, bar U2) MOVED THIS ASSERTION, and did not
         // drop it. Round 2's invariant was "the page always has a way to orbit
         // with one finger, or the brush owns a gesture the user cannot get back",
-        // and `.orbit` was the mode that provided it. The maintainer's note is
-        // that reaching for a mode to turn the part around is the wrong shape —
-        // "one-finger drag always ORBITS and the pencil always PAINTS" — so
-        // `pencilOnly` provides it now.
+        // and `.orbit` was the mode that provided it.
         //
-        // The invariant is unchanged and the coverage is WIDER: it used to be
-        // checked for one input kind, and is now checked for both.
+        // TASK 2026-08-05 (bar D2) AMENDS IT AGAIN, and again does not drop it.
+        // Round 3 read the maintainer's note as an either/or and deleted Orbit;
+        // he has since stated the rule precisely, and it is a conditional. The
+        // invariant — a one-finger drag ALWAYS has some way to turn the part
+        // around — now holds through two paths, and both are asserted here.
+        //
+        // PATH 1: `pencilOnly` ON. The finger falls through to the camera.
         t.mode = .paint
         t.pencilOnly = true
-        XCTAssertFalse(t.paints,
+        XCTAssertFalse(t.fingerPaints,
                        "pencilOnly releases the one-finger drag — without it the "
                        + "page would have no single-finger orbit at all")
         XCTAssertFalse(t.paints(from: .finger))
@@ -512,11 +525,24 @@ final class SmoothingPageRound2Tests: XCTestCase {
         XCTAssertTrue(t.paints(from: .pencil),
                       "and the pencil still paints — the toggle withholds the "
                       + "FINGER, never the pencil")
+        XCTAssertTrue(t.armed,
+                      "AND THE BRUSH IS STILL ARMED. This is the D1 defect as an "
+                      + "assertion: 'a finger does not paint' must never be read "
+                      + "as 'the brush is off', or the pencil dies with it")
 
-        t.pencilOnly = false
+        // PATH 2: `pencilOnly` OFF, Orbit mode. The mode releases the drag.
+        t.setPencilOnly(false)
         XCTAssertTrue(t.paints(from: .finger), "round 2's behaviour, unchanged")
         XCTAssertTrue(t.paints(from: .pencil))
         XCTAssertFalse(t.fingerOrbits)
+        t.mode = .orbit
+        XCTAssertTrue(t.fingerOrbits,
+                      "with the finger claimed by the brush, Orbit is the only "
+                      + "way to turn the part around — bar D2")
+        XCTAssertFalse(t.armed, "a parked brush claims no drag at all")
+        XCTAssertFalse(t.paints(from: .pencil),
+                       "including the pencil's: Orbit is the brush being put "
+                       + "down, not a contact-kind filter")
 
         // The size clamps at both ends, and the bounds are the TO drawer's own.
         t = SmoothBrushTools(radiusPoints: 999)
@@ -538,8 +564,15 @@ final class SmoothingPageRound2Tests: XCTestCase {
         let page = try codeOnly(sourceURL("SmoothingPage.swift"))
         XCTAssertTrue(page.contains("private var toolsSection"),
                       "the brush's tools are a section of the page's own panel")
-        XCTAssertTrue(page.contains("SmoothBrushTools.Mode.allCases"),
-                      "every mode is offered, so none is unreachable")
+        // TASK 2026-08-05, BAR D2: the modes on offer are CONDITIONAL now — Orbit
+        // only while "Pencil only" is off, because that is the only state in
+        // which the brush claims the finger. "None is unreachable" is unchanged
+        // and is asserted on the value that decides it
+        // (`SmoothingRound4Tests.testOrbitIsOfferedOnlyWhilePencilOnlyIsOff`);
+        // what the page must do is render whatever that value offers, rather
+        // than a list of its own.
+        XCTAssertTrue(page.contains("ForEach(tools.availableModes)"),
+                      "every mode the tools offer is drawn, so none is unreachable")
         XCTAssertTrue(page.contains("tools.grow()") && page.contains("tools.shrink()"),
                       "the disc size is adjustable on the page")
         XCTAssertTrue(page.contains("brush.clearStrokes()"),

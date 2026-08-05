@@ -1,0 +1,8 @@
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingRound4Tests.swift:93: error: -[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragPaintsWhilePencilOnlyIsOn] : XCTAssertTrue failed - D1: the brush is ARMED on the smoothing page. This is the assertion the shipped code failed: `armed` was fed from a property answering 'does a FINGER paint?', so checking 'Pencil only' turned the whole gesture off
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingRound4Tests.swift:101: error: -[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragPaintsWhilePencilOnlyIsOn] : XCTAssertEqual failed: ("orbit") is not equal to ("paint") - D1: the pencil's own recognizer paints
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingRound4Tests.swift:105: error: -[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragPaintsWhilePencilOnlyIsOn] : XCTAssertTrue failed
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragPaintsWhilePencilOnlyIsOn]' failed (0.248 seconds).
+Test Suite 'SmoothingRound4Tests' failed at 2026-08-05 11:46:42.507.
+Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-05 11:46:42.507.
+Test Suite 'Selected tests' failed at 2026-08-05 11:46:42.507.
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
