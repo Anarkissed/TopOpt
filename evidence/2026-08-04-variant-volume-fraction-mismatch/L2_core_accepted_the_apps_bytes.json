@@ -1,0 +1,26 @@
+{
+  "forecast": "what a lattice run on THIS variant would produce, computed before the run from the stored design and this job's lattice block. No FEA ran.",
+  "variant_volume_fraction": 1.1,
+  "topology": "octet",
+  "cell_mode": "uniform",
+  "cell_size_mm": 8,
+  "uniform_note": "this job carries NO \"grading\" block, so the run applies no grading law: no cells-per-member floor, no printability floor, one declared strut radius everywhere. The counts below come from the run's OWN boundary and certification-mask predicates, not from the grading law.",
+  "strut_radius_mm": 0.8,
+  "strut_diameter_mm": 1.6,
+  "region_voxels": 50300,
+  "would_lattice_voxels": 50300,
+  "would_stay_solid_voxels": 0,
+  "latticed_fraction_of_region": 1,
+  "would_stay_solid_by_reason": {
+    "cell_does_not_overlap_the_region": 0,
+    "note": "on the uniform path the ONLY predicate is whether a voxel's owning lattice cell overlaps the allowed region; there is no member-width test"
+  },
+  "include_regions": 0,
+  "exclude_regions": 0,
+  "strut_below_min_extrudable": false,
+  "boundary": "diagrid",
+  "boundary_can_emit": true,
+  "counterfactuals": [],
+  "counterfactual_note": "none are offered on the uniform path: it has no grading law to re-run, and the only knobs are the cell size and the strut radius the job already states.",
+  "demand_field": "none — a uniform lattice has no demand field. Every emitted strut has the declared radius."
+}

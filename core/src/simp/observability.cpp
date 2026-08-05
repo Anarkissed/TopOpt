@@ -939,6 +939,8 @@ std::string run_info_json(const RunInfo& info) {
     le += ", \"region_voxels\": " + fmt_ll(info.lattice_export_region_voxels);
     le += ", \"triangles\": " + fmt_ll(info.lattice_export_triangles);
     le += ", \"variant_count\": " + fmt_i(info.lattice_export_variant_count);
+    le += ", \"ungradeable_variants\": " +
+          fmt_i(info.lattice_export_ungradeable_variants);
     le += ", \"emit_stl\": " + bool_json(info.lattice_export_emit_stl);
     le += ", \"emit_3mf\": " + bool_json(info.lattice_export_emit_3mf);
     le += ", \"interpenetrating_soup\": " +

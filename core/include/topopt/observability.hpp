@@ -648,6 +648,11 @@ struct RunInfo {
   long long lattice_export_region_voxels = 0;   // summed solid voxels latticed
   long long lattice_export_triangles = 0;       // summed lattice triangles
   int lattice_export_variant_count = 0;         // accepted variants latticed
+  // Rungs the grading law could lattice NOTHING of, so no lattice file was
+  // written for them and none of their (all-zero) figures entered the aggregates
+  // above (task 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3). Carried
+  // so "3 of 4 rungs latticed" is a stated fact rather than a missing file.
+  int lattice_export_ungradeable_variants = 0;
   bool lattice_export_emit_stl = false;
   bool lattice_export_emit_3mf = false;
   bool lattice_export_interpenetrating_soup = true;

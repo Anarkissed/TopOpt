@@ -256,11 +256,11 @@ final class LatticeForecastTests: XCTestCase {
                                   generateRelativeDensity: 0.3,
                                   minRelativeDensity: 0.1, maxRelativeDensity: 0.5)
         let run = try RelatticeJobBuilder.build(original: original,
-                                                variantVolumeFraction: 0.5,
+                                                designFingerprint: 0x5EED_0050, achievedVolumeFraction: 0.4977,
                                                 designFileName: "design.bin",
                                                 lattice: spec)
         let fc = try RelatticeJobBuilder.build(original: original,
-                                               variantVolumeFraction: 0.5,
+                                               designFingerprint: 0x5EED_0050, achievedVolumeFraction: 0.4977,
                                                designFileName: "design.bin",
                                                lattice: spec, forecastOnly: true)
         XCTAssertNotEqual(run, fc)

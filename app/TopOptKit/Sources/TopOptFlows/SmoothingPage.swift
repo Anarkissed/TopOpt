@@ -227,8 +227,11 @@ public struct SmoothingPage: View {
                 .fill(DS.Surface.panel.color)
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
                     .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
-            if page.receipt == nil, page.kept == nil {
-                Text("Nothing smoothed yet — both show the variant as the run made it.")
+            // BAR C1: the toggle must never offer a comparison it cannot make.
+            // The model owns the sentence, because whether the two sides differ is
+            // a fact about the preview, not about the layout.
+            if let note = page.smoothedSideNote {
+                Text(note)
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .multilineTextAlignment(.trailing)

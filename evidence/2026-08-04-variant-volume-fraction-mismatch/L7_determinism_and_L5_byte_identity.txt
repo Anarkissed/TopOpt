@@ -1,0 +1,41 @@
+L7 — DETERMINISM, on the deliverable itself
+===========================================
+The WallMount lattice job of handoff §5, run twice from scratch.
+  run 1 wall: 1233.29 s
+  run 2 wall: 1456.57 s     (a busier machine — the wall time moved, the output did not)
+
+  IDENTICAL  variant_110_lattice.stl          17,652,084 bytes, 353,040 triangles
+  IDENTICAL  variant_110_lattice.report.json
+  IDENTICAL  lattice_variant.json
+  IDENTICAL  lattice_variant_report.json
+  IDENTICAL  loadcase.json
+  IDENTICAL  fields.bin                       10,808,924 bytes
+
+L5 — BYTE-IDENTITY WHERE NOTHING CHANGED
+========================================
+core at HEAD extracted with `git archive` into a separate tree and built into its
+own binary, so the working tree was never disturbed.
+
+GUARD FIRST (this repo has shipped vacuous identity bars before):
+  before  f0a20654643edebe0bdbfa9924865bab41f792c238bc104d75d590e63f1a7e30
+  after   47a20701ad14eeed031b3a8f39eefe845442f498b6f139cbe1deba6dd156f2ab
+  -> the two binaries DIFFER, so the comparison below is not vacuous.
+
+Both ran the same optimize+lattice job (plate_bore.stl, res 32, ladder [0.6],
+octet 3.0 mm cell, 0.45 mm strut radius, diagrid skin) — a path this task changed
+code inside (emit_lattice gained an early-out branch).
+
+  IDENTICAL  design.bin
+  IDENTICAL  fields.bin
+  IDENTICAL  loadcase.json
+  IDENTICAL  report.json
+  IDENTICAL  variant_060.stl
+  IDENTICAL  variant_060_lattice.stl
+  IDENTICAL  variant_060_lattice.report.json
+  IDENTICAL  iterations.csv        in every non-timing, non-memory column
+                                   (differs only in wall_ms and the *_ms phase columns)
+  IDENTICAL  build_orientation.json apart from sweep_seconds / strut_axis_measure_seconds
+  excepted   run_info.json          carries a deliberate wall-clock stamp
+
+Every design and geometry artifact is byte-for-byte unchanged. The only
+differences anywhere are measured durations.

@@ -978,7 +978,28 @@ public struct WorkspacePlaceholder: View {
                 smoothBrush.paint(smoothTools.erases ? .erase : .add,
                                   triangles: tris.map { Int32($0) })
             case .ended:
-                break
+                // THE STROKE SETTLED — apply it to the preview mesh, so Smoothed
+                // shows the smoothed shape NOW rather than after a certification
+                // (task 2026-08-04-variant-volume-fraction-mismatch, bar C1/L4).
+                // On `.ended` only: previewing mid-drag would re-smooth the whole
+                // mesh on every frame of the stroke.
+                if let page = smoothingPageModel {
+                    let brush = smoothBrush
+                    Task {
+                        await page.refreshPreview(brush: brush)
+                        // The stage draws `smoothedVariantMesh`, so the preview has
+                        // to land THERE or the toggle flips a label over unchanged
+                        // geometry — which is the defect, not the fix. A certified
+                        // or kept result outranks a preview and is never clobbered.
+                        guard page.receipt == nil, page.kept == nil else { return }
+                        smoothedVariantMesh = page.preview.map {
+                            ViewerMesh(vertices: $0.meshVertices,
+                                       indices: $0.meshIndices,
+                                       faceIDs: [], faceGeometry: [],
+                                       pseudoFaces: false, smoothShaded: true)
+                        }
+                    }
+                }
             }
             return
         }
@@ -1578,12 +1599,12 @@ public struct WorkspacePlaceholder: View {
                 ? nil
                 : (SolvingMachine.of(o).isThisDevice ? .computedOnDevice
                                                      : .runPredatesDesignStore)
-            latticeVariantContext = LatticeVariantContext(
-                runName: project.name, variantIndex: idx,
-                requestedVolumeFraction: v.requestedVolumeFraction,
-                massGrams: v.massGrams, worstCaseMargin: v.worstCaseMargin,
-                accepted: v.accepted,
-                meshVertices: v.meshVertices, meshIndices: v.meshIndices,
+            // ONE builder (task 2026-08-04-variant-volume-fraction-mismatch, bar
+            // L2): every field that describes the design comes from the variant's
+            // own record and from the retained container, in a pure function the
+            // tests drive on this same path.
+            latticeVariantContext = LatticeVariantContext.from(
+                variant: v, runName: project.name, variantIndex: idx,
                 field: field, artifacts: artifacts, unavailable: why)
             // The variant's own render mesh. `faceIDs` is deliberately EMPTY: an
             // optimized result has no B-rep and no pseudo-faces, and claiming
@@ -1762,6 +1783,26 @@ public struct WorkspacePlaceholder: View {
                             meshVertices: mesh.vertices, meshIndices: mesh.indices)
                     }
                 }.value
+            },
+            // THE LIVE BRUSH PREVIEW (task
+            // 2026-08-04-variant-volume-fraction-mismatch, failure C / bar L4).
+            // Same smoother, no certification: the Smoothed tab shows the brush's
+            // own deformation as soon as a stroke settles, instead of drawing the
+            // original twice under a label that says "smoothed".
+            // `weights` already carries the freeze: `SmoothBrushModel
+            // .normalizedWeights()` zeroes every frozen vertex, and weight 0 is the
+            // smoother's bit-identical copy-verbatim path. Passing the mask again
+            // here would be a second place for the two to disagree.
+            previewer: { path, strength, weights in
+                try await Task.detached(priority: .userInitiated) {
+                    let p = try TopOptKit.smoothBrushPreview(
+                        inputMeshPath: path, strength: strength, weights: weights)
+                    return SmoothingPageModel.BrushPreviewResult(
+                        meshVertices: p.meshVertices, meshIndices: p.meshIndices,
+                        movedVertices: p.movedVertices,
+                        maxDisplacementMM: p.maxDisplacementMM,
+                        seconds: p.seconds)
+                }.value
             })
 
         // The freeze mask, from CORE's own predicate resolution. Until it arrives
@@ -1914,10 +1955,14 @@ public struct WorkspacePlaceholder: View {
             memberMM: project.lattice.regionMemberMM ?? 0,
             lineWidthMM: project.printParams.wallLineWidthOuterMM,
             regions: emission.regions)
+        // THE VARIANT'S OWN IDENTITY AND ITS OWN NUMBER (task
+        // 2026-08-04-variant-volume-fraction-mismatch). This passed
+        // `ctx.requestedVolumeFraction` — the LADDER RUNG — into a job key core
+        // validates as a fraction in (0, 1]. On the maintainer's growth run the
+        // rung is 1.1 and every attempt died at schema validation. Both values
+        // now come from the variant itself.
         return try? RelatticeJobBuilder.build(
-            original: art.jobJSON,
-            variantVolumeFraction: ctx.requestedVolumeFraction,
-            designFileName: "design.bin", lattice: spec)
+            original: art.jobJSON, variant: ctx, lattice: spec)
     }
 
     /// The forecast's input and identity: the job above, but only when a forecast
