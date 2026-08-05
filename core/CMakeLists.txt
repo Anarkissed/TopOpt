@@ -1367,6 +1367,18 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(smooth_mesh_identity_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
 
+  # S1/S2 (task 2026-08-05-smoothing-must-actually-smooth): CAN the smoothing
+  # operator remove stair-stepping at all, and where does its wall time go?
+  # Measures surface deviation from the PRE-VOXELIZATION CAD. Prints tables,
+  # writes evidence. A harness, not a ctest.
+  #   cmake --build build --target stairstep_probe
+  #   ./build/stairstep_probe [mesh] [res] [smooth_factor] [evidence_dir]
+  add_executable(stairstep_probe EXCLUDE_FROM_ALL
+    tests/harness/stairstep_probe.cpp)
+  target_link_libraries(stairstep_probe PRIVATE topopt)
+  target_compile_definitions(stairstep_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
+
   # V1/V2 (task 2026-08-04-smoothing-viewer-and-ui): does the app's mesh-upload
   # signature (counts + bounds) separate a brushed-smoothed mesh from its input,
   # and is mesh mass computed from the smoothed mesh? Prints a table, writes

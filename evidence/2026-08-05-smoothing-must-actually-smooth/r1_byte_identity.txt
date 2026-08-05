@@ -1,0 +1,34 @@
+R1 — BYTE-IDENTICAL WHEN OFF, by stash-rebuild checksum.
+
+No production source is touched by this branch:
+
+  $ git diff --stat origin/main -- core/src core/include app/TopOptKit/Sources app/TopOpt
+  (no output)
+
+Proven rather than asserted. Two FRESH build directories, configured with
+identical flags, one from the working tree and one from the tree with this
+branch's two core changes stashed (which is origin/main, b3abcf8):
+
+  cmake -S core -B <dir> -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="/opt/homebrew/opt/eigen;/opt/homebrew/opt/opencascade"
+  cmake --build <dir> --target topopt -j8
+  find <dir>/CMakeFiles/topopt.dir -name '*.o' | sort | xargs md5 -q | md5 -q
+
+  45 object files each.
+
+  with this branch's changes : 47669432db84403491cedb838d3f46f0
+  stashed (= origin/main)    : 47669432db84403491cedb838d3f46f0
+
+  IDENTICAL.
+
+The libtopopt.a archive digests differ; ar embeds per-member mtimes. Extracting
+both archives and diffing every member showed no byte differing, which is why the
+objects are checksummed rather than the archive:
+
+  $ diff -r <extracted mine> <extracted main>
+  (no output)
+
+The changes on this branch are: one new harness (core/tests/harness/
+stairstep_probe.cpp), its 12-line EXCLUDE_FROM_ALL CMake block, one new test
+file, this evidence directory and the handoff. Nothing the shipped library
+compiles.
