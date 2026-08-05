@@ -29,6 +29,7 @@
 #include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/gate_diagnosis.hpp"
+#include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/part.hpp"
@@ -1839,6 +1840,19 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
   b.printability_floor_mm =
       topopt::lattice_cell_printability_floor_mm(topo, min_extrudable_width_mm);
   b.cells_per_member_floor = topopt::lattice_cells_per_member_min(topo);
+  // THE DENSEST-END FLOOR, from core's own strut-diameter law rather than an
+  // app-side mirror of it (task 2026-08-05-lattice-retention-app-control, S3).
+  // The first cut of this derived it in Swift from `LatticeType.strutRadiusMM` and
+  // got 1.64 mm at a 0.45 mm bead where core's own arithmetic gives 1.17 — the app
+  // copy of the octet law is 1.4x off. Reading it here means the control's bound
+  // and core's refusal quote the SAME number by construction.
+  if (topo == topopt::LatticeTopology::Octet) {
+    const double phi_hi =
+        topopt::octet_strut_diameter_mm(topopt::lattice_rho_max(topo), 1.0);
+    if (phi_hi > 0.0) b.printability_floor_densest_mm = min_extrudable_width_mm / phi_hi;
+  }
+  b.percolation_cells_per_member_floor =
+      topopt::lattice_percolation_cells_per_member_min(topo);
   b.valid = true;
   return b;
 }
@@ -1849,6 +1863,103 @@ std::vector<std::string> lattice_certifiable_topologies() {
   // 2026-07-29-tensor-library-nine widened this from octet-only to the seven cubic
   // topologies; the three tetragonal ones are deliberately absent — not certifiable).
   return topopt::lattice_certifiable_topology_names();
+}
+
+// ---------------------------------------------------------------------------
+// SUB-FLOOR RETENTION — asking core's own parser what it accepts (task
+// 2026-08-05-lattice-retention-app-control).
+namespace {
+
+// A job document valid all the way down to the `grading` block, so the probe key
+// reaches `reject_unknown_keys` — the FIRST statement inside that block. Nothing
+// here runs: `parse_job` is pure schema validation over a string (core/CMakeLists
+// puts src/cli/job.cpp in the always-built library for exactly this reason), so
+// the probe costs a parse and touches no file, no solver and no geometry.
+std::string probe_job_json(const std::string& grading_body) {
+  return std::string(
+             "{\n"
+             "  \"model\": \"probe.step\",\n"
+             "  \"material\": \"PLA\",\n"
+             "  \"mode\": \"minimize_plastic\",\n"
+             "  \"resolution\": 16,\n"
+             "  \"fixture_faces\": [{\"kind\": \"cylindrical\", \"radius_mm\": 1.0}],\n"
+             "  \"gravity\": {\"direction\": [0.0, 0.0, -1.0], "
+             "\"magnitude_mm_s2\": 9810.0},\n"
+             "  \"ladder\": [0.5],\n"
+             "  \"margin_stop\": 1.5,\n"
+             "  \"output\": {\"report\": \"report.json\", \"mesh_format\": "
+             "\"stl\", \"mesh_prefix\": \"variant\"},\n"
+             "  \"lattice\": {\"topology\": \"octet\", \"emit_stl\": true},\n"
+             "  \"grading\": {") +
+         grading_body + "}\n}\n";
+}
+
+// The grading block a probe submits: the keys every core since the grading law
+// has required, retention ARMED (the two PR-298 keys are schema-gated on it), and
+// the key under test last.
+std::string probe_grading_body(const std::string& key) {
+  return "\n"
+         "    \"topology\": \"octet\",\n"
+         "    \"cell_mm\": 4.0,\n"
+         "    \"min_extrudable_width_mm\": 0.45,\n"
+         "    \"retain_subfloor_in_unloaded_regions\": true,\n"
+         "    \"" +
+         key + "\": true\n  ";
+}
+
+// Did core refuse THIS key by name? `reject_unknown_keys` throws
+// `unknown key "<key>" in grading`, so the answer is unambiguous and does not
+// depend on any other diagnostic staying stable.
+bool schema_refused_key_by_name(const std::string& key) {
+  try {
+    topopt::parse_job(probe_job_json(probe_grading_body(key)));
+    return false;  // parsed clean: the key is accepted
+  } catch (const std::exception& e) {
+    const std::string msg = e.what();
+    return msg.find("unknown key \"" + key + "\"") != std::string::npos;
+  }
+}
+
+// THE TWO-SIDED CONTROL. A probe that silently stopped reaching the grading block
+// would report every key as "accepted" — the direction that emits a key core
+// refuses and kills the job. So the probe proves itself both ways before it is
+// believed: a key core has carried since the grading law landed must come back
+// ACCEPTED, and a key no core will ever carry must come back REFUSED.
+//
+// ★ THE NEGATIVE CONTROL MUST NOT START WITH AN UNDERSCORE. Core's parser treats
+// a leading-underscore key as a maintainer COMMENT and ignores it at every level
+// (`is_comment_key`, core/src/cli/job.cpp) — so the first version of this control
+// used "__topopt_bridge_probe_key_no_core_accepts", core cheerfully accepted it,
+// the control failed, and the probe reported itself unreliable on a core it could
+// read perfectly well. The control caught it, which is the point of having one.
+bool probe_reliable() {
+  static const bool ok =
+      !schema_refused_key_by_name("demand_exponent") &&
+      schema_refused_key_by_name("topopt-bridge-probe-key-no-core-accepts");
+  return ok;
+}
+
+}  // namespace
+
+bool grading_schema_probe_is_reliable() { return probe_reliable(); }
+
+std::string job_schema_error(const std::string& job_json) {
+  try {
+    topopt::parse_job(job_json);
+    return std::string();
+  } catch (const std::exception& e) {
+    return std::string(e.what());
+  }
+}
+
+bool grading_schema_accepts(const std::string& key) {
+  if (key.empty()) return false;
+  if (!probe_reliable()) return false;  // cannot tell => do not emit
+  return !schema_refused_key_by_name(key);
+}
+
+double lattice_subfloor_stress_fraction_default() {
+  return topopt::lattice_subfloor_retention_stress_fraction();
 }
 
 std::vector<std::string> lattice_generatable_topologies() {

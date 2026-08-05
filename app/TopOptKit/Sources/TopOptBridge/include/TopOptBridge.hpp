@@ -946,6 +946,33 @@ struct LatticeCellBounds {
   double printability_floor_mm = 0.0;
   double cells_per_member_floor = 0.0;
   bool valid = false;
+  // printability_floor_densest_mm — THE OTHER END OF THE SAME LAW (task
+  // 2026-08-05-lattice-retention-app-control, S3). `printability_floor_mm` above is
+  // core's own floor evaluated at the band's LIGHTEST density: the smallest cell at
+  // which even a rho_min lattice still prints. Nothing forces a user to lattice at
+  // the lightest density, and core's pre-flight refusals quote the DENSEST-end
+  // number instead ("this region admits cells from 1.09 mm"). Using the light floor
+  // as a control's lower bound therefore made those refusals name a value the user
+  // could not type.
+  //
+  // Same core function on the same law, evaluated at lattice_rho_max:
+  //   floor(w) = w / phi(rho, 1), phi = topopt::octet_strut_diameter_mm.
+  // 0 when core carries no strut-diameter law for the topology (only octet today) —
+  // the caller then has no densest-end number and says so rather than deriving one.
+  double printability_floor_densest_mm = 0.0;
+  // percolation_cells_per_member_floor — THE OTHER FLOOR, and the one that decides
+  // whether a member can be BUILT at all (task 2026-08-05-lattice-retention-app-
+  // control, review P2). `cells_per_member_floor` above is the ACCURACY floor:
+  // below it the homogenized tensor stops describing the member and the certificate
+  // is out of regime — but the part still prints. This one protects the OBJECT:
+  // below it there is no connected strut network and the generator emits debris.
+  //
+  // A member between them is BUILDABLE AND UNCERTIFIABLE — the regime sub-floor
+  // retention exists for. Core's own header says a pipeline that refuses both with
+  // one message is collapsing two verdicts that need different answers, and the
+  // app's per-region receipt was doing exactly that. 0 ⇒ core states no percolation
+  // floor for the topology.
+  double percolation_cells_per_member_floor = 0.0;
 };
 LatticeCellBounds lattice_cell_bounds(const std::string& topology,
                                       double min_extrudable_width_mm);
@@ -960,5 +987,47 @@ std::vector<std::string> lattice_certifiable_topologies();
 // (topopt::lattice_gen_topology_names) — no mirrored list remains app-side, so
 // core enum growth reaches the picker with zero app changes. Never throws.
 std::vector<std::string> lattice_generatable_topologies();
+
+// ---------------------------------------------------------------------------
+// SUB-FLOOR RETENTION: what CORE's job schema accepts, and core's own ceiling
+// (task 2026-08-05-lattice-retention-app-control).
+//
+// WHY THIS IS A RUNTIME PROBE AND NOT AN APP-SIDE CONSTANT. Core's grading schema
+// grows one key at a time, and the app is built against whichever core the
+// maintainer last built. A mirrored boolean would be right on the day it was
+// written and a lie the day after — that is exactly the shape of the design-box
+// refusal the app kept asserting for two PRs after core dropped it (see
+// LatticeCoreCapability's own scar). So the app ASKS THE PARSER: it hands
+// topopt::parse_job a document carrying the key and reads whether the schema
+// refused it by name.
+//
+// A key core does not accept must never be emitted: `reject_unknown_keys` fails
+// the WHOLE job, so one unrecognised grading key does not degrade the run — it
+// kills it before any work. Never throws; returns false when it cannot tell.
+bool grading_schema_accepts(const std::string& key);
+
+// True iff the probe itself is trustworthy on this build — a two-sided control:
+// a key core has always accepted must probe TRUE and a nonsense key must probe
+// FALSE. When this is false, `grading_schema_accepts` answers false for
+// everything (the safe direction) and the UI says the app could not ask.
+bool grading_schema_probe_is_reliable();
+
+// Validate a whole job document against CORE'S OWN SCHEMA (topopt::parse_job).
+// Returns "" when core accepts it, else core's diagnostic verbatim.
+//
+// This is what lets a test assert that the bytes the app's serializer produces are
+// bytes THIS core will run, rather than that they contain the keys the test
+// expected. The app's job documents have died at schema validation before — every
+// re-lattice of a growth variant, in 48 ms, on a key whose value was the wrong
+// SHAPE rather than the wrong name. Never throws.
+std::string job_schema_error(const std::string& job_json);
+
+// Core's OWN default stress-fraction ceiling for sub-floor retention
+// (topopt::lattice_subfloor_retention_stress_fraction(), the number
+// `grading.subfloor_stress_fraction` overrides). Forwarded so the app can SHOW
+// what it would be without ever authoring it — and, critically, so the app can
+// tell "the user moved it" from "the user left core's number alone" and omit the
+// key in the second case. Never throws.
+double lattice_subfloor_stress_fraction_default();
 
 }  // namespace topoptbridge

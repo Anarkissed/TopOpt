@@ -106,21 +106,14 @@ public enum RelatticeJobBuilder {
             "emit_3mf": lat.emit3MF,
             "skin": lat.skin,
         ]
-        if lat.graded {
-            var grading: [String: Any] = [
-                "topology": lat.topologyID,
-                "min_extrudable_width_mm": lat.minExtrudableWidthMM ?? 0,
-            ]
-            switch lat.cellSizeMode {
-            case LatticeCellSizeMode.auto.rawValue:
-                grading["cell_mode"] = lat.cellSizeMode
-            case LatticeCellSizeMode.swept.rawValue:
-                grading["cell_mode"] = lat.cellSizeMode
-                grading["cell_min_mm"] = lat.cellMinMM
-                grading["cell_max_mm"] = lat.cellMaxMM
-            default:
-                grading["cell_mm"] = lat.cellMM
-            }
+        // THE SAME BUILDER THE OPTIMIZE PATH USES (task
+        // 2026-08-05-lattice-retention-app-control). This block used to be written
+        // out a second time here, key for key — two chances to drift, and a
+        // re-lattice that silently dropped the sub-floor posture would be the same
+        // class of bug as the ladder-position-in-a-fraction-shaped-key failure that
+        // killed every re-lattice in 48 ms. One builder; a one-sided edit is no
+        // longer expressible.
+        if let grading = lat.gradingDictionary() {
             job["grading"] = grading
         } else {
             block["cell_mm"] = lat.cellMM

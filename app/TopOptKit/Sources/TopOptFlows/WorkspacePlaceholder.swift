@@ -2094,7 +2094,32 @@ public struct WorkspacePlaceholder: View {
             config: config, modelPath: file.path, jobJSON: jobJSON,
             designBin: art.designBin, projectName: project.name,
             requestedVolumeFraction: ctx.requestedVolumeFraction)
-        run.runner = { _, _, _ in try RelatticeRun.run(inputs).outcome }
+        // THE RECEIPT WAS BEING THROWN AWAY (task
+        // 2026-08-05-lattice-retention-app-control, S4). `RelatticeRun.run` has
+        // always fetched the variant's graded lattice receipt and this call site
+        // took `.outcome` and dropped it on the floor — so a re-lattice, which is
+        // the path the Lattice page actually drives, showed no lattice record at
+        // all. It now carries the receipt onto the outcome, which is what puts the
+        // per-region breakdown on the results screen.
+        let echo = project.lattice.runSpec(
+            topology: project.lattice.topologyID,
+            memberMM: project.lattice.regionMemberMM ?? 0,
+            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            regions: project.variantLatticeJobRegions().regions)
+        run.runner = { _, _, _ in
+            let result = try RelatticeRun.run(inputs)
+            guard let spec = echo else { return result.outcome }
+            return result.outcome.withLatticeReport(LatticeReport(
+                topologyID: spec.topologyID, cellMM: spec.cellMM,
+                generateRelativeDensity: spec.generateRelativeDensity,
+                minRelativeDensity: spec.minRelativeDensity,
+                maxRelativeDensity: spec.maxRelativeDensity,
+                regionScoped: spec.regionScoped,
+                emittedRegions: spec.regions.count,
+                // The per-region rows only exist when the job asked for them; a
+                // receipt that carries none parses to nil and shows nothing.
+                regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil))
+        }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
         run.start(request, remote: true, workerName: compute.selectedWorkerName)
