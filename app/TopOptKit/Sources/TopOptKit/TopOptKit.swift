@@ -836,6 +836,13 @@ public struct LatticeReport: Equatable, Sendable {
     public let maxRelativeDensity: Double
     /// True iff a sub-region primitive scoped the preview (vs the whole part).
     public let regionScoped: Bool
+    /// How many include/exclude regions the JOB actually carried
+    /// (`lattice.regions`). Distinct from `regionScoped`, which is also true for a
+    /// legacy PREVIEW-only include primitive that never reaches the job — the two
+    /// being conflated is what made the results screen say the build ignored the
+    /// user's regions even when it had honoured them (task
+    /// 2026-08-04-variant-volume-fraction-mismatch, bar B6).
+    public let emittedRegions: Int
     /// Worker-generated facts from run_info `lattice_export`; nil when unavailable
     /// (a local run, or the run_info couldn't be read) — then only the settings echo
     /// shows, honestly labelled "requested".
@@ -893,7 +900,8 @@ public struct LatticeReport: Equatable, Sendable {
 
     public init(topologyID: String, cellMM: Double, generateRelativeDensity: Double,
                 minRelativeDensity: Double, maxRelativeDensity: Double,
-                regionScoped: Bool, generated: Generated? = nil,
+                regionScoped: Bool, emittedRegions: Int = 0,
+                generated: Generated? = nil,
                 strut: StrutStrength? = nil) {
         self.topologyID = topologyID
         self.cellMM = cellMM
@@ -901,6 +909,7 @@ public struct LatticeReport: Equatable, Sendable {
         self.minRelativeDensity = minRelativeDensity
         self.maxRelativeDensity = maxRelativeDensity
         self.regionScoped = regionScoped
+        self.emittedRegions = emittedRegions
         self.generated = generated
         self.strut = strut
     }

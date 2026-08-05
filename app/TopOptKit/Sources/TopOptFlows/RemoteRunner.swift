@@ -1087,7 +1087,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             generateRelativeDensity: lat.generateRelativeDensity,
             minRelativeDensity: lat.minRelativeDensity,
             maxRelativeDensity: lat.maxRelativeDensity,
-            regionScoped: lat.regionScoped, generated: generated, strut: strut)
+            regionScoped: lat.regionScoped, emittedRegions: lat.regions.count,
+            generated: generated, strut: strut)
     }
 
     /// The BUILD-ORIENTATION RECEIPT a remote run wrote (handoff

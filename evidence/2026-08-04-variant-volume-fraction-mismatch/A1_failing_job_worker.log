@@ -1,0 +1,3 @@
+2026-08-04T15:53:11.925 meta   launch /Users/nadim/dev/TopOpt/TopOpt/core/build/topopt-cli lattice-variant /Users/nadim/.topopt-worker/0cc8e495de084e5d/job.json --out /Users/nadim/.topopt-worker/0cc8e495de084e5d/out
+2026-08-04T15:53:11.989 stderr topopt-cli: job.json: "variant.volume_fraction" must be in (0, 1]
+2026-08-04T15:53:11.990 meta   exit rc=1

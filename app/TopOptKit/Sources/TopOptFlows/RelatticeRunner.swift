@@ -47,8 +47,28 @@ public enum RelatticeJobBuilder {
     /// `lattice_forecast.json`, and returns WITHOUT a single certification solve.
     /// It is the same law on the same inputs, so what it reports is what this job
     /// would do — for ~1% of the cost.
+    /// *** WHAT NAMES THE VARIANT (task
+    /// 2026-08-04-variant-volume-fraction-mismatch). *** `designFingerprint` is
+    /// the design's IDENTITY — core's FNV-1a over that rung's density field, read
+    /// from the retained container's own index — and it is what core selects by.
+    /// `achievedVolumeFraction` is the variant's OWN achieved fraction, carried so
+    /// core can CHECK that the number this app showed the user is the number the
+    /// stored design achieved, and refuse if not.
+    ///
+    /// This used to send `volume_fraction: <the ladder rung>`, and core validates
+    /// that key as a FRACTION in (0, 1]. On a GROWTH ladder the rungs are
+    /// part-relative — production_growth_ladder() is {1.55, 1.25, 1.10} — so the
+    /// correct join key for the last rung is 1.1, and every re-lattice of a growth
+    /// variant died at schema validation in ~48 ms. The bound was doing its job;
+    /// the ladder POSITION had no business being in a field shaped like a
+    /// fraction. Nothing about the bound changed.
+    ///
+    /// `designFingerprint` nil ⇒ the container carried no fingerprint for this
+    /// rung, and there is nothing to name the variant with. That is thrown rather
+    /// than silently falling back to the rung, because the fallback is the bug.
     public static func build(original: Data,
-                             variantVolumeFraction: Double,
+                             designFingerprint: UInt64?,
+                             achievedVolumeFraction: Double,
                              designFileName: String,
                              lattice: LatticeSpec?,
                              forecastOnly: Bool = false) throws -> Data {
@@ -56,9 +76,20 @@ public enum RelatticeJobBuilder {
                 as? [String: Any] else {
             throw BuildError("the retained job document is not readable JSON")
         }
+        guard let fp = designFingerprint else {
+            throw BuildError("this run's design file carries no fingerprint for "
+                             + "this variant, so the job has no way to name which "
+                             + "design to lattice")
+        }
         job["mode"] = "lattice_variant"
-        job["variant"] = ["design": designFileName,
-                          "volume_fraction": variantVolumeFraction]
+        // A u64 does not survive JSONSerialization's number bridging, so the
+        // fingerprint travels as the DECIMAL STRING core parses exactly.
+        var variant: [String: Any] = ["design": designFileName,
+                                      "fingerprint": String(fp)]
+        if achievedVolumeFraction > 0 {
+            variant["achieved_volume_fraction"] = achievedVolumeFraction
+        }
+        job["variant"] = variant
         // The optimize run may or may not have carried a lattice block. Either
         // way the re-lattice job carries the settings the user has NOW — that is
         // the point of the page. The load case is what must not change; the
@@ -124,6 +155,22 @@ public enum RelatticeJobBuilder {
         job["lattice"] = block
         return try JSONSerialization.data(withJSONObject: job,
                                           options: [.sortedKeys])
+    }
+
+    /// THE SHIPPING ENTRY POINT (task 2026-08-04-variant-volume-fraction-mismatch,
+    /// bar L2). The page hands the VARIANT, not three loose numbers, so there is
+    /// no call site that can pair one variant's identity with another variant's
+    /// fraction — which is the shape the original defect had.
+    public static func build(original: Data,
+                             variant: LatticeVariantContext,
+                             lattice: LatticeSpec?,
+                             designFileName: String = "design.bin",
+                             forecastOnly: Bool = false) throws -> Data {
+        try build(original: original,
+                  designFingerprint: variant.designFingerprint,
+                  achievedVolumeFraction: variant.achievedVolumeFraction,
+                  designFileName: designFileName, lattice: lattice,
+                  forecastOnly: forecastOnly)
     }
 
     /// The keys that determine the LOAD CASE. Bar Z2's app-side check: the
@@ -429,9 +476,21 @@ public enum RelatticeRun {
         let fields = file("fields.bin").flatMap { RemoteFieldsContainer.parse($0) }
         let block = fields?.variants.first
 
+        // A4 (task 2026-08-04-variant-volume-fraction-mismatch): the achieved
+        // fraction is READ from the job's own provenance, not aliased to the
+        // requested rung. `achievedVolumeFraction: inputs.requestedVolumeFraction`
+        // was the same conflation as the job key this task fixed, one layer on:
+        // on the maintainer's growth run it would have labelled a design that
+        // achieved 1.0866 as 1.1. Absent provenance ⇒ 0, which the UI already
+        // reads as "not stated", rather than a number from somewhere else.
+        let provRoot = provenance.flatMap {
+            (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+        }
+        let provSource = provRoot?["source"] as? [String: Any]
+        let achieved = (provSource?["achieved_volume_fraction"] as? Double) ?? 0
         let variant = OptimizeVariant(
             requestedVolumeFraction: inputs.requestedVolumeFraction,
-            achievedVolumeFraction: inputs.requestedVolumeFraction,
+            achievedVolumeFraction: achieved,
             massGrams: block?.massGrams ?? 0,
             supportVolumeVoxels: block?.supportVolumeVoxels ?? 0,
             meshTriangleCount: mesh.indices.count / 3,

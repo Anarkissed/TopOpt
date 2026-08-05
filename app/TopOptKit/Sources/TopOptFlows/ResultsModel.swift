@@ -816,9 +816,52 @@ public final class ResultsModel: ObservableObject {
         func pct(_ x: Double) -> String { "\(Int((x * 100).rounded()))%" }
         var lines: [String] = []
         let name = LatticeType.named(r.topologyID).displayName
-        let scope = r.regionScoped
-            ? " Region-scoped in the preview; this build lattices the whole solid interior."
-            : ""
+        // BAR B6 — THE PREVIEW AND THE BUILD, RECONCILED (task
+        // 2026-08-04-variant-volume-fraction-mismatch). This clause used to read,
+        // unconditionally whenever anything scoped the preview:
+        //
+        //   "Region-scoped in the preview; this build lattices the whole solid
+        //    interior."
+        //
+        // — which announced a disagreement that is only sometimes real, and made
+        // every user's regions look ineffective. The two cases are genuinely
+        // different and the report can now tell them apart:
+        //
+        //   * `lattice.regions` DO travel with the job, and core restricts the
+        //     latticed set to the include union when any include region is
+        //     declared. A build with those is region-scoped, exactly as previewed.
+        //   * the LEGACY preview-only include primitive (`LatticeSettings.region`)
+        //     never reaches the job at all. That, and only that, is the case the
+        //     old sentence described.
+        //
+        // `emittedRegions` is what the job carried; `regionScoped` is what scoped
+        // the preview. Conflating them was the whole defect.
+        let scope: String
+        if r.emittedRegions > 0 {
+            scope = " Region-scoped, as previewed"
+                  + " (\(r.emittedRegions) region\(r.emittedRegions == 1 ? "" : "s")"
+                  + " travelled with the job)."
+        } else if r.regionScoped {
+            scope = " The preview was scoped to a region, but no region travelled "
+                  + "with the job — this build latticed the whole solid interior."
+        } else {
+            scope = ""
+        }
+        // BAR B3/B4 — A LATTICE WITH NOTHING IN IT IS NOT A LATTICE. A run that
+        // latticed zero cells used to be summarised as "filled at 0% density …
+        // strut radius 0.00–0.65 mm" with a strut-strength margin beside it, all
+        // in the voice of a successful build. Core refuses such a run now; this is
+        // the second layer, for records already on disk.
+        let degenerate = (r.generated?.latticedCells ?? 0) == 0
+                      || (r.generated.map { $0.strutRadiusMaxMM <= 0 } ?? false)
+        if degenerate, r.generated != nil {
+            lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell — "
+                + "NO LATTICE WAS PRODUCED. Every voxel in the region stayed solid "
+                + "(the material is too thin to hold \(String(format: "%g", r.cellMM)) mm "
+                + "cells), so this file is the solid part. The density and strut "
+                + "figures below describe nothing and are withheld.")
+            return lines
+        }
         lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell, "
             + "filled at \(pct(r.generateRelativeDensity)) density "
             + "(previewed \(pct(r.minRelativeDensity))–\(pct(r.maxRelativeDensity))).\(scope)")

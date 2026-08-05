@@ -499,6 +499,210 @@ static void section_graded() {
 }
 
 // ---------------------------------------------------------------------------
+// D. Task 2026-08-04-variant-volume-fraction-mismatch — WHICH VARIANT, AND WHAT
+//    HAPPENS WHEN THERE IS NO LATTICE TO EMIT.
+//
+//   A2/A3 The variant is named by its DESIGN FINGERPRINT, and the achieved
+//         volume fraction it carries is CHECKED against the stored design. The
+//         (0, 1] bound on `variant.volume_fraction` is untouched — a growth
+//         ladder's rung simply stopped travelling in that key.
+//   L3    A configuration the grading law can lattice NOTHING of is REFUSED
+//         with the predicate and the counts, not emitted as a file with zero
+//         struts in it and reported as a successful build.
+static void section_identity_and_zero_density() {
+  const MaterialLibrary materials = load_materials_file(MATERIALS_JSON_PATH);
+  const SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
+  const std::string tmp = std::string(CLI_TMP_DIR);
+
+  // The same cylinder the graded section uses — thick enough that a sane cell
+  // DOES lattice it, so the refusal below is about the configuration and not
+  // about a fixture that could never work.
+  const std::string cyl_path = tmp + "/lv_id_cyl.stl";
+  write_stl_file(cyl_path, cylinder_mesh(40.0, 80.0, 48), StlFormat::Binary);
+  double fitted_r = 0.0;
+  {
+    const StepModel part = import_part_file(cyl_path);
+    for (int f = 0; f < part.face_count; ++f)
+      if (part.faces[static_cast<std::size_t>(f)].kind ==
+          StepSurfaceKind::Cylinder)
+        fitted_r = part.faces[static_cast<std::size_t>(f)].cylinder_radius_mm;
+  }
+
+  JobDescription original;
+  original.model = "lv_id_cyl.stl";
+  original.material = "PLA";
+  original.mode = "minimize_plastic";
+  original.resolution = 32;
+  original.fixture_faces.push_back(JobFaceSelector{"cylindrical", fitted_r});
+  original.gravity.direction = Vec3{0.0, 0.0, -1.0};
+  original.gravity.magnitude_mm_s2 = 9810.0;
+  original.ladder = {0.7};
+  original.margin_stop = 0.0;
+  original.simp_max_iterations = 8;
+  original.output.report = "report.json";
+  original.output.mesh_format = "stl";
+  original.output.mesh_prefix = "variant";
+
+  const std::string run_out = tmp + "/lv_id_run";
+  std::filesystem::remove_all(run_out);
+  const RunJobResult run = run_job(original, tmp, run_out, materials, rules,
+                                   /*emit_progress=*/false, RunObservability{});
+  CHECK(run.design_variant_count >= 1, "identity flow: the run stored a design");
+
+  const DesignStore store = read_design_file(run.design_path);
+  CHECK(!store.variants.empty(), "identity flow: the container holds a block");
+  const StoredDesign& sd = store.variants[0];
+
+  // ── A3: SELECT BY FINGERPRINT, CHECK THE ACHIEVED FRACTION ────────────────
+  JobDescription lv = original;
+  lv.mode = "lattice_variant";
+  lv.variant.present = true;
+  lv.variant.design = run.design_path;
+  lv.variant.has_fingerprint = true;
+  lv.variant.fingerprint = sd.fingerprint;
+  lv.variant.has_achieved_volume_fraction = true;
+  lv.variant.achieved_volume_fraction = sd.achieved_volume_fraction;
+  lv.lattice.present = true;
+  lv.lattice.topology = "octet";
+  lv.lattice.cell_mm = 3.0;
+  lv.lattice.strut_radius_mm = 0.45;
+  lv.lattice.emit_stl = true;
+
+  const std::string lv_out = tmp + "/lv_id_lattice";
+  std::filesystem::remove_all(lv_out);
+  const LatticeVariantJobResult r =
+      lattice_variant_job(lv, tmp, lv_out, materials, rules);
+  CHECK(r.design_fingerprint == sd.fingerprint,
+        "A3: the design the job named by fingerprint is the design it latticed");
+  CHECK(r.achieved_volume_fraction == sd.achieved_volume_fraction,
+        "A3: and it reports that design's own achieved fraction");
+  CHECK(r.latticed_voxels > 0, "A3: the fingerprint-selected job really ran");
+
+  // A fingerprint the container does not hold is REFUSED, and the message says
+  // what it does hold — never a nearest-design guess.
+  {
+    JobDescription bad = lv;
+    bad.variant.fingerprint = sd.fingerprint ^ 0xFFULL;
+    bool threw = false;
+    std::string what;
+    try {
+      lattice_variant_job(bad, tmp, tmp + "/lv_id_bad_fp", materials, rules);
+    } catch (const std::exception& e) {
+      threw = true;
+      what = e.what();
+    }
+    CHECK(threw && contains(what, "no stored design with fingerprint"),
+          "A3: an unknown design fingerprint is refused by name");
+  }
+
+  // *** THE BAR A3 CHECK, ENFORCED AT RUNTIME. *** A job that says this variant
+  // achieved one number while the stored design achieved another is describing a
+  // different variant than the one it selected, and is refused.
+  {
+    JobDescription bad = lv;
+    bad.variant.achieved_volume_fraction = sd.achieved_volume_fraction * 0.5;
+    bool threw = false;
+    std::string what;
+    try {
+      lattice_variant_job(bad, tmp, tmp + "/lv_id_bad_vf", materials, rules);
+    } catch (const std::exception& e) {
+      threw = true;
+      what = e.what();
+    }
+    CHECK(threw && contains(what, "describing a different variant"),
+          "A3: a job whose achieved fraction is not the design's is refused");
+  }
+
+  // ── L3: A ZERO-DENSITY LATTICE IS REFUSED, NOT EMITTED ────────────────────
+  //
+  // The cell is far wider than the part, so no member holds the cells-per-member
+  // floor and the grading law lattices NOTHING. Before this task that produced a
+  // "lattice" with rho_min_used 0, rho_max_used 0, strut radius 0.00 mm and a
+  // strut-strength margin computed on no material — reported as a build.
+  {
+    JobDescription none = lv;
+    none.lattice.cell_mm = 0.0;          // the grading block owns the cell
+    none.lattice.strut_radius_mm = 0.0;
+    none.grading.present = true;
+    none.grading.topology = "octet";
+    none.grading.cell_mm = 200.0;        // 5 cells across ⇒ a 1000 mm member
+    none.grading.min_extrudable_width_mm = 0.42;
+    none.grading.demand_exponent = 1.0;
+
+    const std::string out = tmp + "/lv_id_zero";
+    std::filesystem::remove_all(out);
+    bool threw = false;
+    std::string what;
+    try {
+      lattice_variant_job(none, tmp, out, materials, rules);
+    } catch (const std::exception& e) {
+      threw = true;
+      what = e.what();
+    }
+    CHECK(threw, "L3: a configuration that lattices NOTHING is refused");
+    CHECK(contains(what, "could lattice NONE"),
+          "L3: and the refusal names the predicate");
+    CHECK(contains(what, "member_too_thin_for_cell="),
+          "L3: with the per-reason counts");
+    CHECK(contains(what, "min_extrudable_width_mm"),
+          "L3: and the extrusion width that sets the printability floor — the "
+          "knob that actually unlocks it");
+    // NOTHING was written. A refusal that still left a zero-strut mesh on disk
+    // would be the same failure with an error message attached.
+    int meshes = 0;
+    if (std::filesystem::exists(out))
+      for (const auto& e : std::filesystem::directory_iterator(out))
+        if (e.path().extension() == ".stl") ++meshes;
+    CHECK(meshes == 0,
+          "L3: and no geometry was emitted — the refusal is a refusal, not a "
+          "warning printed beside a file with no struts in it");
+    std::printf("[L3] zero-density lattice refused: %s\n", what.c_str());
+  }
+
+  // ── THE FORECAST NAMES THE EXTRUSION-WIDTH REMEDY ─────────────────────────
+  //
+  // `irrecoverable_by_any_cell_size` is true only INSIDE a fixed printability
+  // floor, and that floor is `min_extrudable_width_mm / phi(rho_lo, unit cell)` —
+  // a DECLARED parameter over a constant. The forecast used to withhold every
+  // remedy in this case and then state "no parameter change could help", which is
+  // measurably false and is what the maintainer read for a week.
+  //
+  // Declared width 0.8 mm puts the floor at ~8.8 mm; the widest member here is
+  // ~25 mm and needs 5 cells, so no legal cell reaches it and nothing lattices.
+  // A finer declared width does.
+  {
+    JobDescription fc = lv;
+    fc.lattice.cell_mm = 0.0;
+    fc.lattice.strut_radius_mm = 0.0;
+    fc.lattice.forecast_only = true;
+    fc.lattice.min_extrudable_width_mm = 0.8;
+    fc.grading.present = true;
+    fc.grading.topology = "octet";
+    fc.grading.cell_mm = 0.0;            // Auto ⇒ the law takes the floor
+    fc.grading.cell_mode = "auto";
+    fc.grading.min_extrudable_width_mm = 0.8;
+    fc.grading.demand_exponent = 1.0;
+
+    const std::string out = tmp + "/lv_id_fc";
+    std::filesystem::remove_all(out);
+    const LatticeVariantJobResult fr =
+        lattice_variant_job(fc, tmp, out, materials, rules);
+    const std::string j = read_file(fr.forecast_path);
+    CHECK(contains(j, "\"would_lattice_voxels\": 0"),
+          "the 0.8 mm declared width lattices nothing — the case the forecast "
+          "used to call hopeless");
+    CHECK(contains(j, "lattice.min_extrudable_width_mm"),
+          "the forecast now NAMES the extrusion width as an evaluated remedy");
+    CHECK(contains(j, "\"cell_mm\":"),
+          "and carries the cell that width unlocks — the remedy is genuinely "
+          "two-dimensional and half of it is not actionable");
+    CHECK(!contains(j, "no parameter change could help"),
+          "and it no longer claims to have exhausted the space it never probed");
+    std::printf("[B] extrusion-width remedy present in the forecast\n");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // C. Schema: the mode and its block are validated STRICTLY, before any work.
 static void section_schema() {
   auto parse_fails = [](const std::string& json, const std::string& needle) {
@@ -544,12 +748,69 @@ static void section_schema() {
               ok.variant.volume_fraction == 0.6 && ok.variant.design == "d.bin",
           "schema: a well-formed lattice_variant job parses");
   }
+
+  // ── Task 2026-08-04-variant-volume-fraction-mismatch ──────────────────────
+  //
+  // A2: THE BOUND IS UNTOUCHED. The maintainer's growth rung (1.1) is still
+  // refused in this key, and must stay refused: a number that describes a part's
+  // volume fraction belongs in (0, 1]. What changed is that a ladder POSITION no
+  // longer travels in a field shaped like a fraction.
+  CHECK(parse_fails(base +
+                        R"("mode":"lattice_variant","variant":{"design":"d.bin","volume_fraction":1.1},)"
+                        R"("lattice":{"cell_mm":3,"strut_radius_mm":0.45}})",
+                    "must be in (0, 1]"),
+        "A2: variant.volume_fraction > 1 is STILL refused — the bound was never "
+        "the problem and was not widened");
+  CHECK(parse_fails(base +
+                        R"("mode":"lattice_variant","variant":{"design":"d.bin","volume_fraction":0},)"
+                        R"("lattice":{"cell_mm":3,"strut_radius_mm":0.45}})",
+                    "must be in (0, 1]"),
+        "A2: and 0 is still refused at the other end");
+  {
+    // The FINGERPRINT form: a u64 as a decimal string, parsed exactly. The
+    // maintainer's 1.10 rung hashes to 2898949975693851963, which a JSON double
+    // cannot hold — which is why the wire form is text.
+    const JobDescription fp = parse_job(
+        base +
+        R"("mode":"lattice_variant","variant":{"design":"d.bin",)"
+        R"("fingerprint":"2898949975693851963","achieved_volume_fraction":1.0866043075327818},)"
+        R"("lattice":{"cell_mm":3,"strut_radius_mm":0.45}})");
+    CHECK(fp.variant.has_fingerprint &&
+              fp.variant.fingerprint == 2898949975693851963ULL,
+          "A1: the design fingerprint round-trips EXACTLY through the wire form "
+          "— a JSON double would have lost the low digits");
+    CHECK(fp.variant.has_achieved_volume_fraction &&
+              fp.variant.achieved_volume_fraction == 1.0866043075327818,
+          "A3: and a GROWTH variant's achieved fraction — part-relative, and "
+          "legitimately > 1 — is carried as measured, not clamped");
+    CHECK(!fp.variant.has_volume_fraction && !fp.variant.has_index,
+          "the fingerprint form is a selector in its own right");
+  }
+  CHECK(parse_fails(base +
+                        R"("mode":"lattice_variant","variant":{"design":"d.bin","fingerprint":"12","index":0},)"
+                        R"("lattice":{"cell_mm":3,"strut_radius_mm":0.45}})",
+                    "EXACTLY ONE"),
+        "schema: two selectors together is refused, as with the original pair");
+  CHECK(parse_fails(base +
+                        R"("mode":"lattice_variant","variant":{"design":"d.bin","fingerprint":"0x1f"},)"
+                        R"("lattice":{"cell_mm":3,"strut_radius_mm":0.45}})",
+                    "DECIMAL STRING"),
+        "schema: a fingerprint that is not decimal digits is refused, never "
+        "half-parsed");
+  CHECK(parse_fails(base +
+                        R"("mode":"lattice_variant","variant":{"design":"d.bin","fingerprint":"12",)"
+                        R"("achieved_volume_fraction":0},)"
+                        R"("lattice":{"cell_mm":3,"strut_radius_mm":0.45}})",
+                    "achieved_volume_fraction\" must be > 0"),
+        "schema: a non-positive achieved fraction is refused — it describes no "
+        "part");
 }
 
 int main() {
   section_schema();
   section_flow();
   section_graded();
+  section_identity_and_zero_density();
   std::printf("test_lattice_variant: %d checks, %d failures\n", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;

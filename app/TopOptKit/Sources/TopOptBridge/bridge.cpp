@@ -1368,6 +1368,72 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
   return result;
 }
 
+// THE LIVE BRUSH PREVIEW — see the header for what it deliberately leaves out
+// and why (task 2026-08-04-variant-volume-fraction-mismatch, failure C).
+BridgeSmoothPreview smooth_brush_preview(const std::string& input_mesh_path,
+                                         double strength,
+                                         const BridgeVertexWeights& brush,
+                                         BridgeError& err) {
+  BridgeSmoothPreview out;
+  try {
+    const auto t0 = std::chrono::steady_clock::now();
+    topopt::TriangleMesh input = import_any(input_mesh_path);
+    if (!brush.weight.empty() && brush.weight.size() != input.vertices.size()) {
+      err.ok = false;
+      err.message =
+          "smooth preview: the brush has " +
+          std::to_string(brush.weight.size()) + " weights but the mesh has " +
+          std::to_string(input.vertices.size()) +
+          " vertices — refusing rather than weighting the wrong vertices";
+      return BridgeSmoothPreview{};
+    }
+    topopt::SmoothConstraints c;
+    // No freeze REGIONS and no grid: the caller has already resolved the freeze
+    // mask (smooth_freeze_mask) and hands frozen vertices in as weight 0, which
+    // the smoother copies verbatim on the identical code path. Re-resolving the
+    // predicates here would mean importing the model and voxelizing it on every
+    // stroke, which is exactly the cost this seam exists to avoid.
+    c.enforce_min_feature = false;
+    c.min_feature_grid = nullptr;
+    c.vertex_weight = brush.weight;
+    const topopt::SmoothResult sr = topopt::constrained_taubin_smooth(
+        input, topopt::taubin_params_for_strength(strength), c);
+
+    out.total_vertices = static_cast<int64_t>(sr.mesh.vertices.size());
+    out.vertices.reserve(sr.mesh.vertices.size() * 3);
+    for (std::size_t v = 0; v < sr.mesh.vertices.size(); ++v) {
+      const topopt::Vec3& p = sr.mesh.vertices[v];
+      out.vertices.push_back(static_cast<float>(p.x));
+      out.vertices.push_back(static_cast<float>(p.y));
+      out.vertices.push_back(static_cast<float>(p.z));
+      if (v < input.vertices.size()) {
+        const topopt::Vec3& q = input.vertices[v];
+        const double dx = p.x - q.x, dy = p.y - q.y, dz = p.z - q.z;
+        const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (d > 0.0) ++out.moved_vertices;
+        if (d > out.max_displacement_mm) out.max_displacement_mm = d;
+      }
+    }
+    out.indices.reserve(sr.mesh.triangles.size() * 3);
+    for (const auto& t : sr.mesh.triangles) {
+      out.indices.push_back(static_cast<int32_t>(t[0]));
+      out.indices.push_back(static_cast<int32_t>(t[1]));
+      out.indices.push_back(static_cast<int32_t>(t[2]));
+    }
+    out.seconds = std::chrono::duration<double>(
+                      std::chrono::steady_clock::now() - t0).count();
+    bridge_log("smooth preview: " + std::to_string(out.total_vertices) +
+               " vertices, moved " + std::to_string(out.moved_vertices) +
+               ", max " + std::to_string(out.max_displacement_mm) + " mm, " +
+               std::to_string(out.seconds) + " s");
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    return BridgeSmoothPreview{};
+  }
+  return out;
+}
+
 BridgeFreezeMask smooth_freeze_mask(const std::string& model_path,
                                     const std::string& mesh_path,
                                     int resolution,

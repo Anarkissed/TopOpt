@@ -253,6 +253,59 @@ final class LatticeModeTests: XCTestCase {
         XCTAssertFalse(notes2.contains { $0.contains("Out of regime") })
     }
 
+    // Task 2026-08-04-variant-volume-fraction-mismatch, bars B3/B4/B6 — the app
+    // half of "no silent degenerate output", for records already on disk.
+    func testARunThatLatticedNothingIsNotSummarisedAsALattice() {
+        // The maintainer's own numbers: worker run 4dabe3b8512d4d59 reported 132
+        // cells at radii 0.00-0.65 mm with strut margins of 530.39 / 317.00 —
+        // margins computed on a rung that had no material in it at all. Here the
+        // degenerate case is the whole record.
+        let report = LatticeReport(
+            topologyID: "octet", cellMM: 8, generateRelativeDensity: 0,
+            minRelativeDensity: 0.05, maxRelativeDensity: 0.9,
+            regionScoped: false,
+            generated: .init(emitSTL: true, emit3MF: false, latticedCells: 0,
+                             regionVoxels: 284379, triangles: 134116,
+                             strutRadiusMinMM: 0, strutRadiusMaxMM: 0),
+            strut: .init(marginInPlane: 530.39, marginInterlayer: 317.00,
+                         zKnockdown: 0.55, minCellsPerMember: 0.4,
+                         outOfRegime: true))
+        let notes = ResultsModel.latticeNotes(report)
+        XCTAssertTrue(notes.contains { $0.contains("NO LATTICE WAS PRODUCED") },
+                      "B3: a run with zero latticed cells is not summarised as a "
+                      + "successful lattice")
+        XCTAssertFalse(notes.contains { $0.contains("filled at 0% density") },
+                       "B3: and the 0% density line — which read as a fact about "
+                       + "the fill rather than an absence of one — is gone")
+        XCTAssertFalse(notes.contains { $0.contains("Strut strength") },
+                       "B4: strut margins computed on no material are withheld, "
+                       + "not printed beside a lattice that does not exist")
+    }
+
+    // B6: the two region cases read differently, because they ARE different.
+    func testTheRegionScopeLineSaysWhichOfTheTwoCasesHappened() {
+        func notes(regionScoped: Bool, emitted: Int) -> [String] {
+            ResultsModel.latticeNotes(LatticeReport(
+                topologyID: "octet", cellMM: 8, generateRelativeDensity: 0.3,
+                minRelativeDensity: 0.05, maxRelativeDensity: 0.9,
+                regionScoped: regionScoped, emittedRegions: emitted,
+                generated: .init(emitSTL: true, emit3MF: false,
+                                 latticedCells: 1234, regionVoxels: 5678,
+                                 triangles: 987654, strutRadiusMinMM: 0.8,
+                                 strutRadiusMaxMM: 1.4)))
+        }
+        XCTAssertTrue(notes(regionScoped: true, emitted: 2)[0]
+                        .contains("Region-scoped, as previewed"),
+                      "B6: regions that travelled with the job DID scope the build")
+        XCTAssertTrue(notes(regionScoped: true, emitted: 0)[0]
+                        .contains("no region travelled with the job"),
+                      "B6: only a preview-only region leaves the build unscoped — "
+                      + "the old copy claimed that unconditionally")
+        XCTAssertFalse(notes(regionScoped: false, emitted: 0)[0]
+                        .contains("Region"),
+                      "B6: and a run with no regions at all says nothing about them")
+    }
+
     func testPreLatticeOutcomeBlobDecodes() throws {
         // An outcome without a lattice report round-trips to nil (no lattice notes).
         let o = OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: false, acceptedCount: 0)

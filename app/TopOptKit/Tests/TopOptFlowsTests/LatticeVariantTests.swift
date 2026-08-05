@@ -263,7 +263,7 @@ final class LatticeVariantTests: XCTestCase {
     func testRelatticeJobChangesOnlyTheLatticeQuestion() throws {
         let original = originalJob()
         let relattice = try RelatticeJobBuilder.build(
-            original: original, variantVolumeFraction: 0.6,
+            original: original, designFingerprint: 0x5EED_0060, achievedVolumeFraction: 0.5983,
             designFileName: "design.bin", lattice: spec())
 
         XCTAssertEqual(RelatticeJobBuilder.loadCaseDifferences(original, relattice), [],
@@ -276,8 +276,13 @@ final class LatticeVariantTests: XCTestCase {
         XCTAssertEqual(doc["mode"] as? String, "lattice_variant")
         let v = try XCTUnwrap(doc["variant"] as? [String: Any])
         XCTAssertEqual(v["design"] as? String, "design.bin")
-        XCTAssertEqual(v["volume_fraction"] as? Double, 0.6,
-                       "Z2/Z7: the job names the rung the page said it would act on")
+        XCTAssertEqual(v["fingerprint"] as? String, String(0x5EED_0060 as UInt64),
+                       "Z2/Z7: the job names the DESIGN the page said it would act on, "
+                       + "by identity")
+        XCTAssertNil(v["volume_fraction"],
+                     "task 2026-08-04: the ladder RUNG no longer travels in a key core "
+                     + "validates as a fraction in (0, 1] — that is what killed every "
+                     + "growth-ladder re-lattice at schema validation")
         XCTAssertNotNil(doc["lattice"])
         XCTAssertNotNil(doc["some_future_load_key"],
                         "Z2: an unknown key is CARRIED, never dropped — dropping a "
@@ -306,7 +311,7 @@ final class LatticeVariantTests: XCTestCase {
             graded: true, regions: [], cellSizeMode: "fixed",
             cellMinMM: 0, cellMaxMM: 0)
         let job = try RelatticeJobBuilder.build(
-            original: originalJob(), variantVolumeFraction: 0.6,
+            original: originalJob(), designFingerprint: 0x5EED_0060, achievedVolumeFraction: 0.5983,
             designFileName: "design.bin", lattice: graded)
         let doc = try XCTUnwrap(
             JSONSerialization.jsonObject(with: job) as? [String: Any])
@@ -321,7 +326,7 @@ final class LatticeVariantTests: XCTestCase {
 
     func testAJobWithNoLatticeSettingsIsRefusedBeforeSubmission() {
         XCTAssertThrowsError(try RelatticeJobBuilder.build(
-            original: originalJob(), variantVolumeFraction: 0.6,
+            original: originalJob(), designFingerprint: 0x5EED_0060, achievedVolumeFraction: 0.5983,
             designFileName: "design.bin", lattice: nil),
             "there is nothing to lattice without lattice settings")
     }
@@ -339,7 +344,7 @@ final class LatticeVariantTests: XCTestCase {
             regionScoped: true, skin: "diagrid", minExtrudableWidthMM: 0.42,
             graded: false, regions: [region])
         let job = try RelatticeJobBuilder.build(
-            original: originalJob(), variantVolumeFraction: 0.6,
+            original: originalJob(), designFingerprint: 0x5EED_0060, achievedVolumeFraction: 0.5983,
             designFileName: "design.bin", lattice: withRegion)
         let doc = try XCTUnwrap(
             JSONSerialization.jsonObject(with: job) as? [String: Any])

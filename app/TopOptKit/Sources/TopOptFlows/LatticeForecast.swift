@@ -28,14 +28,21 @@ public struct LatticeForecastRemedy: Equatable, Sendable {
     public let parameter: String
     /// The value that key would take (nil where the remedy is not a number).
     public let value: Double?
+    /// The cell the remedy uses, where the remedy is genuinely two-dimensional
+    /// (task 2026-08-04-variant-volume-fraction-mismatch): a finer declared
+    /// extrusion width only helps THROUGH the smaller cell it makes legal, so the
+    /// advice has to name both or it is not actionable. nil ⇒ single-parameter.
+    public let cellMM: Double?
     public let wouldLatticeVoxels: Int
     public let regionVoxels: Int
 
     public init(change: String, parameter: String, value: Double?,
+                cellMM: Double? = nil,
                 wouldLatticeVoxels: Int, regionVoxels: Int) {
         self.change = change
         self.parameter = parameter
         self.value = value
+        self.cellMM = cellMM
         self.wouldLatticeVoxels = wouldLatticeVoxels
         self.regionVoxels = regionVoxels
     }
@@ -187,6 +194,7 @@ public struct LatticeForecast: Equatable, Sendable {
             var line = "\(r.change.prefix(1).uppercased())\(r.change.dropFirst()) "
                      + "→ \(pct)% latticed (\(fmt(r.wouldLatticeVoxels)) voxels)"
             if let v = r.value { line += ", \(r.parameter) = \(mm(v))" }
+            if let c = r.cellMM { line += " with a \(mm(c)) cell" }
             line += ". Measured, not estimated."
             out.append(line)
         }
@@ -248,6 +256,7 @@ public struct LatticeForecast: Equatable, Sendable {
                   let rv = r["region_voxels"] as? Int else { return nil }
             return LatticeForecastRemedy(change: change, parameter: parameter,
                                          value: r["value"] as? Double,
+                                         cellMM: r["cell_mm"] as? Double,
                                          wouldLatticeVoxels: n, regionVoxels: rv)
         }
         return LatticeForecast(

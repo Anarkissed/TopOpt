@@ -209,6 +209,47 @@ extension TopOptKit {
         return certification(raw, meshPath: meshPath)
     }
 
+    /// THE LIVE BRUSH PREVIEW (task 2026-08-04-variant-volume-fraction-mismatch,
+    /// failure C): the deformation the brush ASKS FOR, with no certification.
+    ///
+    /// The page's Original/Smoothed toggle was inert until a re-certification had
+    /// run — it offered a comparison it could not make, and the maintainer read
+    /// the resulting "no difference" as a broken brush. This is the same
+    /// smoother, cheap enough to run on every settled stroke.
+    ///
+    /// `frozen` is the mask `smoothFreezeMask` already returned; those vertices go
+    /// in at weight 0, which the smoother copies VERBATIM on the identical code
+    /// path it uses for a frozen vertex. It does NOT enforce the min-feature
+    /// constraint, so the certified pass may smooth LESS — the page says so.
+    public struct BrushPreview: Equatable, Sendable {
+        public let meshVertices: [Float]
+        public let meshIndices: [Int32]
+        public let totalVertices: Int
+        public let movedVertices: Int
+        public let maxDisplacementMM: Double
+        public let seconds: Double
+    }
+
+    public static func smoothBrushPreview(inputMeshPath: String,
+                                          strength: Double,
+                                          weights: [Double],
+                                          frozen: [Bool] = []) throws -> BrushPreview {
+        var brush = topoptbridge.BridgeVertexWeights()
+        for (i, w) in weights.enumerated() {
+            brush.weight.push_back(i < frozen.count && frozen[i] ? 0 : w)
+        }
+        var err = topoptbridge.BridgeError()
+        let raw = topoptbridge.smooth_brush_preview(
+            std.string(inputMeshPath), strength, brush, &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        return BrushPreview(
+            meshVertices: Array(raw.vertices), meshIndices: Array(raw.indices),
+            totalVertices: Int(raw.total_vertices),
+            movedVertices: Int(raw.moved_vertices),
+            maxDisplacementMM: raw.max_displacement_mm,
+            seconds: raw.seconds)
+    }
+
     /// Smooth `inputMeshPath` with PER-VERTEX weights, write the result to
     /// `smoothedOutPath`, and certify THAT — the receipt's AFTER column.
     ///

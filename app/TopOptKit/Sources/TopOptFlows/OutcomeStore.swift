@@ -97,6 +97,10 @@ enum OutcomeCodec {
         let minRelativeDensity: Double
         let maxRelativeDensity: Double
         let regionScoped: Bool
+        /// Optional so a blob written before bar B6 still decodes; absent reads as
+        /// 0, which is the pre-B6 behaviour (the note falls back to the
+        /// preview-scoped sentence) rather than an invented region count.
+        let emittedRegions: Int?
         let genEmitSTL: Bool?
         let genEmit3MF: Bool?
         let genLatticedCells: Int?
@@ -230,6 +234,7 @@ enum OutcomeCodec {
                     minRelativeDensity: r.minRelativeDensity,
                     maxRelativeDensity: r.maxRelativeDensity,
                     regionScoped: r.regionScoped,
+                    emittedRegions: r.emittedRegions,
                     genEmitSTL: r.generated?.emitSTL, genEmit3MF: r.generated?.emit3MF,
                     genLatticedCells: r.generated?.latticedCells,
                     genRegionVoxels: r.generated?.regionVoxels,
@@ -311,6 +316,7 @@ enum OutcomeCodec {
                     minRelativeDensity: r.minRelativeDensity,
                     maxRelativeDensity: r.maxRelativeDensity,
                     regionScoped: r.regionScoped,
+                    emittedRegions: r.emittedRegions ?? 0,
                     generated: r.genTriangles.map { tris in
                         LatticeReport.Generated(
                             emitSTL: r.genEmitSTL ?? true, emit3MF: r.genEmit3MF ?? false,

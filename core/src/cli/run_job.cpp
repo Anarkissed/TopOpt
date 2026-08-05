@@ -1664,6 +1664,21 @@ struct LatticeVariantOutcome {
   // than merely argued (bar Z3). Both consumers read the SAME `dens` reference
   // below; this fingerprints it once, at the single point they share.
   std::uint64_t design_fingerprint = 0;
+
+  // NO LATTICE WAS PRODUCED, AND NOTHING WAS EMITTED (task
+  // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3). The grading law
+  // had candidates and could grade NONE of them (`region_ungradeable`), so this
+  // function returned before writing a single triangle. `why` is the whole
+  // predicate — the reasons, the counts and the two widths whose relation is the
+  // remedy.
+  //
+  // A FLAG RATHER THAN A THROW, because the two callers want opposite things
+  // from the same fact. `lattice_variant_job` exists only to produce this one
+  // lattice, so it refuses. The optimize path has a LADDER: one thin rung being
+  // unlatticeable must not destroy the other rungs' output, so it skips that
+  // rung, says so, and — critically — leaves it OUT of the run-level aggregates.
+  bool ungradeable = false;
+  std::string ungradeable_reason;
 };
 
 // `part_grid` is the ORIGINAL imported part's grid and `domain` is the domain the
@@ -1764,6 +1779,49 @@ LatticeVariantOutcome lattice_one_variant(
     if (options.multiscale_lattice) gp.prescribed_relative_density = &dens;
     gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
                        printed_iso);
+    // ── NO SILENT DEGENERATE OUTPUT (task
+    // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3).
+    //
+    // `region_ungradeable` — candidates existed and the law could grade NONE of
+    // them — was computed, carried through five receipts and observability, and
+    // ACTED ON NOWHERE. What came out the far end was a "lattice" with zero
+    // latticed cells: rho_min_used 0, rho_max_used 0, strut radius 0.00 mm, and a
+    // strut-strength margin computed on no material at all — reported to the user
+    // as a successful build. A lattice with no struts in it is not a lattice, and
+    // this is where that stops.
+    //
+    // NOTHING IS EMITTED on this path — no mesh, no receipt, no aggregate
+    // contribution. A silent fall-back to the solid part under a file name that
+    // says "lattice" would be the same dishonesty one layer down. The reason
+    // carries the predicate, the per-reason counts and the two measured widths,
+    // because the whole remedy is the relation between them.
+    if (gf.region_ungradeable) {
+      R.ungradeable = true;
+      R.ungradeable_reason =
+          "the grading law could lattice NONE of this variant's " +
+          std::to_string(gf.region_voxels) +
+          " candidate voxels, so there is no lattice to emit — refusing rather "
+          "than writing a file with zero struts in it and calling it a lattice. "
+          "Reasons: member_too_thin_for_cell=" +
+          std::to_string(gf.fallback_member_too_thin) +
+          ", strut_unprintable_at_every_cell=" +
+          std::to_string(gf.fallback_strut_unprintable) +
+          ", irrecoverable_by_any_cell_size=" +
+          std::to_string(gf.fallback_irrecoverable_by_cell) +
+          ". The widest member the law rejected is " +
+          json_num(gf.fallback_max_member_width_mm) +
+          " mm; at this cell size a member must be at least " +
+          json_num(gf.cells_per_member_floor * gf.cell_size_mm) +
+          " mm across to hold " + json_num(gf.cells_per_member_floor) +
+          " cells. A smaller cell needs a finer declared extrusion width "
+          "(min_extrudable_width_mm " +
+          json_num(gp.min_extrudable_width_mm) +
+          " mm sets the printability floor at " +
+          json_num(gf.printability_floor_mm) +
+          " mm) — run the pre-flight forecast for the evaluated remedies.";
+      R.gf = gf;
+      return R;
+    }
     cell = gf.cell_size_mm;
     // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
     // level the plan used, which is what the boundary window, the cell-overlap
@@ -2668,6 +2726,11 @@ struct ForecastCounterfactual {
   double value = 0.0;
   std::size_t latticed_voxels = 0;
   std::size_t region_voxels = 0;
+  // Set only by the EXTRUSION-WIDTH remedy, which is genuinely two-dimensional:
+  // a finer declared width lowers the printability FLOOR, and it is the cell that
+  // floor unlocks which does the work. Reported so the entry is actionable rather
+  // than a number the reader has to re-derive. 0 ⇒ single-parameter remedy.
+  double cell_mm = 0.0;
 };
 
 // The candidate set the law grades over: solid voxels, minus clearances, minus
@@ -2739,6 +2802,57 @@ GradingLawParams forecast_grading_params(const JobDescription& job) {
   return gp;
 }
 
+// *** THE UNIFORM FORECAST (task 2026-08-04-variant-volume-fraction-mismatch,
+// failure B / B2). ***
+//
+// A job with NO `grading` block does not run the grading law at ALL:
+// `lattice_one_variant` sets `graded = job.grading.present`, and when that is
+// false the cell is `job.lattice.cell_mm`, the radius is `job.lattice
+// .strut_radius_mm`, and EVERY cell overlapping the boundary gets a strut. There
+// is no cells-per-member floor on that path and no printability floor.
+//
+// The forecast, however, ran `grade_lattice` unconditionally — so for a uniform
+// job it forecast a GRADED run that was never going to happen. On the
+// maintainer's WallMount growth variant it therefore reported
+// `would_lattice_voxels: 0` and "This configuration would lattice NOTHING",
+// while the very same job, run for real, wrote a 17.6 MB latticed STL full of
+// struts. A forecast of a different job is worse than no forecast: it warned him
+// off the one configuration that worked.
+//
+// So the uniform case is forecast by running the SAME two functions the uniform
+// run runs — `lattice_boundary_for` and `lattice_certification_mask` — and
+// counting their mask. Not a model of the run: the run's own predicate.
+struct UniformForecast {
+  std::size_t region_voxels = 0;
+  std::size_t latticed_voxels = 0;
+  double strut_diameter_mm = 0.0;
+  bool strut_below_min_extrudable = false;
+};
+
+UniformForecast forecast_uniform(const JobDescription& job,
+                                 const VoxelGrid& grid,
+                                 const StoredDesign& sd,
+                                 const std::vector<ClearanceGeometry>& kos,
+                                 const LatticeRoleRegions& roles,
+                                 const std::vector<char>& cand) {
+  UniformForecast u;
+  for (const char c : cand) u.region_voxels += (c != 0);
+  const double cell = job.lattice.cell_mm;
+  if (!(cell > 0.0)) return u;   // no cell stated ⇒ nothing to forecast uniformly
+  const LatticeBoundary boundary =
+      lattice_boundary_for(grid, sd.density, cell, kos, roles, 0.5);
+  const std::vector<char> mask = lattice_certification_mask(
+      boundary, grid, sd.density, 0.5, grid.origin, cell);
+  for (std::size_t e = 0; e < mask.size(); ++e)
+    if (mask[e] && e < cand.size() && cand[e]) ++u.latticed_voxels;
+  u.strut_diameter_mm = 2.0 * job.lattice.strut_radius_mm;
+  u.strut_below_min_extrudable =
+      job.lattice.min_extrudable_width_mm > 0.0 &&
+      u.strut_diameter_mm > 0.0 &&
+      u.strut_diameter_mm < job.lattice.min_extrudable_width_mm;
+  return u;
+}
+
 std::string lattice_forecast_json(const JobDescription& job,
                                   const VoxelGrid& grid,
                                   const StoredDesign& sd,
@@ -2747,6 +2861,75 @@ std::string lattice_forecast_json(const JobDescription& job,
   LatticeBoundary members;
   const std::vector<char> cand =
       forecast_candidates(grid, sd.density, kos, roles, members);
+  // A UNIFORM job takes an entirely different code path in the run, so it takes
+  // an entirely different forecast here. See `forecast_uniform`.
+  if (!job.grading.present) {
+    const UniformForecast u =
+        forecast_uniform(job, grid, sd, kos, roles, cand);
+    const double frac = u.region_voxels > 0
+                            ? static_cast<double>(u.latticed_voxels) /
+                                  static_cast<double>(u.region_voxels)
+                            : 0.0;
+    std::string s = "{\n";
+    s += "  \"forecast\": \"what a lattice run on THIS variant would produce, "
+         "computed before the run from the stored design and this job's lattice "
+         "block. No FEA ran.\",\n";
+    s += "  \"variant_volume_fraction\": " +
+         json_num(sd.requested_volume_fraction) + ",\n";
+    s += "  \"topology\": \"" + job.lattice.topology + "\",\n";
+    s += "  \"cell_mode\": \"uniform\",\n";
+    s += "  \"cell_size_mm\": " + json_num(job.lattice.cell_mm) + ",\n";
+    s += "  \"uniform_note\": \"this job carries NO \\\"grading\\\" block, so "
+         "the run applies no grading law: no cells-per-member floor, no "
+         "printability floor, one declared strut radius everywhere. The counts "
+         "below come from the run's OWN boundary and certification-mask "
+         "predicates, not from the grading law.\",\n";
+    s += "  \"strut_radius_mm\": " + json_num(job.lattice.strut_radius_mm) +
+         ",\n";
+    s += "  \"strut_diameter_mm\": " + json_num(u.strut_diameter_mm) + ",\n";
+    s += "  \"region_voxels\": " + std::to_string(u.region_voxels) + ",\n";
+    s += "  \"would_lattice_voxels\": " + std::to_string(u.latticed_voxels) +
+         ",\n";
+    s += "  \"would_stay_solid_voxels\": " +
+         std::to_string(u.region_voxels - u.latticed_voxels) + ",\n";
+    s += "  \"latticed_fraction_of_region\": " + json_num(frac) + ",\n";
+    s += "  \"would_stay_solid_by_reason\": {\n";
+    s += "    \"cell_does_not_overlap_the_region\": " +
+         std::to_string(u.region_voxels - u.latticed_voxels) + ",\n";
+    s += "    \"note\": \"on the uniform path the ONLY predicate is whether a "
+         "voxel's owning lattice cell overlaps the allowed region; there is no "
+         "member-width test\"\n";
+    s += "  },\n";
+    s += "  \"include_regions\": " + std::to_string(roles.includes.size()) +
+         ",\n";
+    s += "  \"exclude_regions\": " + std::to_string(roles.excludes.size()) +
+         ",\n";
+    s += "  \"strut_below_min_extrudable\": " +
+         std::string(u.strut_below_min_extrudable ? "true" : "false") + ",\n";
+    if (u.strut_below_min_extrudable)
+      s += "  \"strut_printability_note\": \"the declared strut radius implies a "
+           "strut thinner than the declared extrusion width — the run will emit "
+           "it anyway (the uniform path applies no printability floor), but the "
+           "slicer will not be able to print it\",\n";
+    const bool rim_only = job.lattice.skin == "rim";
+    s += "  \"boundary\": \"" + job.lattice.skin + "\",\n";
+    s += "  \"boundary_can_emit\": " +
+         std::string(rim_only ? "false" : "true") + ",\n";
+    if (rim_only)
+      s += "  \"boundary_note\": \"\\\"rim\\\" dresses the edges where ANALYTIC "
+           "faces meet (plane-plane, plane-bore). An optimized variant's surface "
+           "comes from the voxel grid and owns no analytic face, so a rim emits "
+           "nothing at all here. Choose \\\"diagrid\\\" for a woven surface skin, "
+           "or \\\"none\\\" deliberately.\",\n";
+    s += "  \"counterfactuals\": [],\n";
+    s += "  \"counterfactual_note\": \"none are offered on the uniform path: it "
+         "has no grading law to re-run, and the only knobs are the cell size and "
+         "the strut radius the job already states.\",\n";
+    s += "  \"demand_field\": \"none — a uniform lattice has no demand field. "
+         "Every emitted strut has the declared radius.\"\n";
+    s += "}\n";
+    return s;
+  }
   // The band-floor demand (see the header comment): zeros ⇒ rho_of == 0 ⇒ every
   // candidate clamps to the band's low end.
   const std::vector<double> flat_demand(grid.voxel_count(), 0.0);
@@ -2804,6 +2987,87 @@ std::string lattice_forecast_json(const JobDescription& job,
       cf.latticed_voxels = alt_gf.latticed_voxels;
       cf.region_voxels = alt_gf.region_voxels;
       cfs.push_back(cf);
+    }
+  }
+  // ── THE EXTRUSION-WIDTH remedy (task
+  // 2026-08-04-variant-volume-fraction-mismatch, failure B).
+  //
+  // *** WHY THIS HAD TO BE ADDED. *** "irrecoverable by any cell size" is true
+  // only INSIDE a fixed printability floor, and that floor is not a property of
+  // the part: it is `min_extrudable_width_mm / phi(rho_lo, unit cell)` — the
+  // DECLARED extrusion width divided by a constant. So the sentence this file
+  // used to emit whenever the cell remedies were withheld —
+  //   "An empty list means no parameter change could help"
+  // — was FALSE, and it was false on exactly the maintainer's parts. MEASURED, on
+  // his WallMount growth run (design.bin of worker job efa7cfd3b4e344c6, rung
+  // 1.55, 70788 region voxels): at his declared 0.42 mm every cell size lattices
+  // 0 voxels; at 0.30 mm with a 3.0 mm cell it lattices 6750 (9.5% of the
+  // region), and at 0.25 mm, 12020 (17.0%). He had been told nothing could help
+  // for a week.
+  //
+  // The remedy is genuinely two-dimensional (a finer width only matters through
+  // the cell it unlocks), so both numbers are carried on the entry and both are
+  // EVALUATED — the threshold is derived in closed form, but what it is reported
+  // to produce is what the grading law actually produced when re-run with it.
+  //
+  // Offered whenever ANY voxel was rejected as irrecoverable-by-cell — not only
+  // when the lattice is entirely empty. A partial lattice with a wall of
+  // irrecoverable members is the maintainer's likely next state, and the same
+  // knob is the same remedy there.
+  if (gf.fallback_irrecoverable_by_cell > 0 &&
+      gf.fallback_max_member_width_mm > 0.0 &&
+      gp.min_extrudable_width_mm > 0.0) {
+    // The widest cell the widest REJECTED member can hold, and the declared width
+    // whose floor sits exactly there. phi is linear in cell size, so
+    // floor(w) = w / phi(rho_lo, 1) and the threshold inverts it directly.
+    const double n_star = lattice_cells_per_member_min(gp.topology);
+    const double cell_needed = gf.fallback_max_member_width_mm / n_star;
+    const double phi_unit = octet_strut_diameter_mm(lattice_rho_min(gp.topology), 1.0);
+    const double w_threshold = cell_needed * phi_unit;
+    // Only offered when it is a REDUCTION the user does not already have. A
+    // "remedy" that asks for a wider nozzle than the one declared is not one.
+    if (w_threshold > 0.0 && w_threshold < gp.min_extrudable_width_mm) {
+      for (const double w : {w_threshold, 0.5 * gp.min_extrudable_width_mm}) {
+        if (!(w > 0.0)) continue;
+        GradingLawParams alt = gp;
+        alt.min_extrudable_width_mm = w;
+        // The cell that width unlocks: the FINEST legal one, because a finer cell
+        // clears the cells-per-member floor in MORE members, so this is the most
+        // the declared width can buy. At the threshold it equals `cell_needed`
+        // exactly, which is what makes that entry the break-even point.
+        const double new_floor =
+            lattice_cell_printability_floor_mm(alt.topology, w);
+        const double cell = new_floor;
+        alt.cell_mode = CellSizeMode::Fixed;
+        alt.target_cell_size_mm = cell;
+        GradedField alt_gf;
+        try {
+          alt_gf = grade_lattice(grid, sd.density, flat_demand, &cand, alt);
+        } catch (const std::exception&) {
+          continue;
+        }
+        // Not a remedy unless it lattices MORE than the job already would; the
+        // app's advice list filters on the same predicate, and offering a
+        // sideways move as a fix is the wrong-suggestion failure bar F4 forbids.
+        if (alt_gf.latticed_voxels <= gf.latticed_voxels) continue;
+        ForecastCounterfactual cf;
+        cf.change =
+            "declare a finer extrusion width — it lowers the printability floor, "
+            "which is what makes a small enough cell legal";
+        cf.parameter = "lattice.min_extrudable_width_mm";
+        cf.value = w;
+        cf.cell_mm = cell;
+        cf.latticed_voxels = alt_gf.latticed_voxels;
+        cf.region_voxels = alt_gf.region_voxels;
+        // The two probes can coincide (or the second can be dominated); keep only
+        // entries that say something new.
+        bool dup = false;
+        for (const ForecastCounterfactual& p : cfs)
+          if (p.parameter == cf.parameter &&
+              p.latticed_voxels == cf.latticed_voxels)
+            dup = true;
+        if (!dup) cfs.push_back(cf);
+      }
     }
   }
   // THE REGION counterfactual, always evaluated when include regions exist: what
@@ -2896,6 +3160,7 @@ std::string lattice_forecast_json(const JobDescription& job,
     s += "\n    {\"change\": \"" + cf.change + "\", \"parameter\": \"" +
          cf.parameter + "\"";
     if (cf.value > 0.0) s += ", \"value\": " + json_num(cf.value);
+    if (cf.cell_mm > 0.0) s += ", \"cell_mm\": " + json_num(cf.cell_mm);
     s += ", \"would_lattice_voxels\": " + std::to_string(cf.latticed_voxels) +
          ", \"region_voxels\": " + std::to_string(cf.region_voxels) +
          ", \"latticed_fraction_of_region\": " + json_num(f) + "}";
@@ -2904,9 +3169,11 @@ std::string lattice_forecast_json(const JobDescription& job,
   if (whole_ran) emit_cf(whole);
   s += first ? "],\n" : "\n  ],\n";
   s += "  \"counterfactual_note\": \"every entry above was EVALUATED — the "
-       "grading law was re-run with that one parameter changed and the mask it "
-       "actually produced is reported. An empty list means no parameter change "
-       "could help.\",\n";
+       "grading law was re-run with that change and the mask it actually "
+       "produced is reported. An empty list means none of the changes probed "
+       "here (cell size, extrusion width, dropping the include regions) "
+       "lattices anything on this design — NOT that the part is beyond "
+       "help.\",\n";
   s += "  \"demand_field\": \"none (pre-flight) — densities are forecast at the "
        "certifiable band's LOW end, the conservative end for printability. The "
        "cells-per-member rule does not see density, so the latticed/solid split "
@@ -3744,6 +4011,29 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
                      job.variant.design + "\" holds only " +
                      std::to_string(store.variants.size()) + " design(s)");
     pick = job.variant.index;
+  } else if (job.variant.has_fingerprint) {
+    // BY IDENTITY (task 2026-08-04-variant-volume-fraction-mismatch). The design
+    // fingerprint is the hash of the density field itself, so this asks "the
+    // design that hashes to X", not "whatever sits at position/rung X" — the
+    // only form of the question that is well posed on BOTH ladders, and the same
+    // number bar Z3 uses to tie the certified object to the exported one.
+    for (std::size_t i = 0; i < store.variants.size(); ++i)
+      if (store.variants[i].fingerprint == job.variant.fingerprint) {
+        pick = static_cast<int>(i);
+        break;
+      }
+    if (pick < 0) {
+      std::string have;
+      for (std::size_t i = 0; i < store.variants.size(); ++i)
+        have += (i ? ", " : "") +
+                std::to_string(store.variants[i].fingerprint) + " (rung " +
+                json_num(store.variants[i].requested_volume_fraction) + ")";
+      throw JobError(
+          "lattice_variant: no stored design with fingerprint " +
+          std::to_string(job.variant.fingerprint) + " in \"" +
+          job.variant.design + "\" (it holds: " + have +
+          "). The design container is not the one that produced this variant.");
+    }
   } else {
     for (std::size_t i = 0; i < store.variants.size(); ++i)
       if (store.variants[i].requested_volume_fraction ==
@@ -3762,6 +4052,36 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     }
   }
   const StoredDesign& sd = store.variants[static_cast<std::size_t>(pick)];
+  // BAR A3, ENFORCED (task 2026-08-04-variant-volume-fraction-mismatch). When
+  // the job carries the variant's own achieved fraction, it must be the one the
+  // design actually achieved. A front-end that showed the user one number and
+  // latticed a design with another is the certified-object-is-not-the-exported-
+  // object failure in its cheapest-to-catch form, so it is caught here rather
+  // than trusted.
+  //
+  // *** WHY THIS IS NOT AN EXACT COMPARISON, WHEN THE MARGIN REPRODUCTION BELOW
+  // IS. *** The margin reproduction compares two f64s that both exist at full
+  // precision: one read from design.bin, one just computed. This compares a
+  // design.bin f64 against a number that reached the front-end THROUGH
+  // report.json, and `json_num` writes 10 significant digits — the app is handed
+  // 0.6686514886 for a design that achieved 0.6686514886164624. An exact
+  // comparison here would refuse every honest job on the shipping path while
+  // catching nothing. The wire's own precision is therefore the bar: 1e-9
+  // relative is ~20x the worst truncation error and ~8 orders of magnitude
+  // tighter than the gap between two adjacent ladder rungs, so it cannot confuse
+  // one variant with another — which is the whole thing it exists to catch.
+  const double kAchievedWireTolerance = 1e-9;   // relative; report.json is 10 s.f.
+  if (job.variant.has_achieved_volume_fraction &&
+      std::abs(job.variant.achieved_volume_fraction -
+               sd.achieved_volume_fraction) >
+          kAchievedWireTolerance * std::abs(sd.achieved_volume_fraction))
+    throw JobError(
+        "lattice_variant: the job says this variant achieved volume fraction " +
+        json_num(job.variant.achieved_volume_fraction) +
+        ", but the stored design achieved " +
+        json_num(sd.achieved_volume_fraction) +
+        " (rung " + json_num(sd.requested_volume_fraction) +
+        "). The job is describing a different variant than the one it selected.");
   result.variant_index = pick;
   result.requested_volume_fraction = sd.requested_volume_fraction;
   result.achieved_volume_fraction = sd.achieved_volume_fraction;
@@ -3939,6 +4259,14 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   const LatticeVariantOutcome R =
       lattice_one_variant(v, job, model_grid, domain, options, material,
                           lattice_kos, lattice_roles, out_dir);
+  // BAR B3 / L3 (task 2026-08-04-variant-volume-fraction-mismatch). This entry
+  // point exists to produce ONE latticed object. If the grading law could
+  // lattice nothing, there is no object — and the alternative the optimize path
+  // takes (skip this rung, keep the others) has no meaning here. So it refuses,
+  // with the predicate and the counts, rather than writing a file with zero
+  // struts in it and reporting a successful build.
+  if (R.ungradeable)
+    throw JobError("lattice_variant: " + R.ungradeable_reason);
   // The pipeline's own solve count: the null-posture reproduction it runs as
   // its internal proof, the composite, and (when band clamping happened) the
   // clamp counterfactual. Counted, never assumed.
@@ -4775,6 +5103,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     bool any = false;
     long long cells = 0, voxels = 0, tris = 0;
     int variants = 0;
+    // Rungs the grading law could lattice NOTHING of, so nothing was emitted for
+    // them and nothing of theirs entered the aggregates below (bar B3 / L3).
+    // Counted rather than dropped silently: "3 of 4 rungs latticed" is a fact the
+    // receipt has to carry, or the missing files look like a transport failure.
+    int ungradeable_variants = 0;
     double r_min = 1e30, r_max = 0.0;
     double wall_s = 0.0;
     // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): what the
@@ -4987,6 +5320,30 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     const LatticeVariantOutcome R =
         lattice_one_variant(v, job, grid, domain, options, material,
                             lattice_kos, lattice_roles, out_dir);
+    // ── THIS RUNG PRODUCED NO LATTICE (task
+    // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3).
+    //
+    // Skipped BEFORE the aggregation, and that is the point. The aggregates take
+    // a MIN over rungs — `lat_agg.r_min = min(r_min, min_strut_diameter/2)`,
+    // `lat_agg.rho_lo = min(rho_lo, gf.rho_min_used)` — and an ungradeable rung
+    // carries both of those as 0, because grading.cpp only assigns them when
+    // `latticed_voxels > 0`. One thin rung therefore dragged the WHOLE run's
+    // report to zero. That is the "filled at 0% density … strut radius
+    // 0.00–0.65 mm" the maintainer read: MEASURED in worker run
+    // 4dabe3b8512d4d59, whose other rungs latticed 132 cells at radii up to
+    // 0.645 mm perfectly well. Nothing was wrong with those rungs; the run-level
+    // minimum was reading a rung that had no struts at all.
+    if (R.ungradeable) {
+      std::fprintf(stderr, "[lattice] vf=%.2f NO LATTICE EMITTED — %s\n",
+                   v.requested_volume_fraction, R.ungradeable_reason.c_str());
+      std::fflush(stderr);
+      // `any` is still set: a lattice WAS requested and attempted, and a run
+      // whose every rung was ungradeable must still write a lattice_export
+      // record saying so. Silence there would read as a transport failure.
+      lat_agg.any = true;
+      ++lat_agg.ungradeable_variants;
+      return;
+    }
     lat_agg.wall_s += R.gen_seconds;
     const LatticeExportOutcome& oc = R.oc;
     const LatticeCertOutcome& cc = R.cc;
@@ -5204,12 +5561,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // variant's own cell is in its receipt). Uniform runs: the job's.
     run_info.lattice_export_cell_mm =
         lat_agg.graded ? lat_agg.g_cell : job.lattice.cell_mm;
-    run_info.lattice_export_strut_radius_min_mm = lat_agg.r_min;
+    // A run where EVERY rung was ungradeable emitted no geometry at all, so the
+    // "smallest strut" sentinel (1e30) is not an answer — there were no struts.
+    // Zeroed explicitly rather than leaked, and `ungradeable_variants` beside it
+    // is what says why (bar B3 / L3).
+    run_info.lattice_export_strut_radius_min_mm =
+        lat_agg.variants > 0 ? lat_agg.r_min : 0.0;
     run_info.lattice_export_strut_radius_max_mm = lat_agg.r_max;
     run_info.lattice_export_latticed_cells = lat_agg.cells;
     run_info.lattice_export_region_voxels = lat_agg.voxels;
     run_info.lattice_export_triangles = lat_agg.tris;
     run_info.lattice_export_variant_count = lat_agg.variants;
+    run_info.lattice_export_ungradeable_variants = lat_agg.ungradeable_variants;
     run_info.lattice_export_emit_stl = job.lattice.emit_stl;
     run_info.lattice_export_emit_3mf = job.lattice.emit_3mf;
     run_info.lattice_export_interpenetrating_soup = true;
