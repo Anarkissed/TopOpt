@@ -78,6 +78,19 @@ public struct LatticeForecast: Equatable, Sendable {
 
     public let remedies: [LatticeForecastRemedy]
 
+    // MARK: - sub-floor retention (handoff 2026-08-04-subfloor-lattice-unloaded-regions)
+
+    /// Whether the job asked for lattice to be KEPT in regions whose members are
+    /// below the cells-per-member floor.
+    public let subfloorRequested: Bool
+    /// The ceiling the region's stress must come in under, as a fraction of the
+    /// part's PEAK von Mises.
+    public let subfloorStressFractionCeiling: Double
+    /// How many of this region's voxels are below the floor — i.e. how much material
+    /// the decision is actually about. Exact: the cells-per-member predicate never
+    /// sees density, so the forecast's band-floor approximation cannot move it.
+    public let subfloorVoxelsBelowFloor: Int
+
     public init(variantVolumeFraction: Double, cellSizeMM: Double,
                 cellMode: String, printabilityFloorMM: Double,
                 cellsPerMemberFloor: Double, regionVoxels: Int,
@@ -87,7 +100,13 @@ public struct LatticeForecast: Equatable, Sendable {
                 memberWidthNeededMM: Double, includeRegions: Int,
                 excludeRegions: Int, includeRegionVoidVoxels: Int,
                 boundary: String, boundaryCanEmit: Bool, boundaryNote: String?,
-                remedies: [LatticeForecastRemedy]) {
+                remedies: [LatticeForecastRemedy],
+                subfloorRequested: Bool = false,
+                subfloorStressFractionCeiling: Double = 0,
+                subfloorVoxelsBelowFloor: Int = 0) {
+        self.subfloorRequested = subfloorRequested
+        self.subfloorStressFractionCeiling = subfloorStressFractionCeiling
+        self.subfloorVoxelsBelowFloor = subfloorVoxelsBelowFloor
         self.variantVolumeFraction = variantVolumeFraction
         self.cellSizeMM = cellSizeMM
         self.cellMode = cellMode
@@ -166,6 +185,40 @@ public struct LatticeForecast: Equatable, Sendable {
                      + "empty, and a lattice cannot add material. Those parts of the "
                      + "region do nothing.")
         }
+        // SUB-FLOOR RETENTION, said BEFORE the run (handoff 2026-08-04-subfloor-
+        // lattice-unloaded-regions, bar S7). The forecast can count the material
+        // this is about exactly; what it CANNOT do is evaluate the predicate, which
+        // needs a stress field and therefore a solve. So it names the outcome and is
+        // explicit about which half it cannot answer — rather than implying the
+        // material will stay solid (it may not) or that it will be latticed (it may
+        // not be either).
+        if subfloorRequested && subfloorVoxelsBelowFloor > 0 {
+            let pct = Int((subfloorStressFractionCeiling * 100).rounded())
+            out.append("\(fmt(subfloorVoxelsBelowFloor)) of these voxels are below "
+                     + "the \(trim(cellsPerMemberFloor))-cells-across floor, and you "
+                     + "asked to lattice them anyway where the region carries almost "
+                     + "no load. They WILL be latticed if this region's peak stress "
+                     + "measures at or under \(pct)% of the part's peak, and stay "
+                     + "solid if it measures above. This pre-flight cannot tell you "
+                     + "which — it runs before any solve, so there is no stress to "
+                     + "measure. The run will report it.")
+            out.append("Where they are latticed, the certificate over them is OUT OF "
+                     + "REGIME: the homogenized model is not valid that coarse, and "
+                     + "the certification cannot see the difference — so this buys "
+                     + "you the lattice, not a guarantee about it.")
+            // Said BEFORE the run as well as after it: cell size never enters the
+            // certification maths, so the margin cannot report on this either way.
+            out.append("Be clear about what you are accepting: the margin the run "
+                     + "reports would look the same whether that lattice is fine or "
+                     + "badly wrong, because cell size never enters the "
+                     + "certification maths. It is an accepted unknown.")
+        } else if !subfloorRequested && subfloorVoxelsBelowFloor > 0 {
+            out.append("\(fmt(subfloorVoxelsBelowFloor)) of these are below the "
+                     + "cells-across floor. If this region carries almost no load — a "
+                     + "wall that is there for geometry — you can choose to lattice "
+                     + "them anyway; the certificate over that material would then be "
+                     + "out of regime.")
+        }
         if let note = boundaryNote { out.append(note) }
         return out
     }
@@ -240,6 +293,7 @@ public struct LatticeForecast: Equatable, Sendable {
               let solid = o["would_stay_solid_voxels"] as? Int
         else { return nil }
         let by = o["would_stay_solid_by_reason"] as? [String: Any] ?? [:]
+        let sub = o["subfloor_retention"] as? [String: Any] ?? [:]
         let remedies = (o["counterfactuals"] as? [[String: Any]] ?? []).compactMap {
             r -> LatticeForecastRemedy? in
             guard let change = r["change"] as? String,
@@ -269,7 +323,10 @@ public struct LatticeForecast: Equatable, Sendable {
             boundary: o["boundary"] as? String ?? "",
             boundaryCanEmit: o["boundary_can_emit"] as? Bool ?? true,
             boundaryNote: o["boundary_note"] as? String,
-            remedies: remedies)
+            remedies: remedies,
+            subfloorRequested: sub["requested"] as? Bool ?? false,
+            subfloorStressFractionCeiling: sub["stress_fraction_ceiling"] as? Double ?? 0,
+            subfloorVoxelsBelowFloor: sub["voxels_below_floor"] as? Int ?? 0)
     }
 }
 

@@ -115,6 +115,12 @@ enum OutcomeCodec {
         let strutZKnockdown: Double?
         let strutMinCellsPerMember: Double?
         let strutOutOfRegime: Bool?
+        // SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+        // The DTO must mirror OptimizeOutcome or a restored run silently loses WHY it
+        // was out of regime — the exact class of drop this store has shipped before.
+        // Optional so a blob written before this task still decodes.
+        let strutSubfloorRetainedVoxels: Int?
+        let strutSubfloorRegionStressFraction: Double?
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -243,7 +249,10 @@ enum OutcomeCodec {
                     strutZKnockdown: r.strut?.zKnockdown,
                     strutMinCellsPerMember: r.strut.flatMap {
                         $0.minCellsPerMember.isFinite ? $0.minCellsPerMember : nil },
-                    strutOutOfRegime: r.strut?.outOfRegime) },
+                    strutOutOfRegime: r.strut?.outOfRegime,
+                    strutSubfloorRetainedVoxels: r.strut?.subfloorRetainedVoxels,
+                    strutSubfloorRegionStressFraction:
+                        r.strut?.subfloorRegionStressFraction) },
             solvedBy: o.solvedBy)
     }
 
@@ -328,7 +337,11 @@ enum OutcomeCodec {
                             marginInterlayer: r.strutMarginInterlayer ?? .infinity,
                             zKnockdown: zk,
                             minCellsPerMember: r.strutMinCellsPerMember ?? .infinity,
-                            outOfRegime: r.strutOutOfRegime ?? false) }) },
+                            outOfRegime: r.strutOutOfRegime ?? false,
+                            subfloorRetainedVoxels:
+                                r.strutSubfloorRetainedVoxels ?? 0,
+                            subfloorRegionStressFraction:
+                                r.strutSubfloorRegionStressFraction ?? 0) }) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false)

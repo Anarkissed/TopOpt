@@ -244,6 +244,34 @@ struct JobGrading {
   std::string cell_mode = "fixed";
   double cell_min_mm = 0.0;             // swept only; finite > 0
   double cell_max_mm = 0.0;             // swept only; finite >= cell_min_mm
+
+  // "retain_subfloor_in_unloaded_regions" (handoff 2026-08-04-subfloor-lattice-
+  // unloaded-regions). ABSENT / false is the DEFAULT and is bit-identical to a
+  // pre-task run (bar S1). True lets the grading law keep lattice in a region whose
+  // members cannot hold the cells-per-member floor, PROVIDED the law MEASURES that
+  // region's peak von Mises at or under `subfloor_stress_fraction` of the part's
+  // peak. The maintainer's case is a back wall that carries no load and exists for
+  // geometry: today it is silently left solid.
+  //
+  // OPTING IN IS ACCEPTING A KNOWN INACCURACY. The certificate over the retained
+  // material is out of regime — `lattice_strut_out_of_regime` is raised and the
+  // receipt names which voxels, at what cells-per-member, and at what fraction of
+  // peak stress. Read lattice.hpp's ★★ note before using it: the certification is
+  // structurally blind to cells-per-member, so a margin that does not move is NOT
+  // evidence that this is safe.
+  bool retain_subfloor_in_unloaded_regions = false;
+  // "subfloor_stress_fraction" — optional override of the measured ceiling
+  // (lattice_subfloor_retention_stress_fraction(), 0.20). 0 / absent = take the
+  // core constant. Finite, > 0 and <= 1 when retention is on.
+  double subfloor_stress_fraction = 0.0;
+  // "subfloor_aggregate_cap" — optional override of the AGGREGATE exposure cap
+  // (lattice_subfloor_aggregate_cap_fraction(), 0.03): the ceiling on total
+  // sub-floor material retained across ALL regions, as a fraction of the printed
+  // set. 0 / absent = take the core constant. Finite, > 0 and <= 1 when retention
+  // is on. Over the cap the run retains NOTHING and the receipt says so — see
+  // lattice.hpp's ★★★ note for why this is a policy ceiling on exposure and not a
+  // safety threshold.
+  double subfloor_aggregate_cap = 0.0;
 };
 
 // One load group of a declared load case (handoff 093): its faces are chosen

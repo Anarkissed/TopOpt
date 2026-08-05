@@ -113,6 +113,74 @@ double lattice_rho_max(LatticeTopology topo);
 // that no emitted point sits below the floor (bar L2) is what catches a stale value.
 double lattice_cells_per_member_min(LatticeTopology topo);
 
+// ★ THE SUB-FLOOR RETENTION STRESS FRACTION — the ceiling on a REGION's macro stress,
+// as a fraction of the PART's peak von Mises, under which the grading law is permitted
+// to keep a below-the-floor voxel as lattice instead of falling back to solid
+// (handoff 2026-08-04-subfloor-lattice-unloaded-regions, bar S1/S5). Read this; do NOT
+// hardcode it.
+//
+// IT DOES NOT RELAX A GATE. Nothing in this codebase ever REFUSED a sub-floor lattice:
+// the floor above is a CANDIDATE FILTER inside grade_lattice, and `analyze_fixed_design`
+// only RAISES `lattice_strut_out_of_regime`, a reported flag. This number conditions
+// that filter. It is DISARMED by default; a job opts in explicitly
+// (GradingLawParams::retain_subfloor_in_unloaded_regions).
+//
+// WHERE 0.20 COMES FROM — measured, not chosen. Handoff 2026-08-04-protect-freeze-vs-
+// solidity §10 (`item8_subfloor_floor.txt`) swept a 4 mm flange latticed at 1.33 cells
+// per member across six stations of a cantilever and recorded how far the CERTIFIED
+// margin moved against the same design with the flange solid:
+//
+//     region peak vM, % of part peak :  11.66   14.02   16.57   19.37   22.09   23.48
+//     Δ certified margin             : +0.0001 +0.0002 +0.0003 +0.0008 +0.0203 +0.0823  (%)
+//
+// The effect is flat to within +0.0008 % up to 19.37 % of peak and then turns up by a
+// factor of 25 at 22.09 %. 0.20 is the round threshold that sits in that knee: it admits
+// every station measured flat and excludes every station measured steep. Move the
+// measurement and this number moves with it.
+//
+// ★★ WHAT THIS NUMBER IS NOT — read before trusting it. §10's CONTROL swept the cell
+// across the floor at fixed rho and got a margin identical to TEN DECIMAL PLACES
+// (0.7526820834 at 5.00, 4.00, 2.00, 1.33 and 1.00 cells per member). The homogenized
+// tensor is a function of relative density ALONE — cell size never enters the composite
+// solve — so the certification is STRUCTURALLY BLIND to cells-per-member. The Δ margin
+// above is therefore NOT evidence that a sub-floor lattice is accurate; it is only
+// evidence that substituting C(rho) for solid did not move that part's margin. The
+// accuracy question the floor exists to answer needs direct FEA of the real strut
+// geometry, which the lattice Phase-0 probe measured at a 44-276x cost ceiling.
+// Retaining a sub-floor voxel is therefore a DECISION TO ACCEPT A KNOWN, UNQUANTIFIED
+// INACCURACY, and the receipt says so — it must never be justified by "the margin did
+// not move", because the margin CANNOT move.
+double lattice_subfloor_retention_stress_fraction();
+
+// ★ THE AGGREGATE SUB-FLOOR EXPOSURE CAP — the ceiling on how much of a part may be
+// held under the accuracy claim above, SUMMED ACROSS EVERY REGION, as a fraction of
+// the printed set. Read this; do NOT hardcode it.
+//
+// WHY IT EXISTS, and it is not the same question the fraction above answers. That
+// one asks "is THIS region quiet enough?". Once retention is evaluated PER REGION, a
+// part with eight include regions can have eight of them answer yes independently,
+// and the material under the claim multiplies. "Each region qualified individually"
+// and "the part is fine" are DIFFERENT STATEMENTS, and nothing in the certificate
+// adds them up — see ★★ above: the certification is structurally blind to
+// cells-per-member, so no margin measurement, on any number of regions, can show the
+// total is safe. A quantity that cannot be bounded by measurement must be bounded by
+// POLICY, and this is that bound.
+//
+// WHERE 0.03 COMES FROM. It is a stated multiple of the ONLY configuration ever
+// verified end to end — the maintainer's wall at resolution 128, rung 0.68, where
+// the argmax held and the composite margin moved +0.0853 % against a pre-stated
+// 0.10 % bound. That run retained 822 of 88,424 printed voxels = 0.930 % of the
+// part. 3.0 % is ~3.2x it: room for a part with several genuinely quiet regions,
+// far short of "unlimited because every region passed".
+//
+// ★★★ THIS IS A CEILING ON EXPOSURE, NOT A SAFETY THRESHOLD. No measurement
+// supports 3.0 % as safe, and by the blindness above none could. It does not make
+// the retained material accurate; it bounds how much of the part is held under a
+// claim nothing can check. Over the cap the law retains NOTHING rather than
+// retaining as much as fits — partial retention would mean choosing which regions
+// to sacrifice, and nothing measures that choice.
+double lattice_subfloor_aggregate_cap_fraction();
+
 // The printed octet strut DIAMETER (mm) at relative density `rho` and cell edge
 // `cell_size_mm`. For the printability CHECK of the grading law (bar L3 / requirement
 // 3) — NOT the certification math (that is the tensor above; diameter never enters a

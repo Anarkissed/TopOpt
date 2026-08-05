@@ -1,0 +1,30 @@
+=== S2 — the maintainer's regions, ONE AT A TIME, measured on his own part ===
+job: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/maint/job_off.json
+run: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/maint/out_off
+rung: 0.68   grid 128x31x118 @ 1.7053 mm
+cells-per-member floor n* = 5.0; retention ceiling = 0.20 of the part's peak von Mises.
+NO SOLVE RAN: the demand field is this rung's own von Mises, read from fields.bin.
+
+#   region                                 region vox  below flr   stressfrac  qual   retained  latticed%  min cpm
+----------------------------------------------------------------------------------------------------------------------
+    ALL of them (his job as written)            10607      10135       0.9102    no          0       4.4%     0.00
+    0: face n=(0,0,-1) 137x31mm d=4              1257        933       0.1707   YES        822     100.0%     0.74
+    1: bolt r=84 at (112,-43,120)                   4          4       0.4247    no          0       0.0%     0.00
+    2: bolt r=30 at (181,-22,52)                    0          0       0.0000   YES          0       0.0%     0.00
+    3: bolt r=30 at (44,-22,52)                     4          3       0.2798    no          0      25.0%     0.00
+    4: bolt r=30 at (44,-22,189)                    0          0       0.0000   YES          0       0.0%     0.00
+    5: face n=(-1,0,0) 31x137mm d=4              1022       1022       0.9102    no          0       0.0%     0.00
+    6: face n=(-1,0,0) 9x77mm d=4                  78         78       0.2602    no          0       0.0%     0.00
+    7: face n=(0,1,0) 184x175mm d=4              8339       8191       0.4545    no          0       1.8%     0.00
+
+READ IT LIKE THIS.
+  stressfrac  this region's PEAK von Mises over the PART's peak,
+              measured from the rung's own field — never declared.
+  qual        whether that cleared the ceiling above. A region that
+              does not qualify is left exactly as it is today: SOLID.
+  below flr   voxels whose member cannot hold n* cells across. This
+              is the population retention is about, and it is counted
+              whether or not the region qualifies.
+  retained    how many of those were kept as lattice. Where this is
+              non-zero the certificate over that material is OUT OF
+              REGIME, and the run says so.

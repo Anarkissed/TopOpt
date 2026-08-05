@@ -1,0 +1,54 @@
+=== S2 + S4 — THE MAINTAINER'S WALL, retention OFF vs ON ===
+M2_verticalStand.step, resolution 128, HIS job document with the
+lattice scoped to his one qualifying include region: a 137x31mm,
+4mm-deep wall measured at 0.1707 of the part's peak von Mises.
+
+--- S2: the maintainer's case, measured ---
+  rung   region   lat OFF   lat ON    OFF%     ON%  retained   recov     cpm lo-hi     strut mm lo-hi
+  0.68     1257       324     1257  25.8% 100.0%       822     111   0.74-4.45     0.4200-1.7654   
+  0.52     1145         0        0   0.0%   0.0%         0       0   0.00-0.00     0.0000-0.0000   
+  0.38     1096         0        0   0.0%   0.0%         0       0   0.00-0.00     0.0000-0.0000   
+  0.26     1089         0        0   0.0%   0.0%         0       0   0.00-0.00     0.0000-0.0000   
+
+the predicate, as the run measured it (top rung):
+  region peak vM / part peak vM = 0.170748
+  ceiling                       = 0.2
+  region qualified              = True
+  cells-per-member floor        = 5
+
+--- the flag stays, and it is specific ---
+  rung  retained   strut_out_of_regime OFF       ON  min cells/member ON
+  0.68       822                     False     True               0.7410
+  0.52         0                      None     None                  nan
+  0.38         0                      None     None                  nan
+  0.26         0                      None     None                  nan
+
+--- S4: the margin, priced ---
+SOLID gate (the ladder's own verdict — retention cannot touch it):
+  rung  verdict OFF      margin OFF   verdict ON       margin ON           d
+  0.68       ACCEPT     3254.356637       ACCEPT     3254.356637    +0.0000%
+  0.52       ACCEPT     3389.458618       ACCEPT     3389.506869    +0.0014%
+  0.38       ACCEPT     3290.905387       ACCEPT     3290.878046    -0.0008%
+  0.26       ACCEPT     3011.902423       ACCEPT     3011.570225    -0.0110%
+
+COMPOSITE lattice certificate (the number retention actually moves):
+  rung  verdict OFF      margin OFF   verdict ON       margin ON           d
+  0.68         True     3254.816468         True     3257.592421    +0.0853%
+  0.52         True     3389.458618         True     3389.506870    +0.0014%
+  0.38         True     3290.905387         True     3290.878047    -0.0008%
+  0.26         True     3011.902422         True     3011.570225    -0.0110%
+
+largest |d composite margin| = 0.0853% (rung 0.679951497)
+stated acceptance bound      = 0.10%
+S4 MET
+verdict flips: none
+
+--- S3: the argmax, on the run where retention FIRED ---
+grid 128x31x118; the COMPOSITE solve's own von Mises field.
+  rung      peak OFF         argmax OFF       peak ON          argmax ON
+  0.68      0.016900       (126, 6, 16)      0.016900       (126, 6, 16)  same
+  0.52      0.016227       (17, 14, 61)      0.016227       (17, 14, 61)  same
+  0.38      0.016713       (17, 16, 61)      0.016713       (17, 16, 61)  same
+  0.26      0.018261       (17, 17, 60)      0.018263       (17, 17, 60)  same
+
+S3 MET — the peak von Mises stayed at the same voxel on every rung, with material actually retained below the floor.
