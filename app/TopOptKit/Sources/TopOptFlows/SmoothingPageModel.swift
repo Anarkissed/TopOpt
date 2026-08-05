@@ -516,15 +516,90 @@ public final class SmoothingPageModel: ObservableObject {
     /// text the user had to scroll past to reach the brush.
     @Published public var receiptOpen = false
 
-    /// THE ONE TRANSIENT NOTE (bar U5). Same type, same lifetime and same three
-    /// calls as the lattice page — `PageNoteBox` in `PageChrome.swift`.
-    @Published public private(set) var noteBox = PageNoteBox()
+    /// THE NOTE QUEUE (bar U5, extended by bar D5c). One visible, the rest
+    /// waiting, each for at most `PageTransientNote.lifetime`, each dismissible,
+    /// and a queued one whose topic has gone stale is dropped rather than shown
+    /// late. `PageNoteQueue` lives in `PageChrome.swift` so a fourth page
+    /// inherits the rule instead of inventing a third one.
+    @Published public private(set) var noteBox = PageNoteQueue()
     public var note: PageTransientNote? { noteBox.note }
-    public func post(note text: String, now: Date = Date()) {
-        noteBox.post(text, now: now)
+    /// How many notes are waiting behind the visible one — read by the tests.
+    public var queuedNoteCount: Int { noteBox.depth }
+
+    /// The topics a note can be ABOUT. A topic is re-resolved when its note comes
+    /// up for display; `nil` means the state it described is gone.
+    public enum NoteTopic {
+        /// What the Smoothed side is showing right now.
+        public static let smoothedSide = "smoothedSide"
+        /// "Pencil only is on, so a finger orbits."
+        public static let pencilOnly = "pencilOnly"
     }
-    public func dismissNote() { noteBox.dismiss() }
-    public func tick(now: Date = Date()) { noteBox.tick(now: now) }
+
+    /// The CURRENT text for a topic, or nil if it no longer says anything.
+    public func noteText(forTopic topic: String) -> String? {
+        switch topic {
+        case NoteTopic.smoothedSide: return smoothedSideNote
+        case NoteTopic.pencilOnly: return Self.pencilOnlyNote
+        default: return nil
+        }
+    }
+
+    public func post(note text: String, topic: String = "", now: Date = Date()) {
+        noteBox.post(text, topic: topic, now: now)
+    }
+    /// THE ✕ (bar D5c). A failure banner is not in the queue — it is derived
+    /// from the phase — so dismissing it has to be its own fact, or the button
+    /// would be a control that does nothing. A NEW failure re-arms it: what has
+    /// been waved away is that failure, not the idea of being told.
+    @Published public private(set) var failureDismissed = false
+    public func dismissNote(now: Date = Date()) {
+        if failure != nil, !failureDismissed {
+            failureDismissed = true
+            return
+        }
+        noteBox.dismiss(now: now, resolve: { [weak self] in self?.noteText(forTopic: $0) })
+    }
+    public func tick(now: Date = Date()) {
+        noteBox.tick(now: now, resolve: { [weak self] in self?.noteText(forTopic: $0) })
+    }
+
+    /// BAR D1b — SAY WHY THE BRUSH IGNORED THE FINGER, ONCE.
+    ///
+    /// The maintainer checked "Pencil only", drew with an Apple Pencil, and
+    /// nothing happened; the page's only comment on that was four disabled
+    /// buttons further down the screen. The gate defect is fixed, so a pencil
+    /// paints — but a FINGER drag with this on is still refused (that is the
+    /// point of the toggle), and the page now says so the first time it happens
+    /// rather than leaving the user to work it out.
+    ///
+    /// Once per page session: a finger orbit is the intended behaviour here, and
+    /// a note on every orbit would be noise.
+    @Published public private(set) var pencilOnlyNoteShown = false
+    public static let pencilOnlyNote =
+        "“Pencil only” is on — a finger drag turns the part around. "
+        + "Draw with the pencil, or switch Pencil only off to paint with a finger."
+    public func notePencilOnlyRefusedFinger(now: Date = Date()) {
+        guard !pencilOnlyNoteShown else { return }
+        pencilOnlyNoteShown = true
+        post(note: Self.pencilOnlyNote, topic: NoteTopic.pencilOnly, now: now)
+    }
+
+    /// BAR D5c — THE SMOOTHED-SIDE SENTENCE IS A NOTE, NOT STANDING PROSE.
+    ///
+    /// It used to be a permanent paragraph under the stage tabs, which is a note
+    /// in the wrong place: on his screenshots it lay across the top-centre note
+    /// and ran on under the panel. It goes through the queue now, and only when
+    /// it becomes NEWS — the value at entry is seeded, so the page still starts
+    /// with nothing standing on it (bar U6).
+    private var lastSideNote: String?
+    public func syncSideNote(now: Date = Date()) {
+        let current = smoothedSideNote
+        guard current != lastSideNote else { return }
+        lastSideNote = current
+        if let c = current {
+            post(note: c, topic: NoteTopic.smoothedSide, now: now)
+        }
+    }
 
     /// THE ONE STANDING NOTICE (bar U6): shown on entry, dismissed with OK, and
     /// then gone for this page session. Everything the page used to explain in
@@ -572,6 +647,11 @@ public final class SmoothingPageModel: ObservableObject {
         self.smoothedMeshPath = smoothedMeshPath
         self.runner = runner
         self.previewer = previewer
+        // SEED the side-note tracker at entry: the sentence that is true when the
+        // page opens is not news, and posting it would put a note on a page that
+        // bar U6 says starts with nothing standing on it.
+        self.lastSideNote = nil
+        self.lastSideNote = smoothedSideNote
     }
 
     // ── the live brush preview (failure C) ──────────────────────────────────
@@ -608,6 +688,7 @@ public final class SmoothingPageModel: ObservableObject {
         } catch {
             preview = nil
         }
+        syncSideNote()
     }
 
     /// Drop the preview — the brush changed, or the page is starting over.
@@ -665,7 +746,7 @@ public final class SmoothingPageModel: ObservableObject {
     }
 
     public var topNote: TopNote? {
-        if let f = failure { return .failure(f) }
+        if let f = failure, !failureDismissed { return .failure(f) }
         if let n = note { return .transient(n) }
         if isWorking { return .working(statusLine) }
         return nil
@@ -731,6 +812,7 @@ public final class SmoothingPageModel: ObservableObject {
                 outputMeshPath: smoothedMeshPath, weights: weights,
                 strength: strength, loadCase: lc, modelPath: context.modelPath))
             if out.certification.nonConvergent {
+                failureDismissed = false
                 phase = .couldNotCertify(
                     SmoothCertifyFailure(kind: .didNotConverge,
                                          maxStrength: strength),
@@ -766,8 +848,10 @@ public final class SmoothingPageModel: ObservableObject {
             // is news, and news stops being news. The numbers behind it stay
             // available in the receipt drawer for as long as the user wants them.
             if let r = receipt { post(note: r.headline) }
+            syncSideNote()
         } catch {
             let message = (error as? TopOptError)?.message ?? "\(error)"
+            failureDismissed = false
             phase = .couldNotCertify(
                 SmoothCertifyFailure(kind: .refused(message), maxStrength: strength),
                 stale: lastGood)
@@ -834,8 +918,13 @@ public final class SmoothingPageModel: ObservableObject {
         // The drawer described a receipt that no longer exists, and the note
         // announced its outcome. Both go with it (U4/U5) — a drawer left open
         // over nothing is the "stale number on screen" failure in another shape.
+        // The QUEUE goes too: every note behind the visible one was about a state
+        // this reset has just left, and showing them afterwards is precisely the
+        // "note that describes a state the user has already left" D5c forbids.
         receiptOpen = false
-        dismissNote()
+        failureDismissed = false
+        noteBox.clear()
+        lastSideNote = smoothedSideNote
     }
 
     /// The geometry the viewport draws and everything downstream consumes.
@@ -899,6 +988,27 @@ public struct SmoothPageActions: Equatable, Sendable {
         public let primary: Bool
     }
 
+    /// The four things the page can be asked to do. Named so the column's ORDER
+    /// is a value the tests can read rather than a shape in the view body.
+    public enum Kind: String, Sendable, Hashable, CaseIterable {
+        case receipt, discard, lattice, recertify
+    }
+
+    /// THE ACTION COLUMN, TOP TO BOTTOM (bar D5b, task 2026-08-05).
+    ///
+    /// One column, narrowest first, `recertify` pinned last in every state. The
+    /// widths were MEASURED at the maintainer's own landscape size rather than
+    /// guessed — see `SmoothingRound4Tests.testTheActionColumnIsOrderedByWidth`,
+    /// which renders the page in four different states and checks this constant
+    /// still runs narrow → wide with Apply & certify at the foot.
+    ///
+    /// A CONSTANT, NOT A SORT. Every button is as wide as its own caption and the
+    /// captions change between states ("re-certify to get one" → "before and
+    /// after, both measured"), so sorting at render time would shuffle the column
+    /// under the user's thumb the moment a certification landed. His rule was
+    /// explicit: the order must not reflow as captions change.
+    public static let columnOrder: [Kind] = [.receipt, .discard, .lattice, .recertify]
+
     public let recertify: Action
     public let discard: Action
     /// AE8 forward: send the SMOOTHED variant to the lattice page. Enabled only
@@ -932,8 +1042,12 @@ public struct SmoothPageActions: Equatable, Sendable {
         } else if let why = brush.unusableReason {
             re = Action(label: "Apply & certify", sub: why, enabled: false, primary: true)
         } else if !brush.hasEffect {
+            // "…and give it a strength first" was left over from round 2's
+            // per-region slider. There is no strength to give any more: one
+            // stroke IS a strength (bar U1's ladder), so the sentence told the
+            // user to look for a control that had been deleted.
             re = Action(label: "Apply & certify",
-                        sub: "brush an area and give it a strength first",
+                        sub: "brush an area first",
                         enabled: false, primary: true)
         } else {
             re = Action(
@@ -945,9 +1059,17 @@ public struct SmoothPageActions: Equatable, Sendable {
         }
         return SmoothPageActions(
             recertify: re,
+            // DISCARD IS ENABLED WHENEVER THE PAGE IS NOT BUSY (task 2026-08-05,
+            // the disabled-control audit). It used to require a receipt or a
+            // kept result, which put a greyed-out button in front of a user who
+            // had painted half the part and wanted to start over — the strokes,
+            // the tint and the live preview are all things to discard, and none
+            // of them is a certification. And with nothing painted at all the
+            // press is a harmless no-op that lands exactly where its own caption
+            // says it does: the original variant, unchanged.
             discard: Action(label: "Discard",
                             sub: "returns the original variant, unchanged",
-                            enabled: (hasKept || hasReceipt) && !working,
+                            enabled: !working,
                             primary: false),
             // AE8's guarantee is unchanged: a lattice is only ever generated on
             // geometry that has a certification of its own. What changed is which

@@ -77,6 +77,108 @@ public struct PageNoteBox: Equatable, Sendable {
     }
 }
 
+/// ONE NOTE AT A TIME, AND THE REST WAIT THEIR TURN (task 2026-08-05, bar D5c).
+///
+/// `PageNoteBox` above answers "one note", by replacement: a second post
+/// overwrites the first, which loses it. The maintainer's screenshots show why
+/// that is not enough — several single-line notes on screen at once, overlapping
+/// each other and the chrome — and his rule is a QUEUE: one visible, the others
+/// behind it, each for a minute, each dismissible, and none of them shown late.
+///
+/// THE STALENESS RULE IS THE INTERESTING HALF. A note that has waited its turn
+/// may be describing a state the user has already left ("nothing painted yet",
+/// after he painted). Showing it then is worse than not showing it at all, so a
+/// queued note is re-resolved at the moment it would become visible and DROPPED
+/// if its topic no longer says anything. Notes with no topic (`""`) are plain
+/// news — an outcome that happened — and are never stale.
+public struct PageNoteQueue: Equatable, Sendable {
+
+    /// A note waiting its turn: what it said when it was posted, and the TOPIC
+    /// whose current answer decides whether it is still worth saying.
+    public struct Entry: Equatable, Sendable {
+        public let topic: String
+        public let text: String
+        public init(topic: String, text: String) {
+            self.topic = topic
+            self.text = text
+        }
+    }
+
+    public private(set) var visible: PageTransientNote?
+    /// The topic of the visible note, so a re-post of the same topic refreshes it
+    /// rather than queueing a duplicate behind itself.
+    public private(set) var visibleTopic: String = ""
+    public private(set) var queued: [Entry] = []
+
+    public init() {}
+
+    public var note: PageTransientNote? { visible }
+    public var depth: Int { queued.count }
+
+    /// Post a note. Shown immediately when the band is free, queued otherwise.
+    /// A post on the topic that is already visible REPLACES its text in place
+    /// (the state it describes moved on) without restarting anything else.
+    public mutating func post(_ text: String, topic: String = "",
+                              now: Date = Date()) {
+        if visible != nil, !topic.isEmpty, topic == visibleTopic {
+            visible = PageTransientNote(text: text, postedAt: visible!.postedAt)
+            return
+        }
+        guard visible != nil else {
+            visible = PageTransientNote(text: text, postedAt: now)
+            visibleTopic = topic
+            return
+        }
+        if !topic.isEmpty, let i = queued.firstIndex(where: { $0.topic == topic }) {
+            queued[i] = Entry(topic: topic, text: text)
+        } else {
+            queued.append(Entry(topic: topic, text: text))
+        }
+    }
+
+    /// Dismiss the visible note (the ✕, or the page tearing it down) and promote
+    /// the next one that is still true.
+    public mutating func dismiss(now: Date = Date(),
+                                 resolve: (String) -> String? = { _ in nil }) {
+        visible = nil
+        visibleTopic = ""
+        promote(now: now, resolve: resolve)
+    }
+
+    /// Expire the visible note after `PageTransientNote.lifetime`, then promote.
+    public mutating func tick(now: Date = Date(),
+                              resolve: (String) -> String? = { _ in nil }) {
+        if let v = visible, v.expired(now: now) {
+            visible = nil
+            visibleTopic = ""
+            promote(now: now, resolve: resolve)
+        }
+    }
+
+    /// Drop everything — the page is resetting (Discard).
+    public mutating func clear() {
+        visible = nil
+        visibleTopic = ""
+        queued.removeAll()
+    }
+
+    private mutating func promote(now: Date, resolve: (String) -> String?) {
+        while !queued.isEmpty {
+            let next = queued.removeFirst()
+            if next.topic.isEmpty {
+                visible = PageTransientNote(text: next.text, postedAt: now)
+                visibleTopic = ""
+                return
+            }
+            // STALE ⇒ DROPPED, never shown late.
+            guard let current = resolve(next.topic) else { continue }
+            visible = PageTransientNote(text: current, postedAt: now)
+            visibleTopic = next.topic
+            return
+        }
+    }
+}
+
 public enum PageChrome {
 
     // MARK: - spacing
@@ -146,6 +248,19 @@ public enum PageChrome {
     /// value, unchanged.
     public static var panelBottomClearance: CGFloat {
         panelBottomClearance(actionRows: 1)
+    }
+
+    /// THE BAND A CENTRED SIDE PANEL MAY OCCUPY in landscape (task 2026-08-05,
+    /// bar D3): everything below the identity rows and above the bottom edge.
+    ///
+    /// The smoothing page used `height − 200` — a number with no relationship to
+    /// what is actually on the screen — and then centred the panel in the FULL
+    /// height, which put its top edge over the run-identity bars. Deriving the
+    /// band from the same tokens the rows are built from is what makes "the panel
+    /// cannot cover the identity" a property of the layout rather than of how
+    /// tall the panel happens to be today.
+    public static func sidePanelBand(canvasHeight: CGFloat) -> CGFloat {
+        max(canvasHeight - noteTop - edge, 0)
     }
 
     /// The height of a page's top-left identity stack: the title bar, then the
