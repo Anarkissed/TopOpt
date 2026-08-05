@@ -1,0 +1,54 @@
+R1 — BYTE-IDENTICAL WHEN OFF, by stash-rebuild checksum.
+
+This task adds NO production source. The claim is proven the way PR 299
+proved it: two FRESH build directories, configured with identical flags,
+one from the working tree and one from origin/main, and every object file
+of the shipped library digested. Not 'by construction'.
+
+== the diff against origin/main, restricted to shipped source ==
+$ git diff origin/main -- core/src core/include app/TopOptKit/Sources | wc -l
+       0
+
+== everything this branch touches ==
+   A  app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPreviewGateTests.swift
+   MM core/CMakeLists.txt
+   AM core/tests/harness/stairstep_probe.cpp
+   A  docs/handoffs/2026-08-05-smoothing-must-actually-smooth.md
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/README.md
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/WallMount_ShelfBracket.stl
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/job.json
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/job_nobox.json
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/r1_byte_identity.txt
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/s3_reproduction_failing.txt
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile.png
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile_baseline.csv
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile_pairs160.csv
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile_pairs20.csv
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/stairstep_probe.txt
+   A  evidence/2026-08-05-smoothing-must-actually-smooth/stairstep_sweep.csv
+   ?? core/tests/harness/sdf_geometry.cpp
+   ?? core/tests/harness/sdf_geometry.hpp
+   ?? core/tests/harness/sdf_geometry_probe.cpp
+   ?? core/tests/harness/stairstep_metric.hpp
+   ?? evidence/2026-08-05-smoothing-sdf-geometry-extraction/
+
+== build A: the working tree ==
+objects: 45
+
+== build B: origin/main, from a clean checkout of the same tree ==
+objects: 45
+
+== the digests ==
+digest of all objects, working tree      : 47669432db84403491cedb838d3f46f0
+digest of all objects, origin/main       : 47669432db84403491cedb838d3f46f0
+BYTE-IDENTICAL
+
+(The .a archives are NOT compared: ar embeds member mtimes, so two
+ archives of identical objects differ in bytes that describe when they
+ were written rather than what they contain. PR 299 made the same choice
+ for the same reason, and checked it by extracting both and diffing every
+ member. Same check here:)
+extracted archive members: NO BYTE DIFFERS
+
+== the app library, which this task also does not touch ==
+$ git diff origin/main --stat -- app/

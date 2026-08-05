@@ -1,0 +1,12 @@
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testALaterStrokeStillReachesTheStageAfterACertification]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPreviewGateTests.swift:155: error: -[TopOptFlowsTests.SmoothingPreviewGateTests testALaterStrokeStillReachesTheStageAfterACertification] : XCTAssertTrue failed - a stroke after a certification must still be previewable — otherwise the page silently stops responding to the brush
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testALaterStrokeStillReachesTheStageAfterACertification]' failed (0.013 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheModelPrefersAFreshPreviewOverAStaleCertifiedMesh]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPreviewGateTests.swift:181: error: -[TopOptFlowsTests.SmoothingPreviewGateTests testTheModelPrefersAFreshPreviewOverAStaleCertifiedMesh] : XCTAssertEqual failed: ("[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.9, 0.9, 0.0]") is not equal to ("[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.95, 0.95, 0.0]") - the stage must show the geometry the CURRENT brush describes, not the one a previous certification measured
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheModelPrefersAFreshPreviewOverAStaleCertifiedMesh]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheSmoothedTabIsReachableAsSoonAsAPreviewExists]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPreviewGateTests.swift:130: error: -[TopOptFlowsTests.SmoothingPreviewGateTests testTheSmoothedTabIsReachableAsSoonAsAPreviewExists] : XCTAssertTrue failed - the Smoothed tab must be enabled the moment a preview exists — certification is not a rendering step
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheSmoothedTabIsReachableAsSoonAsAPreviewExists]' failed (0.001 seconds).
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.014 (0.014) seconds
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.014 (0.014) seconds
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.014 (0.015) seconds

@@ -1,0 +1,149 @@
+== sdf_geometry_probe : HIS PART ==
+design    /Users/nadim/.topopt-worker/7ba2442960a24050/out/design.bin
+part      /Users/nadim/.topopt-worker/7ba2442960a24050/M2_verticalStand.step
+grid      128 x 31 x 118, spacing 1.705279 mm, 468224 voxels
+variants  4
+
+-- THE REFERENCE'S OWN FACETING (control) --------------------
+run tessellation   1555 verts, 3106 tris (linear defl 0.100 mm, angular 0.50 rad)
+fine tessellation  48016 verts, 96028 tris (linear defl 0.005 mm, angular 0.05 rad)  <- THE REFERENCE
+run tessellation deviates from it: max 0.0588 mm  rms 0.0073 mm (0.4% of one voxel)
+
+CAD sharp edges (>= 60 deg): 6382; "near-edge" is within 2.558 mm of one
+
+== SUBJECT: occupancy(CAD) ==
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+as exported today        0.9589   0.3728   0.7539   0.2826    7.67   0.0000     0.0%     36     1
+      CAD-SIDE, 96028 fixed CAD points -> the mesh: max 1.4521  rms 0.7632  p99 1.3143 mm  ->  +0.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 0.9589  rms 0.3728  p99 0.7539 mm over 32092 verts  ->  +0.0% removed
+      oblique SPLIT: smooth-surface rms 0.3732 mm (29475 verts, +0.0%)   near-sharp-edge rms 0.3678 mm (2617 verts, +0.0%)
+      139688 verts / 279372 tris; raw design volume 549963.4 mm3 (682.0 g); mesh volume 544925.0 mm3 (675.7 g)
+isocontour only          1.1160   0.3008   0.6899   0.2765    4.14   0.8990    19.3%     31     1
+      CAD-SIDE, 96028 fixed CAD points -> the mesh: max 1.7331  rms 1.0717  p99 1.6302 mm  ->  -40.4% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.1160  rms 0.3008  p99 0.6899 mm over 30022 verts  ->  +19.3% removed
+      oblique SPLIT: smooth-surface rms 0.2869 mm (27668 verts, +23.1%)   near-sharp-edge rms 0.4314 mm (2354 verts, -17.3%)
+      rho_t 0.492040  volume 549447.7 mm3 (681.3 g, target 549963.4, -0.0938%)  wall 0.6 s
+SDF B/h 1 interp f2      1.1179   0.3046   0.6720   0.2735    4.16   0.7562    18.3%     28     1
+      CAD-SIDE, 96028 fixed CAD points -> the mesh: max 1.7328  rms 1.0619  p99 1.6272 mm  ->  -39.1% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.1179  rms 0.3046  p99 0.6720 mm over 31614 verts  ->  +18.3% removed
+      oblique SPLIT: smooth-surface rms 0.2953 mm (28957 verts, +20.9%)   near-sharp-edge rms 0.3915 mm (2657 verts, -6.4%)
+      rho_t 0.492040  volume 549963.8 mm3 (682.0 g, target 549963.4, +0.0001%)  wall 7.4 s
+Taubin shipped max (20/20 prs)   0.8756   0.3471   0.7352   0.2735    7.24   0.1584     6.9%     36     1
+      CAD-SIDE, 96028 fixed CAD points -> the mesh: max 1.5180  rms 0.7880  p99 1.3530 mm  ->  -3.2% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 0.8756  rms 0.3471  p99 0.7352 mm over 31983 verts  ->  +6.9% removed
+      volume 545049.2 mm3 (675.9 g, +0.0228% drift)  wall 0.2 s
+Taubin best-found (20/20 prs)   0.8958   0.2855   0.6438   0.2517    4.48   0.4508    23.4%     36     1
+      CAD-SIDE, 96028 fixed CAD points -> the mesh: max 1.5605  rms 0.8540  p99 1.3946 mm  ->  -11.9% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 0.8958  rms 0.2855  p99 0.6438 mm over 31749 verts  ->  +23.4% removed
+      volume 545311.0 mm3 (676.2 g, +0.0708% drift)  wall 0.2 s
+
+== SUBJECT: rung 0.68 ==
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+as exported today       11.2928   1.2780   5.2530   2.4556    8.94   0.0000     0.0%    388    11
+      CAD-SIDE, 95172 fixed CAD points -> the mesh: max 1.6978  rms 0.7680  p99 1.3176 mm  ->  +0.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.6966  rms 0.4280  p99 1.2409 mm over 26567 verts  ->  +0.0% removed
+      oblique SPLIT: smooth-surface rms 1.3278 mm (26630 verts, +0.0%)   near-sharp-edge rms 0.3942 mm (2338 verts, +0.0%)
+      149256 verts / 298476 tris; raw design volume 437354.0 mm3 (542.3 g); mesh volume 435632.8 mm3 (540.2 g)
+isocontour only         11.2945   1.2534   5.2687   2.3142    5.67   1.0832     1.9%     52     8
+      CAD-SIDE, 95172 fixed CAD points -> the mesh: max 2.3046  rms 1.1164  p99 1.6883 mm  ->  -45.4% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7015  rms 0.4270  p99 1.4083 mm over 24265 verts  ->  +0.2% removed
+      oblique SPLIT: smooth-surface rms 1.2972 mm (24389 verts, +2.3%)   near-sharp-edge rms 0.4745 mm (2023 verts, -20.4%)
+      rho_t 0.504087  volume 437354.4 mm3 (542.3 g, target 437354.0, +0.0001%)  wall 0.3 s
+SDF B/h 1 interp f2     10.8761   1.2974   5.3512   2.3307    5.42   1.0069    -1.5%     53     9
+      CAD-SIDE, 95172 fixed CAD points -> the mesh: max 2.3271  rms 1.0864  p99 1.6501 mm  ->  -41.5% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7046  rms 0.3990  p99 1.3574 mm over 24997 verts  ->  +6.8% removed
+      oblique SPLIT: smooth-surface rms 1.3486 mm (25397 verts, -1.6%)   near-sharp-edge rms 0.4201 mm (2284 verts, -6.6%)
+      rho_t 0.504087  volume 437354.4 mm3 (542.3 g, target 437354.0, +0.0001%)  wall 7.8 s
+Taubin shipped max (20/20 prs)  11.3398   1.2762   5.2246   2.4540    8.33   0.2302     0.1%    384    11
+      CAD-SIDE, 95172 fixed CAD points -> the mesh: max 1.7258  rms 0.7929  p99 1.3636 mm  ->  -3.2% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7048  rms 0.4069  p99 1.2604 mm over 26430 verts  ->  +4.9% removed
+      volume 435692.3 mm3 (540.3 g, +0.0137% drift)  wall 0.3 s
+Taubin best-found (20/20 prs)  11.3591   1.2602   5.2707   2.4498    6.09   0.5409     1.4%    382    11
+      CAD-SIDE, 95172 fixed CAD points -> the mesh: max 1.7606  rms 0.8596  p99 1.4025 mm  ->  -11.9% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7045  rms 0.3564  p99 1.2669 mm over 26111 verts  ->  +16.7% removed
+      volume 435821.3 mm3 (540.4 g, +0.0433% drift)  wall 0.3 s
+
+== SUBJECT: rung 0.52 ==
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+as exported today       13.1852   2.1452   8.7436   3.1958    9.62   0.0000     0.0%    527    17
+      CAD-SIDE, 94986 fixed CAD points -> the mesh: max 1.7053  rms 0.7690  p99 1.3177 mm  ->  +0.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7043  rms 0.4461  p99 1.3989 mm over 23000 verts  ->  +0.0% removed
+      oblique SPLIT: smooth-surface rms 2.2375 mm (25760 verts, +0.0%)   near-sharp-edge rms 0.4171 mm (2355 verts, +0.0%)
+      161454 verts / 322840 tris; raw design volume 381072.3 mm3 (472.5 g); mesh volume 378738.5 mm3 (469.6 g)
+isocontour only         13.1597   2.2072   8.9921   3.2104    5.81   0.9770    -2.9%     96     9
+      CAD-SIDE, 94986 fixed CAD points -> the mesh: max 2.2832  rms 1.1045  p99 1.6780 mm  ->  -43.6% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7046  rms 0.4556  p99 1.4743 mm over 20872 verts  ->  -2.1% removed
+      oblique SPLIT: smooth-surface rms 2.2970 mm (23733 verts, -2.7%)   near-sharp-edge rms 0.4941 mm (2073 verts, -18.5%)
+      rho_t 0.498298  volume 381072.4 mm3 (472.5 g, target 381072.3, +0.0000%)  wall 0.4 s
+SDF B/h 1 interp f2     12.7947   2.2338   8.9768   3.2878    5.82   0.9547    -4.1%    106     9
+      CAD-SIDE, 94986 fixed CAD points -> the mesh: max 2.1851  rms 1.0879  p99 1.6533 mm  ->  -41.5% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7050  rms 0.4631  p99 1.5891 mm over 21785 verts  ->  -3.8% removed
+      oblique SPLIT: smooth-surface rms 2.3341 mm (25145 verts, -4.3%)   near-sharp-edge rms 0.4359 mm (2401 verts, -4.5%)
+      rho_t 0.498298  volume 381072.6 mm3 (472.5 g, target 381072.3, +0.0001%)  wall 7.2 s
+Taubin shipped max (20/20 prs)  13.1747   2.1471   8.7728   3.1942    9.13   0.1657    -0.1%    527    17
+      CAD-SIDE, 94986 fixed CAD points -> the mesh: max 1.7071  rms 0.7940  p99 1.3636 mm  ->  -3.3% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7048  rms 0.4248  p99 1.3796 mm over 22854 verts  ->  +4.8% removed
+      volume 378732.3 mm3 (469.6 g, -0.0016% drift)  wall 0.3 s
+Taubin best-found (20/20 prs)  13.1931   2.1440   8.8022   3.1897    6.48   0.5150     0.1%    524    17
+      CAD-SIDE, 94986 fixed CAD points -> the mesh: max 1.8490  rms 0.8611  p99 1.4025 mm  ->  -12.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7041  rms 0.3815  p99 1.3902 mm over 22497 verts  ->  +14.5% removed
+      volume 378725.0 mm3 (469.6 g, -0.0036% drift)  wall 0.3 s
+
+== SUBJECT: rung 0.38 ==
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+as exported today       14.2901   3.0173  10.7827   3.4552    9.84   0.0000     0.0%    604     5
+      CAD-SIDE, 94798 fixed CAD points -> the mesh: max 1.7053  rms 0.7692  p99 1.3164 mm  ->  +0.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.6986  rms 0.4367  p99 1.3083 mm over 20132 verts  ->  +0.0% removed
+      oblique SPLIT: smooth-surface rms 3.1535 mm (25026 verts, +0.0%)   near-sharp-edge rms 0.4171 mm (2355 verts, +0.0%)
+      165112 verts / 330228 tris; raw design volume 331816.4 mm3 (411.5 g); mesh volume 329738.3 mm3 (408.9 g)
+isocontour only         14.2566   3.1092  10.8201   3.4813    6.17   0.9945    -3.0%     81     3
+      CAD-SIDE, 94798 fixed CAD points -> the mesh: max 2.2738  rms 1.0988  p99 1.6687 mm  ->  -42.9% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.6990  rms 0.4601  p99 1.4555 mm over 18005 verts  ->  -5.4% removed
+      oblique SPLIT: smooth-surface rms 3.2441 mm (22888 verts, -2.9%)   near-sharp-edge rms 0.4942 mm (2081 verts, -18.5%)
+      rho_t 0.496083  volume 331815.7 mm3 (411.5 g, target 331816.4, -0.0002%)  wall 0.7 s
+SDF B/h 1 interp f2     14.3388   3.3189  11.0406   3.3268    5.32   1.0101   -10.0%     92     4
+      CAD-SIDE, 94798 fixed CAD points -> the mesh: max 2.1740  rms 1.0818  p99 1.6427 mm  ->  -40.6% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7039  rms 0.4797  p99 1.6288 mm over 19364 verts  ->  -9.8% removed
+      oblique SPLIT: smooth-surface rms 3.4644 mm (26188 verts, -9.9%)   near-sharp-edge rms 0.4316 mm (2387 verts, -3.5%)
+      rho_t 0.496083  volume 331816.2 mm3 (411.5 g, target 331816.4, -0.0001%)  wall 7.7 s
+Taubin shipped max (20/20 prs)  14.3797   3.0248  10.7844   3.4537    9.35   0.1657    -0.2%    604     5
+      CAD-SIDE, 94798 fixed CAD points -> the mesh: max 1.7075  rms 0.7942  p99 1.3599 mm  ->  -3.3% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7048  rms 0.4160  p99 1.3149 mm over 19988 verts  ->  +4.7% removed
+      volume 329745.0 mm3 (408.9 g, +0.0020% drift)  wall 0.3 s
+Taubin best-found (20/20 prs)  14.4274   3.0471  10.8450   3.4497    6.71   0.5140    -1.0%    604     5
+      CAD-SIDE, 94798 fixed CAD points -> the mesh: max 1.8047  rms 0.8614  p99 1.4005 mm  ->  -12.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7041  rms 0.3775  p99 1.3517 mm over 19636 verts  ->  +13.5% removed
+      volume 329721.1 mm3 (408.9 g, -0.0052% drift)  wall 0.3 s
+
+== SUBJECT: rung 0.26 ==
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+as exported today       15.5964   3.5732  12.8044   3.6511    9.97   0.0000     0.0%    674     2
+      CAD-SIDE, 94705 fixed CAD points -> the mesh: max 1.6929  rms 0.7693  p99 1.3157 mm  ->  +0.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7038  rms 0.4377  p99 1.3978 mm over 18567 verts  ->  +0.0% removed
+      oblique SPLIT: smooth-surface rms 3.7384 mm (24552 verts, +0.0%)   near-sharp-edge rms 0.4171 mm (2355 verts, +0.0%)
+      166590 verts / 333216 tris; raw design volume 289594.5 mm3 (359.1 g); mesh volume 287727.0 mm3 (356.8 g)
+isocontour only         15.5480   3.6995  12.9841   3.7010    6.34   0.9903    -3.5%    120     1
+      CAD-SIDE, 94705 fixed CAD points -> the mesh: max 2.3206  rms 1.0874  p99 1.6516 mm  ->  -41.4% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7050  rms 0.4654  p99 1.4723 mm over 16559 verts  ->  -6.3% removed
+      oblique SPLIT: smooth-surface rms 3.8667 mm (22373 verts, -3.4%)   near-sharp-edge rms 0.4927 mm (2106 verts, -18.1%)
+      rho_t 0.492040  volume 289594.6 mm3 (359.1 g, target 289594.5, +0.0000%)  wall 0.3 s
+SDF B/h 1 interp f2     15.2998   3.8415  13.1440   3.7583    6.31   0.9804    -7.5%    113     1
+      CAD-SIDE, 94705 fixed CAD points -> the mesh: max 2.2628  rms 1.0762  p99 1.6335 mm  ->  -39.9% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7047  rms 0.4726  p99 1.6165 mm over 17003 verts  ->  -8.0% removed
+      oblique SPLIT: smooth-surface rms 4.0247 mm (24013 verts, -7.7%)   near-sharp-edge rms 0.4303 mm (2375 verts, -3.2%)
+      rho_t 0.492040  volume 289594.5 mm3 (359.1 g, target 289594.5, -0.0000%)  wall 6.9 s
+Taubin shipped max (20/20 prs)  15.6100   3.5832  12.8938   3.6499    9.49   0.2003    -0.3%    674     2
+      CAD-SIDE, 94705 fixed CAD points -> the mesh: max 1.7138  rms 0.7944  p99 1.3559 mm  ->  -3.3% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7048  rms 0.4173  p99 1.3936 mm over 18426 verts  ->  +4.7% removed
+      volume 287749.8 mm3 (356.8 g, +0.0079% drift)  wall 0.3 s
+Taubin best-found (20/20 prs)  15.6651   3.5987  12.9135   3.6469    6.81   0.4712    -0.7%    674     2
+      CAD-SIDE, 94705 fixed CAD points -> the mesh: max 1.8046  rms 0.8616  p99 1.3989 mm  ->  -12.0% removed
+      oblique on PART SKIN (<=1 voxel from the CAD): max 1.7041  rms 0.3791  p99 1.4085 mm over 18086 verts  ->  +13.4% removed
+      volume 287731.2 mm3 (356.8 g, +0.0015% drift)  wall 0.3 s
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-sdf-geometry-477925/evidence/2026-08-05-smoothing-sdf-geometry-extraction/sdf_part.csv
