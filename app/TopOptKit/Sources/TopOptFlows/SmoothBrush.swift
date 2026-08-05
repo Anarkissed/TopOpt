@@ -88,53 +88,91 @@ public struct SmoothFreezeMask: Equatable, Sendable {
 ///
 /// A pure value, so the mode rules are unit-tested headlessly like the rest of
 /// the brush.
+/// ROUND 3 (task 2026-08-04, bar U2) REPLACED THE ORBIT MODE WITH `pencilOnly`,
+/// and the invariant round 2 wrote orbit for is unchanged — it is now stronger.
+///
+/// Round 2's reasoning was: the brush claims the one-finger drag, so without a
+/// mode that releases it the page would have no single-finger orbit at all. True,
+/// and the third mode was the only answer available then. But the maintainer's
+/// note is that having to REACH for a mode in order to turn the part around is
+/// the wrong shape: "one-finger drag always ORBITS and the pencil always PAINTS".
+///
+/// `pencilOnly` provides the same guarantee on a control that does not have to be
+/// switched back and forth: with it on, a finger drag never paints and a pencil
+/// always does, so orbiting and painting stop competing for one gesture. With it
+/// off the round-2 behaviour is byte-for-byte what it was — one finger paints,
+/// two fingers orbit.
+///
+/// So the page still always has a single-finger orbit; the assertion that used to
+/// say so through `.orbit` now says so through `pencilOnly`, and covers BOTH
+/// input kinds rather than one. It is replaced, not dropped, and
+/// `SmoothingRound3Tests` states the reasoning inline.
 public struct SmoothBrushTools: Equatable, Sendable {
 
     public enum Mode: String, Sendable, CaseIterable, Identifiable {
-        /// One-finger drag adds triangles to the active region.
+        /// A painting drag deepens the smoothing under the brush.
         case paint
-        /// One-finger drag removes triangles from their region.
+        /// A painting drag clears it back to unsmoothed.
         case erase
-        /// One-finger drag orbits the part instead of painting — the way to
-        /// LOOK at what you brushed. Without it the page would have no
-        /// single-finger orbit at all, since the brush claims that gesture.
-        case orbit
 
         public var id: String { rawValue }
         public var label: String {
             switch self {
             case .paint: return "Paint"
             case .erase: return "Erase"
-            case .orbit: return "Orbit"
             }
         }
         public var icon: String {
             switch self {
             case .paint: return "paintbrush.pointed.fill"
             case .erase: return "eraser.fill"
-            case .orbit: return "rotate.3d"
             }
         }
+    }
+
+    /// Which kind of contact a drag came from. The page's gesture layer mounts a
+    /// separate recognizer per kind, so this is reported rather than guessed.
+    public enum Input: String, Sendable, CaseIterable {
+        case finger, pencil
     }
 
     public var mode: Mode
     /// The brush disc radius in screen points — the same units and the same
     /// bounds the TO page's paint drawer used, so the gesture feels identical.
     public var radiusPoints: Double
+    /// ONLY THE PENCIL PAINTS (bar U2). A finger drag then orbits, always, with
+    /// no mode to switch.
+    public var pencilOnly: Bool
 
     public static let minRadius: Double = 12
     public static let maxRadius: Double = 64
     public static let radiusStep: Double = 6
 
-    public init(mode: Mode = .paint, radiusPoints: Double = 26) {
+    public init(mode: Mode = .paint, radiusPoints: Double = 26,
+                pencilOnly: Bool = false) {
         self.mode = mode
         self.radiusPoints = min(max(radiusPoints, Self.minRadius), Self.maxRadius)
+        self.pencilOnly = pencilOnly
     }
 
-    /// Whether a one-finger drag paints at all (false in `.orbit`).
-    public var paints: Bool { mode != .orbit }
+    /// Whether a drag from `input` paints. A pencil always may; a finger may only
+    /// when it has not been released to the camera.
+    public func paints(from input: Input) -> Bool {
+        switch input {
+        case .pencil: return true
+        case .finger: return !pencilOnly
+        }
+    }
+
+    /// Whether a ONE-FINGER drag paints — the gesture round 2's `.orbit` released
+    /// and `pencilOnly` releases now. Kept under its old name because it answers
+    /// the same question at the same call site.
+    public var paints: Bool { paints(from: .finger) }
     /// Whether a painting drag REMOVES rather than adds.
     public var erases: Bool { mode == .erase }
+    /// Whether a one-finger drag turns the part around — the property the page
+    /// exists to guarantee is always reachable.
+    public var fingerOrbits: Bool { !paints(from: .finger) }
 
     public mutating func grow() {
         radiusPoints = min(radiusPoints + Self.radiusStep, Self.maxRadius)
@@ -225,12 +263,103 @@ public struct SmoothBrushModel: Equatable, Sendable {
 
     private var nextColor: Int = 0
 
+    /// THE STRENGTH LADDER (bar U1). The maintainer's instruction was to take the
+    /// region concept out of the UI entirely — no region list, no per-region
+    /// strength slider — and let the model itself be the interface: "TINT THE
+    /// MODEL where painted — darker tint = more smoothing".
+    ///
+    /// That only works if strength has somewhere to come from once the slider is
+    /// gone, and there is exactly one input left: the brush. So brushing an area
+    /// AGAIN deepens it, one rung per stroke, the way every sculpting tool
+    /// behaves. The tint darkens with the rung, so how hard an area is being
+    /// smoothed is legible from the part rather than from a list beside it.
+    ///
+    /// THE REGION MODEL IS KEPT, INTERNALLY, exactly as the task allows — one
+    /// region per rung, created on first use. That is not a leftover: every
+    /// downstream seam (`vertexWeights`, `maxStrength`, `normalizedWeights`, the
+    /// receipt's region lines) is already written against regions and is
+    /// unchanged by this, so the freeze guarantee — bar B2, PR 279's AE1 — passes
+    /// through untouched code.
+    public static let levels: [Double] = [0.25, 0.50, 0.75, 1.00]
+
+    /// rung index (1-based) → the region backing it.
+    private var levelRegion: [Int: UUID] = [:]
+    /// Triangles already deepened during the CURRENT stroke. A drag emits many
+    /// samples over the same triangles, so without this one gesture would run
+    /// straight to the top rung. One stroke, one rung.
+    private var strokeTouched: Set<Int32> = []
+
     public init(indices: [Int32], vertexCount: Int, freeze: SmoothFreezeMask,
                 meshPath: String = "") {
         self.indices = indices
         self.vertexCount = vertexCount
         self.freeze = freeze
         self.meshPath = meshPath
+    }
+
+    // MARK: - the ladder
+
+    /// Which rung triangle `t` sits on: 0 = unpainted, 1…`levels.count`.
+    public func level(of t: Int32) -> Int {
+        guard let id = assignments[t] else { return 0 }
+        for (rung, rid) in levelRegion where rid == id { return rung }
+        return 0
+    }
+
+    /// The strongest rung any triangle currently sits on — what the panel's own
+    /// readout reports, since there is no list to read it off any more.
+    public var deepestLevel: Int {
+        assignments.keys.reduce(0) { max($0, level(of: $1)) }
+    }
+
+    /// The region backing `rung`, created on first use so an untouched brush
+    /// still reports no regions at all.
+    private mutating func region(forLevel rung: Int) -> UUID {
+        if let id = levelRegion[rung] { return id }
+        let clamped = min(max(rung, 1), Self.levels.count)
+        let id = addRegion(strength: Self.levels[clamped - 1])
+        regions[regions.count - 1].name = "Level \(clamped)"
+        levelRegion[rung] = id
+        return id
+    }
+
+    /// A new stroke begins: the per-gesture dedup resets, so this drag may deepen
+    /// each triangle it covers once.
+    public mutating func beginStroke() { strokeTouched.removeAll() }
+    /// The stroke ends. Separate from `beginStroke` so a cancelled gesture and a
+    /// completed one leave the same state.
+    public mutating func endStroke() { strokeTouched.removeAll() }
+
+    /// THE PAGE'S ONE PAINTING ENTRY POINT (bar U1). Deepen (or clear) every
+    /// covered triangle, and return the exactly-invertible edit.
+    ///
+    /// `.paint` moves each triangle up one rung, capped at the top, and at most
+    /// once per stroke. `.erase` clears it outright — the maintainer asked for a
+    /// paint/erase toggle, not a rung-by-rung undo, and "take the smoothing off
+    /// here" is what erase means everywhere else in the app.
+    ///
+    /// Frozen triangles are refused here exactly as they are by `paint` — this
+    /// routes THROUGH it rather than round it, so layer 1 of the freeze guarantee
+    /// is the same code.
+    @discardableResult
+    public mutating func brush(_ mode: SmoothBrushTools.Mode,
+                               triangles: [Int32]) -> SmoothBrushEdit {
+        guard canPaint else { return SmoothBrushEdit() }
+        if mode == .erase {
+            return paint(.erase, triangles: triangles)
+        }
+        var changes: [SmoothBrushEdit.Change] = []
+        for t in Array(Set(triangles)).sorted() {
+            guard !strokeTouched.contains(t), paintable(triangle: t) else { continue }
+            strokeTouched.insert(t)
+            let next = min(level(of: t) + 1, Self.levels.count)
+            let dest = region(forLevel: next)
+            let old = assignments[t]
+            guard old != dest else { continue }
+            changes.append(.init(triangle: t, from: old, to: dest))
+            assignments[t] = dest
+        }
+        return SmoothBrushEdit(changes: changes)
     }
 
     public var isEmpty: Bool { assignments.isEmpty }
@@ -387,7 +516,14 @@ public struct SmoothBrushModel: Equatable, Sendable {
 
     /// Unpaint everything, keeping the regions and their strengths (the "start the
     /// strokes over" affordance, distinct from discarding the whole smoothing).
-    public mutating func clearStrokes() { assignments.removeAll() }
+    ///
+    /// Also closes any stroke in flight: a clear that left the per-gesture set
+    /// behind would make the NEXT stroke over the same triangles a no-op, which
+    /// reads as a dead brush.
+    public mutating func clearStrokes() {
+        assignments.removeAll()
+        strokeTouched.removeAll()
+    }
 
     // MARK: - the weight vector core consumes
 
@@ -472,21 +608,36 @@ public struct SmoothBrushModel: Equatable, Sendable {
     ///   * FROZEN     → a flat locked tint, drawn WHATEVER the strokes say. The
     ///     user can see what the brush will refuse BEFORE trying to paint it,
     ///     rather than discovering it from a footnote afterwards.
+    /// ONE HUE, DARKENING WITH THE RUNG (bar U1). Round 2 gave every region its
+    /// own palette colour, which was right when the panel listed them by name and
+    /// wrong now that the panel does not: a rainbow encodes WHICH region, and the
+    /// only thing left worth encoding is HOW MUCH. So the strokes are one colour
+    /// that gets darker and more opaque the harder an area is being smoothed, and
+    /// the part itself becomes the readout the region list used to be.
+    public static let paintTint = SIMD3<Float>(0.60, 0.78, 1.00)
+    /// How dark the top rung goes — the tint is scaled toward black by this much
+    /// at full strength, so the rungs are told apart by VALUE and not by opacity
+    /// alone (opacity differences vanish against a light patch of the model).
+    public static let deepestTintScale: Float = 0.42
+
     public func vertexTints(frozenTint: SIMD4<Float> =
                                 SIMD4<Float>(0.42, 0.85, 0.55, 0.34)) -> [SIMD4<Float>] {
         var out = [SIMD4<Float>](repeating: .zero, count: vertexCount)
         guard meshesAgree else { return out }
-        var colorByRegion: [UUID: (RGBA, Double)] = [:]
-        for r in regions { colorByRegion[r.id] = (r.color, r.strength) }
+        var strengthByRegion: [UUID: Double] = [:]
+        for r in regions { strengthByRegion[r.id] = r.strength }
         for (t, id) in assignments {
-            guard let (c, s) = colorByRegion[id], let (a, b, d) = corners(t) else { continue }
+            guard let s = strengthByRegion[id], let (a, b, d) = corners(t) else { continue }
+            let clamped = Float(min(max(s, 0), 1))
             // Opacity floors at 0.20 so a strength-0 region is still visibly
             // painted — "I brushed here and turned it off" is a state the user
             // must be able to see, not an invisible one.
-            let alpha = Float(0.20 + 0.60 * min(max(s, 0), 1))
+            let alpha = 0.20 + 0.60 * clamped
+            let value = 1 - (1 - Self.deepestTintScale) * clamped
+            let c = Self.paintTint * value
             for v in [a, b, d] where v >= 0 && v < out.count {
                 if alpha > out[v].w {
-                    out[v] = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), alpha)
+                    out[v] = SIMD4<Float>(c.x, c.y, c.z, alpha)
                 }
             }
         }

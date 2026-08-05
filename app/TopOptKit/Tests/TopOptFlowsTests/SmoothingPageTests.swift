@@ -653,25 +653,56 @@ final class SmoothingPageTests: XCTestCase {
         XCTAssertTrue(actions.recertify.sub.contains("round the struts"))
     }
 
-    func testSendToLatticeIsGatedOnAKeptSmoothing() async throws {
+    /// AE8's GUARANTEE IS UNCHANGED: a lattice is only ever generated on geometry
+    /// that has a certification of its own. What changed (task 2026-08-04, bar U3)
+    /// is which fact states it.
+    ///
+    /// It used to be `hasKept` — the user having pressed a second button after
+    /// the one that produced the verdict. The maintainer deleted that button
+    /// ("they just keep smoothing if they want to keep smoothing"), so a
+    /// successful re-certification keeps, and the gate reads the receipt. The two
+    /// are now the same condition, and the receipt is the one that is actually
+    /// ABOUT the geometry: `keep` still refuses without a current, non-stale
+    /// verdict, so an uncertified shape still cannot reach the lattice page.
+    func testSendToLatticeIsGatedOnACertifiedSmoothing() async throws {
         let p = page(RecordingRunner())
-        var a = SmoothPageActions.compute(brush: brushed(), working: false,
-                                          hasReceipt: false, hasKept: false,
-                                          unavailable: nil)
-        XCTAssertFalse(a.sendToLattice.enabled)
+        let a0 = SmoothPageActions.compute(brush: brushed(), working: false,
+                                           hasReceipt: false, hasKept: false,
+                                           unavailable: nil)
+        XCTAssertFalse(a0.sendToLattice.enabled,
+                       "no certification, no lattice")
+        XCTAssertTrue(a0.sendToLattice.sub.contains("re-certify first"))
 
         await p.recertify(brush: brushed())
-        a = SmoothPageActions.compute(brush: brushed(), working: false,
-                                      hasReceipt: p.receipt != nil, hasKept: false,
-                                      unavailable: nil)
-        XCTAssertFalse(a.sendToLattice.enabled,
-                       "a certification alone is not enough — the user must KEEP it")
-        XCTAssertTrue(p.keep(regionLines: []))
-        a = SmoothPageActions.compute(brush: brushed(), working: false,
-                                      hasReceipt: true, hasKept: true,
-                                      unavailable: nil)
-        XCTAssertTrue(a.sendToLattice.enabled)
-        XCTAssertTrue(a.sendToLattice.sub.contains("SMOOTHED"))
+        XCTAssertNotNil(p.receipt)
+        XCTAssertNotNil(p.kept,
+                        "U3: the re-certification IS the keep — no second press")
+
+        let a1 = SmoothPageActions.compute(brush: brushed(), working: false,
+                                           hasReceipt: p.receipt != nil,
+                                           hasKept: p.kept != nil,
+                                           unavailable: nil)
+        XCTAssertTrue(a1.sendToLattice.enabled)
+        XCTAssertTrue(a1.sendToLattice.sub.contains("SMOOTHED"))
+    }
+
+    /// The other half of that gate, and the reason it is still a gate: a
+    /// re-certification that produced NO verdict keeps nothing, so "Lattice this"
+    /// stays off. Deleting the button did not delete the condition.
+    func testANonConvergentRecertificationKeepsNothingAndBlocksTheLattice()
+        async throws {
+        let runner = RecordingRunner()
+        runner.nonConvergentOn = .smoothedVariant
+        let p = page(runner)
+        await p.recertify(brush: brushed())
+
+        XCTAssertNil(p.receipt)
+        XCTAssertNil(p.kept, "an uncertified shape is never kept, U3 or not")
+        let a = SmoothPageActions.compute(brush: brushed(), working: false,
+                                          hasReceipt: p.receipt != nil,
+                                          hasKept: p.kept != nil,
+                                          unavailable: nil)
+        XCTAssertFalse(a.sendToLattice.enabled)
     }
 
     // MARK: - AE6 · ONE selection model (PR 274's M1 shape)
@@ -809,7 +840,11 @@ final class SmoothingPageTests: XCTestCase {
                                           unavailable: nil)
         XCTAssertFalse(a.recertify.enabled)
         XCTAssertTrue(a.recertify.sub.contains("brush an area"))
-        for action in [a.recertify, a.keep, a.discard, a.sendToLattice] {
+        // `keep` left this list when the button was deleted (task 2026-08-04,
+        // bar U3 — "they just keep smoothing if they want to keep smoothing").
+        // The assertion is unchanged: EVERY action the page offers states why it
+        // is off. It now covers every action that exists.
+        for action in [a.recertify, a.discard, a.sendToLattice] {
             XCTAssertFalse(action.sub.isEmpty, "\(action.label) gives no reason")
         }
 

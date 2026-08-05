@@ -1,0 +1,54 @@
+== smooth_viewer_identity_probe ==
+mesh       core/tests/fixtures/mesh/WallMount_ShelfBracket.stl
+resolution 96
+
+subject: marching-cubes iso-surface of the 94x96x10 voxelization — 11556 verts, 23132 tris
+
+-- THE SWEEP ------------------------------------------------------
+Every row is one shipped `constrained_taubin_smooth` call with the
+min-feature constraint ENFORCED, exactly as the bridge invokes it.
+
+patch       str painted  moved maxshift   cnt+bounds content      mesh dmass voxel dmass
+                  verts  verts       mm   signature hash                  g           g
+
+[corner] centre (-98.845, 10.575, 1.080) radius 72.342 mm — 1692 of 11556 vertices painted (14.6%)
+corner     0.25    1692   1692   0.4320   differs   differs       +0.035941   +0.000000
+corner     0.50    1692   1692   0.6221   differs   differs       +0.070855   +0.000000
+corner     1.00    1692   1692   0.8314   differs   differs       +0.140012   +0.000000
+
+[interior] centre (35.078, -58.547, 9.720) radius 4.860 mm — 23 of 11556 vertices painted (0.2%)
+interior   0.25      23     23   0.3986   IDENTICAL differs       -0.000000   +0.000000
+interior   0.50      23     23   0.5378   IDENTICAL differs       +0.000000   +0.000000
+interior   1.00      23     23   0.5927   IDENTICAL differs       +0.000000   +0.000000
+
+-- V1 ANSWERED ----------------------------------------------------
+rows where the geometry GENUINELY changed:            6
+  ...of those, count+bounds signature IDENTICAL:      3  <- the view never re-uploads; the ORIGINAL stays on screen
+  ...of those, content hash IDENTICAL:                0
+
+The shipped signature is not merely weak, it is CONDITIONAL: it
+separates the two meshes only when the painted patch happens to
+contain the part's own bounding-box extreme. Brush the middle of
+the part — the maintainer's case — and the viewer shows nothing.
+determinism: content_hash(original) recomputed = 1b2c488508b462c4 (bar B6)
+
+-- V2 ANSWERED ----------------------------------------------------
+material PLA, density 1.2400 g/cm3, grid 94x96x10 @ 2.1601 mm
+BEFORE  mesh mass 245.650462 g   voxel mass 248.145750 g
+
+patch       str  pairs    mesh mass g    receipt     voxel mass g    receipt
+corner     0.25   5/5      245.686403     245.7 *     248.145750     248.1 *
+corner     0.50  10/10     245.721318     245.7       248.145750     248.1 *
+corner     1.00  20/20     245.790474     245.8       248.145750     248.1 *
+interior   0.25   5/5      245.650462     245.7 *     248.145750     248.1 *
+interior   0.50  10/10     245.650462     245.7 *     248.145750     248.1 *
+interior   1.00  20/20     245.650462     245.7 *     248.145750     248.1 *
+
+* = rounds to the SAME string the receipt printed before smoothing.
+
+Both columns are computed from the mesh that was ANALYSED, by the
+arithmetic copied verbatim out of bridge.cpp's analyze_loadcase.
+A mesh mass computed from the ORIGINAL would be constant at
+245.650462 g down the whole column; it is not.
+
+evidence -> evidence/2026-08-04-smoothing-viewer-and-ui/smooth_viewer_identity.txt

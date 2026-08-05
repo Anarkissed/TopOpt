@@ -149,6 +149,13 @@ public struct SmoothReceipt: Equatable, Sendable {
         String(format: "%.\(d)f", x)
     }
 
+    /// Decimal places the two mass rows print at. Three, because the quantity
+    /// they report is one Taubin holds nearly fixed on purpose: on the probe's
+    /// own corner patch the mesh mass moved 0.140 g on 245 g (+0.057 %), and at
+    /// one decimal — what shipped — that printed as no change at all. Named
+    /// rather than inlined so the V2 test pins the resolution itself.
+    public static let massDecimals = 3
+
     /// The side-by-side table. Everything the task's item 5 names: worst-case
     /// margin, in-plane, interlayer, effective, min-feature count, mass, verdict.
     public var rows: [Row] {
@@ -177,13 +184,32 @@ public struct SmoothReceipt: Equatable, Sendable {
                        beforeText: "\(before.minFeatureViolations)",
                        afterText: "\(after.minFeatureViolations)",
                        worse: mfWorse, better: mfBetter))
+        // BOTH MASSES AT `massDecimals` (task 2026-08-04, bar V2). They used to
+        // print at one decimal, and on the maintainer's run that made "Mass
+        // (mesh) 182.6 g → 182.6 g" the only row that did not move — which read
+        // as "the certification solved the ORIGINAL shape". It had not.
+        //
+        // `smooth_viewer_identity_probe` settled it: mesh mass is computed by
+        // bridge.cpp's `analyze_loadcase` from whatever mesh it ANALYSED, which on
+        // the after column is the smoothed file, and the measured column moves
+        // (245.650462 → 245.790474 g on a corner patch at strength 1.00). What
+        // makes it move so LITTLE is Taubin itself: the λ|μ pair is
+        // volume-preserving by construction — that is the whole reason core uses
+        // it instead of a plain Laplacian, which would collapse the part. A
+        // genuine sub-0.05 g change then rounded to the same string at one
+        // decimal, and an unchanged string is not something a reader can
+        // distinguish from an unchanged shape.
+        //
+        // So the fix is precision, not a different quantity. The size of the move
+        // relative to the smoother's own bound is already stated by
+        // `SmoothingApplied.driftLine`.
         out.append(Row(label: "Mass (voxel)",
-                       beforeText: Self.f(before.voxelMassGrams, 1) + " g",
-                       afterText: Self.f(after.voxelMassGrams, 1) + " g",
+                       beforeText: Self.f(before.voxelMassGrams, Self.massDecimals) + " g",
+                       afterText: Self.f(after.voxelMassGrams, Self.massDecimals) + " g",
                        worse: nil, better: nil))
         out.append(Row(label: "Mass (mesh)",
-                       beforeText: Self.f(before.meshMassGrams, 1) + " g",
-                       afterText: Self.f(after.meshMassGrams, 1) + " g",
+                       beforeText: Self.f(before.meshMassGrams, Self.massDecimals) + " g",
+                       afterText: Self.f(after.meshMassGrams, Self.massDecimals) + " g",
                        worse: nil, better: nil))
         out.append(Row(label: "Peak stress",
                        beforeText: Self.f(before.maxStressMPa) + " MPa",
@@ -450,10 +476,39 @@ public final class SmoothingPageModel: ObservableObject {
         @Sendable (_ request: CertifyRequest) async throws -> CertifyOutcome
 
     @Published public private(set) var phase: Phase = .idle
-    /// The kept-or-not decision. Non-nil once the user keeps a smoothing.
+    /// The kept-or-not decision. Non-nil once a re-certification succeeds (U3 —
+    /// there is no longer a second button to press).
     @Published public private(set) var kept: SmoothKeptResult?
     /// Which side of the before/after the viewport is showing.
     @Published public var showingSmoothed = true
+
+    // ── U4/U5/U6: what the page shows, and for how long ─────────────────────
+
+    /// THE RECEIPT IS A DRAWER (bar U4), not a permanent panel. It used to be a
+    /// card inside the left panel, which meant every number on it was standing
+    /// text the user had to scroll past to reach the brush.
+    @Published public var receiptOpen = false
+
+    /// THE ONE TRANSIENT NOTE (bar U5). Same type, same lifetime and same three
+    /// calls as the lattice page — `PageNoteBox` in `PageChrome.swift`.
+    @Published public private(set) var noteBox = PageNoteBox()
+    public var note: PageTransientNote? { noteBox.note }
+    public func post(note text: String, now: Date = Date()) {
+        noteBox.post(text, now: now)
+    }
+    public func dismissNote() { noteBox.dismiss() }
+    public func tick(now: Date = Date()) { noteBox.tick(now: now) }
+
+    /// THE ONE STANDING NOTICE (bar U6): shown on entry, dismissed with OK, and
+    /// then gone for this page session. Everything the page used to explain in
+    /// permanent prose is either this sentence or is behind the receipt drawer.
+    @Published public private(set) var entryNoticeDismissed = false
+    public func dismissEntryNotice() { entryNoticeDismissed = true }
+    public static let entryNotice = "You cannot smooth protected areas."
+    /// Whether that notice is currently up.
+    public var showsEntryNotice: Bool {
+        !entryNoticeDismissed && context.unavailable == nil
+    }
 
     public let context: SmoothVariantContext
     /// Where the variant's own mesh was written for the certification engine to
@@ -510,7 +565,35 @@ public final class SmoothingPageModel: ObservableObject {
         }
     }
 
-    /// The one-line status the page always shows.
+    /// EXACTLY ONE THING AT THE TOP OF THE SCREEN (bar U5).
+    ///
+    /// The page used to draw a status banner, a failure banner and an in-panel
+    /// warning card, all at once and all overlapping — the three notices the
+    /// maintainer counted. This is the single decision that replaces them: a
+    /// precedence, evaluated in one place, returning at most one thing. A view
+    /// cannot show two because there is only one value to render.
+    ///
+    /// At REST it is nil. Nothing stands on this page when nothing is happening —
+    /// that is bar U6 expressed as a state rather than as a promise about layout.
+    public enum TopNote: Equatable, Sendable {
+        /// A re-certification produced no verdict (H1/AE5). Outranks everything:
+        /// it is the only one that changes what the numbers below mean.
+        case failure(SmoothCertifyFailure)
+        /// The transient note — an outcome, or something the page wants to say
+        /// once. Auto-dismisses.
+        case transient(PageTransientNote)
+        /// Work in flight. Only while it actually is.
+        case working(String)
+    }
+
+    public var topNote: TopNote? {
+        if let f = failure { return .failure(f) }
+        if let n = note { return .transient(n) }
+        if isWorking { return .working(statusLine) }
+        return nil
+    }
+
+    /// The one-line status, shown only while working or inside the receipt drawer.
     public var statusLine: String {
         switch phase {
         case .idle:
@@ -585,6 +668,26 @@ public final class SmoothingPageModel: ObservableObject {
                                              after: out.certification,
                                              smoothing: applied))
             lastSmoothedOutcome = out
+            // A SUCCESSFUL RE-CERTIFICATION IS THE KEEP (bar U3). The page used
+            // to carry a separate "Keep smoothing" button, and the maintainer's
+            // note on it was: "that's stupid. They just keep smoothing if they
+            // want to keep smoothing." He is right — the button asked the user to
+            // ratify a decision they had already made by pressing Re-certify, and
+            // its only real job was to gate "Lattice this" on there being a
+            // current verdict. That gate is the receipt, so it can read the
+            // receipt.
+            //
+            // Nothing about WHEN a smoothing is keepable has moved: `keep`
+            // refuses unless there is a current, non-stale receipt, so a
+            // non-convergent or failed re-certification still keeps nothing. This
+            // only removes the second press.
+            keep(regionLines: brush.summaries().filter { !$0.inert }
+                    .map { String(format: "%@ %.2f (%d tri)", $0.name,
+                                  $0.strength, $0.triangles) })
+            // The outcome is a TRANSIENT note, not a standing banner (U5/U6): it
+            // is news, and news stops being news. The numbers behind it stay
+            // available in the receipt drawer for as long as the user wants them.
+            if let r = receipt { post(note: r.headline) }
         } catch {
             let message = (error as? TopOptError)?.message ?? "\(error)"
             phase = .couldNotCertify(
@@ -645,6 +748,11 @@ public final class SmoothingPageModel: ObservableObject {
         lastSmoothedOutcome = nil
         phase = .idle
         showingSmoothed = false
+        // The drawer described a receipt that no longer exists, and the note
+        // announced its outcome. Both go with it (U4/U5) — a drawer left open
+        // over nothing is the "stale number on screen" failure in another shape.
+        receiptOpen = false
+        dismissNote()
     }
 
     /// The geometry the viewport draws and everything downstream consumes.
@@ -675,7 +783,6 @@ public struct SmoothPageActions: Equatable, Sendable {
     }
 
     public let recertify: Action
-    public let keep: Action
     public let discard: Action
     /// AE8 forward: send the SMOOTHED variant to the lattice page. Enabled only
     /// once a smoothing has been kept, so the lattice is always generated on
@@ -690,7 +797,6 @@ public struct SmoothPageActions: Equatable, Sendable {
                              enabled: false, primary: true)
             return SmoothPageActions(
                 recertify: off,
-                keep: Action(label: "Keep", sub: why.reason, enabled: false, primary: false),
                 discard: Action(label: "Discard", sub: "nothing to discard",
                                 enabled: false, primary: false),
                 sendToLattice: Action(label: "Lattice this", sub: why.reason,
@@ -715,20 +821,22 @@ public struct SmoothPageActions: Equatable, Sendable {
         }
         return SmoothPageActions(
             recertify: re,
-            keep: Action(label: "Keep smoothing",
-                         sub: hasReceipt
-                            ? "carries the smoothed mesh and this receipt forward"
-                            : "needs a current certification",
-                         enabled: hasReceipt && !working, primary: false),
             discard: Action(label: "Discard",
                             sub: "returns the original variant, unchanged",
                             enabled: (hasKept || hasReceipt) && !working,
                             primary: false),
+            // AE8's guarantee is unchanged: a lattice is only ever generated on
+            // geometry that has a certification of its own. What changed is which
+            // fact says so. It used to be `hasKept` — the user having pressed a
+            // second button — and it is now the receipt itself, because a
+            // successful re-certification keeps (bar U3). The two are the same
+            // condition now, and the receipt is the one that is actually ABOUT
+            // the geometry.
             sendToLattice: Action(
                 label: "Lattice this",
-                sub: hasKept
+                sub: hasReceipt
                     ? "the lattice is generated on the SMOOTHED geometry"
-                    : "keep the smoothing first — a lattice needs certified geometry",
-                enabled: hasKept && !working, primary: false))
+                    : "re-certify first — a lattice needs certified geometry",
+                enabled: hasReceipt && !working, primary: false))
     }
 }

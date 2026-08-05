@@ -420,7 +420,16 @@ public struct WorkspacePlaceholder: View {
                           // stroke; two-finger drag still orbits.
                           paintActive: brushGestureActive,
                           paintFaceIDs: project.effectivePaintFaceIDs(),
-                          onBrush: handleBrush)
+                          onBrush: { center, phase, input in
+                              handleBrush(center, phase,
+                                          input == .pencil ? .pencil : .finger)
+                          },
+                          // Bar U2: on the smoothing page the maintainer can give
+                          // the brush to the pencil, and a finger drag then orbits
+                          // with no mode to switch. Off everywhere else, so the TO
+                          // page's paint gesture is byte-for-byte unchanged.
+                          brushRequiresPencil: showSmoothingPage
+                                               && smoothTools.pencilOnly)
                 .ignoresSafeArea()
 
             // Strut preview: the raymarched true-strut layer, riding the SAME shared
@@ -956,7 +965,8 @@ public struct WorkspacePlaceholder: View {
     /// On stroke END the sidecar is persisted so the run + live tagging reproduce the paint. The
     /// `.add`/`.erase` mode follows the erase modifier; `force.sync` keeps the load case aligned
     /// with the group the stroke may have created.
-    private func handleBrush(_ center: CGPoint, _ phase: BrushPhase) {
+    private func handleBrush(_ center: CGPoint, _ phase: BrushPhase,
+                             _ input: SmoothBrushTools.Input = .finger) {
         // On the SMOOTHING page the same gesture paints SMOOTHING strength onto the
         // variant's own surface (handoff 2026-08-02-smoothing-page). It is routed
         // here rather than given its own gesture so the brush feels identical on
@@ -965,20 +975,36 @@ public struct WorkspacePlaceholder: View {
         if showSmoothingPage {
             // The page's OWN tools decide the mode and the disc size (bar L4) —
             // the TO page's paint drawer is hidden here and no longer reachable.
-            guard smoothTools.paints else { return }
+            //
+            // WHICH CONTACT (bar U2). A pencil always paints; a finger paints
+            // only while `pencilOnly` is off. The recognizer reports the kind, so
+            // this is not a guess — see `MetalMeshView.handlePencilPan`.
+            guard smoothTools.paints(from: input) else { return }
+            // THE STAGE'S OWN MESH is what the brush hit-tests. On the smoothing
+            // page that is `smoothVariantMesh` — the ORIGINAL variant surface —
+            // even while the stage is showing the smoothed twin, because the
+            // brush's triangle indices, the freeze mask and the weight vector are
+            // all defined on the original. Painting against the smoothed mesh
+            // would index a second mesh, which is the whole class of bug round 2
+            // closed.
             guard let mesh = smoothVariantMesh, let proj = projection else { return }
             switch phase {
-            case .began, .moved:
+            case .began:
+                // ONE STROKE, ONE RUNG (bar U1). A drag emits many samples over
+                // the same triangles; without this boundary a single stroke would
+                // run straight to the deepest level.
+                smoothBrush.beginStroke()
+                fallthrough
+            case .moved:
                 let tris = BrushHitTest.triangles(under: center,
                                                   radiusPoints: CGFloat(smoothTools.radiusPoints),
                                                   mesh: mesh, projection: proj,
                                                   modelRotation: settleQuat,
                                                   modelCenter: meshCenter)
                 guard !tris.isEmpty else { return }
-                smoothBrush.paint(smoothTools.erases ? .erase : .add,
-                                  triangles: tris.map { Int32($0) })
+                smoothBrush.brush(smoothTools.mode, triangles: tris.map { Int32($0) })
             case .ended:
-                break
+                smoothBrush.endStroke()
             }
             return
         }
@@ -1830,15 +1856,6 @@ public struct WorkspacePlaceholder: View {
                                                  pseudoFaces: false, smoothShaded: true)
                                     : nil
                             }
-                        }
-                    },
-                    onKeep: {
-                        let lines = smoothBrush.summaries()
-                            .filter { !$0.inert }
-                            .map { String(format: "%@ %.2f (%d tri)", $0.name,
-                                          $0.strength, $0.triangles) }
-                        if !page.keep(regionLines: lines) {
-                            model.toast = "Nothing to keep — re-certify first."
                         }
                     },
                     onDiscard: {
