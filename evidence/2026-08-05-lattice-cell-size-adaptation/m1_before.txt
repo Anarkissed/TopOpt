@@ -1,0 +1,7 @@
+=== M1 FAILING TEST, BEFORE THE FIX ===
+graded AUTO job, three include regions at 6.000 mm, 0.42 mm bead
+Stage A derivation says a 5.4748 mm member is feasible, so 6 mm is fine.
+
+exit=1
+[lattice] FORECAST: 3 of 3 include regions are thinner than the 23.013 mm the floor requires (thinnest 6.000 mm; floor 5.0 cells x 4.6026 mm)
+topopt-cli: every declared lattice include region is too thin to hold a certifiable lattice at this cell size, so this run cannot put lattice anywhere you asked for it — refusing before spending a solve.

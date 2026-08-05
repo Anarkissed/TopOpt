@@ -113,6 +113,27 @@ double lattice_rho_max(LatticeTopology topo);
 // that no emitted point sits below the floor (bar L2) is what catches a stale value.
 double lattice_cells_per_member_min(LatticeTopology topo);
 
+// ★ THE OTHER FLOOR, AND IT IS NOT THE ONE ABOVE. The minimum cells across a member
+// for the strut network to PERCOLATE — to be connected geometry at all. Measured for
+// octet in the same study as the accuracy floor (0.5 cells is DISCONNECTED, 1 cell is
+// connected at +2.36 % axial error), so it returns 1.0.
+//
+// WHY BOTH EXIST. They answer different questions and have different remedies:
+//   * lattice_cells_per_member_min (5) protects the CERTIFICATE. Below it the
+//     homogenized tensor stops describing the member, so the margin is not
+//     trustworthy — but the part still prints.
+//   * this one (1) protects the OBJECT. Below it there is no connected strut network
+//     to print, and what comes out of the generator is debris.
+// A member between them is BUILDABLE AND UNCERTIFIABLE. That is the regime sub-floor
+// retention exists for; it is emphatically NOT the same as un-latticeable, and a
+// pipeline that refuses both with one message is collapsing two verdicts that need
+// different answers.
+//
+// See the definition for its measurement conditions (rho ~= 0.199, AXIAL, octet only)
+// — they do not cover the top of the band or bending, and this must not be quoted
+// unconditionally.
+double lattice_percolation_cells_per_member_min(LatticeTopology topo);
+
 // ★ THE SUB-FLOOR RETENTION STRESS FRACTION — the ceiling on a REGION's macro stress,
 // as a fraction of the PART's peak von Mises, under which the grading law is permitted
 // to keep a below-the-floor voxel as lattice instead of falling back to solid
@@ -212,6 +233,137 @@ double octet_strut_diameter_mm(double rho, double cell_size_mm);
 // Throws std::invalid_argument if min_extrudable_width_mm is not finite and > 0.
 double lattice_cell_printability_floor_mm(LatticeTopology topo,
                                           double min_extrudable_width_mm);
+
+// ── THE PER-MEMBER CELL DERIVATION (task 2026-08-05-lattice-cell-size-adaptation).
+//
+// WHY IT EXISTS, AND WHAT IT CORRECTS. The floor above is evaluated at
+// lattice_rho_min — the band's LIGHTEST certifiable lattice — because that is the
+// density whose strut is thinnest and therefore the one that sets a floor valid for
+// ANY density. That makes it the right number for "raise a user's target cell", which
+// is what it is used for. It is the WRONG number to answer "how thick must a member be
+// before it can hold a lattice", and it was being read that way: N* x that floor is
+// 23.0131 mm at a 0.42 mm nozzle, and that conditional figure reached the maintainer
+// as an unconditional "you need a 23 mm member". The condition — at the band's LOWEST
+// density — was never surfaced.
+//
+// A member does not have to be latticed at rho_min. Strut diameter is exactly linear
+// in cell size and monotone in rho, so a DENSER lattice prints at a SMALLER cell, and
+// a smaller cell puts more cells across the same member. Answering per member instead
+// of per band collapses the requirement from 23.0131 mm to 5.4748 mm at the same
+// nozzle. This function is that answer, and it reports BOTH ends of the admissible
+// window rather than picking one — which end a user wants is a mass/accuracy judgement
+// nothing here measures.
+//
+// THE ARITHMETIC, IN FULL. Write phi(rho) = octet_strut_diameter_mm(rho, 1) for the
+// measured diameter per unit cell, W for the member width, w for the minimum
+// extrudable width and N* for lattice_cells_per_member_min. A (cell S, density rho)
+// pair is admissible iff
+//     S * phi(rho) >= w        (PRINTABILITY: the strut is at least one bead)
+//     W / S        >= N*       (HOMOGENIZATION: enough cells across to certify)
+// i.e.  w / phi(rho) <= S <= W / N*. Since phi is increasing, the widest window is at
+// the band's top, and the pair set is non-empty iff W >= N* * w / phi(rho_max).
+//
+// ★ A MEASUREMENT LIMIT THAT IS LOAD-BEARING HERE. phi is measured on rho 0.05..0.60
+// and CLAMPED above 0.60, while the certifiable band reaches lattice_rho_max = 0.8999.
+// So phi is FLAT on [0.60, rho_max] and a density above 0.60 buys no extra diameter in
+// this model. That is the conservative direction — a real strut at rho 0.80 is fatter
+// than phi says, so we demand a bigger cell than strictly necessary, never a smaller
+// one — but it means `densest_relative_density` below is reported as the LIGHTEST
+// density that reaches the frontier cell, not as rho_max, because carrying more mass
+// for an identical cell would be a worse answer with no measurement behind it.
+struct LatticeCellDerivation {
+  // ── the inputs that governed, echoed so a receipt never has to re-derive them ──
+  double member_width_mm = 0.0;
+  double min_extrudable_width_mm = 0.0;
+  double cells_per_member_floor = 0.0;  // N*
+  double band_rho_min = 0.0;
+  double band_rho_max = 0.0;
+
+  // Is there ANY (cell, rho) pair in the band that fits this member at this nozzle?
+  bool feasible = false;
+
+  // ── the arithmetic that decides it (populated whether feasible or not) ──────────
+  // The smallest cell at which the band's FATTEST modelled strut still prints:
+  // w / phi(rho_max). No certified lattice exists below this cell at any density.
+  double min_printable_cell_mm = 0.0;
+  // The largest cell this member can homogenize: W / N*.
+  double max_homogenizable_cell_mm = 0.0;
+  // ★ THE NUMBER A USER ACTS ON WHEN INFEASIBLE: `cells_per_member_floor` x
+  // min_printable_cell_mm — the THINNEST member that clears the floor IN FORCE at
+  // this nozzle. A member below it cannot meet that floor at any (cell, rho) in the
+  // band, and the remedy is a thicker member (or a finer nozzle), not a different
+  // cell.
+  double min_member_width_mm = 0.0;
+
+  // ── THE TWO FLOORS, ANSWERED SEPARATELY (M8b). `min_member_width_mm` above uses
+  // whichever floor the caller put in force; these two are always both reported, so
+  // a caller never has to know which question it asked to read the answer.
+  //
+  //   CERTIFIABLE — lattice_cells_per_member_min x the smallest printable cell. The
+  //     thinnest member whose certificate the homogenized tensor can describe.
+  //   BUILDABLE   — lattice_percolation_cells_per_member_min x the same cell. The
+  //     thinnest member whose strut network is CONNECTED GEOMETRY at all.
+  //
+  // A member between them is BUILDABLE AND UNCERTIFIABLE: it prints, and the margin
+  // over it is out of regime. Reporting only the first collapses that case into
+  // "un-latticeable", which it is not — see `feasible_percolation` below.
+  double min_member_width_certifiable_mm = 0.0;
+  double min_member_width_buildable_mm = 0.0;
+  // Which floor produced `feasible` and `min_member_width_mm` — so a message can name
+  // the question it answered instead of leaving the reader to guess.
+  bool floor_in_force_is_accuracy = true;
+  // Does ANY (cell, rho) pair in the band clear PRINTABILITY and PERCOLATION? This is
+  // the genuine un-latticeability test. When it is false nothing can be built here at
+  // any setting; when it is true but `feasible` is false, the member is buildable and
+  // uncertifiable, which is a different verdict with a different remedy.
+  bool feasible_percolation = false;
+  // The member's span in cells at the smallest printable cell, against each floor.
+  // (Same number, two comparisons — reported so a receipt can show the margin.)
+  double cells_per_member_at_finest = 0.0;
+
+  // ── THE ADMISSIBLE WINDOW, both ends (zero when infeasible) ────────────────────
+  // DENSEST/FINEST end: the smallest admissible cell, at the lightest density that
+  // reaches it (see ★ above). Most cells per member, so most homogenization headroom.
+  double densest_relative_density = 0.0;
+  double densest_cell_size_mm = 0.0;
+  double densest_strut_diameter_mm = 0.0;
+  double densest_cells_per_member = 0.0;
+  // LIGHTEST/COARSEST end: the largest admissible cell (exactly W / N*, so exactly N*
+  // cells across), at the lightest density whose strut still prints there. This is the
+  // MINIMUM-MASS certified lattice for this member.
+  double lightest_relative_density = 0.0;
+  double lightest_cell_size_mm = 0.0;
+  double lightest_strut_diameter_mm = 0.0;
+  double lightest_cells_per_member = 0.0;
+};
+
+// Derive the admissible (cell, density) window for ONE member of measured width
+// `member_width_mm` at a stated `min_extrudable_width_mm`. `cells_per_member_floor`
+// <= 0 takes lattice_cells_per_member_min(topo) — the caller passes its own only to
+// report a what-if, never to relax the shipped floor on a certified path.
+//
+// PURE ARITHMETIC on core's own measured constants: no grid, no field, no state, and
+// deterministic. A member width of +infinity (voxel.hpp's "thicker than we measured"
+// sentinel) is feasible with max_homogenizable_cell_mm = +infinity and the coarsest
+// end pinned to the finest, which is the honest reading — nothing bounds the cell
+// from above, so the two ends coincide at the printability frontier.
+//
+// Throws std::invalid_argument if `member_width_mm` is not > 0 (NaN included), if
+// `min_extrudable_width_mm` is not finite and > 0, or if the topology has no measured
+// band (lattice_rho_min returns 0 for a non-certifiable topology).
+LatticeCellDerivation lattice_derive_cell_for_member(
+    LatticeTopology topo, double member_width_mm,
+    double min_extrudable_width_mm, double cells_per_member_floor = 0.0);
+
+// The LIGHTEST relative density in `topo`'s certifiable band whose strut at cell edge
+// `cell_size_mm` is at least `min_extrudable_width_mm` across. Returns the band floor
+// when even that prints, and a negative value when NO density in the band does — the
+// caller must test, because there is no in-band answer to hand back. Exact inverse of
+// octet_strut_diameter_mm on the piecewise-linear measured table, so
+// octet_strut_diameter_mm(result, cell) >= min width holds by construction wherever
+// the result is non-negative.
+double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
+                                     double min_extrudable_width_mm);
 
 // The homogenized effective cubic tensor of `topo` at relative density `rho`, scaled
 // to solid Young's modulus `youngs_modulus_solid` (the library is measured at PLA

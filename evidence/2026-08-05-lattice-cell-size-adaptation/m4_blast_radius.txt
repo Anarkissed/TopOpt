@@ -1,0 +1,37 @@
+base   cli sha256: 1e72bd84cb3e3bf496a7a6c62181078ce0dff3196fba8d2836b485602df299ef
+branch cli sha256: 769840f5481ebe193a7f61892cdd7e32392c490221dada2e82aa26e96c828f78
+the two binaries differ, as they must.
+
+########## CASE 1 — voxel boundary, NO bolt clearance (faces() empty) ##########
+  base   exit=0
+    rim_triangles=0 skin_triangles=0 rim_volume_mm3=0 anchor_nodes=0 interior_volume_mm3=74304.04617
+  branch exit=1
+  branch refusal:
+    topopt-cli: lattice "skin": "rim" produced NO geometry on this part (rim_triangles 0, skin_triangles 0), so refusing rather than silently exporting an undressed lattice under a finish the job asked for.
+      The rim/skin finish rides pairs of ANALYTIC boundary faces, and at least one of each pair must be a PLANE. This run's lattice boundary is built from the voxel silhouette plus clearances and lattice roles, none of which contribute a plane, so there was nothing for the finish to ride and every rim/skin/anchor count came out 0.
+      This is a known gap, not a bad job: dressing a voxel silhouette needs either analytic faces fitted to it or a voxel-native rim law, and neither exists yet (handoff 2026-08-05-lattice-cell-size-adaptation §7).
+      Set "skin": "none" to export the lattice undressed, which is what this job actually produced.
+  CASE 1 PASS — base succeeded while emitting ZERO rim/skin/anchor geometry;
+               branch refuses exactly that run.
+
+########## CASE 2 — SAME job + a BOLT clearance (faces() non-empty) ##########
+  base   exit=0
+    rim_triangles=0 skin_triangles=0 rim_volume_mm3=0 anchor_nodes=0 interior_volume_mm3=69006.00792
+  branch exit=1
+  rim+skin triangles emitted by the control: 0
+  CASE 2 PASS — a SECOND configuration that asks for a rim and emits none;
+    the branch refuses it too, which is the guard doing its job. Note this
+    is the case the ORIGINAL faces()-empty predicate silently MISSED:
+    faces() is non-empty here (one Bore), so that guard stayed quiet while
+    the run still shipped an undressed part.
+
+  STANDING NOTE: across BOTH configurations tested — no clearance, and a bolt
+  clearance — the control emitted ZERO rim/skin triangles. No job on this code
+  path can emit rim geometry, because every emitting face pair needs a PLANE
+  and lattice_boundary_for never makes one. So there is no run the guard could
+  wrongly refuse. That is why the predicate is the MEASURED emitted count:
+  its blast radius is exact by construction and needs no control that would
+  have to exist for the faces()-empty version to be provable.
+
+M4 PASS — the refusal fires only where rim geometry was already zero, and
+          leaves every run that actually emits a rim untouched.

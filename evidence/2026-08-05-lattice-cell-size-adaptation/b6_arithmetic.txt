@@ -1,0 +1,6 @@
+his rho 0.3631366: d@4mm = 1.1055 mm, per mm of cell = 0.27638
+  bead 0.42: floor cell at HIS rho 1.5196 mm -> 5 cells 7.598 mm
+            floor cell at band TOP 1.0950 mm -> 5 cells 5.475 mm  (short by 1.37x on a 4 mm wall)
+  bead 0.45: floor cell at HIS rho 1.6282 mm -> 5 cells 8.141 mm
+            floor cell at band TOP 1.1732 mm -> 5 cells 5.866 mm  (short by 1.47x on a 4 mm wall)
+his run demanded 5 x 8 = 40 mm -> short by 10.0x

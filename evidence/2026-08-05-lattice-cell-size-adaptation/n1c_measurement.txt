@@ -1,0 +1,6 @@
+min cells/member over LATTICED material: 5.684264342
+=> thinnest latticed member = 6.8211172104 mm
+his declared regions are 4 mm -> 4/1.2 = 3.3333333333333335 cells
+so NO latticed voxel sits in a 4 mm wall.
+
+voxel edge at res 64 on a 218 mm part = 3.40625 mm (his run used 128 = 1.703125 mm)
