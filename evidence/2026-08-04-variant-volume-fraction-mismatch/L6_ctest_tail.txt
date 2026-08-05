@@ -1,0 +1,35 @@
+ 91/106 Test  #91: face_tag .........................   Passed    0.23 sec
+        Start  92: mask_face
+ 92/106 Test  #92: mask_face ........................   Passed    0.29 sec
+        Start  93: cli_demo
+ 93/106 Test  #93: cli_demo .........................   Passed  251.39 sec
+        Start  94: design_stream
+ 94/106 Test  #94: design_stream ....................   Passed    5.56 sec
+        Start  95: production_parity
+ 95/106 Test  #95: production_parity ................   Passed   23.92 sec
+        Start  96: clearance_parity
+ 96/106 Test  #96: clearance_parity .................   Passed   22.95 sec
+        Start  97: face_protection_parity
+ 97/106 Test  #97: face_protection_parity ...........   Passed   39.54 sec
+        Start  98: loadcase_small_face
+ 98/106 Test  #98: loadcase_small_face ..............   Passed    0.29 sec
+        Start  99: loadcase_resolution
+ 99/106 Test  #99: loadcase_resolution ..............   Passed    0.32 sec
+        Start 100: loadcase_analyze
+100/106 Test #100: loadcase_analyze .................   Passed    1.33 sec
+        Start 101: lattice_hookup
+101/106 Test #101: lattice_hookup ...................   Passed   13.18 sec
+        Start 102: protect_freeze_vs_solidity
+102/106 Test #102: protect_freeze_vs_solidity .......   Passed  354.98 sec
+        Start 103: lattice_variant
+103/106 Test #103: lattice_variant ..................   Passed   33.03 sec
+        Start 104: designbox_lattice_recert
+104/106 Test #104: designbox_lattice_recert .........   Passed    3.44 sec
+        Start 105: selfweight_clearance_void
+105/106 Test #105: selfweight_clearance_void ........   Passed    3.65 sec
+        Start 106: mesh_job
+106/106 Test #106: mesh_job .........................   Passed    6.74 sec
+
+100% tests passed out of 106
+
+Total Test time (real) = 1851.59 sec

@@ -1074,12 +1074,21 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             if let lc = info?["lattice"] as? [String: Any],
                lc["strut_margin_in_plane"] != nil {
                 func m(_ k: String) -> Double { (lc[k] as? Double) ?? .infinity }
+                let sub = ((info?["grading"] as? [String: Any])?["subfloor_retention"]
+                           as? [String: Any]) ?? [:]
                 strut = LatticeReport.StrutStrength(
                     marginInPlane: m("strut_margin_in_plane"),
                     marginInterlayer: m("strut_margin_interlayer"),
                     zKnockdown: (lc["strut_z_knockdown"] as? Double) ?? 0,
                     minCellsPerMember: m("strut_min_cells_per_member"),
-                    outOfRegime: (lc["strut_out_of_regime"] as? Bool) ?? false)
+                    outOfRegime: (lc["strut_out_of_regime"] as? Bool) ?? false,
+                    // Why the regime flag is set, when the run CHOSE it: the grading
+                    // law's sub-floor retention record. Absent on a run that did not
+                    // opt in, which leaves both at 0 and the reason unattributed —
+                    // correctly, because then it was not a choice.
+                    subfloorRetainedVoxels: sub["voxels_retained"] as? Int ?? 0,
+                    subfloorRegionStressFraction:
+                        sub["region_stress_fraction_measured"] as? Double ?? 0)
             }
         }
         return LatticeReport(
@@ -1087,7 +1096,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             generateRelativeDensity: lat.generateRelativeDensity,
             minRelativeDensity: lat.minRelativeDensity,
             maxRelativeDensity: lat.maxRelativeDensity,
-            regionScoped: lat.regionScoped, generated: generated, strut: strut)
+            regionScoped: lat.regionScoped, emittedRegions: lat.regions.count,
+            generated: generated, strut: strut)
     }
 
     /// The BUILD-ORIENTATION RECEIPT a remote run wrote (handoff

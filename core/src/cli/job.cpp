@@ -1007,7 +1007,9 @@ JobDescription parse_job(const std::string& json_text) {
     const JsonValue& gr = require_object(*gradv, "grading");
     reject_unknown_keys(
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
-             "cell_mode", "cell_min_mm", "cell_max_mm"},
+             "cell_mode", "cell_min_mm", "cell_max_mm",
+             "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction",
+             "subfloor_aggregate_cap"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1071,6 +1073,45 @@ JobDescription parse_job(const std::string& json_text) {
       if (!(job.grading.demand_exponent > 0.0))
         schema_fail("grading \"demand_exponent\" must be > 0");
     }
+    // SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+    // Absent => false => bit-identical (bar S1).
+    if (const JsonValue* r =
+            find_key(gr, "retain_subfloor_in_unloaded_regions")) {
+      if (r->type != JsonValue::Type::Bool)
+        schema_fail(
+            "grading \"retain_subfloor_in_unloaded_regions\" must be a boolean");
+      job.grading.retain_subfloor_in_unloaded_regions = (r->num != 0.0);
+    }
+    if (const JsonValue* f = find_key(gr, "subfloor_stress_fraction")) {
+      // A threshold stated WITHOUT arming retention is a job that means one thing and
+      // says another — refuse it rather than silently ignore the number.
+      if (!job.grading.retain_subfloor_in_unloaded_regions)
+        schema_fail(
+            "grading \"subfloor_stress_fraction\" is only allowed with "
+            "\"retain_subfloor_in_unloaded_regions\": true");
+      job.grading.subfloor_stress_fraction =
+          require_number(*f, "grading.subfloor_stress_fraction");
+      if (!(job.grading.subfloor_stress_fraction > 0.0 &&
+            job.grading.subfloor_stress_fraction <= 1.0))
+        schema_fail(
+            "grading \"subfloor_stress_fraction\" must be > 0 and <= 1 (a fraction "
+            "of the part's PEAK von Mises, not a percentage)");
+    }
+    if (const JsonValue* c = find_key(gr, "subfloor_aggregate_cap")) {
+      // Same rule as the stress fraction: a cap stated WITHOUT arming retention is
+      // a job that means one thing and says another.
+      if (!job.grading.retain_subfloor_in_unloaded_regions)
+        schema_fail(
+            "grading \"subfloor_aggregate_cap\" is only allowed with "
+            "\"retain_subfloor_in_unloaded_regions\": true");
+      job.grading.subfloor_aggregate_cap =
+          require_number(*c, "grading.subfloor_aggregate_cap");
+      if (!(job.grading.subfloor_aggregate_cap > 0.0 &&
+            job.grading.subfloor_aggregate_cap <= 1.0))
+        schema_fail(
+            "grading \"subfloor_aggregate_cap\" must be > 0 and <= 1 (a fraction of "
+            "the PRINTED set, not a percentage)");
+    }
   }
 
   // ── "variant": the finished design to lattice (task
@@ -1090,29 +1131,65 @@ JobDescription parse_job(const std::string& json_text) {
           "mode \"" +
           job.mode + "\")");
     const JsonValue& v = require_object(*vv, "variant");
-    reject_unknown_keys(v, {"design", "index", "volume_fraction"}, "variant");
+    reject_unknown_keys(v,
+                        {"design", "index", "volume_fraction", "fingerprint",
+                         "achieved_volume_fraction"},
+                        "variant");
     job.variant.present = true;
     job.variant.design = require_nonempty_string(
         require_key(v, "design", "variant"), "variant.design");
     const JsonValue* iv = find_key(v, "index");
     const JsonValue* fv = find_key(v, "volume_fraction");
-    if ((iv == nullptr) == (fv == nullptr))
+    const JsonValue* pv = find_key(v, "fingerprint");
+    const int selectors = (iv != nullptr) + (fv != nullptr) + (pv != nullptr);
+    if (selectors != 1)
       schema_fail(
-          "a \"variant\" must give EXACTLY ONE of \"index\" or "
-          "\"volume_fraction\"");
+          "a \"variant\" must give EXACTLY ONE of \"index\", "
+          "\"volume_fraction\" or \"fingerprint\"");
     if (iv != nullptr) {
       const double d = require_number(*iv, "variant.index");
       if (d < 0.0 || d != std::floor(d))
         schema_fail("\"variant.index\" must be a non-negative integer");
       job.variant.has_index = true;
       job.variant.index = static_cast<int>(d);
-    } else {
+    } else if (fv != nullptr) {
       job.variant.volume_fraction =
           require_number(*fv, "variant.volume_fraction");
       if (!(job.variant.volume_fraction > 0.0) ||
           job.variant.volume_fraction > 1.0)
         schema_fail("\"variant.volume_fraction\" must be in (0, 1]");
       job.variant.has_volume_fraction = true;
+    } else {
+      // The design FINGERPRINT, as a DECIMAL STRING — see JobVariantRef. A u64
+      // does not round-trip through a JSON double (the maintainer's 1.10 rung
+      // hashes to 2898949975693851963, which a double cannot hold), so the wire
+      // form is text and the parse is exact or it fails.
+      const std::string s =
+          require_nonempty_string(*pv, "variant.fingerprint");
+      if (s.find_first_not_of("0123456789") != std::string::npos)
+        schema_fail(
+            "\"variant.fingerprint\" must be the design fingerprint as a "
+            "DECIMAL STRING of digits (got \"" +
+            s + "\")");
+      try {
+        std::size_t used = 0;
+        job.variant.fingerprint = std::stoull(s, &used);
+        if (used != s.size()) throw std::invalid_argument("trailing");
+      } catch (const std::exception&) {
+        schema_fail("\"variant.fingerprint\" is not a 64-bit unsigned value (\"" +
+                    s + "\")");
+      }
+      job.variant.has_fingerprint = true;
+    }
+    // The variant's OWN achieved fraction, carried so the job can be CHECKED
+    // against the container rather than trusted. Deliberately un-bounded above:
+    // a growth ladder's achieved fraction is part-relative and exceeds 1.
+    if (const JsonValue* av = find_key(v, "achieved_volume_fraction")) {
+      job.variant.achieved_volume_fraction =
+          require_number(*av, "variant.achieved_volume_fraction");
+      if (!(job.variant.achieved_volume_fraction > 0.0))
+        schema_fail("\"variant.achieved_volume_fraction\" must be > 0");
+      job.variant.has_achieved_volume_fraction = true;
     }
   } else if (job.mode == "lattice_variant") {
     schema_fail(

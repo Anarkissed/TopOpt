@@ -836,6 +836,13 @@ public struct LatticeReport: Equatable, Sendable {
     public let maxRelativeDensity: Double
     /// True iff a sub-region primitive scoped the preview (vs the whole part).
     public let regionScoped: Bool
+    /// How many include/exclude regions the JOB actually carried
+    /// (`lattice.regions`). Distinct from `regionScoped`, which is also true for a
+    /// legacy PREVIEW-only include primitive that never reaches the job — the two
+    /// being conflated is what made the results screen say the build ignored the
+    /// user's regions even when it had honoured them (task
+    /// 2026-08-04-variant-volume-fraction-mismatch, bar B6).
+    public let emittedRegions: Int
     /// Worker-generated facts from run_info `lattice_export`; nil when unavailable
     /// (a local run, or the run_info couldn't be read) — then only the settings echo
     /// shows, honestly labelled "requested".
@@ -860,14 +867,27 @@ public struct LatticeReport: Equatable, Sendable {
         /// below the floor the numbers are indicative, not certified.
         public let minCellsPerMember: Double
         public let outOfRegime: Bool
+        /// SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+        /// How many voxels were DELIBERATELY kept as lattice below the floor because
+        /// the region measured as carrying almost no load, and what that region's peak
+        /// stress measured as a fraction of the part's peak. 0 / 0 means the run did
+        /// not opt in — and then an `outOfRegime` flag means something else entirely
+        /// (a member that came out thinner than the cell could hold), which is why the
+        /// two are reported apart rather than collapsed into one reason.
+        public let subfloorRetainedVoxels: Int
+        public let subfloorRegionStressFraction: Double
         public init(marginInPlane: Double, marginInterlayer: Double,
                     zKnockdown: Double, minCellsPerMember: Double,
-                    outOfRegime: Bool) {
+                    outOfRegime: Bool,
+                    subfloorRetainedVoxels: Int = 0,
+                    subfloorRegionStressFraction: Double = 0) {
             self.marginInPlane = marginInPlane
             self.marginInterlayer = marginInterlayer
             self.zKnockdown = zKnockdown
             self.minCellsPerMember = minCellsPerMember
             self.outOfRegime = outOfRegime
+            self.subfloorRetainedVoxels = subfloorRetainedVoxels
+            self.subfloorRegionStressFraction = subfloorRegionStressFraction
         }
     }
 
@@ -893,7 +913,8 @@ public struct LatticeReport: Equatable, Sendable {
 
     public init(topologyID: String, cellMM: Double, generateRelativeDensity: Double,
                 minRelativeDensity: Double, maxRelativeDensity: Double,
-                regionScoped: Bool, generated: Generated? = nil,
+                regionScoped: Bool, emittedRegions: Int = 0,
+                generated: Generated? = nil,
                 strut: StrutStrength? = nil) {
         self.topologyID = topologyID
         self.cellMM = cellMM
@@ -901,6 +922,7 @@ public struct LatticeReport: Equatable, Sendable {
         self.minRelativeDensity = minRelativeDensity
         self.maxRelativeDensity = maxRelativeDensity
         self.regionScoped = regionScoped
+        self.emittedRegions = emittedRegions
         self.generated = generated
         self.strut = strut
     }

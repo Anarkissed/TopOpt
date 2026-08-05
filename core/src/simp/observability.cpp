@@ -939,6 +939,8 @@ std::string run_info_json(const RunInfo& info) {
     le += ", \"region_voxels\": " + fmt_ll(info.lattice_export_region_voxels);
     le += ", \"triangles\": " + fmt_ll(info.lattice_export_triangles);
     le += ", \"variant_count\": " + fmt_i(info.lattice_export_variant_count);
+    le += ", \"ungradeable_variants\": " +
+          fmt_i(info.lattice_export_ungradeable_variants);
     le += ", \"emit_stl\": " + bool_json(info.lattice_export_emit_stl);
     le += ", \"emit_3mf\": " + bool_json(info.lattice_export_emit_3mf);
     le += ", \"interpenetrating_soup\": " +
@@ -1062,6 +1064,35 @@ std::string run_info_json(const RunInfo& info) {
     gr += ", \"any_strut_below_min\": " +
           bool_json(info.grading_any_strut_below_min);
     gr += ", \"region_ungradeable\": " + bool_json(info.grading_region_ungradeable);
+    // SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+    // Emitted ONLY when a job armed it — an absent block is what keeps every run that
+    // did not opt in byte-identical to a pre-task one (bar S1).
+    if (info.grading_subfloor_armed) {
+      gr += ", \"subfloor_retention\": {";
+      gr += "\"armed\": true";
+      gr += ", \"stress_fraction_ceiling\": " +
+            fmt(info.grading_subfloor_stress_fraction_ceiling);
+      gr += ", \"region_stress_fraction_measured\": " +
+            fmt(info.grading_subfloor_region_stress_fraction);
+      gr += ", \"region_qualified\": " +
+            bool_json(info.grading_subfloor_region_qualified);
+      gr += ", \"voxels_below_floor\": " +
+            fmt_ll(info.grading_subfloor_candidate_voxels);
+      gr += ", \"voxels_retained\": " +
+            fmt_ll(info.grading_subfloor_retained_voxels);
+      gr += ", \"voxels_recovered_in_regime\": " +
+            fmt_ll(info.grading_subfloor_recovered_voxels);
+      gr += ", \"retained_cells_per_member\": [" +
+            fmt(info.grading_subfloor_min_cells_per_member) + ", " +
+            fmt(info.grading_subfloor_max_cells_per_member) + "]";
+      gr += ", \"note\": \"voxels_retained were kept as lattice BELOW the "
+            "cells-per-member floor because this region's measured peak von Mises "
+            "was at or under stress_fraction_ceiling of the part's peak. They are "
+            "why lattice_strut_out_of_regime is raised. The certification is blind "
+            "to cells-per-member, so an unmoved margin is NOT evidence they are "
+            "accurately certified — the inaccuracy is accepted, not measured.\"";
+      gr += "}";
+    }
     // Cell-size mode + the swept plan. Present in every mode (a uniform run reports
     // one level), so a reader never branches; `cell_levels` is the per-REGION
     // cells-per-member report (bar R5).

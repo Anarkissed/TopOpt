@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -244,6 +245,34 @@ struct JobGrading {
   std::string cell_mode = "fixed";
   double cell_min_mm = 0.0;             // swept only; finite > 0
   double cell_max_mm = 0.0;             // swept only; finite >= cell_min_mm
+
+  // "retain_subfloor_in_unloaded_regions" (handoff 2026-08-04-subfloor-lattice-
+  // unloaded-regions). ABSENT / false is the DEFAULT and is bit-identical to a
+  // pre-task run (bar S1). True lets the grading law keep lattice in a region whose
+  // members cannot hold the cells-per-member floor, PROVIDED the law MEASURES that
+  // region's peak von Mises at or under `subfloor_stress_fraction` of the part's
+  // peak. The maintainer's case is a back wall that carries no load and exists for
+  // geometry: today it is silently left solid.
+  //
+  // OPTING IN IS ACCEPTING A KNOWN INACCURACY. The certificate over the retained
+  // material is out of regime — `lattice_strut_out_of_regime` is raised and the
+  // receipt names which voxels, at what cells-per-member, and at what fraction of
+  // peak stress. Read lattice.hpp's ★★ note before using it: the certification is
+  // structurally blind to cells-per-member, so a margin that does not move is NOT
+  // evidence that this is safe.
+  bool retain_subfloor_in_unloaded_regions = false;
+  // "subfloor_stress_fraction" — optional override of the measured ceiling
+  // (lattice_subfloor_retention_stress_fraction(), 0.20). 0 / absent = take the
+  // core constant. Finite, > 0 and <= 1 when retention is on.
+  double subfloor_stress_fraction = 0.0;
+  // "subfloor_aggregate_cap" — optional override of the AGGREGATE exposure cap
+  // (lattice_subfloor_aggregate_cap_fraction(), 0.03): the ceiling on total
+  // sub-floor material retained across ALL regions, as a fraction of the printed
+  // set. 0 / absent = take the core constant. Finite, > 0 and <= 1 when retention
+  // is on. Over the cap the run retains NOTHING and the receipt says so — see
+  // lattice.hpp's ★★★ note for why this is a policy ceiling on exposure and not a
+  // safety threshold.
+  double subfloor_aggregate_cap = 0.0;
 };
 
 // One load group of a declared load case (handoff 093): its faces are chosen
@@ -308,7 +337,7 @@ struct JobVariantRef {
   // Path to the originating run's design.bin. Relative paths resolve against
   // the job file's directory, exactly like "model".
   std::string design;
-  // Which variant. EXACTLY ONE of the two forms, validated at parse:
+  // Which variant. EXACTLY ONE of the three forms, validated at parse:
   //   index            — position in the container (0-based), the form a
   //                      front-end listing variants in order produces;
   //   volume_fraction  — the ladder rung, the join key fields.bin already
@@ -316,10 +345,45 @@ struct JobVariantRef {
   //                      because latticing a rung the user did not pick is
   //                      precisely the silent-surprise failure this job exists
   //                      to avoid.
+  //   fingerprint      — the design FINGERPRINT (design_store.hpp's FNV-1a over
+  //                      the density field), as a DECIMAL STRING.
+  //
+  // *** WHY THE FINGERPRINT FORM EXISTS (task
+  // 2026-08-04-variant-volume-fraction-mismatch). *** `volume_fraction` is a
+  // JOIN KEY on the stored block's `requested_volume_fraction`, but it is
+  // validated as if it were a DENSITY FRACTION — bounded to (0, 1]. On a GROWTH
+  // ladder (minimize_plastic off) the rungs are part-relative and legitimately
+  // exceed 1: production_growth_ladder() is {1.55, 1.25, 1.10}, so the only
+  // correct selector for the last rung is the number 1.1, and the bound rejected
+  // it. Every re-lattice of a growth variant died at schema validation in ~48 ms.
+  //
+  // The bound is NOT the thing to widen: a fraction that describes a part is
+  // exactly what must stay in (0, 1]. What was wrong is that a POSITION IN A
+  // LADDER was being carried in a field shaped like a fraction. So a variant is
+  // now named by its IDENTITY instead — the hash of the density field itself,
+  // which cannot alias another rung, cannot go out of range, and is the same
+  // number bar Z3 already uses to tie "the certified object" to "the exported
+  // one". A STRING because an FNV-1a u64 does not survive a JSON double.
   bool has_index = false;
   int index = 0;
   bool has_volume_fraction = false;
   double volume_fraction = 0.0;
+  bool has_fingerprint = false;
+  std::uint64_t fingerprint = 0;
+
+  // The variant's OWN achieved volume fraction, carried DESCRIPTIVELY and
+  // CHECKED (task 2026-08-04-variant-volume-fraction-mismatch, bar A3). Optional;
+  // when present it must equal the selected block's `achieved_volume_fraction`
+  // EXACTLY or the job refuses. That is a strictly stronger guard than any range
+  // bound: it is the front-end asserting, on the shipping path, that the number
+  // it showed the user is the number the design actually achieved.
+  //
+  // NOT bounded above. On a growth ladder `achieved_volume_fraction` is
+  // part-relative and legitimately exceeds 1 — MEASURED at 1.0866043075327818 for
+  // the 1.10 rung of the maintainer's WallMount run (design.bin of worker job
+  // efa7cfd3b4e344c6). A (0, 1] bound here would refuse the true number.
+  bool has_achieved_volume_fraction = false;
+  double achieved_volume_fraction = 0.0;
 };
 
 // A declared load case (ARCHITECTURE §1 mode (a)) — the CLI counterpart of the

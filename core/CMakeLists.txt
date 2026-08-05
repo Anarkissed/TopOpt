@@ -1332,6 +1332,18 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(subfloor_lattice_probe PRIVATE
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
 
+  # Bar S2 (task 2026-08-04-subfloor-lattice-unloaded-regions): WHICH OF THE
+  # MAINTAINER'S REGIONS IS ACTUALLY UNLOADED? Reads a finished run's design.bin
+  # and fields.bin and calls the grading law once per include region, with
+  # sub-floor retention ARMED, reporting the MEASURED region stress fraction and
+  # what would be retained. NO SOLVE RUNS — the demand is the rung's own stored
+  # von Mises field. Prints a table; asserts nothing.
+  #   cmake --build build --target subfloor_region_probe
+  #   ./build/subfloor_region_probe <job.json> <run-dir> <rung-vf>
+  add_executable(subfloor_region_probe EXCLUDE_FROM_ALL
+    tests/harness/subfloor_region_probe.cpp)
+  target_link_libraries(subfloor_region_probe PRIVATE topopt)
+
   # Item 9 (same task): FREEZE + DESIGN BOX — DOES THE OPTIMIZER BUTTRESS?
   # Freezes a thin wall, enables a design box beside it, and reports whether
   # material is placed against the wall and whether the wall's own peak stress

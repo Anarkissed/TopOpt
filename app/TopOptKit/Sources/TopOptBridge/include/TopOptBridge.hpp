@@ -840,6 +840,45 @@ AnalyzeResult smooth_brush_and_recertify_loadcase(
     const BridgeVertexWeights& brush, BridgeError& err);
 
 // ---------------------------------------------------------------------------
+// THE LIVE BRUSH PREVIEW (task 2026-08-04-variant-volume-fraction-mismatch,
+// failure C).
+//
+// THE DEFECT THIS CLOSES. The smoothing page offered an Original/Smoothed toggle
+// that was INERT until a re-certification had run: with a brush region carrying
+// 71,752 triangles at strength 0.49, both tabs drew the same geometry and the
+// page said "Nothing smoothed yet". The maintainer painted, toggled, saw no
+// difference and concluded the brush was broken. It was not — the page was
+// offering a comparison it could not make.
+//
+// This is the SAME smoother (`constrained_taubin_smooth`) under the SAME
+// per-vertex weights, with two things deliberately left out so it can run at
+// interactive rates:
+//
+//   * NO model import, NO voxelization, NO load case. The freeze predicates are
+//     not re-resolved here; the caller supplies its already-computed freeze mask
+//     as weight 0, which the smoother treats on the SAME bit-identical
+//     copy-verbatim path as a frozen vertex (see SmoothConstraints::vertex_weight).
+//   * NO min-feature constraint. The certified pass may therefore stop EARLIER
+//     than this preview — `min_feature_limited` on that receipt says when it did.
+//
+// So this is the deformation the brush ASKS FOR, and re-certification is what
+// APPLIES it under the constraint. The page must say so; a preview presented as
+// the certified result would be the same dishonesty one layer down.
+struct BridgeSmoothPreview {
+  std::vector<float> vertices;   // flattened xyz
+  std::vector<int32_t> indices;  // flattened triangle corners
+  int64_t total_vertices = 0;
+  int64_t moved_vertices = 0;    // vertices whose position actually changed
+  double max_displacement_mm = 0.0;
+  double seconds = 0.0;
+};
+
+BridgeSmoothPreview smooth_brush_preview(const std::string& input_mesh_path,
+                                         double strength,
+                                         const BridgeVertexWeights& brush,
+                                         BridgeError& err);
+
+// ---------------------------------------------------------------------------
 // Bridge smoke summary — the M7.1 deliverable "material count + imported-mesh
 // triangle count". Loads the materials file and imports the mesh, returning
 // both counts in one call so the app's smoke screen and the headless test share

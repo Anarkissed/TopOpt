@@ -97,6 +97,10 @@ enum OutcomeCodec {
         let minRelativeDensity: Double
         let maxRelativeDensity: Double
         let regionScoped: Bool
+        /// Optional so a blob written before bar B6 still decodes; absent reads as
+        /// 0, which is the pre-B6 behaviour (the note falls back to the
+        /// preview-scoped sentence) rather than an invented region count.
+        let emittedRegions: Int?
         let genEmitSTL: Bool?
         let genEmit3MF: Bool?
         let genLatticedCells: Int?
@@ -115,6 +119,12 @@ enum OutcomeCodec {
         let strutZKnockdown: Double?
         let strutMinCellsPerMember: Double?
         let strutOutOfRegime: Bool?
+        // SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+        // The DTO must mirror OptimizeOutcome or a restored run silently loses WHY it
+        // was out of regime — the exact class of drop this store has shipped before.
+        // Optional so a blob written before this task still decodes.
+        let strutSubfloorRetainedVoxels: Int?
+        let strutSubfloorRegionStressFraction: Double?
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -230,6 +240,7 @@ enum OutcomeCodec {
                     minRelativeDensity: r.minRelativeDensity,
                     maxRelativeDensity: r.maxRelativeDensity,
                     regionScoped: r.regionScoped,
+                    emittedRegions: r.emittedRegions,
                     genEmitSTL: r.generated?.emitSTL, genEmit3MF: r.generated?.emit3MF,
                     genLatticedCells: r.generated?.latticedCells,
                     genRegionVoxels: r.generated?.regionVoxels,
@@ -243,7 +254,10 @@ enum OutcomeCodec {
                     strutZKnockdown: r.strut?.zKnockdown,
                     strutMinCellsPerMember: r.strut.flatMap {
                         $0.minCellsPerMember.isFinite ? $0.minCellsPerMember : nil },
-                    strutOutOfRegime: r.strut?.outOfRegime) },
+                    strutOutOfRegime: r.strut?.outOfRegime,
+                    strutSubfloorRetainedVoxels: r.strut?.subfloorRetainedVoxels,
+                    strutSubfloorRegionStressFraction:
+                        r.strut?.subfloorRegionStressFraction) },
             solvedBy: o.solvedBy)
     }
 
@@ -311,6 +325,7 @@ enum OutcomeCodec {
                     minRelativeDensity: r.minRelativeDensity,
                     maxRelativeDensity: r.maxRelativeDensity,
                     regionScoped: r.regionScoped,
+                    emittedRegions: r.emittedRegions ?? 0,
                     generated: r.genTriangles.map { tris in
                         LatticeReport.Generated(
                             emitSTL: r.genEmitSTL ?? true, emit3MF: r.genEmit3MF ?? false,
@@ -328,7 +343,11 @@ enum OutcomeCodec {
                             marginInterlayer: r.strutMarginInterlayer ?? .infinity,
                             zKnockdown: zk,
                             minCellsPerMember: r.strutMinCellsPerMember ?? .infinity,
-                            outOfRegime: r.strutOutOfRegime ?? false) }) },
+                            outOfRegime: r.strutOutOfRegime ?? false,
+                            subfloorRetainedVoxels:
+                                r.strutSubfloorRetainedVoxels ?? 0,
+                            subfloorRegionStressFraction:
+                                r.strutSubfloorRegionStressFraction ?? 0) }) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false)

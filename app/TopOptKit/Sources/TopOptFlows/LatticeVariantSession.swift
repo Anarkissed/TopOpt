@@ -243,9 +243,29 @@ public struct LatticeVariantContext: Equatable {
     public let runName: String
     /// Its index in the results list — what the variants page shows.
     public let variantIndex: Int
-    /// Its ladder rung. THE JOIN KEY: this is what the job's `variant` block
-    /// names, and what the stored design container is keyed by.
+    /// Its ladder rung — what the results screen labels it and what names its
+    /// exported mesh file. A POSITION IN A LADDER, not a description of the
+    /// design: on a growth ladder it is 1.55 / 1.25 / 1.10 (see below).
     public let requestedVolumeFraction: Double
+    /// THE VARIANT'S OWN ACHIEVED VOLUME FRACTION (task
+    /// 2026-08-04-variant-volume-fraction-mismatch, bar A3) — what this design
+    /// actually came out at, from THIS variant's own record. Travels with the
+    /// re-lattice job and is CHECKED by core against the stored design, so the
+    /// number the page shows and the number the design achieved cannot drift.
+    public let achievedVolumeFraction: Double
+    /// THE DESIGN'S IDENTITY — core's `design_fingerprint` for this rung, read
+    /// from the retained container's own index. This is what the re-lattice job
+    /// selects by.
+    ///
+    /// *** WHY NOT THE RUNG. *** The job used to name the variant by
+    /// `variant.volume_fraction`, which core validates as a FRACTION — bounded to
+    /// (0, 1]. A growth ladder's rungs are part-relative and exceed 1, so every
+    /// re-lattice of a growth variant died at schema validation in ~48 ms with
+    /// *"variant.volume_fraction must be in (0, 1]"*, on a number (1.1) that was
+    /// the correct join key. The bound was right; carrying a ladder position in a
+    /// field shaped like a fraction was not. nil ⇒ the container held no
+    /// fingerprint for this rung, and the entry gate already refuses.
+    public let designFingerprint: UInt64?
     public let massGrams: Double
     public let worstCaseMargin: Double
     public let accepted: Bool
@@ -265,7 +285,10 @@ public struct LatticeVariantContext: Equatable {
     public let unavailable: RelatticeUnavailable?
 
     public init(runName: String, variantIndex: Int,
-                requestedVolumeFraction: Double, massGrams: Double,
+                requestedVolumeFraction: Double,
+                achievedVolumeFraction: Double = 0,
+                designFingerprint: UInt64? = nil,
+                massGrams: Double,
                 worstCaseMargin: Double, accepted: Bool,
                 meshVertices: [Float], meshIndices: [Int32],
                 field: LatticeDemandField,
@@ -274,6 +297,8 @@ public struct LatticeVariantContext: Equatable {
         self.runName = runName
         self.variantIndex = variantIndex
         self.requestedVolumeFraction = requestedVolumeFraction
+        self.achievedVolumeFraction = achievedVolumeFraction
+        self.designFingerprint = designFingerprint
         self.massGrams = massGrams
         self.worstCaseMargin = worstCaseMargin
         self.accepted = accepted
@@ -282,6 +307,36 @@ public struct LatticeVariantContext: Equatable {
         self.field = field
         self.artifacts = artifacts
         self.unavailable = unavailable
+    }
+
+    /// THE ONE PLACE A CONTEXT IS BUILT FROM A FINISHED VARIANT (task
+    /// 2026-08-04-variant-volume-fraction-mismatch, bar L2).
+    ///
+    /// The page used to assemble this inline in the view, which is why the number
+    /// it attached to a job could be a rung while the number it showed the user
+    /// was a fraction and nothing could see both at once. Every field that
+    /// describes the DESIGN now comes from `variant` and from the retained
+    /// container, in one pure function a test can drive end to end — because "the
+    /// value type was right but the call site passed something else" is how this
+    /// defect shipped in the first place.
+    public static func from(variant v: OptimizeVariant,
+                            runName: String,
+                            variantIndex: Int,
+                            field: LatticeDemandField,
+                            artifacts: RelatticeArtifacts?,
+                            unavailable: RelatticeUnavailable?)
+        -> LatticeVariantContext {
+        let index = artifacts.flatMap { DesignContainerIndex.parse($0.designBin) }
+        return LatticeVariantContext(
+            runName: runName, variantIndex: variantIndex,
+            requestedVolumeFraction: v.requestedVolumeFraction,
+            achievedVolumeFraction: v.achievedVolumeFraction,
+            designFingerprint: index?.fingerprint(
+                forRequestedVolumeFraction: v.requestedVolumeFraction),
+            massGrams: v.massGrams, worstCaseMargin: v.worstCaseMargin,
+            accepted: v.accepted,
+            meshVertices: v.meshVertices, meshIndices: v.meshIndices,
+            field: field, artifacts: artifacts, unavailable: unavailable)
     }
 
     /// "Variant 2 · 60% · 41.2 g" — the identity line the page shows so WHICH
@@ -366,6 +421,23 @@ public struct LatticePageActions: Equatable, Sendable {
         } else if let why = v.unavailable {
             re = Action(label: "Lattice this variant", sub: why.reason,
                         enabled: false, primary: true)
+        } else if let f = forecast, f.regionVoxels > 0, f.wouldLatticeVoxels == 0 {
+            // NOTHING WOULD BE LATTICED (task
+            // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3). This is
+            // NOT the partial-lattice case below, and it is not a matter of taste:
+            // a run from here produces a file with zero struts in it, which the
+            // app then reported as *"filled at 0% density … strut radius
+            // 0.00–0.65 mm"* and called a build. Core now refuses it outright; the
+            // button refuses it FIRST, so the refusal costs no Mac time.
+            //
+            // The remedy rides the button, because by this point core has
+            // EVALUATED one (including the extrusion-width remedy this task
+            // added, which is the one that unlocks the maintainer's parts).
+            let remedy = f.adviceLines().first
+            re = Action(
+                label: "Lattice this variant",
+                sub: remedy.map { "\(f.headline) \($0)" } ?? f.headline,
+                enabled: false, primary: true)
         } else if let f = forecast, f.isRefused {
             // THE REFUSAL, BEFORE THE RUN IS SPENT (bars F4 / P3). A configuration
             // that turns most of its region solid is not a lattice, and the

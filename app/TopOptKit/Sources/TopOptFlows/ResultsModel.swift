@@ -816,9 +816,52 @@ public final class ResultsModel: ObservableObject {
         func pct(_ x: Double) -> String { "\(Int((x * 100).rounded()))%" }
         var lines: [String] = []
         let name = LatticeType.named(r.topologyID).displayName
-        let scope = r.regionScoped
-            ? " Region-scoped in the preview; this build lattices the whole solid interior."
-            : ""
+        // BAR B6 — THE PREVIEW AND THE BUILD, RECONCILED (task
+        // 2026-08-04-variant-volume-fraction-mismatch). This clause used to read,
+        // unconditionally whenever anything scoped the preview:
+        //
+        //   "Region-scoped in the preview; this build lattices the whole solid
+        //    interior."
+        //
+        // — which announced a disagreement that is only sometimes real, and made
+        // every user's regions look ineffective. The two cases are genuinely
+        // different and the report can now tell them apart:
+        //
+        //   * `lattice.regions` DO travel with the job, and core restricts the
+        //     latticed set to the include union when any include region is
+        //     declared. A build with those is region-scoped, exactly as previewed.
+        //   * the LEGACY preview-only include primitive (`LatticeSettings.region`)
+        //     never reaches the job at all. That, and only that, is the case the
+        //     old sentence described.
+        //
+        // `emittedRegions` is what the job carried; `regionScoped` is what scoped
+        // the preview. Conflating them was the whole defect.
+        let scope: String
+        if r.emittedRegions > 0 {
+            scope = " Region-scoped, as previewed"
+                  + " (\(r.emittedRegions) region\(r.emittedRegions == 1 ? "" : "s")"
+                  + " travelled with the job)."
+        } else if r.regionScoped {
+            scope = " The preview was scoped to a region, but no region travelled "
+                  + "with the job — this build latticed the whole solid interior."
+        } else {
+            scope = ""
+        }
+        // BAR B3/B4 — A LATTICE WITH NOTHING IN IT IS NOT A LATTICE. A run that
+        // latticed zero cells used to be summarised as "filled at 0% density …
+        // strut radius 0.00–0.65 mm" with a strut-strength margin beside it, all
+        // in the voice of a successful build. Core refuses such a run now; this is
+        // the second layer, for records already on disk.
+        let degenerate = (r.generated?.latticedCells ?? 0) == 0
+                      || (r.generated.map { $0.strutRadiusMaxMM <= 0 } ?? false)
+        if degenerate, r.generated != nil {
+            lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell — "
+                + "NO LATTICE WAS PRODUCED. Every voxel in the region stayed solid "
+                + "(the material is too thin to hold \(String(format: "%g", r.cellMM)) mm "
+                + "cells), so this file is the solid part. The density and strut "
+                + "figures below describe nothing and are withheld.")
+            return lines
+        }
         lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell, "
             + "filled at \(pct(r.generateRelativeDensity)) density "
             + "(previewed \(pct(r.minRelativeDensity))–\(pct(r.maxRelativeDensity))).\(scope)")
@@ -850,6 +893,35 @@ public final class ResultsModel: ObservableObject {
                     + "\(String(format: "%.1f", s.minCellsPerMember)) cells — below the "
                     + "floor the homogenized model needs, so treat the strut numbers "
                     + "as indicative, not certified.")
+                // ★ THE BLIND SPOT, SAID TO THE USER (task 2026-08-04-subfloor-
+                // lattice-unloaded-regions). Shown on EVERY out-of-regime result,
+                // however it got there, because the tempting wrong inference is
+                // "the margin barely moved, so it must be fine". It CANNOT move:
+                // the homogenized tensor is a function of density alone, and
+                // sweeping the cell across the floor at fixed density moved the
+                // certified margin by nothing to ten decimal places.
+                lines.append("The certificate cannot see this. Cell size never "
+                    + "enters the certification maths — only relative density does "
+                    + "— so the margin above would read the same whether this "
+                    + "lattice is fine or badly wrong. A margin that did not move "
+                    + "is NOT evidence that this material is safe. Treat it as an "
+                    + "accepted unknown, not a clean bill of health.")
+                // WHY, when the run CHOSE it (task 2026-08-04-subfloor-lattice-
+                // unloaded-regions). Out-of-regime by accident and out-of-regime on
+                // purpose are different facts, and only the second one has a number
+                // the user picked. Saying "out of regime" alone would hide which of
+                // the two this was.
+                if s.subfloorRetainedVoxels > 0 {
+                    let pct = String(format: "%.1f",
+                                     s.subfloorRegionStressFraction * 100)
+                    lines.append("That was ASKED FOR, not an accident: "
+                        + "\(s.subfloorRetainedVoxels) voxels were kept as lattice "
+                        + "below the floor because this region measured \(pct)% of "
+                        + "the part's peak stress. The trade you accepted is real — "
+                        + "the certification cannot see cells-per-member at all, so "
+                        + "an unmoved margin is not evidence this material is "
+                        + "accurately certified. It is an accepted unknown.")
+                }
             }
         }
         return lines

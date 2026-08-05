@@ -475,6 +475,33 @@ public final class SmoothingPageModel: ObservableObject {
     public typealias Runner =
         @Sendable (_ request: CertifyRequest) async throws -> CertifyOutcome
 
+    /// THE LIVE BRUSH PREVIEW (task 2026-08-04-variant-volume-fraction-mismatch,
+    /// failure C). Injected like `Runner` so the whole behaviour is headlessly
+    /// testable; nil ⇒ the host gave the page no preview engine and the toggle
+    /// says exactly that instead of pretending.
+    public typealias Previewer =
+        @Sendable (_ meshPath: String, _ strength: Double,
+                   _ weights: [Double]) async throws -> BrushPreviewResult
+
+    /// What one preview produced: the deformed geometry and how far it moved.
+    public struct BrushPreviewResult: Equatable, Sendable {
+        public let meshVertices: [Float]
+        public let meshIndices: [Int32]
+        public let movedVertices: Int
+        public let maxDisplacementMM: Double
+        public let seconds: Double
+
+        public init(meshVertices: [Float], meshIndices: [Int32],
+                    movedVertices: Int, maxDisplacementMM: Double,
+                    seconds: Double) {
+            self.meshVertices = meshVertices
+            self.meshIndices = meshIndices
+            self.movedVertices = movedVertices
+            self.maxDisplacementMM = maxDisplacementMM
+            self.seconds = seconds
+        }
+    }
+
     @Published public private(set) var phase: Phase = .idle
     /// The kept-or-not decision. Non-nil once a re-certification succeeds (U3 —
     /// there is no longer a second button to press).
@@ -516,6 +543,16 @@ public final class SmoothingPageModel: ObservableObject {
     public let variantMeshPath: String
     public let smoothedMeshPath: String
     private let runner: Runner
+    private let previewer: Previewer?
+    /// The live preview of the CURRENT brush — the geometry the Smoothed tab
+    /// draws before any certification has run (failure C). Cleared whenever the
+    /// brush changes, so the tab never shows a stroke the user has moved on from.
+    @Published public private(set) var preview: BrushPreviewResult?
+    /// True while a preview is in flight.
+    @Published public private(set) var previewing = false
+    /// How many previews have been produced this session — the test reads it to
+    /// prove the toggle is fed by a real deformation and not by the certification.
+    public private(set) var previewCallCount = 0
     /// The BEFORE reading, measured once per page session. Cached because the
     /// original variant does not change while the page is open — but it is
     /// MEASURED, never remembered from the run.
@@ -528,12 +565,53 @@ public final class SmoothingPageModel: ObservableObject {
     public private(set) var certifyCallCount = 0
 
     public init(context: SmoothVariantContext, variantMeshPath: String = "",
-                smoothedMeshPath: String = "", runner: @escaping Runner) {
+                smoothedMeshPath: String = "", runner: @escaping Runner,
+                previewer: Previewer? = nil) {
         self.context = context
         self.variantMeshPath = variantMeshPath
         self.smoothedMeshPath = smoothedMeshPath
         self.runner = runner
+        self.previewer = previewer
     }
+
+    // ── the live brush preview (failure C) ──────────────────────────────────
+
+    /// Whether this page can show a Smoothed side at all before re-certifying.
+    /// The toggle's copy reads this: a page with no preview engine must SAY the
+    /// comparison is unavailable, never offer it and draw the same mesh twice.
+    public var canPreviewBrush: Bool { previewer != nil }
+
+    /// Apply the CURRENT brush to the preview mesh. Called when a stroke settles,
+    /// so the Smoothed tab shows the smoothed shape immediately — the whole of
+    /// bar C1 / L4.
+    ///
+    /// A brush with nothing painted clears the preview rather than running the
+    /// smoother on an all-zero weight vector: that would return the input mesh
+    /// and make "Smoothed" claim a difference it does not have.
+    public func refreshPreview(brush: SmoothBrushModel) async {
+        guard let p = previewer else { return }
+        let weights = brush.normalizedWeights()
+        let strength = brush.maxStrength
+        guard strength > 0, weights.contains(where: { $0 > 0 }) else {
+            preview = nil
+            return
+        }
+        previewing = true
+        defer { previewing = false }
+        do {
+            previewCallCount += 1
+            let r = try await p(variantMeshPath, strength, weights)
+            // A deformation that moved NOTHING is not a smoothed side. Reported
+            // as absent so the toggle keeps saying "nothing smoothed yet" rather
+            // than offering two identical meshes as a before/after.
+            preview = r.movedVertices > 0 ? r : nil
+        } catch {
+            preview = nil
+        }
+    }
+
+    /// Drop the preview — the brush changed, or the page is starting over.
+    public func clearPreview() { preview = nil }
 
     // ── derived surfaces ────────────────────────────────────────────────────
 
@@ -746,6 +824,11 @@ public final class SmoothingPageModel: ObservableObject {
     public func discard() {
         kept = nil
         lastSmoothedOutcome = nil
+        // AE9 covers the live preview too (task
+        // 2026-08-04-variant-volume-fraction-mismatch): "every trace of the
+        // smoothing goes" has to include the deformed geometry the Smoothed tab
+        // was drawing, or Discard would leave a smoothed shape on screen.
+        preview = nil
         phase = .idle
         showingSmoothed = false
         // The drawer described a receipt that no longer exists, and the note
@@ -765,7 +848,41 @@ public final class SmoothingPageModel: ObservableObject {
            !out.meshVertices.isEmpty, receipt != nil {
             return (out.meshVertices, out.meshIndices, true)
         }
+        // THE LIVE PREVIEW (failure C / bar L4). Before any certification has
+        // run, Smoothed draws the brush's own deformation — which is what makes
+        // the toggle a comparison instead of two identical meshes. It ranks BELOW
+        // a certified or kept result, so once a real one exists the preview never
+        // shadows it.
+        if kept == nil, showingSmoothed, let p = preview,
+           !p.meshVertices.isEmpty {
+            return (p.meshVertices, p.meshIndices, true)
+        }
         return (context.meshVertices, context.meshIndices, false)
+    }
+
+    /// What the toggle should SAY about the Smoothed side right now (bar C1/C2).
+    /// nil ⇒ the two sides genuinely differ and nothing needs explaining.
+    ///
+    /// This replaced an unconditional *"Nothing smoothed yet — both show the
+    /// variant as the run made it"*, which was printed even while a 71,752-triangle
+    /// brush region sat at strength 0.49. The page was describing its own inability
+    /// to preview as a fact about the user's brush.
+    public var smoothedSideNote: String? {
+        if kept != nil || receipt != nil { return nil }
+        if previewing { return "Applying the brush…" }
+        if let p = preview {
+            return "Smoothed shows the brush applied — "
+                 + String(format: "%.2f mm", p.maxDisplacementMM)
+                 + " at the deepest. Re-certify APPLIES it under the min-feature "
+                 + "constraint and measures the result, so the certified shape may "
+                 + "move less."
+        }
+        if !canPreviewBrush {
+            return "This page can’t preview the brush, so Smoothed shows the "
+                 + "variant as the run made it. Re-certify to see the smoothed "
+                 + "shape."
+        }
+        return "Nothing painted yet — both show the variant as the run made it."
     }
 }
 
@@ -793,7 +910,7 @@ public struct SmoothPageActions: Equatable, Sendable {
                                hasReceipt: Bool, hasKept: Bool,
                                unavailable: SmoothUnavailable?) -> SmoothPageActions {
         if let why = unavailable {
-            let off = Action(label: "Re-certify", sub: why.reason,
+            let off = Action(label: "Apply & certify", sub: why.reason,
                              enabled: false, primary: true)
             return SmoothPageActions(
                 recertify: off,
@@ -802,20 +919,27 @@ public struct SmoothPageActions: Equatable, Sendable {
                 sendToLattice: Action(label: "Lattice this", sub: why.reason,
                                       enabled: false, primary: false))
         }
+        // BAR C2 — THE BUTTON NAMES WHAT IT DOES. "Re-certify" read as a CHECK on
+        // a smoothing that had already happened, which is why the maintainer
+        // painted, toggled, saw no change and concluded the brush was broken.
+        // Nothing is smoothed until this runs: it applies the brush under the
+        // min-feature constraint and certifies the result. The label says that;
+        // the sub-line says the two halves in order.
         let re: Action
         if working {
-            re = Action(label: "Re-certify", sub: "a certification is running",
+            re = Action(label: "Apply & certify", sub: "a certification is running",
                         enabled: false, primary: true)
         } else if let why = brush.unusableReason {
-            re = Action(label: "Re-certify", sub: why, enabled: false, primary: true)
+            re = Action(label: "Apply & certify", sub: why, enabled: false, primary: true)
         } else if !brush.hasEffect {
-            re = Action(label: "Re-certify",
+            re = Action(label: "Apply & certify",
                         sub: "brush an area and give it a strength first",
                         enabled: false, primary: true)
         } else {
             re = Action(
-                label: "Re-certify",
-                sub: String(format: "one certification solve on the smoothed shape "
+                label: "Apply & certify",
+                sub: String(format: "applies the brush to the variant, then one "
+                                    + "certification solve on the result "
                                     + "· strongest region %.2f", brush.maxStrength),
                 enabled: true, primary: true)
         }

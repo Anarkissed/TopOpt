@@ -1,0 +1,63 @@
+=== S7 — THE PRE-FLIGHT FORECAST NAMES SUB-FLOOR RETENTION ===
+(task 2026-08-04-subfloor-lattice-unloaded-regions)
+
+DOES F3 ALREADY COVER IT? NO. variant-postprocessing-fix's pre-flight forecast
+reported the two fallback REASONS (member too thin / strut unprintable) but had
+no concept of retention, so a user arming it learned nothing before the run.
+This task adds a "subfloor_retention" block to lattice_forecast.json.
+
+THE JOB: the l-bracket demo, res 32, swept grading on the 4-16 mm ladder, with
+the include region S6 configuration S uses — the top 8 mm slab, measured on this
+part's own field at ~0.021 of the part's peak von Mises, where every region voxel
+is below the cells-per-member floor. Same design, same region; the ONLY
+difference between the two forecasts below is the opt-in key.
+
+--- grading.retain_subfloor_in_unloaded_regions: absent ---
+  requested              : False
+  stress_fraction_ceiling: 0
+  region_voxels          : 252
+  voxels_below_floor     : 252
+  would_lattice_voxels   : 0
+  outcome:
+    NOT REQUESTED. 252 of this region's voxels are below the cells-per-
+    member floor and will stay SOLID. Setting
+    grading.retain_subfloor_in_unloaded_regions would lattice them if this
+    region measures at or under the stress-fraction ceiling — and would put
+    the certificate over them out of regime.
+
+--- grading.retain_subfloor_in_unloaded_regions: true ---
+  requested              : True
+  stress_fraction_ceiling: 0.2
+  region_voxels          : 252
+  voxels_below_floor     : 252
+  would_lattice_voxels   : 0
+  outcome:
+    REQUESTED. 252 of this region's voxels are below the cells-per-member
+    floor. They will be latticed ANYWAY — at 5 cells per member or fewer,
+    below the floor homogenization needs — IF this region's peak von Mises
+    measures at or under 0.2 of the part's peak. If it measures above that,
+    they stay solid. This pre-flight CANNOT tell you which: it runs before
+    any solve, so there is no stress field to measure. The run's receipt
+    reports the measured fraction and every retained voxel.
+
+accuracy_note, carried in both:
+    retaining sub-floor material is a decision to accept an inaccuracy this
+    codebase cannot currently quantify. The certification is STRUCTURALLY
+    BLIND to cells-per-member — the homogenized tensor is a function of
+    relative density alone — so a certified margin that does not move is NOT
+    evidence that a sub-floor lattice is accurate.
+    lattice_strut_out_of_regime is raised over retained material.
+
+AND THE RUN AGREED. S6 configuration S ran this exact job for real: all 252
+region voxels below the floor, all 252 retained, region fraction 0.0206-0.0225
+against the 0.20 ceiling. The forecast's population count was exact.
+
+WHAT THE FORECAST CAN AND CANNOT SAY, and it says so itself.
+  CAN : how many voxels are below the cells-per-member floor. That predicate is
+        width/cell and never sees density, so the band-floor approximation the
+        whole forecast runs under cannot move it.
+  CANNOT: whether they will actually be retained. That needs the region's peak
+        von Mises as a fraction of the part's, and no solve has run — there is no
+        stress field to measure. grade_lattice DISARMS retention when handed a
+        demand-less field precisely so nothing downstream can read the resulting
+        0.0 as "unloaded". Unit test 13f pins that.

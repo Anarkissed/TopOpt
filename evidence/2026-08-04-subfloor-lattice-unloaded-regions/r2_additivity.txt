@@ -1,0 +1,46 @@
+=== A-3 — ADDITIVITY: two quiet regions, alone and together ===
+
+--- what each configuration retained ---
+  cfg  retained   exposure      cap   over  per-region
+ none         0   0.0000%    0.0%  False  
+    A      1536   4.6394%  100.0%  False  id1@0.0168->384, id1@0.0175->384, id1@0.0177->384
+    B     17413  58.0645%  100.0%  False  id1@0.1095->4177, id1@0.1098->4516, id1@0.1107->3914, id1@0.1268->4806
+   AB     17413  58.0645%  100.0%  False  id1@0.0168->384, id1@0.0175->384, id1@0.0177->384, id2@0.1095->3793
+
+
+  retained(A) + retained(B) = 1536 + 17413 = 18949
+  retained(AB)              = 17413
+  AB is NOT the sum of the singles — the regions overlap or the cap bound.
+
+--- the composite certified margin, per rung ---
+   rung           none              A              B             AB        dA        dB       dAB
+    026       7.503571       7.503596       7.505719       7.505719  +0.0003%  +0.0286%  +0.0286%
+    038       8.028368       8.058393       8.072356       8.072356  +0.3740%  +0.5479%  +0.5479%
+    052       8.320483       8.334232       8.359495       8.359495  +0.1652%  +0.4689%  +0.4689%
+    068       8.383096       8.398198       8.420728       8.420728  +0.1801%  +0.4489%  +0.4489%
+
+  worst |d| for a SINGLE region : 0.5479%
+  worst |d| for BOTH together   : 0.5479%
+  pre-stated bound (A-2)        : 0.10%
+  ratio AB / worst single       : 1.00x  (A-3 flags > 2.00x)
+
+  A-2 EXCEEDED — BLOCKED-STOP
+  A-3 MET — the effects are additive within the stated factor.
+  verdict flips: none
+
+--- A-1: the argmax, with BOTH regions retained ---
+   rung     peak none        argmax none       peak AB          argmax AB
+   0.68      6.549050        (34, 15, 0)      6.549050        (34, 15, 0)  same
+   0.52      6.599303        (34, 15, 0)      6.599303        (34, 15, 0)  same
+   0.38      6.825205        (34, 15, 0)      6.825205        (34, 15, 0)  same
+   0.26      7.329843        (34, 16, 0)      7.329843        (34, 16, 0)  same
+
+  A-1 MET — the peak von Mises stayed at the same voxel.
+
+★ HOW MUCH THE MARGIN RESULTS ABOVE ARE WORTH: not much, and that is not a
+  hedge. The certification is STRUCTURALLY BLIND to cells-per-member — §10's
+  control swept the cell across the floor at fixed density and the margin was
+  identical to ten decimal places. A flat Δ here shows the macro solve did
+  not notice the change; it is NOT evidence the retained lattice is accurate.
+  The argmax result (A-1) is the load-bearing one, because a MOVING argmax
+  would indicate non-local redistribution the blind margin could still miss.

@@ -380,6 +380,430 @@ int main() {
           "an unknown mode name is refused, never silently defaulted");
   }
 
+  // ---- 13. SUB-FLOOR RETENTION IN UNLOADED REGIONS -------------------------------
+  //      (handoff 2026-08-04-subfloor-lattice-unloaded-regions, bars S1 / S5)
+  //
+  // THE FIXTURE, and why it has this shape. Retention's predicate is REGION-scoped:
+  // the region's peak demand over the PART's peak. So the fixture needs a part with
+  // two distinct pieces — a thick, loaded body, and a THIN wall attached to it that
+  // is the region. The wall is 4 mm thick, far under N* x the printability floor, so
+  // nothing about it can be latticed by any legal cell: it is exactly the maintainer's
+  // back wall. Sweeping the wall's demand against the body's then walks the threshold.
+  {
+    // 34 x 30 x 30 envelope: a 30 mm cube body (x 0..29) plus a 4-voxel-thick wall
+    // (x 30..33) spanning the full y,z face. The wall's inscribed thickness is ~4 mm.
+    const int pad = 3;
+    VoxelGrid g;
+    g.nx = 34 + 2 * pad; g.ny = 30 + 2 * pad; g.nz = 30 + 2 * pad; g.spacing = 1.0;
+    g.origin = Vec3{0, 0, 0};
+    g.tags.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, VoxelTag::Empty);
+    for (int k = 0; k < 30; ++k)
+      for (int j = 0; j < 30; ++j)
+        for (int i = 0; i < 34; ++i)
+          g.set_tag(i + pad, j + pad, k + pad, VoxelTag::Interior);
+    const std::size_t Ng = g.voxel_count();
+    std::vector<double> gd = density_of(g);
+    // The REGION is the wall alone (x 30..33 in block coordinates).
+    std::vector<char> wall(Ng, 0);
+    for (int k = 0; k < 30; ++k)
+      for (int j = 0; j < 30; ++j)
+        for (int i = 30; i < 34; ++i)
+          wall[g.index(i + pad, j + pad, k + pad)] = 1;
+
+    // Demand: the body at 100, the wall at `w`. The measured region stress fraction
+    // is then exactly w/100 — which is what lets the threshold be tested AT its edge
+    // rather than somewhere convenient.
+    auto demand_with_wall = [&](double w) {
+      std::vector<double> d(Ng, 0.0);
+      for (int k = 0; k < 30; ++k)
+        for (int j = 0; j < 30; ++j)
+          for (int i = 0; i < 34; ++i) {
+            const std::size_t e = g.index(i + pad, j + pad, k + pad);
+            d[e] = (i >= 30) ? w : 100.0;
+          }
+      return d;
+    };
+
+    GradingLawParams wp;
+    wp.topology = topo;
+    wp.target_cell_size_mm = 2.0;
+    wp.min_extrudable_width_mm = 0.4;
+    wp.demand_exponent = 1.0;
+    // THE AGGREGATE CAP IS LIFTED FOR THE THRESHOLD TESTS BELOW, deliberately and
+    // with the number stated. This fixture is a 30 mm block with a 4 mm wall bolted
+    // to it, and that wall is 1,704 of the block's 30,600 printed voxels — 5.57 %,
+    // well over the 3.0 % production cap. That ratio is an artefact of keeping the
+    // fixture small, not a property of any real part (the maintainer's own wall is
+    // 0.930 % of his). Left at the default, the cap would refuse retention here and
+    // every threshold assertion below would pass for the WRONG REASON — they would
+    // be measuring the cap, not the stress predicate. So it is lifted here and
+    // tested on its own in 13j.
+    wp.subfloor_aggregate_cap_fraction = 1.0;
+
+    // --- 13a. DEFAULT IS OFF, AND OFF IS THE OLD BEHAVIOUR (bar S1) --------------
+    {
+      const std::vector<double> d = demand_with_wall(1.0);  // 1% of peak: very quiet
+      GradedField off = grade_lattice(g, gd, d, &wall, wp);
+      CHECK(!off.subfloor_retention_armed,
+            "S1: sub-floor retention is DISARMED by default");
+      // Not the WHOLE wall is sub-floor: the EDT thickness bleeds where the wall
+      // meets the 30 mm body, so a band along the junction reads thick enough to
+      // grade. That is physical, and it makes the fixture a better test — the
+      // retained set is a strict SUBSET of the region, which is the real shape.
+      CHECK(off.subfloor_candidate_voxels > 0,
+            "the fixture really does put material below the floor");
+      CHECK(off.subfloor_candidate_voxels < off.region_voxels,
+            "...and not all of it, so retention is tested on a strict subset");
+      CHECK(off.solid_fallback_voxels == off.subfloor_candidate_voxels,
+            "S1: with retention off every below-floor voxel falls back to solid");
+      CHECK(off.latticed_voxels ==
+                off.region_voxels - off.subfloor_candidate_voxels,
+            "S1: and exactly the above-floor remainder is latticed, as before");
+      CHECK(off.subfloor_retained_voxels == 0 && off.subfloor_flags.empty(),
+            "S1: nothing retained and no per-voxel flags allocated when off");
+      CHECK(off.subfloor_candidate_voxels == off.fallback_member_too_thin,
+            "the below-floor population is counted even when disarmed, so a "
+            "forecast can say what is at stake before anyone opts in");
+    }
+
+    // --- 13b. ARMED + QUIET REGION => the wall IS latticed ------------------------
+    {
+      const std::vector<double> d = demand_with_wall(1.0);
+      GradingLawParams on = wp;
+      on.retain_subfloor_in_unloaded_regions = true;
+      GradedField r = grade_lattice(g, gd, d, &wall, on);
+      CHECK(r.subfloor_retention_armed, "armed flag is reported");
+      CHECK(r.region_qualified_unloaded, "a 1%-of-peak region qualifies");
+      CHECK(r.latticed_voxels == r.region_voxels,
+            "the maintainer's wall is latticed end to end");
+      CHECK(r.subfloor_retained_voxels > 0 &&
+            r.subfloor_retained_voxels == r.subfloor_candidate_voxels,
+            "every below-floor wall voxel is retained, and recorded as such");
+      CHECK(r.solid_fallback_voxels == 0, "nothing fell back once retained");
+      CHECK(r.subfloor_min_cells_per_member < n_star,
+            "the retained material really is BELOW the floor — that is the point, "
+            "and it is what raises lattice_strut_out_of_regime downstream");
+      CHECK(r.subfloor_min_strut_diameter_mm >= wp.min_extrudable_width_mm,
+            "printability is NOT relaxed with the floor: every retained strut still "
+            "prints at the stated minimum width");
+      CHECK(!r.subfloor_flags.empty(), "WHICH voxels is answered per voxel");
+      std::size_t flagged = 0;
+      for (std::size_t e = 0; e < Ng; ++e) if (r.subfloor_flags[e]) ++flagged;
+      CHECK(flagged == r.subfloor_retained_voxels,
+            "the per-voxel flags and the count agree exactly");
+      for (std::size_t e = 0; e < Ng; ++e)
+        if (r.subfloor_flags[e])
+          CHECK(r.posture.mask[e] != 0 && wall[e] != 0,
+                "a flagged voxel is latticed AND inside the region");
+    }
+
+    // --- 13c. THE THRESHOLD, TESTED AT ITS EDGE (bar S5) -------------------------
+    // An untested threshold is a guess with a number attached. These two cases
+    // straddle it by 1% of peak and must come out on opposite sides.
+    {
+      const double ceiling = lattice_subfloor_retention_stress_fraction();
+      CHECK(std::fabs(ceiling - 0.20) < 1e-12,
+            "the measured ceiling is 0.20 (handoff protect-freeze-vs-solidity §10)");
+      GradingLawParams on = wp;
+      on.retain_subfloor_in_unloaded_regions = true;
+
+      // JUST BELOW: 19% of peak -> latticed.
+      GradedField below = grade_lattice(g, gd, demand_with_wall(19.0), &wall, on);
+      CHECK(std::fabs(below.region_stress_fraction - 0.19) < 1e-12,
+            "S5: the region fraction is MEASURED at 0.19, not declared");
+      CHECK(below.region_qualified_unloaded, "S5: just below the ceiling qualifies");
+      CHECK(below.subfloor_retained_voxels > 0,
+            "S5: just below the ceiling, the wall IS latticed");
+
+      // JUST ABOVE: 21% of peak -> stays solid.
+      GradedField above = grade_lattice(g, gd, demand_with_wall(21.0), &wall, on);
+      CHECK(std::fabs(above.region_stress_fraction - 0.21) < 1e-12,
+            "S5: the region fraction is MEASURED at 0.21");
+      CHECK(!above.region_qualified_unloaded,
+            "S5: just above the ceiling does NOT qualify");
+      CHECK(above.subfloor_retained_voxels == 0,
+            "S5: just above the ceiling the wall STAYS SOLID");
+      GradedField plain = grade_lattice(g, gd, demand_with_wall(21.0), &wall, wp);
+      CHECK(above.posture.mask == plain.posture.mask &&
+            above.posture.relative_density == plain.posture.relative_density &&
+            above.latticed_voxels == plain.latticed_voxels &&
+            above.solid_fallback_voxels == plain.solid_fallback_voxels,
+            "S5: above the ceiling the posture is the DISARMED posture exactly");
+
+      // EXACTLY AT the ceiling qualifies — the comparison is <=, and which way an
+      // exact hit falls is a decision, so it is pinned rather than left to drift.
+      GradedField at = grade_lattice(g, gd, demand_with_wall(20.0), &wall, on);
+      CHECK(at.region_qualified_unloaded && at.subfloor_retained_voxels > 0,
+            "S5: exactly AT the ceiling qualifies (the test is <=)");
+    }
+
+    // --- 13d. A LOADED REGION IS NEVER RETAINED, however it is asked -------------
+    {
+      GradingLawParams on = wp;
+      on.retain_subfloor_in_unloaded_regions = true;
+      GradedField hot = grade_lattice(g, gd, demand_with_wall(100.0), &wall, on);
+      CHECK(std::fabs(hot.region_stress_fraction - 1.0) < 1e-12,
+            "a wall at the part's peak measures 1.0");
+      CHECK(hot.subfloor_retained_voxels == 0,
+            "a region at peak stress is never sub-floor-latticed");
+    }
+
+    // --- 13e. NO REGION => NO RETENTION ------------------------------------------
+    // Latticing the WHOLE part below the floor is not "an unloaded region", and the
+    // fraction is 1.0 by construction, so this can never fire by omission.
+    {
+      GradingLawParams on = wp;
+      on.retain_subfloor_in_unloaded_regions = true;
+      VoxelGrid slab = solid_block(40, 6, 40, 1.0);
+      std::vector<double> sdn = density_of(slab);
+      std::vector<double> sdem(slab.voxel_count(), 5.0);
+      GradedField whole = grade_lattice(slab, sdn, sdem, nullptr, on);
+      CHECK(std::fabs(whole.region_stress_fraction - 1.0) < 1e-12,
+            "with no region the fraction is 1.0");
+      CHECK(whole.subfloor_retained_voxels == 0 && whole.latticed_voxels == 0,
+            "an armed run with no region still leaves a thin part solid");
+    }
+
+    // --- 13f. NO DEMAND FIELD => NO RETENTION (the forecast's case) --------------
+    // An all-zero demand makes the fraction 0.0, which READS as "carries nothing"
+    // but MEANS "nothing was measured". Retention must not fire on it — this is the
+    // exact field the pre-flight forecast passes, before any solve has run.
+    {
+      GradingLawParams on = wp;
+      on.retain_subfloor_in_unloaded_regions = true;
+      const std::vector<double> zero(Ng, 0.0);
+      GradedField f = grade_lattice(g, gd, zero, &wall, on);
+      CHECK(!f.region_qualified_unloaded,
+            "S7: a demand-less field DISARMS retention rather than satisfying it");
+      CHECK(f.subfloor_retained_voxels == 0,
+            "S7: the forecast's flat demand never conjures a retained lattice");
+      CHECK(f.subfloor_candidate_voxels > 0 &&
+            f.subfloor_candidate_voxels == f.solid_fallback_voxels,
+            "S7: but the population below the floor is still reported exactly");
+    }
+
+    // --- 13g. an out-of-range ceiling is REFUSED, never clamped ------------------
+    {
+      GradingLawParams bad = wp;
+      bad.retain_subfloor_in_unloaded_regions = true;
+      bad.subfloor_stress_fraction_max = 1.5;
+      bool threw = false;
+      try { grade_lattice(g, gd, demand_with_wall(1.0), &wall, bad); }
+      catch (const std::invalid_argument&) { threw = true; }
+      CHECK(threw, "a stress fraction above 1 is rejected, not silently clamped");
+    }
+
+    // --- 13h. DETERMINISM with retention armed (bar S9) --------------------------
+    {
+      GradingLawParams on = wp;
+      on.retain_subfloor_in_unloaded_regions = true;
+      const std::vector<double> d = demand_with_wall(5.0);
+      GradedField a = grade_lattice(g, gd, d, &wall, on);
+      GradedField b = grade_lattice(g, gd, d, &wall, on);
+      CHECK(a.posture.mask == b.posture.mask &&
+            a.posture.relative_density == b.posture.relative_density &&
+            a.subfloor_flags == b.subfloor_flags &&
+            a.subfloor_retained_voxels == b.subfloor_retained_voxels &&
+            a.region_stress_fraction == b.region_stress_fraction,
+            "S9: retention is deterministic — identical inputs, identical field");
+    }
+
+    // --- 13i. THE SWEPT PATH, where the accounting bug actually was ----------
+    // The maintainer's own job is SWEPT, so this is the path that matters, and
+    // it is shaped differently from the uniform one: the plan rejects a whole
+    // BASE CELL using the thinnest member anywhere inside it. Dropping that
+    // ceiling for a qualified region therefore lets through two DIFFERENT kinds
+    // of voxel — ones genuinely below the floor at their own cell, and ones on
+    // wider material that clear it. Only the first carries an accuracy claim.
+    //
+    // The first version of this code flagged both, which made the retained count
+    // disagree with the posture; the law's own invariant threw, and a probe on a
+    // real part is what surfaced it. This pins the distinction.
+    {
+      GradingLawParams sw = wp;
+      sw.cell_mode = CellSizeMode::Swept;
+      sw.min_cell_size_mm = 2.0;
+      sw.max_cell_size_mm = 8.0;
+      sw.target_cell_size_mm = 0.0;
+      const std::vector<double> d = demand_with_wall(1.0);
+
+      GradedField off = grade_lattice(g, gd, d, &wall, sw);
+      CHECK(off.subfloor_retained_voxels == 0,
+            "S1: swept mode retains nothing when disarmed");
+      CHECK(off.subfloor_candidate_voxels > 0,
+            "the swept fixture really does reject material for thinness");
+
+      GradingLawParams on = sw;
+      on.retain_subfloor_in_unloaded_regions = true;
+      GradedField r = grade_lattice(g, gd, d, &wall, on);
+      CHECK(r.region_qualified_unloaded, "swept: the quiet wall qualifies");
+      CHECK(r.latticed_voxels > off.latticed_voxels,
+            "swept: arming retention latticed strictly more of the region");
+      // THE INVARIANT THE BUG BROKE. Every flagged voxel must really be below
+      // the floor at ITS OWN cell, and the flags must match the count exactly.
+      // (grade_lattice asserts this internally too — this is the independent
+      // restatement, so a change to the assertion cannot quietly excuse itself.)
+      std::size_t flagged = 0, flagged_really_subfloor = 0;
+      const double floor_n = r.cells_per_member_floor;
+      for (std::size_t e = 0; e < Ng; ++e) {
+        if (e >= r.subfloor_flags.size() || !r.subfloor_flags[e]) continue;
+        ++flagged;
+        const double ce = e < r.posture.cell_size_field.size()
+                              ? r.posture.cell_size_field[e]
+                              : r.cell_size_mm;
+        if (ce > 0.0 && r.posture.mask[e]) {
+          // Re-derive from the posture rather than trusting the report.
+          const double w = local_member_thickness_mm(
+              g, gd, 0.5, sw.thickness_cap_voxels)[e];
+          if (w / ce < floor_n) ++flagged_really_subfloor;
+        }
+      }
+      CHECK(flagged == r.subfloor_retained_voxels,
+            "swept: the per-voxel flags and the retained count agree");
+      CHECK(flagged_really_subfloor == flagged,
+            "swept: EVERY flagged voxel is genuinely below the floor at its own "
+            "cell — an in-regime voxel is never counted as an accepted "
+            "inaccuracy");
+      CHECK(r.subfloor_retained_voxels + r.subfloor_recovered_in_regime_voxels
+                <= r.subfloor_candidate_voxels,
+            "swept: retained + recovered never exceeds the population the "
+            "ceiling rejected");
+      if (r.subfloor_retained_voxels > 0)
+        CHECK(r.subfloor_min_cells_per_member < floor_n,
+              "swept: the retained material is below the floor, as reported");
+    }
+
+    // --- 13j. THE AGGREGATE EXPOSURE CAP (lattice.hpp ★★★) --------------------
+    // Per-region evaluation is a WIDENING: eight regions can qualify independently
+    // and the material under an unpriceable accuracy claim multiplies. The cap is
+    // the only thing that bounds the total, because the certification is blind to
+    // cells-per-member and cannot price any of it. These assertions are what stop
+    // the cap from being decorative.
+    {
+      GradingLawParams cap = wp;
+      cap.retain_subfloor_in_unloaded_regions = true;
+      // The cap is OPT-IN (0 = no cap), so ask for the core constant explicitly —
+      // which is also what a caller that wants the production ceiling must do.
+      cap.subfloor_aggregate_cap_fraction =
+          lattice_subfloor_aggregate_cap_fraction();
+      const std::vector<double> d = demand_with_wall(1.0);
+
+      GradedField over = grade_lattice(g, gd, d, &wall, cap);
+      CHECK(over.subfloor_aggregate_cap_fraction ==
+                lattice_subfloor_aggregate_cap_fraction(),
+            "the cap in force is READ FROM CORE, not hardcoded in the law");
+      CHECK(over.subfloor_would_retain_voxels > 0,
+            "the dry run counted what retention would have kept");
+      CHECK(static_cast<double>(over.subfloor_would_retain_voxels) >
+                over.subfloor_aggregate_cap_fraction *
+                    static_cast<double>(over.part_printed_voxels),
+            "this fixture really is over the production cap (5.57% of the block)");
+      CHECK(over.subfloor_over_budget, "over the cap is REPORTED, not silent");
+      CHECK(over.subfloor_retained_voxels == 0,
+            "over the cap retains NOTHING — never 'as much as fits', because "
+            "choosing which regions to sacrifice is a judgement nothing measures");
+      CHECK(over.subfloor_retained_fraction_of_part == 0.0,
+            "and the reported exposure is zero, because none was taken");
+
+      // THE OVER-BUDGET RESULT IS THE DISARMED RESULT, exactly. A refusal that
+      // still perturbed the posture would be a third behaviour nobody asked for.
+      // AND THE DEFAULT IS NO CAP AT ALL: same job, cap left at 0, retains freely.
+      GradingLawParams uncapped = cap;
+      uncapped.subfloor_aggregate_cap_fraction = 0.0;
+      const GradedField unc = grade_lattice(g, gd, d, &wall, uncapped);
+      CHECK(!unc.subfloor_over_budget && unc.subfloor_retained_voxels > 0,
+            "cap 0 means NO CAP — the ceiling is opt-in, not defaulted on");
+
+      GradedField off = grade_lattice(g, gd, d, &wall, wp);   // wp: armed=false
+      CHECK(over.posture.mask == off.posture.mask &&
+            over.posture.relative_density == off.posture.relative_density &&
+            over.latticed_voxels == off.latticed_voxels &&
+            over.solid_fallback_voxels == off.solid_fallback_voxels,
+            "an over-budget refusal leaves the posture byte-identical to disarmed");
+
+      // AND THE CAP BINDS AT ITS EDGE, not merely somewhere. Set the cap just above
+      // and just below the fraction this fixture actually needs.
+      const double need = static_cast<double>(over.subfloor_would_retain_voxels) /
+                          static_cast<double>(over.part_printed_voxels);
+      GradingLawParams just_under = cap;
+      just_under.subfloor_aggregate_cap_fraction = need * 0.99;
+      CHECK(grade_lattice(g, gd, d, &wall, just_under).subfloor_over_budget,
+            "a cap just BELOW what the job needs refuses");
+      GradingLawParams just_over = cap;
+      just_over.subfloor_aggregate_cap_fraction = need * 1.01;
+      const GradedField ok = grade_lattice(g, gd, d, &wall, just_over);
+      CHECK(!ok.subfloor_over_budget, "a cap just ABOVE what the job needs admits");
+      CHECK(ok.subfloor_retained_voxels == over.subfloor_would_retain_voxels,
+            "and admits EXACTLY what the dry run said it would — the count the cap "
+            "bounded is the count that got emitted");
+    }
+
+    // --- 13k. PER-REGION EVALUATION (the widening this task adds) --------------
+    // Two regions, one quiet and one loaded. Under the shipped UNION reading the
+    // loud one vetoes both. Per region, the quiet one is retained and the loud one
+    // is not — which is the whole point, and also strictly more material under the
+    // accuracy claim, which is why 13j exists.
+    {
+      // Split the wall in two along z: the LOW half stays quiet, the HIGH half is
+      // driven to the part's peak.
+      std::vector<int> ids(Ng, 0);
+      std::vector<char> both(Ng, 0);
+      for (int k = 0; k < 30; ++k)
+        for (int j = 0; j < 30; ++j)
+          for (int i = 30; i < 34; ++i) {
+            const std::size_t e = g.index(i + pad, j + pad, k + pad);
+            both[e] = 1;
+            ids[e] = (k < 15) ? 1 : 2;      // 1 = quiet half, 2 = loud half
+          }
+      std::vector<double> d(Ng, 0.0);
+      for (int k = 0; k < 30; ++k)
+        for (int j = 0; j < 30; ++j)
+          for (int i = 0; i < 34; ++i) {
+            const std::size_t e = g.index(i + pad, j + pad, k + pad);
+            d[e] = (i < 30) ? 100.0 : (k < 15 ? 1.0 : 100.0);
+          }
+
+      GradingLawParams uni = wp;
+      uni.retain_subfloor_in_unloaded_regions = true;
+      const GradedField u = grade_lattice(g, gd, d, &both, uni);
+      CHECK(!u.region_qualified_unloaded && u.subfloor_retained_voxels == 0,
+            "UNION: the loud half vetoes the quiet one — nothing retained");
+
+      GradingLawParams per = uni;
+      per.region_ids = &ids;
+      const GradedField r = grade_lattice(g, gd, d, &both, per);
+      CHECK(r.subfloor_regions.size() == 2, "both declared regions are reported");
+      const GradedField::SubfloorRegion* q = nullptr;
+      const GradedField::SubfloorRegion* l = nullptr;
+      for (const GradedField::SubfloorRegion& x : r.subfloor_regions) {
+        if (x.region_id == 1) q = &x;
+        if (x.region_id == 2) l = &x;
+      }
+      CHECK(q != nullptr && l != nullptr, "the report is keyed by the caller's ids");
+      CHECK(q->qualified && !l->qualified,
+            "PER REGION: the quiet half qualifies and the loud half does not — the "
+            "predicate is answered per region, not for their union");
+      CHECK(std::fabs(q->stress_fraction - 0.01) < 1e-12,
+            "the quiet half's fraction is MEASURED (1 of 100), not declared");
+      CHECK(std::fabs(l->stress_fraction - 1.0) < 1e-12,
+            "the loud half measures at the part's peak");
+      CHECK(r.subfloor_retained_voxels > 0 && r.subfloor_retained_voxels == q->retained_voxels,
+            "everything retained came from the QUALIFYING region");
+      CHECK(l->retained_voxels == 0, "and nothing from the loud one");
+      CHECK(r.subfloor_retained_voxels < u.subfloor_candidate_voxels,
+            "per region retains a strict SUBSET of the union's below-floor set");
+      for (std::size_t e = 0; e < Ng; ++e)
+        if (e < r.subfloor_flags.size() && r.subfloor_flags[e])
+          CHECK(ids[e] == 1, "no retained voxel came from the loud region");
+      // The aggregate is reported, and it is the number the cap bounds.
+      CHECK(r.part_printed_voxels > 0 &&
+            std::fabs(r.subfloor_retained_fraction_of_part -
+                      static_cast<double>(r.subfloor_retained_voxels) /
+                          static_cast<double>(r.part_printed_voxels)) < 1e-12,
+            "the aggregate exposure is reported as a fraction of the PRINTED set");
+    }
+  }
+
   std::fprintf(stderr, "grading: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }
