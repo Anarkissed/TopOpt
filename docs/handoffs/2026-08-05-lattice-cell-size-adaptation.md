@@ -72,12 +72,51 @@ in a way that would have cost you another run:
 |---|---|---|
 | **GRADED** (a `grading` block) | cannot even *get* a 1.2 mm cell — a grading block raises your target to the rho_min printability floor, **4.6026 mm** — and at that cell the wall does not percolate | **refused at pre-flight** |
 | **GRADED**, cell somehow honoured | is below the 5-cell accuracy floor, so `grade_lattice` falls it back to **SOLID** | **no lattice, unless `retain_subfloor_in_unloaded_regions` is armed — which the app cannot send** |
-| **UNIFORM** (`cell_mm` + `strut_radius_mm`, no `grading`) | sits at **3.33 cells across**, above percolation (1.0), below accuracy (5.0). The uniform path applies **no** accuracy floor | **lattice IS built; its certificate is out of regime** |
+| **UNIFORM** (`cell_mm` + `strut_radius_mm`, no `grading`) | sits at **3.33 cells across** — above percolation (1.0), below accuracy (5.0) — and the uniform path applies **no** accuracy floor, so nothing stops it | **see the correction below: it was NOT latticed** |
 
-So the honest answer is: **a uniform lattice job at a ~1.2 mm cell is the one
-route that puts lattice in your 4 mm wall today**, and what you get is
-uncertified. The graded route is doubly blocked — the cell is raised out from
-under you, and the switch that would unblock it is not on the iPad.
+**★ CORRECTION, MEASURED AFTER THIS SECTION WAS FIRST WRITTEN AND AFTER THE PR
+WAS APPROVED.** The row above originally claimed the uniform route "builds the
+lattice, out of regime". **That claim was not supported and is withdrawn.**
+
+I ran his own `job.json` (from the worker directory), uniform, `cell_mm` 1.2,
+resolution 64 (`n1c_measurement.txt`). The run succeeded and emitted lattice:
+
+```
+cell_size_mm                 1.2
+include_regions              7          exclude_regions 1
+latticed_cells               6082
+strut_min_cells_per_member   5.684264342     <- the decisive number
+strut_out_of_regime          False
+accepted                     True
+```
+
+`strut_min_cells_per_member` is measured over the **latticed** material, so the
+thinnest member carrying any lattice is 5.684 x 1.2 = **6.82 mm**. His declared
+regions are **4 mm**, which at a 1.2 mm cell is 3.33 cells. **Therefore not one
+latticed voxel sits in a 4 mm wall.** The 6082 cells went into thicker material
+somewhere else — which is §B2 (lattice landing outside the declared regions),
+happening again, on the route I had just recommended.
+
+Two consequences, and both are corrections to what was merged:
+
+1. **The uniform route is NOT a way to lattice his 4 mm wall.** No route
+   currently is. The certificate also came back **in regime** (`out_of_regime`
+   false), not out of regime as the row claimed — because the material actually
+   latticed is thick, not thin.
+2. **The arithmetic was right and the inference was wrong.** 3.33 cells does
+   clear percolation, and the uniform path does apply no accuracy floor. What I
+   failed to check is whether his 4 mm regions get any *voxels* at all: at
+   resolution 64 a voxel is 3.41 mm on this part, so a 4 mm slab is barely one
+   voxel thick and can capture almost no voxel centres. That is partly an
+   artifact of my running at 64 instead of his 128 (1.70 mm voxels) — **so this
+   measurement does not settle what happens at his resolution, and I am not going
+   to claim it does.** The re-run at 128 is the first thing owed.
+
+**What is safe to say to him today:** on a graded run his 4 mm wall comes back
+solid; on a uniform run at a fine cell the lattice is built *somewhere*, and
+proving it reaches his declared wall needs the per-region emitted-cell receipt
+that §B4 says does not exist on the uniform path. That receipt is now the
+blocking item, not a nice-to-have.
 
 **★ THE DERIVATION REPORTS. IT DOES NOT YET PLAN.** (M3.) This is the most
 important caveat on this branch and it was missing from the first version of this
@@ -1048,13 +1087,31 @@ you would have set the cell, waited out the solve, and got a solid wall again.
 Worse, on a graded job you cannot even set the cell you want: it quietly raises
 your number back up to the old one, so that advice did not work either.
 
-**So, concretely, for your 4 mm wall:** run it as a **plain lattice job** — set
-the cell size and strut radius yourself, no automatic-density block. That is the
-one route that actually puts lattice in that wall today, and what you get is a
-lattice the strength certificate does not cover. On a graded job the wall stays
-solid, and the switch that would change that is not available on the iPad yet.
-Every piece of advice the software now prints has been checked against the
-question "does following this actually change the outcome?".
+**So, concretely, for your 4 mm wall — and I got this wrong once already, so here
+is the measured version.** I first wrote that running it as a plain lattice job
+(setting cell size and strut radius yourself, no automatic-density block) would
+put lattice in that wall. **I then actually ran it on your job, and it did not.**
+
+The run worked and built 6,082 lattice cells. But the thinnest piece of material
+that got any lattice was **6.8 mm thick**, and your walls are 4 mm. So all of
+that lattice went somewhere else in the part — thicker material you did not
+select. That is the same problem as item 1 above, showing up on the very route I
+had just recommended to you.
+
+**The honest position: there is currently no route that puts a lattice in a 4 mm
+wall on your part.** On an automatic-density job the wall comes back solid. On a
+plain lattice job the lattice lands in thicker material instead. To change that
+you need either a thicker wall (about 5.9 mm for a certified lattice) or a finer
+nozzle — or the software needs to stop putting lattice where you did not ask for
+it, which is the next task.
+
+One caveat on my own measurement: I ran at half your resolution to keep it to an
+hour, and at that resolution a 4 mm wall is barely one voxel thick, which may be
+part of why nothing landed there. **That test needs redoing at your resolution
+before anyone treats it as the last word.** Every piece of advice the software
+prints has been checked against "does following this actually change the
+outcome?" — this one failed that check, which is why it is written down here
+rather than quietly dropped.
 
 **Three things I found and did not fix, which you should know before your next
 run:**
