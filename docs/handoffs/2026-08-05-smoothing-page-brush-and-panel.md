@@ -337,7 +337,10 @@ SmoothingRound4Tests.swift:361: error: XCTAssertTrue failed - and that trigger i
 * **ERASE clears the accumulation outright**, exactly as it clears the smoothing
   it stands for — round 3's rule ("take the smoothing off here", not a
   rung-by-rung undo), unchanged.
-* **FROZEN still wins** over a stroke, in the array the viewer draws.
+* **FROZEN still wins** over a stroke, in the array the viewer draws, at every
+  pass and after an erase —
+  `testFrozenCornersStayLockedInTheViewerArrayHoweverManyPasses`, with the
+  positive control that its free neighbours DO accumulate (see R3 in §8).
 
 ## R9 — the tint is independent of the solve
 
@@ -470,14 +473,72 @@ two more found in the audit), §4 (D3, `SmoothingPage.swift:146-149`), §5 (D4,
 `WorkspacePlaceholder.swift:378-379`; D5c, `SmoothingPage.swift:282-288` and
 `PageNoteBox.post`). How `pencilOnly` came to be ON: §2, answered with the grep.
 
-**R3 — no assertion weakened or deleted.** The one-finger-orbit invariant is
-amended to cover both paths and asserted over every reachable configuration.
-Three other assertions changed because the maintainer's instructions changed the
-behaviour, each with its reasoning inline: the tint's VALUE channel became
-opacity (D4); a second note queues instead of replacing (D5c); the control count
-ceiling moved 11 → 12 **because he asked for the Orbit tab back** — it is 11 with
-"Pencil only" on and 12 with it off, against round 2's 11 at rest and 13 after a
-stroke, and the accounting is in the test.
+**R3 — no assertion weakened or deleted, and here is the sweep that proves it.**
+
+The first version of this paragraph said "no assertion weakened or deleted" and
+then accounted only for assertions that CHANGED. That is not the same claim, and
+the review was right to reject it: three test FUNCTIONS disappear from the diff
+and none of them was named. The sweep, which is now run on every PR that touches
+tests (see the note under R6):
+
+```
+$ git diff b3abcf8 HEAD -- app/TopOptKit/Tests | grep -E '^-\s*func test'
+-    func testPaintedRegionsTintByTheirOwnStrengthAndFrozenStillWins() {
+-    func testTheTintDarkensWithEachStroke() {
+-    func testThePortraitPanelClearsTheTwoRowActionCluster() {
+```
+
+Every one, with its disposition:
+
+| Removed | Disposition |
+|---|---|
+| `testTheTintDarkensWithEachStroke` | **Superseded** by `testTheTintStrengthensWithEachStroke` (same file). It asserted the VALUE-channel readout the maintainer's D4 instruction replaced with opacity; the invariant it existed for — a further pass always reads as MORE than the one before — is asserted there, plus the exact 10 %/pass step and a constant hue. |
+| `testThePortraitPanelClearsTheTwoRowActionCluster` | **Superseded** by `testThePortraitPanelClearsTheActionCluster` (row count 2 → 4, D5b) and, more strongly, by `testThePortraitPanelClearsTheActionColumn` + `testNoTwoPiecesOfChromeOverlap`, which measure the real rects across 5 states × 2 orientations instead of computing one. |
+| `testPaintedRegionsTintByTheirOwnStrengthAndFrozenStillWins` | **RENAMED, not deleted** — it is `testPaintedAreasTintByTheirPassCountAndFrozenStillWins`, `SmoothingPageTests.swift:222`, and its closing assertion is still `frozen wins over a stroke that touched it`. The grep reports a rename as a deletion, which is exactly why every line it returns has to be accounted for by hand rather than trusted. |
+
+**On the review's specific worry — that the frozen-wins behaviour lost its only
+test — the branch does not support it.** Three tests assert it, and one of them
+was added by this PR against the flat array the review asked for:
+
+* `SmoothingPageTests.testPaintedAreasTintByTheirPassCountAndFrozenStillWins:235`
+  (the renamed one), `vertexTints()`;
+* `SmoothingRound3Tests.testFrozenVerticesStayTintedAtEveryRung:791`, at every
+  rung, `vertexTints()`;
+* `SmoothingRound4Tests.testFrozenCornersStayLockedInTheViewerArray…`,
+  **`viewerTints()`** — the array the renderer actually receives.
+
+The review's underlying point still improved the branch, so the third test was
+**strengthened rather than merely defended.** It now walks `levels.count + 2`
+passes over a triangle that touches the frozen corner and asserts, at every pass:
+the frozen corner keeps the locked green *exactly* (not the orange, not a blend);
+nothing accumulated on it; and — the positive control — its free neighbours in
+the same triangles DID accumulate, so it cannot pass by the whole array being
+inert. Then an erase, which leaves the lock where it was.
+
+**Confirmed to be a real test** the same way D1, D3 and D4 were: by removing the
+frozen override from `viewerTints()` (`SmoothBrush.swift`, the
+`frozen ? frozenTint : c` line) and running it —
+
+```
+SmoothingRound4Tests.swift:530: error: XCTAssertEqual failed:
+  ("SIMD4<Float>(1.0, 0.48, 0.1, 0.1)") is not equal to
+  ("SIMD4<Float>(0.42, 0.85, 0.55, 0.34)") - pass 1: the frozen corner keeps the
+  LOCKED appearance — not the orange, not a blend of the two
+SmoothingRound4Tests.swift:533: error: XCTAssertNotEqual failed: ("0.1") is equal
+  to ("0.1") - pass 1: and nothing accumulated on it
+… same at passes 2 and 3, with the orange deepening 0.1 → 0.2 → 0.3 on a surface
+  that is supposed to be locked.
+```
+
+(`evidence/…/frozen_wins_failing_without_the_guard.txt`.)
+
+**The assertions that CHANGED**, each with its reasoning inline in the test: the
+one-finger-orbit invariant is amended to cover both paths and asserted over every
+reachable configuration of the two controls; the tint's VALUE channel became
+opacity (D4); a second note queues instead of replacing (D5c); and the control
+count ceiling moved 11 → 12 **because he asked for the Orbit tab back** — 11 with
+"Pencil only" on, 12 with it off, against round 2's 11 at rest and 13 after a
+stroke.
 
 **R4 — the page is demonstrably usable, both input modes.**
 `testTheWholePathWorksForBothInputModes` walks the whole path with the pencil
@@ -496,6 +557,19 @@ identical with Orbit present and absent.
 **R6 — no unfilled placeholders.** `grep -nE '<<|TBD|filled in|TODO'` over this
 file: no matches.
 
+**The standing habit this PR added (review M2).** A deleted test is invisible in
+a test-count summary — "1264 passing" says nothing about what stopped being
+asked. Before pushing any PR that touches tests:
+
+```bash
+git diff <merge-base> HEAD -- app/TopOptKit/Tests | grep -E '^-\s*func test'
+```
+
+and account for **every line it returns**, by name, in the handoff: superseded by
+X, renamed to Y, or restored. Note that a rename shows up as a deletion, so the
+sweep over-reports rather than under-reports — which is the right direction, and
+the reason each line needs a human answer rather than a glance.
+
 **R7 — measured layout numbers.** §4 (panel), §6 (column order and widths, note
 position in both orientations), and the full table in
 `evidence/…/measured_layout.txt`.
@@ -510,6 +584,29 @@ row by row rather than as one box, because its rows are different widths and a
 union rect reports an overlap the user cannot see while hiding ones they can.
 
 **R9 — the tint is independent of the solve.** §5.
+
+---
+
+# 8b. TWO THINGS THAT ARE HIS CALL, NOT MINE (raised in review of PR 300)
+
+Both are choices I made inside instructions that did not cover the case. Neither
+is a defect; both are recorded so he can overrule them in a sentence.
+
+1. **The 40 % tint cap is my choice, not his.** He specified orange, 10 % per
+   pass, layering — and no ceiling. I capped it at four passes because the
+   STRENGTH ladder caps there (`SmoothBrushModel.levels.count`): a fifth pass
+   asks for no more smoothing, so a fifth shade would be the page claiming
+   something the result does not do. If he wants the orange to keep deepening
+   past the point where the smoothing stops, that is a one-line change to
+   `tint(forRung:)` — but the tint would then stop tracking the strength.
+2. **At rest the action column is not monotonic.** "Narrowest at the top" and
+   "Apply & certify always at the bottom" agree in every state where that button
+   is enabled (163 → 269 → 338 → 594). At rest its caption is short — "brush an
+   area first" — so it measures 167 against Discard's 269 and Lattice this's 338
+   and the column reads slightly ragged. I held the position because his
+   "always at the bottom" rule is absolute and his no-reflow rule forbids
+   sorting; the alternative he might prefer is a fixed column width, which makes
+   "ordered by width" invisible. His call.
 
 ---
 
@@ -566,6 +663,15 @@ tells you which variant you are painting, so it covered it. It is 284 now,
 centred on the left, and it can no longer reach that high — there is a test that
 measures the real thing, not a drawing of it, and it fails if anything on that
 page ever lands on top of anything else.
+
+**One test came back stronger.** Review of this PR asked whether the guarantee
+that *protected areas cannot be painted over* had quietly lost its test. It had
+not — three tests still assert it — but the reviewer's instinct was right about
+which array matters: the strongest of the three now checks the exact list of
+colours the screen receives, paints over a protected corner half a dozen times,
+and insists it stays locked green with no orange building up on it while its
+unprotected neighbours darken normally. That is the guarantee that bolt holes,
+mating faces and anchors never get smoothed, stated where you can see it.
 
 **The rest.** The design box is no longer drawn through the part on this page (it
 still is on the lattice page). The four buttons are one column with Apply &

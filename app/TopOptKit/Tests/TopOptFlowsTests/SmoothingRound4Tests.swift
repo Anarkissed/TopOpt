@@ -505,14 +505,47 @@ final class SmoothingRound4Tests: XCTestCase {
                        "R9: nothing the engine does changes what was painted")
     }
 
-    /// Frozen still wins over a stroke, in the array the viewer actually draws.
-    func testFrozenVerticesStayTintedInTheViewerArray() {
+    /// FROZEN WINS OVER A STROKE, IN THE ARRAY THAT REACHES THE SCREEN — and it
+    /// keeps winning however many times the area is painted over.
+    ///
+    /// WHY IT IS SPELLED OUT HERE. The freeze guarantee has assertions at three
+    /// layers already (`SmoothingPageTests
+    /// .testPaintedAreasTintByTheirPassCountAndFrozenStillWins`,
+    /// `SmoothingRound3Tests.testFrozenVerticesStayTintedAtEveryRung`), but both
+    /// read `vertexTints()` — the WELDED array, which D4 established the renderer
+    /// never receives. An assertion about an array that does not reach the screen
+    /// is asserting the wrong thing, so the guarantee is restated on
+    /// `viewerTints()`, the flat array the viewer actually draws.
+    ///
+    /// The layering pass is the second half: the tint accumulates 10 % a stroke,
+    /// and the whole point of a locked surface is that nothing accumulates on it.
+    func testFrozenCornersStayLockedInTheViewerArrayHoweverManyPasses() {
         var b = brush(frozen: [false, false, false, true])
-        b.beginStroke(); b.brush(.paint, triangles: [0, 1]); b.endStroke()
-        let t = b.viewerTints()
-        // Triangle 1 is (1, 3, 2); its second corner is the frozen vertex 3.
-        XCTAssertEqual(t[4], SmoothBrushModel.frozenTintDefault)
-        XCTAssertEqual(t[0].w, 0.10, accuracy: 1e-6, "and the free corners are painted")
+        // Triangle 0 = (0,1,2), triangle 1 = (1,3,2). Vertex 3 is frozen, so it
+        // is corner index 4 of the flat array (triangle 1, second corner).
+        for pass in 1...(SmoothBrushModel.levels.count + 2) {
+            b.beginStroke(); b.brush(.paint, triangles: [0, 1]); b.endStroke()
+            let t = b.viewerTints()
+            XCTAssertEqual(t.count, 6, "one entry per flat vertex")
+            XCTAssertEqual(t[4], SmoothBrushModel.frozenTintDefault,
+                           "pass \(pass): the frozen corner keeps the LOCKED "
+                           + "appearance — not the orange, not a blend of the two")
+            XCTAssertNotEqual(t[4].w, SmoothBrushModel.tintPerPass * Float(pass),
+                              "pass \(pass): and nothing accumulated on it")
+            // …while its free neighbours in the same triangles do accumulate, so
+            // this is not passing because the whole array is inert.
+            XCTAssertEqual(t[0].w,
+                           SmoothBrushModel.tintPerPass
+                               * Float(min(pass, SmoothBrushModel.levels.count)),
+                           accuracy: 1e-6,
+                           "pass \(pass): the free corners ARE painting")
+        }
+
+        // Erasing the painted area leaves the lock exactly where it was: it was
+        // never the stroke's to take away.
+        b.beginStroke(); b.brush(.erase, triangles: [0, 1]); b.endStroke()
+        XCTAssertEqual(b.viewerTints()[4], SmoothBrushModel.frozenTintDefault)
+        XCTAssertEqual(b.viewerTints()[0], .zero)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
