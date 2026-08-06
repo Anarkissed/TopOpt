@@ -218,6 +218,13 @@ struct SurfaceOperatorStats {
   // trust box — i.e. how often C1 was doing real work rather than confirming a
   // bound the construction had already met. Zero means the operator met C1 by
   // construction on this input.
+  //
+  // It is numerically EQUAL to `c1_clamped` and that is not a redundancy worth
+  // removing: they are the same event read for two different purposes, and a
+  // future operator that pre-clamped its own proposal internally would make them
+  // diverge. `max_unclamped_excursion_mm` is the one that carries the magnitude,
+  // and it is the number that answers the question — a count of 5793 says the
+  // claim is false, 2.75 mm against a 0.405 mm radius says by how much.
   std::size_t c1_would_violate = 0;
   double max_unclamped_excursion_mm = 0.0;  // deepest such excursion (0 if none)
 

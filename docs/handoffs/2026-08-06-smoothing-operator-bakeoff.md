@@ -14,9 +14,10 @@ analytic sphere. The shipped Taubin smoother removes 11.2% at the strength the a
 can ask for. That is 4.6x, on the same fixture, at the same voxel size, measured
 the same way.**
 
-**Operator B, ramp reconstruction, is a NO-GO. Its best setting removes 14.3%, it
-makes the WORST-CASE deviation 58% worse than doing nothing, at some settings it
-is worse than the unsmoothed mesh outright, and one brush stroke on your mesh
+**Operator B, ramp reconstruction, is a NO-GO. Its best setting removes 14.3%, and
+even at that setting it makes the WORST-CASE deviation 46% worse than doing nothing
+(1.0610 mm against 0.7266 mm) — worse at every other setting too, up to 64% —
+while at some settings its RMS is worse than the unsmoothed mesh outright, and one brush stroke on your mesh
 costs 3.9 to 13.0 seconds against operator A's 0.086. It also fails the one
 prediction that was made for it — see §S1.2.**
 
@@ -33,8 +34,8 @@ the signed constraint armed and with it off. Volume holds to 0.000000%.
    what the §0 re-baseline would settle, and that re-baseline is blocked on the
    classifier (§S3.6).
 2. **A makes the surface locally rougher while making it globally more accurate.**
-   RMS deviation from the true sphere falls 48%, and RMS dihedral angle RISES from
-   14.53° to 26.32°. Taubin does the opposite. Whether that trade looks better to
+   RMS deviation from the true sphere falls to 48.4% of its unsmoothed value, and
+   RMS dihedral angle RISES from 14.53° to 26.32°. Taubin does the opposite. Whether that trade looks better to
    your eye on your part is not something a sphere can decide.
 3. **Nothing here has been measured on your part.** The classifier that separates
    your CAD faces from the optimizer's cuts does not exist yet, and I did not write
@@ -209,7 +210,7 @@ family's best-anywhere by 1.54x.
    A at x20 **0.4478** (38% better), B at its best **1.0610** (46% worse). B's
    maximum is worse than doing nothing at every single setting.
 3. **A makes the surface locally rougher.** Dihedral RMS goes 14.53° → 26.32° while
-   the deviation falls 48%. Taubin does the reverse (14.53° → 5.68°). I said in the
+   the deviation falls to 48.4% of baseline. Taubin does the reverse (14.53° → 5.68°). I said in the
    probe's own header that the corroborating number must move **with** the headline
    for a reading to mean what it says; here it moves against it, and I am reporting
    that rather than dropping the column. The mechanism is not mysterious — A moves
