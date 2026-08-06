@@ -1,0 +1,180 @@
+== sdf_geometry_probe : S3 THE FEATURES THAT MUST NOT MOVE ==
+part /Users/nadim/.topopt-worker/7ba2442960a24050/M2_verticalStand.step — 78 B-rep faces, voxel 1.705279 mm
+
+== rung 0.68 ==
+  -- as exported today --
+  anchor face 18                     15236 verts   signed mean -0.1258  range [-0.4869, -0.0353]  unsigned max 1.6777 rms 0.3455 mm
+  protected face 16                  18392 verts   signed mean -0.0513  range [-1.5110, +1.2395]  unsigned max 1.7046 rms 0.3764 mm
+  load group (21 faces)              34086 verts   signed mean +0.1537  range [-1.6745, +1.6890]  unsigned max 1.7013 rms 0.4879 mm
+  every cylindrical face (bores)     18437 verts   signed mean -0.1741  range [-1.7043, +1.6890]  unsigned max 1.7043 rms 0.7069 mm
+    bore face 19   CAD radius 30.0000 mm   as exported: mean 29.9980 [28.2987, 31.7037]  (mean -0.0020 mm)  3795 verts
+    bore face 21   CAD radius 30.0000 mm   as exported: mean 29.9861 [28.2959, 31.6975]  (mean -0.0139 mm)  6451 verts
+    bore face 32   CAD radius 30.0000 mm   as exported: mean 30.0940 [28.2969, 31.6996]  (mean +0.0940 mm)  2279 verts
+    bore face 58   CAD radius  3.0000 mm   as exported: mean  2.9871 [ 1.3674,  4.6510]  (mean -0.0129 mm)  1246 verts
+    bore face 61   CAD radius  3.0000 mm   as exported: mean  3.1406 [ 1.3702,  4.6804]  (mean +0.1406 mm)  4372 verts
+    bore face 62   CAD radius  3.0000 mm   as exported: mean  3.0547 [ 1.3089,  4.6914]  (mean +0.0547 mm)  4953 verts
+    bore face 63   CAD radius  3.0000 mm   as exported: mean  3.0898 [ 1.3277,  4.6918]  (mean +0.0898 mm)  293 verts
+    bore face 64   CAD radius  3.0000 mm   as exported: mean  2.9638 [ 1.4020,  4.6559]  (mean -0.0362 mm)  281 verts
+    bore face 65   CAD radius  3.0000 mm   as exported: mean  3.0465 [ 1.3702,  4.6974]  (mean +0.0465 mm)  1175 verts
+  -- SDF B/h 1 interp f2 --
+  anchor face 18                     17389 verts   signed mean -0.0523  range [-0.9481, +0.0569]  unsigned max 1.7000 rms 0.3417 mm
+  protected face 16                  20628 verts   signed mean +0.0025  range [-1.3854, +1.6847]  unsigned max 1.6917 rms 0.4284 mm
+  load group (21 faces)              38707 verts   signed mean +0.1240  range [-1.6953, +1.7040]  unsigned max 1.7048 rms 0.4497 mm
+  every cylindrical face (bores)     18187 verts   signed mean -0.2520  range [-1.7050, +1.7040]  unsigned max 1.7050 rms 0.7258 mm
+    bore face 19   CAD radius 30.0000 mm   SDF: mean 29.9836 [28.2962, 31.7023]  (mean -0.0164 mm)  4160 verts
+    bore face 21   CAD radius 30.0000 mm   SDF: mean 29.9661 [28.2955, 31.7025]  (mean -0.0339 mm)  7073 verts
+    bore face 32   CAD radius 30.0000 mm   SDF: mean 30.0950 [28.2949, 31.7047]  (mean +0.0950 mm)  2536 verts
+    bore face 58   CAD radius  3.0000 mm   SDF: mean  2.9346 [ 1.2964,  4.7035]  (mean -0.0654 mm)  1258 verts
+    bore face 61   CAD radius  3.0000 mm   SDF: mean  3.1130 [ 1.3082,  4.7005]  (mean +0.1130 mm)  4805 verts
+    bore face 62   CAD radius  3.0000 mm   SDF: mean  3.0982 [ 1.2949,  4.6986]  (mean +0.0982 mm)  5097 verts
+    bore face 63   CAD radius  3.0000 mm   SDF: mean  3.0861 [ 1.3057,  4.6915]  (mean +0.0861 mm)  341 verts
+    bore face 64   CAD radius  3.0000 mm   SDF: mean  3.0845 [ 1.3305,  4.6986]  (mean +0.0845 mm)  227 verts
+    bore face 65   CAD radius  3.0000 mm   SDF: mean  3.0053 [ 1.3010,  4.6954]  (mean +0.0053 mm)  1221 verts
+  -- isocontour only --
+  anchor face 18                     15224 verts   signed mean -0.0644  range [-0.8253, -0.0139]  unsigned max 1.4351 rms 0.2811 mm
+  protected face 16                  18372 verts   signed mean -0.0546  range [-1.3184, +1.2846]  unsigned max 1.7039 rms 0.4006 mm
+  load group (21 faces)              34033 verts   signed mean +0.1416  range [-1.7014, +1.6890]  unsigned max 1.7046 rms 0.4856 mm
+  every cylindrical face (bores)     17357 verts   signed mean -0.2827  range [-1.7043, +1.6890]  unsigned max 1.7051 rms 0.7588 mm
+    bore face 19   CAD radius 30.0000 mm   isocontour: mean 29.9894 [28.3012, 31.7050]  (mean -0.0106 mm)  3701 verts
+    bore face 21   CAD radius 30.0000 mm   isocontour: mean 29.9449 [28.2959, 31.7009]  (mean -0.0551 mm)  6394 verts
+    bore face 32   CAD radius 30.0000 mm   isocontour: mean 30.0811 [28.3003, 31.6926]  (mean +0.0811 mm)  2237 verts
+    bore face 58   CAD radius  3.0000 mm   isocontour: mean  2.9076 [ 1.2960,  4.6976]  (mean -0.0924 mm)  1165 verts
+    bore face 61   CAD radius  3.0000 mm   isocontour: mean  3.0987 [ 1.3029,  4.6191]  (mean +0.0987 mm)  4288 verts
+    bore face 62   CAD radius  3.0000 mm   isocontour: mean  2.9484 [ 1.2960,  4.7047]  (mean -0.0516 mm)  4551 verts
+    bore face 63   CAD radius  3.0000 mm   isocontour: mean  3.0587 [ 1.3729,  4.6638]  (mean +0.0587 mm)  290 verts
+    bore face 64   CAD radius  3.0000 mm   isocontour: mean  2.9634 [ 1.2959,  4.6729]  (mean -0.0366 mm)  227 verts
+    bore face 65   CAD radius  3.0000 mm   isocontour: mean  2.9783 [ 1.3031,  4.6923]  (mean -0.0217 mm)  1111 verts
+
+== rung 0.52 ==
+  -- as exported today --
+  anchor face 18                     15236 verts   signed mean -0.1258  range [-0.4869, -0.0353]  unsigned max 1.6776 rms 0.3455 mm
+  protected face 16                  18392 verts   signed mean -0.0513  range [-1.5109, +1.2395]  unsigned max 1.7046 rms 0.3764 mm
+  load group (21 faces)              34086 verts   signed mean +0.1538  range [-1.6731, +1.6890]  unsigned max 1.7013 rms 0.4879 mm
+  every cylindrical face (bores)     18360 verts   signed mean -0.1832  range [-1.7043, +1.6890]  unsigned max 1.7043 rms 0.6956 mm
+    bore face 19   CAD radius 30.0000 mm   as exported: mean 29.9999 [28.2987, 31.7037]  (mean -0.0001 mm)  3859 verts
+    bore face 21   CAD radius 30.0000 mm   as exported: mean 29.9922 [28.2959, 31.6975]  (mean -0.0078 mm)  6463 verts
+    bore face 32   CAD radius 30.0000 mm   as exported: mean 30.1179 [28.3009, 31.6926]  (mean +0.1179 mm)  2064 verts
+    bore face 58   CAD radius  3.0000 mm   as exported: mean  2.9322 [ 1.4005,  4.6610]  (mean -0.0678 mm)  1245 verts
+    bore face 61   CAD radius  3.0000 mm   as exported: mean  3.0715 [ 1.3702,  4.6674]  (mean +0.0715 mm)  4540 verts
+    bore face 62   CAD radius  3.0000 mm   as exported: mean  3.0059 [ 1.4138,  4.6995]  (mean +0.0059 mm)  5120 verts
+    bore face 63   CAD radius  3.0000 mm   as exported: mean  3.0898 [ 1.3277,  4.6918]  (mean +0.0898 mm)  293 verts
+    bore face 64   CAD radius  3.0000 mm   as exported: mean  2.9638 [ 1.4021,  4.6565]  (mean -0.0362 mm)  281 verts
+    bore face 65   CAD radius  3.0000 mm   as exported: mean  3.0039 [ 1.3702,  4.6578]  (mean +0.0039 mm)  1201 verts
+  -- SDF B/h 1 interp f2 --
+  anchor face 18                     16277 verts   signed mean -0.0542  range [-0.9407, +0.1675]  unsigned max 1.6442 rms 0.3530 mm
+  protected face 16                  19648 verts   signed mean -0.0244  range [-1.3668, +1.6693]  unsigned max 1.7044 rms 0.3834 mm
+  load group (21 faces)              38406 verts   signed mean +0.1363  range [-1.6848, +1.6858]  unsigned max 1.7052 rms 0.4596 mm
+  every cylindrical face (bores)     17965 verts   signed mean -0.2764  range [-1.7051, +1.6877]  unsigned max 1.7051 rms 0.7161 mm
+    bore face 19   CAD radius 30.0000 mm   SDF: mean 29.9959 [28.2952, 31.7046]  (mean -0.0041 mm)  4213 verts
+    bore face 21   CAD radius 30.0000 mm   SDF: mean 29.9766 [28.2955, 31.6998]  (mean -0.0234 mm)  7095 verts
+    bore face 32   CAD radius 30.0000 mm   SDF: mean 30.1198 [28.2949, 31.6985]  (mean +0.1198 mm)  2344 verts
+    bore face 58   CAD radius  3.0000 mm   SDF: mean  2.8020 [ 1.2957,  4.7052]  (mean -0.1980 mm)  1265 verts
+    bore face 61   CAD radius  3.0000 mm   SDF: mean  3.0388 [ 1.2953,  4.7012]  (mean +0.0388 mm)  4922 verts
+    bore face 62   CAD radius  3.0000 mm   SDF: mean  3.0319 [ 1.3022,  4.6927]  (mean +0.0319 mm)  5187 verts
+    bore face 63   CAD radius  3.0000 mm   SDF: mean  3.0881 [ 1.3046,  4.6933]  (mean +0.0881 mm)  337 verts
+    bore face 64   CAD radius  3.0000 mm   SDF: mean  3.0758 [ 1.3071,  4.7027]  (mean +0.0758 mm)  235 verts
+    bore face 65   CAD radius  3.0000 mm   SDF: mean  2.9365 [ 1.2962,  4.6984]  (mean -0.0635 mm)  1284 verts
+  -- isocontour only --
+  anchor face 18                     15224 verts   signed mean -0.0453  range [-0.8046, +0.0058]  unsigned max 1.4233 rms 0.2815 mm
+  protected face 16                  18362 verts   signed mean -0.0355  range [-1.3184, +1.3549]  unsigned max 1.7047 rms 0.3980 mm
+  load group (21 faces)              34068 verts   signed mean +0.1573  range [-1.6994, +1.6890]  unsigned max 1.7043 rms 0.4943 mm
+  every cylindrical face (bores)     17107 verts   signed mean -0.2954  range [-1.7043, +1.6890]  unsigned max 1.7044 rms 0.7652 mm
+    bore face 19   CAD radius 30.0000 mm   isocontour: mean 29.9798 [28.2982, 31.7050]  (mean -0.0202 mm)  3743 verts
+    bore face 21   CAD radius 30.0000 mm   isocontour: mean 29.9367 [28.2959, 31.6941]  (mean -0.0633 mm)  6399 verts
+    bore face 32   CAD radius 30.0000 mm   isocontour: mean 30.0972 [28.2997, 31.6926]  (mean +0.0972 mm)  2052 verts
+    bore face 58   CAD radius  3.0000 mm   isocontour: mean  2.8464 [ 1.3050,  4.6986]  (mean -0.1536 mm)  1105 verts
+    bore face 61   CAD radius  3.0000 mm   isocontour: mean  3.0011 [ 1.3050,  4.6695]  (mean +0.0011 mm)  4373 verts
+    bore face 62   CAD radius  3.0000 mm   isocontour: mean  2.8863 [ 1.3361,  4.6914]  (mean -0.1137 mm)  4621 verts
+    bore face 63   CAD radius  3.0000 mm   isocontour: mean  3.0624 [ 1.3840,  4.6703]  (mean +0.0624 mm)  290 verts
+    bore face 64   CAD radius  3.0000 mm   isocontour: mean  2.9662 [ 1.3245,  4.6786]  (mean -0.0338 mm)  227 verts
+    bore face 65   CAD radius  3.0000 mm   isocontour: mean  2.9429 [ 1.3050,  4.6625]  (mean -0.0571 mm)  1121 verts
+
+== rung 0.38 ==
+  -- as exported today --
+  anchor face 18                     15236 verts   signed mean -0.1258  range [-0.4860, -0.0353]  unsigned max 1.6776 rms 0.3455 mm
+  protected face 16                  18392 verts   signed mean -0.0513  range [-1.5109, +1.2395]  unsigned max 1.7046 rms 0.3764 mm
+  load group (21 faces)              34086 verts   signed mean +0.1538  range [-1.6733, +1.6890]  unsigned max 1.7013 rms 0.4879 mm
+  every cylindrical face (bores)     18345 verts   signed mean -0.1894  range [-1.7043, +1.6890]  unsigned max 1.7043 rms 0.6895 mm
+    bore face 19   CAD radius 30.0000 mm   as exported: mean 29.9984 [28.2987, 31.7047]  (mean -0.0016 mm)  3890 verts
+    bore face 21   CAD radius 30.0000 mm   as exported: mean 29.9825 [28.2959, 31.7040]  (mean -0.0175 mm)  6645 verts
+    bore face 32   CAD radius 30.0000 mm   as exported: mean 30.1356 [28.3152, 31.6974]  (mean +0.1356 mm)  1957 verts
+    bore face 58   CAD radius  3.0000 mm   as exported: mean  2.8876 [ 1.4005,  4.6582]  (mean -0.1124 mm)  1212 verts
+    bore face 61   CAD radius  3.0000 mm   as exported: mean  2.9903 [ 1.3703,  4.6995]  (mean -0.0097 mm)  4803 verts
+    bore face 62   CAD radius  3.0000 mm   as exported: mean  2.9940 [ 1.4184,  4.6943]  (mean -0.0060 mm)  5136 verts
+    bore face 63   CAD radius  3.0000 mm   as exported: mean  3.0770 [ 1.3277,  4.6918]  (mean +0.0770 mm)  305 verts
+    bore face 64   CAD radius  3.0000 mm   as exported: mean  2.9638 [ 1.4021,  4.6565]  (mean -0.0362 mm)  281 verts
+    bore face 65   CAD radius  3.0000 mm   as exported: mean  2.9730 [ 1.4009,  4.6592]  (mean -0.0270 mm)  1227 verts
+  -- SDF B/h 1 interp f2 --
+  anchor face 18                     27047 verts   signed mean -0.0270  range [-0.9274, +0.1652]  unsigned max 1.6586 rms 0.2756 mm
+  protected face 16                  32014 verts   signed mean -0.0263  range [-1.3537, +1.6777]  unsigned max 1.7036 rms 0.3007 mm
+  load group (21 faces)              48782 verts   signed mean +0.1741  range [-1.6889, +1.6858]  unsigned max 1.7044 rms 0.4424 mm
+  every cylindrical face (bores)     18298 verts   signed mean -0.2654  range [-1.7050, +1.6877]  unsigned max 1.7053 rms 0.7201 mm
+    bore face 19   CAD radius 30.0000 mm   SDF: mean 29.9909 [28.3002, 31.7047]  (mean -0.0091 mm)  5316 verts
+    bore face 21   CAD radius 30.0000 mm   SDF: mean 29.9841 [28.2957, 31.7051]  (mean -0.0159 mm)  9383 verts
+    bore face 32   CAD radius 30.0000 mm   SDF: mean 30.1229 [28.2949, 31.6993]  (mean +0.1229 mm)  2962 verts
+    bore face 58   CAD radius  3.0000 mm   SDF: mean  2.8606 [ 1.2957,  4.6976]  (mean -0.1394 mm)  1342 verts
+    bore face 61   CAD radius  3.0000 mm   SDF: mean  2.9406 [ 1.2961,  4.6998]  (mean -0.0594 mm)  5322 verts
+    bore face 62   CAD radius  3.0000 mm   SDF: mean  3.1619 [ 1.3022,  4.6964]  (mean +0.1619 mm)  5655 verts
+    bore face 63   CAD radius  3.0000 mm   SDF: mean  3.0838 [ 1.2948,  4.6950]  (mean +0.0838 mm)  345 verts
+    bore face 64   CAD radius  3.0000 mm   SDF: mean  3.0996 [ 1.3168,  4.7043]  (mean +0.0996 mm)  239 verts
+    bore face 65   CAD radius  3.0000 mm   SDF: mean  2.9053 [ 1.2965,  4.7023]  (mean -0.0947 mm)  1333 verts
+  -- isocontour only --
+  anchor face 18                     15224 verts   signed mean -0.0381  range [-0.7967, +0.0134]  unsigned max 1.4189 rms 0.2821 mm
+  protected face 16                  18359 verts   signed mean -0.0282  range [-1.3184, +1.3817]  unsigned max 1.7041 rms 0.3974 mm
+  load group (21 faces)              34068 verts   signed mean +0.1641  range [-1.6987, +1.6890]  unsigned max 1.7042 rms 0.4967 mm
+  every cylindrical face (bores)     16924 verts   signed mean -0.3030  range [-1.7043, +1.6890]  unsigned max 1.7043 rms 0.7661 mm
+    bore face 19   CAD radius 30.0000 mm   isocontour: mean 29.9792 [28.2982, 31.7037]  (mean -0.0208 mm)  3774 verts
+    bore face 21   CAD radius 30.0000 mm   isocontour: mean 29.9301 [28.2959, 31.7024]  (mean -0.0699 mm)  6577 verts
+    bore face 32   CAD radius 30.0000 mm   isocontour: mean 30.1029 [28.3034, 31.6926]  (mean +0.1029 mm)  1936 verts
+    bore face 58   CAD radius  3.0000 mm   isocontour: mean  2.7995 [ 1.3362,  4.6662]  (mean -0.2005 mm)  1058 verts
+    bore face 61   CAD radius  3.0000 mm   isocontour: mean  2.9238 [ 1.3265,  4.6841]  (mean -0.0762 mm)  4464 verts
+    bore face 62   CAD radius  3.0000 mm   isocontour: mean  2.8671 [ 1.2954,  4.6941]  (mean -0.1329 mm)  4624 verts
+    bore face 63   CAD radius  3.0000 mm   isocontour: mean  3.0145 [ 1.3436,  4.6767]  (mean +0.0145 mm)  287 verts
+    bore face 64   CAD radius  3.0000 mm   isocontour: mean  2.9673 [ 1.3361,  4.6810]  (mean -0.0327 mm)  227 verts
+    bore face 65   CAD radius  3.0000 mm   isocontour: mean  2.9159 [ 1.3362,  4.6940]  (mean -0.0841 mm)  1123 verts
+
+== rung 0.26 ==
+  -- as exported today --
+  anchor face 18                     15236 verts   signed mean -0.1258  range [-0.4822, -0.0353]  unsigned max 1.6776 rms 0.3455 mm
+  protected face 16                  18392 verts   signed mean -0.0513  range [-1.5109, +1.2395]  unsigned max 1.7046 rms 0.3764 mm
+  load group (21 faces)              34086 verts   signed mean +0.1538  range [-1.6733, +1.6890]  unsigned max 1.7013 rms 0.4879 mm
+  every cylindrical face (bores)     18351 verts   signed mean -0.1950  range [-1.7043, +1.6890]  unsigned max 1.7043 rms 0.6866 mm
+    bore face 19   CAD radius 30.0000 mm   as exported: mean 29.9996 [28.2987, 31.7037]  (mean -0.0004 mm)  3868 verts
+    bore face 21   CAD radius 30.0000 mm   as exported: mean 29.9862 [28.2959, 31.7016]  (mean -0.0138 mm)  6563 verts
+    bore face 32   CAD radius 30.0000 mm   as exported: mean 30.1271 [28.3152, 31.6974]  (mean +0.1271 mm)  1940 verts
+    bore face 58   CAD radius  3.0000 mm   as exported: mean  2.8876 [ 1.4005,  4.6582]  (mean -0.1124 mm)  1212 verts
+    bore face 61   CAD radius  3.0000 mm   as exported: mean  2.9525 [ 1.3971,  4.7045]  (mean -0.0475 mm)  4995 verts
+    bore face 62   CAD radius  3.0000 mm   as exported: mean  2.9907 [ 1.4184,  4.6740]  (mean -0.0093 mm)  5156 verts
+    bore face 63   CAD radius  3.0000 mm   as exported: mean  3.0346 [ 1.3039,  4.6805]  (mean +0.0346 mm)  307 verts
+    bore face 64   CAD radius  3.0000 mm   as exported: mean  2.9638 [ 1.4021,  4.6565]  (mean -0.0362 mm)  281 verts
+    bore face 65   CAD radius  3.0000 mm   as exported: mean  2.9501 [ 1.3964,  4.6578]  (mean -0.0499 mm)  1254 verts
+  -- SDF B/h 1 interp f2 --
+  anchor face 18                     16839 verts   signed mean -0.0344  range [-0.8827, +0.1456]  unsigned max 1.6750 rms 0.3514 mm
+  protected face 16                  19815 verts   signed mean -0.0105  range [-1.3434, +1.6658]  unsigned max 1.7005 rms 0.3802 mm
+  load group (21 faces)              37470 verts   signed mean +0.1451  range [-1.6811, +1.6858]  unsigned max 1.7038 rms 0.4668 mm
+  every cylindrical face (bores)     17038 verts   signed mean -0.2865  range [-1.7050, +1.6877]  unsigned max 1.7050 rms 0.7202 mm
+    bore face 19   CAD radius 30.0000 mm   SDF: mean 29.9851 [28.2949, 31.7048]  (mean -0.0149 mm)  4204 verts
+    bore face 21   CAD radius 30.0000 mm   SDF: mean 29.9747 [28.2965, 31.6983]  (mean -0.0253 mm)  7115 verts
+    bore face 32   CAD radius 30.0000 mm   SDF: mean 30.1173 [28.2949, 31.6985]  (mean +0.1173 mm)  2198 verts
+    bore face 58   CAD radius  3.0000 mm   SDF: mean  2.8443 [ 1.2956,  4.6957]  (mean -0.1557 mm)  1313 verts
+    bore face 61   CAD radius  3.0000 mm   SDF: mean  2.9317 [ 1.2960,  4.7000]  (mean -0.0683 mm)  5471 verts
+    bore face 62   CAD radius  3.0000 mm   SDF: mean  3.1113 [ 1.3001,  4.6926]  (mean +0.1113 mm)  5354 verts
+    bore face 63   CAD radius  3.0000 mm   SDF: mean  3.0660 [ 1.2968,  4.6905]  (mean +0.0660 mm)  313 verts
+    bore face 64   CAD radius  3.0000 mm   SDF: mean  3.1269 [ 1.3265,  4.7029]  (mean +0.1269 mm)  243 verts
+    bore face 65   CAD radius  3.0000 mm   SDF: mean  2.9331 [ 1.2964,  4.7021]  (mean -0.0669 mm)  1376 verts
+  -- isocontour only --
+  anchor face 18                     15224 verts   signed mean -0.0248  range [-0.7822, +0.0271]  unsigned max 1.4108 rms 0.2837 mm
+  protected face 16                  18360 verts   signed mean -0.0151  range [-1.3184, +1.4307]  unsigned max 1.7052 rms 0.3972 mm
+  load group (21 faces)              34078 verts   signed mean +0.1764  range [-1.6973, +1.6890]  unsigned max 1.7042 rms 0.5012 mm
+  every cylindrical face (bores)     16800 verts   signed mean -0.3020  range [-1.7043, +1.6890]  unsigned max 1.7043 rms 0.7657 mm
+    bore face 19   CAD radius 30.0000 mm   isocontour: mean 29.9682 [28.2951, 31.7037]  (mean -0.0318 mm)  3758 verts
+    bore face 21   CAD radius 30.0000 mm   isocontour: mean 29.9222 [28.2959, 31.6969]  (mean -0.0778 mm)  6488 verts
+    bore face 32   CAD radius 30.0000 mm   isocontour: mean 30.0923 [28.3103, 31.6938]  (mean +0.0923 mm)  1920 verts
+    bore face 58   CAD radius  3.0000 mm   isocontour: mean  2.8085 [ 1.3855,  4.6723]  (mean -0.1915 mm)  1058 verts
+    bore face 61   CAD radius  3.0000 mm   isocontour: mean  2.8741 [ 1.3852,  4.6773]  (mean -0.1259 mm)  4568 verts
+    bore face 62   CAD radius  3.0000 mm   isocontour: mean  2.8845 [ 1.4184,  4.7029]  (mean -0.1155 mm)  4612 verts
+    bore face 63   CAD radius  3.0000 mm   isocontour: mean  3.0323 [ 1.3593,  4.6944]  (mean +0.0323 mm)  260 verts
+    bore face 64   CAD radius  3.0000 mm   isocontour: mean  2.9844 [ 1.3572,  4.6992]  (mean -0.0156 mm)  229 verts
+    bore face 65   CAD radius  3.0000 mm   isocontour: mean  2.8920 [ 1.3852,  4.6719]  (mean -0.1080 mm)  1132 verts
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-sdf-geometry-477925/evidence/2026-08-05-smoothing-sdf-geometry-extraction/sdf_features.csv

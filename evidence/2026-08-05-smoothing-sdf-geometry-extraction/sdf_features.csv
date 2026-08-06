@@ -1,0 +1,49 @@
+subject,stage,feature,verts_against_it,signed_mean_mm,signed_min_mm,signed_max_mm,unsigned_max_mm,unsigned_rms_mm
+rung 0.68,as exported today,anchor face 18,15236,-0.125771,-0.486942,-0.035336,1.67768,0.345481
+rung 0.68,as exported today,protected face 16,18392,-0.0513199,-1.51098,1.23948,1.70462,0.376397
+rung 0.68,as exported today,load group (21 faces),34086,0.153748,-1.67452,1.68901,1.70132,0.487922
+rung 0.68,as exported today,every cylindrical face (bores),18437,-0.174051,-1.70428,1.68901,1.70428,0.70694
+rung 0.68,SDF B/h 1 interp f2,anchor face 18,17389,-0.0522818,-0.948141,0.0569183,1.70004,0.341704
+rung 0.68,SDF B/h 1 interp f2,protected face 16,20628,0.00249623,-1.38539,1.68469,1.69169,0.428434
+rung 0.68,SDF B/h 1 interp f2,load group (21 faces),38707,0.124031,-1.69534,1.70398,1.70476,0.449688
+rung 0.68,SDF B/h 1 interp f2,every cylindrical face (bores),18187,-0.25197,-1.70503,1.70398,1.70503,0.725753
+rung 0.68,isocontour only,anchor face 18,15224,-0.0643518,-0.825333,-0.0139405,1.43515,0.281144
+rung 0.68,isocontour only,protected face 16,18372,-0.0545642,-1.31844,1.28465,1.70389,0.400598
+rung 0.68,isocontour only,load group (21 faces),34033,0.141587,-1.7014,1.68901,1.7046,0.485605
+rung 0.68,isocontour only,every cylindrical face (bores),17357,-0.282706,-1.70426,1.68901,1.70513,0.758767
+rung 0.52,as exported today,anchor face 18,15236,-0.125771,-0.486942,-0.035336,1.67761,0.345481
+rung 0.52,as exported today,protected face 16,18392,-0.0513193,-1.51093,1.23948,1.70464,0.376396
+rung 0.52,as exported today,load group (21 faces),34086,0.153763,-1.6731,1.68901,1.70132,0.487912
+rung 0.52,as exported today,every cylindrical face (bores),18360,-0.183242,-1.70428,1.68901,1.70428,0.695567
+rung 0.52,SDF B/h 1 interp f2,anchor face 18,16277,-0.0541501,-0.940744,0.167535,1.64421,0.35298
+rung 0.52,SDF B/h 1 interp f2,protected face 16,19648,-0.0243972,-1.36682,1.66927,1.70442,0.383427
+rung 0.52,SDF B/h 1 interp f2,load group (21 faces),38406,0.136341,-1.68484,1.68577,1.7052,0.459558
+rung 0.52,SDF B/h 1 interp f2,every cylindrical face (bores),17965,-0.276418,-1.70506,1.68772,1.70506,0.716069
+rung 0.52,isocontour only,anchor face 18,15224,-0.0453453,-0.804615,0.0058063,1.42333,0.281512
+rung 0.52,isocontour only,protected face 16,18362,-0.0354592,-1.31844,1.35486,1.70469,0.397979
+rung 0.52,isocontour only,load group (21 faces),34068,0.157343,-1.69942,1.68901,1.70428,0.494276
+rung 0.52,isocontour only,every cylindrical face (bores),17107,-0.29538,-1.70427,1.68901,1.70439,0.765244
+rung 0.38,as exported today,anchor face 18,15236,-0.125771,-0.486015,-0.035336,1.67761,0.345481
+rung 0.38,as exported today,protected face 16,18392,-0.0513193,-1.51093,1.23948,1.70464,0.376396
+rung 0.38,as exported today,load group (21 faces),34086,0.153766,-1.67326,1.68901,1.70132,0.487904
+rung 0.38,as exported today,every cylindrical face (bores),18345,-0.18935,-1.70428,1.68901,1.70428,0.689537
+rung 0.38,SDF B/h 1 interp f2,anchor face 18,27047,-0.0269968,-0.927392,0.165228,1.65859,0.275559
+rung 0.38,SDF B/h 1 interp f2,protected face 16,32014,-0.0262778,-1.35372,1.67766,1.7036,0.300709
+rung 0.38,SDF B/h 1 interp f2,load group (21 faces),48782,0.17411,-1.68887,1.68577,1.70439,0.442356
+rung 0.38,SDF B/h 1 interp f2,every cylindrical face (bores),18298,-0.265419,-1.70503,1.68772,1.70527,0.72009
+rung 0.38,isocontour only,anchor face 18,15224,-0.0380769,-0.796692,0.0133578,1.41887,0.282064
+rung 0.38,isocontour only,protected face 16,18359,-0.0282048,-1.31844,1.38171,1.7041,0.397387
+rung 0.38,isocontour only,load group (21 faces),34068,0.164081,-1.69867,1.68901,1.70421,0.496654
+rung 0.38,isocontour only,every cylindrical face (bores),16924,-0.303032,-1.70427,1.68901,1.70427,0.766099
+rung 0.26,as exported today,anchor face 18,15236,-0.12577,-0.482178,-0.035336,1.67761,0.34548
+rung 0.26,as exported today,protected face 16,18392,-0.0513194,-1.51093,1.23948,1.70464,0.376396
+rung 0.26,as exported today,load group (21 faces),34086,0.153761,-1.67326,1.68901,1.70132,0.487905
+rung 0.26,as exported today,every cylindrical face (bores),18351,-0.19497,-1.70428,1.68901,1.70428,0.686633
+rung 0.26,SDF B/h 1 interp f2,anchor face 18,16839,-0.0344023,-0.882713,0.145622,1.67502,0.351367
+rung 0.26,SDF B/h 1 interp f2,protected face 16,19815,-0.0105377,-1.3434,1.6658,1.70051,0.380173
+rung 0.26,SDF B/h 1 interp f2,load group (21 faces),37470,0.145137,-1.68114,1.68577,1.7038,0.466832
+rung 0.26,SDF B/h 1 interp f2,every cylindrical face (bores),17038,-0.28653,-1.70503,1.68772,1.70503,0.720219
+rung 0.26,isocontour only,anchor face 18,15224,-0.0248044,-0.782224,0.0271473,1.4108,0.283655
+rung 0.26,isocontour only,protected face 16,18360,-0.0151281,-1.31844,1.43074,1.70516,0.397155
+rung 0.26,isocontour only,load group (21 faces),34078,0.176418,-1.69729,1.68901,1.70419,0.501214
+rung 0.26,isocontour only,every cylindrical face (bores),16800,-0.301982,-1.70427,1.68901,1.70427,0.765716

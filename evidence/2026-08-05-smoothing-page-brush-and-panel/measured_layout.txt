@@ -1,0 +1,137 @@
+MEASURED LAYOUT — task 2026-08-05-smoothing-page-brush-and-panel
+Every rect below is what SwiftUI laid out, reported through
+SmoothingPage's own chrome seam (`onChromeFrame`), not computed from the
+chrome tokens. Units are page points; y grows downward.
+
+── landscape (his screenshot) 1194.0×834.0 · rest
+   action:Apply & certify x  1003.0  y   746.0  w   167.0  h    64.0
+   action:Discard x   901.0  y   594.0  w   269.0  h    64.0
+   action:Lattice this x   832.0  y   670.0  w   338.0  h    64.0
+   action:Receipt x  1007.0  y   518.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   panel x    24.0  y   358.0  w   348.0  h   284.0
+   stageTabs x   745.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── landscape (his screenshot) 1194.0×834.0 · restPencilOnly
+   action:Apply & certify x  1003.0  y   746.0  w   167.0  h    64.0
+   action:Discard x   901.0  y   594.0  w   269.0  h    64.0
+   action:Lattice this x   832.0  y   670.0  w   338.0  h    64.0
+   action:Receipt x  1007.0  y   518.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   panel x    24.0  y   358.0  w   348.0  h   284.0
+   stageTabs x   745.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── landscape (his screenshot) 1194.0×834.0 · brushed
+   action:Apply & certify x   576.0  y   746.0  w   594.0  h    64.0
+   action:Discard x   901.0  y   594.0  w   269.0  h    64.0
+   action:Lattice this x   832.0  y   670.0  w   338.0  h    64.0
+   action:Receipt x  1007.0  y   518.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   panel x    24.0  y   358.0  w   348.0  h   284.0
+   stageTabs x   745.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── landscape (his screenshot) 1194.0×834.0 · noted
+   action:Apply & certify x   576.0  y   746.0  w   594.0  h    64.0
+   action:Discard x   901.0  y   594.0  w   269.0  h    64.0
+   action:Lattice this x   832.0  y   670.0  w   338.0  h    64.0
+   action:Receipt x  1007.0  y   518.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   note x   287.0  y   190.0  w   620.0  h    50.0
+   panel x    24.0  y   358.0  w   348.0  h   284.0
+   stageTabs x   745.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── landscape (his screenshot) 1194.0×834.0 · certified
+   action:Apply & certify x   576.0  y   746.0  w   594.0  h    64.0
+   action:Discard x   901.0  y   594.0  w   269.0  h    64.0
+   action:Lattice this x   823.0  y   670.0  w   347.0  h    64.0
+   action:Receipt x   938.0  y   518.0  w   232.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   note x   287.0  y   190.0  w   620.0  h    50.0
+   panel x    24.0  y   358.0  w   348.0  h   284.0
+   stageTabs x   745.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   743.0  h    40.0
+
+── portrait 834.0×1194.0 · rest
+   action:Apply & certify x   643.0  y  1106.0  w   167.0  h    64.0
+   action:Discard x   541.0  y   954.0  w   269.0  h    64.0
+   action:Lattice this x   472.0  y  1030.0  w   338.0  h    64.0
+   action:Receipt x   647.0  y   878.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   panel x    16.0  y   582.0  w   802.0  h   284.0
+   stageTabs x   385.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── portrait 834.0×1194.0 · restPencilOnly
+   action:Apply & certify x   643.0  y  1106.0  w   167.0  h    64.0
+   action:Discard x   541.0  y   954.0  w   269.0  h    64.0
+   action:Lattice this x   472.0  y  1030.0  w   338.0  h    64.0
+   action:Receipt x   647.0  y   878.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   panel x    16.0  y   582.0  w   802.0  h   284.0
+   stageTabs x   385.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── portrait 834.0×1194.0 · brushed
+   action:Apply & certify x   216.0  y  1106.0  w   594.0  h    64.0
+   action:Discard x   541.0  y   954.0  w   269.0  h    64.0
+   action:Lattice this x   472.0  y  1030.0  w   338.0  h    64.0
+   action:Receipt x   647.0  y   878.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   panel x    16.0  y   582.0  w   802.0  h   284.0
+   stageTabs x   385.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── portrait 834.0×1194.0 · noted
+   action:Apply & certify x   216.0  y  1106.0  w   594.0  h    64.0
+   action:Discard x   541.0  y   954.0  w   269.0  h    64.0
+   action:Lattice this x   472.0  y  1030.0  w   338.0  h    64.0
+   action:Receipt x   647.0  y   878.0  w   163.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   note x   226.0  y   190.0  w   382.0  h    50.0
+   panel x    16.0  y   582.0  w   802.0  h   284.0
+   stageTabs x   385.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   628.0  h    40.0
+
+── portrait 834.0×1194.0 · certified
+   action:Apply & certify x   216.0  y  1106.0  w   594.0  h    64.0
+   action:Discard x   541.0  y   954.0  w   269.0  h    64.0
+   action:Lattice this x   463.0  y  1030.0  w   347.0  h    64.0
+   action:Receipt x   578.0  y   878.0  w   232.0  h    64.0
+   loadCase x    24.0  y   138.0  w   750.0  h    40.0
+   note x   226.0  y   190.0  w   382.0  h    56.0
+   panel x    16.0  y   582.0  w   802.0  h   284.0
+   stageTabs x   385.0  y    22.0  w   199.0  h    48.0
+   titleBar x    24.0  y    22.0  w   305.0  h    52.0
+   workingOn x    24.0  y    86.0  w   743.0  h    40.0
+
+── the action column, top to bottom (bar D5b)
+   SmoothPageActions.columnOrder = ["receipt", "discard", "lattice", "recertify"]
+   Apply & certify is pinned last in every state; the other three run
+   narrowest → widest. The order is a constant, so the captions changing
+   between states cannot reflow it.
+
+── the panel (bars D3 / R5), landscape 1194×834
+   BEFORE this task: h 686, top y 74  → across "Working on …" (y 86) and
+                     the load-case row (y 138). That is the occlusion in
+                     the screenshot.
+   AFTER:            h 284, top y 358, at the default brush radius (26).
+                     IDENTICAL with Orbit present (Pencil only OFF) and
+                     absent (ON): the mode tabs are one row either way,
+                     so the third tab costs no height.
+   The only thing that moves it is the brush size, because the disc is
+   drawn at its true footprint: h = 232 + 2 × radius, so 284 at radius 26,
+   332 at his radius 50, and 360 at the maximum 64. Every one of those
+   fits the band (620 pt) with room to spare.
