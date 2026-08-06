@@ -1,0 +1,15 @@
+=== R4 — DELETED-ASSERTION SWEEP (staged tree vs merge-base) ===
+merge-base: 56058c202db59656aa31c3da150d20f6ee776e35
+
+$ git diff <merge-base> --cached -- core/tests app/TopOptKit/Tests | grep -E '^-\s*(func test|TEST|EXPECT|CHECK|REQUIRE)'
+(grep exit 1 — 1 means NO assertion line was removed)
+
+=== every test-file change, by file ===
+ .../TopOptFlowsTests/StrutLineWidthTests.swift     | 296 +++++++++++++++++++++
+ core/tests/unit/test_job_loadcase_copy.cpp         | 254 ++++++++++++++++++
+ 2 files changed, 550 insertions(+)
+
+BOTH TEST FILES ARE NEW. No existing test file is touched, so no assertion could
+be removed and no rename could read as a deletion. Additions, for the record:
+69
+  ^ added assertion / test-function lines

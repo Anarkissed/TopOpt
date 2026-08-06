@@ -1,0 +1,13 @@
+=== S0(b) TRIPWIRE: add a field to JobLoadCase and DO NOT copy it ===
+--- the probe field ---
+480:  double strut_line_width_mm = -1.0;         // TRIPWIRE PROBE: a NEW field
+
+--- rebuild ---
+[  0%] Building CXX object CMakeFiles/topopt.dir/src/cli/run_job.cpp.o
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/core/src/cli/run_job.cpp:3325:15: error: type 'const JobLoadCase' decomposes into 14 elements, but only 13 names were provided
+1 error generated.
+make[3]: *** [CMakeFiles/topopt.dir/src/cli/run_job.cpp.o] Error 1
+make[2]: *** [CMakeFiles/topopt.dir/all] Error 2
+make[1]: *** [CMakeFiles/topopt.dir/rule] Error 2
+make: *** [topopt] Error 2
+exit=

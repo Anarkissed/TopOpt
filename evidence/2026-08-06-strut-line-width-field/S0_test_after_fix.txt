@@ -1,0 +1,6 @@
+
+=== the SAME test after restoring the assignment ===
+job -> load case copy (task 2026-08-06-strut-line-width-field, S0)
+  wall ring t = 2.2200 mm  (loops 5, outer 0.4200 mm, inner 0.4500 mm)
+all job/load-case copy checks passed
+exit=0

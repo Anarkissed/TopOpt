@@ -133,11 +133,15 @@ public struct LatticePage: View {
     private var generatable: Bool {
         TopOptKit.latticeGeneratableTopologies.contains(project.lattice.topologyID)
     }
+    // The page's bounds and refusal text. `lineWidthMM` is the STRUT width, not a
+    // wall bead (task 2026-08-06-strut-line-width-field) — the same value
+    // AppModel.makeRunRequest sends to the job, so what this page refuses and what
+    // the run refuses are one decision.
     private var bounds: LatticeBounds {
         LatticeBounds.compute(settings: project.lattice, limits: limits,
                               generatable: generatable,
                               memberMM: project.lattice.regionMemberMM ?? 0,
-                              lineWidthMM: project.printParams.wallLineWidthOuterMM)
+                              lineWidthMM: project.printParams.strutLineWidthMM)
     }
     private var topologyRows: [LatticeTopologyRow] { LatticeTopologyPicker.rowsFromCore() }
     private var topologyDisplayName: String {
@@ -177,7 +181,9 @@ public struct LatticePage: View {
             cellMM: project.lattice.cellMM,
             bounds: project.lattice.enabled ? bounds : nil,
             running: optimizing,
-            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            // The STRUT width (see `bounds` above), so the panel summary row quotes
+            // the width the run will actually use.
+            lineWidthMM: project.printParams.strutLineWidthMM,
             cellSummary: cellSummaryText,
             designBoxActive: project.designBox.isActive)
     }
@@ -1211,9 +1217,13 @@ public struct LatticePage: View {
                     .foregroundStyle((bounds.cellFloorMM == nil ? DS.Color.textTertiary
                                                                 : DS.Color.textPrimary).color)
             }
+            // The floor is read at the STRUT line width, not the outer wall bead
+            // (task strut-line-width-field), so the copy names the wall widths the
+            // strut width is derived FROM rather than sending the user to change a
+            // wall setting in order to move a lattice floor.
             Text(bounds.cellFloorMM == nil
-                 ? "Core has no cell for this topology at your print settings yet — set an outer line width to read it."
-                 : "Core picks the smallest cell whose struts still print at your line width; no cell is entered here.")
+                 ? "Core has no cell for this topology at your print settings yet — set your wall line widths to read it."
+                 : "Core picks the smallest cell whose struts still print at your strut line width; no cell is entered here.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
         case .fixed:

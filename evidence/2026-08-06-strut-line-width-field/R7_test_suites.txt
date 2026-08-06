@@ -1,0 +1,26 @@
+=== R7 — the two full suites, on the CLEAN build ===
+branch: 56058c2 + working tree
+
+--- core: ctest -j4 ---
+107/107 Test  #18: app_core_capability_mirror .......   Passed    1.10 sec
+
+100% tests passed out of 107
+
+Total Test time (real) = 491.98 sec
+
+  the new test:  61/107 Test  #93: job_loadcase_copy ................   Passed    0.52 sec
+
+--- app: swift test (TopOptKit package) ---
+Test Suite 'All tests' passed at 2026-08-05 23:45:35.147.
+	 Executed 1324 tests, with 18 tests skipped and 0 failures (0 unexpected) in 305.297 (305.398) seconds
+
+★ AN EARLIER RUN OF THIS SUITE REPORTED THREE FAILURES (cli_demo, design_stream,
+  lattice_variant), ALL WITH A SEGFAULT IN topopt-cli. They were an artefact of THIS
+  BUILD DIRECTORY, not of the change: the S0(b) tripwire probe temporarily added a
+  field to JobLoadCase, that build failed part-way, and the restore landed in the same
+  wall-clock second as job.cpp.o — so make left ONE translation unit compiled against
+  a JobDescription 8 bytes larger than main.cpp expected. load_job_file then overran
+  main's stack into materials_path, and the crash surfaced inside libc++ string code
+  during materials loading, nowhere near the change. The base-ref binary ran the
+  identical job fine, which is what identified it as local. 'cmake --build core/build
+  --clean-first' cleared it; all three pass above.

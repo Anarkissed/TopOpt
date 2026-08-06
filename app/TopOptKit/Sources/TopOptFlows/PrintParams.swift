@@ -51,11 +51,55 @@ public struct PrintParams: Equatable, Sendable, Codable {
     /// A bead width, not the nozzle diameter. This is the core's historical single
     /// `wall_line_width_mm`.
     public var wallLineWidthInnerMM: Double
+    /// Extrusion line width (mm) assumed for a LATTICE STRUT — the printability
+    /// reference the lattice path sends to core as `min_extrudable_width_mm`, which
+    /// sets the strut floor and, through it, the derived cell size.
+    ///
+    /// WHY THIS EXISTS AS ITS OWN FIELD, and is not `wallLineWidthOuterMM`:
+    ///
+    /// A lattice strut is not a wall loop. A wall loop is a closed perimeter laid
+    /// against neighbouring loops and against the layer below; a strut is a LONE
+    /// UNSUPPORTED EXTRUSION crossing open space, with nothing beside it and, on the
+    /// diagonal members, very little under it. The two are different deposition
+    /// problems, and NOBODY HAS ESTABLISHED WHICH BEAD A SLICER ACTUALLY DEPOSITS FOR
+    /// ONE — Bambu Studio / OrcaSlicer expose outer-wall, inner-wall, sparse-infill
+    /// and bridge widths, and which of those a strut is routed through has not been
+    /// measured on this project's machine or any other. Until it is, the honest
+    /// answer is "we do not know", not "the outer wall".
+    ///
+    /// So the default is the CONSERVATIVE direction: the WIDER of the two wall beads.
+    /// A too-wide assumption raises the strut floor, which raises the derived cell and
+    /// leaves the lattice coarser and more solid than strictly necessary — a part
+    /// heavier than it had to be. A too-narrow assumption authorises a strut the
+    /// printer cannot lay down, and the certificate then describes a member that does
+    /// not exist in the print. The first error costs grams; the second costs the
+    /// certificate. Wider is the direction to be wrong in.
+    ///
+    /// It was `wallLineWidthOuterMM` until 2026-08-06, which made the strut floor the
+    /// NARROWER bead by default (0.42 vs 0.45 on the shipped 0.4-nozzle profile) —
+    /// the wrong direction — and meant the only way to state a strut width was to
+    /// falsify the outer wall bead, which also corrupts the wall-ring term the
+    /// width-aware gate sizes. The five lattice call sites that source from this
+    /// field — and the wall-loop sites that deliberately do NOT — are audited in
+    /// docs/handoffs/2026-08-06-strut-line-width-field.md and guarded by
+    /// StrutLineWidthTests.
+    ///
+    /// NOT EDITABLE IN THE PRINT PARAMETERS SHEET YET. It resolves by the rule
+    /// above, which is what delivers 0.45 mm on the shipped profile without anyone
+    /// hand-editing a wall bead. Giving it a row is a UI decision this change did
+    /// not make; the field is stored and round-trips, so a row can be added later
+    /// without a second migration.
+    public var strutLineWidthMM: Double
 
+    /// `strutLineWidthMM: nil` (the default) resolves the strut width BY THE RULE —
+    /// `max(outer, inner)` of the two wall beads given here — rather than by a
+    /// literal. That is deliberate: 0.45 mm is one machine's number, and a literal
+    /// would be that machine's number baked into every project on every device.
     public init(layerHeightMM: Double, wallLoops: Int, topLayers: Int,
                 bottomLayers: Int, infillPercent: Int, infillPattern: String,
                 wallLineWidthOuterMM: Double = PrintParams.fdmDefault.wallLineWidthOuterMM,
-                wallLineWidthInnerMM: Double = PrintParams.fdmDefault.wallLineWidthInnerMM) {
+                wallLineWidthInnerMM: Double = PrintParams.fdmDefault.wallLineWidthInnerMM,
+                strutLineWidthMM: Double? = nil) {
         self.layerHeightMM = layerHeightMM
         self.wallLoops = wallLoops
         self.topLayers = topLayers
@@ -64,6 +108,18 @@ public struct PrintParams: Equatable, Sendable, Codable {
         self.infillPattern = infillPattern
         self.wallLineWidthOuterMM = wallLineWidthOuterMM
         self.wallLineWidthInnerMM = wallLineWidthInnerMM
+        self.strutLineWidthMM = strutLineWidthMM
+            ?? PrintParams.defaultStrutLineWidthMM(outer: wallLineWidthOuterMM,
+                                                   inner: wallLineWidthInnerMM)
+    }
+
+    /// THE RULE, in one place: the strut width a project gets when it has not stated
+    /// one — the WIDER of its own two wall beads. Used by the initialiser (a new
+    /// project) and by the decoder (a project saved before the field existed), so the
+    /// two can never disagree. No literal: a machine whose beads are 0.6 / 0.55 gets
+    /// 0.6, not somebody else's 0.45.
+    public static func defaultStrutLineWidthMM(outer: Double, inner: Double) -> Double {
+        Swift.max(outer, inner)
     }
 
     // MARK: - Codable (back-compat, N4)
@@ -71,6 +127,7 @@ public struct PrintParams: Equatable, Sendable, Codable {
     private enum CodingKeys: String, CodingKey {
         case layerHeightMM, wallLoops, topLayers, bottomLayers, infillPercent, infillPattern
         case wallLineWidthOuterMM, wallLineWidthInnerMM
+        case strutLineWidthMM
     }
 
     /// A project saved BEFORE the line-width fields existed (its JSON carries the six
@@ -91,6 +148,17 @@ public struct PrintParams: Equatable, Sendable, Codable {
             ?? PrintParams.fdmDefault.wallLineWidthOuterMM
         wallLineWidthInnerMM = try c.decodeIfPresent(Double.self, forKey: .wallLineWidthInnerMM)
             ?? PrintParams.fdmDefault.wallLineWidthInnerMM
+        // A project saved BEFORE the strut width existed carries no key, and resolves
+        // by THE RULE against ITS OWN two widths — decoded just above, so a project
+        // with hand-edited beads derives from those and not from the FDM default.
+        // On the shipped 0.42 / 0.45 profile that is 0.45 mm; on a 0.6 / 0.55 machine
+        // it is 0.6 mm. This is the ONE case where the strut width CHANGES for an
+        // existing project (0.42 -> 0.45 on the shipped profile), and it is the
+        // deliberate change this task exists to make, measured in S4 — not a silent
+        // migration. A project saved AFTER keeps whatever it stated.
+        strutLineWidthMM = try c.decodeIfPresent(Double.self, forKey: .strutLineWidthMM)
+            ?? PrintParams.defaultStrutLineWidthMM(outer: wallLineWidthOuterMM,
+                                                   inner: wallLineWidthInnerMM)
     }
 
     /// FDM-sensible defaults (a typical desktop-FDM starting point: 0.2 mm layers,
@@ -103,6 +171,11 @@ public struct PrintParams: Equatable, Sendable, Codable {
     /// `wall_line_width_mm` and the value coupons 191/192 were measured at, so the inner
     /// term is continuous with the calibrated knockdown. These are BEAD widths, not the
     /// nozzle diameter.
+    ///
+    /// The STRUT width is NOT stated here. It resolves through
+    /// `defaultStrutLineWidthMM(outer:inner:)` — `max(0.42, 0.45)` = 0.45 mm on this
+    /// profile — so what ships is the RULE, not a number. Change the beads and the
+    /// strut default follows them.
     public static let fdmDefault = PrintParams(
         layerHeightMM: 0.2, wallLoops: 3, topLayers: 4,
         bottomLayers: 4, infillPercent: 20, infillPattern: "gyroid",
@@ -147,7 +220,14 @@ public struct PrintParams: Equatable, Sendable, Codable {
             infillPercent: Self.clamp(infillPercent, Self.infillRange),
             infillPattern: PrintParams.patternOptions.contains(infillPattern) ? infillPattern : PrintParams.fdmDefault.infillPattern,
             wallLineWidthOuterMM: wallLineWidthOuterMM.isFinite ? Self.clamp(wallLineWidthOuterMM, Self.lineWidthRange) : PrintParams.fdmDefault.wallLineWidthOuterMM,
-            wallLineWidthInnerMM: wallLineWidthInnerMM.isFinite ? Self.clamp(wallLineWidthInnerMM, Self.lineWidthRange) : PrintParams.fdmDefault.wallLineWidthInnerMM)
+            wallLineWidthInnerMM: wallLineWidthInnerMM.isFinite ? Self.clamp(wallLineWidthInnerMM, Self.lineWidthRange) : PrintParams.fdmDefault.wallLineWidthInnerMM,
+            // Clamped to the same bead bounds, and passed EXPLICITLY: a project that
+            // states a strut width keeps it through a clamp. Only a non-finite value
+            // falls back to the rule, and it re-derives from the ALREADY-CLAMPED
+            // beads, so `clamped()` is idempotent.
+            strutLineWidthMM: strutLineWidthMM.isFinite
+                ? Self.clamp(strutLineWidthMM, Self.lineWidthRange)
+                : nil)
     }
 
     private static func clamp<V: Comparable>(_ v: V, _ range: ClosedRange<V>) -> V {

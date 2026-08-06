@@ -1478,6 +1478,19 @@ endif()
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_sources(topopt PRIVATE src/cli/run_job.cpp)
 
+  # THE job.json -> ProductionLoadCase COPY, tested at its own seam (task
+  # 2026-08-06-strut-line-width-field, S0). production_loadcase_from_job lost
+  # `wall_line_width_outer_mm` to a merge-conflict resolution and no test noticed:
+  # the parser test stops one step short of it and the knockdown test starts one
+  # step past it, setting MinimizePlasticOptions directly. This drives a
+  # JobDescription through the real helper and asserts every carried field
+  # arrives, that an OMITTED outer width still reaches the mirror-inner sentinel,
+  # and the wall-ring arithmetic the width feeds. Synthetic in-code StepModel, no
+  # solve — it lives here only because run_job.cpp is compiled in this block.
+  add_executable(test_job_loadcase_copy tests/unit/test_job_loadcase_copy.cpp)
+  target_link_libraries(test_job_loadcase_copy PRIVATE topopt)
+  add_test(NAME job_loadcase_copy COMMAND test_job_loadcase_copy)
+
   add_executable(topopt_cli src/cli/main.cpp)
   set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)
   target_link_libraries(topopt_cli PRIVATE topopt)

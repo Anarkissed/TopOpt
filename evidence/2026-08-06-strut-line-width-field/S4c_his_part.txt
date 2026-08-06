@@ -1,0 +1,42 @@
+=== his part, resolution 128, analyze path ===
+at a 0.42 mm stated strut width (what the app USED to send): exit 0
+at a 0.45 mm stated strut width (what it sends NOW):         exit 0
+
+
+=== at a 0.42 mm stated strut width ===
+  cell_mode fit   finest printable cell 1.094961872 mm   distinct cells 1
+  region_voxels 46291   latticed 4414   solid_fallback 41877   no_derivation 41877   printed_outside_regions 41877
+  density_raised 4414   out_of_regime_voxels 0
+  region | extent mm | cell mm | rho     | strut mm | cells/member | candidates | latticed | floor in force
+       0 |    4.0000 |  1.0950 |  0.6000 |   0.4200 |         3.65 |        238 |      238 | PERCOLATION (accuracy unreachable)
+       1 |    4.0000 |  1.0950 |  0.6000 |   0.4200 |         3.65 |        396 |      396 | PERCOLATION (accuracy unreachable)
+       2 |    4.0000 |  1.0950 |  0.6000 |   0.4200 |         3.65 |        384 |      384 | PERCOLATION (accuracy unreachable)
+       3 |    4.0000 |  1.0950 |  0.6000 |   0.4200 |         3.65 |        576 |      576 | PERCOLATION (accuracy unreachable)
+       4 |    4.0000 |  1.0950 |  0.6000 |   0.4200 |         3.65 |        672 |      672 | PERCOLATION (accuracy unreachable)
+       5 |    4.0000 |  1.0950 |  0.6000 |   0.4200 |         3.65 |        828 |      828 | PERCOLATION (accuracy unreachable)
+       6 |    4.0000 |  1.0950 |  0.6000 |   0.4200 |         3.65 |       1320 |     1320 | PERCOLATION (accuracy unreachable)
+  VERDICT (verdict, worst-case margin, effective margin, peak vM MPa, voxel mass g): ('REJECTED', 2.612793696, 0.5410123586, 18.00739053, 244.059339)
+
+=== at a 0.45 mm stated strut width ===
+  cell_mode fit   finest printable cell 1.173173434 mm   distinct cells 1
+  region_voxels 46291   latticed 4414   solid_fallback 41877   no_derivation 41877   printed_outside_regions 41877
+  density_raised 4414   out_of_regime_voxels 0
+  region | extent mm | cell mm | rho     | strut mm | cells/member | candidates | latticed | floor in force
+       0 |    4.0000 |  1.1732 |  0.6000 |   0.4500 |         3.41 |        238 |      238 | PERCOLATION (accuracy unreachable)
+       1 |    4.0000 |  1.1732 |  0.6000 |   0.4500 |         3.41 |        396 |      396 | PERCOLATION (accuracy unreachable)
+       2 |    4.0000 |  1.1732 |  0.6000 |   0.4500 |         3.41 |        384 |      384 | PERCOLATION (accuracy unreachable)
+       3 |    4.0000 |  1.1732 |  0.6000 |   0.4500 |         3.41 |        576 |      576 | PERCOLATION (accuracy unreachable)
+       4 |    4.0000 |  1.1732 |  0.6000 |   0.4500 |         3.41 |        672 |      672 | PERCOLATION (accuracy unreachable)
+       5 |    4.0000 |  1.1732 |  0.6000 |   0.4500 |         3.41 |        828 |      828 | PERCOLATION (accuracy unreachable)
+       6 |    4.0000 |  1.1732 |  0.6000 |   0.4500 |         3.41 |       1320 |     1320 | PERCOLATION (accuracy unreachable)
+  VERDICT (verdict, worst-case margin, effective margin, peak vM MPa, voxel mass g): ('REJECTED', 2.612793696, 0.5410123586, 18.00739053, 244.059339)
+
+=== ★ THE BLOCKED-STOP CHECK: DID THE VERDICT MOVE? ===
+  (verdict, worst-case margin, effective margin, peak von Mises MPa, voxel mass g)
+  at a 0.42 mm stated strut width: ('REJECTED', 2.612793696, 0.5410123586, 18.00739053, 244.059339)
+  at a 0.45 mm stated strut width: ('REJECTED', 2.612793696, 0.5410123586, 18.00739053, 244.059339)
+  the verdict did NOT move: REJECTED at both widths, as expected — a 4 mm
+  wall is out of regime and latticed at either width (3.65 cells per member
+  at 0.42 mm, 3.41 at 0.45 mm).
+
+  his 4 mm wall's derived cell: 1.094962 mm at a 0.42 mm strut width -> 1.173173 mm at 0.45 mm  (7.14 % coarser)
