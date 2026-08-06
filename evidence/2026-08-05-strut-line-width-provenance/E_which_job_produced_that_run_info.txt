@@ -1,0 +1,45 @@
+E — WHICH JOB PRODUCED maintainer-job/run_info.json (established, not assumed)
+==============================================================================
+The folder holds FOUR job variants. The pairing matters, so here is the
+identification, then the widths.
+
+  file                      minimize_plastic  design_box  resolution  outer/inner mm
+  job.json                  false             yes         128         0.42 / 0.45
+  job_reduction.json        true              yes         128         0.42 / 0.45
+  job_res64.json            false             yes         64          0.42 / 0.45
+  job_growth_autobox.json   false             no          128         0.42 / 0.45
+
+  run_info.json records:
+    "fingerprint": "2b8b715fd347",
+    "resolution": 128,
+    "load_source": "loadcase",
+    "has_design_box": true,
+    "ladder": [0.9],
+  worker.log records:
+    2026-08-02T05:40:00.697 meta   launch /Users/nadim/dev/TopOpt/TopOpt/core/build/topopt-cli run /Users/nadim/.topopt-worker/7fbc7ee2900e425a/job.json --out /Users/nadim/.topopt-worker/7fbc7ee2900e425a/out
+    2026-08-02T05:40:27.883 stdout PROGRESS rung=0 rungs=1 iter=1
+
+  ELIMINATION:
+    resolution 128            -> not job_res64.json (64)
+    has_design_box true       -> not job_growth_autobox.json (no design_box)
+    ladder [0.9], ONE rung    -> not job_reduction.json. At the run's own build
+      (worker.log PROGRESS       (fingerprint 2b8b715fd347) the ladder was
+       "rung=0 rungs=1")         built as:
+          opts.volume_fraction_ladder =
+              lc.minimize_plastic ? production_reduction_ladder() : std::vector<double>{0.9};
+      i.e. minimize_plastic TRUE gives the multi-rung reduction ladder;
+      only minimize_plastic FALSE gives the single rung {0.9}. job.json is the
+      only res-128, design-boxed, minimize_plastic-false variant.
+
+  => run_info.json was produced by job.json. That job sends outer 0.42 mm
+     (inner 0.45 mm); its run_info reports outer 0.45 mm (inner 0.45 mm).
+
+  ROBUSTNESS: the identification does not actually carry the conclusion — ALL
+  FOUR variants send outer 0.42 mm / inner 0.45 mm, so whichever ran, the job
+  said 0.42 mm and the record says 0.45 mm.
+
+  THE OTHER FINGERPRINT. The overnight lattice run quoted at
+  core/src/cli/run_job.cpp:5558 is fingerprint b3abcf880554 — a DIFFERENT run
+  (and a different commit, 2026-08-04) from the 2026-08-02 pair above. Both
+  fingerprints resolve to real commits, and BOTH are downstream of the deletion
+  (see file B, section 2), so both ran a binary that drops the outer width.

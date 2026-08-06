@@ -1,0 +1,56 @@
+B — WHEN THE COPY WAS LOST (it existed, and a merge deleted it)
+===============================================================
+The line-width split (PR #227, commit 84a1350, 2026-07-28 20:52) DID copy the
+outer width. It was deleted 71 minutes later by the conflict resolution of
+"Merge branch 'main' into claude/analyze-fixed-design-loadcase-ef6320"
+(commit fc6e95f, 2026-07-28 22:03), which hoisted the inline job->loadcase
+block into the new helper production_loadcase_from_job() and re-typed five of
+the six assignments — omitting the sixth.
+
+1. The line as SHIPPED by PR #227 (git show 84a1350 -- core/src/cli/run_job.cpp):
+          lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+     +    lc.wall_line_width_outer_mm = job.loads.wall_line_width_outer_mm;
+          lc.has_design_box = job.has_design_box;
+
+2. Presence of "lc.wall_line_width_outer_mm" in core/src/cli/run_job.cpp, by commit:
+     84a1350   count=1  2026-07-28 extrusion-line-width-params
+     4fed171   count=1  2026-07-28 Merge pull request #227 from Anarkissed/claude/extrusion-line
+     ecbbf0e   count=0  2026-07-28 analyze-fixed-design-loadcase
+     fc6e95f   count=0  2026-07-28 Merge branch 'main' into claude/analyze-fixed-design-loadcase
+     84c561c   count=0  2026-07-28 Merge pull request #228 from Anarkissed/claude/analyze-fixed-
+     2b8b715   count=0  2026-08-02 Merge pull request #289 from Anarkissed/claude/smoothing-brus
+     b3abcf8   count=0  2026-08-04 Merge pull request #297 from Anarkissed/claude/smoothing-view
+     90e9ec5   count=0  2026-08-05 Merge pull request #300 from Anarkissed/claude/smoothing-page
+     84a1350 = PR #227, the split itself                       -> PRESENT
+     4fed171 = merge of #227 to main (evidence 2026-07-28 was
+               produced here, and it was HONEST)               -> PRESENT
+     fc6e95f = "Merge branch 'main' into ...loadcase"          -> GONE
+     84c561c = PR #228 merged to main; every commit since      -> GONE
+     2b8b715 = run_info.fingerprint of the maintainer's
+               2026-08-02 worker run                           -> GONE
+     b3abcf8 = run_info.fingerprint of the overnight lattice
+               run quoted at run_job.cpp:5558                  -> GONE
+     90e9ec5 = main today                                      -> GONE
+
+3. The deleting hunk (git diff 4fed171 fc6e95f -- core/src/cli/run_job.cpp),
+   both original lines removed, only the inner one re-added in the new helper:
+     86:+  lc.wall_loops = job.loads.wall_loops;
+     87:+  lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+     419:-    lc.wall_loops = job.loads.wall_loops;
+     420:-    lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+     421:-    lc.wall_line_width_outer_mm = job.loads.wall_line_width_outer_mm;
+   (the "+" pair is the new production_loadcase_from_job(); the "-" trio is the
+    inline block it replaced — note the "+" set has no outer line.)
+
+4. WHY NO TEST CAUGHT IT. The two tests that touch the split never cross the
+   job.json -> ProductionLoadCase boundary the merge broke:
+     core/tests/unit/test_job.cpp:434-485    asserts the PARSER (step 1) — still
+                                             green, and still correct.
+     core/tests/validation/test_production_parity.cpp:278-284 asserts
+                                             knockdown_spec_for() by setting
+                                             MinimizePlasticOptions::wall_line_width_outer_mm
+                                             = 0.42 DIRECTLY on the struct.
+   Both pass at HEAD. Neither ever sends a job.json with an outer width through
+   run_job and reads the result back.
+     $ ./build/test_job
+     job schema (M6.2): all 177 checks passed

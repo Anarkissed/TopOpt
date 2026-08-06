@@ -1,0 +1,10 @@
+R1 — NO PRODUCTION FILE CHANGED (stage 1 is evidence only).
+
+$ git diff main -- core/src core/include app/TopOptKit/Sources
+(no output — the diff is empty)
+
+$ git diff --stat main -- core/src core/include app/TopOptKit/Sources | wc -l
+       0
+
+$ git status --porcelain    # nothing but this task's evidence/handoff
+?? evidence/2026-08-05-strut-line-width-provenance/

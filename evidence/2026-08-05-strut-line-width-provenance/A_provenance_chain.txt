@@ -1,0 +1,90 @@
+A — WHERE run_info.wall_line_width_outer_mm GETS ITS VALUE
+==========================================================
+The chain, front to back, on the job.json (CLI / LAN worker) path. Every line
+below is quoted from the tree at HEAD (commit 90e9ec5, main).
+
+ANSWER: it is an ECHO of MinimizePlasticOptions, and on this path that struct
+NEVER RECEIVES the job's outer width. The job's 0.42 is parsed, validated, and
+then dropped at ONE line-less spot: core/src/cli/run_job.cpp:3138, where the
+job->ProductionLoadCase transfer copies wall_loops and the INNER width and stops.
+The echo then mirrors the inner width (0.45) because the mirror sentinel is
+still in place.
+
+1. PARSE — the job's 0.42 IS read and validated. core/src/cli/job.cpp:650-656
+    if (const JsonValue* wwo = find_key(lv, "wall_line_width_outer_mm")) {
+      job.loads.wall_line_width_outer_mm =
+          require_number(*wwo, "loads.wall_line_width_outer_mm");
+      if (!(job.loads.wall_line_width_outer_mm > 0.0) ||
+          job.loads.wall_line_width_outer_mm > 100.0)
+        schema_fail("\"loads.wall_line_width_outer_mm\" must be in (0, 100]");
+    }
+
+2. TRANSFER job -> ProductionLoadCase — production_loadcase_from_job(),
+   core/src/cli/run_job.cpp:3069. wall_loops and the INNER width are copied;
+   the OUTER width is NOT. job.loads.wall_line_width_outer_mm is read NOWHERE
+   ELSE in the tree, so the parsed 0.42 dies right here:
+  3134    lc.minimize_plastic = job.loads.minimize_plastic;
+  3135    lc.build_dir = job.loads.build_dir;
+  3136    lc.infill_percent = job.loads.infill_percent;
+  3137    lc.wall_loops = job.loads.wall_loops;
+  3138    lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+  3139    lc.has_design_box = job.has_design_box;
+   (grep proof — every 'lc.wall*' assignment in run_job.cpp:)
+     3137:  lc.wall_loops = job.loads.wall_loops;
+     3138:  lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+   (grep proof — every reader of job.loads.wall_line_width_outer_mm:)
+     core/src/cli/job.cpp:651:      job.loads.wall_line_width_outer_mm =
+     core/src/cli/job.cpp:653:      if (!(job.loads.wall_line_width_outer_mm > 0.0) ||
+     core/src/cli/job.cpp:654:          job.loads.wall_line_width_outer_mm > 100.0)
+     (none — the field is written by the parser and read by no one)
+
+3. FORWARD ProductionLoadCase -> MinimizePlasticOptions — core/src/cli/loadcase.cpp:491-496.
+   Guarded on "> 0", so the never-written -1.0 default silently declines to
+   override and options.wall_line_width_outer_mm stays at the mirror sentinel:
+  if (lc.wall_line_width_mm > 0.0) opts.wall_line_width_mm = lc.wall_line_width_mm;
+  // Only forward a real outer-width override (> 0); a negative value leaves the
+  // MinimizePlasticOptions default (< 0 → mirror inner), so a caller that supplies one
+  // line width still sizes the ring at loops·inner, byte-identical to before.
+  if (lc.wall_line_width_outer_mm > 0.0)
+    opts.wall_line_width_outer_mm = lc.wall_line_width_outer_mm;
+
+4. ECHO — core/src/cli/run_job.cpp:262-265. This line is NOT the bug: it prints
+   the EFFECTIVE width, and with the sentinel still in place "effective" IS the
+   inner width. It is faithfully reporting the value step 2 lost.
+  info.wall_line_width_outer_mm = options.wall_line_width_outer_mm >= 0.0
+                                      ? options.wall_line_width_outer_mm
+                                      : options.wall_line_width_mm;
+  info.wall_thickness_mm = knockdown_spec_for(options).wall_thickness_mm;
+
+5. EVERY reader of the outer width downstream of the options struct (complete):
+     core/src/cli/loadcase.cpp:496:    opts.wall_line_width_outer_mm = lc.wall_line_width_outer_mm;
+     core/src/cli/run_job.cpp:262:  info.wall_line_width_outer_mm = options.wall_line_width_outer_mm >= 0.0
+     core/src/cli/run_job.cpp:263:                                      ? options.wall_line_width_outer_mm
+     core/src/simp/production.cpp:431:      opts.wall_line_width_outer_mm >= 0.0 ? opts.wall_line_width_outer_mm : inner_w;
+     core/src/simp/gate_diagnosis.cpp:438:                             in.wall_line_width_outer_mm);
+     core/src/simp/minimize_plastic.cpp:466:  if (!std::isfinite(options.wall_line_width_outer_mm))
+     core/src/simp/minimize_plastic.cpp:2050:      gd.wall_line_width_outer_mm = options.wall_line_width_outer_mm;
+     production.cpp:431   -> knockdown_spec_for(): t = outer + (loops-1)*inner
+     run_job.cpp:262      -> the run_info echo
+     minimize_plastic.cpp -> finiteness check (466) + copy into the gate-diagnosis
+                             input (2050), consumed at gate_diagnosis.cpp:438
+
+6. THE ON-DEVICE (bridge) PATH IS INTACT — bridge.cpp:463-467 writes the
+   ProductionLoadCase field DIRECTLY and never calls production_loadcase_from_job:
+  lc.wall_loops = load_case.wall_loops;
+  if (load_case.wall_line_width_mm > 0.0)
+    lc.wall_line_width_mm = load_case.wall_line_width_mm;
+  if (load_case.wall_line_width_outer_mm > 0.0)
+    lc.wall_line_width_outer_mm = load_case.wall_line_width_outer_mm;
+
+7. THE APP ALWAYS EMITS THE KEY — unconditional, so "his device never sent it"
+   is REFUTED. RemoteRunner.swift:821-825:
+        loads["wall_loops"] = Int(TopOptKit.bridgeWallLoops(forOverride: request.wallLoops))
+        loads["wall_line_width_mm"] =
+            TopOptKit.bridgeWallLineWidthMM(forOverride: request.wallLineWidthInnerMM)
+        loads["wall_line_width_outer_mm"] =
+            TopOptKit.bridgeWallLineWidthOuterMM(forOverride: request.wallLineWidthOuterMM)
+   and the mapping is a Double identity (TopOptKit.swift:1436-1438) seeded from
+   PrintParams.fdmDefault (PrintParams.swift:106-109), whose widths are
+   outer 0.42 mm / inner 0.45 mm — which is why every app-sent job in the repo
+   says 0.42.
