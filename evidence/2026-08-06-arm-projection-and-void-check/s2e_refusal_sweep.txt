@@ -8,7 +8,7 @@ main. It is 164 full optimize runs and it is still going. What follows is the
 state when this handoff was written; the final count belongs in a comment on
 the PR rather than being guessed at here.
 
-  job documents completed in BOTH arms : 23
+  job documents completed in BOTH arms : 41
   ★ NEWLY REFUSED BY THE BRANCH        : 0
 
 searched: core/tests, docs, evidence, tools, app — every *.json that parses as a job document (has "mode" and "model")

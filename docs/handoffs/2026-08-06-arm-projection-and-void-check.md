@@ -264,7 +264,7 @@ the new `default_arming` (10 checks).
    your job at two resolutions with the rule **armed**, and none refused. Arming
    by default cannot refuse what arming by hand did not.
 
-**Result at the time of writing: 21 of 82 runnable job documents completed in
+**Result at the time of writing: 41 of 82 runnable job documents completed in
 both arms, and ZERO newly refused.** The sweep is still running — it is 164 full
 optimize runs and it competes with the machine's other work — and its final
 count belongs in a follow-up comment rather than being guessed at here. 34
@@ -710,7 +710,7 @@ written up in detail and it is the first job on the list.
    corrected part and `variant_068_lattice.stl` is still the oversize one. Same
    rung, same run, two different parts.
 3. **Let the repo-wide sweep finish.** It runs all 82 committed job documents
-   through both the old and the new build. 21 are done and none refuses; the rest
+   through both the old and the new build. 41 are done and none refuses; the rest
    is running and the number belongs in a comment on this PR, not in a guess.
 4. **Cover the other quarter of your surface.** About 19.8% of the part is CAD
    surface that is neither a plane nor a cylinder — cones, tori, fillets. Those
