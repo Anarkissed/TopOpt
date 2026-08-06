@@ -1,0 +1,229 @@
+Test project /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-material-forbidden-interval-265383/core/build
+        Start 109: designbox_lattice_recert
+        Start  38: fea_mgcg_matfree
+        Start  89: preflight_divergence
+  1/112 Test #109: designbox_lattice_recert .........   Passed    6.18 sec
+        Start  80: coarsen_rule
+  2/112 Test  #89: preflight_divergence .............   Passed   41.20 sec
+        Start  82: mma
+  3/112 Test  #82: mma ..............................   Passed  123.23 sec
+        Start  47: beam_validation
+  4/112 Test  #80: coarsen_rule .....................   Passed  191.39 sec
+        Start  45: geneo_twolevel
+  5/112 Test  #38: fea_mgcg_matfree .................   Passed  233.91 sec
+        Start  46: matfree_cubic_lattice
+  6/112 Test  #47: beam_validation ..................   Passed  103.85 sec
+        Start  87: conditional_projection
+  7/112 Test  #45: geneo_twolevel ...................   Passed   83.03 sec
+        Start  56: gate_v2
+  8/112 Test  #46: matfree_cubic_lattice ............   Passed   84.99 sec
+        Start  53: simp
+  9/112 Test  #87: conditional_projection ...........   Passed   50.72 sec
+        Start  88: rung_infeasible
+ 10/112 Test  #56: gate_v2 ..........................   Passed   61.51 sec
+        Start  86: mma_projection
+ 11/112 Test  #88: rung_infeasible ..................   Passed   47.02 sec
+        Start 102: face_protection_parity
+ 12/112 Test  #53: simp .............................   Passed   50.96 sec
+        Start   6: lattice_skin_freeform
+ 13/112 Test  #86: mma_projection ...................   Passed   54.05 sec
+        Start 110: lattice_void_exterior
+ 14/112 Test #110: lattice_void_exterior ............   Passed    8.54 sec
+        Start  35: fea_cg
+ 15/112 Test   #6: lattice_skin_freeform ............   Passed   37.76 sec
+        Start  99: design_stream
+ 16/112 Test  #99: design_stream ....................   Passed    6.43 sec
+        Start 101: clearance_parity
+ 17/112 Test  #35: fea_cg ...........................   Passed   27.38 sec
+        Start  92: stress
+ 18/112 Test #102: face_protection_parity ...........   Passed   82.36 sec
+        Start 100: production_parity
+ 19/112 Test #101: clearance_parity .................   Passed   36.95 sec
+        Start  67: smooth_recert_loadcase
+ 20/112 Test  #92: stress ...........................   Passed   22.92 sec
+        Start  60: minimize_plastic
+ 21/112 Test  #60: minimize_plastic .................   Passed   22.38 sec
+        Start  83: adaptive_move
+ 22/112 Test  #67: smooth_recert_loadcase ...........   Passed   29.46 sec
+        Start  36: fea_mgcg
+ 23/112 Test #100: production_parity ................   Passed   35.10 sec
+        Start  63: load_retention_connectivity
+ 24/112 Test  #36: fea_mgcg .........................   Passed   10.87 sec
+        Start  44: krylov_recycling
+ 25/112 Test  #83: adaptive_move ....................   Passed   14.45 sec
+        Start  42: fea_matfree_threads
+ 26/112 Test  #63: load_retention_connectivity ......   Passed   10.89 sec
+        Start  84: penalty_continuation
+ 27/112 Test  #42: fea_matfree_threads ..............   Passed    8.20 sec
+        Start  91: active_domain
+ 28/112 Test  #44: krylov_recycling .................   Passed    8.86 sec
+        Start  43: fea_mixed_precision
+ 29/112 Test  #84: penalty_continuation .............   Passed    6.53 sec
+        Start  90: nonconvergence_rejection
+ 30/112 Test  #43: fea_mixed_precision ..............   Passed    8.09 sec
+        Start  73: growth_ladder
+ 31/112 Test  #91: active_domain ....................   Passed    8.49 sec
+        Start 112: mesh_job
+ 32/112 Test  #90: nonconvergence_rejection .........   Passed    8.32 sec
+        Start  59: passive_regions
+ 33/112 Test  #73: growth_ladder ....................   Passed    3.83 sec
+        Start  75: ladder_rung_count
+ 34/112 Test #112: mesh_job .........................   Passed    6.55 sec
+        Start  27: surface_operator
+ 35/112 Test  #59: passive_regions ..................   Passed    6.32 sec
+        Start  66: analyze_fixed_design
+ 36/112 Test  #27: surface_operator .................   Passed    0.54 sec
+        Start 111: selfweight_clearance_void
+ 37/112 Test  #75: ladder_rung_count ................   Passed    5.60 sec
+        Start  58: variants
+ 38/112 Test #111: selfweight_clearance_void ........   Passed    3.41 sec
+        Start  29: cad_project
+ 39/112 Test  #29: cad_project ......................   Passed    0.30 sec
+        Start  55: mbb_validation
+ 40/112 Test  #66: analyze_fixed_design .............   Passed    4.86 sec
+        Start  77: designbox_anchor_pad
+ 41/112 Test  #58: variants .........................   Passed    4.68 sec
+        Start  97: job_loadcase_copy
+ 42/112 Test  #97: job_loadcase_copy ................   Passed    0.05 sec
+        Start  76: warm_start_integration
+ 43/112 Test  #55: mbb_validation ...................   Passed    4.06 sec
+        Start  78: face_protection
+ 44/112 Test  #77: designbox_anchor_pad .............   Passed    3.87 sec
+        Start  65: galerkin_cache
+ 45/112 Test  #76: warm_start_integration ...........   Passed    3.69 sec
+        Start  40: fea_mg_coarse_hook
+ 46/112 Test  #78: face_protection ..................   Passed    3.19 sec
+        Start  41: fea_mg_algebraic_level1
+ 47/112 Test  #65: galerkin_cache ...................   Passed    3.24 sec
+        Start  62: anchor_integrity
+ 48/112 Test  #40: fea_mg_coarse_hook ...............   Passed    2.08 sec
+        Start  70: strut_report_j6
+ 49/112 Test  #41: fea_mg_algebraic_level1 ..........   Passed    1.91 sec
+        Start  57: property_v3
+ 50/112 Test  #62: anchor_integrity .................   Passed    2.86 sec
+        Start  51: gate_diagnosis
+ 51/112 Test  #70: strut_report_j6 ..................   Passed    2.29 sec
+        Start  72: designbox_reduction
+ 52/112 Test  #57: property_v3 ......................   Passed    2.36 sec
+        Start 105: loadcase_analyze
+ 53/112 Test #105: loadcase_analyze .................   Passed    1.03 sec
+        Start   7: grading
+ 54/112 Test  #72: designbox_reduction ..............   Passed    1.50 sec
+        Start  50: build_direction
+ 55/112 Test  #51: gate_diagnosis ...................   Passed    1.86 sec
+        Start  64: design_domain
+ 56/112 Test  #50: build_direction ..................   Passed    1.15 sec
+        Start   9: multiscale_material
+ 57/112 Test  #64: design_domain ....................   Passed    1.04 sec
+        Start  74: savings_part_relative
+ 58/112 Test   #9: multiscale_material ..............   Passed    0.11 sec
+        Start  85: mma_projection_gate
+ 59/112 Test   #7: grading ..........................   Passed    2.18 sec
+        Start  10: lattice_dehomog
+ 60/112 Test  #74: savings_part_relative ............   Passed    0.88 sec
+        Start  37: fea_matfree
+ 61/112 Test  #85: mma_projection_gate ..............   Passed    0.89 sec
+        Start   3: lattice_gen
+ 62/112 Test  #37: fea_matfree ......................   Passed    0.65 sec
+        Start  39: fea_mg_tuning
+ 63/112 Test   #3: lattice_gen ......................   Passed    0.66 sec
+        Start  31: smooth_brush
+ 64/112 Test  #10: lattice_dehomog ..................   Passed    0.81 sec
+        Start  24: resample
+ 65/112 Test  #31: smooth_brush .....................   Passed    0.09 sec
+        Start  49: gate_v5
+ 66/112 Test  #24: resample .........................   Passed    0.13 sec
+        Start  94: segment_vs_step
+ 67/112 Test  #39: fea_mg_tuning ....................   Passed    0.22 sec
+        Start  93: step_import
+ 68/112 Test  #49: gate_v5 ..........................   Passed    0.11 sec
+        Start  48: gate_v4
+ 69/112 Test  #94: segment_vs_step ..................   Passed    0.07 sec
+        Start  79: designbox_padding
+ 70/112 Test  #48: gate_v4 ..........................   Passed    0.05 sec
+        Start  68: lattice_certification
+ 71/112 Test  #93: step_import ......................   Passed    0.11 sec
+        Start  28: smooth
+ 72/112 Test  #28: smooth ...........................   Passed    0.13 sec
+        Start  23: job_schema
+ 73/112 Test  #79: designbox_padding ................   Passed    0.20 sec
+        Start  12: mesh_segmentation
+ 74/112 Test  #68: lattice_certification ............   Passed    0.20 sec
+        Start  71: width_aware_knockdown
+ 75/112 Test  #23: job_schema .......................   Passed    0.05 sec
+        Start  16: orientation
+ 76/112 Test  #71: width_aware_knockdown ............   Passed    0.05 sec
+        Start  18: settings
+ 77/112 Test  #12: mesh_segmentation ................   Passed    0.06 sec
+        Start  61: observability_capture
+ 78/112 Test  #16: orientation ......................   Passed    0.05 sec
+        Start  32: observability
+ 79/112 Test  #18: settings .........................   Passed    0.05 sec
+        Start  26: clearance
+ 80/112 Test  #32: observability ....................   Passed    0.05 sec
+        Start  81: designbox_grid_report
+ 81/112 Test  #26: clearance ........................   Passed    0.05 sec
+        Start   1: materials_loader
+ 82/112 Test   #1: materials_loader .................   Passed    0.05 sec
+        Start  14: voxelize
+ 83/112 Test  #81: designbox_grid_report ............   Passed    0.09 sec
+        Start  33: fea_assembly
+ 84/112 Test  #14: voxelize .........................   Passed    0.06 sec
+        Start  25: warm_start
+ 85/112 Test  #33: fea_assembly .....................   Passed    0.05 sec
+        Start  95: face_tag
+ 86/112 Test  #25: warm_start .......................   Passed    0.05 sec
+        Start   2: stl_import
+ 87/112 Test  #61: observability_capture ............   Passed    0.26 sec
+        Start  22: fields
+ 88/112 Test  #95: face_tag .........................   Passed    0.06 sec
+        Start  11: surface_stiffness_model
+ 89/112 Test   #2: stl_import .......................   Passed    0.05 sec
+        Start  54: rmin
+ 90/112 Test  #22: fields ...........................   Passed    0.05 sec
+        Start  34: traction_loads
+ 91/112 Test  #11: surface_stiffness_model ..........   Passed    0.05 sec
+        Start   4: lattice_boundary
+ 92/112 Test  #54: rmin .............................   Passed    0.05 sec
+        Start  15: hex_element
+ 93/112 Test  #34: traction_loads ...................   Passed    0.05 sec
+        Start  20: report
+ 94/112 Test  #15: hex_element ......................   Passed    0.05 sec
+        Start  17: orientation_invariants
+ 95/112 Test  #20: report ...........................   Passed    0.05 sec
+        Start  13: face_overrides
+ 96/112 Test  #13: face_overrides ...................   Passed    0.05 sec
+        Start 104: loadcase_resolution
+ 97/112 Test  #17: orientation_invariants ...........   Passed    0.06 sec
+        Start  21: export_stl
+ 98/112 Test   #4: lattice_boundary .................   Passed    0.16 sec
+        Start   8: lattice_material_model
+ 99/112 Test #104: loadcase_resolution ..............   Passed    0.05 sec
+        Start  96: mask_face
+100/112 Test  #21: export_stl .......................   Passed    0.05 sec
+        Start  69: strut_strength
+101/112 Test   #8: lattice_material_model ...........   Passed    0.05 sec
+        Start 103: loadcase_small_face
+102/112 Test  #96: mask_face ........................   Passed    0.06 sec
+        Start   5: lattice_void
+103/112 Test  #69: strut_strength ...................   Passed    0.07 sec
+        Start  30: default_arming
+104/112 Test #103: loadcase_small_face ..............   Passed    0.05 sec
+        Start  19: app_core_capability_mirror
+105/112 Test  #19: app_core_capability_mirror .......   Passed    0.00 sec
+        Start  52: bake_build_orientation
+106/112 Test   #5: lattice_void .....................   Passed    0.05 sec
+        Start  98: cli_demo
+107/112 Test  #30: default_arming ...................   Passed    0.05 sec
+        Start 106: lattice_hookup
+108/112 Test  #52: bake_build_orientation ...........   Passed   12.91 sec
+        Start 107: protect_freeze_vs_solidity
+109/112 Test #106: lattice_hookup ...................   Passed   15.68 sec
+        Start 108: lattice_variant
+110/112 Test #108: lattice_variant ..................   Passed   46.29 sec
+111/112 Test  #98: cli_demo .........................   Passed  263.49 sec
+112/112 Test #107: protect_freeze_vs_solidity .......   Passed  332.67 sec
+
+100% tests passed out of 112
+
+Total Test time (real) = 881.53 sec

@@ -1,0 +1,136 @@
+S2e — THE REPO-WIDE REFUSAL SWEEP, PARTIAL RESULT AT THE TIME OF WRITING
+task 2026-08-06-arm-projection-and-void-check
+
+This sweep runs EVERY committed job document through BOTH binaries — the
+merge-base one (both defaults off) and the branch one (both on) — so that a
+failure on the branch can be told apart from a recipe that already fails on
+main. It is 164 full optimize runs and it is still going. What follows is the
+state when this handoff was written; the final count belongs in a comment on
+the PR rather than being guessed at here.
+
+  job documents completed in BOTH arms : 23
+  ★ NEWLY REFUSED BY THE BRANCH        : 0
+
+searched: core/tests, docs, evidence, tools, app — every *.json that parses as a job document (has "mode" and "model")
+runnable here: 82    skipped: 34    resolution cap: 48
+
+
+--- the skip list, printed in full so nothing is dropped silently ---
+SKIPPED, and why — nothing is dropped silently:
+  docs/handoffs/evidence/134/bracket64_job.json
+      resolution 64 is above the 48 cap for this sweep
+  docs/handoffs/evidence/2026-07-24-mesh-repair/e2e_job.json
+      model file bracket.stl is nowhere in the repo
+  docs/handoffs/evidence/2026-07-25-mesh-job-params/job.mesh.json
+      resolution 96 is above the 48 cap for this sweep
+  docs/handoffs/evidence/2026-07-25-mesh-job-params/job.step.json
+      resolution 96 is above the 48 cap for this sweep
+  evidence/2026-07-26-group-editing/sample-job-clearances.json
+      model file part.stl is nowhere in the repo
+  evidence/2026-07-29-lattice-grading-law/job_grading.json
+      model file bracket.step is nowhere in the repo
+  evidence/2026-07-29-viewer-lag/ladder64/job.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-07-31-analyze-loadcase-resolution/graded_job.json
+      model file lat_hookup_cyl.stl is nowhere in the repo
+  evidence/2026-07-31-analyze-loadcase-resolution/sim_job.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-07-31-analyze-loadcase-resolution/sim_job_oor.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-07-31-analyze-loadcase-resolution/sim_job_zero.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-07-31-lattice-page-round2/job_with_regions.json
+      model file m.step is nowhere in the repo
+  evidence/2026-08-01-lattice-cell-size-sweep/r1_fixed_job.json
+      model file model.stl is nowhere in the repo
+  evidence/2026-08-01-lattice-cell-size-sweep/r4_swept_job.json
+      model file model.stl is nowhere in the repo
+  evidence/2026-08-03-multiscale-lattice-to/job_multiscale.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-03-multiscale-lattice-to/job_reachability_probe.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-03-multiscale-lattice-to/job_twostep.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-03-preflight-feasibility-and-divergence/maintainer-job/job.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-03-preflight-feasibility-and-divergence/maintainer-job/job_growth_autobox.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-03-preflight-feasibility-and-divergence/maintainer-job/job_reduction.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-03-preflight-feasibility-and-divergence/maintainer-job/job_res64.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-08-03-preflight-feasibility-and-divergence/res64_same_job.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-08-03-retention-designbox-device-failure/device_run_job.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-08-03-retention-designbox-device-failure/refused_lattice_designbox_job.json
+      resolution 64 is above the 48 cap for this sweep
+  evidence/2026-08-03-variant-postprocessing-fix/r1_his_job.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-04-protect-freeze-vs-solidity/job_maintainer.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-04-variant-volume-fraction-mismatch/A1_failing_job_as_the_app_sent_it.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-04-variant-volume-fraction-mismatch/L2_growth_variant_job_as_the_app_emits_it.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-05-smoothing-must-actually-smooth/job.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-05-smoothing-must-actually-smooth/job_nobox.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-05-smoothing-sdf-geometry-extraction/job_analyze.json
+      resolution 128 is above the 48 cap for this sweep
+  evidence/2026-08-05-smoothing-sdf-geometry-extraction/job_analyze_192.json
+      resolution 192 is above the 48 cap for this sweep
+  evidence/2026-08-05-smoothing-sdf-geometry-extraction/job_analyze_256.json
+      resolution 256 is above the 48 cap for this sweep
+  evidence/2026-08-06-cad-face-projection/job_analyze.json
+      resolution 128 is above the 48 cap for this sweep
+
+
+--- rows completed so far ---
+  core/tests/fixtures/demo/job.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  docs/handoffs/evidence/134/box_job.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  docs/handoffs/evidence/2026-07-26-constrained-smooth-ui/job_stl.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-27-wall-loops-plumbing/job_wall_loops_5.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-27-wall-loops-plumbing/job_wall_loops_omitted.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-28-constrained-smooth-ui/job.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-28-lattice-generation-production/job_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-28-lattice-generation-production/job_nolattice.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-28-line-width-plumbing/job_inner_only.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-28-line-width-plumbing/job_maintainer_defaults.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-28-line-width-plumbing/job_split.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-28-loadcase-analyze/loadcase_job.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-29-lattice-boundary-finish/job_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-29-lattice-boundary-finish/job_nolattice.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-29-lattice-certification-e2e/job_step_aboveband.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-29-lattice-certification-e2e/job_step_belowband.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-29-lattice-certification-e2e/job_step_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-29-lattice-certification-e2e/job_step_nolattice.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_cyl_shell_c25.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_cyl_shell_c40.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_cyl_shellskin_c25.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_cyl_shellskin_c40.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_cyl_skin_c25.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
