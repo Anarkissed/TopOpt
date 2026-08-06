@@ -791,7 +791,9 @@ JobDescription parse_job(const std::string& json_text) {
     const JsonValue& out =
         require_object(require_key(root, "output", "the job"), "output");
     reject_unknown_keys(
-        out, {"report", "mesh_format", "mesh_prefix", "smooth_factor"},
+        out,
+        {"report", "mesh_format", "mesh_prefix", "smooth_factor",
+         "project_cad_faces"},
         "output");
     job.output.report = require_nonempty_string(
         require_key(out, "report", "output"), "output.report");
@@ -809,6 +811,13 @@ JobDescription parse_job(const std::string& json_text) {
       if (job.output.smooth_factor < 1 || job.output.smooth_factor > 4)
         schema_fail("output \"smooth_factor\" must be in [1, 4] (got " +
                     std::to_string(job.output.smooth_factor) + ")");
+    }
+    // Optional CAD-face projection (task 2026-08-06-cad-face-projection);
+    // absent => false, and the exported bytes are unchanged.
+    if (const JsonValue* p = find_key(out, "project_cad_faces")) {
+      if (p->type != JsonValue::Type::Bool)
+        schema_fail("output \"project_cad_faces\" must be a boolean");
+      job.output.project_cad_faces = (p->num != 0.0);
     }
   }
 

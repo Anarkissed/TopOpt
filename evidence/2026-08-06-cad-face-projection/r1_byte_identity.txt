@@ -1,0 +1,21 @@
+== BRANCH (projection compiled in, job does not ask for it) ==
+branch: binary mtime 1785983583
+== BASE (branch changes stashed away) ==
+base: binary mtime 1785983681
+
+-- the guard: the two binaries MUST differ ---------------------
+branch binary sha256 e64aef6f5e89746319530ab6a0aae1a29cb411bb1c6ba22fc75647af36250ad1
+base   binary sha256 02a98786a47876d2206fc42a1f93dcabe493fd30a5c3b2ec6d96a0f793c77473
+the binaries differ, so the rebuild is real.
+
+-- the bar: every artifact byte-identical ----------------------
+R1 MET: every artifact is byte-identical across the two binaries.
+files compared: 8
+9d62acfcd71f211544980f5af9b740360afbeea1c8b9bdba23c13e5ad6b7f3c7  ./design.bin
+2f0be08b48920cb6ca1d5fa183f37b0b57088e17488e9d5286b133b6dcdb65c5  ./fields.bin
+0beaf775c434955896fe9f6b5909d0a2a351844435c7a2efe4768e69a3168d1b  ./loadcase.json
+43dff1466a54cc5e0d92232318403c2a964ff94c442e6fc5e5556df1a87e6378  ./report.json
+999db6d0a0a8e94666d99a65f44854325cbc07e8a7971b4d2fc57504c844007a  ./variant_026.stl
+e39dd6ca33ea01d75a9434a63399a744f937223f41c2843eff6b4abe3628b791  ./variant_038.stl
+9a579c2b86c2056616f183c788cc5f1a227a8b0eec603c0130e06995d9131973  ./variant_052.stl
+610e8f1b7ed02e6226ecfd0f935135a1ff0cd0254898e35e8fd93cbd5a86b589  ./variant_068.stl

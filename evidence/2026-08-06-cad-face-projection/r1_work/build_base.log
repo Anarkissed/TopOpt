@@ -1,0 +1,10 @@
+-- Configuring done (0.1s)
+-- Generating done (0.3s)
+-- Build files have been written to: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build
+[  5%] Building CXX object CMakeFiles/topopt.dir/src/cli/job.cpp.o
+[  5%] Building CXX object CMakeFiles/topopt.dir/src/cli/run_job.cpp.o
+[ 11%] Linking CXX static library libtopopt.a
+[ 94%] Built target topopt
+[ 94%] Building CXX object CMakeFiles/topopt_cli.dir/src/cli/main.cpp.o
+[100%] Linking CXX executable topopt-cli
+[100%] Built target topopt_cli

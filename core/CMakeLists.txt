@@ -43,6 +43,11 @@ add_library(topopt
   src/io/design_store.cpp
   src/mesh/mesh.cpp
   src/mesh/smooth.cpp
+  # Projection of an exported surface onto the KNOWN analytic CAD surface (task
+  # 2026-08-06-cad-face-projection). OCCT-free — it reads StepModel's plain data
+  # exactly as src/io/face_tag.cpp does — so it builds in every configuration,
+  # including the dependency-free iOS slices.
+  src/mesh/cad_project.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/lattice_boundary.cpp
   src/voxel/voxelize.cpp
@@ -463,6 +468,15 @@ add_test(NAME clearance COMMAND test_clearance)
 add_executable(test_smooth tests/unit/test_smooth.cpp)
 target_link_libraries(test_smooth PRIVATE topopt)
 add_test(NAME smooth COMMAND test_smooth)
+
+# CAD-face projection (task 2026-08-06-cad-face-projection), bar R2. A fixture
+# with a KNOWN plane and a KNOWN cylinder goes through the shipped export path
+# and the test asserts BOTH halves: the exported surface is measurably OFF
+# nominal before, and EXACTLY on nominal after. Pure C++/std — the StepModel is
+# built in code, so no OCCT, no Eigen — and it therefore gates every CI config.
+add_executable(test_cad_project tests/unit/test_cad_project.cpp)
+target_link_libraries(test_cad_project PRIVATE topopt)
+add_test(NAME cad_project COMMAND test_cad_project)
 
 # The BRUSH — per-region smoothing strength (handoff 2026-08-02-smoothing-page).
 # Bar AE1 at PR 200's own standard and on PR 200's own specimen: the committed
@@ -1385,6 +1399,26 @@ if(OpenCASCADE_FOUND)
   target_link_libraries(stairstep_probe PRIVATE topopt)
   target_compile_definitions(stairstep_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
+
+  # S1/S2 (task 2026-08-06-cad-face-projection): how much of an exported variant's
+  # surface came from the user's CAD — where the true surface is KNOWN and can be
+  # restored exactly — and how much the optimizer cut, where no ground truth
+  # exists. Uses PR 299's deviation metric unchanged and cross-checks the shipped
+  # attributor against its own reading. A harness, not a ctest.
+  #   cmake --build build --target cad_face_probe
+  #   ./build/cad_face_probe <part.step> <res> <evidence_dir> <variant.stl>...
+  add_executable(cad_face_probe EXCLUDE_FROM_ALL
+    tests/harness/cad_face_probe.cpp)
+  target_link_libraries(cad_face_probe PRIVATE topopt)
+
+  # S3/S4 (task 2026-08-06-cad-face-projection): what the exact projection was
+  # off by — bore roundness, face flatness, vertex motion against half a voxel —
+  # and what the seam costs.
+  #   cmake --build build --target cad_project_probe
+  #   ./build/cad_project_probe <part.step> <res> <evidence_dir> <variant.stl>...
+  add_executable(cad_project_probe EXCLUDE_FROM_ALL
+    tests/harness/cad_project_probe.cpp)
+  target_link_libraries(cad_project_probe PRIVATE topopt)
 
   # V1/V2 (task 2026-08-04-smoothing-viewer-and-ui): does the app's mesh-upload
   # signature (counts + bounds) separate a brushed-smoothed mesh from its input,

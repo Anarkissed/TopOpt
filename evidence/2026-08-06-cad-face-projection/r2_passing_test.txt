@@ -1,0 +1,14 @@
+fixture: 256 verts, 512 tris, 7 faces (6 Plane + 1 Cylinder r=6.0000 mm)
+grid 48 x 48 x 24, ONE VOXEL 0.833333 mm
+exported: 40928 verts, 81856 tris
+attributed 40776 / 40928 (Plane 35496, Cylinder 5280, ambiguous 152)
+BEFORE bore face 6: nominal 6.0000, measured min 5.7483 max 6.2983 mean 6.0263, out-of-roundness 0.5499 mm (0.660 voxel), rms error 0.1699 mm
+BEFORE worst planar face: max |deviation from its own nominal plane| 0.208333 mm (0.250 voxel)
+projected: moved 40776 (Plane 35496, Cylinder 5280), refused by guard 0, max move 0.298255 mm (0.3579 voxel)
+fold guard put back 0 of 40776 projected vertices (0.0000%)
+AFTER  bore face 6: nominal 6.000000, measured min 6.000000 max 6.000000, out-of-roundness 5.329e-15 mm, rms error 1.069e-15 mm
+AFTER  worst planar face: max |deviation| 0.000e+00 mm
+band OFF: unattributed vertices 152, of which moved 0 (must be 0)
+band ON (2 rings): 152 optimizer-cut vertices carried, furthest 0.082937 mm; projection's own max 0.298255 mm
+fold guard: 0 band vertices put back, 0 projected vertices put back, 0 inverted triangles left (0.000000 mm^2)
+31 checks, 0 failures

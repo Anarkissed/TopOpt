@@ -1,0 +1,8 @@
+== BRANCH (projection compiled in, job does not ask for it) ==
+== BASE (branch changes stashed away) ==
+
+-- the guard: the two binaries MUST differ ---------------------
+branch binary sha256 3c13634b00bdbac7ea1a9978340b0a887a925dae3fcb7f83d9640a29ed6a0bb4
+base   binary sha256 3c13634b00bdbac7ea1a9978340b0a887a925dae3fcb7f83d9640a29ed6a0bb4
+R1 INVALID: the two binaries are identical — no rebuild happened, so the
+artifact comparison below would prove nothing.

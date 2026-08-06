@@ -1,0 +1,81 @@
+== cad_face_probe — S1/S2 of 2026-08-06-cad-face-projection ==
+
+-- ARITHMETIC, MEASURED --------------------------------------
+part            M2_verticalStand.step
+bbox            218.276 x 52.593 x 200.000 mm
+grid            128 x 31 x 118 @ resolution 128
+ONE VOXEL       1.705279 mm   <- every tolerance below is stated in these units
+CAD mesh        1555 verts, 3106 tris, 78 B-rep faces
+CAD surface     94020.4 mm^2 total; by kind — Plane 36 faces (69.5% of area), Cylinder 12 (8.3%), Other 30 (22.2%)
+
+==============================================================
+VARIANT variant_068.stl — 143862 verts, 287720 tris (as core's importer welds it)
+
+-- S1(a) THE SPLIT, by vertex, at three tolerances ---------
+A vertex is ON A CAD FACE iff its distance to the CAD surface <= tol.
+tol              tol (mm)  on CAD face optimizer-cut  %% on CAD
+0.5 voxel          0.8526        65052        78810     45.22%
+1.0 voxel (default)     1.7053       119155        24707     82.83%
+1.5 voxel          2.5579       122361        21501     85.05%
+
+-- distance-to-CAD histogram (in voxels) — is the threshold on a knife edge? --
+  [0.00,0.25)      40117   27.89%  #################################
+  [0.25,0.50)      24935   17.33%  ####################
+  [0.50,0.75)      32797   22.80%  ###########################
+  [0.75,1.00)      21306   14.81%  #################
+  [1.00,1.25)       2408    1.67%  ##
+  [1.25,1.50)        798    0.55%  
+  [1.50,1.75)       1334    0.93%  #
+  [1.75,2.00)        492    0.34%  
+  [2.00,2.25)       1032    0.72%  
+  [2.25,2.50)        755    0.52%  
+  [2.50,2.75)      11753    8.17%  #########
+  [2.75,3.00)       1235    0.86%  #
+  [3.00,3.25)       1024    0.71%  
+  [3.25,3.50)        813    0.57%  
+  [3.50,3.75)       1218    0.85%  #
+  [3.75,4.00)         32    0.02%  
+  [4.00,99.00)+      1813    1.26%  #
+
+-- S1(a) THE SPLIT, by AREA, at tol = 1.000 voxel (1.7053 mm) --
+total exported surface   98654.7 mm^2 over 287720 triangles
+  on a CAD face             80655.5 mm^2   81.76%   <- has a correct answer
+  optimizer-cut             15470.7 mm^2   15.68%   <- no ground truth exists
+  seam (mixed triangle)      2528.5 mm^2    2.56%   <- S4's subject
+by VERTEX                on CAD 119155 / 143862 (82.83%), unattributed 24707 (17.17%)
+
+-- S1(b) THE CAD-FACE AREA, BY SURFACE KIND ----------------
+  Plane        52852.4 mm^2   65.53% of the CAD-face area   53.57% of the whole part
+  Cylinder      8226.7 mm^2   10.20% of the CAD-face area    8.34% of the whole part
+  Other        19576.4 mm^2   24.27% of the CAD-face area   19.84% of the whole part
+
+-- S1(c) DEVIATION FROM THE CAD, EACH POPULATION SEPARATELY -
+Reference: the pre-voxelization imported CAD tessellation (3106 tris,
+linear deflection 0.100 mm — the importer default). Unsigned point-to-surface
+distance, PR 299's metric unchanged. Voxel = 1.705279 mm.
+
+population                                             n    max mm    rms mm    p99 mm   rms vox
+CAD-face, all                                     119155    1.7052    0.8843    1.6346     0.519
+CAD-face, OBLIQUE                                  28223    1.7050    0.9547    1.6655     0.560
+optimizer-cut, all                                 24707   11.1552    4.7278   10.2548     2.772
+optimizer-cut, OBL                                  2372   10.3322    3.5381    7.0290     2.075
+OBLIQUE, both (PR 299's headline population)       30595   10.3322    1.3459    4.9349     0.789
+
+NOTE the optimizer-cut rows are NOT an error reading. That surface was never
+meant to lie on the CAD; its distance to the CAD is how deep into the part the
+optimizer cut. It is printed so the two halves are never averaged together.
+
+-- S1(d) TWO PARTITIONS, CROSS-TABULATED -------------------
+reviewer's reading, reproduced: 287720 triangles, 98655 mm^2 total, 80.4% of area
+axis-aligned by MESH normal (max|n| >= 0.98), 19.6% oblique.
+
+vertices                               mesh: AXIS  mesh: OBLIQUE
+nearest CAD normal: AXIS                    99173          14094
+nearest CAD normal: OBLIQUE                  8766          21829
+the two partitions agree on 84.1% of vertices.
+
+-- S2 THE SHIPPED ATTRIBUTOR, ON THE SAME MESH -------------
+attributed   116882   unattributed 26980   ambiguous 2273
+by kind:  Plane 72608   Cylinder 12690   Other(left alone) 31584
+probe vs shipped attributor: 2273 vertices disagree (must be 0)
+FATAL: the harness and the shipped attributor do not agree; every number above is suspect.

@@ -1,0 +1,20 @@
+ 97/107 Test #102: lattice_hookup ...................   Passed   14.01 sec
+        Start 103: protect_freeze_vs_solidity
+ 98/107 Test  #96: production_parity ................   Passed   34.43 sec
+        Start 104: lattice_variant
+ 99/107 Test  #97: clearance_parity .................   Passed   34.83 sec
+        Start 105: designbox_lattice_recert
+100/107 Test #105: designbox_lattice_recert .........   Passed    4.44 sec
+        Start 106: selfweight_clearance_void
+101/107 Test #106: selfweight_clearance_void ........   Passed    3.83 sec
+        Start 107: mesh_job
+102/107 Test #107: mesh_job .........................   Passed    6.93 sec
+103/107 Test  #77: coarsen_rule .....................   Passed  163.43 sec
+104/107 Test  #98: face_protection_parity ...........   Passed   59.74 sec
+105/107 Test #104: lattice_variant ..................   Passed   35.28 sec
+106/107 Test  #94: cli_demo .........................   Passed  242.16 sec
+107/107 Test #103: protect_freeze_vs_solidity .......   Passed  330.97 sec
+
+100% tests passed out of 107
+
+Total Test time (real) = 633.10 sec
