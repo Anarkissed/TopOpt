@@ -783,6 +783,99 @@ Worth its own task.
 
 ---
 
+## REVIEW CLEANUP — 18.9 MB OF SCRATCH THAT MUST NOT MERGE
+
+Review caught four files committed to the **repository root**, outside `evidence/`.
+They were scratch from the §S1.1 SDF re-measurement, swept in by a `git add -A`.
+Binaries in git are permanent — deleting them in a later commit removes them from
+the working tree and **not from history**, so every clone would pay the 18.9 MB
+forever. Removed before merge.
+
+### What each one was, and the verdict
+
+| file | bytes | what it actually is | verdict |
+| --- | --- | --- | --- |
+| `subject_variant.stl` | 8,211,484 | 164,228 tris — PR 299's subject: his bracket voxelized at 128, exported at factor 2 | **scratch** |
+| `sdf_clamped.stl` | 8,551,484 | 171,028 tris — the `SDF B/h 1.000 interp f2` row's output | **scratch** |
+| `sdf_out.stl` | 2,187,484 | 43,748 tris — the last per-config overwrite (`B/h 1.000 approx f1`) | **scratch** |
+| `sdf_headline.csv` | 1,224 | PR 303's WHOLE-PART headline table | **scratch, and already committed elsewhere** |
+
+**All four are scratch, and none is evidence.** The reasoning, per the review's
+requirement that this be decided rather than left vague:
+
+- **Nothing here cites them.** The only SDF number this handoff uses is the sphere
+  control, and that comes from `sdf_geometry_probe sphere`, whose output is captured
+  in `evidence/.../sdf_sphere_remeasured.txt`. The `sphere` mode returns before the
+  part-based code path and never writes any of these four.
+- **`subject_variant.stl` is regenerated, not lost.** `operator_bakeoff_probe` §S3.5
+  builds the identical mesh in process — 82,104 verts / 164,228 tris, the same
+  164,228 as this file — writes it, round-trips it and `std::remove`s it. The
+  measurement that used it is in the handoff; the artefact was never the evidence.
+- **`sdf_headline.csv` was already in the repo.** Its content is PR 303's own
+  committed `evidence/2026-08-05-smoothing-sdf-geometry-extraction/sdf_headline.txt`.
+  Keeping the root copy would have duplicated existing evidence. It is also the
+  **whole-part** objective §0 identifies as contaminated by CAD-face damage — the
+  measurement this task explicitly does not build on.
+
+### Root cause
+
+`core/tests/harness/sdf_geometry_probe.cpp:1482`:
+
+```cpp
+const std::string evdir = argc > 5 ? argv[5] : ".";
+```
+
+The part-based modes default their output directory to **the current working
+directory**. Run from the repo root — which is what a bare
+`./build/sdf_geometry_probe` does while exploring its modes — the four writes at
+lines 1507, 1562, 1580 and 1626 land in the repository.
+
+### Why the fix is NOT one line, and is not made here
+
+The review's instruction was to make it if it is a one-liner and to name it and stop
+if it is larger. It is larger, for two reasons that only show up on inspection:
+
+1. **That default is load-bearing for another task's documented recipe.** PR 303's
+   own `evidence/2026-08-05-smoothing-sdf-geometry-extraction/README.md:60` runs
+   `sdf_geometry_probe partfactor $D/out/design.bin $D/M2_verticalStand.step` with
+   **no evidence directory**. Making the harness require one breaks that line.
+2. **Six write sites share `evdir`** (1078, 1274, 1507, 1562, 1580, 1626), so a
+   change of contract has to be audited across all of them and the README updated.
+
+That is restructuring another task's harness inside a cleanup commit, which is
+exactly what the review ruled out. **It belongs to the SDF harness's own task.**
+
+### The guard that IS made here
+
+`.gitignore` gains **root-anchored** patterns — a leading `/`, so they match only
+the repository root and leave the identically-named files under `evidence/<task>/`
+tracked (verified: the four `evidence/**/sdf_*.csv` remain in `git ls-files`):
+
+```
+/sdf_*.stl        /sphere_control.stl
+/sdf_*.csv        /dumbbell.stl
+/subject_variant.stl   /bracket_export.stl
+```
+
+The last three are **this task's own** probe's transient files. `operator_bakeoff_probe`
+writes them to the CWD when given no evidence directory (lines 515, 787, 923) and
+`std::remove`s each immediately (518, 790, 926) — so they are never left behind by a
+successful run, but a crash between the write and the remove would leave an 8 MB file
+in the root. Same hazard, smaller window, covered by the same guard.
+
+**This is a guard, not the fix.** It makes this recurrence impossible in this
+repository; it does not stop the harness writing to a CWD somewhere else.
+
+### What this commit does NOT change
+
+**No production behaviour, and no result.** The only tracked source touched is
+`.gitignore`. R1's byte-identity result therefore carries over unchanged rather than
+being re-run — no binary in it, and no harness it covers, was modified. The R5 sweep
+on the cleanup returns no removed assertion, test registration or `add_test`, and the
+registered ctest count is still 107.
+
+---
+
 ## FILES
 
 | file | what |
@@ -867,6 +960,12 @@ better surface, or it may partly be the scoring — we grade by averaging the er
 every point, and a mesh with a tenth of the points has a tenth of the places to be
 wrong. Nobody has separated those two yet, and it should be separated before either
 method is chosen.
+
+**One housekeeping note.** Review caught 18.9 MB of scratch files that had been
+committed to the top level of the repository by accident — leftovers from re-running
+the other team's measurement. They are gone. **Nothing about any result changed, only
+what was committed:** no number in this document moved, and no code that runs on your
+part was touched.
 
 **Next steps, in order:**
 
