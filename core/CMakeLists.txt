@@ -43,6 +43,7 @@ add_library(topopt
   src/io/design_store.cpp
   src/mesh/mesh.cpp
   src/mesh/smooth.cpp
+  src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/lattice_boundary.cpp
   src/voxel/voxelize.cpp
@@ -460,6 +461,16 @@ add_test(NAME clearance COMMAND test_clearance)
 # in code, so it runs in every configuration. Covers bars S1 (frozen=bit-identical),
 # S2 (min-feature constraint stops a thinning), S4 (volume drift vs bound), S5
 # (determinism), S6 (strength 0 = identity).
+# The S2 CONSTRAINT BARS for the two candidate surface operators (task
+# 2026-08-06-smoothing-operator-bakeoff, bar R2). Each of C1 / C2 / C3 is a PAIR
+# of arms: the unconstrained arm asserts the damage actually happens, the
+# constrained arm asserts it does not. Pure C++/std like test_smooth (meshes are
+# built in code from synthetic fields via marching_cubes), so it runs in every
+# configuration.
+add_executable(test_surface_operator tests/unit/test_surface_operator.cpp)
+target_link_libraries(test_surface_operator PRIVATE topopt)
+add_test(NAME surface_operator COMMAND test_surface_operator)
+
 add_executable(test_smooth tests/unit/test_smooth.cpp)
 target_link_libraries(test_smooth PRIVATE topopt)
 add_test(NAME smooth COMMAND test_smooth)
@@ -1384,6 +1395,18 @@ if(OpenCASCADE_FOUND)
     tests/harness/stairstep_probe.cpp)
   target_link_libraries(stairstep_probe PRIVATE topopt)
   target_compile_definitions(stairstep_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
+
+  # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
+  # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
+  # S3 instrumentation (minimum cross-section, outward excursion, volume, wall
+  # time per stroke). Prints tables, writes evidence. A harness, not a ctest.
+  #   cmake --build build --target operator_bakeoff_probe
+  #   ./build/operator_bakeoff_probe [evidence_dir] [bracket.stl]
+  add_executable(operator_bakeoff_probe EXCLUDE_FROM_ALL
+    tests/harness/operator_bakeoff_probe.cpp)
+  target_link_libraries(operator_bakeoff_probe PRIVATE topopt)
+  target_compile_definitions(operator_bakeoff_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
 
   # V1/V2 (task 2026-08-04-smoothing-viewer-and-ui): does the app's mesh-upload

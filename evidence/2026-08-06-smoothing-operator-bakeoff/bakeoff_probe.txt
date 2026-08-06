@@ -1,0 +1,167 @@
+== operator_bakeoff_probe ==
+sphere R 20.000 mm, spacing 1.620040 mm (12.3 voxels across the radius),
+export factor 2. The spacing is his part's at resolution 128, so
+the staircase is the same physical size PR 299 and PR 303 measured.
+
+C1 cell (the lattice that produced the vertices) = 0.810020 mm = spacing / factor.
+Trust radius at 0.5 cells = 0.405010 mm.
+
+baseline: 11232 verts / 22460 tris, rms 0.3307 mm, max 0.7266 mm, volume 33035.076 mm3
+
+== S3.1 THE BAKE-OFF ON THE ANALYTIC SPHERE ==
+Taubin rows reproduce PR 299 §S1(d) exactly (guard OFF, which is the
+best the family can do anywhere, not the strength the app ships).
+A and B rows are under C1 at 0.5 cells and C3 on. C2 is INERT here —
+a sphere has no load path, no thin section and no design box — which
+is stated rather than hidden: S3.4 exercises C2 on a fixture that has
+all three.
+
+configuration                  max mm   rms mm %ofbase  REMOVED   dihed   maxmove     vol%    verts   iters   wall s
+unsmoothed (PR 299 base)       0.7266   0.3307   100.0     0.0%   14.53    0.0000   0.0000    11232       0    0.000
+Taubin pairs 5                 0.7279   0.3176    96.0     4.0%   14.48    0.2709   0.0109    11232       5    0.002
+Taubin pairs 20                0.6956   0.2936    88.8    11.2%   13.26    0.4285   0.0457    11232      20    0.004
+Taubin pairs 80                0.5753   0.2450    74.1    25.9%    8.43    0.5352   0.1873    11232      80    0.012
+Taubin pairs 160               0.5769   0.2198    66.5    33.5%    5.68    0.6653   0.3848    11232     160    0.021
+A mean-curvature x1            0.6391   0.2875    86.9    13.1%   17.91    0.3627   0.0000    11232       1    0.002
+A mean-curvature x2            0.8893   0.2678    81.0    19.0%   26.79    0.3933   0.0000    11232       2    0.003
+A mean-curvature x5            0.5665   0.2080    62.9    37.1%   31.48    0.5685   0.0000    11232       5    0.004
+A mean-curvature x10           0.4978   0.1735    52.5    47.5%   30.45    0.6329   0.0000    11232      10    0.006
+A mean-curvature x20           0.4478   0.1602    48.4    51.6%   26.32    0.6339   0.0000    11232      20    0.011
+A mean-curvature x40           0.5513   0.1656    50.1    49.9%   20.45    0.6108   0.0000    11232      40    0.021
+A mean-curvature x80           0.5767   0.1887    57.0    43.0%   18.12    0.5877   0.0000    11232      80    0.040
+A mean-curvature x160          0.6343   0.2055    62.1    37.9%   17.30    0.5902   0.0000    11232     160    0.077
+B ramp r1 e0.0 x1              1.1514   0.3096    93.6     6.4%   22.93    0.6159   0.0000    11232       1    0.018
+B ramp r1 e0.0 x2              1.0600   0.3132    94.7     5.3%   24.71    0.6654   0.0000    11232       2    0.035
+B ramp r1 e0.0 x4              1.1673   0.3261    98.6     1.4%   24.45    0.6982   0.0000    11232       4    0.069
+B ramp r1 e0.0 x8              1.1073   0.3452   104.4    -4.4%   25.61    0.6873   0.0000    11232       8    0.130
+B ramp r1 e0.5 x1              1.1955   0.3045    92.0     8.0%   18.81    0.6023   0.0000   105412       1    0.269
+B ramp r1 e0.5 x2              1.1079   0.3051    92.3     7.7%   21.24    0.6741   0.0000   105412       2    0.427
+B ramp r1 e0.5 x4              1.0252   0.2995    90.6     9.4%   24.87    0.6774   0.0000   105412       4    0.754
+B ramp r1 e0.5 x8              1.1214   0.3284    99.3     0.7%   30.81    0.6980   0.0000   105412       8    1.429
+B ramp r2 e0.0 x1              1.0610   0.2835    85.7    14.3%   28.22    0.6317   0.0000    11232       1    0.022
+B ramp r2 e0.0 x2              0.9619   0.2887    87.3    12.7%   29.20    0.6652   0.0000    11232       2    0.041
+B ramp r2 e0.0 x4              1.0914   0.3008    90.9     9.1%   29.82    0.6701   0.0000    11232       4    0.083
+B ramp r2 e0.0 x8              0.9086   0.2971    89.8    10.2%   32.32    0.6682   0.0000    11232       8    0.162
+B ramp r2 e0.5 x1              1.1672   0.2893    87.5    12.5%   22.13    0.6063   0.0000   105412       1    0.290
+B ramp r2 e0.5 x2              1.1145   0.2960    89.5    10.5%   28.19    0.6908   0.0000   105412       2    0.483
+B ramp r2 e0.5 x4              1.1560   0.2992    90.5     9.5%   33.68    0.6880   0.0000   105412       4    0.866
+B ramp r2 e0.5 x8              1.0945   0.3111    94.1     5.9%   39.07    0.7002   0.0000   105412       8    1.603
+
+== S3.2 DOES OPERATOR B MEET C1 BY CONSTRUCTION? ==
+The claim under test: a ramp between a terrace's own extremes lies
+inside that terrace's envelope, so the trust region is met without
+clamping. Measured by running B with C1 DISABLED and asking how far
+outside the box it would have gone, and by counting how often the
+envelope clamp itself bit.
+
+configuration               C1 off: would exceed deepest exc mm   envelope     max env mm
+                            maxmove   C1 (verts)                    clamps               
+B ramp r1 e0.5 x1            2.2483         5793         1.2108          2         0.0443
+                         (trust radius 0.4050 mm; 5793 of 105412 vertices)
+B ramp r1 e0.5 x4            2.1818        14312         1.7785         38         0.1169
+                         (trust radius 0.4050 mm; 14312 of 105412 vertices)
+B ramp r1 e0.5 x8            2.8710        37332         2.7549        133         0.1169
+                         (trust radius 0.4050 mm; 37332 of 105412 vertices)
+B ramp r2 e0.5 x1            2.2541         6047         1.2027          0         0.0000
+                         (trust radius 0.4050 mm; 6047 of 105412 vertices)
+B ramp r2 e0.5 x4            2.4279        23635         2.4639          7         0.1354
+                         (trust radius 0.4050 mm; 23635 of 105412 vertices)
+B ramp r2 e0.5 x8            2.9898        43577         2.4639         35         0.5351
+                         (trust radius 0.4050 mm; 43577 of 105412 vertices)
+
+== S3.3 THE INSTRUMENTS, VALIDATED ==
+Every instrument below is checked against a fixture whose answer is
+known by construction. An instrument that has never been shown to
+MOVE cannot be trusted to report that something did not.
+
+-- minimum cross-section: a dumbbell with a neck of known width --
+The measure has a 2-voxel quantum (2*r*spacing, r integer), so the
+sweep uses EVEN necks it can actually represent. An odd neck reads
+down to the next even value and that is a property of the instrument,
+not of the part.
+
+neck (voxels)   expected mm measured min   global min       p01 mm  components   dropped
+2                     2.000        2.000        2.000        2.000           1         0
+4                     4.000        2.000        2.000        2.000           1         0   <-- MISMATCH
+6                     6.000        2.000        2.000        2.000           1         0   <-- MISMATCH
+Hildebrand min tracks the constructed neck width EXACTLY: NO — see the note above; it is corner-limited
+
+-- minimum cross-section, measured as a SLICE AREA --
+neck (voxels)    expected mm2     source mm2   exported mm2   equiv w mm    solid vox
+2                       4.000          4.000          4.000        2.000         1632
+3                       9.000          9.000          4.000        3.000         1672
+4                      16.000         16.000          4.000        4.000         1728
+6                      36.000         36.000          4.000        6.000         1888
+slice-area instrument reproduces the constructed neck EXACTLY on the
+source occupancy: YES
+
+THE `exported mm2` COLUMN IS NOT THE SAME NUMBER, AND THAT IS A
+PRE-EXISTING CORE DEFECT, NOT AN OPERATOR EFFECT. Round-tripping the
+solid through marching_cubes and voxelize_onto_grid (voxel.hpp:121)
+ADDS solid voxels the source never had: on the neck-6 dumbbell,
+1888 source voxels become 1932, and the 44 extra ones sit in columns
+at (10,11,k) and (17,11,k) running from the bridge down to k = 0,
+through space the source marks VOID. Those columns are the exact
+corner columns of an axis-aligned bridge, which is the signature of
+a parity/ray fill flipping on a degenerate edge hit. They are
+CONNECTED to the part, so a largest-component filter does not remove
+them, and because this statistic is a minimum they set a floor.
+Consequence, stated plainly: the ABSOLUTE cross-section readings in
+S3.4 carry that floor, so only the CHANGE from the exported baseline
+is read there, and the solid-voxel count is printed beside it so a
+change in the fill itself cannot masquerade as a change in the part.
+
+-- maximum outward excursion: a constructed violation --
+  wholly inside the box :  -1.0000 mm (must be <= 0)
+  one vertex 0.75 mm out:  +0.7500 mm (must read 0.75)
+instrument separates the two: YES
+
+== S3.4 THE NUMBERS THAT DECIDE IT, ON A FIXTURE WITH A TENDRIL ==
+The sphere has no tendril, so the minimum cross-section cannot be
+exercised on it. The dumbbell can: a 2-voxel neck is the thinnest
+member and is exactly what a smoother necks. That neck also sits ON
+the 2-voxel floor §7 V3 gates at, so classify_trust_sign reads it as
+material that matters and C2 makes it OUTWARD-ONLY. The design box
+clips ONE side only, so the InwardOnly and Both cases are present
+too rather than the box swallowing the whole part.
+
+trust radius 0.2500 mm (0.5 cell), so the box bind tolerance is its
+cube diagonal 0.4330 mm — see the note in the source.
+C2 classification of 4384 vertices: 128 OutwardOnly, 480 InwardOnly, 0 Pinned, 3776 Both
+
+`TENDRIL` is the minimum cross-section OF THE BRIDGE ITSELF (x-slices over
+i in [10,18)) — the number his objection is about. `whole part` is the same
+statistic over the entire grid, and its LOCATION is printed because the fill
+defect documented in S3.3 puts an artefact column at z = 0 that can be thinner
+than any real member.
+
+configuration                 TENDRIL  d TENDRIL whole part         at    max exc  volume mm3  wall s
+                                  mm2        mm2        mm2                    mm                   s
+as exported today              4.0000          -     4.0000        x=10    +0.0000    1616.067       -
+A x10  C2 OFF                  4.0000    +0.0000     4.0000        x=10    +0.0484    1616.067   0.002  <-- OUTSIDE THE DESIGN BOX
+A x10  C2 ARMED                4.0000    +0.0000     4.0000        x=10    -0.0436    1616.067   0.003
+A x40  C2 OFF                  4.0000    +0.0000     1.0000        z=0     +0.0869    1616.067   0.008  <-- OUTSIDE THE DESIGN BOX
+A x40  C2 ARMED                4.0000    +0.0000     1.0000        z=0     -0.0535    1616.067   0.008
+B x2  C2 OFF                   4.0000    +0.0000     4.0000        x=10    -0.0510    1616.067   0.168
+B x2  C2 ARMED                 4.0000    +0.0000     4.0000        x=10    -0.0195    1616.067   0.170
+B x8  C2 OFF                   4.0000    +0.0000     4.0000        x=10    -0.0342    1616.067   0.546
+B x8  C2 ARMED                 4.0000    +0.0000     4.0000        x=10    -0.0057    1616.067   0.524
+Taubin pairs 20                4.0000    +0.0000     4.0000        x=10    -0.0045    1620.283   0.001
+Taubin pairs 160               4.0000    +0.0000     4.0000        x=10    +0.0961    1647.068   0.006  <-- OUTSIDE THE DESIGN BOX
+
+== S3.5 WALL TIME PER STROKE AT HIS MESH SIZE ==
+The point of all of this is a BRUSH, so the number that matters is
+one stroke on a mesh the size of his. His part voxelized at 128 and
+exported at factor 2, through the same weld the app's round trip
+does.
+
+his mesh: 82104 verts / 164228 tris, grid 125x128x13 spacing 1.620040 mm, cell 0.810020 mm
+
+one stroke                          iters     wall s ms / iteration
+A mean-curvature x5                     5      0.029            5.7
+A mean-curvature x20                   20      0.082            4.1
+B ramp x2                               2      3.984         1991.9  (82104 -> 980639 verts)
+B ramp x8                               8     13.259         1657.3  (82104 -> 980639 verts)
+Taubin pairs 20                        20      0.025            1.2
+
+== END ==
