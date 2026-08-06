@@ -7,7 +7,8 @@ Handoff: `docs/handoffs/2026-08-06-smoothing-operator-bakeoff.md`
 | `bakeoff_probe.txt` | the full run of `operator_bakeoff_probe`: the 29-row sphere bake-off (§S3.1), the C1-by-construction test for operator B (§S3.2), the validated instruments (§S3.3), the tendril table (§S3.4), and wall time per stroke at his mesh size (§S3.5) |
 | `sphere_bakeoff.csv` | the same sphere table, machine-readable |
 | `r2_failing_first.txt` | bar R2 — C1, C2, C3 and the normal orientation each DISABLED in `core/src/mesh/surface_operator.cpp` in turn, with the unmodified `test_surface_operator` re-run and its failures pasted; all constraints restored at the end |
-| `r1_byte_identity.txt` | bar R1 — stdout checksums of 11 shipped test binaries across a baseline worktree at `90e9ec5` and this change, plus the two vacuity guards (at least 5 binaries compared; the two `libtopopt.a` archives demonstrably differ) |
+| `r1_byte_identity.txt` | bar R1 — stdout checksums of 11 shipped test binaries across a baseline worktree at `origin/main` (`81a2368`) and this change, plus the two vacuity guards (at least 5 binaries compared; the two `libtopopt.a` archives demonstrably differ). Re-run against the MERGED tree: main moved 11 commits under this task |
+| `sdf_sphere_remeasured.txt` | PR 303's own sphere control, re-run here after PR 303 merged to main — the source of the matched-vertex-count comparison in §S1.1 |
 
 ## Reproducing
 
@@ -28,6 +29,8 @@ the STL round trip: 11232 verts, rms 0.3307 mm, max 0.7266 mm, matching PR 299
 
 The classifier from `cad-face-projection` had not landed, so there is no
 measurement on the cut population: no §0 re-baseline of Taubin or the SDF route, no
-per-rung comparison on his part, and no C4 assertion. The SDF figure quoted in the
-handoff (58.9% on this sphere) is **read from PR 303's own evidence** on the
-unmerged branch `claude/smoothing-sdf-geometry-477925`, not re-measured here.
+per-rung comparison on his part, and no C4 assertion. PR 303 **merged to main while this task was running**, so its sphere figures are
+no longer quoted — `sdf_sphere_remeasured.txt` is that probe re-run here, and it
+reproduces PR 303's published table exactly. What is still owed is the
+re-baselining of those figures on the cut population, which is the part that needs
+the classifier.

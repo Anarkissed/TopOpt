@@ -28,11 +28,15 @@ the signed constraint armed and with it off. Volume holds to 0.000000%.
 
 **Three things are NOT settled here, and none of them is a detail:**
 
-1. **A LOSES to the SDF route on this fixture.** PR 303 scored the same sphere at
-   58.9% removed; A reaches 51.6%. Whether A also loses on the population that
-   actually matters — your cut surfaces, with the CAD faces excluded — is exactly
-   what the §0 re-baseline would settle, and that re-baseline is blocked on the
-   classifier (§S3.6).
+1. **Against the SDF route it depends entirely on mesh density, and that is a new
+   result.** PR 303 merged to `main` while this task was running, so its probe is
+   now buildable here and I re-measured it rather than quoting it. **At a matched
+   vertex count A wins: 51.6% removed on 11,232 vertices against SDF's 48.2% on
+   11,502.** SDF only pulls ahead — 58.9%, and 64.8% at its best — by DECIMATING
+   the mesh 3.9x and 10.6x. Some of that lead is the metric rather than the
+   surface: the score is a per-vertex RMS, and a mesh with a tenth of the vertices
+   has a tenth of the places to be wrong. Which is genuinely better is still open,
+   and still needs the cut population (§S3.6).
 2. **A makes the surface locally rougher while making it globally more accurate.**
    RMS deviation from the true sphere falls to 48.4% of its unsmoothed value, and
    RMS dihedral angle RISES from 14.53° to 26.32°. Taubin does the opposite. Whether that trade looks better to
@@ -224,23 +228,47 @@ family's best-anywhere by 1.54x.
    0.3848% at 160.** That is C3 doing its job (§S2.3), not a property of the
    operators.
 
-**On the SDF row.** 58.9% is **quoted from PR 303, not re-measured here.** PR 303 is
-still an open PR on `claude/smoothing-sdf-geometry-477925`; its sphere table reads
-41.1% of base at B/h = 2, whose complement is 58.9%, and 35.2% (64.8% removed) at
-B/h = 3.3. I did not merge that branch to re-run it, and I did not re-baseline it,
-because re-baselining is the §0 work that needs the classifier. Two things make the
-comparison less clean than one number suggests, and both cut the same way:
+**On the SDF rows — RE-MEASURED, not quoted.** PR 303 **merged to `main` while this
+task was running** (main moved 11 commits: PRs 301, 302 and 303). Its
+`sdf_geometry_probe` builds in this configuration, so main was merged in and the
+sphere control re-run here rather than quoted. It reproduces PR 303's published
+table exactly (`evidence/.../sdf_sphere_remeasured.txt`):
 
-- SDF is a **re-meshing**, not a brush-scoped operator. It takes the sphere from
-  11,232 vertices to 2,886 at B/h = 2. A keeps the vertex set.
+```
+configuration               max mm    rms mm % of base     verts
+unsmoothed (PR 299)         0.7266    0.3307     100.0     11232
+SDF B/h = 3.300             0.3920    0.1164      35.2      1062     -> 64.8% removed
+SDF B/h = 2.000             0.4647    0.1361      41.1      2886     -> 58.9% removed
+SDF B/h = 1.000             0.4909    0.1714      51.8     11502     -> 48.2% removed
+SDF B/h = 0.500             0.4862    0.1664      50.3     45390     -> 49.7% removed
+```
+
+**THE VERTEX COUNT COLUMN IS THE STORY.** Operator A scores 51.6% on **11,232**
+vertices — the input mesh, unchanged. The SDF row at a comparable count, B/h = 1.0
+with **11,502** vertices, scores **48.2%**. **A wins at matched mesh density.** SDF's
+58.9% costs a decimation to 2,886 vertices (3.9x) and its 64.8% costs 1,062 (10.6x).
+
+I am not claiming the decimation makes SDF's lead fake — a smooth reconstruction
+placing 1,062 well-chosen vertices really may sit closer to a sphere than 11,232
+badly-placed ones. But the metric is a **per-vertex RMS**, so a mesh with a tenth of
+the vertices has a tenth of the places to be wrong, and no part of PR 303's headline
+separates those two effects. That separation is owed alongside the re-baseline.
+
+Two further things make the comparison less clean than one number suggests, and both
+cut the same way:
+
+- SDF is a **re-meshing**, not a brush-scoped operator. A keeps the vertex set and
+  the topology, which is what makes it brushable at all: a stroke changes some
+  vertices and leaves the rest bit-identical.
 - SDF carries **no displacement bound**. PR 303's own Gibson table measures it moving
   0.9001 mm on your part at B/h = 2, and reports 0.02% of vertices pulled back at a
   0.5-voxel bound. A is bounded at 0.405 mm per axis by construction, on every
   vertex, always.
 
-So "SDF scores higher" is true and "SDF and A are interchangeable" is not. Which one
-is better **on your cut surfaces under a displacement bound** is the measurement
-that is owed.
+So "SDF scores higher" is true only at 3.9x to 10.6x fewer vertices, "A scores
+higher at matched density" is also true, and "SDF and A are interchangeable" is not
+true at all. Which is better **on your cut surfaces, at matched density, under a
+displacement bound** is the measurement that is owed.
 
 ---
 
@@ -547,7 +575,11 @@ Owed to `cad-face-projection`:
 
 ## THE BARS
 
-**R1 — byte-identical when off.** See `evidence/.../r1_byte_identity.txt`. The change
+**R1 — byte-identical when off**, **re-run against the MERGED tree**. main moved 11
+commits under this task (PRs 301, 302, 303), so the first R1 — taken against
+`90e9ec5` — was stale before it could be published; the published one is against
+`origin/main` at `81a2368` with that main merged in. See
+`evidence/.../r1_byte_identity.txt`. The change
 is additive: one new header, one new source file, two new test/harness files, and
 three additive blocks in `core/CMakeLists.txt`. No existing translation unit was
 edited. The stash-rebuild comparison checksums the stdout of every shipped test
@@ -723,7 +755,8 @@ Worth its own task.
 | `core/CMakeLists.txt` | three additive blocks |
 | `evidence/.../bakeoff_probe.txt`, `sphere_bakeoff.csv` | the run |
 | `evidence/.../r2_failing_first.txt` | each constraint disabled, failures pasted |
-| `evidence/.../r1_byte_identity.txt` | stash-rebuild checksums |
+| `evidence/.../r1_byte_identity.txt` | stash-rebuild checksums, against the merged tree |
+| `evidence/.../sdf_sphere_remeasured.txt` | PR 303's sphere control, re-run here after it merged |
 
 Reproduce:
 
@@ -785,13 +818,16 @@ faces did not move — and I deliberately did not invent a second version of tha
 to fill the gap, because two tools disagreeing about which surfaces are yours would
 be worse than waiting.
 
-There is also one result that goes against the winner and you should have it: on this
-same sphere, the **SDF method from the previous round scores higher — 58.9% against
-51.6%**. It is not a like-for-like comparison (that method rebuilds the whole mesh
-and has no movement limit at all, and it was scored against an objective that
-included the damage it was doing to CAD faces, which is exactly what needs
-re-measuring). But as it stands, it is ahead, and whether mean-curvature flow catches
-it on your real surfaces is an open question, not a settled one.
+There is also the comparison against the **SDF method** from the previous round, and
+it turned out more interesting than expected. That work landed on the main branch
+while I was working, so instead of quoting its number I re-ran it here. **On a mesh
+the same size as ours, mean-curvature flow is ahead — 51.6% against 48.2%.** The SDF
+method only scores higher (58.9%, and 64.8% at its best) by throwing away most of the
+mesh first: four times fewer points, or ten times fewer. That may genuinely be a
+better surface, or it may partly be the scoring — we grade by averaging the error at
+every point, and a mesh with a tenth of the points has a tenth of the places to be
+wrong. Nobody has separated those two yet, and it should be separated before either
+method is chosen.
 
 **Next steps, in order:**
 
