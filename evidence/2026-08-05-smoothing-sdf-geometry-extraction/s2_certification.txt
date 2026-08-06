@@ -1,0 +1,124 @@
+S2 — VOLUME PRESERVATION IS NOT MARGIN PRESERVATION.
+
+Every row is one run of the SHIPPED certification seam:
+  topopt-cli analyze job_analyze.json --mesh <mesh> --out <dir>
+on the maintainer's own job (mode switched to "analyze"; the lattice
+stage removed, since a certification is not a lattice run). Nothing here
+is inferred from volume or argued from geometry.
+
+job:  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-sdf-geometry-477925/evidence/2026-08-05-smoothing-sdf-geometry-extraction/job_analyze.json   part: M2_verticalStand.step   resolution 128
+-----------------------------------------------------------------------
+
+### v026_exported.stl
+analyze: mesh meshes/v026_exported.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.02005 MPa   worst-case margin: 2743 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 359.1 g   mesh mass: 356.8 g
+  min-feature violations: 674
+real 72.52
+user 113.57
+
+### v026_isocontour.stl
+real 14.32
+user 14.13
+
+### v026_sdf.stl
+real 14.34
+user 14.18
+
+### v026_taubin.stl
+analyze: mesh meshes/v026_taubin.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.02005 MPa   worst-case margin: 2743 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 359.1 g   mesh mass: 356.8 g
+  min-feature violations: 674
+real 74.92
+user 116.92
+
+### v038_exported.stl
+analyze: mesh meshes/v038_exported.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.01844 MPa   worst-case margin: 2983 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 411.5 g   mesh mass: 408.9 g
+  min-feature violations: 604
+real 80.72
+user 126.28
+
+### v038_isocontour.stl
+real 14.75
+user 14.57
+
+### v038_sdf.stl
+real 15.20
+user 15.06
+
+### v038_taubin.stl
+analyze: mesh meshes/v038_taubin.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.01844 MPa   worst-case margin: 2983 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 411.5 g   mesh mass: 408.9 g
+  min-feature violations: 604
+real 82.32
+user 132.75
+
+### v052_exported.stl
+analyze: mesh meshes/v052_exported.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.01787 MPa   worst-case margin: 3077 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 472.5 g   mesh mass: 469.6 g
+  min-feature violations: 527
+real 85.29
+user 135.42
+
+### v052_isocontour.stl
+real 14.48
+user 14.35
+
+### v052_sdf.stl
+real 14.66
+user 14.48
+
+### v052_taubin.stl
+analyze: mesh meshes/v052_taubin.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.01787 MPa   worst-case margin: 3077 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 472.5 g   mesh mass: 469.6 g
+  min-feature violations: 527
+real 83.66
+user 135.74
+
+### v068_exported.stl
+analyze: mesh meshes/v068_exported.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.0187 MPa   worst-case margin: 2942 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 543.6 g   mesh mass: 540.2 g
+  min-feature violations: 388
+real 91.60
+user 152.38
+
+### v068_isocontour.stl
+real 14.43
+user 14.32
+
+### v068_sdf.stl
+real 14.41
+user 14.25
+
+### v068_taubin.stl
+analyze: mesh meshes/v068_taubin.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.0187 MPa   worst-case margin: 2942 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 543.6 g   mesh mass: 540.3 g
+  min-feature violations: 384
+real 86.20
+user 141.13
+
+-----------------------------------------------------------------------
+CONTROL: the same job with NO substitute mesh (the solid part), so the
+cost of the certification itself is separated from the mesh handling.
+  peak stress: 0.0187 MPa   worst-case margin: 2941 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 682 g
+  min-feature violations: 36
+real 89.50
+user 153.90

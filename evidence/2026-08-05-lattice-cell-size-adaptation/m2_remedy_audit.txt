@@ -1,0 +1,6 @@
+cell_size_mm         1.2
+latticed_cells       7757
+interior_volume_mm3  19367.98455
+strut_min_cells_per_member 2.083333333
+strut_out_of_regime  True
+lattice accepted     True

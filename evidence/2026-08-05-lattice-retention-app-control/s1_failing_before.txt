@@ -1,0 +1,80 @@
+Building for debugging...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.13s)
+Test Suite 'Selected tests' started at 2026-08-05 18:10:20.689.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-08-05 18:10:20.690.
+Test Suite 'LatticeRetentionControlTests' started at 2026-08-05 18:10:20.690.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAKeyTheCoreDoesNotAcceptIsNeverEmitted]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAKeyTheCoreDoesNotAcceptIsNeverEmitted]' passed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOlderCoreSaysSoRatherThanFailingSilently]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOlderCoreSaysSoRatherThanFailingSilently]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testANonLatticeJobIsUntouched]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testANonLatticeJobIsUntouched]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOutOfRegimeRegionSaysTheCertificateDoesNotCoverIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOutOfRegimeRegionSaysTheCertificateDoesNotCoverIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnUnmeasuredMemberWidthStaysUnmeasured]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnUnmeasuredMemberWidthStaysUnmeasured]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAPartiallyCapableCoreGetsExactlyWhatItAccepts]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:203: error: -[TopOptFlowsTests.LatticeRetentionControlTests testAPartiallyCapableCoreGetsExactlyWhatItAccepts] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)")
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAPartiallyCapableCoreGetsExactlyWhatItAccepts]' failed (0.011 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAReceiptWithoutTheReportReadsAsAbsent]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAReceiptWithoutTheReportReadsAsAbsent]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testARegionThatReceivedNothingIsNamedAndComesFirst]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testARegionThatReceivedNothingIsNamedAndComesFirst]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:96: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)") - the switch itself must reach the worker
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:98: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(0.12)") - a ceiling the user MOVED must reach the worker
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:100: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:101: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)")
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:116: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)") - a re-lattice must carry the same posture as the optimize run
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:118: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(0.12)")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:119: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:120: error: -[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)")
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAUniformRunSaysWhyRetentionIsUnavailable]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAUniformRunSaysWhyRetentionIsUnavailable]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testBothSerializersEmitTheSameGradingBlock]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testBothSerializersEmitTheSameGradingBlock]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testPerRegionIsNeverArmedWhileRetentionIsOff]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testPerRegionIsNeverArmedWhileRetentionIsOff]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingIsOmittedWhenTheUserHasNotMovedIt]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:150: error: -[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingIsOmittedWhenTheUserHasNotMovedIt] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)")
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingIsOmittedWhenTheUserHasNotMovedIt]' failed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingRowNamesCoresNumberUntilTheUserMovesIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingRowNamesCoresNumberUntilTheUserMovesIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlIsOffByDefaultAndSaysWhatChanges]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlIsOffByDefaultAndSaysWhatChanges]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlShowsTheExposureBeforeTheRun]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlShowsTheExposureBeforeTheRun]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:287: error: -[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer] : XCTAssertTrue failed - the job must carry the key, or core can never echo it back and the branch stays dead
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:294: error: -[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer] : XCTAssertTrue failed
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:296: error: -[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer] : XCTAssertTrue failed - the requested-retention paragraph must appear: ["822 stay solid because the material there is too thin for this cell: a lattice needs 5 cells across a member, which at 4.60 mm means 23.00 mm of thickness. The thickest that failed is 4.00 mm.", "111 stay solid because the struts they would need are thinner than your printer\'s line width at every cell size available. A LARGER cell prints fatter struts.", "822 of these are below the cells-across floor. If this region carries almost no load — a wall that is there for geometry — you can choose to lattice them anyway; the certificate over that material would then be out of regime."]
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:298: error: -[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer] : XCTAssertTrue failed - the out-of-regime warning must appear: ["822 stay solid because the material there is too thin for this cell: a lattice needs 5 cells across a member, which at 4.60 mm means 23.00 mm of thickness. The thickest that failed is 4.00 mm.", "111 stay solid because the struts they would need are thinner than your printer\'s line width at every cell size available. A LARGER cell prints fatter struts.", "822 of these are below the cells-across floor. If this region carries almost no load — a wall that is there for geometry — you can choose to lattice them anyway; the certificate over that material would then be out of regime."]
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:300: error: -[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer] : XCTAssertTrue failed - the 'the margin cannot see this' paragraph must appear
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:302: error: -[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer] : XCTAssertTrue failed - the ceiling shown is CORE's echoed number: ["822 stay solid because the material there is too thin for this cell: a lattice needs 5 cells across a member, which at 4.60 mm means 23.00 mm of thickness. The thickest that failed is 4.00 mm.", "111 stay solid because the struts they would need are thinner than your printer\'s line width at every cell size available. A LARGER cell prints fatter struts.", "822 of these are below the cells-across floor. If this region carries almost no load — a wall that is there for geometry — you can choose to lattice them anyway; the certificate over that material would then be out of regime."]
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer]' failed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheLinkedCoreTakesTheRetentionSwitch]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheLinkedCoreTakesTheRetentionSwitch]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheNotRequestedBranchStillSaysWhatIsThere]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheNotRequestedBranchStillSaysWhatIsThere]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheSchemaProbeProvesItselfOnThisBuild]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheSchemaProbeProvesItselfOnThisBuild]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheScopeNoteDoesNotClaimCellCounts]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheScopeNoteDoesNotClaimCellCounts]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalJob]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalJob]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalRelatticeJob]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalRelatticeJob]' passed (0.000 seconds).
+Test Suite 'LatticeRetentionControlTests' failed at 2026-08-05 18:10:20.718.
+	 Executed 24 tests, with 16 failures (0 unexpected) in 0.027 (0.028) seconds
+Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-05 18:10:20.718.
+	 Executed 24 tests, with 16 failures (0 unexpected) in 0.027 (0.028) seconds
+Test Suite 'Selected tests' failed at 2026-08-05 18:10:20.718.
+	 Executed 24 tests, with 16 failures (0 unexpected) in 0.027 (0.029) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

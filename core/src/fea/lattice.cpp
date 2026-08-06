@@ -320,6 +320,34 @@ double lattice_cells_per_member_min(LatticeTopology topo) {
   return 5.0;
 }
 
+double lattice_percolation_cells_per_member_min(LatticeTopology topo) {
+  // MEASURED for octet, from the SAME study as the accuracy floor above
+  // (handoff 2026-07-28-graded-cell-size-phase0, the C2 AXIAL table):
+  //   0.5 cells across -> DISCONNECTED: the member does not percolate at all
+  //   1   cell         -> +2.36 % axial error, CONNECTED
+  //   2   cells        -> +1.20 %
+  //   3   cells        -> +0.81 %
+  // So one cell is where the geometry first holds together. This is a DIFFERENT
+  // FLOOR FROM A DIFFERENT FAILURE MODE and the two must not be confused: the
+  // accuracy floor above protects the CERTIFICATE (a homogenized tensor stops
+  // describing the member), while this protects the OBJECT (below it there is no
+  // connected strut network to print). A member between the two is buildable and
+  // uncertifiable — that is exactly the regime sub-floor retention exists for, and
+  // it is not the same thing as un-latticeable.
+  //
+  // ★ PLACEHOLDER STATUS, stated because three numbers on this project have already
+  // been quoted without their conditions. This is measured for OCTET, at rho ~= 0.199
+  // and AXIALLY. It is NOT measured at the top of the band (rho ~ 0.60), where the
+  // derived-cell route puts it, and NOT in bending. It is forwarded for the other
+  // topologies with no independent measurement at all. Re-measure before treating a
+  // near-1.0 result as safe; and note the empirical end of the argument, which IS
+  // measured: the maintainer's shipped mesh ran at 0.4263 cells per member and
+  // produced 123 isolated fragments at the line-width threshold. Below percolation
+  // you do not get a thin lattice, you get debris.
+  (void)topo;
+  return 1.0;
+}
+
 double lattice_subfloor_retention_stress_fraction() {
   // MEASURED — handoff 2026-08-04-protect-freeze-vs-solidity §10, the six-station
   // flange sweep in `item8_subfloor_floor.txt`. The certified-margin movement from
@@ -402,6 +430,146 @@ double lattice_cell_printability_floor_mm(LatticeTopology topo,
   // the stated width divided by the diameter at a UNIT cell.
   const double phi_lo = octet_strut_diameter_mm(lattice_rho_min(topo), 1.0);
   return min_extrudable_width_mm / phi_lo;
+}
+
+double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
+                                     double min_extrudable_width_mm) {
+  if (!(cell_size_mm > 0.0))
+    throw std::invalid_argument(
+        "lattice_min_density_for_strut: cell_size_mm must be > 0");
+  if (!(std::isfinite(min_extrudable_width_mm) && min_extrudable_width_mm > 0.0))
+    throw std::invalid_argument(
+        "lattice_min_density_for_strut: min_extrudable_width_mm must be finite "
+        "and > 0");
+  const double rho_lo = lattice_rho_min(topo);
+  const double rho_hi = lattice_rho_max(topo);
+  if (!(rho_hi > 0.0))
+    throw std::invalid_argument(
+        "lattice_min_density_for_strut: topology has no certifiable band");
+
+  // The band floor already prints — nothing lighter is admissible anyway.
+  if (octet_strut_diameter_mm(rho_lo, cell_size_mm) >= min_extrudable_width_mm)
+    return rho_lo;
+  // Not even the band ceiling prints at this cell — there is no in-band answer, and
+  // returning the ceiling would be a silent lie about a strut that comes out under
+  // one bead. The contract is a negative sentinel the caller must test.
+  if (octet_strut_diameter_mm(rho_hi, cell_size_mm) < min_extrudable_width_mm)
+    return -1.0;
+
+  // BISECT on the piecewise-linear measured table. It is monotone non-decreasing in
+  // rho, so bisection converges on the exact breakpoint to machine precision; a
+  // closed-form inversion would have to special-case the CLAMPED region above the
+  // table's last measured row (rho 0.60), where phi is flat and the inverse is a
+  // whole interval. Bisection returns that interval's LOW end, which is the lightest
+  // density reaching the required diameter — exactly the contract.
+  double lo = rho_lo, hi = rho_hi;
+  for (int it = 0; it < 200; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    if (octet_strut_diameter_mm(mid, cell_size_mm) >= min_extrudable_width_mm)
+      hi = mid;
+    else
+      lo = mid;
+  }
+  // Return the side that SATISFIES the constraint. `hi` is the admissible end by the
+  // loop invariant; a caller that fed it back into octet_strut_diameter_mm must not
+  // see a strut one ULP under the bead width.
+  return hi;
+}
+
+LatticeCellDerivation lattice_derive_cell_for_member(
+    LatticeTopology topo, double member_width_mm,
+    double min_extrudable_width_mm, double cells_per_member_floor) {
+  // NaN fails every comparison, so `> 0.0` rejects it — deliberate: a member width
+  // that is not a number must not be silently read as "thick enough".
+  if (!(member_width_mm > 0.0))
+    throw std::invalid_argument(
+        "lattice_derive_cell_for_member: member_width_mm must be > 0");
+  if (!(std::isfinite(min_extrudable_width_mm) && min_extrudable_width_mm > 0.0))
+    throw std::invalid_argument(
+        "lattice_derive_cell_for_member: min_extrudable_width_mm must be finite "
+        "and > 0");
+
+  LatticeCellDerivation d;
+  d.member_width_mm = member_width_mm;
+  d.min_extrudable_width_mm = min_extrudable_width_mm;
+  d.band_rho_min = lattice_rho_min(topo);
+  d.band_rho_max = lattice_rho_max(topo);
+  if (!(d.band_rho_max > 0.0))
+    throw std::invalid_argument(
+        "lattice_derive_cell_for_member: topology '" +
+        std::string(lattice_topology_name(topo)) +
+        "' has no certifiable density band");
+  d.cells_per_member_floor = cells_per_member_floor > 0.0
+                                 ? cells_per_member_floor
+                                 : lattice_cells_per_member_min(topo);
+  d.floor_in_force_is_accuracy =
+      !(cells_per_member_floor > 0.0) ||
+      cells_per_member_floor == lattice_cells_per_member_min(topo);
+
+  // The two bounds. phi is monotone in rho, so the band's top gives the smallest
+  // printable cell; N* against the measured width gives the largest homogenizable one.
+  const double phi_hi = octet_strut_diameter_mm(d.band_rho_max, 1.0);
+  d.min_printable_cell_mm = min_extrudable_width_mm / phi_hi;
+  d.min_member_width_mm = d.cells_per_member_floor * d.min_printable_cell_mm;
+  // BOTH floors, always — see the declaration. The caller must never have to know
+  // which question it asked in order to read the answer.
+  d.min_member_width_certifiable_mm =
+      lattice_cells_per_member_min(topo) * d.min_printable_cell_mm;
+  d.min_member_width_buildable_mm =
+      lattice_percolation_cells_per_member_min(topo) * d.min_printable_cell_mm;
+  d.cells_per_member_at_finest = member_width_mm / d.min_printable_cell_mm;
+  // GENUINE un-latticeability: does any pair clear printability AND percolation? A
+  // member that fails THIS cannot be built at any setting. A member that clears it
+  // but fails `feasible` below is buildable and uncertifiable, which is a different
+  // verdict with a different remedy (M8c).
+  d.feasible_percolation =
+      member_width_mm >= d.min_member_width_buildable_mm;
+  // +inf member width (voxel.hpp's "thicker than the EDT cap" sentinel) propagates to
+  // +inf here, which is the honest reading: nothing bounds the cell from above.
+  d.max_homogenizable_cell_mm = member_width_mm / d.cells_per_member_floor;
+
+  d.feasible = d.max_homogenizable_cell_mm >= d.min_printable_cell_mm;
+  if (!d.feasible) return d;  // every window field stays 0 — there is no window
+
+  // `min_printable_cell_mm` is w/phi(rho_max) by construction, so the strut at
+  // rho_max there is w EXACTLY — in real arithmetic. In floating point the product
+  // can land one ULP low and make lattice_min_density_for_strut return its "no
+  // in-band answer" sentinel at the very cell that defines the frontier. Resolve it
+  // to the band ceiling, which is the true answer in the limit; anywhere the cell is
+  // genuinely too fine this helper is never reached, because `feasible` is false.
+  auto lightest_or_ceiling = [&](double cell) {
+    const double r =
+        lattice_min_density_for_strut(topo, cell, min_extrudable_width_mm);
+    return r >= 0.0 ? r : d.band_rho_max;
+  };
+
+  // ── FINEST end: the smallest admissible cell. Report the LIGHTEST density that
+  // reaches it rather than band_rho_max, because phi is CLAMPED above the measured
+  // table's last row (see the ★ note on the declaration) and every density in that
+  // flat region gives the identical cell — quoting the heaviest of them would add
+  // mass for nothing.
+  d.densest_cell_size_mm = d.min_printable_cell_mm;
+  d.densest_relative_density = lightest_or_ceiling(d.densest_cell_size_mm);
+  d.densest_strut_diameter_mm =
+      octet_strut_diameter_mm(d.densest_relative_density, d.densest_cell_size_mm);
+  d.densest_cells_per_member = member_width_mm / d.densest_cell_size_mm;
+
+  // ── COARSEST end: exactly N* cells across, at the lightest density that still
+  // prints there — the MINIMUM-MASS certified lattice for this member. On an +inf
+  // member width there is no upper bound, so both ends coincide at the frontier.
+  if (std::isfinite(d.max_homogenizable_cell_mm)) {
+    d.lightest_cell_size_mm = d.max_homogenizable_cell_mm;
+    d.lightest_relative_density = lightest_or_ceiling(d.lightest_cell_size_mm);
+    d.lightest_strut_diameter_mm = octet_strut_diameter_mm(
+        d.lightest_relative_density, d.lightest_cell_size_mm);
+    d.lightest_cells_per_member = member_width_mm / d.lightest_cell_size_mm;
+  } else {
+    d.lightest_cell_size_mm = d.densest_cell_size_mm;
+    d.lightest_relative_density = d.densest_relative_density;
+    d.lightest_strut_diameter_mm = d.densest_strut_diameter_mm;
+    d.lightest_cells_per_member = d.densest_cells_per_member;
+  }
+  return d;
 }
 
 CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,

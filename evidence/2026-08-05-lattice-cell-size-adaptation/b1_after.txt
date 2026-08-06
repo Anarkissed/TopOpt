@@ -1,0 +1,38 @@
+=== B1: seven 4 mm include regions, 8 mm cell (floor needs 5 x 8 = 40 mm) ===
+topopt-cli exit code: 1
+
+--- the forecast it printed ---
+[lattice] FORECAST region_too_thin: include region 0 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 1 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 2 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 3 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 4 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 5 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 6 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST: 7 of 7 include regions are thinner than the 40.000 mm the floor requires (thinnest 4.000 mm; floor 5.0 cells x 8.0000 mm)
+
+--- the refusal ---
+[lattice] FORECAST region_too_thin: include region 1 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 2 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 3 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 4 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 5 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 6 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST: 7 of 7 include regions are thinner than the 40.000 mm the floor requires (thinnest 4.000 mm; floor 5.0 cells x 8.0000 mm)
+topopt-cli: every declared lattice include region is too thin to hold a certifiable lattice at this cell size, so this run cannot put lattice anywhere you asked for it — refusing before spending a solve.
+  regions declared (include): 7, all of them too thin
+  planned cell: 8 mm; cells-per-member floor 5 => required member 40 mm
+  thinnest declared region: 4 mm
+  NO (cell, density) PAIR IN THE CERTIFIABLE BAND FITS THIS THICKNESS AT THIS NOZZLE.
+    smallest cell any certifiable strut prints at (0.42 mm bead): 1.094961872 mm
+    largest cell a 4 mm member can homogenize: 0.8 mm
+    the two bounds cross, so no cell satisfies both.
+  WHAT WOULD CHANGE THE ANSWER (your call, not this pipeline's):
+    * thicken the region to at least 5.474809359 mm; or
+    * use a nozzle/bead of at most 0.30686 mm; or
+    * dress the region with a SKIN instead of a lattice — an option offered here, never substituted automatically.
+  To proceed anyway with lattice OUTSIDE your declared regions, remove the include regions from the lattice block — but read the receipt first: this run would have put every cell in material you did not select.
+
+B1 PASS — the run refused before solving.
+--- negative control ---
+6 of 7 regions too thin -> exit 0, 4 lattice STLs emitted (refusal correctly did NOT fire)

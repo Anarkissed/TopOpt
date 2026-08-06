@@ -165,6 +165,31 @@ public struct LatticeSpec: Equatable, Sendable {
     public let cellMinMM: Double
     public let cellMaxMM: Double
 
+    // ── SUB-FLOOR RETENTION (task 2026-08-05-lattice-retention-app-control) ─────
+    // The four `grading` keys core has carried with no way for the device to ask.
+    // ALL DEFAULT OFF / ABSENT, so a spec built from untouched controls serializes
+    // to exactly the dictionary this app produced before (bar R1). Every one is
+    // already gated against the LINKED core's schema by `runSpec` — a spec never
+    // carries a key core would refuse, because `reject_unknown_keys` kills the
+    // whole job over one.
+
+    /// Keep lattice in members below the cells-per-member floor where the region
+    /// measures as carrying almost no load (`retain_subfloor_in_unloaded_regions`).
+    public let retainSubfloorInUnloadedRegions: Bool
+    /// The stress-fraction ceiling, ONLY when the user moved it off core's own
+    /// number. nil ⇒ the key is omitted ⇒ core takes its constant at call time.
+    /// Echoing core's default back as if the app owned it would make the app the
+    /// author of a number it merely read.
+    public let subfloorStressFraction: Double?
+    /// Evaluate the retention predicate per declared region rather than over the
+    /// union (`subfloor_per_region`). Core's schema gates this on retention being
+    /// armed, and so does `runSpec`.
+    public let subfloorPerRegion: Bool
+    /// Ask for the per-region cell/voxel report in the graded lattice receipt
+    /// (`report_region_cells`). Decision-free: it changes no mask, cell, density
+    /// or verdict.
+    public let reportRegionCells: Bool
+
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
                 maxRelativeDensity: Double, emitSTL: Bool = true, emit3MF: Bool = false,
@@ -174,10 +199,18 @@ public struct LatticeSpec: Equatable, Sendable {
                 graded: Bool = false,
                 regions: [LatticeRegionSpec] = [],
                 cellSizeMode: String = LatticeCellSizeMode.fixed.rawValue,
-                cellMinMM: Double = 0, cellMaxMM: Double = 0) {
+                cellMinMM: Double = 0, cellMaxMM: Double = 0,
+                retainSubfloorInUnloadedRegions: Bool = false,
+                subfloorStressFraction: Double? = nil,
+                subfloorPerRegion: Bool = false,
+                reportRegionCells: Bool = false) {
         self.cellSizeMode = cellSizeMode
         self.cellMinMM = cellMinMM
         self.cellMaxMM = cellMaxMM
+        self.retainSubfloorInUnloadedRegions = retainSubfloorInUnloadedRegions
+        self.subfloorStressFraction = subfloorStressFraction
+        self.subfloorPerRegion = subfloorPerRegion
+        self.reportRegionCells = reportRegionCells
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.strutRadiusMM = strutRadiusMM
@@ -191,6 +224,63 @@ public struct LatticeSpec: Equatable, Sendable {
         self.minExtrudableWidthMM = minExtrudableWidthMM
         self.graded = graded
         self.regions = regions
+    }
+
+    /// THE `grading` BLOCK, BUILT ONCE (task 2026-08-05-lattice-retention-app-control).
+    ///
+    /// `RemoteRunner` (optimize) and `RelatticeJobBuilder` (re-lattice) used to build
+    /// this dictionary independently, with the same keys written out twice. That is
+    /// two chances to drift, and dropping the posture on the re-lattice path is the
+    /// same class of bug as the ladder-position-in-a-fraction-shaped-key failure that
+    /// killed every re-lattice in 48 ms. So there is one builder and both call it —
+    /// a one-sided edit is no longer expressible.
+    ///
+    /// Returns nil for a non-graded spec: core's schema REJECTS a grading block's
+    /// keys alongside a uniform cell, and retention lives inside grading, so a
+    /// uniform run has nowhere to carry it.
+    func gradingDictionary() -> [String: Any]? {
+        guard graded else { return nil }
+        var grading: [String: Any] = [
+            "topology": topologyID,
+            // Required by the grading schema: the printability floor's input.
+            "min_extrudable_width_mm": minExtrudableWidthMM ?? 0,
+        ]
+        // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep, bar R6).
+        // Core does NOT merely ignore a stated cell in auto/swept: `job.cpp`
+        // REFUSES `cell_mm` alongside either mode ("a target cell alongside a
+        // ladder is a CONFLICT, not a hint"), and refuses the ladder keys outside
+        // swept. So the three shapes are exclusive, mirrored exactly:
+        //   fixed  → cell_mm, no mode key   (an absent cell_mode IS "fixed")
+        //   auto   → cell_mode only         (core picks from its own floor)
+        //   swept  → cell_mode + min + max  (no cell_mm)
+        switch cellSizeMode {
+        case LatticeCellSizeMode.auto.rawValue:
+            grading["cell_mode"] = cellSizeMode
+        case LatticeCellSizeMode.swept.rawValue:
+            grading["cell_mode"] = cellSizeMode
+            grading["cell_min_mm"] = cellMinMM
+            grading["cell_max_mm"] = cellMaxMM
+        default:
+            grading["cell_mm"] = cellMM
+        }
+        // SUB-FLOOR RETENTION. Every key below is ABSENT unless the user armed it
+        // AND the linked core accepts it (`LatticeSettings.resolvedSubfloor`), so a
+        // job built from untouched controls is byte-identical to the one this app
+        // produced before (bar R1) — and no key core would refuse can be written
+        // here, because `reject_unknown_keys` kills the whole job over one.
+        if retainSubfloorInUnloadedRegions {
+            grading["retain_subfloor_in_unloaded_regions"] = true
+            // Only when the user MOVED it. Absent means core takes its own constant
+            // at call time, which is a different document from one restating it.
+            if let f = subfloorStressFraction { grading["subfloor_stress_fraction"] = f }
+            // Core's schema gates this on retention being armed; `resolvedSubfloor`
+            // already enforces it, and nesting it here makes the rule structural.
+            if subfloorPerRegion { grading["subfloor_per_region"] = true }
+        }
+        // Decision-free and independent of retention: it feeds no mask, cell,
+        // density or verdict — it only adds the per-region rows to the receipt.
+        if reportRegionCells { grading["report_region_cells"] = true }
+        return grading
     }
 }
 
@@ -251,6 +341,21 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// and the legacy painted-include preview depth.
     public var paintDepthMM: Double
 
+    // ── SUB-FLOOR RETENTION, the user's raw choices (task
+    // 2026-08-05-lattice-retention-app-control). All OFF / absent by default, so
+    // an untouched project emits exactly today's job (bar R1), and absent from
+    // every older snapshot so those projects decode unchanged.
+
+    /// "Keep the lattice where the part is too thin to certify it."
+    public var retainSubfloorInUnloadedRegions: Bool
+    /// The stress-fraction ceiling ONLY when the user typed one. nil ⇒ core's own
+    /// number, and the key is not sent at all.
+    public var subfloorStressFraction: Double?
+    /// Decide region by region rather than over the union of them.
+    public var subfloorPerRegion: Bool
+    /// Ask the run for the per-region breakdown in its receipt.
+    public var reportRegionCells: Bool
+
     /// The FIRST include primitive — the legacy single-region accessor the existing
     /// gizmo plumbing (`placeLatticeRegion` / `moveLatticeRegion` / proxy scoping)
     /// reads and writes. One source of truth: this is a view over
@@ -285,7 +390,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 densityMode: LatticeDensityMode = .uniform,
                 paintedIncludeFaces: [Int] = [],
                 paintDepthMM: Double = 4,
-                groupRoles: [UUID: LatticeGroupRole] = [:]) {
+                groupRoles: [UUID: LatticeGroupRole] = [:],
+                retainSubfloorInUnloadedRegions: Bool = false,
+                subfloorStressFraction: Double? = nil,
+                subfloorPerRegion: Bool = false,
+                reportRegionCells: Bool = false) {
+        self.retainSubfloorInUnloadedRegions = retainSubfloorInUnloadedRegions
+        self.subfloorStressFraction = subfloorStressFraction
+        self.subfloorPerRegion = subfloorPerRegion
+        self.reportRegionCells = reportRegionCells
         self.enabled = enabled
         self.topologyID = topologyID
         self.cellMM = cellMM
@@ -314,6 +427,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
+        // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
+        case retainSubfloorInUnloadedRegions, subfloorStressFraction
+        case subfloorPerRegion, reportRegionCells
     }
 
     public init(from decoder: Decoder) throws {
@@ -345,6 +461,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
+        // Absent from every snapshot written before this task ⇒ off / core's own
+        // number ⇒ those projects keep emitting exactly the job they emitted.
+        retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
+            Bool.self, forKey: .retainSubfloorInUnloadedRegions) ?? false
+        subfloorStressFraction = try c.decodeIfPresent(
+            Double.self, forKey: .subfloorStressFraction)
+        subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
+        reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -363,6 +487,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
+        try c.encode(retainSubfloorInUnloadedRegions,
+                     forKey: .retainSubfloorInUnloadedRegions)
+        // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
+        // not as core's number written into the project — the whole point of the
+        // nil is that the app never becomes the author of that constant.
+        try c.encodeIfPresent(subfloorStressFraction, forKey: .subfloorStressFraction)
+        try c.encode(subfloorPerRegion, forKey: .subfloorPerRegion)
+        try c.encode(reportRegionCells, forKey: .reportRegionCells)
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the
@@ -400,11 +532,38 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// print facts (only affect the advisory readouts today, since core exposes no cell
     /// ceiling yet). The generated uniform strut radius is the topology's grading law at
     /// the range's clamped dense end.
+    /// SUB-FLOOR RETENTION, resolved against BOTH gates before it can ride a job
+    /// (task 2026-08-05-lattice-retention-app-control):
+    ///
+    ///   * CORE'S SCHEMA GATE — `subfloor_stress_fraction` and
+    ///     `subfloor_per_region` are refused by core unless retention is armed
+    ///     ("a job that means one thing and says another"), so retention off
+    ///     zeroes both here rather than shipping a document core will reject.
+    ///   * THE CAPABILITY GATE — a key the linked core does not accept is never
+    ///     emitted, because `reject_unknown_keys` fails the WHOLE job over one.
+    ///
+    /// Returns the four values a `LatticeSpec` carries.
+    func resolvedSubfloor(capability: LatticeRetentionCapability)
+        -> (retain: Bool, fraction: Double?, perRegion: Bool, regionCells: Bool) {
+        let retain = retainSubfloorInUnloadedRegions && capability.retention
+        // Sent ONLY when the user moved it off core's own number: nil means
+        // "core takes its own constant at call time", which is a different job
+        // document from one that states the same value.
+        let fraction = (retain && capability.stressFraction)
+            ? subfloorStressFraction : nil
+        let perRegion = retain && subfloorPerRegion && capability.perRegion
+        // Decision-free and independent of retention — but still capability-gated.
+        let regionCells = reportRegionCells && capability.regionCells
+        return (retain, fraction, perRegion, regionCells)
+    }
+
     public func runSpec(limits: TopOptKit.LatticeLimits, generatable: Bool,
                         memberMM: Double = 0,
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
                         emit3MF: Bool = false,
-                        regions: [LatticeRegionSpec] = []) -> LatticeSpec? {
+                        regions: [LatticeRegionSpec] = [],
+                        capability: LatticeRetentionCapability = .fromCore)
+        -> LatticeSpec? {
         guard enabled else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
                                       generatable: generatable,
@@ -429,6 +588,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // back to the fixed cell rather than shipping a job the schema rejects.
             let mode: LatticeCellSizeMode = (cellSizeMode == .swept && !(lo > 0))
                 ? .fixed : cellSizeMode
+            // Sub-floor retention rides the GRADED path only — the keys live in the
+            // `grading` block, and a uniform lattice job has no grading block at
+            // all, so there is nothing for core to read there. The control says so.
+            let sub = resolvedSubfloor(capability: capability)
             return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
                                generateRelativeDensity: 0,
                                minRelativeDensity: b.densityLo,
@@ -440,7 +603,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                graded: true,
                                regions: regions,
                                cellSizeMode: mode.rawValue,
-                               cellMinMM: lo, cellMaxMM: hi)
+                               cellMinMM: lo, cellMaxMM: hi,
+                               retainSubfloorInUnloadedRegions: sub.retain,
+                               subfloorStressFraction: sub.fraction,
+                               subfloorPerRegion: sub.perRegion,
+                               reportRegionCells: sub.regionCells)
         }
         let genRho = b.generateRelativeDensity
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
@@ -462,13 +629,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public func runSpec(topology: String? = nil, memberMM: Double = 0,
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
                         emit3MF: Bool = false,
-                        regions: [LatticeRegionSpec] = []) -> LatticeSpec? {
+                        regions: [LatticeRegionSpec] = [],
+                        capability: LatticeRetentionCapability = .fromCore)
+        -> LatticeSpec? {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
         let generatable = TopOptKit.latticeGeneratableTopologies.contains(id)
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
-                       regions: regions)
+                       regions: regions, capability: capability)
     }
 
     /// The proxy grading parameters for the current settings, with the density range
@@ -481,6 +650,70 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                   maxRelativeDensity: b.densityHi,
                                   gamma: 1,
                                   uniformRelativeDensity: 0.5 * (b.densityLo + b.densityHi))
+    }
+}
+
+/// THE CELL-SIZE CONTROL'S ENVELOPE, as a pure value (task
+/// 2026-08-05-lattice-retention-app-control, S3).
+///
+/// *** WHY THIS MOVED OUT OF THE VIEW. *** The audit this task ran asked a simple
+/// question — can the user type the cell size a pre-flight refusal names? — and the
+/// answer lived in two `private` functions on a SwiftUI view, where no test could
+/// reach it. It could not. Two independent reasons, both here now where they can be
+/// pinned:
+///
+///   * TYPED INPUT WAS QUANTIZED TO HALF A MILLIMETRE. `1.2` became `1.0`.
+///   * THE LOWER BOUND WAS CORE'S rho_min PRINTABILITY FLOOR — 4.93 mm at the
+///     maintainer's own 0.45 mm line width, four times the value the refusal names.
+///     Core itself refuses no such cell (`lattice "cell_mm" must be > 0`,
+///     job.cpp:851; a graded target is RAISED, never refused). The app was the only
+///     thing in the way.
+public enum LatticeCellEntry {
+    /// The slider's top end — a UI convenience, unchanged.
+    public static let sliderMaxMM: Double = 20
+    /// The start of range when core has no number to give (no line width, or a
+    /// topology it carries no tensor for). Explicitly not a certifiable limit.
+    public static let fallbackFloorMM: Double = 2
+    /// The floor of last resort. A cell has to be a positive length; below this
+    /// the control is not expressing a lattice, it is expressing a typo.
+    public static let hardFloorMM: Double = 0.05
+
+    /// The control's real lower bound: the DENSEST-end printability floor when core
+    /// gives one, else the old fallback. Never core's rho_min floor, which describes
+    /// one end of the band rather than what the printer can make.
+    public static func entryFloorMM(_ b: LatticeBounds?) -> Double {
+        if let d = b?.cellFloorDensestMM { return d }
+        return Swift.min(b?.cellFloorMM ?? fallbackFloorMM, fallbackFloorMM)
+    }
+
+    public static func range(_ b: LatticeBounds?) -> ClosedRange<Double> {
+        let lo = Swift.max(hardFloorMM,
+                           Swift.min(entryFloorMM(b), sliderMaxMM - 0.5))
+        return lo...sliderMaxMM
+    }
+
+    /// DRAGGING quantizes to a half-millimetre — the shipped feel, unchanged.
+    public static func dragged(_ v: Double, _ b: LatticeBounds?) -> Double {
+        let r = range(b)
+        return Swift.min(r.upperBound, Swift.max(r.lowerBound, (v * 2).rounded() / 2))
+    }
+
+    /// TYPING is EXACT to two decimals — what the refusals quote, and what the
+    /// number pad already accepts.
+    public static func typed(_ v: Double, _ b: LatticeBounds?) -> Double {
+        let r = range(b)
+        return Swift.min(r.upperBound,
+                         Swift.max(r.lowerBound, (v * 100).rounded() / 100))
+    }
+
+    /// A cell size as text. Two decimals when the value needs them — a cell typed
+    /// from a refusal ("1.17 mm") must not read back as "1.2 mm", or the number on
+    /// screen is not the number in the job.
+    public static func text(_ v: Double) -> String {
+        let oneDP = (v * 10).rounded() / 10
+        return abs(v - oneDP) < 5e-4
+            ? String(format: "%.1f mm", v)
+            : String(format: "%.2f mm", v)
     }
 }
 
@@ -528,6 +761,32 @@ public struct LatticeBounds: Equatable, Sendable {
     /// bound of the cell-size control, the partner of `cellCeilingMM` above, and the
     /// cell core picks in AUTO mode (bar R6).
     public let cellFloorMM: Double?
+    /// THE OTHER FLOOR — the one the refusals name (task
+    /// 2026-08-05-lattice-retention-app-control, S3).
+    ///
+    /// `cellFloorMM` above is core's `lattice_cell_printability_floor_mm`, and that
+    /// number is evaluated at the band's LIGHTEST density: it is the smallest cell
+    /// at which even a rho_min lattice still prints. Nothing forces a user to
+    /// lattice at the lightest density, and the concurrent cell-size-adaptation work
+    /// establishes the same point from the other side — the "23 mm member" the
+    /// maintainer was told he needed was that same rho_min-conditional figure, and
+    /// at the density a member can actually carry the arithmetic gives 5.47 mm.
+    ///
+    /// This is the DENSEST-end partner: the smallest cell whose strut at core's
+    /// band-TOP density still reaches one extrusion line width. Below it no cell
+    /// prints at any density; between it and `cellFloorMM` a cell prints at the
+    /// dense end only, which is exactly the range a pre-flight refusal tells the
+    /// user to type in ("this region admits cells from 1.09 mm"). Using the LIGHT
+    /// floor as the control's hard bound made those numbers unenterable — a refusal
+    /// naming a value the user could not type.
+    ///
+    /// READ FROM CORE, not derived here (`TopOptKit.latticeCellBounds`), because the
+    /// app's own octet strut law disagrees with core's by a factor of 1.4: derived in
+    /// Swift this came out 1.64 mm at a 0.45 mm bead where core's arithmetic gives
+    /// 1.17. A bound that disagrees with the refusal quoting it is no better than the
+    /// bound it replaced. nil ⇒ no line width, or core carries no strut-diameter law
+    /// for the topology.
+    public let cellFloorDensestMM: Double?
     /// How many cells span the governing member at the current cell size (the readout).
     public let cellsAcrossMember: Double
     /// True iff `cellMM` exceeds a real (non-advisory) ceiling — a genuine clamp.
@@ -621,6 +880,7 @@ public struct LatticeBounds: Equatable, Sendable {
         // hardcodes no cell number, so a core re-measurement moves the control. Only
         // meaningful with a line width AND a topology core carries a tensor for.
         var cellFloor: Double? = nil
+        var cellFloorDensest: Double? = nil
         // `certifiable` is the honest gate: core's floor is derived from the topology's
         // certifiable band, so a preview-only topology has no floor to state (the bridge
         // returns a band-of-zero number there rather than refusing).
@@ -628,11 +888,25 @@ public struct LatticeBounds: Equatable, Sendable {
             let cb = TopOptKit.latticeCellBounds(topology: settings.topologyID,
                                                  minExtrudableWidthMM: lineWidthMM)
             if cb.valid && cb.printabilityFloorMM > 0 { cellFloor = cb.printabilityFloorMM }
+            if cb.valid && cb.printabilityFloorDensestMM > 0 {
+                cellFloorDensest = cb.printabilityFloorDensestMM
+            }
         }
         // A cell UNDER the floor is its own honest clamp — but never overwrite the
-        // ceiling's message, which is the harder failure.
-        if cellReason == nil, let f = cellFloor, settings.cellMM < f - 1e-9 {
-            cellReason = "below core's printability floor for \(name) at this line width — cell ≥ \(mm(f))"
+        // ceiling's message, which is the harder failure. Which floor it is under
+        // decides what actually happens, and they are different outcomes: under the
+        // LIGHT floor a graded run has its target raised by core and a uniform run
+        // builds the cell as typed; under the DENSE floor nothing prints at all.
+        if cellReason == nil, let d = cellFloorDensest, settings.cellMM < d - 1e-9 {
+            cellReason = "no lattice prints at \(mm(settings.cellMM)) at this line "
+                       + "width — even at the densest certifiable \(name) the struts "
+                       + "come out thinner than one bead. Cell ≥ \(mm(d))."
+        } else if cellReason == nil, let f = cellFloor, settings.cellMM < f - 1e-9 {
+            cellReason = "below core's printability floor for \(name) at this line "
+                       + "width (\(mm(f))), which is measured at the LIGHTEST "
+                       + "certifiable density. A graded run has its cell raised to "
+                       + "that number; a uniform run builds the cell you typed, and "
+                       + "its struts print because it fills at the dense end."
         }
 
         // Strut printability from the user's own line width. The densest grading end
@@ -651,6 +925,7 @@ public struct LatticeBounds: Equatable, Sendable {
             certifiable: limits.certifiable, topologyReason: topoReason,
             generatable: generatable, generatableReason: genReason,
             cellCeilingMM: ceiling, cellFloorMM: cellFloor,
+            cellFloorDensestMM: cellFloorDensest,
             cellsAcrossMember: cells, cellOverCeiling: overCeiling,
             cellReason: cellReason,
             strutRadiusMM: strutR, strutFloorMM: floor, strutTooThin: tooThin,

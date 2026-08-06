@@ -1303,6 +1303,20 @@ if(OpenCASCADE_FOUND)
   add_executable(repair_evidence EXCLUDE_FROM_ALL tests/tools/repair_evidence.cpp)
   target_link_libraries(repair_evidence PRIVATE topopt)
 
+  # R2 probe (task lattice-cell-size-adaptation): which wall thicknesses the grading
+  # law can lattice at a stated nozzle, and the (cell, rho) arithmetic behind it.
+  #   cmake --build core/build --target probe_cell_adaptation
+  add_executable(probe_cell_adaptation EXCLUDE_FROM_ALL
+                 tests/tools/probe_cell_adaptation.cpp)
+  target_link_libraries(probe_cell_adaptation PRIVATE topopt)
+
+  # R2 flip table (task lattice-cell-fit-mode): the cell law's own before/after on
+  # the same inputs, including the three shipped fixtures whose Fixed target this
+  # task PINNED — so what the unpinned value now does is reported, not concealed.
+  #   cmake --build core/build --target probe_fit_flips
+  add_executable(probe_fit_flips EXCLUDE_FROM_ALL tests/tools/probe_fit_flips.cpp)
+  target_link_libraries(probe_fit_flips PRIVATE topopt)
+
   # Bar AE4 (handoff 2026-08-02-smoothing-page): does aggressive smoothing move a
   # verdict on the maintainer's WallMount bracket, and what does brushing LOCALLY
   # cost against brushing everything? A harness, not a ctest — it prints a table
@@ -1389,6 +1403,22 @@ if(OpenCASCADE_FOUND)
     tests/harness/stairstep_probe.cpp)
   target_link_libraries(stairstep_probe PRIVATE topopt)
   target_compile_definitions(stairstep_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
+
+  # S1 (task 2026-08-05-smoothing-sdf-geometry-extraction): does the SDF geometry
+  # extraction of arXiv:2512.06976 beat Taubin's 10.6% ceiling on the
+  # maintainer's part? Measured with PR 299's metric, which both probes now share
+  # (tests/harness/stairstep_metric.hpp) rather than each defining. Prints
+  # tables, writes evidence. A harness, not a ctest.
+  #   cmake --build build --target sdf_geometry_probe
+  #   ./build/sdf_geometry_probe <mode> [args]
+  add_executable(sdf_geometry_probe EXCLUDE_FROM_ALL
+    tests/harness/sdf_geometry_probe.cpp
+    tests/harness/sdf_geometry.cpp)
+  target_link_libraries(sdf_geometry_probe PRIVATE topopt)
+  target_include_directories(sdf_geometry_probe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/harness)
+  target_compile_definitions(sdf_geometry_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
 
   # V1/V2 (task 2026-08-04-smoothing-viewer-and-ui): does the app's mesh-upload

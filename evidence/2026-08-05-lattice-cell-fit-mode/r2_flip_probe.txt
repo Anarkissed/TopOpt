@@ -1,0 +1,75 @@
+band rho [0.0505, 0.8999]   N* = 5.00   percolation floor = 1.00
+bead 0.42 mm: rho_min floor 4.6026 mm (needs 23.0131 mm of member); floor that BINDS 1.0950 mm (needs 5.4748 mm)
+bead 0.40 mm: rho_min floor 4.3834 mm (needs 21.9172 mm of member); floor that BINDS 1.0428 mm (needs 5.2141 mm)
+bead 0.20 mm: rho_min floor 2.1917 mm (needs 10.9586 mm of member); floor that BINDS 0.5214 mm (needs 2.6071 mm)
+
+unpinned 2.0 @ bead 0.40 (test_grading), 15 mm member bead 0.40 wall  15.00 target  2.0000 (fixed)
+    BEFORE cell   4.3834  latticed      0  fallback  48000  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   2.0000  latticed  42760  fallback   5240  rho [0.2189, 0.8999]  raised 42759
+    => MOVED
+
+unpinned 2.0 @ bead 0.40 (test_grading), 4 mm member bead 0.40 wall   4.00 target  2.0000 (fixed)
+    BEFORE cell   4.3834  latticed      0  fallback  12800  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   2.0000  latticed      0  fallback  12800  rho [0.0000, 0.0000]  raised 0
+    => MOVED
+
+unpinned 3.0 @ bead 0.40 (hookup), 15 mm member bead 0.40 wall  15.00 target  3.0000 (fixed)
+    BEFORE cell   4.3834  latticed      0  fallback  48000  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   3.0000  latticed  34624  fallback  13376  rho [0.0999, 0.8999]  raised 34623
+    => MOVED
+
+his bead, his wall, hand-set 1.2               bead 0.42 wall   4.00 target  1.2000 (fixed)
+    BEFORE cell   4.6026  latticed      0  fallback  12800  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   1.2000  latticed      0  fallback  12800  rho [0.0000, 0.0000]  raised 0
+    => MOVED
+
+his bead, a 8 mm member, hand-set 1.2          bead 0.42 wall   8.00 target  1.2000 (fixed)
+    BEFORE cell   4.6026  latticed      0  fallback  25600  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   1.2000  latticed  24432  fallback   1168  rho [0.5239, 0.8999]  raised 24431
+    => MOVED
+
+his bead, a 30 mm boss, hand-set 1.2           bead 0.42 wall  30.00 target  1.2000 (fixed)
+    BEFORE cell   4.6026  latticed      0  fallback  96000  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   1.2000  latticed  94304  fallback   1696  rho [0.5239, 0.8999]  raised 94303
+    => MOVED
+
+CONTROL target above the rho_min floor         bead 0.42 wall  30.00 target  6.0000 (fixed)
+    BEFORE cell   6.0000  latticed      0  fallback  96000  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   6.0000  latticed      0  fallback  96000  rho [0.0000, 0.0000]  raised 0
+    => identical
+
+CONTROL auto (never redefined, bar S4)         bead 0.42 wall  30.00 target  0.0000 (auto)
+    BEFORE cell   4.6026  latticed      0  fallback  96000  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   4.6026  latticed      0  fallback  96000  rho [0.0000, 0.0000]  raised 0
+    => identical
+
+CONTROL auto on a thin wall                    bead 0.42 wall   4.00 target  0.0000 (auto)
+    BEFORE cell   4.6026  latticed      0  fallback  12800  rho [0.0000, 0.0000]  raised 0
+    AFTER  cell   4.6026  latticed      0  fallback  12800  rho [0.0000, 0.0000]  raised 0
+    => identical
+
+FIT derivation at a 0.42 mm stated width — cell = max(extent / N*, finest printable cell)
+  extent mm | derived cell | rho     | strut mm | cells/member | floor in force
+     2.0000 |       1.0950 |  0.6000 |   0.4200 |         1.83 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     4.0000 |       1.0950 |  0.6000 |   0.4200 |         3.65 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     5.4748 |       1.0950 |  0.6000 |   0.4200 |         5.00 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     6.0000 |       1.2000 |  0.5239 |   0.4200 |         5.00 | ACCURACY
+     8.0000 |       1.6000 |  0.3362 |   0.4200 |         5.00 | ACCURACY
+    12.0000 |       2.4000 |  0.1751 |   0.4200 |         5.00 | ACCURACY
+    24.0000 |       4.8000 |  0.0505 |   0.4380 |         5.00 | ACCURACY
+    30.0000 |       6.0000 |  0.0505 |   0.5475 |         5.00 | ACCURACY
+  finest printable cell at this width = 1.09496187186339 mm
+
+FIT derivation at a 0.45 mm stated width — cell = max(extent / N*, finest printable cell)
+  extent mm | derived cell | rho     | strut mm | cells/member | floor in force
+     2.0000 |       1.1732 |  0.6000 |   0.4500 |         1.70 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     4.0000 |       1.1732 |  0.6000 |   0.4500 |         3.41 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     5.4748 |       1.1732 |  0.6000 |   0.4500 |         4.67 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     6.0000 |       1.2000 |  0.5806 |   0.4500 |         5.00 | ACCURACY
+     8.0000 |       1.6000 |  0.3726 |   0.4500 |         5.00 | ACCURACY
+    12.0000 |       2.4000 |  0.1961 |   0.4500 |         5.00 | ACCURACY
+    24.0000 |       4.8000 |  0.0531 |   0.4500 |         5.00 | ACCURACY
+    30.0000 |       6.0000 |  0.0505 |   0.5475 |         5.00 | ACCURACY
+  finest printable cell at this width = 1.17317343413935 mm
+
+PR #301 cross-check @ 0.45 mm: their control floor 1.17317343413935 mm, this derivation 1.17317343413935 mm, delta 0.000e+00 mm — AGREE

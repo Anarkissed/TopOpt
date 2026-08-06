@@ -125,6 +125,12 @@ enum OutcomeCodec {
         // Optional so a blob written before this task still decodes.
         let strutSubfloorRetainedVoxels: Int?
         let strutSubfloorRegionStressFraction: Double?
+        // THE PER-REGION RECEIPT (task 2026-08-05-lattice-retention-app-control).
+        // Same honesty rule: a reopened run that forgot which of its regions got
+        // nothing would silently lose the single number this whole task exists to
+        // put on screen. Stored as the raw bytes core wrote. Optional so every blob
+        // written before this task decodes → nil → no breakdown, which is honest.
+        let regionCellsJSON: Data?
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -257,7 +263,8 @@ enum OutcomeCodec {
                     strutOutOfRegime: r.strut?.outOfRegime,
                     strutSubfloorRetainedVoxels: r.strut?.subfloorRetainedVoxels,
                     strutSubfloorRegionStressFraction:
-                        r.strut?.subfloorRegionStressFraction) },
+                        r.strut?.subfloorRegionStressFraction,
+                    regionCellsJSON: r.regionCellsJSON) },
             solvedBy: o.solvedBy)
     }
 
@@ -347,7 +354,8 @@ enum OutcomeCodec {
                             subfloorRetainedVoxels:
                                 r.strutSubfloorRetainedVoxels ?? 0,
                             subfloorRegionStressFraction:
-                                r.strutSubfloorRegionStressFraction ?? 0) }) },
+                                r.strutSubfloorRegionStressFraction ?? 0) },
+                    regionCellsJSON: r.regionCellsJSON) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false)

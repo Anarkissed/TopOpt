@@ -1,0 +1,35 @@
+band rho [0.0505, 0.8999]   N* = 5.00   w_min = 0.42 mm
+phi(rho_min) = 0.091252 mm of strut per mm of cell
+phi(rho_max) = 0.383575 mm of strut per mm of cell
+SHIPPED floor cell  = w_min/phi(rho_min) = 4.6026 mm  -> N* cells span 23.0131 mm
+DERIVED floor cell  = w_min/phi(rho_max) = 1.0950 mm  -> N* cells span 5.4748 mm
+
+wall_mm    voxels       tau_mm     latticed   solid_back    cell_mm
+2.00       4              2.00            0        57600     4.6026
+4.00       8              4.00            0       115200     4.6026
+5.50       11             6.00            0       158400     4.6026
+6.00       12             6.00            0       172800     4.6026
+8.00       16             8.00            0       230400     4.6026
+12.00      24            12.00            0       345600     4.6026
+16.00      32            16.00            0       460800     4.6026
+23.00      46            23.00            0       662400     4.6026
+24.00      48            24.00       583408       107792     4.6026
+28.00      56            28.00       695248       111152     4.6026
+
+STAGE A derivation (topology octet, w_min = 0.42 mm, N* = 5.00):
+  the thinnest member that can hold a certified lattice = 5.4748 mm
+
+wall_mm   feasible  | fine_cell fine_rho fine_d   fine_n | coarse_cl coar_rho coarse_d coar_n
+2.0000    no        | NO (cell, rho) PAIR: printable cell >= 1.0950 mm but homogenizable cell <= 0.4000 mm — thicken to 5.4748 mm
+4.0000    no        | NO (cell, rho) PAIR: printable cell >= 1.0950 mm but homogenizable cell <= 0.8000 mm — thicken to 5.4748 mm
+5.0000    no        | NO (cell, rho) PAIR: printable cell >= 1.0950 mm but homogenizable cell <= 1.0000 mm — thicken to 5.4748 mm
+5.4748    no        | NO (cell, rho) PAIR: printable cell >= 1.0950 mm but homogenizable cell <= 1.0950 mm — thicken to 5.4748 mm
+5.5000    yes       | 1.0950    0.6000   0.4200   5.02   | 1.1000    0.5960   0.4200   5.00  
+6.0000    yes       | 1.0950    0.6000   0.4200   5.48   | 1.2000    0.5239   0.4200   5.00  
+8.0000    yes       | 1.0950    0.6000   0.4200   7.31   | 1.6000    0.3362   0.4200   5.00  
+10.0000   yes       | 1.0950    0.6000   0.4200   9.13   | 2.0000    0.2374   0.4200   5.00  
+12.0000   yes       | 1.0950    0.6000   0.4200   10.96  | 2.4000    0.1751   0.4200   5.00  
+16.0000   yes       | 1.0950    0.6000   0.4200   14.61  | 3.2000    0.0969   0.4200   5.00  
+23.0000   yes       | 1.0950    0.6000   0.4200   21.01  | 4.6000    0.0505   0.4200   5.00  
+24.0000   yes       | 1.0950    0.6000   0.4200   21.92  | 4.8000    0.0505   0.4380   5.00  
+30.0000   yes       | 1.0950    0.6000   0.4200   27.40  | 6.0000    0.0505   0.5475   5.00  

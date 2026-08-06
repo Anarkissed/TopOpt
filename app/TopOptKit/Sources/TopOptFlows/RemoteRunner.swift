@@ -667,40 +667,18 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 // "none" | "rim" | "diagrid", the page's three-way choice (bar B7).
                 "skin": lat.skin,
             ]
-            if lat.graded {
+            if let grading = lat.gradingDictionary() {
                 // GRADED run (task lattice-page-core-hookup stage 4): the schema
                 // REJECTS cell_mm/strut_radius_mm alongside a "grading" block —
                 // core derives the cell (target raised to its printability floor)
                 // and the strut radii from the run's OWN final stress field, and
                 // writes the provenance + clamp accounting into each variant's
                 // lattice receipt.
-                var grading: [String: Any] = [
-                    "topology": lat.topologyID,
-                    // Required by the grading schema: the printability floor's input.
-                    "min_extrudable_width_mm": lat.minExtrudableWidthMM ?? 0,
-                ]
-                // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep, bar R6).
-                // These keys live in `grading` ONLY — the schema rejects cell geometry
-                // inside `lattice` whenever a grading block is present. Core does NOT
-                // merely ignore a stated cell in auto/swept: `job.cpp` REFUSES
-                // `cell_mm` alongside either mode ("a target cell alongside a ladder is
-                // a CONFLICT, not a hint"), and refuses the ladder keys outside swept.
-                // So the three shapes are exclusive, mirrored exactly:
-                //   fixed  → cell_mm, no mode key   (an absent cell_mode IS "fixed")
-                //   auto   → cell_mode only         (core picks from its own floor)
-                //   swept  → cell_mode + min + max  (no cell_mm)
-                // Nothing new is emitted for FIXED, so a fixed-cell job's JSON is
-                // byte-identical to the one this serializer produced before (bar R1).
-                switch lat.cellSizeMode {
-                case LatticeCellSizeMode.auto.rawValue:
-                    grading["cell_mode"] = lat.cellSizeMode
-                case LatticeCellSizeMode.swept.rawValue:
-                    grading["cell_mode"] = lat.cellSizeMode
-                    grading["cell_min_mm"] = lat.cellMinMM
-                    grading["cell_max_mm"] = lat.cellMaxMM
-                default:
-                    grading["cell_mm"] = lat.cellMM
-                }
+                //
+                // THE BLOCK ITSELF IS BUILT BY `LatticeSpec.gradingDictionary()`,
+                // which `RelatticeJobBuilder` also calls — one builder, so an
+                // optimize run and a re-lattice of its result cannot carry
+                // different postures (task 2026-08-05-lattice-retention-app-control).
                 job["grading"] = grading
             } else {
                 block["cell_mm"] = lat.cellMM
@@ -1043,7 +1021,31 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// (best-effort — a worker that didn't emit it, or a transport error, leaves the
     /// facts nil and only the requested settings show, honestly labelled). nil when no
     /// lattice was requested, so a non-lattice run's outcome is unchanged.
-    private func fetchLatticeReport() -> LatticeReport? {
+    /// THE PER-REGION RECEIPT (task 2026-08-05-lattice-retention-app-control, S4).
+    /// Core writes it into the per-variant GRADED lattice receipt
+    /// (`variant_XXX_lattice.report.json`, `lattice_cert_report_json`) — not into
+    /// run_info — so it takes its own fetch, and only when the job asked for it.
+    ///
+    /// `acceptedRequestedVFs` is the run's accepted rungs in ladder order; the
+    /// receipt is read for the LAST of them, which is the rung the export and the
+    /// recommendation centre on. The tag convention (`%03d` of vf × 100) is core's
+    /// own mesh-prefix convention, the same one `RelatticeRun` fetches by.
+    private func fetchRegionCells(acceptedRequestedVFs: [Double]) -> Data? {
+        guard request.lattice?.reportRegionCells == true,
+              let id = jobID, let vf = acceptedRequestedVFs.last else { return nil }
+        let tag = String(format: "%03d", Int((vf * 100).rounded()))
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+            .appendingPathComponent("variant_\(tag)_lattice.report.json")
+        guard let (data, resp) = try? syncGET(url),
+              (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty else {
+            diag("per-region lattice receipt unavailable — no region breakdown shown")
+            return nil
+        }
+        return data
+    }
+
+    private func fetchLatticeReport(regionCellsJSON: Data? = nil) -> LatticeReport? {
         guard let lat = request.lattice else { return nil }
         var generated: LatticeReport.Generated? = nil
         var strut: LatticeReport.StrutStrength? = nil
@@ -1097,7 +1099,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             minRelativeDensity: lat.minRelativeDensity,
             maxRelativeDensity: lat.maxRelativeDensity,
             regionScoped: lat.regionScoped, emittedRegions: lat.regions.count,
-            generated: generated, strut: strut)
+            generated: generated, strut: strut,
+            regionCellsJSON: regionCellsJSON)
     }
 
     /// The BUILD-ORIENTATION RECEIPT a remote run wrote (handoff
@@ -1454,7 +1457,14 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         let timing = fetchTiming()
         // The lattice the run carried (handoff 2026-07-29-lattice-mode-ui); nil for a
         // non-lattice run, so the outcome below is unchanged for every current run.
-        let latticeReport = fetchLatticeReport()
+        // The per-region breakdown, when the job asked for it (task
+        // 2026-08-05-lattice-retention-app-control, S4). Read here rather than
+        // inside fetchLatticeReport because it needs the accepted rungs to name the
+        // receipt file, and those come off the stream.
+        streamedLock.lock(); let acceptedForReceipt = streamed; streamedLock.unlock()
+        let latticeReport = fetchLatticeReport(
+            regionCellsJSON: fetchRegionCells(
+                acceptedRequestedVFs: acceptedForReceipt.map { $0.requestedVF }))
         // The orientation ranking this run produced — a RECOMMENDATION shown beside
         // the results, never applied and never consulted for a verdict.
         let buildOrientation = fetchBuildOrientation()

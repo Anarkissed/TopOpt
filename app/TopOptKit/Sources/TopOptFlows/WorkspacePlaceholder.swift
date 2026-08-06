@@ -334,12 +334,21 @@ public struct WorkspacePlaceholder: View {
     /// gating every site, is what makes a fourth page correct by default.
     private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage }
 
-    /// The viewer's one-finger paint gesture. The SMOOTHING PAGE OWNS IT while it
-    /// is up: its brush is the page's whole point, so it cannot depend on the TO
-    /// page's Paint toggle — which L1 now hides. The page's own three-way mode
-    /// control decides whether a drag paints, erases or orbits.
-    private var brushGestureActive: Bool {
-        showSmoothingPage ? smoothTools.paints : paintActive
+    /// THE BRUSH GESTURE, AS ONE VALUE (task 2026-08-05, bar D1). The SMOOTHING
+    /// PAGE OWNS IT while it is up: its brush is the page's whole point, so it
+    /// cannot depend on the TO page's Paint toggle — which L1 hides.
+    ///
+    /// WHAT WENT WRONG HERE. This site used to read `smoothTools.paints`, a
+    /// property that answered "does a FINGER paint?", to decide whether the
+    /// gesture existed AT ALL — so with "Pencil only" checked it evaluated false,
+    /// the viewer's brush was disarmed, and the pencil (which that toggle exists
+    /// to privilege) could not paint either. Two mechanisms decided one thing and
+    /// the stricter one won. `BrushGesture` is now the only mechanism: `armed`
+    /// comes from the MODE, `requiresPencil` decides WHICH contact, and both
+    /// travel to the recognizers together.
+    private var brushGesture: BrushGesture {
+        showSmoothingPage ? .smoothingPage(smoothTools)
+                          : .workspacePaint(active: paintActive)
     }
 
     public var body: some View {
@@ -352,7 +361,13 @@ public struct WorkspacePlaceholder: View {
                           settleRotation: settleQuat,           // D2: settle onto the floor
                           settleAnimated: !reduceMotion,
                           showGround: showGround,
-                          faceToolActive: true,                 // D1: tap always selects (routed by phase)
+                          // D1: tap always selects (routed by phase) — EXCEPT on
+                          // the smoothing page, which authors no selection at all
+                          // (bar L1/AE6). With the brush parked in Orbit a tap
+                          // would otherwise fall through to the face picker and
+                          // change the very selections the freeze mask was
+                          // computed from.
+                          faceToolActive: !showSmoothingPage,
                           onPickFace: handlePick,
                           onProjection: { projection = $0 },
                           // Round-6 item 4 (redo gesture updated 2026-07-25): two-finger
@@ -370,13 +385,33 @@ public struct WorkspacePlaceholder: View {
                           // strength, and every FROZEN vertex flatly tinted, so
                           // what the brush will refuse is visible before it is
                           // tried (handoff 2026-08-02-smoothing-page).
-                          stressTints: showSmoothingPage ? smoothBrush.vertexTints()
+                          // `viewerTints`, NOT `vertexTints` (task 2026-08-05, bar
+                          // D4): the renderer's tint buffer is per FLAT vertex —
+                          // three per triangle — and it drops an array of any
+                          // other length in silence. This page had been handing it
+                          // one entry per WELDED vertex since the brush shipped,
+                          // so no stroke the maintainer ever painted could have
+                          // tinted anything.
+                          stressTints: showSmoothingPage ? smoothBrush.viewerTints()
                                                          : latticeProxyTints,
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn. L1: a
                           // full-screen page draws NO design-box wireframe.
-                          designBox: showDesignGizmo ? project.designBox.box : nil,
-                          keepOutBoxes: showDesignGizmo ? project.designBox.keepOuts : [],
+                          // …AND NOT ON THE SMOOTHING PAGE (task 2026-08-05, bar
+                          // D5a). The comment above says a full-screen page draws
+                          // no design-box wireframe; the CONDITION never said so.
+                          // `showDesignGizmo` is only "the tool is on and we are
+                          // in the edit phase", so a user who had ever switched
+                          // the Design Box on kept its translucent box and bright
+                          // edges drawn straight through the part he was trying to
+                          // brush — the bounding box in the maintainer's
+                          // screenshots. Gated on THIS page alone, deliberately:
+                          // the lattice page mounts the same view and its geometry
+                          // is unchanged by this.
+                          designBox: (showDesignGizmo && !showSmoothingPage)
+                              ? project.designBox.box : nil,
+                          keepOutBoxes: (showDesignGizmo && !showSmoothingPage)
+                              ? project.designBox.keepOuts : [],
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
                           // reason about every keep-out; the selected group's volume brightens.
@@ -418,7 +453,7 @@ public struct WorkspacePlaceholder: View {
                           // triangles so the highlight + picker treat them as one face (live paint
                           // highlight). `onBrush` resolves the covered triangles and applies the
                           // stroke; two-finger drag still orbits.
-                          paintActive: brushGestureActive,
+                          paintActive: brushGesture.armed,
                           paintFaceIDs: project.effectivePaintFaceIDs(),
                           onBrush: { center, phase, input in
                               handleBrush(center, phase,
@@ -428,8 +463,15 @@ public struct WorkspacePlaceholder: View {
                           // the brush to the pencil, and a finger drag then orbits
                           // with no mode to switch. Off everywhere else, so the TO
                           // page's paint gesture is byte-for-byte unchanged.
-                          brushRequiresPencil: showSmoothingPage
-                                               && smoothTools.pencilOnly)
+                          brushRequiresPencil: brushGesture.requiresPencil,
+                          // BAR D1b: an armed brush that refuses a contact says so
+                          // AT THE MOMENT the user tries it. Once per page — a
+                          // note on every orbit would be noise, and orbiting with
+                          // a finger is the intended behaviour, not a mistake.
+                          onBrushRefused: { _ in
+                              guard showSmoothingPage, smoothTools.pencilOnly else { return }
+                              smoothingPageModel?.notePencilOnlyRefusedFinger()
+                          })
                 .ignoresSafeArea()
 
             // Strut preview: the raymarched true-strut layer, riding the SAME shared
@@ -978,8 +1020,10 @@ public struct WorkspacePlaceholder: View {
             //
             // WHICH CONTACT (bar U2). A pencil always paints; a finger paints
             // only while `pencilOnly` is off. The recognizer reports the kind, so
-            // this is not a guess — see `MetalMeshView.handlePencilPan`.
-            guard smoothTools.paints(from: input) else { return }
+            // this is not a guess — see `MetalMeshView.handlePencilPan`. Asked of
+            // the SAME gate the recognizer routes through (bar D1), so the page
+            // and the viewer cannot disagree about who may paint.
+            guard brushGesture.admits(input) else { return }
             // THE STAGE'S OWN MESH is what the brush hit-tests. On the smoothing
             // page that is `smoothVariantMesh` — the ORIGINAL variant surface —
             // even while the stage is showing the smoothed twin, because the
@@ -2050,7 +2094,32 @@ public struct WorkspacePlaceholder: View {
             config: config, modelPath: file.path, jobJSON: jobJSON,
             designBin: art.designBin, projectName: project.name,
             requestedVolumeFraction: ctx.requestedVolumeFraction)
-        run.runner = { _, _, _ in try RelatticeRun.run(inputs).outcome }
+        // THE RECEIPT WAS BEING THROWN AWAY (task
+        // 2026-08-05-lattice-retention-app-control, S4). `RelatticeRun.run` has
+        // always fetched the variant's graded lattice receipt and this call site
+        // took `.outcome` and dropped it on the floor — so a re-lattice, which is
+        // the path the Lattice page actually drives, showed no lattice record at
+        // all. It now carries the receipt onto the outcome, which is what puts the
+        // per-region breakdown on the results screen.
+        let echo = project.lattice.runSpec(
+            topology: project.lattice.topologyID,
+            memberMM: project.lattice.regionMemberMM ?? 0,
+            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            regions: project.variantLatticeJobRegions().regions)
+        run.runner = { _, _, _ in
+            let result = try RelatticeRun.run(inputs)
+            guard let spec = echo else { return result.outcome }
+            return result.outcome.withLatticeReport(LatticeReport(
+                topologyID: spec.topologyID, cellMM: spec.cellMM,
+                generateRelativeDensity: spec.generateRelativeDensity,
+                minRelativeDensity: spec.minRelativeDensity,
+                maxRelativeDensity: spec.maxRelativeDensity,
+                regionScoped: spec.regionScoped,
+                emittedRegions: spec.regions.count,
+                // The per-region rows only exist when the job asked for them; a
+                // receipt that carries none parses to nil and shows nothing.
+                regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil))
+        }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
         run.start(request, remote: true, workerName: compute.selectedWorkerName)

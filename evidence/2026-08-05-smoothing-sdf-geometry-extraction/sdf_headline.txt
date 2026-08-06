@@ -1,0 +1,43 @@
+[loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=1464 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=GROWTH rungs=[1.55,1.25,1.10] anchor_pad=1 — add as little plastic as possible to reach the required margin
+[loadcase] growth design box AUTO-DERIVED (none drawn): min=(-102,-198,-1.62) max=(104,12.2,22.7) mm spacing=1.62
+== sdf_geometry_probe : headline ==
+mesh          core/tests/fixtures/mesh/WallMount_ShelfBracket.stl
+grid          125 x 128 x 13, spacing 1.620040 mm
+export factor 2 (the job's output.smooth_factor)
+
+subject   82104 verts, 164228 tris; OBLIQUE 28884 (35.2%)
+reference 1102 verts, 2224 tris (the imported CAD)
+
+CAD sharp edges (>= 30 deg): 1019; "near-edge" is within 2.430 mm (1.5 voxel) of one
+
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+unsmoothed (PR 299)      0.9566   0.3424   0.7091   0.3837    9.03   0.0000     0.0%      6     1
+      oblique SPLIT: smooth-surface rms 0.3418 mm (21206 verts, +0.0%)   near-sharp-edge rms 0.3440 mm (7678 verts, +0.0%)
+isocontour only f2       1.1535   0.3258   0.8394   0.3975    6.06   0.5784     4.8%      5     1
+      oblique SPLIT: smooth-surface rms 0.2935 mm (21198 verts, +14.1%)   near-sharp-edge rms 0.4094 mm (6901 verts, -19.0%)
+      rho_t 0.492040  vol 196880.1 -> 196880.1 mm3 (target 196822.0, err +0.0295%)  c +0.00000 mm in 0  CG 0 it res 0.00e+00  SDF grid 0x0x0  iso 0 tris  wall 0.8 s [nodal 0.0 / thresh 0.7 / sdf 0.0 / rbf 0.0 / shift 0.0 / extract 0.0]
+  + Gibson bound 0.5 vox   1.1535   0.3258   0.8394   0.3975    6.06   0.5784     4.8%      5     1
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm; mesh volume 195115.0 mm3
+  + Gibson bound 1.0 vox   1.1535   0.3258   0.8394   0.3975    6.06   0.5784     4.8%      5     1
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm; mesh volume 195115.0 mm3
+SDF B/h 1.000 interp f2   1.1167   0.3266   0.7777   0.3691    5.59   0.8445     4.6%      3     1
+      oblique SPLIT: smooth-surface rms 0.3053 mm (21082 verts, +10.7%)   near-sharp-edge rms 0.3789 mm (7722 verts, -10.2%)
+      rho_t 0.492040  vol 196880.1 -> 196822.0 mm3 (target 196822.0, err -0.0000%)  c +0.03184 mm in 18  CG 95 it res 9.09e-09  SDF grid 144x147x32  iso 656068 tris  wall 5.8 s [nodal 0.0 / thresh 0.4 / sdf 2.9 / rbf 1.9 / shift 0.5 / extract 0.1]
+  + Gibson bound 0.5 vox   1.1167   0.3266   0.7777   0.3691    5.59   0.8433     4.6%      3     1
+      0.07% of vertices pulled back, deepest pull-back 0.0345 mm; mesh volume 197281.2 mm3
+  + Gibson bound 1.0 vox   1.1167   0.3266   0.7777   0.3691    5.59   0.8445     4.6%      3     1
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm; mesh volume 197280.9 mm3
+SDF B/h 1.000 approx f2   1.6842   0.3808   0.9850   0.4109    4.72   1.5491   -11.2%      0     1
+      oblique SPLIT: smooth-surface rms 0.3303 mm (21401 verts, +3.4%)   near-sharp-edge rms 0.5005 mm (7288 verts, -45.5%)
+      rho_t 0.492040  vol 196880.1 -> 196822.1 mm3 (target 196822.0, err +0.0000%)  c +0.54729 mm in 20  CG 0 it res 0.00e+00  SDF grid 144x147x32  iso 656068 tris  wall 3.7 s [nodal 0.0 / thresh 0.3 / sdf 2.5 / rbf 0.2 / shift 0.5 / extract 0.1]
+SDF B/h 1.000 interp f1   1.1251   0.3298   0.8171   0.3549   10.26   0.3896     3.7%      2     1
+      oblique SPLIT: smooth-surface rms 0.3076 mm (4902 verts, +10.0%)   near-sharp-edge rms 0.3810 mm (1904 verts, -10.8%)
+      rho_t 0.492040  vol 196880.1 -> 196822.0 mm3 (target 196822.0, err -0.0000%)  c +0.05349 mm in 34  CG 95 it res 9.09e-09  SDF grid 144x147x32  iso 656068 tris  wall 4.6 s [nodal 0.0 / thresh 0.4 / sdf 2.5 / rbf 1.5 / shift 0.2 / extract 0.0]
+SDF B/h 1.000 approx f1   1.6943   0.3717   0.9534   0.3828    8.51   1.6066    -8.5%     19     1
+      oblique SPLIT: smooth-surface rms 0.3438 mm (4928 verts, -0.6%)   near-sharp-edge rms 0.4347 mm (1929 verts, -26.4%)
+      rho_t 0.492040  vol 196880.1 -> 196812.5 mm3 (target 196822.0, err -0.0049%)  c +0.59672 mm in 60  CG 0 it res 0.00e+00  SDF grid 144x147x32  iso 656068 tris  wall 3.3 s [nodal 0.0 / thresh 0.4 / sdf 2.6 / rbf 0.0 / shift 0.4 / extract 0.0]
+
+wrote evidence/2026-08-05-smoothing-sdf-geometry-extraction/sdf_headline.csv
