@@ -1015,6 +1015,122 @@ public struct LatticePage: View {
                     }
                 }
             }
+            // SUB-FLOOR RETENTION (task 2026-08-05-lattice-retention-app-control).
+            retentionCard
+        }
+    }
+
+    // MARK: sub-floor retention — the control the device never had
+
+    /// The forecast's own numbers for the CURRENT configuration, or nil while
+    /// there is none. Never a stale forecast's: `forecast(for:)` returns nil the
+    /// moment the job document moves, so the exposure shown is always about the
+    /// settings on screen.
+    private var liveForecast: LatticeForecast? { forecast.forecast(for: forecastJob) }
+
+    private var retentionControl: LatticeRetentionControl {
+        LatticeRetentionControl.compute(
+            armed: project.lattice.retainSubfloorInUnloadedRegions,
+            graded: project.lattice.densityMode == .auto,
+            capability: LatticeRetentionCapability.fromCore,
+            belowFloorVoxels: liveForecast?.subfloorVoxelsBelowFloor,
+            regionVoxels: liveForecast?.regionVoxels,
+            ceilingFraction: project.lattice.subfloorStressFraction,
+            coreCeilingFraction: LatticeRetentionCapability.coreStressFractionDefault)
+    }
+
+    @ViewBuilder private var retentionCard: some View {
+        let c = retentionControl
+        let cap = LatticeRetentionCapability.fromCore
+        card(warning: c.exposureIsLive) {
+            HStack(alignment: .top) {
+                Text(c.title).dsStyle(DS.TypeScale.body)
+                Spacer(minLength: DS.Space.sm)
+                Toggle("", isOn: Binding(
+                    get: { project.lattice.retainSubfloorInUnloadedRegions },
+                    set: { on in
+                        project.lattice.retainSubfloorInUnloadedRegions = on
+                        // Core's schema refuses the dependents without the switch;
+                        // dropping them here means the page can never author a
+                        // document core would reject.
+                        if !on {
+                            project.lattice.subfloorPerRegion = false
+                            project.lattice.subfloorStressFraction = nil
+                        }
+                    }))
+                    .labelsHidden()
+                    .disabled(!c.enabled)
+            }
+            Text(c.body).dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+            if let why = c.disabledReason {
+                Text(why).dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(RGBA(hex: 0xFFCF7A).color)
+            }
+            // THE EXPOSURE, BEFORE HE COMMITS — core's own pre-flight count of the
+            // material this decision is about, shown on the control rather than in
+            // a receipt afterwards.
+            if let e = c.exposure {
+                Text(e).dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle((c.exposureIsLive ? DS.Color.warning
+                                                       : DS.Color.textSecondary).color)
+            } else if c.enabled && forecast.isRunning(for: forecastJob) {
+                Text("Checking how much of this lattice is below the cells-across floor…")
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            if c.showsCeiling {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Counts as unloaded up to").dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                    Spacer()
+                    tappableNumber(key: "subfloorCeiling", text: c.ceilingText,
+                                   title: "Stress ceiling", unit: "%",
+                                   seed: (project.lattice.subfloorStressFraction
+                                          ?? LatticeRetentionCapability
+                                              .coreStressFractionDefault) * 100) { v in
+                        project.lattice.subfloorStressFraction =
+                            Swift.min(1, Swift.max(0.01, v / 100))
+                    }
+                }
+                Text("Of the part's PEAK stress, measured on the run's own field. "
+                     + "Leave it and core uses its own number — the app doesn't "
+                     + "send one.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            if project.lattice.retainSubfloorInUnloadedRegions && c.enabled {
+                Toggle(isOn: $project.lattice.subfloorPerRegion) {
+                    Text("Decide region by region").dsStyle(DS.TypeScale.caption)
+                }
+                .disabled(!cap.perRegion)
+                if let why = cap.unavailableReason(forPerRegion: true) {
+                    Text(why).dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                } else {
+                    Text("Each declared region is measured on its own instead of all "
+                         + "of them together, so one loaded region no longer keeps "
+                         + "the quiet ones solid.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                }
+            }
+            // The per-region receipt. Independent of retention: it decides nothing,
+            // it only makes the run say what each region got.
+            Toggle(isOn: $project.lattice.reportRegionCells) {
+                Text("Report what each region got").dsStyle(DS.TypeScale.caption)
+            }
+            .disabled(!cap.regionCells)
+            if let why = cap.unavailableReason(forRegionCells: true) {
+                Text(why).dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            } else {
+                Text("Adds a per-region breakdown to the run's receipt — voxels "
+                     + "latticed, voxels left solid and why, region by region. It "
+                     + "changes nothing about the part.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
         }
     }
 
@@ -1030,10 +1146,10 @@ public struct LatticePage: View {
     private var cellSummaryText: String {
         // A uniform run always uses the fixed cell whatever the stored mode says
         // (runSpec resolves it) — the summary must not claim otherwise.
-        guard cellModeGraded else { return String(format: "%.1f mm", project.lattice.cellMM) }
+        guard cellModeGraded else { return LatticeCellEntry.text(project.lattice.cellMM) }
         switch project.lattice.cellSizeMode {
         case .fixed:
-            return String(format: "%.1f mm", project.lattice.cellMM)
+            return LatticeCellEntry.text(project.lattice.cellMM)
         case .auto:
             return bounds.cellFloorMM.map { String(format: "Auto %.1f mm", $0) } ?? "Auto (core)"
         case .swept:
@@ -1042,13 +1158,11 @@ public struct LatticePage: View {
             return String(format: "Swept %.1f–%.1f mm", lo, hi)
         }
     }
-    /// The slider's top end (mm) — a UI convenience, unchanged from the shipped
-    /// control. The BOTTOM end is core's (`bounds.cellFloorMM`), never this file's.
-    private static let cellSliderMaxMM: Double = 20
-    /// Shown only when NO core floor exists (no line width set, or core carries no
-    /// tensor for the topology): the control's own start of range, explicitly not a
-    /// certifiable limit — the caption says so.
-    private static let cellFallbackFloorMM: Double = 2
+    /// The envelope lives in `LatticeCellEntry` (a pure value) so the S3 audit's
+    /// question — can the user type the cell a refusal names? — is answerable by a
+    /// test rather than only by reading a SwiftUI view.
+    private static let cellSliderMaxMM: Double = LatticeCellEntry.sliderMaxMM
+    private static let cellFallbackFloorMM: Double = LatticeCellEntry.fallbackFloorMM
 
     private var cellModeIndex: Int {
         LatticePage.cellModes.firstIndex(of: project.lattice.cellSizeMode) ?? 1
@@ -1069,19 +1183,21 @@ public struct LatticePage: View {
     }
 
     /// Core's floor for the current topology at the user's own line width, or the
-    /// control's fallback start when core has no number to give.
+    /// control's fallback start when core has no number to give. This is the LIGHT
+    /// floor (measured at the band's lightest density) — the slider's comfortable
+    /// start, and the number a graded run's cell is raised to.
     private var cellFloorMM: Double { bounds.cellFloorMM ?? LatticePage.cellFallbackFloorMM }
 
-    private var cellSliderRange: ClosedRange<Double> {
-        let top = LatticePage.cellSliderMaxMM
-        let lo = Swift.max(0.5, Swift.min(cellFloorMM, top - 0.5))
-        return lo...top
+    /// The drag range, from the pure envelope.
+    private var cellSliderRange: ClosedRange<Double> { LatticeCellEntry.range(bounds) }
+
+    /// DRAGGING quantizes to a half-millimetre — the shipped feel, unchanged.
+    private func clampCellDragged(_ v: Double) -> Double {
+        LatticeCellEntry.dragged(v, bounds)
     }
 
-    private func clampCell(_ v: Double) -> Double {
-        let r = cellSliderRange
-        return Swift.min(r.upperBound, Swift.max(r.lowerBound, (v * 2).rounded() / 2))
-    }
+    /// TYPING is EXACT to two decimals (S3).
+    private func clampCell(_ v: Double) -> Double { LatticeCellEntry.typed(v, bounds) }
 
     @ViewBuilder private var cellModeBody: some View {
         switch project.lattice.cellSizeMode {
@@ -1104,7 +1220,7 @@ public struct LatticePage: View {
             HStack(alignment: .firstTextBaseline) {
                 Spacer()
                 tappableNumber(key: "cell",
-                               text: String(format: "%.1f mm", project.lattice.cellMM),
+                               text: LatticeCellEntry.text(project.lattice.cellMM),
                                title: "Cell size", unit: "mm",
                                seed: project.lattice.cellMM) { v in
                     project.lattice.cellMM = clampCell(v)
@@ -1113,7 +1229,7 @@ public struct LatticePage: View {
             Slider(value: Binding(get: { Swift.min(cellSliderRange.upperBound,
                                                    Swift.max(cellSliderRange.lowerBound,
                                                              project.lattice.cellMM)) },
-                                  set: { project.lattice.cellMM = clampCell($0) }),
+                                  set: { project.lattice.cellMM = clampCellDragged($0) }),
                    in: cellSliderRange)
                 .tint(DS.Color.accent.color)
         case .swept:

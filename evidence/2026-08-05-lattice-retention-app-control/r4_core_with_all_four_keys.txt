@@ -1,0 +1,220 @@
+[0/1] Planning build
+Building for debugging...
+[0/3] Write sources
+[1/3] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Emitting module TopOptFlowsTests
+[4/5] Compiling TopOptFlowsTests LatticeRetentionEvidenceGen.swift
+[4/6] Write Objects.LinkFileList
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[2](version.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[3](materials.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[4](stl.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[6](segment.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[7](part.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[8](face_tag.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[9](face_overrides.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[12](mesh.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[13](smooth.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[14](lattice_gen.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[15](lattice_boundary.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[16](voxelize.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[17](clearance.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[18](warm_start.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[20](cell_plan.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[21](observability.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[22](hex_element.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[23](lattice.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[24](lattice_material.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[25](strut_strength.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[26](orient.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[27](build_orientation.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[29](settings.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[30](report.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[31](gate_diagnosis_report.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[32](job.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[33](step.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[34](assembly.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[35](multigrid.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[36](matfree.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[37](recycle.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[38](geneo.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[39](algebraic_coarsen.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[40](simp.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[41](minimize_plastic.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[42](analyze.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[43](gate_diagnosis.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[44](production.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[45](threemf.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: object file (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-retention-app-control-3f7186/app/TopOptKit/.build/arm64-apple-macosx/debug/libtopopt.a[46](loadcase.cpp.o)) was built for newer 'macOS' version (26.0) than being linked (14.0)
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKDESTEP.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKXSBase.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKDE.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKMesh.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKTopAlgo.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKGeomAlgo.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKPrim.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKBRep.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKGeomBase.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKG3d.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKG2d.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKMath.7.9.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/opencascade/lib/libTKernel.7.9.dylib' which was built for newer version 26.0
+[5/6] Linking TopOptKitPackageTests
+Build complete! (4.24s)
+Test Suite 'Selected tests' started at 2026-08-05 20:29:56.156.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-08-05 20:29:56.157.
+Test Suite 'LatticeRetentionControlTests' started at 2026-08-05 20:29:56.157.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testACellUnderTheDenseFloorSaysNothingPrints]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testACellUnderTheDenseFloorSaysNothingPrints]' passed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testACellUnderTheLightFloorExplainsWhatEachPathDoes]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testACellUnderTheLightFloorExplainsWhatEachPathDoes]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testACoreThatDoesNotKnowAKeyRefusesTheWholeJob]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testACoreThatDoesNotKnowAKeyRefusesTheWholeJob]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAKeyTheCoreDoesNotAcceptIsNeverEmitted]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAKeyTheCoreDoesNotAcceptIsNeverEmitted]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAMemberBelowPercolationIsToldItCannotBeBuilt]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAMemberBelowPercolationIsToldItCannotBeBuilt]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOlderCoreSaysSoRatherThanFailingSilently]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOlderCoreSaysSoRatherThanFailingSilently]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testANonLatticeJobIsUntouched]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testANonLatticeJobIsUntouched]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOutOfRegimeRegionSaysTheCertificateDoesNotCoverIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnOutOfRegimeRegionSaysTheCertificateDoesNotCoverIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnUnmeasuredMemberWidthStaysUnmeasured]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAnUnmeasuredMemberWidthStaysUnmeasured]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAPartiallyCapableCoreGetsExactlyWhatItAccepts]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAPartiallyCapableCoreGetsExactlyWhatItAccepts]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAReceiptWithoutTheReportReadsAsAbsent]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAReceiptWithoutTheReportReadsAsAbsent]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testARegionThatReceivedNothingIsNamedAndComesFirst]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testARegionThatReceivedNothingIsNamedAndComesFirst]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAReportWithoutTheBreakdownAddsNothing]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAReportWithoutTheBreakdownAddsNothing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheOptimizeJob]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testArmedRetentionReachesTheRelatticeJob]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAUniformRunSaysWhyRetentionIsUnavailable]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testAUniformRunSaysWhyRetentionIsUnavailable]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testBothFloorsTrackTheUsersLineWidth]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testBothFloorsTrackTheUsersLineWidth]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testBothSerializersEmitTheSameGradingBlock]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testBothSerializersEmitTheSameGradingBlock]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testDraggingStillLandsOnHalfMillimetres]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testDraggingStillLandsOnHalfMillimetres]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testEveryJobTheAppBuildsIsAcceptedByCoresOwnParser]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testEveryJobTheAppBuildsIsAcceptedByCoresOwnParser]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testPerRegionIsNeverArmedWhileRetentionIsOff]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testPerRegionIsNeverArmedWhileRetentionIsOff]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testRetentionOffSaysSoRatherThanBlamingTheRegion]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testRetentionOffSaysSoRatherThanBlamingTheRegion]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testSolidLoadDoesNotAssertLoadAsAMeasuredFact]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testSolidLoadDoesNotAssertLoadAsAMeasuredFact]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheAggregateCapIsNotBlamedOnTheRegion]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheAggregateCapIsNotBlamedOnTheRegion]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheBreakdownAlsoShowsWhenTheLatticeProducedNothing]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheBreakdownAlsoShowsWhenTheLatticeProducedNothing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheBreakdownSurvivesTheOutcomeStoreRoundTrip]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheBreakdownSurvivesTheOutcomeStoreRoundTrip]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingIsOmittedWhenTheUserHasNotMovedIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingIsOmittedWhenTheUserHasNotMovedIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingRowNamesCoresNumberUntilTheUserMovesIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCeilingRowNamesCoresNumberUntilTheUserMovesIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCellControlCanReachTheValueTheRefusalsName]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheCellControlCanReachTheValueTheRefusalsName]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlIsOffByDefaultAndSaysWhatChanges]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlIsOffByDefaultAndSaysWhatChanges]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlShowsTheExposureBeforeTheRun]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheControlShowsTheExposureBeforeTheRun]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheEntryFloorIsTheDensestEndNotCoresLightestEndFloor]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheEntryFloorIsTheDensestEndNotCoresLightestEndFloor]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheExtrusionWidthTheGradingLawReadsIsTheUsersOuterWallWidth]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheExtrusionWidthTheGradingLawReadsIsTheUsersOuterWallWidth]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheForecastRetentionBranchIsReachableThroughTheRealSerializer]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheLinkedCoreTakesTheRetentionSwitch]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheLinkedCoreTakesTheRetentionSwitch]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheNotRequestedBranchStillSaysWhatIsThere]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheNotRequestedBranchStillSaysWhatIsThere]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testThePerRegionBreakdownReachesTheResultsLines]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testThePerRegionBreakdownReachesTheResultsLines]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheSchemaProbeProvesItselfOnThisBuild]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheSchemaProbeProvesItselfOnThisBuild]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheScopeNoteDoesNotClaimCellCounts]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTheScopeNoteDoesNotClaimCellCounts]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTwoRegionsWithIdenticalMembersGetNonContradictoryReasons]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testTwoRegionsWithIdenticalMembersGetNonContradictoryReasons]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalJob]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalJob]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalRelatticeJob]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalRelatticeJob]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testWithNoLineWidthTheControlFallsBackToItsOwnStart]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testWithNoLineWidthTheControlFallsBackToItsOwnStart]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testWithoutCoresPercolationFloorTheBuildableClaimIsNotMade]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testWithoutCoresPercolationFloorTheBuildableClaimIsNotMade]' passed (0.000 seconds).
+Test Suite 'LatticeRetentionControlTests' passed at 2026-08-05 20:29:56.183.
+	 Executed 44 tests, with 0 failures (0 unexpected) in 0.023 (0.026) seconds
+Test Suite 'LatticeRetentionEvidenceGen' started at 2026-08-05 20:29:56.183.
+Test Case '-[TopOptFlowsTests.LatticeRetentionEvidenceGen testWriteRetentionReachabilityEvidence]' started.
+Test Case '-[TopOptFlowsTests.LatticeRetentionEvidenceGen testWriteRetentionReachabilityEvidence]' passed (0.002 seconds).
+Test Suite 'LatticeRetentionEvidenceGen' passed at 2026-08-05 20:29:56.185.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-08-05 20:29:56.185.
+	 Executed 45 tests, with 0 failures (0 unexpected) in 0.025 (0.028) seconds
+Test Suite 'Selected tests' passed at 2026-08-05 20:29:56.185.
+	 Executed 45 tests, with 0 failures (0 unexpected) in 0.025 (0.029) seconds
+R4 probe reliable = true
+R4 core accepts: retention=true stressFraction=true perRegion=true regionCells=true
+R4 core default ceiling = 0.2
+R4 --- controls UNTOUCHED, grading block ---
+{
+  "cell_mm" : 8,
+  "min_extrudable_width_mm" : 0.45000000000000001,
+  "topology" : "octet"
+}
+R4 --- retention ARMED, all four controls on ---
+{
+  "cell_mm" : 8,
+  "min_extrudable_width_mm" : 0.45000000000000001,
+  "report_region_cells" : true,
+  "retain_subfloor_in_unloaded_regions" : true,
+  "subfloor_per_region" : true,
+  "topology" : "octet"
+}
+R4 --- retention ARMED with a MOVED ceiling ---
+{
+  "cell_mm" : 8,
+  "min_extrudable_width_mm" : 0.45000000000000001,
+  "retain_subfloor_in_unloaded_regions" : true,
+  "subfloor_stress_fraction" : 0.12,
+  "topology" : "octet"
+}
+R4 cell control @0.45mm: light floor=4.931378498367851 densest floor=1.173173434139347 range=1.173173434139347...20.0 typed(1.2)=1.2
+R4 reason at 1.2mm: below core's printability floor for Octet truss at this line width (4.9 mm), which is measured at the LIGHTEST certifiable density. A graded run has its cell raised to that number; a uniform run builds the cell you typed, and its struts print because it fills at the dense end.  runnable=true
+R4 control [OFF, nothing below the floor] enabled=true ceiling=core’s 20%
+     title: Keep the lattice where the part is too thin to certify it
+      body: This region’s members are thinner than a certified lattice needs. Turn this on and the lattice is built anyway — the strength certificate will not cover it, and the part is stamped out of regime.
+  exposure: Nothing in this lattice is below the cells-across floor, so this setting would change nothing on these settings.
+R4 control [OFF, 822 below the floor] enabled=true ceiling=core’s 20%
+     title: Keep the lattice where the part is too thin to certify it
+      body: This region’s members are thinner than a certified lattice needs. Turn this on and the lattice is built anyway — the strength certificate will not cover it, and the part is stamped out of regime.
+  exposure: 822 voxels here — 65.4% of the 1,257 voxels this lattice covers are below the cells-across floor and will stay SOLID. Turning this on is what would lattice them.
+R4 control [ON, 822 below the floor] enabled=true ceiling=core’s 20%
+     title: Keep the lattice where the part is too thin to certify it
+      body: This region’s members are thinner than a certified lattice needs. Turn this on and the lattice is built anyway — the strength certificate will not cover it, and the part is stamped out of regime.
+  exposure: Up to 822 voxels — 65.4% of the 1,257 voxels this lattice covers would be latticed with no certificate over them. It is an upper bound: they are kept only where the region’s own peak stress measures at or under the ceiling below, and the run reports which.
+R4 --- the results screen's lattice lines (CONSTRUCTED GRADED FIXTURE, not his uniform run) ---
+     • Lattice: Octet truss, 8 mm cell, filled at 50% density (previewed 20%–50%). Region-scoped, as previewed (7 regions travelled with the job).
+     • Generated: 1131 cells, 2400000 triangles (STL), strut radius 0.21–0.88 mm.
+     • Per region — 5 of 7 regions received NO lattice: Region 1, Region 2, Region 3, Region 4, Region 5.
+     • Region 1: 0 of 1,257 voxels latticed · 1,257 left solid · members 4.00–4.00 mm. No cell size can CERTIFY this member: nothing is both printable at your nozzle and coarse enough for the homogenized model to describe it. It CAN still be built: at core's finest printable cell (1.17 mm) this member spans 3.4 cells, above the 1 cell the struts need to connect. That lattice would print and its certificate would be out of regime — which is what the “keep the lattice where the part is too thin to certify it” switch is for. To CERTIFY it the member would need 5.47 mm. A nozzle of 0.31 mm or finer would also do it. Retention was on and this region did NOT qualify: its peak stress measures 44.0% of the part's peak, above the 20% ceiling, so its 1,257 below-floor voxels stayed solid. Raising the ceiling above 44.0% would keep them.
+     • Region 2: 0 of 1,257 voxels latticed · 1,257 left solid · members 4.00–4.00 mm. No cell size can CERTIFY this member: nothing is both printable at your nozzle and coarse enough for the homogenized model to describe it. It CAN still be built: at core's finest printable cell (1.17 mm) this member spans 3.4 cells, above the 1 cell the struts need to connect. That lattice would print and its certificate would be out of regime — which is what the “keep the lattice where the part is too thin to certify it” switch is for. To CERTIFY it the member would need 5.47 mm. A nozzle of 0.31 mm or finer would also do it. Retention was on and this region did NOT qualify: its peak stress measures 44.0% of the part's peak, above the 20% ceiling, so its 1,257 below-floor voxels stayed solid. Raising the ceiling above 44.0% would keep them.
+     • Region 3: 0 of 1,257 voxels latticed · 1,257 left solid · members 4.00–4.00 mm. No cell size can CERTIFY this member: nothing is both printable at your nozzle and coarse enough for the homogenized model to describe it. It CAN still be built: at core's finest printable cell (1.17 mm) this member spans 3.4 cells, above the 1 cell the struts need to connect. That lattice would print and its certificate would be out of regime — which is what the “keep the lattice where the part is too thin to certify it” switch is for. To CERTIFY it the member would need 5.47 mm. A nozzle of 0.31 mm or finer would also do it. Retention was on and this region did NOT qualify: its peak stress measures 44.0% of the part's peak, above the 20% ceiling, so its 1,257 below-floor voxels stayed solid. Raising the ceiling above 44.0% would keep them.
+     • Region 4: 0 of 1,257 voxels latticed · 1,257 left solid · members 4.00–4.00 mm. No cell size can CERTIFY this member: nothing is both printable at your nozzle and coarse enough for the homogenized model to describe it. It CAN still be built: at core's finest printable cell (1.17 mm) this member spans 3.4 cells, above the 1 cell the struts need to connect. That lattice would print and its certificate would be out of regime — which is what the “keep the lattice where the part is too thin to certify it” switch is for. To CERTIFY it the member would need 5.47 mm. A nozzle of 0.31 mm or finer would also do it. Retention was on and this region did NOT qualify: its peak stress measures 44.0% of the part's peak, above the 20% ceiling, so its 1,257 below-floor voxels stayed solid. Raising the ceiling above 44.0% would keep them.
+     • Region 5: 0 of 1,257 voxels latticed · 1,257 left solid · members 4.00–4.00 mm. No cell size can CERTIFY this member: nothing is both printable at your nozzle and coarse enough for the homogenized model to describe it. It CAN still be built: at core's finest printable cell (1.17 mm) this member spans 3.4 cells, above the 1 cell the struts need to connect. That lattice would print and its certificate would be out of regime — which is what the “keep the lattice where the part is too thin to certify it” switch is for. To CERTIFY it the member would need 5.47 mm. A nozzle of 0.31 mm or finer would also do it. Retention was on and this region did NOT qualify: its peak stress measures 44.0% of the part's peak, above the 20% ceiling, so its 1,257 below-floor voxels stayed solid. Raising the ceiling above 44.0% would keep them.
+     • Region 6: 1,257 of 1,257 voxels latticed · 0 left solid · members 4.00–4.00 mm. Latticed, and the certificate does NOT cover it: this is the sub-floor material you asked to keep. 1,257 voxels here were kept below the floor. Across the whole run, 2.89% of the printed part is sub-floor lattice. Cell size never enters the certification maths, so the margin reads the same whether that lattice is fine or badly wrong.
+     • Region 7: 900 of 1,257 voxels latticed · 357 left solid · members 4.00–4.00 mm. The lattice here is inside the certified regime.
+     • Counted in VOXELS, not emitted cells, and only on a graded (Auto density) run — that is what core measures per region today. A uniform lattice run still has no per-region breakdown.
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

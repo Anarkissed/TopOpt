@@ -857,6 +857,17 @@ public struct LatticeReport: Equatable, Sendable {
     /// strut numbers (older worker, non-octet lattice, or run_info unreadable).
     public let strut: StrutStrength?
 
+    /// THE PER-REGION RECEIPT, RAW (task 2026-08-05-lattice-retention-app-control).
+    /// The graded lattice receipt (`variant_XXX_lattice.report.json`) core wrote for
+    /// the run's last accepted variant, kept as bytes because the reader —
+    /// `LatticeRegionCellReceipt` — lives above this module. Present only when the
+    /// job asked for it (`grading.report_region_cells`), so a run that did not ask
+    /// carries nothing and costs no extra fetch.
+    ///
+    /// This is the file that answers "which of my seven regions got what", which no
+    /// artifact could answer after the maintainer's overnight run.
+    public let regionCellsJSON: Data?
+
     public struct StrutStrength: Equatable, Sendable {
         public let marginInPlane: Double
         public let marginInterlayer: Double
@@ -915,7 +926,9 @@ public struct LatticeReport: Equatable, Sendable {
                 minRelativeDensity: Double, maxRelativeDensity: Double,
                 regionScoped: Bool, emittedRegions: Int = 0,
                 generated: Generated? = nil,
-                strut: StrutStrength? = nil) {
+                strut: StrutStrength? = nil,
+                regionCellsJSON: Data? = nil) {
+        self.regionCellsJSON = regionCellsJSON
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.generateRelativeDensity = generateRelativeDensity
@@ -1042,10 +1055,26 @@ public enum TopOptKit {
         public let printabilityFloorMM: Double
         public let cellsPerMemberFloor: Double
         public let valid: Bool
-        public init(printabilityFloorMM: Double, cellsPerMemberFloor: Double, valid: Bool) {
+        /// - `printabilityFloorDensestMM` — the SAME core law at the band's TOP
+        ///   density: the smallest cell that prints at all, at any density. Core's
+        ///   own pre-flight refusals quote this end ("admits cells from 1.09 mm"),
+        ///   so a control bounded by `printabilityFloorMM` names values its user
+        ///   cannot enter. 0 ⇒ core carries no strut-diameter law for the topology.
+        public let printabilityFloorDensestMM: Double
+        /// - `percolationCellsPerMemberFloor` — the floor that decides whether a
+        ///   member can be BUILT at all, as opposed to `cellsPerMemberFloor`, which
+        ///   decides whether it can be CERTIFIED. Between them a member prints and
+        ///   its certificate is out of regime; below this one the strut network is
+        ///   not connected and the generator emits debris. 0 ⇒ core states none.
+        public let percolationCellsPerMemberFloor: Double
+        public init(printabilityFloorMM: Double, cellsPerMemberFloor: Double,
+                    valid: Bool, printabilityFloorDensestMM: Double = 0,
+                    percolationCellsPerMemberFloor: Double = 0) {
+            self.percolationCellsPerMemberFloor = percolationCellsPerMemberFloor
             self.printabilityFloorMM = printabilityFloorMM
             self.cellsPerMemberFloor = cellsPerMemberFloor
             self.valid = valid
+            self.printabilityFloorDensestMM = printabilityFloorDensestMM
         }
     }
 
@@ -1057,7 +1086,11 @@ public enum TopOptKit {
         let b = topoptbridge.lattice_cell_bounds(std.string(topology), minExtrudableWidthMM)
         return LatticeCellBounds(printabilityFloorMM: b.printability_floor_mm,
                                  cellsPerMemberFloor: b.cells_per_member_floor,
-                                 valid: b.valid)
+                                 valid: b.valid,
+                                 printabilityFloorDensestMM:
+                                    b.printability_floor_densest_mm,
+                                 percolationCellsPerMemberFloor:
+                                    b.percolation_cells_per_member_floor)
     }
 
     /// The topology names the core can RUN and certify today (the seven cubic
@@ -1074,6 +1107,45 @@ public enum TopOptKit {
     /// 2026-07-30-lattice-page, bar B0).
     public static var latticeGeneratableTopologies: [String] {
         topoptbridge.lattice_generatable_topologies().map { String($0) }
+    }
+
+    // MARK: - grading schema capability (task 2026-08-05-lattice-retention-app-control)
+
+    /// Does the CORE THIS BUILD LINKS accept `grading.<key>` in a job document?
+    ///
+    /// Asked of core's own parser (`topopt::parse_job`), not mirrored in Swift. The
+    /// app must never emit a grading key core does not know: `reject_unknown_keys`
+    /// fails the WHOLE job, so one unrecognised key is not a degraded run, it is a
+    /// dead one. Answering false when the probe cannot be trusted is the safe
+    /// direction, and `gradingSchemaProbeIsReliable` says when that is happening.
+    public static func gradingSchemaAccepts(key: String) -> Bool {
+        topoptbridge.grading_schema_accepts(std.string(key))
+    }
+
+    /// Validate a whole job document against CORE'S OWN SCHEMA. nil ⇒ core accepts
+    /// it; otherwise core's diagnostic verbatim. Lets a test assert that what the
+    /// serializer produced is what this core will RUN, not merely that it contains
+    /// the keys the test expected.
+    public static func jobSchemaError(_ jobJSON: Data) -> String? {
+        let text = String(data: jobJSON, encoding: .utf8) ?? ""
+        let e = String(topoptbridge.job_schema_error(std.string(text)))
+        return e.isEmpty ? nil : e
+    }
+
+    /// Whether the schema probe proved itself on this build — a key core has always
+    /// accepted probes true AND a nonsense key probes false. False ⇒ every
+    /// `gradingSchemaAccepts` answer is a conservative false.
+    public static var gradingSchemaProbeIsReliable: Bool {
+        topoptbridge.grading_schema_probe_is_reliable()
+    }
+
+    /// Core's OWN default stress-fraction ceiling for sub-floor retention — the
+    /// number `grading.subfloor_stress_fraction` overrides. Read from core so the
+    /// app can show it without authoring it, and so "the user moved it" is
+    /// distinguishable from "the user left core's number alone" (the second omits
+    /// the key entirely).
+    public static var latticeSubfloorStressFractionDefault: Double {
+        topoptbridge.lattice_subfloor_stress_fraction_default()
     }
 
     /// Load and validate a materials.json file (ARCHITECTURE §6). Materials are
