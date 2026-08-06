@@ -815,7 +815,19 @@ git diff 90e9ec5 HEAD -- core/tests app/TopOptKit/Tests \
   | grep -E '^-\s*(func test|TEST|EXPECT|CHECK|REQUIRE)'
 ```
 
-R5_RESULT_PLACEHOLDER
+**Zero lines matched.** The full accounting, so a rename cannot hide in it:
+
+```
+--- what changed under core/tests and app/TopOptKit/Tests ---
+ core/tests/harness/cad_face_probe.cpp    | 655 +++++++++++++++++++++++++++++++
+ core/tests/harness/cad_project_probe.cpp | 602 ++++++++++++++++++++++++++++
+ core/tests/unit/test_cad_project.cpp     | 394 +++++++++++++++++++
+ 3 files changed, 1651 insertions(+)
+```
+
+**Three files, all NEW, 1,651 insertions and zero deletions.** No existing test
+is touched at all, so there is no rename to match by hand. On the other side of
+the ledger, 32 added lines match the same assertion pattern.
 
 One assertion **changed shape** during the work and it is accounted for by hand
 here, because a reader should not have to take the grep's word for it. The test
@@ -848,7 +860,15 @@ from 24 to 31.
 
 ## R7 — NO UNFILLED PLACEHOLDERS
 
-Grepped before commit: no `<<`, no "TBD", no "filled in with the results".
+```
+grep -n "PLACEHOLDER\|<<\|TBD\|filled in with\|FIXME\|XXX" \
+  docs/handoffs/2026-08-06-cad-face-projection.md \
+  evidence/2026-08-06-cad-face-projection/README.md
+```
+
+Clean before commit — the only hits are this section quoting the words it is
+grepping for. Every number in this document is a measurement that exists in
+`evidence/2026-08-06-cad-face-projection/`.
 
 ## R8 — SEPARATE COMMIT FOR ANY REVIEW RESPONSE
 

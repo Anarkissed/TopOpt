@@ -1,12 +1,17 @@
 R5 — DELETED-ASSERTION SWEEP
 
-merge-base: 90e9ec5451dbb25059bfe1d5a1555cd6a27190d6
+merge-base: 90e9ec5451dbb25059bfe1d5a1555cd6a27190d6   HEAD: 929a77e
 
-$ git diff $(git merge-base HEAD main) -- core/tests app/TopOptKit/Tests \
+$ git diff 90e9ec5451dbb25059bfe1d5a1555cd6a27190d6 HEAD -- core/tests app/TopOptKit/Tests \
     | grep -E '^-\s*(func test|TEST|EXPECT|CHECK|REQUIRE)'
 
 (no output — ZERO lines matched)
 
-Accounting: this branch DELETES no assertion and RENAMES none. It adds one
-new test file (core/tests/unit/test_cad_project.cpp, 31 checks) and touches no
-existing test. The full list of test files changed:
+--- what changed under core/tests and app/TopOptKit/Tests ---
+ core/tests/harness/cad_face_probe.cpp    | 655 +++++++++++++++++++++++++++++++
+ core/tests/harness/cad_project_probe.cpp | 602 ++++++++++++++++++++++++++++
+ core/tests/unit/test_cad_project.cpp     | 394 +++++++++++++++++++
+ 3 files changed, 1651 insertions(+)
+
+--- added assertion lines, for the other side of the ledger ---
+additions matching the same pattern: 32
