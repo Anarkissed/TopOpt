@@ -297,23 +297,44 @@ then flood-fills the empty space **6-connected** from the grid boundary — PR
 question asked twice. Anything the fill cannot reach is an enclosed cavity in the
 exported solid.
 
-**Your part, resolution 128, all four rungs** (`s3_mesh_flood_fill.txt`):
+**★ THE COUNT IS SWEPT ACROSS THE MEASURING GRID, and that is not a formality —
+it is the difference between this section's answer and its opposite.** The flood
+fill discretises the exported mesh, so its OWN grid can close a channel the mesh
+leaves open. On the first pass, at a single grid, this probe reported a
+**703-voxel / 6960.668 mm³ cavity appearing on rung 068 the moment projection
+was armed**. That is exactly the shape of the blocked-stop this section exists to
+catch, and I was one measurement away from reporting it as one.
 
-| rung | watertight | enclosed cavities BEFORE | AFTER |
-|---|---|---:|---:|
-| 026 | yes → yes | 0 | **0** |
-| 038 | yes → yes | 0 | **0** |
-| 052 | yes → yes | **1** (1 voxel, 1.267 mm³) | **0** |
-| 068 | yes → yes | 0 | **0** |
+It is not one. The same two meshes measured at 96, 128 and 160 report **zero**
+cavities in **both** arms — the drain channel is simply narrower than a 3.4 mm
+measuring voxel. **A cavity count at one grid is not evidence.**
 
-**★ NO PORE THE FIELD CALLS OPEN BECOMES SEALED IN THE EXPORTED MESH.** On rung
-052 it goes the other way: the un-projected export has one enclosed cavity and
-the projected one has none. That cavity is a single voxel at the resolution
-limit — a discretisation artefact, not a feature — and it is reported as
-measured rather than dressed up as a benefit.
+**Your part, resolution 128, all four rungs, swept** (`s3_mesh_flood_fill.txt`):
 
-The 26-connected fill is computed alongside as a negative control (it can only
-reach more) and agrees at 0 everywhere.
+| mesh | grid 128 | grid 160 | grid 192 |
+|---|---:|---:|---:|
+| variant_026 | 0 | 2 (3 vox) | 0 |
+| variant_026 **projected** | 0 | 0 | 1 (1 vox) |
+| variant_038 | 0 | 0 | 0 |
+| variant_038 **projected** | 0 | 0 | 0 |
+| variant_052 | 1 (1 vox) | 0 | 0 |
+| variant_052 **projected** | 0 | 0 | 0 |
+| variant_068 | 0 | 0 | 0 |
+| variant_068 **projected** | 0 | 0 | 0 |
+
+**Every mesh is watertight at every grid, in both arms** — which is what makes
+the parity inside/outside test meaningful at all, and is precisely the property
+this task's weld guard exists to protect.
+
+**★ NO PORE THE FIELD CALLS OPEN BECOMES SEALED IN THE EXPORTED MESH.** Not one
+non-zero entry survives a change of measuring grid, and every one of them is 1–3
+voxels — the probe's own noise floor. Nothing appears in the projected arm and
+stays. The 26-connected negative control (it can only ever reach more) agrees at
+0 throughout.
+
+An earlier draft of this section read "rung 052 goes 1 → 0" as though projection
+had *opened* something. That was the same noise seen from the other side, and it
+is corrected rather than left standing.
 
 ## S3(b) — the blocked-stop is not triggered
 
@@ -611,7 +632,7 @@ and is regenerable from the committed scripts.
 | the stop | hit? |
 |---|---|
 | a certified verdict moves | **No.** ACCEPTED → ACCEPTED on all four rungs. §R1. |
-| S3 finds projection sealing a pore the field calls open | **No.** 0 enclosed cavities before and after on every rung; rung 052 goes 1 → 0. §S3. |
+| S3 finds projection sealing a pore the field calls open | **No** — but only after the count was swept across the measuring grid. A single-grid reading showed a 6960 mm³ cavity appearing on rung 068 and it evaporated at every finer grid. Nothing above the probe's own 1–3 voxel noise floor survives in either arm. §S3. |
 | an existing fixture, test or recipe refuses and cannot be explained | **No.** Six tests failed and all six are explained and fixed (§R6); 21/82 job documents swept in both arms with zero newly refused; the one recipe that does refuse (`job_multiscale.json`, `skin: "rim"`) refuses on the merge base too. §S2(e). |
 | the mass audit finds a figure whose source you cannot determine | **No.** All ten sourced. §S1(d). |
 | **a job-building site cannot send a key without restructuring how jobs are assembled** | **★ YES — REPORTED, NOT SPECIAL-CASED.** The on-device path builds no job document and contains no projection at all. §S1(b). |

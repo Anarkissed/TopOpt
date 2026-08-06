@@ -625,24 +625,6 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
   // is not this operation's doing, reverting would not fix it, and treating it
   // as a collision would make the guard fight a pre-existing degeneracy every
   // pass and never converge.
-  const auto weld_key = [](const Vec3& p) {
-    // Round-trip through float exactly as write_stl_file will.
-    return std::array<float, 3>{static_cast<float>(p.x), static_cast<float>(p.y),
-                                static_cast<float>(p.z)};
-  };
-  std::map<std::array<float, 3>, std::size_t> preexisting;
-  std::vector<char> already_coincident(nv, 0);
-  for (std::size_t i = 0; i < nv; ++i) {
-    const auto k = weld_key(mesh.vertices[i]);
-    const auto it = preexisting.find(k);
-    if (it == preexisting.end()) {
-      preexisting.emplace(k, i);
-    } else {
-      already_coincident[i] = 1;
-      already_coincident[it->second] = 1;
-    }
-  }
-  //
   // The remedy is the fold guard's own: put a vertex back. Same currency order
   // — band vertices are free and are spent first — and the same fixed-point
   // loop, because reverting one vertex can expose another collision.
@@ -650,6 +632,42 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
   // The LOWEST INDEX KEEPS ITS PROJECTED POSITION and the rest are reverted.
   // Deterministic and order-independent, so the receipt stays byte-reproducible
   // (which five separate tests require of it).
+  const auto weld_key = [](const Vec3& p) {
+    // Round-trip through float exactly as write_stl_file will.
+    return std::array<float, 3>{static_cast<float>(p.x), static_cast<float>(p.y),
+                                static_cast<float>(p.z)};
+  };
+  // Pairs the INPUT already could not tell apart. Excluded from the scan below:
+  // not this operation's doing, reverting would not fix them, and counting them
+  // would make the guard fight a standing degeneracy every pass and never
+  // converge.
+  std::vector<char> already_coincident(nv, 0);
+  {
+    std::map<std::array<float, 3>, std::size_t> preexisting;
+    for (std::size_t i = 0; i < nv; ++i) {
+      const auto it = preexisting.find(weld_key(mesh.vertices[i]));
+      if (it == preexisting.end()) {
+        preexisting.emplace(weld_key(mesh.vertices[i]), i);
+      } else {
+        already_coincident[i] = 1;
+        already_coincident[it->second] = 1;
+      }
+    }
+  }
+  // How many collisions the RAW projection produced, counted BEFORE the guard
+  // spends anything — so the figure means "what this operation created", not
+  // "what was left when the paid phase started". Reported so a clean result is
+  // distinguishable from a scan that never had anything to find (which is
+  // exactly what the block fixture in test_cad_project.cpp does, and it says
+  // so).
+  {
+    std::map<std::array<float, 3>, std::size_t> at;
+    for (std::size_t i = 0; i < nv; ++i) {
+      if (already_coincident[i]) continue;
+      if (!at.emplace(weld_key(out.vertices[i]), i).second)
+        ++st.weld_collisions_found;
+    }
+  }
   if (opts.fold_guard) {
     // `free_only` restricts reverting to band vertices (phase 1).
     auto run_guard = [&](bool free_only) {
@@ -706,7 +724,6 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
             }
           }
         }
-        if (pass == 0 && !free_only) st.weld_collisions_found = welds;
         if ((folded == 0 && welds == 0) || revertible == 0) break;
         ++st.fold_guard_passes;
         for (std::size_t i = 0; i < nv; ++i) {

@@ -35,6 +35,19 @@ Run it on the SAME rung exported both ways. A cavity count that RISES when
 projection is armed is projection sealing something, and that is the finding the
 brief calls a blocked-stop for the default.
 
+★ BUT RUN IT AT MORE THAN ONE GRID BEFORE BELIEVING ANY NON-ZERO COUNT, and this
+is not a caveat — it is the difference between the right answer and its
+opposite. The fill discretises the mesh, so its OWN grid can close a channel the
+mesh leaves open. On this task's first pass, at grid 64, this probe reported a
+703-voxel / 6960.668 mm^3 cavity appearing on the maintainer's rung 068 the
+moment projection was armed — exactly the shape of the blocked-stop. At grids
+96, 128 and 160 the same two meshes report ZERO in both arms: the drain channel
+is narrower than a 3.4 mm measuring voxel and nothing more.
+
+So: a cavity count at one grid is not evidence. Only one that SURVIVES a change
+of grid is. Every non-zero reading this probe produced on the maintainer's part
+was 1-3 voxels and did not survive.
+
 ★ WATERTIGHTNESS IS REPORTED FIRST AND IS NOT A FORMALITY. Parity is only
 meaningful on a closed surface, and this task found that projection could weld
 two surface sheets together and produce a file that is NOT closed (the weld

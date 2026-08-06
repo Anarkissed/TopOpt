@@ -34,7 +34,7 @@ they produced.
 |---|---|
 | `s1d_mass_audit.md` | **S1(d)** — every mass and volume the app displays, with file:line and MESH-vs-VOXEL provenance. Nothing was changed. Includes the measured before/after and the warning that the −8% is his part's, not the feature's. |
 | `s2e_refusal_sweep.py` / `.txt` | **S2(e)** — every committed job document run through BOTH binaries so a new refusal is attributable. Partial at the time of writing; skip list printed in full. |
-| `s3_mesh_flood_fill.py` / `.txt` | **S3** — a 6-connected flood fill on the EXPORTED GEOMETRY, all four rungs at 128. **No pore seals; rung 052 goes 1 cavity → 0.** Refuses to print a cavity count for a non-watertight mesh, because parity has no defined inside on one. |
+| `s3_mesh_flood_fill.py` / `.txt` | **S3** — a 6-connected flood fill on the EXPORTED GEOMETRY, all four rungs at 128, **swept across three measuring grids**. No pore seals. The sweep is the point: a single grid showed a 6960 mm³ cavity that vanished at every finer one. Refuses to print a cavity count for a non-watertight mesh, because parity has no defined inside on one. |
 
 ## Reproducing
 
