@@ -129,6 +129,25 @@ struct GradingLawParams {
   // Null (the DEFAULT) is the demand map, byte-for-byte.
   const std::vector<double>* prescribed_relative_density = nullptr;
 
+  // ── FIT (task 2026-08-05-lattice-cell-fit-mode) ────────────────────────────────
+  // REQUIRED when cell_mode == Fit, ignored otherwise. Grid-indexed (size
+  // grid.voxel_count()): the cell size DERIVED for the declared include region this
+  // voxel belongs to — max(region width / N*, the finest printable cell) — and 0.0
+  // for a voxel no derivation covers.
+  //
+  // WHY THE CALLER DERIVES IT AND NOT THIS LAW. The requirement is the region the
+  // USER DECLARED, and its extent is job geometry (a slab's depth, a bolt region's
+  // diameter). This law measures the DESIGN's local member width, which on a thin
+  // include slab cut into a thick wall is a different and larger number — grading it
+  // by that width would fit a cell to material the user did not ask to lattice. So
+  // the declaration is resolved where the declaration lives (run_job.cpp) and handed
+  // in, and this law stays geometry-agnostic.
+  //
+  // A voxel with 0.0 here is NOT latticed in Fit mode: no derivation covers it, and
+  // guessing a cell for it is exactly the "conservative bound promoted to a selection
+  // rule" mistake this mode exists to undo.
+  const std::vector<double>* fit_cell_size_mm = nullptr;
+
   // HOW THESE TWO COMPOSE (multiscale x sub-floor retention). A multiscale run
   // prescribes rho and stops using `demand` FOR THE DENSITY — but it still hands
   // in the variant's real von Mises field, and that is what the retention
@@ -216,6 +235,34 @@ struct GradedField {
   double printability_floor_mm = 0.0;  // smallest cell that prints the rho_min strut
   bool cell_size_floored = false;      // target was below the floor and got raised
   CellSizeMode cell_mode = CellSizeMode::Fixed;
+
+  // ── THE FLOOR THAT ACTUALLY BINDS (task 2026-08-05-lattice-cell-fit-mode, S2) ───
+  // `printability_floor_mm` above is evaluated at the band's LIGHTEST density, so it
+  // is the smallest cell that prints IF the lattice is as light as the band allows.
+  // It is a valid BOUND and it is what Auto still selects. It is NOT the smallest
+  // legal cell: a DENSER lattice prints a fatter strut, so a cell down to
+  //     min_printable_cell_mm = min_extrudable_width / phi(rho_max)
+  // is legal as long as the density is raised with it — which this law now does. That
+  // is why a hand-set Fixed target between the two is no longer raised.
+  double min_printable_cell_mm = 0.0;
+  // Latticed voxels whose relative density was RAISED above what demand asked for, so
+  // the strut at their cell clears the stated width. Zero on every path whose cell is
+  // at or above `printability_floor_mm`, because there the raise is inert by
+  // construction (the band floor already prints) — which is what makes S2 a no-op on
+  // a run whose cell was never overridden.
+  std::size_t density_raised_for_print_voxels = 0;
+
+  // ── FIT (S1) ────────────────────────────────────────────────────────────────────
+  // Latticed voxels whose member holds fewer than the cells-per-member ACCURACY floor
+  // at their own derived cell: buildable (they clear percolation, which the pre-flight
+  // enforces) and NOT certifiable. Reported, never silently absorbed.
+  std::size_t fit_out_of_regime_voxels = 0;
+  // Distinct derived cells the run actually emitted (1 on a single-region job).
+  std::size_t fit_distinct_cells = 0;
+  // Candidate voxels no declared region covered, so no cell was derived for them.
+  // They stay SOLID — included in `solid_fallback_voxels`, named separately because
+  // the remedy (declare a region there) is unlike either of the other two.
+  std::size_t fit_no_derivation_voxels = 0;
 
   // The SWEPT plan (bar R4/R5). In Fixed / Auto mode this is a trivial one-level
   // record of the uniform cell, so every consumer reads the same shape in all three

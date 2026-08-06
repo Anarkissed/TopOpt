@@ -47,8 +47,28 @@ GradedField grade_lattice(const VoxelGrid& grid,
     throw std::invalid_argument(
         "grade_lattice: prescribed_relative_density->size() != voxel_count");
   const bool swept = params.cell_mode == CellSizeMode::Swept;
+  const bool fit = params.cell_mode == CellSizeMode::Fit;
   if (params.cell_mode == CellSizeMode::Fixed && !(params.target_cell_size_mm > 0.0))
     throw std::invalid_argument("grade_lattice: target_cell_size_mm must be > 0");
+  if (fit) {
+    if (params.fit_cell_size_mm == nullptr)
+      throw std::invalid_argument(
+          "grade_lattice: fit mode needs fit_cell_size_mm — the per-voxel cell "
+          "derived from the declared include regions (see grading.hpp)");
+    if (params.fit_cell_size_mm->size() != n)
+      throw std::invalid_argument(
+          "grade_lattice: fit_cell_size_mm->size() != voxel_count");
+    // REFUSED RATHER THAN IGNORED. Sub-floor retention exists to keep material the
+    // ACCURACY floor rejected at the part's ONE cell; fit already fits a cell to each
+    // region and already emits below that floor where the region cannot hold it, with
+    // its own accounting. Running both would leave two mechanisms deciding the same
+    // voxel with two different receipts, and silently dropping one would hide which.
+    if (params.retain_subfloor_in_unloaded_regions)
+      throw std::invalid_argument(
+          "grade_lattice: cell_mode \"fit\" and retain_subfloor_in_unloaded_regions "
+          "are mutually exclusive — fit already derives a cell per region and reports "
+          "the out-of-regime material itself (fit_out_of_regime_voxels)");
+  }
   if (swept) {
     if (!(params.min_cell_size_mm > 0.0))
       throw std::invalid_argument(
@@ -111,19 +131,55 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // floor is min_width / phi_lo.
   const double floor_mm = lattice_cell_printability_floor_mm(
       topo, params.min_extrudable_width_mm);
-  // AUTO takes the floor itself — the finest cell every strut still prints at, and
-  // therefore the uniform cell that leaves the most of the part latticed (the
-  // cells-per-member rule is an UPPER bound, so finer is always more latticed).
-  // FIXED takes the caller's target, raised to that same floor. SWEPT's cell is
-  // per-region and comes from the plan below; the scalar it reports is the coarsest
-  // level the plan actually used.
-  const double uniform_cell = params.cell_mode == CellSizeMode::Auto
-                                  ? floor_mm
-                                  : std::max(params.target_cell_size_mm, floor_mm);
+  // ★ S2 — THE FLOOR IS A BOUND AGAIN, NOT AN ANSWER (task
+  // 2026-08-05-lattice-cell-fit-mode). `floor_mm` above is
+  // `min_extrudable_width / phi(rho_min)`: the smallest cell at which the band's
+  // LIGHTEST strut still prints. Raising a user's target to it guards against a
+  // density NOBODY SELECTED — at a 0.42 mm bead it raises a hand-set 1.2 mm cell to
+  // 4.6026 mm, which then needs 23.0131 mm of member and rejects the very region the
+  // user was trying to reach. Measured, on the maintainer's own geometry: cell_mm 1.2
+  // graded ⇒ "planned cell 4.602619932 mm gives 0.8690702381 cells across".
+  //
+  // The cell that is genuinely illegal is the one at which NO density in the band
+  // prints — `min_extrudable_width / phi(rho_max)`, 1.0950 mm at the same bead. That
+  // is the bound Fixed now applies, and the density is raised WITH the cell below
+  // (`print_rho_floor`) so the pair is legal jointly rather than the cell alone being
+  // legal at an assumed density.
+  //
+  // WHY THIS CANNOT MOVE A RUN WHOSE CELL WAS NEVER OVERRIDDEN: for any target at or
+  // above `floor_mm` the max() picks the target either way, AND the density raise is
+  // inert, because a cell at or above `floor_mm` already prints at rho_min and the
+  // grade is clamped to rho_min from below. So every such run is byte-identical, by
+  // construction and measured (bar R1).
+  const double abs_floor_mm =
+      params.min_extrudable_width_mm /
+      octet_strut_diameter_mm(rho_hi, 1.0);  // = w / phi(rho_max)
+  // AUTO takes `floor_mm` itself — UNCHANGED, deliberately (bar S4): past runs stay
+  // reproducible and the default path stays byte-identical. FIXED takes the caller's
+  // target, raised only to the floor that actually binds. SWEPT's cell is per-region
+  // and comes from the plan below; FIT's likewise.
+  const double uniform_cell =
+      params.cell_mode == CellSizeMode::Auto
+          ? floor_mm
+          : std::max(params.target_cell_size_mm, abs_floor_mm);
   const double cell = uniform_cell;
   out.printability_floor_mm = floor_mm;
-  out.cell_size_floored =
-      params.cell_mode == CellSizeMode::Fixed && params.target_cell_size_mm < floor_mm;
+  out.min_printable_cell_mm = abs_floor_mm;
+  out.cell_size_floored = params.cell_mode == CellSizeMode::Fixed &&
+                          params.target_cell_size_mm < abs_floor_mm;
+  // The lightest band density whose strut prints at cell `S`. At or above `floor_mm`
+  // this is at or below rho_min and the raise below is a no-op; under it, it is what
+  // makes the smaller cell legal instead of forbidden.
+  // A NEGATIVE return means "no density in the band prints at this cell". At exactly
+  // `abs_floor_mm` that can happen by one ULP (the frontier cell is defined by the
+  // reciprocal of the same phi), so it resolves to the band ceiling — the true answer
+  // in the limit — rather than to 0, which would silently emit an under-width strut.
+  // The same resolution lattice_derive_cell_for_member applies, for the same reason.
+  auto print_rho_floor = [&](double S) {
+    const double r = lattice_min_density_for_strut(topo, S,
+                                                   params.min_extrudable_width_mm);
+    return r >= 0.0 ? r : rho_hi;
+  };
   out.cell_size_mm = cell;
   out.cell_mode = params.cell_mode;
 
@@ -337,7 +393,12 @@ GradedField grade_lattice(const VoxelGrid& grid,
   double sub_min_cpm = kInfinity, sub_max_cpm = 0.0;
   double sub_min_d = kInfinity, sub_max_d = 0.0;
 
-  if (!swept) {
+  // The density floor the UNIFORM cell imposes, hoisted: one cell for the part means
+  // one floor. At or above `floor_mm` it is at or below rho_lo and every use of it is
+  // a no-op (S2).
+  const double uniform_rho_floor = swept || fit ? 0.0 : print_rho_floor(cell);
+
+  if (!swept && !fit) {
     apply_aggregate_cap(/*swept_mode=*/false);
     // ── FIXED / AUTO: ONE cell for the part. Unchanged from the pre-sweep law. ────
     for (std::size_t e = 0; e < n; ++e) {
@@ -361,11 +422,16 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // a uniform posture stays uniform, and the retained material joins one lattice
         // instead of meeting it at a cell-size discontinuity.
         //
-        // Printability is NOT relaxed with it: on this path `cell >= floor_mm` by
-        // construction, so the strut at any density in the band prints at or above the
-        // stated minimum width, and the unconditional assertion at the end re-proves it.
+        // Printability is NOT relaxed with it: the density is raised to whatever this
+        // cell needs (`uniform_rho_floor`, S2) before the band clamp, so the strut
+        // prints at or above the stated minimum width, and the unconditional assertion
+        // at the end re-proves it. Before S2 the cell was at or above `floor_mm` by
+        // construction and the raise was inert; it still is on every path that does
+        // not hand-set a finer cell.
         if (retain_subfloor && region_qualified(e) && !out.subfloor_over_budget) {
-          const double rho_r = clamp_rho(e, rho_of(e));
+          const double rho_clamped_r = clamp_rho(e, rho_of(e));
+          const double rho_r = std::max(rho_clamped_r, uniform_rho_floor);
+          if (rho_r > rho_clamped_r) ++out.density_raised_for_print_voxels;
           post.mask[e] = 1;
           post.relative_density[e] = rho_r;
           ++out.latticed_voxels;
@@ -397,7 +463,22 @@ GradedField grade_lattice(const VoxelGrid& grid,
         continue;
       }
 
-      const double rho = clamp_rho(e, rho_of(e));
+      // S2 — the density is raised WITH the cell, so a Fixed target under the
+      // rho_min floor is legal instead of being overridden upward.
+      //
+      // ★ THE RAISE HAPPENS AFTER THE BAND CLAMP, NOT BEFORE IT, and the ordering is
+      // load-bearing. Raising first swallows the clamp: a voxel whose demand density
+      // is under rho_lo would arrive at the clamp already AT rho_lo, so
+      // `clamped_lo_voxels` would read 0 and the CLAMP COUNTERFACTUAL — a whole extra
+      // certification solve — would stop running. Bar R1 case C caught exactly that:
+      // identical mesh, identical design, identical run_info, and a lattice receipt
+      // that differed in `clamped_lo_voxels` 40 -> 0 and `clamp_counterfactual_ran`
+      // true -> false. Clamping first keeps every counter and every solve identical,
+      // and the raise then does nothing at all wherever the cell already prints at
+      // rho_lo — which is every cell at or above `floor_mm`.
+      const double rho_clamped_u = clamp_rho(e, rho_of(e));
+      const double rho = std::max(rho_clamped_u, uniform_rho_floor);
+      if (rho > rho_clamped_u) ++out.density_raised_for_print_voxels;
 
       post.mask[e] = 1;
       post.relative_density[e] = rho;
@@ -420,6 +501,121 @@ GradedField grade_lattice(const VoxelGrid& grid,
     out.cell_plan.max_level = 0;
     out.cell_plan.cells_per_member_floor = n_star;
     out.cell_plan.printability_floor_mm = floor_mm;
+  } else if (fit) {
+    // ── FIT: the cell is DERIVED PER DECLARED REGION and handed in ───────────────
+    // (task 2026-08-05-lattice-cell-fit-mode, S1.) The caller resolved each include
+    // region's requirement into a per-voxel desired cell; this law lands those cells
+    // on ONE aligned dyadic ladder (so two regions with different cells meet at
+    // shared nodes and the existing multilevel emitter can carry them), grades the
+    // density jointly with the cell, and reports what came out.
+    //
+    // WHAT IT ENFORCES AND WHAT IT DELIBERATELY DOES NOT. It never emits a strut
+    // under the stated width (the density is raised with the cell) and it never
+    // emits below the PERCOLATION floor (below that there is no connected network to
+    // print — the voxel stays solid). It DOES emit below the ACCURACY floor where
+    // the region cannot hold it, counted in `fit_out_of_regime_voxels` and reported
+    // out of regime. That is the case the pre-flight names (C): buildable and
+    // uncertifiable, which is a different verdict from un-latticeable.
+    const double perc_floor = lattice_percolation_cells_per_member_min(topo);
+    std::vector<char> cand(n, 0);
+    std::vector<double> rho_raw(n, 0.0);
+    const std::vector<double>& want = *params.fit_cell_size_mm;
+    double s_min = kInf, s_max = 0.0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
+      ++out.region_voxels;
+      if (!(want[e] > 0.0)) {
+        // No declared region covers this voxel, so nothing states what its cell has
+        // to fit into. It stays SOLID rather than being handed a guessed cell —
+        // guessing is the defect this mode exists to remove.
+        ++out.solid_fallback_voxels;
+        ++out.fit_no_derivation_voxels;
+        continue;
+      }
+      cand[e] = 1;
+      rho_raw[e] = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
+      if (want[e] < s_min) s_min = want[e];
+      if (want[e] > s_max) s_max = want[e];
+    }
+
+    if (s_max > 0.0) {
+      CellPlanParams pp;
+      pp.topology = topo;
+      pp.mode = CellSizeMode::Fit;
+      // The ladder's base is the FINEST cell any region asked for — never finer, so
+      // every emitted cell still has a printable density in the band.
+      pp.min_cell_size_mm = s_min;
+      pp.max_cell_size_mm = s_max;
+      pp.min_extrudable_width_mm = params.min_extrudable_width_mm;
+      pp.thickness_cap_voxels = params.thickness_cap_voxels;
+      out.cell_plan =
+          plan_cell_sizes_fit(grid, rho_raw, cand, width, want, pp);
+      voxel_cell = cell_size_field(grid, out.cell_plan);
+    } else {
+      out.cell_plan.mode = CellSizeMode::Fit;
+      out.cell_plan.origin = grid.origin;
+      out.cell_plan.cells_per_member_floor = n_star;
+      out.cell_plan.printability_floor_mm = floor_mm;
+      voxel_cell.assign(n, 0.0);
+    }
+
+    double coarsest = 0.0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!cand[e]) continue;
+      const double ce = voxel_cell[e];
+      if (!(ce > 0.0)) {
+        // The octree left this base cell unlatticed (it is not wholly inside the
+        // candidate set at any level). Same terminal fallback the swept path takes.
+        // ★ The "irrecoverable by any cell" test inside note_member_too_thin is given
+        // `abs_floor_mm`, not `floor_mm`: on this path the finest legal cell IS the
+        // band-top one, so measuring irrecoverability against the rho_min floor would
+        // call a member irrecoverable that fit can in fact reach.
+        ++out.solid_fallback_voxels;
+        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        continue;
+      }
+      // ★ THE PERCOLATION FLOOR, measured against the DESIGN's own member width
+      // rather than the region's declared extent. The declaration is what the cell
+      // was derived from; this is what the printed material actually is. Below the
+      // percolation floor the generator emits debris, so the voxel stays SOLID.
+      const double cpm = width[e] / ce;
+      if (cpm < perc_floor) {
+        ++out.solid_fallback_voxels;
+        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
+        continue;
+      }
+      // Clamp FIRST, raise second — see the ordering note on the uniform path: the
+      // band-clamp counters are part of the receipt and a raise that pre-empts them
+      // silently deletes both the count and the counterfactual solve it triggers.
+      const double rho_clamped = clamp_rho(e, rho_of(e));
+      const double rho = std::max(rho_clamped, print_rho_floor(ce));
+      if (rho > rho_clamped) ++out.density_raised_for_print_voxels;
+      post.mask[e] = 1;
+      post.relative_density[e] = rho;
+      ++out.latticed_voxels;
+      if (cpm < n_star) ++out.fit_out_of_regime_voxels;
+
+      if (rho < rho_min_used) rho_min_used = rho;
+      if (rho > rho_max_used) rho_max_used = rho;
+      if (width[e] < min_width) min_width = width[e];
+      if (cpm < min_cpm) min_cpm = cpm;
+      const double d = octet_strut_diameter_mm(rho, ce);
+      if (d < min_d) min_d = d;
+      if (d > max_d) max_d = d;
+      if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
+      if (ce > coarsest) coarsest = ce;
+    }
+    if (coarsest > 0.0) {
+      out.cell_size_mm = coarsest;
+      post.cell_size_mm = coarsest;
+    }
+    post.cell_size_field = voxel_cell;
+    {
+      std::size_t distinct = 0;
+      for (const CellLevelReport& r : out.cell_plan.levels)
+        if (r.cells > 0) ++distinct;
+      out.fit_distinct_cells = distinct;
+    }
   } else {
     // ── SWEPT: cell size follows demand on a dyadic octree (cell_plan.hpp) ────────
     // Pass 1 — the density grade over every candidate. No cell size is involved here,
@@ -634,15 +830,25 @@ GradedField grade_lattice(const VoxelGrid& grid,
       const bool retained = out.region_qualified_unloaded &&
                             e < out.subfloor_flags.size() &&
                             out.subfloor_flags[e] != 0;
-      if (!retained)
+      // ★ THE SECOND ADMISSIBLE EXCEPTION, and it is likewise a narrowing. FIT emits
+      // below the ACCURACY floor on purpose where the declared region cannot hold it
+      // — that material is buildable and uncertifiable, and it is counted. What it
+      // may NEVER do is emit below the PERCOLATION floor: there is no connected
+      // network there, so anything emitted is debris and a bug in this law.
+      if (fit) {
+        if (!(width[e] / ce >= lattice_percolation_cells_per_member_min(topo)))
+          throw std::logic_error(
+              "grade_lattice: fit emitted lattice below the percolation floor");
+      } else if (!retained) {
         throw std::logic_error(
             "grade_lattice: emitted lattice below the cells-per-member floor");
-      ++seen_subfloor;
+      }
+      if (retained) ++seen_subfloor;
     }
     if (!(octet_strut_diameter_mm(rho, ce) >= params.min_extrudable_width_mm) &&
-        swept)
+        (swept || fit))
       throw std::logic_error(
-          "grade_lattice: swept plan emitted a strut under the stated minimum "
+          "grade_lattice: plan emitted a strut under the stated minimum "
           "extrudable width");
   }
   // THE RECEIPT MUST ACCOUNT FOR EXACTLY THE MATERIAL THE POSTURE CARRIES. The count
@@ -663,11 +869,27 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // the retained set can never be under it. (min_cells_per_member is the thinnest
   // INCLUDING retained material — deliberately, because that is the number
   // analyze_fixed_design compares to the floor to raise lattice_strut_out_of_regime.)
-  if (out.subfloor_retained_voxels == 0 && out.latticed_voxels > 0 &&
-      !(out.min_cells_per_member >= n_star))
+  // FIT is the other way material may legally sit under the floor, and it is not an
+  // exemption from the accounting: every such voxel is counted in
+  // `fit_out_of_regime_voxels`, so the same demand — that sub-floor material be
+  // NAMED, not merely permitted — is met. What is asserted here instead is that the
+  // count and the posture agree.
+  if (fit) {
+    std::size_t seen_oor = 0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!post.mask[e]) continue;
+      const double ce = voxel_cell.empty() ? cell : voxel_cell[e];
+      if (width[e] / ce < n_star) ++seen_oor;
+    }
+    if (seen_oor != out.fit_out_of_regime_voxels)
+      throw std::logic_error(
+          "grade_lattice: fit's out-of-regime count disagrees with the posture");
+  } else if (out.subfloor_retained_voxels == 0 && out.latticed_voxels > 0 &&
+             !(out.min_cells_per_member >= n_star)) {
     throw std::logic_error(
         "grade_lattice: thinnest latticed member is below the floor with no "
         "retention in force");
+  }
 
   return out;
 }

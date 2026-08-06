@@ -792,6 +792,38 @@ struct RunInfo {
   long long grading_cells_dropped_unprintable = 0;  // bounds crossed -> stayed solid
   long long grading_cells_split_by_balance = 0;     // split to hold the 2:1 balance
   bool grading_cell_any_out_of_regime = false;      // any level's tripwire fired
+
+  // ── FIT (task 2026-08-05-lattice-cell-fit-mode). All zero on every other mode, and
+  // the serializer emits the block only in fit mode, so a non-fit run is byte-
+  // identical (bar R1). Per DECLARED include region: what its extent derived, and
+  // what the run then did with it.
+  struct GradingFitRegion {
+    int region_index = 0;            // index into the job's lattice.regions
+    double extent_mm = 0.0;          // thinnest declared dimension
+    bool feasible = false;           // a printing AND percolating pair exists
+    double cell_mm = 0.0;            // the derived cell
+    double relative_density = 0.0;   // lightest band density printing at it
+    double strut_mm = 0.0;
+    double cells_per_member = 0.0;
+    bool out_of_regime = false;      // under the ACCURACY floor: buildable, uncertified
+    // ── WHAT THIS REGION ACTUALLY GOT (review Q2). A bare part-level
+    // `no_derivation_voxels` total is the shape of number that hid the overnight
+    // run's real failure for a night, so the split is reported per region.
+    long long candidate_voxels = 0;  // PRINTED voxels whose centre is in this region
+    long long latticed_voxels = 0;   // of those, graded to lattice
+  };
+  std::vector<GradingFitRegion> grading_fit_regions;
+  long long grading_fit_out_of_regime_voxels = 0;
+  long long grading_fit_no_derivation_voxels = 0;
+  // ★ PRINTED voxels lying in NO declared include region. The identity that answers
+  // "were the skipped voxels inside or outside what he declared?" is
+  //   grading_fit_no_derivation_voxels == grading_fit_printed_outside_regions
+  // — when it holds, every skipped voxel was OUTSIDE, and the candidate set (not the
+  // derivation) is what reached past the declaration.
+  long long grading_fit_printed_outside_regions = 0;
+  long long grading_fit_distinct_cells = 0;
+  long long grading_density_raised_for_print_voxels = 0;
+  double grading_min_printable_cell_mm = 0.0;
   struct GradingCellLevel {
     int level = 0;
     double cell_size_mm = 0.0;

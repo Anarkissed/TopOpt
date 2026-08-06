@@ -1,0 +1,33 @@
+== sdf_geometry_probe : S3.4 GIBSON'S ONE-VOXEL BOUND ==
+grid 128 x 31 x 118, voxel 1.705279 mm
+
+== SUBJECT: occupancy(CAD) ==
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+as exported today        0.9589   0.3728   0.7539   0.2826    7.67   0.0000     0.0%     36     1
+SDF B/h 1                1.1179   0.3046   0.6720   0.2735    4.16   0.7562    18.3%     28     1
+  + Gibson 0.5 voxel     1.1179   0.3046   0.6720   0.2735    4.16   0.7562    18.3%     28     1
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm
+  + Gibson 1.0 voxel     1.1179   0.3046   0.6720   0.2735    4.16   0.7562    18.3%     28     1
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm
+SDF B/h 2                1.1373   0.2927   0.7380   0.2804    6.39   0.9001    21.5%      8     1
+  + Gibson 0.5 voxel     1.1178   0.2927   0.7380   0.2804    6.39   0.8526    21.5%      8     1
+      0.02% of vertices pulled back, deepest pull-back 0.0474 mm
+  + Gibson 1.0 voxel     1.1373   0.2927   0.7380   0.2804    6.39   0.9001    21.5%      8     1
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm
+
+== SUBJECT: rung 0.68 ==
+configuration           obl max  obl rms  obl p99  all rms   dihed   motion  removed     mf  comp
+                             mm       mm       mm       mm     deg       mm        %   viol      
+as exported today       11.2928   1.2780   5.2530   2.4556    8.94   0.0000     0.0%    388    11
+SDF B/h 1               10.8761   1.2974   5.3512   2.3307    5.42   1.0069    -1.5%     53     9
+  + Gibson 0.5 voxel    10.8761   1.2974   5.3512   2.3307    5.44   0.8526    -1.5%     53     9
+      0.27% of vertices pulled back, deepest pull-back 0.1543 mm
+  + Gibson 1.0 voxel    10.8761   1.2974   5.3512   2.3307    5.42   1.0069    -1.5%     53     9
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm
+SDF B/h 2               11.0353   1.3293   5.2313   2.2853    8.68   1.6704    -4.0%     99     8
+  + Gibson 0.5 voxel    11.0353   1.3271   5.2293   2.2847    8.78   0.8528    -3.8%    108     8
+      0.60% of vertices pulled back, deepest pull-back 0.8177 mm
+  + Gibson 1.0 voxel    11.0353   1.3293   5.2313   2.2853    8.68   1.6704    -4.0%     99     8
+      0.00% of vertices pulled back, deepest pull-back 0.0000 mm
+

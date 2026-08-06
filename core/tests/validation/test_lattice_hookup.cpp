@@ -338,8 +338,16 @@ static void section_graded() {
   job.lattice.emit_stl = true;
   job.grading.present = true;
   job.grading.topology = "octet";
-  job.grading.cell_mm = 3.0;
   job.grading.min_extrudable_width_mm = 0.4;
+  // ★ PINNED to the rho_min printability floor, READ from core (task
+  // 2026-08-05-lattice-cell-fit-mode, S2). It was 3.0 mm, which the pre-S2 law RAISED
+  // to exactly this value (4.3834 mm at a 0.4 mm bead) — so every assertion below,
+  // including the L4 solid-fallback bar and the receipt/law equality, was measured at
+  // that cell. S2 stops raising a target some band density can print at, which would
+  // silently re-point this whole fixture at a 3.0 mm cell that lattices MORE and
+  // falls back on nothing. The S2 behaviour itself is asserted directly below.
+  job.grading.cell_mm =
+      lattice_cell_printability_floor_mm(LatticeTopology::Octet, 0.4);
   job.grading.demand_exponent = 1.0;
 
   auto run = [&](const std::string& sub) {
@@ -395,8 +403,22 @@ static void section_graded() {
           "H4a: receipt fallback count == law on THIS variant's own field");
     CHECK(std::fabs(json_number(rcpt, "cell_size_mm") - gf.cell_size_mm) < 1e-9,
           "H4a: receipt cell == law's cell");
-    CHECK(contains(rcpt, "\"cell_size_floored\": true"),
-          "graded: the 3mm target was raised to the printability floor");
+    // S2: the pinned target IS the rho_min floor, so nothing is raised — and the
+    // claim the old assertion made (a target under the floor in force IS raised, and
+    // is reported) is asserted here directly, on the law, at a target under it.
+    CHECK(contains(rcpt, "\"cell_size_floored\": false"),
+          "graded: a target at the rho_min floor is not raised");
+    {
+      GradingLawParams under = gp;
+      under.target_cell_size_mm = 0.5 * gf.min_printable_cell_mm;
+      const GradedField U = grade_lattice(sg, v.optimization.physical_density,
+                                          v.von_mises_field, &cand, under);
+      CHECK(U.cell_size_floored,
+            "graded: a target below the floor that BINDS is still raised, and said "
+            "so in the receipt");
+      CHECK(std::fabs(U.cell_size_mm - U.min_printable_cell_mm) < 1e-12,
+            "graded: and it is raised to that floor exactly");
+    }
     // H4b — every emitted density is inside the band READ FROM CORE.
     const double lo = lattice_rho_min(LatticeTopology::Octet);
     const double hi = lattice_rho_max(LatticeTopology::Octet);

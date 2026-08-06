@@ -1,0 +1,34 @@
+S4 — WHAT A FINER CERTIFICATION ACTUALLY COSTS, MEASURED.
+
+The task says not to price this from PR 299's 47.44 s — that is a
+certification of a DIFFERENT part on a DIFFERENT grid. So it is measured
+here, on HIS part, through the shipped seam, at three resolutions, on the
+SAME object each time: rung 0.68 as it is exported today.
+
+  topopt-cli analyze job_analyze<res>.json --mesh meshes/v068_exported.stl
+
+Wall AND, where it is recorded, iterations. FixedDesignAnalysis records the
+CG iteration count only on NON-convergence (analyze.hpp:33-35), so a
+converged certification surfaces wall clock and peak RSS and no iteration
+count. No figure is invented for it.
+
+======================================================================
+### resolution 128
+    peak stress: 0.0187 MPa   worst-case margin: 2942 (required 1.5)
+    verdict: ACCEPTED
+    voxel mass: 543.6 g   mesh mass: 540.2 g
+    min-feature violations: 388
+             394461184  maximum resident set size
+======================================================================
+### resolution 192
+  topopt-cli: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+             528646144  maximum resident set size
+======================================================================
+### resolution 256
+  topopt-cli: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+            1097285632  maximum resident set size
+======================================================================
+(Both this Mac's cores and its memory were shared with an unrelated
+ optimization run in another worktree for part of this measurement; the
+ wall figures are therefore an UPPER bound and the RATIO between rows is
+ the safer reading. The peak-RSS figures are unaffected by sharing.)
