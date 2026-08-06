@@ -1,19 +1,19 @@
 === R6 — deleted-test sweep, branch vs origin/main ===
 
 --- 1. Files changed ---
- core/CMakeLists.txt                   |  29 ++++
- core/include/topopt/job.hpp           |  22 +++
- core/include/topopt/observability.hpp |  28 ++++
- core/src/cli/job.cpp                  |  12 +-
- core/src/cli/run_job.cpp              | 280 +++++++++++++++++++++++++++++++++-
- core/src/simp/observability.cpp       |  34 +++++
- 6 files changed, 400 insertions(+), 5 deletions(-)
+ core/CMakeLists.txt                                |  29 ++
+ core/include/topopt/job.hpp                        |  22 +
+ core/include/topopt/lattice_void.hpp               | 210 +++++++++
+ core/include/topopt/observability.hpp              |  28 ++
+ core/src/cli/job.cpp                               |  12 +-
+ core/src/cli/run_job.cpp                           | 285 +++++++++++-
+ core/src/mesh/lattice_void.cpp                     | 385 ++++++++++++++++
+ core/src/simp/observability.cpp                    |  34 ++
+ core/tests/unit/test_lattice_void.cpp              | 507 +++++++++++++++++++++
+ .../validation/test_lattice_void_exterior.cpp      | 268 +++++++++++
+ 10 files changed, 1775 insertions(+), 5 deletions(-)
 
 --- untracked (new) files ---
-core/include/topopt/lattice_void.hpp
-core/src/mesh/lattice_void.cpp
-core/tests/unit/test_lattice_void.cpp
-core/tests/validation/test_lattice_void_exterior.cpp
 
 --- 2. EVERY removed line in core/ and app/, with its file ---
 (a line that starts with '-' and is not the /dev/null header)
@@ -24,8 +24,8 @@ core/src/cli/run_job.cpp:                                             role_rcpt,
 core/src/cli/run_job.cpp:                                             frozen_rcpt);
 
 --- 3. Assertion census: CHECK( messages present on origin/main and absent now ---
-distinct CHECK( lines on origin/main: 3265
-distinct CHECK( lines on branch : 3355
+distinct CHECK( lines on origin/main: 3344
+distinct CHECK( lines on branch : 3434
 present on origin/main, absent on branch: 0
 
 added on branch: 90

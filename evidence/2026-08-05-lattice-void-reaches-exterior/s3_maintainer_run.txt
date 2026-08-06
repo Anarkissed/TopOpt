@@ -1,14 +1,14 @@
 his captured job: M2_verticalStand.step, resolution 128, 8 include + 1 exclude lattice regions, grading swept
 
---- resolution 64 (418 s wall; the job's iteration cap is IGNORED in loadcase mode, so this is the production ladder's own termination) ---
+--- resolution 64 (417 s wall; the job's iteration cap is IGNORED in loadcase mode, so this is the production ladder's own termination) ---
    run-level: sealed=False sealed_variants=0 sealed_cells=0 sealed_voxels=0 sealed_volume_mm3=0.0
    open lattice: cells=1082 voxels_reached=6276 escape_depth=0 faces=-x,+x,-y,+y,-z,+z reachable_void_mm3=8124327
    pre-existing enclosed voids holding NO lattice (reported, never refused): 1
-   check cost: 0.0041 s over 240011 voxel pushes
+   check cost: 0.0034 s over 240011 voxel pushes
      variant_026_lattice.report.json: sealed=False latticed=1444 reached=1444 cells=270 depth=0 faces=['-x', '+x', '-y', '+y', '-z', '+z']
      variant_038_lattice.report.json: sealed=False latticed=1447 reached=1447 cells=270 depth=0 faces=['-x', '+x', '-y', '+y', '-z', '+z']
      variant_052_lattice.report.json: sealed=False latticed=1578 reached=1578 cells=270 depth=0 faces=['-x', '+x', '-y', '+y', '-z', '+z']
      variant_068_lattice.report.json: sealed=False latticed=1807 reached=1807 cells=272 depth=0 faces=['-x', '+x', '-y', '+y', '-z', '+z']
 
 SUMMARY
-  resolution   64: pass   [418 s]
+  resolution   64: pass   [417 s]

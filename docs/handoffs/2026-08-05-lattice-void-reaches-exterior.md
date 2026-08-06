@@ -49,8 +49,8 @@ Four things came back:
   corner-touch staircase that a 26-connected fill calls OPEN, this check calls
   SEALED. That test is in ctest, with the 26-connected fill computed alongside it
   as the negative control.
-* **It costs nothing.** 0.1–27 ms per run — 27 ms on his 128³ job, against a
-  3441 s run, i.e. 0.0008 % of it. The fill
+* **It costs nothing.** 0.1–29 ms per run — 29 ms on his 128³ job, against a
+  3688 s run, i.e. 0.0008 % of it. The fill
   is O(voxel_count) and reports its own visit count and its own wall clock,
   separately, and neither is folded into `gen_seconds`. §8.
 
@@ -364,15 +364,15 @@ repo owns, run with the rule ARMED.
 
 | fixture | verdict | sealed cells | sealed mm³ | latticed cells | reached | depth | escape faces | bfs visits | check s | run s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
-| uniform whole-part lattice (l-bracket, 4-rung ladder) | pass | 0 | 0.0 | 335 | 42659 | 0 | −x,+x,−y,+y,−z,+z | 335904 | 0.0045 | 260.0 |
-| graded SWEPT lattice (l-bracket, dyadic cell ladder) | pass | 0 | 0.0 | 290 | 2532 | 0 | −x,−y,+y,−z,+z | 284292 | 0.0041 | 256.8 |
-| freeform SKIN outer finish (no solid shell) | pass | 0 | 0.0 | 335 | 42659 | 0 | −x,+x,−y,+y,−z,+z | 335904 | 0.0069 | 287.3 |
-| self-weight mesh job, uniform lattice (plate_bore.stl) | pass | 0 | 0.0 | 80 | 1836 | 0 | −x,+x,−y,+y,−z,+z | 6048 | 0.0001 | 1.6 |
-| … + EXCLUDE bolt region (kept solid) | pass | 0 | 0.0 | 78 | 1692 | 0 | −x,+x,−y,+y,−z,+z | 5874 | 0.0001 | 1.6 |
-| … + INCLUDE slab region (only it is latticed) | pass | 0 | 0.0 | 50 | 1074 | 0 | −x,+x,−y,+y,−z,+z | 5131 | 0.0001 | 1.6 |
-| maintainer's WallMount part, uniform 8 mm cell | pass | 0 | 0.0 | 445 | 3276 | 0 | −x,+x,−y,+y,−z,+z | 37538 | 0.0005 | 25.4 |
-| **★ CONTROL, SEALED** — cavity buried in the l-bracket foot | **REFUSE** | **6** | **843.8** | 6 | 0 | −1 | — | 57048 | 0.0009 | 2.9 |
-| **★ CONTROL, OPEN** — the same cavity, run out to the y faces | pass | 0 | 0.0 | 24 | 1644 | 0 | −x,+x,−y,+y,−z,+z | 64378 | 0.0009 | 3.9 |
+| uniform whole-part lattice (l-bracket, 4-rung ladder) | pass | 0 | 0.0 | 335 | 42659 | 0 | −x,+x,−y,+y,−z,+z | 335904 | 0.0044 | 252.1 |
+| graded SWEPT lattice (l-bracket, dyadic cell ladder) | pass | 0 | 0.0 | 290 | 2532 | 0 | −x,−y,+y,−z,+z | 284292 | 0.0041 | 245.3 |
+| freeform SKIN outer finish (no solid shell) | pass | 0 | 0.0 | 335 | 42659 | 0 | −x,+x,−y,+y,−z,+z | 335904 | 0.0043 | 255.7 |
+| self-weight mesh job, uniform lattice (plate_bore.stl) | pass | 0 | 0.0 | 80 | 1836 | 0 | −x,+x,−y,+y,−z,+z | 6048 | 0.0001 | 1.4 |
+| … + EXCLUDE bolt region (kept solid) | pass | 0 | 0.0 | 78 | 1692 | 0 | −x,+x,−y,+y,−z,+z | 5874 | 0.0001 | 1.4 |
+| … + INCLUDE slab region (only it is latticed) | pass | 0 | 0.0 | 50 | 1074 | 0 | −x,+x,−y,+y,−z,+z | 5131 | 0.0001 | 1.5 |
+| maintainer's WallMount part, uniform 8 mm cell | pass | 0 | 0.0 | 445 | 3276 | 0 | −x,+x,−y,+y,−z,+z | 37538 | 0.0005 | 23.1 |
+| **★ CONTROL, SEALED** — cavity buried in the l-bracket foot | **REFUSE** | **6** | **843.8** | 6 | 0 | −1 | — | 57048 | 0.0008 | 2.2 |
+| **★ CONTROL, OPEN** — the same cavity, run out to the y faces | pass | 0 | 0.0 | 24 | 1644 | 0 | −x,+x,−y,+y,−z,+z | 64378 | 0.0013 | 3.4 |
 
 Reading it: `depth` is the geodesic distance in 6-connected escape steps from the
 grid's boundary planes to the nearest reached latticed voxel — 0 means the
@@ -402,8 +402,8 @@ cell the brief describes, and the rule armed.
 
 | resolution | verdict | latticed cells | voxels reached | sealed | escape depth | escape faces | enclosed voids holding NO lattice | check cost | run wall |
 | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
-| 64 | **pass** | 1082 | 6276 | 0 | 0 | −x,+x,−y,+y,−z,+z | 1 | 0.0041 s / 240 011 pushes | 418 s |
-| **128** (his own) | **pass** | 1146 | 41862 | 0 | 0 | −x,+x,−y,+y,−z,+z | 25 | 0.0270 s / 1 770 303 pushes | 3441 s |
+| 64 | **pass** | 1082 | 6276 | 0 | 0 | −x,+x,−y,+y,−z,+z | 1 | 0.0034 s / 240 011 pushes | 417 s |
+| **128** (his own) | **pass** | 1146 | 41862 | 0 | 0 | −x,+x,−y,+y,−z,+z | 25 | 0.0289 s / 1 770 303 pushes | 3688 s |
 
 Per rung at 128 — every one of them open, none even partially:
 
@@ -420,13 +420,17 @@ His include regions are 4 mm-deep face slabs drawn ON the outer faces and bolt
 cylinders (Ø 60–169 mm) that punch through the part. Those are the "lattices that
 start from the outside going in" case he said works fine.
 
-**Two deviations, both stated:**
+**Three deviations, all stated:**
 * the grading block is dropped for the uniform cell — that is what the brief
   asks for, and it also side-steps the cells-per-member floor that leaves his
   graded job with almost nothing latticed (his own forecast, printed by the run:
   *8 of 8 include regions are thinner than the 40.000 mm the floor requires*);
 * an iteration cap was written into the job document and **is not honoured** —
-  see R7.
+  see R7;
+* **his job says `"skin": "rim"` and it is set to `"none"` here**, and that is
+  not a choice I made — see §11a. On a voxel-silhouette part a non-`"none"`
+  finish emits nothing and `run_job` now refuses the run for THAT reason, which
+  would abort before this rule could be measured at all.
 
 **25 enclosed voids holding no lattice** were found at resolution 128 and are
 REPORTED, not refused. They are pre-existing enclosed voids in his design itself,
@@ -490,11 +494,11 @@ per-variant receipt and in `run_info`. Neither is folded into `gen_seconds`
 
 | run | grid | check wall | check "iterations" (voxel pushes) | lattice generation | run wall | check / run |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| l-bracket, uniform whole-part, 4 rungs | 48³-ish | 0.0045 s | 335 904 | 0.052 s | 260.0 s | 0.0017 % |
-| l-bracket, graded swept, 4 rungs | same | 0.0041 s | 284 292 | — | 256.8 s | 0.0016 % |
-| plate_bore self-weight, 1 rung | 32³-ish | 0.0001 s | 6 048 | — | 1.6 s | 0.006 % |
-| the sealed control (refused) | 48³-ish | 0.0009 s | 57 048 | n/a — refused first | 2.9 s | 0.03 % |
-| **his job, resolution 128, 4 rungs** | 128³-ish | **0.0270 s** | **1 770 303** | — | **3441 s** | **0.0008 %** |
+| l-bracket, uniform whole-part, 4 rungs | 48³-ish | 0.0044 s | 335 904 | 0.050 s | 252.1 s | 0.0017 % |
+| l-bracket, graded swept, 4 rungs | same | 0.0041 s | 284 292 | — | 245.3 s | 0.0017 % |
+| plate_bore self-weight, 1 rung | 32³-ish | 0.0001 s | 6 048 | — | 1.4 s | 0.007 % |
+| the sealed control (refused) | 48³-ish | 0.0008 s | 57 048 | n/a — refused first | 2.2 s | 0.04 % |
+| **his job, resolution 128, 4 rungs** | 128³-ish | **0.0289 s** | **1 770 303** | — | **3688 s** | **0.0008 %** |
 
 The fill is O(voxel_count) with two passes: one component-labelling sweep that
 produces the verdict, the pockets, the cells, the bounding boxes and the
@@ -612,7 +616,7 @@ comparator that cannot count is worth nothing:
 and does a CHECK-message census by text (so a moved assertion is not miscounted
 as a lost one):
 
-* distinct `CHECK(` lines on `origin/main`: **3265**; on the branch: **3355**;
+* distinct `CHECK(` lines on `origin/main`: **3344**; on the branch: **3434**;
   **present on main and absent now: 0**; added: 90.
 * Every removed line in `core/` and `app/`, all five of them, and every one is a
   line I edited rather than an assertion: the `reject_unknown_keys` key list in
@@ -660,6 +664,42 @@ None.
 * *you find yourself relaxing the connectivity definition to make a case pass* —
   the opposite happened: the connectivity is the strictest of the three options
   and section C is built to fail if it were relaxed.
+
+---
+
+## 11a. MAIN MOVED WHILE THIS WAS IN FLIGHT, AND EVERY CLAIM WAS RE-VERIFIED
+
+The sibling task `lattice-cell-fit-mode` merged to main mid-flight and brought a
+new refusal with it (`run_job.cpp`, its bar M4): a lattice `skin` other than
+`"none"` that emits NO geometry is now refused rather than silently exporting an
+undressed lattice. On a part whose lattice boundary is the voxel silhouette —
+which is every part in this task's evidence, and the maintainer's too — the
+rim/diagrid finish rides pairs of ANALYTIC boundary faces that do not exist
+there, so it emits nothing and that refusal fires.
+
+CI tests the branch MERGED WITH MAIN, so it caught this immediately: the new
+validation test aborted on the *other* rule. It is worth saying plainly that this
+is CI doing its job — the bar failed for a reason that had nothing to do with the
+rule being shipped, and nothing about this task's own behaviour was wrong.
+
+**Every fixture this task owns now sets `"skin": "none"`, with the reason written
+down at the point it is set** — including the maintainer's job, where it is a
+stated third deviation rather than a silent edit (§6).
+
+**Re-verified against merged main rather than assumed.** Every number in this
+handoff was re-measured after the merge:
+
+| bar | before the merge | after |
+| --- | --- | --- |
+| ctest | 108/108 | **108/108** |
+| S1 sealed cavity | 432 voxels, 6 cells, 843.750 mm³, refused; open twin exported | **identical** |
+| R3 gate table | Δ margin 0.000e+00 on all 4 rungs, 0 voxel flips, composites unmoved; C1 = 1 flip, C2 = 2009 | **identical** |
+| R1 byte identity | A, B, C all pass | **identical** (base rebuilt from the NEW origin/main) |
+| resolution sweep | 3 constructions × 6 resolutions | **identical on all 18 rows** |
+| S3 fixture table | 9 rows, 2 controls | **identical on all 9** |
+| his job, resolution 64 | pass, depth 0, all six faces | **identical** |
+| his job, resolution 128 | pass on all 4 rungs, depth 0, all six faces | **identical** (same voxel counts to the unit) |
+| R6 assertion census | 0 lost | **0 lost** (3344 on main → 3434 on branch) |
 
 ---
 

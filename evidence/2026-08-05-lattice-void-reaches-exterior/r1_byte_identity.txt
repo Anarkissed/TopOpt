@@ -2,9 +2,9 @@
 branch build: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/core/build
 base   build: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-void-exterior-check-ad2160/ed2434fd-4d40-4e7e-bece-52f82a75a8f6/scratchpad/build-main-r1
 
---- stashing the branch and rebuilding BASE (target: topopt_cli) ---
-base   cli sha256: 6ecdb9ce48025e9f1db8ed7a790c6e2288139cd5cd20fc6849c8719e5b3dc234
-branch cli sha256: 93a1628f23e34b5e5210df3e224dffb51ba13fa724d0daa0ba391ef011f79afd
+--- tree is clean: building BASE from origin/main in a detached worktree ---
+base   cli sha256: fbb2cd569e0dc783bbb447dfb01517d1759babca4f90b21b18aa597a9347e893
+branch cli sha256: 00c1adab0e1cf3bf88880069b11c0955dc6a2b437ccc5046972fbb4810d4b9f4
 the two binaries differ, as they must for this bar to mean anything.
 
 ########## A — NO LATTICE, base vs branch. MUST be identical. ##########
@@ -34,10 +34,10 @@ IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf61858
 IDENTICAL  variant_052_lattice.stl  d86f8d0e7524721e6168cd8a473a898a25c33507c54839f39cd8b9354fa6912a
 IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
 IDENTICAL  variant_068_lattice.stl  a3e478127a595911c189d884b0777ac54698fb1f697ea2b22b0b9de4921461af
-IDENTICAL  variant_026_lattice.report.json  ac87021cbc31058d93cd7c2994a3f9ef2911f6412546be00910514dcb151d151
-IDENTICAL  variant_038_lattice.report.json  366d6698e918a08f758f088c5bbfb81560960f668fe21323003370046bbbf8a8
-IDENTICAL  variant_052_lattice.report.json  eb19a8ad21b667acf4efb2bff8169caaa45e166797efc879a1a2f2182ce596ed
-IDENTICAL  variant_068_lattice.report.json  d208b2460cadfa7454182dc102a49a779b2da9debe12104877173a947ccb1085
+IDENTICAL  variant_026_lattice.report.json  653b5331c8d7bb4482e8b25349e6f7a1d4ccf01993cdabf845224304ddee4ed4
+IDENTICAL  variant_038_lattice.report.json  238c9ed30ddb8f667a056acdbbf58fce78382db7510be89a5d29a9f74fbbb1af
+IDENTICAL  variant_052_lattice.report.json  452b978b63540ec1dc4f768f559ea14852ec07af0bb15c9ac65a4b94257e65e6
+IDENTICAL  variant_068_lattice.report.json  056709e39ea7c6c0662cad5ccb417b2fabb3bca624048c70bbb9d102f4ad0100
 IDENTICAL  run_info.json (minus the named clock keys)
 IDENTICAL  iterations.csv (physics columns)
 
@@ -57,13 +57,13 @@ GAIN — and it must change, or the user could not tell the check was on.
   IDENTICAL  variant_052_lattice.stl
   IDENTICAL  variant_068.stl
   IDENTICAL  variant_068_lattice.stl
-  variant_026_lattice.report.json void_escape: ran=True sealed=False reached=960 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=74143 wall_seconds=0.001043833
+  variant_026_lattice.report.json void_escape: ran=True sealed=False reached=960 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=74143 wall_seconds=0.001048875
   IDENTICAL  variant_026_lattice.report.json (minus the void_escape block)
-  variant_038_lattice.report.json void_escape: ran=True sealed=False reached=1036 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=72525 wall_seconds=0.001047125
+  variant_038_lattice.report.json void_escape: ran=True sealed=False reached=1036 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=72525 wall_seconds=0.001001958
   IDENTICAL  variant_038_lattice.report.json (minus the void_escape block)
-  variant_052_lattice.report.json void_escape: ran=True sealed=False reached=1274 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=70719 wall_seconds=0.0010245
+  variant_052_lattice.report.json void_escape: ran=True sealed=False reached=1274 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=70719 wall_seconds=0.001003208
   IDENTICAL  variant_052_lattice.report.json (minus the void_escape block)
-  variant_068_lattice.report.json void_escape: ran=True sealed=False reached=1396 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=68652 wall_seconds=0.001221791
+  variant_068_lattice.report.json void_escape: ran=True sealed=False reached=1396 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=68652 wall_seconds=0.001232584
   IDENTICAL  variant_068_lattice.report.json (minus the void_escape block)
   IDENTICAL  run_info.json (minus void_escape and the clocks)
 
