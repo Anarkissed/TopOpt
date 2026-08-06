@@ -1,0 +1,37 @@
+=== CONTROL — the tree as committed ===
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead]' passed (0.101 seconds).
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testWallLoopConsumersStillCarryTheWallBead]' passed (0.008 seconds).
+    	 Executed 2 tests, with 0 failures (0 unexpected) in 0.109 (0.109) seconds
+    	 Executed 2 tests, with 0 failures (0 unexpected) in 0.109 (0.109) seconds
+    	 Executed 2 tests, with 0 failures (0 unexpected) in 0.109 (0.110) seconds
+
+=== PROBE 1 — one lattice site reverted to the WALL bead ===
+    WorkspacePlaceholder.swift, the re-lattice receipt echo.
+    edited line(s):
+      2022:            lineWidthMM: project.printParams.strutLineWidthMM,
+      2112:            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/app/TopOptKit/Tests/TopOptFlowsTests/StrutLineWidthTests.swift:261: error: -[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead] : XCTAssertEqual failed: ("4") is not equal to ("5") - the five audited lattice sites (AppModel 1, LatticePage 2, WorkspacePlaceholder 2). If this number moved, audit the new site and update the count.
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/app/TopOptKit/Tests/TopOptFlowsTests/StrutLineWidthTests.swift:265: error: -[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead] : XCTAssertTrue failed - lattice lineWidthMM site(s) reading a WALL bead:
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead]' failed (0.296 seconds).
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testWallLoopConsumersStillCarryTheWallBead]' passed (0.008 seconds).
+    	 Executed 2 tests, with 2 failures (0 unexpected) in 0.304 (0.304) seconds
+    	 Executed 2 tests, with 2 failures (0 unexpected) in 0.304 (0.304) seconds
+    	 Executed 2 tests, with 2 failures (0 unexpected) in 0.304 (0.305) seconds
+
+=== PROBE 2 — the strut width wired into a WALL-LOOP consumer ===
+    PrintParamsSheet.swift, the outer-wall stepper.
+    edited line(s):
+      326:        project.printParams.strutLineWidthMM = project.printParams.steppingOuterLineWidth(by: steps)
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead]' passed (0.088 seconds).
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/app/TopOptKit/Tests/TopOptFlowsTests/StrutLineWidthTests.swift:282: error: -[TopOptFlowsTests.StrutLineWidthTests testWallLoopConsumersStillCarryTheWallBead] : XCTAssertFalse failed - PrintParamsSheet.swift is a WALL-LOOP consumer and must not read the strut width
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testWallLoopConsumersStillCarryTheWallBead]' failed (0.208 seconds).
+    	 Executed 2 tests, with 1 failure (0 unexpected) in 0.296 (0.296) seconds
+    	 Executed 2 tests, with 1 failure (0 unexpected) in 0.296 (0.296) seconds
+    	 Executed 2 tests, with 1 failure (0 unexpected) in 0.296 (0.297) seconds
+
+=== RESTORED — the tree as committed, guards green again ===
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead]' passed (0.090 seconds).
+    Test Case '-[TopOptFlowsTests.StrutLineWidthTests testWallLoopConsumersStillCarryTheWallBead]' passed (0.008 seconds).
+    	 Executed 2 tests, with 0 failures (0 unexpected) in 0.098 (0.099) seconds
+    	 Executed 2 tests, with 0 failures (0 unexpected) in 0.098 (0.099) seconds
+    	 Executed 2 tests, with 0 failures (0 unexpected) in 0.098 (0.099) seconds

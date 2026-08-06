@@ -260,10 +260,17 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         // variant's OWN final field). The one remaining requirement is the
         // stated line width — core's grading schema requires it (the
         // printability floor's input) — so ONLY that is gated, with the reason.
+        //
+        // THE REASON NAMES THE STRUT WIDTH, not the outer wall bead (task
+        // strut-line-width-field). It used to say "outer line width", which told the
+        // user to go and edit a WALL setting to change a LATTICE floor — the exact
+        // conflation this task separated, and the one that also corrupts the wall
+        // ring the width-aware gate sizes. The strut width resolves from the two
+        // wall beads by rule, so "set them in print settings" is still the action.
         if densityMode == .auto && lineWidthMM <= 0 {
             return LatticeOptimizeSurface(
                 enabled: false, label: "Optimize",
-                sub: "auto density needs your outer line width (the grading printability floor) — set it in print settings")
+                sub: "auto density needs a strut line width (the grading printability floor) — set your wall line widths in print settings")
         }
         if let b = bounds, !b.runnableAsCertified {
             let why = b.generatableReason ?? b.topologyReason ?? b.cellReason ?? "settings not certifiable"

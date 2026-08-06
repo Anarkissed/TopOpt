@@ -819,8 +819,11 @@ public struct LatticeBounds: Equatable, Sendable {
     ///   - memberMM: the governing (thinnest) member width the lattice must span, in
     ///     mm — from the region if one is set, else a part-scale estimate. Pass 0 when
     ///     unknown (the cells-per-member readout is then omitted).
-    ///   - lineWidthMM: the user's outer extrusion line width (mm) — the strut
-    ///     printability floor. Pass 0 to skip the strut-printability check.
+    ///   - lineWidthMM: the STRUT extrusion line width (mm) — the strut printability
+    ///     floor, `PrintParams.strutLineWidthMM`. It was the OUTER WALL bead until
+    ///     2026-08-06; a strut is a lone unsupported extrusion, not a wall loop, so it
+    ///     carries its own width now (task strut-line-width-field). Pass 0 to skip the
+    ///     strut-printability check.
     public static func compute(settings: LatticeSettings,
                                limits: TopOptKit.LatticeLimits,
                                generatable: Bool = true,
@@ -909,7 +912,8 @@ public struct LatticeBounds: Equatable, Sendable {
                        + "its struts print because it fills at the dense end."
         }
 
-        // Strut printability from the user's own line width. The densest grading end
+        // Strut printability from the user's own STRUT line width (not a wall bead —
+        // see the parameter doc). The densest grading end
         // makes the thinnest… no: the densest end makes the THICKEST strut; the
         // printability risk is at the SPARSE end, so check the low density's radius.
         let strutR = topo.strutRadiusMM(relativeDensity: lo, cellMM: settings.cellMM)
