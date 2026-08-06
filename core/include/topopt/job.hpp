@@ -205,6 +205,28 @@ struct JobLattice {
   // emit at all, and EVALUATED counterfactuals for the remedies worth offering.
   // Default false => every existing job is byte-identical.
   bool forecast_only = false;
+
+  // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+  // false (the DEFAULT, and what an absent key means) => byte-identical to a
+  // pre-task run: the check does not run, nothing is measured and nothing is
+  // written. true => after the lattice occupancy is decided and BEFORE anything
+  // is exported, the void space is flood-filled from outside the part inward
+  // (topopt/lattice_void.hpp) and a lattice cell whose pore space cannot reach
+  // the exterior REFUSES the variant, naming how many cells are sealed, where,
+  // in which declared include region, and how much trapped volume.
+  //
+  // IT REFUSES; IT DOES NOT AUTO-CORRECT. Opening a sealed cavity means removing
+  // material the user did not ask to remove, so the run says what is wrong and
+  // stops. The two callers behave as they do for `region_ungradeable`:
+  // lattice_variant_job (which exists to produce ONE object) throws;
+  // the optimize ladder skips that rung, says so on stderr, and leaves it out of
+  // the run-level aggregates.
+  //
+  // WHEN THE CHECK PASSES it still writes its receipt — how much void was
+  // reachable, how deep the drain path runs and which grid faces it escapes
+  // through — because a silent pass is indistinguishable from a check that
+  // never ran.
+  bool require_lattice_void_reaches_exterior = false;
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the

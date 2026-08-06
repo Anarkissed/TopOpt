@@ -46,6 +46,7 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/lattice_boundary.cpp
+  src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
@@ -247,6 +248,17 @@ target_link_libraries(test_lattice_boundary PRIVATE topopt)
 target_compile_definitions(test_lattice_boundary PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_boundary COMMAND test_lattice_boundary)
+
+# THE ENCLOSED-VOID RULE FOR LATTICE (task 2026-08-05-lattice-void-reaches-
+# exterior): the void space inside any lattice must connect to the exterior.
+# ADVERSARIAL BY CONSTRUCTION twice over — section A asserts the pre-task
+# pipeline happily emits a sealed lattice-filled cavity BEFORE asserting the
+# check refuses it, and section C asserts a 26-connected fill (the adjacency the
+# SOLID load path uses) calls a corner-touch staircase open while this check does
+# not.
+add_executable(test_lattice_void tests/unit/test_lattice_void.cpp)
+target_link_libraries(test_lattice_void PRIVATE topopt)
+add_test(NAME lattice_void COMMAND test_lattice_void)
 
 # The FREEFORM lattice skin (task 2026-07-30-lattice-skin-freeform): the diagrid
 # generalised to the arbitrary voxel-derived outer surface. Pins freeform-off ==
@@ -1730,6 +1742,23 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME designbox_lattice_recert COMMAND test_designbox_lattice_recert)
+
+  # THE ENCLOSED-VOID RULE, END TO END (task 2026-08-05-lattice-void-reaches-
+  # exterior). test_lattice_void proves the WALK on constructed grids; this one
+  # proves the WIRING — schema key -> run_job -> refusal -> receipt -> run_info —
+  # on a real optimize run with a deliberately sealed lattice-filled cavity, and
+  # carries the OPEN control (the same slab, one dimension widened so it reaches
+  # the surface) that stops every bar from being met by a check that refuses
+  # everything.
+  add_executable(test_lattice_void_exterior
+    tests/validation/test_lattice_void_exterior.cpp)
+  target_link_libraries(test_lattice_void_exterior PRIVATE topopt)
+  target_compile_definitions(test_lattice_void_exterior PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_void_exterior COMMAND test_lattice_void_exterior)
 
   # Task 2026-08-03-selfweight-clearance-void-crash: self-weight must never be
   # applied to a voxel a keep-clear has voided. Drives minimize_plastic on a

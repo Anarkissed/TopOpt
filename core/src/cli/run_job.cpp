@@ -29,6 +29,7 @@
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_gen.hpp"
+#include "topopt/lattice_void.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -1539,7 +1540,13 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      const LatticeRoleReceipt& roles,
                                      const LatticeGradedReceipt& graded,
                                      const LatticeAddedMaterialReceipt& added,
-                                     const LatticeFrozenReceipt& frozen) {
+                                     const LatticeFrozenReceipt& frozen,
+                                     // THE ENCLOSED-VOID RULE (task 2026-08-05-
+                                     // lattice-void-reaches-exterior). Null on
+                                     // every run that did not arm the check, and
+                                     // then not one byte of the receipt changes.
+                                     const LatticeVoidEscapeReport* void_escape,
+                                     double void_check_seconds) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -2161,6 +2168,101 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          "and rotated WITH the part, so its relation to the build direction "
          "travels with the geometry.\"},\n";
   }
+  // ── THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+  // Written whenever the check RAN, pass or refusal. A receipt that only spoke
+  // when something was wrong could not be told from one where the check never
+  // fired — this project has shipped that exact failure twice (a forecast-only
+  // job that reported itself as a build; a rim that emitted nothing while
+  // succeeding), so a PASS states what it found and how it found it.
+  if (void_escape) {
+    const LatticeVoidEscapeReport& ve = *void_escape;
+    s += "  \"void_escape\": {\n";
+    s += "    \"rule\": \"the void space inside any lattice must reach the "
+         "exterior — no sealed lattice-filled cavities\",\n";
+    s += "    \"ran\": true,\n";
+    s += "    \"decidable\": " + std::string(ve.decidable ? "true" : "false") +
+         ",\n";
+    s += "    \"sealed\": " + std::string(ve.sealed() ? "true" : "false") + ",\n";
+    s += "    \"connectivity\": 6,\n";
+    s += "    \"connectivity_note\": \"FACE adjacency only. Two voxels meeting "
+         "along an edge or at a corner share zero area, so nothing flows "
+         "through the contact; a diagonal 'escape' is a staircase of corner "
+         "touches through a wall that is solid everywhere a fluid could pass. "
+         "The SOLID load path deliberately uses 26-connectivity (two hex8 "
+         "elements touching at a corner do share a node and do pass force), and "
+         "the two must be complementary — (26, 6) — or a void path and a solid "
+         "path could cross the same diagonal. 6 also reaches a subset of what "
+         "18 or 26 would, so this check can only ever refuse MORE, never "
+         "less.\",\n";
+    s += "    \"latticed_voxels\": " + std::to_string(ve.latticed_voxels) + ",\n";
+    s += "    \"latticed_cells\": " + std::to_string(ve.latticed_cells) + ",\n";
+    s += "    \"latticed_voxels_reached\": " +
+         std::to_string(ve.latticed_reached) + ",\n";
+    s += "    \"latticed_voxels_sealed\": " +
+         std::to_string(ve.latticed_sealed) + ",\n";
+    s += "    \"sealed_cells\": " + std::to_string(ve.sealed_cells) + ",\n";
+    s += "    \"sealed_volume_mm3\": " + json_num(ve.sealed_volume_mm3) + ",\n";
+    s += "    \"reachable_void_volume_mm3\": " +
+         json_num(ve.reachable_escape_volume_mm3) + ",\n";
+    // WHICH WAY OUT IT FOUND.
+    s += "    \"escape_depth_voxels\": " +
+         std::to_string(ve.lattice_escape_depth) + ",\n";
+    s += "    \"escape_faces\": [";
+    {
+      bool first = true;
+      for (int f = 0; f < 6; ++f)
+        if (ve.face_escapes[f]) {
+          if (!first) s += ", ";
+          first = false;
+          s += json_str(grid_face_name(static_cast<GridFace>(f)));
+        }
+    }
+    s += "],\n";
+    s += "    \"escape_components\": " + std::to_string(ve.open_components) +
+         ",\n";
+    // Enclosed voids that hold NO lattice: reported, never refused — this rule
+    // is about lattice, and a check that widened its own scope in the receipt
+    // would be a different check.
+    s += "    \"sealed_pockets_without_lattice\": " +
+         std::to_string(ve.sealed_pockets_without_lattice) + ",\n";
+    s += "    \"sealed_volume_without_lattice_mm3\": " +
+         json_num(ve.sealed_volume_without_lattice_mm3) + ",\n";
+    // COST (bar R5): the check's own work and its own wall clock, SEPARATELY,
+    // and separate from `gen_seconds` above.
+    s += "    \"bfs_visits\": " + std::to_string(ve.bfs_visits) + ",\n";
+    s += "    \"wall_seconds\": " + json_num(void_check_seconds) + ",\n";
+    s += "    \"pockets\": [";
+    for (std::size_t p = 0; p < ve.pockets.size(); ++p) {
+      const SealedVoidPocket& P = ve.pockets[p];
+      if (p) s += ",";
+      s += "\n      {\"voxels\": " + std::to_string(P.voxels) +
+           ", \"latticed_voxels\": " + std::to_string(P.latticed_voxels) +
+           ", \"cells\": " + std::to_string(P.cells) +
+           ", \"volume_mm3\": " + json_num(P.volume_mm3) +
+           ", \"bbox_min_mm\": [" + json_num(P.bbox_min.x) + ", " +
+           json_num(P.bbox_min.y) + ", " + json_num(P.bbox_min.z) +
+           "], \"bbox_max_mm\": [" + json_num(P.bbox_max.x) + ", " +
+           json_num(P.bbox_max.y) + ", " + json_num(P.bbox_max.z) +
+           "], \"include_regions\": [";
+      for (std::size_t q = 0; q < P.region_ids.size(); ++q) {
+        if (q) s += ", ";
+        s += std::to_string(P.region_ids[q]);
+      }
+      s += "]}";
+    }
+    s += ve.pockets.empty() ? "],\n" : "\n    ],\n";
+    s += "    \"pockets_listed\": " + std::to_string(ve.pockets.size()) + ",\n";
+    s += "    \"pockets_total\": " + std::to_string(ve.sealed_pockets_total) +
+         ",\n";
+    s += "    \"scope_note\": \"this is a statement about the DESIGN FIELD the "
+         "certificate and the file are both derived from. It is not the "
+         "isolated-fragment check (SOLID pieces attached to nothing — opposite "
+         "polarity, not implemented here), and it does not model the exported "
+         "solid shell as a barrier: the shell is the marching-cubes surface of "
+         "the printed set, and whether it closes over a boundary lattice cell "
+         "is what the 'skin' / 'shell+skin' outer finish exists to answer.\"\n";
+    s += "  },\n";
+  }
   s += "  \"note\": \"stiffness and solid-region strength are certified against the "
        "real composite; the lattice region's macro (effective) stress is recovered "
        "but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. "
@@ -2220,6 +2322,28 @@ struct LatticeVariantOutcome {
   // rung, says so, and — critically — leaves it OUT of the run-level aggregates.
   bool ungradeable = false;
   std::string ungradeable_reason;
+
+  // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+  // `void_check_ran` is false on every run that did not arm
+  // `lattice.require_lattice_void_reaches_exterior`, and then nothing below is
+  // measured, reported or written — the byte-identity bar.
+  //
+  // When it IS armed, `void_report` is the walk itself (topopt/lattice_void.hpp)
+  // and it is reported whichever way the verdict went: a PASS records how much
+  // void was reachable, how deep the drain path runs and which grid faces it
+  // escapes through, because a silent pass is indistinguishable from a check
+  // that did not run.
+  //
+  // `void_sealed` is a FLAG rather than a throw for exactly the reason
+  // `ungradeable` above is: lattice_variant_job refuses (it exists to produce
+  // this one object), while the optimize ladder skips the rung and keeps the
+  // others. `void_check_seconds` is the check's own wall time, kept separate
+  // from `gen_seconds` so its cost can be read against the run it protects.
+  bool void_check_ran = false;
+  LatticeVoidEscapeReport void_report;
+  double void_check_seconds = 0.0;
+  bool void_sealed = false;
+  std::string void_sealed_reason;
 };
 
 // ★ THE LATTICE PIPELINE MUST NOT MOVE THE LADDER'S SOLVER STATE
@@ -2739,6 +2863,71 @@ LatticeVariantOutcome lattice_one_variant(
         static_cast<double>(added_rcpt.kept_solid_voxels) * vv;
   }
 
+  // ── ★ THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+  //
+  // THE VOID SPACE INSIDE ANY LATTICE MUST CONNECT TO THE EXTERIOR. A lattice is
+  // a porous material; a pocket of it with no path to the outside is a pocket
+  // whose powder, resin or support can never be emptied.
+  //
+  // HERE is where it belongs: `mask` is FINAL on this line — the certification
+  // mask, intersected with the grading law's own mask on a graded run and with
+  // the design box's whole-cell clearing above — and not one triangle has been
+  // written yet. So the set this walks is exactly the set the file will carry
+  // and the posture will certify (bar B7's principle again), and a refusal
+  // happens before any output exists rather than after it.
+  //
+  // Off by default: `require_lattice_void_reaches_exterior` is false unless the
+  // job asks, and then this whole block is skipped and nothing downstream sees a
+  // difference.
+  if (job.lattice.require_lattice_void_reaches_exterior) {
+    // WHICH declared include region each latticed voxel belongs to (1-based, in
+    // the job's own declaration order, FIRST match wins — the same precedence
+    // `in_include_region` short-circuits with, and the same rule the grading
+    // law's own region ids use). This is what lets a refusal name the region the
+    // user drew instead of only a bounding box.
+    std::vector<int> void_region_id;
+    if (!lattice_roles.includes.empty()) {
+      void_region_id.assign(solved_grid.voxel_count(), 0);
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!mask[e]) continue;
+            const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                         solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                         solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+            for (std::size_t ri = 0; ri < lattice_roles.includes.size(); ++ri)
+              if (point_in_clearance_region(lattice_roles.includes[ri], c, 0.0)) {
+                void_region_id[e] = static_cast<int>(ri) + 1;
+                break;
+              }
+          }
+    }
+    // `cell` is the SAME cell `lattice_certification_mask` was keyed with above
+    // — on a SWEPT run that is the plan's COARSEST level, the conservative end.
+    // It affects only the CELL counts a refusal reports (the verdict itself is
+    // per voxel), and using it keeps "the cell that certifies this voxel" and
+    // "the cell this check calls sealed" the same integer triple.
+    const auto void_t0 = std::chrono::steady_clock::now();
+    R.void_report = lattice_void_escape(
+        solved_grid, dens, printed_iso, mask, solved_grid.origin, cell,
+        void_region_id.empty() ? nullptr : &void_region_id);
+    R.void_check_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - void_t0)
+            .count();
+    R.void_check_ran = true;
+    if (R.void_report.sealed()) {
+      R.void_sealed = true;
+      R.void_sealed_reason = lattice_void_refusal(R.void_report);
+      // RETURN BEFORE A SINGLE TRIANGLE IS WRITTEN. The refusal is the whole
+      // point: a file that a slicer would open containing a cavity nothing can
+      // be emptied from must not exist. `gf` IS `R.gf` (a reference, bound at
+      // the top of this function), so what the grading law did on the way here
+      // travels out with the refusal.
+      return R;
+    }
+  }
+
   // ── the radius field + cell activation.
   LatticeRadiusField G;
   G.nseg = 8;
@@ -3173,9 +3362,10 @@ LatticeVariantOutcome lattice_one_variant(
       join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
                                            v.requested_volume_fraction) +
                              ".report.json");
-  R.receipt_json = lattice_cert_report_json(v, job.lattice, R.cc, R.oc, cell,
-                                            role_rcpt, grad_rcpt, added_rcpt,
-                                            frozen_rcpt);
+  R.receipt_json = lattice_cert_report_json(
+      v, job.lattice, R.cc, R.oc, cell, role_rcpt, grad_rcpt, added_rcpt,
+      frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr,
+      R.void_check_seconds);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null
@@ -5238,6 +5428,13 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // struts in it and reporting a successful build.
   if (R.ungradeable)
     throw JobError("lattice_variant: " + R.ungradeable_reason);
+  // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+  // Same shape, same reason: this entry point exists to produce ONE latticed
+  // object, and the object it would produce is one nothing can ever be emptied
+  // from. Nothing was written — `lattice_one_variant` returned before the
+  // generator ran — so there is no half-object to clean up.
+  if (R.void_sealed)
+    throw JobError("lattice_variant: " + R.void_sealed_reason);
   // The pipeline's own solve count: the null-posture reproduction it runs as
   // its internal proof, the composite, and (when band clamping happened) the
   // clamp counterfactual. Counted, never assumed.
@@ -6454,6 +6651,24 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     int ungradeable_variants = 0;
     double r_min = 1e30, r_max = 0.0;
     double wall_s = 0.0;
+    // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+    // All zero and `void_check_ran` false unless the job armed
+    // `require_lattice_void_reaches_exterior`, so a run that did not arm it
+    // writes no key. `void_wall_s` is the CHECK's own time, kept out of `wall_s`
+    // (which is generation) so the two costs are never conflated. Rungs the rule
+    // REFUSED are counted like ungradeable ones and, like them, contribute
+    // nothing to the aggregates below.
+    bool void_check_ran = false;
+    int void_sealed_variants = 0;
+    long long void_sealed_cells = 0, void_sealed_voxels = 0;
+    double void_sealed_volume_mm3 = 0.0;
+    long long void_latticed_reached = 0, void_latticed_cells = 0;
+    double void_reachable_volume_mm3 = 0.0;
+    long long void_bfs_visits = 0;
+    int void_escape_depth_max = -1;
+    bool void_face_escapes[6] = {false, false, false, false, false, false};
+    long long void_sealed_pockets_without_lattice = 0;
+    double void_wall_s = 0.0;
     // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): what the
     // clip/skin passes did, summed over variants — B9's volume accounting.
     long long clipped = 0, landings = 0, anchors = 0;
@@ -6686,6 +6901,42 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // record saying so. Silence there would read as a transport failure.
       lat_agg.any = true;
       ++lat_agg.ungradeable_variants;
+      return;
+    }
+    // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+    // Aggregated FIRST, and unconditionally on `void_check_ran`, so a PASS is
+    // recorded too — a run whose receipt only spoke when something was wrong
+    // would be indistinguishable from a run where the check never fired.
+    if (R.void_check_ran) {
+      const LatticeVoidEscapeReport& vr = R.void_report;
+      lat_agg.void_check_ran = true;
+      lat_agg.void_wall_s += R.void_check_seconds;
+      lat_agg.void_bfs_visits += vr.bfs_visits;
+      lat_agg.void_latticed_reached += vr.latticed_reached;
+      lat_agg.void_latticed_cells += vr.latticed_cells;
+      lat_agg.void_reachable_volume_mm3 += vr.reachable_escape_volume_mm3;
+      lat_agg.void_sealed_pockets_without_lattice +=
+          vr.sealed_pockets_without_lattice;
+      if (vr.lattice_escape_depth > lat_agg.void_escape_depth_max)
+        lat_agg.void_escape_depth_max = vr.lattice_escape_depth;
+      for (int f = 0; f < 6; ++f)
+        if (vr.face_escapes[f]) lat_agg.void_face_escapes[f] = true;
+      if (R.void_sealed) {
+        lat_agg.void_sealed_cells += vr.sealed_cells;
+        lat_agg.void_sealed_voxels += vr.latticed_sealed;
+        lat_agg.void_sealed_volume_mm3 += vr.sealed_volume_mm3;
+      }
+    }
+    // The REFUSAL, on the ladder: skip this rung, say so, and — exactly as for
+    // an ungradeable rung — leave it OUT of the aggregates below, which take
+    // MINs that a rung with no geometry would drag to zero. The other rungs are
+    // unaffected; one unlatticeable rung must not destroy the run's output.
+    if (R.void_sealed) {
+      std::fprintf(stderr, "[lattice] vf=%.2f NO LATTICE EMITTED — %s\n",
+                   v.requested_volume_fraction, R.void_sealed_reason.c_str());
+      std::fflush(stderr);
+      lat_agg.any = true;
+      ++lat_agg.void_sealed_variants;
       return;
     }
     lat_agg.wall_s += R.gen_seconds;
@@ -6923,6 +7174,32 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.lattice_export_triangles = lat_agg.tris;
     run_info.lattice_export_variant_count = lat_agg.variants;
     run_info.lattice_export_ungradeable_variants = lat_agg.ungradeable_variants;
+    // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+    // Only when the check actually ran; otherwise every field stays at its zero
+    // default and the serializer writes no key at all (bar R1).
+    if (lat_agg.void_check_ran) {
+      run_info.lattice_void_check_ran = true;
+      run_info.lattice_void_sealed_variants = lat_agg.void_sealed_variants;
+      run_info.lattice_void_sealed_cells = lat_agg.void_sealed_cells;
+      run_info.lattice_void_sealed_voxels = lat_agg.void_sealed_voxels;
+      run_info.lattice_void_sealed_volume_mm3 = lat_agg.void_sealed_volume_mm3;
+      run_info.lattice_void_latticed_reached = lat_agg.void_latticed_reached;
+      run_info.lattice_void_latticed_cells = lat_agg.void_latticed_cells;
+      run_info.lattice_void_reachable_volume_mm3 =
+          lat_agg.void_reachable_volume_mm3;
+      run_info.lattice_void_bfs_visits = lat_agg.void_bfs_visits;
+      run_info.lattice_void_escape_depth_max = lat_agg.void_escape_depth_max;
+      run_info.lattice_void_sealed_pockets_without_lattice =
+          lat_agg.void_sealed_pockets_without_lattice;
+      run_info.lattice_void_wall_seconds = lat_agg.void_wall_s;
+      std::string faces;
+      for (int f = 0; f < 6; ++f)
+        if (lat_agg.void_face_escapes[f]) {
+          if (!faces.empty()) faces += ",";
+          faces += grid_face_name(static_cast<GridFace>(f));
+        }
+      run_info.lattice_void_escape_faces = faces;
+    }
     run_info.lattice_export_emit_stl = job.lattice.emit_stl;
     run_info.lattice_export_emit_3mf = job.lattice.emit_3mf;
     run_info.lattice_export_interpenetrating_soup = true;

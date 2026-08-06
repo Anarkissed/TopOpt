@@ -941,6 +941,40 @@ std::string run_info_json(const RunInfo& info) {
     le += ", \"variant_count\": " + fmt_i(info.lattice_export_variant_count);
     le += ", \"ungradeable_variants\": " +
           fmt_i(info.lattice_export_ungradeable_variants);
+    // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+    // Emitted ONLY when the job armed the check, so an un-armed run's record is
+    // byte-identical (bar R1). Present on a PASS as well as on a refusal — a
+    // check that only speaks when it fails cannot be told from one that never
+    // ran, and this project has shipped that failure before.
+    if (info.lattice_void_check_ran) {
+      std::string ve = "{\"rule\": \"the void space inside any lattice must "
+                       "reach the exterior\"";
+      ve += ", \"connectivity\": 6";
+      ve += ", \"connectivity_note\": \"face adjacency only: an edge or corner "
+            "touch shares zero area and is not an aperture\"";
+      ve += ", \"sealed\": " +
+            bool_json(info.lattice_void_sealed_variants > 0);
+      ve += ", \"sealed_variants\": " +
+            fmt_i(info.lattice_void_sealed_variants);
+      ve += ", \"sealed_cells\": " + fmt_ll(info.lattice_void_sealed_cells);
+      ve += ", \"sealed_voxels\": " + fmt_ll(info.lattice_void_sealed_voxels);
+      ve += ", \"sealed_volume_mm3\": " +
+            fmt(info.lattice_void_sealed_volume_mm3);
+      ve += ", \"latticed_cells\": " + fmt_ll(info.lattice_void_latticed_cells);
+      ve += ", \"latticed_voxels_reached\": " +
+            fmt_ll(info.lattice_void_latticed_reached);
+      ve += ", \"reachable_void_volume_mm3\": " +
+            fmt(info.lattice_void_reachable_volume_mm3);
+      ve += ", \"escape_depth_voxels\": " +
+            fmt_i(info.lattice_void_escape_depth_max);
+      ve += ", \"escape_faces\": \"" + info.lattice_void_escape_faces + "\"";
+      ve += ", \"sealed_pockets_without_lattice\": " +
+            fmt_ll(info.lattice_void_sealed_pockets_without_lattice);
+      ve += ", \"bfs_visits\": " + fmt_ll(info.lattice_void_bfs_visits);
+      ve += ", \"wall_seconds\": " + fmt(info.lattice_void_wall_seconds);
+      ve += "}";
+      le += ", \"void_escape\": " + ve;
+    }
     le += ", \"emit_stl\": " + bool_json(info.lattice_export_emit_stl);
     le += ", \"emit_3mf\": " + bool_json(info.lattice_export_emit_3mf);
     le += ", \"interpenetrating_soup\": " +

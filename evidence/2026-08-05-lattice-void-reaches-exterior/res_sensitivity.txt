@@ -1,0 +1,32 @@
+--- MARGINAL bolt cylinder — the verdict FLIPS with the grid ---
+resolution  spacing mm  verdict sealed cells  sealed mm3   reached  depth faces                run s
+        32      1.8750     pass            0         0.0       104      3 -x,+x,-y,+y,-z,+z      1.6
+        40      1.5000     pass            0         0.0       224      3 -x,-y,+y,-z,+z         5.0
+        48      1.2500     pass            0         0.0       320      7 -x,-y,+y,-z,+z         3.2
+        56      1.0714     pass            0         0.0       598      4 -x,+x,-y,+y,-z,+z     13.3
+        64      0.9375   REFUSE            3       618.0         0     -1 -                     17.4
+        72      0.8333     pass            0         0.0      1232      6 -x,-y,+y,-z,+z        11.1
+
+--- SHIPPED slab, buried — must be SEALED at every resolution ---
+resolution  spacing mm  verdict sealed cells  sealed mm3   reached  depth faces                run s
+        32      1.8750   REFUSE            9       533.9         0     -1 -                      1.1
+        40      1.5000   REFUSE            9       816.8         0     -1 -                      3.4
+        48      1.2500   REFUSE            6       843.8         0     -1 -                      2.2
+        56      1.0714   REFUSE            9       830.2         0     -1 -                      8.1
+        64      0.9375   REFUSE            9       714.4         0     -1 -                     12.7
+        72      0.8333   REFUSE            9       694.4         0     -1 -                      7.6
+
+--- SHIPPED slab, OPEN twin — must PASS at every resolution ---
+resolution  spacing mm  verdict sealed cells  sealed mm3   reached  depth faces                run s
+        32      1.8750     pass            0         0.0       276      0 -x,+x,-y,+y,-z,+z      1.6
+        40      1.5000     pass            0         0.0       846      0 -x,+x,-y,+y,-z,+z      4.9
+        48      1.2500     pass            0         0.0      1644      0 -x,+x,-y,+y,-z,+z      3.3
+        56      1.0714     pass            0         0.0      2415      0 -x,+x,-y,+y,-z,+z     12.6
+        64      0.9375     pass            0         0.0      3129      0 -x,+x,-y,+y,-z,+z     18.8
+        72      0.8333     pass            0         0.0      4152      0 -x,+x,-y,+y,-z,+z     10.9
+
+The marginal row is reported, not asserted: it is the CAVITY that is
+marginal, not the check. The shipped fixture was chosen because it is
+stable across every resolution above, and both of its rows are asserted.
+
+RESULT PASS

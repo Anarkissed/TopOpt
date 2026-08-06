@@ -1,0 +1,41 @@
+############################################################
+# BEFORE — the option ABSENT. This is what ships today.
+############################################################
+  WROTE  variant_100_lattice.stl  1749084 bytes
+  variant_100_lattice.report.json: lattice_accepted=True lattice_voxels=432 lattice_margin_worst_case=2542.281254
+
+  BEFORE PASS — the sealed cavity is exported and CERTIFIED with no
+         complaint anywhere. That is the defect this task closes.
+
+############################################################
+# AFTER — the option ARMED, the same part.
+############################################################
+  --- the refusal, verbatim from stderr ---
+  [lattice] vf=1.00 NO LATTICE EMITTED — the void space inside this lattice does 
+  not reach the exterior. 6 of 6 lattice cells (432 of 432 latticed voxels) sit 
+  in 1 SEALED cavity/cavities holding 843.750 mm^3 of trapped space with no 
+  path out of the part. Nothing can ever be emptied from them — powder, resin or 
+  support placed there stays there. Cavity 1: 432 latticed voxels in 6 cells, 
+  843.750 mm^3, bounding box (-12.500, -7.500, 2.500) to (2.500, 7.500, 6.250) 
+  mm, declared include region 1. NOTHING WAS AUTO-CORRECTED: opening a cavity 
+  would change geometry that was not asked to change. Either place the lattice 
+  so it reaches the surface, add a drain path, or clear 
+  lattice.require_lattice_void_reaches_exterior.
+  no latticed STL was written — the refusal happens BEFORE the generator runs
+  run_info.lattice_export.void_escape: sealed=True sealed_variants=1 cells=6 voxels=432 volume_mm3=843.75 bfs_visits=57048 wall_seconds=0.000851458
+
+  AFTER PASS — refused, with the counts, the volume and the box.
+
+############################################################
+# OPEN — the option ARMED, the lattice reaching the surface.
+# The rule must PERMIT what he actually wants.
+############################################################
+  variant_100_lattice.report.json: sealed=False latticed_voxels=1644 reached=1644 escape_depth_voxels=0 escape_faces=['-x', '+x', '-y', '+y', '-z', '+z'] reachable_void_volume_mm3=113789.0625
+  WROTE  variant_100_lattice.stl  2396084 bytes
+
+  OPEN PASS — an interior lattice pocket that reaches the surface is
+       exported, and the receipt SAYS which way out it found.
+
+S1 PASS — today's build accepts a sealed lattice-filled cavity; the armed
+          check refuses it before a triangle is written; and an OPEN
+          interior lattice pocket still passes.
