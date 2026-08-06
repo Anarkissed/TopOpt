@@ -3,7 +3,13 @@
 **Slug:** `smoothing-sdf-geometry-extraction` · **Branch:**
 `claude/smoothing-sdf-geometry-477925` · started from `main` at `b3abcf8`, with
 PR 299's harness commit `3eedf16` cherry-picked so its metric could be re-used
-rather than re-typed.
+rather than re-typed. **`main` moved during this work** — PR 299 (#299), the
+lattice cell-size adaptation (#298) and the smoothing-page brush panel (#300)
+all landed — so the branch was merged up to `90e9ec5` and everything below was
+re-verified against it: R1 re-run (new digest, still identical), R3 re-run (still
+identical to PR 299's recorded output), and every `file:line` re-checked, which
+moved four of them (S2.3/S3.3/S4.0's `run_job.cpp` sites shifted ~350 lines by
+#298, and `analyze.hpp:33-35` was wrong in PR 299 and is corrected here).
 **Evidence:** `evidence/2026-08-05-smoothing-sdf-geometry-extraction/`
 
 ---
@@ -488,7 +494,7 @@ topopt-cli: fea_solve_mgcg_matfree: under-constrained system
 
 on the SDF mesh and on the isocontour-only mesh, on every rung. Root cause and
 counts are in S3.3: the smoothing erodes 34 of the 5,165 load-tagged voxels
-(0.66%), the fixture survives intact, and `run_job.cpp:3745-3752` carries the
+(0.66%), the fixture survives intact, and `run_job.cpp:4092-4100` carries the
 Load tag onto a substitute mesh only where that mesh still has material.
 
 **So the S2 numbers the task asked for — margin before and after, through the
@@ -598,7 +604,7 @@ v068_taubin.stl                    5165          0       3348          0
 
 **34 of the 5,165 load-tagged voxels (0.66%) lose their material.** The fixture
 survives intact; it is the load interface alone. And the code says exactly why —
-`core/src/cli/run_job.cpp:3745-3752`:
+`core/src/cli/run_job.cpp:4092-4100`:
 
 ```cpp
 if (cert_grid.tags[i] == VoxelTag::Load) {
@@ -676,13 +682,13 @@ Certification is voxel-based end to end. `core/src/simp/analyze.cpp` works in
 `:256-259`, `:296`), and the FEA it drives is an 8-node hexahedron on a regular
 lattice (`core/include/topopt/fea.hpp:12, 43`). Any mesh handed to
 `topopt-cli analyze --mesh` is re-voxelized onto the run's solved grid before a
-single element is assembled — `core/src/cli/run_job.cpp:3741`:
+single element is assembled — `core/src/cli/run_job.cpp:4091`:
 
 ```cpp
 design_grid = voxelize_onto_grid(design_mesh, cert_grid);
 ```
 
-The provenance file already says so in as many words (`run_job.cpp:4032`: *"the
+The provenance file already says so in as many words (`run_job.cpp:4382`: *"the
 analysed geometry is voxelized onto the SOLVED grid"*). **So sub-voxel surface
 motion is invisible to the certificate by construction**, and S2.2 is that
 statement measured: the exported mesh and the Taubin-smoothed mesh — 0.23 mm
@@ -731,7 +737,7 @@ an upper bound; user CPU time and peak RSS are the safer columns, and the memory
 pressure that stopped the 256 row was partly theirs.)
 
 **R5 note, and it is the same gap PR 299 found.** `FixedDesignAnalysis` records
-the CG iteration count only on NON-convergence (`analyze.hpp:33-35`,
+the CG iteration count only on NON-convergence (`analyze.hpp:132-140`,
 `non_convergent_iteration`). A converged certification does not surface it, so
 the rows above carry wall clock and peak RSS but no iteration count. I did not
 fabricate one and did not re-implement the solve to get one.
@@ -834,7 +840,7 @@ No measurement needed and no downside. **Most of it already exists.**
 `translucentBodyPipeline` (premultiplied "over" blending) with a depth state that
 tests but does not write, "so back walls show through the front (the x-ray
 read)", driven by a `bodyAlpha` uniform in buffer 1
-(`MetalMeshView.swift:118-121`, `:505-506`, `:538-545`). It is wired to the load-flow modes
+(`MetalMeshView.swift:118-121`, `:507`, `:542-545`). It is wired to the load-flow modes
 only. Pointing the smoothing page's stage at it is a binding change, not a
 rendering project.
 
@@ -954,16 +960,19 @@ identical flags — one from the working tree, one from a clean `origin/main`
 worktree:
 
 ```
-digest of all 45 objects, working tree   : 47669432db84403491cedb838d3f46f0
-digest of all 45 objects, origin/main    : 47669432db84403491cedb838d3f46f0
+digest of all 45 objects, working tree   : 565a792e4f6791b10f65f271c0ed6f59
+digest of all 45 objects, origin/main    : 565a792e4f6791b10f65f271c0ed6f59
 BYTE-IDENTICAL
 extracted archive members: NO BYTE DIFFERS
 ```
 
-**That is also the digest PR 299 recorded** (`evidence/2026-08-05-smoothing-must-
-actually-smooth/r1_byte_identity.txt`), which is a second, independent
-confirmation: two tasks, two independent harnesses, one metric moved between
-files — and the shipped library has not moved a byte.
+**Run TWICE, against two different mains.** Before the merge, against `b3abcf8`,
+both sides digested `47669432db84403491cedb838d3f46f0` — which is the digest
+PR 299 recorded for the same commit. After merging `origin/main` up to `90e9ec5`
+(which changed core: #298 added 1,022 lines across `lattice.cpp`, `run_job.cpp`
+and `job.hpp`), both sides digest `565a792e4f6791b10f65f271c0ed6f59`. The digest
+moved because MAIN moved; the two sides of the comparison did not diverge either
+time.
 
 Full record in `evidence/.../r1_byte_identity.txt`, including the note on why the
 objects are checksummed rather than the `.a` archive (`ar` embeds member mtimes;
@@ -1012,21 +1021,25 @@ relative residual per row (`sdf_part.csv` `cg_iters`, `cg_res` — 95–96 itera
 to 9.1e-09 on his part); the volume-shift bisection reports its evaluation count
 (18–34); the threshold bisection reports its own. **The one gap is named rather
 than filled:** `FixedDesignAnalysis` records the CG iteration count only on
-NON-convergence (`analyze.hpp:33-35`), so every converged certification in S2 and
+NON-convergence (`analyze.hpp:132-140`), so every converged certification in S2 and
 S4 is reported as wall clock and peak RSS with no iteration count. I did not
 fabricate one. This is the same gap PR 299 found and handled the same way.
 
 **R6 — no assertion weakened or deleted.** Nothing was removed or relaxed. The
 only edit to an existing file is the metric MOVE, and R3 proves it output-
 preserving. PR 299's own evidence files are untouched (its `stairstep_sweep.csv`
-was overwritten by a re-run and restored from its branch).
+was overwritten by a re-run and restored from its branch). **Re-checked after
+merging `main`:** `stairstep_probe` was re-run on the merged tree and compared
+line by line against PR 299's recorded output — the ONLY non-timing difference in
+134 lines is the evidence path passed on the command line. Every geometric figure
+is still identical.
 
 **R7 — root cause with file and line for every defect found.**
 
-* The certification refuses the SDF mesh: `core/src/cli/run_job.cpp:3745-3752` —
+* The certification refuses the SDF mesh: `core/src/cli/run_job.cpp:4092-4100` —
   the Load tag is carried onto a substitute mesh only where that mesh has
   material, and the SDF route erodes 34 of 5,165 load voxels (S3.3, counted).
-* The certificate cannot see a smoothing: `core/src/cli/run_job.cpp:3741`
+* The certificate cannot see a smoothing: `core/src/cli/run_job.cpp:4091`
   (`voxelize_onto_grid(design_mesh, cert_grid)`) with `analyze.cpp:160, 223, 227,
   256-259, 296` working in `grid.solid()` throughout (S4.0).
 * The reference implementation cannot be driven from his field:
@@ -1049,23 +1062,40 @@ commands in its README.
 
 ## Suites
 
-**core (`ctest`, 106 tests): 100% passed**, 1106 s.
+**core (`ctest`, 106 tests): 100% passed**, 1106 s — measured on the PRE-merge
+tree (`b3abcf8` plus this branch):
 
 ```
 100% tests passed out of 106
 Total Test time (real) = 1106.29 sec
 ```
 
-**app (`swift build` on `app/TopOptKit`): Build complete! (75.41 s)**, after
-`LIB3MF_PREFIX=/nonexistent ./app/scripts/build_core.sh` to provision the
-worktree's `vendor/TopOptCore.xcframework` (without it SwiftPM cannot even
-resolve the package here — the known worktree trap, and nothing to do with this
-branch). The only diagnostic is a pre-existing Swift 6 `@Sendable` warning in a
-local function, untouched by this work.
+**core, POST-merge: the smoothing/mesh subset, 5 of 5 passed**, 18.6 s:
 
-Both were run with two unrelated optimization jobs from other worktrees on the
-same Mac, which is why the ctest wall clock is longer than PR 299 recorded for
-the same suite.
+```
+mesh_job / loadcase_analyze / smooth / smooth_brush / smooth_recert_loadcase
+100% tests passed out of 5
+```
+
+**The full suite was NOT re-run after the merge, and that is a deliberate cap
+rather than an omission.** It was started and abandoned at 5 of 107 after an
+hour: this Mac's load average had climbed to 20 under two other sessions'
+optimization runs and the longest tests were taking many times their recorded
+cost. What a full re-run would be exercising is MAIN's new code (#298 alone added
+1,022 lines of lattice and run_job), whose suite is main's own; this branch's
+delta is proven byte-identical to main twice over (R1), so no test can see it.
+The subset above is the part that could conceivably notice this work — the
+smoothing, mesh-export and analyze paths the harness drives — and it passes on
+the merged tree.
+
+**app (`swift build` on `app/TopOptKit`): Build complete!** — 75.41 s pre-merge,
+18.65 s post-merge (incremental), both clean, with main's reworked
+`SmoothingPage`/`SmoothBrush`/`PageChrome` compiled in.
+`LIB3MF_PREFIX=/nonexistent ./app/scripts/build_core.sh` is needed first to
+provision the worktree's `vendor/TopOptCore.xcframework`; without it SwiftPM
+cannot resolve the package here at all. That is the known worktree trap and has
+nothing to do with this branch. The only diagnostic is a pre-existing Swift 6
+`@Sendable` warning in a local function.
 
 ## If any of this is taken further
 

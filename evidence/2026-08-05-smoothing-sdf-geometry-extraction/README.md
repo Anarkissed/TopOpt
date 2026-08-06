@@ -28,7 +28,7 @@ S1, S2 and S3.
 | `s4_mesh_substitution_refused.txt` | S4: the first attempt, certifying the same exported mesh at 128/192/256. 192 and 256 are REFUSED, for the same reason the SDF mesh is. |
 | `sdf_gibson.txt` | S3.4: the S1 numbers under Gibson's one-voxel constraint, on his part. |
 | `r3_metric_move.txt` | The proof that PR 299's metric is unchanged: `stairstep_probe`'s output before and after the metric moved into the shared header. Every geometric figure identical; only wall-clock columns differ. |
-| `r1_byte_identity.txt` | The stash-rebuild proof that the shipped library is byte-identical with this work applied. |
+| `r1_byte_identity.txt` | The stash-rebuild proof that the shipped library is byte-identical with this work applied. Re-run after `main` moved (PRs #298/#299/#300 landed mid-task): the digest changed because MAIN changed, the two sides did not diverge either time. |
 | `julia_reference/` | The paper's own implementation, rho2sdf.jl v0.1.0, driven on a case it can finish, and the port's output at the same points. `crosscheck.jl` is the driver, `crosscheck_reference.txt` its output, `crosscheck_port.txt` the comparison. |
 | `job_analyze.json`, `M2_verticalStand.step` | His own job with the mode switched to `analyze`, and his part, for the S2/S4 CLI runs. |
 | `s2_loadcheck.txt` | The root cause of S2's refusal: how many of the 5,165 load-tagged voxels each mesh loses. |
@@ -83,7 +83,7 @@ julia -t 1,0 --project=. ../evidence/.../julia_reference/crosscheck.jl ref.txt
 
 `-t 1,0` is not decoration — see the trap below.
 
-## Four traps this run hit, worth not hitting again
+## Five traps this run hit, worth not hitting again
 
 1. **The reference implementation cannot be driven from his density field, and
    the reason is one line.** `Sign_Detection_HEX8`
@@ -107,7 +107,14 @@ julia -t 1,0 --project=. ../evidence/.../julia_reference/crosscheck.jl ref.txt
    touches the grid wall, which cost 0.13 mm of all-vertex RMS and 0.37 mm of
    oblique max — larger than the whole effect being measured, and in the
    direction that would have read as "the method damages the part".
-4. **PR 299's `WallMount_ShelfBracket.stl` reference is faceted at the scale
+4. **`main` can move under a long task, and it moves `file:line`.** PR #298 added
+   637 lines to `core/src/cli/run_job.cpp` ABOVE the sites this task's S2/S3/S4
+   cite, shifting them by ~350. Every reference here was re-checked against the
+   merged tree; four had to be corrected, one of which (`analyze.hpp:33-35` for
+   `non_convergent_iteration`, actually `:132-140`) was wrong in PR 299 and had
+   been carried over unverified. Re-grep every `file:line` before publishing a
+   handoff that took more than an afternoon.
+5. **PR 299's `WallMount_ShelfBracket.stl` reference is faceted at the scale
    being measured; his own part is not.** His part is a STEP, so the reference
    can be tessellated as finely as wanted: the run's own tessellation deviates
    from a 20x finer one by rms 0.0073 mm (0.4% of a voxel). The bracket's is a

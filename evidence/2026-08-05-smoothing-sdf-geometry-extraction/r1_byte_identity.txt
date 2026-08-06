@@ -10,27 +10,7 @@ $ git diff origin/main -- core/src core/include app/TopOptKit/Sources | wc -l
        0
 
 == everything this branch touches ==
-   A  app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPreviewGateTests.swift
-   MM core/CMakeLists.txt
-   AM core/tests/harness/stairstep_probe.cpp
-   A  docs/handoffs/2026-08-05-smoothing-must-actually-smooth.md
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/README.md
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/WallMount_ShelfBracket.stl
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/job.json
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/job_nobox.json
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/r1_byte_identity.txt
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/s3_reproduction_failing.txt
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile.png
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile_baseline.csv
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile_pairs160.csv
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/sphere_profile_pairs20.csv
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/stairstep_probe.txt
-   A  evidence/2026-08-05-smoothing-must-actually-smooth/stairstep_sweep.csv
-   ?? core/tests/harness/sdf_geometry.cpp
-   ?? core/tests/harness/sdf_geometry.hpp
-   ?? core/tests/harness/sdf_geometry_probe.cpp
-   ?? core/tests/harness/stairstep_metric.hpp
-   ?? evidence/2026-08-05-smoothing-sdf-geometry-extraction/
+    M evidence/2026-08-05-smoothing-sdf-geometry-extraction/r1_byte_identity.txt
 
 == build A: the working tree ==
 objects: 45
@@ -39,8 +19,8 @@ objects: 45
 objects: 45
 
 == the digests ==
-digest of all objects, working tree      : 47669432db84403491cedb838d3f46f0
-digest of all objects, origin/main       : 47669432db84403491cedb838d3f46f0
+digest of all objects, working tree      : 565a792e4f6791b10f65f271c0ed6f59
+digest of all objects, origin/main       : 565a792e4f6791b10f65f271c0ed6f59
 BYTE-IDENTICAL
 
 (The .a archives are NOT compared: ar embeds member mtimes, so two
@@ -52,3 +32,22 @@ extracted archive members: NO BYTE DIFFERS
 
 == the app library, which this task also does not touch ==
 $ git diff origin/main --stat -- app/
+
+======================================================================
+RUN TWICE, AGAINST TWO DIFFERENT MAINS.
+
+`main` moved during this task (#298 lattice cell-size adaptation, #299 the
+predecessor whose harness was cherry-picked, #300 smoothing-page brush panel),
+so this bar was measured before and after merging it up.
+
+  against origin/main = b3abcf8   both sides: 47669432db84403491cedb838d3f46f0
+  against origin/main = 90e9ec5   both sides: 565a792e4f6791b10f65f271c0ed6f59
+
+The first digest is the one PR 299 recorded for the same commit
+(evidence/2026-08-05-smoothing-must-actually-smooth/r1_byte_identity.txt). The
+digest MOVED between the two runs because MAIN moved — #298 alone added 1,022
+lines across core/src/fea/lattice.cpp, core/src/cli/run_job.cpp and
+core/include/topopt/job.hpp. What did not move, either time, is the agreement
+between the two sides of the comparison: this branch adds no production source.
+
+The block above is the second (current) run, verbatim.
