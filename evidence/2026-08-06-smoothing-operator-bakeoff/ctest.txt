@@ -1,0 +1,15 @@
+== ctest, full suite, on the MERGED tree ==
+
+Subject: f631bf6, with origin/main (81a2368) merged in.
+Baseline registers 106 tests, this branch 107 — the added one is #26,
+surface_operator (see r1_byte_identity.txt step 2).
+
+        Start 107: mesh_job
+107/107 Test #107: mesh_job .........................   Passed    6.62 sec
+
+100% tests passed out of 107
+
+Total Test time (real) = 1633.81 sec
+
+-- the added test, run directly --
+50 checks, 0 failures

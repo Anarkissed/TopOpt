@@ -1,0 +1,11 @@
+== sdf_geometry_probe : ANALYTIC SPHERE CONTROL ==
+R 20.000 mm, spacing 1.620040 mm (12.3 voxels across the radius), export factor 2
+
+configuration               max mm    rms mm % of base     verts
+unsmoothed (PR 299)         0.7266    0.3307     100.0     11232
+SDF B/h = 3.300             0.3920    0.1164      35.2      1062   rho_t 0.4792  vol 33096.3/33096.3 mm3
+SDF B/h = 2.000             0.4647    0.1361      41.1      2886   rho_t 0.4792  vol 33096.3/33096.3 mm3
+SDF B/h = 1.000             0.4909    0.1714      51.8     11502   rho_t 0.4792  vol 33096.4/33096.3 mm3
+SDF B/h = 0.500             0.4862    0.1664      50.3     45390   rho_t 0.4792  vol 33096.3/33096.3 mm3
+SDF B/h = 0.250             0.4898    0.1674      50.6    180342   rho_t 0.4792  vol 33096.4/33096.3 mm3
+SDF B/h = 0.125             0.4906    0.1683      50.9    721205   rho_t 0.4792  vol 33096.4/33096.3 mm3
