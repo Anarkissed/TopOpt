@@ -198,12 +198,17 @@ void weld_guard_positive_control(const Fixture& fx) {
     m.triangles.push_back({2 * i + 1, 2 * (i + 1) + 1, 2 * (i + 2)});
   }
 
+  // ★ KEYED AT FLOAT32 — the precision binary STL stores and therefore the
+  // precision at which two vertices become one. A double-precision key passed
+  // on the maintainer's part at resolution 64 while the exported file still
+  // welded two pairs; see cad_project.cpp's weld guard.
   auto coincident_positions = [](const TriangleMesh& mm) {
-    std::map<std::array<double, 3>, std::size_t> at;
+    std::map<std::array<float, 3>, std::size_t> at;
     std::size_t n = 0;
     for (std::size_t i = 0; i < mm.vertices.size(); ++i) {
-      const std::array<double, 3> k{mm.vertices[i].x, mm.vertices[i].y,
-                                    mm.vertices[i].z};
+      const std::array<float, 3> k{static_cast<float>(mm.vertices[i].x),
+                                   static_cast<float>(mm.vertices[i].y),
+                                   static_cast<float>(mm.vertices[i].z)};
       if (!at.emplace(k, i).second) ++n;
     }
     return n;
@@ -473,11 +478,12 @@ int main() {
   //
   // So the invariant has to be stated at the level the file is written at.
   {
-    std::map<std::array<double, 3>, std::size_t> at;
+    std::map<std::array<float, 3>, std::size_t> at;
     std::size_t coincident = 0;
     for (std::size_t i = 0; i < proj.vertices.size(); ++i) {
-      const std::array<double, 3> k{proj.vertices[i].x, proj.vertices[i].y,
-                                    proj.vertices[i].z};
+      const std::array<float, 3> k{static_cast<float>(proj.vertices[i].x),
+                                   static_cast<float>(proj.vertices[i].y),
+                                   static_cast<float>(proj.vertices[i].z)};
       if (!at.emplace(k, i).second) ++coincident;
     }
     std::printf("weld guard: %zu collisions found, %zu projected vertices put "
@@ -489,12 +495,12 @@ int main() {
           "the exported file welds by position and would stop being watertight");
     // The SOURCE mesh must have no coincident vertices either, or the check
     // above would be measuring marching cubes rather than the projection.
-    std::map<std::array<double, 3>, std::size_t> at0;
+    std::map<std::array<float, 3>, std::size_t> at0;
     std::size_t coincident0 = 0;
     for (std::size_t i = 0; i < exported.vertices.size(); ++i) {
-      const std::array<double, 3> k{exported.vertices[i].x,
-                                    exported.vertices[i].y,
-                                    exported.vertices[i].z};
+      const std::array<float, 3> k{static_cast<float>(exported.vertices[i].x),
+                                   static_cast<float>(exported.vertices[i].y),
+                                   static_cast<float>(exported.vertices[i].z)};
       if (!at0.emplace(k, i).second) ++coincident0;
     }
     CHECK(coincident0 == 0,

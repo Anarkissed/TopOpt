@@ -1,0 +1,12 @@
+S3 — enclosed cavities in the EXPORTED MESH, 6-connected flood fill from outside, grid 128^3
+
+mesh                               watertight     tris  solid vox  cavities  cav vox    cav mm^3 26-conn cav
+------------------------------------------------------------------------------------------------------------
+variant_026.stl                           yes   324512     304796         0        0       0.000           0
+variant_026_projected.stl                 yes   324512     272511         0        0       0.000           0
+variant_038.stl                           yes   323036     337381         0        0       0.000           0
+variant_038_projected.stl                 yes   323036     303653         0        0       0.000           0
+variant_052.stl                           yes   291840     389527         1        1       1.267           0
+variant_052_projected.stl                 yes   291840     353233         0        0       0.000           0
+variant_068.stl                           yes   287720     420118         0        0       0.000           0
+variant_068_projected.stl                 yes   287720     380602         0        0       0.000           0

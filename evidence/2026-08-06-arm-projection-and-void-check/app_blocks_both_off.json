@@ -1,0 +1,19 @@
+{
+  "lattice" : {
+    "cell_mm" : 8,
+    "emit_3mf" : false,
+    "emit_stl" : true,
+    "min_extrudable_width_mm" : 0.45000000000000001,
+    "require_lattice_void_reaches_exterior" : false,
+    "skin" : "diagrid",
+    "strut_radius_mm" : 1.0953720829015134,
+    "topology" : "octet"
+  },
+  "output" : {
+    "mesh_format" : "stl",
+    "mesh_prefix" : "variant",
+    "project_cad_faces" : false,
+    "report" : "report.json",
+    "smooth_factor" : 2
+  }
+}

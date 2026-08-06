@@ -1,0 +1,53 @@
+before: 4 solid variant meshes: variant_026.stl, variant_038.stl, variant_052.stl, variant_068.stl
+after: 4 solid variant meshes: variant_026.stl, variant_038.stl, variant_052.stl, variant_068.stl
+
+====================================================================================================
+R1 — THE EXPORTED FILE, BEFORE (both defaults OFF) vs AFTER (both ON)
+     same job document; the BINARY decides what the absent keys mean
+====================================================================================================
+rung          arm         tris   verts watertight   volume mm^3 mesh mass g
+---------------------------------------------------------------------------
+variant_026   before     76964   38472        yes      386443.8      479.19
+variant_026   after      76964   38472        yes      397487.6      492.88
+              delta                                       2.86%       2.86%
+variant_038   before     76224   38102        yes      408299.7      506.29
+variant_038   after      76224   38102        yes      414794.3      514.34
+              delta                                       1.59%       1.59%
+variant_052   before     75616   37800        yes      434791.2      539.14
+variant_052   after      75616   37800        yes      441775.1      547.80
+              delta                                       1.61%       1.61%
+variant_068   before     73328   36664        yes      462211.6      573.14
+variant_068   after      73328   36664        yes      472004.8      585.29
+              delta                                       2.12%       2.12%
+
+====================================================================================================
+R1 — THE VOID-CHECK RECORD
+====================================================================================================
+before   NO void_escape block at all — the check did not run
+after    ran=None decidable=None sealed=False sealed_variants=0
+         latticed_cells=1082 reached=6276 sealed_voxels=0 depth=0 faces=-x,+x,-y,+y,-z,+z
+         connectivity=6 bfs_visits=240011 wall_seconds=0.003579457
+         enclosed voids holding NO lattice: 1 (None mm^3)
+
+====================================================================================================
+R2 — VOXEL-CLASSIFICATION FLIPS, against a 1e-9 negative-control floor
+====================================================================================================
+grid 64x16x59 spacing 3.410559 mm; 4 designs before, 4 after
+C1 negative control  : one voxel moved across the printed iso by 1e-9 (1.000000000000 -> 0.499999999000)  ->  1 flip(s) [must be exactly 1]
+C2 sensitivity control: rung 0.68 vs rung 0.52 of the SAME run  ->  743 flips [must be large]
+
+ requested vf  achieved before  achieved after  margin before  margin after    accepted  voxel flips
+----------------------------------------------------------------------------------------------------
+       0.6800      0.680001295     0.680001295    1837.416402   1837.416402  True->True            0
+       0.5200      0.520004835     0.520004835    1780.493448   1780.493448  True->True            0
+       0.3800      0.379999999     0.379999999    1691.749462   1691.749462  True->True            0
+       0.2600      0.260002808     0.260002808    1654.089195   1654.089195  True->True            0
+
+TOTAL VOXEL FLIPS ACROSS EVERY RUNG: 0
+
+ATTRIBUTION. Both changes act strictly AFTER the design is final —
+projection inside export_variant_mesh (run_job.cpp:342) on a copy of the
+mesh, the void check at run_job.cpp:2905 as a refuse-or-nothing gate on
+the final mask. Neither can move a voxel, so the expected count is 0 and
+any non-zero flip would have to be explained as a defect rather than as
+a result. C1 above proves the comparator can see a single 1e-9 move.

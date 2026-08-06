@@ -606,11 +606,42 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
   // watertight: on the demo l-bracket at resolution 48, 293 edges ended up
   // shared by four triangles.
   //
-  // EXACT EQUALITY IS THE RIGHT TEST, not a tolerance, and that is a property
-  // of the geometry rather than a convenience: the two endpoints' in-plane
-  // coordinates are IDENTICAL before projection and are left untouched by it,
-  // so a genuine weld is exact in double and a merely-near-miss is not. A
-  // tolerance would revert vertices that were never going to collide.
+  // ★ THE TEST IS AT THE PRECISION THE FILE CARRIES, WHICH IS FLOAT32 — NOT
+  // DOUBLE. This was wrong on its first cut and the l-bracket said so: keyed on
+  // exact double equality the guard cleaned up resolution 48 completely, and
+  // then rung 052 of the maintainer's part at resolution 64 still exported
+  // 37 798 distinct float32 positions from 37 800 double-distinct vertices — two
+  // pairs that stayed apart in double and MET when written. Binary STL stores
+  // float32, and every consumer re-welds by position, so a difference smaller
+  // than a float32 ULP does not exist once the file is written.
+  //
+  // The canonical riser case IS exact in double — the two endpoints share their
+  // in-plane coordinates and projection leaves those untouched — which is why
+  // the double test worked at all. Float32 simply also catches the near misses,
+  // and it is the correct bound rather than a safety margin: it is exactly the
+  // set of pairs the FILE cannot tell apart.
+  //
+  // A pair that was ALREADY float32-coincident in the input is left alone. That
+  // is not this operation's doing, reverting would not fix it, and treating it
+  // as a collision would make the guard fight a pre-existing degeneracy every
+  // pass and never converge.
+  const auto weld_key = [](const Vec3& p) {
+    // Round-trip through float exactly as write_stl_file will.
+    return std::array<float, 3>{static_cast<float>(p.x), static_cast<float>(p.y),
+                                static_cast<float>(p.z)};
+  };
+  std::map<std::array<float, 3>, std::size_t> preexisting;
+  std::vector<char> already_coincident(nv, 0);
+  for (std::size_t i = 0; i < nv; ++i) {
+    const auto k = weld_key(mesh.vertices[i]);
+    const auto it = preexisting.find(k);
+    if (it == preexisting.end()) {
+      preexisting.emplace(k, i);
+    } else {
+      already_coincident[i] = 1;
+      already_coincident[it->second] = 1;
+    }
+  }
   //
   // The remedy is the fold guard's own: put a vertex back. Same currency order
   // — band vertices are free and are spent first — and the same fixed-point
@@ -652,10 +683,10 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
         // index wins" rule would not by itself guarantee.
         std::size_t welds = 0;
         {
-          std::map<std::array<double, 3>, std::size_t> first_at;
+          std::map<std::array<float, 3>, std::size_t> first_at;
           for (std::size_t i = 0; i < nv; ++i) {
-            const std::array<double, 3> key{out.vertices[i].x, out.vertices[i].y,
-                                            out.vertices[i].z};
+            if (already_coincident[i]) continue;  // not ours to fix
+            const auto key = weld_key(out.vertices[i]);
             const auto it = first_at.find(key);
             if (it == first_at.end()) {
               first_at.emplace(key, i);

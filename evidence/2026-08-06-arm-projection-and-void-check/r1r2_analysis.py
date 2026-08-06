@@ -49,21 +49,33 @@ PLA_DENSITY_G_MM3 = None   # read from materials.json below
 
 
 def read_designs(path):
-    """-> (meta, [(requested_vf, [rho...]) ...]) from design.bin v1.
-    Same reader PR 305's r3_gate_table.py used, unchanged."""
+    """-> (meta, [(requested_vf, achieved_vf, margin, accepted, [rho...]) ...]).
+
+    Mirrors `write_design_file` (core/src/io/design_store.cpp:99) field for
+    field. NOTE for anyone reusing PR 305's `r3_gate_table.py` reader: that one
+    expects an 8-byte magic and a v1 header, and the format has moved on — there
+    is no magic, the first byte IS the version, and each block now carries the
+    applied build direction, two flags and a fingerprint before the density
+    array. A stale reader does not fail cleanly here, it silently misaligns, so
+    the version is asserted."""
     d = open(path, "rb").read()
     o = 0
-    magic = d[o:o + 8]; o += 8
-    (ver,) = struct.unpack_from("<i", d, o); o += 4
+    ver = d[0]; o += 4                      # u8 version + 3 pad
     assert ver == 1, f"design.bin version {ver} — this reader is v1 only"
     nx, ny, nz = struct.unpack_from("<3i", d, o); o += 12
     ox, oy, oz, sp = struct.unpack_from("<4d", d, o); o += 32
-    vc, _ = struct.unpack_from("<2i", d, o); o += 8
+    (vc,) = struct.unpack_from("<i", d, o); o += 8   # i32 count + 4 pad
     out = []
     for _ in range(vc):
         vf, avf, mwc, meff, vm = struct.unpack_from("<5d", d, o); o += 40
         acc, iters = struct.unpack_from("<2i", d, o); o += 8
+        bx, by, bz = struct.unpack_from("<3d", d, o); o += 24
+        auto, baked = struct.unpack_from("<2i", d, o); o += 8
+        (fp,) = struct.unpack_from("<Q", d, o); o += 8
         (n,) = struct.unpack_from("<q", d, o); o += 8
+        assert n == nx * ny * nz, (
+            f"design.bin block claims {n} voxels but the grid is "
+            f"{nx}x{ny}x{nz} — the reader is misaligned")
         rho = struct.unpack_from(f"<{n}d", d, o); o += 8 * n
         out.append((vf, avf, mwc, acc, list(rho)))
     return dict(nx=nx, ny=ny, nz=nz, spacing=sp), out
@@ -103,15 +115,9 @@ def stl_stats(path):
 
 # PLA density, read from the shipped library rather than typed in here.
 mats = json.load(open(os.path.join(REPO, "core", "src", "materials", "materials.json")))
-_rows = mats["materials"] if isinstance(mats, dict) and "materials" in mats else mats
-for m in (_rows if isinstance(_rows, list) else _rows.values()):
-    if str(m.get("name", "")).upper() == "PLA":
-        for k in ("density_g_cm3", "density"):
-            if k in m:
-                PLA_DENSITY_G_MM3 = float(m[k]) / 1000.0
-        if "density_g_mm3" in m:
-            PLA_DENSITY_G_MM3 = float(m["density_g_mm3"])
-assert PLA_DENSITY_G_MM3, "could not read PLA density from materials.json"
+# The library is keyed BY MATERIAL NAME at the top level ("PLA": { … }).
+PLA_DENSITY_G_MM3 = float(mats["PLA"]["density_g_cm3"]) / 1000.0
+assert PLA_DENSITY_G_MM3 > 0, "could not read PLA density from materials.json"
 
 arms = {}
 for arm in ("before", "after"):

@@ -1,0 +1,28 @@
+=== the keys the APP put in each job (read back off disk) =============
+both_on    output.project_cad_faces = True   lattice.require_lattice_void_reaches_exterior = True
+cad_off    output.project_cad_faces = False   lattice.require_lattice_void_reaches_exterior = True
+void_off   output.project_cad_faces = True   lattice.require_lattice_void_reaches_exterior = False
+both_off   output.project_cad_faces = False   lattice.require_lattice_void_reaches_exterior = False
+
+=== running each through the REAL cli ================================
+  both_on: exit 0
+  cad_off: exit 0
+  void_off: exit 0
+  both_off: exit 0
+
+=== THE EFFECT, read out of the RESULT ===============================
+arm         exported mm^3    tris   void_escape in run_info  sealed
+-------------------------------------------------------------------
+both_on           22029.1   60364                       yes   False
+cad_off           20215.0   60364                       yes   False
+void_off          22029.1   60364                        NO       —
+both_off          20215.0   60364                        NO       —
+
+WHAT TO READ:
+  * `project_cad_faces` ON vs OFF must change the EXPORTED VOLUME. That
+    is the effect being visible in the result rather than in a log line.
+  * `require_lattice_void_reaches_exterior` ON vs OFF must change whether
+    run_info carries a `void_escape` record at all. PR 305's bar V5 is
+    that OFF means not one extra byte, and it still holds.
+  * The two must move INDEPENDENTLY across the four arms, or they are
+    one switch wearing two names.
