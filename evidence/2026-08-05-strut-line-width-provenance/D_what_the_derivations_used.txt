@@ -1,0 +1,57 @@
+D — WHICH WIDTH THE DERIVATIONS ACTUALLY USED ON HIS RUN
+=========================================================
+His run: evidence/2026-08-03-preflight-feasibility-and-divergence/maintainer-job/,
+run_info.fingerprint 2b8b715fd347, LAN worker (worker.log line 1 launches
+topopt-cli run job.json), job.json sends outer 0.42 mm / inner 0.45 mm, 5 loops.
+
+THE ANSWER: every derivation on that run used 0.45 mm as the OUTER width. The
+0.42 mm he set never reached MinimizePlasticOptions, so the mirror sentinel was
+still in place and the outer width WAS the inner width, 0.45 mm.
+
+WHAT THAT CHANGED, EXACTLY:
+  wall_thickness_mm (the solid perimeter ring the width-aware gate would size)
+    used   : 5 x 0.45 = 2.25 mm      <- what run_info.json records, at
+                                        outer 0.45 mm / inner 0.45 mm
+    honest : 0.42 + 4 x 0.45 = 2.22 mm  at outer 0.42 mm / inner 0.45 mm
+    honest - used = -0.03 mm (-1.33% of 2.25 mm). The ring the run used is
+    THICKER than the beads he actually prints, because the true outer bead
+    (0.42 mm) is narrower than an inner one (0.45 mm).
+
+WHAT THAT DID *NOT* CHANGE — and this is the part worth being plain about:
+  t is read by exactly one arithmetic consumer, width_aware_knockdown(), and
+  only inside a width_aware branch:
+    75:  if (knockdown.width_aware) {
+    76-    // --- Width-aware posture (handoff 2026-07-26-width-aware-knockdown) --------
+    77-    // In-plane: the worst SOLID-EQUIVALENT von Mises max(vm/k(W)) over the printed
+    78-    // field already folds the per-voxel wall rescue in, so the in-plane effective
+    --
+    326:          if (knockdown.width_aware) {
+    327-            // k_v in (0, 1] (wall_area_fraction in [0,1], core knockdown >= floor),
+    328-            // so vm/k_v never divides by zero and only ever inflates the stress.
+    core/src/simp/gate_diagnosis.cpp:110  ->  if (k.width_aware) { ... reprice ... }
+  and the shipped posture is OFF:
+    183:constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
+    his run_info: 80:  "width_aware_knockdown": false,
+  The gate-diagnosis WALL LOOPS lever reads t too, but in the width-blind posture
+  it refuses to recommend at all (gate_diagnosis.cpp:423-431, "INERT IN THIS
+  POSTURE"), so it never priced anything at 2.25 mm either.
+
+  SO: no margin, no verdict, no mass, and no recommendation on his run moved
+  because of this. The corrupted number is the PROVENANCE RECORD itself — the
+  file the project reads when it argues about what his settings were. Every
+  discussion this week that quoted "outer 0.45 mm" or "t = 2.25 mm" off a
+  run_info was quoting a value his device did not send. The moment
+  kProductionWidthAwareKnockdown is armed, the same drop stops being cosmetic
+  and starts sizing the gate's wall ring 0.03 mm too thick on a 0.42/0.45 job.
+
+  NOT AFFECTED, and worth stating because the task is about STRUT widths: the
+  lattice strut printability floor rides a DIFFERENT key,
+  lattice.min_extrudable_width_mm, which core does read —
+    536:      LatticeTopology::Octet, job.grading.min_extrudable_width_mm);
+    657:  S.min_radius_mm = lat.min_extrudable_width_mm > 0.0
+    658:                        ? lattice_skin_min_radius_mm(lat.min_extrudable_width_mm)
+    2158:    gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
+  — so a lattice run's strut floor is NOT corrupted by this drop. What the strut
+  floor DOES inherit is the app-side decision to feed it the WALL outer width
+  (AppModel.swift:269, "the outer wall line width is the strut printability
+  reference"), which is precisely what S2 is chartered to separate.

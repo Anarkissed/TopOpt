@@ -253,6 +253,11 @@ struct JobGrading {
   // Cell-size MODE (handoff 2026-08-01-lattice-cell-size-sweep):
   //   "fixed" (DEFAULT, and what an absent key means) — cell_mm for the whole part,
   //     raised to the printability floor. Byte-identical to a pre-sweep run (bar R1).
+  //     ★ WHICH floor changed in task 2026-08-05-lattice-cell-fit-mode (S2): the
+  //     target is now raised only to the cell below which NO density in the band
+  //     prints (min_extrudable_width / phi(rho_max)), not to the one evaluated at the
+  //     band's LIGHTEST density. A target between the two is kept and the DENSITY is
+  //     raised to suit it. A target at or above the old floor is untouched.
   //   "auto"  — core picks ONE cell (the printability floor: the finest cell every
   //     strut still prints at, and so the uniform cell that leaves the most of the
   //     part latticed). cell_mm is then ignored and may be omitted.
@@ -261,6 +266,17 @@ struct JobGrading {
   //     does. REQUIRES both bounds; cell_mm is refused alongside it (a target cell
   //     would conflict with the ladder rather than add to it, so the schema says so
   //     instead of silently ignoring one).
+  //   "fit"   — (task 2026-08-05-lattice-cell-fit-mode) the cell is DERIVED PER
+  //     DECLARED INCLUDE REGION from what that region has to fit into:
+  //     max(region extent / cells-per-member floor, the finest printable cell), with
+  //     the relative density raised to whatever prints at it. REQUIRES at least one
+  //     "role": "include" region — without a declaration there is no requirement to
+  //     fit — and refuses cell_mm (core derives it) and
+  //     retain_subfloor_in_unloaded_regions (fit already reports the out-of-regime
+  //     material it emits). A region that cannot hold a PERCOLATING lattice at any
+  //     (cell, density) is refused by the pre-flight before a solve is spent; one
+  //     that percolates but cannot reach the accuracy floor is latticed and stamped
+  //     OUT OF REGIME.
   std::string cell_mode = "fixed";
   double cell_min_mm = 0.0;             // swept only; finite > 0
   double cell_max_mm = 0.0;             // swept only; finite >= cell_min_mm

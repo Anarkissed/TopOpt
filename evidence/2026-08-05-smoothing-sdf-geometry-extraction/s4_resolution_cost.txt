@@ -1,0 +1,57 @@
+S4 — WHAT A FINER CERTIFICATION ACTUALLY COSTS, MEASURED ON HIS PART.
+
+The task says not to price this from PR 299's 47.44 s — that is a
+certification of a DIFFERENT part on a DIFFERENT grid. Measured here,
+through the shipped seam, at three resolutions:
+
+  topopt-cli analyze job_analyze<res>.json --out /tmp/s4out
+
+NO --mesh. Not a simplification — a FINDING. The first attempt certified
+the SAME exported mesh at each resolution and the seam REFUSED it at 192
+and at 256 with the same under-constrained error the SDF mesh gets
+(s4_mesh_substitution_refused.txt): re-voxelizing a mesh onto a grid
+finer than the one it came from leaves load-tagged voxels empty. So the
+cost of a certification at resolution R is measured on the object that
+CAN be certified at any R — the part itself.
+
+Wall AND, where it is recorded, iterations. FixedDesignAnalysis records the
+CG iteration count only on NON-convergence (analyze.hpp:33-35), so a
+CONVERGED certification surfaces wall clock and peak RSS and no iteration
+count. No figure is invented for it.
+
+======================================================================
+### resolution 128
+    peak stress: 0.0187 MPa   worst-case margin: 2941 (required 1.5)
+    verdict: ACCEPTED
+    voxel mass: 682 g
+    min-feature violations: 36
+         99.92 real       172.45 user         2.42 sys
+             584531968  maximum resident set size
+======================================================================
+### resolution 192
+    peak stress: 0.02641 MPa   worst-case margin: 2082 (required 1.5)
+    verdict: ACCEPTED
+    voxel mass: 673 g
+    min-feature violations: 13
+        769.49 real      1040.93 user        15.89 sys
+            1406795776  maximum resident set size
+======================================================================
+### resolution 256
+  STOPPED, NOT COMPLETED — and the reason is the answer.
+
+  The 256 run allocated a peak of 1.86 GB (observed live) and then fell to about
+  2% duty: 20 minutes of CPU accumulated over more than two hours of wall clock,
+  at 93% of ONE core. This Mac has 16 GB and was hosting two unrelated
+  optimization runs from other worktrees; at the point this was stopped the
+  system had 8,908 pages free (139 MB) with 1.9 million pages in the compressor.
+  The certification was not compute-bound, it was MEMORY-bound, and it was still
+  running after the 128 and 192 rows had both finished.
+
+  So the honest 256 figure is not a number of seconds. It is: at 3.7 million
+  elements this certification does not fit in a 16 GB machine alongside anything
+  else, and the 128 -> 192 scaling above (3.4x the elements, 6.0x the CPU,
+  2.4x the memory) is the measurement to reason from.
+======================================================================
+(This Mac's cores AND memory were shared with two unrelated optimization runs in
+ other worktrees for this measurement, so the wall figures are an UPPER bound;
+ peak RSS is unaffected by sharing.)

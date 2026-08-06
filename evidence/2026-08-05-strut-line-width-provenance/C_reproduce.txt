@@ -1,0 +1,42 @@
+cli built from: 90e9ec5
+=== job_maintainer_defaults
+  JOB SENT:
+    "wall_line_width_mm": 0.45
+    "wall_line_width_outer_mm": 0.42
+  run_info.json GOT BACK (HEAD, 90e9ec5):
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.45,
+    "wall_line_width_outer_mm": 0.45,
+    "wall_thickness_mm": 2.25,
+  run_info.json COMMITTED 2026-07-28 (built at 4fed171, pre-drop):
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.45,
+    "wall_line_width_outer_mm": 0.42,
+    "wall_thickness_mm": 2.22,
+=== job_split
+  JOB SENT:
+    "wall_line_width_mm": 0.5
+    "wall_line_width_outer_mm": 0.4
+  run_info.json GOT BACK (HEAD, 90e9ec5):
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.5,
+    "wall_line_width_outer_mm": 0.5,
+    "wall_thickness_mm": 2.5,
+  run_info.json COMMITTED 2026-07-28 (built at 4fed171, pre-drop):
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.5,
+    "wall_line_width_outer_mm": 0.4,
+    "wall_thickness_mm": 2.4,
+=== job_inner_only
+  JOB SENT:
+    "wall_line_width_mm": 0.45
+  run_info.json GOT BACK (HEAD, 90e9ec5):
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.45,
+    "wall_line_width_outer_mm": 0.45,
+    "wall_thickness_mm": 2.25,
+  run_info.json COMMITTED 2026-07-28 (built at 4fed171, pre-drop):
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.45,
+    "wall_line_width_outer_mm": 0.45,
+    "wall_thickness_mm": 2.25,

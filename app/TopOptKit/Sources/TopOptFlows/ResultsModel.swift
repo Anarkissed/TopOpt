@@ -815,6 +815,32 @@ public final class ResultsModel: ObservableObject {
         guard let r = report else { return [] }
         func pct(_ x: Double) -> String { "\(Int((x * 100).rounded()))%" }
         var lines: [String] = []
+        // ★ WHICH REGION GOT WHAT (task 2026-08-05-lattice-retention-app-control,
+        // S4). Present only when the job asked for the breakdown; a region that
+        // received ZERO lattice is named FIRST, because that is the single number
+        // that would have told the maintainer in one glance what was wrong with his
+        // overnight run instead of costing him a night and a forensic pass.
+        //
+        // Computed UP HERE and appended at BOTH exits on purpose: the early return
+        // below is the "no lattice was produced" path, which is exactly the case
+        // where knowing which region caught nothing matters most. Appending only at
+        // the bottom would have hidden it on the one run that needed it.
+        let regionLines: [String] = {
+            guard let raw = r.regionCellsJSON,
+                  let receipt = LatticeRegionCellReceipt.parse(raw) else { return [] }
+            // Core's PERCOLATION floor, read at the run's own extrusion width, so a
+            // row can separate "cannot be certified" from "cannot be built" (review
+            // P2). The width is not on the report, so this uses core's own default
+            // relationship: the floor is a cells-per-member count and does not
+            // depend on the width at all — only the CELL it is compared against
+            // does, and that comes out of the receipt.
+            let pf = TopOptKit.latticeCellBounds(
+                topology: r.topologyID,
+                minExtrudableWidthMM: 0.4).percolationCellsPerMemberFloor
+            return ["Per region — \(receipt.headline())"]
+                 + receipt.lines(percolationFloor: pf > 0 ? pf : nil)
+                 + [LatticeRegionCellReceipt.scopeNote]
+        }()
         let name = LatticeType.named(r.topologyID).displayName
         // BAR B6 — THE PREVIEW AND THE BUILD, RECONCILED (task
         // 2026-08-04-variant-volume-fraction-mismatch). This clause used to read,
@@ -860,7 +886,7 @@ public final class ResultsModel: ObservableObject {
                 + "(the material is too thin to hold \(String(format: "%g", r.cellMM)) mm "
                 + "cells), so this file is the solid part. The density and strut "
                 + "figures below describe nothing and are withheld.")
-            return lines
+            return lines + regionLines
         }
         lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell, "
             + "filled at \(pct(r.generateRelativeDensity)) density "
@@ -924,7 +950,7 @@ public final class ResultsModel: ObservableObject {
                 }
             }
         }
-        return lines
+        return lines + regionLines
     }
 
     /// Format the Face-protection diagnostics from a finished outcome into honest lines.

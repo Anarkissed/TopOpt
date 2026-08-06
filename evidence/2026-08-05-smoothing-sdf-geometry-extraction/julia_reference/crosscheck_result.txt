@@ -1,0 +1,7 @@
+== crosscheck against rho2sdf.jl v0.1.0 ==
+reference file evidence/2026-08-05-smoothing-sdf-geometry-extraction/julia_reference/crosscheck_reference.txt
+target volume   reference 284.783683815   port 284.783683815   (diff 1.592e-10)
+rho_t           reference 0.416259765625   port 0.416259765625   (diff 0.000e+00)
+nodal densities 2197 values: worst |port - reference| 4.697e-13, rms 1.303e-13
+SDF 6859 points: worst |port - reference| 9999999997.3930 mm, rms 8594983562.2885 mm; within 2 cells of the surface (916 points) worst 0.0197 mm
+wrote evidence/2026-08-05-smoothing-sdf-geometry-extraction/julia_reference/crosscheck_port.txt

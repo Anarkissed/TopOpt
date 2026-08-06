@@ -94,8 +94,15 @@ int main() {
 
   GradingLawParams p;
   p.topology = topo;
-  p.target_cell_size_mm = 2.0;          // below the printability floor -> raised
   p.min_extrudable_width_mm = 0.4;      // 0.4 mm nozzle, single bead
+  // ★ PINNED to the rho_min printability floor, and READ from core rather than
+  // written as a number (task 2026-08-05-lattice-cell-fit-mode, S2). It used to be
+  // 2.0 mm, which the pre-S2 law RAISED to exactly this value — so every assertion
+  // below ran against this cell. S2 stops raising a target that some band density can
+  // print at, so leaving 2.0 here would silently re-point a dozen unrelated bars at a
+  // different cell. Pinning keeps them measuring what they were written to measure;
+  // the raise itself is asserted directly in section 4.
+  p.target_cell_size_mm = lattice_cell_printability_floor_mm(topo, 0.4);
   p.demand_exponent = 1.0;
 
   // ---- 1. limits are READ from core (★) ------------------------------------------
@@ -133,9 +140,36 @@ int main() {
         "min strut diameter >= min extrudable width");
 
   // ---- 4. cell-size floor (printability) -----------------------------------------
-  CHECK(gf.cell_size_floored, "target below floor was raised");
+  // TWO floors, and S2 is about which one BINDS a Fixed target:
+  //   printability_floor_mm  = w / phi(rho_min) — the smallest cell printing the
+  //       band's LIGHTEST strut. A bound, and still what AUTO selects.
+  //   min_printable_cell_mm  = w / phi(rho_max) — the smallest cell at which ANY band
+  //       density prints. Below it nothing is legal at any density; at or above it the
+  //       density can be raised to suit. This is what a Fixed target is raised to.
+  {
+    // (a) A target UNDER the absolute floor is still raised, and still reported.
+    GradingLawParams under = p;
+    under.target_cell_size_mm = 0.5 * gf.min_printable_cell_mm;
+    const GradedField U = grade_lattice(thick, dens, demand, nullptr, under);
+    CHECK(U.cell_size_floored, "target below the binding floor was raised");
+    CHECK(std::fabs(U.cell_size_mm - U.min_printable_cell_mm) < 1e-12,
+          "raised cell equals the floor that binds");
+    // (b) A target BETWEEN the two floors SURVIVES — the S2 fix. Before it, this
+    // was silently raised to printability_floor_mm.
+    GradingLawParams between = p;
+    between.target_cell_size_mm =
+        0.5 * (gf.min_printable_cell_mm + gf.printability_floor_mm);
+    const GradedField B2 = grade_lattice(thick, dens, demand, nullptr, between);
+    CHECK(!B2.cell_size_floored && std::fabs(B2.cell_size_mm -
+                                             between.target_cell_size_mm) < 1e-12,
+          "a target between the two floors is kept, not raised to the rho_min one");
+    CHECK(B2.density_raised_for_print_voxels > 0,
+          "and the DENSITY is raised instead, so the strut still prints");
+  }
   CHECK(std::fabs(gf.cell_size_mm - gf.printability_floor_mm) < 1e-12,
-        "raised cell equals the printability floor");
+        "the pinned target is exactly the rho_min floor");
+  CHECK(gf.density_raised_for_print_voxels == 0,
+        "at that cell the density raise is inert — the band floor already prints");
   CHECK(gf.cell_size_mm == gf.posture.cell_size_mm, "posture carries the chosen cell");
   // A strut at rho_lo at exactly the floor cell prints at the stated width.
   CHECK(std::fabs(octet_strut_diameter_mm(rho_lo, gf.printability_floor_mm) -
@@ -426,8 +460,12 @@ int main() {
 
     GradingLawParams wp;
     wp.topology = topo;
-    wp.target_cell_size_mm = 2.0;
     wp.min_extrudable_width_mm = 0.4;
+    // PINNED for the same reason as `p` above (S2): 2.0 mm used to be raised to
+    // exactly this cell, and every exposure number quoted in the comments below —
+    // 1,704 of 30,600 voxels, 5.57 % — was measured at it. Reading it from core keeps
+    // the cap tests measuring the CAP rather than the cell law.
+    wp.target_cell_size_mm = lattice_cell_printability_floor_mm(topo, 0.4);
     wp.demand_exponent = 1.0;
     // THE AGGREGATE CAP IS LIFTED FOR THE THRESHOLD TESTS BELOW, deliberately and
     // with the number stated. This fixture is a 30 mm block with a 4 mm wall bolted
@@ -959,6 +997,265 @@ int main() {
             topo, std::numeric_limits<double>::quiet_NaN(), w);
       } catch (const std::invalid_argument&) { threw = true; }
       CHECK(threw, "a NaN member width is refused, never read as 'thick enough'");
+    }
+  }
+
+  // ==========================================================================
+  // FIT MODE + THE PRINTABILITY-FLOOR OVERRIDE
+  // (task 2026-08-05-lattice-cell-fit-mode, bars R3 / S1 / S2 / S3)
+  //
+  // THE DEFECT THESE ASSERT AGAINST, stated as arithmetic so the numbers are
+  // checkable by hand at a 0.42 mm bead (the maintainer's declared bead):
+  //     phi(rho_min) = 0.091252  =>  floor cell = 0.42/phi = 4.6026 mm
+  //     phi(rho_max) = 0.383575  =>  finest printable cell = 0.42/phi = 1.0950 mm
+  //     N* = 5  =>  4.6026 mm needs 23.0131 mm of member; 1.0950 mm needs 5.4748 mm
+  // A 4 mm wall holds NEITHER at N*, but it holds 3.65 cells at the finest printable
+  // cell — buildable, out of regime — and today AUTO hands it a 4.6026 mm cell and
+  // lattices nothing.
+  // ==========================================================================
+  {
+    const double w_bead = 0.42;
+    const double floor_cell =
+        lattice_cell_printability_floor_mm(topo, w_bead);            // 4.6026
+    const double finest_cell =
+        w_bead / octet_strut_diameter_mm(rho_hi, 1.0);               // 1.0950
+    CHECK(std::fabs(floor_cell - 4.6026) < 1e-3,
+          "FIT0: the rho_min floor is 4.6026 mm at a 0.42 mm bead");
+    CHECK(std::fabs(finest_cell - 1.0950) < 1e-3,
+          "FIT0: the finest printable cell is 1.0950 mm at the same bead");
+    CHECK(finest_cell ==
+              lattice_derive_cell_for_member(topo, 4.0, w_bead).min_printable_cell_mm,
+          "FIT0: and it is core's own number, not a second derivation here");
+
+    // A 4 mm WALL — his geometry. 0.5 mm voxels, 8 deep.
+    const VoxelGrid wall = solid_block(40, 40, 8, 0.5);
+    const std::vector<double> wd = density_of(wall);
+    // A demand field with ONE hot voxel and a quiet remainder — the realistic shape,
+    // and the one that exercises the joint (cell, rho) solve: the quiet material's
+    // demand density is far under what the derived cell can print, so the law has to
+    // raise it rather than emit a strut under the bead.
+    std::vector<double> wdem(wall.voxel_count(), 0.0);
+    wdem[wall.index(3 + 20, 3 + 20, 3 + 4)] = 1.0;
+    const std::vector<double> ww =
+        local_member_thickness_mm(wall, wd, 0.5, 32);
+
+    GradingLawParams base;
+    base.topology = topo;
+    base.min_extrudable_width_mm = w_bead;
+    base.demand_exponent = 1.0;
+
+    // ── FIT1 — THE DEFECT, ASSERTED. AUTO plans the rho_min floor and lattices
+    // NOTHING in a 4 mm wall. This is what the maintainer's job does today, and it
+    // passes on unfixed code: it is the "before" half of bar R3.
+    GradingLawParams au = base;
+    au.cell_mode = CellSizeMode::Auto;
+    const GradedField A = grade_lattice(wall, wd, wdem, nullptr, au);
+    CHECK(std::fabs(A.cell_size_mm - floor_cell) < 1e-9,
+          "FIT1: AUTO plans the 4.6026 mm rho_min floor in a 4 mm wall");
+    CHECK(A.latticed_voxels == 0,
+          "FIT1: and lattices NOTHING there — 4 mm / 4.6026 mm = 0.87 cells");
+    CHECK(A.region_voxels > 0, "FIT1 is not vacuous: there were candidates");
+
+    // ── FIT2 — FIT derives max(extent/N*, finest printable) = 1.0950 mm here and
+    // DOES lattice. This is the "after" half of R3 and it cannot pass on unfixed
+    // code, where the mode does not exist.
+    const double want = std::max(4.0 / n_star, finest_cell);
+    CHECK(std::fabs(want - finest_cell) < 1e-12,
+          "FIT2: a 4 mm wall cannot hold N* cells, so the finest printable cell wins");
+    std::vector<double> wfit(wall.voxel_count(), 0.0);
+    for (std::size_t e = 0; e < wall.voxel_count(); ++e)
+      if (wd[e] > 0.5) wfit[e] = want;
+    GradingLawParams fi = base;
+    fi.cell_mode = CellSizeMode::Fit;
+    fi.fit_cell_size_mm = &wfit;
+    const GradedField Fi = grade_lattice(wall, wd, wdem, nullptr, fi);
+    CHECK(std::fabs(Fi.cell_size_mm - want) < 1e-9,
+          "FIT2: FIT plans the 1.0950 mm derived cell, not the 4.6026 mm floor");
+    CHECK(Fi.latticed_voxels > 0, "FIT2: and it lattices the 4 mm wall");
+    CHECK(Fi.latticed_voxels > A.latticed_voxels,
+          "FIT2: strictly more than AUTO, which is the point of the mode");
+    CHECK(Fi.posture.cell_size_field.size() == wall.voxel_count(),
+          "FIT2: a fit posture carries a per-voxel cell field");
+    // EVERY strut prints, and every latticed voxel is honestly stamped.
+    bool all_print = true, all_band = true, all_percolate = true;
+    for (std::size_t e = 0; e < wall.voxel_count(); ++e) {
+      if (!Fi.posture.mask[e]) continue;
+      const double c = Fi.posture.cell_size_field[e];
+      const double r = Fi.posture.relative_density[e];
+      if (octet_strut_diameter_mm(r, c) < w_bead - 1e-9) all_print = false;
+      if (r < rho_lo - 1e-12 || r > rho_hi + 1e-12) all_band = false;
+      if (ww[e] / c < lattice_percolation_cells_per_member_min(topo) - 1e-9)
+        all_percolate = false;
+    }
+    CHECK(all_print, "FIT2: every emitted strut is at or above the stated bead");
+    CHECK(all_band, "FIT2: every emitted density is inside the certifiable band");
+    CHECK(all_percolate, "FIT2: every emitted cell percolates in its own member");
+    CHECK(Fi.fit_out_of_regime_voxels == Fi.latticed_voxels,
+          "FIT2: a 4 mm wall is BELOW the accuracy floor at 1.0950 mm (3.65 cells), "
+          "and every latticed voxel is counted as out of regime rather than hidden");
+    CHECK(Fi.density_raised_for_print_voxels > 0,
+          "FIT2: the density was RAISED to print at the finer cell — the joint "
+          "(cell, rho) solve, not a cell chosen alone");
+
+    // ── FIT3 — A CANDIDATE WITH NO DERIVATION STAYS SOLID, and is counted as such
+    // rather than being handed a guessed cell.
+    {
+      std::vector<double> half = wfit;
+      std::size_t cleared = 0;
+      for (int k = 0; k < wall.nz; ++k)
+        for (int j = 0; j < wall.ny; ++j)
+          for (int i = 0; i < wall.nx / 2; ++i) {
+            const std::size_t e = wall.index(i, j, k);
+            if (half[e] > 0.0) { half[e] = 0.0; ++cleared; }
+          }
+      CHECK(cleared > 0, "FIT3 is not vacuous: some candidates lost their cell");
+      GradingLawParams f3 = fi;
+      f3.fit_cell_size_mm = &half;
+      const GradedField F3 = grade_lattice(wall, wd, wdem, nullptr, f3);
+      CHECK(F3.fit_no_derivation_voxels == cleared,
+            "FIT3: every uncovered candidate is counted, not silently dropped");
+      CHECK(F3.latticed_voxels < Fi.latticed_voxels,
+            "FIT3: and none of them was latticed");
+    }
+
+    // ── FIT4 (bar S3) — TWO REGIONS, TWO CELLS, ONE DYADIC LADDER. The emitter can
+    // only carry more than one cell size on an aligned dyadic octree, so the plan
+    // must land the derived cells there: every emitted cell is base * 2^L, no cell
+    // is coarser than its own region asked for, and face-adjacent cells differ by at
+    // most one level (2:1 balance — what makes the levels meet at shared nodes).
+    {
+      // A 4 mm-thick slab whose two halves are declared with DIFFERENT cells: the
+      // thin half wants 1.0950 mm, the thick half is declared as a 12 mm region and
+      // wants 12/5 = 2.4 mm.
+      std::vector<double> two = wfit;
+      std::size_t coarse_n = 0;
+      for (int k = 0; k < wall.nz; ++k)
+        for (int j = 0; j < wall.ny; ++j)
+          for (int i = wall.nx / 2; i < wall.nx; ++i) {
+            const std::size_t e = wall.index(i, j, k);
+            if (two[e] > 0.0) { two[e] = 12.0 / n_star; ++coarse_n; }
+          }
+      CHECK(coarse_n > 0, "FIT4 is not vacuous: a second region was declared");
+      GradingLawParams f4 = fi;
+      f4.fit_cell_size_mm = &two;
+      const GradedField F4 = grade_lattice(wall, wd, wdem, nullptr, f4);
+      CHECK(F4.cell_plan.max_level >= 1,
+            "FIT4: two different derived cells produce a real ladder");
+      CHECK(F4.fit_distinct_cells >= 2,
+            "FIT4: and BOTH cells are actually emitted, not collapsed to one");
+      bool dyadic = true, never_coarser = true;
+      for (std::size_t e = 0; e < wall.voxel_count(); ++e) {
+        if (!F4.posture.mask[e]) continue;
+        const double c = F4.posture.cell_size_field[e];
+        const double lg = std::log2(c / F4.cell_plan.base_cell_mm);
+        if (std::fabs(lg - std::round(lg)) > 1e-9) dyadic = false;
+        if (c > two[e] * (1.0 + 1e-9)) never_coarser = false;
+      }
+      CHECK(dyadic, "FIT4: every emitted cell is base * 2^L — the ladder the "
+                    "multilevel emitter indexes");
+      CHECK(never_coarser,
+            "FIT4: no voxel got a cell COARSER than its own region derived");
+      bool balanced = true;
+      const CellSizePlan& P = F4.cell_plan;
+      for (int k = 0; k < P.nz && balanced; ++k)
+        for (int j = 0; j < P.ny && balanced; ++j)
+          for (int i = 0; i < P.nx && balanced; ++i) {
+            const int L = P.level[P.index(i, j, k)];
+            if (L < 0) continue;
+            static const int d6[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},
+                                         {0,1,0},{0,0,-1},{0,0,1}};
+            for (int f = 0; f < 6; ++f) {
+              const int ni = i + d6[f][0], nj = j + d6[f][1], nk = k + d6[f][2];
+              if (ni < 0 || nj < 0 || nk < 0 || ni >= P.nx || nj >= P.ny ||
+                  nk >= P.nz) continue;
+              const int NL = P.level[P.index(ni, nj, nk)];
+              if (NL >= 0 && std::abs(NL - L) > 1) balanced = false;
+            }
+          }
+      CHECK(balanced, "FIT4: face-adjacent octree cells differ by at most one level");
+    }
+
+    // ── FIT5 — DETERMINISM. Same inputs, byte-identical posture.
+    {
+      const GradedField B = grade_lattice(wall, wd, wdem, nullptr, fi);
+      CHECK(B.posture.relative_density == Fi.posture.relative_density &&
+                B.posture.mask == Fi.posture.mask &&
+                B.posture.cell_size_field == Fi.posture.cell_size_field,
+            "FIT5: fit is deterministic");
+    }
+
+    // ── FIT6 — FIT AND SUB-FLOOR RETENTION ARE REFUSED TOGETHER, not silently
+    // resolved in favour of one.
+    {
+      GradingLawParams f6 = fi;
+      f6.retain_subfloor_in_unloaded_regions = true;
+      bool threw = false;
+      try { grade_lattice(wall, wd, wdem, nullptr, f6); }
+      catch (const std::invalid_argument&) { threw = true; }
+      CHECK(threw, "FIT6: fit + retention is refused");
+      GradingLawParams f6b = fi;
+      f6b.fit_cell_size_mm = nullptr;
+      threw = false;
+      try { grade_lattice(wall, wd, wdem, nullptr, f6b); }
+      catch (const std::invalid_argument&) { threw = true; }
+      CHECK(threw, "FIT6: fit without a derived field is refused, never defaulted");
+    }
+
+    // ══ S2 — THE PRINTABILITY FLOOR IS A BOUND AGAIN, NOT AN ANSWER ═══════════
+    // On UNFIXED code these three fail: a Fixed target of 1.2 mm is raised to
+    // 4.6026 mm, so S2a reads 4.6026 and S2b lattices nothing.
+    {
+      // S2a — the hand-set cell SURVIVES.
+      GradingLawParams s2 = base;
+      s2.cell_mode = CellSizeMode::Fixed;
+      s2.target_cell_size_mm = 1.2;
+      const GradedField S2 = grade_lattice(wall, wd, wdem, nullptr, s2);
+      CHECK(std::fabs(S2.cell_size_mm - 1.2) < 1e-12,
+            "S2a: a hand-set 1.2 mm cell is NOT raised to the 4.6026 mm rho_min "
+            "floor");
+      CHECK(!S2.cell_size_floored, "S2a: and it is not reported as floored");
+      CHECK(std::fabs(S2.min_printable_cell_mm - finest_cell) < 1e-12,
+            "S2a: the floor that binds is the one at the band's TOP");
+
+      // S2b — on a member thick enough to hold it, that cell now LATTICES. An 8 mm
+      // wall spans 6.67 cells at 1.2 mm (over N*) and 1.74 at 4.6026 mm (under it),
+      // so this is exactly the material the override was throwing away.
+      const VoxelGrid w8 = solid_block(40, 40, 16, 0.5);
+      const std::vector<double> d8 = density_of(w8);
+      const std::vector<double> dem8(w8.voxel_count(), 1.0);
+      const GradedField L8 = grade_lattice(w8, d8, dem8, nullptr, s2);
+      CHECK(L8.latticed_voxels > 0,
+            "S2b: a 1.2 mm cell lattices an 8 mm wall — 6.67 cells across");
+      GradingLawParams s2auto = base;
+      s2auto.cell_mode = CellSizeMode::Auto;
+      const GradedField A8 = grade_lattice(w8, d8, dem8, nullptr, s2auto);
+      CHECK(A8.latticed_voxels == 0,
+            "S2b control: the SAME wall under AUTO's 4.6026 mm cell lattices "
+            "nothing — 1.74 cells across");
+      bool print8 = true;
+      for (std::size_t e = 0; e < w8.voxel_count(); ++e)
+        if (L8.posture.mask[e] &&
+            octet_strut_diameter_mm(L8.posture.relative_density[e], 1.2) <
+                w_bead - 1e-9)
+          print8 = false;
+      CHECK(print8,
+            "S2b: every strut at the finer cell still clears the stated bead — the "
+            "density was raised with the cell, not the cell with the density");
+
+      // S2c — INERT WHERE THE CELL WAS NEVER OVERRIDDEN. A target at or above the
+      // rho_min floor is untouched and NO density is raised, which is why S2 cannot
+      // move a run that was not being overridden (blocked-stop 4).
+      GradingLawParams s2c = base;
+      s2c.cell_mode = CellSizeMode::Fixed;
+      s2c.target_cell_size_mm = 6.0;   // > 4.6026
+      const GradedField C = grade_lattice(w8, d8, dem8, nullptr, s2c);
+      CHECK(std::fabs(C.cell_size_mm - 6.0) < 1e-12,
+            "S2c: a target above the rho_min floor is untouched");
+      CHECK(C.density_raised_for_print_voxels == 0,
+            "S2c: and no voxel's density is raised — the S2 path is inert here");
+      const GradedField CA = grade_lattice(w8, d8, dem8, nullptr, s2auto);
+      CHECK(CA.density_raised_for_print_voxels == 0,
+            "S2c: AUTO likewise raises nothing — its cell IS the rho_min floor");
     }
   }
 

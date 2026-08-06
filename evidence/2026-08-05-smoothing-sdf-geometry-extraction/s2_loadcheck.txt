@@ -1,0 +1,8 @@
+== sdf_geometry_probe : WHY THE CERTIFICATION REFUSES ==
+his load case on the solved grid 128 x 31 x 118 @ 1.705279 mm: 5165 Load voxels, 3348 Fixture voxels
+
+mesh                          Load kept  Load LOST   Fix kept   Fix LOST
+v068_exported.stl                  5165          0       3348          0
+v068_sdf.stl                       5131         34       3348          0
+v068_isocontour.stl                5100         65       3348          0
+v068_taubin.stl                    5165          0       3348          0

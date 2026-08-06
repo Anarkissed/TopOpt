@@ -1,0 +1,15 @@
+== sdf_geometry_probe : EXPORT TESSELLATION (S5) ==
+grid 128 x 31 x 118, spacing 1.705279 mm
+
+-- occupancy(CAD) --
+factor        verts       tris  obl max mm  obl rms mm dihed deg
+1             34922      69840      0.8575      0.3757     12.29
+2            139688     279372      0.9589      0.3728      7.67
+4            558728    1117452      0.9917      0.3660      4.53
+
+-- rung 0.68 --
+factor        verts       tris  obl max mm  obl rms mm dihed deg
+1             37434      74832     10.0444      1.3058     14.94
+2            149256     298476     11.2928      1.2780      8.94
+4            597676    1195316     11.1538      1.2781      5.11
+

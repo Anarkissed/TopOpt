@@ -220,6 +220,30 @@ constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
 constexpr bool kProductionMultiscaleLatticeTO = true;  // job flag HONOURED
 
 // ===========================================================================
+// ★ THE ONE CONSTANT THAT DECIDES WHAT "auto" MEANS
+// (task 2026-08-05-lattice-cell-fit-mode, S4).
+// ===========================================================================
+// FALSE (the shipped default) — `"cell_mode": "auto"` resolves to the printability
+// floor, exactly as it always has. Every past run reproduces and the default path is
+// byte-identical (bar R1, measured).
+// TRUE — `"cell_mode": "auto"` resolves to `"fit"`: the cell is derived per declared
+// include region from what it has to fit into.
+//
+// WHY IT IS A CONSTANT AND NOT A SILENT REDEFINITION. `auto` is shipped and its
+// meaning is in run receipts, in the app's UI copy, and in the maintainer's saved
+// jobs. Redefining it would change results on jobs nobody edited, which is exactly
+// the class of change this codebase treats as a blocked-stop. So the new law arrives
+// as a NAMED mode a job asks for, and this constant is the one-line maintainer
+// decision to make it the default.
+//
+// FLIPPING IT IS NOT COSMETIC. It changes which voxels are latticed, at what cell,
+// at what density, and therefore the certified margin, on every graded AUTO job with
+// declared include regions. The flip table measured before shipping is
+// evidence/2026-08-05-lattice-cell-fit-mode/r2_flip_table.md — read it first; that is
+// what it is for.
+constexpr bool kProductionLatticeAutoIsFit = false;  // "auto" keeps its old meaning
+
+// ===========================================================================
 // TRIPWIRE — the GENEO TWO-LEVEL DEFLATION production arming
 // (handoff 2026-07-29-geneo-arming; measured in 2026-07-29-matrixfree-geneo-
 // phase2).
@@ -403,6 +427,7 @@ double production_draft_loose_tol() { return kProductionDraftLooseTol; }
 bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
 
 bool production_multiscale_lattice_to() { return kProductionMultiscaleLatticeTO; }
+bool production_lattice_auto_is_fit() { return kProductionLatticeAutoIsFit; }
 bool production_geneo_twolevel() { return kProductionGeneoTwoLevel; }
 bool production_matfree_cubic_lattice() { return kProductionMatfreeCubicLattice; }
 bool production_mg_algebraic_level1() { return kProductionMgAlgebraicLevel1; }
