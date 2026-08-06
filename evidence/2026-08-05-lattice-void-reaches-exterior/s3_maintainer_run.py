@@ -62,6 +62,12 @@ for res in RESOLUTIONS:
     j["lattice"]["strut_radius_mm"] = 1.2        # rho ~0.41, inside the band
     j["lattice"].pop("min_extrudable_width_mm", None)
     j["lattice"]["require_lattice_void_reaches_exterior"] = True
+    # THIRD DEVIATION, and not one I chose: his job says `"skin": "rim"`, and on
+    # a voxel-silhouette part a non-"none" finish now emits nothing and run_job
+    # REFUSES it (run_job.cpp M4, task lattice-cell-fit-mode, merged into main
+    # while this task was in flight). That refusal is a different rule from this
+    # one and it would abort the run before this one could be measured at all.
+    j["lattice"]["skin"] = "none"
     j["simp"] = {"max_iterations": ITERS}
     sub = f"his_{res}"
     shutil.rmtree(os.path.join(OUT, sub), ignore_errors=True)

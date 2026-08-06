@@ -43,7 +43,7 @@ BASE = {
     # A lattice WITH a role region, and an OPEN one — a refused rung would give
     # the armed side no lattice artifacts to compare and make the table vacuous.
     "lattice": {"topology": "octet", "cell_mm": 8.0, "strut_radius_mm": 1.2,
-                "emit_stl": True, "skin": "rim",
+                "emit_stl": True, "skin": "none",
                 "regions": [{"role": "include", "kind": "face", "geometry": {
                     "origin": [-5.0, 0.0, 6.0], "normal": [0.0, 0.0, -1.0],
                     "half_u_mm": 8.0, "half_w_mm": 40.0, "depth_mm": 3.0}}]},

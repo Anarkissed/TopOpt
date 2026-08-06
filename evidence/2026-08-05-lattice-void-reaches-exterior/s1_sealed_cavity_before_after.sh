@@ -56,7 +56,7 @@ def job(region, armed):
          "output": {"report": "report.json", "mesh_format": "stl",
                     "mesh_prefix": "variant"},
          "lattice": {"topology": "octet", "cell_mm": 8.0, "strut_radius_mm": 1.2,
-                     "emit_stl": True, "skin": "rim",
+                     "emit_stl": True, "skin": "none",
                      "regions": [region]}}
     if armed:
         j["lattice"]["require_lattice_void_reaches_exterior"] = True

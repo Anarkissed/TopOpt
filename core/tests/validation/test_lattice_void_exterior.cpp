@@ -111,7 +111,12 @@ static JobDescription bracket_job() {
   job.lattice.cell_mm = 8.0;
   job.lattice.strut_radius_mm = 1.2;  // rho ~0.41, inside the certifiable band
   job.lattice.emit_stl = true;
-  job.lattice.skin = "rim";
+  // "none", not "rim": on a voxel-silhouette part the rim/skin finish rides
+  // pairs of ANALYTIC boundary faces and there are none, so a non-"none"
+  // finish emits nothing and run_job REFUSES it (run_job.cpp M4, task
+  // lattice-cell-fit-mode). That refusal is a different rule from this one and
+  // would mask it.
+  job.lattice.skin = "none";
   return job;
 }
 

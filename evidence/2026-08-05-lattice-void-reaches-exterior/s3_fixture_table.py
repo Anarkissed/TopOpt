@@ -8,6 +8,13 @@ Every lattice-shaped job this repo owns, run with
 `lattice.require_lattice_void_reaches_exterior` ARMED, tabulated: would it
 refuse, and why.
 
+EVERY ROW SETS `"skin": "none"`. On a voxel-silhouette part the rim/diagrid
+finish rides pairs of ANALYTIC boundary faces and there are none, so a non-"none"
+finish emits nothing and run_job REFUSES it (run_job.cpp M4, task
+lattice-cell-fit-mode). That is a DIFFERENT rule from this one and it would mask
+this one. The one exception is the freeform `outer_finish: "skin"` row, which
+requires `skin: "diagrid"` by schema and rides the voxel surface itself.
+
 THE ROWS mirror the lattice fixtures the test suite actually exercises — the
 uniform whole-part lattice, the graded SWEPT ladder, the self-weight mesh job,
 each of the two role regions, the freeform "skin" outer finish, and the
@@ -77,11 +84,11 @@ ROWS = []
 
 j = bracket_loadcase()
 j["lattice"] = {"topology": "octet", "cell_mm": 8.0, "strut_radius_mm": 1.2,
-                "emit_stl": True, "skin": "rim"}
+                "emit_stl": True, "skin": "none"}
 ROWS.append(("uniform whole-part lattice (l-bracket, 4-rung ladder)", arm(j), None))
 
 j = bracket_loadcase()
-j["lattice"] = {"topology": "octet", "emit_stl": True, "skin": "rim",
+j["lattice"] = {"topology": "octet", "emit_stl": True, "skin": "none",
                 "min_extrudable_width_mm": 0.42}
 j["grading"] = {"topology": "octet", "cell_mode": "swept", "cell_min_mm": 3.0,
                 "cell_max_mm": 12.0, "min_extrudable_width_mm": 0.42}
@@ -95,12 +102,12 @@ ROWS.append(("freeform SKIN outer finish (no solid shell)", arm(j), None))
 
 j = plate_selfweight()
 j["lattice"] = {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.45,
-                "emit_stl": True}
+                "emit_stl": True, "skin": "none"}
 ROWS.append(("self-weight mesh job, uniform lattice (plate_bore.stl)", arm(j), None))
 
 j = plate_selfweight()
 j["lattice"] = {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.45,
-                "emit_stl": True,
+                "emit_stl": True, "skin": "none",
                 "regions": [{"role": "exclude", "kind": "bolt", "geometry": {
                     "axis_point": [8.0, 0.0, 2.0], "axis_dir": [0.0, 0.0, 1.0],
                     "radius_mm": 3.0, "half_length_mm": 5.0}}]}
@@ -108,7 +115,7 @@ ROWS.append(("... + EXCLUDE bolt region (kept solid)", arm(j), None))
 
 j = plate_selfweight()
 j["lattice"] = {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.45,
-                "emit_stl": True,
+                "emit_stl": True, "skin": "none",
                 "regions": [{"role": "include", "kind": "face", "geometry": {
                     "origin": [-12.0, 0.0, 2.0], "normal": [1.0, 0.0, 0.0],
                     "half_u_mm": 50.0, "half_w_mm": 50.0, "depth_mm": 14.0}}]}
@@ -124,7 +131,7 @@ j = {"model": "WallMount_ShelfBracket.stl", "material": "PLA",
      "output": {"report": "report.json", "mesh_format": "stl",
                 "mesh_prefix": "variant"},
      "lattice": {"topology": "octet", "cell_mm": 8.0, "strut_radius_mm": 1.2,
-                 "emit_stl": True, "skin": "rim"}}
+                 "emit_stl": True, "skin": "none"}}
 ROWS.append(("maintainer's WallMount part, uniform 8 mm cell", arm(j), None))
 
 j = bracket_loadcase(res=48, iters=3)
@@ -133,7 +140,7 @@ j.update({"fixture_faces": [{"kind": "cylindrical", "radius_mm": 2.5}],
           "gravity": {"direction": [0, 0, -1.0], "magnitude_mm_s2": 9810.0},
           "ladder": [1.0], "margin_stop": 0.0})
 j["lattice"] = {"topology": "octet", "cell_mm": 8.0, "strut_radius_mm": 1.2,
-                "emit_stl": True, "skin": "rim", "regions": [foot_slab(8.0)]}
+                "emit_stl": True, "skin": "none", "regions": [foot_slab(8.0)]}
 ROWS.append(("★ CONTROL, SEALED: cavity buried in the l-bracket foot",
              arm(j), True))
 

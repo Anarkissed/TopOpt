@@ -61,7 +61,7 @@ cat > "$OUT/job_lattice.json" <<'JSON'
     "groups": [{"face_ids": [2], "force": [0.0, 0.0, -60.0]}]
   },
   "lattice": {"topology": "octet", "cell_mm": 8.0, "strut_radius_mm": 1.2,
-              "emit_stl": true, "skin": "rim",
+              "emit_stl": true, "skin": "none",
               "regions": [{"role": "include", "kind": "face",
                            "geometry": {"origin": [-5.0, 0.0, 6.0],
                                         "normal": [0.0, 0.0, -1.0],

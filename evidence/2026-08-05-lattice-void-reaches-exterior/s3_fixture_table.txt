@@ -1,14 +1,14 @@
 fixture                                                  verdict  sealed cells  sealed mm3 latticed cells   reached  depth faces                bfs  check s   run s
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-uniform whole-part lattice (l-bracket, 4-rung ladder)    pass                0         0.0            335     42659      0 -x,+x,-y,+y,-z,+z    335904   0.0045   260.0
-graded SWEPT lattice (l-bracket, dyadic cell ladder)     pass                0         0.0            290      2532      0 -x,-y,+y,-z,+z    284292   0.0041   256.8
-freeform SKIN outer finish (no solid shell)              pass                0         0.0            335     42659      0 -x,+x,-y,+y,-z,+z    335904   0.0069   287.3
-self-weight mesh job, uniform lattice (plate_bore.stl)   pass                0         0.0             80      1836      0 -x,+x,-y,+y,-z,+z      6048   0.0001     1.6
-... + EXCLUDE bolt region (kept solid)                   pass                0         0.0             78      1692      0 -x,+x,-y,+y,-z,+z      5874   0.0001     1.6
-... + INCLUDE slab region (only it is latticed)          pass                0         0.0             50      1074      0 -x,+x,-y,+y,-z,+z      5131   0.0001     1.6
-maintainer's WallMount part, uniform 8 mm cell           pass                0         0.0            445      3276      0 -x,+x,-y,+y,-z,+z     37538   0.0005    25.4
-★ CONTROL, SEALED: cavity buried in the l-bracket foot   REFUSE              6       843.8              6         0     -1 -                  57048   0.0009     2.9
-★ CONTROL, OPEN: the same cavity, run out to the y faces pass                0         0.0             24      1644      0 -x,+x,-y,+y,-z,+z     64378   0.0009     3.9
+uniform whole-part lattice (l-bracket, 4-rung ladder)    pass                0         0.0            335     42659      0 -x,+x,-y,+y,-z,+z    335904   0.0044   252.1
+graded SWEPT lattice (l-bracket, dyadic cell ladder)     pass                0         0.0            290      2532      0 -x,-y,+y,-z,+z    284292   0.0041   245.3
+freeform SKIN outer finish (no solid shell)              pass                0         0.0            335     42659      0 -x,+x,-y,+y,-z,+z    335904   0.0043   255.7
+self-weight mesh job, uniform lattice (plate_bore.stl)   pass                0         0.0             80      1836      0 -x,+x,-y,+y,-z,+z      6048   0.0001     1.4
+... + EXCLUDE bolt region (kept solid)                   pass                0         0.0             78      1692      0 -x,+x,-y,+y,-z,+z      5874   0.0001     1.4
+... + INCLUDE slab region (only it is latticed)          pass                0         0.0             50      1074      0 -x,+x,-y,+y,-z,+z      5131   0.0001     1.5
+maintainer's WallMount part, uniform 8 mm cell           pass                0         0.0            445      3276      0 -x,+x,-y,+y,-z,+z     37538   0.0005    23.1
+★ CONTROL, SEALED: cavity buried in the l-bracket foot   REFUSE              6       843.8              6         0     -1 -                  57048   0.0008     2.2
+★ CONTROL, OPEN: the same cavity, run out to the y faces pass                0         0.0             24      1644      0 -x,+x,-y,+y,-z,+z     64378   0.0013     3.4
 
 READING THIS TABLE. 'depth' is the geodesic distance in 6-connected escape
 steps from the design grid's boundary planes to the nearest reached

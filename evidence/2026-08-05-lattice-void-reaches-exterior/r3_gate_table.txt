@@ -17,7 +17,7 @@ variant_038_lattice.report.json         6.572584231      6.572584231         Tru
 variant_052_lattice.report.json         6.898128923      6.898128923         True->True      1274->1274
 variant_068_lattice.report.json         7.001637930      7.001637930         True->True      1396->1396
 
-cost: the run took 262.2 s wall (un-armed twin 279.0 s); lattice generation 0.05162883364 s; the void check 0.004190251 s over 286039 voxel pushes.
+cost: the run took 239.9 s wall (un-armed twin 250.6 s); lattice generation 0.04957437608 s; the void check 0.004100209 s over 286039 voxel pushes.
 
 R3 PASS — every rung's verdict, both margins, the composite margins and
        every voxel classification are UNCHANGED by arming the check, against
