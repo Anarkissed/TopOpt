@@ -1,0 +1,65 @@
+{
+ "mode": "analyze",
+ "bake_build_orientation": "off",
+ "resolution": 256,
+ "output": {
+  "mesh_prefix": "variant",
+  "smooth_factor": 2,
+  "report": "report.json",
+  "mesh_format": "stl"
+ },
+ "model": "M2_verticalStand.step",
+ "build_orientation_report": true,
+ "loads": {
+  "infill_percent": 35,
+  "groups": [
+   {
+    "face_ids": [
+     20,
+     1,
+     4,
+     19,
+     21,
+     22,
+     25,
+     26,
+     27,
+     32,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     49,
+     75,
+     76,
+     24
+    ],
+    "force": [
+     0,
+     0,
+     -24.516624450683594
+    ]
+   }
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "wall_loops": 5,
+  "minimize_plastic": true,
+  "wall_line_width_mm": 0.45,
+  "wall_line_width_outer_mm": 0.42,
+  "face_protection_depth_mm": 5,
+  "face_protections": [
+   16
+  ],
+  "anchor_face_ids": [
+   18
+  ]
+ },
+ "material": "PLA"
+}

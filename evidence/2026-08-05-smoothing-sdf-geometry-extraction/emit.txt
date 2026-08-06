@@ -1,0 +1,4 @@
+rung 0.68: exported 298476 tris, sdf 325588 tris, isocontour 289488 tris, taubin 298476 tris (rho_t 0.504087)
+rung 0.52: exported 322840 tris, sdf 355924 tris, isocontour 316168 tris, taubin 322840 tris (rho_t 0.498298)
+rung 0.38: exported 330228 tris, sdf 484144 tris, isocontour 322804 tris, taubin 330228 tris (rho_t 0.496083)
+rung 0.26: exported 333216 tris, sdf 365612 tris, isocontour 325980 tris, taubin 333216 tris (rho_t 0.492040)

@@ -1386,6 +1386,22 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(stairstep_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
 
+  # S1 (task 2026-08-05-smoothing-sdf-geometry-extraction): does the SDF geometry
+  # extraction of arXiv:2512.06976 beat Taubin's 10.6% ceiling on the
+  # maintainer's part? Measured with PR 299's metric, which both probes now share
+  # (tests/harness/stairstep_metric.hpp) rather than each defining. Prints
+  # tables, writes evidence. A harness, not a ctest.
+  #   cmake --build build --target sdf_geometry_probe
+  #   ./build/sdf_geometry_probe <mode> [args]
+  add_executable(sdf_geometry_probe EXCLUDE_FROM_ALL
+    tests/harness/sdf_geometry_probe.cpp
+    tests/harness/sdf_geometry.cpp)
+  target_link_libraries(sdf_geometry_probe PRIVATE topopt)
+  target_include_directories(sdf_geometry_probe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/harness)
+  target_compile_definitions(sdf_geometry_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
+
   # V1/V2 (task 2026-08-04-smoothing-viewer-and-ui): does the app's mesh-upload
   # signature (counts + bounds) separate a brushed-smoothed mesh from its input,
   # and is mesh mass computed from the smoothed mesh? Prints a table, writes
