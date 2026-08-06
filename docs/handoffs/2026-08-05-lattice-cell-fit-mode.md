@@ -5,47 +5,88 @@ Evidence `evidence/2026-08-05-lattice-cell-fit-mode/`.
 
 ---
 
+## BUILD RITUAL — MERGE ORDER FIRST
+
+1. **PR #298 (`claude/lattice-cell-size-adaptation-7ec715`) MERGES FIRST.** This branch
+   is stacked on it and already contains its commits. The three core functions this
+   branch depends on are `lattice_derive_cell_for_member`,
+   `lattice_min_density_for_strut` and `lattice_percolation_cells_per_member_min` — if
+   #298 is reworked, those are what must survive.
+2. **Then this branch.** It changes `core/` only.
+3. Then, as always:
+   ```
+   ./build_core.sh
+   cmake --build core/build --target topopt-cli      # ★ the TARGET is topopt_cli
+   ```
+   restart the worker, rebuild the app. CI: `core-linux` + `app-macos`.
+4. **PR #301 (`claude/lattice-retention-app-control`) must merge before any of this is
+   reachable from the iPad.** `fit` is job-JSON only today: `LatticeCellSizeMode`
+   (`LatticeSettings.swift`) has three cases where it needs four, and nothing app-side
+   was changed here. #301 is also the branch that fixes the cell-size control's lower
+   bound, and this branch's derivation agrees with its number exactly (§5.8).
+
+★ The CMake target is `topopt_cli` (underscore); the binary is `topopt-cli` (hyphen).
+`--target topopt-cli` finds an existing file, declares it up to date, and builds
+nothing. Every script in the evidence directory asserts the two binaries differ before
+comparing anything.
+
+---
+
 ## 0. WHAT CHANGES FOR YOU
 
-**Your 4 mm walls can now hold a lattice.** Set `"cell_mode": "fit"` in the
-`grading` block and core derives the cell from each declared include region's own
-extent instead of from a constant. On your seven 4 mm regions at your 0.42 mm bead
-that is a **1.0950 mm cell at relative density 0.6000**, strut 0.4200 mm, 3.65 cells
-across the wall — and it **emits**. Today `"auto"` plans a 4.6026 mm cell, which needs
-23.0131 mm of material, and puts nothing in those regions at all.
+**Your 4 mm walls can now hold a lattice.** Set `"cell_mode": "fit"` in the `grading`
+block and core derives the cell from each declared include region's own extent instead
+of from a constant.
 
-**Your hand-set `cell_mm` now survives.** A graded job asking for a 1.2 mm cell used to
-be silently raised to 4.6026 mm and land straight back in "0.87 cells across". It is now
-raised only to 1.0950 mm — the cell below which *no* density in the band prints — and the
-density is raised with the cell instead. That is why `cell_mm: 1.2` works on a graded run
-now and did not before.
+★ **EVERY NUMBER BELOW DEPENDS ON ONE INPUT: the stated extrusion width.** Your app
+sends `PrintParams.wallLineWidthOuterMM` — your **outer bead, 0.42 mm** — as
+`min_extrudable_width_mm`, at all four call sites. It is not a nozzle bore
+(`PrintParams.swift:44-46` says so explicitly), and your inner bead
+(`wall_line_width_mm`) is 0.45 and is **not** what this key receives. Both are given
+below because a 7 % move in that input moves every result by 7 %.
+
+**Your 4 mm wall, both widths:**
+
+| stated width | derived cell | rho | strut | cells across | regime |
+|---|---|---|---|---|---|
+| **0.42 mm** — your outer bead, what the app sends today | 1.0950 mm | 0.6000 | 0.4200 mm | 3.65 | out of regime |
+| 0.45 mm — your inner bead, for comparison | 1.1732 mm | 0.6000 | 0.4500 mm | 3.41 | out of regime |
+
+Today `"auto"` plans **4.6026 mm** at your outer bead — a cell needing 23.0131 mm of
+member — and puts nothing in those regions at all.
+
+**What has actually been shown, and what has not.** `fit` derives correctly on your
+geometry, and through the analyze path **at your own resolution 128** it lattices
+**4,414 voxels** inside your seven declared regions where `auto` lattices none — every
+candidate in every region, none skipped. It has **not** been shown to complete a run on
+your part: the three-rung optimize did not finish (§5.2). A derivation has been produced
+and 4,414 voxels through one path; a part has not.
+
+**Your hand-set `cell_mm` now survives.** A graded job asking for 1.2 mm used to be
+silently raised to 4.6026 mm and land straight back in "0.87 cells across". It is now
+raised only to the cell below which *no* density in the band prints (1.0950 mm at your
+outer bead), and the density is raised with the cell instead.
 
 **`"auto"` is untouched.** Every saved job, every past run, every app screen that says
-"auto" behaves exactly as it did. Making `auto` mean `fit` is a one-line decision you
-take, not one this branch takes for you — `kProductionLatticeAutoIsFit` in
-`core/src/simp/production.cpp`, default `false`. §3's flip table is the evidence for
-taking it.
+"auto" behaves exactly as it did. Making `auto` mean `fit` is one line —
+`kProductionLatticeAutoIsFit` in `core/src/simp/production.cpp`, default `false` — and
+§4's flip table is the evidence for taking it.
 
-**Three things to know before you use it.**
+**Five things to know before you use it.**
 
-1. A 4 mm wall latticed at 1.0950 mm is **BUILDABLE and OUT OF REGIME**. It prints and
-   it percolates; the homogenized certificate over it is not trustworthy, because
-   3.65 cells across is under the 5-cell accuracy floor. The receipt says so per region
-   and per voxel. Nothing in this task relaxes that floor or hides it.
-2. A fine cell is a **big file**. Your l-bracket reproduction emitted a 152 MB STL at
-   1.0950 mm where a 4.6026 mm cell emits ~1 MB. §5 has the numbers. This is arithmetic,
-   not a defect — an octet cell is ~24 struts and you asked for 4.2× more of them per
-   axis — but it is the practical cost of the mode.
-3. `fit` is **job-JSON only today**. The app's `LatticeCellSizeMode` (`LatticeSettings.swift`)
-   has three cases and would need a fourth. Nothing app-side was changed.
-4. ★ **Your job carries a design box, and no graded mode can run with one.**
-   `run_job.cpp:5665` refuses a `"grading"` block alongside a `"design_box"` — a
-   PRE-EXISTING guard (it is in the stack base verbatim, and it predates this task),
-   because the cell plan is chosen before the added-material policy runs. So to use
-   `fit` on the WallMount bracket you have to drop the box, exactly as you would for
-   `auto` or `swept`. Your own `job_nobox.json` is that job. This is reported, not
-   fixed: lifting it means making the grading law's candidate set added-material-aware,
-   which is its own task.
+1. A 4 mm wall latticed this fine is **BUILDABLE and OUT OF REGIME**. It prints and it
+   percolates; the homogenized certificate over it is not trustworthy, because 3.65
+   cells across is under the 5-cell accuracy floor. The receipt says so per region and
+   per voxel. Nothing here relaxes that floor or hides it.
+2. **The isolated-fragment bar is NOT met.** One loose strut, not zero (§5.3). It is
+   named, located and attributed; it is not fixed here.
+3. A fine cell is a **big file** — 152 MB for the heaviest rung of the seven-region
+   reproduction (§5.5).
+4. `fit` is **job-JSON only today** — see the build ritual, item 4.
+5. ★ **Your design box has to come out.** `run_job.cpp:5665` refuses a `"grading"`
+   block alongside a `"design_box"` — a pre-existing guard, verbatim in the stack base.
+   No graded cell mode, `fit` included, is reachable on your job while it carries a
+   box. Your own `job_nobox.json` is the job that runs.
 
 **This task does NOT decide where lattice goes.** It only decides how big the cells are
 where you have already asked for it. Working out that a lattice could also go somewhere
@@ -122,6 +163,36 @@ D4 is worth pausing on: PR #298 had already **found** D2 and, unable to fix it i
 own scope, wrote a message telling the user the obvious remedy would not work. That
 message is now false and has been replaced with the remedy that does work.
 
+### 2.3 ★ WHICH WIDTH THE DERIVATION IS FED, AND WHO ASSUMES WHAT (review Q1)
+
+The whole law hangs off one input, so it was traced end to end before any number moved.
+Full reading with every file and line in `q1_width_provenance.md`; the conclusions:
+
+* **Core's meaning** (`grading.hpp:88-92`, `job.hpp:230`): "the STATED minimum
+  extrudable strut width" — an extrusion width, never sourced by core, always an input.
+* **The app supplies `PrintParams.wallLineWidthOuterMM`** at all four call sites
+  (`LatticePage.swift:140,180`, `AppModel.swift:269`,
+  `WorkspacePlaceholder.swift:1974`), and **PR #301 does not change that**.
+* **`wallLineWidthOuterMM` is a deposited bead width, NOT a nozzle bore** —
+  `PrintParams.swift:44-46` states it in those words. Shipped defaults, which are also
+  his job's values: outer **0.42**, inner **0.45**.
+* So the app sends **0.42**, and this branch's 0.42 derivations describe what his device
+  sends today. The `0.45000000000000001` in PR #301's evidence is its **own test
+  fixture** (`LatticeRetentionEvidenceGen.swift:28,36` sets `lineWidthMM: 0.45` and
+  `wallLineWidthOuterMM: 0.45`), not his configuration.
+
+**★ THE DEFECT THAT IS ACTUALLY THERE.** The codebase carries two bead widths and the
+lattice path silently takes the **narrower**: the strut printability floor comes from
+the OUTER wall bead (0.42) while the width-aware knockdown and core's historical
+`wall_line_width_mm` use the INNER bead (0.45). **A lattice strut is not a wall loop**,
+and nothing in the app, core, or any handoff states which bead a slicer deposits for a
+lone unsupported extrusion. Taking the outer width is the less conservative choice: if a
+strut is really laid at 0.45, every strut derived at 0.42 is thinner than one line of
+his slicer's output. That is APP-side and it is a decision, not a patch — named,
+quantified at both widths, and left to the maintainer. Whoever takes it must answer
+*which bead does the slicer lay for a single extrusion?*, and the answer belongs in
+`PrintParams.swift` beside the two fields.
+
 ---
 
 ## 3. WHAT WAS BUILT
@@ -140,7 +211,8 @@ that member — the coarse end of `lattice_derive_cell_for_member`'s own window)
 **finest printable cell** where it cannot, because that is the cell with the *most* cells
 across and therefore the least inaccuracy accepted.
 
-At a 0.42 mm bead (`r2_flip_probe.txt`):
+At his 0.42 mm OUTER bead — the width the app sends (§2.3); the same table at
+0.45 mm is in `r2_flip_probe.txt`:
 
 | region extent | derived cell | rho | strut | cells/member | floor in force |
 |---|---|---|---|---|---|
@@ -339,41 +411,86 @@ The unit test `FIT1` asserts that fact directly at the level of the law (`AUTO` 
 wall: `cell_size_mm == 4.6026`, `latticed_voxels == 0`), which is the form of it that
 survives both behaviours.
 
-### 5.2 R4 — his own part: PARTIALLY MET, and here is exactly which part
+### 5.2 R4 — his own part: what is established, and what is not
 
-`r4_his_part.txt`. WallMount_ShelfBracket.stl, his loads block verbatim (including
-`"minimize_plastic": false` and his three bolt clearances), seven 4 mm include
-regions, his 0.42 mm bead, resolution 64.
+`r4_his_part.txt`, `q2_no_derivation.md`. WallMount_ShelfBracket.stl, his loads block
+verbatim (`"minimize_plastic": false` ⇒ the GROWTH ladder {1.55, 1.25, 1.10}, his three
+bolt clearances), seven 4 mm include regions, his 0.42 mm outer bead.
 
-**Two things about his job had to change before any graded mode could run at all, and
-both are pre-existing:**
+**Two things about his job had to change before any graded mode could run, both
+pre-existing:** his design box (§0 item 5), and the ladder is three rungs, not four —
+`"minimize_plastic": false` selects the growth ladder; four is the *reduction* ladder.
 
-* **His design box had to come out.** `run_job.cpp:5665` refuses `grading` alongside
-  `design_box` — verbatim in the stack base. No graded cell mode, `fit` included, is
-  reachable on his job as saved. His own `job_nobox.json` is the job that runs.
-* **His ladder is three rungs, not four.** `"minimize_plastic": false` selects
-  `production_growth_ladder()` = {1.55, 1.25, 1.10}. Four is the *reduction* ladder.
-
-**MEASURED, on his part:**
+**MEASURED:**
 
 | | |
 |---|---|
-| pre-flight under `auto` | REFUSES in 0.05 s — "5.0 cells × 4.6026 mm = 23.013 mm", 7 of 7 regions |
-| pre-flight under `fit` | all seven regions: extent 4.000 mm → **cell 1.0950 mm at rho 0.6000, strut 0.4200 mm, 3.65 cells/member**, PERCOLATION floor in force, out of regime |
-| the ANALYZE path end to end (`analyze_path_fit.txt`) | cell 1.094961872, region 5710 voxels, **456 latticed**, 5254 kept solid as `fit_no_derivation_voxels` (analyze grades the whole printed design, so everything outside the seven declared regions has no derived cell), 454 densities raised for printability |
+| pre-flight, `auto` | REFUSES in 0.05 s — "5.0 cells × 4.6026 mm = 23.013 mm", 7 of 7 regions |
+| pre-flight, `fit` | all seven: extent 4.000 mm → **cell 1.0950 mm at rho 0.6000, strut 0.4200 mm, 3.65 cells/member**, PERCOLATION floor in force, out of regime |
+| ANALYZE path, end to end, **resolution 128 (his)** | **4,414 latticed**, and the per-region split below |
 
-**NOT MEASURED: the three-rung optimize end to end.** The `auto` side has nothing to
-run — it refuses at the pre-flight, and that refusal *is* the auto result. The `fit`
-side runs, but on the loadcase path the schema refuses both `ladder` and `margin_stop`
-while `simp.max_iterations` does not bind the MMA plateau, so every rung runs to the
-200-iteration cap; under this machine's load (other worktrees held it between 5 and 61
-on 8 cores all session) rung 0 of 3 was still running past iteration 210 when the session ended (past the
-200-iteration MMA plateau cap, so a rung here is not bounded by that number either). Re-run
-`r4_his_part.sh core/build <out> 64` on an idle machine to finish it.
+#### ★ WHERE THE SKIPPED VOXELS WERE, PER REGION (review Q2)
 
-The part of R4 that is arithmetic on his declared geometry — extent, derived cell,
-derived density, strut diameter, cells per member, floor in force — is measured twice
-and does not depend on the solve. The part that is per-rung emitted counts is not.
+A bare `no_derivation` total against a small latticed count is the shape of number that
+hid the overnight run's failure for a night, so the receipt now answers it directly.
+Added: `GradingFitRegion::candidate_voxels` / `latticed_voxels`, and a run-level
+`printed_outside_regions`, filled by `fill_fit_region_voxels` (`run_job.cpp:673`) using
+the SAME membership test and precedence as `fit_cell_field`. Wired at all three fit call
+sites (`:4524`, `:5260`, `:6745`).
+
+**Resolution 128 — his:**
+
+```
+region_voxels 46291   latticed 4414   solid_fallback 41877
+no_derivation 41877   printed_outside_regions 41877
+IDENTITY no_derivation == printed_outside_regions: True
+density_raised 4414   out_of_regime_voxels 0   distinct_cells 1
+
+  region | extent | cell mm  | candidates | latticed | region out of regime
+       0 |   4 mm | 1.094962 |        238 |      238 | True
+       1 |   4 mm | 1.094962 |        396 |      396 | True
+       2 |   4 mm | 1.094962 |        384 |      384 | True
+       3 |   4 mm | 1.094962 |        576 |      576 | True
+       4 |   4 mm | 1.094962 |        672 |      672 | True
+       5 |   4 mm | 1.094962 |        828 |      828 | True
+       6 |   4 mm | 1.094962 |       1320 |     1320 | True
+  sum 4414  +  outside 41877  =  46291
+```
+
+(At resolution 64 the same identity holds: 456 latticed, 5,254 outside, 5,710 total.)
+
+**Every skipped voxel was OUTSIDE every region he declared**, at both resolutions, and
+the decomposition is exact and total. **Inside the declared regions nothing failed**:
+candidates == latticed in all seven.
+
+**Why the candidate set was the whole part, and why that is NOT §B2.** `run_job.cpp:4497`
+passes `nullptr` for the region mask on the **analyze** path — deliberate and
+pre-existing: `analyze_job` grades the whole printed design. `fit` then declines to
+invent a cell for undeclared material, counts it, and keeps it solid. The control that
+proves it is the call site and not the law: on the OPTIMIZE path the candidate set IS
+include-scoped, and on the same geometry it reports `region_voxels 2302, latticed 2302,
+solid_fallback 0, no_derivation 0`.
+
+**★ §B2 IS still live — at EMISSION, not at candidacy.** Whole-cell activation from any
+masked voxel overhangs the region boundary; that is what put one clipped strut outside
+every region in the seam fixture and it is why R5 is not met (§5.4). Two different
+mechanisms; they must not be conflated.
+
+**★ TWO NUMBERS THAT LOOK CONTRADICTORY AND ARE NOT.** `out_of_regime_voxels` is 0 while
+every REGION is stamped out of regime. The region flag is judged on the region's
+DECLARED extent (4 mm) — what the cell was derived from, the conservative reading — and
+the voxel count on the DESIGN's own measured local member width. A 4 mm include slab cut
+into a thicker wall sits on material wider than 4 mm. That gap between declared extent
+and measured width is the coherence gap PR #298 filed (§item-7b); reported, not closed.
+
+**NOT ESTABLISHED: the three-rung optimize.** Re-run at **resolution 128** as the review
+asked, on a machine at load ~8 rather than the previous ~40. The `auto` side has nothing
+to run — it refuses at the pre-flight in 0.05 s, and that refusal *is* the auto result.
+The `fit` side runs but **cannot be bounded**: `simp.max_iterations` is accepted and
+**silently ignored** on the loadcase path (`run_job.cpp:5560-5561` sit inside the `else`
+at `:5516`), root-caused with file and line in `q3c_max_iterations_ignored.md` and
+summarised in §6. So the per-rung emitted-cell counts, verdicts, margins and mass under
+`fit` are not established on his ladder, and §0 does not claim a part has been produced.
 
 ### 5.3 S3 — the seam, measured
 
@@ -413,12 +530,41 @@ them, so two interpenetrating struts are two components by shared-vertex
 connectivity. That is exactly why the isolated test is proximity-based at the job's own
 line width, and why a component count on its own says nothing.
 
-### 5.4 R5 — percolation
+### 5.4 R5 — ★ NOT MET. One isolated fragment, not zero.
 
 `r5_percolation.py`, run inside `s3_seam.sh` and `r6_cost.sh`. The threshold is the
-run's own `wall_line_width_mm` read from `run_info.json` (0.45 mm on these runs) —
-never a literal, and never a strut radius. Result on the seam fixture: 8,928
-components, **1 isolated** — §5.3.
+run's own `wall_line_width_mm` read from `run_info.json` (0.45 mm) — never a literal,
+never a strut radius.
+
+**Result: 8,928 components, 1 isolated.** The bar demands zero. It is **NOT MET** and it
+is recorded as an open, not as a pass.
+
+* **The fragment**: 16 triangles — one strut — bbox `[-6.0, 1.0, 3.0]`–`[-4.5, 2.5, 6.0]`,
+  about 6 mm below either declared region and outside both.
+* **The cause**: §B2's whole-cell activation. The certification mask is include-scoped
+  per VOXEL while cell activation is whole-cell from any masked voxel, so an activated
+  cell reaches past the region and its clipped strut has nothing to weld to. A finer
+  cell makes the leftover piece smaller and lonelier; it does not create it.
+* **NOT fixed here, deliberately.** The fix moves the emitted mask on every graded path
+  there has ever been, so it needs its own before/after gate table.
+* **THE SUCCESSOR TASK**: make cell activation REGION-AWARE — an octree cell must be
+  activated only where the certification mask would actually keep it, so the emitted set
+  and the certified set agree at the region boundary. Its bar is that no strut is
+  emitted outside the include union, with the isolated count measured at the job's own
+  line width on a part that previously produced one.
+
+**★ THE RAW COMPONENT COUNT IS NOT A FRAGMENT COUNT.** The generator emits each strut as
+its own unwelded capsule mesh, so two struts that interpenetrate are two components by
+shared-vertex connectivity. 8,928 is an artefact of that, not 8,928 loose pieces — which
+is exactly why the isolated test must stay **proximity-based at the job's own line
+width**. Anyone who replaces it with a component count will report a catastrophe that
+is not there, or miss the one piece that is.
+
+**★ AND THE SEAM WAS NEVER EXERCISED ON HIS GEOMETRY.** `fit.distinct_cells` came out
+**1** on his part — all seven of his regions are 4 mm, so all seven derive the same
+1.0950 mm cell and the run is single-cell. The multi-cell seam is measured only on the
+constructed two-region fixture (§5.3). Nothing about the seam has been observed on the
+part he actually prints.
 
 ### 5.5 R6 — iterations and wall
 
@@ -462,14 +608,31 @@ read as measurements.
 | bar | verdict |
 |---|---|
 | R1 byte-identical when off | **MET**, measured against the stack base, with positive controls — and it caught a real defect first (§5.6) |
+| Q1 width provenance | **ANSWERED** (§2.3, `q1_width_provenance.md`) — and it cross-checks with PR #301 to 0.000e+00 (§5.8) |
 | R2 enumerate every flip | **MET** — §4, machine-generated in `r2_flip_probe.txt`, including the three fixtures this task pinned, run at their unpinned values |
 | R3 failing test first | **MET** — `r3_before_after.txt` end to end plus `FIT1`/`FIT2`/`S2a-c` in `test_grading.cpp` |
-| R4 his part end to end | **PARTIALLY MET** — §5.2. The derivation on his geometry and the analyze path are measured; the three-rung optimize did not finish on this machine |
-| R5 the lattice must percolate | **NOT MET, and named**: 1 isolated component, not 0 — §5.3. It is one strut outside every declared region, from pre-existing cell overhang, not from the seam and not from `fit` |
+| R4 his part end to end | **PARTIALLY MET** — §5.2. The derivation and the analyze path are measured at his resolution and per region; the three-rung optimize could not be bounded (§6, `simp.max_iterations` ignored on the loadcase path) |
+| R5 the lattice must percolate | ★ **NOT MET** — 1 isolated component, not 0 (§5.4). One strut outside every declared region, from pre-existing whole-cell activation (§B2), not from the seam and not from `fit`. Successor task named. |
 | R6 iterations and wall, both | **MET** — §5.5, with the iterations-identical control |
 | R7 never weaken an assertion | **MET** — §4.4, four removed lines all accounted for, 42 added |
 | R8 root cause with file and line | **MET** — §2.2 |
 | R9 no unfilled placeholders | **MET** |
+
+### 5.8 CROSS-CHECK AGAINST PR #301 (review Q1(d))
+
+PR #301's cell-size control is bounded below by core's densest-end printability floor,
+recorded in its evidence as **1.173173434139347 mm** at a 0.45 mm stated width. This
+branch's derivation at the same width:
+
+```
+PR #301 cross-check @ 0.45 mm: their control floor 1.17317343413935 mm,
+this derivation 1.17317343413935 mm, delta 0.000e+00 mm — AGREE
+```
+
+Identical to the last printed digit. Both are
+`w / octet_strut_diameter_mm(lattice_rho_max, 1.0)` read from core, not transcribed, and
+the check is compiled into `probe_fit_flips.cpp` so it re-runs with the numbers rather
+than being asserted once in prose.
 
 ---
 
@@ -479,6 +642,27 @@ read as measurements.
   brief.
 * **`fit` is not exposed in the app.** Core-only task.
 * **De-homogenization** — deciding *where* lattice could go — is untouched.
+* ★ **`simp.max_iterations` IS ACCEPTED AND SILENTLY IGNORED ON THE LOADCASE PATH.**
+  A named defect found while trying to bound the R4 run, root-caused in
+  `q3c_max_iterations_ignored.md`. `run_job.cpp:5560-5561` applies the job's cap, and
+  those lines sit inside the `else` at `:5516` — the self-weight branch. A job with a
+  `loads` block takes its options from `build_production_loadcase` and the key is
+  parsed, stored and dropped. The schema accepts it unconditionally
+  (`job.cpp:715-721`) while *explicitly refusing* `ladder` and `margin_stop` on the same
+  path (`job.cpp:465-470`), so a user reading that refusal list reasonably concludes the
+  unlisted keys are honoured. This is the same shape as the open item he already
+  carries: a control that exists, is accepted, and cannot act. Not fixed here — moving
+  an iteration cap changes the DESIGN on every loadcase run that states the key, which
+  needs its own gate table. A fix must either honour it there or refuse it there;
+  accepting and ignoring is the worst of the three.
+  (Even where it IS read it is not a single ceiling: with a projection schedule
+  `build_stage_plan` (`simp.cpp:967-974`) takes each stage's cap from `ps.iterations`
+  and never consults `max_iterations` — `heaviside_continuation_schedule()` is
+  6 × 50 = 300 iterations — and under conditional MMA projection a gray rung is
+  continued *within the same rung*, each phase backstopped separately.)
+* **The two bead widths are not reconciled.** §2.3: the lattice path takes the OUTER
+  bead while the knockdown takes the INNER one, and nothing states which a slicer lays
+  for a lone strut. App-side, and a decision.
 * **The grading + design-box refusal is not lifted.** It is pre-existing
   (`run_job.cpp:5665`, verbatim in the stack base) and it is what makes `fit`
   unreachable on his job as saved. Naming it is this task's contribution; fixing it is
@@ -496,59 +680,83 @@ read as measurements.
 
 You have seven 4 mm-deep regions where you want lattice, and until now the pipeline put
 nothing in them. The reason was not your part and not the optimizer. The pipeline was
-choosing the cell size with a rule that never asked what the cell had to fit into: it took
-the smallest cell that would still print *if* the lattice were as light as the material
-library allows, and because that "if" is the extreme case, the answer came out large —
-4.6 mm. A 4.6 mm cell needs about 23 mm of material to sit in. Your walls are 4 mm. So
-everything you declared was rejected, and the number you were shown, "23 mm", looked like
-a property of your part when it was really a property of an assumption nobody had made.
+choosing the cell size with a rule that never asked what the cell had to fit into: it
+took the smallest cell that would still print *if* the lattice were as light as the
+material library allows, and because that "if" is the extreme case, the answer came out
+large — 4.6 mm. A 4.6 mm cell needs about 23 mm of material to sit in. Your walls are
+4 mm. So everything you declared was rejected, and the number you were shown, "23 mm",
+looked like a property of your part when it was really a property of an assumption
+nobody had made.
 
 The fix is to ask the question the other way round. Given a 4 mm wall, what cell *and*
 what lattice density fit together? A denser lattice has fatter struts, so it can be
-printed at a smaller cell. Solving for both at once gets you a 1.1 mm cell at 60 % density
-in that wall, with struts exactly one bead wide — and that does fit, and it does print.
-That is what the new `"fit"` mode does, once per region you declared, using the region's
-own size.
+printed at a smaller cell. Solving for both at once gets you a cell of about 1.1 mm at
+60 % density in that wall, with struts exactly one extrusion line wide — and that does
+fit, and it does print. That is what the new `"fit"` mode does, once per region you
+declared, using the region's own size.
 
-Two honest caveats. First, a 4 mm wall still cannot be *certified* — 3.65 lattice cells
-across a member is under the 5 the homogenized model needs, so the strength number over
-that material is out of regime, and the receipt says so for every region and every voxel.
-It is buildable, not blessed. Second, small cells mean a lot of struts: one of these runs
-produced a 152 MB mesh file. Both are stated in the receipt rather than left for you to
-discover.
+**Which width your numbers depend on.** Everything above is computed from one input: the
+extrusion line width the app sends. It sends your **outer bead, 0.42 mm** — the width of
+the single outer wall loop, which is a slicer setting, not your nozzle's bore. Your
+*inner* bead is 0.45 mm, and the cell would come out about 7 % bigger (1.17 mm, struts
+0.45 mm) if that were the number used. Both are printed side by side everywhere in this
+handoff, because a result this sensitive to one input should never be quoted without
+naming it. And there is a real open question underneath: a lattice strut is not a wall
+loop, and nobody has established which of the two widths your slicer actually lays down
+for a single strut floating in space. If it lays 0.45, then struts designed at 0.42 are
+thinner than one line of your own output. That is worth settling before you print one.
 
-Separately, one thing that used to be broken is now simply fixed: if you set the cell size
-by hand on a graded run, it is no longer overridden behind your back. Setting `cell_mm` to
-1.2 does what it says.
+**What has been shown, and what has not.** The mode derives correctly on your part, and
+through one path — the analyze path, at your own resolution — it puts lattice in all
+seven of your regions: 4,414 voxels, every candidate in every region, none skipped. That
+is the first time this project has produced lattice in those walls. What has **not** been shown is a finished run on
+your part: the three-rung optimize did not complete, because a key that should have
+bounded it (`simp.max_iterations`) turns out to be accepted and then ignored on the path
+your job takes. So a derivation exists and 4,414 voxels exist; a part does not.
+
+**And one bar is not met.** The rule that says no piece of the lattice may come out
+loose is not satisfied: one strut, sixteen triangles, ends up detached — about 6 mm
+outside any region you declared. It comes from an old behaviour, not from this work: a
+lattice cell is switched on as a whole whenever any part of it is inside your region, so
+a cell sitting on the boundary reaches past it, and the piece that reaches past gets
+trimmed off with nothing to weld to. Fixing that moves the geometry on every graded run
+ever made, so it belongs to its own task, and that task is named in §5.4. Two smaller
+cautions with it: the "8,928 components" figure in the evidence is not 8,928 loose
+pieces — the generator writes every strut as its own unwelded shape, so overlapping
+struts still count separately; and your part never exercised the seam between two
+different cell sizes at all, because all seven of your regions are the same 4 mm and
+therefore get the same cell.
+
+Separately, one thing that used to be broken is now simply fixed: if you set the cell
+size by hand on a graded run, it is no longer overridden behind your back. Setting
+`cell_mm` to 1.2 does what it says.
 
 Nothing here changes what `"auto"` means. Your old jobs re-run identically. If you want
 `auto` to start doing this, that is one constant in one file, and the flip table in §4 is
 what you should read before flipping it.
 
-### The two bars this did not clear, in one place
+### The bars this did not clear, in one place
 
-**R5 wanted zero loose fragments and got one.** It is a single 16-triangle strut about
-6 mm outside every region you declared, and it comes from a mechanism that predates
-this work: an activated lattice cell reaches past the region boundary, because the
-certification mask is scoped per voxel while cell activation is whole-cell. A finer
-cell just makes the leftover piece smaller and lonelier. Named, located, and not fixed
-here — fixing it moves the emitted mask on every graded run there has ever been.
+**R5 wanted zero loose fragments and got one** — named, located, attributed, successor
+task written (§5.4).
 
-**R4 wanted your part through every rung and got most of the way.** Everything about
-your regions that is arithmetic — the extent, the cell, the density, the strut, the
-cells per member, which floor is in force — is measured on your part, twice. What is
-missing is the per-rung emitted counts, because the run was still on rung 1 of 3 when
-the session ended, still on the first of three rungs; the machine was shared with
-several other jobs all night. One command re-runs it.
+**R4 wanted your part through every rung and got most of the way** — everything about
+your regions that is arithmetic is measured on your part at your own resolution, and the
+per-region split now shows all seven regions fully latticed with nothing skipped inside
+them. The per-rung emitted counts are missing because the run could not be bounded.
 
 ### What next
 
-1. **Decide on the alias.** Read §4, then flip `kProductionLatticeAutoIsFit` or leave it.
-2. **Decide whether a 4 mm wall should be latticed at all.** `fit` will do it and stamp it
-   out of regime. Whether an out-of-regime lattice is acceptable in a part you ship is your
+1. **Settle the bead width.** Which line does your slicer lay for a lone strut, 0.42 or
+   0.45? Everything in §0 moves ~7 % with the answer, and one direction designs struts
+   thinner than your own output.
+2. **Decide on the alias.** Read §4, then flip `kProductionLatticeAutoIsFit` or leave it.
+3. **Decide whether a 4 mm wall should be latticed at all.** `fit` will do it and stamp
+   it out of regime. Whether an out-of-regime lattice belongs in a part you ship is your
    call, not the pipeline's.
-3. **The file size wants an answer.** The natural one is a coarser cell where the region
+4. **The loose-strut task** (§5.4) and **the ignored-iteration-cap defect** (§6) are both
+   written up ready to pick up.
+5. **The file size wants an answer.** The natural one is a coarser cell where the region
    allows it — which `fit` already does for anything ≥ 6 mm — plus mesh decimation on
    export. Nothing here does the second.
-4. **`fit` in the app** is a fourth enum case plus a picker label.
-5. **The seam** is measured, not solved. §5.3 says exactly what it does today.
+6. **`fit` in the app** is a fourth enum case plus a picker label, on top of PR #301.

@@ -1,43 +1,67 @@
-THE ANALYZE PATH UNDER FIT (`topopt-cli analyze`), his part, resolution 64.
+THE ANALYZE PATH UNDER FIT, ON HIS PART, AT HIS RESOLUTION.
 
-Why this is here: fit touches THREE call sites that build GradingLawParams —
-the per-variant optimize path, the pre-flight forecast, and analyze_job. A unit
-test on grade_lattice exercises none of them. This is the analyze one, run end
-to end on WallMount_ShelfBracket.stl (his job_nobox.json + seven 4 mm include
-regions + "cell_mode": "fit").
+`topopt-cli analyze` on WallMount_ShelfBracket.stl (his job_nobox.json + seven 4 mm
+include regions + "cell_mode": "fit"), stated width 0.42 mm — his OUTER extrusion bead,
+which is the field the app sends (see q1_width_provenance.md).
 
-job: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-cell-fit-mode-2c28f1/62ba5e20-5756-4e80-af26-8681821fcce2/scratchpad/an/analyze_fit.json
+Why this file exists: fit touches THREE call sites that build GradingLawParams — the
+per-variant optimize path, the pre-flight forecast, and analyze_job. A unit test on
+grade_lattice exercises none of them.
 
-cell_mode           : fit
-cell_size_mm        : 1.094961872
-printability_floor  : 4.602619932  (the rho_min bound — NOT selected)
-region_voxels       : 5710
-latticed_voxels     : 456
-solid_fallback      : 5254
-fit.min_printable_cell_mm       : 1.094961872
-fit.distinct_cells              : 1
-fit.out_of_regime_voxels        : 0
-fit.no_derivation_voxels        : 5254
-fit.density_raised_for_print    : 454
+Why resolution 128: it is his. At 64 the voxel is ~3.24 mm and a 4 mm wall spans ~1.2
+voxels, so that instrument cannot tell a 4 mm wall from a 7 mm one. Both are below.
 
-region | extent mm | cell mm      | rho | strut mm | cells/member | out of regime
-     0 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     1 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     2 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     3 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     4 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     5 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     6 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+=== RESOLUTION 128 (his) ===
+region_voxels         46291  (the analyze path grades the WHOLE printed design)
+latticed_voxels       4414
+solid_fallback        41877
+no_derivation         41877
+printed_outside_reg   41877
+IDENTITY no_derivation == printed_outside_regions: True
+density_raised        4414
+out_of_regime_voxels  0
+distinct_cells        1
 
-READ THE TWO 'out of regime' NUMBERS CAREFULLY — they answer different questions
-and they are both right:
-  * the PER-REGION flag is judged on the region's DECLARED extent (4 mm), which
-    is what the cell was derived from and is the conservative reading.
-  * fit.out_of_regime_voxels is judged per voxel on the DESIGN's own measured
-    local member width. A 4 mm include slab cut into a thicker wall sits on
-    material wider than 4 mm, so those voxels clear the accuracy floor at the
-    derived cell even though the region as declared does not.
-  * no_derivation_voxels is large here because the analyze path grades the WHOLE
-    printed design (it passes no region mask), so every voxel outside the seven
-    declared regions has no derived cell and stays solid, counted rather than
-    guessed at.
+region | extent mm | cell mm      | candidates | latticed | region out of regime
+     0 |         4 |     1.094962 |        238 |      238 | True
+     1 |         4 |     1.094962 |        396 |      396 | True
+     2 |         4 |     1.094962 |        384 |      384 | True
+     3 |         4 |     1.094962 |        576 |      576 | True
+     4 |         4 |     1.094962 |        672 |      672 | True
+     5 |         4 |     1.094962 |        828 |      828 | True
+     6 |         4 |     1.094962 |       1320 |     1320 | True
+sum of per-region candidates: 4414  + outside 41877 = 46291
+
+=== RESOLUTION 64 (the earlier run, kept for the resolution comparison) ===
+region_voxels 5710  latticed 456  no_derivation 5254  out_of_regime_voxels 0
+per-region candidates: [18, 54, 42, 48, 84, 102, 108]
+
+=== WHAT THESE NUMBERS SAY ===
+
+1. AT HIS RESOLUTION, FIT LATTICES 4,414 VOXELS INSIDE HIS SEVEN DECLARED REGIONS where
+   `auto` lattices none (auto refuses at the pre-flight, 0.87 cells across).
+
+2. NOTHING INSIDE A DECLARED REGION WAS SKIPPED. candidates == latticed in all seven
+   regions, at both resolutions. Every voxel that reached the fit path with a
+   declaration covering it got a cell and was latticed.
+
+3. THE SKIPPED VOXELS WERE ALL OUTSIDE. The identity
+   no_derivation == printed_outside_regions holds exactly at both resolutions
+   (41,877 at 128; 5,254 at 64). The analyze call site passes `nullptr` for the region
+   mask (run_job.cpp:4497) — it grades the whole printed design by construction — so
+   fit declines to invent cells for undeclared material, counts it, and keeps it solid.
+   The OPTIMIZE path, whose candidate set IS include-scoped, reports no_derivation 0.
+
+4. ★ distinct_cells = 1. All seven of his regions are 4 mm, so all seven derive the
+   SAME 1.0950 mm cell. The multi-cell seam is NEVER exercised on his geometry; it is
+   measured only on the constructed two-region fixture (s3_seam.txt).
+
+5. ★ out_of_regime_voxels = 0 AT 128 while every REGION is stamped out of regime, and
+   that is not a contradiction — the two are measured against different things:
+     * the per-REGION flag uses the region's DECLARED extent (4 mm), which is what the
+       cell was derived from, and is the conservative reading;
+     * the per-VOXEL count uses the DESIGN's own measured local member width. A 4 mm
+       include slab cut into a thicker wall sits on material wider than 4 mm, so those
+       voxels clear the accuracy floor at the derived cell.
+   At 64 the same run reports 0 as well. The gap between declared extent and measured
+   width is the coherence gap PR #298 filed (§item-7b); it is reported here, not closed.

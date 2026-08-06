@@ -163,14 +163,20 @@ int main() {
   run_row({"CONTROL auto on a thin wall",              0.42,  4.0, 0.0,
            CellSizeMode::Auto});
 
-  // ── FIT, per region extent: what the mode derives, at his bead ────────────────
-  std::printf("FIT derivation at a %.2f mm bead — cell = max(extent / N*, finest "
-              "printable cell)\n", 0.42);
+  // ── FIT, per region extent, at BOTH stated widths the app carries ────────────
+  // ★ THE DERIVATION IS ONLY AS GOOD AS THE WIDTH IT IS GIVEN. This project's app
+  // carries TWO bead widths — PrintParams.wallLineWidthOuterMM (0.42 by default and
+  // on the maintainer's job) and wallLineWidthInnerMM (0.45) — and the lattice path
+  // sends the OUTER one as `min_extrudable_width_mm`. Both are printed here so the
+  // size of that dependency is visible wherever the result is quoted.
+  for (const double bead : {0.42, 0.45}) {
+  std::printf("FIT derivation at a %.2f mm stated width — cell = max(extent / N*, "
+              "finest printable cell)\n", bead);
   std::printf("  extent mm | derived cell | rho     | strut mm | cells/member | "
               "floor in force\n");
   for (const double extent : {2.0, 4.0, 5.4748, 6.0, 8.0, 12.0, 24.0, 30.0}) {
     const LatticeCellDerivation dv =
-        lattice_derive_cell_for_member(topo, extent, 0.42);
+        lattice_derive_cell_for_member(topo, extent, bead);
     if (!dv.feasible_percolation) {
       std::printf("  %9.4f | (no printable AND percolating pair — refused; needs "
                   "%.4f mm)\n", extent, dv.min_member_width_buildable_mm);
@@ -178,7 +184,7 @@ int main() {
     }
     const double cell = std::max(extent / lattice_cells_per_member_min(topo),
                                  dv.min_printable_cell_mm);
-    const double rho = lattice_min_density_for_strut(topo, cell, 0.42);
+    const double rho = lattice_min_density_for_strut(topo, cell, bead);
     const double r = rho >= 0.0 ? rho : lattice_rho_max(topo);
     const double cpm = extent / cell;
     std::printf("  %9.4f | %12.4f | %7.4f | %8.4f | %12.2f | %s\n", extent, cell, r,
@@ -186,6 +192,22 @@ int main() {
                 cpm < lattice_cells_per_member_min(topo)
                     ? "PERCOLATION (accuracy unreachable) — OUT OF REGIME"
                     : "ACCURACY");
+  }
+  std::printf("  finest printable cell at this width = %.15g mm\n\n",
+              bead / octet_strut_diameter_mm(lattice_rho_max(topo), 1.0));
+  }
+
+  // ── ★ CROSS-CHECK AGAINST PR #301's APP CONTROL. Its cell-size control is bounded
+  // below by core's DENSEST-end printability floor, which its evidence records as
+  // 1.173173434139347 mm at a 0.45 mm stated width. This branch's derivation must
+  // agree to the same precision or one of the two is wrong.
+  {
+    const double ours = 0.45 / octet_strut_diameter_mm(lattice_rho_max(topo), 1.0);
+    const double theirs = 1.173173434139347;
+    std::printf("PR #301 cross-check @ 0.45 mm: their control floor %.15g mm, this "
+                "derivation %.15g mm, delta %.3e mm — %s\n",
+                theirs, ours, ours - theirs,
+                std::fabs(ours - theirs) < 1e-12 ? "AGREE" : "DISAGREE (blocked-stop)");
   }
   return 0;
 }

@@ -4,8 +4,19 @@
 #   ./r4_his_part.sh <branch-build-dir> <out-dir> [resolution]
 #
 # WallMount_ShelfBracket.stl — the part from his overnight run — with SEVEN include
-# regions, each 4 mm across its thinnest dimension, his 0.42 mm bead and his 0.45 mm
-# line width, over a four-rung ladder. Run twice: `auto` (what he has) and `fit`.
+# regions, each 4 mm across its thinnest dimension, over his own ladder. Run twice:
+# `auto` (what he has) and `fit`.
+#
+# ★ THE STATED WIDTH IS 0.42 mm AND THAT IS DELIBERATE: it is
+# PrintParams.wallLineWidthOuterMM — his OUTER extrusion bead — which is the field the
+# app sends as `min_extrudable_width_mm` at every call site (LatticePage.swift:140,180;
+# AppModel.swift:269; WorkspacePlaceholder.swift:1974). It is NOT a nozzle bore: see
+# PrintParams.swift:44-46. His INNER bead (`wall_line_width_mm`) is 0.45 and is NOT what
+# this key receives. The sensitivity to that choice is measured at both widths in
+# q1_width_provenance.md and r2_flip_probe.txt.
+#
+# ★ DEFAULT RESOLUTION IS 128 — his. At 64 the voxel is ~3.24 mm and a 4 mm wall spans
+# ~1.2 voxels, so the instrument cannot tell a 4 mm wall from a 7 mm one.
 #
 # The per-region table this prints is the R4 deliverable: measured thinnest extent,
 # derived cell, derived density, strut diameter, cells per member, cells emitted, and
@@ -14,7 +25,7 @@ set -euo pipefail
 BUILD="$(cd "${1:?usage: r4_his_part.sh <build-dir> <out-dir> [resolution]}" && pwd)"
 mkdir -p "${2:?}"
 OUT="$(cd "$2" && pwd)"
-RES="${3:-64}"
+RES="${3:-128}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cp "$REPO/evidence/2026-08-05-smoothing-must-actually-smooth/WallMount_ShelfBracket.stl" "$OUT/"
 

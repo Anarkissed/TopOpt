@@ -1,78 +1,87 @@
-R4 — HIS OWN PART. WallMount_ShelfBracket.stl, his loads block verbatim from
-evidence/2026-08-05-smoothing-must-actually-smooth/job.json (including
-"minimize_plastic": false, which selects the GROWTH ladder {1.55, 1.25, 1.10},
-and his three bolt clearances), seven include regions each 4 mm across their
-thinnest dimension, his 0.42 mm bead and 0.45 mm line width, resolution 64.
+R4 — HIS OWN PART, AT HIS RESOLUTION. WallMount_ShelfBracket.stl, his loads block
+verbatim from evidence/2026-08-05-smoothing-must-actually-smooth/job.json (including
+"minimize_plastic": false, which selects the GROWTH ladder {1.55, 1.25, 1.10}, and his
+three bolt clearances), seven include regions each 4 mm across their thinnest
+dimension, stated width 0.42 mm, resolution 128.
+
+★ THE STATED WIDTH IS 0.42 AND THAT IS HIS. It is PrintParams.wallLineWidthOuterMM —
+his OUTER extrusion bead — which is the field the app sends as
+`min_extrudable_width_mm` at all four call sites. It is NOT a nozzle bore
+(PrintParams.swift:44-46 says so in those words). His INNER bead is 0.45 and is not
+what this key receives. Sensitivity at both widths: q1_width_provenance.md.
 
 ★ HIS DESIGN BOX HAD TO COME OUT, and not by choice. run_job.cpp:5665 refuses a
-"grading" block alongside a "design_box" — a PRE-EXISTING guard, present
-verbatim in the stack base. So NO graded cell mode, fit included, is reachable
-on his job as saved. His own job_nobox.json is the job that runs.
+"grading" block alongside a "design_box" — a PRE-EXISTING guard, present verbatim in
+the stack base. So NO graded cell mode, fit included, is reachable on his job as
+saved. His own job_nobox.json is the job that runs.
 
-★ HIS LADDER IS THREE RUNGS, NOT FOUR. With "minimize_plastic": false the job
-takes production_growth_ladder() = {1.55, 1.25, 1.10}. The bar asked for four;
-four is the REDUCTION ladder, which is not what this job selects.
+★ HIS LADDER IS THREE RUNGS, NOT FOUR. With "minimize_plastic": false the job takes
+production_growth_ladder() = {1.55, 1.25, 1.10}. Four is the REDUCTION ladder, which
+this job does not select.
 
-=== 1. THE PRE-FLIGHT, BOTH MODES, ON HIS GEOMETRY (measured) ===
-=== his part, resolution 64, four rungs, cell_mode auto ===
+=== 1. THE PRE-FLIGHT, BOTH MODES, ON HIS GEOMETRY AT RESOLUTION 128 (measured) ===
+=== his part, resolution 128, four rungs, cell_mode auto ===
 exit code: 1
 [lattice] FORECAST region_too_thin: include region 0 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
 [lattice] FORECAST region_too_thin: include region 1 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
-[lattice] FORECAST region_too_thin: include region 2 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
-[lattice] FORECAST region_too_thin: include region 3 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FIT region 0 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 1 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 2 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 3 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 4 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 5 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 6 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT: 7 of 7 include regions cannot reach the 5.0-cell accuracy floor at their derived cell (thinnest region 4.000 mm; finest derived cell 1.0950 mm). Those are BUILDABLE and their certificate is OUT OF REGIME; the rest certify.
 
-=== his part, resolution 64, four rungs, cell_mode fit ===
+=== 2. THE ANALYZE PATH, END TO END ON HIS PART AT RESOLUTION 128 (measured) ===
+    (the full receipt, and the resolution-64 comparison, are in analyze_path_fit.txt)
+  region_voxels 46291 (the analyze call site grades the WHOLE printed design)
+  latticed 4414   solid_fallback 41877
+  no_derivation 41877 == printed_outside_regions 41877  -> True
+  distinct_cells 1   out_of_regime_voxels 0   density_raised 4414
 
-=== 2. THE ANALYZE PATH, END TO END ON HIS PART (measured; analyze_path_fit.txt
-    has the full receipt) ===
+  region | extent mm | cell mm  | derived rho | strut mm | cells/member | candidates | latticed | floor in force
+       0 |    4.0000 |   1.0950 |      0.6000 |   0.4200 |         3.65 |        238 |      238 | PERCOLATION (accuracy unreachable)
+       1 |    4.0000 |   1.0950 |      0.6000 |   0.4200 |         3.65 |        396 |      396 | PERCOLATION (accuracy unreachable)
+       2 |    4.0000 |   1.0950 |      0.6000 |   0.4200 |         3.65 |        384 |      384 | PERCOLATION (accuracy unreachable)
+       3 |    4.0000 |   1.0950 |      0.6000 |   0.4200 |         3.65 |        576 |      576 | PERCOLATION (accuracy unreachable)
+       4 |    4.0000 |   1.0950 |      0.6000 |   0.4200 |         3.65 |        672 |      672 | PERCOLATION (accuracy unreachable)
+       5 |    4.0000 |   1.0950 |      0.6000 |   0.4200 |         3.65 |        828 |      828 | PERCOLATION (accuracy unreachable)
+       6 |    4.0000 |   1.0950 |      0.6000 |   0.4200 |         3.65 |       1320 |     1320 | PERCOLATION (accuracy unreachable)
 
-cell_mode           : fit
-cell_size_mm        : 1.094961872
-printability_floor  : 4.602619932  (the rho_min bound — NOT selected)
-region_voxels       : 5710
-latticed_voxels     : 456
-solid_fallback      : 5254
-fit.min_printable_cell_mm       : 1.094961872
-fit.distinct_cells              : 1
-fit.out_of_regime_voxels        : 0
-fit.no_derivation_voxels        : 5254
-fit.density_raised_for_print    : 454
+  EVERY CANDIDATE IN EVERY REGION WAS LATTICED — candidates == latticed, all seven.
+  Nothing inside a declared region was skipped. Where auto refuses outright, fit puts
+  4,414 voxels of lattice in his walls.
 
-region | extent mm | cell mm      | rho | strut mm | cells/member | out of regime
-     0 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     1 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     2 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     3 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     4 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     5 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
-     6 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+=== 3. THE THREE-RUNG OPTIMIZE: STILL NOT ESTABLISHED, AND NOW WITH THE REASON ===
 
-=== 3. THE THREE-RUNG OPTIMIZE: NOT COMPLETED IN THIS SESSION ===
+State at write time, from r4_128/fit.log:
+PROGRESS rung=0 rungs=3 iter=25
 
-State when the session ended (the run was then stopped), from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-cell-fit-mode-2c28f1/62ba5e20-5756-4e80-af26-8681821fcce2/scratchpad/r4e/fit.log:
-PROGRESS rung=0 rungs=3 iter=210
+THE RUN CANNOT BE BOUNDED, AND THAT IS ITS OWN FINDING. The fixture states
+`"simp": {"max_iterations": 30}`. It has no effect: run_job.cpp:5560-5561 applies the
+job's cap and those lines sit inside the `else` at :5516 — the SELF-WEIGHT branch. A
+job with a `loads` block takes its options from build_production_loadcase and the key
+is parsed, stored and dropped. The schema accepts it unconditionally
+(job.cpp:715-721) while EXPLICITLY REFUSING `ladder` and `margin_stop` on that same
+path (job.cpp:465-470). Root cause, and why even a honoured cap would not be a single
+ceiling, in q3c_max_iterations_ignored.md.
 
-WHY, precisely, and it is not a property of fit. The `auto` side REFUSES at the
-pre-flight in 0.05 s (case B: 0.87 cells across a 4 mm region), so there is no `auto`
-run to compare against — that refusal IS the auto result and it is measured above. The
-`fit` side runs, and on the loadcase path the schema refuses both "ladder" and
-"margin_stop" while `simp.max_iterations` does not bind the MMA plateau, so each rung
-runs to the 200-iteration cap. Under this machine's load (other worktrees held the
-load average between 5 and 61 on 8 cores for the whole session) that is hours per
-rung, and rung 0 of 3 reached the iteration in the log line above. Note it is PAST 200: the
-MMA plateau cap did not stop this rung, so "how long is a rung" is not bounded by a
-number this fixture can state.
+The `auto` side has nothing to run: it refuses at the pre-flight in 0.05 s, and that
+refusal IS the auto result (section 1 above).
 
-WHAT IS AND IS NOT ESTABLISHED BY THAT.
-  * ESTABLISHED: the per-region derivation on HIS geometry, at HIS bead — all seven
-    regions, cell 1.0950 mm at relative density 0.6000, strut 0.4200 mm, 3.65 cells
-    per member, PERCOLATION floor in force, out of regime. That is arithmetic on the
-    declared geometry and core's constants; it does not depend on the solve, and it is
-    measured twice above (pre-flight and analyze).
-  * ESTABLISHED: on his part, through the real analyze path, `fit` lattices 456 voxels
-    inside those regions where `auto` lattices none.
-  * NOT ESTABLISHED: the per-rung emitted-cell counts across his growth ladder, and
-    the per-rung verdict/margin/mass under fit. Those need the optimize to finish.
-  * TO FINISH IT: `evidence/2026-08-05-lattice-cell-fit-mode/r4_his_part.sh
-    core/build <out> 64` on an idle machine. Expect hours, and expect the emitted
-    lattice mesh at a 1.0950 mm cell to be large (see r6_cost.txt).
+WHAT IS AND IS NOT ESTABLISHED.
+  * ESTABLISHED, at HIS resolution: the per-region derivation — all seven regions, cell
+    1.0950 mm at relative density 0.6000, strut 0.4200 mm, 3.65 cells per member,
+    PERCOLATION floor in force, out of regime. Arithmetic on the declared geometry and
+    core's constants; it does not depend on the solve.
+  * ESTABLISHED, at HIS resolution: 4,414 voxels latticed through the analyze path,
+    every candidate in every region, where auto lattices none.
+  * ESTABLISHED: every skipped voxel was outside every declared region (identity above).
+  * NOT ESTABLISHED: the per-rung emitted-cell counts, verdicts, margins and mass under
+    fit across his growth ladder. Those need the optimize to finish, and it cannot be
+    bounded until the iteration-cap defect above is fixed.
+  * TO FINISH IT: fix or work around q3c, then
+    `evidence/2026-08-05-lattice-cell-fit-mode/r4_his_part.sh core/build <out> 128` on
+    an idle machine. Expect the emitted lattice mesh at a 1.0950 mm cell to be large
+    (see r6_cost.txt).

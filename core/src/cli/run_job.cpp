@@ -662,6 +662,39 @@ std::vector<double> fit_cell_field(const VoxelGrid& grid,
   return out;
 }
 
+// ★ WHERE THE SKIPPED VOXELS WERE (review Q2). Walks the printed set once and splits
+// it by declared include region, so the receipt can say whether a voxel that got no
+// derived cell was INSIDE a region the user declared (a defect in this law) or OUTSIDE
+// every one of them (the candidate set reaching past the declaration — a different
+// defect, and one this project has paid for twice).
+//
+// Uses the SAME membership test and the same first-match precedence as
+// `fit_cell_field`, so the two cannot disagree about which region owns a voxel.
+void fill_fit_region_voxels(RunInfo& gi, const VoxelGrid& grid,
+                            const std::vector<double>& density, double iso,
+                            const std::vector<ClearanceGeometry>& includes,
+                            const GradedField& gf) {
+  if (gi.grading_fit_regions.size() != includes.size()) return;
+  long long outside = 0;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!(density[e] > iso)) continue;      // not printed: not a candidate at all
+        const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
+                     grid.origin.y + (j + 0.5) * grid.spacing,
+                     grid.origin.z + (k + 0.5) * grid.spacing};
+        std::size_t owner = includes.size();
+        for (std::size_t ri = 0; ri < includes.size(); ++ri)
+          if (point_in_clearance_region(includes[ri], c, 0.0)) { owner = ri; break; }
+        if (owner == includes.size()) { ++outside; continue; }
+        RunInfo::GradingFitRegion& R = gi.grading_fit_regions[owner];
+        ++R.candidate_voxels;
+        if (e < gf.posture.mask.size() && gf.posture.mask[e]) ++R.latticed_voxels;
+      }
+  gi.grading_fit_printed_outside_regions = outside;
+}
+
 // FIT's run_info block. Recomputed from the JOB rather than plumbed through the
 // variant outcome: the derivation is pure arithmetic on core's own constants and the
 // declared geometry, so recomputing it here cannot disagree with what the run used —
@@ -4487,6 +4520,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gi.grading_region_ungradeable = gf.region_ungradeable;
     fill_grading_cell_plan(gi, gf);
     fill_grading_fit(gi, gf, job);
+    if (gp.cell_mode == CellSizeMode::Fit)
+      fill_fit_region_voxels(gi, design_grid, density, 0.5, an_roles.includes, gf);
     fill_grading_subfloor(gi, gf);
 
     result.grading_run_info_path = join_path(out_dir, "run_info.json");
@@ -5221,6 +5256,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.grading_region_ungradeable = R.gf.region_ungradeable;
       fill_grading_cell_plan(gi, R.gf);
       fill_grading_fit(gi, R.gf, job);
+      if (R.gf.cell_mode == CellSizeMode::Fit)
+        fill_fit_region_voxels(gi, model_grid, sd.density,
+                               run_printed_iso(options), lattice_roles.includes,
+                               R.gf);
       fill_grading_subfloor(gi, R.gf);
     }
     result.run_info_path = join_path(out_dir, "run_info.json");
@@ -6702,6 +6741,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.g_ungradeable = gf.region_ungradeable;
       fill_grading_cell_plan(lat_agg.g_cell_ri, gf);
       fill_grading_fit(lat_agg.g_cell_ri, gf, job);
+      if (gf.cell_mode == CellSizeMode::Fit)
+        fill_fit_region_voxels(lat_agg.g_cell_ri, solved_grid,
+                               v.optimization.physical_density,
+                               run_printed_iso(options), lattice_roles.includes, gf);
       fill_grading_subfloor(lat_agg.g_cell_ri, gf);
     }
     lat_agg.cells += oc.stats.latticed_cells;
@@ -6962,6 +7005,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           lat_agg.g_cell_ri.grading_fit_no_derivation_voxels;
       run_info.grading_fit_distinct_cells =
           lat_agg.g_cell_ri.grading_fit_distinct_cells;
+      run_info.grading_fit_printed_outside_regions =
+          lat_agg.g_cell_ri.grading_fit_printed_outside_regions;
       run_info.grading_fit_regions = lat_agg.g_cell_ri.grading_fit_regions;
     }
     // Certification (handoff 2026-07-29-lattice-certification-e2e, bars E1/E3) — WHAT

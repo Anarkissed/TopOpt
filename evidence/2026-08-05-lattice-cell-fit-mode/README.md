@@ -17,7 +17,10 @@ isolates this task's own movement. See handoff §1.
 | `r5_percolation.py` | R5 | connected components and isolated-component count on an emitted STL, at the RUN's own `wall_line_width_mm` read from `run_info.json` (never a literal, never a strut radius) |
 | `r6_cost.sh` / `.txt` | R6 | iterations and wall, separately: one 12 mm region so BOTH modes run, asserting the solver iterations are identical and only generation moves |
 | `r7_test_suite.txt` | R7 | the full core suite, before and after the one fixture pin, plus the re-run after the final code change |
-| `analyze_path_fit.txt` | — | `fit` through the ANALYZE call site on his part (a unit test on `grade_lattice` exercises none of the three call sites) |
+| `analyze_path_fit.txt` | — | `fit` through the ANALYZE call site on his part **at his resolution 128** (a unit test on `grade_lattice` exercises none of the three call sites) |
+| `q1_width_provenance.md` | Q1 | what `min_extrudable_width_mm` is DEFINED to mean, which field the app actually sends, and the sensitivity at 0.42 vs 0.45 — read before any number was changed |
+| `q2_no_derivation.md` | Q2 | where the skipped voxels went, per declared region, decided by an identity rather than by argument |
+| `q3c_max_iterations_ignored.md` | Q3(c) | `simp.max_iterations` is accepted and silently ignored on the loadcase path — root-caused with file and line, not fixed here |
 | `s3_seam.sh` / `.txt` | S3 | two abutting regions with different derived cells: what the emitter produces at the seam, measured. Also carries the **R5 result: 1 isolated component, not 0**, located and attributed |
 
 Reproduce (from the repo root, with a Release build in `core/build`):

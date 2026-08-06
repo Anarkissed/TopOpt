@@ -1148,6 +1148,8 @@ std::string run_info_json(const RunInfo& info) {
             std::to_string(info.grading_fit_out_of_regime_voxels);
       gr += ", \"no_derivation_voxels\": " +
             std::to_string(info.grading_fit_no_derivation_voxels);
+      gr += ", \"printed_outside_regions\": " +
+            std::to_string(info.grading_fit_printed_outside_regions);
       gr += ", \"density_raised_for_print_voxels\": " +
             std::to_string(info.grading_density_raised_for_print_voxels);
       gr += ", \"regions\": [";
@@ -1162,6 +1164,8 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"strut_mm\": " + fmt(R.strut_mm);
         gr += ", \"cells_per_member\": " + fmt(R.cells_per_member);
         gr += ", \"out_of_regime\": " + bool_json(R.out_of_regime);
+        gr += ", \"candidate_voxels\": " + std::to_string(R.candidate_voxels);
+        gr += ", \"latticed_voxels\": " + std::to_string(R.latticed_voxels);
         gr += "}";
       }
       gr += "]";

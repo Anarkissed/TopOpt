@@ -48,7 +48,7 @@ CONTROL auto on a thin wall                    bead 0.42 wall   4.00 target  0.0
     AFTER  cell   4.6026  latticed      0  fallback  12800  rho [0.0000, 0.0000]  raised 0
     => identical
 
-FIT derivation at a 0.42 mm bead — cell = max(extent / N*, finest printable cell)
+FIT derivation at a 0.42 mm stated width — cell = max(extent / N*, finest printable cell)
   extent mm | derived cell | rho     | strut mm | cells/member | floor in force
      2.0000 |       1.0950 |  0.6000 |   0.4200 |         1.83 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
      4.0000 |       1.0950 |  0.6000 |   0.4200 |         3.65 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
@@ -58,3 +58,18 @@ FIT derivation at a 0.42 mm bead — cell = max(extent / N*, finest printable ce
     12.0000 |       2.4000 |  0.1751 |   0.4200 |         5.00 | ACCURACY
     24.0000 |       4.8000 |  0.0505 |   0.4380 |         5.00 | ACCURACY
     30.0000 |       6.0000 |  0.0505 |   0.5475 |         5.00 | ACCURACY
+  finest printable cell at this width = 1.09496187186339 mm
+
+FIT derivation at a 0.45 mm stated width — cell = max(extent / N*, finest printable cell)
+  extent mm | derived cell | rho     | strut mm | cells/member | floor in force
+     2.0000 |       1.1732 |  0.6000 |   0.4500 |         1.70 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     4.0000 |       1.1732 |  0.6000 |   0.4500 |         3.41 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     5.4748 |       1.1732 |  0.6000 |   0.4500 |         4.67 | PERCOLATION (accuracy unreachable) — OUT OF REGIME
+     6.0000 |       1.2000 |  0.5806 |   0.4500 |         5.00 | ACCURACY
+     8.0000 |       1.6000 |  0.3726 |   0.4500 |         5.00 | ACCURACY
+    12.0000 |       2.4000 |  0.1961 |   0.4500 |         5.00 | ACCURACY
+    24.0000 |       4.8000 |  0.0531 |   0.4500 |         5.00 | ACCURACY
+    30.0000 |       6.0000 |  0.0505 |   0.5475 |         5.00 | ACCURACY
+  finest printable cell at this width = 1.17317343413935 mm
+
+PR #301 cross-check @ 0.45 mm: their control floor 1.17317343413935 mm, this derivation 1.17317343413935 mm, delta 0.000e+00 mm — AGREE
