@@ -823,7 +823,8 @@ JobDescription parse_job(const std::string& json_text) {
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
                          "outer_finish", "regions", "multiscale",
-                         "forecast_only"},
+                         "forecast_only",
+                         "require_lattice_void_reaches_exterior"},
                         "lattice");
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
@@ -996,6 +997,15 @@ JobDescription parse_job(const std::string& json_text) {
       if (fo->type != JsonValue::Type::Bool)
         schema_fail("lattice \"forecast_only\" must be a boolean");
       job.lattice.forecast_only = (fo->num != 0.0);
+    }
+    // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
+    // Absent => false => every existing job runs, and writes, exactly as it did.
+    if (const JsonValue* rv =
+            find_key(lat, "require_lattice_void_reaches_exterior")) {
+      if (rv->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"require_lattice_void_reaches_exterior\" must be "
+                    "a boolean");
+      job.lattice.require_lattice_void_reaches_exterior = (rv->num != 0.0);
     }
   }
 

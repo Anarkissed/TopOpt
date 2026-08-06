@@ -1,0 +1,24 @@
+grid 48x32x48 @ 1.2500 mm, 4 rungs, printed iso 0.5
+
+C1 negative-control floor: one voxel moved 0.999947154531 -> 0.499999999000 (across the iso by 1e-9) => 1 flip(s)
+C2 negative-control floor: rung 0.68 vs rung 0.52 => 2009 flips
+
+  rung       margin OFF        margin ON     d margin        eff OFF         eff ON          verdict  voxel flips
+----------------------------------------------------------------------------------------------------------------
+  0.68      8.398164525      8.398164525    0.000e+00    8.398164525    8.398164525       True->True            0
+  0.52      8.334213155      8.334213155    0.000e+00    8.334213155    8.334213155       True->True            0
+  0.38      8.058366106      8.058366106    0.000e+00    8.058366106    8.058366106       True->True            0
+  0.26      7.503571156      7.503571156    0.000e+00    7.503571156    7.503571156       True->True            0
+
+latticed variant                      composite OFF     composite ON           accepted  lattice voxels
+--------------------------------------------------------------------------------------------------------
+variant_026_lattice.report.json         6.027866483      6.027866483         True->True        960->960
+variant_038_lattice.report.json         6.572584231      6.572584231         True->True      1036->1036
+variant_052_lattice.report.json         6.898128923      6.898128923         True->True      1274->1274
+variant_068_lattice.report.json         7.001637930      7.001637930         True->True      1396->1396
+
+cost: the run took 262.2 s wall (un-armed twin 279.0 s); lattice generation 0.05162883364 s; the void check 0.004190251 s over 286039 voxel pushes.
+
+R3 PASS — every rung's verdict, both margins, the composite margins and
+       every voxel classification are UNCHANGED by arming the check, against
+       a comparator proven to resolve a 1e-9 iso crossing.

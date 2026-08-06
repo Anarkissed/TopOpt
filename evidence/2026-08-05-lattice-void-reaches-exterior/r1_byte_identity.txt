@@ -1,0 +1,75 @@
+=== R1 — byte-identity when the option is OFF ===
+branch build: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/core/build
+base   build: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-void-exterior-check-ad2160/ed2434fd-4d40-4e7e-bece-52f82a75a8f6/scratchpad/build-main-r1
+
+--- stashing the branch and rebuilding BASE (target: topopt_cli) ---
+base   cli sha256: 6ecdb9ce48025e9f1db8ed7a790c6e2288139cd5cd20fc6849c8719e5b3dc234
+branch cli sha256: 93a1628f23e34b5e5210df3e224dffb51ba13fa724d0daa0ba391ef011f79afd
+the two binaries differ, as they must for this bar to mean anything.
+
+########## A — NO LATTICE, base vs branch. MUST be identical. ##########
+IDENTICAL  report.json  1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb
+IDENTICAL  fields.bin  499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354
+IDENTICAL  design.bin  09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061
+IDENTICAL  variant_026.stl  4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76
+IDENTICAL  variant_038.stl  e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901
+IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c
+IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
+IDENTICAL  run_info.json (minus the named clock keys)
+IDENTICAL  iterations.csv (physics columns)
+
+A PASS
+
+########## B — LATTICE + ROLE REGIONS, option OFF, base vs branch. ##########
+The exact shape the check inspects, with the check not armed. MUST be
+identical: the default path may not move by one byte.
+IDENTICAL  report.json  1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb
+IDENTICAL  fields.bin  499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354
+IDENTICAL  design.bin  09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061
+IDENTICAL  variant_026.stl  4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76
+IDENTICAL  variant_026_lattice.stl  540680491dbc709ae7496aaec1915c621f67a4805c80599f6edbe17b6212f299
+IDENTICAL  variant_038.stl  e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901
+IDENTICAL  variant_038_lattice.stl  b71f77d28cb92caadc62633b7f0045cdcdc15c75695d532469e79855cc87ae47
+IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c
+IDENTICAL  variant_052_lattice.stl  d86f8d0e7524721e6168cd8a473a898a25c33507c54839f39cd8b9354fa6912a
+IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
+IDENTICAL  variant_068_lattice.stl  a3e478127a595911c189d884b0777ac54698fb1f697ea2b22b0b9de4921461af
+IDENTICAL  variant_026_lattice.report.json  ac87021cbc31058d93cd7c2994a3f9ef2911f6412546be00910514dcb151d151
+IDENTICAL  variant_038_lattice.report.json  366d6698e918a08f758f088c5bbfb81560960f668fe21323003370046bbbf8a8
+IDENTICAL  variant_052_lattice.report.json  eb19a8ad21b667acf4efb2bff8169caaa45e166797efc879a1a2f2182ce596ed
+IDENTICAL  variant_068_lattice.report.json  d208b2460cadfa7454182dc102a49a779b2da9debe12104877173a947ccb1085
+IDENTICAL  run_info.json (minus the named clock keys)
+IDENTICAL  iterations.csv (physics columns)
+
+B PASS
+
+########## C — SAME BINARY, ARMED vs NOT. ##########
+The only thing that may change is the void_escape record the documents
+GAIN — and it must change, or the user could not tell the check was on.
+  IDENTICAL  report.json
+  IDENTICAL  design.bin
+  IDENTICAL  fields.bin
+  IDENTICAL  variant_026.stl
+  IDENTICAL  variant_026_lattice.stl
+  IDENTICAL  variant_038.stl
+  IDENTICAL  variant_038_lattice.stl
+  IDENTICAL  variant_052.stl
+  IDENTICAL  variant_052_lattice.stl
+  IDENTICAL  variant_068.stl
+  IDENTICAL  variant_068_lattice.stl
+  variant_026_lattice.report.json void_escape: ran=True sealed=False reached=960 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=74143 wall_seconds=0.001043833
+  IDENTICAL  variant_026_lattice.report.json (minus the void_escape block)
+  variant_038_lattice.report.json void_escape: ran=True sealed=False reached=1036 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=72525 wall_seconds=0.001047125
+  IDENTICAL  variant_038_lattice.report.json (minus the void_escape block)
+  variant_052_lattice.report.json void_escape: ran=True sealed=False reached=1274 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=70719 wall_seconds=0.0010245
+  IDENTICAL  variant_052_lattice.report.json (minus the void_escape block)
+  variant_068_lattice.report.json void_escape: ran=True sealed=False reached=1396 faces=['-x', '+x', '-y', '+y', '-z', '+z'] bfs_visits=68652 wall_seconds=0.001221791
+  IDENTICAL  variant_068_lattice.report.json (minus the void_escape block)
+  IDENTICAL  run_info.json (minus void_escape and the clocks)
+
+  C PASS — arming adds the record and changes nothing else.
+
+R1 PASS — with the option off (its default), a no-lattice run and a
+          lattice-with-roles run are BYTE-IDENTICAL across two separately
+          built binaries; arming it adds the void_escape record and
+          changes no geometry.

@@ -653,6 +653,34 @@ struct RunInfo {
   // above (task 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3). Carried
   // so "3 of 4 rungs latticed" is a stated fact rather than a missing file.
   int lattice_export_ungradeable_variants = 0;
+  // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior). The
+  // serializer emits a nested "void_escape" object ONLY when
+  // `lattice_void_check_ran`, i.e. only when the job armed
+  // `lattice.require_lattice_void_reaches_exterior`, so a run that did not arm
+  // it writes a byte-identical record (bar R1).
+  //
+  // BOTH VERDICTS ARE RECORDED. `sealed_variants` is the refusal count; the
+  // reached / reachable / escape-depth / face fields are what a PASS says, and
+  // they exist because a silent pass is indistinguishable from a check that did
+  // not run. `bfs_visits` and `wall_seconds` are the check's OWN cost, separate
+  // from `gen_seconds` (generation) — the R5 bar.
+  bool lattice_void_check_ran = false;
+  int lattice_void_sealed_variants = 0;
+  long long lattice_void_sealed_cells = 0;
+  long long lattice_void_sealed_voxels = 0;
+  double lattice_void_sealed_volume_mm3 = 0.0;
+  long long lattice_void_latticed_reached = 0;
+  long long lattice_void_latticed_cells = 0;
+  double lattice_void_reachable_volume_mm3 = 0.0;
+  long long lattice_void_bfs_visits = 0;
+  int lattice_void_escape_depth_max = -1;
+  // "-x,+x,-y,+y,-z,+z" — the grid faces the OPEN lattice's own escape network
+  // touched, joined by commas. Empty when no latticed voxel was reached.
+  std::string lattice_void_escape_faces;
+  // Sealed cavities holding NO lattice: pre-existing enclosed voids in the
+  // design. REPORTED, never a refusal — this rule is about lattice.
+  long long lattice_void_sealed_pockets_without_lattice = 0;
+  double lattice_void_wall_seconds = 0.0;
   bool lattice_export_emit_stl = false;
   bool lattice_export_emit_3mf = false;
   bool lattice_export_interpenetrating_soup = true;
