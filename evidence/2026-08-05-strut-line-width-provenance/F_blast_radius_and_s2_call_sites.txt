@@ -1,0 +1,84 @@
+F — BLAST RADIUS, AND THE CALL SITES S2 WILL NEED
+==================================================
+
+F.1 IS ANYTHING ELSE DROPPED BY THE SAME TRANSFER? No — exactly one field.
+    Every member of JobLoadCase (core/include/topopt/job.hpp:437-463) against
+    its copy in production_loadcase_from_job (core/src/cli/run_job.cpp:3069+):
+
+      anchors                     -> run_job.cpp:3074   copied
+      anchor_face_ids             -> run_job.cpp:3073   copied
+      groups                      -> run_job.cpp:3076   copied
+      clearances                  -> run_job.cpp:3089   copied
+      face_protection_face_ids    -> run_job.cpp:3131   copied
+      face_protection_depth_mm    -> run_job.cpp:3132   copied
+      minimize_plastic            -> run_job.cpp:3134   copied
+      build_dir                   -> run_job.cpp:3135   copied
+      infill_percent              -> run_job.cpp:3136   copied
+      wall_loops                  -> run_job.cpp:3137   copied
+      wall_line_width_mm          -> run_job.cpp:3138   copied
+      wall_line_width_outer_mm    ->  ---               DROPPED
+
+    (mechanically: every `job.loads.<field>` reference in run_job.cpp)
+      189:  info.load_source = job.loads.present ? "loadcase" : "self_weight";
+      595:  if (!job.loads.present) return out;
+      596:  for (const JobClearance& jc : job.loads.clearances) {
+      3073:  lc.anchor_face_ids = job.loads.anchor_face_ids;
+      3074:  for (const int id : resolve_selectors(model, job.loads.anchors, "anchors"))
+      3076:  for (const JobLoadGroup& g : job.loads.groups) {
+      3089:  for (const JobClearance& jc : job.loads.clearances) {
+      3131:  lc.face_protection_face_ids = job.loads.face_protection_face_ids;
+      3132:  if (job.loads.face_protection_depth_mm > 0.0)
+      3133:    lc.face_protection_depth_mm = job.loads.face_protection_depth_mm;
+      3134:  lc.minimize_plastic = job.loads.minimize_plastic;
+      3135:  lc.build_dir = job.loads.build_dir;
+      3136:  lc.infill_percent = job.loads.infill_percent;
+      3137:  lc.wall_loops = job.loads.wall_loops;
+      3138:  lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+      3179:    for (const JobLoadGroup& g : job.loads.groups) {
+      3196:    s += "  \"build_dir\": [" + json_num(job.loads.build_dir.x) + ", " +
+      3197:         json_num(job.loads.build_dir.y) + ", " +
+      3198:         json_num(job.loads.build_dir.z) + "],\n";
+      3873:  const bool loadcase = job.loads.present;
+
+F.2 THE FIX S2 WILL MAKE IN CORE — one line, immediately after
+    core/src/cli/run_job.cpp:3138, restoring what PR #227 shipped:
+        lc.wall_line_width_outer_mm = job.loads.wall_line_width_outer_mm;
+    plus the test that would have caught it: a job.json carrying an outer width
+    driven THROUGH run_job, asserting run_info echoes it (both existing tests
+    stop short of that boundary — file B section 4). NOT DONE HERE: S1 changes
+    no production file.
+
+F.3 THE FOUR APP CALL SITES that feed the WALL outer line width to the STRUT,
+    which S2 must give its own field (all four pass the same
+    project.printParams.wallLineWidthOuterMM):
+      app/TopOptKit/Sources/TopOptFlows/LatticePage.swift:140:                              lineWidthMM: project.printParams.wallLineWidthOuterMM)
+      app/TopOptKit/Sources/TopOptFlows/LatticePage.swift:180:            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+      app/TopOptKit/Sources/TopOptFlows/AppModel.swift:269:            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+      app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift:2018:            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+      1. LatticePage.swift:140            -> LatticeBounds.compute(...) — the
+                                             page's own bounds/refusal text
+      2. LatticePage.swift:180            -> the panel summary row
+      3. AppModel.swift:269               -> project.lattice.runSpec(...) — THE
+                                             ONE that reaches the job/bridge
+      4. WorkspacePlaceholder.swift:2018  -> the workspace lattice summary
+
+    Where it lands after AppModel.swift:269 (LatticeSettings.swift:439/454):
+                                     regionScoped: region != nil || !regions.isEmpty,
+                                     skin: boundary.jobSkinValue,
+                                     minExtrudableWidthMM: lineWidthMM,
+                                     graded: true,
+                                     regions: regions,
+                                 regionScoped: region != nil || !regions.isEmpty,
+                                 skin: boundary.jobSkinValue,
+                                 minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil,
+                                 regions: regions)
+          }
+    and the two runners that serialize it (both carry it today, unchanged by
+    this task):
+      RemoteRunner.swift:680,709-712      -> job.json "lattice".min_extrudable_width_mm
+      RelatticeRunner.swift:112,129-130   -> the same key on the re-lattice path
+    plus the WALL widths the two runners send, which is the pair this task is
+    about:
+      RemoteRunner.swift:821-825          -> loads.wall_{loops,line_width_mm,
+                                             line_width_outer_mm}  (LAN)
+      RunModel.swift:1033-1034            -> the bridge twins             (device)
