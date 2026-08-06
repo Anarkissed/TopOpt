@@ -8,6 +8,7 @@ Handoff: `docs/handoffs/2026-08-06-smoothing-operator-bakeoff.md`
 | `sphere_bakeoff.csv` | the same sphere table, machine-readable |
 | `r2_failing_first.txt` | bar R2 — C1, C2, C3 and the normal orientation each DISABLED in `core/src/mesh/surface_operator.cpp` in turn, with the unmodified `test_surface_operator` re-run and its failures pasted; all constraints restored at the end |
 | `r1_byte_identity.txt` | bar R1 — stdout checksums of 11 shipped test binaries across a baseline worktree at `origin/main` (`81a2368`) and this change, plus the two vacuity guards (at least 5 binaries compared; the two `libtopopt.a` archives demonstrably differ). Re-run against the MERGED tree: main moved 11 commits under this task |
+| `ctest.txt` | the full suite on the merged tree — 107/107, and the added test run directly |
 | `sdf_sphere_remeasured.txt` | PR 303's own sphere control, re-run here after PR 303 merged to main — the source of the matched-vertex-count comparison in §S1.1 |
 
 ## Reproducing
