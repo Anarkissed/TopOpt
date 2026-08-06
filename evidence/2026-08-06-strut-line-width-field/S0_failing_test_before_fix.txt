@@ -1,0 +1,11 @@
+=== R2 / S0(c): the round-trip test run against UNFIXED code ===
+HEAD:            56058c2
+run_job.cpp copy: lc.wall_line_width_outer_mm is NOT assigned (the PR #228 drop)
+
+job -> load case copy (task 2026-08-06-strut-line-width-field, S0)
+FAIL: wall_line_width_outer_mm (OUTER) carried  <-- the PR #228 drop
+      job said 0.420000, load case got -1.000000 (the mirror-inner sentinel: the value was DROPPED)
+  wall ring t = 2.2500 mm  (loops 5, outer 0.4500 mm, inner 0.4500 mm)
+FAIL: wall ring t = 2.22 mm at outer 0.42 mm / inner 0.45 mm, 5 loops
+2 check(s) failed
+exit=1

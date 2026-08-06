@@ -1,0 +1,132 @@
+== R2: FAILING TEST FIRST, one constraint at a time ==
+
+Each block below DISABLES one constraint's enforcement in
+core/src/mesh/surface_operator.cpp and re-runs the unmodified
+core/tests/unit/test_surface_operator.cpp. The failures are the damage the
+constraint exists to prevent, observed rather than asserted about.
+
+-------------------------------------------------------------------
+C1 DISABLED — the trust region is not enforced
+-------------------------------------------------------------------
+  without C1: max per-axis motion 1.8679 mm = 1.87 cells
+  with    C1: max per-axis motion 1.8679 mm = 1.87 cells (0 vertices clamped, deepest pull-back 0.0000 mm)
+FAIL: C1: no vertex leaves its voxel (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:213)
+FAIL: C1 POSITIVE CONTROL: the clamp actually bit (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:214)
+  operator B with C1: max per-axis motion 0.7854 mm = 0.79 cells
+FAIL: C1 holds for operator B too (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:234)
+  without C2: max inward 1.1170 mm, max outward 0.0000 mm
+FAIL: C2 POSITIVE CONTROL: unsigned flow adds material somewhere (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:263)
+  OutwardOnly: max inward 2.3661e-15 mm (must be 0), max outward 0.6097 mm, 1082 vertices projected
+  InwardOnly : max outward 0.0000e+00 mm (must be 0), max inward 1.2157 mm, 606 vertices projected
+  Pinned     : A bit-identical yes, B bit-identical yes (1896 pinned)
+  mixed      : worst OutwardOnly violation 2.0512e-15 mm, worst InwardOnly violation 0.0000e+00 mm
+  thin section: 34 OutwardOnly, 598 Both; on the fin 34/34 OutwardOnly
+  load path   : 27/27 vertices beside the Load voxel flagged
+  box + fin   : 144 InwardOnly, 34 Pinned
+  without C3: 4204.6667 -> 3060.7137 mm3  (-27.2067%)
+  with    C3: 4204.6667 -> 4204.6667 mm3  (+0.000000%) in 5 shift iterations
+  operator B: 4204.6667 -> 4204.6667 mm3  (drift 0.000000%)
+  uv_sphere       signed_volume   +2129.3934 -> 1106 radially outward, 0 inward
+  marching_cubes  signed_volume   -4204.6667 -> 1896 radially outward, 0 inward
+44 checks, 4 failures
+
+-------------------------------------------------------------------
+C2 DISABLED — the sign of the bound is not enforced
+-------------------------------------------------------------------
+  without C1: max per-axis motion 1.8679 mm = 1.87 cells
+  with    C1: max per-axis motion 0.5000 mm = 0.50 cells (576 vertices clamped, deepest pull-back 0.1764 mm)
+  operator B with C1: max per-axis motion 0.5000 mm = 0.50 cells
+  without C2: max inward 0.7394 mm, max outward 0.0171 mm
+  OutwardOnly: max inward 7.3935e-01 mm (must be 0), max outward 0.0171 mm, 0 vertices projected
+FAIL: C2 OutwardOnly: no vertex removes material (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:274)
+FAIL: C2 POSITIVE CONTROL: the projection bit (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:275)
+  InwardOnly : max outward 1.7063e-02 mm (must be 0), max inward 0.7394 mm, 0 vertices projected
+FAIL: C2 InwardOnly: no vertex adds material (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:287)
+FAIL: C2 POSITIVE CONTROL: the projection bit (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:288)
+  Pinned     : A bit-identical NO, B bit-identical NO (0 pinned)
+FAIL: C2 Pinned: operator A moves nothing, bitwise (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:307)
+FAIL: C2 Pinned: operator B moves nothing, bitwise (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:308)
+FAIL: C2 Pinned: every vertex counted (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:309)
+  mixed      : worst OutwardOnly violation 7.3935e-01 mm, worst InwardOnly violation 1.7063e-02 mm
+FAIL: C2 mixed: every vertex obeys its OWN sign (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:336)
+  thin section: 34 OutwardOnly, 598 Both; on the fin 34/34 OutwardOnly
+  load path   : 27/27 vertices beside the Load voxel flagged
+  box + fin   : 144 InwardOnly, 34 Pinned
+  without C3: 4204.6667 -> 3631.3001 mm3  (-13.6364%)
+  with    C3: 4204.6667 -> 4204.6667 mm3  (+0.000000%) in 5 shift iterations
+  operator B: 4204.6667 -> 4204.6667 mm3  (drift 0.000000%)
+  uv_sphere       signed_volume   +2129.3934 -> 1106 radially outward, 0 inward
+  marching_cubes  signed_volume   -4204.6667 -> 1896 radially outward, 0 inward
+FAIL: C5: a brush weight cannot move what C2 pinned (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:676)
+44 checks, 9 failures
+
+-------------------------------------------------------------------
+C3 DISABLED — no volume compensator
+-------------------------------------------------------------------
+  without C1: max per-axis motion 1.8679 mm = 1.87 cells
+  with    C1: max per-axis motion 0.5000 mm = 0.50 cells (576 vertices clamped, deepest pull-back 0.1764 mm)
+  operator B with C1: max per-axis motion 0.5000 mm = 0.50 cells
+  without C2: max inward 0.7394 mm, max outward 0.0171 mm
+  OutwardOnly: max inward 2.4490e-15 mm (must be 0), max outward 0.5448 mm, 1082 vertices projected
+  InwardOnly : max outward 1.6072e-15 mm (must be 0), max inward 0.7353 mm, 606 vertices projected
+  Pinned     : A bit-identical yes, B bit-identical yes (1896 pinned)
+  mixed      : worst OutwardOnly violation 2.0535e-15 mm, worst InwardOnly violation 1.6875e-15 mm
+  thin section: 34 OutwardOnly, 598 Both; on the fin 34/34 OutwardOnly
+  load path   : 27/27 vertices beside the Load voxel flagged
+  box + fin   : 144 InwardOnly, 34 Pinned
+  without C3: 4204.6667 -> 3631.3001 mm3  (-13.6364%)
+  with    C3: 4204.6667 -> 3631.3001 mm3  (-13.636434%) in 0 shift iterations
+FAIL: C3: drift below 1e-4 % after the uniform shift (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:473)
+FAIL: C3: the compensator strictly improves on the uncompensated drift (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:475)
+  operator B: 4204.6667 -> 3994.9974 mm3  (drift 4.986584%)
+FAIL: C3: operator B holds volume too (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:485)
+  uv_sphere       signed_volume   +2129.3934 -> 1106 radially outward, 0 inward
+  marching_cubes  signed_volume   -4204.6667 -> 1896 radially outward, 0 inward
+44 checks, 3 failures
+
+-------------------------------------------------------------------
+NORMAL ORIENTATION NOT MEASURED — winding taken on faith (the defect found in this task)
+-------------------------------------------------------------------
+  without C1: max per-axis motion 1.8679 mm = 1.87 cells
+  with    C1: max per-axis motion 0.5000 mm = 0.50 cells (576 vertices clamped, deepest pull-back 0.1764 mm)
+  operator B with C1: max per-axis motion 0.5000 mm = 0.50 cells
+  without C2: max inward 0.0171 mm, max outward 0.7394 mm
+  OutwardOnly: max inward 1.6072e-15 mm (must be 0), max outward 0.7353 mm, 606 vertices projected
+  InwardOnly : max outward 2.4490e-15 mm (must be 0), max inward 0.5448 mm, 1082 vertices projected
+  Pinned     : A bit-identical yes, B bit-identical yes (1896 pinned)
+  mixed      : worst OutwardOnly violation 1.1243e-15 mm, worst InwardOnly violation 2.4498e-15 mm
+  thin section: 34 OutwardOnly, 598 Both; on the fin 34/34 OutwardOnly
+  load path   : 27/27 vertices beside the Load voxel flagged
+  box + fin   : 144 InwardOnly, 34 Pinned
+  without C3: 4204.6667 -> 3631.3001 mm3  (-13.6364%)
+  with    C3: 4204.6667 -> 3631.3001 mm3  (-13.636434%) in 0 shift iterations
+FAIL: C3: drift below 1e-4 % after the uniform shift (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:473)
+FAIL: C3: the compensator strictly improves on the uncompensated drift (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:475)
+  operator B: 4204.6667 -> 3994.9974 mm3  (drift 4.986584%)
+FAIL: C3: operator B holds volume too (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:485)
+  uv_sphere       signed_volume   +2129.3934 -> 1106 radially outward, 0 inward
+  marching_cubes  signed_volume   -4204.6667 -> 0 radially outward, 1896 inward
+FAIL: vertex_normals points geometrically OUTWARD on this winding (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:554)
+44 checks, 4 failures
+
+-------------------------------------------------------------------
+ALL CONSTRAINTS RESTORED
+-------------------------------------------------------------------
+44 checks, 0 failures
+
+-------------------------------------------------------------------
+REFINEMENT INHERITANCE REMOVED — a vertex BORN inside a protected
+region defaults to unconstrained (the hole this fix closes)
+-------------------------------------------------------------------
+-- REFINED VERTICES INHERIT THEIR PARENTS -----------------
+FAIL: all-pinned: refinement happens but nothing moves (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:707)
+  1248 -> 8234 verts; in the pinned half 4143 vertices, 1586 moved; 4091 moved outside it
+FAIL: no vertex in the pinned region moved — including ones refinement created (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:737)
+  brush: 1586 vertices in the unpainted half moved
+FAIL: a vertex born between two unpainted parents inherits weight 0 (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-operator-bakeoff-9530b1/core/tests/unit/test_surface_operator.cpp:754)
+50 checks, 3 failures
+
+-------------------------------------------------------------------
+RESTORED
+-------------------------------------------------------------------
+50 checks, 0 failures

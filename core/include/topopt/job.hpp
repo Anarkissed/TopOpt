@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "topopt/analyze.hpp"     // FixedDesignAnalysis
+#include "topopt/loadcase.hpp"   // ProductionLoadCase
 #include "topopt/materials.hpp"  // MaterialLibrary
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/pipeline.hpp"   // MinimizePlasticResult
@@ -847,6 +848,23 @@ struct SmoothRequest {
   double freeze_tol_mm = 0.0;    // ≤0 → default (0.75 × voxel spacing)
   bool enforce_min_feature = true;
 };
+
+// Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
+// core builder (build_production_loadcase) consumes. THE ONE MAPPING: run_job's
+// optimize path, analyze_job's re-certification path and lattice_variant_job all
+// call it, so a declared load case resolves IDENTICALLY however the job is run.
+// Geometric anchor / load-face selectors are resolved against `model` here
+// (resolve_selectors THROWS a JobError naming any selector that matches nothing);
+// they compose with any raw B-rep face ids.
+//
+// DECLARED HERE SO IT CAN BE TESTED AT ITS OWN SEAM (task
+// 2026-08-06-strut-line-width-field, S0). It lived in run_job.cpp's anonymous
+// namespace, which is why the only tests that could reach the wall-width split set
+// MinimizePlasticOptions directly and never crossed this boundary — precisely the
+// "tests on the value type miss the call site" shape that let PR #228's
+// merge-conflict resolution drop `wall_line_width_outer_mm` here for eight days.
+ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
+                                                const StepModel& model);
 
 // Re-certify a FIXED design under `job`'s load case. Builds the grid / fixtures /
 // BCs / loads from the job's MODEL exactly as run_job does — a declared "loads"

@@ -23,3 +23,20 @@ build-asan/
 build-release/
 build-probe/
 build-diag/
+
+# Harness scratch that lands in the REPO ROOT when a probe is run without an
+# explicit evidence directory (task 2026-08-06-smoothing-operator-bakeoff, C1).
+# Every pattern is ROOT-ANCHORED with a leading slash, so the identically-named
+# files that legitimately live under evidence/<task>/ are still tracked — only
+# the root copies, which are never legitimate, are ignored.
+#
+# This is a GUARD, NOT THE FIX. The cause is sdf_geometry_probe.cpp:1482, where
+# the part-based modes default their output directory to "." — see the handoff
+# for why that default is load-bearing for another task's documented recipe and
+# so is not safe to change here.
+/sdf_*.stl
+/sdf_*.csv
+/subject_variant.stl
+/sphere_control.stl
+/dumbbell.stl
+/bracket_export.stl

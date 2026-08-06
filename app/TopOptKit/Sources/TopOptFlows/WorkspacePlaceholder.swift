@@ -2012,10 +2012,14 @@ public struct WorkspacePlaceholder: View {
         }
         // The SAME spec builder the optimize request uses — only the regions
         // differ, and they differ for the Z11 reason above.
+        // The STRUT width, matching AppModel.makeRunRequest (task
+        // 2026-08-06-strut-line-width-field): a re-lattice must use the same
+        // printability reference the optimize run did, or the two jobs derive
+        // different cells from the same project.
         let spec = project.lattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            lineWidthMM: project.printParams.strutLineWidthMM,
             regions: emission.regions)
         // THE VARIANT'S OWN IDENTITY AND ITS OWN NUMBER (task
         // 2026-08-04-variant-volume-fraction-mismatch). This passed
@@ -2101,10 +2105,11 @@ public struct WorkspacePlaceholder: View {
         // the path the Lattice page actually drives, showed no lattice record at
         // all. It now carries the receipt onto the outcome, which is what puts the
         // per-region breakdown on the results screen.
+        // The STRUT width, matching the job this receipt describes.
         let echo = project.lattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            lineWidthMM: project.printParams.strutLineWidthMM,
             regions: project.variantLatticeJobRegions().regions)
         run.runner = { _, _, _ in
             let result = try RelatticeRun.run(inputs)

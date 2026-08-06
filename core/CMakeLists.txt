@@ -48,6 +48,7 @@ add_library(topopt
   # exactly as src/io/face_tag.cpp does — so it builds in every configuration,
   # including the dependency-free iOS slices.
   src/mesh/cad_project.cpp
+  src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/lattice_boundary.cpp
   src/voxel/voxelize.cpp
@@ -465,6 +466,16 @@ add_test(NAME clearance COMMAND test_clearance)
 # in code, so it runs in every configuration. Covers bars S1 (frozen=bit-identical),
 # S2 (min-feature constraint stops a thinning), S4 (volume drift vs bound), S5
 # (determinism), S6 (strength 0 = identity).
+# The S2 CONSTRAINT BARS for the two candidate surface operators (task
+# 2026-08-06-smoothing-operator-bakeoff, bar R2). Each of C1 / C2 / C3 is a PAIR
+# of arms: the unconstrained arm asserts the damage actually happens, the
+# constrained arm asserts it does not. Pure C++/std like test_smooth (meshes are
+# built in code from synthetic fields via marching_cubes), so it runs in every
+# configuration.
+add_executable(test_surface_operator tests/unit/test_surface_operator.cpp)
+target_link_libraries(test_surface_operator PRIVATE topopt)
+add_test(NAME surface_operator COMMAND test_surface_operator)
+
 add_executable(test_smooth tests/unit/test_smooth.cpp)
 target_link_libraries(test_smooth PRIVATE topopt)
 add_test(NAME smooth COMMAND test_smooth)
@@ -1426,6 +1437,19 @@ if(OpenCASCADE_FOUND)
   add_executable(cad_project_probe EXCLUDE_FROM_ALL
     tests/harness/cad_project_probe.cpp)
   target_link_libraries(cad_project_probe PRIVATE topopt)
+  # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
+  # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
+  # S3 instrumentation (minimum cross-section, outward excursion, volume, wall
+  # time per stroke). Prints tables, writes evidence. A harness, not a ctest.
+  #   cmake --build build --target operator_bakeoff_probe
+  #   ./build/operator_bakeoff_probe [evidence_dir] [bracket.stl]
+  add_executable(operator_bakeoff_probe EXCLUDE_FROM_ALL
+    tests/harness/operator_bakeoff_probe.cpp)
+  target_link_libraries(operator_bakeoff_probe PRIVATE topopt)
+  target_compile_definitions(operator_bakeoff_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
+
+
   # S1 (task 2026-08-05-smoothing-sdf-geometry-extraction): does the SDF geometry
   # extraction of arXiv:2512.06976 beat Taubin's 10.6% ceiling on the
   # maintainer's part? Measured with PR 299's metric, which both probes now share
@@ -1510,6 +1534,19 @@ endif()
 
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_sources(topopt PRIVATE src/cli/run_job.cpp)
+
+  # THE job.json -> ProductionLoadCase COPY, tested at its own seam (task
+  # 2026-08-06-strut-line-width-field, S0). production_loadcase_from_job lost
+  # `wall_line_width_outer_mm` to a merge-conflict resolution and no test noticed:
+  # the parser test stops one step short of it and the knockdown test starts one
+  # step past it, setting MinimizePlasticOptions directly. This drives a
+  # JobDescription through the real helper and asserts every carried field
+  # arrives, that an OMITTED outer width still reaches the mirror-inner sentinel,
+  # and the wall-ring arithmetic the width feeds. Synthetic in-code StepModel, no
+  # solve — it lives here only because run_job.cpp is compiled in this block.
+  add_executable(test_job_loadcase_copy tests/unit/test_job_loadcase_copy.cpp)
+  target_link_libraries(test_job_loadcase_copy PRIVATE topopt)
+  add_test(NAME job_loadcase_copy COMMAND test_job_loadcase_copy)
 
   add_executable(topopt_cli src/cli/main.cpp)
   set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)

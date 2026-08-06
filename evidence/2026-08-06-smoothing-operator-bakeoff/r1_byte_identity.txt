@@ -1,0 +1,50 @@
+== R1: BYTE-IDENTICAL WHEN OFF, by stash-rebuild checksum ==
+
+RE-RUN AGAINST THE MERGED TREE. main moved under this task — PRs 301, 302 and
+303 landed while it was running — so the first R1, taken against 90e9ec5, was
+stale before it was published. This is the one that counts.
+
+BASELINE  : a detached worktree at origin/main (81a2368),
+            configured and built with the same command.
+SUBJECT   : this worktree, main merged in, with the change applied.
+
+-- STEP 0: are these binaries deterministic at all? --------------------
+An identity bar over nondeterministic output would be meaningless, so each
+subject is run TWICE in the same tree first and must agree with itself.
+  test_smooth            deterministic (84ff65a1142ec5b0)
+  test_smooth_brush      deterministic (2e45f6878acd1d27)
+  test_export            deterministic (c0c3bbe2792601b3)
+  test_resample          deterministic (fc18a15fa23d4cf9)
+  test_voxel             deterministic (4798aefaf9b9d658)
+  test_stl               deterministic (889a9e61916caaa1)
+  test_fields            deterministic (eb97feb9fb1154a5)
+  test_segment           deterministic (a3fc74b4522f27fc)
+  test_report            deterministic (dd8ffcf05e11f53d)
+  test_job               deterministic (e05d740e5099f8e5)
+  test_warm_start        deterministic (5f73173849f1ea6d)
+
+-- STEP 1: the identity ------------------------------------------------
+  binary                 baseline           with the change    verdict
+  test_smooth            84ff65a1142ec5b0   84ff65a1142ec5b0   IDENTICAL
+  test_smooth_brush      2e45f6878acd1d27   2e45f6878acd1d27   IDENTICAL
+  test_export            c0c3bbe2792601b3   c0c3bbe2792601b3   IDENTICAL
+  test_resample          fc18a15fa23d4cf9   fc18a15fa23d4cf9   IDENTICAL
+  test_voxel             4798aefaf9b9d658   4798aefaf9b9d658   IDENTICAL
+  test_stl               889a9e61916caaa1   889a9e61916caaa1   IDENTICAL
+  test_fields            eb97feb9fb1154a5   eb97feb9fb1154a5   IDENTICAL
+  test_segment           a3fc74b4522f27fc   a3fc74b4522f27fc   IDENTICAL
+  test_report            dd8ffcf05e11f53d   dd8ffcf05e11f53d   IDENTICAL
+  test_job               e05d740e5099f8e5   e05d740e5099f8e5   IDENTICAL
+  test_warm_start        5f73173849f1ea6d   5f73173849f1ea6d   IDENTICAL
+  (11 binaries actually compared)
+
+-- STEP 2: THE GUARDS --------------------------------------------------
+Two ways this bar can pass while proving nothing, both closed here:
+  (a) comparing ZERO binaries and reporting success;
+  (b) comparing two builds that are actually the same build.
+  libtopopt.a            2765f836979b382a   69d54eae53fa7424   DIFFER — good
+  mean_curvature_flow syms subject 4, baseline 0
+  registered ctests      baseline 106, subject 107
+
+VERDICT: R1 HOLDS. 11 shipped binaries, all deterministic, all byte-identical
+         across two demonstrably different builds of the MERGED tree.

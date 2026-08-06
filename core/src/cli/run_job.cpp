@@ -3312,6 +3312,8 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
     options.bake_build_orientation = BakeBuildOrientation::Auto;
 }
 
+}  // namespace
+
 // Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
 // core builder (build_production_loadcase) consumes. This is the ONE mapping —
 // run_job's optimize path AND analyze_job's re-certification path both call it, so
@@ -3321,14 +3323,44 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
 // a JobError naming any selector that matches nothing — the loud "face does not
 // exist" failure), and compose with any raw B-rep face ids. Clearance / face-
 // protection / design-box / infill / wall metadata are forwarded verbatim.
+//
+// Declared in job.hpp (no longer file-local) so job_loadcase_copy can assert the
+// round trip AT THIS SEAM rather than on the value type.
 ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                                                const StepModel& model) {
+  // ★ THE FIELD LEDGER — this copy is EXHAUSTIVE BY CONSTRUCTION.
+  //
+  // THE DEFECT CLASS, not the defect: a hand-retyped copy block. PR #227 added
+  // `lc.wall_line_width_outer_mm` on 2026-07-28 20:52 (commit 84a1350); PR #228's
+  // merge-conflict resolution 71 minutes later (commit fc6e95f) hoisted this block
+  // into a helper and re-typed five of its six trailing assignments, dropping the
+  // sixth. Nothing failed, because a hand-written list cannot notice a field it
+  // was never told about — and the next conflict here would drop a different one.
+  //
+  // So the body below never writes `job.loads.<field>`. It decomposes JobLoadCase
+  // by STRUCTURED BINDING, which the language requires to name EVERY direct
+  // non-static data member — no more, no fewer. ADD A FIELD TO JobLoadCase AND
+  // THIS DECLARATION STOPS COMPILING until someone names it here and, on the line
+  // that follows, states what happens to it: copied, resolved, or deliberately
+  // not carried. The round-trip test (core/tests/unit/test_job_loadcase_copy.cpp)
+  // then locks the VALUES; this locks the COVERAGE, which is the half that was
+  // missing.
+  const auto& [j_present, j_anchors, j_anchor_face_ids, j_groups, j_clearances,
+               j_face_protection_face_ids, j_face_protection_depth_mm,
+               j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
+               j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
+  // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
+  // which is the CALLER's question (every call site gates on job.loads.present
+  // before asking for a load case). ProductionLoadCase has no counterpart and
+  // should not grow one. Named here so the ledger stays complete.
+  (void)j_present;
+
   ProductionLoadCase lc;
   // Anchors: raw B-rep ids (from the app) and/or geometric selectors compose.
-  lc.anchor_face_ids = job.loads.anchor_face_ids;
-  for (const int id : resolve_selectors(model, job.loads.anchors, "anchors"))
+  lc.anchor_face_ids = j_anchor_face_ids;
+  for (const int id : resolve_selectors(model, j_anchors, "anchors"))
     lc.anchor_face_ids.push_back(id);
-  for (const JobLoadGroup& g : job.loads.groups) {
+  for (const JobLoadGroup& g : j_groups) {
     ProductionLoadCase::LoadGroup lg;
     lg.face_ids = g.face_ids;
     for (const int id : resolve_selectors(model, g.faces, "loads group faces"))
@@ -3341,7 +3373,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // suggestion the app prefills — for a bolt those depend on the bore radius,
   // read from the imported face geometry, so a hand-authored job need only give
   // face_id + kind.
-  for (const JobClearance& jc : job.loads.clearances) {
+  for (const JobClearance& jc : j_clearances) {
     ProductionLoadCase::Clearance c;
     c.face_id = jc.face_id;
     c.manual = jc.manual;
@@ -3383,14 +3415,22 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // depth <= 0 in the job means "use the core default"; leave the
   // ProductionLoadCase field at its default so the builder derives voxels from
   // kFaceProtectionDepthDefaultMm. Empty list => byte-identical.
-  lc.face_protection_face_ids = job.loads.face_protection_face_ids;
-  if (job.loads.face_protection_depth_mm > 0.0)
-    lc.face_protection_depth_mm = job.loads.face_protection_depth_mm;
-  lc.minimize_plastic = job.loads.minimize_plastic;
-  lc.build_dir = job.loads.build_dir;
-  lc.infill_percent = job.loads.infill_percent;
-  lc.wall_loops = job.loads.wall_loops;
-  lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+  lc.face_protection_face_ids = j_face_protection_face_ids;
+  if (j_face_protection_depth_mm > 0.0)
+    lc.face_protection_depth_mm = j_face_protection_depth_mm;
+  lc.minimize_plastic = j_minimize_plastic;
+  lc.build_dir = j_build_dir;
+  lc.infill_percent = j_infill_percent;
+  lc.wall_loops = j_wall_loops;
+  lc.wall_line_width_mm = j_wall_line_width_mm;
+  // ★ RESTORED. This assignment shipped in PR #227 (commit 84a1350, 2026-07-28
+  // 20:52) and was dropped 71 minutes later by PR #228's merge-conflict
+  // resolution (commit fc6e95f), which hoisted this block into the helper and
+  // re-typed five of these six lines. From then until this commit every job.json
+  // / LAN-worker run silently fell back to the "mirror inner" sentinel, so a
+  // 0.42 / 0.45 job computed — and truthfully reported — an outer width of 0.45.
+  // (Device runs never used this path: bridge.cpp writes the field directly.)
+  lc.wall_line_width_outer_mm = j_wall_line_width_outer_mm;
   lc.has_design_box = job.has_design_box;
   if (job.has_design_box) {
     lc.design_box = to_design_box(job.design_box);
@@ -3399,6 +3439,8 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   }
   return lc;
 }
+
+namespace {
 
 // --- THE load-case RECEIPT (task 2026-08-02-lattice-a-variant, bar Z2) -------
 //

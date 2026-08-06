@@ -1,0 +1,76 @@
+run thin_042: exit 0
+run thin_045: exit 0
+run thin_ctrl: exit 0
+run thick_042: exit 0
+run thick_045: exit 0
+run thick_ctrl: exit 0
+
+=== 1. THE NEGATIVE CONTROL — a 1e-9 mm width perturbation ===
+    0.42 mm vs 0.42 + 1e-9 mm. This must be ZERO flips, or every count below
+    is noise and the bar is vacuous.
+  THIN  4 mm  rung 0.80: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THIN  4 mm  rung 0.70: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THIN  4 mm  rung 0.60: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THICK 12 mm  rung 0.80: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THICK 12 mm  rung 0.70: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THICK 12 mm  rung 0.60: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+    thin: 0 flips — the floor holds.
+    thick: 0 flips — the floor holds.
+
+=== 2. THE RUNG TABLE — every rung, verdict and margin, both widths ===
+  --- THIN  4 mm region ---
+      rung | verdict @0.42mm |   worst-case margin | effective margin | printed frac || verdict @0.45mm |   worst-case margin | effective margin | printed frac | MOVED?
+      0.8000 |        ACCEPTED |         3557.917204 |      3557.917204 | 0.7901394422 ||        ACCEPTED |         3557.917204 |      3557.917204 | 0.7901394422 | no
+      0.7000 |        ACCEPTED |         3545.384123 |      3545.384123 | 0.6800796813 ||        ACCEPTED |         3545.384123 |      3545.384123 | 0.6800796813 | no
+      0.5998 |        ACCEPTED |         3517.250009 |      3517.250009 | 0.5644422311 ||        ACCEPTED |         3517.250009 |      3517.250009 | 0.5644422311 | no
+      variant_060.stl: IDENTICAL  (dd0da105316d99bb vs dd0da105316d99bb)
+      variant_060_lattice.report.json: DIFFERS  (a230cfc439ee8e3e vs c55eed620cf0342e)
+      variant_060_lattice.stl: DIFFERS  (6c64cf6df885db97 vs 79fe7c235b869e17)
+      variant_070.stl: IDENTICAL  (346dc6583c1f8b27 vs 346dc6583c1f8b27)
+      variant_070_lattice.report.json: DIFFERS  (f4377ae2994d9c42 vs ada819835ac669eb)
+      variant_070_lattice.stl: DIFFERS  (c205683b5c492a84 vs b2fd94bf052f21ee)
+      variant_080.stl: IDENTICAL  (62ac9fbca1a75b8d vs 62ac9fbca1a75b8d)
+      variant_080_lattice.report.json: DIFFERS  (466214efe19822a8 vs f2839134e3466005)
+      variant_080_lattice.stl: DIFFERS  (22ace955deee70c1 vs 9b628efe66876982)
+  --- THICK 12 mm region ---
+      rung | verdict @0.42mm |   worst-case margin | effective margin | printed frac || verdict @0.45mm |   worst-case margin | effective margin | printed frac | MOVED?
+      0.8000 |        ACCEPTED |         3557.917204 |      3557.917204 | 0.7901394422 ||        ACCEPTED |         3557.917204 |      3557.917204 | 0.7901394422 | no
+      0.7000 |        ACCEPTED |         3545.384123 |      3545.384123 | 0.6800796813 ||        ACCEPTED |         3545.384123 |      3545.384123 | 0.6800796813 | no
+      0.5998 |        ACCEPTED |         3517.250009 |      3517.250009 | 0.5644422311 ||        ACCEPTED |         3517.250009 |      3517.250009 | 0.5644422311 | no
+      variant_060.stl: IDENTICAL  (dd0da105316d99bb vs dd0da105316d99bb)
+      variant_060_lattice.report.json: DIFFERS  (617aefb761b19df9 vs 90fa77d220adb93a)
+      variant_060_lattice.stl: IDENTICAL  (645ba5301ceb954a vs 645ba5301ceb954a)
+      variant_070.stl: IDENTICAL  (346dc6583c1f8b27 vs 346dc6583c1f8b27)
+      variant_070_lattice.report.json: DIFFERS  (a094624d67d1e11f vs db53765278403119)
+      variant_070_lattice.stl: IDENTICAL  (0ed3ec2223baccec vs 0ed3ec2223baccec)
+      variant_080.stl: IDENTICAL  (62ac9fbca1a75b8d vs 62ac9fbca1a75b8d)
+      variant_080_lattice.report.json: DIFFERS  (1768f8c8260f22d0 vs 1d3ac2912bd8ae70)
+      variant_080_lattice.stl: IDENTICAL  (68f49a619d849db3 vs 68f49a619d849db3)
+
+=== 3. THE DESIGN ITSELF — 0.42 mm vs 0.45 mm ===
+  THIN  4 mm  rung 0.80: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THIN  4 mm  rung 0.70: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THIN  4 mm  rung 0.60: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THICK 12 mm  rung 0.80: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THICK 12 mm  rung 0.70: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+  THICK 12 mm  rung 0.60: voxel-class flips 0   max |d rho| 0.000e+00   design fingerprint SAME
+
+=== 4. THE LATTICE DERIVATION, each figure beside its width (bar R3) ===
+  --- THIN  4 mm region ---
+    at a 0.42 mm stated strut width: cell_size_mm 1.094961872  printability_floor_mm 4.602619932  finest_printable_cell 1.094961872
+        latticed 171  solid_fallback 0  rho_used [0.6, 0.89988]  density_raised 12  out_of_regime_voxels 6
+        region 0: extent 4 mm -> cell 1.094961872 mm, rho 0.6, strut 0.42 mm, 3.653095238 cells/member, out_of_regime True, candidates 171, latticed 171
+    at a 0.45 mm stated strut width: cell_size_mm 1.173173434  printability_floor_mm 4.931378498  finest_printable_cell 1.173173434
+        latticed 171  solid_fallback 0  rho_used [0.6, 0.89988]  density_raised 12  out_of_regime_voxels 6
+        region 0: extent 4 mm -> cell 1.173173434 mm, rho 0.6, strut 0.45 mm, 3.409555556 cells/member, out_of_regime True, candidates 171, latticed 171
+  --- THICK 12 mm region ---
+    at a 0.42 mm stated strut width: cell_size_mm 2.4  printability_floor_mm 4.602619932  finest_printable_cell 1.094961872
+        latticed 635  solid_fallback 0  rho_used [0.5646652974, 0.89988]  density_raised 0  out_of_regime_voxels 635
+        region 0: extent 12 mm -> cell 2.4 mm, rho 0.1751469353, strut 0.42 mm, 5 cells/member, out_of_regime False, candidates 635, latticed 635
+    at a 0.45 mm stated strut width: cell_size_mm 2.4  printability_floor_mm 4.931378498  finest_printable_cell 1.173173434
+        latticed 635  solid_fallback 0  rho_used [0.5646652974, 0.89988]  density_raised 0  out_of_regime_voxels 635
+        region 0: extent 12 mm -> cell 2.4 mm, rho 0.1961376994, strut 0.45 mm, 5 cells/member, out_of_regime False, candidates 635, latticed 635
+
+=== 5. VERDICT ===
+    negative control at 1e-9 mm: CLEAN (0 flips both fixtures)
+    design voxel-class flips 0.42 -> 0.45 mm: thin 0, thick 0

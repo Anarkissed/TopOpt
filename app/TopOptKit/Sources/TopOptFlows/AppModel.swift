@@ -261,12 +261,17 @@ public final class AppModel: ObservableObject {
         // 2026-07-29-lattice-mode-ui). runSpec returns nil unless lattice mode is on and
         // the settings are runnable-as-certified, so a non-lattice project yields the
         // exact request it does today (lattice: nil → job omits the block, BAR U1). The
-        // outer wall line width is the strut printability reference (the user's own
-        // setting, not a hardcoded number).
+        // STRUT'S OWN width is the printability reference core reads as
+        // `min_extrudable_width_mm` (task 2026-08-06-strut-line-width-field). It was
+        // `wallLineWidthOuterMM` — a wall-loop bead standing in for a lone unsupported
+        // extrusion, and the NARROWER of the two beads at that. Still the user's own
+        // setting, never a hardcoded number; see PrintParams.strutLineWidthMM.
+        // THIS IS THE SITE THAT REACHES THE JOB AND THE BRIDGE; the other five are
+        // display, and all six must agree or the page describes a different run.
         let latticeSpec = project.lattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            lineWidthMM: project.printParams.strutLineWidthMM,
             // Round-2 (M3): the include/exclude regions — role groups' primitives +
             // faces and the legacy include primitives — ride `lattice.regions`.
             regions: project.latticeJobRegions().regions)
