@@ -53,9 +53,10 @@ margin next to a smoothed part.
 ## 1. THE GATE, AND WHAT IT MOVED
 
 The brief was gated on `cad-face-projection`, which produces the CAD-versus-cut
-classifier. That task is running in parallel and has not landed:
-`claude/cad-face-projection-a1e996` is at `90e9ec5`, byte-identical to `main`, with
-no commits, no PR, and no evidence directory.
+classifier. That task is running in parallel and had not landed as of this work:
+`claude/cad-face-projection-a1e996` sat at `90e9ec5` — byte-identical to what `main`
+was at the time — with no commits, no PR, and no evidence directory. (`main` has
+since moved to `81a2368`; the classifier branch still carries nothing.)
 
 **I did not write a second classifier.** Two mechanisms deciding which vertices came
 from your CAD, with the stricter or the newer one silently winning, is a failure
@@ -81,6 +82,43 @@ C4 is not approximated with a normal test or a curvature heuristic anywhere in t
 change. `core/include/topopt/surface_operator.hpp` says so at the point where a
 reader would otherwise go looking for it, and `SurfaceConstraints::sign` is the
 input the classifier's answer will arrive through.
+
+### THE CLASSIFIER APPEARED WHILE THIS WAS BEING WRITTEN — PR 307, OPEN
+
+`cad-face-projection` pushed three commits and opened **PR 307** during this task.
+It is **not merged**, so nothing here is measured against it, but the integration is
+now a known quantity rather than a hope, and it is small. Recording it exactly so
+whoever picks this up does not have to rediscover it:
+
+- The classifier is `attribute_to_cad_faces(mesh, StepModel, CadProjectOptions)` in
+  `core/include/topopt/cad_project.hpp`, returning `CadAttribution`.
+- `core/src/mesh/cad_project.cpp` is in the **always-built** sources, beside
+  `surface_operator.cpp`, and its unit test is **not** OCCT-gated — it builds a
+  `StepModel` in code. So the two modules compose in every configuration.
+- **The predicate is `att.face_of_vertex[v] >= 0`**: a vertex attributed to a CAD
+  face. Their own test uses exactly that test to separate the populations.
+
+**C4 then costs one line**, and it lands on a case this PR already asserts:
+
+```cpp
+for (std::size_t v = 0; v < mesh.vertices.size(); ++v)
+  if (att.face_of_vertex[v] >= 0) constraints.sign[v] = TrustSign::Pinned;
+```
+
+`TrustSign::Pinned` is already asserted **bit-identical** for both operators
+(§S2.2), which is precisely what C4 demands — "zero displacement, asserted, not
+assumed" — rather than a small number that would need a tolerance argued for.
+
+The **cut population** for the §0 re-baseline is the complement,
+`face_of_vertex[v] < 0`, minus `ambiguous_flag` if the re-baseline wants to exclude
+the band the classifier itself declines to call.
+
+**What still gates it:** PR 307 is open and unreviewed, and the measurement on his
+part additionally needs OCCT to import his STEP (`cad_project_probe` is inside the
+`OpenCASCADE_FOUND` block for that reason). Building the deciding number on an
+unmerged branch would put it hostage to that review — which is not hypothetical:
+PR 303's figures were quoted here, then merged, then re-measured, and the
+conclusion moved (§S1.1).
 
 ---
 
@@ -627,8 +665,9 @@ rename reads as a deletion). Net: **+50 assertions, −0**.
 **R6 — root cause with file and line.** §R6 below.
 
 **R7 — no unfilled placeholders.** Every number in this document is from a run in
-`evidence/`; the one figure quoted rather than measured (SDF 58.9%) is labelled as
-quoted, with its source branch named.
+`evidence/`. There is no quoted figure left: PR 303's sphere numbers began as a
+quote and were re-measured here once it merged, and the re-measurement is in
+`evidence/.../sdf_sphere_remeasured.txt`.
 
 **R8 — separate commit for any review response.**
 
@@ -831,10 +870,13 @@ method is chosen.
 
 **Next steps, in order:**
 
-1. **Wait for the classifier**, then re-run the §0 baseline on the cut population and
-   redo this comparison on your part across all four rungs. That is the measurement
-   that decides whether A or the SDF route ships.
-2. **Assert C4** — CAD faces move zero — the moment the classifier lands.
+1. **Merge PR 307**, then re-run the §0 baseline on the cut population and redo this
+   comparison on your part across all four rungs. That is the measurement that
+   decides whether A or the SDF route ships. The classifier now exists (§1) — it is
+   the review, and an OCCT build for your STEP, that stand in the way.
+2. **Assert C4** — CAD faces move zero. It is one line against
+   `face_of_vertex[v] >= 0`, and it lands on the `Pinned` case this PR already
+   asserts bit-identical (§1).
 3. **Wire the brush**: PR 300's app-side accumulation needs rasterising onto the grid
    and handing to the operator as per-vertex weights. Core already accepts and
    enforces them; the app side is not connected.
