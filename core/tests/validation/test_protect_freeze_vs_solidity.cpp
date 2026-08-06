@@ -416,7 +416,14 @@ int main() {
         // hide it, so the assertion below still reads the captured text.
       }
     });
-    CHECK(contains(err, "FORECAST region_too_thin"),
+    // The forecast's SHAPE changed in task 2026-08-07-cell-mode-fit-and-swept-floor
+    // (S3): per-region output is now one TABLE ROW rather than a paragraph each, so
+    // the marker moved from the old "FORECAST region_too_thin" prefix onto the row
+    // itself. The assertion is unchanged in strength and in message — the region is
+    // still named, by index, kind and its own measured extent, before the run — and
+    // is in fact stricter, because it now pins all three on one line.
+    CHECK(contains(err, "0 (face)") && contains(err, "4.000") &&
+              contains(err, "SOLID: under the floor"),
           "PF5: a too-thin include region is NAMED before the run");
     CHECK(contains(err, "cells-per-member floor needs"),
           "PF5: the forecast carries the floor's own numbers");

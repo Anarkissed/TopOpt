@@ -1139,6 +1139,15 @@ public enum TopOptKit {
         topoptbridge.grading_schema_probe_is_reliable()
     }
 
+    /// Does the LINKED core's grading schema accept this `cell_mode` VALUE?
+    /// `gradingSchemaAccepts(key:)` cannot answer it — "cell_mode" is an accepted
+    /// key on every core since the cell-size sweep, while the value set has grown
+    /// ("fit" arrived with PR 302) and an unknown value kills the whole job at
+    /// validation exactly as an unknown key does.
+    public static func gradingSchemaAcceptsCellMode(_ mode: String) -> Bool {
+        topoptbridge.grading_schema_accepts_cell_mode(std.string(mode))
+    }
+
     /// Core's OWN default stress-fraction ceiling for sub-floor retention — the
     /// number `grading.subfloor_stress_fraction` overrides. Read from core so the
     /// app can show it without authoring it, and so "the user moved it" is

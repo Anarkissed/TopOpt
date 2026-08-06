@@ -288,6 +288,38 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
 std::vector<double> cell_size_field(const VoxelGrid& grid,
                                     const CellSizePlan& plan);
 
+// ── THE SWEPT LADDER, AS ONE RULE (task 2026-08-07-cell-mode-fit-and-swept-floor) ──
+//
+// Two callers used to answer "what cell will a SWEPT job actually run at?" — run_job's
+// pre-flight forecast and its multiscale length-scale derivation — and BOTH answered
+// `max(cell_min_mm, lattice_cell_printability_floor_mm)`, the floor evaluated at
+// rho_MIN. THE PLANNER BELOW DOES NEITHER OF THOSE THINGS. `plan_cell_sizes` takes
+// `min_cell_size_mm` VERBATIM as the base cell and applies no part-wide floor at all;
+// its only printability rule is per base cell (`need`), which climbs the DYADIC ladder
+// until that cell's own strut prints. So a declared 1.173 mm minimum was reported as
+// 4.9314 mm while the plan would have used 1.173 mm — a forecast describing a run that
+// was never going to happen. These two functions are the one rule both sides now read.
+
+// The ladder's top level for a sweep window: the largest L with S0 * 2^L <= max.
+// EXACTLY the arithmetic `plan_cell_sizes` uses for `CellSizePlan::max_level`, including
+// the 1e-9 guard against floating point landing just under an exact power of two (a
+// 4 -> 8 mm sweep must give exactly one doubling). Returns 0 for a degenerate window.
+int cell_plan_max_level(double min_cell_size_mm, double max_cell_size_mm);
+
+// The FINEST cell a swept plan over this window could grant ANY member — the lowest
+// rung of the ladder whose strut still prints at the stated width, evaluated at the
+// band's MOST GENEROUS density (rho_max), which is the most favourable a base cell's
+// own `need` test can ever be. That makes it a true lower bound on the plan's cell and
+// therefore the honest denominator for a cells-per-member statement about the run.
+//
+// When NO rung on the ladder prints — the whole window sits under w/phi(rho_max) — it
+// returns that frontier cell itself rather than a rung the plan cannot use, which is
+// the same resolution `Fit` applies when no declared region is feasible.
+double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
+                                          double min_cell_size_mm,
+                                          double max_cell_size_mm,
+                                          double min_extrudable_width_mm);
+
 }  // namespace topopt
 
 #endif  // TOPOPT_CELL_PLAN_HPP

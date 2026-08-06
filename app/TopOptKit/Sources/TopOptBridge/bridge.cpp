@@ -1875,7 +1875,18 @@ namespace {
 // here runs: `parse_job` is pure schema validation over a string (core/CMakeLists
 // puts src/cli/job.cpp in the always-built library for exactly this reason), so
 // the probe costs a parse and touches no file, no solver and no geometry.
-std::string probe_job_json(const std::string& grading_body) {
+// A lattice include region, for the probes whose mode REQUIRES one. Core refuses
+// `cell_mode: "fit"` on a job that declares no include region ("a job that declares
+// none states no requirement to fit", job.cpp) — so a probe without one measures that
+// rule instead of whether the core knows the mode at all. Found by the probe's own
+// two-sided control failing against a core that does carry fit.
+const char* kProbeIncludeRegion =
+    ", \"regions\": [{\"role\": \"include\", \"kind\": \"bolt\", \"geometry\": "
+    "{\"axis_point\": [0.0, 0.0, 0.0], \"axis_dir\": [1.0, 0.0, 0.0], "
+    "\"radius_mm\": 4.0, \"half_length_mm\": 4.0}}]";
+
+std::string probe_job_json(const std::string& grading_body,
+                           const std::string& lattice_extra = std::string()) {
   return std::string(
              "{\n"
              "  \"model\": \"probe.step\",\n"
@@ -1889,9 +1900,8 @@ std::string probe_job_json(const std::string& grading_body) {
              "  \"margin_stop\": 1.5,\n"
              "  \"output\": {\"report\": \"report.json\", \"mesh_format\": "
              "\"stl\", \"mesh_prefix\": \"variant\"},\n"
-             "  \"lattice\": {\"topology\": \"octet\", \"emit_stl\": true},\n"
-             "  \"grading\": {") +
-         grading_body + "}\n}\n";
+             "  \"lattice\": {\"topology\": \"octet\", \"emit_stl\": true") +
+         lattice_extra + "},\n  \"grading\": {" + grading_body + "}\n}\n";
 }
 
 // The grading block a probe submits: the keys every core since the grading law
@@ -1956,6 +1966,34 @@ bool grading_schema_accepts(const std::string& key) {
   if (key.empty()) return false;
   if (!probe_reliable()) return false;  // cannot tell => do not emit
   return !schema_refused_key_by_name(key);
+}
+
+bool grading_schema_accepts_cell_mode(const std::string& mode) {
+  if (mode.empty()) return false;
+  if (!probe_reliable()) return false;  // cannot tell => do not offer
+  // "auto" and "fit" REFUSE a target cell alongside them and "swept" needs its two
+  // ladder ends instead, so the probe body cannot be one shape for every mode. It
+  // states the mode and exactly the companion keys that mode requires; anything
+  // else and the probe would measure the companion rule rather than the mode.
+  std::string body =
+      "\n"
+      "    \"topology\": \"octet\",\n"
+      "    \"min_extrudable_width_mm\": 0.45,\n"
+      "    \"cell_mode\": \"" + mode + "\"";
+  if (mode == "fixed")
+    body += ",\n    \"cell_mm\": 4.0";
+  else if (mode == "swept")
+    body += ",\n    \"cell_min_mm\": 4.0,\n    \"cell_max_mm\": 8.0";
+  body += "\n  ";
+  try {
+    // The include region is present for EVERY mode, not only fit: it is legal on all
+    // four (a region-scoped lattice), so one document shape keeps the probe answering
+    // the same question each time.
+    topopt::parse_job(probe_job_json(body, kProbeIncludeRegion));
+    return true;
+  } catch (const std::exception&) {
+    return false;
+  }
 }
 
 double lattice_subfloor_stress_fraction_default() {

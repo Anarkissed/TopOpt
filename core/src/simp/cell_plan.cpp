@@ -40,6 +40,39 @@ bool cell_size_mode_from_name(const char* name, CellSizeMode& out) {
   return false;
 }
 
+int cell_plan_max_level(double min_cell_size_mm, double max_cell_size_mm) {
+  // A degenerate window has no ladder above the base — never a negative level, which
+  // would make `0..Lmax` an empty range and silently report "nothing prints".
+  if (!(min_cell_size_mm > 0.0) || !(max_cell_size_mm >= min_cell_size_mm)) return 0;
+  const double ratio = max_cell_size_mm / min_cell_size_mm;
+  int L = 0;
+  while (static_cast<double>(ipow2(L + 1)) <= ratio * (1.0 + 1e-9)) ++L;
+  return L;
+}
+
+double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
+                                          double min_cell_size_mm,
+                                          double max_cell_size_mm,
+                                          double min_extrudable_width_mm) {
+  // The cell below which NO density in the band prints — w / phi(rho_max). Read from
+  // core's own law, never a literal, exactly as grading.cpp's `abs_floor_mm` is.
+  const double abs_floor_mm =
+      min_extrudable_width_mm /
+      octet_strut_diameter_mm(lattice_rho_max(topo), 1.0);
+  if (!(min_cell_size_mm > 0.0) || !(min_extrudable_width_mm > 0.0))
+    return abs_floor_mm;
+  const int Lmax = cell_plan_max_level(min_cell_size_mm, max_cell_size_mm);
+  for (int L = 0; L <= Lmax; ++L) {
+    const double S = min_cell_size_mm * static_cast<double>(ipow2(L));
+    // The SAME predicate `plan_cell_sizes` applies per base cell, at the density most
+    // favourable to it. A cell clearing this is one the plan can use somewhere; a cell
+    // failing it can never be used by any base cell, at any density in the band.
+    if (octet_strut_diameter_mm(lattice_rho_max(topo), S) >= min_extrudable_width_mm)
+      return S;
+  }
+  return abs_floor_mm;
+}
+
 double CellSizePlan::cell_mm_at_level(int L) const {
   return base_cell_mm * static_cast<double>(ipow2(L));
 }
@@ -106,14 +139,11 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
       topo, params.min_extrudable_width_mm);
 
   // The dyadic ladder: levels 0..max_level, cell(L) = S0 * 2^L, capped by the
-  // caller's max. floor(log2(max/min)) with a guard against fp landing just under an
-  // exact power of two (a 4->8 mm sweep must give exactly one doubling).
-  {
-    const double ratio = params.max_cell_size_mm / params.min_cell_size_mm;
-    int L = 0;
-    while (static_cast<double>(ipow2(L + 1)) <= ratio * (1.0 + 1e-9)) ++L;
-    P.max_level = L;
-  }
+  // caller's max. `cell_plan_max_level` IS the arithmetic that used to be inline here
+  // — extracted, not changed, so run_job's forecast of "what cell will this sweep run
+  // at" reads the plan's own ladder instead of a second rule (task 2026-08-07).
+  P.max_level = cell_plan_max_level(params.min_cell_size_mm,
+                                    params.max_cell_size_mm);
   const int Lmax = P.max_level;
 
   // ── the BASE cell grid ──────────────────────────────────────────────────────────
@@ -451,12 +481,9 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
   P.printability_floor_mm =
       lattice_cell_printability_floor_mm(topo, params.min_extrudable_width_mm);
 
-  {
-    const double ratio = params.max_cell_size_mm / params.min_cell_size_mm;
-    int L = 0;
-    while (static_cast<double>(ipow2(L + 1)) <= ratio * (1.0 + 1e-9)) ++L;
-    P.max_level = L;
-  }
+  // The same ladder rule the swept plan uses, read from the same function.
+  P.max_level = cell_plan_max_level(params.min_cell_size_mm,
+                                    params.max_cell_size_mm);
   const int Lmax = P.max_level;
 
   const double S0 = P.base_cell_mm;

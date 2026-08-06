@@ -912,17 +912,28 @@ public struct LatticePage: View {
 
     private var cellDensityPane: some View {
         VStack(spacing: DS.Space.sm) {
-            // Cell size card — Auto / Fixed / Swept (bar R6). Fixed is today's single
-            // value + slider, unchanged; the slider's LOWER bound is now core's own
-            // printability floor (bounds.cellFloorMM) instead of the old app hardcode.
+            // Cell size card — Auto / Fixed / Swept / Per region (bar R6; "Per region"
+            // is core's `fit`, task 2026-08-07). Fixed is today's single value +
+            // slider, unchanged; the slider's LOWER bound is core's own printability
+            // floor (bounds.cellFloorMM) instead of the old app hardcode.
             card {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Cell size").dsStyle(DS.TypeScale.body)
                     Spacer()
                 }
-                segment(["Auto", "Fixed", "Swept"],
+                segment(["Auto", "Fixed", "Swept", "Per region"],
                         selected: cellModeIndex, enabled: cellModeEnabled) { i in
                     project.lattice.cellSizeMode = LatticePage.cellModes[i]
+                    // ★ THE MUTUAL EXCLUSION, MADE STRUCTURAL — the same pattern the
+                    // retention switch already uses for its own dependents (turning
+                    // it off drops `subfloorPerRegion` and `subfloorStressFraction`).
+                    // Core THROWS on fit + retention (grading.cpp:66-70), so the page
+                    // must not be able to author that job at all.
+                    if project.lattice.cellSizeMode == .fit {
+                        project.lattice.retainSubfloorInUnloadedRegions = false
+                        project.lattice.subfloorPerRegion = false
+                        project.lattice.subfloorStressFraction = nil
+                    }
                 }
                 cellModeBody
                 if let note = cellModeGateNote {
@@ -1042,7 +1053,8 @@ public struct LatticePage: View {
             belowFloorVoxels: liveForecast?.subfloorVoxelsBelowFloor,
             regionVoxels: liveForecast?.regionVoxels,
             ceilingFraction: project.lattice.subfloorStressFraction,
-            coreCeilingFraction: LatticeRetentionCapability.coreStressFractionDefault)
+            coreCeilingFraction: LatticeRetentionCapability.coreStressFractionDefault,
+            cellMode: project.lattice.cellSizeMode)
     }
 
     @ViewBuilder private var retentionCard: some View {
@@ -1144,7 +1156,7 @@ public struct LatticePage: View {
 
     /// Segment order: ONE source of truth for index ↔ mode, so the control and the
     /// stored setting can never drift.
-    private static let cellModes: [LatticeCellSizeMode] = [.auto, .fixed, .swept]
+    private static let cellModes: [LatticeCellSizeMode] = [.auto, .fixed, .swept, .fit]
 
     /// The one-line cell summary the ladder row and the Review drawer both show, so
     /// the mode is legible without opening the pane ("Auto 2.6 mm" / "8.0 mm" /
@@ -1162,6 +1174,9 @@ public struct LatticePage: View {
             let lo = Swift.max(project.lattice.cellMinMM, bounds.cellFloorMM ?? 0)
             let hi = Swift.max(project.lattice.cellMaxMM, lo)
             return String(format: "Swept %.1f–%.1f mm", lo, hi)
+        case .fit:
+            // No one number to show: the whole point is that there is one per region.
+            return "Per region"
         }
     }
     /// The envelope lives in `LatticeCellEntry` (a pure value) so the S3 audit's
@@ -1178,14 +1193,27 @@ public struct LatticePage: View {
     /// pass — so they are offered only when Density mode is Auto. Greyed with the
     /// reason below rather than silently ignored.
     private var cellModeGraded: Bool { project.lattice.densityMode == .auto }
-    private var cellModeEnabled: [Bool] { [cellModeGraded, true, cellModeGraded] }
+    /// Per region additionally needs the LINKED core to take `"cell_mode": "fit"` —
+    /// an unknown value kills the whole job at schema validation, so the segment is
+    /// greyed with the reason rather than offered and silently downgraded.
+    private var cellModeFitAvailable: Bool { LatticeCellModeCapability.fromCore.fit }
+    private var cellModeEnabled: [Bool] {
+        [cellModeGraded, true, cellModeGraded, cellModeGraded && cellModeFitAvailable]
+    }
 
     private var cellModeGateNote: String? {
-        guard !cellModeGraded else { return nil }
+        if cellModeGraded {
+            // Only reason left to explain here.
+            if project.lattice.cellSizeMode != .fit, !cellModeFitAvailable,
+               let why = LatticeCellModeCapability.fromCore.unavailableReason {
+                return "Per region is unavailable: " + why
+            }
+            return nil
+        }
         if project.lattice.cellSizeMode != .fixed {
             return "This run is uniform, so it will use the fixed cell — set Density mode to Auto for core to choose or sweep the cell."
         }
-        return "Auto and Swept need Density mode = Auto: core picks the cell inside the graded pass."
+        return "Auto, Swept and Per region need Density mode = Auto: core picks the cell inside the graded pass."
     }
 
     /// Core's floor for the current topology at the user's own line width, or the
@@ -1268,6 +1296,33 @@ public struct LatticePage: View {
                           cellFloorMM))
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
+        case .fit:
+            // ★ THE COPY, IN HIS TERMS (task 2026-08-07, S2b). What it DOES, on his
+            // part, in the words he used. The words "advanced" and "expert" are
+            // deliberately absent — they tell a user nothing about their part.
+            HStack(alignment: .firstTextBaseline) {
+                Text("Core's cell").dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                Spacer()
+                Text("one per region")
+                    .dsStyle(DS.TypeScale.headline)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            Text("The cell size is derived per region from that region's own "
+                 + "thickness, so a thin wall gets a fine dense lattice and a thick "
+                 + "member a coarse light one. No cell is entered here.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+            if !project.latticeJobRegions().regions.contains(where: { $0.role == .include }) {
+                // Fit derives FROM the declared include regions. With none declared
+                // there is nothing to derive from, and saying so here is cheaper
+                // than a receipt that latticed nothing.
+                Text("Add at least one lattice region first — this mode derives the "
+                     + "cell from the regions you declare, so with none declared "
+                     + "there is nothing to fit to.")
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(RGBA(hex: 0xFFCF7A).color)
+            }
         }
     }
 

@@ -1,0 +1,83 @@
+// R2 REPRODUCTION — deleted before the branch is pushed. Written to COMPILE against
+// the UNFIXED app so the S2 defect can be shown failing rather than asserted.
+import XCTest
+import simd
+import TopOptKit
+@testable import TopOptFlows
+
+@MainActor
+final class R2FitModeRepro: XCTestCase {
+
+    private static func request(lattice: LatticeSpec?) -> RunRequest {
+        RunRequest(
+            modelPath: "/tmp/part.step", material: "PLA", materialsPath: "",
+            rulesPath: "", resolution: 64, projectName: "fitrepro",
+            anchorFaceIDs: [3],
+            loadGroups: [TopOptKit.LoadGroupSpec(faceIDs: [11],
+                                                force: SIMD3(0, 0, -250))],
+            minimizePlastic: true, buildDirection: SIMD3(0, 0, 1),
+            infillPercent: 40, wallLoops: 3,
+            wallLineWidthOuterMM: 0.45, wallLineWidthInnerMM: 0.45,
+            lattice: lattice)
+    }
+
+    private static func optimizeJob(lattice: LatticeSpec?) throws -> [String: Any] {
+        let cfg = RemoteRunnerConfig(host: "127.0.0.1", port: 8757,
+                                     expectedFingerprint: "test")
+        let run = RemoteRun(config: cfg, request: request(lattice: lattice),
+                            progress: { _, _, _ in true }, onVariant: { _ in })
+        return try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try run.buildJobJSON())
+                as? [String: Any])
+    }
+
+    /// (1) THE MODE DOES NOT EXIST IN THE APP'S ENUM.
+    func testR2a_theEnumHasNoFitCase() {
+        XCTAssertNotNil(LatticeCellSizeMode(rawValue: "fit"),
+                        "R2a: the app cannot represent core's fourth cell mode")
+    }
+
+    /// (2) EVEN GIVEN THE RAW VALUE, THE REAL SERIALIZER DROPS IT and emits a target
+    /// cell instead — the exact job core refuses alongside a derived cell.
+    func testR2b_theSerializerDropsFit() throws {
+        let spec = LatticeSpec(
+            topologyID: "octet", cellMM: 4.0, strutRadiusMM: 0,
+            generateRelativeDensity: 0, minRelativeDensity: 0.2,
+            maxRelativeDensity: 0.5, emitSTL: true, emit3MF: false,
+            regionScoped: true, skin: "none", minExtrudableWidthMM: 0.45,
+            graded: true, regions: [], cellSizeMode: "fit",
+            cellMinMM: 0, cellMaxMM: 0)
+        let grading = try XCTUnwrap(
+            try Self.optimizeJob(lattice: spec)["grading"] as? [String: Any])
+        XCTAssertEqual(grading["cell_mode"] as? String, "fit",
+                       "R2b: selecting fit must reach the worker")
+        XCTAssertNil(grading["cell_mm"],
+                     "R2b: core REFUSES a target cell alongside fit")
+    }
+
+    /// (3) THE PAIR CORE THROWS ON IS EXPRESSIBLE. fit + retention reaches the job.
+    func testR2c_fitPlusRetentionIsExpressible() throws {
+        let spec = LatticeSpec(
+            topologyID: "octet", cellMM: 4.0, strutRadiusMM: 0,
+            generateRelativeDensity: 0, minRelativeDensity: 0.2,
+            maxRelativeDensity: 0.5, emitSTL: true, emit3MF: false,
+            regionScoped: true, skin: "none", minExtrudableWidthMM: 0.45,
+            graded: true, regions: [], cellSizeMode: "fit",
+            cellMinMM: 0, cellMaxMM: 0,
+            retainSubfloorInUnloadedRegions: true)
+        let grading = try XCTUnwrap(
+            try Self.optimizeJob(lattice: spec)["grading"] as? [String: Any])
+        XCTAssertNil(grading["retain_subfloor_in_unloaded_regions"],
+                     "R2c: fit + retention is the pair grade_lattice THROWS on — "
+                   + "the app must not be able to author it")
+    }
+
+    /// (4) THERE IS NO PROBE FOR THE cell_mode VALUE at all.
+    func testR2d_noCellModeValueProbeExists() {
+        XCTAssertTrue(TopOptKit.gradingSchemaAccepts(key: "cell_mode"),
+                      "the KEY is accepted — which is exactly why a key probe "
+                    + "cannot answer whether the VALUE fit is")
+        // A value probe would answer this; on unfixed code there is none to call.
+        XCTFail("R2d: no API exists to ask core whether it takes cell_mode \"fit\"")
+    }
+}
