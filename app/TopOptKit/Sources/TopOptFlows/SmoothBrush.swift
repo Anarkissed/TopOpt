@@ -88,25 +88,36 @@ public struct SmoothFreezeMask: Equatable, Sendable {
 ///
 /// A pure value, so the mode rules are unit-tested headlessly like the rest of
 /// the brush.
-/// ROUND 3 (task 2026-08-04, bar U2) REPLACED THE ORBIT MODE WITH `pencilOnly`,
-/// and the invariant round 2 wrote orbit for is unchanged — it is now stronger.
+/// ── THE TWO CONTROLS, AND WHAT EACH ONE DECIDES (task 2026-08-05, bars D1/D2)
 ///
-/// Round 2's reasoning was: the brush claims the one-finger drag, so without a
-/// mode that releases it the page would have no single-finger orbit at all. True,
-/// and the third mode was the only answer available then. But the maintainer's
-/// note is that having to REACH for a mode in order to turn the part around is
-/// the wrong shape: "one-finger drag always ORBITS and the pencil always PAINTS".
+/// ROUND 3 REPLACED ORBIT WITH `pencilOnly`, READING AN EARLIER NOTE OF THE
+/// MAINTAINER'S AS AN EITHER/OR. It is not one. His rule, stated precisely:
 ///
-/// `pencilOnly` provides the same guarantee on a control that does not have to be
-/// switched back and forth: with it on, a finger drag never paints and a pencil
-/// always does, so orbiting and painting stop competing for one gesture. With it
-/// off the round-2 behaviour is byte-for-byte what it was — one finger paints,
-/// two fingers orbit.
+///   * `pencilOnly` OFF → the brush claims the one-finger drag, so an EXPLICIT
+///     ORBIT MODE IS REQUIRED: without it there is no way to turn the part
+///     around with a finger at all.
+///   * `pencilOnly` ON  → a finger cannot brush and the pencil can only brush,
+///     so a one-finger drag ALREADY always orbits. A third tab here would be a
+///     control that does nothing new, which is clutter.
 ///
-/// So the page still always has a single-finger orbit; the assertion that used to
-/// say so through `.orbit` now says so through `pencilOnly`, and covers BOTH
-/// input kinds rather than one. It is replaced, not dropped, and
-/// `SmoothingRound3Tests` states the reasoning inline.
+/// So orbit's PRESENCE is conditional on `pencilOnly` being off (`availableModes`),
+/// and turning `pencilOnly` on while in orbit falls back to paint rather than
+/// leaving a dead mode selected (`setPencilOnly`).
+///
+/// TWO QUESTIONS, TWO PROPERTIES — this is the D1 defect stated as a rule.
+/// Round 3 left the page's master gate reading a property called `paints` that
+/// silently meant "a FINGER paints", so checking "Pencil only" disarmed the
+/// gesture entirely and the pencil never painted either. A finger-only property
+/// must never decide whether the gesture EXISTS. They are now separate names:
+///
+///   * `armed` — does the brush claim a drag at all? MODE decides. Never contact.
+///   * `paints(from:)` — may THIS contact paint? `pencilOnly` decides, and only
+///     for the finger; a pencil always may while the brush is armed.
+///
+/// The invariant both rounds existed to guarantee — that a one-finger drag
+/// always has SOME way to turn the part around — holds through both paths now:
+/// `pencilOnly` ON lets the finger fall through to the camera gestures, and
+/// `pencilOnly` OFF offers the Orbit mode that releases the drag.
 public struct SmoothBrushTools: Equatable, Sendable {
 
     public enum Mode: String, Sendable, CaseIterable, Identifiable {
@@ -114,20 +125,29 @@ public struct SmoothBrushTools: Equatable, Sendable {
         case paint
         /// A painting drag clears it back to unsmoothed.
         case erase
+        /// The brush is PARKED: a drag turns the part around instead of
+        /// painting, with either contact. Offered only while `pencilOnly` is
+        /// off, because that is the only state in which the brush would
+        /// otherwise own the one-finger drag.
+        case orbit
 
         public var id: String { rawValue }
         public var label: String {
             switch self {
             case .paint: return "Paint"
             case .erase: return "Erase"
+            case .orbit: return "Orbit"
             }
         }
         public var icon: String {
             switch self {
             case .paint: return "paintbrush.pointed.fill"
             case .erase: return "eraser.fill"
+            case .orbit: return "rotate.3d"
             }
         }
+        /// Whether a drag in this mode marks the surface at all.
+        public var marks: Bool { self != .orbit }
     }
 
     /// Which kind of contact a drag came from. The page's gesture layer mounts a
@@ -150,24 +170,50 @@ public struct SmoothBrushTools: Equatable, Sendable {
 
     public init(mode: Mode = .paint, radiusPoints: Double = 26,
                 pencilOnly: Bool = false) {
-        self.mode = mode
+        // Orbit is not offered while `pencilOnly` is on, so it cannot be the
+        // state a value STARTS in either — normalised here so there is no
+        // reachable way to hold a mode the page would not draw a tab for.
+        self.mode = (pencilOnly && mode == .orbit) ? .paint : mode
         self.radiusPoints = min(max(radiusPoints, Self.minRadius), Self.maxRadius)
         self.pencilOnly = pencilOnly
     }
 
-    /// Whether a drag from `input` paints. A pencil always may; a finger may only
-    /// when it has not been released to the camera.
+    /// The modes the page offers RIGHT NOW (bar D2). Orbit only while the finger
+    /// would otherwise be claimed by the brush.
+    public var availableModes: [Mode] { Self.modes(pencilOnly: pencilOnly) }
+
+    public static func modes(pencilOnly: Bool) -> [Mode] {
+        pencilOnly ? [.paint, .erase] : Mode.allCases
+    }
+
+    /// Set "Pencil only", falling back OUT of orbit when it is turned on — a
+    /// selected mode with no tab is a dead control, and the page would otherwise
+    /// sit in it with nothing on screen to leave it by.
+    public mutating func setPencilOnly(_ on: Bool) {
+        pencilOnly = on
+        if on, mode == .orbit { mode = .paint }
+    }
+
+    /// WHETHER THE BRUSH CLAIMS A DRAG AT ALL. The MODE decides this and nothing
+    /// else — see the type comment: a contact-kind property here is the D1 defect.
+    public var armed: Bool { mode.marks }
+
+    /// Whether a drag from `input` paints. A pencil always may while the brush is
+    /// armed; a finger may only when it has not been released to the camera.
     public func paints(from input: Input) -> Bool {
+        guard armed else { return false }
         switch input {
         case .pencil: return true
         case .finger: return !pencilOnly
         }
     }
 
-    /// Whether a ONE-FINGER drag paints — the gesture round 2's `.orbit` released
-    /// and `pencilOnly` releases now. Kept under its old name because it answers
-    /// the same question at the same call site.
-    public var paints: Bool { paints(from: .finger) }
+    /// Whether a ONE-FINGER drag paints. RENAMED from `paints` (task 2026-08-05):
+    /// a property called `paints` that silently meant "a finger paints" is how it
+    /// came to be read as "the brush is armed" at the page's master gate, which
+    /// killed the pencil too. The name now says which contact it is about, so the
+    /// same mistake cannot be written by accident.
+    public var fingerPaints: Bool { paints(from: .finger) }
     /// Whether a painting drag REMOVES rather than adds.
     public var erases: Bool { mode == .erase }
     /// Whether a one-finger drag turns the part around — the property the page
@@ -182,6 +228,91 @@ public struct SmoothBrushTools: Equatable, Sendable {
     }
     public var canGrow: Bool { radiusPoints < Self.maxRadius }
     public var canShrink: Bool { radiusPoints > Self.minRadius }
+}
+
+// MARK: - who may paint, and where a drag goes (task 2026-08-05, bar D1)
+
+/// ONE DECISION, READ BY EVERY SITE THAT ROUTES A DRAG.
+///
+/// THE DEFECT THIS EXISTS TO MAKE UNWRITABLE. Round 2 armed the viewer's brush
+/// gesture from one property; round 3 added `brushRequiresPencil` as a second,
+/// correct admission mechanism at the recognizer — and left the first one
+/// reading a finger-only value. Two mechanisms decided the same thing, the
+/// stricter one won, and checking a box called "Pencil only" turned off painting
+/// entirely, the pencil included. The maintainer lost a night to it.
+///
+/// So the question is asked ONCE here and the answer is passed down. The
+/// workspace builds this value; the view's inputs carry its two fields; the
+/// recognizers route through `route(_:touches:)`. There is no second place to
+/// disagree with.
+public struct BrushGesture: Equatable, Sendable {
+    /// Does the brush claim a drag at all? Off ⇒ every contact is the camera's.
+    public let armed: Bool
+    /// Is the brush withholding the FINGER (the pencil is never withheld)?
+    public let requiresPencil: Bool
+
+    public init(armed: Bool, requiresPencil: Bool) {
+        self.armed = armed
+        self.requiresPencil = requiresPencil
+    }
+
+    /// The smoothing page: the brush is armed unless the user parked it in
+    /// Orbit, and WHICH contact may paint is `pencilOnly`'s business alone.
+    public static func smoothingPage(_ tools: SmoothBrushTools) -> BrushGesture {
+        BrushGesture(armed: tools.armed, requiresPencil: tools.pencilOnly)
+    }
+
+    /// The TO page's paint drawer — unchanged behaviour: armed by its own toggle,
+    /// and it never withholds the finger.
+    public static func workspacePaint(active: Bool) -> BrushGesture {
+        BrushGesture(armed: active, requiresPencil: false)
+    }
+
+    /// The brush is off everywhere else.
+    public static let off = BrushGesture(armed: false, requiresPencil: false)
+
+    /// May a drag from `input` paint?
+    public func admits(_ input: SmoothBrushTools.Input) -> Bool {
+        guard armed else { return false }
+        switch input {
+        case .pencil: return true
+        case .finger: return !requiresPencil
+        }
+    }
+
+    /// Where a drag goes.
+    public enum Route: String, Equatable, Sendable {
+        /// Into the brush.
+        case paint
+        /// To the camera's orbit.
+        case orbit
+        /// To the camera's pan (two fingers, brush not claiming the drag).
+        case pan
+    }
+
+    /// Route a drag of `touches` contacts of kind `input`.
+    ///
+    /// The rules, unchanged from what the recognizers did before this value
+    /// existed — one finger paints while the brush admits it, two fingers orbit
+    /// so the camera stays drivable mid-stroke, and a contact the brush does not
+    /// admit falls through to the ordinary camera gestures (two fingers pan, one
+    /// orbits). What changed is that they are stated once.
+    public func route(_ input: SmoothBrushTools.Input, touches: Int) -> Route {
+        if admits(input) {
+            // A pencil is always exactly one contact; a finger drag with a second
+            // finger down is the user reaching for the camera mid-stroke.
+            if input == .pencil || touches <= 1 { return .paint }
+            return .orbit
+        }
+        return touches >= 2 ? .pan : .orbit
+    }
+
+    /// Whether a drag from `input` is being REFUSED — the brush is armed and this
+    /// contact still cannot paint. The page says so at the moment it happens
+    /// rather than leaving grey buttons downstream to imply it.
+    public func refuses(_ input: SmoothBrushTools.Input) -> Bool {
+        armed && !admits(input)
+    }
 }
 
 // MARK: - one painted region
@@ -344,7 +475,10 @@ public struct SmoothBrushModel: Equatable, Sendable {
     @discardableResult
     public mutating func brush(_ mode: SmoothBrushTools.Mode,
                                triangles: [Int32]) -> SmoothBrushEdit {
-        guard canPaint else { return SmoothBrushEdit() }
+        // `.orbit` is a parked brush, not a stroke. The gesture layer already
+        // routes it to the camera, so this is the second layer: a mode that does
+        // not mark the surface can never mark it from here either.
+        guard mode.marks, canPaint else { return SmoothBrushEdit() }
         if mode == .erase {
             return paint(.erase, triangles: triangles)
         }
@@ -608,40 +742,89 @@ public struct SmoothBrushModel: Equatable, Sendable {
     ///   * FROZEN     → a flat locked tint, drawn WHATEVER the strokes say. The
     ///     user can see what the brush will refuse BEFORE trying to paint it,
     ///     rather than discovering it from a footnote afterwards.
-    /// ONE HUE, DARKENING WITH THE RUNG (bar U1). Round 2 gave every region its
-    /// own palette colour, which was right when the panel listed them by name and
-    /// wrong now that the panel does not: a rainbow encodes WHICH region, and the
-    /// only thing left worth encoding is HOW MUCH. So the strokes are one colour
-    /// that gets darker and more opaque the harder an area is being smoothed, and
-    /// the part itself becomes the readout the region list used to be.
-    public static let paintTint = SIMD3<Float>(0.60, 0.78, 1.00)
-    /// How dark the top rung goes — the tint is scaled toward black by this much
-    /// at full strength, so the rungs are told apart by VALUE and not by opacity
-    /// alone (opacity differences vanish against a light patch of the model).
-    public static let deepestTintScale: Float = 0.42
+    /// ORANGE, 10% PER PASS, LAYERING (task 2026-08-05, bar D4 — the maintainer's
+    /// own specification).
+    ///
+    /// One hue, and the OPACITY is the readout: a first pass lays 10% orange, a
+    /// second pass over the same area adds another 10%, and so on, so how hard an
+    /// area has been worked is legible from the part itself. Round 3 encoded the
+    /// same fact half in opacity and half in VALUE (the tint darkened toward
+    /// black); his instruction is opacity, so the hue and the value are now
+    /// constant and only `w` moves.
+    ///
+    /// THE CAP IS THE LADDER'S CAP, and that is the whole justification: strength
+    /// stops climbing at `levels.count` passes (the top rung is 1.00 — there is
+    /// no more smoothing to ask for), so the tint stops there too at
+    /// `0.10 × levels.count`. A tint that kept darkening past the point where the
+    /// result stopped changing would be the page lying about what a pass did.
+    ///
+    /// ERASE CLEARS IT OUTRIGHT — the accumulated passes go with the assignment,
+    /// exactly as erase clears the smoothing itself (round 3's rule: erase is
+    /// "take the smoothing off here", not a rung-by-rung undo).
+    public static let paintTint = SIMD3<Float>(1.00, 0.48, 0.10)
+    /// Opacity added per pass.
+    public static let tintPerPass: Float = 0.10
 
-    public func vertexTints(frozenTint: SIMD4<Float> =
-                                SIMD4<Float>(0.42, 0.85, 0.55, 0.34)) -> [SIMD4<Float>] {
+    /// The tint for a triangle sitting on `rung` (0 = unpainted).
+    public static func tint(forRung rung: Int) -> SIMD4<Float> {
+        guard rung > 0 else { return .zero }
+        let capped = min(rung, levels.count)
+        return SIMD4<Float>(paintTint.x, paintTint.y, paintTint.z,
+                            tintPerPass * Float(capped))
+    }
+
+    /// The FROZEN tint — a flat locked green, drawn whatever the strokes say, so
+    /// what the brush will refuse is visible before it is tried.
+    public static let frozenTintDefault = SIMD4<Float>(0.42, 0.85, 0.55, 0.34)
+
+    /// The per-MESH-VERTEX tint. Kept because the weight/freeze reasoning is all
+    /// per mesh vertex — but note that this is NOT what the viewer consumes; see
+    /// `viewerTints`, and the header comment there for why that mattered.
+    public func vertexTints(frozenTint: SIMD4<Float> = frozenTintDefault)
+        -> [SIMD4<Float>] {
         var out = [SIMD4<Float>](repeating: .zero, count: vertexCount)
         guard meshesAgree else { return out }
-        var strengthByRegion: [UUID: Double] = [:]
-        for r in regions { strengthByRegion[r.id] = r.strength }
-        for (t, id) in assignments {
-            guard let s = strengthByRegion[id], let (a, b, d) = corners(t) else { continue }
-            let clamped = Float(min(max(s, 0), 1))
-            // Opacity floors at 0.20 so a strength-0 region is still visibly
-            // painted — "I brushed here and turned it off" is a state the user
-            // must be able to see, not an invisible one.
-            let alpha = 0.20 + 0.60 * clamped
-            let value = 1 - (1 - Self.deepestTintScale) * clamped
-            let c = Self.paintTint * value
+        for t in assignments.keys {
+            let c = Self.tint(forRung: level(of: t))
+            guard c.w > 0, let (a, b, d) = corners(t) else { continue }
             for v in [a, b, d] where v >= 0 && v < out.count {
-                if alpha > out[v].w {
-                    out[v] = SIMD4<Float>(c.x, c.y, c.z, alpha)
-                }
+                if c.w > out[v].w { out[v] = c }
             }
         }
         for v in 0..<out.count where freeze.frozen[v] { out[v] = frozenTint }
+        return out
+    }
+
+    /// THE TINT THE VIEWER ACTUALLY DRAWS — one entry per FLAT (unshared) render
+    /// vertex, three per triangle, in triangle order.
+    ///
+    /// WHY THIS EXISTS, AND WHY THE TINT HAD NEVER APPEARED ON DEVICE. The stage
+    /// consumes tints through `MetalMeshView`'s per-vertex channel, and the
+    /// renderer draws the FLAT buffer: `ViewerMesh.flat.vertexCount` is
+    /// `3 × triangleCount`, not the welded vertex count. `Renderer.setStressTints`
+    /// (MetalMeshView.swift:1380) requires exactly that length and RETURNS
+    /// SILENTLY otherwise — and the smoothing page was handing it
+    /// `vertexTints()`, one entry per WELDED vertex. On the maintainer's bracket
+    /// those two numbers differ by about 6:1, so every upload was dropped on the
+    /// floor and no stroke he ever painted could have tinted anything.
+    ///
+    /// Per-flat-vertex is also the RIGHT unit for this brush: a stroke paints
+    /// TRIANGLES, so an unshared buffer paints exactly the triangles that were
+    /// brushed, with no bleed across a shared corner into an unpainted neighbour.
+    /// Frozen vertices still win over a stroke, as they do everywhere else.
+    public func viewerTints(frozenTint: SIMD4<Float> = frozenTintDefault)
+        -> [SIMD4<Float>] {
+        var out = [SIMD4<Float>](repeating: .zero, count: indices.count)
+        guard meshesAgree else { return out }
+        for i in stride(from: 0, to: indices.count, by: 3) {
+            let t = Int32(i / 3)
+            let c = Self.tint(forRung: level(of: t))
+            for k in 0..<3 {
+                let v = Int(indices[i + k])
+                let frozen = v >= 0 && v < freeze.frozen.count && freeze.frozen[v]
+                out[i + k] = frozen ? frozenTint : c
+            }
+        }
         return out
     }
 

@@ -1,0 +1,7 @@
+strut radius from run_info: 1.095372083 mm
+components: 845   fragments (excluding the 2 real bodies): 843
+  shares space with the STRUT network : 693
+  shares space with the SOLID body    : 146
+  FULLY ISOLATED IN AIR               : 4
+  isolated triangle total             : 88
+  isolated sizes (largest 12)         : [36, 20, 16, 16]

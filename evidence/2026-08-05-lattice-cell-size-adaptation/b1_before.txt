@@ -1,0 +1,27 @@
+=== B1: seven 4 mm include regions, 8 mm cell (floor needs 5 x 8 = 40 mm) ===
+topopt-cli exit code: 0
+
+--- the forecast it printed ---
+[lattice] FORECAST region_too_thin: include region 0 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 1 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 2 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 3 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 4 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 5 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 6 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 8.0000 mm = 40.000 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST: 7 of 7 include regions are thinner than the 40.000 mm the floor requires (thinnest 4.000 mm; floor 5.0 cells x 8.0000 mm)
+
+*** B1 REPRODUCED: the run SUCCEEDED with every declared region too thin. ***
+    emitted variant_026_lattice.stl
+    emitted variant_038_lattice.stl
+    emitted variant_052_lattice.stl
+    emitted variant_068_lattice.stl
+    variant_026_lattice.report.json: cell_mm=8 latticed_cells=None
+    variant_038_lattice.report.json: cell_mm=8 latticed_cells=None
+    variant_052_lattice.report.json: cell_mm=8 latticed_cells=None
+    variant_068_lattice.report.json: cell_mm=8 latticed_cells=None
+    forecast: 7 of 7 regions too thin; required 40 mm; thinnest 4 mm
+    latticed_cells emitted anyway: 161
+
+B1 FAIL (expected, on unfixed code): a forecast that says nothing can be
+        latticed did not stop the run.

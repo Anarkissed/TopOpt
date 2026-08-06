@@ -273,6 +273,49 @@ struct JobGrading {
   // lattice.hpp's ★★★ note for why this is a policy ceiling on exposure and not a
   // safety threshold.
   double subfloor_aggregate_cap = 0.0;
+
+  // ── "report_region_cells" (task 2026-08-05-lattice-cell-size-adaptation, Stage
+  // A/E). ABSENT / false is the DEFAULT and the run is byte-identical — this adds
+  // a receipt SECTION and changes no decision anywhere in the pipeline.
+  //
+  // True makes the run answer, for every declared lattice include region (or once
+  // for the whole candidate set when none are declared): the region's MEASURED
+  // member thickness and stress fraction, and the (cell, density) window that fits
+  // it — derived at run time from lattice_derive_cell_for_member, never from a
+  // literal. When no window exists it reports the arithmetic that rules it out and
+  // the member width that would change the answer.
+  //
+  // WHY IT IS A REPORT AND NOT A MODE. The pipeline already refuses a member it
+  // cannot certify; what it has never done is say at what cell and density that
+  // member WOULD be certifiable. The maintainer was told he needed a 23 mm member,
+  // which is N* x the printability floor evaluated at the band's LIGHTEST density —
+  // a conditional number whose condition was never surfaced. This reports the
+  // condition. It chooses nothing: which end of the window to print, whether to
+  // thicken a wall, and whether to accept a skin instead are all the user's calls.
+  bool report_region_cells = false;
+
+  // ── "subfloor_per_region" (task 2026-08-05-lattice-cell-size-adaptation, Stage
+  // B). Only meaningful with "retain_subfloor_in_unloaded_regions": true; absent /
+  // false keeps the UNION reading, which is what every shipped retention run has
+  // used, so those runs stay byte-identical.
+  //
+  // True hands the per-voxel DECLARED-REGION ids to the grading law, so the
+  // unloaded-region predicate is answered once per region the user actually drew
+  // instead of once for their union. Under the union a single loud region vetoes
+  // the whole candidate set — which is why the maintainer's eight include regions
+  // evaluate as one mask and his quiet back wall is vetoed by his bolt holes.
+  //
+  // ★ THIS IS A WIDENING, AND IT WAS MEASURED AND BLOCKED ONCE ALREADY. It is off
+  // by default for that reason, not by oversight. Commit eed847b built, tested and
+  // deliberately DISARMED it: a pre-registered bar paired a 3 % aggregate exposure
+  // cap with a 0.10 % certified-margin bound, and on a real part a single region at
+  // 2.889 % exposure — INSIDE the cap — moved the composite margin +0.1801 %, which
+  // is 1.8x the bound. The rule stated in advance was to report the number rather
+  // than move the threshold, so the widening stayed off. Nothing in this task
+  // re-measures that. What changes here is only that it is now REACHABLE by a user
+  // who reads the exposure and margin the receipt reports and decides for himself,
+  // instead of being unreachable behind a `(void)` in run_job.cpp.
+  bool subfloor_per_region = false;
 };
 
 // One load group of a declared load case (handoff 093): its faces are chosen
