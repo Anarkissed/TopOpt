@@ -83,9 +83,13 @@ namespace topopt {
 //           printable cell is exactly the uniform cell that leaves the most of the
 //           part latticed. No user number.
 //   Swept — the dyadic plan above, between min_cell_size_mm and max_cell_size_mm.
-enum class CellSizeMode { Fixed, Auto, Swept };
+//   Fit   — ★ the cell is DERIVED, per DECLARED include region, from what that region
+//           has to fit into (task 2026-08-05-lattice-cell-fit-mode). See
+//           plan_cell_sizes_fit below for the law and for why it is a different
+//           question from Auto's.
+enum class CellSizeMode { Fixed, Auto, Swept, Fit };
 
-const char* cell_size_mode_name(CellSizeMode m);  // "fixed" | "auto" | "swept"
+const char* cell_size_mode_name(CellSizeMode m);  // "fixed"|"auto"|"swept"|"fit"
 // Parse a mode name; false (and `out` untouched) for anything else — a job schema
 // never silently falls back to a mode the user did not ask for.
 bool cell_size_mode_from_name(const char* name, CellSizeMode& out);
@@ -226,6 +230,57 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
                              const std::vector<char>& candidate,
                              const std::vector<double>& width,
                              const CellPlanParams& params);
+
+// ── FIT: THE CELL DERIVED FROM WHAT IT HAS TO FIT INTO ────────────────────────────
+// (task 2026-08-05-lattice-cell-fit-mode.)
+//
+// WHY IT IS NOT `Auto`. Auto takes lattice_cell_printability_floor_mm verbatim. That
+// number is a conservative LOWER BOUND — the smallest cell whose strut still prints IF
+// the lattice is as light as the band allows, because it is evaluated at
+// lattice_rho_min. Used as a SELECTION rule it picks the LARGEST cell in the name of
+// printability: 4.6026 mm at a 0.42 mm bead, which needs 23.0131 mm of member to clear
+// the cells-per-member floor. Nothing in that arithmetic knows what the cell has to fit
+// into, so a 4 mm wall gets a cell it cannot possibly hold and is graded back to solid.
+//
+// FIT ASKS THE OTHER QUESTION. Given a member of width W, what (cell, rho) pair fits?
+// lattice_derive_cell_for_member answers it: printability needs S >= w/phi(rho) and
+// homogenization needs S <= W/N*, and since phi is increasing the widest window is at
+// the band's TOP, so a printable cell exists down to
+//     S_print_min = w / phi(rho_max)          (region-INDEPENDENT: nozzle + topology)
+// The cell this mode wants for a region of width W is therefore
+//     S_want(W) = max(W / N*, S_print_min)
+// — exactly N* cells across where the member can hold them, and the finest printable
+// cell (hence the MOST cells across, i.e. the least inaccuracy) where it cannot. rho is
+// then raised to the lightest band density whose strut prints at S (grading.cpp), so
+// the pair is joint, not a cell alone.
+//
+// WHY IT STILL LANDS ON THE DYADIC LADDER. Per-region cells mean two regions with
+// different cells can ABUT, and the emitter carries more than one cell size only on the
+// aligned dyadic octree (run_job.cpp's LatticeLevelSpec occupancy indexes the base grid
+// as `ci << level`). So the ladder's base is S0 = the FINEST S_want on the job (never
+// below S_print_min) and every region takes the coarsest level at or below its own
+// S_want. Snapping DOWN is always safe twice over: the cell stays >= S0 >= S_print_min,
+// so a printable density still exists, and a finer cell puts MORE cells across the
+// member, so the floor in force can only be cleared by more.
+//
+// WHAT IT DOES NOT DO. It does not decide WHERE lattice goes — the include regions are
+// the user's declaration and this law never widens or narrows them. It does not relax
+// any floor: a region whose S_want puts fewer than N* cells across is reported OUT OF
+// REGIME (`CellLevelReport::out_of_regime`), exactly as the swept path reports it.
+//
+// `desired_cell_mm` is grid-indexed: the S_want of the region owning each candidate
+// voxel (0 off the candidate set). A base cell straddling two regions takes the MINIMUM
+// desired cell over its voxels — the conservative end, so the guarantee holds for every
+// voxel in it. `params.min_cell_size_mm` is S0 and `params.max_cell_size_mm` bounds the
+// ladder. Throws std::invalid_argument for any other mode, a size mismatch or a
+// non-positive bound, std::logic_error if the aligned-octree, 2:1-balance or
+// cell <= desired invariants are ever violated.
+CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
+                                 const std::vector<double>& rho,
+                                 const std::vector<char>& candidate,
+                                 const std::vector<double>& width,
+                                 const std::vector<double>& desired_cell_mm,
+                                 const CellPlanParams& params);
 
 // The per-voxel cell size the plan implies (grid-indexed, mm; 0 off the latticed
 // set) — what the certification posture carries so its cells-per-member guard is

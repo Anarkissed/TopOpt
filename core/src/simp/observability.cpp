@@ -1135,6 +1135,47 @@ std::string run_info_json(const RunInfo& info) {
       }
       gr += "]";
     }
+    // ── FIT's own block. Emitted ONLY in fit mode: on every other mode the fields
+    // are at their zero defaults and no key appears, which is what keeps a non-fit
+    // run byte-identical (bar R1).
+    if (info.grading_cell_mode == "fit") {
+      gr += ", \"fit\": {";
+      gr += "\"min_printable_cell_mm\": " +
+            fmt(info.grading_min_printable_cell_mm);
+      gr += ", \"distinct_cells\": " +
+            std::to_string(info.grading_fit_distinct_cells);
+      gr += ", \"out_of_regime_voxels\": " +
+            std::to_string(info.grading_fit_out_of_regime_voxels);
+      gr += ", \"no_derivation_voxels\": " +
+            std::to_string(info.grading_fit_no_derivation_voxels);
+      gr += ", \"printed_outside_regions\": " +
+            std::to_string(info.grading_fit_printed_outside_regions);
+      gr += ", \"density_raised_for_print_voxels\": " +
+            std::to_string(info.grading_density_raised_for_print_voxels);
+      gr += ", \"regions\": [";
+      for (std::size_t i = 0; i < info.grading_fit_regions.size(); ++i) {
+        const RunInfo::GradingFitRegion& R = info.grading_fit_regions[i];
+        if (i) gr += ", ";
+        gr += "{\"region_index\": " + std::to_string(R.region_index);
+        gr += ", \"extent_mm\": " + fmt(R.extent_mm);
+        gr += ", \"feasible\": " + bool_json(R.feasible);
+        gr += ", \"cell_mm\": " + fmt(R.cell_mm);
+        gr += ", \"relative_density\": " + fmt(R.relative_density);
+        gr += ", \"strut_mm\": " + fmt(R.strut_mm);
+        gr += ", \"cells_per_member\": " + fmt(R.cells_per_member);
+        gr += ", \"out_of_regime\": " + bool_json(R.out_of_regime);
+        gr += ", \"candidate_voxels\": " + std::to_string(R.candidate_voxels);
+        gr += ", \"latticed_voxels\": " + std::to_string(R.latticed_voxels);
+        gr += "}";
+      }
+      gr += "]";
+      gr += ", \"note\": \"the cell is DERIVED per declared include region: "
+            "max(region extent / cells-per-member floor, the finest printable "
+            "cell), with the density raised to whatever prints at it. A region "
+            "marked out_of_regime is BUILDABLE and its certificate is out of "
+            "regime — it is not certified accurate.\"";
+      gr += "}";
+    }
     gr += "}";
     num("grading", gr, /*comma=*/has_frame || info.multiscale_armed);
   }
