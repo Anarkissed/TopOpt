@@ -81,6 +81,25 @@ struct JobOutput {
   // mesh-vs-readout volume gap this widens. Optional key "smooth_factor"; absent
   // or 1 keeps every existing job byte-for-byte identical.
   int smooth_factor = 1;
+
+  // Optional CAD-FACE PROJECTION (task 2026-08-06-cad-face-projection). false
+  // (the DEFAULT) exports exactly the bytes it always did.
+  //
+  // When true, every exported variant vertex that came from a face of the
+  // IMPORTED PART — a wall, a mounting face, a bolt bore — is moved onto that
+  // face's own analytic surface, which the B-rep already states exactly
+  // (topopt/step.hpp StepFaceInfo: this plane, this cylinder, this radius, this
+  // axis). Vertices the OPTIMIZER cut are left untouched, because no ground
+  // truth exists there.
+  //
+  // This is NOT smoothing and does not share a line of code with it: nothing is
+  // averaged, no surface is estimated, and the motion is bounded by one voxel.
+  // It changes ONLY the exported mesh's vertex positions — not the design, the
+  // physics, the optimizer, the density field, the reported mass, or the
+  // certified margin (all of which are computed on the voxel grid, which this
+  // never touches). Optional key "project_cad_faces"; absent or false keeps
+  // every existing job byte-for-byte identical.
+  bool project_cad_faces = false;
 };
 
 // Optional "lattice" block (handoff 2026-07-28-lattice-generation-production).

@@ -1,0 +1,152 @@
+== cad_project_probe — S3/S4 of 2026-08-06-cad-face-projection ==
+
+part            M2_verticalStand.step   (78 B-rep faces)
+grid            128 x 31 x 118 @ resolution 128
+ONE VOXEL       1.705279 mm
+HALF A VOXEL    0.852640 mm   <- the bar every displacement below is held to
+tolerances      attribution 1.705279 mm (1.00 voxel), motion guard 1.705279 mm (1.00 voxel),
+                ambiguity band 0.170528 mm (0.10 voxel)
+
+-- the FLOOR under every exactness claim below ---------------
+The CAD's own tessellation vertices, measured against the CAD's own nominal
+surfaces: worst planar 9.240e-04 mm, worst cylindrical 2.651e-02 mm.
+Nothing projected onto a nominal surface can be 'exact' beyond this.
+
+==============================================================
+VARIANT variant_068.stl — 143862 verts, 287720 tris
+attributed 111986 / 143862 (77.84%)  —  Plane 71471, Cylinder 10937, Other 29578 (LEFT ALONE)
+unattributed 31876 — treated as OPTIMIZER-CUT and left alone. Of those:
+  ambiguous (a second face of another kind just as close)  7097  (4.9332% of all vertices)
+  near a face's PATCH but not its ANALYTIC surface        72  (0.0500%)
+seam vertices 16346 (11.36%)
+
+-- S3 area by treatment (triangles all of whose vertices agree on one face) --
+  Plane    (projected exactly)    48827.3 mm^2   49.49%
+  Cylinder (projected exactly)     5950.6 mm^2    6.03%
+  Other    (LEFT ALONE)           17001.6 mm^2   17.23%
+  cut / seam / unattributed       26875.2 mm^2   27.24%
+
+-- S3 BOLT BORES — measured radius vs the B-rep's OWN nominal ----------
+Reference: StepFaceInfo::cylinder_radius_mm and the face's own axis, read from
+the B-rep on import. Every figure in mm; out-of-roundness = max - min.
+
+  face   nominal   verts | BEFORE  min/max  oor  rmserr | AFTER   min/max  oor  rmserr
+     4   84.5000    2554 | 82.7959/84.5785 1.7826 1.1040 | 82.8854/84.5000 1.6146 0.2995
+    17   67.5000     992 | 65.8248/69.1872 3.3624 0.9129 | 65.8390/69.1872 3.3483 0.6359
+    19   30.0000     801 | 28.3096/30.0154 1.7058 1.1417 | 30.0000/30.0000 0.0000 0.0000
+    21   30.0000    2119 | 28.2964/30.0964 1.8000 1.0702 | 28.4491/30.0000 1.5509 0.0337
+    32   30.0000     303 | 28.6792/29.9029 1.2237 0.9700 | 30.0000/30.0000 0.0000 0.0000
+    58    3.0000     443 |  3.2696/ 3.6866 0.4170 0.4836 |  3.0000/ 3.0000 0.0000 0.0000
+    61    3.0000    1500 |  3.2488/ 3.6760 0.4272 0.4975 |  3.0000/ 3.0000 0.0000 0.0000
+    62    3.0000    1501 |  3.4438/ 3.9279 0.4841 0.6841 |  3.0000/ 3.0000 0.0000 0.0000
+    63    3.0000      21 |  3.2740/ 3.7305 0.4565 0.5570 |  3.0000/ 3.0000 0.0000 0.0000
+    64    3.0000      21 |  3.4558/ 3.9199 0.4641 0.7078 |  3.0000/ 3.0000 0.0000 0.0000
+    65    3.0000     337 |  3.2695/ 3.6861 0.4166 0.5017 |  3.0000/ 3.0000 0.0000 0.0000
+    66 2000.0000     345 | 1998.3082/2001.6327 3.3246 0.8571 | 1998.3082/2000.0000 1.6918 0.5673
+
+WORST out-of-roundness on this variant: BEFORE 3.3624 mm (1.97 voxel) -> AFTER 3.3483 mm (1.96 voxel)
+
+-- S3 FLAT FACES — deviation from the B-rep's OWN nominal plane -------
+30 planar faces carried vertices.
+WORST max |deviation|  BEFORE 1.704635 mm (1.000 voxel) -> AFTER 1.697e+00 mm
+WORST rms  deviation   BEFORE 1.373732 mm (0.806 voxel) -> AFTER 8.597e-01 mm
+
+  face   verts |  before max  before rms |   after max   after rms
+    15    8336 |    1.704635    0.673598 |   1.552e-01   1.699e-03
+    51     457 |    1.697104    0.569988 |   1.697e+00   1.797e-01
+     2   16282 |    1.689111    0.423828 |   0.000e+00   0.000e+00
+     3    2389 |    1.646423    0.538478 |   1.468e+00   8.994e-02
+    11      17 |    1.634774    1.190788 |   1.635e+00   8.133e-01
+    30     669 |    1.622726    0.538114 |   9.086e-01   4.973e-02
+    10      32 |    1.598961    1.219578 |   1.494e+00   2.640e-01
+    39     234 |    1.588027    1.156429 |   1.373e+00   1.244e-01
+     5      13 |    1.552931    1.304453 |   1.082e-14   4.226e-15
+    33     151 |    1.536677    0.856919 |   1.537e+00   2.994e-01
+
+-- S3 HOW FAR ANY VERTEX MOVED, against HALF A VOXEL -------
+moved            81698 (Plane 71393, Cylinder 10305)
+left alone       31876 unattributed (optimizer-cut), 29578 on a kind we have no surface for
+fold guard       1160 band vertices put back (free) + 710 PROJECTED vertices put back (costs
+                 exactness), in 33 passes; inverted triangles left 0 carrying 0.0000 mm^2
+refused by guard 0  <- would have moved further than half a voxel; the ATTRIBUTION
+                     would be wrong, not the CAD, so the vertex is left where it is
+MAX MOVE         1.704635 mm = 0.9996 voxel
+rms move         0.812838 mm = 0.4767 voxel
+
+displacement histogram, in EIGHTHS of a voxel:
+  [0.000,0.125) voxel      2087    2.55% of moved
+  [0.125,0.250) voxel     36657   44.87% of moved
+  [0.250,0.375) voxel      4958    6.07% of moved
+  [0.375,0.500) voxel     11900   14.57% of moved
+  [0.500,0.625) voxel     19057   23.33% of moved
+  [0.625,0.750) voxel      2719    3.33% of moved
+  [0.750,0.875) voxel     11096   13.58% of moved
+  [0.875,1.000) voxel       790    0.97% of moved
+  [1.000,9.000) voxel         0    0.00% of moved
+
+-- the BLOCKED-STOP question, answered with data ------------
+The stop condition reads: a move beyond HALF A VOXEL means the ATTRIBUTION is
+wrong, not the CAD. So for every such vertex: does its analytic projection
+still land on the tessellated patch of the very face it was attributed to?
+moved further than half a voxel   33109 (40.53% of moved)
+of those, STILL ON THEIR OWN FACE 33086 (99.93%)
+
+-- S4 THE SEAM ---------------------------------------------
+seam vertices              16346
+transition band            7566 optimizer-cut vertices carried, furthest 1.136423 mm (0.6664 voxel)
+                           (2 rings; every attributed vertex kept its exact position)
+held inside their patch    263 (their analytic projection would have left the
+                           CAD face; they were placed on its boundary instead)
+moved/unmoved mesh edges   10198 of 431580 total (2.36%)
+MAX discontinuity across the seam  1.703548 mm = 0.9990 voxel
+rms discontinuity across the seam  0.579211 mm = 0.3397 voxel
+
+A SHIFT IS NOT A CREASE. What is visible is a change of surface ANGLE:
+dihedral change at seam edges      max 160.70 deg, rms 15.70 deg
+dihedral of the WHOLE mesh         before rms 10.87 deg -> after rms 12.88 deg
+
+BUT A MAX OVER 14000 EDGES IS ONE EDGE. "A visible crease at EVERY CAD boundary"
+is a COUNT, so here is the count. This surface is a voxel staircase: it arrives
+already full of sharp edges, and what matters is how many the projection ADDS.
+manifold edges                     BEFORE        AFTER
+total                              431580       431580
+>= 45 deg                            8513         9170
+>= 60 deg                             261         3787
+>= 90 deg                              15          945
+
+NEWLY SHARP (was < 45 deg, is now >= 60 deg): 3033 edges = 0.7028% of the mesh
+  of which at a moved/unmoved junction: 330 (3.2359% of the 10198 seam edges)
+
+-- DID THE PROJECTION FOLD THE MESH? ------------------------
+triangles touched by the projection   183784 of 287720
+INVERTED (normal reversed)            0  (0.0000% of touched)  [Plane 0, Cylinder 0]
+COLLAPSED to zero area                0
+area carried by the inverted ones     0.000000 mm^2 before -> 0.000000 mm^2 after
+  = 0.000000% of the part's 98655 mm^2; the LARGEST single inverted triangle is 0.000e+00 mm^2
+smallest triangle area  before 2.147e-07 mm^2 -> after 1.072e-08 mm^2
+watertight  before yes -> after yes
+
+-- THE DECISION TABLE — tolerance x seam band ---------------
+`cover` is the share of ALL vertices that get an exact answer. `bore oor` and
+`flat max` are the WORST over every face, AFTER projection. `seam dih` is the max
+change of dihedral angle at a moved/unmoved edge — the crease. The mesh's own
+ambient dihedral is printed on the last column for comparison.
+
+  tol rings guard   cover    moved  bore oor  flat max  inverted  inv mm2 newsharp  seam rms
+  vox                   %                 mm        mm      tris     mm^2    edges        mm
+ 0.50     0   off  42.32%    49315  9.09e-13  1.09e-14        45    5.323     3450    0.5857
+ 0.50     0    on  42.32%    49222  1.67e+00  8.06e-01         0    0.000     3324    0.5839
+ 0.50     1   off  42.32%    49315  9.09e-13  1.09e-14       174   14.543     2717    0.3044
+ 0.50     1    on  42.32%    49239  1.67e+00  8.06e-01         0    0.000     2435    0.3139
+ 0.50     2   off  42.32%    49315  9.09e-13  1.09e-14       279   16.650     2777    0.1593
+ 0.50     2    on  42.32%    49243  1.67e+00  8.06e-01         0    0.000     2349    0.1999
+ 1.00     0   off  77.84%    82408  9.09e-13  1.09e-14       167    4.151     4382    0.9196
+ 1.00     0    on  77.84%    81554  3.35e+00  1.70e+00         0    0.000     4212    0.8948
+ 1.00     1   off  77.84%    82408  9.09e-13  1.09e-14       632   72.330     3370    0.5416
+ 1.00     1    on  77.84%    81639  3.35e+00  1.70e+00         0    0.000     3053    0.6401
+ 1.00     2   off  77.84%    82408  9.09e-13  1.09e-14       989   94.391     3633    0.3750
+ 1.00     2    on  77.84%    81698  3.35e+00  1.70e+00         0    0.000     3033    0.5792
+
+projected mesh written to /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-06-cad-face-projection/variant_068_projected.stl
+
+evidence written to /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-06-cad-face-projection/s3_bores.csv, s3_flats.csv, s3_motion.csv

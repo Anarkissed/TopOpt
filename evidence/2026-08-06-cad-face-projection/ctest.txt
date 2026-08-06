@@ -1,0 +1,13 @@
+BUILD DONE
+101/107 Test  #66: strut_strength ...................   Passed    1.51 sec
+        Start  92: face_tag
+102/107 Test  #90: step_import ......................   Passed    1.55 sec
+103/107 Test  #45: gate_v4 ..........................   Passed    1.60 sec
+104/107 Test  #99: loadcase_small_face ..............   Passed    1.64 sec
+105/107 Test  #68: width_aware_knockdown ............   Passed    1.51 sec
+106/107 Test #100: loadcase_resolution ..............   Passed    1.66 sec
+107/107 Test  #92: face_tag .........................   Passed    1.62 sec
+
+100% tests passed out of 107
+
+Total Test time (real) = 370.93 sec

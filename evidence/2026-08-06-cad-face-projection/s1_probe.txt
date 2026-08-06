@@ -1,0 +1,320 @@
+== cad_face_probe — S1/S2 of 2026-08-06-cad-face-projection ==
+
+-- ARITHMETIC, MEASURED --------------------------------------
+part            M2_verticalStand.step
+bbox            218.276 x 52.593 x 200.000 mm
+grid            128 x 31 x 118 @ resolution 128
+ONE VOXEL       1.705279 mm   <- every tolerance below is stated in these units
+CAD mesh        1555 verts, 3106 tris, 78 B-rep faces
+CAD surface     94020.4 mm^2 total; by kind — Plane 36 faces (69.5% of area), Cylinder 12 (8.3%), Other 30 (22.2%)
+
+==============================================================
+VARIANT variant_026.stl — 162248 verts, 324512 tris (as core's importer welds it)
+
+-- S1(a) THE SPLIT, by vertex, at three tolerances ---------
+A vertex is ON A CAD FACE iff its distance to the CAD surface <= tol.
+tol              tol (mm)  on CAD face optimizer-cut  %% on CAD
+0.5 voxel          0.8526        47177       115071     29.08%
+1.0 voxel (default)     1.7053        97717        64531     60.23%
+1.5 voxel          2.5579       102299        59949     63.05%
+
+-- distance-to-CAD histogram (in voxels) — is the threshold on a knife edge? --
+  [0.00,0.25)      30778   18.97%  ######################
+  [0.25,0.50)      16399   10.11%  ############
+  [0.50,0.75)      31192   19.22%  #######################
+  [0.75,1.00)      19348   11.92%  ##############
+  [1.00,1.25)       2710    1.67%  ##
+  [1.25,1.50)       1872    1.15%  #
+  [1.50,1.75)       1957    1.21%  #
+  [1.75,2.00)       1739    1.07%  #
+  [2.00,2.25)       2010    1.24%  #
+  [2.25,2.50)       1957    1.21%  #
+  [2.50,2.75)      17158   10.58%  ############
+  [2.75,3.00)       3890    2.40%  ##
+  [3.00,3.25)       2878    1.77%  ##
+  [3.25,3.50)       7156    4.41%  #####
+  [3.50,3.75)       9082    5.60%  ######
+  [3.75,4.00)        369    0.23%  
+  [4.00,99.00)+     11753    7.24%  ########
+
+-- S1(a) THE SPLIT, by AREA, at tol = 1.000 voxel (1.7053 mm) --
+total exported surface   109373.0 mm^2 over 324512 triangles
+  on a CAD face             65626.9 mm^2   60.00%   <- has a correct answer
+  optimizer-cut             40880.3 mm^2   37.38%   <- no ground truth exists
+  seam (mixed triangle)      2865.7 mm^2    2.62%   <- S4's subject
+by VERTEX                on CAD 97717 / 162248 (60.23%), unattributed 64531 (39.77%)
+
+-- S1(b) THE CAD-FACE AREA, BY SURFACE KIND ----------------
+  Plane        41847.0 mm^2   63.76% of the CAD-face area   38.26% of the whole part
+  Cylinder      8229.6 mm^2   12.54% of the CAD-face area    7.52% of the whole part
+  Other        15550.3 mm^2   23.69% of the CAD-face area   14.22% of the whole part
+
+-- S1(c) DEVIATION FROM THE CAD, EACH POPULATION SEPARATELY -
+Reference: the pre-voxelization imported CAD tessellation (3106 tris,
+linear deflection 0.100 mm — the importer default). Unsigned point-to-surface
+distance, PR 299's metric unchanged. Voxel = 1.705279 mm.
+
+population                                             n    max mm    rms mm    p99 mm   rms vox
+CAD-face, all                                      97717    1.7052    0.9146    1.6374     0.536
+CAD-face, OBLIQUE                                  21397    1.7046    0.9159    1.6572     0.537
+optimizer-cut, all                                 64531   15.7738    5.7764   11.5106     3.387
+optimizer-cut, OBL                                  7551   15.6337    6.2367   13.8364     3.657
+OBLIQUE, both (PR 299's headline population)       28948   15.6337    3.2811   11.8774     1.924
+
+NOTE the optimizer-cut rows are NOT an error reading. That surface was never
+meant to lie on the CAD; its distance to the CAD is how deep into the part the
+optimizer cut. It is printed so the two halves are never averaged together.
+
+-- S1(d) TWO PARTITIONS, CROSS-TABULATED -------------------
+MEASURED on /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/variant_026.stl (16225684 bytes on disk):
+  324512 triangles, 109373.0 mm^2 total, 77.13% of area axis-aligned by MESH normal
+  (max|n| >= 0.98), 22.87% oblique.
+  raw file header triangle count (unwelded, as written): 324512
+  connected components 1; largest component alone: 324512 triangles, 109373.0 mm^2
+  axis-aligned % by threshold: 0.9->85.36%  0.95->80.12%  0.98->77.13%  0.999->65.18%  1->49.87%  
+
+vertices                               mesh: AXIS  mesh: OBLIQUE
+nearest CAD normal: AXIS                   106067          27233
+nearest CAD normal: OBLIQUE                  8950          19998
+the two partitions agree on 77.7% of vertices.
+
+-- S2 THE SHIPPED ATTRIBUTOR, ON THE SAME MESH -------------
+attributed   91012   unattributed 71236   ambiguous 6633
+by kind:  Plane 57039   Cylinder 10937   Other(left alone) 23036
+attributed 91012 + ambiguous 6633 + off-analytic 72 = 97717, vs the harness's 97717 on-CAD (must match)
+WITHHELD, by reason, as % of ALL vertices:
+  ambiguous (a second CAD face of a DIFFERENT kind within 0.1705 mm = 0.10 voxel)  4.0882%
+  off the ANALYTIC surface though near the face's patch                     0.0444%
+==============================================================
+VARIANT variant_038.stl — 161512 verts, 323036 tris (as core's importer welds it)
+
+-- S1(a) THE SPLIT, by vertex, at three tolerances ---------
+A vertex is ON A CAD FACE iff its distance to the CAD surface <= tol.
+tol              tol (mm)  on CAD face optimizer-cut  %% on CAD
+0.5 voxel          0.8526        52846       108666     32.72%
+1.0 voxel (default)     1.7053       104082        57430     64.44%
+1.5 voxel          2.5579       108534        52978     67.20%
+
+-- distance-to-CAD histogram (in voxels) — is the threshold on a knife edge? --
+  [0.00,0.25)      34169   21.16%  #########################
+  [0.25,0.50)      18677   11.56%  #############
+  [0.50,0.75)      31651   19.60%  #######################
+  [0.75,1.00)      19585   12.13%  ##############
+  [1.00,1.25)       2782    1.72%  ##
+  [1.25,1.50)       1670    1.03%  #
+  [1.50,1.75)       1931    1.20%  #
+  [1.75,2.00)       1459    0.90%  #
+  [2.00,2.25)       1893    1.17%  #
+  [2.25,2.50)       1785    1.11%  #
+  [2.50,2.75)      16054    9.94%  ###########
+  [2.75,3.00)       3200    1.98%  ##
+  [3.00,3.25)       2517    1.56%  #
+  [3.25,3.50)       5964    3.69%  ####
+  [3.50,3.75)       7776    4.81%  #####
+  [3.75,4.00)        361    0.22%  
+  [4.00,99.00)+     10038    6.22%  #######
+
+-- S1(a) THE SPLIT, by AREA, at tol = 1.000 voxel (1.7053 mm) --
+total exported surface   109298.2 mm^2 over 323036 triangles
+  on a CAD face             70235.9 mm^2   64.26%   <- has a correct answer
+  optimizer-cut             36282.5 mm^2   33.20%   <- no ground truth exists
+  seam (mixed triangle)      2779.8 mm^2    2.54%   <- S4's subject
+by VERTEX                on CAD 104082 / 161512 (64.44%), unattributed 57430 (35.56%)
+
+-- S1(b) THE CAD-FACE AREA, BY SURFACE KIND ----------------
+  Plane        45695.9 mm^2   65.06% of the CAD-face area   41.81% of the whole part
+  Cylinder      8228.7 mm^2   11.72% of the CAD-face area    7.53% of the whole part
+  Other        16311.3 mm^2   23.22% of the CAD-face area   14.92% of the whole part
+
+-- S1(c) DEVIATION FROM THE CAD, EACH POPULATION SEPARATELY -
+Reference: the pre-voxelization imported CAD tessellation (3106 tris,
+linear deflection 0.100 mm — the importer default). Unsigned point-to-surface
+distance, PR 299's metric unchanged. Voxel = 1.705279 mm.
+
+population                                             n    max mm    rms mm    p99 mm   rms vox
+CAD-face, all                                     104082    1.7052    0.8999    1.6334     0.528
+CAD-face, OBLIQUE                                  22308    1.7046    0.9194    1.6551     0.539
+optimizer-cut, all                                 57430   14.7248    5.7002   10.6580     3.343
+optimizer-cut, OBL                                  6657   14.7248    5.8337   12.7166     3.421
+OBLIQUE, both (PR 299's headline population)       28965   14.7248    2.9108   10.6010     1.707
+
+NOTE the optimizer-cut rows are NOT an error reading. That surface was never
+meant to lie on the CAD; its distance to the CAD is how deep into the part the
+optimizer cut. It is printed so the two halves are never averaged together.
+
+-- S1(d) TWO PARTITIONS, CROSS-TABULATED -------------------
+MEASURED on /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/variant_038.stl (16151884 bytes on disk):
+  323036 triangles, 109298.2 mm^2 total, 78.25% of area axis-aligned by MESH normal
+  (max|n| >= 0.98), 21.75% oblique.
+  raw file header triangle count (unwelded, as written): 323036
+  connected components 1; largest component alone: 323036 triangles, 109298.2 mm^2
+  axis-aligned % by threshold: 0.9->86.15%  0.95->81.21%  0.98->78.25%  0.999->65.95%  1->50.61%  
+
+vertices                               mesh: AXIS  mesh: OBLIQUE
+nearest CAD normal: AXIS                   106729          25818
+nearest CAD normal: OBLIQUE                 10077          18888
+the two partitions agree on 77.8% of vertices.
+
+-- S2 THE SHIPPED ATTRIBUTOR, ON THE SAME MESH -------------
+attributed   97184   unattributed 64328   ambiguous 6826
+by kind:  Plane 62305   Cylinder 10937   Other(left alone) 23942
+attributed 97184 + ambiguous 6826 + off-analytic 72 = 104082, vs the harness's 104082 on-CAD (must match)
+WITHHELD, by reason, as % of ALL vertices:
+  ambiguous (a second CAD face of a DIFFERENT kind within 0.1705 mm = 0.10 voxel)  4.2263%
+  off the ANALYTIC surface though near the face's patch                     0.0446%
+==============================================================
+VARIANT variant_052.stl — 145922 verts, 291840 tris (as core's importer welds it)
+
+-- S1(a) THE SPLIT, by vertex, at three tolerances ---------
+A vertex is ON A CAD FACE iff its distance to the CAD surface <= tol.
+tol              tol (mm)  on CAD face optimizer-cut  %% on CAD
+0.5 voxel          0.8526        58748        87174     40.26%
+1.0 voxel (default)     1.7053       111239        34683     76.23%
+1.5 voxel          2.5579       115252        30670     78.98%
+
+-- distance-to-CAD histogram (in voxels) — is the threshold on a knife edge? --
+  [0.00,0.25)      37625   25.78%  ##############################
+  [0.25,0.50)      21123   14.48%  #################
+  [0.50,0.75)      32092   21.99%  ##########################
+  [0.75,1.00)      20399   13.98%  ################
+  [1.00,1.25)       2737    1.88%  ##
+  [1.25,1.50)       1276    0.87%  #
+  [1.50,1.75)       1675    1.15%  #
+  [1.75,2.00)        981    0.67%  
+  [2.00,2.25)       1482    1.02%  #
+  [2.25,2.50)       1307    0.90%  #
+  [2.50,2.75)      14428    9.89%  ###########
+  [2.75,3.00)       2016    1.38%  #
+  [3.00,3.25)       1666    1.14%  #
+  [3.25,3.50)       1928    1.32%  #
+  [3.50,3.75)       2248    1.54%  #
+  [3.75,4.00)         98    0.07%  
+  [4.00,99.00)+      2841    1.95%  ##
+
+-- S1(a) THE SPLIT, by AREA, at tol = 1.000 voxel (1.7053 mm) --
+total exported surface   99579.9 mm^2 over 291840 triangles
+  on a CAD face             75095.8 mm^2   75.41%   <- has a correct answer
+  optimizer-cut             21734.5 mm^2   21.83%   <- no ground truth exists
+  seam (mixed triangle)      2749.5 mm^2    2.76%   <- S4's subject
+by VERTEX                on CAD 111239 / 145922 (76.23%), unattributed 34683 (23.77%)
+
+-- S1(b) THE CAD-FACE AREA, BY SURFACE KIND ----------------
+  Plane        48961.0 mm^2   65.20% of the CAD-face area   49.17% of the whole part
+  Cylinder      8227.3 mm^2   10.96% of the CAD-face area    8.26% of the whole part
+  Other        17907.4 mm^2   23.85% of the CAD-face area   17.98% of the whole part
+
+-- S1(c) DEVIATION FROM THE CAD, EACH POPULATION SEPARATELY -
+Reference: the pre-voxelization imported CAD tessellation (3106 tris,
+linear deflection 0.100 mm — the importer default). Unsigned point-to-surface
+distance, PR 299's metric unchanged. Voxel = 1.705279 mm.
+
+population                                             n    max mm    rms mm    p99 mm   rms vox
+CAD-face, all                                     111239    1.7052    0.8905    1.6315     0.522
+CAD-face, OBLIQUE                                  25488    1.7050    0.9356    1.6599     0.549
+optimizer-cut, all                                 34683   11.0698    4.8447   10.2548     2.841
+optimizer-cut, OBL                                  4096   10.3364    3.9834    7.1506     2.336
+OBLIQUE, both (PR 299's headline population)       29584   10.3364    1.7178    5.7390     1.007
+
+NOTE the optimizer-cut rows are NOT an error reading. That surface was never
+meant to lie on the CAD; its distance to the CAD is how deep into the part the
+optimizer cut. It is printed so the two halves are never averaged together.
+
+-- S1(d) TWO PARTITIONS, CROSS-TABULATED -------------------
+MEASURED on /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/variant_052.stl (14592084 bytes on disk):
+  291840 triangles, 99579.9 mm^2 total, 79.45% of area axis-aligned by MESH normal
+  (max|n| >= 0.98), 20.55% oblique.
+  raw file header triangle count (unwelded, as written): 291840
+  connected components 1; largest component alone: 291840 triangles, 99579.9 mm^2
+  axis-aligned % by threshold: 0.9->87.19%  0.95->82.21%  0.98->79.45%  0.999->69.34%  1->54.97%  
+
+vertices                               mesh: AXIS  mesh: OBLIQUE
+nearest CAD normal: AXIS                    98614          17724
+nearest CAD normal: OBLIQUE                  9038          20546
+the two partitions agree on 81.7% of vertices.
+
+-- S2 THE SHIPPED ATTRIBUTOR, ON THE SAME MESH -------------
+attributed   104207   unattributed 41715   ambiguous 6960
+by kind:  Plane 66463   Cylinder 10937   Other(left alone) 26807
+attributed 104207 + ambiguous 6960 + off-analytic 72 = 111239, vs the harness's 111239 on-CAD (must match)
+WITHHELD, by reason, as % of ALL vertices:
+  ambiguous (a second CAD face of a DIFFERENT kind within 0.1705 mm = 0.10 voxel)  4.7697%
+  off the ANALYTIC surface though near the face's patch                     0.0493%
+==============================================================
+VARIANT variant_068.stl — 143862 verts, 287720 tris (as core's importer welds it)
+
+-- S1(a) THE SPLIT, by vertex, at three tolerances ---------
+A vertex is ON A CAD FACE iff its distance to the CAD surface <= tol.
+tol              tol (mm)  on CAD face optimizer-cut  %% on CAD
+0.5 voxel          0.8526        65052        78810     45.22%
+1.0 voxel (default)     1.7053       119155        24707     82.83%
+1.5 voxel          2.5579       122361        21501     85.05%
+
+-- distance-to-CAD histogram (in voxels) — is the threshold on a knife edge? --
+  [0.00,0.25)      40117   27.89%  #################################
+  [0.25,0.50)      24935   17.33%  ####################
+  [0.50,0.75)      32797   22.80%  ###########################
+  [0.75,1.00)      21306   14.81%  #################
+  [1.00,1.25)       2408    1.67%  ##
+  [1.25,1.50)        798    0.55%  
+  [1.50,1.75)       1334    0.93%  #
+  [1.75,2.00)        492    0.34%  
+  [2.00,2.25)       1032    0.72%  
+  [2.25,2.50)        755    0.52%  
+  [2.50,2.75)      11753    8.17%  #########
+  [2.75,3.00)       1235    0.86%  #
+  [3.00,3.25)       1024    0.71%  
+  [3.25,3.50)        813    0.57%  
+  [3.50,3.75)       1218    0.85%  #
+  [3.75,4.00)         32    0.02%  
+  [4.00,99.00)+      1813    1.26%  #
+
+-- S1(a) THE SPLIT, by AREA, at tol = 1.000 voxel (1.7053 mm) --
+total exported surface   98654.7 mm^2 over 287720 triangles
+  on a CAD face             80655.5 mm^2   81.76%   <- has a correct answer
+  optimizer-cut             15470.7 mm^2   15.68%   <- no ground truth exists
+  seam (mixed triangle)      2528.5 mm^2    2.56%   <- S4's subject
+by VERTEX                on CAD 119155 / 143862 (82.83%), unattributed 24707 (17.17%)
+
+-- S1(b) THE CAD-FACE AREA, BY SURFACE KIND ----------------
+  Plane        52852.4 mm^2   65.53% of the CAD-face area   53.57% of the whole part
+  Cylinder      8226.7 mm^2   10.20% of the CAD-face area    8.34% of the whole part
+  Other        19576.4 mm^2   24.27% of the CAD-face area   19.84% of the whole part
+
+-- S1(c) DEVIATION FROM THE CAD, EACH POPULATION SEPARATELY -
+Reference: the pre-voxelization imported CAD tessellation (3106 tris,
+linear deflection 0.100 mm — the importer default). Unsigned point-to-surface
+distance, PR 299's metric unchanged. Voxel = 1.705279 mm.
+
+population                                             n    max mm    rms mm    p99 mm   rms vox
+CAD-face, all                                     119155    1.7052    0.8843    1.6346     0.519
+CAD-face, OBLIQUE                                  28223    1.7050    0.9547    1.6655     0.560
+optimizer-cut, all                                 24707   11.1552    4.7278   10.2548     2.772
+optimizer-cut, OBL                                  2372   10.3322    3.5381    7.0290     2.075
+OBLIQUE, both (PR 299's headline population)       30595   10.3322    1.3459    4.9349     0.789
+
+NOTE the optimizer-cut rows are NOT an error reading. That surface was never
+meant to lie on the CAD; its distance to the CAD is how deep into the part the
+optimizer cut. It is printed so the two halves are never averaged together.
+
+-- S1(d) TWO PARTITIONS, CROSS-TABULATED -------------------
+MEASURED on /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/variant_068.stl (14386084 bytes on disk):
+  287720 triangles, 98654.7 mm^2 total, 80.38% of area axis-aligned by MESH normal
+  (max|n| >= 0.98), 19.62% oblique.
+  raw file header triangle count (unwelded, as written): 287720
+  connected components 1; largest component alone: 287720 triangles, 98654.7 mm^2
+  axis-aligned % by threshold: 0.9->87.88%  0.95->83.00%  0.98->80.38%  0.999->71.39%  1->57.81%  
+
+vertices                               mesh: AXIS  mesh: OBLIQUE
+nearest CAD normal: AXIS                    99173          14094
+nearest CAD normal: OBLIQUE                  8766          21829
+the two partitions agree on 84.1% of vertices.
+
+-- S2 THE SHIPPED ATTRIBUTOR, ON THE SAME MESH -------------
+attributed   111986   unattributed 31876   ambiguous 7097
+by kind:  Plane 71471   Cylinder 10937   Other(left alone) 29578
+attributed 111986 + ambiguous 7097 + off-analytic 72 = 119155, vs the harness's 119155 on-CAD (must match)
+WITHHELD, by reason, as % of ALL vertices:
+  ambiguous (a second CAD face of a DIFFERENT kind within 0.1705 mm = 0.10 voxel)  4.9332%
+  off the ANALYTIC surface though near the face's patch                     0.0500%
+
+evidence written to /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-06-cad-face-projection/s1_split.csv, s1_deviation.csv, s1_histogram.csv

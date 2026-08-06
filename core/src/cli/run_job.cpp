@@ -20,6 +20,7 @@
 
 #include "topopt/analyze.hpp"
 #include "topopt/build_frame.hpp"
+#include "topopt/cad_project.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/coarsen.hpp"
 #include "topopt/design_store.hpp"
@@ -312,7 +313,8 @@ std::optional<BuildFrameRotation> variant_bake_rotation(
 // and then the certificate would describe an object the slicer never produces.
 std::string export_variant_mesh(const MinimizePlasticVariant& variant,
                                 const std::string& out_dir, const JobOutput& out,
-                                const VoxelGrid& sg, double printed_iso = 0.5) {
+                                const VoxelGrid& sg, double printed_iso = 0.5,
+                                const StepModel* cad = nullptr) {
   const std::string path = join_path(
       out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
                               out.mesh_format));
@@ -325,7 +327,28 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
         ResampleInterp::Tricubic);
     smooth = keep_largest_component(raw);
   }
-  const TriangleMesh& model_mesh = (sf > 1) ? smooth : variant.v3.mesh;
+  // CAD-FACE PROJECTION (task 2026-08-06-cad-face-projection), DEFAULT OFF.
+  //
+  // WHY IT HAPPENS HERE, and it is the only place it can. The exported mesh
+  // carries no face ids and cannot: it is extracted by marching cubes from a
+  // scalar density field (the call just above), which has no face channel, and
+  // written to STL/3MF, which have no per-triangle attribute slot. So the
+  // attribution has to be re-established from geometry — and this is the last
+  // point in the pipeline where the imported CAD is still in hand.
+  //
+  // It runs BEFORE the bake rotation so the projection is done in the frame the
+  // CAD's own planes and cylinder axes are stated in.
+  TriangleMesh projected;
+  if (out.project_cad_faces && cad != nullptr && !cad->faces.empty()) {
+    const TriangleMesh& src = (sf > 1) ? smooth : variant.v3.mesh;
+    CadProjectOptions po = cad_project_options_for_grid(sg.spacing);
+    po.enabled = true;
+    const CadAttribution att = attribute_to_cad_faces(src, *cad, po);
+    projected = project_onto_cad_faces(src, *cad, po, att);
+  }
+  const TriangleMesh& model_mesh =
+      !projected.vertices.empty() ? projected
+                                  : ((sf > 1) ? smooth : variant.v3.mesh);
   const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
   TriangleMesh baked;
   if (R) baked = rotate_mesh(model_mesh, *R);
@@ -7448,7 +7471,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (!v.accepted) return;
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid,
-                              run_printed_iso(options));
+                              run_printed_iso(options), &result.model);
       streamed_paths.push_back(p);
       // `achieved` is the optimizer-achieved (continuous) fraction — the stream's
       // join key against the report's volume_fraction; `printed` is the printed/count
@@ -7863,7 +7886,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (!variant.accepted) continue;
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid,
-          run_printed_iso(options)));
+          run_printed_iso(options), &result.model));
       emit_lattice(variant, /*stream_lines=*/false);  // batch: no stdout lines
     }
   }

@@ -1,0 +1,14 @@
+FAIL (line 261): AFTER: the bore must be round to floating-point about its own nominal axis
+FAIL (line 264): AFTER: every bore vertex must sit at the B-rep's OWN nominal radius
+FAIL (line 271): AFTER: every attributed planar vertex must lie in the B-rep's OWN nominal plane to floating-point
+fixture: 256 verts, 512 tris, 7 faces (6 Plane + 1 Cylinder r=6.0000 mm)
+grid 48 x 48 x 24, ONE VOXEL 0.833333 mm
+exported: 40928 verts, 81856 tris
+attributed 40776 / 40928 (Plane 35496, Cylinder 5280, ambiguous 152)
+BEFORE bore face 6: nominal 6.0000, measured min 5.7483 max 6.2983 mean 6.0263, out-of-roundness 0.5499 mm (0.660 voxel), rms error 0.1699 mm
+BEFORE worst planar face: max |deviation from its own nominal plane| 0.208333 mm (0.250 voxel)
+projected: moved 0 (Plane 0, Cylinder 0), refused by guard 0, max move 0.000000 mm (0.0000 voxel)
+AFTER  bore face 6: nominal 6.000000, measured min 5.748317 max 6.298255, out-of-roundness 5.499e-01 mm, rms error 1.699e-01 mm
+AFTER  worst planar face: max |deviation| 2.083e-01 mm
+unattributed vertices 152, of which moved 0 (must be 0)
+24 checks, 3 failures

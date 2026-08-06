@@ -1,0 +1,39 @@
+{
+  "material": "PLA",
+  "variants": [
+    {
+      "volume_fraction": 0.9222570872,
+      "printed_fraction": 0.9222570872,
+      "volume_saved_fraction": 0.07774291279,
+      "max_stress_mpa": 0.01191766496,
+      "max_interlayer_tension_mpa": 0.001151257253,
+      "margin": {
+        "in_plane": 4614.998005,
+        "interlayer": 26275.62165,
+        "worst_case": 4614.998005
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 3,
+        "top_layers": 5,
+        "bottom_layers": 3,
+        "infill_percent": 15,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 98,
+      "min_feature_warning": "98 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 955.5943738,
+      "rejection_reason": ""
+    }
+  ],
+  "rejected_variants": []
+}

@@ -1,0 +1,14 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+analyze: mesh variant_068_projected.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.01192 MPa   worst-case margin: 4615 (required 1.5)
+  load case: declared external load
+  verdict: ACCEPTED
+  voxel mass: 628.9 g   mesh mass: 599 g
+  min-feature violations: 98
+report: r3_cert_projected/analysis_report.json
+provenance: r3_cert_projected/analysis.json
+fields: r3_cert_projected/fields.bin
+$R/core/build/topopt-cli analyze job_analyze.json --mesh  --out   218.87s user 3.23s system 153% cpu 2:24.56 total
