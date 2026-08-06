@@ -1568,8 +1568,11 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      // lattice-void-reaches-exterior). Null on
                                      // every run that did not arm the check, and
                                      // then not one byte of the receipt changes.
-                                     const LatticeVoidEscapeReport* void_escape,
-                                     double void_check_seconds) {
+                                     // NO WALL CLOCK PARAMETER. The check's
+                                     // wall time is deliberately not in this
+                                     // document — see the cost block below. It
+                                     // ships in run_info instead.
+                                     const LatticeVoidEscapeReport* void_escape) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -2250,10 +2253,36 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          std::to_string(ve.sealed_pockets_without_lattice) + ",\n";
     s += "    \"sealed_volume_without_lattice_mm3\": " +
          json_num(ve.sealed_volume_without_lattice_mm3) + ",\n";
-    // COST (bar R5): the check's own work and its own wall clock, SEPARATELY,
-    // and separate from `gen_seconds` above.
+    // COST: the check's own work, separate from `gen_seconds` above.
+    //
+    // ★ `bfs_visits` IS HERE AND THE WALL CLOCK IS NOT (task
+    // 2026-08-06-arm-projection-and-void-check). It used to carry both, and
+    // arming the check by default is what exposed why it cannot.
+    //
+    // THE PER-VARIANT RECEIPT IS A DOCUMENT THIS PROJECT REQUIRES TO BE
+    // BYTE-IDENTICAL ON A RERUN. Five validation tests assert exactly that —
+    // test_lattice_hookup H1d/H5, test_lattice_variant Z8,
+    // test_protect_freeze_vs_solidity PF6, test_designbox_lattice_recert AI7,
+    // and test_bake_build_orientation V6, which compares receipts across a
+    // rotation. A wall clock cannot satisfy that: two identical runs measured
+    // 0.0010455 s and 0.001088709 s, and those two numbers were the ONLY
+    // difference between the two documents.
+    //
+    // PR 305 wrote the clock here and never hit this, because the block only
+    // existed when the check was explicitly armed and no armed run was ever
+    // rerun-compared. Defaulting the check on makes every lattice receipt carry
+    // it, so the conflict became five test failures at once.
+    //
+    // NOTHING IS LOST. `bfs_visits` is the DETERMINISTIC cost figure — voxel
+    // pushes, a pure function of the grid and the mask, and the one that
+    // actually bounds the work (O(voxel_count), asserted in
+    // test_lattice_void.cpp section F). The WALL CLOCK still ships, in
+    // `run_info.lattice_export.void_escape.wall_seconds`
+    // (observability.cpp:974) — which is where this project already keeps
+    // clocks, and which every byte-identity comparison already excludes BY NAME
+    // for exactly this reason. Both figures are still reported, still
+    // separately, and still outside `gen_seconds`.
     s += "    \"bfs_visits\": " + std::to_string(ve.bfs_visits) + ",\n";
-    s += "    \"wall_seconds\": " + json_num(void_check_seconds) + ",\n";
     s += "    \"pockets\": [";
     for (std::size_t p = 0; p < ve.pockets.size(); ++p) {
       const SealedVoidPocket& P = ve.pockets[p];
@@ -3387,8 +3416,7 @@ LatticeVariantOutcome lattice_one_variant(
                              ".report.json");
   R.receipt_json = lattice_cert_report_json(
       v, job.lattice, R.cc, R.oc, cell, role_rcpt, grad_rcpt, added_rcpt,
-      frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr,
-      R.void_check_seconds);
+      frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null

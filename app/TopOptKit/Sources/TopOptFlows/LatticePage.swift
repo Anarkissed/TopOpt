@@ -1023,6 +1023,48 @@ public struct LatticePage: View {
             }
             // SUB-FLOOR RETENTION (task 2026-08-05-lattice-retention-app-control).
             retentionCard
+            // THE ENCLOSED-VOID RULE (task 2026-08-06-arm-projection-and-void-check).
+            enclosedVoidCard
+        }
+    }
+
+    // MARK: the enclosed-void rule — the one switch here that REFUSES a run
+
+    /// ★ THE OFF CONTROL for `lattice.require_lattice_void_reaches_exterior`
+    /// (task 2026-08-06-arm-projection-and-void-check, S2c). ARMED BY DEFAULT.
+    ///
+    /// It gets its own card rather than a row inside `retentionCard` because it
+    /// is a different KIND of setting from everything else on this page. The
+    /// others change what the lattice looks like. This one can STOP A RUN — and
+    /// a switch that can stop a run should not be found by accident while
+    /// reading about cell sizes.
+    ///
+    /// The copy states the consequence of turning it OFF, not just the meaning
+    /// of turning it on, because off is the direction that ships a part with a
+    /// cavity nothing can be emptied from.
+    private var enclosedVoidCard: some View {
+        card {
+            HStack(spacing: DS.Space.s) {
+                Text("Empty space must reach the outside")
+                    .dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
+                Spacer()
+                Toggle("", isOn: $project.lattice.requireVoidReachesExterior)
+                    .labelsHidden()
+            }
+            if project.lattice.requireVoidReachesExterior {
+                Text("A lattice pocket with no path out of the part stops that "
+                     + "rung, and the run says how many cells, where, and in "
+                     + "which region you drew them. Nothing is opened for you — "
+                     + "that would remove material you did not ask to remove.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            } else {
+                Text("OFF — sealed lattice cavities will be exported. Powder, "
+                     + "resin or support inside one can never be removed after "
+                     + "printing, and the part will weigh more than the run says.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.warning.color)
+            }
         }
     }
 

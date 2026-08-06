@@ -1,0 +1,46 @@
+merge base: d9fe8f7 (Merge pull request #307 from Anarkissed/claude/cad-face-projection-a1e996)
+branch    : claude/arm-projection-void-check-7fe5b5
+
+=== C++ (core/tests): distinct CHECK message texts =====================
+on the merge base : 1507
+on the branch     : 1507
+PRESENT ON MAIN, ABSENT ON BRANCH : 0
+added                             : 0
+
+=== Swift (app/TopOptKit/Tests): test functions ========================
+on the merge base : 1322
+on the branch     : 1322
+PRESENT ON MAIN, ABSENT ON BRANCH : 0
+added                             : 0
+
+=== Swift assertion-call census (kind x count) =========================
+--- merge base ---
+2431 XCTAssertEqual(
+ 942 XCTAssertTrue(
+ 496 XCTAssertFalse(
+ 329 XCTAssertNil(
+ 182 XCTAssertGreaterThan(
+ 134 XCTAssertNotNil(
+  83 XCTAssertNotEqual(
+  64 XCTAssertLessThan(
+  34 XCTAssertGreaterThanOrEqual(
+  32 XCTAssertLessThanOrEqual(
+  13 XCTAssertThrowsError(
+--- branch ---
+2431 XCTAssertEqual(
+ 942 XCTAssertTrue(
+ 496 XCTAssertFalse(
+ 329 XCTAssertNil(
+ 182 XCTAssertGreaterThan(
+ 134 XCTAssertNotNil(
+  83 XCTAssertNotEqual(
+  64 XCTAssertLessThan(
+  34 XCTAssertGreaterThanOrEqual(
+  32 XCTAssertLessThanOrEqual(
+  13 XCTAssertThrowsError(
+
+=== every REMOVED line under core/tests and app/TopOptKit/Tests ========
+(so a change inside an assertion is visible even when the message survives)
+  (none)
+
+=== files changed under the two test trees =============================

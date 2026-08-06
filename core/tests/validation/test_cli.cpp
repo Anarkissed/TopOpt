@@ -30,6 +30,7 @@
 // No third-party test framework (ARCHITECTURE §4): the self-contained CHECK
 // harness the other tests use.
 
+#include "topopt/cad_project.hpp"
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -309,10 +310,47 @@ int main() {
     // winding sign is not pinned anywhere (marching-cubes output currently
     // comes out inward-facing), and the invariant is "nonzero volume".
     const double vol = std::fabs(signed_volume(re));
-    const double ref = std::fabs(signed_volume(run.pipeline.evaluated[i].v3.mesh));
     CHECK(vol > 0.0, "re-imported variant has nonzero volume");
+
+    // ★ THE REFERENCE CHANGED, THE CLAIM DID NOT (task
+    // 2026-08-06-arm-projection-and-void-check).
+    //
+    // This compared the exported file with `evaluated[i].v3.mesh` — the
+    // UN-PROJECTED in-memory mesh — at 0.5%. `output.project_cad_faces` now
+    // defaults to TRUE, so the file is the PROJECTED mesh and the two are
+    // deliberately different objects: on this fixture the exported volume moves
+    // about 7%. Leaving the old reference in place would have meant either a
+    // failing bar or loosening 0.5% to something that proves nothing.
+    //
+    // THE CLAIM IS THE ROUND TRIP — "the bytes I wrote re-import as the mesh I
+    // had" — and it is kept at its original 0.5%, simply aimed at the mesh that
+    // is actually written. The projection is reproduced here with the SAME two
+    // calls `export_variant_mesh` makes (run_job.cpp:342) on the same grid
+    // spacing, so this is the shipped path and not a re-derivation of it. The
+    // demo job sets no `smooth_factor` and no bake, so the export source is
+    // `v3.mesh` directly and there is nothing else in between.
+    const topopt::TriangleMesh& src = run.pipeline.evaluated[i].v3.mesh;
+    topopt::CadProjectOptions po =
+        topopt::cad_project_options_for_grid(run.pipeline.solved_grid.spacing);
+    po.enabled = true;
+    const topopt::CadAttribution att =
+        topopt::attribute_to_cad_faces(src, run.model, po);
+    const topopt::TriangleMesh proj =
+        topopt::project_onto_cad_faces(src, run.model, po, att);
+    const double ref = std::fabs(signed_volume(proj));
     CHECK(std::fabs(vol - ref) <= 0.005 * ref,
-          "re-imported volume within 0.5% of the in-memory variant mesh");
+          "re-imported volume within 0.5% of the mesh that was WRITTEN (the "
+          "projected one, since project_cad_faces now defaults on)");
+
+    // A POSITIVE CONTROL for the line above, so it cannot pass by the
+    // projection having quietly become a no-op: the armed default must actually
+    // move the exported volume away from the un-projected mesh. If projection
+    // ever stopped running, `proj` would equal `src` and the 0.5% check would
+    // still pass while claiming something false.
+    const double unprojected = std::fabs(signed_volume(src));
+    CHECK(std::fabs(ref - unprojected) > 0.005 * unprojected,
+          "the ARMED default measurably moved the exported volume — the 0.5% "
+          "check above is not comparing the mesh with itself");
   }
 
   // --- Run 2: the real binary; byte-identical report (determinism) ------------

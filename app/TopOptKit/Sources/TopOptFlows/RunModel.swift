@@ -124,6 +124,20 @@ public struct RunRequest: Equatable, Sendable {
     /// optimization) and unused by the local bridge path; nil for an ad-hoc run.
     public let projectID: UUID?
 
+    /// ★ CAD-FACE PROJECTION ON EXPORT (task 2026-08-06-arm-projection-and-void-check).
+    ///
+    /// Mirrors core's `output.project_cad_faces`, which now defaults to TRUE. The
+    /// app SENDS IT EXPLICITLY on every job rather than leaning on that default,
+    /// so `run_info` records what was ASKED FOR and not merely what was assumed
+    /// — the two are indistinguishable in a receipt otherwise, and this project
+    /// has already spent a week on two front-ends quietly disagreeing about a
+    /// setting (the dropped outer wall line width).
+    ///
+    /// Part of the request identity (synthesized `==`), like `wallLoops`, so
+    /// flipping it re-enables Optimize instead of leaving a stale result on
+    /// screen that was produced the other way.
+    public let projectCADFaces: Bool
+
     /// True for a STEP/STP part (B-rep source). NOT a proxy for "has a load case":
     /// an STL/3MF part also carries selectable faces (segmentation pseudo-faces,
     /// handoff 134) and runs the load-case path when one is declared. Kept only to
@@ -149,7 +163,10 @@ public struct RunRequest: Equatable, Sendable {
                 clearances: [TopOptKit.ClearanceSpec] = [],
                 faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
                 projectID: UUID? = nil, sourceFormat: String = "",
-                lattice: LatticeSpec? = nil) {
+                lattice: LatticeSpec? = nil,
+                // Defaults to core's own default. A caller that says nothing gets
+                // the armed posture, which is the whole point of arming it.
+                projectCADFaces: Bool = true) {
         self.modelPath = modelPath
         self.sourceFormat = sourceFormat
         self.material = material
@@ -174,6 +191,7 @@ public struct RunRequest: Equatable, Sendable {
         self.faceProtectionDepthMM = faceProtectionDepthMM
         self.projectID = projectID
         self.lattice = lattice
+        self.projectCADFaces = projectCADFaces
     }
 }
 

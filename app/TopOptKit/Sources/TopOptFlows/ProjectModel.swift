@@ -134,6 +134,23 @@ public final class ProjectModel: ObservableObject {
     /// Fine 128³). Default Fast.
     @Published public var quality: RunQuality = .fast
 
+    /// ★ RESTORE THE SURFACES THAT CAME FROM THE CAD, on export (task
+    /// 2026-08-06-arm-projection-and-void-check, S1c). DEFAULT ON, matching
+    /// core's own `output.project_cad_faces` default — the app never invents a
+    /// second answer to this question, it only lets the user override the one
+    /// core states.
+    ///
+    /// ON  — every exported vertex that came from a face of the imported CAD is
+    ///       put back on the plane or cylinder the B-rep states, exactly. Bolt
+    ///       bores come out the radius they were drawn at.
+    /// OFF — the voxelised approximation is exported instead. That is what the
+    ///       app shipped before, and it is measurably ~8% oversize.
+    ///
+    /// This exists so the same job can be run BOTH WAYS while the maintainer
+    /// evaluates the new default; it is not a preference the app has an opinion
+    /// about beyond agreeing with core.
+    @Published public var projectCADFaces = true
+
     /// The M7.params print parameters (wall loops, top/bottom shell layers, infill %,
     /// pattern, layer height) — the user's override of the M5.1 recommended slicer
     /// settings. Seeded with FDM-sensible defaults; persisted on the project. The
@@ -248,6 +265,10 @@ public final class ProjectModel: ObservableObject {
         self.printParams = snapshot.printParams ?? .fdmDefault
         self.designBox = snapshot.designBox ?? DesignBoxModel()
         self.lattice = snapshot.lattice ?? LatticeSettings()
+        // nil → TRUE. A project saved before this field existed reopens with CAD-face
+        // projection ARMED, which is what the new core default means; decoding it to
+        // false would quietly opt every existing project out of the change.
+        self.projectCADFaces = snapshot.projectCADFaces ?? true
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
@@ -1260,7 +1281,14 @@ public final class ProjectModel: ObservableObject {
                                minimizePlastic: minimizePlastic, quality: quality,
                                optimized: hasResults, printParams: printParams,
                                designBox: designBox,
-                               lattice: lattice.enabled ? lattice : nil)
+                               lattice: lattice.enabled ? lattice : nil,
+                               // Written ALWAYS, including when it is at the
+                               // default — this is a setting the user can turn
+                               // off, and "absent" already means ON, so an
+                               // omitted-when-default rule would make the OFF
+                               // state the only one that survives a reopen only
+                               // by accident of which value it happened to be.
+                               projectCADFaces: projectCADFaces)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

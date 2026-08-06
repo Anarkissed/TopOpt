@@ -35,6 +35,12 @@ public enum SettingsChipID: Int, CaseIterable, Hashable, Sendable {
     /// Paint mode toggle (handoff 2026-07-25): brush faces into the active group when
     /// tap-selection over-selects. Always present in the edit phase.
     case paint
+    /// ★ CAD-FACE PROJECTION on export (task
+    /// 2026-08-06-arm-projection-and-void-check, S1c). ON by default, matching
+    /// core. Shown only for a STEP part — the whole operation is "put the
+    /// surface back where the B-rep says it is", and an STL/3MF import has no
+    /// B-rep to put it back to, so the chip would be a control over nothing.
+    case cadFaces
 }
 
 public enum BottomChipOrder {

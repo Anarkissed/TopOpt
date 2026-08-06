@@ -2328,6 +2328,7 @@ public struct WorkspacePlaceholder: View {
             }
         case .minimizePlastic: minimizePlasticChip.background(chipWidthReader(id))
         case .quality: qualityChip.background(chipWidthReader(id))
+        case .cadFaces: cadFacesChip.background(chipWidthReader(id))
         case .faceProtectDepth: faceProtectDepthChip.background(chipWidthReader(id))
         case .designBox:
             VStack(alignment: .trailing, spacing: DS.Space.s) {
@@ -2359,6 +2360,12 @@ public struct WorkspacePlaceholder: View {
             case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0
             // The Paint toggle needs a mesh to brush on.
             case .paint: return viewerMesh != nil
+            // CAD-face projection has nothing to project ONTO unless the part
+            // came from a STEP B-rep. On an STL/3MF import every face is a
+            // manufactured pseudo-face (handoff 134) with no analytic surface
+            // behind it, so core attributes nothing and the switch would be a
+            // control over an operation that cannot run.
+            case .cadFaces: return isStepPart
             default: return true
             }
         }
@@ -2533,6 +2540,51 @@ public struct WorkspacePlaceholder: View {
                 Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.accent.color)
                 Text("\(project.quality.title) · \(project.quality.resolution)³")
+                    .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
+    }
+
+    /// True when the part came from a STEP/STP B-rep, which is the only source
+    /// that carries the analytic surfaces CAD-face projection puts vertices back
+    /// onto. Matches `RunRequest.isStepModel`'s test on the same path.
+    private var isStepPart: Bool {
+        guard let p = project.importedFile?.path.lowercased() else { return false }
+        return p.hasSuffix(".step") || p.hasSuffix(".stp")
+    }
+
+    /// ★ CAD-FACE PROJECTION — the OFF control (task
+    /// 2026-08-06-arm-projection-and-void-check, S1c).
+    ///
+    /// A Menu rather than a plain toggle, for one reason: the copy has to say
+    /// WHAT IT DOES, and a switch has nowhere to say it. Both choices are
+    /// spelled out, so turning it off is a decision rather than a guess about
+    /// what the label meant.
+    ///
+    /// It is ON by default — the maintainer armed it — and the chip states
+    /// which state it is in rather than only the setting's name, the same rule
+    /// `minimizePlasticChip` follows.
+    private var cadFacesChip: some View {
+        Menu {
+            Button { project.projectCADFaces = true } label: {
+                Text("Restore CAD surfaces · walls and holes exactly as drawn")
+            }
+            Button { project.projectCADFaces = false } label: {
+                Text("Export the voxel approximation · what earlier versions shipped")
+            }
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: project.projectCADFaces
+                        ? "ruler.fill" : "square.grid.3x3.square")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle((project.projectCADFaces
+                                        ? DS.Color.accent
+                                        : DS.Color.textTertiary).color)
+                Text(project.projectCADFaces ? "CAD surfaces" : "Voxel surfaces")
                     .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
             }
             .padding(.vertical, 9).padding(.horizontal, DS.Space.l)

@@ -105,6 +105,18 @@ public enum RelatticeJobBuilder {
             "emit_stl": lat.emitSTL,
             "emit_3mf": lat.emit3MF,
             "skin": lat.skin,
+            // ★ THE ENCLOSED-VOID RULE (task
+            // 2026-08-06-arm-projection-and-void-check, S2). Written here as
+            // well as in `RemoteRun.buildJobJSON`, from the SAME `LatticeSpec`
+            // field, because `job["lattice"]` is wiped above and rebuilt from
+            // the CURRENT settings — an inherited key would not survive.
+            //
+            // This matters more on THIS path than on the optimize one: a
+            // re-lattice exists to produce ONE object, so a sealed cavity here
+            // THROWS rather than skipping a rung. The user needs the record to
+            // say the rule was armed.
+            "require_lattice_void_reaches_exterior":
+                lat.requireVoidReachesExterior,
         ]
         // THE SAME BUILDER THE OPTIMIZE PATH USES (task
         // 2026-08-05-lattice-retention-app-control). This block used to be written

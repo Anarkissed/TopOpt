@@ -501,6 +501,17 @@ add_executable(test_cad_project tests/unit/test_cad_project.cpp)
 target_link_libraries(test_cad_project PRIVATE topopt)
 add_test(NAME cad_project COMMAND test_cad_project)
 
+# BOTH DEFAULTS ARE ARMED (task 2026-08-06-arm-projection-and-void-check).
+# `output.project_cad_faces` and `lattice.require_lattice_void_reaches_exterior`
+# now default to TRUE. The default lives in the CORE so the CLI and the
+# on-device bridge cannot disagree about it — the shape the dropped outer wall
+# line width already took once. Asserts the struct default, the absent-key
+# parse, and BOTH explicit directions (the OFF control is what lets the same
+# job be run both ways). Pure C++/std, so it gates every CI configuration.
+add_executable(test_default_arming tests/unit/test_default_arming.cpp)
+target_link_libraries(test_default_arming PRIVATE topopt)
+add_test(NAME default_arming COMMAND test_default_arming)
+
 # The BRUSH — per-region smoothing strength (handoff 2026-08-02-smoothing-page).
 # Bar AE1 at PR 200's own standard and on PR 200's own specimen: the committed
 # REAL ladder variant (variant_030.stl, 4344 verts) from the constrained-smooth

@@ -190,6 +190,22 @@ public struct LatticeSpec: Equatable, Sendable {
     /// or verdict.
     public let reportRegionCells: Bool
 
+    /// ★ `lattice.require_lattice_void_reaches_exterior` — ALWAYS EMITTED, in
+    /// both directions (task 2026-08-06-arm-projection-and-void-check).
+    ///
+    /// Unlike the four retention flags above, this key is NOT omitted when it
+    /// is at its default. Core defaults it to TRUE, so omitting it would run the
+    /// same way — but the receipt could not tell "the user asked for this" from
+    /// "nobody said anything", and this is the switch that can REFUSE A RUN.
+    /// When a rung stops, the record has to say whether the rule was asked for.
+    ///
+    /// It also rides in the `lattice` block rather than `grading`, so it is NOT
+    /// covered by the grading-schema capability probe and must be written at
+    /// BOTH emission sites by hand — `RemoteRun.buildJobJSON` and
+    /// `RelatticeJobBuilder.build`. That duplication is asserted against in
+    /// DefaultArmingTests rather than trusted.
+    public let requireVoidReachesExterior: Bool
+
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
                 maxRelativeDensity: Double, emitSTL: Bool = true, emit3MF: Bool = false,
@@ -203,7 +219,9 @@ public struct LatticeSpec: Equatable, Sendable {
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
-                reportRegionCells: Bool = false) {
+                reportRegionCells: Bool = false,
+                requireVoidReachesExterior: Bool = true) {
+        self.requireVoidReachesExterior = requireVoidReachesExterior
         self.cellSizeMode = cellSizeMode
         self.cellMinMM = cellMinMM
         self.cellMaxMM = cellMaxMM
@@ -356,6 +374,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// Ask the run for the per-region breakdown in its receipt.
     public var reportRegionCells: Bool
 
+    /// ★ THE ENCLOSED-VOID RULE — the OFF control (task
+    /// 2026-08-06-arm-projection-and-void-check, S2c). DEFAULT TRUE, matching
+    /// core's own `lattice.require_lattice_void_reaches_exterior`.
+    ///
+    /// ON  — a lattice cell whose pore space cannot reach the outside of the
+    ///       part REFUSES that rung, naming how many cells, where, in which
+    ///       declared region, and how much volume is trapped.
+    /// OFF — the run exports the sealed cavity, as it did before. Whatever ends
+    ///       up inside it — powder, resin, support — can never come out.
+    ///
+    /// ★ THIS ONE REFUSES RUNS, unlike every other switch in this struct, which
+    /// is why it is worth being able to turn off: a job that succeeded
+    /// yesterday can stop today, and the maintainer needs a way to get the part
+    /// out while he decides what to do about it.
+    public var requireVoidReachesExterior: Bool
+
     /// The FIRST include primitive — the legacy single-region accessor the existing
     /// gizmo plumbing (`placeLatticeRegion` / `moveLatticeRegion` / proxy scoping)
     /// reads and writes. One source of truth: this is a view over
@@ -394,11 +428,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
-                reportRegionCells: Bool = false) {
+                reportRegionCells: Bool = false,
+                // Defaults ON, like core. Every other flag here defaults OFF
+                // because it adds behaviour; this one defaults ON because the
+                // maintainer armed the rule.
+                requireVoidReachesExterior: Bool = true) {
         self.retainSubfloorInUnloadedRegions = retainSubfloorInUnloadedRegions
         self.subfloorStressFraction = subfloorStressFraction
         self.subfloorPerRegion = subfloorPerRegion
         self.reportRegionCells = reportRegionCells
+        self.requireVoidReachesExterior = requireVoidReachesExterior
         self.enabled = enabled
         self.topologyID = topologyID
         self.cellMM = cellMM
@@ -430,6 +469,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction
         case subfloorPerRegion, reportRegionCells
+        // the enclosed-void rule's OFF control
+        // (task 2026-08-06-arm-projection-and-void-check)
+        case requireVoidReachesExterior
     }
 
     public init(from decoder: Decoder) throws {
@@ -469,6 +511,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             Double.self, forKey: .subfloorStressFraction)
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
+        // ★ nil → TRUE, and the asymmetry with the four lines above is the point.
+        // Those decode to "off" because absent meant off when they were written.
+        // This rule is ARMED BY DEFAULT now, so a project saved before this
+        // field existed must reopen ARMED — decoding it to false would opt every
+        // existing project out of a rule the maintainer turned on, silently.
+        requireVoidReachesExterior = try c.decodeIfPresent(
+            Bool.self, forKey: .requireVoidReachesExterior) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -495,6 +544,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encodeIfPresent(subfloorStressFraction, forKey: .subfloorStressFraction)
         try c.encode(subfloorPerRegion, forKey: .subfloorPerRegion)
         try c.encode(reportRegionCells, forKey: .reportRegionCells)
+        try c.encode(requireVoidReachesExterior, forKey: .requireVoidReachesExterior)
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the
@@ -607,7 +657,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                retainSubfloorInUnloadedRegions: sub.retain,
                                subfloorStressFraction: sub.fraction,
                                subfloorPerRegion: sub.perRegion,
-                               reportRegionCells: sub.regionCells)
+                               reportRegionCells: sub.regionCells,
+                               // NOT capability-gated: this key lives in the
+                               // `lattice` block, not `grading`, and it has been
+                               // in core's schema since PR 305. The retention
+                               // keys need the probe because they were added to
+                               // `grading` after some cores were built.
+                               requireVoidReachesExterior: requireVoidReachesExterior)
         }
         let genRho = b.generateRelativeDensity
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
@@ -619,7 +675,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                            regionScoped: region != nil || !regions.isEmpty,
                            skin: boundary.jobSkinValue,
                            minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil,
-                           regions: regions)
+                           regions: regions,
+                           // The UNIFORM path carries it too. The enclosed-void
+                           // rule is about the lattice's pore space, which a
+                           // uniform lattice has exactly as much of as a graded
+                           // one — carrying it on only one path would make the
+                           // rule silently depend on the density mode.
+                           requireVoidReachesExterior: requireVoidReachesExterior)
     }
 
     /// Convenience: read the certifiable limits AND the generatable set from core
