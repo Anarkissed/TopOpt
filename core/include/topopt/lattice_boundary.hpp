@@ -28,10 +28,19 @@
 //
 // which is why clipping a strut's CENTRELINE to {signed_distance >= radius}
 // keeps the strut's SOLID inside the part (bar B3 — clip the solid, not the
-// line). Every primitive here is evaluated ANALYTICALLY (planes, capped
-// cylinders, bounded slabs, and the exact distance to a voxel solid set); no
-// sampled contour or distance field is ever consulted, so the prototype's
-// 0.093 mm contour-sampling overshoot cannot be inherited (blocked-stop 1).
+// line). Every primitive here is evaluated EXACTLY (planes, capped cylinders,
+// bounded slabs, and the exact distance to the base region — the exported shell
+// mesh, or a voxel solid set when no mesh was supplied); no sampled contour or
+// distance field is ever consulted, so the prototype's 0.093 mm
+// contour-sampling overshoot cannot be inherited (blocked-stop 1).
+//
+// ★ WHICH SURFACE IS THE BASE MATTERS, and getting it wrong is what task
+// 2026-08-08-strut-clip-matches-shell fixed. The voxel-cube union and the
+// marching-cubes isosurface describe the same solid set but are NOT the same
+// surface: they coincide exactly on a flat face and the isosurface chamfers the
+// cube union at a convex edge. The latticed export writes the ISOSURFACE as its
+// shell, so clipping against the cube union left strut ends outside it — at
+// edges, and only at edges. See set_shell_base.
 //
 // Clipping itself is a Lipschitz-CERTIFIED interval refinement: an interval is
 // kept only when min(f(a), f(b)) >= (b-a)/2 PROVES f >= 0 throughout (f is
@@ -41,13 +50,16 @@
 // kept.
 
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 #include "topopt/clearance.hpp"  // ClearanceGeometry — the existing keep-out
-#include "topopt/mesh.hpp"       // Vec3
+#include "topopt/mesh.hpp"       // Vec3, TriangleMesh
 #include "topopt/voxel.hpp"      // VoxelGrid
 
 namespace topopt {
+
+class MeshDistance;  // topopt/mesh_distance.hpp — the shell base's distance
 
 // An analytic face of the allowed region's boundary — what the skin/rim/collar
 // pass walks. Faces come from the SAME primitives the signed distance is built
@@ -99,6 +111,29 @@ class LatticeBoundary {
   // `grid` and `density` must outlive this object.
   void set_voxel_base(const VoxelGrid* grid, const std::vector<double>* density,
                       double iso, double window_mm);
+
+  // ── SHELL base (task 2026-08-08-strut-clip-matches-shell) ────────────────
+  // THE BASE REGION IS THE INTERIOR OF `shell` — the very surface the latticed
+  // export writes beside the struts (`variant.v3.mesh`). Supersedes the voxel
+  // base when both are set, and that is the whole point: they are DIFFERENT
+  // SURFACES.
+  //
+  // A marching-cubes vertex lies on the segment between two voxel CENTRES, so on
+  // a flat face the isosurface and the voxel-cube union coincide exactly, while
+  // at a CONVEX EDGE the isosurface chamfers the cube union and lies strictly
+  // inside it. Clipping struts to the cube union while writing the isosurface as
+  // the shell therefore leaves strut ends outside the shell — at edges, and only
+  // at edges, which is exactly the defect the maintainer photographed. Measured
+  // on his own run and on a convex-edge fixture: evidence/2026-08-08-strut-clip-
+  // matches-shell/.
+  //
+  // The distance supplied is the EXACT signed distance to the mesh (positive
+  // inside — MeshDistance, topopt/mesh_distance.hpp), hence 1-Lipschitz, so the
+  // certified-clip refinement stays sound with this term in the min(). `shell`
+  // must be closed, consistently wound and welded (marching_cubes output is) and
+  // must OUTLIVE this object. A null or empty mesh throws — a caller that means
+  // "no shell" must simply not call this.
+  void set_shell_base(const TriangleMesh* shell);
 
   // Protected feature: the EXISTING clearance keep-out, subtracted from the
   // allowed region. A Bolt keep-out contributes a Bore face (collar-capable);
@@ -217,7 +252,13 @@ class LatticeBoundary {
   // in the order their half-spaces were added; Bore faces in keep-out order.
   const std::vector<LatticeBoundaryFace>& faces() const { return faces_; }
 
-  bool has_base() const { return !planes_.empty() || voxel_grid_ != nullptr; }
+  bool has_base() const {
+    return !planes_.empty() || voxel_grid_ != nullptr || shell_ != nullptr;
+  }
+  // Whether the base region is the exported SHELL rather than the voxel-cube
+  // union — read by the receipts, so "which surface was this clipped against"
+  // is a recorded fact and not an inference.
+  bool has_shell_base() const { return shell_ != nullptr; }
   std::size_t keep_out_count() const { return keep_outs_.size(); }
 
   // The crossing-location tolerance (mm) clip_segment refines to. Well under
@@ -250,6 +291,12 @@ class LatticeBoundary {
   const std::vector<double>* voxel_density_ = nullptr;
   double voxel_iso_ = 0.5;
   double voxel_window_mm_ = 0.0;
+
+  // The SHELL base (set_shell_base). shared_ptr rather than unique_ptr so this
+  // type stays copyable, which lattice_boundary_for's return-by-value and the
+  // probes rely on; the accelerator is immutable once built, so sharing it is
+  // sharing a read-only index.
+  std::shared_ptr<const MeshDistance> shell_;
 };
 
 // The certification-side voxel mask, built from the SAME predicate the

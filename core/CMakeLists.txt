@@ -80,6 +80,11 @@ add_library(topopt
   src/io/fields.cpp
   src/io/design_store.cpp
   src/mesh/mesh.cpp
+  # Exact signed distance to a closed mesh (task 2026-08-08-strut-clip-matches-
+  # shell) — the term that lets the strut clip be evaluated against the SURFACE
+  # the shell is extracted from rather than the voxel-cube union it chamfers.
+  # Plain geometry over TriangleMesh, so it builds in every configuration.
+  src/mesh/mesh_distance.cpp
   src/mesh/smooth.cpp
   # Projection of an exported surface onto the KNOWN analytic CAD surface (task
   # 2026-08-06-cad-face-projection). OCCT-free — it reads StepModel's plain data
@@ -291,6 +296,14 @@ target_link_libraries(test_lattice_boundary PRIVATE topopt)
 target_compile_definitions(test_lattice_boundary PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_boundary COMMAND test_lattice_boundary)
+
+# The strut clip and the exported shell are ONE surface (task
+# 2026-08-08-strut-clip-matches-shell). Adversarial by construction: every case
+# that requires zero protrusion also runs the OLD voxel-cube predicate on the
+# identical fixture and requires it to protrude, so the bar cannot pass vacuously.
+add_executable(test_lattice_clip_shell tests/unit/test_lattice_clip_shell.cpp)
+target_link_libraries(test_lattice_clip_shell PRIVATE topopt)
+add_test(NAME lattice_clip_shell COMMAND test_lattice_clip_shell)
 
 # THE ENCLOSED-VOID RULE FOR LATTICE (task 2026-08-05-lattice-void-reaches-
 # exterior): the void space inside any lattice must connect to the exterior.

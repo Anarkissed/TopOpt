@@ -1,0 +1,95 @@
+=== R5 — MESH INTEGRITY, the maintainer's own run ===
+threshold = his job's own wall_line_width_mm = 0.45
+
+---- variant_068_lattice.stl ----
+R5 mesh integrity — isolation threshold = the job's own line width 0.450 mm
+
+BEFORE  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runA/out/variant_068_lattice.stl
+        triangles          766532
+        components         3305
+        largest components [355680, 143816, 82016, 80320]
+        fragments          3303
+        ISOLATED @0.450mm 942
+        sweep              {'0.000': 3303, '0.100': 1260, '0.250': 1151, '0.450': 942, '0.500': 885, '1.000': 332}
+
+AFTER   /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runB/out/variant_068_lattice.stl
+        triangles          763320
+        components         3210
+        largest components [355552, 143816, 82016, 80256]
+        fragments          3208
+        ISOLATED @0.450mm 908
+        sweep              {'0.000': 3208, '0.100': 1164, '0.250': 1078, '0.450': 908, '0.500': 855, '1.000': 332}
+
+DELTA   components -95   isolated -34
+BAR     isolated must not INCREASE — a protrusion may not be traded for a loose fragment.
+VERDICT HOLDS
+  (exit 0)
+---- variant_052_lattice.stl ----
+R5 mesh integrity — isolation threshold = the job's own line width 0.450 mm
+
+BEFORE  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runA/out/variant_052_lattice.stl
+        triangles          799188
+        components         3356
+        largest components [384832, 146548, 82016, 79040]
+        fragments          3354
+        ISOLATED @0.450mm 835
+        sweep              {'0.000': 3354, '0.100': 1148, '0.250': 1053, '0.450': 835, '0.500': 770, '1.000': 278}
+
+AFTER   /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runB/out/variant_052_lattice.stl
+        triangles          799412
+        components         3338
+        largest components [384896, 146548, 82016, 80256]
+        fragments          3336
+        ISOLATED @0.450mm 828
+        sweep              {'0.000': 3336, '0.100': 1099, '0.250': 1018, '0.450': 828, '0.500': 768, '1.000': 279}
+
+DELTA   components -18   isolated -7
+BAR     isolated must not INCREASE — a protrusion may not be traded for a loose fragment.
+VERDICT HOLDS
+  (exit 0)
+---- variant_038_lattice.stl ----
+R5 mesh integrity — isolation threshold = the job's own line width 0.450 mm
+
+BEFORE  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runA/out/variant_038_lattice.stl
+        triangles          473816
+        components         1673
+        largest components [165816, 82016, 77344, 54272]
+        fragments          1671
+        ISOLATED @0.450mm 765
+        sweep              {'0.000': 1671, '0.100': 1178, '0.250': 1083, '0.450': 765, '0.500': 682, '1.000': 160}
+
+AFTER   /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runB/out/variant_038_lattice.stl
+        triangles          474144
+        components         1640
+        largest components [165816, 82016, 79008, 54272]
+        fragments          1638
+        ISOLATED @0.450mm 759
+        sweep              {'0.000': 1638, '0.100': 1175, '0.250': 1078, '0.450': 759, '0.500': 677, '1.000': 160}
+
+DELTA   components -33   isolated -6
+BAR     isolated must not INCREASE — a protrusion may not be traded for a loose fragment.
+VERDICT HOLDS
+  (exit 0)
+---- variant_026_lattice.stl ----
+R5 mesh integrity — isolation threshold = the job's own line width 0.450 mm
+
+BEFORE  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runA/out/variant_026_lattice.stl
+        triangles          277044
+        components         596
+        largest components [167960, 82720, 9952, 2720]
+        fragments          594
+        ISOLATED @0.450mm 76
+        sweep              {'0.000': 594, '0.100': 114, '0.250': 108, '0.450': 76, '0.500': 62, '1.000': 7}
+
+AFTER   /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/runB/out/variant_026_lattice.stl
+        triangles          277408
+        components         577
+        largest components [167960, 84064, 9600, 2816]
+        fragments          575
+        ISOLATED @0.450mm 75
+        sweep              {'0.000': 575, '0.100': 113, '0.250': 107, '0.450': 75, '0.500': 62, '1.000': 7}
+
+DELTA   components -19   isolated -1
+BAR     isolated must not INCREASE — a protrusion may not be traded for a loose fragment.
+VERDICT HOLDS
+  (exit 0)

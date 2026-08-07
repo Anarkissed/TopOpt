@@ -1,0 +1,6 @@
+case,edge_distance_voxels_below,samples,max_inset_mm
+block,0.250000,17136,0.984382
+block,0.500000,13950,0.393753
+block,1.000000,27000,0.000000
+block,2.000000,47994,0.000000
+block,inf,242406,0.000000
