@@ -147,16 +147,22 @@ final class SmoothingPreviewGateTests: XCTestCase {
                       "precondition: the model would hand the stage the preview")
         XCTAssertNil(page.receipt, "precondition: nothing has been certified")
 
-        throw XCTSkip("G1 CONFIRMED FAILING — see s3_reproduction_failing.txt. "
-                      + "Deferred behind S1's NO-GO: fix is SmoothingPage.swift:296, "
-                      + "`hasSmoothed` must include `page.preview != nil`.")
-
-        // SmoothingPage.swift:296, verbatim. This is the whole of the view's
-        // enable condition for the Smoothed tab.
-        let hasSmoothedAsShipped = page.receipt != nil || page.kept != nil
-        XCTAssertTrue(hasSmoothedAsShipped,
+        // ★ FIXED by task 2026-08-08 (S3d). The skip that stood here is gone.
+        //
+        // It is no longer a retyped copy of the view's expression either: the
+        // view's `hasSmoothed` now returns `page.hasSmoothedToShow`, so this
+        // assertion and the control the user taps read THE SAME PROPERTY. A
+        // mirror could pass while the tab stayed dead; this cannot.
+        XCTAssertTrue(page.hasSmoothedToShow,
                       "the Smoothed tab must be enabled the moment a preview "
                       + "exists — certification is not a rendering step")
+
+        // …and the positive control for it: with no preview and no certification
+        // there is genuinely nothing to show, and the tab must stay off. Without
+        // this, `hasSmoothedToShow` could simply return true forever.
+        page.clearPreview()
+        XCTAssertFalse(page.hasSmoothedToShow,
+                       "with nothing smoothed and nothing previewed the tab must be off")
     }
 
     // ═══════════════════════════════════════════════════════════════════════

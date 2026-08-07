@@ -372,8 +372,11 @@ public struct SmoothingPage: View {
         .padding(.top, PageChrome.topInset)
     }
 
-    /// Whether there is a smoothed shape to look at at all.
-    private var hasSmoothed: Bool { page.receipt != nil || page.kept != nil }
+    /// Whether there is a smoothed shape to look at at all. ONE definition, on
+    /// the model (task 2026-08-08, S3d) — this used to be a second copy here that
+    /// ignored `page.preview`, which is what made the Smoothed tab unreachable
+    /// without a certification solve.
+    private var hasSmoothed: Bool { page.hasSmoothedToShow }
 
     private func stageTab(_ title: String, on: Bool, enabled: Bool,
                           action: @escaping () -> Void) -> some View {
@@ -789,6 +792,11 @@ public struct SmoothingPage: View {
             footnote(r.smoothing.driftLine)
             if let capped = r.smoothing.cappedLine { footnote(capped, warn: true) }
             footnote(r.quantizationLine)
+            // S3e: and what that proxy CANNOT see. Immediately after the
+            // quantization line, because it is the same fact carried one step
+            // further — the grid the margin was computed on is coarser than the
+            // motion the brush produces.
+            footnote(r.certificateBlindnessLine, warn: true)
             if !r.smoothing.regionLines.isEmpty {
                 footnote("Regions: " + r.smoothing.regionLines.joined(separator: " · "))
             }

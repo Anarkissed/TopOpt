@@ -282,6 +282,29 @@ public struct SmoothReceipt: Equatable, Sendable {
             after.spacingMM, after.voxelVolumeFraction, after.meshVolumeFraction,
             after.quantizationGapPercent)
     }
+
+    /// ★ WHAT THE CERTIFICATE CANNOT SEE (task 2026-08-08, S3e).
+    ///
+    /// PR 303 measured the shipped smoother moving this part's surface **0.23 mm**
+    /// and returning an IDENTICAL margin, peak stress, verdict and voxel mass — to
+    /// every digit. That is not the certificate confirming the part is still fine;
+    /// it is the certificate being structurally unable to see the change, because
+    /// it re-voxelizes onto the same grid and a sub-voxel move does not alter a
+    /// single voxel.
+    ///
+    /// So this line exists to stop the most likely misreading of the row above it:
+    /// that a margin which did not move is a safety check on the smoothing. It is
+    /// not. It is stated UNCONDITIONALLY rather than only when the margin holds
+    /// still, because the limitation is a property of the instrument and not of
+    /// any particular reading — a footnote that appeared only sometimes would
+    /// imply the certificate CAN see the change the rest of the time.
+    public var certificateBlindnessLine: String {
+        String(format:
+            "The certification re-voxelizes at %.2f mm, so it cannot see surface "
+            + "motion smaller than one voxel: a margin that did not move is NOT "
+            + "evidence that the smoothing was safe. What bounds the risk is the "
+            + "displacement limit on the brush, not this number.", after.spacingMM)
+    }
 }
 
 /// The smoothing that produced an "after" reading — the brush's own receipt.
@@ -715,6 +738,30 @@ public final class SmoothingPageModel: ObservableObject {
 
     /// Drop the preview — the brush changed, or the page is starting over.
     public func clearPreview() { preview = nil }
+
+    /// ★ IS THERE A SMOOTHED SHAPE TO LOOK AT? (task 2026-08-08, S3d.)
+    ///
+    /// THE DEFECT. The view's own copy of this read `receipt != nil || kept != nil`
+    /// and ignored `preview` — so the Smoothed tab was DEAD until a certification
+    /// had run, even though `refreshPreview` produces a displaced mesh on every
+    /// settled stroke and `currentGeometry` was already willing to hand it to the
+    /// stage. The maintainer's words for it: certification was being used as the
+    /// rendering path. PR 303 reproduced it, named this exact fix, and deferred it
+    /// behind PR 299's NO-GO on the operator.
+    ///
+    /// IT IS TAKEN NOW REGARDLESS OF THE OPERATOR QUESTION. Whether the smoother
+    /// is worth improving (it is not — see this task's S2) is a different question
+    /// from whether the user can see what it did. A preview he cannot reach is a
+    /// broken control, not a small change.
+    ///
+    /// IT LIVES ON THE MODEL, NOT IN THE VIEW, on purpose. As a `private var` in
+    /// `SmoothingPage` the only way to test it was to retype the expression in the
+    /// test — which is a mirror, and a mirror agrees with the view right up until
+    /// someone edits one of them. Here the test and the view read the same
+    /// property.
+    public var hasSmoothedToShow: Bool {
+        receipt != nil || kept != nil || preview != nil
+    }
 
     // ── derived surfaces ────────────────────────────────────────────────────
 
