@@ -1,0 +1,371 @@
+== field_information_probe — S2 of closing-flow-and-the-field ==
+
+design   evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/design.bin
+grid     128 x 31 x 118 = 468224 voxels, spacing 1.705279 mm
+export   factor 2 (tricubic) => tessellation cell 0.852640 mm
+rungs    4
+
+CAD      78 faces, classifier tolerance 1.705279 mm
+
+=====================================================================
+RUNG 0.68   (achieved vf 0.6799, accepted 1)
+=====================================================================
+
+-- S2.b(1) THE FIELD ------------------------------------------------
+  solid voxels (rho > 0.5): 88251 of 468224 (18.85%)
+  BOUNDARY voxels (a 6-neighbour on the other side of iso): 54004 (11.53%)
+  whole grid  (n = 468224)
+      rho [0.0,0.1)      379148   80.98%
+      rho [0.1,0.2)         333    0.07%
+      rho [0.2,0.3)         214    0.05%
+      rho [0.3,0.4)         146    0.03%
+      rho [0.4,0.5)         132    0.03%
+      rho [0.5,0.6)         108    0.02%
+      rho [0.6,0.7)         144    0.03%
+      rho [0.7,0.8)         174    0.04%
+      rho [0.8,0.9)         304    0.06%
+      rho [0.9,1.0)       87521   18.69%
+      <= 0.05047 :     378841 (80.910%)   >= 0.89988 :      87525 (18.693%)   STRICTLY BETWEEN : 1858 (0.397%)
+  BOUNDARY voxels only  <- the brief's reading  (n = 54004)
+      rho [0.0,0.1)       21374   39.58%
+      rho [0.1,0.2)         333    0.62%
+      rho [0.2,0.3)         214    0.40%
+      rho [0.3,0.4)         146    0.27%
+      rho [0.4,0.5)         132    0.24%
+      rho [0.5,0.6)         107    0.20%
+      rho [0.6,0.7)         142    0.26%
+      rho [0.7,0.8)         170    0.31%
+      rho [0.8,0.9)         303    0.56%
+      rho [0.9,1.0)       31083   57.56%
+      <= 0.05047 :      21076 (39.027%)   >= 0.89988 :      31087 (57.564%)   STRICTLY BETWEEN : 1841 (3.409%)
+
+-- ★ S2.b(2) THE DECIDING READING: WHERE MARCHING CUBES PUT THE POINT --
+  A binary field gives frac == 0.5 on EVERY crossing — every vertex at an
+  edge midpoint, which IS a staircase. The spread of frac is the sub-voxel
+  information the field still carries.
+
+  on the DESIGN lattice (spacing 1.705 mm)
+      crossings 37342   mean frac 0.49919
+        frac [0.0,0.1)         134    0.36%
+        frac [0.1,0.2)         182    0.49%
+        frac [0.2,0.3)         257    0.69%
+        frac [0.3,0.4)         356    0.95%
+        frac [0.4,0.5)        3159    8.46%
+        frac [0.5,0.6)       32421   86.82%
+        frac [0.6,0.7)         356    0.95%
+        frac [0.7,0.8)         212    0.57%
+        frac [0.8,0.9)         163    0.44%
+        frac [0.9,1.0)         102    0.27%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 33999 (91.05%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 1762 (4.72%)
+      rms |frac-0.5| = 0.06079  =>  0.1037 mm on a 1.7053 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49856  =>  0.8502 mm
+
+  on the SHIPPED lattice (tricubic factor 2, cell 0.853 mm)
+      crossings 149378   mean frac 0.51920
+        frac [0.0,0.1)        1533    1.03%
+        frac [0.1,0.2)        3059    2.05%
+        frac [0.2,0.3)       11094    7.43%
+        frac [0.3,0.4)       10975    7.35%
+        frac [0.4,0.5)       17892   11.98%
+        frac [0.5,0.6)       56440   37.78%
+        frac [0.6,0.7)       31941   21.38%
+        frac [0.7,0.8)       11111    7.44%
+        frac [0.8,0.9)        3914    2.62%
+        frac [0.9,1.0)        1419    0.95%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 50069 (33.52%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 75046 (50.24%)
+      rms |frac-0.5| = 0.15551  =>  0.1326 mm on a 0.8526 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49992  =>  0.4262 mm
+
+-- S2.b(3) THE SAME, SPLIT BY POPULATION ---------------------------
+  NOTE: a lattice CROSSING is not a mesh vertex, so PR 307's
+  classifier cannot be called on it. This split uses the classifier's
+  own tolerance against the CAD tessellation and NOT its analytic
+  distance test, so it is an approximation. The decisive readings
+  above are whole-population and do not depend on it.
+  CAD-side crossings (within 1.7053 mm of a CAD face): 116721 of 149378 (78.14%)
+      rms |frac-0.5| = 0.15123 => 0.1289 mm
+  OPTIMIZER-CUT crossings (the rest): 32657
+      rms |frac-0.5| = 0.16994 => 0.1449 mm   (staircase 0.3424 mm)
+
+=====================================================================
+RUNG 0.52   (achieved vf 0.5199, accepted 1)
+=====================================================================
+
+-- S2.b(1) THE FIELD ------------------------------------------------
+  solid voxels (rho > 0.5): 76968 of 468224 (16.44%)
+  BOUNDARY voxels (a 6-neighbour on the other side of iso): 58321 (12.46%)
+  whole grid  (n = 468224)
+      rho [0.0,0.1)      390280   83.35%
+      rho [0.1,0.2)         398    0.09%
+      rho [0.2,0.3)         230    0.05%
+      rho [0.3,0.4)         188    0.04%
+      rho [0.4,0.5)         160    0.03%
+      rho [0.5,0.6)         133    0.03%
+      rho [0.6,0.7)         180    0.04%
+      rho [0.7,0.8)         227    0.05%
+      rho [0.8,0.9)         417    0.09%
+      rho [0.9,1.0)       76011   16.23%
+      <= 0.05047 :     389880 (83.268%)   >= 0.89988 :      76019 (16.236%)   STRICTLY BETWEEN : 2325 (0.497%)
+  BOUNDARY voxels only  <- the brief's reading  (n = 58321)
+      rho [0.0,0.1)       24085   41.30%
+      rho [0.1,0.2)         397    0.68%
+      rho [0.2,0.3)         230    0.39%
+      rho [0.3,0.4)         188    0.32%
+      rho [0.4,0.5)         160    0.27%
+      rho [0.5,0.6)         133    0.23%
+      rho [0.6,0.7)         180    0.31%
+      rho [0.7,0.8)         227    0.39%
+      rho [0.8,0.9)         414    0.71%
+      rho [0.9,1.0)       32307   55.40%
+      <= 0.05047 :      23689 (40.618%)   >= 0.89988 :      32315 (55.409%)   STRICTLY BETWEEN : 2317 (3.973%)
+
+-- ★ S2.b(2) THE DECIDING READING: WHERE MARCHING CUBES PUT THE POINT --
+  A binary field gives frac == 0.5 on EVERY crossing — every vertex at an
+  edge midpoint, which IS a staircase. The spread of frac is the sub-voxel
+  information the field still carries.
+
+  on the DESIGN lattice (spacing 1.705 mm)
+      crossings 39180   mean frac 0.50022
+        frac [0.0,0.1)         146    0.37%
+        frac [0.1,0.2)         208    0.53%
+        frac [0.2,0.3)         273    0.70%
+        frac [0.3,0.4)         408    1.04%
+        frac [0.4,0.5)        4899   12.50%
+        frac [0.5,0.6)       32163   82.09%
+        frac [0.6,0.7)         428    1.09%
+        frac [0.7,0.8)         309    0.79%
+        frac [0.8,0.9)         212    0.54%
+        frac [0.9,1.0)         134    0.34%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 34561 (88.21%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 2118 (5.41%)
+      rms |frac-0.5| = 0.06539  =>  0.1115 mm on a 1.7053 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49981  =>  0.8523 mm
+
+  on the SHIPPED lattice (tricubic factor 2, cell 0.853 mm)
+      crossings 156754   mean frac 0.51895
+        frac [0.0,0.1)        1729    1.10%
+        frac [0.1,0.2)        3513    2.24%
+        frac [0.2,0.3)       11291    7.20%
+        frac [0.3,0.4)        8893    5.67%
+        frac [0.4,0.5)       22921   14.62%
+        frac [0.5,0.6)       60885   38.84%
+        frac [0.6,0.7)       29841   19.04%
+        frac [0.7,0.8)       11738    7.49%
+        frac [0.8,0.9)        4256    2.72%
+        frac [0.9,1.0)        1687    1.08%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 55865 (35.64%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 72948 (46.54%)
+      rms |frac-0.5| = 0.15571  =>  0.1328 mm on a 0.8526 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49989  =>  0.4262 mm
+
+-- S2.b(3) THE SAME, SPLIT BY POPULATION ---------------------------
+  NOTE: a lattice CROSSING is not a mesh vertex, so PR 307's
+  classifier cannot be called on it. This split uses the classifier's
+  own tolerance against the CAD tessellation and NOT its analytic
+  distance test, so it is an approximation. The decisive readings
+  above are whole-population and do not depend on it.
+  CAD-side crossings (within 1.7053 mm of a CAD face): 107988 of 156754 (68.89%)
+      rms |frac-0.5| = 0.15196 => 0.1296 mm
+  OPTIMIZER-CUT crossings (the rest): 48766
+      rms |frac-0.5| = 0.16371 => 0.1396 mm   (staircase 0.3424 mm)
+
+=====================================================================
+RUNG 0.38   (achieved vf 0.3799, accepted 1)
+=====================================================================
+
+-- S2.b(1) THE FIELD ------------------------------------------------
+  solid voxels (rho > 0.5): 67078 of 468224 (14.33%)
+  BOUNDARY voxels (a 6-neighbour on the other side of iso): 60977 (13.02%)
+  whole grid  (n = 468224)
+      rho [0.0,0.1)      400021   85.43%
+      rho [0.1,0.2)         477    0.10%
+      rho [0.2,0.3)         284    0.06%
+      rho [0.3,0.4)         195    0.04%
+      rho [0.4,0.5)         169    0.04%
+      rho [0.5,0.6)         160    0.03%
+      rho [0.6,0.7)         196    0.04%
+      rho [0.7,0.8)         277    0.06%
+      rho [0.8,0.9)         529    0.11%
+      rho [0.9,1.0)       65916   14.08%
+      <= 0.05047 :     399414 (85.304%)   >= 0.89988 :      65923 (14.079%)   STRICTLY BETWEEN : 2887 (0.617%)
+  BOUNDARY voxels only  <- the brief's reading  (n = 60977)
+      rho [0.0,0.1)       26021   42.67%
+      rho [0.1,0.2)         477    0.78%
+      rho [0.2,0.3)         284    0.47%
+      rho [0.3,0.4)         195    0.32%
+      rho [0.4,0.5)         169    0.28%
+      rho [0.5,0.6)         160    0.26%
+      rho [0.6,0.7)         196    0.32%
+      rho [0.7,0.8)         277    0.45%
+      rho [0.8,0.9)         525    0.86%
+      rho [0.9,1.0)       32673   53.58%
+      <= 0.05047 :      25417 (41.683%)   >= 0.89988 :      32679 (53.592%)   STRICTLY BETWEEN : 2881 (4.725%)
+
+-- ★ S2.b(2) THE DECIDING READING: WHERE MARCHING CUBES PUT THE POINT --
+  A binary field gives frac == 0.5 on EVERY crossing — every vertex at an
+  edge midpoint, which IS a staircase. The spread of frac is the sub-voxel
+  information the field still carries.
+
+  on the DESIGN lattice (spacing 1.705 mm)
+      crossings 40304   mean frac 0.50020
+        frac [0.0,0.1)         181    0.45%
+        frac [0.1,0.2)         204    0.51%
+        frac [0.2,0.3)         322    0.80%
+        frac [0.3,0.4)         541    1.34%
+        frac [0.4,0.5)        5722   14.20%
+        frac [0.5,0.6)       32045   79.51%
+        frac [0.6,0.7)         577    1.43%
+        frac [0.7,0.8)         302    0.75%
+        frac [0.8,0.9)         222    0.55%
+        frac [0.9,1.0)         188    0.47%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 34577 (85.79%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 2537 (6.29%)
+      rms |frac-0.5| = 0.06992  =>  0.1192 mm on a 1.7053 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49970  =>  0.8521 mm
+
+  on the SHIPPED lattice (tricubic factor 2, cell 0.853 mm)
+      crossings 161320   mean frac 0.51773
+        frac [0.0,0.1)        2082    1.29%
+        frac [0.1,0.2)        4056    2.51%
+        frac [0.2,0.3)       11577    7.18%
+        frac [0.3,0.4)        7236    4.49%
+        frac [0.4,0.5)       25130   15.58%
+        frac [0.5,0.6)       65258   40.45%
+        frac [0.6,0.7)       27214   16.87%
+        frac [0.7,0.8)       12044    7.47%
+        frac [0.8,0.9)        4612    2.86%
+        frac [0.9,1.0)        2111    1.31%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 60842 (37.72%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 70932 (43.97%)
+      rms |frac-0.5| = 0.15831  =>  0.1350 mm on a 0.8526 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49999  =>  0.4263 mm
+
+-- S2.b(3) THE SAME, SPLIT BY POPULATION ---------------------------
+  NOTE: a lattice CROSSING is not a mesh vertex, so PR 307's
+  classifier cannot be called on it. This split uses the classifier's
+  own tolerance against the CAD tessellation and NOT its analytic
+  distance test, so it is an approximation. The decisive readings
+  above are whole-population and do not depend on it.
+  CAD-side crossings (within 1.7053 mm of a CAD face): 100225 of 161320 (62.13%)
+      rms |frac-0.5| = 0.15090 => 0.1287 mm
+  OPTIMIZER-CUT crossings (the rest): 61095
+      rms |frac-0.5| = 0.16976 => 0.1447 mm   (staircase 0.3424 mm)
+
+=====================================================================
+RUNG 0.26   (achieved vf 0.2600, accepted 1)
+=====================================================================
+
+-- S2.b(1) THE FIELD ------------------------------------------------
+  solid voxels (rho > 0.5): 58586 of 468224 (12.51%)
+  BOUNDARY voxels (a 6-neighbour on the other side of iso): 61855 (13.21%)
+  whole grid  (n = 468224)
+      rho [0.0,0.1)      408469   87.24%
+      rho [0.1,0.2)         500    0.11%
+      rho [0.2,0.3)         275    0.06%
+      rho [0.3,0.4)         210    0.04%
+      rho [0.4,0.5)         184    0.04%
+      rho [0.5,0.6)         161    0.03%
+      rho [0.6,0.7)         192    0.04%
+      rho [0.7,0.8)         283    0.06%
+      rho [0.8,0.9)         519    0.11%
+      rho [0.9,1.0)       57431   12.27%
+      <= 0.05047 :     407823 (87.100%)   >= 0.89988 :      57443 (12.268%)   STRICTLY BETWEEN : 2958 (0.632%)
+  BOUNDARY voxels only  <- the brief's reading  (n = 61855)
+      rho [0.0,0.1)       27147   43.89%
+      rho [0.1,0.2)         500    0.81%
+      rho [0.2,0.3)         275    0.44%
+      rho [0.3,0.4)         210    0.34%
+      rho [0.4,0.5)         184    0.30%
+      rho [0.5,0.6)         161    0.26%
+      rho [0.6,0.7)         192    0.31%
+      rho [0.7,0.8)         283    0.46%
+      rho [0.8,0.9)         517    0.84%
+      rho [0.9,1.0)       32386   52.36%
+      <= 0.05047 :      26504 (42.849%)   >= 0.89988 :      32398 (52.377%)   STRICTLY BETWEEN : 2953 (4.774%)
+
+-- ★ S2.b(2) THE DECIDING READING: WHERE MARCHING CUBES PUT THE POINT --
+  A binary field gives frac == 0.5 on EVERY crossing — every vertex at an
+  edge midpoint, which IS a staircase. The spread of frac is the sub-voxel
+  information the field still carries.
+
+  on the DESIGN lattice (spacing 1.705 mm)
+      crossings 40376   mean frac 0.49953
+        frac [0.0,0.1)         206    0.51%
+        frac [0.1,0.2)         244    0.60%
+        frac [0.2,0.3)         358    0.89%
+        frac [0.3,0.4)         549    1.36%
+        frac [0.4,0.5)        6091   15.09%
+        frac [0.5,0.6)       31637   78.36%
+        frac [0.6,0.7)         551    1.36%
+        frac [0.7,0.8)         307    0.76%
+        frac [0.8,0.9)         244    0.60%
+        frac [0.9,1.0)         189    0.47%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 34509 (85.47%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 2648 (6.56%)
+      rms |frac-0.5| = 0.07279  =>  0.1241 mm on a 1.7053 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49839  =>  0.8499 mm
+
+  on the SHIPPED lattice (tricubic factor 2, cell 0.853 mm)
+      crossings 161546   mean frac 0.51686
+        frac [0.0,0.1)        2166    1.34%
+        frac [0.1,0.2)        4144    2.57%
+        frac [0.2,0.3)       11876    7.35%
+        frac [0.3,0.4)        5511    3.41%
+        frac [0.4,0.5)       25893   16.03%
+        frac [0.5,0.6)       68379   42.33%
+        frac [0.6,0.7)       24446   15.13%
+        frac [0.7,0.8)       12206    7.56%
+        frac [0.8,0.9)        4814    2.98%
+        frac [0.9,1.0)        2111    1.31%
+      |frac-0.5| <= 0.01 (NO sub-voxel information): 64381 (39.85%)
+      |frac-0.5| >  0.10 (real sub-voxel placement): 67274 (41.64%)
+      rms |frac-0.5| = 0.15845  =>  0.1351 mm on a 0.8526 mm cell   (staircase is 0.3424 mm)
+      max |frac-0.5| = 0.49995  =>  0.4263 mm
+
+-- S2.b(3) THE SAME, SPLIT BY POPULATION ---------------------------
+  NOTE: a lattice CROSSING is not a mesh vertex, so PR 307's
+  classifier cannot be called on it. This split uses the classifier's
+  own tolerance against the CAD tessellation and NOT its analytic
+  distance test, so it is an approximation. The decisive readings
+  above are whole-population and do not depend on it.
+  CAD-side crossings (within 1.7053 mm of a CAD face): 93954 of 161546 (58.16%)
+      rms |frac-0.5| = 0.15204 => 0.1296 mm
+  OPTIMIZER-CUT crossings (the rest): 67592
+      rms |frac-0.5| = 0.16696 => 0.1424 mm   (staircase 0.3424 mm)
+
+=====================================================================
+S2.d — A VERTEX-POSITION OPTIMISATION AGAINST THE FIELD, RUNG 0.68
+=====================================================================
+  141894 vertices, CAD 113123 / ambiguous 3596 / CUT 25175
+  as exported: dihedral 8.36 deg, CAD dev rms 0.3270 mm, volume 443799 mm3, min section 104.6872 mm2
+
+operator                     iters  wall_s  cutmax  cutrms  cadmoved  dihed_a  cad_rm%    vol%  resid_rms_mm  minsec
+Fit_field_i20                  20   0.120  0.4263  0.1969         0     8.35     0.0%   0.007       0.00045  104.6872
+Fit_field_i50                  50   0.253  0.4263  0.2131         0     8.36     0.0%   0.008       0.00048  104.6872
+Fit_field_i200                200   0.923  0.4263  0.2320         0     8.36     0.0%   0.008       0.00049  104.6872
+Fair_only_i20  (control)       20   0.036  0.4263  0.2296         0     8.12     0.0%   0.133       0.14735  104.6872
+Fair_only_i50  (control)       50   0.049  0.4263  0.2468         0     8.15     0.0%   0.183       0.16711  104.6872
+Fair_only_i200 (control)      200   0.119  0.4263  0.2658         0     8.16     0.0%   0.245       0.19013  104.6872
+
+  level-set residual of the SHIPPED surface, before anything runs: rms 0.000000 mm
+  (a surface already ON the level set has nothing for a projection to
+   recover — that number is the size of the opportunity.)
+
+
+  -- C4 OFF: amplitude removed on the surface that HAS an answer --
+  as exported: cad_rms 0.3270 mm
+operator                     iters  wall_s   cad_rms_mm  removed%   resid_rms_mm    vol%
+Fit_field_i20                  20   0.486      0.3263      0.2%        0.00037  -0.027
+Fit_field_i50                  50   1.148      0.3270     -0.0%        0.00042  -0.028
+Fit_field_i200                200   4.514      0.3273     -0.1%        0.00043  -0.029
+Fair_only_i20  (control)       20   0.068      0.3216      1.7%        0.16159  -0.482
+Fair_only_i50  (control)       50   0.111      0.3313     -1.3%        0.18423  -0.645
+Fair_only_i200 (control)      200   0.324      0.3477     -6.3%        0.20877  -0.885
+Taubin_pairs_20                20   0.045      0.3187      2.5%              -   0.018
+Taubin_pairs_160              160   0.222      0.3009      8.0%              -   0.129
+
+Taubin_pairs_20                20   0.031  0.5093  0.1234         0     8.30     0.0%  -0.004             -  104.6872
+Taubin_pairs_160              160   0.116  0.7595  0.1866         0     8.09     0.0%  -0.032             -  104.6872
+
