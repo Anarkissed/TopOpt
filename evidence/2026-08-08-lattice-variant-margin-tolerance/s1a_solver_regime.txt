@@ -1,0 +1,7 @@
+S1(a) FALSIFIER — the recycler only engages where the multigrid hierarchy is
+rejected, because production sets fea_set_krylov_recycle_wrap_multigrid(false)
+(core/src/simp/production.cpp:673). Read straight out of each run's iterations.csv.
+
+plate_bore.stl res48 (repo fixture)        solves=240  cg_multigrid={'1': 240}             hier_built={'1': 240}             recycle_dim={'0': 240}
+M2_verticalStand.step res40                solves=243  cg_multigrid={'0': 239, '1': 4}     hier_built={'1': 9, '0': 234}     recycle_dim={'0': 5, '16': 238}
+HIS RUN M2_verticalStand.step res128       solves=445  cg_multigrid={'0': 445}             hier_built={'1': 3, '0': 442}     recycle_dim={'0': 1, '16': 444}

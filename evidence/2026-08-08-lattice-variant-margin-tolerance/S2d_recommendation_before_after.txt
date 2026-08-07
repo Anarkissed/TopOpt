@@ -1,0 +1,61 @@
+S2(d) — THE RECOMMENDATION ON HIS OWN RUN, BEFORE AND AFTER
+worker job ca62f91cba4b422d · M2_verticalStand.step · resolution 128 · 4 rungs,
+all accepted, all four lattices certified (lattice_accepted true on every rung).
+
+THE LADDER, WITH BOTH OF EACH RUNG'S OBJECTS
+
+  ladder   rung   solid (g)   latticed (g)   lattice/solid   would PRINT   mesh
+  1st      0.68     543.73        215.16         0.396         215.16 L    1.95 GB
+  2nd      0.52     473.32        239.93         0.507         239.93 L    1.42 GB
+  3rd      0.38     412.47        244.78         0.593         244.78 L    1.06 GB
+  4th      0.26     360.30        246.38         0.684         246.38 L     740 MB
+
+  "would PRINT" = the accepted lattice where the rung has one, else the solid.
+  All four rungs here have one, so all four are latticed.
+
+BEFORE  (rule: `recommendedIndex = variants.count - 1`, the last accepted rung)
+
+  tab            the 4th rung's SOLID
+  mass           360.30 g
+  line           "Recommended: the solid object of the −47% rung, 360 g
+                  · the same rung's latticed is 246 g"
+  what he'd print if he tapped Export on that rung's lattice: 246.38 g
+
+AFTER   (rule: the lightest object that would actually be exported)
+
+  tab            the 1st rung's LATTICE
+  mass           215.16 g
+  line           "Recommended: the latticed object of the −20% rung, 215 g
+                  · the same rung's solid is 544 g"
+
+WHAT MOVED
+
+  recommended object   246.38 g  ->  215.16 g      −31.22 g,  −12.7 %
+  recommended rung     0.26      ->  0.68
+  recommended tab      solid     ->  latticed
+  mesh he must move    740 MB    ->  1.95 GB       2.6x  (the honest cost)
+
+  Verdicts: NONE moved. All four rungs accepted before and after; all four
+  lattices certified before and after (R4_no_verdict_moves.txt).
+
+THE TRADE-OFF THIS MAKES, STATED
+
+  PR 311 noted that the lightest lattice sits on the LARGEST mesh, so ranking by
+  printed mass systematically points at the least transferable rung. That is
+  still true and is now the shipped behaviour: the recommended object is the one
+  he would print, and it is also the 1.95 GB file. On his iPad neither the 740 MB
+  nor the 1.95 GB rung can be DISPLAYED (PR 311 §4), so this changes which object
+  Export writes, not what he can look at.
+
+FALLBACK BEHAVIOUR, MEASURED IN THE SUITE
+
+  every lattice refused        -> the lightest SOLID, i.e. the old rule exactly
+                                  (testWithNoCertifiedLatticeTheRuleIsTheOldOne:
+                                   360.30 g, rung 0.26)
+  the lightest lattice refused -> the next-lightest printed object
+                                  (testARefusedLatticeFallsBackToItsSolidForRanking:
+                                   239.93 g, rung 0.52)
+  no masses (remote run with   -> the last accepted rung, unranked
+  no fields.bin scalars)          (testAMasslessRunFallsBackToTheLadderRule)
+  a lattice with no readable   -> not a 0 g object; its solid is ranked instead
+  mass                            (testALatticeWithNoReadableMassCannotBeRecommended)

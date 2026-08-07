@@ -62,6 +62,26 @@ double infill_margin_knockdown(double infill_percent) {
   return std::max(std::pow(f, kKnockdownExponent), kKnockdownFloor);
 }
 
+double margin_reproduction_relative_delta(double recorded, double reproduced) {
+  // Exact equality first, so two infinities (a zero-stress posture) and two
+  // zeros read as a perfect reproduction rather than falling into the guards.
+  if (recorded == reproduced) return 0.0;
+  if (!std::isfinite(recorded) || !std::isfinite(reproduced))
+    return std::numeric_limits<double>::infinity();
+  const double scale = std::abs(recorded);
+  if (!(scale > 0.0)) return std::numeric_limits<double>::infinity();
+  return std::abs(reproduced - recorded) / scale;
+}
+
+bool margin_reproduces(double recorded, double reproduced, double cg_tolerance) {
+  const double band = kMarginReproductionResidualFactor * cg_tolerance;
+  // No declared convergence bound -> no derived band. Fall back to the exact
+  // comparison rather than invent one: the band's whole justification is that it
+  // is a multiple of the residual tolerance both solves actually met.
+  if (!(band > 0.0)) return recorded == reproduced;
+  return margin_reproduction_relative_delta(recorded, reproduced) <= band;
+}
+
 double gate_margin_effective(double yield_strength_mpa, double z_knockdown,
                              double max_von_mises,
                              double max_von_mises_effective,
@@ -198,10 +218,23 @@ FixedDesignAnalysis analyze_fixed_design(
     }
   }
 
-  // Penalized solve on the FIXED density to recover the displacement field. The
-  // certification solve is stateless (no warm start, no cached solver) so a
-  // re-analysis of the same field is bit-identical. Solver selection matches the
+  // Penalized solve on the FIXED density to recover the displacement field. No
+  // warm start and no cached solver is passed here. Solver selection matches the
   // originating run via `solver_kind`.
+  //
+  // *** THIS IS NOT A PURE FUNCTION OF ITS ARGUMENTS, AND THE COMMENT THAT SAID
+  // SO WAS WRONG (task 2026-08-08-lattice-variant-margin-tolerance). *** The
+  // Krylov recycling subspace (core/src/fea/recycle.cpp:83) is thread-local,
+  // production-armed and deliberately carried BETWEEN solves, so two calls with
+  // byte-identical arguments can take different Krylov paths and land at two
+  // different points inside the same residual ball. The ladder's certification
+  // runs with it warm; every re-certification runs with it disabled by
+  // ScopedLadderSolverIsolation. Measured on the maintainer's own run: the
+  // margins agree to nine significant figures and no further. That is why
+  // "reproduces the recorded margin" is `margin_reproduces` (analyze.hpp) and not
+  // `==`. With recycling DISARMED — the library default, which is what
+  // test_analyze_fixed_design runs under — a re-analysis of the same field IS
+  // bit-identical, and that test still asserts exactly that.
   //
   // Handoff 2026-07-27-nonconvergence-rejection — the certification solve runs at the
   // caller's tight `cg_tolerance`, UNCHANGED. If it fails to converge we do NOT soften

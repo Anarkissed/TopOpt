@@ -1,0 +1,6 @@
+=== compare ===
+triangles: 14807216 vs 14807216
+identical triangles : 12540748 (84.6935 %)
+differing triangles : 2266468 (15.3065 %)
+worst vertex coordinate difference : 1.52588e-05 mm (8.95e-06 of a voxel)
+worst normal component difference  : 2.00249e-13

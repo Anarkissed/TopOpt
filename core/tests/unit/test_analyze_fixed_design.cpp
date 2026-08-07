@@ -11,8 +11,18 @@
 // It is provable because minimize_plastic's recovery block CALLS
 // analyze_fixed_design (single source of truth): run one rung, then call
 // analyze_fixed_design directly on that variant's converged density and compare
-// every field. The penalized certification solve is stateless (no warm start, no
-// cached solver) and deterministic, so re-running it on the same inputs is exact.
+// every field. No warm start and no cached solver is passed, so re-running it on
+// the same inputs is exact.
+//
+// *** AND THE CONDITION UNDER WHICH THAT HOLDS, NAMED (task
+// 2026-08-08-lattice-variant-margin-tolerance). *** It holds HERE because the
+// library ships with Krylov recycling DISARMED, so nothing is carried between
+// these solves. A PRODUCTION run arms it (core/src/simp/production.cpp:672) and
+// carries the subspace across solves on purpose, which makes the same two calls
+// land at two different points inside the same residual ball — measured at 7e-9
+// relative in test_margin_reproduction, and the reason `lattice_variant`'s
+// reproduction check is a band and not a `==`. Nothing below is weakened: this
+// file's claim is exactly as strong as it was, and it now says what it depends on.
 //
 // Also asserts the engine NEVER optimizes: it runs one solve and returns; there is
 // no ladder, no iteration, no design change (the density it is handed is the

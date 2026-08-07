@@ -1,0 +1,5 @@
+  B: recorded 18.634321588184484  reproduced 18.634321714356346  relative delta 6.77e-09 (band 1e-06)
+  B3: load off by 1e-4 -> relative delta 0.0001
+  B3: design 2 % denser -> relative delta 0.0612
+  B3: ONE voxel flipped to solid -> relative delta 0.00203
+margin_reproduction: 28 checks, 0 failures

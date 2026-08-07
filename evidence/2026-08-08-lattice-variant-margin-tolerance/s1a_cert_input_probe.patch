@@ -1,0 +1,95 @@
+diff --git a/core/src/simp/analyze.cpp b/core/src/simp/analyze.cpp
+index 5dcc4a5..b3eca80 100644
+--- a/core/src/simp/analyze.cpp
++++ b/core/src/simp/analyze.cpp
+@@ -141,6 +141,61 @@ FixedDesignAnalysis analyze_fixed_design(
+     throw std::invalid_argument(
+         "analyze_fixed_design: printed_iso must be in (0, 1)");
+   const double kIso = printed_iso;
++#ifdef TOPOPT_CERT_INPUT_PROBE
++  {
++    // TEMPORARY INSTRUMENTATION (task lattice-variant-margin-tolerance, S1(a)).
++    // Never built in production: guarded by a compile flag set only by the
++    // probe build directory. Dumps every input of the certification solve so
++    // the ladder's call and lattice_variant's call can be compared field by
++    // field.
++    auto fnv = [](const void* p, std::size_t n) {
++      const unsigned char* b = static_cast<const unsigned char*>(p);
++      std::uint64_t h = 1469598103934665603ull;
++      for (std::size_t i = 0; i < n; ++i) {
++        h ^= b[i];
++        h *= 1099511628211ull;
++      }
++      return h;
++    };
++    std::vector<char> tags(grid.voxel_count());
++    for (int k = 0; k < grid.nz; ++k)
++      for (int j = 0; j < grid.ny; ++j)
++        for (int i = 0; i < grid.nx; ++i)
++          tags[grid.index(i, j, k)] = grid.solid(i, j, k) ? 1 : 0;
++    double lsum = 0.0, labs = 0.0;
++    for (const NodalLoad& l : loads) {
++      lsum += l.value;
++      labs += std::abs(l.value);
++    }
++    std::fprintf(stderr,
++                 "CERTPROBE grid=%dx%dx%d spacing=%.17g origin=%.17g,%.17g,%.17g "
++                 "tags=%016llx density=%016llx nbc=%zu bcs=%016llx nload=%zu "
++                 "loads=%016llx lsum=%.17g labs=%.17g E=%.17g nu=%.17g p=%.17g "
++                 "bdir=%.17g,%.17g,%.17g tol=%.17g maxit=%d solver=%d "
++                 "mstop=%.17g kd=%.17g,%d,%.17g,%.17g lp=%d psolid=%.17g "
++                 "iso=%.17g lat=%d\n",
++                 grid.nx, grid.ny, grid.nz, grid.spacing, grid.origin.x,
++                 grid.origin.y, grid.origin.z,
++                 (unsigned long long)fnv(tags.data(), tags.size()),
++                 (unsigned long long)fnv(density.data(),
++                                         density.size() * sizeof(double)),
++                 bcs.size(),
++                 (unsigned long long)fnv(bcs.data(),
++                                         bcs.size() * sizeof(DirichletBC)),
++                 loads.size(),
++                 (unsigned long long)fnv(loads.data(),
++                                         loads.size() * sizeof(NodalLoad)),
++                 lsum, labs, params.youngs_modulus, params.poisson,
++                 params.penalty, build_dir.x, build_dir.y, build_dir.z,
++                 cg_tolerance, cg_max_iterations, (int)solver_kind, margin_stop,
++                 knockdown.infill_knockdown, (int)knockdown.width_aware,
++                 knockdown.infill_percent, knockdown.wall_thickness_mm,
++                 (int)load_path_ok, part_solid, printed_iso, (int)(lattice != nullptr));
++    std::fprintf(stderr, "CERTPROBE-STATE recycling=%d mglatched=%d\n",
++                 (int)fea_krylov_recycling_enabled(),
++                 (int)fea_matfree_mg_stagnation_latched());
++  }
++#endif
+   FixedDesignAnalysis out;
+   // The orientation this analysis describes. Reassigned at the very end IF the
+   // caller armed auto-apply and the scorer chose a different direction; until
+@@ -405,6 +460,28 @@ FixedDesignAnalysis analyze_fixed_design(
+   out.margin = margin;
+   out.margin_effective = margin_effective;
+   out.accepted = load_path_ok && margin_ok;
++#ifdef TOPOPT_CERT_INPUT_PROBE
++  {
++    auto fnv = [](const void* p, std::size_t n) {
++      const unsigned char* b = static_cast<const unsigned char*>(p);
++      std::uint64_t h = 1469598103934665603ull;
++      for (std::size_t i = 0; i < n; ++i) {
++        h ^= b[i];
++        h *= 1099511628211ull;
++      }
++      return h;
++    };
++    std::fprintf(stderr,
++                 "CERTPROBE-OUT cgiter=%d cgres=%.17g cgconv=%d "
++                 "u=%016llx maxvm=%.17g worst=%.17g inplane=%.17g "
++                 "interlayer=%.17g eff=%.17g printed=%zu\n",
++                 sc.cg.iterations, sc.cg.residual, (int)sc.cg.converged,
++                 (unsigned long long)fnv(sc.solution.u.data(),
++                                         sc.solution.u.size() * sizeof(double)),
++                 max_von_mises, out.margin.worst_case, out.margin.in_plane,
++                 out.margin.interlayer, out.margin_effective, printed_voxels);
++  }
++#endif
+ 
+   // Lattice reporting (all default when no posture was applied). `margin`/`accepted`
+   // above are the SOLID region's strength over the real composite field; the lattice

@@ -1014,7 +1014,17 @@ struct LatticeVariantJobResult {
   // THE REPRODUCTION PROOF (step 3 above).
   double recorded_margin_worst_case = 0.0;   // as the original run recorded it
   double reproduced_margin_worst_case = 0.0; // as this job re-derived it
-  bool reproduction_exact = false;           // enforced: false never returns
+  // BIT-equality of the two above. REPORTED, no longer enforced: the recorded
+  // margin came from a solve that carried a warm Krylov recycle subspace and this
+  // one is denied it by ScopedLadderSolverIsolation, so on any run whose solves
+  // fall back to Jacobi-CG this is false and always was. See analyze.hpp's
+  // kMarginReproductionResidualFactor note for the full mechanism.
+  bool reproduction_exact = false;
+  // What is ENFORCED: the two margins agree inside the band the certification
+  // solve's own relative-residual tolerance justifies. False never returns.
+  bool reproduction_within_band = false;
+  double reproduction_relative_delta = 0.0;  // |repro - recorded| / |recorded|
+  double reproduction_band = 0.0;            // the band it was judged against
 
   FixedDesignAnalysis solid;    // the null-posture (SOLID) certification
   FixedDesignAnalysis lattice;  // the composite (LATTICED) certification

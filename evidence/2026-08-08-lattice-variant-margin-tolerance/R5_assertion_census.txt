@@ -1,0 +1,59 @@
+=== R5 assertion census: 966ffa6eaf9bb4608b1be62ee1b04e04815a49f0 → working tree ===
+
+APP 1. TEST FUNCTIONS   before=1365  after=1375
+   removed:
+     func testTheRecommendationPointsAtTheHeaviestLatticedObject
+   (only the re-pinned P above = bar met)
+
+APP 2. ASSERTION / LITERAL MESSAGES   before=3727  after=3796
+   removed:
+     "      byte-for-byte the worker's variant_026_lattice.stl ✓"
+     "  [3] selected the RECOMMENDED rung's latticed variant: "
+     "(246.38 g against 215.16 g on the vf=0.68 rung) — a 31 g, "
+     "(its solid: \(recommended.massLabel))"
+     "12.6 % penalty for following the recommendation"
+     "inverse of the ordering the recommendation assumes"
+     "lattice mass rises as the solid rung gets lighter — the "
+     "still true there"
+     "the recommendation is the vf=0.26 rung, 360 g solid"
+     "the recommendation stays on a SOLID tab — its rule is "
+     "the recommended rung's lattice is the HEAVIEST of the four "
+     "…and it is the lightest solid, as it always was"
+
+APP 3. ASSERTION KINDS (before → after; a kind that DROPPED is the thing to look at)
+     XCTAssertEqual                 2493 →   2516  
+     XCTAssertFalse                  510 →    515  
+     XCTAssertGreaterThan            187 →    187  
+     XCTAssertGreaterThanOrEqual      34 →     35  
+     XCTAssertLessThan                64 →     64  
+     XCTAssertLessThanOrEqual         32 →     32  
+     XCTAssertNil                    350 →    353  
+     XCTAssertNotEqual                85 →     87  
+     XCTAssertNotNil                 141 →    141  
+     XCTAssertThrowsError             13 →     13  
+     XCTAssertTrue                   972 →    988  
+     XCTFail                          91 →     91  
+     XCTSkip                          59 →     59  
+     XCTSkipIf                         2 →      2  
+     XCTSkipIfNil                      9 →      9  
+     XCTSkipUnless                    12 →     12  
+     XCTUnwrap                       507 →    525  
+
+CORE 1. CHECK() CALL SITES   before=3921  after=3947
+CORE 2. ASSERTION / LITERAL MESSAGES   before=11282  after=11318
+   removed:
+   (nothing above = no core assertion message disappeared)
+
+R. THE ONE PRODUCTION CHECK THIS TASK RELAXES
+   before (merge base):
+     966ffa6eaf9bb4608b1be62ee1b04e04815a49f0:core/src/cli/run_job.cpp:5463:  result.reproduction_exact =
+     966ffa6eaf9bb4608b1be62ee1b04e04815a49f0:core/src/cli/run_job.cpp-5464-      (result.solid.margin.worst_case == sd.margin_worst_case);
+     966ffa6eaf9bb4608b1be62ee1b04e04815a49f0:core/src/cli/run_job.cpp:5473:  if (!result.reproduction_exact)
+   after (working tree):
+     5521:  result.reproduction_within_band =
+     5522-      margin_reproduces(sd.margin_worst_case, result.solid.margin.worst_case,
+     5523-                        options.simp.cg_tolerance);
+     5532:  if (!result.reproduction_within_band)
+   the EXACT flag survives, reported, and both core tests that assert it are untouched:
+     core/tests/validation/test_lattice_variant.cpp:251:  CHECK(r.reproduction_exact &&
+     core/tests/validation/test_designbox_lattice_recert.cpp:348:  CHECK(r.reproduction_exact,

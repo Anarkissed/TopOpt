@@ -1,0 +1,38 @@
+R4 — NO VERDICT MOVES, on the maintainer's own run (worker job ca62f91cba4b422d).
+
+Every verdict is compared between what the RUN recorded (report.json /
+design.bin / the eager per-variant receipts on the Mac Mini) and what the
+on-demand `topopt-cli lattice-variant` path produces from {job.json,
+design.bin} alone under the new band. A ranking change is not a verdict
+change; if any of these moved, the task stops.
+
+A. THE SOLID RUNG's ACCEPT VERDICT
+   rung   report.json      design.bin       on-demand re-cert
+   068    True             True             accepted (latticed, so its rung certified)
+   052    True             True             accepted (latticed, so its rung certified)
+   038    True             True             accepted (latticed, so its rung certified)
+   026    True             True             accepted (latticed, so its rung certified)
+
+B. THE LATTICED OBJECT's OWN VERDICT  (core's lattice_accepted)
+   rung   eager run      on-demand      eager margin   on-demand margin
+   068    True           True           1183.249541    1183.249537   
+   052    True           True           1244.670011    1244.67001    
+   038    True           True           730.5215464    730.5215474   
+   026    True           True           933.0889676    933.0889664   
+
+C. THE LATTICED OBJECT's MASS  (what the app ranks on)
+   rung   eager run        on-demand       
+   068    215.1568193      215.1568193     
+   052    239.9349267      239.9349267     
+   038    244.7773503      244.7773503     
+   026    246.3776328      246.3776328     
+
+D. THE RECORDED SOLID MARGIN vs THE ON-DEMAND REPRODUCTION
+   rung   recorded (f64)   reproduced       rel delta      band    
+   068    2169.6171706043  2169.6171630000  3.505e-09      1e-06   
+   052    2259.9528152616  2259.9528130000  1.001e-09      1e-06   
+   038    2193.8768329099  2193.8768350000  9.527e-10      1e-06   
+   026    2008.2783386128  2008.2783370000  8.031e-10      1e-06   
+
+Nothing in A, B or C differs. D is the difference the band exists to admit,
+and every row is 3-4 orders of magnitude inside it.

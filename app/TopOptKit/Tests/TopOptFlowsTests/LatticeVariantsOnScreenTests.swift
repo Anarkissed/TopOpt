@@ -340,18 +340,23 @@ final class LatticeVariantsOnScreenTests: XCTestCase {
         }
     }
 
-    /// *** THE NUMBER THAT SHOWED THE COST. *** His app displayed the recommended
-    /// variant at 360 g. The latticed object of that same rung weighs 246.38 g, and
+    /// *** THE NUMBER THAT SHOWED THE COST. *** His app displayed the vf=0.26 rung
+    /// at 360 g. The latticed object of that same rung weighs 246.38 g, and
     /// selecting it must show THAT — not the solid's mass under a different label.
+    ///
+    /// Keyed to the RUNG (the last one, vf=0.26) rather than to `isRecommended`.
+    /// The recommendation moved to the vf=0.68 rung's lattice in task
+    /// 2026-08-08-lattice-variant-margin-tolerance; the fact this test is about —
+    /// a latticed tab shows the latticed mass — is about the rung, not the badge.
     @MainActor
     func testSelectingALatticedVariantShowsTheLatticedMass() throws {
         let model = try hisResultsModel()
-        let recommended = try XCTUnwrap(model.tabs.first { $0.isRecommended })
-        XCTAssertEqual(recommended.massGrams, 360.304, accuracy: 0.01,
-                       "the recommendation is the vf=0.26 rung, 360 g solid")
+        let lastRung = try XCTUnwrap(model.tabs.last { !$0.isLatticed })
+        XCTAssertEqual(lastRung.massGrams, 360.304, accuracy: 0.01,
+                       "the vf=0.26 rung's solid is 360 g")
 
         let latticed = try XCTUnwrap(
-            model.tabs.first { $0.isLatticed && $0.variantIndex == recommended.variantIndex })
+            model.tabs.first { $0.isLatticed && $0.variantIndex == lastRung.variantIndex })
         model.select(latticed.index)
         XCTAssertEqual(model.selected?.massGrams ?? 0, 246.38, accuracy: 0.01)
         XCTAssertEqual(model.selected?.massLabel, "246 g")
@@ -465,43 +470,58 @@ final class LatticeVariantsOnScreenTests: XCTestCase {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // S2(c) — THE FINDING THE RECOMMENDER GETS BACKWARDS
+    // S2(c) — THE INVERSION, AND THE RULING THAT ANSWERED IT
     // ══════════════════════════════════════════════════════════════════════
 
-    /// *** REPORTED, NOT FIXED. *** On his run the latticed masses FALL as the
-    /// solid rung gets heavier, because a heavier rung has more material to replace
-    /// with a 26–90 %-density lattice. So "the last accepted rung" — the lightest
-    /// SOLID, and the rule the recommendation has always used — lands on the
-    /// HEAVIEST of the four latticed objects.
+    /// *** THIS TEST WAS RE-PINNED, DELIBERATELY AND OUT LOUD. ***
     ///
-    /// This test PINS the inversion rather than correcting it: which object the
-    /// recommendation should rank once a lattice exists is the maintainer's ruling,
-    /// and the task says not to change the rule without it. If someone later
-    /// changes the rule, this test fails and makes them say so out loud.
+    /// It shipped as `testTheRecommendationPointsAtTheHeaviestLatticedObject`,
+    /// pinning the OLD rule ("the last accepted rung" — the lightest solid) so that
+    /// changing it could not happen quietly, because which object to rank was the
+    /// maintainer's ruling to make. He ruled (task 2026-08-08-lattice-variant-
+    /// margin-tolerance, S2): rank by mass, over the object that would actually be
+    /// exported. So the expected recommendation moves — and every MEASURED fact the
+    /// old version asserted is still asserted here, plus the size of what the old
+    /// rule cost.
     @MainActor
-    func testTheRecommendationPointsAtTheHeaviestLatticedObject() throws {
+    func testTheRecommendationPointsAtTheLightestPrintedObject() throws {
         let model = try hisResultsModel()
         let recommended = try XCTUnwrap(model.tabs.first { $0.isRecommended })
-        XCTAssertFalse(recommended.isLatticed,
-                       "the recommendation stays on a SOLID tab — its rule is "
-                       + "still true there")
-        XCTAssertEqual(recommended.massGrams, 360.304, accuracy: 0.01,
-                       "…and it is the lightest solid, as it always was")
 
+        // UNCHANGED, and still the finding: ladder order is heaviest-solid-first and
+        // the latticed masses ASCEND along it — 215.16, 239.93, 244.78, 246.38 —
+        // the inverse of the ordering the old rule assumed.
         let latticedMasses = model.tabs.filter { $0.isLatticed }.map { $0.massGrams }
         XCTAssertEqual(latticedMasses.count, 4)
-        // Ladder order is heaviest-solid-first, and the latticed masses ASCEND
-        // along it: 215.16, 239.93, 244.78, 246.38.
         XCTAssertEqual(latticedMasses, latticedMasses.sorted(),
-                       "lattice mass rises as the solid rung gets lighter — the "
-                       + "inverse of the ordering the recommendation assumes")
-        let recommendedLattice = try XCTUnwrap(
-            model.tabs.first { $0.isLatticed && $0.variantIndex == recommended.variantIndex })
-        XCTAssertEqual(recommendedLattice.massGrams, try XCTUnwrap(latticedMasses.max()),
+                       "lattice mass rises as the solid rung gets lighter")
+
+        // WHAT MOVED: the recommendation is now the LIGHTEST latticed object, not
+        // the lattice of the lightest solid.
+        XCTAssertTrue(recommended.isLatticed,
+                      "every rung of this run has an accepted lattice, so the "
+                      + "object he would print is a lattice on every one of them")
+        XCTAssertEqual(recommended.massGrams, try XCTUnwrap(latticedMasses.min()),
                        accuracy: 0.01,
-                       "the recommended rung's lattice is the HEAVIEST of the four "
-                       + "(246.38 g against 215.16 g on the vf=0.68 rung) — a 31 g, "
-                       + "12.6 % penalty for following the recommendation")
+                       "…and the recommendation is the lightest of the four")
+        XCTAssertEqual(recommended.massGrams, 215.16, accuracy: 0.01)
+
+        // AND WHAT THE OLD RULE COST, asserted rather than remembered: the lattice
+        // of the last accepted rung — where the recommendation used to sit — is the
+        // HEAVIEST of the four, 246.38 g against 215.16 g.
+        let lastRung = try XCTUnwrap(model.tabs.last { !$0.isLatticed })
+        XCTAssertEqual(lastRung.massGrams, 360.304, accuracy: 0.01,
+                       "the old rule's tab: the lightest SOLID, 360 g")
+        let oldRuleLattice = try XCTUnwrap(
+            model.tabs.first { $0.isLatticed && $0.variantIndex == lastRung.variantIndex })
+        XCTAssertEqual(oldRuleLattice.massGrams, try XCTUnwrap(latticedMasses.max()),
+                       accuracy: 0.01,
+                       "…whose lattice is the HEAVIEST of the four")
+        XCTAssertEqual(oldRuleLattice.massGrams - recommended.massGrams, 31.22,
+                       accuracy: 0.01,
+                       "31.22 g — 12.7 % — is what following the old rule cost")
+        XCTAssertFalse(oldRuleLattice.isRecommended)
+        XCTAssertFalse(lastRung.isRecommended)
     }
 
     // ══════════════════════════════════════════════════════════════════════
