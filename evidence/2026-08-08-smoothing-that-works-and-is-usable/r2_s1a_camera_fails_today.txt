@@ -1,0 +1,52 @@
+R2 — S1(a) FAILING TEST FIRST: THE CAMERA MOVES TODAY
+
+Method: PR 306's. The fix is surgically DISABLED in the source
+(app/TopOptKit/Sources/TopOptFlows/MetalMeshView.swift — applyMesh always calls
+setMesh, and the coordinator clears appliedTint/lastSettleVector
+unconditionally, which is the pre-fix tree) and the UNMODIFIED test re-run.
+
+The reading that matters: the user's camera is distance 0.9108709 with the
+target panned to (0.451, 0.446, 0.593). After ONE stroke it is distance
+2.6155658 with the target back on the model centre. That is his sentence —
+'moving the zoom/position back to the origin point' — as a number.
+
+The four tests that PASS in this arm are the positive controls: a different
+part must still be framed and still be settled, and the signature must still
+separate the two cases. They are what stops the bars passing vacuously.
+
+Test Suite 'SmoothingStrokeCameraTests' started at 2026-08-07 14:59:22.891.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartDoesSettleAgain]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartDoesSettleAgain]' passed (0.185 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartStillReframesTheCamera]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartStillReframesTheCamera]' passed (0.126 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotMoveTheCamera]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:157: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotMoveTheCamera] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.5, 0.4925, 0.5), homeTarget: SIMD3<Float>(0.5, 0.4925, 0.5), distance: 2.6155658, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17407541, maxDistance: 10.444525)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - a brush stroke must leave the camera exactly as the user had it
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:159: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotMoveTheCamera] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.5, 0.4925, 0.5), homeTarget: SIMD3<Float>(0.5, 0.4925, 0.5), distance: 2.6155658, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17407541, maxDistance: 10.444525)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - …and the renderer must be drawing from that same camera
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotMoveTheCamera]' failed (0.371 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotRestartTheSettleAnimation]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:225: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotRestartTheSettleAnimation] : XCTAssertEqual failed: ("2") is not equal to ("1") - a stroke must not re-run the settle animation — the part must not re-drop
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotRestartTheSettleAnimation]' failed (0.125 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:182: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.505, 0.5, 0.5), homeTarget: SIMD3<Float>(0.505, 0.5, 0.5), distance: 2.6111922, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17378436, maxDistance: 10.427061)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - stroke 1 moved the camera
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:182: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.505, 0.5, 0.5), homeTarget: SIMD3<Float>(0.505, 0.5, 0.5), distance: 2.6111922, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17378436, maxDistance: 10.427061)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - stroke 2 moved the camera
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:182: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.505, 0.5, 0.5), homeTarget: SIMD3<Float>(0.505, 0.5, 0.5), distance: 2.6111922, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17378436, maxDistance: 10.427061)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - stroke 3 moved the camera
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:182: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.505, 0.5, 0.5), homeTarget: SIMD3<Float>(0.505, 0.5, 0.5), distance: 2.6111922, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17378436, maxDistance: 10.427061)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - stroke 4 moved the camera
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:182: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.505, 0.5, 0.5), homeTarget: SIMD3<Float>(0.505, 0.5, 0.5), distance: 2.6111922, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17378436, maxDistance: 10.427061)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - stroke 5 moved the camera
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas]' failed (0.366 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheSignatureSeparatesAMovedSurfaceFromADifferentOne]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheSignatureSeparatesAMovedSurfaceFromADifferentOne]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheTopologyHashIgnoresThePositions]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheTopologyHashIgnoresThePositions]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTogglingBackToTheOriginalDoesNotMoveTheCamera]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-page-reset-63aa19/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingStrokeCameraTests.swift:197: error: -[TopOptFlowsTests.SmoothingStrokeCameraTests testTogglingBackToTheOriginalDoesNotMoveTheCamera] : XCTAssertEqual failed: ("OrbitCamera(target: SIMD3<Float>(0.5, 0.5, 0.5), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 2.6024883, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") is not equal to ("OrbitCamera(target: SIMD3<Float>(0.45108888, 0.44554216, 0.59337574), homeTarget: SIMD3<Float>(0.5, 0.5, 0.5), distance: 0.9108709, azimuth: 0.7853981, elevation: 0.52359873, roll: 0.0, fovY: 0.7853981, minDistance: 0.17320508, maxDistance: 10.392304)") - flipping between Original and Smoothed must not reframe
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTogglingBackToTheOriginalDoesNotMoveTheCamera]' failed (0.185 seconds).
+Test Suite 'SmoothingStrokeCameraTests' failed at 2026-08-07 14:59:24.251.
+	 Executed 8 tests, with 9 failures (0 unexpected) in 1.359 (1.360) seconds
+Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-07 14:59:24.251.
+	 Executed 8 tests, with 9 failures (0 unexpected) in 1.359 (1.360) seconds
+Test Suite 'Selected tests' failed at 2026-08-07 14:59:24.251.
+	 Executed 8 tests, with 9 failures (0 unexpected) in 1.359 (1.361) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

@@ -1371,14 +1371,19 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
 
 // THE LIVE BRUSH PREVIEW — see the header for what it deliberately leaves out
 // and why (task 2026-08-04-variant-volume-fraction-mismatch, failure C).
-BridgeSmoothPreview smooth_brush_preview(const std::string& input_mesh_path,
-                                         double strength,
-                                         const BridgeVertexWeights& brush,
-                                         BridgeError& err) {
+//
+// ONE BODY, TWO DOORS (task 2026-08-08, S1b). The path-taking entry point and
+// the in-memory one differ ONLY in where the input mesh comes from; everything
+// after that is this function. Written this way on purpose: two copies of the
+// smoothing call would be two places for the preview the page draws and the
+// preview a test takes to drift apart.
+static BridgeSmoothPreview smooth_brush_preview_impl(
+    const topopt::TriangleMesh& input, double strength,
+    const BridgeVertexWeights& brush, double import_seconds, BridgeError& err) {
   BridgeSmoothPreview out;
   try {
     const auto t0 = std::chrono::steady_clock::now();
-    topopt::TriangleMesh input = import_any(input_mesh_path);
+    out.seconds_import = import_seconds;
     if (!brush.weight.empty() && brush.weight.size() != input.vertices.size()) {
       err.ok = false;
       err.message =
@@ -1421,18 +1426,84 @@ BridgeSmoothPreview smooth_brush_preview(const std::string& input_mesh_path,
       out.indices.push_back(static_cast<int32_t>(t[1]));
       out.indices.push_back(static_cast<int32_t>(t[2]));
     }
-    out.seconds = std::chrono::duration<double>(
-                      std::chrono::steady_clock::now() - t0).count();
+    out.seconds_smooth = std::chrono::duration<double>(
+                             std::chrono::steady_clock::now() - t0).count();
+    out.seconds = out.seconds_import + out.seconds_smooth;
     bridge_log("smooth preview: " + std::to_string(out.total_vertices) +
                " vertices, moved " + std::to_string(out.moved_vertices) +
                ", max " + std::to_string(out.max_displacement_mm) + " mm, " +
-               std::to_string(out.seconds) + " s");
+               std::to_string(out.seconds) + " s (import " +
+               std::to_string(out.seconds_import) + " s, smooth " +
+               std::to_string(out.seconds_smooth) + " s)");
   } catch (const std::exception& e) {
     err.ok = false;
     err.message = e.what();
     return BridgeSmoothPreview{};
   }
   return out;
+}
+
+BridgeSmoothPreview smooth_brush_preview(const std::string& input_mesh_path,
+                                         double strength,
+                                         const BridgeVertexWeights& brush,
+                                         BridgeError& err) {
+  topopt::TriangleMesh input;
+  double import_seconds = 0.0;
+  try {
+    const auto t0 = std::chrono::steady_clock::now();
+    input = import_any(input_mesh_path);
+    import_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count();
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    return BridgeSmoothPreview{};
+  }
+  return smooth_brush_preview_impl(input, strength, brush, import_seconds, err);
+}
+
+// ★ THE IN-MEMORY DOOR (task 2026-08-08, S1b). No file is opened.
+BridgeSmoothPreview smooth_brush_preview_mesh(const BridgeMeshGeometry& mesh,
+                                              double strength,
+                                              const BridgeVertexWeights& brush,
+                                              BridgeError& err) {
+  const std::vector<float>& vertices = mesh.vertices;
+  const std::vector<int32_t>& indices = mesh.indices;
+  if (vertices.size() % 3 != 0 || indices.size() % 3 != 0) {
+    err.ok = false;
+    err.message =
+        "smooth preview: geometry is not triangles — " +
+        std::to_string(vertices.size()) + " floats and " +
+        std::to_string(indices.size()) +
+        " indices, both of which must be multiples of 3";
+    return BridgeSmoothPreview{};
+  }
+  topopt::TriangleMesh input;
+  input.vertices.reserve(vertices.size() / 3);
+  for (std::size_t i = 0; i + 2 < vertices.size(); i += 3)
+    input.vertices.push_back(topopt::Vec3{vertices[i], vertices[i + 1],
+                                          vertices[i + 2]});
+  const auto nverts = static_cast<int32_t>(input.vertices.size());
+  input.triangles.reserve(indices.size() / 3);
+  for (std::size_t i = 0; i + 2 < indices.size(); i += 3) {
+    // An out-of-range corner would index past the vertex array inside the
+    // operator. Refuse it here, where the message can say which value was wrong.
+    for (std::size_t k = 0; k < 3; ++k) {
+      if (indices[i + k] < 0 || indices[i + k] >= nverts) {
+        err.ok = false;
+        err.message = "smooth preview: triangle corner " +
+                      std::to_string(indices[i + k]) + " is outside the " +
+                      std::to_string(nverts) + " vertices supplied";
+        return BridgeSmoothPreview{};
+      }
+    }
+    input.triangles.push_back({static_cast<int>(indices[i]),
+                               static_cast<int>(indices[i + 1]),
+                               static_cast<int>(indices[i + 2])});
+  }
+  // import_seconds is 0 BY CONSTRUCTION here — nothing was read.
+  return smooth_brush_preview_impl(input, strength, brush, 0.0, err);
 }
 
 BridgeFreezeMask smooth_freeze_mask(const std::string& model_path,

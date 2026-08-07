@@ -295,6 +295,20 @@ public struct ViewerMeshSignature: Equatable, Sendable {
     public let triangleCount: Int
     /// FNV-1a over positions then indices.
     public let contentHash: UInt64
+    /// FNV-1a over the INDICES ALONE — the mesh's connectivity with its geometry
+    /// left out (task 2026-08-08-smoothing-that-works-and-is-usable, S1a).
+    ///
+    /// `contentHash` answers "is this a different mesh?", which is the only
+    /// question the upload cache had to ask. The camera has to ask a second and
+    /// narrower one: "is this the SAME SURFACE, moved?" A brush stroke returns the
+    /// welded vertex set and the triangle list untouched and moves some positions
+    /// — so connectivity is exactly the part that survives a stroke, and reading
+    /// it on its own is what separates "the user smoothed the thing on screen"
+    /// from "a different object arrived and needs framing".
+    ///
+    /// Same construction as `contentHash` (fixed basis, fixed prime, fixed order),
+    /// so it is deterministic across launches for the same reason.
+    public let topologyHash: UInt64
 
     private static let offsetBasis: UInt64 = 1469598103934665603
     private static let prime: UInt64 = 1099511628211
@@ -312,10 +326,33 @@ public struct ViewerMeshSignature: Equatable, Sendable {
             }
         }
         for p in vertices { mix(p.bitPattern) }
+        // The positions are folded in first and the indices after, so
+        // `contentHash` keeps EXACTLY the value it had before `topologyHash`
+        // existed — this addition changes no cache decision anywhere.
         for i in indices { mix(UInt32(bitPattern: i)) }
         self.vertexCount = vertices.count / 3
         self.triangleCount = indices.count / 3
         self.contentHash = h
+        // Re-fold the indices from a clean basis: the topology hash must not
+        // depend on the positions, which is the whole point of it.
+        h = Self.offsetBasis
+        for i in indices { mix(UInt32(bitPattern: i)) }
+        self.topologyHash = h
+    }
+
+    /// THE SAME SURFACE, MOVED. True when both meshes have the same vertex count,
+    /// the same triangle count and the same connectivity — which is precisely
+    /// what a smoothing pass, a brush stroke or an Original/Smoothed swap
+    /// produces, and precisely what a different part, a different variant or a
+    /// re-meshing does not.
+    ///
+    /// Deliberately says nothing about the positions: two meshes that satisfy
+    /// this are the same object at two moments of being edited, whether or not
+    /// any vertex actually moved.
+    public func isSameSurface(as other: ViewerMeshSignature) -> Bool {
+        vertexCount == other.vertexCount
+            && triangleCount == other.triangleCount
+            && topologyHash == other.topologyHash
     }
 
     /// The empty mesh's signature — an explicit value rather than an optional, so

@@ -228,26 +228,66 @@ extension TopOptKit {
         public let movedVertices: Int
         public let maxDisplacementMM: Double
         public let seconds: Double
+        /// The STL re-read, split out from the smoothing (task 2026-08-08, S1b).
+        /// Zero on the in-memory route, which is why that route exists.
+        public let secondsImport: Double
+        public let secondsSmooth: Double
     }
 
-    public static func smoothBrushPreview(inputMeshPath: String,
-                                          strength: Double,
-                                          weights: [Double],
-                                          frozen: [Bool] = []) throws -> BrushPreview {
-        var brush = topoptbridge.BridgeVertexWeights()
-        for (i, w) in weights.enumerated() {
-            brush.weight.push_back(i < frozen.count && frozen[i] ? 0 : w)
-        }
-        var err = topoptbridge.BridgeError()
-        let raw = topoptbridge.smooth_brush_preview(
-            std.string(inputMeshPath), strength, brush, &err)
-        if !err.ok { throw TopOptError(message: String(err.message)) }
-        return BrushPreview(
+    private static func brushPreview(_ raw: topoptbridge.BridgeSmoothPreview) -> BrushPreview {
+        BrushPreview(
             meshVertices: Array(raw.vertices), meshIndices: Array(raw.indices),
             totalVertices: Int(raw.total_vertices),
             movedVertices: Int(raw.moved_vertices),
             maxDisplacementMM: raw.max_displacement_mm,
-            seconds: raw.seconds)
+            seconds: raw.seconds,
+            secondsImport: raw.seconds_import,
+            secondsSmooth: raw.seconds_smooth)
+    }
+
+    private static func bridgeBrush(weights: [Double], frozen: [Bool]) -> topoptbridge.BridgeVertexWeights {
+        var brush = topoptbridge.BridgeVertexWeights()
+        for (i, w) in weights.enumerated() {
+            brush.weight.push_back(i < frozen.count && frozen[i] ? 0 : w)
+        }
+        return brush
+    }
+
+    /// ★ THE PREVIEW THE PAGE RUNS (task 2026-08-08, S1b): the geometry goes in
+    /// directly, so a settled stroke opens no file.
+    ///
+    /// The app is already holding these vertices — it is DRAWING them — and the
+    /// path-taking overload below re-read them from an STL on every stroke. On
+    /// the maintainer's own variant that is 14.4 MB and 164,228 triangles, and
+    /// the re-read was the overwhelming majority of what he waited for.
+    public static func smoothBrushPreview(vertices: [Float],
+                                          indices: [Int32],
+                                          strength: Double,
+                                          weights: [Double],
+                                          frozen: [Bool] = []) throws -> BrushPreview {
+        var geom = topoptbridge.BridgeMeshGeometry()
+        for v in vertices { geom.vertices.push_back(v) }
+        for i in indices { geom.indices.push_back(i) }
+        var err = topoptbridge.BridgeError()
+        let raw = topoptbridge.smooth_brush_preview_mesh(
+            geom, strength, bridgeBrush(weights: weights, frozen: frozen), &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        return brushPreview(raw)
+    }
+
+    /// The same preview from a FILE. Kept for callers that genuinely only have a
+    /// path (the harness, and the certification seam, which must read the file the
+    /// engine will read). The page does NOT use this — see the overload above.
+    public static func smoothBrushPreview(inputMeshPath: String,
+                                          strength: Double,
+                                          weights: [Double],
+                                          frozen: [Bool] = []) throws -> BrushPreview {
+        var err = topoptbridge.BridgeError()
+        let raw = topoptbridge.smooth_brush_preview(
+            std.string(inputMeshPath), strength,
+            bridgeBrush(weights: weights, frozen: frozen), &err)
+        if !err.ok { throw TopOptError(message: String(err.message)) }
+        return brushPreview(raw)
     }
 
     /// Smooth `inputMeshPath` with PER-VERTEX weights, write the result to
