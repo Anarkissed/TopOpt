@@ -241,7 +241,8 @@ sets `require_lattice_void_reaches_exterior = false` explicitly, which is also
 the OFF control a user runs the same job with. It was **not deleted** and not
 weakened, and V7 was added alongside it to cover the default.
 
-`ctest`: **112/112 passed** (`ctest.txt`), including `lattice_void` (75 checks,
+`ctest`: **114/114 passed** (`ctest.txt`) — see §A3 on why an earlier run of
+this suite said 112 — including `lattice_void` (75 checks,
 up from 70), `lattice_void_exterior`, `cad_project` (38 checks, up from 31) and
 the new `default_arming` (10 checks).
 
@@ -653,6 +654,132 @@ and is regenerable from the committed scripts.
 
 ---
 
+# A — THE PR 309 CI FAILURE: PROJECTION WAS RUNNING ON FITTED SURFACES
+
+`threemf_import` failed in CI (113/114) on *"STL and 3MF export byte-identical
+variant meshes"*. Full working in
+[`a1_root_cause.txt`](../../evidence/2026-08-06-arm-projection-and-void-check/a1_root_cause.txt).
+
+## A1 — established before fixing
+
+**The review's premise — that the FLOAT32 weld key is STL-specific and welded a
+pair 3MF would have written apart — is refuted by measurement.** The weld key is
+not involved.
+
+* **(a) The guard runs ONCE, on a shared mesh.** `export_variant_mesh` resolves
+  one `export_mesh` and only then branches to `write_3mf_file` /
+  `write_stl_file`. A divergence *between the writers* is not expressible there.
+* **(b) Line 277 compares the two WRITTEN FILES — and both are STL.**
+  `plate_job()` ([test_3mf_import.cpp:181](../../core/tests/validation/test_3mf_import.cpp))
+  sets `mesh_format = "stl"` for both arms; what differs is the **input**
+  (`plate_bore.stl` vs `plate_bore.3mf`). The assertion says *the same part
+  through the two front doors must export the same bytes*. Nothing re-imports an
+  export, so the lossy-round-trip distinction never arises.
+* **(c) It PASSED on the merge base**, same fixture, same lib3mf 2.5.0#1:
+  `Test #113: threemf_import ... Passed`. It was not marginal. The branch caused it.
+* **(d) The two failing checks are the same assertion**, fired once per exported
+  variant (the fixture accepts two). Everything else passed — including
+  identical pseudo-face ids, solid-diff 0 at five resolutions, and a
+  byte-identical report. **The design was identical; only the geometry moved.**
+
+**Isolated with the CLI, not argued:** `project_cad_faces=off` → the two exports
+are byte-identical; `on` → they are not. And the magnitudes settle the rest:
+**~1000 of 6972 corners differ by ~2.4e-07 mm.** A different weld-guard decision
+reverts a vertex by up to one voxel — ~1.5 mm here. Six orders of magnitude too
+small, three orders too many vertices.
+
+## ★ Root cause, with file and line
+
+[`segment.cpp:185`](../../core/src/io/segment.cpp) fits a plane from a patch's
+**mean normal** and [`:280`](../../core/src/io/segment.cpp) fits a cylinder by
+**least squares**. So an STL/3MF import's `StepModel::faces` carry
+`Plane`/`Cylinder` that were **estimated from the imported mesh**. The projection
+gate in `export_variant_mesh` only asked `!cad->faces.empty()`, which those
+manufactured faces satisfy — so arming the default turned projection on for mesh
+parts, snapping exported vertices onto surfaces fitted from the very mesh being
+exported. Because the fit is computed from vertices that STL quantises to
+float32 and 3MF does not, the two imports fit slightly different surfaces.
+
+**It is a correctness bug, not only a test failure.** PR #307's justification is
+that projection is exact *because the B-rep states the surface*, and
+[`job.hpp`](../../core/include/topopt/job.hpp) says "nothing is averaged, no
+surface is estimated". On a mesh part both are false.
+
+## A2 — the fix, and why not the three offered options
+
+All three options in the review presuppose the weld key is the cause. It is not,
+so none of them would have fixed this. The fix is **`StepModel::faces_are_fitted`**
+([step.hpp](../../core/include/topopt/step.hpp)), set `false` by the STEP path
+([part.cpp:507](../../core/src/io/part.cpp)) and `true` by the mesh path
+([:551](../../core/src/io/part.cpp)); `export_variant_mesh` now requires
+`!cad->faces_are_fitted`. **Projection runs where surfaces were READ, not where
+they were FITTED.** It also makes core agree with the app, which already gated
+its control to STEP parts (`isStepPart`).
+
+**No writer loses precision** — the blocked-stop about one of them giving up
+something it is supposed to carry does not arise, because the two writers were
+never the problem. **The assertion at line 277 was not touched.**
+
+**What happened to the two near-miss pairs the float32 key was added to catch:
+nothing.** They are on the maintainer's part, which is STEP, so projection and
+the weld guard still run there. Re-measured on the fixed build:
+
+| case | tris | distinct float32 verts | non-manifold |
+|---|---:|---:|---:|
+| his part @64 rung 052, projection OFF | 75 616 | 37 800 | 0 |
+| his part @64 rung 052, projection **ON** | 75 616 | **37 800** | 0 |
+| l-bracket @48 rung 070, projection **ON** | 14 972 | **7 474** | 0 |
+
+37 800 — not the 37 798 that motivated the float32 key — and the l-bracket's
+7 474 matches its projection-OFF count exactly, so the 124 collisions are still
+caught.
+
+## A3 — ★ my local suite was not CI's, and that is why this shipped
+
+**112 was true and meaningless.** `lib3mf` was absent from my configure, so
+`export_3mf` and `threemf_import` never registered — and one of them was the test
+that broke. The gates are
+[CMakeLists.txt:1529](../../core/CMakeLists.txt) and
+[:1843](../../core/CMakeLists.txt) (`if(lib3mf_FOUND)`); the cache read
+`lib3mf_DIR-NOTFOUND`.
+
+**Both now register locally.** `./app/scripts/build_lib3mf_macos.sh` provisions
+CI's exact lib3mf 2.5.0#1 via the pinned vcpkg baseline. One trap worth naming,
+already documented at
+[build_cli_macos.sh:53](../../app/scripts/build_cli_macos.sh): a stale cache
+keeps `lib3mf_DIR-NOTFOUND` and **re-running cmake does not re-search** —
+`find_package` short-circuits. The cache must be deleted.
+
+**And the omission is now LOUD**, so the next fresh worktree cannot repeat this.
+`core/CMakeLists.txt` emits a configure-time **warning** naming the missing
+dependency, the tests that will not register, and the fix:
+
+```
+REDUCED TEST SUITE — this configuration registers FEWER TESTS THAN CI.
+    lib3mf       -> tests `export_3mf` and `threemf_import` will NOT register
+                    fix: ./app/scripts/build_lib3mf_macos.sh   (pins CI's exact 2.5.0#1)
+  A `ctest` pass here does NOT mean a CI pass. Report N/<CI's total>, not
+  N/N, and say which tests did not run.
+```
+
+**Corrected denominator: `ctest` 114/114** (`ctest.txt`), including
+`threemf_import` and `export_3mf`. Every evidence file claiming a full pass now
+states the denominator; the earlier "112/112" is corrected in place with the
+reason rather than quietly overwritten.
+
+## A — bars
+
+| bar | result |
+|---|---|
+| **R1** failing test is the proof | Red locally before (`FAIL (line 277)`, 2/47), green after. Both pasted in `a1_root_cause.txt`. Not a claimed pass — actually run. |
+| **R2** full suite at CI's denominator | **114/114**, not N/N. |
+| **R3** no assertion weakened | Census re-run: **1** C++ message lost (the V6 clock, already accounted for) and **0** Swift test functions. **Nothing was added to or removed from line 277.** |
+| **R4** arming work not re-opened | Untouched. Both defaults, both OFF controls, the mass audit and the S3 sweep all stand. |
+| **R5** root cause with file and line | `segment.cpp:185`/`:280` + the gate in `export_variant_mesh`. |
+| **R6** no placeholders, no root scratch | Clean; `.vcpkg/` is gitignored ([.gitignore:12](../../.gitignore)). |
+
+---
+
 # IN PLAIN WORDS — WHAT WAS DONE, AND WHAT IS NEXT
 
 **Your bolt holes now come out the size you drew them.** Every one of your six
@@ -700,6 +827,23 @@ have the feature in it. I did not wire it, because doing so means threading the
 CAD model through a part of the bridge that four previous changes have broken,
 and it can't be checked without a full rebuild and testing on the device. It is
 written up in detail and it is the first job on the list.
+
+**About the CI failure, and your four latticed variants from last night.**
+The build caught something real: with the correction switched on by default, it
+was also being applied to parts imported as **STL or 3MF** — and for those there
+is no CAD file to restore anything to. The app invents approximate flat and
+round surfaces for them by looking at the mesh, and the correction was snapping
+the geometry onto those guesses instead of onto anything you drew. It now only
+runs on STEP parts, where the surfaces are genuinely stated. Your STEP parts are
+unaffected: the bores and flat faces still come out exactly as described above.
+
+**★ Are last night's four latticed variants affected? No.** They were exported
+as STL by a build from before this branch, so none of this touched them — not
+the correction, not the enclosed-void rule. They are exactly the files you
+already have. What is true of them is what §S1(d) says of any export from that
+build: their **mesh-derived** weights are about 8% high, because the part in the
+file is bigger than the part you drew. Re-run them on the new build and the
+weights will drop by roughly that much without a gram of material changing.
 
 **What I would do next, in order:**
 

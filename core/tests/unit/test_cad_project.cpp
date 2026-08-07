@@ -531,6 +531,32 @@ int main() {
           "with both kinds disabled the mesh must come back untouched");
   }
 
+  // ★ FITTED SURFACES ARE NOT CAD SURFACES (task
+  // 2026-08-06-arm-projection-and-void-check, the PR 309 CI failure).
+  //
+  // An STL/3MF import carries `faces` MANUFACTURED by segmentation — a plane
+  // fitted from a patch's mean normal, a cylinder fitted by least squares
+  // (src/io/segment.cpp:185, :280). Those are estimates OF THE IMPORTED MESH,
+  // not statements about it, and projecting onto them snaps geometry toward a
+  // guess. It also makes the export depend on the input FORMAT, because the fit
+  // is computed from vertices that STL quantises to float32 and 3MF does not.
+  //
+  // The gate lives in `export_variant_mesh`, so what is asserted here is the
+  // FLAG's contract — that it exists, defaults to "read", and is what a
+  // consumer holding only a StepModel can key on. The end-to-end behaviour is
+  // `threemf_import`'s byte-identity assertion, unchanged and now passing.
+  {
+    const StepModel fresh;
+    CHECK(!fresh.faces_are_fitted,
+          "a StepModel defaults to READ surfaces — a model that never says "
+          "otherwise must not be treated as carrying estimates");
+    StepModel segmented = fx.model;
+    segmented.faces_are_fitted = true;
+    CHECK(segmented.faces_are_fitted && !fx.model.faces_are_fitted,
+          "the flag is per-model and settable, and the B-rep fixture this file "
+          "projects is on the READ side of it");
+  }
+
   // The tolerances are derived from the voxel in ONE place, and they are the
   // numbers the handoff quotes.
   {

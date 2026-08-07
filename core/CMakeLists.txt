@@ -30,6 +30,44 @@ else()
   find_package(lib3mf CONFIG QUIET)
 endif()
 
+# ★ A SMALLER SUITE THAN CI'S MUST SAY SO, LOUDLY (task
+# 2026-08-06-arm-projection-and-void-check, the PR 309 CI failure).
+#
+# CI configures with TOPOPT_REQUIRE_DEPS=ON and runs 114 tests. A developer Mac
+# without one of these dependencies silently registers FEWER, and `ctest` then
+# reports "100% tests passed" over a denominator nobody stated. That is a green
+# check over an unreachable code path, and it is exactly how PR 309 shipped: the
+# evidence said "ctest 112/112" — true, and meaningless for the two 3MF tests
+# that never built, one of which was the one that broke.
+#
+# So the omission is announced at configure time, by name, with the fix. It is a
+# WARNING rather than a status line because the failure mode is someone reading
+# a pass and believing it covers what CI covers.
+set(_topopt_missing_deps "")
+if(NOT TOPOPT_REQUIRE_DEPS)
+  if(NOT OpenCASCADE_FOUND)
+    list(APPEND _topopt_missing_deps
+      "OpenCASCADE  -> STEP import + most validation tests will NOT register")
+  endif()
+  if(NOT Eigen3_FOUND)
+    list(APPEND _topopt_missing_deps
+      "Eigen3       -> the FEA assembly/solve tests will NOT register")
+  endif()
+  if(NOT lib3mf_FOUND)
+    list(APPEND _topopt_missing_deps
+      "lib3mf       -> tests `export_3mf` and `threemf_import` will NOT register"
+      "                fix: ./app/scripts/build_lib3mf_macos.sh   (pins CI's exact 2.5.0#1)")
+  endif()
+endif()
+if(_topopt_missing_deps)
+  string(REPLACE ";" "\n    " _topopt_missing_pretty "${_topopt_missing_deps}")
+  message(WARNING
+    "REDUCED TEST SUITE — this configuration registers FEWER TESTS THAN CI.\n"
+    "    ${_topopt_missing_pretty}\n"
+    "  A `ctest` pass here does NOT mean a CI pass. Report N/<CI's total>, not\n"
+    "  N/N, and say which tests did not run.")
+endif()
+
 add_library(topopt
   src/version.cpp
   src/materials/materials.cpp

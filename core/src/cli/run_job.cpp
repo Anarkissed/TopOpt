@@ -338,8 +338,33 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
   //
   // It runs BEFORE the bake rotation so the projection is done in the frame the
   // CAD's own planes and cylinder axes are stated in.
+  // ★ AND ONLY WHERE THE SURFACES WERE READ, NOT FITTED (task
+  // 2026-08-06-arm-projection-and-void-check, the PR 309 CI failure).
+  //
+  // `faces_are_fitted` is true for an STL/3MF import, whose "faces" are
+  // manufactured by segmentation: segment.cpp:185 fits a plane from a patch's
+  // MEAN NORMAL and :280 fits a cylinder by least squares, within a tolerance.
+  // Projecting onto those is not restoring a stated surface, it is snapping
+  // geometry onto an estimate of itself — the one thing this operation promised
+  // never to do ("nothing is averaged, no surface is estimated", job.hpp).
+  //
+  // IT ALSO BREAKS AN INVARIANT, which is how it was caught. The fit is computed
+  // FROM the imported vertices, so the same part imported from STL (quantised to
+  // float32 by the format) and from 3MF (full double, decimal text) fits
+  // slightly different surfaces and therefore exports different files. On
+  // plate_bore that is ~1000 of 6972 corners differing by ~2.4e-07 mm — a
+  // pervasive last-bit divergence, six orders of magnitude smaller than the
+  // ~1.5 mm voxel, i.e. exactly the size of a float32 quantum in the INPUT.
+  // `threemf_import`'s "STL and 3MF export byte-identical variant meshes" is the
+  // assertion that says two front doors to the same part must not disagree, and
+  // it is right.
+  //
+  // Measured, not reasoned: the fixture passes on the merge base, fails on this
+  // branch, and passes again with `project_cad_faces` false — see
+  // evidence/…/a1_root_cause.txt.
   TriangleMesh projected;
-  if (out.project_cad_faces && cad != nullptr && !cad->faces.empty()) {
+  if (out.project_cad_faces && cad != nullptr && !cad->faces.empty() &&
+      !cad->faces_are_fitted) {
     const TriangleMesh& src = (sf > 1) ? smooth : variant.v3.mesh;
     CadProjectOptions po = cad_project_options_for_grid(sg.spacing);
     po.enabled = true;

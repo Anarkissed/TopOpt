@@ -505,6 +505,9 @@ PartModel import_part(const std::string& path, const PartOptions& opts) {
     // project for no benefit.
     out.model = import_step_file(path, opts.tessellation);
     out.pseudo_faces = false;
+    // The B-rep STATES these surfaces; nothing is fitted. This is the only case
+    // in which CAD-face projection is legitimate — see StepModel in step.hpp.
+    out.model.faces_are_fitted = false;
     out.inspection.checked = false;
     out.inspection.acceptable = true;
     return out;
@@ -541,6 +544,11 @@ PartModel import_part(const std::string& path, const PartOptions& opts) {
   // geometry the user supplied — it is not an approximation of something else.
   out.model.brep_volume = insp.volume;
   out.pseudo_faces = true;
+  // ★ These `faces` were FITTED to the imported mesh (segment.cpp:185 mean-normal
+  // plane, :280 least-squares cylinder), not read from a B-rep. Carried on the
+  // model itself so a consumer holding only a StepModel cannot mistake an
+  // estimate for a statement.
+  out.model.faces_are_fitted = true;
   return out;
 }
 

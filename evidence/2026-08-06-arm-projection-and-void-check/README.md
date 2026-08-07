@@ -25,7 +25,7 @@ they produced.
 | `r1r2_analysis.py` / `r1r2_defaultpath_res64.txt` | **R1 + R2** — the default-path before/after and the voxel-flip table, with the 1e-9 negative control run first. **0 flips.** |
 | `r4_end_to_end.sh` / `.txt`, `r4_app_bytes.txt`, `app_blocks_*.json` | **R4** — the app's REAL serializer output, written to disk, fed to the real CLI, in all four combinations. Both effects visible in the result; the two switches move independently. |
 | `r5_assertion_census.sh` / `.txt` | **R5** — assertion-message census, merge base vs branch. 1 C++ message lost (named and accounted for), 0 Swift test functions lost. |
-| `ctest.txt` | **112/112 passed.** |
+| `ctest.txt` | **114/114 passed — CI's full denominator.** An earlier run of this suite reported "112/112", which was true and meaningless: `lib3mf` was absent locally so `export_3mf` and `threemf_import` never registered, and `threemf_import` is the one that failed in CI. `core/CMakeLists.txt` now WARNS at configure time when the local suite is smaller than CI's, naming the missing tests and the fix. |
 | `app_tests.txt` | 1334 app tests, 8 failures — all pre-existing 3MF, **proved** by rerunning with this task's `app/` changes stashed (8 failures either way). |
 
 ## The sections
