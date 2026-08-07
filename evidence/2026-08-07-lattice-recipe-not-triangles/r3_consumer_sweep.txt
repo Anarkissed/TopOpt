@@ -1,0 +1,85 @@
+=== 1. Every spelling of the lattice file in SOURCE
+    (whole repo minus evidence/, docs/, .git/, build outputs and caches)
+./core/include/topopt/job.hpp:186:  bool emit_stl = true;            // write <prefix>_<vf>_lattice.stl
+./core/include/topopt/job.hpp:187:  bool emit_3mf = false;           // write <prefix>_<vf>_lattice.3mf (streaming)
+./core/tests/validation/test_designbox_lattice_recert.cpp:234:  CHECK(std::filesystem::exists(out  "/variant_080_lattice.stl"),
+./app/TopOptKit/Sources/TopOptFlows/RelatticeRunner.swift:457:        guard let meshData = file("variant_\(vfTag)_lattice.stl") else {
+
+=== 2. The path-as-string route: LatticeExportOutcome::paths
+core/src/cli/run_job.cpp:1159:    oc.paths.push_back(path);
+core/src/cli/run_job.cpp:1166:    oc.paths.push_back(path);
+core/src/cli/run_job.cpp:5518:  result.mesh_paths = R.oc.paths;
+core/src/cli/run_job.cpp:5722:  for (std::size_t i = 0; i < result.mesh_paths.size(); +i)
+core/src/cli/run_job.cpp:5723:    prov = (i ? ", " : "")  json_str(base_name(result.mesh_paths[i]));
+core/src/cli/run_job.cpp:7010:  std::vector<std::string> lattice_paths;  // merged into result.mesh_paths at end
+core/src/cli/run_job.cpp:7378:    lattice_paths.insert(lattice_paths.end(), oc.paths.begin(), oc.paths.end());
+core/src/cli/run_job.cpp:7380:      for (const std::string& p : oc.paths) {
+core/src/cli/run_job.cpp:8138:    result.mesh_paths = std::move(streamed_paths);
+core/src/cli/run_job.cpp:8143:      result.mesh_paths.push_back(export_variant_mesh(
+core/src/cli/run_job.cpp:8152:  result.mesh_paths.insert(result.mesh_paths.end(), lattice_paths.begin(),
+core/src/cli/run_job.cpp:8153:                           lattice_paths.end());
+core/src/cli/main.cpp:486:    for (const std::string& p : result.mesh_paths)
+
+=== 3. NEGATIVE — certification and the void rule hold no TriangleMesh
+  core/src/simp/analyze.cpp                TriangleMesh occurrences: 0
+  core/src/mesh/lattice_void.cpp           TriangleMesh occurrences: 0
+  core/src/fea/strut_strength.cpp          TriangleMesh occurrences: 0
+  analyze_fixed_design signature (core/include/topopt/analyze.hpp):
+    306:FixedDesignAnalysis analyze_fixed_design(
+    307-    const VoxelGrid& grid, const SimpParams& params,
+    308-    const std::vector<double>& density, const std::vector<DirichletBC>& bcs,
+    309-    const std::vector<NodalLoad>& loads, const Material& material,
+    310-    const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
+    311-    SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
+    312-    bool load_path_ok, double part_solid, const LatticePosture* lattice = nullptr,
+    313-    bool score_build_orientation = false,
+    314-    bool build_direction_inferred = false,
+
+=== 4. NEGATIVE — nothing in core re-imports a mesh it wrote
+  production callers of read_stl_file / import_stl_file (excluding tests):
+    core/src/io/part.cpp:51:    return read_stl_file(path).mesh;
+
+=== 5. The app: every fetch of a lattice artifact
+  app/TopOptKit/Sources/TopOptKit/TopOptKit.swift:861:    /// The graded lattice receipt (`variant_XXX_lattice.report.json`) core wrote for
+  app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift:78:    /// run's `design.bin` (each variant's own density field).
+  app/TopOptKit/Sources/TopOptFlows/VariantEntry.swift:67:    /// That run's `design.bin`.
+  app/TopOptKit/Sources/TopOptFlows/VariantEntry.swift:212:        // design.bin. Reading the both-halves `artifacts` here meant a run whose
+  app/TopOptKit/Sources/TopOptFlows/RunModel.swift:864:    /// document that produced them and that run's `design.bin` (PR 274).
+  app/TopOptKit/Sources/TopOptFlows/AppModel.swift:959:            // that run's design.bin. Written together, cleared together — a
+  app/TopOptKit/Sources/TopOptFlows/RelatticeRunner.swift:160:                             designFileName: String = "design.bin",
+  app/TopOptKit/Sources/TopOptFlows/RelatticeRunner.swift:358:        // SUBMIT: model  job  the run's own design.bin.
+  app/TopOptKit/Sources/TopOptFlows/RelatticeRunner.swift:374:        part("Content-Disposition: form-data; name=\"design\"; filename=\"design.bin\"\r\n"
+  app/TopOptKit/Sources/TopOptFlows/RelatticeRunner.swift:457:        guard let meshData = file("variant_\(vfTag)_lattice.stl") else {
+  app/TopOptKit/Sources/TopOptFlows/RelatticeRunner.swift:467:        let receipt = file("variant_\(vfTag)_lattice.report.json")
+  app/TopOptKit/Sources/TopOptFlows/RelatticeRunner.swift:468:        let provenance = file("lattice_variant.json")
+  app/TopOptKit/Sources/TopOptFlows/ProjectStore.swift:152:    /// That run's `design.bin` — each variant's own density field.
+  app/TopOptKit/Sources/TopOptFlows/ProjectStore.swift:154:        projectDir(id).appendingPathComponent("run_design.bin")
+  app/TopOptKit/Sources/TopOptFlows/ProjectStore.swift:159:    /// blob: `design.bin` is a core-format container the CLI reads back verbatim,
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:241:    /// this app submitted and the run's `design.bin` — when both survive (task
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:244:    /// `run_job.json` / `run_design.bin` back from disk and never wrote them, so
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:966:    /// Fetch the run's `design.bin` — the per-variant DENSITY FIELDS core writes
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:977:            .appendingPathComponent("design.bin")
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:979:            diag("remote design.bin fetch failed (transport) — variants can't be smoothed/latticed")
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:984:            diag("remote design.bin unavailable (HTTP \(code)) — variants can't be smoothed/latticed")
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:988:            diag("remote design.bin was empty — variants can't be smoothed/latticed")
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:991:        diag("remote design.bin fetched: \(data.count) bytes")
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:1026:    /// (`variant_XXX_lattice.report.json`, `lattice_cert_report_json`) — not into
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:1039:            .appendingPathComponent("variant_\(tag)_lattice.report.json")
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:1383:        // design.bin after every variant, so there is something to fetch here — and
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:1398:    /// Fetch `design.bin` and report the retention pair, if both halves are there.
+  app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:1474:        // streamed. Best-effort, exactly like fields.bin: a run whose design.bin
+  app/TopOptKit/Sources/TopOptFlows/LatticeVariantSession.swift:24:///   * `designBin` — the run's `design.bin`: each variant's own DENSITY FIELD.
+  app/TopOptKit/Sources/TopOptFlows/LatticeVariantSession.swift:41:/// exists the instant the run is submitted; `design.bin` exists only once the
+  app/TopOptKit/Sources/TopOptFlows/LatticeVariantSession.swift:69:// MARK: - what a retained design.bin actually contains
+  app/TopOptKit/Sources/TopOptFlows/LatticeVariantSession.swift:71:/// THE VOLUME FRACTIONS A RETAINED `design.bin` HOLDS BLOCKS FOR.
+  app/TopOptKit/Sources/TopOptFlows/LatticeVariantSession.swift:180:    /// The worker served no design.bin for this job.
+
+=== 6. What the worker announces as a VARIANT mesh (it is the SOLID one)
+  260-                "margin": _float(kv.get("margin")),
+  261-                "accepted": kv.get("accepted") == "1",
+  262:                "mesh": os.path.basename(mesh) if mesh else None}
+
+=== 7. The worker's retention of out/ (there is none)
+  810:            shutil.rmtree(tmpdir, ignore_errors=True)
+  826:            shutil.rmtree(tmpdir, ignore_errors=True)
+  ^ both are the UPLOAD staging tmpdir; out/ is never pruned.

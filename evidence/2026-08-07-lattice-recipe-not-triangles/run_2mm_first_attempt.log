@@ -1,0 +1,56 @@
+[lattice] 5 of 8 declared lattice include regions are under the accuracy floor at the planned 2 mm cell.
+[lattice] ARM "retain_subfloor_in_unloaded_regions" (the app's "Keep lattice in thin members" control) to lattice them OUT OF REGIME — or set "cell_mode": "fit", which derives a cell per region instead. The two are mutually exclusive and core refuses a job arming both.
+[lattice] 
+[lattice]   region        thinnest   cells
+[lattice]   1 (face)       4.000    2.00  SOLID: under the floor
+[lattice]   2 (bolt)       7.385    3.69  SOLID: under the floor
+[lattice]   3 (bolt)      31.263   15.63  certifiable
+[lattice]   4 (bolt)      30.503   15.25  certifiable
+[lattice]   5 (bolt)      30.739   15.37  certifiable
+[lattice]   6 (face)       4.000    2.00  SOLID: under the floor
+[lattice]   7 (face)       4.000    2.00  SOLID: under the floor
+[lattice]   8 (face)       4.000    2.00  SOLID: under the floor
+[lattice]   ("cells" = the region's thinnest extent across the planned 2.0000 mm cell)
+[lattice] 
+[lattice] Why: your thinnest declared region (4.000 mm) percolates at the planned 2.0000 mm cell (2.00 cells across, percolation floor 1.00) but is BELOW the 5.00-cell accuracy floor, which needs 5.475 mm. The grading law falls sub-floor candidates back to solid, SO THOSE REGIONS WILL COME BACK SOLID and no lattice will be emitted in them unless retention is armed — in which case they are latticed and the certificate over them is OUT OF REGIME.
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+[preflight] load path CONNECTED: 5165 load voxels, 3348 anchor voxels, 110904 of 468224 voxels allowed to hold material; narrowest separating cross-section 3840 voxels (1.117e+04 mm^2) at 11/12 steps from the anchor; 4.37 ms
+NOTE: solve grid 128x31x118 has odd axis(es) [y=31] - geometric multigrid pads its INDEX SPACE to 128x32x120 (up to 4 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=4 iter=1
+PROGRESS rung=0 rungs=4 iter=2
+PROGRESS rung=0 rungs=4 iter=3
+PROGRESS rung=0 rungs=4 iter=4
+PROGRESS rung=0 rungs=4 iter=5
+PROGRESS rung=0 rungs=4 iter=6
+PROGRESS rung=0 rungs=4 iter=7
+PROGRESS rung=0 rungs=4 iter=8
+PROGRESS rung=0 rungs=4 iter=9
+PROGRESS rung=0 rungs=4 iter=10
+PROGRESS rung=0 rungs=4 iter=11
+PROGRESS rung=0 rungs=4 iter=12
+PROGRESS rung=0 rungs=4 iter=13
+PROGRESS rung=0 rungs=4 iter=14
+PROGRESS rung=0 rungs=4 iter=15
+PROGRESS rung=0 rungs=4 iter=16
+PROGRESS rung=0 rungs=4 iter=17
+PROGRESS rung=0 rungs=4 iter=18
+PROGRESS rung=0 rungs=4 iter=19
+PROGRESS rung=0 rungs=4 iter=20
+PROGRESS rung=0 rungs=4 iter=21
+PROGRESS rung=0 rungs=4 iter=22
+PROGRESS rung=0 rungs=4 iter=23
+PROGRESS rung=0 rungs=4 iter=24
+PROGRESS rung=0 rungs=4 iter=25
+PROGRESS rung=0 rungs=4 iter=26
+PROGRESS rung=0 rungs=4 iter=27
+VARIANT vf=0.680000 achieved=0.679951 printed=0.797302 margin=3254.36 accepted=1 mesh=out_2mm/variant_068.stl
+topopt-cli: lattice "skin": "rim" produced NO geometry on this part (rim_triangles 0, skin_triangles 0), so refusing rather than silently exporting an undressed lattice under a finish the job asked for.
+  The rim/skin finish rides pairs of ANALYTIC boundary faces, and at least one of each pair must be a PLANE. This run's lattice boundary is built from the voxel silhouette plus clearances and lattice roles, none of which contribute a plane, so there was nothing for the finish to ride and every rim/skin/anchor count came out 0.
+  This is a known gap, not a bad job: dressing a voxel silhouette needs either analytic faces fitted to it or a voxel-native rim law, and neither exists yet (handoff 2026-08-05-lattice-cell-size-adaptation §7).
+  Set "skin": "none" to export the lattice undressed, which is what this job actually produced.
+real 406.57
+user 725.16
+sys 21.30

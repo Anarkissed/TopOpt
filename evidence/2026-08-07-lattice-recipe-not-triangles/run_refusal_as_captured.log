@@ -1,0 +1,25 @@
+topopt-cli: 5 of 8 declared lattice include regions are too thin for the planned 4.602619932 mm cell — refusing before spending a solve.
+SET cell size between 1.094961872 mm and 4 mm — lower "cell_min_mm" in the GRADING block into that range ("cell_mm" is refused alongside a swept ladder). Or set "cell_mode": "fit" and core derives it per region.
+
+  region        thinnest   cells
+  1 (face)       4.000    0.87  SOLID: under the floor
+  2 (bolt)       7.385    1.60  SOLID: under the floor
+  3 (bolt)      31.263    6.79  certifiable
+  4 (bolt)      30.503    6.63  certifiable
+  5 (bolt)      30.739    6.68  certifiable
+  6 (face)       4.000    0.87  SOLID: under the floor
+  7 (face)       4.000    0.87  SOLID: under the floor
+  8 (face)       4.000    0.87  SOLID: under the floor
+  ("cells" = the region's thinnest extent across the planned 4.6026 mm cell)
+
+Why: a strut network only connects when at least 1 cell(s) lie across the member. The planned 4.602619932 mm cell puts 0.8690702381 across your thinnest region (4 mm), so this run would emit loose fragments rather than a lattice. At a 0.42 mm strut line width that region admits cells from 1.094961872 mm (printability) up to 4 mm (percolation).
+     A graded cell is raised only to 1.094961872 mm (the cell below which no density in the band prints), and the density is raised with it so the strut still clears your strut line width.
+     Separately: a CERTIFIED lattice needs 5.474809359 mm of member and your thinnest region has 4 mm. What that means here:
+       * GRADED run: the grading law falls sub-floor candidates back to SOLID, so setting the cell alone will get you past this refusal and STILL leave those regions solid with no lattice in them.
+       * To lattice them anyway, arm "retain_subfloor_in_unloaded_regions" (the app's "Keep lattice in thin members" control, or the job-JSON key). The lattice is then built and the certificate over it is OUT OF REGIME — read the exposure the receipt reports before arming it.
+       * OR set "cell_mode": "fit", which derives a cell from each region's own extent, lattices it, and reports the out-of-regime material it emitted — no retention switch involved. Use fit when the regions differ in thickness; use retention when they do not. They are mutually exclusive, and core refuses a job that arms both.
+
+     To proceed anyway with lattice OUTSIDE your declared regions, remove the include regions from the lattice block — but read the receipt first: this run would have put every cell in material you did not select.
+real 0.05
+user 0.04
+sys 0.00

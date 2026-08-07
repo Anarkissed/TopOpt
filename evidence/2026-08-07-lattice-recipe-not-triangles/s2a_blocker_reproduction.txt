@@ -1,0 +1,34 @@
+S2(a) BLOCKER — lattice_variant refuses EVERY variant of the run it came from
+
+The check (core/src/cli/run_job.cpp:5410-5411), a bare == on a double:
+    result.reproduction_exact =
+        (result.solid.margin.worst_case == sd.margin_worst_case);
+
+Command, per rung (job built from {job document, design.bin} ONLY — no mesh read):
+    topopt-cli lattice-variant j_<vf>.json --out o_<vf>
+
+vf     recorded         reproduced       rel_delta  verdict
+0.68   3254.356637      3254.356646      2.77e-09   REFUSED
+0.52   3389.417071      3389.417070      2.95e-10   REFUSED
+0.38   3290.912400      3290.912403      9.12e-10   REFUSED
+0.26   3014.120054      3014.120050      1.33e-09   REFUSED
+
+4 of 4 rungs refused. Deltas are 3e-10 to 3e-9 relative — the ninth
+significant figure. The check admits no tolerance at all.
+
+Stability: vf=0.68 was run twice and reproduced 3254.356646 both times,
+so this is a SYSTEMATIC difference between a warm-started run-time
+certification solve and a cold standalone one, not thread nondeterminism.
+
+Raw:
+--- vf=0.26 ---
+recorded 3014.120054, reproduced 3014.12005
+--- vf=0.38 ---
+recorded 3290.9124, reproduced 3290.912403
+--- vf=0.52 ---
+recorded 3389.417071, reproduced 3389.41707
+
+--- vf=0.68, first probe (s2_probes.txt P1), full message ---
+topopt-cli: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 3254.356637, reproduced 3254.356646). That means the load case, the grid or the design is not the one that produced this variant — refusing to lattice it, because the certificate would describe a different object than the run's.
+real 98.46
+user 176.83

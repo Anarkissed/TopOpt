@@ -1,0 +1,34 @@
+R2 — NO PRODUCTION BEHAVIOUR CHANGE
+
+$ git rev-parse --abbrev-ref HEAD
+claude/lattice-recipe-triangles-d64151
+
+$ git merge-base HEAD main
+ea45f7cfcaec7156eb24ab2dd4a32d76d5da5d91
+
+$ git diff main --stat -- core/src app/TopOptKit/Sources
+(no output above = EMPTY DIFF)
+
+$ git diff main --name-only -- core/src app/TopOptKit/Sources | wc -l
+       0
+
+$ git diff main --stat  (everything this branch adds)
+ .../2026-08-07-lattice-recipe-not-triangles.md     | 390 ++++++++++++++++
+ .../README.md                                      | 148 ++++++
+ .../job_his_2mm_skinnone.json                      | 249 ++++++++++
+ .../r2_no_production_change.txt                    |  15 +
+ .../r3_consumer_sweep.sh                           |  53 +++
+ .../r3_consumer_sweep.txt                          |  85 ++++
+ .../run_2mm_first_attempt.log                      |  56 +++
+ .../run_his_2mm_skinnone.log                       | 502 +++++++++++++++++++++
+ .../run_refusal_as_captured.log                    |  25 +
+ .../s1_recipe_vs_expansion.csv                     |   6 +
+ .../s1_recipe_vs_expansion.py                      | 234 ++++++++++
+ .../s1_recipe_vs_expansion.txt                     |  17 +
+ .../s1c_consumers.md                               | 194 ++++++++
+ .../s2_probes.sh                                   |  81 ++++
+ .../s2_probes.txt                                  |  68 +++
+ .../s2_scope.md                                    | 225 +++++++++
+ .../s2a_blocker_reproduction.txt                   |  34 ++
+ .../s2a_make_lattice_variant_job.py                | 110 +++++
+ 18 files changed, 2492 insertions(+)

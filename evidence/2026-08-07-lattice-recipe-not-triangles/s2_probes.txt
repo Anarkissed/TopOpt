@@ -1,0 +1,68 @@
+### P1 — materialise on demand (emit_stl true), skin none, swept 2 mm
+== p1_emit ==
+wrote job_p1_emit.json
+  variant vf=0.68 achieved=0.679951 fingerprint=16669337693309665918
+  cell_mode=swept cell_min_mm=2.0 skin=none
+exit=1
+topopt-cli: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 3254.356637, reproduced 3254.356646). That means the load case, the grid or the design is not the one that produced this variant — refusing to lattice it, because the certificate would describe a different object than the run's.
+real 98.46
+user 176.83
+sys 2.70
+-- bytes written --
+   loadcase.json                                     643
+                                                     643 TOTAL
+
+### P2 — identical recipe, emit_stl FALSE (nothing generated, nothing written)
+== p2_noemit ==
+wrote job_p2_noemit.json
+  variant vf=0.68 achieved=0.679951 fingerprint=16669337693309665918
+  cell_mode=swept cell_min_mm=2.0 skin=none
+exit=1
+topopt-cli: job.json: lattice block requests neither STL nor 3MF output
+real 0.04
+user 0.04
+sys 0.00
+-- bytes written --
+                                                       0 TOTAL
+
+### P3 — the same recipe at cell_mode=fit (the mode PR 310's refusal recommends)
+== p3_fit ==
+wrote job_p3_fit.json
+  variant vf=0.68 achieved=0.679951 fingerprint=16669337693309665918
+  cell_mode=fit cell_min_mm=2.0 skin=none
+exit=1
+topopt-cli: job.json: grading "cell_min_mm" / "cell_max_mm" are only allowed with "cell_mode": "swept"
+real 0.04
+user 0.04
+sys 0.00
+-- bytes written --
+                                                       0 TOTAL
+
+### P4 — the same recipe at a PINNED 2 mm cell (cell_mode=fixed)
+== p4_fixed2 ==
+wrote job_p4_fixed2.json
+  variant vf=0.68 achieved=0.679951 fingerprint=16669337693309665918
+  cell_mode=fixed cell_min_mm=None skin=none
+exit=143
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-density-proxy-a12459/evidence/2026-08-07-lattice-recipe-not-triangles/s2_probes.sh: line 40: 17067 Terminated: 15          /usr/bin/time -p "$CLI" lattice-variant "job_$tag.json" --out "out_$tag" --materials "$MAT" --rules "$RULES"
+-- bytes written --
+   loadcase.json                                     643
+                                                     643 TOTAL
+
+### P5 — pinned at the printability floor the refusal quotes (1.094961872 mm)
+== p5_floor ==
+wrote job_p5_floor.json
+  variant vf=0.68 achieved=0.679951 fingerprint=16669337693309665918
+  cell_mode=fixed cell_min_mm=None skin=none
+exit=1
+topopt-cli: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 3254.356637, reproduced 3254.356646). That means the load case, the grid or the design is not the one that produced this variant — refusing to lattice it, because the certificate would describe a different object than the run's.
+real 108.86
+user 192.30
+sys 3.13
+-- bytes written --
+   loadcase.json                                     643
+                                                     643 TOTAL
+
