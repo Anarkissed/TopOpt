@@ -265,13 +265,42 @@ the new `default_arming` (10 checks).
    your job at two resolutions with the rule **armed**, and none refused. Arming
    by default cannot refuse what arming by hand did not.
 
-**Result at the time of writing: 41 of 82 runnable job documents completed in
-both arms, and ZERO newly refused.** The sweep is still running — it is 164 full
-optimize runs and it competes with the machine's other work — and its final
-count belongs in a follow-up comment rather than being guessed at here. 34
-documents are skipped and **every skip is printed with its reason** (model file
-absent from the repo, or resolution above the 48 cap chosen to keep 164 runs
-tractable); nothing is dropped silently.
+**★ THE SWEEP HAS SINCE FINISHED — all 82 in both arms — AND THE ANSWER IS
+LONGER THAN "NONE".**
+
+    job documents run in both arms : 82
+    succeeded on BOTH              : 61
+    failed on BOTH (pre-existing)  : 21
+    SEALED (would refuse)          :  2
+    ★ NEWLY REFUSED BY THE BRANCH  :  0
+
+**No recipe newly FAILS. But two now produce LESS, and exit 0 while doing it:**
+
+    evidence/2026-08-03-multiscale-lattice-to/m2b/job_multiscale.json
+    evidence/2026-08-03-multiscale-lattice-to/m2c/job_multiscale.json
+
+Both are the demo l-bracket at resolution 40. The merge-base binary writes
+`variant_045_lattice.stl` **and** `variant_060_lattice.stl`; the branch writes
+only `variant_060_lattice.stl`. The 0.45 rung is skipped for a genuinely sealed
+**2-cell, 6.750 mm³** pocket at (3.000, 2.500, 1.500)–(4.500, 4.000, 4.500) mm,
+and the refusal names all of it.
+
+**The exit code stays 0 because that is PR #305's design** — the optimize ladder
+skips a sealed rung, prints why, and leaves every other rung and artifact
+intact; only `lattice_variant` throws. **★ Which means an exit-code sweep
+under-reports this rule, and mine is an exit-code sweep.** It answers "does any
+recipe now FAIL" (none) and not "does any recipe now produce LESS" (these two).
+The per-rung mesh counts were read separately, afterwards, and are the honest
+answer. Naming that gap is the point — the alternative was a "zero" that was
+true and incomplete.
+
+It is fully explained, so the blocked-stop (*"refuses for a reason you cannot
+explain"*) is not hit: the rule found exactly what it was built to find, in a
+fixture that had a sealed cavity all along and shipped it silently.
+
+34 documents are skipped and **every skip is printed with its reason** (model
+file absent from the repo, or resolution above the 48 cap chosen to keep 164
+runs tractable); nothing is dropped silently.
 
 **One documented recipe DOES refuse today, and it is not caused by this task.**
 `evidence/2026-08-03-multiscale-lattice-to/job_multiscale.json` sets
@@ -634,7 +663,7 @@ and is regenerable from the committed scripts.
 |---|---|
 | a certified verdict moves | **No.** ACCEPTED → ACCEPTED on all four rungs. §R1. |
 | S3 finds projection sealing a pore the field calls open | **No** — but only after the count was swept across the measuring grid. A single-grid reading showed a 6960 mm³ cavity appearing on rung 068 and it evaporated at every finer grid. Nothing above the probe's own 1–3 voxel noise floor survives in either arm. §S3. |
-| an existing fixture, test or recipe refuses and cannot be explained | **No.** Six tests failed and all six are explained and fixed (§R6); 21/82 job documents swept in both arms with zero newly refused; the one recipe that does refuse (`job_multiscale.json`, `skin: "rim"`) refuses on the merge base too. §S2(e). |
+| an existing fixture, test or recipe refuses and cannot be explained | **No — everything is explained.** Seven tests failed across the branch's life and all seven are diagnosed and fixed (§R6, §A). All **82** job documents swept in both arms: **0 newly refused**, and **2 that now drop one latticed rung** for a real 6.750 mm³ sealed cavity, named in §S2(e). The one recipe that outright refuses (`job_multiscale.json`, `skin: "rim"`) refuses on the merge base too. |
 | the mass audit finds a figure whose source you cannot determine | **No.** All ten sourced. §S1(d). |
 | **a job-building site cannot send a key without restructuring how jobs are assembled** | **★ YES — REPORTED, NOT SPECIAL-CASED.** The on-device path builds no job document and contains no projection at all. §S1(b). |
 
@@ -853,9 +882,11 @@ weights will drop by roughly that much without a gram of material changing.
 2. **Project the latticed companion too.** Right now `variant_068.stl` is the
    corrected part and `variant_068_lattice.stl` is still the oversize one. Same
    rung, same run, two different parts.
-3. **Let the repo-wide sweep finish.** It runs all 82 committed job documents
-   through both the old and the new build. 41 are done and none refuses; the rest
-   is running and the number belongs in a comment on this PR, not in a guess.
+3. **Look at those two lattice fixtures.** The sweep finished: nothing fails,
+   but two committed recipes quietly stop producing one of their two latticed
+   variants, because they contain a real 6.75 mm³ sealed pocket that has been
+   shipping unnoticed. Worth deciding whether to fix the fixtures or keep them
+   as the rule's standing proof.
 4. **Cover the other quarter of your surface.** About 19.8% of the part is CAD
    surface that is neither a plane nor a cylinder — cones, tori, fillets. Those
    have closed-form answers too and are the largest remaining win.

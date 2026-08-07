@@ -1,21 +1,68 @@
-S2e — THE REPO-WIDE REFUSAL SWEEP, PARTIAL RESULT AT THE TIME OF WRITING
+S2e — THE REPO-WIDE REFUSAL SWEEP, COMPLETE
 task 2026-08-06-arm-projection-and-void-check
 
-This sweep runs EVERY committed job document through BOTH binaries — the
-merge-base one (both defaults off) and the branch one (both on) — so that a
-failure on the branch can be told apart from a recipe that already fails on
-main. It is 164 full optimize runs and it is still going. What follows is the
-state when this handoff was written; the final count belongs in a comment on
-the PR rather than being guessed at here.
+Every committed job document run through BOTH binaries — the merge-base one
+(both defaults off) and the branch one (both on) — so that a failure on the
+branch can be told apart from a recipe that already fails on main.
 
-  job documents completed in BOTH arms : 41
-  ★ NEWLY REFUSED BY THE BRANCH        : 0
+==============================================================================
+job documents run in both arms : 82
+succeeded on BOTH              : 61
+failed on BOTH (pre-existing)  : 21
+carried a void_escape record   : 35
+SEALED (would refuse)          : 2
+★ NEWLY REFUSED BY THE BRANCH  : 0
+==============================================================================
 
-searched: core/tests, docs, evidence, tools, app — every *.json that parses as a job document (has "mode" and "model")
-runnable here: 82    skipped: 34    resolution cap: 48
+★ NEWLY REFUSED (exit code): 0. But that is NOT the whole answer — see below.
 
+==============================================================================
+★ TWO COMMITTED RECIPES NOW LOSE A LATTICED RUNG, AND EXIT 0 WHILE DOING IT
+==============================================================================
 
---- the skip list, printed in full so nothing is dropped silently ---
+  evidence/2026-08-03-multiscale-lattice-to/m2b/job_multiscale.json
+  evidence/2026-08-03-multiscale-lattice-to/m2c/job_multiscale.json
+
+Both are the demo l-bracket at resolution 40. Latticed meshes written:
+
+    merge-base binary : variant_045_lattice.stl   variant_060_lattice.stl
+    branch binary     :                           variant_060_lattice.stl
+
+The 0.45 rung is no longer exported. THE RUN STILL EXITS 0 — that is PR 305's
+design, not a bug: the optimize ladder SKIPS a sealed rung, says so on stderr,
+and leaves the other rungs and every other artifact intact. Only
+lattice_variant (which exists to produce ONE object) throws.
+
+★ SO AN EXIT-CODE SWEEP UNDER-REPORTS THIS RULE, and this sweep is an
+exit-code sweep. It answers 'does a recipe now FAIL' (no, none) and not 'does
+a recipe now produce LESS' (yes, these two). The per-rung mesh counts above
+were read separately, after the sweep finished, and are the honest answer.
+
+IT IS EXPLAINED, so the blocked-stop ('refuses for a reason you cannot
+explain') is not hit. The cavity is real and the refusal names it exactly:
+
+    the void space inside this lattice does not reach the exterior. 2 of 882 
+    lattice cells (2 of 3230 latticed voxels) sit in 1 SEALED cavity/cavities 
+    holding 6.750 mm^3 of trapped space with no path out of the part. Nothing 
+    can ever be emptied from them — powder, resin or support placed there stays 
+    there. Cavity 1: 2 latticed voxels in 2 cells, 6.750 mm^3, bounding box 
+    (3.000, 2.500, 1.500) to (4.500, 4.000, 4.500) mm. NOTHING WAS 
+    AUTO-CORRECTED: opening a cavity would change geometry that was not asked 
+    to change. TO PROCEED, either (a) place the lattice so it reaches the 
+    surface or add a drain path — the cavity above tells you where — or (b) set 
+    "require_lattice_void_reaches_exterior": false in the job's "lattice" block 
+    to export anyway. THIS CHECK IS ON BY DEFAULT, so REMOVING the key does not 
+    turn it off; only an explicit false does. Exporting with it off ships a 
+    part with sealed lattice cavities: whatever ends up inside them — powder, 
+    resin or support — cannot be removed after printing, and the part's real 
+    mass will exceed the reported one by the mass of whatever stays in there.
+
+A 2-cell, 6.750 mm^3 pocket at (3.000, 2.500, 1.500)-(4.500, 4.000, 4.500) mm.
+That is a genuinely sealed lattice cavity in a fixture nobody prints — the
+rule found exactly what it was built to find, in a recipe that had it all
+along and shipped it silently.
+
+==============================================================================
 SKIPPED, and why — nothing is dropped silently:
   docs/handoffs/evidence/134/bracket64_job.json
       resolution 64 is above the 48 cap for this sweep
@@ -86,8 +133,7 @@ SKIPPED, and why — nothing is dropped silently:
   evidence/2026-08-06-cad-face-projection/job_analyze.json
       resolution 128 is above the 48 cap for this sweep
 
-
---- rows completed so far ---
+--- all 82 rows ---
   core/tests/fixtures/demo/job.json
       base exit=1  branch exit=1  void_escape=no  sealed=False
   docs/handoffs/evidence/134/box_job.json
@@ -134,3 +180,121 @@ SKIPPED, and why — nothing is dropped silently:
       base exit=0  branch exit=0  void_escape=yes  sealed=False
   evidence/2026-07-30-lattice-skin-freeform/job_cyl_skin_c25.json
       base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_cyl_skin_c40.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_lattice_shellskin.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_lattice_skin.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-30-lattice-skin-freeform/job_nolattice.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-31-analyze-loadcase-resolution/demo_stl_job.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/analyze.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/clearance_roles_loadcase.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/exclude.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/graded.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/include.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/include_exclude.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/nolattice.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-07-31-lattice-page-core-hookup/jobs/uniform.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-07-31-lattice-strut-strength-report/example_job.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-01-active-domain-disarm/job_ad_disarm.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-01-build-direction-separation/u1_job_declared_z.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-01-build-direction-separation/u1_job_unarmed.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-02-geneo-disarm/ladder32.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-02-geneo-disarm/ladder32_1rung.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-02-iteration-phase-timing/abort20.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-02-iteration-phase-timing/ladder32.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-02-multigrid-component-sweep/byteid_job.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-02-simp-penalization-continuation/designbox_job.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-02-warm-start-coarse-experiment/healthy48_cold.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-02-warm-start-coarse-experiment/healthy48_warm.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-03-algebraic-level1-coarsening/byteid_job.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/A_nobox_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/B_box_nolattice.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/C_box_keepclear_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/D_box_selfweight_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/E_box_lattice_variant.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/F_box_analyze_smooth.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/G_nobox_analyze_smooth.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-design-box-recertification/jobs/X_preexisting_selfweight_clearance_crash.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-03-hybrid-amg-coarsening-probe/byteid_job.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-multiscale-lattice-to/m1_base/job.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-multiscale-lattice-to/m1_controlled/job.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-multiscale-lattice-to/m2b/job_multiscale.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=True
+  evidence/2026-08-03-multiscale-lattice-to/m2b/job_twostep.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-multiscale-lattice-to/m2c/job_multiscale.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=True
+  evidence/2026-08-03-multiscale-lattice-to/m2c/job_twostep.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-multiscale-lattice-to/m8_pipeline/job.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-preflight-feasibility-and-divergence/byte_identity_job.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/A_nobox_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/B_box_nolattice.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/C_box_keepclear_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/D_box_selfweight_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/E_box_lattice_variant.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/F_box_analyze_smooth.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/G_nobox_analyze_smooth.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/X_preexisting_selfweight_clearance_crash.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/Y_nobox_clearance_selfweight.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/ZA_analyze_on_Z_mesh.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/ZQ_analyze_loadcase_no_groups.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/ZV_lattice_variant_clearance.json
+      base exit=1  branch exit=1  void_escape=no  sealed=False
+  evidence/2026-08-03-selfweight-clearance-void-crash/jobs/Z_box_clearance_selfweight_lattice.json
+      base exit=0  branch exit=0  void_escape=yes  sealed=False
+  evidence/2026-08-06-cad-face-projection/r1_job.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False
+  evidence/2026-08-06-cad-face-projection/r1_work/job.json
+      base exit=0  branch exit=0  void_escape=no  sealed=False

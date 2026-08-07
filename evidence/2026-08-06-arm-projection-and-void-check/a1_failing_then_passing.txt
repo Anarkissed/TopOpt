@@ -1,0 +1,24 @@
+R1 — threemf_import, RED before the fix and GREEN after, RUN LOCALLY.
+task 2026-08-06-arm-projection-and-void-check
+
+Reproduced locally only after provisioning lib3mf (see A3) — before that the
+test did not exist in this configuration at all.
+
+--- BEFORE (branch, projection armed on fitted surfaces) ---
+1/1 Test #114: threemf_import ...................***Failed   10.88 sec
+FAIL (line 277): STL and 3MF export byte-identical variant meshes
+FAIL (line 277): STL and 3MF export byte-identical variant meshes
+3MF import (enable): 2/47 checks FAILED
+STL-vs-3MF plate_bore equivalence (max vertex diff 9.537e-07 mm, vol rel diff 1.955e-08)
+
+--- MERGE BASE d9fe8f7, same fixture, same lib3mf 2.5.0#1 ---
+1/1 Test #113: threemf_import ...................   Passed    9.50 sec
+
+--- AFTER (this fix) ---
+1/1 Test #114: threemf_import ...................   Passed    9.50 sec
+
+--- R2: FULL SUITE AT CI'S DENOMINATOR ---
+
+100% tests passed out of 114
+
+Total Test time (real) = 712.22 sec

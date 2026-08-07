@@ -12,9 +12,9 @@ added                             : 4
 
 === Swift (app/TopOptKit/Tests): test functions ========================
 on the merge base : 1322
-on the branch     : 1332
+on the branch     : 1333
 PRESENT ON MAIN, ABSENT ON BRANCH : 0
-added                             : 10
+added                             : 11
 
 === Swift assertion-call census (kind x count) =========================
 --- merge base ---
@@ -55,11 +55,12 @@ added                             : 10
 -          "V6: and its own WALL time");
 
 === files changed under the two test trees =============================
+ .../DefaultArmingEvidenceGen.swift                 | 106 ++++++++++
  .../TopOptFlowsTests/DefaultArmingTests.swift      | 235 +++++++++++++++++++++
  .../DesignOverhaulRound2Tests.swift                |  16 +-
- core/tests/unit/test_cad_project.cpp               | 151 +++++++++++++
+ core/tests/unit/test_cad_project.cpp               | 183 ++++++++++++++++
  core/tests/unit/test_default_arming.cpp            | 200 ++++++++++++++++++
  core/tests/unit/test_lattice_void.cpp              |  29 +++
  core/tests/validation/test_cli.cpp                 |  42 +++-
  .../validation/test_lattice_void_exterior.cpp      |  73 ++++++-
- 7 files changed, 737 insertions(+), 9 deletions(-)
+ 8 files changed, 875 insertions(+), 9 deletions(-)
