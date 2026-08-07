@@ -1,0 +1,45 @@
+Test Suite 'Selected tests' started at 2026-08-07 02:23:29.276.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-08-07 02:23:29.278.
+Test Suite 'LatticeVariantsOnScreenTests' started at 2026-08-07 02:23:29.278.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testALatticedSelectionNeverDrawsTheSolid]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testALatticedSelectionNeverDrawsTheSolid]' passed (0.059 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testAMachineWithRoomIsNotRefused]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testAMachineWithRoomIsNotRefused]' passed (0.034 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testANonLatticeRunIsUnchanged]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testANonLatticeRunIsUnchanged]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testAnUnreportedSizeRefusesRatherThanGuessing]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testAnUnreportedSizeRefusesRatherThanGuessing]' passed (0.033 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testARefusedTransferSaysTheLatticeExistsAndWhyItCannotComeOver]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testARefusedTransferSaysTheLatticeExistsAndWhyItCannotComeOver]' passed (0.033 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testEachRungOffersItsLatticedAlternativeInTheVariantList]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testEachRungOffersItsLatticedAlternativeInTheVariantList]' passed (0.035 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testEveryLatticedRungIsReachableAndNoMeshWasTransferred]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testEveryLatticedRungIsReachableAndNoMeshWasTransferred]' passed (0.032 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testExportTargetsTheLatticedFileUnderItsOwnName]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testExportTargetsTheLatticedFileUnderItsOwnName]' passed (0.034 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testHisCheckpointLinesParse]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testHisCheckpointLinesParse]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testLatticedAlternativesSurviveThePersistenceRoundTrip]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testLatticedAlternativesSurviveThePersistenceRoundTrip]' passed (0.034 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testNonCheckpointLinesAreNotParsedAsLattices]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testNonCheckpointLinesAreNotParsedAsLattices]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testSelectingALatticedVariantShowsTheLatticedMass]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testSelectingALatticedVariantShowsTheLatticedMass]' passed (0.033 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheLatticedMassStatesItsProvenanceAndOffersNoMeshCrossCheck]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheLatticedMassStatesItsProvenanceAndOffersNoMeshCrossCheck]' passed (0.032 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheLatticedMeshSizeIsProbedByHeadNotByFetching]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheLatticedMeshSizeIsProbedByHeadNotByFetching]' passed (0.032 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheRecommendationPointsAtTheHeaviestLatticedObject]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheRecommendationPointsAtTheHeaviestLatticedObject]' passed (0.036 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheSolidMassesAreUnchanged]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testTheSolidMassesAreUnchanged]' passed (0.032 seconds).
+Test Suite 'LatticeVariantsOnScreenTests' passed at 2026-08-07 02:23:29.741.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.461 (0.464) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-08-07 02:23:29.741.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.461 (0.464) seconds
+Test Suite 'Selected tests' passed at 2026-08-07 02:23:29.741.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.461 (0.465) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

@@ -1,0 +1,8 @@
+# The four latticed meshes worker job ca62f91cba4b422d left on disk, in bytes, as
+# `ls -l` reported them. Not checked in — 5.17 GB — but their SIZES are the fact
+# the transfer decision turns on, so the sizes are.
+#   name                       bytes         solid counterpart (bytes)
+variant_026_lattice.stl        740360884     variant_026.stl 16790484
+variant_038_lattice.stl        1058859084    variant_038.stl 16502084
+variant_052_lattice.stl        1420059884    variant_052.stl 14554484
+variant_068_lattice.stl        1954879484    variant_068.stl 14235484

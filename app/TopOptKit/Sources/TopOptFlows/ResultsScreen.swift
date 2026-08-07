@@ -97,6 +97,12 @@ public struct ResultsScreen: View {
     /// An export failure message (rare — a temp-dir write error), surfaced as an alert
     /// rather than failing silently.
     @State private var stlExportError: String?
+    /// Fraction of a LATTICED export transferred so far, or nil when none is in
+    /// flight (task 2026-08-07-lattice-variants-on-screen). A solid export writes
+    /// bytes the app already holds and is instant; a latticed one streams 740 MB to
+    /// 1.95 GB from the worker, and an Export button that simply sat there for
+    /// minutes would read as a broken button.
+    @State private var latticeExportProgress: Double?
     /// The ONE shared orbit camera for this results stage (STEP 1). The Metal viewer AND
     /// the orientation gizmo both drive it, so dragging the model turns the cube and
     /// tapping the cube orbits the model.
@@ -245,6 +251,16 @@ public struct ResultsScreen: View {
             // `trigger.outcome`, NEVER `self.liveOutcome`: see `MergeTrigger`.
             model.update(from: trigger.outcome)
         }
+        .onAppear {
+            // HOW A LATTICED VARIANT REACHES ITS MESH (task 2026-08-07-lattice-
+            // variants-on-screen). The run holds the address of its own job on the
+            // worker; the model asks it for a mesh only when the user selects a
+            // latticed variant and only after the memory budget agrees. nil on an
+            // on-device run, on a restored result, or on a run whose job the app no
+            // longer knows — in which case the latticed variant still shows its
+            // mass and verdict and says plainly that its geometry is out of reach.
+            model.latticeMeshTransfer = run?.latticeMeshSource
+        }
         .sheet(isPresented: Binding(
             get: { if case .ready = videoExport.state { return true } else { return false } },
             set: { if !$0 { videoExport.reset() } })) {
@@ -279,6 +295,28 @@ public struct ResultsScreen: View {
     /// + presentation live here. No-op when the variant has no exportable mesh (the
     /// button is disabled in that case anyway).
     private func exportSTL() {
+        // A LATTICED SELECTION EXPORTS THE LATTICED FILE (task 2026-08-07-lattice-
+        // variants-on-screen, S2d). It streams from the worker straight to disk and
+        // is never decoded, so it exports on a device that cannot display it —
+        // which, at 740 MB to 1.95 GB per rung, is every iPad. The solid path below
+        // is unchanged.
+        if model.exportIsStreamed {
+            latticeExportProgress = 0
+            model.exportLatticedMesh { received, total in
+                DispatchQueue.main.async {
+                    latticeExportProgress =
+                        total > 0 ? Double(received) / Double(total) : 0
+                }
+            } completion: { result in
+                latticeExportProgress = nil
+                switch result {
+                case .success(let url): stlExportURL = url
+                case .failure(let error):
+                    stlExportError = error.localizedDescription
+                }
+            }
+            return
+        }
         guard let data = model.exportSTLData() else { return }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(model.exportFilename)
@@ -942,12 +980,12 @@ public struct ResultsScreen: View {
     /// The Smooth entry's verdict for the SELECTED variant. A caller that has not
     /// wired the gate (previews, evidence captures) gets the pre-gate behaviour.
     private var smoothVerdict: VariantEntryVerdict {
-        smoothEntry?(model.selectedIndex)
+        smoothEntry?(model.selectedVariantIndex)
             ?? VariantEntryVerdict(label: "Smooth", enabled: true, reason: nil,
                                    allReasons: [])
     }
     private var latticeVerdict: VariantEntryVerdict {
-        latticeEntry?(model.selectedIndex)
+        latticeEntry?(model.selectedVariantIndex)
             ?? VariantEntryVerdict(label: "Lattice", enabled: true, reason: nil,
                                    allReasons: [])
     }
@@ -1080,13 +1118,13 @@ public struct ResultsScreen: View {
                 if let onSmooth {
                     entryControl(icon: "scribble.variable",
                                  verdict: smoothVerdict,
-                                 action: { onSmooth(model.selectedIndex) })
+                                 action: { onSmooth(model.selectedVariantIndex) })
                 }
 
                 if let onLattice {
                     entryControl(icon: "square.grid.3x3.fill",
                                  verdict: latticeVerdict,
-                                 action: { onLattice(model.selectedIndex) })
+                                 action: { onLattice(model.selectedVariantIndex) })
                 }
 
                 Spacer(minLength: DS.Space.m)
@@ -1264,6 +1302,7 @@ public struct ResultsScreen: View {
             ladderModeCaption   // WHICH ladder these tabs came off (growth-ladder G7)
             addedMaterialCaption   // the HEADLINE of a growth run: what was added
             massDetailCaption   // honest mesh-vs-voxel mass when they diverge (Open #6)
+            latticeDetailCaption   // the latticed object's own mass + where it is
             HStack(alignment: .bottom, spacing: DS.Space.s) {
                 ForEach(model.tabs, id: \.index) { tab in
                     let active = tab.index == model.selectedIndex
@@ -1273,6 +1312,27 @@ public struct ResultsScreen: View {
                                 Text("RECOMMENDED")
                                     .font(.system(size: 9, weight: .bold)).tracking(0.6)
                                     .foregroundStyle(DS.Color.okGreen.color)
+                            }
+                            // THE RUNG'S OTHER OBJECT (task 2026-08-07-lattice-
+                            // variants-on-screen). Badged rather than merely
+                            // differently-worded, because the two tabs for one rung
+                            // otherwise read as a duplicate — and because the
+                            // latticed object carries its OWN certification
+                            // verdict, which is a separate fact from the rung's.
+                            if tab.isLatticed {
+                                HStack(spacing: DS.Space.xs) {
+                                    Image(systemName: "square.grid.3x3.middle.filled")
+                                        .font(.system(size: 9, weight: .bold))
+                                    Text("LATTICED")
+                                        .font(.system(size: 9, weight: .bold)).tracking(0.6)
+                                    if tab.latticeAccepted == false {
+                                        Text("· NOT CERTIFIED")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .tracking(0.6)
+                                            .foregroundStyle(DS.Color.warning.color)
+                                    }
+                                }
+                                .foregroundStyle(DS.Color.accent.color)
                             }
                             // "−30%" on a reduction run, "+48%" on a GROWTH one
                             // (task 2026-08-03-growth-ladder). Read on the savings
@@ -1379,6 +1439,88 @@ public struct ResultsScreen: View {
             .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
             .background(Capsule().fill(DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
+    }
+
+    /// THE LATTICED OBJECT'S OWN STORY (task 2026-08-07-lattice-variants-on-screen).
+    ///
+    /// Shown only while a latticed variant is selected, and it always says three
+    /// things: what this object weighs and where that number came from, where its
+    /// mesh is and how big, and — the part that matters most — what state its
+    /// geometry is in ON THIS DEVICE. A refusal or a failed transfer is stated in
+    /// full. It must never quietly become the solid: showing the solid's geometry
+    /// under a latticed tab is the substitution that cost the maintainer a night,
+    /// and `ResultsModel.selectedMesh` returns nil rather than do it, which leaves
+    /// this caption as the only thing on screen explaining the empty viewer.
+    @ViewBuilder private var latticeDetailCaption: some View {
+        if let provenance = model.latticeMassProvenanceLine {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                HStack(alignment: .top, spacing: DS.Space.s) {
+                    Image(systemName: "scalemass")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(provenance).dsStyle(DS.TypeScale.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let summary = model.latticeGeometrySummary {
+                    HStack(alignment: .top, spacing: DS.Space.s) {
+                        Image(systemName: "externaldrive.connected.to.line.below")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(summary).dsStyle(DS.TypeScale.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                latticeMeshStateRow
+            }
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .frame(maxWidth: 460, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
+    }
+
+    @ViewBuilder private var latticeMeshStateRow: some View {
+        switch model.selectedLatticeMeshState {
+        case .idle?:
+            Button { model.bringLatticedMeshOver() } label: {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Bring the latticed mesh over to view it")
+                        .dsStyle(DS.TypeScale.caption)
+                }
+                .foregroundStyle(DS.Color.accent.color)
+            }
+            .buttonStyle(.plain)
+        case .transferring(let got, let total)?:
+            HStack(spacing: DS.Space.s) {
+                ProgressView().controlSize(.small)
+                Text(total > 0
+                     ? "Transferring \(LatticeMeshBudget.byteLabel(Int(got))) of "
+                       + "\(LatticeMeshBudget.byteLabel(Int(total)))…"
+                     : "Transferring \(LatticeMeshBudget.byteLabel(Int(got)))…")
+                    .dsStyle(DS.TypeScale.caption)
+            }
+        case .ready(let triangles)?:
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Latticed geometry on this device · \(triangles) triangles")
+                    .dsStyle(DS.TypeScale.caption)
+            }
+            .foregroundStyle(DS.Color.okGreen.color)
+        case .refused(let reason)?, .failed(let reason)?:
+            HStack(alignment: .top, spacing: DS.Space.s) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(reason).dsStyle(DS.TypeScale.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(DS.Color.warning.color)
+        case nil:
+            EmptyView()
         }
     }
 

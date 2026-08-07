@@ -499,6 +499,15 @@ public struct OptimizeVariant {
     /// REDUCTION run — the question was never asked — and the headline of a GROWTH
     /// one. See `AddedMaterial`.
     public let addedMaterial: AddedMaterial?
+    /// THE LATTICED OBJECT THIS RUNG ALSO PRODUCED (task 2026-08-07-lattice-
+    /// variants-on-screen). A lattice optimize run makes TWO objects per accepted
+    /// rung — this solid one and a latticed alternative — and until this field
+    /// existed the second was unreachable from the app: it lived on the worker as
+    /// a mesh and a receipt that nothing fetched. Carries the latticed object's own
+    /// MASS, margin, verdict and size, and the name of its mesh; deliberately NOT
+    /// its geometry (see `LatticeVariantAlternative`). nil on every non-lattice
+    /// run, and on any rung whose lattice was refused or ungradeable.
+    public let latticeAlternative: LatticeVariantAlternative?
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 printedFraction: Double? = nil,
@@ -512,7 +521,8 @@ public struct OptimizeVariant {
                 displacementField: [Float] = [], stressTensorField: [Float] = [],
                 keyframeMeshes: [KeyframeMesh] = [],
                 diagnosis: GateDiagnosis? = nil,
-                addedMaterial: AddedMaterial? = nil) {
+                addedMaterial: AddedMaterial? = nil,
+                latticeAlternative: LatticeVariantAlternative? = nil) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         // printedFraction defaults to achievedVolumeFraction: on the app the two are
@@ -540,6 +550,7 @@ public struct OptimizeVariant {
         self.keyframeMeshes = keyframeMeshes
         self.diagnosis = diagnosis
         self.addedMaterial = addedMaterial
+        self.latticeAlternative = latticeAlternative
     }
 
     /// The same variant with DIFFERENT GEOMETRY — the smooth-then-lattice handoff
@@ -565,7 +576,13 @@ public struct OptimizeVariant {
             meshVertices: vertices, meshIndices: indices,
             vonMisesField: vonMisesField, displacementField: displacementField,
             stressTensorField: stressTensorField, keyframeMeshes: keyframeMeshes,
-            diagnosis: diagnosis, addedMaterial: addedMaterial)
+            diagnosis: diagnosis, addedMaterial: addedMaterial,
+            // The latticed alternative travels with the rung, not with the solid
+            // SURFACE this call replaces. Smoothing the solid does not un-produce
+            // the lattice the run wrote, and dropping it here would make a rung's
+            // latticed object vanish from the screen the moment its solid was
+            // smoothed — the same disappearance this task exists to end.
+            latticeAlternative: latticeAlternative)
     }
 }
 

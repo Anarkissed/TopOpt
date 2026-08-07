@@ -1,0 +1,74 @@
+S2(c) — THE RECOMMENDER INVERSION, MEASURED ON HIS OWN RUN
+==========================================================
+Worker job ca62f91cba4b422d (M2_verticalStand.step, 128³, four rungs, all
+accepted, minimize_plastic on, graded octet lattice, cell 2 mm, density band
+0.265125 – 0.899880). Reported, NOT acted on: the recommendation's rule is
+unchanged (see §6 of the handoff).
+
+Solid mass: fields.bin per-rung scalar (the number the app already displayed).
+Lattice mass: lattice_mass_grams from variant_XXX_lattice.report.json.
+
+  ladder                                                        latticed mesh
+  position  rung    solid (g)   latticed (g)   lattice ÷ solid   on disk
+  ------------------------------------------------------------------------------
+  1st       0.68      543.73        215.16         0.396          1 954 879 484
+  2nd       0.52      473.32        239.93         0.507          1 420 059 884
+  3rd       0.38      412.47        244.78         0.593          1 058 859 084
+  4th       0.26      360.30        246.38         0.684            740 360 884
+                                                                  -------------
+                                                                  5 174 159 336
+
+THE RULE: "the last accepted rung" — ResultsModel.buildTabs, `recommendedIndex =
+variants.count - 1`. Rungs arrive heaviest-solid-first, so the last one is the
+LIGHTEST SOLID. On a run with no lattice that is exactly right and nothing here
+changes it.
+
+THE INVERSION: the solid masses DESCEND down the ladder (543.73 → 360.30) and the
+latticed masses ASCEND (215.16 → 246.38). They are monotone in opposite
+directions, so the rung the recommendation picks is the one whose latticed object
+is the HEAVIEST of the four.
+
+  recommended rung 0.26  → its lattice weighs 246.38 g
+  lightest lattice 0.68  → 215.16 g
+  penalty for following the recommendation: 31.22 g, 12.7 %
+
+WHY, mechanically: the lattice replaces printed material with 26.5–90 %-density
+octet. A heavier rung has MORE material inside the include region to replace, so
+it gains more from the substitution; a rung that has already had its material
+optimized away has less left to convert and ends up closer to its own solid mass.
+The ratio column shows it directly — 0.396 of the solid at rung 0.68, 0.684 at
+rung 0.26.
+
+  Fixed cost sanity check: the four latticed objects span only 31 g (215–246)
+  while their solids span 183 g (360–544). Most of a latticed object's mass is
+  the part of the design the lattice does NOT touch — the solid companion body
+  and the shell — which barely moves along the ladder.
+
+AND THE SECOND-ORDER PROBLEM, which is worse for the user than the first: the
+lightest latticed object is the one on the 1.95 GB mesh, and the heaviest is the
+one on the 740 MB mesh. The better object is also the harder one to bring to the
+device. Ranking by latticed mass would systematically point at the least
+transferable rung.
+
+WHAT IS **NOT** DECIDED HERE:
+  * whether the recommendation should rank latticed objects at all;
+  * whether it should rank the pair (rung, lattice) jointly, and by what;
+  * whether "Minimize plastic" should mean minimum PRINTED mass (the lattice) or
+    minimum optimized volume (the solid) once both exist.
+All three change what verdict a user acts on, and the task says not to move that
+rule without the maintainer's ruling. `testTheRecommendationPointsAtTheHeaviest
+LatticedObject` PINS the current behaviour so that a later change has to be made
+deliberately and out loud.
+
+A CAUTION AGAINST GENERALISING THIS. On a different part the ordering reverses.
+A four-rung fixture from /private/tmp/m4/C1_base (uniform 6 mm octet, strut
+radius 1 mm, no grading) gives lattice masses that RISE with the rung, the same
+direction as the solid:
+
+  rung 0.26  11.00 g      rung 0.38  12.57 g
+  rung 0.52  14.40 g      rung 0.68  16.49 g
+
+So the recommendation is not reliably backwards — it is UNGROUNDED once a lattice
+exists. On his part it points at the heaviest of the four; on a uniform-lattice
+part it happens to point at the lightest. Neither is because the rule considered
+the question.

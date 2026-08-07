@@ -1,0 +1,40 @@
+Test Case '-[TopOptFlowsTests.LatticeMeshTransferProfileTests testStreamedToDiskTransferAndMappedDecodeCost]' passed (4.249 seconds).
+Test Case '-[TopOptFlowsTests.LatticeMeshTransferProfileTests testViewerMeshBuildCostForOneLatticedVariant]' started.
+Test Case '-[TopOptFlowsTests.LatticeMeshTransferProfileTests testViewerMeshBuildCostForOneLatticedVariant]' passed (7.543 seconds).
+Test Suite 'LatticeMeshTransferProfileTests' passed at 2026-08-07 02:44:18.166.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 16.391 (16.392) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-08-07 02:44:18.166.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 16.391 (16.392) seconds
+Test Suite 'Selected tests' passed at 2026-08-07 02:44:18.166.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 16.391 (16.393) seconds
+== lattice mesh transfer profile ==
+  file: /Users/nadim/.topopt-worker/ca62f91cba4b422d/out/variant_052_lattice.stl
+  size: 1420059884 bytes (1.42 GB)
+  baseline footprint: 0.01 GB
+  transfer: 1.58 s over loopback (898.5 MB/s)
+  footprint after transfer: 4.31 GB (+4.30 GB)
+  decode: 3.01 s
+  triangles: 28401196
+  vertices floats: 255610764 (1.02 GB)
+  indices: 85203588 (0.34 GB)
+  PEAK footprint (bytes + soup held together): 6.08 GB (+6.07 GB)
+  TOTAL wall: 4.59 s
+== lattice mesh transfer profile — STREAMED TO DISK ==
+  size: 1420059884 bytes (1.42 GB)
+  baseline footprint: 4.71 GB
+  transfer to disk: 0.83 s over loopback (1712.9 MB/s)
+  footprint after transfer: 2.89 GB (+18446744071.89 GB)
+  mapped decode: 3.33 s
+  triangles: 28401196
+  PEAK footprint (mapped bytes + soup): 4.65 GB (+18446744073.65 GB)
+  TOTAL wall: 4.16 s
+== lattice viewer-mesh build cost ==
+  triangles: 28401196
+  footprint after decode: 3.61 GB (+18446744072.71 GB)
+  ViewerMesh build: 5.18 s
+  viewer triangles: 28401196
+  PEAK footprint (soup + ViewerMesh): 8.37 GB (+3.76 GB)
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

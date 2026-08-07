@@ -244,13 +244,23 @@ public extension RunModel {
     /// `run_job.json` / `run_design.bin` back from disk and never wrote them, so
     /// every finished run reported "this run kept no design file" forever. This is
     /// the missing producer. Called on the run thread; the caller hops to main.
+    /// `onLatticeMeshSource` receives a handle to THIS run's latticed meshes on the
+    /// worker (task 2026-08-07-lattice-variants-on-screen). It is reported at
+    /// submit, the same moment the job document is, and for the same reason: the
+    /// results screen needs to be able to ask for a latticed mesh, and by the time
+    /// the run resolves its re-attach record has already been cleared. Reported
+    /// even on a run that turns out to carry no lattice — the handle costs nothing
+    /// and knowing the job id is what makes a LATER answer possible.
     static func remoteRunner(_ config: RemoteRunnerConfig,
                              defaults: UserDefaults = .standard,
-                             onArtifacts: ((RelatticeArtifacts) -> Void)? = nil) -> Runner {
+                             onArtifacts: ((RelatticeArtifacts) -> Void)? = nil,
+                             onLatticeMeshSource: ((LatticeMeshTransferring) -> Void)? = nil)
+        -> Runner {
         return { request, progress, onVariant in
             try RemoteRun(config: config, request: request,
                           progress: progress, onVariant: onVariant,
-                          defaults: defaults, onArtifacts: onArtifacts).run()
+                          defaults: defaults, onArtifacts: onArtifacts,
+                          onLatticeMeshSource: onLatticeMeshSource).run()
         }
     }
 
@@ -264,12 +274,20 @@ public extension RunModel {
     /// served `out/`), and a document rebuilt from the current request would be the
     /// re-authored load case this whole path exists to avoid. The variant then says
     /// so with its own reason (`RelatticeUnavailable.jobDocumentNotRecorded`).
+    /// A RE-ATTACH reports no artifacts (see above) but it DOES report a lattice
+    /// mesh source: the job id is the one thing it definitely knows, and the
+    /// latticed meshes are served from that job's own output. So a run resumed the
+    /// next morning can still reach its lattices even though it cannot re-lattice
+    /// (which needs the submitted document it no longer holds).
     static func remoteReattachRunner(_ config: RemoteRunnerConfig, jobID: String,
-                                     defaults: UserDefaults = .standard) -> Runner {
+                                     defaults: UserDefaults = .standard,
+                                     onLatticeMeshSource: ((LatticeMeshTransferring) -> Void)? = nil)
+        -> Runner {
         return { request, progress, onVariant in
             try RemoteRun(config: config, request: request,
                           progress: progress, onVariant: onVariant,
-                          defaults: defaults, existingJobID: jobID).run()
+                          defaults: defaults, existingJobID: jobID,
+                          onLatticeMeshSource: onLatticeMeshSource).run()
         }
     }
 }
@@ -290,6 +308,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private let existingJobID: String?
     /// Where the run's retention pair is handed back (see `remoteRunner`).
     private let onArtifacts: ((RelatticeArtifacts) -> Void)?
+    /// Where this run's handle to its LATTICED meshes on the worker is handed back
+    /// (task 2026-08-07-lattice-variants-on-screen). Reported once, at submit.
+    private let onLatticeMeshSource: ((LatticeMeshTransferring) -> Void)?
     /// The most recent `fields.bin` fetched DURING the run — kept for its GRID, so
     /// a later fetch failure cannot wipe the geometry an earlier rung established
     /// (task 2026-08-03-variant-postprocessing-concurrency). Touched only from the
@@ -393,6 +414,17 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// (handoff 101: "variants are already recorded by mesh basename — reuse that").
     private var seenMeshes: Set<String> = []
 
+    /// THE LATTICE ANNOUNCEMENTS THIS RUN MADE (task 2026-08-07-lattice-variants-
+    /// on-screen), keyed by the rung's requested volume fraction. Core prints one
+    /// `LATTICE …` checkpoint line per rung naming that rung's receipt and mesh
+    /// (run_job.cpp, `emit_lattice`); the worker forwards it verbatim as a `log`
+    /// SSE event, and this reader used to drop it at `handleEvent`'s `default`.
+    /// Bounded by the LADDER (≈4) exactly like `streamed`, and holding only the
+    /// parsed scalars + two basenames — no geometry, so the retention bound the
+    /// 119 audit established is unchanged. Guarded by `streamedLock` alongside the
+    /// collection it is joined to.
+    private var latticeCheckpoints: [Double: LatticeCheckpoint] = [:]
+
     #if canImport(os)
     private static let log = Logger(subsystem: "app.topopt", category: "remote")
     /// Per-rung memory checkpoint (handoff 119). Emitted as a signpost EVENT so a
@@ -412,7 +444,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
          onVariant: @escaping (OptimizeOutcome) -> Void,
          defaults: UserDefaults = .standard,
          existingJobID: String? = nil,
-         onArtifacts: ((RelatticeArtifacts) -> Void)? = nil) {
+         onArtifacts: ((RelatticeArtifacts) -> Void)? = nil,
+         onLatticeMeshSource: ((LatticeMeshTransferring) -> Void)? = nil) {
         self.config = config
         self.request = request
         self.progress = progress
@@ -420,6 +453,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         self.defaults = defaults
         self.existingJobID = existingJobID
         self.onArtifacts = onArtifacts
+        self.onLatticeMeshSource = onLatticeMeshSource
     }
 
     // MARK: run
@@ -483,6 +517,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                                                    projectID: request.projectID,
                                                    projectName: request.projectName),
                                 defaults: defaults)
+        }
+
+        // THE HANDLE TO THIS RUN'S LATTICED MESHES (task 2026-08-07-lattice-
+        // variants-on-screen). Reported here — after the job id is known and
+        // BEFORE the stream — for the same reason the job document is retained at
+        // submit: it exists now, and reporting it only at the end would tie it to
+        // whether the run reaches its terminal event. It costs nothing on a run
+        // that turns out to carry no lattice; the results screen simply never asks.
+        if let id = jobID, let report = onLatticeMeshSource {
+            report(RemoteLatticeMeshTransfer(config: config, jobID: id))
         }
 
         // 3) STREAM events, driven by the progress-based liveness loop (no clock).
@@ -1045,6 +1089,93 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         return data
     }
 
+    /// THE LATTICED ALTERNATIVE FOR EVERY RUNG THAT PRODUCED ONE (task
+    /// 2026-08-07-lattice-variants-on-screen, S1).
+    ///
+    /// For each accepted rung the run announced a lattice for, this fetches that
+    /// rung's OWN certification receipt — a few kB — and probes the size of its
+    /// mesh. It does NOT fetch the mesh. On the maintainer's run the four meshes
+    /// are 740 MB / 1.06 GB / 1.42 GB / 1.95 GB, and a measured 4.30 GB of
+    /// resident memory goes into an in-memory GET of just the 1.42 GB one
+    /// (`LatticeMeshBudget`), so fetching four eagerly at run end is not a thing
+    /// this app can do on any device it ships to. The mesh is transferred only
+    /// when a latticed variant is SELECTED, and only after the budget agrees.
+    ///
+    /// `fetchRegionCells` above reads ONE receipt — the last accepted rung's, and
+    /// only when the job asked for a region breakdown. That is a different
+    /// question (the run-level region roll-up) and is left exactly as it was; this
+    /// reads every rung's, unconditionally on the rung having announced a lattice.
+    ///
+    /// Best-effort per rung, like `fetchFields`: a receipt that does not arrive
+    /// leaves that rung with no alternative and the screen shows the solid alone —
+    /// but the DIAGNOSTIC says which rung and why, because a lattice that exists
+    /// and cannot be reached is exactly what this task exists to stop being silent.
+    private func fetchLatticeAlternatives(acceptedRequestedVFs: [Double])
+        -> [Double: LatticeVariantAlternative] {
+        streamedLock.lock(); let checkpoints = latticeCheckpoints; streamedLock.unlock()
+        guard !checkpoints.isEmpty, let id = jobID else { return [:] }
+        let files = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+        var out: [Double: LatticeVariantAlternative] = [:]
+        for vf in acceptedRequestedVFs {
+            // Join by the rung's REQUESTED fraction — the same key the checkpoint
+            // line carries and the same one that names the files. Matched with a
+            // tolerance because both sides travelled through a decimal print.
+            guard let cp = checkpoints.first(where: {
+                abs($0.key - vf) < 1e-6
+            })?.value else { continue }
+            var mass = 0.0
+            var accepted = cp.accepted
+            var margin = cp.margin
+            var receipt: Data?
+            if let (data, resp) = try? syncGET(files.appendingPathComponent(cp.reportName)),
+               (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty {
+                receipt = data
+                let facts = LatticeVariantAlternative.receiptFacts(data)
+                mass = facts.massGrams
+                // The RECEIPT is authoritative where it speaks; the checkpoint
+                // line is the fallback. They come from the same computation, so
+                // they agree — but a null margin in the receipt (that failure mode
+                // carries no load) must not overwrite a real number with 0.
+                if let a = facts.accepted { accepted = a }
+                if let m = facts.margin { margin = m }
+            } else {
+                diag("lattice receipt \(cp.reportName) unavailable — the latticed "
+                     + "variant for vf=\(vf) will show without its mass")
+            }
+            // The mesh's SIZE, not the mesh. A HEAD on the same static-file route.
+            let bytes = latticeMeshBytes(files.appendingPathComponent(cp.meshName))
+            out[vf] = LatticeVariantAlternative(
+                requestedVolumeFraction: vf, meshName: cp.meshName,
+                massGrams: mass, accepted: accepted, margin: margin,
+                triangleCount: cp.triangles, meshBytes: bytes, receiptJSON: receipt)
+            diag("latticed alternative vf=\(vf): \(cp.meshName) "
+                 + "\(LatticeMeshBudget.byteLabel(bytes)), \(mass) g, "
+                 + "accepted=\(accepted)")
+        }
+        return out
+    }
+
+    /// A HEAD request for one artifact's `Content-Length`. 0 when the worker does
+    /// not answer HEAD or the header is absent — read downstream as "unknown",
+    /// which refuses to promise a transfer rather than starting a blind one.
+    private func latticeMeshBytes(_ url: URL) -> Int {
+        var req = URLRequest(url: url)
+        req.httpMethod = "HEAD"
+        req.timeoutInterval = config.controlTimeout
+        var bytes = 0
+        let sem = DispatchSemaphore(value: 0)
+        controlSession.dataTask(with: req) { _, resp, _ in
+            if let http = resp as? HTTPURLResponse, http.statusCode == 200,
+               http.expectedContentLength > 0 {
+                bytes = Int(http.expectedContentLength)
+            }
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + config.controlTimeout + 2)
+        return bytes
+    }
+
     private func fetchLatticeReport(regionCellsJSON: Data? = nil) -> LatticeReport? {
         guard let lat = request.lattice else { return nil }
         var generated: LatticeReport.Generated? = nil
@@ -1271,8 +1402,27 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             terminal = true; terminalFromWorker = true
             lock.unlock()
             tick.signal()
+        case "log":
+            // *** THE LATTICE ANNOUNCEMENT ARRIVES HERE (task 2026-08-07-lattice-
+            // variants-on-screen). *** Core prints one `LATTICE …` checkpoint per
+            // rung — the rung, the topology, the cell, the triangle count, the
+            // composite margin, the verdict, and the two filenames — and the
+            // worker has no typed event for it, so it falls through
+            // `_line_to_event`'s catch-all as `{"type": "log", "line": …}`. That
+            // is why the optimize path could not reach a lattice it had produced:
+            // not a missing protocol, a dropped line. Everything else on this
+            // channel is still ignored for the outcome, exactly as before.
+            if let line = ev["line"] as? String,
+               let cp = LatticeCheckpoint.parse(line) {
+                streamedLock.lock()
+                latticeCheckpoints[cp.requestedVolumeFraction] = cp
+                streamedLock.unlock()
+                diag("lattice checkpoint vf=\(cp.requestedVolumeFraction): "
+                     + "\(cp.meshName) (\(cp.triangles) tris, "
+                     + "accepted=\(cp.accepted))")
+            }
         default:
-            break  // log lines: ignored for the outcome
+            break  // every other line: ignored for the outcome
         }
     }
 
@@ -1503,11 +1653,21 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             return best
         }
 
+        // THE LATTICED ALTERNATIVES (task 2026-08-07-lattice-variants-on-screen).
+        // Receipts + sizes only — never the meshes. Read here, at the one assembly
+        // point BOTH the live-completion and the re-attach paths reach, so a run
+        // whose client force-quit and re-attached the next morning gets its
+        // latticed variants from the replayed checkpoint lines exactly as a run
+        // watched to the end does.
+        let latticeAlternatives = fetchLatticeAlternatives(
+            acceptedRequestedVFs: accepted.map { $0.requestedVF })
+
         if !accepted.isEmpty {
             let variants = accepted.map { s in
                 makeVariant(streamed: s,
                             report: reportVariant(forAchieved: s.achievedVF),
-                            fields: fields?.variant(forRequestedVF: s.requestedVF))
+                            fields: fields?.variant(forRequestedVF: s.requestedVF),
+                            lattice: latticeAlternatives[s.requestedVF])
             }
             return remoteOutcome(variants: variants, acceptedCount: variants.count,
                                  fields: fields, timing: timing, latticeReport: latticeReport,
@@ -1560,7 +1720,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
 
     private func makeVariant(streamed s: StreamedVariant?,
                              report rv: [String: Any]?,
-                             fields f: RemoteFieldsContainer.Variant?) -> OptimizeVariant {
+                             fields f: RemoteFieldsContainer.Variant?,
+                             lattice: LatticeVariantAlternative? = nil) -> OptimizeVariant {
         let margin = rv?["margin"] as? [String: Any]
         let orient = rv?["orientation"] as? [String: Any]
         // Savings/count basis (handoff 104): the app's savings is 1 - achievedVolume-
@@ -1610,7 +1771,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             // and the same numbers the on-device bridge hands over. Absent on every
             // reduction run (core emits it only on a growth ladder) → nil, and the
             // results screen shows the savings headline exactly as before.
-            addedMaterial: RemoteRun.decodeAddedMaterial(rv))
+            addedMaterial: RemoteRun.decodeAddedMaterial(rv),
+            // THE LATTICED OBJECT THIS RUNG ALSO PRODUCED (task 2026-08-07-
+            // lattice-variants-on-screen). Its mass, margin and verdict, read from
+            // its OWN receipt — never the solid's, and never derived from a mesh
+            // that has not been transferred. nil on every non-lattice run, so a
+            // run that asked for no lattice is byte-identical to before.
+            latticeAlternative: lattice)
     }
 
     /// Decode one variant's `added_material` object from report.json. nil when the

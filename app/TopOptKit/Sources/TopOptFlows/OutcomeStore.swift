@@ -54,6 +54,32 @@ enum OutcomeCodec {
         // so pre-growth blobs still decode (→ nil → a reduction variant, which is
         // exactly what they are).
         let addedMaterial: AddedMaterialDTO?
+        // THE LATTICED OBJECT THIS RUNG ALSO PRODUCED (task 2026-08-07-lattice-
+        // variants-on-screen). It MUST survive the round trip for the same reason
+        // `addedMaterial` must: a reopened lattice run that lost it would show the
+        // solid alone, which is precisely the silent substitution this task ends —
+        // and the mass it would then show is the SOLID's, 114 g heavier than the
+        // object on the worker. Optional so pre-lattice blobs still decode (→ nil
+        // → a rung with no latticed alternative, which is what they are).
+        let latticeAlternative: LatticeAlternativeDTO?
+    }
+
+    // The latticed alternative's facts, mirrored for persistence. The MESH is not
+    // persisted and never was: it is a multi-gigabyte file on the worker, fetched
+    // on demand and only when this device can hold it (`LatticeMeshBudget`). What
+    // is persisted is what the screen needs to name it honestly without it.
+    struct LatticeAlternativeDTO: Codable, Sendable {
+        let requestedVolumeFraction: Double
+        let meshName: String
+        let massGrams: Double
+        let accepted: Bool
+        let margin: Double
+        let triangleCount: Int
+        let meshBytes: Int
+        /// The per-variant certification receipt, raw. Optional because a rung
+        /// whose receipt did not transfer still has a name, a size and a mesh to
+        /// export — it simply shows its mass as n/a.
+        let receiptJSON: Data?
     }
 
     // The core's per-variant added-material accounting, mirrored for persistence.
@@ -221,7 +247,14 @@ enum OutcomeCodec {
                                          netAddedVolumeMM3: $0.netAddedVolumeMM3,
                                          outsideMassGrams: $0.outsideMassGrams,
                                          netAddedMassGrams: $0.netAddedMassGrams,
-                                         targetSaturated: $0.targetSaturated) })
+                                         targetSaturated: $0.targetSaturated) },
+                    latticeAlternative: v.latticeAlternative.map {
+                        LatticeAlternativeDTO(
+                            requestedVolumeFraction: $0.requestedVolumeFraction,
+                            meshName: $0.meshName, massGrams: $0.massGrams,
+                            accepted: $0.accepted, margin: $0.margin,
+                            triangleCount: $0.triangleCount,
+                            meshBytes: $0.meshBytes, receiptJSON: $0.receiptJSON) })
             },
             growthLadder: o.growthLadder,
             stoppedOnMargin: o.stoppedOnMargin, cancelled: o.cancelled,
@@ -305,7 +338,14 @@ enum OutcomeCodec {
                                                 netAddedVolumeMM3: $0.netAddedVolumeMM3,
                                                 outsideMassGrams: $0.outsideMassGrams,
                                                 netAddedMassGrams: $0.netAddedMassGrams,
-                                                targetSaturated: $0.targetSaturated) })
+                                                targetSaturated: $0.targetSaturated) },
+                    latticeAlternative: v.latticeAlternative.map {
+                        LatticeVariantAlternative(
+                            requestedVolumeFraction: $0.requestedVolumeFraction,
+                            meshName: $0.meshName, massGrams: $0.massGrams,
+                            accepted: $0.accepted, margin: $0.margin,
+                            triangleCount: $0.triangleCount,
+                            meshBytes: $0.meshBytes, receiptJSON: $0.receiptJSON) })
             },
             stoppedOnMargin: d.stoppedOnMargin, cancelled: d.cancelled,
             acceptedCount: d.acceptedCount, voxelVolumeMM3: d.voxelVolumeMM3,
