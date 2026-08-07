@@ -479,8 +479,16 @@ public final class SmoothingPageModel: ObservableObject {
     /// failure C). Injected like `Runner` so the whole behaviour is headlessly
     /// testable; nil ⇒ the host gave the page no preview engine and the toggle
     /// says exactly that instead of pretending.
+    ///
+    /// ★ IT TAKES THE GEOMETRY, NOT A PATH (task 2026-08-08, S1b). This used to
+    /// be `(meshPath, strength, weights)`, and the bridge behind it re-imported
+    /// the variant's STL on EVERY settled stroke — 14.4 MB and 164,228 triangles
+    /// on the maintainer's own part, to produce vertices this model is already
+    /// holding in `context.meshVertices`. The signature is the fix: there is no
+    /// longer a parameter through which a file could be named, so the re-read
+    /// cannot come back by someone re-wiring a caller.
     public typealias Previewer =
-        @Sendable (_ meshPath: String, _ strength: Double,
+        @Sendable (_ vertices: [Float], _ indices: [Int32], _ strength: Double,
                    _ weights: [Double]) async throws -> BrushPreviewResult
 
     /// What one preview produced: the deformed geometry and how far it moved.
@@ -490,10 +498,19 @@ public final class SmoothingPageModel: ObservableObject {
         public let movedVertices: Int
         public let maxDisplacementMM: Double
         public let seconds: Double
+        /// Where `seconds` went (task 2026-08-08, S1b/S1c). `secondsImport` is
+        /// the STL re-read the page no longer does — it is 0 on the shipped
+        /// route, and a non-zero value here means something re-wired the preview
+        /// back onto a file.
+        public var secondsImport: Double = 0
+        public var secondsSmooth: Double = 0
 
         public init(meshVertices: [Float], meshIndices: [Int32],
                     movedVertices: Int, maxDisplacementMM: Double,
-                    seconds: Double) {
+                    seconds: Double,
+                    secondsImport: Double = 0, secondsSmooth: Double = 0) {
+            self.secondsImport = secondsImport
+            self.secondsSmooth = secondsSmooth
             self.meshVertices = meshVertices
             self.meshIndices = meshIndices
             self.movedVertices = movedVertices
@@ -680,7 +697,12 @@ public final class SmoothingPageModel: ObservableObject {
         defer { previewing = false }
         do {
             previewCallCount += 1
-            let r = try await p(variantMeshPath, strength, weights)
+            // THE GEOMETRY THE PAGE ALREADY OWNS. `context` is the variant as the
+            // run made it — the same buffer the stage draws and the same one the
+            // brush's weights are indexed against — so this cannot preview a
+            // different mesh from the one on screen (task 2026-08-08, S1b).
+            let r = try await p(context.meshVertices, context.meshIndices,
+                                strength, weights)
             // A deformation that moved NOTHING is not a smoothed side. Reported
             // as absent so the toggle keeps saying "nothing smoothed yet" rather
             // than offering two identical meshes as a before/after.

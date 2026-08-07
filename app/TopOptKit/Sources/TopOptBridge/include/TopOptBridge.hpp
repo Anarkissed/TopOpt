@@ -871,12 +871,43 @@ struct BridgeSmoothPreview {
   int64_t moved_vertices = 0;    // vertices whose position actually changed
   double max_displacement_mm = 0.0;
   double seconds = 0.0;
+  // ★ THE COST, SPLIT (task 2026-08-08, S1b/S1c). `seconds` is the whole call;
+  // these two say where it went. `seconds_import` is the STL re-read — 0 on the
+  // in-memory overload, which is the entire point of that overload existing —
+  // and `seconds_smooth` is the operator. Reported rather than asserted, so the
+  // handoff can state the split from a run instead of quoting PR 299.
+  double seconds_import = 0.0;
+  double seconds_smooth = 0.0;
 };
 
 BridgeSmoothPreview smooth_brush_preview(const std::string& input_mesh_path,
                                          double strength,
                                          const BridgeVertexWeights& brush,
                                          BridgeError& err);
+
+// ★ THE SAME PREVIEW, FROM GEOMETRY THE CALLER ALREADY HAS
+// (task 2026-08-08-smoothing-that-works-and-is-usable, S1b).
+//
+// The path-taking overload above re-imports the variant's STL on EVERY settled
+// stroke. On the maintainer's own part that file is 14.4 MB / 164,228 triangles,
+// and PR 299 measured the re-import at 93% of the preview's cost against 7% for
+// the smoothing it exists to do. The app is holding those exact vertices — it is
+// drawing them — so the import is not fetching anything the caller lacks.
+//
+// `vertices` is flattened xyz (3 per vertex) and `indices` flattened triangle
+// corners (3 per triangle), the same layout `BridgeSmoothPreview` returns and the
+// same layout `ImportedMesh` carries. Nothing about the smoothing differs: both
+// overloads build the same `SmoothConstraints` and call the same operator, so a
+// preview taken through either route is bit-identical for the same geometry.
+struct BridgeMeshGeometry {
+  std::vector<float> vertices;   // flattened xyz
+  std::vector<int32_t> indices;  // flattened triangle corners
+};
+
+BridgeSmoothPreview smooth_brush_preview_mesh(const BridgeMeshGeometry& mesh,
+                                              double strength,
+                                              const BridgeVertexWeights& brush,
+                                              BridgeError& err);
 
 // ---------------------------------------------------------------------------
 // Bridge smoke summary — the M7.1 deliverable "material count + imported-mesh

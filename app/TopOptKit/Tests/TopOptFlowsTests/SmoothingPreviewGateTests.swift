@@ -109,10 +109,14 @@ final class SmoothingPreviewGateTests: XCTestCase {
                     meshVertices: before ? [] : [0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0.9, 0],
                     meshIndices: before ? [] : self.tris)
             },
-            previewer: { _, _, _ in
+            previewer: { verts, idx, _, _ in
+                // THE PAGE'S OWN GEOMETRY GOES IN, NOT A PATH (task 2026-08-08,
+                // S1b) — asserted so a re-wiring back onto a file fails here.
+                XCTAssertFalse(verts.isEmpty, "the previewer must be given the variant's vertices")
+                XCTAssertEqual(idx, self.tris)
                 // What core's `smooth_brush_preview` returns: a moved mesh, no
                 // certification, in milliseconds.
-                SmoothingPageModel.BrushPreviewResult(
+                return SmoothingPageModel.BrushPreviewResult(
                     meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0.95, 0],
                     meshIndices: self.tris, movedVertices: 1,
                     maxDisplacementMM: 0.49, seconds: 0.004)

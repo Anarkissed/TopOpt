@@ -1,0 +1,24 @@
+STROKE LATENCY ON HIS OWN VARIANT — rung 068
+
+BUILD: RELEASE — the configuration the app ships.
+
+mesh   variant_068.stl: 14386084 bytes, 143862 vertices / 287720 triangles
+brush  every vertex at weight 1.0, strength 0.49 (Taubin pairs as resolved by taubin_params_for_strength)
+repeats per row: 5; every figure is ms PER STROKE
+
+stage                                  repeats    ms/stroke
+------------------------------------------------------------
+A  preview via PATH   — STL re-import        5     620.6
+A  preview via PATH   — smoothing            5      35.9
+A  preview via PATH   — TOTAL                5     656.3
+B  preview via MEMORY — STL re-import        5       0.0
+B  preview via MEMORY — smoothing            5      35.9
+B  preview via MEMORY — TOTAL                5      45.8
+   ViewerMesh build (app side, both)         5      19.8
+------------------------------------------------------------
+stroke release -> updated preview, BEFORE:    676.1 ms
+stroke release -> updated preview, AFTER :     65.6 ms
+removed: 610.5 ms per stroke (90.3% of the before figure)
+
+The import share of the SHIPPED preview call: 94.5%
+moved vertices 143862 / 143862; max displacement 0.4449 mm
