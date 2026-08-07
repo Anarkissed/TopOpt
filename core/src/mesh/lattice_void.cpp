@@ -375,10 +375,27 @@ std::string lattice_void_refusal(const LatticeVoidEscapeReport& r) {
     s += " (" + std::to_string(r.sealed_pockets_with_lattice - listed) +
          " further sealed lattice cavities are counted above but not listed "
          "individually.)";
+  // ★ HOW TO PROCEED — required, not decoration (task
+  // 2026-08-06-arm-projection-and-void-check, S2b). This check is ARMED BY
+  // DEFAULT now, so the first person to meet it did not opt in to it and has a
+  // run that has stopped. A refusal that says only what is wrong is the
+  // "painted door" defect this project has already shipped twice.
+  //
+  // ★ AND THE OLD REMEDY TEXT BECAME WRONG THE MOMENT THE DEFAULT FLIPPED. It
+  // said "clear lattice.require_lattice_void_reaches_exterior" — advice that
+  // was correct while the default was false and is now a loop: clearing the key
+  // leaves it at the default, which is TRUE, and the next run refuses
+  // identically. The remedy must name the explicit value to set.
   s += " NOTHING WAS AUTO-CORRECTED: opening a cavity would change geometry that "
-       "was not asked to change. Either place the lattice so it reaches the "
-       "surface, add a drain path, or clear "
-       "lattice.require_lattice_void_reaches_exterior.";
+       "was not asked to change. TO PROCEED, either (a) place the lattice so it "
+       "reaches the surface or add a drain path — the cavity above tells you "
+       "where — or (b) set \"require_lattice_void_reaches_exterior\": false in "
+       "the job's \"lattice\" block to export anyway. THIS CHECK IS ON BY "
+       "DEFAULT, so REMOVING the key does not turn it off; only an explicit "
+       "false does. Exporting with it off ships a part with sealed lattice "
+       "cavities: whatever ends up inside them — powder, resin or support — "
+       "cannot be removed after printing, and the part's real mass will exceed "
+       "the reported one by the mass of whatever stays in there.";
   return s;
 }
 

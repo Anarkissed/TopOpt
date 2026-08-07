@@ -164,7 +164,23 @@ int main() {
   {
     JobDescription job = bracket_job();
     job.lattice.regions.push_back(foot_slab(8.0));
-    // require_lattice_void_reaches_exterior stays at its default: false.
+    // ★ UPDATED DELIBERATELY, NOT DELETED (task
+    // 2026-08-06-arm-projection-and-void-check, S2d).
+    //
+    // This line used to read "stays at its default: false" and set nothing. The
+    // default is now TRUE, so leaving it unset would refuse this rung and every
+    // assertion below would be testing the armed path — i.e. V1 would silently
+    // stop being the positive control it exists to be.
+    //
+    // THE CLAIM V1 MAKES IS UNCHANGED and is still exactly the claim that gives
+    // the rest of this file its meaning: with the check OFF, this build exports
+    // and CERTIFIES a sealed lattice cavity with no complaint anywhere. That is
+    // the defect the rule closes, and if it ever stopped being true, V2's
+    // refusal would be refusing something that was already being caught. What
+    // changed is only HOW the check is turned off — it must now be asked for
+    // explicitly, which is also the OFF CONTROL the maintainer runs the same
+    // job with while he evaluates the new default.
+    job.lattice.require_lattice_void_reaches_exterior = false;
     const RunJobResult r = run(job, "off");
     const std::string mesh = lattice_mesh_of(r);
     CHECK(!mesh.empty(),
@@ -253,14 +269,65 @@ int main() {
     // V6 — COST, BOTH FIGURES, SEPARATELY.
     CHECK(json_number(rc, "bfs_visits") > 0.0,
           "V6: the check reports its own ITERATION count (voxels pushed)");
-    CHECK(json_number(rc, "wall_seconds") >= 0.0,
-          "V6: and its own WALL time");
+    // ★ ONE ASSERTION CHANGED SHAPE HERE, AND IT IS NAMED RATHER THAN QUIETLY
+    // DROPPED (task 2026-08-06-arm-projection-and-void-check).
+    //
+    // This line used to read `json_number(rc, "wall_seconds") >= 0.0` — the
+    // check's WALL CLOCK, asserted to be in the per-variant RECEIPT. Arming the
+    // check by default put that clock into every lattice receipt and broke five
+    // separate "the receipt is byte-identical on a rerun" assertions at once
+    // (H1d/H5, Z8, PF6, AI7, and bake V6's across-rotation comparison). Two
+    // identical runs differed by 0.0010455 vs 0.001088709 s and by NOTHING
+    // ELSE. A wall clock cannot live in a document that must be byte-
+    // reproducible; run_info is where this project keeps clocks, and every
+    // byte-identity comparison already excludes it by name.
+    //
+    // THE CLAIM IS NOT WEAKENED — it is split and made stronger. Both figures
+    // are still asserted to exist and to be separate; what is added is the
+    // reason the receipt may not carry the clock, asserted directly so the
+    // clock cannot come back without failing here first.
+    CHECK(!contains(rc, "\"wall_seconds\""),
+          "V6: the RECEIPT carries NO wall clock — it is a byte-reproducible "
+          "document and a clock would break five rerun-identity assertions");
     const std::string ri = read_file(r.run_info_path);
     CHECK(json_number(ri, "bfs_visits") > 0.0 &&
               !std::isnan(json_number(ri, "wall_seconds")),
           "V6: run_info carries both as well, outside gen_seconds");
     CHECK(contains(ri, "\"gen_seconds\""),
           "V6: ... and gen_seconds is still there, unconflated");
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // V7 — ★ THE DEFAULT ITSELF, AT THE RUN LEVEL (task
+  // 2026-08-06-arm-projection-and-void-check, S2a/S2d).
+  //
+  // V2 above proves the check refuses WHEN ASKED. That is a different claim
+  // from the one this task makes, which is that a job asking for NOTHING gets
+  // it. The two blocks differ by exactly one line — V2 sets the flag, this one
+  // does not touch it — so a regression that made the flag ineffective would
+  // fail V7 while V2 still passed, and a regression that re-defaulted it to
+  // false would fail V7 while V1 still passed.
+  //
+  // This is also the assertion that catches the failure mode the brief names:
+  // shipping the feature quietly as opt-in to keep a bar green.
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    JobDescription job = bracket_job();
+    job.lattice.regions.push_back(foot_slab(8.0));
+    // NOT SET. This is the whole point of V7.
+    const RunJobResult r = run(job, "default");
+    CHECK(lattice_mesh_of(r).empty(),
+          "V7: a job that asks for NOTHING refuses the sealed cavity — the "
+          "check is ARMED BY DEFAULT, not merely available");
+    const std::string ri = read_file(r.run_info_path);
+    CHECK(contains(ri, "void_escape") && contains(ri, "\"sealed\": true"),
+          "V7: and the default-path run_info carries the same record the "
+          "explicitly-armed run wrote");
+    CHECK(json_number(ri, "sealed_variants") == 1.0,
+          "V7: one rung refused, exactly as when the flag was set by hand");
+    CHECK(!r.report_path.empty() && std::filesystem::exists(r.report_path),
+          "V7: and the solid ladder still produced its output — arming a "
+          "refusal by default must not cost the rest of the run");
   }
 
   std::fprintf(stderr, "%d checks, %d failures\n", g_checks, g_failures);

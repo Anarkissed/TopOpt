@@ -1,0 +1,14 @@
+R3 — THE FAILING TEST, BEFORE EITHER DEFAULT WAS FLIPPED
+task 2026-08-06-arm-projection-and-void-check
+
+$ ./test_default_arming     # built from the merge-base tree (d9fe8f7) + this test file only
+observed: output.project_cad_faces with the key ABSENT = false
+FAIL (line 115): project_cad_faces: an ABSENT key must now mean ARMED (was false before this task)
+FAIL (line 120): project_cad_faces: the JobOutput struct's own default must be armed, so an in-process caller that never parses JSON agrees with the CLI
+observed: lattice.require_lattice_void_reaches_exterior with the key ABSENT = false
+FAIL (line 149): require_lattice_void_reaches_exterior: an ABSENT key must now mean ARMED (was false before this task)
+FAIL (line 154): require_lattice_void_reaches_exterior: the JobLattice struct's own default must be armed, so the in-process caller agrees with the CLI
+FAIL (line 179): independence: disarming projection leaves the void check armed
+FAIL (line 185): independence: disarming the void check leaves projection armed
+default arming: 6 of 10 checks FAILED
+exit=1

@@ -622,9 +622,22 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             "material": request.material,
             "mode": "minimize_plastic",
             "resolution": request.resolution,
+            // ★ `project_cad_faces` IS SENT EXPLICITLY, ALWAYS — never omitted to
+            // ride core's default (task 2026-08-06-arm-projection-and-void-check,
+            // S1b). Core defaults it to TRUE, so omitting it would produce the
+            // same run; what it would NOT produce is a record. `run_info` echoes
+            // the job it was given, and "the key was absent" and "the user asked
+            // for this" are the same bytes there. Writing it makes the receipt
+            // unambiguous about what was ASKED FOR versus what was DEFAULTED,
+            // which is the only way a run months from now can be attributed.
+            //
+            // It is also how the two front-ends are kept from diverging: this is
+            // the value the user set, not a second opinion about what the default
+            // should be. Core still owns the default (topopt/job.hpp).
             "output": ["report": "report.json", "mesh_format": "stl",
                        "mesh_prefix": "variant",
-                       "smooth_factor": Self.smoothExportFactor],
+                       "smooth_factor": Self.smoothExportFactor,
+                       "project_cad_faces": request.projectCADFaces],
         ]
         // The true source format when `model` is a working copy in another format
         // (a 3MF normalised to STL at import, handoff 2026-07-26-3mf-optimize-path).
@@ -666,6 +679,15 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 // The boundary treatment (handoff 2026-07-29-lattice-boundary-finish):
                 // "none" | "rim" | "diagrid", the page's three-way choice (bar B7).
                 "skin": lat.skin,
+                // ★ THE ENCLOSED-VOID RULE, sent EXPLICITLY in both directions
+                // (task 2026-08-06-arm-projection-and-void-check, S2). Core
+                // defaults it TRUE, so omitting it would run identically — but
+                // this is the switch that can REFUSE A RUNG, and when a rung
+                // stops the record must say whether the rule was asked for or
+                // merely inherited. `RelatticeJobBuilder` writes the same key
+                // from the same spec field, so the two paths cannot diverge.
+                "require_lattice_void_reaches_exterior":
+                    lat.requireVoidReachesExterior,
             ]
             if let grading = lat.gradingDictionary() {
                 // GRADED run (task lattice-page-core-hookup stage 4): the schema

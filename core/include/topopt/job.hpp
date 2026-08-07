@@ -82,8 +82,20 @@ struct JobOutput {
   // or 1 keeps every existing job byte-for-byte identical.
   int smooth_factor = 1;
 
-  // Optional CAD-FACE PROJECTION (task 2026-08-06-cad-face-projection). false
-  // (the DEFAULT) exports exactly the bytes it always did.
+  // CAD-FACE PROJECTION (task 2026-08-06-cad-face-projection).
+  //
+  // ★ ARMED BY DEFAULT since task 2026-08-06-arm-projection-and-void-check. It
+  // shipped false in PR 307 and the maintainer has decided it is on. THE
+  // DEFAULT EXPORT PATH THEREFORE CHANGES — deliberately, and this is the one
+  // place in the project where that is true. There is no byte-identity claim
+  // for a default run any more; see that task's handoff §R1 for the measured
+  // before/after instead.
+  //
+  // ★ THE DEFAULT LIVES HERE, IN THE CORE, and not in whichever front-end is
+  // assembling a job. "Universally" has to mean ONE answer: the CLI, the LAN
+  // worker and the on-device bridge all read this initializer, so they cannot
+  // diverge. The dropped outer wall line width — written correctly by
+  // bridge.cpp and silently not by the CLI helper — is the shape this avoids.
   //
   // When true, every exported variant vertex that came from a face of the
   // IMPORTED PART — a wall, a mounting face, a bolt bore — is moved onto that
@@ -95,11 +107,20 @@ struct JobOutput {
   // This is NOT smoothing and does not share a line of code with it: nothing is
   // averaged, no surface is estimated, and the motion is bounded by one voxel.
   // It changes ONLY the exported mesh's vertex positions — not the design, the
-  // physics, the optimizer, the density field, the reported mass, or the
+  // physics, the optimizer, the density field, the VOXEL-derived mass, or the
   // certified margin (all of which are computed on the voxel grid, which this
-  // never touches). Optional key "project_cad_faces"; absent or false keeps
-  // every existing job byte-for-byte identical.
-  bool project_cad_faces = false;
+  // never touches).
+  //
+  // ★ IT DOES MOVE EVERY MESH-DERIVED FIGURE, and that is not a defect. PR 307
+  // measured the un-projected export ~8% OVERSIZE (100% of flat-face vertices
+  // outside their own CAD plane by ~0.67 mm; a re-certified un-projected
+  // variant reporting volume_fraction 1.0028, which is impossible). So a
+  // mesh-derived mass DROPS by about 8% the day this defaults on, and it drops
+  // because it stops being wrong. No mass formula was touched.
+  //
+  // Set "project_cad_faces": false to export the voxelised approximation
+  // instead — the OFF control, so the same job can be run both ways.
+  bool project_cad_faces = true;
 };
 
 // Optional "lattice" block (handoff 2026-07-28-lattice-generation-production).
@@ -226,9 +247,29 @@ struct JobLattice {
   bool forecast_only = false;
 
   // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
-  // false (the DEFAULT, and what an absent key means) => byte-identical to a
-  // pre-task run: the check does not run, nothing is measured and nothing is
-  // written. true => after the lattice occupancy is decided and BEFORE anything
+  //
+  // ★ ARMED BY DEFAULT since task 2026-08-06-arm-projection-and-void-check. It
+  // shipped false in PR 305 and the maintainer has decided it is on.
+  //
+  // ★ THIS ONE REFUSES RUNS, and that makes it a different kind of default from
+  // `output.project_cad_faces` above. Projection changes geometry: a run that
+  // worked still works and the exported surface moves. This one can stop a job
+  // that succeeded yesterday. The two are NOT one switch and must never be
+  // collapsed into one — see this file's other key and the independence
+  // assertions in core/tests/unit/test_default_arming.cpp.
+  //
+  // Because it refuses on a default-on posture, the refusal is required to be
+  // ACTIONABLE and not merely correct: the text names how many cells, where (mm
+  // bounding box), which declared include region, how much volume is trapped,
+  // AND how to proceed — which key turns the check off and what exporting with
+  // it off actually means. A refusal that does not say how to continue is the
+  // "painted door" defect this project has hit twice. The text is asserted, not
+  // merely written: core/src/mesh/lattice_void.cpp and the remedy assertions in
+  // core/tests/unit/test_lattice_void.cpp.
+  //
+  // false => the check does not run, nothing is measured and nothing is written
+  // (the OFF control, so the same job can be run both ways). true (the DEFAULT)
+  // => after the lattice occupancy is decided and BEFORE anything
   // is exported, the void space is flood-filled from outside the part inward
   // (topopt/lattice_void.hpp) and a lattice cell whose pore space cannot reach
   // the exterior REFUSES the variant, naming how many cells are sealed, where,
@@ -245,7 +286,7 @@ struct JobLattice {
   // reachable, how deep the drain path runs and which grid faces it escapes
   // through — because a silent pass is indistinguishable from a check that
   // never ran.
-  bool require_lattice_void_reaches_exterior = false;
+  bool require_lattice_void_reaches_exterior = true;
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the

@@ -1,0 +1,148 @@
+A1 — PR 309 CI FAILURE (`threemf_import`): ESTABLISHED BEFORE FIXING
+task 2026-08-06-arm-projection-and-void-check
+
+CI: core-linux, 113 of 114 passed. Test #114 threemf_import,
+    "FAIL (line 276): STL and 3MF export byte-identical variant meshes"
+    "(max vertex diff 9.537e-07 mm, vol rel diff 1.955e-08)"
+
+★ THE BRIEF'S PREMISE — that the FLOAT32 WELD KEY is STL-specific and welded a
+pair 3MF would have written apart — IS REFUTED BY MEASUREMENT. The float32 key
+is not involved. What follows is what was measured, in the order it was measured.
+
+
+(a) DOES THE GUARD RUN ONCE ON A SHARED MESH, OR ONCE PER EXPORT PATH?
+----------------------------------------------------------------------
+ONCE, on a shared mesh, and both writers receive that same mesh.
+`export_variant_mesh` (core/src/cli/run_job.cpp) projects into one local
+`projected`, resolves one `export_mesh`, and only then branches:
+
+    const TriangleMesh& export_mesh = R ? baked : model_mesh;
+    if (out.mesh_format == "3mf") { write_3mf_file(path, export_mesh); }
+    else                         { write_stl_file(path, export_mesh); }
+
+So a divergence BETWEEN THE TWO WRITERS is not expressible here — they are handed
+identical vertices. The divergence is somewhere else, and (b) says where.
+
+
+(b) WHAT DOES LINE 276/277 ACTUALLY COMPARE?
+---------------------------------------------
+THE TWO WRITTEN FILES, byte for byte — and BOTH OF THEM ARE STL.
+core/tests/validation/test_3mf_import.cpp:
+
+    for (...) CHECK(read_file(rstl.mesh_paths[i]) == read_file(r3mf.mesh_paths[i]),
+                    "STL and 3MF export byte-identical variant meshes");
+
+`plate_job()` at :181 sets `job.output.mesh_format = "stl"` for BOTH arms. The
+thing that differs is the INPUT: `plate_bore.stl` versus `plate_bore.3mf`.
+
+★ SO THE ASSERTION IS NOT ABOUT THE TWO WRITERS AT ALL. It says: the same part,
+imported through the two front doors, must optimize and export to the same
+bytes. Nothing on this path re-imports an export, so the STL-round-trip-is-lossy
+distinction the brief draws does not apply — it never gets a chance to.
+
+
+(c) DID IT PASS ON THE MERGE BASE, SAME FIXTURE?
+-------------------------------------------------
+YES. d9fe8f7 checked out fresh, configured against the SAME lib3mf 2.5.0#1 this
+branch now uses:
+
+    $ ctest -R '^threemf_import$'
+    1/1 Test #113: threemf_import ...................   Passed    9.50 sec
+    100% tests passed out of 1
+
+And on the branch, before the fix:
+
+    1/1 Test #114: threemf_import ...................***Failed   10.88 sec
+    FAIL (line 277): STL and 3MF export byte-identical variant meshes
+    FAIL (line 277): STL and 3MF export byte-identical variant meshes
+    3MF import (enable): 2/47 checks FAILED
+    STL-vs-3MF plate_bore equivalence (max vertex diff 9.537e-07 mm, ...)
+
+It was NOT marginal before — it passed byte-identically. The branch caused it.
+
+
+(d) WHICH TWO OF THE 47 CHECKS FAIL?
+--------------------------------------
+Both are the SAME assertion at test_3mf_import.cpp:277, fired once per exported
+variant mesh — the fixture accepts two variants (ladder {0.6, 0.4}), so the loop
+runs twice and both iterations fail. Every other check in the file passes,
+including the ones that would have caught a deeper divergence:
+
+    per-face tags identical at res 16/24/32/48/64 ....... yes (solid-diff 0)
+    "STL and 3MF produce identical pseudo-face ids" ..... pass
+    "... produce a BYTE-IDENTICAL report" ............... pass
+    3MF end-to-end: report 8856 bytes byte-identical .... pass
+
+So the DESIGN is identical and only the exported GEOMETRY differs.
+
+
+WHICH OF MY CHANGES? ISOLATED WITH THE CLI, NOT ARGUED
+-------------------------------------------------------
+Same two job documents the test builds, run through the branch's own
+`topopt-cli`, with `output.project_cad_faces` explicitly set:
+
+    project_cad_faces=on  : STL-input vs 3MF-input exported meshes identical?  no
+    project_cad_faces=off : STL-input vs 3MF-input exported meshes identical?  YES
+
+Arming projection is the cause. The weld guard only runs INSIDE projection, so
+this alone does not separate "projection ran" from "the weld key inside it" —
+the magnitudes do:
+
+    variant_040.stl: 1079 of 6972 corners differ; max 4.7684e-07 mm; median 2.3842e-07 mm
+    variant_060.stl: 1007 of 8928 corners differ; max 4.7684e-07 mm; median 2.3842e-07 mm
+
+A different weld-guard DECISION reverts a vertex, moving it by up to one voxel —
+about 1.5 mm on this part at resolution 32. What is observed is ~1000 corners
+differing by ~2.4e-07 mm: SIX ORDERS OF MAGNITUDE too small to be a reverted
+vertex, and three orders too many vertices. That is a pervasive last-bit
+difference, which is the signature of the projection TARGETS differing, not of
+the guard choosing differently.
+
+
+★ ROOT CAUSE, WITH FILE AND LINE
+---------------------------------
+`core/src/io/segment.cpp:185` fits a plane from a patch's MEAN NORMAL, and
+`:280` fits a cylinder by LEAST SQUARES within `cylinder_radius_tolerance`. So an
+STL/3MF import's `StepModel::faces` carry `StepSurfaceKind::Plane` and
+`::Cylinder` that were ESTIMATED FROM THE IMPORTED MESH — they are not
+statements, they are fits.
+
+`core/src/cli/run_job.cpp` gated projection only on `!cad->faces.empty()`, which
+is true for those manufactured faces. So arming `project_cad_faces` by default
+turned projection on for mesh parts, projecting exported vertices onto surfaces
+fitted from the very mesh being exported.
+
+Because the fit is computed FROM the imported vertices, and STL stores float32
+while 3MF stores full-precision decimal text, the two imports fit slightly
+different surfaces — and the exports diverge by exactly one float32 quantum.
+
+★ AND IT IS A CORRECTNESS BUG, NOT ONLY A TEST FAILURE. PR 307's justification
+for projection is that moving a vertex onto its own analytic surface is
+dimensionally exact BECAUSE the B-rep states that surface; `job.hpp` says in
+as many words "nothing is averaged, no surface is estimated". On a mesh part
+both of those are false. The test caught it because a fitted surface is
+input-format-dependent, but the problem would be there on a single format too:
+the geometry is being snapped onto a guess about itself.
+
+
+THE FIX
+--------
+`StepModel::faces_are_fitted` (core/include/topopt/step.hpp), set false by the
+STEP path (core/src/io/part.cpp:507) and true by the mesh path (:551), and
+`export_variant_mesh` now requires `!cad->faces_are_fitted`. Projection runs
+where the surfaces were READ and not where they were FITTED.
+
+AFTER:  1/1 Test #114: threemf_import ...................   Passed    9.50 sec
+
+WHAT HAPPENS TO THE TWO NEAR-MISS PAIRS THE FLOAT32 KEY WAS ADDED TO CATCH:
+nothing — they are on the maintainer's part, which is STEP, so projection and the
+weld guard still run there. Re-measured on the fixed build:
+
+    his part @64 rung052, projection OFF   tris 75616  distinct float32 verts 37800  non-manifold 0
+    his part @64 rung052, projection ON    tris 75616  distinct float32 verts 37800  non-manifold 0
+    l-bracket @48 rung070, projection ON   tris 14972  distinct float32 verts  7474  non-manifold 0
+
+37800, not 37798 — the two pairs the float32 key exists for are still caught. The
+l-bracket's 7474 matches its projection-OFF count exactly, so the 124 collisions
+that motivated the guard are still caught too. THE ASSERTION AT LINE 277 WAS NOT
+TOUCHED.

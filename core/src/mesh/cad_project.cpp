@@ -9,6 +9,7 @@
 #include "topopt/cad_project.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -588,6 +589,85 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
     return Vec3{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z,
                 u.x * v.y - u.y * v.x};
   };
+  // ── THE WELD GUARD, run in the SAME loop as the fold guard ─────────────────
+  //
+  // ★ A SECOND WAY TO DESTROY THE MESH, and the fold guard is structurally
+  // blind to it (task 2026-08-06-arm-projection-and-void-check).
+  //
+  // The fold guard reasons PER TRIANGLE, about normals and area. This damage is
+  // PER MESH, about vertex IDENTITY. A terrace riser stands perpendicular to
+  // the face it approximates, so its two endpoints share their in-plane
+  // position exactly and differ only along the normal; projecting both onto
+  // that plane puts them on the SAME POINT. Nothing inverts — the collapsed
+  // riser reads dot == 0, which the loop below skips ON PURPOSE — and no
+  // triangle becomes degenerate, because the two vertices belong to different
+  // triangles. What happens instead is that the two surface sheets the riser
+  // separated get welded together, and the exported file stops being
+  // watertight: on the demo l-bracket at resolution 48, 293 edges ended up
+  // shared by four triangles.
+  //
+  // ★ THE TEST IS AT THE PRECISION THE FILE CARRIES, WHICH IS FLOAT32 — NOT
+  // DOUBLE. This was wrong on its first cut and the l-bracket said so: keyed on
+  // exact double equality the guard cleaned up resolution 48 completely, and
+  // then rung 052 of the maintainer's part at resolution 64 still exported
+  // 37 798 distinct float32 positions from 37 800 double-distinct vertices — two
+  // pairs that stayed apart in double and MET when written. Binary STL stores
+  // float32, and every consumer re-welds by position, so a difference smaller
+  // than a float32 ULP does not exist once the file is written.
+  //
+  // The canonical riser case IS exact in double — the two endpoints share their
+  // in-plane coordinates and projection leaves those untouched — which is why
+  // the double test worked at all. Float32 simply also catches the near misses,
+  // and it is the correct bound rather than a safety margin: it is exactly the
+  // set of pairs the FILE cannot tell apart.
+  //
+  // A pair that was ALREADY float32-coincident in the input is left alone. That
+  // is not this operation's doing, reverting would not fix it, and treating it
+  // as a collision would make the guard fight a pre-existing degeneracy every
+  // pass and never converge.
+  // The remedy is the fold guard's own: put a vertex back. Same currency order
+  // — band vertices are free and are spent first — and the same fixed-point
+  // loop, because reverting one vertex can expose another collision.
+  //
+  // The LOWEST INDEX KEEPS ITS PROJECTED POSITION and the rest are reverted.
+  // Deterministic and order-independent, so the receipt stays byte-reproducible
+  // (which five separate tests require of it).
+  const auto weld_key = [](const Vec3& p) {
+    // Round-trip through float exactly as write_stl_file will.
+    return std::array<float, 3>{static_cast<float>(p.x), static_cast<float>(p.y),
+                                static_cast<float>(p.z)};
+  };
+  // Pairs the INPUT already could not tell apart. Excluded from the scan below:
+  // not this operation's doing, reverting would not fix them, and counting them
+  // would make the guard fight a standing degeneracy every pass and never
+  // converge.
+  std::vector<char> already_coincident(nv, 0);
+  {
+    std::map<std::array<float, 3>, std::size_t> preexisting;
+    for (std::size_t i = 0; i < nv; ++i) {
+      const auto it = preexisting.find(weld_key(mesh.vertices[i]));
+      if (it == preexisting.end()) {
+        preexisting.emplace(weld_key(mesh.vertices[i]), i);
+      } else {
+        already_coincident[i] = 1;
+        already_coincident[it->second] = 1;
+      }
+    }
+  }
+  // How many collisions the RAW projection produced, counted BEFORE the guard
+  // spends anything — so the figure means "what this operation created", not
+  // "what was left when the paid phase started". Reported so a clean result is
+  // distinguishable from a scan that never had anything to find (which is
+  // exactly what the block fixture in test_cad_project.cpp does, and it says
+  // so).
+  {
+    std::map<std::array<float, 3>, std::size_t> at;
+    for (std::size_t i = 0; i < nv; ++i) {
+      if (already_coincident[i]) continue;
+      if (!at.emplace(weld_key(out.vertices[i]), i).second)
+        ++st.weld_collisions_found;
+    }
+  }
   if (opts.fold_guard) {
     // `free_only` restricts reverting to band vertices (phase 1).
     auto run_guard = [&](bool free_only) {
@@ -601,8 +681,9 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
           if (!any) continue;
           const Vec3 nb = tri_normal_of(mesh, t);
           const Vec3 na = tri_normal_of(out, t);
-          // A triangle that merely COLLAPSED reads dot == 0 and is left alone: a
-          // flattened riser has no area and nothing to fold through.
+          // A triangle that merely COLLAPSED reads dot == 0 and is left alone
+          // HERE: a flattened riser has no area and nothing to fold through.
+          // The weld scan below is what catches the harm it actually does.
           if (dot(nb, na) >= 0.0) continue;
           ++folded;
           for (int k = 0; k < 3; ++k) {
@@ -613,15 +694,50 @@ TriangleMesh project_onto_cad_faces(const TriangleMesh& mesh,
             ++revertible;
           }
         }
-        if (folded == 0 || revertible == 0) break;
+        // THE WELD SCAN. Group vertices by their OUTPUT position; any group of
+        // more than one is a weld about to happen. Only a MOVED vertex can be
+        // reverted, and an unmoved one always keeps its place — so a moved
+        // vertex landing on an unmoved one is reverted too, which the "lowest
+        // index wins" rule would not by itself guarantee.
+        std::size_t welds = 0;
+        {
+          std::map<std::array<float, 3>, std::size_t> first_at;
+          for (std::size_t i = 0; i < nv; ++i) {
+            if (already_coincident[i]) continue;  // not ours to fix
+            const auto key = weld_key(out.vertices[i]);
+            const auto it = first_at.find(key);
+            if (it == first_at.end()) {
+              first_at.emplace(key, i);
+              continue;
+            }
+            ++welds;
+            // Prefer to revert the one that MOVED; if both moved, revert the
+            // later index and leave the earlier one exact.
+            const std::size_t keep = it->second;
+            std::size_t drop = i;
+            if (!moved[i] && moved[keep]) drop = keep;
+            if (!moved[drop]) continue;  // neither moved: pre-existing, not ours
+            if (free_only && !blended[drop]) continue;
+            if (!revert[drop]) {
+              revert[drop] = 1;
+              ++revertible;
+            }
+          }
+        }
+        if ((folded == 0 && welds == 0) || revertible == 0) break;
         ++st.fold_guard_passes;
         for (std::size_t i = 0; i < nv; ++i) {
           if (!revert[i]) continue;
+          const bool was_weld_only = (folded == 0);
           out.vertices[i] = mesh.vertices[i];
           st.move_mm[i] = 0.0;
           moved[i] = 0;
           if (blended[i]) { blended[i] = 0; ++st.reverted_band; --st.blended; }
-          else { st.reverted[i] = 1; ++st.reverted_by_fold_guard; }
+          else {
+            st.reverted[i] = 1;
+            if (was_weld_only) ++st.reverted_by_weld_guard;
+            else ++st.reverted_by_fold_guard;
+          }
         }
       }
     };

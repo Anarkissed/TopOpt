@@ -84,6 +84,31 @@ struct StepModel {
   // TopExp_Explorer(TopAbs_FACE) order as triangle_face). This is what lets a
   // caller select faces geometrically (M6.2 job fixture_faces selectors).
   std::vector<StepFaceInfo> faces;
+
+  // ★ WERE THESE SURFACES READ, OR FITTED? (task
+  // 2026-08-06-arm-projection-and-void-check, CI failure on PR 309.)
+  //
+  // false — `faces` came from a B-rep. `plane_normal`, `cylinder_radius_mm` and
+  //         the axes are STATEMENTS the CAD makes, exact by construction.
+  // true  — `faces` were MANUFACTURED by segmenting an imported STL/3MF
+  //         (handoff 134). src/io/segment.cpp:185 fits a plane from the MEAN
+  //         NORMAL of a patch and :280 fits a cylinder by least squares, inside
+  //         a tolerance. They are estimates of the mesh that was imported.
+  //
+  // ★ THIS IS LOAD-BEARING, not descriptive. CAD-face projection is only
+  // legitimate on the false case: its whole justification is that moving a
+  // vertex onto its own analytic surface is dimensionally exact BECAUSE the
+  // B-rep states that surface. Projecting onto a FITTED surface moves geometry
+  // toward a guess — and, because the fit is computed from the imported
+  // vertices, the same part imported from STL (float32) and from 3MF (full
+  // double) fits SLIGHTLY DIFFERENT surfaces and exports different files. That
+  // is what broke `threemf_import`'s "STL and 3MF export byte-identical variant
+  // meshes" assertion. See run_job.cpp's export_variant_mesh.
+  //
+  // `PartModel::pseudo_faces` (part.hpp) carries the same fact for UI copy;
+  // this is the copy that travels WITH the faces, so a consumer holding only a
+  // StepModel cannot lose it.
+  bool faces_are_fitted = false;
 };
 
 // Import a STEP file (AP203/AP214/AP242) via OCCT and tessellate it at the given

@@ -1,0 +1,29 @@
+============================================================================================================
+R1 — CERTIFIED MARGIN AND VERDICT, his part, resolution 128
+     BEFORE = the un-projected export   AFTER = the projected export
+============================================================================================================
+rung              verdict   margin before   margin after   Δ margin   voxel mass g    Δ mass
+--------------------------------------------------------------------------------------------
+026    ACCEPTED -> ACCEPTED     5062.150734    4511.449877  -10.8788%       534.2728   -10.14%
+038    ACCEPTED -> ACCEPTED     5044.721905    4714.375520   -6.5484%       579.4130    -9.32%
+052    ACCEPTED -> ACCEPTED     4948.661523    4724.384380   -4.5321%       643.7936    -8.40%
+068    ACCEPTED -> ACCEPTED     4595.797434    4614.998005    0.4178%       683.8424    -8.03%
+
+the same rows in full:
+rung   arm                  margin    interlayer   stress MPa  vol fraction  minfeat    voxel g     mesh g
+----------------------------------------------------------------------------------------------------------
+026    original        5062.150734    11528.1155   0.01086495   0.783443338      223   534.2728   479.9651
+026    projected       4511.449877     8069.0105   0.01219120   0.704041333      120   480.1242   436.8467
+038    original        5044.721905    16961.7880   0.01090248   0.849635721      197   579.4130   529.5612
+038    projected       4714.375520    12107.7874   0.01166644   0.770459136      110   525.4181   484.1953
+052    original        4948.661523    18734.1413   0.01111412   0.944041694      181   643.7936   604.6974
+052    projected       4724.384380    18964.7864   0.01164173   0.864711823       91   589.6942   556.8426
+068    original        4595.797434    17455.9674   0.01196746   1.002768160      175   683.8424   649.9440
+068    projected       4614.998005    26275.6217   0.01191766   0.922248070       97   628.9313   598.9880
+
+THE VERDICT DID NOT MOVE ON ANY RUNG. The blocked-stop is not triggered.
+
+★ AN UN-PROJECTED VARIANT CERTIFIES AT A VOLUME FRACTION ABOVE 1.0, which
+  is impossible for a design that removed material — it is the same fact
+  as the oversize export, seen from the certificate's end. Projection
+  brings it back below 1.

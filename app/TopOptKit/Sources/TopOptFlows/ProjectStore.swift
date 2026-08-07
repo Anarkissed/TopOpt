@@ -57,6 +57,16 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// lattice mode is OFF) is treated as the default-off `LatticeSettings()`, so a
     /// non-lattice project's project.json is byte-identical to a pre-lattice one.
     public var lattice: LatticeSettings?
+    /// CAD-face projection on export (task 2026-08-06-arm-projection-and-void-check,
+    /// S1c) — the OFF control for `output.project_cad_faces`, which core now
+    /// defaults to TRUE.
+    ///
+    /// OPTIONAL, and nil means ON, for the same back-compat reason as the fields
+    /// above: a snapshot written before this field must decode, and when it does
+    /// the project must get the NEW default rather than silently opting out of a
+    /// feature the maintainer armed. nil → true is therefore the correct reading,
+    /// not merely the convenient one.
+    public var projectCADFaces: Bool?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
@@ -64,7 +74,8 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
                 selection: SelectionModel, force: ForceModel,
                 minimizePlastic: Bool? = nil, quality: RunQuality? = nil,
                 optimized: Bool? = nil, printParams: PrintParams? = nil,
-                designBox: DesignBoxModel? = nil, lattice: LatticeSettings? = nil) {
+                designBox: DesignBoxModel? = nil, lattice: LatticeSettings? = nil,
+                projectCADFaces: Bool? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -81,6 +92,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.printParams = printParams
         self.designBox = designBox
         self.lattice = lattice
+        self.projectCADFaces = projectCADFaces
     }
 }
 

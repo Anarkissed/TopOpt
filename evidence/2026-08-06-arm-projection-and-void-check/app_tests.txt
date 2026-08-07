@@ -1,0 +1,19 @@
+app test suite, full run (swift test), final code
+
+	 Executed 1335 tests, with 18 tests skipped and 8 failures (0 unexpected) in 128.526 (128.619) seconds
+
+the 8 failures — three test functions, all 3MF import, ALL PRE-EXISTING:
+error: -[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]
+error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]
+error: -[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]
+
+PROVEN pre-existing, not argued: AppModelTests re-run with this task's
+app/ changes STASHED gives the SAME failure count.
+
+  WITH this task's app changes : 	 Executed 31 tests, with 8 failures (0 unexpected) in 0.531 (0.534) seconds
+  WITHOUT (merge-base app/)    : 	 Executed 31 tests, with 8 failures (0 unexpected) in 0.398 (0.401) seconds
+
+CAUSE: this worktree's vendored core is built 3MF-free, so .3mf import is
+unavailable and the import returns nil —
+3:==> lib3mf: (none) — macOS slice is 3MF-free; run app/scripts/build_lib3mf_macos.sh to enable
+14:    (no vendor/lib3mf-ios — iOS slices are 3MF-free; .3mf import will be UNAVAILABLE on iPad.

@@ -1,0 +1,29 @@
+-- the guard: the two binaries MUST differ ---------------------
+branch binary sha256 52af39f01f8698e6ff61996078e3f31595d649876d4345b9ce6c5add28334180
+base   binary sha256 c686b14f19c5da1f67a32d7bda8c36e392f778e893cb9559813e9682d6270028
+the binaries differ, so the comparison is real.
+
+-- the job: BOTH switches explicitly false --------------------
+    "project_cad_faces": false
+    "require_lattice_void_reaches_exterior": false
+
+-- the bar: every artifact byte-identical ----------------------
+  (identical apart from the wall clocks sweep_seconds and
+   strut_axis_measure_seconds: ./build_orientation.json)
+  (excluded, carries wall-clock timings: ./iterations.csv)
+  (excluded, carries wall-clock timings: ./run_info.json)
+
+R1 MET: with both switches off, every artifact is byte-identical across
+        the merge-base binary and the branch binary.
+files compared: 11
+691fabdc707b78c6e673028f6ee2e97a4ceb51e8017f02b966c876ee8c35490e  ./build_orientation.json
+18c71f150e466a522a8ada123f239eb351a8b1799ad671e6259b779d08bda52d  ./design.bin
+e59362b64a6f161eacf0fc4fd02378347ffba7c5c0f2c10e82ef07f016c5bdb6  ./fields.bin
+5986c3d315bf52f25ab89af55c68b27848fd71fc8b890c2a12047b78dc79a4c9  ./loadcase.json
+561723dfa54f098dcfc23288ddcf3830cd61d5af954994a63ce41d020c20de9e  ./report.json
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  ./variant_050.stl
+b4d3e68c9b37e9883095e2d22dc39d8fc32b410c61c35060b7edd77b4f34a939  ./variant_050_lattice.report.json
+fd22fa3bf5c638a833dddc9fc8469a5a44b73295400b29e90d71818e604515b1  ./variant_050_lattice.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  ./variant_070.stl
+bc706996bd5abc8bdc4f2f8abbb548c133e361a5e9cb96abcc39682f5bc5d95e  ./variant_070_lattice.report.json
+1333bd1b48652e33675b43a595c7cbcd779e9cc399347b9d074da3a84b9fabd8  ./variant_070_lattice.stl

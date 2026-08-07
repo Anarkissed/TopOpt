@@ -1,0 +1,6 @@
+R2 — the failing-then-passing default-arming test, AFTER the flip
+
+observed: output.project_cad_faces with the key ABSENT = true
+observed: lattice.require_lattice_void_reaches_exterior with the key ABSENT = true
+default arming: all 10 checks passed
+exit=0

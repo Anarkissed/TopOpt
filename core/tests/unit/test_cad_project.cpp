@@ -27,8 +27,10 @@
 #include "topopt/step.hpp"
 #include "topopt/voxel.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <vector>
 
 using namespace topopt;
@@ -150,6 +152,109 @@ Fixture build_fixture() {
   b.axis_point = {kCx, kCy, 0.0};
   b.axis_dir = {0, 0, 1};
   return fx;
+}
+
+// ── ★ THE WELD GUARD'S POSITIVE CONTROL ──────────────────────────────────────
+//
+// The block fixture above cannot exercise the weld guard: its faces are all
+// axis-aligned, so the exported iso-surface has no TERRACES, and with no
+// terraces there are no risers to collapse. Running the guard there proves only
+// that it does no harm.
+//
+// So the failure is CONSTRUCTED, from the exact geometry that produces it in
+// the field. A terrace riser stands perpendicular to the face it approximates,
+// which means its two endpoints share their in-plane coordinates EXACTLY and
+// differ only along the normal. Here that is a strip of surface near the top
+// face (z = kLz), stepping between z = kLz - h and z = kLz + h at the SAME
+// (x, y): projecting both endpoints onto the plane z = kLz puts them on the
+// same point, to the bit.
+//
+// `h` is well inside the one-voxel attribution tolerance, so both endpoints
+// attribute to F_TOP — which is what makes this the real case and not a
+// contrivance: the pipeline produces exactly this, at every terrace, on every
+// oblique or curved face, and the coarser the grid the more of them there are.
+//
+// The control runs the SAME projection twice, differing only in `fold_guard`
+// (which owns the weld scan), and requires the two answers to DISAGREE. If the
+// guard were removed, the "off" arm would still collide and the "on" arm would
+// too, and the test would fail rather than pass quietly.
+void weld_guard_positive_control(const Fixture& fx) {
+  constexpr double h = 0.05;  // half the riser height, mm — well under tolerance
+  TriangleMesh m;
+  // Eight (x, y) stations along a line on the top face, alternating between the
+  // two z levels — a one-voxel staircase seen edge-on.
+  const int kN = 8;
+  for (int i = 0; i < kN; ++i) {
+    const double x = 8.0 + 2.0 * i;
+    const double z = (i % 2 == 0) ? (kLz - h) : (kLz + h);
+    // TWO vertices at the same (x, y) and different z: the riser's endpoints.
+    m.vertices.push_back({x, 6.0, z});
+    m.vertices.push_back({x, 6.0, (i % 2 == 0) ? (kLz + h) : (kLz - h)});
+  }
+  // Triangles so every vertex is referenced (the projection needs incident
+  // triangles for its guards). Winding is irrelevant here — nothing folds.
+  for (int i = 0; i + 2 < kN; ++i) {
+    m.triangles.push_back({2 * i, 2 * i + 1, 2 * (i + 1)});
+    m.triangles.push_back({2 * i + 1, 2 * (i + 1) + 1, 2 * (i + 2)});
+  }
+
+  // ★ KEYED AT FLOAT32 — the precision binary STL stores and therefore the
+  // precision at which two vertices become one. A double-precision key passed
+  // on the maintainer's part at resolution 64 while the exported file still
+  // welded two pairs; see cad_project.cpp's weld guard.
+  auto coincident_positions = [](const TriangleMesh& mm) {
+    std::map<std::array<float, 3>, std::size_t> at;
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < mm.vertices.size(); ++i) {
+      const std::array<float, 3> k{static_cast<float>(mm.vertices[i].x),
+                                   static_cast<float>(mm.vertices[i].y),
+                                   static_cast<float>(mm.vertices[i].z)};
+      if (!at.emplace(k, i).second) ++n;
+    }
+    return n;
+  };
+
+  CadProjectOptions po = cad_project_options_for_grid(1.0);
+  po.enabled = true;
+  po.seam_blend_rings = 0;  // isolate the projection from the transition band
+  const CadAttribution att = attribute_to_cad_faces(m, fx.model, po);
+
+  CHECK(coincident_positions(m) == 0,
+        "control: the constructed riser mesh starts with every vertex at a "
+        "distinct position");
+
+  // ARM 1 — guard OFF. This is the defect, asserted rather than described.
+  CadProjectOptions off = po;
+  off.fold_guard = false;
+  CadProjectionStats st_off;
+  const TriangleMesh p_off = project_onto_cad_faces(m, fx.model, off, att, &st_off);
+  const std::size_t welded = coincident_positions(p_off);
+  std::printf("weld control: guard OFF -> %zu coincident positions "
+              "(of %zu vertices)\n", welded, m.vertices.size());
+  CHECK(welded > 0,
+        "POSITIVE CONTROL: with the guard off, projecting a terrace riser onto "
+        "its own plane DOES weld distinct vertices together — if this ever "
+        "stops being true the guard is being tested against nothing");
+
+  // ARM 2 — guard ON. Same mesh, same options, one field different.
+  CadProjectionStats st_on;
+  const TriangleMesh p_on = project_onto_cad_faces(m, fx.model, po, att, &st_on);
+  std::printf("weld control: guard ON  -> %zu coincident positions, "
+              "%zu collisions found, %zu vertices put back\n",
+              coincident_positions(p_on), st_on.weld_collisions_found,
+              st_on.reverted_by_weld_guard);
+  CHECK(coincident_positions(p_on) == 0,
+        "the weld guard removes every collision the arm above demonstrates");
+  CHECK(st_on.weld_collisions_found > 0 && st_on.reverted_by_weld_guard > 0,
+        "and it SAYS it did — a silent pass is indistinguishable from a guard "
+        "that never ran");
+
+  // It must spend the minimum: one endpoint of each riser keeps its exact
+  // projected position, so the correction costs half the collisions, not all
+  // the vertices.
+  CHECK(st_on.reverted_by_weld_guard <= welded,
+        "the guard puts back at most one vertex per collision — the other "
+        "endpoint stays exactly on its nominal plane");
 }
 
 }  // namespace
@@ -356,6 +461,58 @@ int main() {
   CHECK(check_watertight(proj).watertight,
         "the projected mesh must still be watertight");
 
+  // ★ THE WELD GUARD, AND WHY `check_watertight` ABOVE CANNOT STAND IN FOR IT
+  // (task 2026-08-06-arm-projection-and-void-check).
+  //
+  // `check_watertight` walks the mesh's INDEX topology: every edge, keyed by a
+  // pair of vertex INDICES, must appear twice. Two DISTINCT indices sitting at
+  // the SAME POSITION leave that topology perfectly manifold — which is why
+  // this assertion passed while the exported file did not.
+  //
+  // The file carries POSITIONS, not indices. STL is triangle soup and every
+  // consumer downstream re-welds by position, so two coincident indices become
+  // ONE vertex the moment the mesh is written and read back, and the two
+  // surface sheets they belonged to are joined. Measured on the demo l-bracket
+  // at resolution 48 through the real CLI: 124 positions received two vertices
+  // each and the re-imported file had 293 edges shared by FOUR triangles.
+  //
+  // So the invariant has to be stated at the level the file is written at.
+  {
+    std::map<std::array<float, 3>, std::size_t> at;
+    std::size_t coincident = 0;
+    for (std::size_t i = 0; i < proj.vertices.size(); ++i) {
+      const std::array<float, 3> k{static_cast<float>(proj.vertices[i].x),
+                                   static_cast<float>(proj.vertices[i].y),
+                                   static_cast<float>(proj.vertices[i].z)};
+      if (!at.emplace(k, i).second) ++coincident;
+    }
+    std::printf("weld guard: %zu collisions found, %zu projected vertices put "
+                "back, %zu coincident positions left\n",
+                st.weld_collisions_found, st.reverted_by_weld_guard,
+                coincident);
+    CHECK(coincident == 0,
+          "no two distinct vertices may share a position after projection — "
+          "the exported file welds by position and would stop being watertight");
+    // The SOURCE mesh must have no coincident vertices either, or the check
+    // above would be measuring marching cubes rather than the projection.
+    std::map<std::array<float, 3>, std::size_t> at0;
+    std::size_t coincident0 = 0;
+    for (std::size_t i = 0; i < exported.vertices.size(); ++i) {
+      const std::array<float, 3> k{static_cast<float>(exported.vertices[i].x),
+                                   static_cast<float>(exported.vertices[i].y),
+                                   static_cast<float>(exported.vertices[i].z)};
+      if (!at0.emplace(k, i).second) ++coincident0;
+    }
+    CHECK(coincident0 == 0,
+          "positive control: the UN-projected export has no coincident "
+          "vertices, so a clean result above is the guard's doing");
+    // ★ AND THE ASSERTION ABOVE IS VACUOUS ON THIS FIXTURE — `collisions found`
+    // prints 0, because a block with six AXIS-ALIGNED faces exports no
+    // staircase and so has no risers to collapse. A bar that can only pass is
+    // not a bar, so the case that DOES collide is constructed next.
+    weld_guard_positive_control(fx);
+  }
+
   // A caller that turns both kinds off gets its mesh back unchanged — the
   // in-library form of the byte-identity bar.
   {
@@ -372,6 +529,32 @@ int main() {
                   same.vertices[i].z == exported.vertices[i].z;
     CHECK(identical && st_off.moved == 0,
           "with both kinds disabled the mesh must come back untouched");
+  }
+
+  // ★ FITTED SURFACES ARE NOT CAD SURFACES (task
+  // 2026-08-06-arm-projection-and-void-check, the PR 309 CI failure).
+  //
+  // An STL/3MF import carries `faces` MANUFACTURED by segmentation — a plane
+  // fitted from a patch's mean normal, a cylinder fitted by least squares
+  // (src/io/segment.cpp:185, :280). Those are estimates OF THE IMPORTED MESH,
+  // not statements about it, and projecting onto them snaps geometry toward a
+  // guess. It also makes the export depend on the input FORMAT, because the fit
+  // is computed from vertices that STL quantises to float32 and 3MF does not.
+  //
+  // The gate lives in `export_variant_mesh`, so what is asserted here is the
+  // FLAG's contract — that it exists, defaults to "read", and is what a
+  // consumer holding only a StepModel can key on. The end-to-end behaviour is
+  // `threemf_import`'s byte-identity assertion, unchanged and now passing.
+  {
+    const StepModel fresh;
+    CHECK(!fresh.faces_are_fitted,
+          "a StepModel defaults to READ surfaces — a model that never says "
+          "otherwise must not be treated as carrying estimates");
+    StepModel segmented = fx.model;
+    segmented.faces_are_fitted = true;
+    CHECK(segmented.faces_are_fitted && !fx.model.faces_are_fitted,
+          "the flag is per-model and settable, and the B-rep fixture this file "
+          "projects is on the READ side of it");
   }
 
   // The tolerances are derived from the voxel in ONE place, and they are the

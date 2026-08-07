@@ -181,6 +181,30 @@ struct CadProjectionStats {
   // guard spends them before it spends any exactness.
   std::size_t reverted_band = 0;
   int fold_guard_passes = 0;
+  // ★ VERTICES PUT BACK BECAUSE PROJECTING THEM WOULD HAVE WELDED THE MESH SHUT
+  // (task 2026-08-06-arm-projection-and-void-check).
+  //
+  // A DIFFERENT failure from a fold, found only when projection was armed by
+  // default and run on a COARSE grid. Where an oblique CAD face was exported as
+  // a staircase, a terrace riser is perpendicular to the face, so its two
+  // endpoints share their in-plane position EXACTLY and differ only along the
+  // normal. Projecting both onto that plane therefore lands them on the SAME
+  // POINT, to the bit. No triangle inverts and none becomes degenerate, so the
+  // fold guard passes over it by design (it treats a collapsed riser as having
+  // "nothing to fold through") — but the two surface sheets the riser separated
+  // are now topologically welded, and the exported file stops being watertight.
+  //
+  // Measured on the demo l-bracket at resolution 48: 124 positions each
+  // received two distinct vertices, producing 293 edges shared by FOUR
+  // triangles instead of two. On the maintainer's own part at resolution 128
+  // it does not bite (two vertices coincide, no non-manifold edge results),
+  // which is why PR 307 never saw it — the coarser the grid relative to the
+  // feature, the more of the surface is terraced.
+  std::size_t reverted_by_weld_guard = 0;
+  // Distinct positions that two or more vertices would have landed on, before
+  // the guard broke them up. Reported so a pass is distinguishable from a
+  // check that never ran.
+  std::size_t weld_collisions_found = 0;
   // Triangles left with a REVERSED normal, and the area they carry. Counted
   // whether or not the guard ran, so "with the guard" and "without it" are the
   // same measurement rather than two different ones.

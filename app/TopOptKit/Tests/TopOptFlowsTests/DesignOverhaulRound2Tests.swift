@@ -80,12 +80,17 @@ final class DesignOverhaulRound2Tests: XCTestCase {
         // chip (the plate-normal control, adjacent to gravity); measure it too, so the
         // ramp stays pure and this test keeps checking the ORDER rather than which
         // chips exist.
+        // task 2026-08-06-arm-projection-and-void-check added the `.cadFaces` chip
+        // (the CAD-face projection OFF control); measure it too, for the same
+        // reason every chip before it is measured — this test is about the ORDER,
+        // and an unmeasured chip would turn it into a test of which chips exist.
         let widths: [SettingsChipID: CGFloat] = [
             .gravity: 140, .minimizePlastic: 175, .quality: 120, .designBox: 200,
-            .faceProtectDepth: 160, .paint: 190, .buildOrientation: 210]
+            .faceProtectDepth: 160, .paint: 190, .buildOrientation: 210,
+            .cadFaces: 155]
         let order = BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths)
-        XCTAssertEqual(order, [.quality, .gravity, .faceProtectDepth, .minimizePlastic,
-                               .paint, .designBox, .buildOrientation])
+        XCTAssertEqual(order, [.quality, .gravity, .cadFaces, .faceProtectDepth,
+                               .minimizePlastic, .paint, .designBox, .buildOrientation])
     }
 
     /// Equal widths keep their default (declaration) order — a stable tie-break.
@@ -109,9 +114,12 @@ final class DesignOverhaulRound2Tests: XCTestCase {
         // Measure all but one; the single unmeasured chip parks at the bottom (treated as
         // maximally wide). handoff 124's `.faceProtectDepth` is measured here so `.designBox`
         // is the lone unmeasured one and the intent (unmeasured → last) still reads cleanly.
+        // `.cadFaces` (task 2026-08-06-arm-projection-and-void-check) is measured
+        // here for the same reason: `.designBox` must stay the LONE unmeasured
+        // chip or this stops testing "unmeasured parks last".
         let widths: [SettingsChipID: CGFloat] = [
             .quality: 120, .gravity: 130, .minimizePlastic: 150, .faceProtectDepth: 160,
-            .paint: 170, .buildOrientation: 180]
+            .paint: 170, .buildOrientation: 180, .cadFaces: 140]
         // .designBox unmeasured → last.
         XCTAssertEqual(BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths).last, .designBox)
     }

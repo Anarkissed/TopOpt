@@ -299,7 +299,12 @@ public final class AppModel: ObservableObject {
                           faceProtectionDepthMM: protections.depthMM,
                           projectID: project.id,
                           sourceFormat: file.sourceFormat,
-                          lattice: latticeSpec)
+                          lattice: latticeSpec,
+                          // The user's own OFF control for CAD-face projection
+                          // (task 2026-08-06-arm-projection-and-void-check).
+                          // Defaults true on the project, so an untouched project
+                          // asks for the armed posture explicitly.
+                          projectCADFaces: project.projectCADFaces)
     }
 
     // MARK: - Materials

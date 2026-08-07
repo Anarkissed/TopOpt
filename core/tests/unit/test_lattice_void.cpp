@@ -200,6 +200,35 @@ int main() {
     CHECK(why.find("bounding box") != std::string::npos,
           "A: the refusal names WHERE");
 
+    // ★ THE REFUSAL MUST BE ACTIONABLE, NOT MERELY CORRECT (task
+    // 2026-08-06-arm-projection-and-void-check, S2b). The check is ARMED BY
+    // DEFAULT now, so the first person to meet this refusal never opted in to
+    // it: they have a run that stopped and no route forward unless the text
+    // gives them one. Naming the fault is not enough.
+    CHECK(why.find("TO PROCEED") != std::string::npos,
+          "A: the refusal states how to CONTINUE, not only what is wrong");
+    CHECK(why.find("\"require_lattice_void_reaches_exterior\": false") !=
+              std::string::npos,
+          "A: the refusal names the exact setting AND the value that turns the "
+          "check off");
+    CHECK(why.find("sealed lattice cavities") != std::string::npos &&
+              why.find("cannot be removed after printing") != std::string::npos,
+          "A: the refusal states the CONSEQUENCE of turning it off, so the way "
+          "out is an informed choice rather than a way to make a message stop");
+
+    // ★ AND THE ADVICE MUST NOT BE A LOOP. While the default was false,
+    // "clear the key" was a correct remedy. The moment the default flipped to
+    // true it became wrong: removing the key leaves it at the default, which is
+    // ARMED, and the next run refuses identically. This assertion exists so the
+    // old wording cannot come back with the new default.
+    CHECK(why.find("clear lattice.require_lattice_void_reaches_exterior") ==
+              std::string::npos,
+          "A: the refusal must NOT tell the user to CLEAR the key — with the "
+          "check armed by default, clearing it changes nothing");
+    CHECK(why.find("REMOVING the key does not turn it off") != std::string::npos,
+          "A: and it says so explicitly, because clearing the key is exactly "
+          "what a reader would otherwise try first");
+
     // Determinism: the reachable SET is order-independent, so a rerun agrees.
     const LatticeVoidEscapeReport r2 =
         lattice_void_escape(g, dens, 0.5, mask, g.origin, 2.0);

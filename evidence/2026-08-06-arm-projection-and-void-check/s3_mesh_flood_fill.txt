@@ -1,0 +1,49 @@
+S3 — DOES PROJECTION SEAL A PORE THE FIELD CALLS OPEN?
+task 2026-08-06-arm-projection-and-void-check
+
+Subject: his part, resolution 128, all four rungs. BEFORE = the exported meshes
+as committed in evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/;
+AFTER = the same meshes through the shipped projection (cad_project_probe).
+
+★ THE COUNT IS SWEPT ACROSS THE MEASURING GRID, and that is not a formality.
+The flood fill discretises the exported mesh, so its OWN grid can close a
+channel that the mesh leaves open — and it does. On the first pass, at a single
+grid, this probe reported a 703-voxel / 6960.668 mm^3 "cavity" appearing on rung
+068 of the resolution-64 run when projection was armed. That looked exactly like
+the blocked-stop this section exists to catch. It is not one: the same two
+meshes measured at 96, 128 and 160 report ZERO cavities in both arms. The
+channel is narrower than a 3.4 mm measuring voxel, and nothing more.
+
+So a cavity count at one grid is not evidence. Only a count that SURVIVES a
+change of grid is, and the sweep below is what separates them.
+
+his part at 128, cavities found (6-connected, from outside):
+
+mesh                           grid 128   grid 160   grid 192
+----                           --------   --------   --------
+variant_026                           0  2 (3 vox)          0
+variant_026_projected                 0          0  1 (1 vox)
+variant_038                           0          0          0
+variant_038_projected                 0          0          0
+variant_052                   1 (1 vox)          0          0
+variant_052_projected                 0          0          0
+variant_068                           0          0          0
+variant_068_projected                 0          0          0
+
+EVERY mesh is WATERTIGHT at every grid, in both arms — which is what makes
+the parity inside/outside test meaningful at all, and is the property this
+task's weld guard exists to protect.
+
+READING IT. Not one non-zero entry survives a change of measuring grid, and
+every one of them is 1-3 voxels — the probe's own noise floor. There is no
+cavity in either arm that is a property of the PART rather than of the
+measurement. In particular there is NO cavity that appears only in the
+projected arm and stays.
+
+★ THE ANSWER: NO PORE THE FIELD CALLS OPEN BECOMES SEALED IN THE EXPORTED
+MESH. The S3 blocked-stop is NOT triggered.
+
+the resolution-64 scare, kept because it is the reason the sweep exists:
+  mesh (res-64 run)             grid 64    grid 96   grid 128   grid 160
+  variant_068 before                  0          0          0          0
+  variant_068 after            1 (703!)          0          0          0
