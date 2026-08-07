@@ -588,6 +588,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var settleDuration: CFTimeInterval = 0
     /// True while the settle animation is running (drives continuous redraw).
     private(set) var isSettling = false
+    /// How many times a settle has been STARTED. `isSettling` cannot answer the
+    /// question a mesh swap raises, because the animation is advanced by `draw` —
+    /// so a headless test that never draws sees it stuck true and learns nothing.
+    /// This counts the restarts instead, which is the claim: a brush stroke must
+    /// not re-run the settle (task 2026-08-08, S1a).
+    private(set) var settleBeginCount = 0
 
     // Detent face-highlight PULSE (device round 3, item 2): a brief gold flash of the part face a
     // design-box drag just snapped to — the in-viewer replacement for the old "Snapped to face"
@@ -947,9 +953,85 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         super.init()
     }
 
+    /// What `applyMesh` did — reported so the caller can tell "a new object
+    /// arrived and was framed" from "the object on screen moved".
+    enum MeshApplyOutcome: Equatable {
+        /// A genuinely different mesh: uploaded through `setMesh`, which REFRAMES
+        /// the camera and resets the settle.
+        case reframed
+        /// The same surface with its vertices moved: positions re-uploaded, and
+        /// the camera, the settle and the ground left exactly as the user had
+        /// them.
+        case positionsUpdatedInPlace
+    }
+
+    /// THE ONE ENTRY POINT FOR PUTTING A MESH ON SCREEN
+    /// (task 2026-08-08-smoothing-that-works-and-is-usable, S1a).
+    ///
+    /// WHAT WENT WRONG. Every mesh swap went through `setMesh`, and `setMesh`
+    /// ends with `camera.frame(mesh.bounds)` — it re-anchors the look-at target,
+    /// re-fits the distance and re-derives the zoom limits. That is right for a
+    /// new part and wrong for a brush stroke: on the smoothing page the stroke's
+    /// preview is the SAME SURFACE with some vertices moved, so every time the
+    /// maintainer lifted the brush his zoom and his pan were thrown away and the
+    /// view jumped back to the framed default. (Azimuth and elevation survived,
+    /// because the coordinator mirrors them onto the renderer before the swap —
+    /// which is why the symptom reads as "the zoom/position went back to the
+    /// origin point" rather than "the view spun".) The coordinator then handed
+    /// the reframed camera back to the shared `OrbitCameraModel`, so the reset
+    /// was persisted, not merely drawn once. MEASURED, on the fixture in
+    /// `SmoothingStrokeCameraTests`: distance 0.9108709 -> 2.6155658 and the
+    /// target snapped from his pan back onto the model centre, on every stroke.
+    ///
+    /// WHY THIS ROUTE AND NOT "PRESERVE THE CAMERA ACROSS THE SWAP". Saving the
+    /// camera around a `setMesh` call would restore those numbers and still be a
+    /// full re-upload: the settle rotation is reset to identity and re-animated
+    /// (0.8 s), the ground is rebuilt, the model centre jumps, and the tint
+    /// buffer is zeroed and rebuilt. The maintainer did not report only a camera
+    /// jump — he reported the page resetting — and those are the rest of it. A
+    /// stroke should touch the vertex positions and NOTHING else, so this takes
+    /// the in-place route and the camera falls out of it rather than being
+    /// restored by hand. It also cannot be forgotten: a caller who does not know
+    /// about the camera still gets the right behaviour.
+    ///
+    /// The decision is `ViewerMeshSignature.isSameSurface` — same counts, same
+    /// connectivity — which a stroke, a smoothing pass and an Original/Smoothed
+    /// swap all satisfy and a different part, a streamed variant or a re-meshing
+    /// all fail.
+    @discardableResult
+    func applyMesh(_ mesh: ViewerMesh) -> MeshApplyOutcome {
+        if let current = self.mesh, !mesh.isEmpty, !current.isEmpty,
+           current.signature.isSameSurface(as: mesh.signature),
+           mesh.flat.vertexCount == vertexDrawCount {
+            updateVertexPositions(mesh)
+            return .positionsUpdatedInPlace
+        }
+        setMesh(mesh)
+        return .reframed
+    }
+
+    /// Re-upload the positions of a mesh whose connectivity is unchanged. The
+    /// camera, the settle, the model centre, the ground and the tint buffer are
+    /// deliberately untouched — see `applyMesh`.
+    ///
+    /// The id buffer IS rebuilt, because it carries the positions the pick pass
+    /// rasterizes: leaving it stale would make the brush hit-test the shape from
+    /// before the stroke.
+    private func updateVertexPositions(_ mesh: ViewerMesh) {
+        self.mesh = mesh
+        let interleaved = mesh.flat.interleaved()
+        vertexBuffer = interleaved.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+        buildIDBuffer()
+    }
+
     /// Upload the mesh's flat-shaded (unshared-vertex) buffers — the interleaved
     /// position+normal buffer, the per-vertex face-id buffer (for the id pass) and a
     /// zeroed tint buffer — and frame it.
+    ///
+    /// THIS REFRAMES THE CAMERA AND RESETS THE SETTLE. Prefer `applyMesh`, which
+    /// routes a moved-but-identical surface away from here — see its comment.
     func setMesh(_ mesh: ViewerMesh) {
         self.mesh = mesh
         loadPathBuffer = nil; loadPathVertexCount = 0   // new variant → drop stale glyphs
@@ -997,6 +1079,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Begin (or snap) the settle to `rotation`. `duration <= 0` snaps immediately
     /// (reduced-motion). Rebuilds the ground for the new resting pose.
     func beginSettle(to rotation: simd_quatf, duration: CFTimeInterval) {
+        settleBeginCount += 1
         settleFrom = modelRotation
         settleTo = rotation
         settleDuration = Swift.max(0, duration)
@@ -2460,9 +2543,15 @@ extension MetalMeshView {
                     // framing (so the fit keeps the user's azimuth/elevation), then hand the
                     // freshly-framed distance/target back to the model — it stays the single
                     // source of truth.
-                    if let model = cameraModel {
-                        renderer.camera = model.camera
-                        renderer.setMesh(mesh)
+                    if let model = cameraModel { renderer.camera = model.camera }
+                    // `applyMesh`, NOT `setMesh` (task 2026-08-08, S1a). A brush
+                    // stroke hands back the SAME surface with moved vertices, and
+                    // `setMesh` would reframe the camera and restart the settle
+                    // for it — the "one stroke resets the whole page" defect.
+                    // `applyMesh` routes that case to an in-place position
+                    // upload; everything else still lands in `setMesh`.
+                    let outcome = renderer.applyMesh(mesh)
+                    if outcome == .reframed, let model = cameraModel {
                         // Handing the freshly-framed camera back to the shared model
                         // REPUBLISHES it (`@Published camera` on the @StateObject the
                         // live body observes). `apply` runs inside `updateUIView` — a
@@ -2475,12 +2564,21 @@ extension MetalMeshView {
                         // camera for the current draw.
                         let framed = renderer.camera
                         DispatchQueue.main.async { [weak model] in model?.adopt(framed) }
-                    } else {
-                        renderer.setMesh(mesh)
                     }
+                    // ONLY A REFRAME INVALIDATES THESE. `setMesh` zeroes the tint
+                    // buffer and resets the settle to identity, so both have to be
+                    // re-applied after it. The in-place path touches neither — and
+                    // clearing `lastSettleVector` there would re-run `beginSettle`
+                    // with its 0.8 s animation on every stroke, which is the part
+                    // of "resets the entire page" that is not the camera.
+                    if outcome == .reframed {
+                        appliedTint = nil        // rebuild highlight for the new mesh
+                        lastSettleVector = nil   // re-apply settle for the new mesh
+                    }
+                } else {
+                    appliedTint = nil
+                    lastSettleVector = nil
                 }
-                appliedTint = nil            // rebuild highlight for the new mesh
-                lastSettleVector = nil       // re-apply settle for the new mesh
                 dirty = true
             }
 
