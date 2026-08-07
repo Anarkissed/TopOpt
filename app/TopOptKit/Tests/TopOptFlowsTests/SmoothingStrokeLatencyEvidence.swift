@@ -69,19 +69,29 @@ final class SmoothingStrokeLatencyEvidence: XCTestCase {
             return Date().timeIntervalSince(t0) / Double(n)
         }
 
-        // ── route A: the one that shipped — a path, re-imported every stroke ──
+        // EVERY FIGURE IN THE TABLE IS A MEAN OVER THE SAME `repeats`, INCLUDING
+        // THE PER-STAGE ONES. Reading `secondsImport` off the LAST call while the
+        // total is a mean of five produces rows that do not add up — the import
+        // can print larger than the total it is part of, which is a defect in the
+        // table and not in the code it is measuring.
         var viaFile: TopOptKit.BrushPreview!
+        var fileImport = 0.0, fileSmooth = 0.0
         let fileWall = try time(repeats) {
             viaFile = try TopOptKit.smoothBrushPreview(
                 inputMeshPath: stl.path, strength: strength, weights: weights)
+            fileImport += viaFile.secondsImport / Double(repeats)
+            fileSmooth += viaFile.secondsSmooth / Double(repeats)
         }
 
         // ── route B: the one the page takes now — the geometry it already holds ──
         var viaMemory: TopOptKit.BrushPreview!
+        var memImport = 0.0, memSmooth = 0.0
         let memWall = try time(repeats) {
             viaMemory = try TopOptKit.smoothBrushPreview(
                 vertices: mesh.vertices, indices: mesh.indices,
                 strength: strength, weights: weights)
+            memImport += viaMemory.secondsImport / Double(repeats)
+            memSmooth += viaMemory.secondsSmooth / Double(repeats)
         }
 
         XCTAssertEqual(viaMemory.meshVertices, viaFile.meshVertices,
@@ -147,11 +157,11 @@ final class SmoothingStrokeLatencyEvidence: XCTestCase {
         p("")
         p("stage                                  repeats    ms/stroke")
         p("------------------------------------------------------------")
-        p("A  preview via PATH   — STL re-import  \(String(format: "%7d", repeats))  \(ms(viaFile.secondsImport))")
-        p("A  preview via PATH   — smoothing      \(String(format: "%7d", repeats))  \(ms(viaFile.secondsSmooth))")
+        p("A  preview via PATH   — STL re-import  \(String(format: "%7d", repeats))  \(ms(fileImport))")
+        p("A  preview via PATH   — smoothing      \(String(format: "%7d", repeats))  \(ms(fileSmooth))")
         p("A  preview via PATH   — TOTAL          \(String(format: "%7d", repeats))  \(ms(fileWall))")
-        p("B  preview via MEMORY — STL re-import  \(String(format: "%7d", repeats))  \(ms(viaMemory.secondsImport))")
-        p("B  preview via MEMORY — smoothing      \(String(format: "%7d", repeats))  \(ms(viaMemory.secondsSmooth))")
+        p("B  preview via MEMORY — STL re-import  \(String(format: "%7d", repeats))  \(ms(memImport))")
+        p("B  preview via MEMORY — smoothing      \(String(format: "%7d", repeats))  \(ms(memSmooth))")
         p("B  preview via MEMORY — TOTAL          \(String(format: "%7d", repeats))  \(ms(memWall))")
         p("   ViewerMesh build (app side, both)   \(String(format: "%7d", repeats))  \(ms(viewerWall))")
         p("------------------------------------------------------------")
@@ -169,7 +179,7 @@ final class SmoothingStrokeLatencyEvidence: XCTestCase {
         p("   the coordinator's array compare against the uploaded copy \(ms(tintCompareWall)) ms")
         p("")
         p("The import share of the SHIPPED preview call: "
-          + String(format: "%.1f%%", viaFile.secondsImport / viaFile.seconds * 100))
+          + String(format: "%.1f%%", fileImport / (fileImport + fileSmooth) * 100))
         p("moved vertices \(viaMemory.movedVertices) / \(nverts); "
           + String(format: "max displacement %.4f mm", viaMemory.maxDisplacementMM))
 
