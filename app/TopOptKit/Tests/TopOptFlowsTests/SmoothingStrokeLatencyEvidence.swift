@@ -101,6 +101,27 @@ final class SmoothingStrokeLatencyEvidence: XCTestCase {
         }
         XCTAssertEqual(viewer.vertexCount, nverts)
 
+        // ── S1d: THE OTHER THING EVERY STROKE REBUILDS. `stressTints` on the
+        //    smoothing page is `smoothBrush.viewerTints()`, and it is computed in
+        //    `WorkspacePlaceholder.body` — so it is rebuilt on EVERY SwiftUI pass,
+        //    not only when the brush changes. The coordinator then compares the
+        //    result against the uploaded copy element by element. Both are sized
+        //    to the FLAT vertex count, three per triangle.
+        var brush = SmoothBrushModel(
+            indices: mesh.indices, vertexCount: nverts,
+            freeze: SmoothFreezeMask(frozen: [Bool](repeating: false, count: nverts),
+                                     toleranceMM: 0.75))
+        brush.addRegion(strength: 0.49)
+        brush.paint(.add, triangles: (0..<min(20_000, ntris)).map { Int32($0) })
+        var tints: [SIMD4<Float>] = []
+        let tintWall = time(repeats) { tints = brush.viewerTints() }
+        // A DISTINCT buffer, differing in its LAST element: `==` on the same
+        // copy-on-write storage short-circuits on pointer identity and would
+        // report ~0, which is not what the coordinator pays.
+        var other = tints
+        other[other.count - 1] = SIMD4<Float>(1, 1, 1, 1)
+        let tintCompareWall = time(repeats) { _ = (tints == other) }
+
         var out = ""
         func p(_ s: String) { out += s + "\n"; print(s) }
         p("STROKE LATENCY ON HIS OWN VARIANT — rung 068")
@@ -139,6 +160,13 @@ final class SmoothingStrokeLatencyEvidence: XCTestCase {
         let saved = (fileWall + viewerWall) - (memWall + viewerWall)
         p(String(format: "removed: %.1f ms per stroke (%.1f%% of the before figure)",
                  saved * 1000, saved / (fileWall + viewerWall) * 100))
+        p("")
+        p("")
+        p("S1d — WHAT ELSE A PASS REBUILDS (not on the critical path above, but")
+        p("      paid on EVERY SwiftUI body evaluation, of which a stroke causes")
+        p("      several):")
+        p("   smoothBrush.viewerTints()  \(tints.count) entries   \(ms(tintWall)) ms")
+        p("   the coordinator's array compare against the uploaded copy \(ms(tintCompareWall)) ms")
         p("")
         p("The import share of the SHIPPED preview call: "
           + String(format: "%.1f%%", viaFile.secondsImport / viaFile.seconds * 100))

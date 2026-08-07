@@ -1498,6 +1498,17 @@ if(OpenCASCADE_FOUND)
   add_executable(cad_project_probe EXCLUDE_FROM_ALL
     tests/harness/cad_project_probe.cpp)
   target_link_libraries(cad_project_probe PRIVATE topopt)
+
+  # S2 (task 2026-08-08-smoothing-that-works-and-is-usable): the bake-off PR 306
+  # stopped short of — Taubin against mean-curvature flow on the OPTIMIZER-CUT
+  # population of his own four rungs, with PR 307's classifier deciding which
+  # vertices those are and C4 freezing every CAD one. OCCT-gated because it
+  # imports his STEP to get the classifier's answer.
+  #   cmake --build build --target cut_population_probe
+  #   ./build/cut_population_probe <design.bin> <part.step> [evidence_dir]
+  add_executable(cut_population_probe EXCLUDE_FROM_ALL
+    tests/harness/cut_population_probe.cpp)
+  target_link_libraries(cut_population_probe PRIVATE topopt)
   # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
   # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
   # S3 instrumentation (minimum cross-section, outward excursion, volume, wall
