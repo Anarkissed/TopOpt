@@ -103,10 +103,14 @@ public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
 /// the user's extrusion width, so the app states that number rather than inventing one.
 /// `swept` gives core a min…max window to grade the cell across (coarse where the
 /// stress is low, fine where it is high), both ends still bounded by core's floor.
+/// `fit` (task 2026-08-07-cell-mode-fit-and-swept-floor) derives the cell PER
+/// DECLARED REGION from that region's own thickness — core has carried it since
+/// PR 302 and the device had no way to select it.
 public enum LatticeCellSizeMode: String, Codable, Equatable, Sendable {
     case auto
     case fixed
     case swept
+    case fit
 }
 
 /// The lattice block the run carries — the exact fields the core job schema's
@@ -253,8 +257,10 @@ public struct LatticeSpec: Equatable, Sendable {
         //   fixed  → cell_mm, no mode key   (an absent cell_mode IS "fixed")
         //   auto   → cell_mode only         (core picks from its own floor)
         //   swept  → cell_mode + min + max  (no cell_mm)
+        //   fit    → cell_mode only         (core derives one cell per region)
         switch cellSizeMode {
-        case LatticeCellSizeMode.auto.rawValue:
+        case LatticeCellSizeMode.auto.rawValue,
+             LatticeCellSizeMode.fit.rawValue:
             grading["cell_mode"] = cellSizeMode
         case LatticeCellSizeMode.swept.rawValue:
             grading["cell_mode"] = cellSizeMode
@@ -541,11 +547,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     ///     zeroes both here rather than shipping a document core will reject.
     ///   * THE CAPABILITY GATE — a key the linked core does not accept is never
     ///     emitted, because `reject_unknown_keys` fails the WHOLE job over one.
+    ///   * ★ THE FIT EXCLUSION (task 2026-08-07-cell-mode-fit-and-swept-floor) —
+    ///     `grade_lattice` THROWS on `cell_mode: "fit"` alongside retention
+    ///     (core/src/simp/grading.cpp:66-70), deliberately: fit already derives a
+    ///     cell per region and already reports what it emitted below the accuracy
+    ///     floor, with its own accounting, so running both leaves two mechanisms
+    ///     deciding the same voxel with two receipts. The job that pairs them is
+    ///     therefore NOT EXPRESSIBLE from here — `cellMode` is the mode the SPEC
+    ///     will carry, not the stored setting, so a swept snapshot that `runSpec`
+    ///     resolved down to fixed cannot smuggle the pair through either.
     ///
     /// Returns the four values a `LatticeSpec` carries.
-    func resolvedSubfloor(capability: LatticeRetentionCapability)
+    func resolvedSubfloor(capability: LatticeRetentionCapability,
+                          cellMode: LatticeCellSizeMode)
         -> (retain: Bool, fraction: Double?, perRegion: Bool, regionCells: Bool) {
         let retain = retainSubfloorInUnloadedRegions && capability.retention
+            && cellMode != .fit
         // Sent ONLY when the user moved it off core's own number: nil means
         // "core takes its own constant at call time", which is a different job
         // document from one that states the same value.
@@ -562,7 +579,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
                         emit3MF: Bool = false,
                         regions: [LatticeRegionSpec] = [],
-                        capability: LatticeRetentionCapability = .fromCore)
+                        capability: LatticeRetentionCapability = .fromCore,
+                        cellModes: LatticeCellModeCapability = .fromCore)
         -> LatticeSpec? {
         guard enabled else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
@@ -586,12 +604,28 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             let hi = Swift.max(cellMaxMM, lo)
             // Core refuses a non-positive ladder end, so a snapshot carrying one falls
             // back to the fixed cell rather than shipping a job the schema rejects.
-            let mode: LatticeCellSizeMode = (cellSizeMode == .swept && !(lo > 0))
+            // FIT falls back the same way when the LINKED core does not carry the
+            // value: an unknown cell_mode kills the whole job at validation, exactly
+            // as an unknown grading key does, so a project snapshot saved against a
+            // newer core degrades to the fixed cell instead of dying at the worker.
+            var mode: LatticeCellSizeMode = (cellSizeMode == .swept && !(lo > 0))
                 ? .fixed : cellSizeMode
+            if mode == .fit && !cellModes.fit { mode = .fixed }
+            // ★ FIT DERIVES FROM A DECLARED REGION, so core REFUSES the mode on a job
+            // that declares none (job.cpp: "a job that declares none states no
+            // requirement to fit"). Caught by this task's own schema test, which
+            // handed the emitted bytes to core's parser rather than checking a key
+            // list — a job.json that dies at validation is not a degraded run, it is
+            // no run. The page says so on the control; this is the structural half.
+            if mode == .fit && !regions.contains(where: { $0.role == .include }) {
+                mode = .fixed
+            }
             // Sub-floor retention rides the GRADED path only — the keys live in the
             // `grading` block, and a uniform lattice job has no grading block at
             // all, so there is nothing for core to read there. The control says so.
-            let sub = resolvedSubfloor(capability: capability)
+            // `mode` (not `cellSizeMode`) carries the fit exclusion, so a spec that
+            // fell back to fixed can still arm retention.
+            let sub = resolvedSubfloor(capability: capability, cellMode: mode)
             return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
                                generateRelativeDensity: 0,
                                minRelativeDensity: b.densityLo,
@@ -630,14 +664,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
                         emit3MF: Bool = false,
                         regions: [LatticeRegionSpec] = [],
-                        capability: LatticeRetentionCapability = .fromCore)
+                        capability: LatticeRetentionCapability = .fromCore,
+                        cellModes: LatticeCellModeCapability = .fromCore)
         -> LatticeSpec? {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
         let generatable = TopOptKit.latticeGeneratableTopologies.contains(id)
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
-                       regions: regions, capability: capability)
+                       regions: regions, capability: capability,
+                       cellModes: cellModes)
     }
 
     /// The proxy grading parameters for the current settings, with the density range

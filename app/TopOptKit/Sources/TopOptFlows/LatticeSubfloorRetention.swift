@@ -120,6 +120,58 @@ public struct LatticeRetentionCapability: Equatable, Sendable {
     }
 }
 
+// MARK: - 1b · which cell_mode VALUES the linked core accepts
+
+/// Whether the core the app is built against takes `"cell_mode": "fit"` (task
+/// 2026-08-07-cell-mode-fit-and-swept-floor).
+///
+/// *** WHY A SECOND PROBE AND NOT `gradingSchemaAccepts`. *** That one asks about a
+/// grading KEY, and `cell_mode` has been an accepted key since the cell-size sweep
+/// landed. What grew afterwards is the SET OF VALUES it takes — "fit" arrived with
+/// PR 302 — and a core that predates it does not ignore the value, it fails the whole
+/// job with `grading "cell_mode" must be "fixed", "auto" or "swept"`. Same fatal
+/// shape as an unknown key, different question, so it needs its own probe rather than
+/// a hardcoded "core has this now" that is right on the day it is written.
+public struct LatticeCellModeCapability: Equatable, Sendable {
+    /// True iff the linked core's schema accepts `"cell_mode": "fit"`.
+    public let fit: Bool
+    /// False ⇒ the probe could not prove itself on this build (the same two-sided
+    /// control `LatticeRetentionCapability` uses), so `fit` is a conservative false.
+    public let probeReliable: Bool
+
+    public init(fit: Bool, probeReliable: Bool) {
+        self.fit = fit
+        self.probeReliable = probeReliable
+    }
+
+    /// Nothing available — what a builder falls back to when it cannot ask.
+    public static let none = LatticeCellModeCapability(fit: false,
+                                                       probeReliable: false)
+    /// Everything available. Tests drive the serializer with this so the emission is
+    /// proven WITHOUT depending on which core happens to be vendored.
+    public static let all = LatticeCellModeCapability(fit: true,
+                                                      probeReliable: true)
+
+    /// Read from the linked core, once (`static let` is lazy in Swift).
+    public static let fromCore: LatticeCellModeCapability = {
+        LatticeCellModeCapability(
+            fit: TopOptKit.gradingSchemaAcceptsCellMode(
+                LatticeCellSizeMode.fit.rawValue),
+            probeReliable: TopOptKit.gradingSchemaProbeIsReliable)
+    }()
+
+    /// Why the control is unavailable, in the user's terms. nil ⇒ offered.
+    public var unavailableReason: String? {
+        if fit { return nil }
+        if !probeReliable {
+            return "The app couldn’t ask this core what it accepts, so it won’t "
+                 + "send a setting that might stop the job before it starts."
+        }
+        return "The core on your Mac doesn’t take this setting yet — rebuild core "
+             + "and this appears on its own."
+    }
+}
+
 // MARK: - 2 · the control, its copy, and the exposure
 
 /// The lattice page's retention control as a pure value: whether it is offered,
@@ -161,7 +213,9 @@ public struct LatticeRetentionControl: Equatable, Sendable {
                                belowFloorVoxels: Int?,
                                regionVoxels: Int?,
                                ceilingFraction: Double?,
-                               coreCeilingFraction: Double) -> LatticeRetentionControl {
+                               coreCeilingFraction: Double,
+                               cellMode: LatticeCellSizeMode = .fixed)
+        -> LatticeRetentionControl {
         let body =
             "This region’s members are thinner than a certified lattice needs. "
           + "Turn this on and the lattice is built anyway — the strength "
@@ -174,6 +228,18 @@ public struct LatticeRetentionControl: Equatable, Sendable {
             disabled = "Set Density mode to Auto — retention is part of the grading "
                      + "law, and a uniform lattice run carries no grading block for "
                      + "it to ride."
+        } else if cellMode == .fit {
+            // ★ THE FIT EXCLUSION, IN HIS TERMS. From where he sits these two solve
+            // the same problem — "my regions are too thin, lattice them anyway" — so
+            // the copy says WHICH TO USE WHEN rather than only that they conflict.
+            // Core THROWS on the pair (grading.cpp:66-70) and the app must not let
+            // him author that job.
+            disabled = "Cell size is set to Per region, which already fits a cell to "
+                     + "each region and reports what it emitted below the floor. "
+                     + "Use Per region when your regions differ in thickness; use "
+                     + "this switch when one cell has to serve them all. Only one "
+                     + "of the two can decide a given piece of material, so core "
+                     + "refuses a run that asks for both."
         } else if let why = capability.unavailableReason() {
             disabled = why
         }

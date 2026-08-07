@@ -1,0 +1,29 @@
+Building for debugging...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.14s)
+Test Suite 'Selected tests' started at 2026-08-06 18:07:48.790.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-08-06 18:07:48.791.
+Test Suite 'R2FitModeRepro' started at 2026-08-06 18:07:48.791.
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2a_theEnumHasNoFitCase]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/app/TopOptKit/Tests/TopOptFlowsTests/R2FitModeRepro.swift:36: error: -[TopOptFlowsTests.R2FitModeRepro testR2a_theEnumHasNoFitCase] : XCTAssertNotNil failed - R2a: the app cannot represent core's fourth cell mode
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2a_theEnumHasNoFitCase]' failed (0.012 seconds).
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2b_theSerializerDropsFit]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/app/TopOptKit/Tests/TopOptFlowsTests/R2FitModeRepro.swift:52: error: -[TopOptFlowsTests.R2FitModeRepro testR2b_theSerializerDropsFit] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("fit")") - R2b: selecting fit must reach the worker
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/app/TopOptKit/Tests/TopOptFlowsTests/R2FitModeRepro.swift:54: error: -[TopOptFlowsTests.R2FitModeRepro testR2b_theSerializerDropsFit] : XCTAssertNil failed: "4" - R2b: core REFUSES a target cell alongside fit
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2b_theSerializerDropsFit]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2c_fitPlusRetentionIsExpressible]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/app/TopOptKit/Tests/TopOptFlowsTests/R2FitModeRepro.swift:70: error: -[TopOptFlowsTests.R2FitModeRepro testR2c_fitPlusRetentionIsExpressible] : XCTAssertNil failed: "1" - R2c: fit + retention is the pair grade_lattice THROWS on — the app must not be able to author it
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2c_fitPlusRetentionIsExpressible]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2d_noCellModeValueProbeExists]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/app/TopOptKit/Tests/TopOptFlowsTests/R2FitModeRepro.swift:81: error: -[TopOptFlowsTests.R2FitModeRepro testR2d_noCellModeValueProbeExists] : failed - R2d: no API exists to ask core whether it takes cell_mode "fit"
+Test Case '-[TopOptFlowsTests.R2FitModeRepro testR2d_noCellModeValueProbeExists]' failed (0.001 seconds).
+Test Suite 'R2FitModeRepro' failed at 2026-08-06 18:07:48.806.
+	 Executed 4 tests, with 5 failures (0 unexpected) in 0.014 (0.015) seconds
+Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-06 18:07:48.806.
+	 Executed 4 tests, with 5 failures (0 unexpected) in 0.014 (0.015) seconds
+Test Suite 'Selected tests' failed at 2026-08-06 18:07:48.806.
+	 Executed 4 tests, with 5 failures (0 unexpected) in 0.014 (0.016) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

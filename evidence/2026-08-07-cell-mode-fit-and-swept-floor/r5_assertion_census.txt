@@ -1,0 +1,41 @@
+base ref            : d9fe8f768331c9202b172376b2779fc0a0315af2
+assertion messages on base   : 5435
+assertion messages on branch : 5466
+
+=== PRESENT ON MAIN, ABSENT ON BRANCH (the only direction that matters) ===
+  (none — no assertion message was removed or reworded)
+
+=== ADDED ON BRANCH (informational) ===
+  + S1 positive control: the plan actually latticed something, so the comparison below is not vacuous
+  + S1 precondition: the two floors are different numbers, and the light one is the larger
+  + S1: a declared minimum above the frontier is the answer, unchanged
+  + S1: a window with no printable rung reports the frontier cell
+  + S1: and it is FINER than the light floor — the old rule reported 4.9314 mm here, which is the whole defect
+  + S1: and the plan does grant a cell under the light floor — the number the forecast used to report
+  + S1: it is exactly one doubling of the declared minimum (the first rung at or above the frontier), not an invented number
+  + S1: the forecast's cell is a true LOWER bound on the cell the plan grants
+  + S1: the plan's base cell IS the declared minimum — no part-wide floor is applied to it, which is the fact the forecast used to contradict
+  + S1: the reported cell is at or above the cell below which nothing prints
+  + a re-lattice must carry the same cell mode as the run
+  + an absent cell_mode IS fixed — the untouched job is unchanged
+  + an unknown cell_mode kills the whole job; degrade instead
+  + and the document that IS emitted must be one core runs
+  + core must accept the document the app emits for fit
+  + core refuses fit with nothing declared to fit into
+  + fit + retention is the job core throws on — it must not be expressible from the app
+  + fit takes no target cell — core refuses one alongside it
+  + negative control: a nonsense mode must be refused
+  + one-sided edits to the two serializers must fail here
+  + positive control: every core takes fixed
+  + retention cannot be armed while fit is selected
+  + retention must be unaffected on \(mode.rawValue)
+  + the block being compared must actually carry the mode
+  + the core in this worktree carries fit (PR 302) — if this fails, core is stale, rebuild it
+  + the default cell mode is NOT changed by this task
+  + the exclusion must be scoped to fit alone
+  + the mode the user picked must reach the worker
+  + the reason must name the control that is winning: \(why)
+  + the settings under test must actually arm retention
+  + use per region when
+
+R5: PASS

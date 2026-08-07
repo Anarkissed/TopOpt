@@ -753,12 +753,16 @@ void fill_grading_fit(RunInfo& gi, const GradedField& gf,
 
 // The FINEST lattice cell (mm) the grading law could grant any member on this job —
 // the most favourable cell a member could be measured against, and therefore the
-// honest denominator for the cells-per-member floor while the design is forming.
+// honest denominator for any cells-per-member statement about the run.
 // AUTO takes the printability floor itself; FIXED takes its target raised to the floor
-// that actually binds (S2); SWEPT's finest level is its declared minimum, likewise
-// raised; FIT's is the finest cell any declared region derived. Mirrors grading.cpp's
-// own resolution — it does not invent a second rule.
-double multiscale_floor_cell_mm(const JobDescription& job) {
+// that actually binds (S2); SWEPT's finest level comes from the PLAN'S OWN LADDER (S1);
+// FIT's is the finest cell any declared region derived. Mirrors grading.cpp's and
+// cell_plan.cpp's own resolution — it does not invent a second rule.
+//
+// `swept_light_floor` selects the PRE-S1 swept answer. It exists for exactly one
+// caller and that caller documents why (see `multiscale_floor_cell_mm` below); no new
+// code should pass true.
+double planned_cell_mm(const JobDescription& job, bool swept_light_floor) {
   const double floor_mm = lattice_cell_printability_floor_mm(
       LatticeTopology::Octet, job.grading.min_extrudable_width_mm);
   // S2: the cell below which NO density in the band prints — the bound Fixed applies.
@@ -769,8 +773,29 @@ double multiscale_floor_cell_mm(const JobDescription& job) {
   if (!resolve_cell_mode(job.grading.cell_mode, mode))
     return floor_mm;  // unknown mode is refused downstream; report the floor
   switch (mode) {
+    // AUTO KEEPS THE LIGHT FLOOR, DELIBERATELY. "auto" means "the lightest lattice
+    // core can print", and `lattice_cell_printability_floor_mm` — evaluated at
+    // rho_MIN — is exactly the cell that claim implies. It is the mode's ANSWER, not
+    // a bound on someone else's number, so S1 does not touch it and past auto runs
+    // stay reproducible.
     case CellSizeMode::Auto:  return floor_mm;
-    case CellSizeMode::Swept: return std::max(job.grading.cell_min_mm, floor_mm);
+    // ★ S1 (task 2026-08-07-cell-mode-fit-and-swept-floor). SWEPT'S DECLARED MINIMUM
+    // IS THE USER STATING AN INTENT, and it must be bounded by what can PRINT — not
+    // by what a LIGHT lattice needs. This used to be `max(cell_min_mm, floor_mm)`,
+    // which silently reported a declared 1.173 mm minimum as 4.9314 mm at a 0.45 mm
+    // strut line width; `plan_cell_sizes` meanwhile takes `cell_min_mm` VERBATIM as
+    // its base cell (cell_plan.cpp) and climbs the dyadic ladder per base cell. The
+    // forecast and the planner therefore DISAGREED — measured, in
+    // evidence/2026-08-07-cell-mode-fit-and-swept-floor/s1_disagreement.txt. The
+    // ladder is now read from `cell_plan_finest_printable_cell_mm`, which IS the
+    // planner's own arithmetic.
+    case CellSizeMode::Swept:
+      return swept_light_floor
+                 ? std::max(job.grading.cell_min_mm, floor_mm)
+                 : cell_plan_finest_printable_cell_mm(
+                       LatticeTopology::Octet, job.grading.cell_min_mm,
+                       job.grading.cell_max_mm,
+                       job.grading.min_extrudable_width_mm);
     case CellSizeMode::Fit: {
       double finest = 0.0;
       for (const FitRegionCell& f :
@@ -782,6 +807,32 @@ double multiscale_floor_cell_mm(const JobDescription& job) {
     case CellSizeMode::Fixed: break;
   }
   return std::max(job.grading.cell_mm, abs_floor_mm);
+}
+
+// ★★ S1's SECOND CONSUMER, DELIBERATELY LEFT ON THE OLD RULE — BUILT + DISARMED.
+//
+// This is the ONE place the swept resolution reaches GEOMETRY rather than text: its
+// return value becomes `options.min_feature_mm` (the density filter's length scale) on
+// a `lattice.multiscale` job, so changing it changes the design.
+//
+// MEASURED, not assumed. evidence/2026-08-07-cell-mode-fit-and-swept-floor/
+// r1_byte_identity.txt case G — a swept multiscale job declaring a 0.6 mm minimum at a
+// 0.20 mm strut line width:
+//     old rule : floor 5.0 cells x 2.1917 mm = 10.959 mm member => min_feature 5.479 mm
+//     new rule : floor 5.0 cells x 0.6000 mm =  3.000 mm member => min_feature 2.500 mm
+// and EVERY artifact moved — design.bin, both meshes, report.json, fields.bin. That is
+// a verdict moving on a job that runs today, which this task's R3 makes a
+// BLOCKED-STOP. So the correction stops at the refusal path (which touches no
+// geometry, proven by the same script's cases A-F) and this caller keeps the old
+// answer until the maintainer decides.
+//
+// IT IS THE SAME DEFECT. The old answer here is too COARSE in the same way and for the
+// same reason: it forces a length scale derived from a cell the plan would never use,
+// which forbids members the lattice could actually hold. Flipping the argument below
+// to false is the whole change; what it needs is a gate table on multiscale swept jobs,
+// not more code.
+double multiscale_floor_cell_mm(const JobDescription& job) {
+  return planned_cell_mm(job, /*swept_light_floor=*/true);
 }
 
 // Copy the SUB-FLOOR RETENTION record into run_info — ONE filler for both call sites,
@@ -6033,12 +6084,23 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     if (!job.lattice.regions.empty()) {
       const LatticeTopology topo = LatticeTopology::Octet;
       const double n_star = lattice_cells_per_member_min(topo);
-      // The cell this run will actually use, by the SAME rules the law applies
-      // (grading.cpp): AUTO takes the printability floor, FIXED the target raised
-      // to the floor that actually binds (S2), SWEPT its own minimum raised to the
-      // rho_min floor; a uniform job states its cell. FIT has NO single planned
-      // cell — it derives one per region — so the scalar below carries the FINEST
-      // derived cell and every per-region line uses that region's own.
+      // The cell this run will actually use, by the SAME rules the law applies:
+      // AUTO takes the printability floor, FIXED the target raised to the floor that
+      // actually binds (S2), SWEPT the finest rung its OWN dyadic ladder can print
+      // (S1, task 2026-08-07); a uniform job states its cell. FIT has NO single
+      // planned cell — it derives one per region — so the scalar below carries the
+      // FINEST derived cell and every table row uses that region's own.
+      //
+      // ★ THIS IS `planned_cell_mm`, CALLED — not copied. The two used to be duplicate
+      // switches, and the duplication is exactly how the defect survived: task
+      // 2026-08-05-lattice-cell-fit-mode's S2 corrected FIXED in both copies and left
+      // SWEPT unchanged in both (commit 4032ce8, diff context lines 245/431).
+      //
+      // `swept_light_floor=false` is the S1 CORRECTION and it is the refusal path's
+      // answer. `multiscale_floor_cell_mm` — the other caller — passes true and says
+      // at length why: its value reaches geometry, and moving it flips a design on a
+      // job that runs today. Nothing here reaches geometry, so nothing here is gated
+      // on that decision.
       CellSizeMode pf_mode = CellSizeMode::Fixed;
       const bool pf_mode_known =
           !job.grading.present ||
@@ -6051,22 +6113,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (job.grading.present) {
         floor_mm = lattice_cell_printability_floor_mm(
             topo, job.grading.min_extrudable_width_mm);
-        const double abs_floor_mm =
-            job.grading.min_extrudable_width_mm /
-            octet_strut_diameter_mm(lattice_rho_max(topo), 1.0);
-        if (pf_mode == CellSizeMode::Auto) cell_mm = floor_mm;
-        else if (pf_mode == CellSizeMode::Swept)
-          cell_mm = std::max(job.grading.cell_min_mm, floor_mm);
-        else if (pf_fit) {
+        if (pf_fit)
           pf_fit_cells = fit_region_cells(job, topo,
                                           job.grading.min_extrudable_width_mm);
-          cell_mm = 0.0;
-          for (const FitRegionCell& f : pf_fit_cells)
-            if (f.feasible && (cell_mm == 0.0 || f.cell_mm < cell_mm))
-              cell_mm = f.cell_mm;
-          if (cell_mm == 0.0) cell_mm = abs_floor_mm;  // nothing feasible: report
-                                                       // the frontier cell
-        } else cell_mm = std::max(job.grading.cell_mm, abs_floor_mm);
+        cell_mm = planned_cell_mm(job, /*swept_light_floor=*/false);
       }
       const double required_mm = n_star * cell_mm;
       // The stated bead width the derivation is evaluated at. A uniform job carries
@@ -6076,6 +6126,66 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       const double w_min_fc = job.grading.present
                                   ? job.grading.min_extrudable_width_mm
                                   : job.lattice.min_extrudable_width_mm;
+      // ── A SWEPT WINDOW WHOSE TOP IS UNDER THE PRINTABLE FRONTIER (found by this
+      // task's own R3 table, case S_underfrontier).
+      //
+      // Every rung of the ladder is `cell_min_mm * 2^L <= cell_max_mm`, so if
+      // `cell_max_mm` itself is below `w / phi(rho_max)` then NO rung prints at any
+      // density in the band. The plan drops every base cell as unprintable, the run
+      // emits no lattice, and the solve is spent for nothing — which is exactly the
+      // outcome this pre-flight exists to predict.
+      //
+      // ★ REPORTED, NOT REFUSED, and the distinction is deliberate. Refusing it would
+      // be a NEW refusal on jobs that run today: before S1 the planned cell here was
+      // the LIGHT floor, so a job whose regions cleared percolation against that
+      // number ran to completion (emitting nothing). This task's R3 makes a new
+      // refusal on such a job a blocked-stop, so the pre-flight says the sentence and
+      // changes no verdict. Turning it into a refusal is a one-line change behind its
+      // own gate table.
+      std::string swept_unprintable_note;
+      if (job.grading.present && pf_mode == CellSizeMode::Swept && w_min_fc > 0.0) {
+        const double frontier_mm =
+            w_min_fc / octet_strut_diameter_mm(lattice_rho_max(topo), 1.0);
+        if (job.grading.cell_max_mm < frontier_mm)
+          swept_unprintable_note =
+              "\n     ★ AND SEPARATELY: your whole swept window (" +
+              json_num(job.grading.cell_min_mm) + " to " +
+              json_num(job.grading.cell_max_mm) +
+              " mm) is FINER than the smallest cell that prints at a " +
+              json_num(w_min_fc) + " mm strut line width, which is " +
+              json_num(frontier_mm) +
+              " mm. No level of the ladder can carry a strut, so this run will "
+              "solve and then emit NO LATTICE AT ALL. Raise \"cell_max_mm\" to at "
+              "least that value.";
+      }
+      // ── S3: PER-REGION OUTPUT IS ONE TABLE ROW, AND THE EXPLANATION APPEARS ONCE
+      // (task 2026-08-07-cell-mode-fit-and-swept-floor).
+      //
+      // WHAT WAS WRONG, in the maintainer's words: "Nothing is clear. This is a
+      // *horrible* way to help the user." Nine declared regions produced NINE
+      // near-identical paragraphs — each one restating the same floor, the same cell
+      // and the same physics — and the single sentence telling him what to TYPE came
+      // last, below the fold on an iPad, cut off mid-word. The completeness bar (every
+      // number, every remedy) was met; readability was never specified, so it was not
+      // met at all.
+      //
+      // The shape is now fixed and it is the same for every case below:
+      //     HEADLINE — what happened, with the count and the planned cell
+      //     ACTION   — the number to type, FIRST, before any explanation
+      //     TABLE    — one row per declared region, and nothing else per region
+      //     Why:     — the explanation, ONCE
+      //
+      // Nothing here decides anything. The three-case machine below is untouched: the
+      // same jobs refuse, for the same reasons, with the same arithmetic. Only the
+      // composition of the text changed.
+      struct PfRow {
+        std::size_t ri = 0;
+        std::string kind;
+        double extent_mm = 0.0;
+        const FitRegionCell* fit = nullptr;  // FIT only; null on every other mode
+        bool thin = false;                   // counted against `thin_regions`
+      };
+      std::vector<PfRow> pf_rows;
       int thin_regions = 0, include_regions = 0;
       double thinnest_mm = std::numeric_limits<double>::infinity();
       for (std::size_t ri = 0; ri < job.lattice.regions.size(); ++ri) {
@@ -6087,9 +6197,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         // derivation, so the two cannot describe different regions.
         const double extent_mm = lattice_region_thinnest_extent_mm(r);
         if (extent_mm < thinnest_mm) thinnest_mm = extent_mm;
+        PfRow row;
+        row.ri = ri;
+        row.kind = r.kind;
+        row.extent_mm = extent_mm;
         // ── FIT reports what this region DERIVED, not what one part-wide cell
         // demands of it. That is the whole difference the mode makes, and it is
-        // the line the maintainer reads to see his own region.
+        // the row the maintainer reads to see his own region.
         if (pf_fit) {
           // Matched by the region's OWN job index rather than by a running counter:
           // fit_region_cells drops a degenerate region (mirroring the role resolver)
@@ -6099,64 +6213,94 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           for (const FitRegionCell& c : pf_fit_cells)
             if (c.job_region_index == ri) { f = &c; break; }
           if (f == nullptr) continue;   // degenerate region, dropped by the resolver
-          if (!f->feasible) {
-            ++thin_regions;
-            std::fprintf(
-                stderr,
-                "[lattice] FIT region %zu (%s): %.3f mm across its thinnest "
-                "dimension — NO (cell, density) pair prints AND percolates here. "
-                "A connected strut network needs %.3f mm at this bead; it will be "
-                "kept SOLID.\n",
-                ri, r.kind.c_str(), extent_mm, f->min_width_buildable_mm);
-            continue;
-          }
-          std::fprintf(
-              stderr,
-              "[lattice] FIT region %zu (%s): %.3f mm across => cell %.4f mm at "
-              "relative density %.4f (strut %.4f mm), %.2f cells across — %s.\n",
-              ri, r.kind.c_str(), extent_mm, f->cell_mm, f->relative_density,
-              f->strut_mm, f->cells_per_member,
-              f->out_of_regime
-                  ? "BUILDABLE but UNDER the accuracy floor, so the certificate "
-                    "over it is OUT OF REGIME"
-                  : "certifiable");
-          if (f->out_of_regime) ++thin_regions;
-          continue;
+          row.fit = f;
+          row.thin = !f->feasible || f->out_of_regime;
+        } else {
+          row.thin = extent_mm < required_mm;
         }
-        if (extent_mm >= required_mm) continue;
-        ++thin_regions;
-        std::fprintf(
-            stderr,
-            "[lattice] FORECAST region_too_thin: include region %zu (%s) is "
-            "%.3f mm across its thinnest dimension; the cells-per-member floor "
-            "needs %.1f cells x %.4f mm = %.3f mm. Nothing inside this region "
-            "can hold a certifiable lattice — it will be kept SOLID. This is a "
-            "property of the region's geometry and the printability floor "
-            "(nozzle-derived), not of the optimizer or of any Protect setting.\n",
-            ri, r.kind.c_str(), extent_mm, n_star, cell_mm, required_mm);
+        if (row.thin) ++thin_regions;
+        pf_rows.push_back(row);
       }
       if (include_regions > 0) {
-        if (pf_fit)
-          std::fprintf(
-              stderr,
-              "[lattice] FIT: %d of %d include regions cannot reach the %.1f-cell "
-              "accuracy floor at their derived cell (thinnest region %.3f mm; "
-              "finest derived cell %.4f mm). Those are BUILDABLE and their "
-              "certificate is OUT OF REGIME; the rest certify.\n",
-              thin_regions, include_regions, n_star, thinnest_mm, cell_mm);
-        else
-        std::fprintf(stderr,
-                     "[lattice] FORECAST: %d of %d include regions are thinner "
-                     "than the %.3f mm the floor requires (thinnest %.3f mm; "
-                     "floor %.1f cells x %.4f mm)\n",
-                     thin_regions, include_regions, required_mm, thinnest_mm,
-                     n_star, cell_mm);
         fc_region_too_thin = thin_regions;
         fc_include_regions = include_regions;
         fc_required_mm = required_mm;
         fc_thinnest_mm = thinnest_mm;
       }
-      std::fflush(stderr);
+
+      // THE TABLE. Fixed-width columns so nine rows read as nine rows and not as a
+      // wall; the header names the cell every "cells across" number is measured at,
+      // so that cell appears ONCE rather than on every line.
+      auto pf_table = [&]() {
+        std::string t;
+        char line[320];
+        for (const PfRow& row : pf_rows) {
+          const std::string label =
+              "  " + std::to_string(row.ri) + " (" + row.kind + ")";
+          if (t.empty())
+            t += pf_fit ? "  region        thinnest      cell   density    strut  "
+                          "cells\n"
+                        : "  region        thinnest   cells\n";
+          if (pf_fit && row.fit != nullptr && !row.fit->feasible) {
+            std::snprintf(line, sizeof(line),
+                          "%-14s %7.3f        —        —        —      —  SOLID: "
+                          "no (cell, density) pair prints AND percolates\n",
+                          label.c_str(), row.extent_mm);
+          } else if (pf_fit && row.fit != nullptr) {
+            std::snprintf(line, sizeof(line),
+                          "%-14s %7.3f %9.4f %8.4f %8.4f %6.2f  %s\n",
+                          label.c_str(), row.extent_mm, row.fit->cell_mm,
+                          row.fit->relative_density, row.fit->strut_mm,
+                          row.fit->cells_per_member,
+                          row.fit->out_of_regime ? "OUT OF REGIME"
+                                                 : "certifiable");
+          } else if (pf_fit) {
+            continue;
+          } else {
+            std::snprintf(line, sizeof(line), "%-14s %7.3f %7.2f  %s\n",
+                          label.c_str(), row.extent_mm,
+                          cell_mm > 0.0 ? row.extent_mm / cell_mm : 0.0,
+                          row.thin ? "SOLID: under the floor" : "certifiable");
+          }
+          t += line;
+        }
+        // The cell every "cells" number is measured at, named ONCE under the table
+        // instead of on every row — which is what the nine paragraphs were doing.
+        if (!t.empty() && !pf_fit) {
+          std::snprintf(line, sizeof(line),
+                        "  (\"cells\" = the region's thinnest extent across the "
+                        "planned %.4f mm cell)\n", cell_mm);
+          t += line;
+        }
+        return t;
+      };
+
+      // ONE composer for every message this pre-flight can produce — refusal or
+      // forecast. The order is the bar: action before explanation, always.
+      auto pf_compose = [&](const std::string& headline, const std::string& action,
+                            const std::string& why) {
+        std::string s = headline;
+        if (!action.empty()) s += "\n" + action;
+        s += "\n\n" + pf_table();
+        if (!why.empty()) s += "\nWhy: " + why;
+        // Appended to EVERY shape rather than to one branch: the window being
+        // unprintable is a fact about the job, not about which of the three cases
+        // the regions landed in, and it is the sentence that saves the solve.
+        s += swept_unprintable_note;
+        return s;
+      };
+      // Printing a composed block to stderr keeps the existing "[lattice] " prefix on
+      // every line, so a log grep for the tag still finds the whole message.
+      auto pf_print = [&](const std::string& block) {
+        std::string out = "[lattice] ";
+        for (char c : block) {
+          out += c;
+          if (c == '\n') out += "[lattice] ";
+        }
+        out += "\n";
+        std::fwrite(out.data(), 1, out.size(), stderr);
+        std::fflush(stderr);
+      };
 
       // ── THE REFUSAL (task 2026-08-05-lattice-cell-size-adaptation, B1).
       //
@@ -6232,7 +6376,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       const bool fit_any_feasible =
           pf_fit && std::any_of(pf_fit_cells.begin(), pf_fit_cells.end(),
                                 [](const FitRegionCell& f) { return f.feasible; });
-      if (include_regions > 0 && w_min_fc > 0.0 && !(pf_fit && fit_any_feasible)) {
+      const bool pf_decidable =
+          include_regions > 0 && w_min_fc > 0.0 && !(pf_fit && fit_any_feasible);
+      if (pf_decidable) {
         const double perc_floor = lattice_percolation_cells_per_member_min(topo);
         const LatticeCellDerivation d =
             lattice_derive_cell_for_member(topo, thinnest_mm, w_min_fc);
@@ -6243,31 +6389,36 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         std::string msg;
         if (!d.feasible_percolation) {
           // (A) — nothing can be built here at any setting.
-          msg = "every declared lattice include region is too thin to hold a "
-                "CONNECTED lattice at any cell size or density this library "
-                "carries, so nothing printable can go where you asked — refusing "
-                "before spending a solve.\n";
-          msg += "  regions declared (include): " +
-                 std::to_string(include_regions) + ", thinnest " +
-                 json_num(thinnest_mm) + " mm\n";
-          msg += "  smallest cell any certifiable strut prints at (" +
-                 json_num(w_min_fc) + " mm bead): " +
-                 json_num(d.min_printable_cell_mm) + " mm\n";
-          msg += "  a connected strut network needs " + json_num(perc_floor) +
-                 " cell(s) across => at least " +
-                 json_num(d.min_member_width_buildable_mm) + " mm of material; "
-                 "your thinnest region has " + json_num(thinnest_mm) + " mm.\n";
-          msg += "  WHAT WOULD CHANGE THE ANSWER (your call, not this "
-                 "pipeline's):\n";
-          msg += "    * thicken the region to at least " +
-                 json_num(d.min_member_width_buildable_mm) +
-                 " mm to get a connected lattice, or " +
-                 json_num(d.min_member_width_certifiable_mm) +
-                 " mm to get a CERTIFIED one; or\n";
-          msg += "    * use a nozzle/bead of at most " +
-                 json_num((thinnest_mm / perc_floor) *
-                          octet_strut_diameter_mm(lattice_rho_max(topo), 1.0)) +
-                 " mm.\n";
+          //
+          // S3 SHAPE: headline, then the action (what to change and to what), then the
+          // per-region table, then the explanation ONCE. Every number the old
+          // paragraph-per-region form carried is still here — the region indices,
+          // kinds and extents in the table, the floors and the bead in the prose.
+          const std::string headline =
+              std::to_string(include_regions) + " of " +
+              std::to_string(include_regions) +
+              " declared lattice include regions are too thin to hold a CONNECTED "
+              "lattice at any cell size or density — refusing before spending a "
+              "solve.";
+          std::string action =
+              "THICKEN the region to at least " +
+              json_num(d.min_member_width_buildable_mm) +
+              " mm for a connected lattice, or " +
+              json_num(d.min_member_width_certifiable_mm) +
+              " mm for a CERTIFIED one — or use a strut line width of at most " +
+              json_num((thinnest_mm / perc_floor) *
+                       octet_strut_diameter_mm(lattice_rho_max(topo), 1.0)) +
+              " mm. Your thinnest region has " + json_num(thinnest_mm) +
+              " mm. Both are your call, not this pipeline's.";
+          std::string why =
+              "at a " + json_num(w_min_fc) +
+              " mm strut line width the smallest cell any certifiable strut prints "
+              "at is " + json_num(d.min_printable_cell_mm) +
+              " mm, and a connected strut network needs " + json_num(perc_floor) +
+              " cell(s) across it — so " +
+              json_num(d.min_member_width_buildable_mm) +
+              " mm of material is the least a lattice can live in, whatever the "
+              "cell size or density. Nothing printable can go where you asked.\n";
           // ── M2: EVERY REMEDY A REFUSAL NAMES MUST CHANGE THE OUTCOME.
           // A SKIN is deliberately NOT offered here. It was, and it should not
           // have been: the rim/skin finish dresses only ANALYTIC boundary faces,
@@ -6275,28 +6426,61 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           // produces exactly zero geometry there (handoff §7). Recommending it
           // sent the user to a door that is painted on. It is named as
           // UNAVAILABLE rather than omitted, so nobody re-adds it.
-          msg += "  NOT AVAILABLE as an alternative on this part: a SKIN / RIM "
+          why += "     NOT AVAILABLE as an alternative on this part: a SKIN / RIM "
                  "finish. It dresses analytic faces (flat planes, bolt bores) "
                  "and this part's boundary comes from the voxel grid, so it "
                  "would emit nothing at all. The export refuses it rather than "
-                 "producing an undressed part silently.\n";
+                 "producing an undressed part silently.";
+          msg = pf_compose(headline, action, why);
         } else if (!planned_percolates) {
-          // (B) — the CELL is wrong, and a working range exists. Name it.
-          msg = "the planned lattice cell is too COARSE for the regions you "
-                "declared: the strut network would not be connected there, so "
-                "this run would emit loose fragments rather than a lattice — "
-                "refusing before spending a solve.\n";
-          msg += "  regions declared (include): " +
-                 std::to_string(include_regions) + ", thinnest " +
-                 json_num(thinnest_mm) + " mm\n";
-          msg += "  planned cell " + json_num(cell_mm) + " mm gives " +
-                 json_num(planned_cpm) + " cells across that region; a connected "
-                 "network needs at least " + json_num(perc_floor) + ".\n";
-          msg += "  A SMALLER CELL WORKS. At a " + json_num(w_min_fc) +
-                 " mm bead this region admits cells from " +
-                 json_num(d.min_printable_cell_mm) + " mm (printability) up to " +
-                 json_num(thinnest_mm / perc_floor) +
-                 " mm (percolation).\n";
+          // (B) — the CELL is wrong, and a working range exists. Name it FIRST.
+          const std::string headline =
+              std::to_string(thin_regions) + " of " +
+              std::to_string(include_regions) +
+              " declared lattice include regions are too thin for the planned " +
+              json_num(cell_mm) +
+              " mm cell — refusing before spending a solve.";
+          // ── WHICH KEY, FOR THIS JOB. The old copy said `Set "cell_mm" in the
+          // GRADING block` on EVERY graded path — and the schema REFUSES "cell_mm"
+          // alongside both "auto" and "swept" (job.cpp: "a target cell alongside a
+          // ladder is a CONFLICT, not a hint"). So the remedy it named was a job core
+          // would reject, on the two modes the app can actually send. Named per mode
+          // now; the range itself is unchanged.
+          std::string action =
+              "SET cell size between " + json_num(d.min_printable_cell_mm) +
+              " mm and " + json_num(thinnest_mm / perc_floor) + " mm";
+          if (job.grading.present) {
+            if (pf_mode == CellSizeMode::Swept)
+              action += " — lower \"cell_min_mm\" in the GRADING block into that "
+                        "range (\"cell_mm\" is refused alongside a swept ladder).";
+            else if (pf_mode == CellSizeMode::Auto)
+              action += " — set \"cell_mode\": \"fixed\" with \"cell_mm\" in that "
+                        "range (\"auto\" takes core's own floor, which is how you "
+                        "got here).";
+            else
+              action += " — set \"cell_mm\" in the GRADING block to a value in "
+                        "that range.";
+            action += " Or set \"cell_mode\": \"fit\" and core derives it per "
+                      "region.";
+          } else {
+            action += " — set \"cell_mm\" in the lattice block to a value in that "
+                      "range.";
+          }
+          // THE EXPLANATION, ONCE. Every number the nine paragraphs carried is here
+          // or in the table: the region indices, kinds and extents are rows; the
+          // planned cell heads the "cells across" column and the headline; the
+          // floors, the bead and the admissible window are stated once.
+          std::string why =
+              "a strut network only connects when at least " +
+              json_num(perc_floor) +
+              " cell(s) lie across the member. The planned " + json_num(cell_mm) +
+              " mm cell puts " + json_num(planned_cpm) +
+              " across your thinnest region (" + json_num(thinnest_mm) +
+              " mm), so this run would emit loose fragments rather than a lattice. "
+              "At a " + json_num(w_min_fc) +
+              " mm strut line width that region admits cells from " +
+              json_num(d.min_printable_cell_mm) + " mm (printability) up to " +
+              json_num(thinnest_mm / perc_floor) + " mm (percolation).\n";
           // ── WHAT S2 CHANGED HERE (task 2026-08-05-lattice-cell-fit-mode).
           // This message used to say that setting "cell_mm" on a GRADED job WILL
           // NOT WORK, and it was correct: grading.cpp took max(target,
@@ -6308,54 +6492,51 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           // The override is FIXED (grading.cpp, the `abs_floor_mm` bound): a Fixed
           // target is now raised only to the cell below which NO density in the
           // band prints, and the density is raised with the cell. So the remedy
-          // this message names is a remedy the code path no longer overrides, and
-          // the graded advice is now the same one line as the uniform advice.
-          if (job.grading.present) {
-            msg += "    Set \"cell_mm\" in the GRADING block to a value in that "
-                   "range. It is raised only to " +
+          // this message names is a remedy the code path no longer overrides.
+          if (job.grading.present)
+            why += "     A graded cell is raised only to " +
                    json_num(w_min_fc / octet_strut_diameter_mm(
                                            lattice_rho_max(topo), 1.0)) +
-                   " mm (the cell below which no density in the band prints); "
-                   "the density is raised with the cell so the strut still "
-                   "clears your bead.\n";
-            msg += "      Or set \"cell_mode\": \"fit\" and let core derive "
-                   "the cell from each declared region's own extent.\n";
-          } else {
-            msg += "    Set \"cell_mm\" in the lattice block to a value in that "
-                   "range.\n";
-          }
+                   " mm (the cell below which no density in the band prints), and "
+                   "the density is raised with it so the strut still clears your "
+                   "strut line width.\n";
           if (thinnest_mm < d.min_member_width_certifiable_mm) {
             // ── N1/N2: say what the region will actually DO on this path, and
             // lead with the remedy the user can actually reach.
-            msg += "  NOTE — this region needs " +
+            why += "     Separately: a CERTIFIED lattice needs " +
                    json_num(d.min_member_width_certifiable_mm) +
-                   " mm to clear the cells-per-member ACCURACY floor and has " +
+                   " mm of member and your thinnest region has " +
                    json_num(thinnest_mm) + " mm. What that means here:\n";
             if (job.grading.present) {
-              msg += "    * GRADED run: the grading law falls sub-floor "
+              why += "       * GRADED run: the grading law falls sub-floor "
                      "candidates back to SOLID, so setting the cell alone will "
-                     "get you past this refusal and STILL leave this region "
-                     "solid with no lattice in it.\n";
-              msg += "    * To lattice it anyway, arm "
-                     "\"retain_subfloor_in_unloaded_regions\" in the job JSON. "
-                     "The lattice is then built and the certificate over it is "
-                     "OUT OF REGIME — read the exposure the receipt reports "
-                     "before arming it.\n";
-              msg += "    * ★ THAT SWITCH IS NOT EXPOSED IN THE APP. It is a "
-                     "job-JSON key only, so from the iPad this region cannot be "
-                     "latticed at all today. The cell size IS sent by the app, "
-                     "which is why it is named first above.\n";
-              msg += "    * OR set \"cell_mode\": \"fit\", which derives a "
-                     "cell from this region's own extent, lattices it, and "
+                     "get you past this refusal and STILL leave those regions "
+                     "solid with no lattice in them.\n";
+              // ★ CORRECTED (task 2026-08-07). This bullet used to read "THAT SWITCH
+              // IS NOT EXPOSED IN THE APP … from the iPad this region cannot be
+              // latticed at all today". Task 2026-08-05-lattice-retention-app-control
+              // shipped the control; the sentence has been telling the maintainer to
+              // give up on a switch that is on his own lattice page.
+              why += "       * To lattice them anyway, arm "
+                     "\"retain_subfloor_in_unloaded_regions\" (the app's \"Keep "
+                     "lattice in thin members\" control, or the job-JSON key). The "
+                     "lattice is then built and the certificate over it is OUT OF "
+                     "REGIME — read the exposure the receipt reports before arming "
+                     "it.\n";
+              why += "       * OR set \"cell_mode\": \"fit\", which derives a "
+                     "cell from each region's own extent, lattices it, and "
                      "reports the out-of-regime material it emitted — no "
-                     "retention switch involved.\n";
+                     "retention switch involved. Use fit when the regions differ "
+                     "in thickness; use retention when they do not. They are "
+                     "mutually exclusive, and core refuses a job that arms both.\n";
             } else {
-              msg += "    * UNIFORM run: no cells-per-member floor is applied on "
-                     "this path, so a lattice in the range above WILL be built "
+              why += "       * UNIFORM run: no cells-per-member floor is applied "
+                     "on this path, so a lattice in the range above WILL be built "
                      "here — CONNECTED but NOT CERTIFIED. The margin over it is "
                      "out of regime and lattice_strut_out_of_regime is raised.\n";
             }
           }
+          msg = pf_compose(headline, action, why);
         } else {
           // (C) — percolates. Not a refusal. Report and continue.
           //
@@ -6368,25 +6549,33 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           // whole solve — which is the entire point of a pre-flight.
           if (thinnest_mm >= d.min_member_width_certifiable_mm &&
               planned_cpm < n_star) {
-            std::fprintf(
-                stderr,
-                "[lattice] NOTE: the thinnest declared include region (%.3f mm) IS "
-                "thick enough for a CERTIFIED lattice — it needs %.3f mm and has "
-                "%.3f mm — but the planned %.4f mm cell puts only %.2f cells across "
-                "it, under the %.2f-cell accuracy floor, so the grading law will "
-                "reject it and emit no lattice.\n"
-                "[lattice]       The cell is what is wrong, not the part. A cell of "
-                "%.4f mm at relative density %.4f (strut %.4f mm) puts %.2f cells "
-                "across this region and certifies. Set \"cell_mm\" in the lattice "
-                "block to that value.\n"
-                "[lattice]       (\"cell_mode\": \"auto\" will NOT do this — it "
-                "selects the printability floor at the band's LIGHTEST density, "
-                "%.4f mm, which is how you got here. \"cell_mode\": \"fit\" "
-                "WILL: it derives exactly the cell named above, per region.)\n",
-                thinnest_mm, d.min_member_width_certifiable_mm, thinnest_mm,
-                cell_mm, planned_cpm, n_star, d.lightest_cell_size_mm,
-                d.lightest_relative_density, d.lightest_strut_diameter_mm,
-                d.lightest_cells_per_member, cell_mm);
+            char n1[1024];
+            std::snprintf(
+                n1, sizeof(n1),
+                "A cell of %.4f mm at relative density %.4f (strut %.4f mm) puts "
+                "%.2f cells across your thinnest region and certifies — set it, or "
+                "set \"cell_mode\": \"fit\" and core derives exactly that, per "
+                "region.",
+                d.lightest_cell_size_mm, d.lightest_relative_density,
+                d.lightest_strut_diameter_mm, d.lightest_cells_per_member);
+            char n1why[1024];
+            std::snprintf(
+                n1why, sizeof(n1why),
+                "your thinnest declared region (%.3f mm) IS thick enough for a "
+                "CERTIFIED lattice — it needs %.3f mm — but the planned %.4f mm "
+                "cell puts only %.2f cells across it, under the %.2f-cell accuracy "
+                "floor, so the grading law will reject it and emit no lattice. The "
+                "cell is what is wrong, not the part. (\"cell_mode\": \"auto\" will "
+                "NOT fix it: it selects the printability floor at the band's "
+                "LIGHTEST density, %.4f mm, which is how you got here.)",
+                thinnest_mm, d.min_member_width_certifiable_mm, cell_mm,
+                planned_cpm, n_star, cell_mm);
+            pf_print(pf_compose(
+                std::to_string(thin_regions) + " of " +
+                    std::to_string(include_regions) +
+                    " declared lattice include regions will come back SOLID at the "
+                    "planned " + json_num(cell_mm) + " mm cell.",
+                std::string(n1), std::string(n1why)));
           }
           if (thinnest_mm < d.min_member_width_certifiable_mm) {
             // ── N1: WHAT ACTUALLY HAPPENS HERE DEPENDS ON THE PATH, and an
@@ -6409,49 +6598,116 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
             // FLAG, not a gate. That is why the maintainer's own uniform run
             // emitted 1131 cells at 0.4263 cells per member with
             // strut_out_of_regime true and strut_gated false.
-            if (job.grading.present)
-              std::fprintf(
-                  stderr,
-                  "[lattice] NOTE (GRADED run): the thinnest declared include "
-                  "region (%.3f mm) percolates at the planned %.4f mm cell "
-                  "(%.2f cells across, percolation floor %.2f) but is BELOW the "
-                  "%.2f-cell accuracy floor, which needs %.3f mm.\n"
-                  "[lattice]       SO THIS REGION WILL COME BACK SOLID. The "
-                  "grading law falls sub-floor candidates back to solid, and no "
-                  "lattice will be emitted here, unless "
-                  "\"retain_subfloor_in_unloaded_regions\" is armed in the job "
-                  "JSON — in which case it is latticed and the certificate over "
-                  "it is OUT OF REGIME.\n"
-                  "[lattice]       That switch is a job-JSON key and is NOT "
-                  "exposed in the app today, so on the iPad this region cannot "
-                  "be latticed at all. The remedy the app CAN send is the cell "
-                  "size itself.\n",
-                  thinnest_mm, cell_mm, planned_cpm, perc_floor, n_star,
-                  d.min_member_width_certifiable_mm);
-            else
-              std::fprintf(
-                  stderr,
-                  "[lattice] NOTE (UNIFORM run): the thinnest declared include "
-                  "region (%.3f mm) percolates at the planned %.4f mm cell "
-                  "(%.2f cells across, percolation floor %.2f) but is BELOW the "
-                  "%.2f-cell accuracy floor, which needs %.3f mm.\n"
-                  "[lattice]       The uniform path applies NO cells-per-member "
-                  "floor, so the lattice WILL be built here and the certificate "
-                  "over it will be OUT OF REGIME "
-                  "(lattice_strut_out_of_regime is raised; it is a flag, not a "
-                  "gate). This is reported, not refused.\n",
-                  thinnest_mm, cell_mm, planned_cpm, perc_floor, n_star,
-                  d.min_member_width_certifiable_mm);
+            char n2why[1400];
+            std::snprintf(
+                n2why, sizeof(n2why),
+                "your thinnest declared region (%.3f mm) percolates at the planned "
+                "%.4f mm cell (%.2f cells across, percolation floor %.2f) but is "
+                "BELOW the %.2f-cell accuracy floor, which needs %.3f mm. %s",
+                thinnest_mm, cell_mm, planned_cpm, perc_floor, n_star,
+                d.min_member_width_certifiable_mm,
+                job.grading.present
+                    ? "The grading law falls sub-floor candidates back to solid, "
+                      "SO THOSE REGIONS WILL COME BACK SOLID and no lattice will "
+                      "be emitted in them unless retention is armed — in which "
+                      "case they are latticed and the certificate over them is "
+                      "OUT OF REGIME."
+                    : "The uniform path applies NO cells-per-member floor, so the "
+                      "lattice WILL be built here and the certificate over it will "
+                      "be OUT OF REGIME (lattice_strut_out_of_regime is raised; it "
+                      "is a flag, not a gate). This is reported, not refused.");
+            // ★ CORRECTED (task 2026-08-07): the graded arm used to end "That switch
+            // is a job-JSON key and is NOT exposed in the app today, so on the iPad
+            // this region cannot be latticed at all." Retention SHIPPED to the app in
+            // task 2026-08-05-lattice-retention-app-control.
+            pf_print(pf_compose(
+                std::to_string(thin_regions) + " of " +
+                    std::to_string(include_regions) +
+                    " declared lattice include regions are under the accuracy "
+                    "floor at the planned " + json_num(cell_mm) + " mm cell.",
+                job.grading.present
+                    ? std::string(
+                          "ARM \"retain_subfloor_in_unloaded_regions\" (the app's "
+                          "\"Keep lattice in thin members\" control) to lattice "
+                          "them OUT OF REGIME — or set \"cell_mode\": \"fit\", "
+                          "which derives a cell per region instead. The two are "
+                          "mutually exclusive and core refuses a job arming both.")
+                    : std::string(
+                          "Nothing to set: this uniform run builds the lattice "
+                          "anyway and stamps the certificate OUT OF REGIME."),
+                std::string(n2why)));
           }
           std::fflush(stderr);
         }
         if (!msg.empty()) {
-          msg += "  To proceed anyway with lattice OUTSIDE your declared regions, "
-                 "remove the include regions from the lattice block — but read "
-                 "the receipt first: this run would have put every cell in "
+          msg += "\n     To proceed anyway with lattice OUTSIDE your declared "
+                 "regions, remove the include regions from the lattice block — but "
+                 "read the receipt first: this run would have put every cell in "
                  "material you did not select.";
           throw JobError(msg);
         }
+      } else if (include_regions > 0) {
+        // ── THE PATHS THE THREE-CASE MACHINE DOES NOT DECIDE, reported in the SAME
+        // shape (S3). Two of them:
+        //   * FIT with at least one feasible region. It never refuses — each region
+        //     gets its own cell — but it must still SAY what each region derived, and
+        //     that is exactly one table row per region.
+        //   * A job that stated no strut line width. No derivation is possible, so
+        //     there is no action to name; the table still reports what was declared.
+        // This is where the old "FORECAST: N of M include regions are thinner than …"
+        // summary lived, and it is the line that must not be lost: with no refusal and
+        // no per-region paragraphs, silence would read as "everything is fine".
+        std::string headline, action, why;
+        if (pf_fit) {
+          const double cert_mm =
+              pf_fit_cells.empty() ? 0.0
+                                   : pf_fit_cells.front().min_width_certifiable_mm;
+          headline =
+              thin_regions == 0
+                  ? ("all " + std::to_string(include_regions) +
+                     " declared lattice include regions certify at the cell FIT "
+                     "derived for them (finest " + json_num(cell_mm) + " mm).")
+                  : (std::to_string(thin_regions) + " of " +
+                     std::to_string(include_regions) +
+                     " declared lattice include regions cannot reach the " +
+                     json_num(n_star) +
+                     "-cell accuracy floor at the cell FIT derived for them "
+                     "(thinnest region " + json_num(thinnest_mm) +
+                     " mm; finest derived cell " + json_num(cell_mm) + " mm).");
+          if (thin_regions > 0 && cert_mm > 0.0)
+            action = "NOTHING TO SET — fit already picked the finest cell each "
+                     "region can print. To CERTIFY a row marked OUT OF REGIME, "
+                     "thicken that region to " + json_num(cert_mm) +
+                     " mm; otherwise the part is buildable and the certificate "
+                     "does not cover that material.";
+          why = "fit derives cell = max(region extent / " + json_num(n_star) +
+                ", the finest printable cell) per declared region, then raises the "
+                "density with it so the strut still clears your strut line width. A "
+                "region with fewer than " + json_num(n_star) +
+                " cells across is BUILDABLE and its homogenized tensor stops "
+                "describing the member, so the certificate over it is OUT OF REGIME "
+                "— reported, never silently certified. A row marked SOLID has no "
+                "(cell, density) pair that both prints and percolates at any "
+                "setting.";
+        } else {
+          headline =
+              std::to_string(thin_regions) + " of " +
+              std::to_string(include_regions) +
+              " declared lattice include regions are thinner than the " +
+              json_num(required_mm) + " mm the accuracy floor requires at the "
+              "planned " + json_num(cell_mm) + " mm cell (thinnest " +
+              json_num(thinnest_mm) + " mm).";
+          action = "This job states no strut line width, so core cannot derive a "
+                   "cell that would work — state \"min_extrudable_width_mm\" and "
+                   "this pre-flight will name the range.";
+          why = "the cells-per-member floor needs " + json_num(n_star) +
+                " x " + json_num(cell_mm) + " mm = " + json_num(required_mm) +
+                " mm of material across a member before its homogenized tensor "
+                "describes it. That is a property of the region's geometry and the "
+                "printability floor (nozzle-derived), not of the optimizer and not "
+                "of any Protect setting.";
+        }
+        pf_print(pf_compose(headline, action, why));
       }
     }
   }

@@ -1259,6 +1259,80 @@ int main() {
     }
   }
 
+  // ---- 5. S1 — THE SWEPT LADDER, AS ONE RULE ------------------------------------
+  // (task 2026-08-07-cell-mode-fit-and-swept-floor.)
+  //
+  // THE DEFECT, AS A TEST. run_job forecast a swept job's cell as
+  // `max(cell_min_mm, lattice_cell_printability_floor_mm)` — the floor evaluated at
+  // rho_MIN, 4.9314 mm at a 0.45 mm bead. `plan_cell_sizes` takes `min_cell_size_mm`
+  // VERBATIM as its base cell and applies no part-wide floor at all. So a declared
+  // 1.173 mm minimum was REPORTED as 4.9314 mm and PLANNED at 1.173 mm, and the run
+  // was refused on a number the planner was never going to use. These bars pin the
+  // two together at the finest cell the plan can actually grant.
+  {
+    const double w = 0.45;
+    const double light_floor = lattice_cell_printability_floor_mm(topo, w);
+    const double abs_floor = w / octet_strut_diameter_mm(rho_hi, 1.0);
+    CHECK(abs_floor < light_floor,
+          "S1 precondition: the two floors are different numbers, and the light one "
+          "is the larger");
+
+    // A declared minimum UNDER the frontier climbs the plan's own dyadic ladder to
+    // the first rung that prints — it is NOT raised to the light floor.
+    const double finest = cell_plan_finest_printable_cell_mm(topo, 1.173, 9.384, w);
+    CHECK(finest >= abs_floor - 1e-12,
+          "S1: the reported cell is at or above the cell below which nothing prints");
+    CHECK(finest < light_floor,
+          "S1: and it is FINER than the light floor — the old rule reported 4.9314 mm "
+          "here, which is the whole defect");
+    CHECK(std::fabs(finest - 2.0 * 1.173) < 1e-12,
+          "S1: it is exactly one doubling of the declared minimum (the first rung at "
+          "or above the frontier), not an invented number");
+
+    // A declared minimum ALREADY above the frontier is returned untouched — which is
+    // why every swept job the app authors (it pushes both ends onto core's floor) is
+    // unchanged by S1.
+    CHECK(std::fabs(cell_plan_finest_printable_cell_mm(topo, 6.0, 12.0, w) - 6.0) <
+              1e-12,
+          "S1: a declared minimum above the frontier is the answer, unchanged");
+
+    // A whole window under the frontier has no usable rung; the frontier itself is
+    // reported rather than a rung the plan cannot use.
+    CHECK(std::fabs(cell_plan_finest_printable_cell_mm(topo, 0.1, 0.2, w) -
+                    abs_floor) < 1e-12,
+          "S1: a window with no printable rung reports the frontier cell");
+
+    // AND THE PLANNER AGREES — measured, not asserted by construction. A swept plan
+    // over the same window must never grant a cell finer than the reported one.
+    VoxelGrid pg = solid_block(24, 24, 24, 0.5);
+    std::vector<double> pd = density_of(pg);
+    std::vector<char> cand(pg.voxel_count(), 1);
+    std::vector<double> rho(pg.voxel_count(), rho_hi);
+    std::vector<double> wid(pg.voxel_count(), 60.0);  // thick: the ceiling never binds
+    CellPlanParams pp;
+    pp.topology = topo;
+    pp.mode = CellSizeMode::Swept;
+    pp.min_cell_size_mm = 1.173;
+    pp.max_cell_size_mm = 9.384;
+    pp.min_extrudable_width_mm = w;
+    const CellSizePlan P = plan_cell_sizes(pg, rho, cand, wid, pp);
+    CHECK(P.base_cell_mm == pp.min_cell_size_mm,
+          "S1: the plan's base cell IS the declared minimum — no part-wide floor is "
+          "applied to it, which is the fact the forecast used to contradict");
+    double planned_finest = 0.0;
+    for (const CellLevelReport& r : P.levels)
+      if (r.cells > 0 && (planned_finest == 0.0 || r.cell_size_mm < planned_finest))
+        planned_finest = r.cell_size_mm;
+    CHECK(planned_finest > 0.0,
+          "S1 positive control: the plan actually latticed something, so the "
+          "comparison below is not vacuous");
+    CHECK(planned_finest >= finest - 1e-12,
+          "S1: the forecast's cell is a true LOWER bound on the cell the plan grants");
+    CHECK(planned_finest < light_floor,
+          "S1: and the plan does grant a cell under the light floor — the number the "
+          "forecast used to report");
+  }
+
   std::fprintf(stderr, "grading: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

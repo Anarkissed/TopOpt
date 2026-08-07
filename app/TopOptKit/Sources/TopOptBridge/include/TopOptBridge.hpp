@@ -1012,6 +1012,17 @@ bool grading_schema_accepts(const std::string& key);
 // everything (the safe direction) and the UI says the app could not ask.
 bool grading_schema_probe_is_reliable();
 
+// The same question about a cell_mode VALUE rather than a grading KEY (task
+// 2026-08-07-cell-mode-fit-and-swept-floor). `grading_schema_accepts` cannot answer
+// it: "cell_mode" has been an accepted key since the cell-size sweep landed, while
+// the set of values it takes has grown since — "fit" arrived with PR 302. A core
+// that predates it fails the whole job with `grading "cell_mode" must be …`, which
+// is the same fatal-at-validation shape one unknown key has.
+//
+// Never throws; false when it cannot tell (including when the two-sided control
+// above says the probe is not reaching the grading block at all).
+bool grading_schema_accepts_cell_mode(const std::string& mode);
+
 // Validate a whole job document against CORE'S OWN SCHEMA (topopt::parse_job).
 // Returns "" when core accepts it, else core's diagnostic verbatim.
 //

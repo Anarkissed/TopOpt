@@ -1,0 +1,100 @@
+resolution: 128
+
+########################################################################
+# cell_mode "auto"   exit=1
+########################################################################
+topopt-cli: 9 of 9 declared lattice include regions are too thin for the planned 4.931378498 mm cell — refusing before spending a solve.
+SET cell size between 1.173173434 mm and 2.828427125 mm — set "cell_mode": "fixed" with "cell_mm" in that range ("auto" takes core's own floor, which is how you got here). Or set "cell_mode": "fit" and core derives it per region.
+  region        thinnest   cells
+  0 (bolt)       2.828    0.57  SOLID: under the floor
+  1 (bolt)       2.828    0.57  SOLID: under the floor
+  2 (bolt)       2.828    0.57  SOLID: under the floor
+  3 (bolt)       4.000    0.81  SOLID: under the floor
+  4 (bolt)       4.000    0.81  SOLID: under the floor
+  5 (bolt)       4.000    0.81  SOLID: under the floor
+  6 (bolt)       6.000    1.22  SOLID: under the floor
+  7 (bolt)       6.000    1.22  SOLID: under the floor
+  8 (bolt)       6.000    1.22  SOLID: under the floor
+  ("cells" = the region's thinnest extent across the planned 4.9314 mm cell)
+Why: a strut network only connects when at least 1 cell(s) lie across the member. The planned 4.931378498 mm cell puts 0.5735570948 across your thinnest region (2.828427125 mm), so this run would emit loose fragments rather than a lattice. At a 0.45 mm strut line width that region admits cells from 1.173173434 mm (printability) up to 2.828427125 mm (percolation).
+     A graded cell is raised only to 1.173173434 mm (the cell below which no density in the band prints), and the density is raised with it so the strut still clears your strut line width.
+     Separately: a CERTIFIED lattice needs 5.865867171 mm of member and your thinnest region has 2.828427125 mm. What that means here:
+       * GRADED run: the grading law falls sub-floor candidates back to SOLID, so setting the cell alone will get you past this refusal and STILL leave those regions solid with no lattice in them.
+       * To lattice them anyway, arm "retain_subfloor_in_unloaded_regions" (the app's "Keep lattice in thin members" control, or the job-JSON key). The lattice is then built and the certificate over it is OUT OF REGIME — read the exposure the receipt reports before arming it.
+       * OR set "cell_mode": "fit", which derives a cell from each region's own extent, lattices it, and reports the out-of-regime material it emitted — no retention switch involved. Use fit when the regions differ in thickness; use retention when they do not. They are mutually exclusive, and core refuses a job that arms both.
+     To proceed anyway with lattice OUTSIDE your declared regions, remove the include regions from the lattice block — but read the receipt first: this run would have put every cell in material you did not select.
+
+  (no run_info.json — this job was REFUSED before any solve)
+
+########################################################################
+# cell_mode "swept"   exit=0
+########################################################################
+[lattice] 9 of 9 declared lattice include regions are under the accuracy floor at the planned 2.346 mm cell.
+[lattice] ARM "retain_subfloor_in_unloaded_regions" (the app's "Keep lattice in thin members" control) to lattice them OUT OF REGIME — or set "cell_mode": "fit", which derives a cell per region instead. The two are mutually exclusive and core refuses a job arming both.
+[lattice] 
+[lattice]   region        thinnest   cells
+[lattice]   0 (bolt)       2.828    1.21  SOLID: under the floor
+[lattice]   1 (bolt)       2.828    1.21  SOLID: under the floor
+[lattice]   2 (bolt)       2.828    1.21  SOLID: under the floor
+[lattice]   3 (bolt)       4.000    1.71  SOLID: under the floor
+[lattice]   4 (bolt)       4.000    1.71  SOLID: under the floor
+[lattice]   5 (bolt)       4.000    1.71  SOLID: under the floor
+[lattice]   6 (bolt)       6.000    2.56  SOLID: under the floor
+[lattice]   7 (bolt)       6.000    2.56  SOLID: under the floor
+[lattice]   8 (bolt)       6.000    2.56  SOLID: under the floor
+[lattice]   ("cells" = the region's thinnest extent across the planned 2.3460 mm cell)
+[lattice] 
+[lattice] Why: your thinnest declared region (2.828 mm) percolates at the planned 2.3460 mm cell (1.21 cells across, percolation floor 1.00) but is BELOW the 5.00-cell accuracy floor, which needs 5.866 mm. The grading law falls sub-floor candidates back to solid, SO THOSE REGIONS WILL COME BACK SOLID and no lattice will be emitted in them unless retention is armed — in which case they are latticed and the certificate over them is OUT OF REGIME.
+[lattice] vf=0.60 NO LATTICE EMITTED — the grading law could lattice NONE of this variant's 286 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=2, strut_unprintable_at_every_cell=284, irrecoverable_by_any_cell_size=2. The widest member the law rejected is 3.240079924 mm; at this cell size a member must be at least 5.865867171 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.45 mm sets the printability floor at 4.931378498 mm) — run the pre-flight forecast for the evaluated remedies.
+  vf 0.60: margin 90, accepted
+
+  PER REGION
+  (this mode derives ONE part-wide cell; per-region rows below are the
+   receipt's own counts, and the cell/density/strut are the plan's)
+  plan base cell   : None mm
+  plan levels      : []
+  density band used: None .. None
+  strut diameter   : None .. None mm
+  min cells/member : None
+
+  RUN TOTALS: region_voxels=0 latticed_cells=0 triangles=0
+  forecast: 9 of 9 regions too thin; required member 11.73 mm; thinnest 2.828427125 mm
+  certificate: margin_worst_case=None accepted=None strut_out_of_regime=None min_cells_per_member=None
+
+########################################################################
+# cell_mode "fit"   exit=0
+########################################################################
+[lattice] 6 of 9 declared lattice include regions cannot reach the 5-cell accuracy floor at the cell FIT derived for them (thinnest region 2.828427125 mm; finest derived cell 1.173173434 mm).
+[lattice] NOTHING TO SET — fit already picked the finest cell each region can print. To CERTIFY a row marked OUT OF REGIME, thicken that region to 5.865867171 mm; otherwise the part is buildable and the certificate does not cover that material.
+[lattice] 
+[lattice]   region        thinnest      cell   density    strut  cells
+[lattice]   0 (bolt)       2.828    1.1732   0.6000   0.4500   2.41  OUT OF REGIME
+[lattice]   1 (bolt)       2.828    1.1732   0.6000   0.4500   2.41  OUT OF REGIME
+[lattice]   2 (bolt)       2.828    1.1732   0.6000   0.4500   2.41  OUT OF REGIME
+[lattice]   3 (bolt)       4.000    1.1732   0.6000   0.4500   3.41  OUT OF REGIME
+[lattice]   4 (bolt)       4.000    1.1732   0.6000   0.4500   3.41  OUT OF REGIME
+[lattice]   5 (bolt)       4.000    1.1732   0.6000   0.4500   3.41  OUT OF REGIME
+[lattice]   6 (bolt)       6.000    1.2000   0.5806   0.4500   5.00  certifiable
+[lattice]   7 (bolt)       6.000    1.2000   0.5806   0.4500   5.00  certifiable
+[lattice]   8 (bolt)       6.000    1.2000   0.5806   0.4500   5.00  certifiable
+[lattice] 
+[lattice] Why: fit derives cell = max(region extent / 5, the finest printable cell) per declared region, then raises the density with it so the strut still clears your strut line width. A region with fewer than 5 cells across is BUILDABLE and its homogenized tensor stops describing the member, so the certificate over it is OUT OF REGIME — reported, never silently certified. A row marked SOLID has no (cell, density) pair that both prints and percolates at any setting.
+[lattice] vf=0.60 frozen material: printed=27 latticed=0 solid=27 in_include=0 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+  vf 0.60: margin 90, accepted
+
+  PER REGION
+  reg  thinnest  cell mm   density  strut    cells   candidates  latticed 
+  0    2.828     1.1732    0.6000   0.4500   2.41    0           0          OUT OF REGIME
+  1    2.828     1.1732    0.6000   0.4500   2.41    0           0          OUT OF REGIME
+  2    2.828     1.1732    0.6000   0.4500   2.41    20          20         OUT OF REGIME
+  3    4.000     1.1732    0.6000   0.4500   3.41    36          36         OUT OF REGIME
+  4    4.000     1.1732    0.6000   0.4500   3.41    2           2          OUT OF REGIME
+  5    4.000     1.1732    0.6000   0.4500   3.41    0           0          OUT OF REGIME
+  6    6.000     1.2000    0.5806   0.4500   5.00    66          66         certifiable
+  7    6.000     1.2000    0.5806   0.4500   5.00    108         108        certifiable
+  8    6.000     1.2000    0.5806   0.4500   5.00    54          54         certifiable
+  printed OUTSIDE every declared region: 26170 voxels
+
+  RUN TOTALS: region_voxels=26456 latticed_cells=286 triangles=318128
+  forecast: 6 of 9 regions too thin; required member 5.865867171 mm; thinnest 2.828427125 mm
+  certificate: margin_worst_case=90.01910573 accepted=True strut_out_of_regime=True min_cells_per_member=2.761808127

@@ -1,0 +1,71 @@
+==============================================================================
+S1a — WHICH FUNCTION PRODUCED "planned cell 4.931378498 mm"
+==============================================================================
+  core/src/cli/run_job.cpp, the PRE-FLIGHT block, on origin/main line 6059:
+
+      else if (pf_mode == CellSizeMode::Swept)
+        cell_mm = std::max(job.grading.cell_min_mm, floor_mm);
+
+  where `floor_mm` is lattice_cell_printability_floor_mm(octet, 0.45) = 4.931378498.
+  His job was cell_mode "auto", which takes the same `floor_mm` on line 6058 — the
+  swept arm one line below reports the identical number for a DIFFERENT reason, and
+  that is what this bar is about.
+
+  It is NOT `multiscale_floor_cell_mm` (origin/main run_job.cpp:761-785). That is a
+  SECOND COPY of the same switch, carrying the same swept arm on line 773, and it is
+  read only when `lattice.multiscale` is armed. Both copies were wrong; only the
+  pre-flight one is on his path.
+
+S1b — DOES plan_cell_sizes APPLY THE SAME FLOOR, A DIFFERENT ONE, OR NONE?
+
+  NONE.  core/src/simp/cell_plan.cpp:
+
+      P.base_cell_mm = params.min_cell_size_mm;          // verbatim, no max(), no floor
+
+  and grading.cpp passes the job's `cell_min_mm` straight through
+  (run_job.cpp: `gp.min_cell_size_mm = job.grading.cell_min_mm`). The only
+  printability rule the planner applies is PER BASE CELL — `need[c]`, the smallest
+  dyadic level whose strut at THAT cell's own rho still prints — and a cell whose
+  `need` exceeds its `cap` is dropped to solid.
+
+  SO THE PRE-FLIGHT AND THE PLANNER ALREADY DISAGREED, and by a factor of 4.2 on his
+  numbers: forecast 4.9314 mm, plan 1.173 mm. That is the defect; the one-line change
+  was not the fix. Both now read `cell_plan_finest_printable_cell_mm`, which IS the
+  planner's ladder — the first rung at or above w/phi(rho_max).
+
+==============================================================================
+S1d — THE FAILING TEST FIRST, on the UNFIXED binary
+==============================================================================
+  base, cell_mode auto            : exit 1
+  base, cell_mode swept @1.173 mm : exit 1
+  sha256 of the auto  message: 447e45f73371085372203d90e76464dfd7280c867c41f4b71e437a3b5e311515
+  sha256 of the swept message: 447e45f73371085372203d90e76464dfd7280c867c41f4b71e437a3b5e311515
+  ★ IDENTICAL. Declaring cell_min_mm 1.173 changed NOT ONE CHARACTER of the
+    refusal: the number was raised to 4.931378498 mm and discarded.
+
+  the refusal he would have seen (base, swept):
+    topopt-cli: the planned lattice cell is too COARSE for the regions you declared: the strut network would not be connected there, so this run would emit loose fragments rather than a lattice — refusing before spending a solve.
+      regions declared (include): 9, thinnest 2.828427125 mm
+      planned cell 4.931378498 mm gives 0.5735570948 cells across that region; a connected network needs at least 1.
+      A SMALLER CELL WORKS. At a 0.45 mm bead this region admits cells from 1.173173434 mm (printability) up to 2.828427125 mm (percolation).
+        Set "cell_mm" in the GRADING block to a value in that range. It is raised only to 1.173173434 mm (the cell below which no density in the band prints); the density is raised with the cell so the strut still clears your bead.
+          Or set "cell_mode": "fit" and let core derive the cell from each declared region's own extent.
+
+==============================================================================
+S1d — THE SAME TWO JOBS ON THE FIXED BINARY
+==============================================================================
+  branch, cell_mode auto            : exit 1  (still refuses — auto IS the light floor, deliberately)
+  branch, cell_mode swept @1.173 mm : exit 0  (RUNS)
+  sha256 of the auto  message: 031861fa31de24bd24e6b939844bc91b80cb620117e0b3dd4d6647e74a4b1d81
+  sha256 of the swept message: b2d7f92907bf84cec33215f440fe67ac3cc45c3f4b964572fb9e4fb2fc90608c
+  ★ they now DIFFER — the declared minimum reaches the forecast.
+
+  what the swept job now says:
+    [lattice] 9 of 9 declared lattice include regions are under the accuracy floor at the planned 2.346 mm cell.
+    [lattice] ARM "retain_subfloor_in_unloaded_regions" (the app's "Keep lattice in thin members" control) to lattice them OUT OF REGIME — or set "cell_mode": "fit", which derives a cell per region instead. The two are mutually exclusive and core refuses a job arming both.
+    [lattice] 
+    [lattice]   region        thinnest   cells
+    [lattice]   0 (bolt)       2.828    1.21  SOLID: under the floor
+    [lattice]   1 (bolt)       2.828    1.21  SOLID: under the floor
+    [lattice]   2 (bolt)       2.828    1.21  SOLID: under the floor
+    [lattice]   3 (bolt)       4.000    1.71  SOLID: under the floor

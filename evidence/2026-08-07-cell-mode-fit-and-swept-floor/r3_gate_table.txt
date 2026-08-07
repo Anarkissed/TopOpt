@@ -1,0 +1,64 @@
+base commit : d9fe8f768331c9202b172376b2779fc0a0315af2
+base   cli  : 04b723412b65183f…
+branch cli  : a3171159378078cb…
+
+==============================================================================
+R3 GATE TABLE — swept jobs, base (origin/main) vs branch
+==============================================================================
+
+--- M_multiscale   base exit=0  branch exit=0
+    rung   base verdict base margin | branch verdict branch margin
+    0.6995404314 True         {'in_plane': 5296.293671, 'interlayer': 9148.695007, 'worst_case': 5296.293671} | True         {'in_plane': 5296.293671, 'interlayer': 9148.695007, 'worst_case': 5296.293671}
+    0.5479696545 True         {'in_plane': 5177.586853, 'interlayer': 8923.378317, 'worst_case': 5177.586853} | True         {'in_plane': 5177.586853, 'interlayer': 8923.378317, 'worst_case': 5177.586853}
+    0.3998256585 True         {'in_plane': 4757.418251, 'interlayer': 8092.028643, 'worst_case': 4757.418251} | True         {'in_plane': 4757.418251, 'interlayer': 8092.028643, 'worst_case': 4757.418251}
+    voxel flips: 0 of 27691   (negative control at 1e-9: 0)
+
+--- S_above_noregion   base exit=0  branch exit=0
+    rung   base verdict base margin | branch verdict branch margin
+    0.6989632181 True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204} | True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204}
+    0.548873609 True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611} | True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611}
+    0.3992408008 True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796} | True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796}
+    voxel flips: 0 of 27691   (negative control at 1e-9: 0)
+
+--- S_above_region   base exit=0  branch exit=0
+    rung   base verdict base margin | branch verdict branch margin
+    0.6989632181 True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204} | True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204}
+    0.548873609 True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611} | True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611}
+    0.3992408008 True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796} | True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796}
+    voxel flips: 0 of 27691   (negative control at 1e-9: 0)
+
+--- S_between_noregion   base exit=0  branch exit=0
+    rung   base verdict base margin | branch verdict branch margin
+    0.6989632181 True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204} | True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204}
+    0.548873609 True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611} | True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611}
+    0.3992408008 True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796} | True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796}
+    voxel flips: 0 of 27691   (negative control at 1e-9: 0)
+
+--- S_between_thick   base exit=0  branch exit=0
+    rung   base verdict base margin | branch verdict branch margin
+    0.6989632181 True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204} | True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204}
+    0.548873609 True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611} | True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611}
+    0.3992408008 True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796} | True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796}
+    voxel flips: 0 of 27691   (negative control at 1e-9: 0)
+
+--- S_between_thin   base exit=1  branch exit=0
+    ★ PREVIOUSLY REFUSED, NOW RUNS — this is the POINT of S1.
+      base refusal: topopt-cli: the planned lattice cell is too COARSE for the regions you declared: the strut network would not be connected there, so this run would emi
+    rung   base verdict base margin | branch verdict branch margin
+    0.6989632181 None         None       | True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204}
+    0.548873609 None         None       | True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611}
+    0.3992408008 None         None       | True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796}
+    voxel flips: n/a (one side produced no design.bin)
+
+--- S_underfrontier   base exit=1  branch exit=0
+    ★ PREVIOUSLY REFUSED, NOW RUNS — this is the POINT of S1.
+      base refusal: topopt-cli: the planned lattice cell is too COARSE for the regions you declared: the strut network would not be connected there, so this run would emi
+    rung   base verdict base margin | branch verdict branch margin
+    0.6989632181 None         None       | True         {'in_plane': 5269.513204, 'interlayer': 9133.136545, 'worst_case': 5269.513204}
+    0.548873609 None         None       | True         {'in_plane': 5086.548611, 'interlayer': 8722.864347, 'worst_case': 5086.548611}
+    0.3992408008 None         None       | True         {'in_plane': 4484.769796, 'interlayer': 7576.869412, 'worst_case': 4484.769796}
+    voxel flips: n/a (one side produced no design.bin)
+
+==============================================================================
+Jobs that previously refused and now run: S_between_thin, S_underfrontier
+==============================================================================
