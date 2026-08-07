@@ -1,0 +1,28 @@
+=== vf=0.68 ===
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+topopt-cli: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 2169.617171, reproduced 2169.617169). That means the load case, the grid or the design is not the one that produced this variant — refusing to lattice it, because the certificate would describe a different object than the run's.
+real 102.21
+user 171.22
+sys 3.04
+=== vf=0.52 ===
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+topopt-cli: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 2259.952815, reproduced 2259.952813). That means the load case, the grid or the design is not the one that produced this variant — refusing to lattice it, because the certificate would describe a different object than the run's.
+real 107.47
+user 183.12
+sys 2.86
+=== vf=0.38 ===
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+topopt-cli: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 2193.876833, reproduced 2193.876835). That means the load case, the grid or the design is not the one that produced this variant — refusing to lattice it, because the certificate would describe a different object than the run's.
+real 113.93
+user 188.66
+sys 2.81
+=== vf=0.26 ===
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+topopt-cli: lattice_variant: the restored design does NOT reproduce the margin the run recorded for this variant (recorded 2008.278339, reproduced 2008.278337). That means the load case, the grid or the design is not the one that produced this variant — refusing to lattice it, because the certificate would describe a different object than the run's.
+real 119.83
+user 199.63
+sys 3.57

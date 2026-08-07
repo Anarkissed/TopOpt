@@ -996,6 +996,15 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME analyze_fixed_design COMMAND test_analyze_fixed_design)
 
+  # THE CERTIFICATION SOLVE IS NOT PURE, AND THIS IS THE BAND THAT FACT JUSTIFIES
+  # (task 2026-08-08-lattice-variant-margin-tolerance). Reproduces, in process, the
+  # Krylov-recycler divergence that made `lattice_variant` refuse all four rungs of
+  # the maintainer's own run, and pins that the band admits it while still refusing
+  # a load case off by one part in 10^4. Drives analyze_fixed_design (Eigen).
+  add_executable(test_margin_reproduction tests/unit/test_margin_reproduction.cpp)
+  target_link_libraries(test_margin_reproduction PRIVATE topopt)
+  add_test(NAME margin_reproduction COMMAND test_margin_reproduction)
+
   # THE RECEIPT IS REAL (handoff 2026-07-28-constrained-smooth-ui, bar S3): a
   # synthetic bar in axial tension, driven through build_production_loadcase and
   # re-certified through analyze_fixed_design, whose worst-case margin DROPS as

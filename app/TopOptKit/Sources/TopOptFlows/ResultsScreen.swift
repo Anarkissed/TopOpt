@@ -1300,6 +1300,7 @@ public struct ResultsScreen: View {
             Spacer()
             streamingChip   // "optimizing more…" sits right above the variant tabs
             ladderModeCaption   // WHICH ladder these tabs came off (growth-ladder G7)
+            recommendationCaption  // WHICH OBJECT is recommended, and what it weighs
             addedMaterialCaption   // the HEADLINE of a growth run: what was added
             massDetailCaption   // honest mesh-vs-voxel mass when they diverge (Open #6)
             latticeDetailCaption   // the latticed object's own mass + where it is
@@ -1400,6 +1401,30 @@ public struct ResultsScreen: View {
         .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
         .background(Capsule().fill(DS.Surface.bar.color)
             .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+    }
+
+    /// WHICH OBJECT THE RECOMMENDATION MEANS (task 2026-08-08-lattice-variant-
+    /// margin-tolerance, S2(c)).
+    ///
+    /// Once a rung has two objects, a RECOMMENDED badge on a tab no longer says
+    /// what is being recommended: "−47%, 360 g" and "−20%, 215 g latticed" are
+    /// different recommendations and the difference is 31 g of plastic. So the
+    /// object is named in words, with its mass and its rung, and — when the rung's
+    /// other object exists — what that one weighs instead.
+    @ViewBuilder private var recommendationCaption: some View {
+        if let line = model.recommendationLine {
+            HStack(alignment: .top, spacing: DS.Space.s) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DS.Color.okGreen.color)
+                Text(line).dsStyle(DS.TypeScale.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
     }
 
     /// THE HEADLINE OF A GROWTH RUN (task 2026-08-03-growth-ladder, item 5): how

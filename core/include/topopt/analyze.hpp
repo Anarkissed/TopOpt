@@ -329,6 +329,88 @@ FixedDesignAnalysis analyze_fixed_design(
     // means "not void". Must be in (0, 1).
     double printed_iso = 0.5);
 
+// ═══ THE MARGIN-REPRODUCTION BAND ═══════════════════════════════════════════
+// (task 2026-08-08-lattice-variant-margin-tolerance, S1)
+//
+// WHAT THIS IS FOR. Two places re-certify a design the run already certified and
+// compare the margin they get with the margin the run RECORDED: the lattice
+// pipeline's null-posture proof (`certify_latticed_variant`) and the re-lattice
+// entry point (`lattice_variant_job`), which REFUSES on a mismatch. Both used a
+// bare `==` on a double. Both were wrong, and the second one refused every
+// variant of the maintainer's own 128³ run.
+//
+// *** THE COMMENT ON THE SOLVE ABOVE — "the certification solve is stateless (no
+// warm start, no cached solver) so a re-analysis of the same field is
+// bit-identical" — IS FALSE, AND THIS IS WHY. *** `analyze_fixed_design` is not a
+// pure function of its arguments. The Krylov recycling subspace
+// (`core/src/fea/recycle.cpp:83`, `thread_local RcSpace g_space`) is
+// production-ARMED (`core/src/simp/production.cpp:672`) and deliberately CARRIED
+// across solves (`krylov_recycle_reset_per_rung` is false,
+// `core/src/simp/production.cpp:674`). So:
+//
+//   * the ladder's per-rung certification solve
+//     (`core/src/simp/minimize_plastic.cpp:1806`) — the solve whose margin is the
+//     RECORDED one — runs with a subspace harvested from that rung's own hundreds
+//     of trajectory solves;
+//   * every RE-certification runs inside `ScopedLadderSolverIsolation`
+//     (`core/src/cli/run_job.cpp:2517`), which disables recycling and GenEO for
+//     the duration precisely so the lattice post-process cannot perturb the
+//     ladder — and which covers `lattice_variant_job` too, by design.
+//
+// Two different Krylov paths on the same operator. Both stop at the same relative
+// residual (`cg_tolerance`), so they land at two different points inside the same
+// residual ball, and the margin — a smooth functional of the displacement field —
+// differs by what that ball admits.
+//
+// MEASURED, on three parts (evidence/2026-08-08-lattice-variant-margin-tolerance):
+// the recycler only engages when a solve falls back to Jacobi-CG, because
+// production sets `fea_set_krylov_recycle_wrap_multigrid(false)`
+// (`core/src/simp/production.cpp:673`). A fixture whose grid coarsens (plate_bore
+// at res 48: multigrid carried 240/240 solves, recycle_dim 0) reproduces
+// BIT-FOR-BIT. The maintainer's part never coarsens (his run: hierarchy built on
+// 3 of 445 solves, recycle_dim 16 on 444) and reproduces to 9 significant figures
+// and no further.
+//
+// THE BAND, AND WHY IT IS THIS NUMBER. It is anchored to the thing that causes
+// the difference — the solver's own convergence tolerance — and not fitted to the
+// spread that was observed. Both solves satisfy ||f - Ku|| / ||f|| <= cg_tolerance
+// (1e-8 on every production run: minimize_plastic's kCertTol, asserted there), so
+// the admissible disagreement scales with cg_tolerance. The factor buys headroom
+// over that bound for the stress recovery on top of it:
+//
+//   band = kMarginReproductionResidualFactor * cg_tolerance = 1e-6 in production
+//
+// WHAT THAT STILL CATCHES. The check exists because a mismatch means the load
+// case, the grid or the design is not the one that produced the variant, and that
+// protection has to survive. Every row below is MEASURED — the noise across three
+// parts and twelve rungs (evidence README §1), the corruptions in
+// test_margin_reproduction section B3:
+//
+//   solver-path noise, the thing that must pass   8.4e-11 .. 6.8e-09   ACCEPTED
+//   ── the band ────────────────────────────────────────── 1.0e-06 ──
+//   the declared load off by one part in 10^4              1.0e-04     REFUSED
+//   ONE voxel of the design flipped to solid               2.0e-03     REFUSED
+//   the whole design 2 % denser                            6.1e-02     REFUSED
+//
+// The band sits 148x above the worst noise it must admit and 100x below the
+// SMALLEST corruption it must catch — and that smallest corruption is one voxel,
+// which is the finest change to the design that exists. Nothing that changes the
+// OBJECT moves the margin by less than the band; nothing that changes only the
+// SOLVE PATH moves it by more.
+inline constexpr double kMarginReproductionResidualFactor = 100.0;
+
+// |reproduced - recorded| / |recorded|. Exactly equal inputs (including two
+// infinities, which a zero-stress lattice posture produces) are 0.0; anything
+// non-finite or a zero denominator that is not an exact match is +inf, so it can
+// never pass a band.
+double margin_reproduction_relative_delta(double recorded, double reproduced);
+
+// ONE definition of "this re-certification reproduces the recorded margin", so
+// the receipt's proof and the re-lattice path's refusal cannot drift apart. A
+// non-positive `cg_tolerance` (no declared convergence bound) falls back to exact
+// equality rather than inventing a band.
+bool margin_reproduces(double recorded, double reproduced, double cg_tolerance);
+
 // THE ONE accept-gate margin expression (handoff
 // 2026-08-01-build-direction-separation). Extracted verbatim from
 // analyze_fixed_design so the ORIENTATION SCORER can price a candidate
