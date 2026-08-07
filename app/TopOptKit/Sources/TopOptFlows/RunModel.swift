@@ -907,6 +907,22 @@ public final class RunModel: ObservableObject {
         pendingArtifacts = artifacts
     }
 
+    /// HOW THE RESULTS SCREEN REACHES THIS RUN'S LATTICED MESHES (task
+    /// 2026-08-07-lattice-variants-on-screen). A lattice optimize run leaves a
+    /// multi-gigabyte latticed STL per rung on the worker; the app carries their
+    /// masses and verdicts in the outcome and fetches a MESH only when one is
+    /// selected, so it needs a live handle to the job long after the run resolved
+    /// (by which point the re-attach record has been cleared).
+    ///
+    /// Unlike the retention pair this is NOT gated on the run producing accepted
+    /// variants: it is just a job address, it holds nothing, and a run that
+    /// produces nothing simply never has a latticed variant to ask about.
+    @Published public private(set) var latticeMeshSource: LatticeMeshTransferring?
+
+    public func noteLatticeMeshSource(_ source: LatticeMeshTransferring) {
+        latticeMeshSource = source
+    }
+
     /// Reinstate a pair loaded from disk beside restored results (persist-c).
     public func restoreArtifacts(_ artifacts: RelatticeArtifacts?) {
         guard phase == .idle else { return }

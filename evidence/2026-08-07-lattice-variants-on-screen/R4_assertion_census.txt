@@ -1,0 +1,28 @@
+=== R4 assertion census: ea45f7cfcaec7156eb24ab2dd4a32d76d5da5d91 → working tree ===
+
+1. TEST FUNCTIONS   before=1334  after=1354
+   removed:
+   (nothing above = no test stopped being asked)
+
+2. ASSERTION / LITERAL MESSAGES   before=3475  after=3685
+   removed:
+   (nothing above = no assertion message disappeared)
+
+3. ASSERTION KINDS (before → after; a kind that DROPPED is the thing to look at)
+     XCTAssertEqual                 2441 →   2483  
+     XCTAssertFalse                  500 →    508  
+     XCTAssertGreaterThan            182 →    187  
+     XCTAssertGreaterThanOrEqual      34 →     34  
+     XCTAssertLessThan                64 →     64  
+     XCTAssertLessThanOrEqual         32 →     32  
+     XCTAssertNil                    341 →    350  
+     XCTAssertNotEqual                83 →     84  
+     XCTAssertNotNil                 136 →    139  
+     XCTAssertThrowsError             13 →     13  
+     XCTAssertTrue                   948 →    968  
+     XCTFail                          86 →     91  
+     XCTSkip                          59 →     59  
+     XCTSkipIf                         2 →      2  
+     XCTSkipIfNil                      9 →      9  
+     XCTSkipUnless                     6 →     12  
+     XCTUnwrap                       467 →    493  

@@ -1,0 +1,40 @@
+Test Suite 'LatticeVariantsHisRunEvidence' started at 2026-08-07 02:36:03.929.
+Test Case '-[TopOptFlowsTests.LatticeVariantsHisRunEvidence testHisFourVariantRunEndToEnd]' started.
+Test Case '-[TopOptFlowsTests.LatticeVariantsHisRunEvidence testHisFourVariantRunEndToEnd]' passed (155.628 seconds).
+Test Suite 'LatticeVariantsHisRunEvidence' passed at 2026-08-07 02:38:39.558.
+	 Executed 1 test, with 0 failures (0 unexpected) in 155.628 (155.629) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-08-07 02:38:39.558.
+	 Executed 1 test, with 0 failures (0 unexpected) in 155.628 (155.629) seconds
+Test Suite 'Selected tests' passed at 2026-08-07 02:38:39.558.
+	 Executed 1 test, with 0 failures (0 unexpected) in 155.628 (155.630) seconds
+== R1: his four-variant run, end to end ==
+  worker output: /Users/nadim/.topopt-worker/ca62f91cba4b422d/out
+  variant_068_lattice.stl  1954879484 bytes (1.95 GB)
+  variant_052_lattice.stl  1420059884 bytes (1.42 GB)
+  variant_038_lattice.stl  1058859084 bytes (1.06 GB)
+  variant_026_lattice.stl  740360884 bytes (740 MB)
+  [1] run completes: 4 accepted rungs in 0.50 s (the app's own assembly, not the solve)
+  [1] latticed-mesh GETs during the run: 0 (the real files were right there)
+  [2] variant list: 8 tabs
+        solid    rung −20% · 544 g
+        latticed rung −20% · 215 g
+        solid    rung −31% · 473 g
+        latticed rung −31% · 240 g
+        solid    rung −40% · 412 g
+        latticed rung −40% · 245 g
+        solid    rung −47% · 360 g
+        latticed rung −47% · 246 g
+  [3] selected the RECOMMENDED rung's latticed variant: 246 g (its solid: 360 g)
+      provenance: 246 g from the lattice certification receipt (voxel basis) — a latticed mesh is an interpenetrating soup, so it has no enclosed volume to weigh.
+      geometry:   variant_026_lattice.stl on the worker · 740 MB · 14660132 triangles
+  [4] asking for the geometry. device headroom reported as 16.59 GB
+      READY: 14807216 triangles in 1.62 s
+      viewer mesh: 14807216 triangles
+      footprint now 4.41 GB (was 589 MB)
+  [5] export writes: M2_vertical_stand-PLA-47pct-latticed.stl (streamed: true)
+      wrote M2_vertical_stand-PLA-47pct-latticed.stl (740360884 bytes) in 2.16 s
+      byte-for-byte the worker's variant_026_lattice.stl ✓
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

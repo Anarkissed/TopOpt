@@ -1,0 +1,18 @@
+Building for debugging...
+Build complete! (0.14s)
+Test Suite 'Selected tests' started at 2026-08-07 02:23:23.960.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-08-07 02:23:23.961.
+Test Suite 'LatticeVariantsOnScreenTests' started at 2026-08-07 02:23:23.961.
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testEveryLatticedRungIsReachableAndNoMeshWasTransferred]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeVariantsOnScreenTests.swift:194: error: -[TopOptFlowsTests.LatticeVariantsOnScreenTests testEveryLatticedRungIsReachableAndNoMeshWasTransferred] : XCTUnwrap failed: expected non-nil value of type "LatticeVariantAlternative" - rung vf=0.68 announced a lattice on its LATTICE checkpoint line, so the app must carry that latticed object — this is the gap: the optimize path fetched the report and never made the lattice reachable
+Test Case '-[TopOptFlowsTests.LatticeVariantsOnScreenTests testEveryLatticedRungIsReachableAndNoMeshWasTransferred]' failed (0.055 seconds).
+Test Suite 'LatticeVariantsOnScreenTests' failed at 2026-08-07 02:23:24.016.
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.055 (0.055) seconds
+Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-07 02:23:24.016.
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.055 (0.056) seconds
+Test Suite 'Selected tests' failed at 2026-08-07 02:23:24.016.
+	 Executed 1 test, with 1 failure (0 unexpected) in 0.055 (0.057) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

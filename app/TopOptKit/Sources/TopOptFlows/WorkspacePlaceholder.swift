@@ -792,6 +792,11 @@ public struct WorkspacePlaceholder: View {
         run.runner = compute.activeRemote.map { cfg in
             RunModel.remoteRunner(cfg, onArtifacts: { art in
                 DispatchQueue.main.async { liveRun.noteRetainedArtifacts(art) }
+            }, onLatticeMeshSource: { src in
+                // THE ADDRESS OF THIS RUN'S LATTICED MESHES (task 2026-08-07-
+                // lattice-variants-on-screen). Lands on the run so the results
+                // screen can ask for one; nothing is transferred until it does.
+                DispatchQueue.main.async { liveRun.noteLatticeMeshSource(src) }
             })
         } ?? RunModel.bridgeRunner
         // A remote run's liveness is RemoteRun's (queue- + heartbeat-aware); only a

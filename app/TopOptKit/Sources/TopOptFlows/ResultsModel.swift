@@ -22,6 +22,13 @@ import TopOptDesign
 /// they are named + tested here and may be tuned without touching the core.
 public enum LayerShear: Equatable, Sendable {
     case low, moderate, high
+    /// NOT CLASSIFIED, because the object in question has no interlayer margin to
+    /// classify (task 2026-08-07-lattice-variants-on-screen). A latticed variant's
+    /// composite certification reports ONE worst case rather than the in-plane /
+    /// interlayer split this classification reads, so inheriting the solid rung's
+    /// classification would put a claim about the solid on the latticed object.
+    /// Renders as "n/a", never as "Low".
+    case unknown
 
     /// Design label ("Low ✓" renders the ✓ + green tint in the view when `isLow`).
     public var label: String {
@@ -29,6 +36,7 @@ public enum LayerShear: Equatable, Sendable {
         case .low: return "Low"
         case .moderate: return "Moderate"
         case .high: return "High"
+        case .unknown: return "n/a"
         }
     }
     /// Whether interlayer failure is a low concern (the green, checkmarked state).
@@ -329,7 +337,31 @@ public enum FailureLoad {
 /// readouts). Everything is precomputed from the outcome so it is `Equatable` and
 /// directly assertable in tests.
 public struct ResultVariantVM: Equatable, Sendable {
+    /// WHICH OBJECT A TAB STANDS FOR (task 2026-08-07-lattice-variants-on-screen).
+    /// A lattice optimize run produces two per accepted rung, and until this
+    /// existed the list could only name one of them.
+    public enum Kind: Equatable, Sendable {
+        /// The optimized solid the ladder produced for this rung.
+        case solid
+        /// The latticed object the SAME rung produced — a different mesh, a
+        /// different mass, and its own certification verdict.
+        case latticed
+    }
+
+    /// The tab's own position in `tabs`, and the argument `select(_:)` takes.
+    ///
+    /// This USED to be the accepted-variant index, because with one tab per rung
+    /// the two coincided. They no longer do: a rung with a lattice contributes two
+    /// tabs. On a run with no lattices every tab is `.solid` and `index ==
+    /// variantIndex` exactly as before, so nothing about a non-lattice run moved.
     public let index: Int
+    /// Which accepted variant this tab reads its rung facts from. Both of a rung's
+    /// tabs carry the same value — they ARE the same rung.
+    public let variantIndex: Int
+    public let kind: Kind
+    /// The latticed object's facts, on a `.latticed` tab. nil on a `.solid` one.
+    public let latticeAlternative: LatticeVariantAlternative?
+    public var isLatticed: Bool { kind == .latticed }
     /// Achieved physical volume fraction (0–1); savings is the complement.
     public let achievedVolumeFraction: Double
     /// Rounded percent of material saved, e.g. 30 for a 0.70 volume fraction.
@@ -377,17 +409,44 @@ public struct ResultVariantVM: Equatable, Sendable {
     /// The HEADLINE the tab shows: "−30%" saved on a reduction run, "+48%" added on
     /// a growth run. `headlineNoun` names which it is in one word, so no caller has
     /// to re-derive the sign's meaning.
-    public var headlineLabel: String { isGrowth ? growthLabel : savingsLabel }
-    public var headlineNoun: String { isGrowth ? "added" : "saved" }
+    ///
+    /// *** A LATTICED TAB'S HEADLINE IS ITS MASS, AND THAT IS DELIBERATE. *** The
+    /// savings percentage is a PRINTED-VOXEL-COUNT fraction of the imported part
+    /// (`1 − printedFraction`), and the run measures it for the solid rung only —
+    /// nothing anywhere reports a latticed printed fraction. Showing the rung's
+    /// solid savings above a latticed object would attach a number to the wrong
+    /// thing, which is the exact failure this task exists to end. So the latticed
+    /// tab leads with the one figure that IS measured for it: `lattice_mass_grams`.
+    public var headlineLabel: String {
+        if isLatticed { return massLabel }
+        return isGrowth ? growthLabel : savingsLabel
+    }
+    public var headlineNoun: String {
+        if isLatticed { return "latticed" }
+        return isGrowth ? "added" : "saved"
+    }
     /// "+48%" — the material ADDED against the imported part, on the same printed
     /// count basis the savings label uses.
     public let growthLabel: String
     /// Rounded percent of material ADDED (0 on a reduction run).
     public let growthPercent: Int
+    /// The rung headline this tab belongs to ("−47%" / "+48%"), so a latticed tab
+    /// can name its rung without pretending the number describes IT.
+    public let rungLabel: String
+    /// The LATTICED object's own certification verdict, on a `.latticed` tab; nil
+    /// on a solid one. Kept separate from the rung's `accepted` because they are
+    /// separate verdicts: a rung whose solid passes can produce a lattice that does
+    /// not, and one badge must never stand for the other.
+    public let latticeAccepted: Bool?
 
     /// The tab's sub-line, e.g. "199 g · selected" / "199 g · plastic" (design).
+    /// A latticed tab says what it is and which rung it came off instead, since its
+    /// headline already carries the mass.
     public func subLabel(active: Bool) -> String {
-        "\(massLabel) · \(active ? "selected" : "plastic")"
+        if isLatticed {
+            return "latticed · \(active ? "selected" : "from \(rungLabel)")"
+        }
+        return "\(massLabel) · \(active ? "selected" : "plastic")"
     }
 
     /// The ONE line a growth variant's result reads as, when there is one: how much
@@ -1145,8 +1204,205 @@ public final class ResultsModel: ObservableObject {
         tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil
     }
 
+    /// The accepted variant the selected TAB reads its rung facts from. Since a
+    /// rung can contribute two tabs (its solid and its latticed alternative), the
+    /// selection is resolved through the tab rather than indexing `accepted`
+    /// directly. With no lattices the two indices coincide and this is the old
+    /// expression exactly.
     private var selectedVariant: OptimizeVariant? {
-        accepted.indices.contains(selectedIndex) ? accepted[selectedIndex] : nil
+        guard let tab = selected, accepted.indices.contains(tab.variantIndex)
+        else { return nil }
+        return accepted[tab.variantIndex]
+    }
+
+    /// The latticed alternative the user currently has selected, or nil when the
+    /// selection is a solid variant. THE gate on every latticed-only behaviour
+    /// below — masses, provenance, export, transfer.
+    public var selectedLattice: LatticeVariantAlternative? {
+        selected?.latticeAlternative
+    }
+
+    /// WHICH ACCEPTED VARIANT the selection belongs to — the index every caller
+    /// that reaches past the tab into the RUN wants: the Smooth and "Lattice this"
+    /// entries, and their gates.
+    ///
+    /// It exists because `selectedIndex` stopped being that number when a rung
+    /// gained a second tab. Both of a rung's tabs answer with the same variant,
+    /// which is right: smoothing and re-latticing operate on the rung's DESIGN
+    /// FIELD, not on whichever of its two meshes is on screen — so those entries
+    /// mean the same thing from either tab, and neither is disabled by the other.
+    public var selectedVariantIndex: Int { selected?.variantIndex ?? 0 }
+
+    // MARK: - the latticed object's geometry (task 2026-08-07-lattice-variants-on-screen)
+
+    /// Where a latticed variant's MESH stands on this device. The numbers — mass,
+    /// margin, verdict, size — never depend on this: they come off the receipt and
+    /// are on screen the moment the tab is. This is only about the geometry.
+    public enum LatticeMeshState: Equatable, Sendable {
+        /// Nobody has asked for it yet. The default, because the transfer is
+        /// multi-gigabyte and must be a choice.
+        case idle
+        /// This device cannot hold it, and this is the sentence saying why, with
+        /// the numbers (`LatticeMeshBudget.displayVerdict`). *** THE UI IS
+        /// REQUIRED TO SHOW THIS. *** Silently falling back to the solid is the
+        /// defect this whole task exists to close.
+        case refused(String)
+        case transferring(receivedBytes: Int64, totalBytes: Int64)
+        /// On this device, decoded, and being drawn.
+        case ready(triangles: Int)
+        /// It was attempted and did not arrive. Also never a silent fallback.
+        case failed(String)
+    }
+
+    /// Per-mesh transfer state, keyed by the worker-side filename so switching
+    /// between tabs does not lose a transfer already made.
+    @Published public private(set) var latticeMeshStates: [String: LatticeMeshState] = [:]
+
+    /// The selected latticed variant's mesh state (`.idle` when nothing is known,
+    /// nil when the selection is not a latticed variant).
+    public var selectedLatticeMeshState: LatticeMeshState? {
+        guard let alt = selectedLattice else { return nil }
+        return latticeMeshStates[alt.meshName] ?? .idle
+    }
+
+    /// Decoded latticed geometry, by mesh name. Holds AT MOST ONE — the measured
+    /// footprint for a single 1.42 GB rung is 6.15 GB with its ViewerMesh, so
+    /// caching two would be caching a crash.
+    private var latticeGeometry: (name: String, vertices: [Float], indices: [Int32])?
+
+    /// How the app reaches the worker for this run's latticed meshes. nil when the
+    /// run was not remote, or when the app no longer knows which job it was — in
+    /// which case the numbers still show and the transfer is honestly unavailable.
+    public var latticeMeshTransfer: LatticeMeshTransferring?
+
+    /// Injectable for tests: how much memory this device says it has left. Nil
+    /// (production) reads the real figure from the OS.
+    var latticeAvailableBytesOverride: Int?
+
+    /// WHAT THE SELECTED LATTICED MASS IS, AND WHERE IT CAME FROM. The solid's
+    /// mass caption offers a mesh-derived cross-check; this one states its single
+    /// source instead, because there is no honest second opinion to offer.
+    public var latticeMassProvenanceLine: String? {
+        guard let alt = selectedLattice else { return nil }
+        guard alt.massGrams > 0 else {
+            return "This latticed variant's certification receipt did not reach "
+                 + "this device, so its mass is not known. The mesh is on the "
+                 + "worker (\(LatticeMeshBudget.byteLabel(alt.meshBytes))) and can "
+                 + "still be exported."
+        }
+        return "\(ResultsModel.massLabel(alt.massGrams)) "
+             + "\(LatticeVariantAlternative.massProvenance)."
+    }
+
+    /// The one-line summary of what this latticed object IS, for the tab detail:
+    /// its size on the worker and its triangle count, so the cost of asking for it
+    /// is visible before it is asked for.
+    public var latticeGeometrySummary: String? {
+        guard let alt = selectedLattice else { return nil }
+        let size = alt.meshBytes > 0
+            ? LatticeMeshBudget.byteLabel(alt.meshBytes) : "size not reported"
+        // *** THE TRIANGLE COUNT IS THE GENERATOR'S, AND IT IS NOT THE FILE'S. ***
+        // The `tris=` token on the checkpoint line counts what the LATTICE
+        // generator emitted; the file also carries the solid companion body — the
+        // printed voxels the grading law kept solid — which core writes into the
+        // same soup. Measured on the maintainer's vf=0.26 rung: the line says
+        // 14 660 132, the file decodes to 14 807 216, 1.0 % more. Once the mesh is
+        // here, `LatticeMeshState.ready` reports the file's own count instead. The
+        // word "struts" is what keeps the two from reading as the same number.
+        let tris = alt.triangleCount > 0
+            ? " · \(alt.triangleCount) strut triangles" : ""
+        return "\(alt.meshName) on the worker · \(size)\(tris)"
+    }
+
+    /// Ask for the selected latticed variant's geometry.
+    ///
+    /// Checks the budget FIRST and refuses with the numbers rather than starting a
+    /// transfer that would take the app down part-way through — on the maintainer's
+    /// run the meshes are 740 MB to 1.95 GB and displaying the 1.42 GB one was
+    /// measured at 6.15 GB resident. A refusal is a RESULT, not an error: the mass,
+    /// the margin and the verdict on screen are unaffected, and Export still works,
+    /// because an export streams and never decodes.
+    public func bringLatticedMeshOver() {
+        guard let alt = selectedLattice else { return }
+        if case .transferring = latticeMeshStates[alt.meshName] ?? .idle { return }
+        if case .ready = latticeMeshStates[alt.meshName] ?? .idle { return }
+
+        let available = latticeAvailableBytesOverride ?? LatticeMeshBudget.availableBytes()
+        let verdict = LatticeMeshBudget.displayVerdict(
+            fileBytes: alt.meshBytes, available: available, meshName: alt.meshName)
+        // THE DEVICE'S OWN NUMBER, ON THE RECORD. On iOS `available` is
+        // `os_proc_available_memory()` — the jetsam headroom the system will
+        // actually enforce for this process on THIS iPad, not an estimate from a
+        // model name. Logged at the moment it decides something, so a device QA
+        // pass can read what the hardware said rather than infer it.
+        LatticeMeshBudget.logDecision(
+            meshName: alt.meshName, fileBytes: alt.meshBytes,
+            available: available, fits: verdict.fits)
+        if let reason = verdict.refusalReason {
+            latticeMeshStates[alt.meshName] = .refused(reason)
+            return
+        }
+        guard let transfer = latticeMeshTransfer else {
+            latticeMeshStates[alt.meshName] = .failed(
+                "This latticed mesh is on the worker that produced it "
+                + "(\(alt.meshName), \(LatticeMeshBudget.byteLabel(alt.meshBytes))), "
+                + "but this app no longer has a connection to that run to fetch it "
+                + "with. Its mass and verdict here are the real ones.")
+            return
+        }
+        latticeMeshStates[alt.meshName] =
+            .transferring(receivedBytes: 0, totalBytes: Int64(alt.meshBytes))
+        transfer.downloadMesh(named: alt.meshName, progress: { [weak self] got, total in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Only advance a transfer that is still the current story for this
+                // mesh — a refusal or failure must not be overwritten by a late
+                // progress callback.
+                if case .transferring = self.latticeMeshStates[alt.meshName] ?? .idle {
+                    self.latticeMeshStates[alt.meshName] = .transferring(
+                        receivedBytes: got,
+                        totalBytes: total > 0 ? total : Int64(alt.meshBytes))
+                }
+            }
+        }, completion: { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
+                    self.latticeMeshStates[alt.meshName] = .failed(
+                        "\(error.localizedDescription) The lattice itself was "
+                        + "produced — its mass and verdict on this screen are read "
+                        + "from its certification receipt — so this is a transfer "
+                        + "failure, not a missing result.")
+                case .success(let url):
+                    self.adoptLatticedMesh(at: url, for: alt)
+                }
+            }
+        })
+    }
+
+    /// Decode a landed latticed mesh and make it the displayed geometry. Reads the
+    /// file MEMORY-MAPPED so the source bytes stay evictable pages rather than a
+    /// second resident copy — measured at 3.21 GB peak against 6.07 GB for the
+    /// in-memory route on the same 1.42 GB rung.
+    private func adoptLatticedMesh(at url: URL, for alt: LatticeVariantAlternative) {
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+            latticeMeshStates[alt.meshName] = .failed(
+                "The latticed mesh arrived but could not be read back off this "
+                + "device's disk.")
+            return
+        }
+        let mesh = MeshExport.parseBinarySTL(data)
+        guard !mesh.vertices.isEmpty, !mesh.indices.isEmpty else {
+            latticeMeshStates[alt.meshName] = .failed(
+                "The latticed mesh arrived (\(LatticeMeshBudget.byteLabel(data.count))) "
+                + "but did not decode to any geometry — not showing an empty part.")
+            return
+        }
+        latticeGeometry = (alt.meshName, mesh.vertices, mesh.indices)
+        latticeMeshStates[alt.meshName] = .ready(triangles: mesh.indices.count / 3)
+        selectedMeshCache = nil          // the viewer must rebuild against it
     }
 
     // MARK: - STL export (EXPORT task) + honest mesh mass (Open #6)
@@ -1156,6 +1412,15 @@ public final class ResultsModel: ObservableObject {
     /// (the worker returns the mesh even when it withholds the fields — 097), so a
     /// remote variant exports identically; only a genuinely empty mesh disables it.
     public var canExport: Bool {
+        // *** A LATTICED VARIANT IS ALWAYS EXPORTABLE, EVEN WHEN IT CANNOT BE
+        // SHOWN (task 2026-08-07-lattice-variants-on-screen, S2d). *** Export
+        // streams the worker's file straight to disk and never decodes it — the
+        // measured cost is one 8 MB buffer, against the 6.15 GB that DISPLAYING
+        // the same 1.42 GB rung needs. So the memory ceiling that stops the viewer
+        // has no bearing here, and gating export on `meshVertices` — which a
+        // latticed variant deliberately never carries — would have made the one
+        // object the user wants to print the one object he cannot get out.
+        if let alt = selectedLattice { return !alt.meshName.isEmpty }
         guard let v = selectedVariant else { return false }
         return !v.meshVertices.isEmpty && v.meshIndices.count >= 3
     }
@@ -1164,7 +1429,66 @@ public final class ResultsModel: ObservableObject {
     /// accessible label (a variant with no mesh — e.g. a cancelled rung — can't be
     /// written). nil when export is available.
     public var exportDisabledReason: String? {
-        canExport ? nil : "This variant has no mesh to export."
+        if selectedLattice != nil {
+            return canExport ? nil
+                : "This latticed variant's mesh was not named by the worker, so "
+                + "there is no file to ask for."
+        }
+        return canExport ? nil : "This variant has no mesh to export."
+    }
+
+    /// Whether the Export button must go through the STREAMING path (a latticed
+    /// selection) rather than writing bytes the app already holds.
+    public var exportIsStreamed: Bool { selectedLattice != nil }
+
+    /// Stream the selected LATTICED variant's mesh from the worker to a local file
+    /// and hand back its URL for the share sheet. Never decodes, so it works on a
+    /// device that cannot display the same object.
+    ///
+    /// Refuses up front when the volume cannot hold the file, with the numbers —
+    /// a half-written multi-gigabyte STL handed to a share sheet is a worse outcome
+    /// than a sentence saying there is no room for it.
+    public func exportLatticedMesh(
+        progress: @escaping (Int64, Int64) -> Void = { _, _ in },
+        completion: @escaping (Result<URL, Error>) -> Void) {
+        guard let alt = selectedLattice else {
+            completion(.failure(LatticeMeshTransferError(
+                "the selected variant is not a latticed one")))
+            return
+        }
+        let free = LatticeMeshBudget.freeDiskBytes()
+        if let reason = LatticeMeshBudget.exportVerdict(
+            fileBytes: alt.meshBytes, freeDiskBytes: free).refusalReason {
+            completion(.failure(LatticeMeshTransferError(reason)))
+            return
+        }
+        guard let transfer = latticeMeshTransfer else {
+            completion(.failure(LatticeMeshTransferError(
+                "This latticed mesh is on the worker that produced it "
+                + "(\(alt.meshName)), but this app no longer has a connection to "
+                + "that run to fetch it with. It is in that job's output folder.")))
+            return
+        }
+        let name = exportFilename
+        transfer.downloadMesh(named: alt.meshName, progress: progress) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .failure(let e): completion(.failure(e))
+                case .success(let url):
+                    // Rename to the export filename so what lands in Files is named
+                    // for the variant the user chose, not for the worker's job.
+                    let dest = url.deletingLastPathComponent()
+                        .appendingPathComponent(name)
+                    try? FileManager.default.removeItem(at: dest)
+                    do {
+                        try FileManager.default.moveItem(at: url, to: dest)
+                        completion(.success(dest))
+                    } catch {
+                        completion(.success(url))   // the bytes matter more than the name
+                    }
+                }
+            }
+        }
     }
 
     /// The export filename: `{project}-{material}-{NN}pct.stl`, where NN is the
@@ -1173,19 +1497,21 @@ public final class ResultsModel: ObservableObject {
     /// in the project / material names collapse to underscores. Falls back to
     /// "variant" when nothing is selected.
     public var exportFilename: String {
+        let proj = ResultsModel.fileToken(projectName, fallback: "part")
+        let mat = ResultsModel.fileToken(materialName, fallback: "material")
         // Task 2026-08-03-growth-ladder — on a GROWTH variant the savings percent is
         // NEGATIVE, which would name the file "…--48pct.stl". The filename carries
         // the number the user is CHOOSING BY, so it carries the growth percent on a
         // growth run, tagged so the two can never be confused for each other.
-        if let v = selected, v.isGrowth {
-            let proj = ResultsModel.fileToken(projectName, fallback: "part")
-            let mat = ResultsModel.fileToken(materialName, fallback: "material")
-            return "\(proj)-\(mat)-plus\(v.growthPercent)pct.stl"
-        }
-        let pct = selected?.savingsPercent ?? 0
-        let proj = ResultsModel.fileToken(projectName, fallback: "part")
-        let mat = ResultsModel.fileToken(materialName, fallback: "material")
-        return "\(proj)-\(mat)-\(pct)pct.stl"
+        let rung: String
+        if let v = selected, v.isGrowth { rung = "plus\(v.growthPercent)pct" }
+        else { rung = "\(selected?.savingsPercent ?? 0)pct" }
+        // A LATTICED EXPORT IS A DIFFERENT OBJECT AND MUST NOT SHARE A FILENAME
+        // (task 2026-08-07-lattice-variants-on-screen). The rung is the same, so
+        // without the tag the two files collide in Files/AirDrop and the 246 g
+        // object overwrites the 360 g one under the 360 g one's name.
+        if selectedLattice != nil { return "\(proj)-\(mat)-\(rung)-latticed.stl" }
+        return "\(proj)-\(mat)-\(rung).stl"
     }
 
     /// The 80-byte STL header detail naming the variant, e.g.
@@ -1202,6 +1528,11 @@ public final class ResultsModel: ObservableObject {
     /// it is derived purely from the local mesh buffers, so a remote variant exports
     /// the same way a local one does.
     public func exportSTLData() -> Data? {
+        // A LATTICED SELECTION HAS NO IN-MEMORY BYTES TO WRITE, and must never fall
+        // through to the solid's. `exportLatticedMesh` is its path; returning nil
+        // here makes a caller that forgot to branch produce NOTHING rather than the
+        // wrong object under the right name.
+        guard selectedLattice == nil else { return nil }
         guard let v = selectedVariant, canExport else { return nil }
         return MeshExport.binarySTL(vertices: v.meshVertices, indices: v.meshIndices,
                                     header: MeshExport.header(detail: exportHeaderDetail))
@@ -1210,6 +1541,10 @@ public final class ResultsModel: ObservableObject {
     /// The exported mesh's true enclosed volume (mm³) — the divergence-theorem sum
     /// over the selected variant's triangles. 0 when nothing exportable.
     public var selectedMeshVolumeMM3: Double {
+        // 0 for a latticed selection — an interpenetrating soup has no enclosed
+        // volume, and the divergence-theorem sum over one is not a smaller number,
+        // it is a meaningless one. See `selectedMassComparison`.
+        guard selectedLattice == nil else { return 0 }
         guard let v = selectedVariant, canExport else { return 0 }
         return MeshExport.meshVolume(vertices: v.meshVertices, indices: v.meshIndices)
     }
@@ -1219,6 +1554,10 @@ public final class ResultsModel: ObservableObject {
     /// false the mesh mass is labeled an ESTIMATE — an open surface has no
     /// well-defined enclosed volume.
     public var selectedMeshWatertight: Bool {
+        // A latticed mesh is a deliberately non-manifold soup and is never
+        // watertight — but the honest answer is "not a question this asks", so it
+        // does not claim otherwise from the SOLID's topology.
+        guard selectedLattice == nil else { return false }
         guard let v = selectedVariant, canExport else { return false }
         return MeshExport.isWatertight(vertices: v.meshVertices, indices: v.meshIndices)
     }
@@ -1229,6 +1568,15 @@ public final class ResultsModel: ObservableObject {
     /// both are labeled and shown — never silently swapped. nil when there is no
     /// exportable mesh or no material density (nothing honest to compare).
     public var selectedMassComparison: MassComparison? {
+        // *** NEVER FOR A LATTICED SELECTION (task 2026-08-07-lattice-variants-
+        // on-screen). *** This comparison's whole basis is the divergence-theorem
+        // volume of a closed surface. A latticed mesh is an interpenetrating SOUP —
+        // struts weld through each other and through the solid companion body — so
+        // that integral double-counts every overlap and returns a confidently wrong
+        // number. The latticed mass comes from the certification receipt and there
+        // is nothing honest to cross-check it against, which
+        // `latticeMassProvenanceLine` says on screen rather than leaving unsaid.
+        guard selectedLattice == nil else { return nil }
         guard canExport else { return nil }
         let voxelG = selectedVariant?.massGrams ?? 0
         // With no material density we can't compute a mesh mass — nothing to compare.
@@ -1315,6 +1663,18 @@ public final class ResultsModel: ObservableObject {
 
     /// The selected variant's isosurface for display (nil if it has no geometry).
     public var selectedMesh: ViewerMesh? {
+        // A LATTICED SELECTION DRAWS THE LATTICED GEOMETRY — or nothing at all.
+        // Never the solid: showing the solid under a latticed tab would restore
+        // exactly the substitution this task removed, with the tab's own label
+        // asserting it is something else.
+        if let alt = selectedLattice {
+            guard let g = latticeGeometry, g.name == alt.meshName else { return nil }
+            if let c = selectedMeshCache, c.index == selectedIndex { return c.mesh }
+            let mesh = ViewerMesh(vertices: g.vertices, indices: g.indices,
+                                  faceIDs: [], smoothShaded: true)
+            selectedMeshCache = (selectedIndex, mesh)
+            return mesh
+        }
         guard let v = selectedVariant, !v.meshVertices.isEmpty else { return nil }
         // Cache the built mesh on the selection (viewer-lag fix, 2026-07-29). This is
         // read from `ResultsScreen.body` — once per orbit frame (the shared camera
@@ -2122,8 +2482,83 @@ public final class ResultsModel: ObservableObject {
                           knockdown: Double = 1, remote: Bool = false) -> [ResultVariantVM] {
         // Variants arrive heaviest-first (ladder order); the LAST accepted rung is
         // the lightest safe one — the recommendation.
+        //
+        // *** THE RULE IS UNCHANGED, AND SECTION 6 OF THE HANDOFF SAYS WHY THAT IS
+        // A FINDING RATHER THAN A DECISION. *** On the maintainer's own run the
+        // latticed masses fall as the SOLID rung gets heavier (246.4 g at vf 0.26,
+        // 215.2 g at vf 0.68), so "the last accepted rung" — which is the lightest
+        // SOLID — is the HEAVIEST latticed object of the four. The recommendation
+        // therefore points away from the lightest thing on the screen once a
+        // lattice exists. That is reported, not silently corrected: which object
+        // the recommendation should rank is the maintainer's ruling to make, and
+        // changing it here would move a verdict he did not ask to move. The
+        // recommendation stays on SOLID tabs only, where its rule is still true.
         let recommendedIndex = variants.count - 1
-        return variants.enumerated().map { i, v in
+        var tabs: [ResultVariantVM] = []
+        for (i, v) in variants.enumerated() {
+            tabs.append(solidTab(v, variantIndex: i, tabIndex: tabs.count,
+                                 isRecommended: i == recommendedIndex,
+                                 voxelVolumeMM3: voxelVolumeMM3,
+                                 knockdown: knockdown, remote: remote))
+            // THE RUNG'S OTHER OBJECT (task 2026-08-07-lattice-variants-on-screen).
+            // Right beside its solid, because that is where the comparison the
+            // user is making actually happens — 360 g against 246 g — and because
+            // the variant list is where he already looks. No new page.
+            if let alt = v.latticeAlternative {
+                tabs.append(latticedTab(alt, of: tabs[tabs.count - 1],
+                                        variantIndex: i, tabIndex: tabs.count))
+            }
+        }
+        return tabs
+    }
+
+    /// The latticed object's tab: its OWN mass, its OWN verdict, its OWN margin.
+    /// Everything a solid tab derives from the voxel field is deliberately absent
+    /// rather than copied across — a latticed object's support estimate, stress
+    /// peak and min-feature count are not the solid's, and the run does not measure
+    /// them for it.
+    private static func latticedTab(_ alt: LatticeVariantAlternative,
+                                    of solid: ResultVariantVM,
+                                    variantIndex: Int,
+                                    tabIndex: Int) -> ResultVariantVM {
+        ResultVariantVM(
+            index: tabIndex, variantIndex: variantIndex, kind: .latticed,
+            latticeAlternative: alt,
+            achievedVolumeFraction: solid.achievedVolumeFraction,
+            savingsPercent: solid.savingsPercent,
+            savingsLabel: solid.savingsLabel,
+            massGrams: alt.massGrams,
+            massLabel: massLabel(alt.massGrams),
+            // Support is estimated from the SOLID variant's overhang voxels. The
+            // latticed object is a different shape, so that number does not
+            // describe it; "n/a" here is the honest answer, not a gap to fill.
+            supportCm3: 0, supportLabel: ResultsModel.massNA,
+            orientation: solid.orientation, tiltDegrees: solid.tiltDegrees,
+            orientationSummary: solid.orientationSummary,
+            // Layer shear classifies the INTERLAYER margin, and the latticed
+            // object's composite certification reports one worst case, not the
+            // in-plane/interlayer split. Left unclassified rather than inheriting
+            // the solid's.
+            layerShear: .unknown,
+            maxStressMPa: 0,
+            // The composite certification's own worst case for the LATTICED
+            // object. Not knocked down: the infill knockdown models a sparse
+            // slicer infill inside solid walls, and this object's interior is an
+            // explicit certified lattice, not slicer infill — applying it would
+            // discount the same porosity twice.
+            worstCaseMargin: alt.margin,
+            minFeatureViolations: 0, minFeatureWarning: "",
+            isRecommended: false,
+            isGrowth: solid.isGrowth, addedMaterial: nil,
+            growthLabel: solid.growthLabel, growthPercent: solid.growthPercent,
+            rungLabel: solid.headlineLabel,
+            latticeAccepted: alt.accepted)
+    }
+
+    private static func solidTab(_ v: OptimizeVariant, variantIndex i: Int,
+                                 tabIndex: Int, isRecommended: Bool,
+                                 voxelVolumeMM3: Double, knockdown: Double,
+                                 remote: Bool) -> ResultVariantVM {
             let savings = 1 - v.achievedVolumeFraction
             let pct = Int((savings * 100).rounded())
             // ── GROWTH (task 2026-08-03-growth-ladder) ──────────────────────
@@ -2148,11 +2583,14 @@ public final class ResultsModel: ObservableObject {
             let supportLabel = hasScalars ? realSupport
                                           : (remote ? ResultsModel.remoteNA : realSupport)
             let tilt = tiltFromVertical(v.orientation)
+            let growthLabel = "+\(growthPct)%"
+            let savingsLabel = "\u{2212}\(pct)%"
             return ResultVariantVM(
-                index: i,
+                index: tabIndex, variantIndex: i, kind: .solid,
+                latticeAlternative: nil,
                 achievedVolumeFraction: v.achievedVolumeFraction,
                 savingsPercent: pct,
-                savingsLabel: "\u{2212}\(pct)%",
+                savingsLabel: savingsLabel,
                 massGrams: v.massGrams,
                 massLabel: hasScalars ? massLabel(v.massGrams)
                                       : (remote ? ResultsModel.remoteNA : massLabel(v.massGrams)),
@@ -2168,12 +2606,13 @@ public final class ResultsModel: ObservableObject {
                 worstCaseMargin: v.worstCaseMargin * knockdown,
                 minFeatureViolations: v.minFeatureViolations,
                 minFeatureWarning: v.minFeatureWarning,
-                isRecommended: i == recommendedIndex,
+                isRecommended: isRecommended,
                 isGrowth: isGrowth,
                 addedMaterial: v.addedMaterial,
-                growthLabel: "+\(growthPct)%",
-                growthPercent: growthPct)
-        }
+                growthLabel: growthLabel,
+                growthPercent: growthPct,
+                rungLabel: isGrowth ? growthLabel : savingsLabel,
+                latticeAccepted: nil)
     }
 
     /// Angle (whole degrees) of a build direction away from vertical (+Z), folded
