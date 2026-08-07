@@ -68,6 +68,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -167,7 +168,6 @@ struct Row {
 
 }  // namespace
 
-#include <cstring>
 
 int main(int argc, char** argv) {
   if (argc < 3) {

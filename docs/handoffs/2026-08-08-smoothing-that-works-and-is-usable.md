@@ -43,11 +43,14 @@ stopped, correctly, because the classifier that separates your CAD from the
 optimizer's cuts did not exist. PR 307 merged it. **I finished the measurement on
 your own four rungs, and MCF does not reproduce that win on your part.**
 
-| | Taubin (shipped) | mean-curvature flow |
+Taubin at the strength the app can ask for (20 pairs) and at its best-anywhere
+(160); MCF at 5, 20 and 40 steps — 20 being where PR 306 found its sphere optimum.
+
+| | Taubin 20 / 160 | MCF 5 / 20 / 40 |
 |---|---|---|
-| **on the CUT surface**, roughness (rms dihedral, rung 068) | 8.36° → **8.09°** (smoother) | 8.36° → **11.03°** (ROUGHER) |
-| same, rung 026 | 9.00° → **8.18°** | 9.00° → **15.65°** |
-| **on surface that HAS a correct answer**, amplitude removed (rung 068) | +2.5% / **+8.0%** | +4.2% / **−3.7%** / **−5.5%** |
+| **on the CUT surface**, roughness (rms dihedral), rung 068 | 8.36° → **8.30° / 8.09°** (smoother) | 8.36° → **10.99° / 11.03° / 10.69°** (ROUGHER) |
+| same, rung 026 | 9.00° → **8.82° / 8.18°** | 9.00° → **15.65° / 15.20° / 14.36°** |
+| **on surface that HAS a correct answer**, amplitude removed, rung 068 | +2.5% / **+8.0%** | +4.2% / **−3.7%** / **−5.5%** |
 | same, rung 026 | +1.9% / **+6.2%** | −0.3% / **−8.4%** / **−10.4%** |
 
 **MCF makes your part's surface rougher at every setting, on every rung, and on
@@ -158,20 +161,27 @@ app ships**; the harness stamps which build it ran in, because a plain
 ```
 stage                                  repeats    ms/stroke
 ------------------------------------------------------------
-A  preview via PATH   — STL re-import        5     ~795
-A  preview via PATH   — smoothing            5      ~40
-A  preview via PATH   — TOTAL                5     ~798
+A  preview via PATH   — STL re-import        5     588.0
+A  preview via PATH   — smoothing            5      35.5
+A  preview via PATH   — TOTAL                5     628.8
 B  preview via MEMORY — STL re-import        5       0.0
-B  preview via MEMORY — smoothing            5      ~39
-B  preview via MEMORY — TOTAL                5      ~48
-   ViewerMesh build (app side, both)         5      ~21
+B  preview via MEMORY — smoothing            5      34.9
+B  preview via MEMORY — TOTAL                5      43.7
+   ViewerMesh build (app side, both)         5      19.7
 ------------------------------------------------------------
-stroke release -> updated preview, BEFORE:   ~819 ms
-stroke release -> updated preview, AFTER :    ~69 ms
+stroke release -> updated preview, BEFORE:    648.4 ms
+stroke release -> updated preview, AFTER :     63.3 ms
+removed: 585.1 ms per stroke (90.2% of the before figure)
+
+The import share of the SHIPPED preview call: 94.3%
 ```
 
-The exact run is `evidence/.../s1c_stroke_latency.txt`; the figures move a few per
-cent between runs on this machine and the conclusion does not.
+`evidence/.../s1c_stroke_latency.txt`. Every figure is a mean over the same five
+repeats, including the per-stage ones — reading `secondsImport` off the last call
+while the total is a mean produces rows that do not add up, and an early draft of
+this table had exactly that. Run-to-run these move a few per cent (the BEFORE
+figure ranged 648–819 ms across runs, depending on what else was on the machine);
+the ratio does not.
 
 **And the end-to-end path, walked on that same variant** (`r3_usable_path.txt`):
 
@@ -347,10 +357,28 @@ whole domain is the remaining 17.74%.
 
 | constraint | status on his part |
 |---|---|
-| C1 Gibson per-vertex trust region | **met.** cell = 1.705279/2 = 0.852640 mm, radius 0.426320 mm. Max cut motion 0.6774–0.7212 mm, i.e. inside the cube's r·√3 = 0.7384 mm diagonal, every per-axis component inside r. |
+| C1 Gibson per-vertex trust region | **met, for MCF.** cell = 1.705279/2 = 0.852640 mm, radius 0.426320 mm, cube diagonal r·√3 = **0.7384 mm**. MCF's max cut motion across all four rungs and all three settings is **0.6047–0.7212 mm** — inside it, every per-axis component within r. |
 | C2 signed one-sided bound | **met**, via `classify_trust_sign` with C4 overriding to Pinned. |
-| C3 volume preservation | **met for MCF: 0.000% on every row.** Taubin drifts −0.004% to −0.125% — it has no volume term, which is a property of the incumbent, not a failure here. |
-| C4 CAD faces do not move | **met, bitwise** — see above. |
+| C3 volume preservation | **met for MCF: 0.0000% on every row of every rung.** |
+| C4 CAD faces do not move | **met, bitwise, for both operators** — see above. |
+
+**★ AND THE INCUMBENT MEETS NEITHER C1 NOR C3, WHICH IS WORTH SAYING OUT LOUD.**
+Taubin has no trust region and no volume term, so it is not bounded by either:
+
+| | Taubin 20 | Taubin 160 | MCF (any setting) |
+|---|---|---|---|
+| max cut motion | 0.4877–0.5351 mm | **0.7537–0.8054 mm** | 0.6047–0.7212 mm |
+| against C1's 0.7384 mm | inside | **OUTSIDE** | inside |
+| volume drift | 0.0037–0.0149% | 0.0319–**0.1253%** | **0.0000%** |
+
+This reproduces PR 306's dumbbell finding on his real part: the operator that
+ships today moves the surface further than the half-voxel bound the whole safety
+argument rests on, and drifts volume, and nothing stops it. **That is an argument
+for putting C1/C2/C3 around the SHIPPED smoother**, which is a much smaller change
+than replacing it and does not depend on MCF being better. It is not done here —
+it is a different task from the one this brief set, and it would change what the
+brush does to a design he is mid-way through — but it is the one thing S2 found
+that is worth building.
 
 **(d) MINIMUM cross-section of every tendril, before and after — not the mean.**
 Measured with PR 306's own slice-area instrument (moved verbatim into a shared
@@ -499,6 +527,17 @@ number here is from a run in `evidence/`. No scratch at the repository root.
 
 **R7 — separate commit for any review response.**
 
+**SUITES.** `evidence/.../ctest_and_suites.txt`.
+
+* **core: `ctest` 114/114 — CI's FULL denominator.** Configured with
+  OpenCASCADE + Eigen + lib3mf via `./app/scripts/build_cli_macos.sh`, so no test
+  is silently unregistered. (A local pass at 112/112 would have been true and
+  meaningless — that is how PR 309's CI failure shipped.)
+* **app: `swift test` 1381 tests, 21 skipped, 0 failures.** Of the skips, two are
+  PR 303's G2/G3 reproductions this task deliberately leaves standing; the rest
+  are pre-existing. This task **removed** one skip (PR 303's G1) by fixing the
+  defect behind it, and added none.
+
 ---
 
 # FILES
@@ -587,6 +626,18 @@ limit on how far any point may move, not the number that did not change.
 The Smoothed view used to be greyed out until you had run a certification, which
 meant a several-minute solve just to look at your own brush stroke. It turns on as
 soon as there is something to show.
+
+**One thing the failed experiment did turn up, and it is worth doing.** The
+smoother you already have has **no limit on how far it may move a point and no
+volume term** — at its strongest setting it shifts your surface up to **0.81 mm**,
+past the half-voxel line the whole safety argument rests on, and changes the
+part's volume by up to 0.13%. The new method, whatever else is wrong with it,
+holds volume to zero and stays inside that line, because it was built with those
+limits around it. **Putting the same limits around the existing smoother is a much
+smaller job than replacing it**, and it does not depend on the new method being
+better. I did not do it here — it changes what the brush does to a design you may
+be part-way through, which deserves its own decision — but it is the one thing
+this round found that I would build.
 
 **What I would do next, in order:**
 
