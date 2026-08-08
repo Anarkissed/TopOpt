@@ -1,0 +1,56 @@
+=== §A(b) + the gate table — HIS run, runB (inward) vs runC (outward) ===
+runB binary sha256: ab1dac825f14b6ce84ab8ef90506b8c7839c62095dfaac1c87cf57ef5b6995dc
+runC binary sha256: b006166f64f00630e5f7585cf842b7a040f9fe98ff581e7dd70c7bc19121bf5a
+(they differ, as they must for this to mean anything)
+
+★ THE ZERO MUST BE A ZERO FOR A DIFFERENT REASON THAN BEFORE.
+  Before: MeshDistance detected the inward winding and flipped its
+  pseudonormals, so the invariant was right BECAUSE of a compensation.
+  After: the mesh is outward, that branch does not execute, and
+  test_lattice_clip_shell case 0 asserts !inward_wound() to prove it.
+
+=== R4a — the DESIGN is untouched (the fix is a post-process) ===
+  rung  accepted    margin_before     margin_after      flips  control
+  0.68      True      3254.356637      3254.356637          0        0
+  0.52      True      3389.417071      3389.417071          0        0
+  0.38      True      3290.912400      3290.912400          0        0
+  0.26      True      3014.120054      3014.120054          0        0
+grid 128x31x118 = 468224 voxels, spacing 1.705279 mm
+TOTAL voxel-classification flips: 0   (negative control must be 0 on every row)
+
+=== R3 — the no-protrusion invariant, per variant ===
+                              file          clip base   max protrusion mm   outside   measured  allowance mm
+BEFORE variant_026_lattice.report.json     exported_shell                   0         0     328344     0.0001000
+AFTER  variant_026_lattice.report.json     exported_shell                   0         0     328344     0.0001000
+BEFORE variant_038_lattice.report.json     exported_shell                   0         0     923856     0.0001000
+AFTER  variant_038_lattice.report.json     exported_shell                   0         0     923856     0.0001000
+BEFORE variant_052_lattice.report.json     exported_shell                   0         0    1933764     0.0001000
+AFTER  variant_052_lattice.report.json     exported_shell                   0         0    1933764     0.0001000
+BEFORE variant_068_lattice.report.json     exported_shell                   0         0    1848060     0.0001000
+AFTER  variant_068_lattice.report.json     exported_shell                   0         0    1848060     0.0001000
+
+=== R4b — the LATTICE gate + what the clip cost, per variant ===
+    (mass is the emitted interior volume x PLA 1.24 g/cm^3; the latticed-voxel column is
+     the CERTIFIED set, so a change there is a change in what the gate was asked about)
+                              file   lattice margin  accepted  latticed voxels    interior mm3  clipped struts
+BEFORE variant_026_lattice.report.json      2912.194018      True              225        1409.429             797
+AFTER  variant_026_lattice.report.json      2912.194018      True              225        1409.429             797
+DELTA  variant_026_lattice.report.json latticed voxels +0   lattice mass +0.000000 g (+0.000 % of 1.7477 g)
+BEFORE variant_038_lattice.report.json      3047.621385      True              527        3720.701            2097
+AFTER  variant_038_lattice.report.json      3047.621385      True              527        3720.701            2097
+DELTA  variant_038_lattice.report.json latticed voxels +0   lattice mass +0.000000 g (+0.000 % of 4.6137 g)
+BEFORE variant_052_lattice.report.json      3096.575242      True             1123        5611.517            3609
+AFTER  variant_052_lattice.report.json      3096.575242      True             1123        5611.517            3609
+DELTA  variant_052_lattice.report.json latticed voxels +0   lattice mass +0.000000 g (+0.000 % of 6.9583 g)
+BEFORE variant_068_lattice.report.json      3090.491158      True             1221        4963.953            3686
+AFTER  variant_068_lattice.report.json      3090.491158      True             1221        4963.953            3686
+DELTA  variant_068_lattice.report.json latticed voxels +0   lattice mass +0.000000 g (+0.000 % of 6.1553 g)
+
+=== S2(a) — what clipping against the shell COST, in generator time ===
+BEFORE  lattice_export.gen_seconds = 574.362 s   fraction of the run = 0.133674   implied run wall = 4296.7 s
+AFTER   lattice_export.gen_seconds = 628.682 s   fraction of the run = 0.100298   implied run wall = 6268.1 s
+    ★ BOTH SIDES INCLUDE THE NEW MEASUREMENT (the MeasuringSink and
+      the per-voxel Lipschitz floor), which is identical on each, so
+      this difference is the CLIP's and not the invariant's. The
+      generator timed ALONE, with no measurement attached, is in
+      s1_probe.txt's 'GENERATOR ALONE' line.

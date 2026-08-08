@@ -1,0 +1,26 @@
+=== R6 assertion census: c586e8d7526b9f006e173b2d74cac8ad5c697484 → working tree ===
+
+1. TEST ASSERTION MESSAGES   before=3164  after=3202
+   REMOVED:
+     "every sign in this file"
+     "marching_cubes output is wound inward — if this flips, re-check "
+   (nothing above = no assertion message disappeared)
+
+2. REGISTERED CTESTS   before=115  after=116
+   REMOVED:
+   ADDED:
+     mesh_winding
+
+3. PRODUCTION REFUSALS   before=397  after=397
+   REMOVED:
+   (nothing above = no production refusal disappeared)
+
+4. COMPARISON KINDS INSIDE CHECK() (before → after; a DROP is the thing to look at)
+     !=         28 →     28  
+     &&        271 →    272  
+     <         206 →    206  
+     <=        133 →    134  
+     ==        821 →    821  
+     >         230 →    239  
+     >=         58 →     58  
+     ||          2 →      2  

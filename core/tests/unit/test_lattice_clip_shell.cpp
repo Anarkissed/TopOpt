@@ -159,16 +159,28 @@ int main() {
   const double radius_mm = 0.30;
 
   // ── 0. MeshDistance itself: the sign convention every assertion below rests
-  // on. marching_cubes is wound INWARD by the STL convention, so a utility that
-  // assumed either winding would be silently inverted here — which would make
-  // every "0 outside" below vacuous.
+  // on. A utility that assumed a winding rather than measuring it would be
+  // silently inverted here — which would make every "0 outside" below vacuous.
+  //
+  // ★ THIS ASSERTION FLIPPED, ON PURPOSE, AND IT IS THE RECEIPT FOR WHY THE
+  // ZEROES BELOW STILL MEAN WHAT THEY MEANT (task
+  // 2026-08-09-fix-inward-wound-normals). It used to read `md.inward_wound()`,
+  // because marching_cubes emitted inward and `MeshDistance` compensated for it
+  // at build time. The no-protrusion invariant was therefore CORRECT BECAUSE OF
+  // a compensation for a bug. That bug is now fixed at its source, the
+  // compensation no longer fires, and the invariant's zero comes from the
+  // geometry itself. Asserting `!inward_wound()` is what makes the difference
+  // between those two situations visible instead of inferred: change the winding
+  // and leave the compensation (or the reverse) and this line fails, rather than
+  // the whole file passing while reporting the opposite of the truth.
   {
     const Fixture f = make_block(20, 6, 13, false);
     const TriangleMesh shell = exported_shell(f);
     const MeshDistance md(shell);
-    CHECK(md.inward_wound(),
-          "marching_cubes output is wound inward — if this flips, re-check "
-          "every sign in this file");
+    CHECK(!md.inward_wound(),
+          "marching_cubes output is wound OUTWARD, so MeshDistance's winding "
+          "compensation must NOT be firing — if this flips, the protrusion "
+          "zeroes below are coming from the compensation and not the geometry");
     // Dead centre of the block: 4 solid voxels from each face, and the
     // isosurface sits half a voxel inside the outer cube faces.
     const Vec3 c = f.grid.voxel_center(9, 9, 9);
