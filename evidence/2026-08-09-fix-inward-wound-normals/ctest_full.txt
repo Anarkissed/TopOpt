@@ -1,0 +1,12 @@
+=== both CI jobs, this branch ===
+core-linux equivalent: ctest over 116 registered tests
+  (CI's denominator on main is 114; +lattice_clip_shell from the stacked
+   PR, +mesh_winding from this one. The lib3mf-gated tests DID register.)
+
+100% tests passed out of 116
+
+Total Test time (real) = 802.92 sec
+
+app-macos equivalent: build_core.sh + swift test
+	 Executed 1367 tests, with 22 tests skipped and 0 failures (0 unexpected) in 310.145 (310.260) seconds
+  build_core.sh exit 0; swift test exit 0; 0 compiler errors.

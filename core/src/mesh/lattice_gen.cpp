@@ -186,12 +186,18 @@ void emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1, double r,
     ring0[i] = add(p0, off);
     ring1[i] = add(p1, off);
   }
+  // ★ WOUND OUTWARD (task 2026-08-09-fix-inward-wound-normals). Every triangle
+  // here used to be emitted with its last two vertices the other way round, so
+  // the prism's normals pointed INTO the strut — the same defect marching_cubes
+  // had, and it had to be fixed in the SAME change: the latticed export writes
+  // the shell and this soup into ONE file, and an outward shell around inward
+  // struts is worse than a file that is uniformly wrong.
   for (int i = 0; i < nseg; ++i) {
     const int j = (i + 1) % nseg;
-    sink.add_triangle(ring0[i], ring1[i], ring1[j]);  // wall
-    sink.add_triangle(ring0[i], ring1[j], ring0[j]);
-    sink.add_triangle(p0, ring0[i], ring0[j]);  // cap 0 (fan)
-    sink.add_triangle(p1, ring1[j], ring1[i]);  // cap 1 (fan)
+    sink.add_triangle(ring0[i], ring1[j], ring1[i]);  // wall
+    sink.add_triangle(ring0[i], ring0[j], ring1[j]);
+    sink.add_triangle(p0, ring0[j], ring0[i]);  // cap 0 (fan)
+    sink.add_triangle(p1, ring1[i], ring1[j]);  // cap 1 (fan)
   }
 }
 
@@ -209,6 +215,16 @@ void emit_node(TriangleSink& sink, const Vec3& c, double r) {
       {1, 5, 9},  {5, 11, 4},  {11, 10, 2}, {10, 7, 6}, {7, 1, 8},
       {3, 9, 4},  {3, 4, 2},   {3, 2, 6},   {3, 6, 8},  {3, 8, 9},
       {4, 9, 5},  {2, 4, 11},  {6, 2, 10},  {8, 6, 7},  {9, 8, 1}};
+  // ★ THIS TABLE IS ALREADY OUTWARD AND MUST NOT BE TOUCHED (task
+  // 2026-08-09-fix-inward-wound-normals). Measured: 14 of these at r = 1 enclose
+  // +35.506 mm^3, and the pre-fix lattice soup came to -684.494 mm^3 =
+  // -(36 x 20.000 strut) + 35.506 node — i.e. the soup was MIXED, inward struts
+  // around outward node balls, not uniformly inward as the shell was.
+  //
+  // Swapping these two indices "for consistency" with emit_strut is exactly the
+  // mistake this comment exists to prevent; it was made once and caught only
+  // because test_mesh_winding cross-checks the emitted geometry against
+  // LatticeGenStats::interior_volume_mm3, which the sign test alone would not.
   for (const auto& tr : f) sink.add_triangle(p[tr[0]], p[tr[1]], p[tr[2]]);
 }
 

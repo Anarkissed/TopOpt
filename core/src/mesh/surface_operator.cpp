@@ -250,18 +250,25 @@ std::vector<Vec3> vertex_normals(const TriangleMesh& mesh) {
     }
   }
 
-  // ORIENTATION IS MEASURED, NOT ASSUMED, and this is not defensive coding — the
-  // assumption is FALSE on the meshes this module is for. STL specifies a
-  // counter-clockwise-from-outside winding, but core's own `marching_cubes`
-  // emits the opposite: on a voxelized R=10 sphere signed_volume(m) is
-  // -4204.6667, so cross(p1-p0, p2-p0) points INTO the solid at every triangle.
+  // ORIENTATION IS MEASURED, NOT ASSUMED.
+  //
+  // ★ AS OF task 2026-08-09-fix-inward-wound-normals THIS BRANCH NO LONGER FIRES
+  // on core-built meshes, and the history is worth keeping because it is what
+  // makes the branch worth keeping. When this was written, core's own
+  // `marching_cubes` emitted the OPPOSITE of the counter-clockwise-from-outside
+  // winding STL specifies: on a voxelized R=10 sphere signed_volume(m) was
+  // -4204.6667, so cross(p1-p0, p2-p0) pointed INTO the solid at every triangle.
   // Taking the winding on faith would have made every "outward" normal in this
-  // file point inward, and the consequence is not cosmetic: C2's OutwardOnly —
+  // file point inward, and the consequence was not cosmetic: C2's OutwardOnly —
   // the case whose entire job is to forbid removing material from a load path or
   // a thin section — would have permitted exactly and only the motion that
-  // removes it, while reporting that it was protecting the part. The sign is
-  // read off the enclosed volume instead, which is well defined for the closed
-  // meshes this module is ever handed.
+  // removes it, while reporting that it was protecting the part.
+  //
+  // That producer is now fixed at its source, so `signed_volume` is positive for
+  // a core mesh and this flip is skipped. It STAYS because it is a measurement
+  // of the mesh in hand, not a compensation tuned to one producer: this module
+  // is also handed IMPORTED meshes, and the first inward one would silently
+  // invert OutwardOnly again if the sign were taken on faith instead.
   if (signed_volume(mesh) < 0.0)
     for (Vec3& v : n) v = scale(v, -1.0);
 

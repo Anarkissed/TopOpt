@@ -1,0 +1,40 @@
+=== S1 — WHICH MESH PRODUCERS ARE WOUND WHICH WAY (measured, before the fix) ===
+
+S1 — mesh producer winding (signed_volume < 0 == INWARD by the STL convention)
+
+  marching_cubes(block)                          tris      188  signed_volume       -58.6667  -> INWARD
+  keep_largest_component(marching_cubes)         tris      188  signed_volume       -58.6667  -> INWARD
+  marching_cubes_resampled(factor 2, tricubic)   tris      764  signed_volume       -60.9845  -> INWARD
+  generate_lattice(octet, 1 cell) [soup]         tris     1432  signed_volume      -684.4939  -> INWARD   (struts 36 nodes 14)
+    marching_cubes -> write_stl_file -> read_stl_file tris      188  signed_volume       -58.6667  -> INWARD
+
+=== the map this establishes ===
+SYNTHESIZERS (build triangles from nothing) — ALL INWARD, consistently:
+  core/src/mesh/mesh.cpp        marching_cubes (one push_back, ~:569)
+                                marching_cubes_resampled routes through it
+  core/src/mesh/lattice_gen.cpp emit_strut (:176)   — 4 add_triangle
+                                emit_node  (:200)   — the icosahedron face table
+                                emit_rim_torus (:676) — 4 add_triangle
+                                emit_skin_edge / emit_freeform_skin_edge /
+                                emit_rim_line all funnel through emit_strut
+
+IMPORTERS (winding arrives from a file) — OUTWARD, and asserted so already:
+  core/src/io/step.cpp          test_step.cpp:98,117  signed_volume == +1000.0
+  core/src/io/stl.cpp           test_stl.cpp:118,150  signed_volume == +1000.0
+  core/src/io/part.cpp:485      NORMALIZES an import to outward. This is not a
+                                compensation for the bug — it is the convention
+                                this task is making universal. It STAYS.
+
+TRANSFORMERS (inherit their input's winding) — nothing to do:
+  core/src/mesh/surface_operator.cpp  subdivision preserves vertex order
+  rotate_mesh / keep_largest_component / the sink wrappers
+
+COMPENSATIONS FOR THE BUG — both MEASURED at runtime, not hardcoded:
+  core/src/mesh/mesh_distance.cpp:272   flips the pseudonormals if signed_volume<0
+  core/src/mesh/surface_operator.cpp:265 flips the vertex normals if signed_volume<0
+  Both read the mesh, so they SELF-DISARM when the producers are fixed. That is
+  why they can be kept; see the handoff for why keeping them is the safer choice.
+
+MAGNITUDE-ONLY consumers (fabs) — unaffected either way:
+  run_job.cpp:3838 mesh_enclosed_volume_mm3, smooth.cpp:12 enclosed_volume,
+  surface_operator.cpp's volume bookkeeping

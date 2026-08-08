@@ -1,0 +1,9 @@
+===== R2 GREEN — every synthesizer outward =====
+
+  marching_cubes                       signed_volume +58.666667
+  marching_cubes -> STL -> re-read      signed_volume +58.666667
+  generate_lattice (soup, 36 struts) signed_volume +755.506110
+  collar run: rim_triangles 2912, soup signed_volume +1866.839147
+  hand-built outward cube -> STL -> re-read  signed_volume +1000.000000
+test_mesh_winding: 15 checks, 0 failures
+exit=0

@@ -305,6 +305,16 @@ add_executable(test_lattice_clip_shell tests/unit/test_lattice_clip_shell.cpp)
 target_link_libraries(test_lattice_clip_shell PRIVATE topopt)
 add_test(NAME lattice_clip_shell COMMAND test_lattice_clip_shell)
 
+# Every mesh core SYNTHESIZES is wound outward (task 2026-08-09-fix-inward-wound-
+# normals). Covers marching_cubes, the resample, the written STL and the lattice
+# generator's own primitives, with the already-outward importers as the negative
+# control that a blanket flip would break.
+add_executable(test_mesh_winding tests/unit/test_mesh_winding.cpp)
+target_link_libraries(test_mesh_winding PRIVATE topopt)
+target_compile_definitions(test_mesh_winding PRIVATE
+  MESH_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME mesh_winding COMMAND test_mesh_winding)
+
 # THE ENCLOSED-VOID RULE FOR LATTICE (task 2026-08-05-lattice-void-reaches-
 # exterior): the void space inside any lattice must connect to the exterior.
 # ADVERSARIAL BY CONSTRUCTION twice over — section A asserts the pre-task

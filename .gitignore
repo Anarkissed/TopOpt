@@ -40,3 +40,4 @@ build-diag/
 /sphere_control.stl
 /dumbbell.stl
 /bracket_export.stl
+__pycache__/

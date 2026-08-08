@@ -257,14 +257,28 @@ MeshDistance::MeshDistance(const TriangleMesh& mesh, double cell_mm)
     }
   }
 
-  // ── WHICH WAY IS OUT. Read from the mesh itself rather than assumed, because
-  // the mesh this serves does NOT follow the STL convention: `marching_cubes`
-  // emits triangles whose (b-a)x(c-a) normals point INTO the solid — measured,
-  // `signed_volume(marching_cubes(<a solid block>)) == -58.667` for a body of
-  // volume 58.667. The codebase already absorbs that silently
-  // (`mesh_enclosed_volume_mm3`, run_job.cpp:3524, takes std::fabs), so a
-  // utility that hardcoded either convention would be right for one caller and
-  // silently inverted for the other.
+  // ── WHICH WAY IS OUT. Read from the mesh itself rather than assumed.
+  //
+  // ★ THIS NO LONGER FIRES ON CORE'S OWN MESHES, AND THAT IS THE POINT (task
+  // 2026-08-09-fix-inward-wound-normals). When this class was written,
+  // `marching_cubes` emitted triangles whose (b-a)x(c-a) normals pointed INTO
+  // the solid — `signed_volume` of a 58.667 mm^3 block came out at -58.667 — and
+  // this branch is what kept the pseudonormal sign correct anyway. That bug is
+  // now fixed at its source (mesh.cpp's emission, one swapped index pair), so
+  // for a core-built mesh `signed_volume` is positive and this branch is skipped.
+  //
+  // ★ IT IS KEPT RATHER THAN DELETED, deliberately. It is a MEASUREMENT, not a
+  // hardcoded compensation: it reads the mesh in front of it, so it cannot drift
+  // out of step with whatever produced that mesh. Deleting it would make this
+  // class silently wrong for the first inward mesh it is ever handed — an
+  // imported STL that `part.cpp`'s repair never normalised, say — while deleting
+  // it buys nothing, since the branch simply does not execute today.
+  //
+  // WHAT PROVES THE DIFFERENCE: `inward_wound()` is asserted FALSE for
+  // marching-cubes output in test_lattice_clip_shell case 0. Before the fix that
+  // same assertion read TRUE. So the no-protrusion invariant's zero is now a
+  // zero from the geometry rather than from this compensation, and the test
+  // records which of the two is doing the work.
   //
   // signed_volume is exact and origin-independent for a CLOSED mesh, so its sign
   // is the winding. An open or degenerate mesh gives ~0; then no flip is applied

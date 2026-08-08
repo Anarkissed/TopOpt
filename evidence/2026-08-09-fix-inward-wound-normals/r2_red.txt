@@ -1,0 +1,14 @@
+===== R2 RED — the winding test against the merge base's behaviour =====
+
+FAIL (line 120): marching_cubes must emit OUTWARD-wound triangles — signed_volume is the positive enclosed volume for the winding STL specifies (mesh.hpp), and every exported STL derives its facet normals from it
+FAIL (line 126): keep_largest_component must preserve the outward winding
+FAIL (line 132): marching_cubes_resampled must be outward too — it is what the SOLID export writes at smooth_factor > 1
+FAIL (line 147): a written-and-re-read STL of a core-built mesh must enclose a POSITIVE volume — this is the property a slicer sees
+FAIL (line 177): the lattice generator's struts and nodes must be OUTWARD too — the latticed export writes them into the SAME file as the shell, and a file that is outward in one body and inward in another is worse than one that is uniformly wrong
+FAIL (line 187): LatticeGenStats::interior_volume_mm3 must equal the volume the emitted triangles actually enclose
+  marching_cubes                       signed_volume -58.666667
+  marching_cubes -> STL -> re-read      signed_volume -58.666667
+  generate_lattice (soup, 36 struts) signed_volume -684.493890
+  hand-built outward cube -> STL -> re-read  signed_volume +1000.000000
+test_mesh_winding: 11 checks, 6 failures
+exit=1

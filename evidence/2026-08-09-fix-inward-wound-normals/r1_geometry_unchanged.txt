@@ -1,0 +1,88 @@
+=== R1 — the meshes moved ONLY by triangle orientation, ALL FOUR RUNGS ===
+BEFORE = runB (inward winding)   AFTER = runC (outward winding). Same job, same design.
+BAR: 'facets that matched NEITHER' must be 0 on every file.
+
+--- variant_068.stl ---
+  before variant_068.stl: 284704 facets
+  after  variant_068.stl: 284704 facets
+  facets matched with the SAME winding : 0
+  facets matched only REVERSED         : 284704
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+--- variant_068_lattice.stl ---
+  before variant_068_lattice.stl: 763320 facets
+  after  variant_068_lattice.stl: 763320 facets
+  facets matched with the SAME winding : 120384
+  facets matched only REVERSED         : 642936
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+--- variant_052.stl ---
+  before variant_052.stl: 291100 facets
+  after  variant_052.stl: 291100 facets
+  facets matched with the SAME winding : 0
+  facets matched only REVERSED         : 291100
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+--- variant_052_lattice.stl ---
+  before variant_052_lattice.stl: 799412 facets
+  after  variant_052_lattice.stl: 799412 facets
+  facets matched with the SAME winding : 131296
+  facets matched only REVERSED         : 668116
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+--- variant_038.stl ---
+  before variant_038.stl: 330212 facets
+  after  variant_038.stl: 330212 facets
+  facets matched with the SAME winding : 0
+  facets matched only REVERSED         : 330212
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+--- variant_038_lattice.stl ---
+  before variant_038_lattice.stl: 474144 facets
+  after  variant_038_lattice.stl: 474144 facets
+  facets matched with the SAME winding : 79036
+  facets matched only REVERSED         : 395108
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+--- variant_026.stl ---
+  before variant_026.stl: 335588 facets
+  after  variant_026.stl: 335588 facets
+  facets matched with the SAME winding : 0
+  facets matched only REVERSED         : 335588
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+--- variant_026_lattice.stl ---
+  before variant_026_lattice.stl: 277408 facets
+  after  variant_026_lattice.stl: 277408 facets
+  facets matched with the SAME winding : 23032
+  facets matched only REVERSED         : 254376
+  facets that matched NEITHER          : 0
+  BAR     every facet is the same triangle, unchanged or reversed; at least one reversed (else the fix did nothing)
+  VERDICT HOLDS — geometry identical, orientation corrected
+
+=== the end-to-end property: what a slicer now reads off HIS files ===
+  variant_068          before      -442684.0 mm^3   after      +442684.0 mm^3
+  variant_068_lattice  before      -879884.4 mm^3   after      +880249.3 mm^3
+  variant_052          before      -405520.5 mm^3   after      +405520.5 mm^3
+  variant_052_lattice  before      -786498.5 mm^3   after      +786932.9 mm^3
+  variant_038          before      -332134.7 mm^3   after      +332134.7 mm^3
+  variant_038_lattice  before      -665676.2 mm^3   after      +666009.0 mm^3
+  variant_026          before      -289301.6 mm^3   after      +289301.6 mm^3
+  variant_026_lattice  before      -580454.7 mm^3   after      +580576.7 mm^3
+
+  ★ THE SOLID files negate EXACTLY (-442684.0 -> +442684.0): pure marching cubes,
+    every facet flipped.
+  ★ THE LATTICED files do NOT negate exactly (-879884.4 -> +880249.3), and that
+    asymmetry is the finding, not an error. Half the difference is
+    (880249.3 - 879884.4)/2 = 182.45 mm^3 — the node icosahedra, which were
+    ALREADY outward and were correctly left alone. Before the fix they were
+    SUBTRACTING from a mesh whose other primitives were inward; now they add.
+    A latticed file that negated exactly would mean the node balls had been
+    wrongly flipped too.

@@ -565,8 +565,29 @@ TriangleMesh marching_cubes(int nx, int ny, int nz, double spacing,
           }
           // Skip degenerate triangles (can occur when a corner value equals iso
           // exactly and two edge crossings coincide).
+          //
+          // ★ THE LAST TWO INDICES ARE SWAPPED, and that swap is the whole of
+          // task 2026-08-09-fix-inward-wound-normals (core side).
+          //
+          // The classic Marching Cubes triangle table is written for the
+          // convention "inside is where the field EXCEEDS the iso", which is the
+          // opposite of this function's ("solid is >= iso"). Emitting the table's
+          // order verbatim therefore produced triangles whose (b-a)x(c-a) normal
+          // points INTO the solid — measured, `signed_volume` of a 58.667 mm^3
+          // block came out at -58.667 — and `write_stl_file` derives every facet
+          // normal from the winding (stl.cpp, facet_normal), so every STL and 3MF
+          // this codebase has ever exported carried inverted normals. A shipped
+          // 128-resolution variant enclosed -442,684 mm^3.
+          //
+          // It survived because no consumer was ever allowed to notice: the
+          // volume bookkeeping takes std::fabs, `MeshDistance` and
+          // `surface_operator` MEASURE the winding and compensate, and slicers
+          // auto-repair inverted normals. mesh.hpp has documented the correct
+          // contract the whole time ("the positive enclosed volume ... for the
+          // outward-facing counter-clockwise winding STL specifies"); this line
+          // is what finally makes it true. Bar: tests/unit/test_mesh_winding.cpp.
           if (idx[0] != idx[1] && idx[1] != idx[2] && idx[0] != idx[2])
-            mesh.triangles.push_back({idx[0], idx[1], idx[2]});
+            mesh.triangles.push_back({idx[0], idx[2], idx[1]});
         }
       }
   return mesh;
