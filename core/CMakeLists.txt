@@ -80,6 +80,11 @@ add_library(topopt
   src/io/fields.cpp
   src/io/design_store.cpp
   src/mesh/mesh.cpp
+  # Exact signed distance to a closed mesh (task 2026-08-08-strut-clip-matches-
+  # shell) — the term that lets the strut clip be evaluated against the SURFACE
+  # the shell is extracted from rather than the voxel-cube union it chamfers.
+  # Plain geometry over TriangleMesh, so it builds in every configuration.
+  src/mesh/mesh_distance.cpp
   src/mesh/smooth.cpp
   # Projection of an exported surface onto the KNOWN analytic CAD surface (task
   # 2026-08-06-cad-face-projection). OCCT-free — it reads StepModel's plain data
@@ -296,6 +301,14 @@ target_link_libraries(test_lattice_boundary PRIVATE topopt)
 target_compile_definitions(test_lattice_boundary PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_boundary COMMAND test_lattice_boundary)
+
+# The strut clip and the exported shell are ONE surface (task
+# 2026-08-08-strut-clip-matches-shell). Adversarial by construction: every case
+# that requires zero protrusion also runs the OLD voxel-cube predicate on the
+# identical fixture and requires it to protrude, so the bar cannot pass vacuously.
+add_executable(test_lattice_clip_shell tests/unit/test_lattice_clip_shell.cpp)
+target_link_libraries(test_lattice_clip_shell PRIVATE topopt)
+add_test(NAME lattice_clip_shell COMMAND test_lattice_clip_shell)
 
 # THE ENCLOSED-VOID RULE FOR LATTICE (task 2026-08-05-lattice-void-reaches-
 # exterior): the void space inside any lattice must connect to the exterior.
@@ -1546,6 +1559,29 @@ if(OpenCASCADE_FOUND)
   add_executable(semdot_surface_probe EXCLUDE_FROM_ALL
     tests/harness/semdot_surface_probe.cpp)
   target_link_libraries(semdot_surface_probe PRIVATE topopt)
+
+  # S1 (task 2026-08-08-closing-flow-and-the-field): the CLOSING FLOW of Sellán,
+  # Kesten, Ang Yan Sheng & Jacobson (SIGGRAPH Asia 2020) on the cut population of
+  # his own four rungs. Not a fourth filter — it ADDS material, under a
+  # curvature-based obstacle that makes the motion outward by construction. Scored
+  # with PR 314's metric so its rows land in PR 314's table.
+  #   cmake --build build --target closing_flow_probe
+  #   ./build/closing_flow_probe <design.bin> <part.step> [evidence_dir]
+  add_executable(closing_flow_probe EXCLUDE_FROM_ALL
+    tests/harness/closing_flow_probe.cpp)
+  target_link_libraries(closing_flow_probe PRIVATE topopt)
+
+  # S2 (task 2026-08-08-closing-flow-and-the-field): how much sub-voxel
+  # information the PRE-BINARIZATION density field still carries, and what a
+  # vertex-position optimisation against it recovers. The Wedekind et al. (2021)
+  # analogue: fit the vertices to the field the design was solved on, rather than
+  # filtering the mesh the grid produced.
+  #   cmake --build build --target field_information_probe
+  #   ./build/field_information_probe <design.bin> <part.step> [evidence_dir]
+  add_executable(field_information_probe EXCLUDE_FROM_ALL
+    tests/harness/field_information_probe.cpp)
+  target_link_libraries(field_information_probe PRIVATE topopt)
+
   # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
   # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
   # S3 instrumentation (minimum cross-section, outward excursion, volume, wall

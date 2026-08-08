@@ -1,0 +1,91 @@
+R2 — THE SHARED ROWS, THIS TASK AGAINST PR 314's COMMITTED CSV
+==================================================================
+
+Both probes extract the SAME mesh from the SAME design.bin, freeze the SAME
+population with PR 314's own classifier call, and score with the SAME included
+headers. The Taubin rows are therefore a DIRECT reproduction check on the
+metric, not merely 'comparable'. Every shared column, every shared row:
+
+  rung 0.26  Taubin_pairs_160
+      cut_max_mm           mine 0.805427       PR314 0.805427       MATCH
+      cut_rms_mm           mine 0.207832       PR314 0.207832       MATCH
+      cut_moved            mine 67594          PR314 67594          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 9.0006         PR314 9.0006         MATCH
+      dihedral_after       mine 8.18188        PR314 8.18188        MATCH
+      vol_before_mm3       mine 288601         PR314 288601         MATCH
+      vol_after_mm3        mine 288312         PR314 288312         MATCH
+
+  rung 0.26  Taubin_pairs_20
+      cut_max_mm           mine 0.521282       PR314 0.521282       MATCH
+      cut_rms_mm           mine 0.140545       PR314 0.140545       MATCH
+      cut_moved            mine 65801          PR314 65801          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 9.0006         PR314 9.0006         MATCH
+      dihedral_after       mine 8.81667        PR314 8.81667        MATCH
+      vol_before_mm3       mine 288601         PR314 288601         MATCH
+      vol_after_mm3        mine 288568         PR314 288568         MATCH
+
+  rung 0.38  Taubin_pairs_160
+      cut_max_mm           mine 0.804459       PR314 0.804459       MATCH
+      cut_rms_mm           mine 0.206346       PR314 0.206346       MATCH
+      cut_moved            mine 61097          PR314 61097          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 8.75405        PR314 8.75405        MATCH
+      dihedral_after       mine 8.06198        PR314 8.06198        MATCH
+      vol_before_mm3       mine 330293         PR314 330293         MATCH
+      vol_after_mm3        mine 329879         PR314 329879         MATCH
+
+  rung 0.38  Taubin_pairs_20
+      cut_max_mm           mine 0.535103       PR314 0.535103       MATCH
+      cut_rms_mm           mine 0.138963       PR314 0.138963       MATCH
+      cut_moved            mine 59590          PR314 59590          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 8.75405        PR314 8.75405        MATCH
+      dihedral_after       mine 8.60898        PR314 8.60898        MATCH
+      vol_before_mm3       mine 330293         PR314 330293         MATCH
+      vol_after_mm3        mine 330244         PR314 330244         MATCH
+
+  rung 0.52  Taubin_pairs_160
+      cut_max_mm           mine 0.753675       PR314 0.753675       MATCH
+      cut_rms_mm           mine 0.197162       PR314 0.197162       MATCH
+      cut_moved            mine 36384          PR314 36384          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 8.54775        PR314 8.54775        MATCH
+      dihedral_after       mine 8.11358        PR314 8.11358        MATCH
+      vol_before_mm3       mine 403600         PR314 403600         MATCH
+      vol_after_mm3        mine 403411         PR314 403411         MATCH
+
+  rung 0.52  Taubin_pairs_20
+      cut_max_mm           mine 0.487745       PR314 0.487745       MATCH
+      cut_rms_mm           mine 0.131867       PR314 0.131867       MATCH
+      cut_moved            mine 35103          PR314 35103          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 8.54775        PR314 8.54775        MATCH
+      dihedral_after       mine 8.45446        PR314 8.45446        MATCH
+      vol_before_mm3       mine 403600         PR314 403600         MATCH
+      vol_after_mm3        mine 403578         PR314 403578         MATCH
+
+  rung 0.68  Taubin_pairs_160
+      cut_max_mm           mine 0.75952        PR314 0.75952        MATCH
+      cut_rms_mm           mine 0.186604       PR314 0.186604       MATCH
+      cut_moved            mine 25175          PR314 25175          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 8.36204        PR314 8.36204        MATCH
+      dihedral_after       mine 8.0923         PR314 8.0923         MATCH
+      vol_before_mm3       mine 443799         PR314 443799         MATCH
+      vol_after_mm3        mine 443658         PR314 443658         MATCH
+
+  rung 0.68  Taubin_pairs_20
+      cut_max_mm           mine 0.509289       PR314 0.509289       MATCH
+      cut_rms_mm           mine 0.123437       PR314 0.123437       MATCH
+      cut_moved            mine 24218          PR314 24218          MATCH
+      cad_moved_bitwise    mine 0              PR314 0              MATCH
+      dihedral_before      mine 8.36204        PR314 8.36204        MATCH
+      dihedral_after       mine 8.30212        PR314 8.30212        MATCH
+      vol_before_mm3       mine 443799         PR314 443799         MATCH
+      vol_after_mm3        mine 443783         PR314 443783         MATCH
+
+shared rows: 8   fields compared: 64   differing: 0
+
+wall_s is deliberately NOT compared — it is a machine reading, not a metric.

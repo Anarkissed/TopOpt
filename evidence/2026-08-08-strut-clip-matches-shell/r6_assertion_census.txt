@@ -1,0 +1,24 @@
+=== R6 assertion census: 966ffa6eaf9bb4608b1be62ee1b04e04815a49f0 → working tree ===
+
+1. TEST ASSERTION MESSAGES   before=3124  after=3157
+   REMOVED:
+   (nothing above = no assertion message disappeared)
+
+2. REGISTERED CTESTS   before=114  after=115
+   REMOVED:
+   ADDED:
+     lattice_clip_shell
+
+3. PRODUCTION REFUSALS   before=395  after=397
+   REMOVED:
+   (nothing above = no production refusal disappeared)
+
+4. COMPARISON KINDS INSIDE CHECK() (before → after; a DROP is the thing to look at)
+     !=         28 →     28  
+     &&        269 →    271  
+     <         202 →    205  
+     <=        131 →    132  
+     ==        819 →    821  
+     >         224 →    230  
+     >=         57 →     58  
+     ||          2 →      2  

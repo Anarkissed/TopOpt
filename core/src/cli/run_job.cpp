@@ -34,6 +34,7 @@
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/mesh_distance.hpp"
 #include "topopt/observability.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/part.hpp"
@@ -422,6 +423,50 @@ struct LatticeExportOutcome {
   long long solid_region_voxels = 0;      // printed, non-keep-out, not latticed
   double solid_region_volume_mm3 = 0.0;   // voxel basis: count × spacing³
   std::uint64_t solid_region_triangles = 0;
+
+  // ★ THE NO-PROTRUSION INVARIANT, MEASURED ON WHAT WAS WRITTEN (task
+  // 2026-08-08-strut-clip-matches-shell, bar R3). Every vertex of every LATTICE
+  // triangle — struts, nodes, anchor balls, skin, rim; NOT the shell's own
+  // triangles and NOT the solid companion's — is evaluated against the exact
+  // signed distance to the shell in the same file, and the largest amount by
+  // which any of them lies OUTSIDE it is recorded here.
+  //
+  // MEASURED, not derived. The clip's Lipschitz certificate proves containment
+  // for the spans it certified, but the generator also has a fast path that
+  // skips the clip entirely (lattice_gen.cpp:344), a node/anchor ball pass, and
+  // a skin pass with its own relaxed predicate — so "the clip is correct"
+  // and "nothing was written outside the shell" are different claims. This is
+  // the second one, and it is what the maintainer can actually see in a slicer.
+  //
+  // The measurement runs on the STREAM, so peak RSS stays flat in output size
+  // (bar B8): the sink wrapper holds one running maximum, and a per-voxel
+  // lower-bound field keeps deep-interior vertices to an array lookup.
+  bool protrusion_measured = false;
+  // THE ONLY GEOMETRY ALLOWED OUTSIDE THE SHELL, in mm — the clip's own crossing
+  // tolerance, PLUS the freeform skin's declared sag budget when that pass ran.
+  // The freeform skin deliberately buys `kLatticeSkinSagBudgetMm` of overshoot
+  // against the base surface (lattice_gen.hpp says why), so a run that armed it
+  // is allowed exactly that and not a micron more; every other run is allowed
+  // nothing. Recorded so the receipt states the bar it was judged against rather
+  // than leaving the reader to infer it.
+  double protrusion_allowance_mm = 0.0;
+  // WHICH SURFACE THE STRUTS WERE CLIPPED AGAINST, read from the boundary
+  // itself rather than written as a constant beside it. The whole defect was two
+  // surfaces that everyone believed were one, so a receipt that ASSERTS the
+  // answer instead of reporting it would be repeating the mistake in prose.
+  bool clipped_against_shell = false;
+  double max_protrusion_mm = 0.0;   // largest distance OUTSIDE the shell
+  long long protruding_vertices = 0;  // lattice vertices strictly outside it
+  long long measured_vertices = 0;    // lattice vertices examined
+  Vec3 worst_protrusion_at{};         // where the worst one is, model frame
+  // WHICH GENERATOR PASS emitted the worst one. The generator has five of them
+  // (interior struts, node balls, anchor balls, skin, rim) and they reach the
+  // boundary through DIFFERENT predicates — the struts through a certified clip,
+  // the node balls through a single sd >= r test, the freeform skin through a
+  // deliberately relaxed one. A refusal that says only "0.8 mm somewhere" sends
+  // the next reader back to the whole file; naming the pass is the difference
+  // between a diagnosis and a puzzle.
+  std::string worst_protrusion_pass;
 };
 
 std::string lattice_base_name(const std::string& prefix, double requested_vf) {
@@ -886,16 +931,49 @@ void fill_grading_subfloor(RunInfo& gi, const GradedField& gf) {
   gi.grading_subfloor_max_cells_per_member = gf.subfloor_max_cells_per_member;
 }
 
+// ★ THE SHELL THE LATTICED FILE CARRIES (task 2026-08-08-strut-clip-matches-
+// shell). `export_latticed_variant` pushes `variant.v3.mesh` as the solid shell,
+// and `variant.v3.mesh` is
+// `keep_largest_component(marching_cubes(grid, density, 0.5))` — voxelize.cpp
+// :735 + :813, at analyze.cpp:25's `kIso`, which is 0.5 UNCONDITIONALLY: check_v3
+// is called with that constant and not with the run's printed iso, so the shell
+// in the file is the 0.5 isosurface even on a multiscale run. Spelled ONCE here
+// so the surface the struts are clipped against, the surface the invariant is
+// measured against and the surface the file actually carries are the same object
+// by construction, not by three sites agreeing. The forecast path has no
+// `v3.mesh` in hand and calls this to reconstruct it from the stored design,
+// which is why it takes the field rather than the variant.
+constexpr double kExportedShellIso = 0.5;
+TriangleMesh exported_shell_for(const VoxelGrid& sg,
+                                const std::vector<double>& dens) {
+  return keep_largest_component(marching_cubes(sg, dens, kExportedShellIso));
+}
+
 LatticeBoundary lattice_boundary_for(const VoxelGrid& sg,
                                      const std::vector<double>& dens,
                                      double cell_mm,
                                      const std::vector<ClearanceGeometry>& kos,
                                      const LatticeRoleRegions& roles,
-                                     double printed_iso = 0.5) {
+                                     double printed_iso = 0.5,
+                                     // THE EXPORTED SHELL. Non-null => the base
+                                     // region is its interior (set_shell_base);
+                                     // null keeps the voxel-cube union, which is
+                                     // what every test that builds a boundary
+                                     // without a mesh still gets.
+                                     const TriangleMesh* shell = nullptr) {
   LatticeBoundary B;
   // Window: clipping needs exact distances only out to one cell of slack past
   // the largest erosion; two cells is comfortably conservative.
   B.set_voxel_base(&sg, &dens, printed_iso, 2.0 * cell_mm);
+  // ★ ONE SURFACE, NOT TWO. The voxel-cube union is NOT the surface the export
+  // writes: a marching-cubes vertex sits between voxel CENTRES, so the two
+  // coincide on a flat face and the isosurface CHAMFERS the cube union at a
+  // convex edge — measured at h/sqrt(3) = 0.984 mm on his 1.705 mm voxel
+  // (evidence/2026-08-08-strut-clip-matches-shell/s1b_surface_gap.csv). Struts
+  // clipped to the cube union therefore ended outside the shell at edges and
+  // only at edges, which is exactly what the maintainer photographed. When the
+  // shell is in hand it supersedes the cube union (set_shell_base).
+  if (shell != nullptr && !shell->triangles.empty()) B.set_shell_base(shell);
   for (const ClearanceGeometry& g : kos)
     B.add_keep_out(g, /*collar=*/g.kind == ClearanceKind::Bolt);
   // Lattice roles (stage 1): activation + certification-mask terms of the SAME
@@ -1150,10 +1228,152 @@ LatticeExportOutcome export_latticed_variant(
     Rbase = lattice_region_for(sg, base_cell_mm, &boundary);
     Rbase.latticed = nullptr;  // each level carries its own predicate
   }
+  // ── ★ THE NO-PROTRUSION MEASUREMENT (task 2026-08-08-strut-clip-matches-
+  // shell, bar R3). One `MeshDistance` over the shell in this very file, plus a
+  // per-voxel LOWER BOUND on the shell distance so the overwhelming majority of
+  // vertices — the deep interior — cost an array lookup instead of a query.
+  //
+  // THE BOUND IS SOUND, not a heuristic: the exact signed distance is
+  // 1-Lipschitz, so for any point p inside voxel (i,j,k) whose centre c has
+  // shell distance sd(c), sd(p) >= sd(c) - |p - c| >= sd(c) - (sqrt(3)/2)*h.
+  // A vertex whose owning voxel clears that bound is PROVEN inside and is
+  // skipped; every other vertex is measured exactly. Nothing is sampled and
+  // nothing is assumed.
+  //
+  // `MeasuringSink` wraps the writer, so the measurement rides the stream and
+  // peak memory stays flat in output size. It wraps ONLY the lattice emission —
+  // the shell's own triangles lie on the shell (distance 0 by construction) and
+  // the solid companion is a different body with its own accounting, so folding
+  // either in would report a number about something else.
+  //
+  // A "skin" outer finish drops the shell from the file entirely, and there is
+  // then no shell for a strut to protrude through: the measurement is SKIPPED
+  // and `protrusion_measured` stays false, rather than reporting a vacuous zero
+  // against a surface the file does not carry.
+  const MeshDistance shell_dist(shell);
+  const bool measure_protrusion = with_shell && !shell_dist.empty();
+  std::vector<float> sd_floor;  // per voxel: a lower bound on shell distance
+  const double voxel_reach = 0.5 * std::sqrt(3.0) * sg.spacing;
+  if (measure_protrusion) {
+    sd_floor.assign(sg.voxel_count(), 0.0f);
+    for (int k = 0; k < sg.nz; ++k)
+      for (int j = 0; j < sg.ny; ++j)
+        for (int i = 0; i < sg.nx; ++i) {
+          const Vec3 c{sg.origin.x + (i + 0.5) * sg.spacing,
+                       sg.origin.y + (j + 0.5) * sg.spacing,
+                       sg.origin.z + (k + 0.5) * sg.spacing};
+          // The bound is stored NARROWED to float (2 MB rather than 16 at his
+          // grid), so it carries a guard band an order of magnitude wider than
+          // float's own error at these magnitudes. Narrowing must never make
+          // the bound optimistic: a skip is a claim that a vertex is provably
+          // inside, and a claim that is 1e-5 mm too generous is still a claim
+          // the measurement did not earn.
+          constexpr double kFloatGuardMm = 1e-3;
+          sd_floor[sg.index(i, j, k)] = static_cast<float>(
+              shell_dist.signed_distance(c) - voxel_reach - kFloatGuardMm);
+        }
+  }
+  struct MeasuringSink : TriangleSink {
+    TriangleSink* inner = nullptr;
+    const MeshDistance* dist = nullptr;
+    const VoxelGrid* grid = nullptr;
+    const std::vector<float>* floor = nullptr;
+    double max_out = 0.0;
+    long long n_out = 0;
+    long long n_seen = 0;
+    Vec3 worst{};
+    long long worst_vertex = -1;
+    void one(const Vec3& v) {
+      ++n_seen;
+      const VoxelGrid& g = *grid;
+      const int i = static_cast<int>(std::floor((v.x - g.origin.x) / g.spacing));
+      const int j = static_cast<int>(std::floor((v.y - g.origin.y) / g.spacing));
+      const int k = static_cast<int>(std::floor((v.z - g.origin.z) / g.spacing));
+      if (i >= 0 && j >= 0 && k >= 0 && i < g.nx && j < g.ny && k < g.nz &&
+          (*floor)[g.index(i, j, k)] > 0.0f)
+        return;  // PROVEN inside by the Lipschitz bound — no query needed
+      const double out = -dist->signed_distance(v);
+      if (out > 0.0) {
+        ++n_out;
+        if (out > max_out) {
+          max_out = out;
+          worst = v;
+          worst_vertex = n_seen - 1;
+        }
+      }
+    }
+    void add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) override {
+      one(a);
+      one(b);
+      one(c);
+      inner->add_triangle(a, b, c);
+    }
+  };
   auto emit_lattice = [&](TriangleSink& w) {
-    return swept ? generate_lattice_multilevel(LatticeGenTopology::Octet, Rbase,
-                                               *levels, w, skin)
-                 : generate_lattice(LatticeGenTopology::Octet, R, radius, w, skin);
+    if (!measure_protrusion)
+      return swept ? generate_lattice_multilevel(LatticeGenTopology::Octet,
+                                                 Rbase, *levels, w, skin)
+                   : generate_lattice(LatticeGenTopology::Octet, R, radius, w,
+                                      skin);
+    MeasuringSink m;
+    m.inner = &w;
+    m.dist = &shell_dist;
+    m.grid = &sg;
+    m.floor = &sd_floor;
+    // WHICH PASS emitted which vertices. `on_element` fires immediately AFTER
+    // that element's triangles, so a running (vertex count, kind) ledger of one
+    // entry per element lets the worst vertex be attributed exactly, without the
+    // sink having to know anything about the generator. Observing never changes
+    // the emitted bytes (lattice_gen.hpp), so this cannot move the file.
+    std::vector<std::pair<long long, const char*>> pass_marks;
+    LatticeGenObserver obs;
+    obs.on_element = [&m, &pass_marks](LatticeGenElement k, const Vec3&,
+                                       const Vec3&, double) {
+      const char* name = "unknown";
+      switch (k) {
+        case LatticeGenElement::InteriorStrut: name = "interior strut"; break;
+        case LatticeGenElement::Node: name = "node ball"; break;
+        case LatticeGenElement::AnchorNode: name = "skin anchor ball"; break;
+        case LatticeGenElement::SkinStrut: name = "skin strut"; break;
+        case LatticeGenElement::RimStrut: name = "rim line"; break;
+        case LatticeGenElement::RimTorusChord: name = "rim torus"; break;
+      }
+      pass_marks.emplace_back(m.n_seen, name);
+    };
+    const LatticeGenStats st =
+        swept ? generate_lattice_multilevel(LatticeGenTopology::Octet, Rbase,
+                                            *levels, m, skin, &obs)
+              : generate_lattice(LatticeGenTopology::Octet, R, radius, m, skin,
+                                 &obs);
+    const char* worst_pass = "unattributed";
+    if (m.worst_vertex >= 0)
+      for (const auto& pm : pass_marks)
+        if (pm.first > m.worst_vertex) {
+          worst_pass = pm.second;
+          break;
+        }
+    // Both writers run the identical emission, so the second pass measures the
+    // identical stream; take the max rather than overwrite, so a divergence
+    // could only ever be reported UP.
+    oc.protrusion_measured = true;
+    oc.clipped_against_shell = boundary.has_shell_base();
+    // The freeform skin is the ONE pass that is permitted outside the base
+    // surface, and only by the budget it declares. Read from the spec that was
+    // actually handed to the generator, so a run that did not arm it gets no
+    // allowance at all.
+    oc.protrusion_allowance_mm =
+        LatticeBoundary::kClipTolMm +
+        ((skin.freeform && skin.mode == LatticeSkinMode::Diagrid)
+             ? kLatticeSkinSagBudgetMm
+             : 0.0);
+    if (m.max_out > oc.max_protrusion_mm) {
+      oc.max_protrusion_mm = m.max_out;
+      oc.worst_protrusion_at = m.worst;
+      oc.worst_protrusion_pass = worst_pass;
+    }
+    oc.protruding_vertices = std::max(oc.protruding_vertices, m.n_out);
+    oc.measured_vertices = std::max(oc.measured_vertices, m.n_seen);
+    return st;
   };
   // ── THE BAKED BUILD FRAME, ON THE STREAM (handoff
   // 2026-08-01-bake-build-orientation). When this variant's orientation was
@@ -1561,6 +1781,26 @@ struct LatticeAddedMaterialReceipt {
   long long inside_part = 0;        //   ... inside the ORIGINAL part envelope
   long long outside_part = 0;       //   ... OUTSIDE it (the material grown)
   long long outside_kept_solid = 0; // of those, dropped from the lattice mask
+  // ── AND OF THOSE, THE ONES THAT WERE NEVER IN THE MASK TO BEGIN WITH (task
+  // 2026-08-08-strut-clip-matches-shell). The added-material policy can only
+  // DROP a voxel the certification mask had already accepted, so on its own
+  // `outside_kept_solid` does not account for every outside voxel — and a count
+  // that silently fails to add up is how an accounting bar turns into a bar
+  // about accounting.
+  //
+  // WHY ANY OUTSIDE VOXEL IS NOW MISSED BY THE MASK. The mask's cell-overlap
+  // proof runs against the EXPORTED SHELL, which is
+  // `keep_largest_component(marching_cubes(...))` — the LARGEST body only. Under
+  // a design box the optimizer can grow a disconnected island, and an island the
+  // shell does not include is provably outside the allowed region, so its cells
+  // never enter the mask. That is the RIGHT answer: a strut there would have sat
+  // in the file with no shell around it at all. Measured on
+  // test_designbox_lattice_recert's fixture: 12 of 716 outside voxels.
+  //
+  // outside_kept_solid + outside_never_masked == outside_part, exactly, and the
+  // test asserts that partition rather than the old equality that assumed the
+  // second term was always zero.
+  long long outside_never_masked = 0;
   // EVERY voxel the policy dropped from the mask — the added material PLUS the
   // part voxels that share a lattice cell with it. The policy acts on whole
   // cells (see kDesignBoxAddedMaterialKeptSolid), so this is the honest "how
@@ -1712,6 +1952,29 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                       : mesh_enclosed_volume_mm3(variant.v3.mesh)) +
          ",\n";
   }
+  // ★ THE NO-PROTRUSION INVARIANT, as a recorded number (task 2026-08-08-strut-
+  // clip-matches-shell, bar R3). Not a boolean: the amount, where, and out of how
+  // many vertices — because "0" is only meaningful beside the count it was taken
+  // over, and because the defect this closes was invisible in every receipt the
+  // run wrote while being plainly visible in a slicer.
+  //
+  // Absent when the run could not measure (a "skin" outer finish carries no
+  // shell), so a receipt never reports a zero it did not earn.
+  if (oc.protrusion_measured) {
+    s += "  \"clip_base_surface\": " +
+         json_str(oc.clipped_against_shell ? "exported_shell"
+                                           : "voxel_cube_union") +
+         ",\n";
+    s += "  \"protrusion_measured_against\": \"exported_shell\",\n";
+    s += "  \"max_strut_protrusion_mm\": " + json_num(oc.max_protrusion_mm) +
+         ",\n";
+    s += "  \"protrusion_allowance_mm\": " +
+         json_num(oc.protrusion_allowance_mm) + ",\n";
+    s += "  \"protruding_vertices\": " +
+         std::to_string(oc.protruding_vertices) + ",\n";
+    s += "  \"protrusion_vertices_measured\": " +
+         std::to_string(oc.measured_vertices) + ",\n";
+  }
   s += "  \"clipped_struts\": " + std::to_string(gs.clipped_struts) + ",\n";
   s += "  \"landings\": " + std::to_string(gs.landings) + ",\n";
   s += "  \"anchor_nodes\": " + std::to_string(gs.anchor_nodes) + ",\n";
@@ -1834,6 +2097,12 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          ",\n";
     s += "    \"outside_kept_solid_voxels\": " +
          std::to_string(added.outside_kept_solid) + ",\n";
+    // The OTHER half of the partition: outside voxels the certification mask
+    // never accepted, so the policy had nothing to drop. Both terms are emitted
+    // so that outside_kept_solid + outside_never_masked == outside_original_part
+    // is checkable from the receipt alone.
+    s += "    \"outside_never_masked_voxels\": " +
+         std::to_string(added.outside_never_masked) + ",\n";
     // The WHOLE-CELL cost of the policy: the added material plus the part
     // voxels that share a lattice cell with it. Reported separately because it
     // is the number that actually describes how much of the file is solid.
@@ -2918,12 +3187,20 @@ LatticeVariantOutcome lattice_one_variant(
   }
   R.cell_mm = cell;
 
-  // ── THE shared boundary for this variant: its solid density as the base,
+  // ── THE shared boundary for this variant: THE EXPORTED SHELL as the base,
   // the resolved clearance keep-outs subtracted, the role regions carried as
   // activation/mask terms. Geometry (a) and certification (b) below both
   // consume this ONE object (bar B7 / H1b).
-  const LatticeBoundary boundary = lattice_boundary_for(
-      solved_grid, dens, cell, lattice_kos, lattice_roles, printed_iso);
+  //
+  // ★ THE BASE IS `v.v3.mesh` — the surface `export_latticed_variant` pushes
+  // into the same file — and not the voxel-cube union it used to be (task
+  // 2026-08-08-strut-clip-matches-shell). B7 said the certified region and the
+  // exported region must be one region; this extends it from the REGION to the
+  // SURFACE, because the two descriptions of the same solid set do not agree at
+  // convex edges and the file carried both.
+  const LatticeBoundary boundary =
+      lattice_boundary_for(solved_grid, dens, cell, lattice_kos, lattice_roles,
+                           printed_iso, &v.v3.mesh);
 
   // ── THE certification mask — shared by the export (companion + graded cell
   // activation) and the posture. On a graded run it is intersected with the
@@ -3012,6 +3289,10 @@ LatticeVariantOutcome lattice_one_variant(
             continue;
           }
           ++added_rcpt.outside_part;
+          // Recorded BEFORE pass 2 clears anything: a voxel the mask never
+          // accepted cannot be "dropped" by the policy, and counting it here is
+          // what makes the two terms partition `outside_part` exactly.
+          if (!mask[e]) ++added_rcpt.outside_never_masked;
           if (kDesignBoxAddedMaterialKeptSolid) cell_has_added[owner_cell(i, j, k)] = 1;
         }
     // Pass 2 — clear those cells WHOLE.
@@ -3366,6 +3647,48 @@ LatticeVariantOutcome lattice_one_variant(
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso);
   R.gen_seconds = wall_seconds() - tg0;
+
+  // ── ★ THE NO-PROTRUSION INVARIANT, ASSERTED (task 2026-08-08-strut-clip-
+  // matches-shell, bar R3). Not eyeballed, not derived from the clip's
+  // certificate: measured on the very stream that was written, for EVERY
+  // exported lattice, and refused if a single vertex came out beyond the shell
+  // in the same file.
+  //
+  // WHY A REFUSAL. A strut end standing proud of the outer surface is the file
+  // disagreeing with itself — the certificate describes the composite inside the
+  // shell, and the slicer prints teeth outside it. That is the same
+  // certified-object-is-not-the-exported-object class this codebase refuses
+  // everywhere else, and it cost the maintainer a set of prints before anyone
+  // could name it. The tolerance is the clip refinement's own crossing tolerance
+  // (LatticeBoundary::kClipTolMm, 1e-4 mm), so the bar is "zero to the precision
+  // the clip is able to resolve" and not a budget anybody may spend.
+  //
+  // THE ONE EXCEPTION IS DECLARED, NOT DISCOVERED. A freeform skin buys
+  // `kLatticeSkinSagBudgetMm` (0.045 mm) of overshoot against the base surface
+  // ON PURPOSE — lattice_gen.hpp states why, and keep-outs and planes stay at
+  // full erosion regardless. `protrusion_allowance_mm` carries that budget only
+  // when that pass actually ran, so an ordinary run is still held to zero, and
+  // the receipt reports the allowance beside the measurement so the bar a run
+  // was judged against is never left to inference.
+  if (R.oc.protrusion_measured &&
+      R.oc.max_protrusion_mm > R.oc.protrusion_allowance_mm)
+    throw JobError(
+        "lattice geometry escaped the exported shell: " +
+        std::to_string(R.oc.protruding_vertices) + " of " +
+        std::to_string(R.oc.measured_vertices) +
+        " lattice vertices lie OUTSIDE the solid shell written into the same "
+        "file, the worst by " + json_num(R.oc.max_protrusion_mm) +
+        " mm at (" + json_num(R.oc.worst_protrusion_at.x) + ", " +
+        json_num(R.oc.worst_protrusion_at.y) + ", " +
+        json_num(R.oc.worst_protrusion_at.z) + "), emitted by the " +
+        R.oc.worst_protrusion_pass +
+        " pass (allowance " + json_num(R.oc.protrusion_allowance_mm) +
+        " mm; the clip predicate reads " +
+        json_num(boundary.signed_distance(R.oc.worst_protrusion_at)) +
+        " mm there).\n  The file would print strut ends standing proud of the outer "
+        "surface, and the certificate — which describes the composite INSIDE "
+        "the shell — would not describe it. Refusing rather than writing an "
+        "object that disagrees with its own receipt.");
 
   // ── M4: A SKIN MODE THAT PRODUCED NOTHING MUST SAY SO. The full root cause and
   // why the predicate is the MEASURED count rather than a prediction are on
@@ -4061,8 +4384,15 @@ UniformForecast forecast_uniform(const JobDescription& job,
   for (const char c : cand) u.region_voxels += (c != 0);
   const double cell = job.lattice.cell_mm;
   if (!(cell > 0.0)) return u;   // no cell stated ⇒ nothing to forecast uniformly
+  // The SAME base surface the run will clip and certify against (task
+  // 2026-08-08-strut-clip-matches-shell). The forecast holds a stored design and
+  // no variant, so it rebuilds the shell the run's export would write, through
+  // the one helper. Skipping this would put the forecast back on the surface the
+  // run no longer uses — the exact "forecast forecast the WRONG job" failure the
+  // comment above this function is about.
+  const TriangleMesh shell = exported_shell_for(grid, sd.density);
   const LatticeBoundary boundary =
-      lattice_boundary_for(grid, sd.density, cell, kos, roles, 0.5);
+      lattice_boundary_for(grid, sd.density, cell, kos, roles, 0.5, &shell);
   const std::vector<char> mask = lattice_certification_mask(
       boundary, grid, sd.density, 0.5, grid.origin, cell);
   for (std::size_t e = 0; e < mask.size(); ++e)

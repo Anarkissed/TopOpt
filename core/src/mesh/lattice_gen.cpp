@@ -271,7 +271,7 @@ constexpr double kRimSagMm = 0.02;        // rim torus facet sag budget
 // exact offset surface has f == 0 against the voxel term everywhere — the same
 // degeneracy the plane skin dodges by excluding its own face, which the voxel
 // base (face == -1) cannot offer.
-constexpr double kSkinSagBudgetMm = 0.045;
+constexpr double kSkinSagBudgetMm = kLatticeSkinSagBudgetMm;
 // Straight-chord surface band: a candidate chord whose sampled deviation from
 // its local offset surface leaves the band is REJECTED whole — never bent
 // silently (bar E4's rejection clause). The band is ASYMMETRIC:

@@ -1,0 +1,50 @@
+R5 — THE INSTRUMENT MOVE, AND THE ASSERTION CENSUS
+==================================================
+
+This task changed exactly one pre-existing file that carries assertions:
+core/tests/harness/operator_bakeoff_probe.cpp, -247 lines. That drop is a
+MOVE, carried verbatim from PR 314, not a deletion. Two checks, both run
+here rather than quoted from PR 314's evidence.
+
+(1) EVERY REMOVED NON-BLANK LINE IS PRESENT VERBATIM IN THE HEADER.
+    Exact whole-line match (grep -Fxq), no normalisation, no fuzzy compare.
+
+    removed non-blank lines: 232
+    not found verbatim in surface_instruments.hpp: 0
+
+(2) THE PROBE STILL REPRODUCES PR 306's COMMITTED OUTPUT.
+    Re-run here and diffed against evidence/2026-08-06-smoothing-operator-
+    bakeoff/bakeoff_probe.txt, the file PR 306 committed.
+
+    $ diff <(rerun) evidence/2026-08-06-smoothing-operator-bakeoff/bakeoff_probe.txt
+    differing lines: 62
+
+    EVERY ONE OF THEM IS A WALL-TIME COLUMN. Dropping the trailing field:
+
+    143c143
+    < A x40 C2 OFF 4.0000 +0.0000 1.0000 z=0 +0.0869 1616.067 0.010 <-- OUTSIDE THE DESIGN
+    ---
+    > A x40 C2 OFF 4.0000 +0.0000 1.0000 z=0 +0.0869 1616.067 0.008 <-- OUTSIDE THE DESIGN
+    161,165c161,165
+    < A mean-curvature x5 5 0.031
+    < A mean-curvature x20 20 0.086
+    < B ramp x2 2 4.187 2093.6 (82104 -> 980639
+    < B ramp x8 8 14.151 1768.8 (82104 -> 980639
+    < Taubin pairs 20 20 0.026
+    ---
+    > A mean-curvature x5 5 0.042
+    > A mean-curvature x20 20 0.083
+    > B ramp x2 2 4.059 2029.5 (82104 -> 980639
+    > B ramp x8 8 17.110 2138.8 (82104 -> 980639
+    > Taubin pairs 20 20 0.030
+    ^ the residue above is the ms/stroke and wall_s rows, whose LAST field is
+      a label rather than the time, so the strip removed the wrong token.
+      Every geometry figure — deviation, amplitude removed, dihedral, volume,
+      cross-section, vertex counts, iteration counts — is IDENTICAL.
+
+(3) NO ASSERTION WAS REMOVED OR WEAKENED. The 232 removed lines are all
+    accounted for by (1); no XCTAssert, no assert(), no FAIL branch and no
+    diagnostic message was dropped. The two NEW harnesses add assertions
+    rather than remove any: closing_flow_probe's S1.0 sign control is a
+    hard FAIL-and-exit-3 gate with two positive controls and one negative
+    control, and IT FIRED during development — see s1_sign_control_caught_it.txt.

@@ -1,0 +1,70 @@
+S1.0 — THE SIGN CONTROL FIRED, AND WHAT IT CAUGHT
+=================================================
+
+The closing flow's whole behaviour turns on one predicate: kappa_min < -1/r.
+If the sign or the scale of kappa_min is wrong, the operator selects RIDGES
+instead of VALLEYS and every table downstream is confidently backwards. So the
+probe refuses to measure anything until it has read a known answer off a known
+shape, and it EXITS 3 rather than continuing.
+
+It fired on the first run. Pasted verbatim:
+
+  -- S1.0 SIGN CONTROL: an analytic sphere must read +1/R -------------
+    R =   5.0 mm   expect kappa = +0.20000   read kmin +0.09869  kmax +0.14988   rel err 50.65%  FAIL
+                   obstacle (-1/1mm) selects 0 of 1026 vertices   OK (a convex body has nothing to close)
+    R =  20.0 mm   expect kappa = +0.05000   read kmin +0.02467  kmax +0.03747   rel err 50.65%  FAIL
+                   obstacle (-1/1mm) selects 0 of 1026 vertices   OK (a convex body has nothing to close)
+    concave 90-degree seam: obstacle (-1/5mm) selects 13 of 13 seam vertices   OK (a crevice IS selected)
+    * SIGN CONTROL FAILED -- every number below is suspect.
+
+TWO DEFECTS, and the second one is the interesting one.
+
+(1) THE COEFFICIENT WAS HALF. The Python reimplementation
+    (github.com/kentechx/closing_flow, discrete_mean_curvature) writes the
+    per-edge mean-curvature contribution as `0.5*0.5*0.5*(pi - A)*l` = 1/8 to
+    EACH endpoint. That constant was copied. It is wrong in THIS mass
+    convention: summing the per-vertex form over all vertices counts each edge
+    twice, so
+
+        sum_v H_int(v) = (1/2) sum_e |e| beta_e
+
+    which is Cohen-Steiner & Morvan's estimate of the integral of H dA. On a
+    sphere that must come to 4*pi*R. With 1/8 it comes to 2*pi*R -- the factor
+    of two in the reading above. The reference's 1/8 pairs with a different mass
+    matrix downstream. Copying a constant across conventions is exactly the
+    "agrees in spirit" failure the shared-instrument-header rule exists to stop,
+    and it is worth recording that it happened here anyway.
+
+(2) THE CONTROL ITSELF WAS READ WRONG. It took kmin as a MINIMUM over vertices
+    and kmax as a MAXIMUM, on an octahedron-subdivision sphere whose triangles
+    are strongly non-uniform. That reads the worst-shaped corner of the
+    tessellation, not the operator. The two quantities the continuous identities
+    pin EXACTLY are the area-weighted means -- Cohen-Steiner & Morvan for
+    integral H dA = 4*pi*R, Gauss-Bonnet for integral K dA = 4*pi -- so the
+    assertion moved onto those, with the p10/median/p90 spread printed beside
+    them so a wide distribution cannot hide inside a correct mean.
+
+AFTER BOTH FIXES, on the same two spheres:
+
+  -- S1.0 SIGN CONTROL: an analytic sphere must read +1/R -------------
+    R =   5.0 mm  expect kappa +0.20000, K +0.040000, area    314.16 mm2
+         area-weighted: kappa_mean +0.20042  K +0.040085  kmin +0.19750  kmax +0.20335   area    313.16 mm2
+         kappa_min spread p10 +0.19304  median +0.19988  p90 +0.20021
+         rel err on the area-weighted principals: 1.67%  OK
+                   obstacle (-1/1mm) selects 0 of 1026 vertices   OK (a convex body has nothing to close)
+    R =  20.0 mm  expect kappa +0.05000, K +0.002500, area   5026.55 mm2
+         area-weighted: kappa_mean +0.05011  K +0.002505  kmin +0.04938  kmax +0.05084   area   5010.59 mm2
+         kappa_min spread p10 +0.04826  median +0.04997  p90 +0.05005
+         rel err on the area-weighted principals: 1.67%  OK
+                   obstacle (-1/1mm) selects 0 of 1026 vertices   OK (a convex body has nothing to close)
+    concave 90-degree seam: obstacle (-1/5mm) selects 13 of 13 seam vertices   OK (a crevice IS selected)
+    SIGN CONTROL PASSES -- the obstacle selects valleys, not ridges.
+
+kappa_mean lands within 0.2% of 1/R and the Gaussian curvature within 0.2% of
+1/R^2, on both radii; the 1.67% is the split between the two principals, which
+is the tessellation's own anisotropy and not a bias.
+
+THE NEGATIVE CONTROL IS THE POINT. Two convex bodies selecting nothing would
+pass an operator that selects nothing EVER. The concave 90-degree seam is there
+so that "the obstacle fires" is also asserted, not only "the obstacle does not
+misfire". Both directions, every run.
