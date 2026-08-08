@@ -1,0 +1,41 @@
+strut_clip_shell_probe — task 2026-08-08-strut-clip-matches-shell
+  voxel spacing   1.7050 mm (his: resolution 128 on M2_verticalStand)
+  lattice cell    6.8200 mm
+  strut radius    0.3000 mm (his measured range 0.225-0.384 mm)
+
+=== block ===
+  shell (v3.mesh)  3456 verts, 6908 tris, watertight=1, inward_wound=1
+  S1b  isosurface inset BELOW the cube-union boundary, by distance to the nearest convex edge:
+        <  0.25 vox   samples 17136     max inset 0.984382 mm
+        <  0.50 vox   samples 13950     max inset 0.393753 mm
+        <  1.00 vox   samples 27000     max inset 0.000000 mm
+        <  2.00 vox   samples 47994     max inset 0.000000 mm
+        >= 2.00 vox   samples 242406    max inset 0.000000 mm
+  S1a  clip = voxel-cube union (as shipped): max 0.178444 mm, mean 0.178444 mm, 2880 of 496092 vertices OUTSIDE the shell
+        struts 4752, clipped 1452, dropped 8280, interior 6296.591546 mm3, gen 2.735848 s, latticed voxels 13824
+  S2c  same struts vs a TRICUBIC smooth_factor=1 shell: max 0.178444 mm, 2880 of 496092 outside
+  S2c  same struts vs a TRICUBIC smooth_factor=2 shell: max 0.069365 mm, 2880 of 496092 outside
+  S2c  same struts vs a TRICUBIC smooth_factor=3 shell: max 0.076752 mm, 1800 of 496092 outside
+  S2a  clip = the exported SHELL: max 0.000000 mm, 0 of 496092 outside
+        struts 4752 (+0), dropped 8112 (-168), interior 6288.473587 mm3 (-0.129%), gen 2.977454 s (1.09x), latticed voxels 13824 (+0)
+  S2b  cube union eroded by 0.984382 mm: max 0.000000 mm, 0 of 496092 outside
+        struts 4752 (+0), dropped 8280 (+0), interior 5696.742439 mm3 (-9.527%), gen 2.677227 s (0.98x)
+
+  S2a  GENERATOR ALONE (best of 5, counting sink): cube union 0.047531 s, shell 0.378718 s  =>  7.97x
+
+=== notched_block ===
+  shell (v3.mesh)  3456 verts, 6908 tris, watertight=1, inward_wound=1
+  S1a  clip = voxel-cube union (as shipped): max 0.178444 mm, mean 0.178444 mm, 3024 of 427404 vertices OUTSIDE the shell
+        struts 4104, clipped 1443, dropped 8280, interior 5413.346351 mm3, gen 1.437033 s, latticed voxels 12096
+  S2c  same struts vs a TRICUBIC smooth_factor=1 shell: max 0.178444 mm, 3024 of 427404 outside
+  S2c  same struts vs a TRICUBIC smooth_factor=2 shell: max 0.069365 mm, 3024 of 427404 outside
+  S2c  same struts vs a TRICUBIC smooth_factor=3 shell: max 0.076752 mm, 1910 of 427404 outside
+  S2a  clip = the exported SHELL: max 0.000000 mm, 0 of 430992 outside
+        struts 4137 (+33), dropped 8031 (-249), interior 5415.959066 mm3 (+0.048%), gen 1.911867 s (1.33x), latticed voxels 12096 (+0)
+  S2b  cube union eroded by 0.984382 mm: max 0.000000 mm, 0 of 427404 outside
+        struts 4104 (+0), dropped 8280 (+0), interior 4814.534803 mm3 (-11.062%), gen 1.494804 s (1.04x)
+
+  S2a  GENERATOR ALONE (best of 5, counting sink): cube union 0.046081 s, shell 0.358424 s  =>  7.78x
+
+wrote evidence/2026-08-08-strut-clip-matches-shell/s1_protrusion.csv
+wrote evidence/2026-08-08-strut-clip-matches-shell/s1b_surface_gap.csv

@@ -247,9 +247,24 @@ static void section_optimize_with_box() {
   CHECK(outside > 0.0,
         "AI6: this fixture's optimizer DID grow material outside the part — if "
         "it did not, the policy below would be untested");
-  CHECK(kept_solid == outside,
+  // ★ THE PARTITION, not the equality (task 2026-08-08-strut-clip-matches-shell).
+  // An outside voxel reaches "certified SOLID" by one of TWO routes: the policy
+  // drops it from the mask, or the mask never accepted it. The second route is
+  // now reachable — the mask's cell-overlap proof runs against the exported
+  // shell, which is the LARGEST marching-cubes body, so an island the design box
+  // grew that the shell does not include is provably outside the allowed region
+  // and never enters the mask at all. Measured on this fixture: 12 of 716.
+  //
+  // Asserting `kept_solid == outside` alone would now fail for a reason that has
+  // nothing to do with what it is protecting, and relaxing it to `<=` would stop
+  // protecting anything. The exact partition is the claim that was always meant.
+  const double never_masked = json_number(rcpt, "outside_never_masked_voxels");
+  CHECK(kept_solid + never_masked == outside,
         "AI6: under the conservative default EVERY outside voxel was dropped "
         "from the lattice mask (certified SOLID, exported as the companion)");
+  CHECK(never_masked >= 0.0 && kept_solid >= 0.0,
+        "AI6: both routes to certified-solid are counted, and the receipt says "
+        "which route each outside voxel took");
   CHECK(contains(rcpt, "\"policy\": \"keep_solid\""),
         "AI6: the receipt NAMES the policy that ran");
   CHECK(contains(rcpt, "PLACEHOLDER"),

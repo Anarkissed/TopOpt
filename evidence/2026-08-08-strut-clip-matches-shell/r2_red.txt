@@ -1,0 +1,15 @@
+===== R2 RED — LatticeBoundary::set_shell_base neutralised, everything else as shipped =====
+(taken against the FINAL code, i.e. with the accelerator's off-by-one-shell
+ stopping bound already corrected, so these counts are the ones the merge base
+ actually produces and not an artifact of a since-fixed measurement.)
+
+FAIL (line 297): set_shell_base must be recorded
+FAIL (line 307): NO strut vertex may lie outside the exported shell
+FAIL (line 309): max protrusion must be zero to the clip's own resolution
+FAIL (line 345): NO strut vertex may lie outside the exported shell (notched)
+  [oracle]  729 probes: max |accelerated| - |brute force| = 0.002414107 mm; worst Lipschitz excess = 0.000000000 mm
+  [control] voxel-cube clip: 2880 of 496092 vertices outside the shell, worst 0.178444 mm at (54.472, 20.460, 14.152)
+  [fixed]   shell clip:      2880 of 496092 vertices outside, worst 0.178444 mm; struts 4752, clipped 1452, dropped 8280
+  [notched] shell clip:      3024 of 427404 vertices outside, worst 0.178444 mm; struts 4104 (control 4104)
+test_lattice_clip_shell: 20 checks, 4 failures
+exit=1

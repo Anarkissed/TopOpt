@@ -113,6 +113,21 @@ struct LatticeSkinSpec {
   bool freeform = false;
 };
 
+// ★ THE SAG BUDGET THE FREEFORM SKIN BUYS AGAINST THE BASE SURFACE, in mm —
+// the ONLY geometry any lattice pass is permitted to place outside it, and the
+// reason it exists is stated at the constant's use site (lattice_gen.cpp): a
+// chord riding the exact offset surface is degenerate against an exact base
+// term, and the voxel/shell base has no face index to exclude the way the plane
+// skin does. Keep-out and plane terms stay at FULL erosion (zero intrusion).
+//
+// It is PUBLIC because the no-protrusion invariant (task 2026-08-08-strut-clip-
+// matches-shell) has to know it. That invariant refuses any lattice vertex
+// outside the exported shell, and a freeform-skin run legitimately places
+// geometry up to this far outside it — so the check reads the budget from here
+// rather than carrying a second copy of the number that could drift from the one
+// the generator actually spends.
+inline constexpr double kLatticeSkinSagBudgetMm = 0.045;
+
 // The skin printability clamp law (bar (e)) — CORE owns this number, callers
 // read it. An interior strut's floor is one extrusion width of diameter
 // (grading.hpp's printability floor). A skin strut is boundary-exposed: it

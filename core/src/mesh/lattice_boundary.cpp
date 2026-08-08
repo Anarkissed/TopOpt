@@ -2,7 +2,8 @@
 // See the header for the contract; the load-bearing property implemented here is
 // that signed_distance is a 1-LIPSCHITZ LOWER BOUND on the true signed distance:
 //   * each primitive term is the EXACT signed distance to its own region
-//     (plane, capped cylinder, bounded slab, voxel-cube union);
+//     (plane, capped cylinder, bounded slab, and the BASE — either the exported
+//     shell mesh or, when no mesh was supplied, the voxel-cube union);
 //   * the allowed region is base ∩ ¬(∪ keep-outs), and min() of exact terms is
 //     a 1-Lipschitz lower bound for the intersection.
 // Everything is closed-form arithmetic — no sampled field, no RNG, no state —
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+
+#include "topopt/mesh_distance.hpp"
 
 namespace topopt {
 namespace {
@@ -144,6 +147,14 @@ void LatticeBoundary::set_voxel_base(const VoxelGrid* grid,
   voxel_window_mm_ = window_mm;
 }
 
+void LatticeBoundary::set_shell_base(const TriangleMesh* shell) {
+  if (!shell || shell->triangles.empty())
+    throw std::invalid_argument(
+        "LatticeBoundary::set_shell_base: the shell mesh is empty — a caller "
+        "that means \"no shell base\" must not call this");
+  shell_ = std::make_shared<const MeshDistance>(*shell);
+}
+
 void LatticeBoundary::add_keep_out(const ClearanceGeometry& geom, bool collar) {
   if (!geom.valid) return;  // same safe no-op as the rasterizer
   keep_outs_.push_back(geom);
@@ -268,7 +279,16 @@ double LatticeBoundary::sd_excluding_relaxed(const Vec3& p, int exclude_face_a,
     if (excluded(pl.face)) continue;
     d = std::min(d, -vdot(vsub(p, pl.point), pl.unit_outward));
   }
-  if (voxel_grid_) d = std::min(d, voxel_distance(p) + base_relax);
+  // THE BASE TERM, and there is exactly ONE of it (task 2026-08-08-strut-clip-
+  // matches-shell). When a shell was supplied it SUPERSEDES the voxel-cube
+  // union: the cube union is not the surface the export writes, and clipping
+  // against a surface the file does not carry is what put strut ends outside
+  // the shell at convex edges. Both are exact distances, hence 1-Lipschitz, so
+  // the certified-clip refinement is sound either way.
+  if (shell_)
+    d = std::min(d, shell_->signed_distance(p) + base_relax);
+  else if (voxel_grid_)
+    d = std::min(d, voxel_distance(p) + base_relax);
   for (std::size_t i = 0; i < keep_outs_.size(); ++i) {
     if (excluded(keep_out_face_[i])) continue;
     d = std::min(d, -keep_out_signed_distance(keep_outs_[i], p));
@@ -297,11 +317,12 @@ int LatticeBoundary::nearest_face(const Vec3& p) const {
       face = pl.face;
     }
   }
-  if (voxel_grid_) {
-    const double d = voxel_distance(p);
+  // The base term owns no analytic face, whichever surface supplies it.
+  if (shell_ || voxel_grid_) {
+    const double d = shell_ ? shell_->signed_distance(p) : voxel_distance(p);
     if (d < best) {
       best = d;
-      face = -1;  // the voxel base owns no analytic face
+      face = -1;
     }
   }
   for (std::size_t i = 0; i < keep_outs_.size(); ++i) {

@@ -1,0 +1,20 @@
+=== full core ctest, this branch ===
+registered: 115  (CI's denominator on main is 114 — memory local-ctest-denominator-is-not-cis
+             — plus this task's lattice_clip_shell)
+
+the lib3mf-GATED tests DID register in this configure, so the denominator is CI's:
+  Test  #98: export_3mf
+  Test #115: threemf_import
+
+
+100% tests passed out of 115
+
+Total Test time (real) = 1103.61 sec
+
+=== app package (the app-macos CI job), this branch ===
+./app/scripts/build_core.sh  -> exit 0 (lib3mf present, so the 3MF AppModelTests really parse)
+TOPOPT_ASSERT_FRAME_BUDGET=0 swift test --package-path app/TopOptKit  -> exit 0
+	 Executed 1367 tests, with 22 tests skipped and 0 failures (0 unexpected) in 269.344 (269.437) seconds
+	 Executed 1367 tests, with 22 tests skipped and 0 failures (0 unexpected) in 269.344 (269.440) seconds
+(the app links core but does not link the lattice generator — its
+ LatticeBoundaryTreatment is a UI enum. This is the no-regression check.)

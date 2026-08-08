@@ -1,0 +1,48 @@
+R1 — NO PRODUCTION FILE CHANGED
+================================
+
+$ git diff main -- core/src core/include app/TopOptKit/Sources
+(no output — the diff is EMPTY, staged and unstaged alike)
+
+$ git diff --stat main -- app
+(no output — the app is untouched, so app-macos builds the same tree as main)
+
+$ git diff --cached --stat main
+ core/CMakeLists.txt                                |   34 +
+ core/tests/harness/closing_flow_probe.cpp          | 1171 ++++++++++++++++++++
+ core/tests/harness/cut_population_probe.cpp        |  433 ++++++++
+ core/tests/harness/field_information_probe.cpp     |  798 +++++++++++++
+ core/tests/harness/operator_bakeoff_probe.cpp      |  247 +----
+ core/tests/harness/surface_instruments.hpp         |  274 +++++
+ .../2026-08-08-closing-flow-and-the-field.md       |  714 ++++++++++++
+ 7 files changed, 3430 insertions(+), 241 deletions(-)
+
+Every changed path is a TEST HARNESS or the build rule for one:
+  core/CMakeLists.txt                            three additive EXCLUDE_FROM_ALL blocks
+  core/tests/harness/closing_flow_probe.cpp      NEW — S1
+  core/tests/harness/field_information_probe.cpp NEW — S2
+  core/tests/harness/surface_instruments.hpp     carried from PR 314 (R2)
+  core/tests/harness/cut_population_probe.cpp    carried from PR 314 (R2)
+  core/tests/harness/operator_bakeoff_probe.cpp  PR 314's instrument MOVE — see r5_instrument_move_and_census.txt
+  docs/handoffs/...                              the handoff
+
+None of the three new CMake targets is in the default build — all are
+EXCLUDE_FROM_ALL, so CI configures them and never compiles them:
+
+1509:  add_executable(cut_population_probe EXCLUDE_FROM_ALL
+1520:  add_executable(closing_flow_probe EXCLUDE_FROM_ALL
+1531:  add_executable(field_information_probe EXCLUDE_FROM_ALL
+
+WHY TWO HARNESS FILES ARE CARRIED FROM AN UNMERGED BRANCH.
+PR 314 (branch claude/smoothing-page-reset-63aa19) is NOT in main:
+
+$ git merge-base --is-ancestor f193777 main; echo $?
+  exit 1 (non-zero = not an ancestor of main)
+
+R2 requires this task to be scored by PR 314's metric UNCHANGED. That metric
+lives in surface_instruments.hpp, which is on that branch and not on main.
+Re-typing it would put a silent discrepancy exactly where the comparison
+lives. Both files are taken VERBATIM — the diff against PR 314's own copies:
+
+$ git diff claude/smoothing-page-reset-63aa19 -- <the three carried files>
+(no output — byte-identical to PR 314's own copies)

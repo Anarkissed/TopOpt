@@ -1,0 +1,8 @@
+===== R2 GREEN — the fix in place =====
+
+  [oracle]  729 probes: max |accelerated| - |brute force| = 0.002414107 mm; worst Lipschitz excess = 0.000000000 mm
+  [control] voxel-cube clip: 2880 of 496092 vertices outside the shell, worst 0.178444 mm at (54.472, 20.460, 14.152)
+  [fixed]   shell clip:      0 of 496092 vertices outside, worst 0.000000 mm; struts 4752, clipped 1452, dropped 8112
+  [notched] shell clip:      0 of 430992 vertices outside, worst 0.000000 mm; struts 4137 (control 4104)
+test_lattice_clip_shell: 20 checks, 0 failures
+exit=0

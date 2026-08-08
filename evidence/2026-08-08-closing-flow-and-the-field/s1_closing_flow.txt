@@ -1,0 +1,426 @@
+== closing_flow_probe — S1 of closing-flow-and-the-field ==
+
+-- S1.0 SIGN CONTROL: an analytic sphere must read +1/R -------------
+  R =   5.0 mm  expect kappa +0.20000, K +0.040000, area    314.16 mm2
+       area-weighted: kappa_mean +0.20042  K +0.040085  kmin +0.19750  kmax +0.20335   area    313.16 mm2
+       kappa_min spread p10 +0.19304  median +0.19988  p90 +0.20021
+       rel err on the area-weighted principals: 1.67%  OK
+                 obstacle (-1/1mm) selects 0 of 1026 vertices   OK (a convex body has nothing to close)
+  R =  20.0 mm  expect kappa +0.05000, K +0.002500, area   5026.55 mm2
+       area-weighted: kappa_mean +0.05011  K +0.002505  kmin +0.04938  kmax +0.05084   area   5010.59 mm2
+       kappa_min spread p10 +0.04826  median +0.04997  p90 +0.05005
+       rel err on the area-weighted principals: 1.67%  OK
+                 obstacle (-1/1mm) selects 0 of 1026 vertices   OK (a convex body has nothing to close)
+  concave 90-degree seam: obstacle (-1/5mm) selects 13 of 13 seam vertices   OK (a crevice IS selected)
+  SIGN CONTROL PASSES — the obstacle selects valleys, not ridges.
+
+design   evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/design.bin
+part     evidence/2026-08-03-multiscale-lattice-to/M2_verticalStand.step
+grid     128 x 31 x 118, spacing 1.705279 mm
+export   factor 2 (tricubic) => cell 0.852640 mm, C1 half-cell 0.426320 mm
+material PLA, 1.24 g/cm3
+rungs    4
+
+CAD      78 faces over 3106 tessellation triangles
+
+=====================================================================
+RUNG 0.68 — 141894 vertices / 283784 triangles
+=====================================================================
+  CAD-attributed   113123 (79.72%)   ambiguous   3596   OPTIMIZER-CUT    25175 (17.74%)
+
+  as exported: dihedral 8.36 deg, volume 443799 mm3 (550.31 g), CAD dev rms 0.3270 mm
+               min section 104.6872 mm2 (design grid) / 167.9357 mm2 (export cell)
+
+-- ★ S1.1 THE CREVICE RADIUS OF THE CUT POPULATION -----------------
+  A closing at radius r moves exactly the vertices whose crevice
+  radius -1/kappa_min is BELOW r. Over 25175 cut vertices:
+    convex (no crevice at all, unreachable by any closing): 8698 (34.55%)
+    concave: 16477   crevice radius p01 1.0477  p10 2.5572  median 454.8792  p90 80920845.2297 mm
+    fraction of the CUT population a closing reaches, by radius:
+        r =   0.2500 mm (0.15 voxel)  reaches        0  =   0.00%
+        r =   0.5000 mm (0.29 voxel)  reaches        2  =   0.01%
+        r =   1.0000 mm (0.59 voxel)  reaches       70  =   0.28%
+        r =   1.7053 mm (1.00 voxel)  reaches      798  =   3.17%
+        r =   3.4106 mm (2.00 voxel)  reaches     2780  =  11.04%
+        r =   6.8211 mm (4.00 voxel)  reaches     3611  =  14.34%
+  READ THIS AGAINST THE STAIRCASE: PR 299 measured its amplitude at
+  rms 0.3424 mm on a 1.7053 mm voxel. A terrace that shallow and that
+  wide is an OBTUSE concavity, and an obtuse concavity has a LARGE
+  crevice radius — which is exactly what a closing cannot reach
+  without a ball big enough to swallow the design's own features.
+
+operator             r_mm  iters  wall_s  cutmax  cutrms  cutmoved  cadmoved  dihed_b  dihed_a    vol%   mass_g   cad_rm%   inward
+as exported          -     0    0.000  0.0000  0.0000         0         0     8.36     8.36   0.000    0.000     0.0%        0
+Close_r0.50_expl_C1on  0.50    40   3.576  0.4263  0.0038         2         0     8.36     8.37   0.000    0.000     0.0%        0
+       active set 2 -> 2 (STILL NON-EMPTY at the iteration cap), C1 clamped 78, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_C1off  0.50    15   1.431  5.0992  0.0493         8         0     8.36     8.42   0.002    0.011     0.0%        0
+       active set 2 -> 0 (EMPTIED — the surface is r-closed), C1 clamped 0, frozen 116719, max outward 5.0462 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_dt.025  0.50    40   3.631  0.4263  0.0038         2         0     8.36     8.37   0.000    0.000     0.0%        0
+       active set 2 -> 2 (STILL NON-EMPTY at the iteration cap), C1 clamped 74, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_COUPLED   0.50    40   3.978  0.0000  0.0000         0         0     8.36     8.36   0.000    0.000     0.0%        0
+       active set 2 -> 2 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 116719, max outward 0.0000 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_C1on  1.00    40   3.588  0.4708  0.0370       189         0     8.36     8.71   0.007    0.041     0.0%        0
+       active set 70 -> 182 (STILL NON-EMPTY at the iteration cap), C1 clamped 6145, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 36
+Close_r1.00_expl_C1off  1.00    40   3.559  10.7507  0.5357       897         0     8.36    12.94   0.448    2.464     0.0%      101
+       active set 70 -> 390 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 116719, max outward 9.8748 mm, worst inward -4.873275 mm
+       min section: design grid 104.6872 -> 2.9080 mm2, export cell 167.9357 -> 0.7270 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_dt.025  1.00    40   3.591  0.4695  0.0339       167         0     8.36     8.68   0.006    0.034     0.0%        0
+       active set 70 -> 161 (STILL NON-EMPTY at the iteration cap), C1 clamped 3893, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_COUPLED   1.00    40   3.600  0.0179  0.0001         1         0     8.36     8.36   0.000    0.000     0.0%        0
+       active set 70 -> 70 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 116719, max outward 0.0179 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_C1on  1.71    40   3.614  0.4836  0.1031      1491         0     8.36    10.62   0.064    0.354     0.0%        0
+       active set 798 -> 1435 (STILL NON-EMPTY at the iteration cap), C1 clamped 49531, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 723
+Close_r1.71_expl_C1off  1.71    40   3.631  12.9153  1.4594      4550         0     8.36    22.77   4.340   23.882     0.0%      844
+       active set 798 -> 3688 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 116719, max outward 12.7544 mm, worst inward -5.311766 mm
+       min section: design grid 104.6872 -> 40.7117 mm2, export cell 167.9357 -> 28.3528 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_dt.025  1.71    40   3.611  0.4656  0.0962      1354         0     8.36    10.35   0.057    0.312     0.0%        0
+       active set 798 -> 1297 (STILL NON-EMPTY at the iteration cap), C1 clamped 30543, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 429
+Close_r1.71_COUPLED   1.71    40   3.984  0.4263  0.0033        25         0     8.36     8.37   0.000    0.001     0.0%        0
+       active set 798 -> 799 (STILL NON-EMPTY at the iteration cap), C1 clamped 40, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_C1on  3.41    40   3.598  0.6864  0.1475      4179         0     8.36    12.65   0.154    0.846     0.0%        2
+       active set 2780 -> 2873 (STILL NON-EMPTY at the iteration cap), C1 clamped 89313, frozen 116719, max outward 0.4263 mm, worst inward -0.123511 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 5393
+Close_r3.41_expl_C1off  3.41    40   3.568  11.7050  1.8507      8009         0     8.36    26.61   8.697   47.862     0.0%     1451
+       active set 2780 -> 6541 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 116719, max outward 11.4552 mm, worst inward -7.618179 mm
+       min section: design grid 104.6872 -> 101.7792 mm2, export cell 167.9357 -> 69.0645 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_dt.025  3.41    40   3.593  0.4970  0.1248      3641         0     8.36    11.62   0.106    0.585     0.0%        0
+       active set 2780 -> 2320 (STILL NON-EMPTY at the iteration cap), C1 clamped 44706, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 988
+Close_r3.41_COUPLED   3.41    40   3.680  0.4263  0.0095       262         0     8.36     8.44   0.002    0.009     0.0%        0
+       active set 2780 -> 2776 (STILL NON-EMPTY at the iteration cap), C1 clamped 40, frozen 116719, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 104.6872 -> 104.6872 mm2, export cell 167.9357 -> 167.9357 mm2   aspect 3511.05 -> 3511.05   degenerate tris 0 -> 0   C1 box clamps 0
+
+  -- C4 OFF: amplitude removed on the surface that HAS an answer --
+  as exported: cad_rms 0.3270 mm
+operator             r_mm  iters  wall_s   cad_rms_mm  removed%   cad_max_mm   vol%   mass_g
+Close_r0.50_expl      0.50    40   3.600      0.3280     -0.3%       1.7045  0.003    0.018
+Close_r0.50_COUPLED   0.50    40   3.693      0.3270      0.0%       1.7045  0.000    0.000
+Close_r1.00_expl      1.00    40   3.607      0.3413     -4.4%       1.7045  0.241    1.327
+Close_r1.00_COUPLED   1.00    40   3.703      0.3270      0.0%       1.7045  0.000    0.000
+Close_r1.71_expl      1.71    40   3.558      0.3557     -8.8%       1.7045  0.660    3.631
+Close_r1.71_COUPLED   1.71    40   3.946      0.3269      0.0%       1.7045  0.001    0.006
+Close_r3.41_expl      3.41    40   3.645      0.3653    -11.7%       2.0024  1.151    6.331
+Close_r3.41_COUPLED   3.41    40   3.637      0.3269      0.0%       1.7045  0.007    0.037
+Taubin_pairs_20       -    20   0.047      0.3187      2.5%       2.0296  0.018    0.098
+Taubin_pairs_160      -   160   0.236      0.3009      8.0%       2.1220  0.129    0.712
+
+  -- the incumbent, re-run on THIS extraction (PR 314's rows) --
+Taubin_pairs_20       -    20   0.033  0.5093  0.1234     24218         0     8.36     8.30  -0.004   -0.021     0.0%        -
+Taubin_pairs_160      -   160   0.122  0.7595  0.1866     25175         0     8.36     8.09  -0.032   -0.175     0.0%        -
+
+=====================================================================
+RUNG 0.52 — 144370 vertices / 288736 triangles
+=====================================================================
+  CAD-attributed   104313 (72.25%)   ambiguous   3673   OPTIMIZER-CUT    36384 (25.20%)
+
+  as exported: dihedral 8.55 deg, volume 403600 mm3 (500.46 g), CAD dev rms 0.3459 mm
+               min section 84.3313 mm2 (design grid) / 141.0369 mm2 (export cell)
+
+-- ★ S1.1 THE CREVICE RADIUS OF THE CUT POPULATION -----------------
+  A closing at radius r moves exactly the vertices whose crevice
+  radius -1/kappa_min is BELOW r. Over 36384 cut vertices:
+    convex (no crevice at all, unreachable by any closing): 12410 (34.11%)
+    concave: 23974   crevice radius p01 1.0660  p10 2.5572  median 159.0886  p90 80920845.2297 mm
+    fraction of the CUT population a closing reaches, by radius:
+        r =   0.2500 mm (0.15 voxel)  reaches        3  =   0.01%
+        r =   0.5000 mm (0.29 voxel)  reaches       14  =   0.04%
+        r =   1.0000 mm (0.59 voxel)  reaches      120  =   0.33%
+        r =   1.7053 mm (1.00 voxel)  reaches     1345  =   3.70%
+        r =   3.4106 mm (2.00 voxel)  reaches     4700  =  12.92%
+        r =   6.8211 mm (4.00 voxel)  reaches     5998  =  16.49%
+  READ THIS AGAINST THE STAIRCASE: PR 299 measured its amplitude at
+  rms 0.3424 mm on a 1.7053 mm voxel. A terrace that shallow and that
+  wide is an OBTUSE concavity, and an obtuse concavity has a LARGE
+  crevice radius — which is exactly what a closing cannot reach
+  without a ball big enough to swallow the design's own features.
+
+operator             r_mm  iters  wall_s  cutmax  cutrms  cutmoved  cadmoved  dihed_b  dihed_a    vol%   mass_g   cad_rm%   inward
+as exported          -     0    0.000  0.0000  0.0000         0         0     8.55     8.55   0.000    0.000     0.0%        0
+Close_r0.50_expl_C1on  0.50    40   3.678  0.4322  0.0087        15         0     8.55     8.61   0.000    0.001     0.0%        0
+       active set 14 -> 15 (STILL NON-EMPTY at the iteration cap), C1 clamped 586, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_C1off  0.50    40   3.696  16.2076  0.1444        54         0     8.55     8.89   0.017    0.085     0.0%        0
+       active set 14 -> 2 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 14.1456 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_dt.025  0.50    40   3.666  0.4322  0.0087        15         0     8.55     8.61   0.000    0.001     0.0%        0
+       active set 14 -> 15 (STILL NON-EMPTY at the iteration cap), C1 clamped 553, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_COUPLED   0.50    40   3.726  0.0000  0.0000         0         0     8.55     8.55   0.000    0.000     0.0%        0
+       active set 14 -> 14 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 0.0000 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_C1on  1.00    40   3.729  0.4695  0.0465       430         0     8.55     9.24   0.019    0.097     0.0%        0
+       active set 120 -> 425 (STILL NON-EMPTY at the iteration cap), C1 clamped 13253, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 53
+Close_r1.00_expl_C1off  1.00    40   3.724  9.1896  0.6500      1894         0     8.55    16.74   0.965    4.828     0.0%      167
+       active set 120 -> 936 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 9.1007 mm, worst inward -4.454553 mm
+       min section: design grid 84.3313 -> 17.4479 mm2, export cell 141.0369 -> 7.9969 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_dt.025  1.00    40   3.708  0.4669  0.0400       338         0     8.55     9.13   0.014    0.070     0.0%        0
+       active set 120 -> 331 (STILL NON-EMPTY at the iteration cap), C1 clamped 7398, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 61
+Close_r1.00_COUPLED   1.00    40   3.750  0.0179  0.0001         1         0     8.55     8.55   0.000    0.000     0.0%        0
+       active set 120 -> 120 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 0.0179 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_C1on  1.71    40   3.801  0.7384  0.1123      2558         0     8.55    12.12   0.120    0.601     0.0%        0
+       active set 1345 -> 2442 (STILL NON-EMPTY at the iteration cap), C1 clamped 84473, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 1739
+Close_r1.71_expl_C1off  1.71    40   4.023  9.9291  1.5686      7695         0     8.55    28.71   7.929   39.679     0.0%     1390
+       active set 1345 -> 6226 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 9.8454 mm, worst inward -5.807126 mm
+       min section: design grid 84.3313 -> 14.5399 mm2, export cell 141.0369 -> 18.9019 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_dt.025  1.71    40   3.767  0.7384  0.1051      2333         0     8.55    11.70   0.106    0.530     0.0%        0
+       active set 1345 -> 2245 (STILL NON-EMPTY at the iteration cap), C1 clamped 52032, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 955
+Close_r1.71_COUPLED   1.71    40   3.905  0.2634  0.0024        40         0     8.55     8.55   0.000    0.001     0.0%        0
+       active set 1345 -> 1347 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 0.2634 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_C1on  3.41    40   3.854  0.6870  0.1581      6971         0     8.55    14.82   0.276    1.381     0.0%        0
+       active set 4700 -> 4772 (STILL NON-EMPTY at the iteration cap), C1 clamped 145985, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 8078
+Close_r3.41_expl_C1off  3.41    40   3.750  12.2434  1.9780     13524         0     8.55    33.69  15.693   78.537     0.0%     2504
+       active set 4700 -> 11222 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 12.1588 mm, worst inward -6.184909 mm
+       min section: design grid 84.3313 -> 34.8957 mm2, export cell 141.0369 -> 26.1718 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_dt.025  3.41    40   3.767  0.5380  0.1325      5992         0     8.55    13.20   0.190    0.949     0.0%        0
+       active set 4700 -> 3744 (STILL NON-EMPTY at the iteration cap), C1 clamped 74118, frozen 107986, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 2054
+Close_r3.41_COUPLED   3.41    40   3.759  0.3509  0.0091       432         0     8.55     8.63   0.003    0.014     0.0%        0
+       active set 4700 -> 4690 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 107986, max outward 0.3493 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 141.0369 -> 141.0369 mm2   aspect 3592.91 -> 3592.91   degenerate tris 0 -> 0   C1 box clamps 0
+
+  -- C4 OFF: amplitude removed on the surface that HAS an answer --
+  as exported: cad_rms 0.3459 mm
+operator             r_mm  iters  wall_s   cad_rms_mm  removed%   cad_max_mm   vol%   mass_g
+Close_r0.50_expl      0.50    40   3.686      0.3470     -0.3%       1.7050  0.004    0.020
+Close_r0.50_COUPLED   0.50    40   3.717      0.3459      0.0%       1.7050  0.000    0.000
+Close_r1.00_expl      1.00    40   3.705      0.3600     -4.1%       1.7207  0.305    1.526
+Close_r1.00_COUPLED   1.00    40   3.754      0.3459      0.0%       1.7050  0.000    0.000
+Close_r1.71_expl      1.71    40   3.614      0.3705     -7.1%       1.7515  0.777    3.887
+Close_r1.71_COUPLED   1.71    40   3.674      0.3459      0.0%       1.7050  0.001    0.006
+Close_r3.41_expl      3.41    40   3.647      0.3783     -9.3%       2.0025  1.352    6.766
+Close_r3.41_COUPLED   3.41    40   3.709      0.3459      0.0%       1.7573  0.008    0.041
+Taubin_pairs_20       -    20   0.046      0.3385      2.2%       1.9139  0.018    0.089
+Taubin_pairs_160      -   160   0.231      0.3222      6.9%       1.9328  0.130    0.653
+
+  -- the incumbent, re-run on THIS extraction (PR 314's rows) --
+Taubin_pairs_20       -    20   0.034  0.4877  0.1319     35103         0     8.55     8.45  -0.005   -0.026     0.0%        -
+Taubin_pairs_160      -   160   0.139  0.7537  0.1972     36384         0     8.55     8.11  -0.047   -0.234     0.0%        -
+
+=====================================================================
+RUNG 0.38 — 161320 vertices / 322652 triangles
+=====================================================================
+  CAD-attributed    96475 (59.80%)   ambiguous   3748   OPTIMIZER-CUT    61097 (37.87%)
+
+  as exported: dihedral 8.75 deg, volume 330293 mm3 (409.56 g), CAD dev rms 0.3582 mm
+               min section 84.3313 mm2 (design grid) / 149.7608 mm2 (export cell)
+
+-- ★ S1.1 THE CREVICE RADIUS OF THE CUT POPULATION -----------------
+  A closing at radius r moves exactly the vertices whose crevice
+  radius -1/kappa_min is BELOW r. Over 61097 cut vertices:
+    convex (no crevice at all, unreachable by any closing): 18101 (29.63%)
+    concave: 42996   crevice radius p01 1.0549  p10 2.4761  median 72.7420  p90 80920845.2297 mm
+    fraction of the CUT population a closing reaches, by radius:
+        r =   0.2500 mm (0.15 voxel)  reaches        1  =   0.00%
+        r =   0.5000 mm (0.29 voxel)  reaches       30  =   0.05%
+        r =   1.0000 mm (0.59 voxel)  reaches      236  =   0.39%
+        r =   1.7053 mm (1.00 voxel)  reaches     2356  =   3.86%
+        r =   3.4106 mm (2.00 voxel)  reaches     8629  =  14.12%
+        r =   6.8211 mm (4.00 voxel)  reaches    11339  =  18.56%
+  READ THIS AGAINST THE STAIRCASE: PR 299 measured its amplitude at
+  rms 0.3424 mm on a 1.7053 mm voxel. A terrace that shallow and that
+  wide is an OBTUSE concavity, and an obtuse concavity has a LARGE
+  crevice radius — which is exactly what a closing cannot reach
+  without a ball big enough to swallow the design's own features.
+
+operator             r_mm  iters  wall_s  cutmax  cutrms  cutmoved  cadmoved  dihed_b  dihed_a    vol%   mass_g   cad_rm%   inward
+as exported          -     0    0.000  0.0000  0.0000         0         0     8.75     8.75   0.000    0.000     0.0%        0
+Close_r0.50_expl_C1on  0.50    40   4.128  0.4322  0.0096        31         0     8.75     8.89   0.000    0.001     0.0%        0
+       active set 30 -> 31 (STILL NON-EMPTY at the iteration cap), C1 clamped 1208, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_C1off  0.50    40   4.294  16.8458  0.2061       135         0     8.75     9.53   0.058    0.236     0.0%        1
+       active set 30 -> 10 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 15.8922 mm, worst inward -2.210222 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_dt.025  0.50    40   4.119  0.4322  0.0096        31         0     8.75     8.89   0.000    0.001     0.0%        0
+       active set 30 -> 31 (STILL NON-EMPTY at the iteration cap), C1 clamped 1148, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_COUPLED   0.50    40   4.117  0.0000  0.0000         0         0     8.75     8.75   0.000    0.000     0.0%        0
+       active set 30 -> 30 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 0.0000 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_C1on  1.00    40   4.108  0.5839  0.0503       857         0     8.75    10.02   0.045    0.184     0.0%        0
+       active set 236 -> 830 (STILL NON-EMPTY at the iteration cap), C1 clamped 26849, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 363
+Close_r1.00_expl_C1off  1.00    40   4.384  9.7993  0.7619      4379         0     8.75    22.39   2.980   12.204     0.0%      467
+       active set 236 -> 2061 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 9.2100 mm, worst inward -5.207323 mm
+       min section: design grid 84.3313 -> 17.4479 mm2, export cell 149.7608 -> 7.9969 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_dt.025  1.00    40   4.098  0.4682  0.0449       709         0     8.75     9.90   0.035    0.141     0.0%        0
+       active set 236 -> 685 (STILL NON-EMPTY at the iteration cap), C1 clamped 16184, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 244
+Close_r1.00_COUPLED   1.00    40   4.121  0.0873  0.0005         4         0     8.75     8.75   0.000    0.000     0.0%        0
+       active set 236 -> 235 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 0.0873 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_C1on  1.71    40   4.096  0.5328  0.1187      4782         0     8.75    14.35   0.275    1.124     0.0%        0
+       active set 2356 -> 4560 (STILL NON-EMPTY at the iteration cap), C1 clamped 156725, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 3736
+Close_r1.71_expl_C1off  1.71    40   4.122  10.3491  1.7046     16284         0     8.75    38.64  20.337   83.294     0.0%     2928
+       active set 2356 -> 13283 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 9.1926 mm, worst inward -6.239090 mm
+       min section: design grid 84.3313 -> 17.4479 mm2, export cell 149.7608 -> 20.3558 mm2   aspect 18153.81 -> 1868.00   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_dt.025  1.71    40   4.132  0.4745  0.1103      4324         0     8.75    13.67   0.240    0.984     0.0%        0
+       active set 2356 -> 4183 (STILL NON-EMPTY at the iteration cap), C1 clamped 94872, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 1973
+Close_r1.71_COUPLED   1.71    40   4.132  0.1811  0.0034       190         0     8.75     8.81   0.001    0.005     0.0%        0
+       active set 2356 -> 2354 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 0.1811 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_C1on  3.41    40   4.137  0.6045  0.1740     13412         0     8.75    18.42   0.697    2.855     0.0%        0
+       active set 8629 -> 9715 (STILL NON-EMPTY at the iteration cap), C1 clamped 293331, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 1868.00   degenerate tris 0 -> 0   C1 box clamps 22291
+Close_r3.41_expl_C1off  3.41    40   4.154  10.7530  2.1377     27935         0     8.75    45.88  38.567  157.958     0.0%     5096
+       active set 8629 -> 23989 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 9.6479 mm, worst inward -6.312735 mm
+       min section: design grid 84.3313 -> 31.9878 mm2, export cell 149.7608 -> 26.1718 mm2   aspect 18153.81 -> 1057.25   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_dt.025  3.41    40   4.110  0.4855  0.1426     11306         0     8.75    16.09   0.453    1.857     0.0%        0
+       active set 8629 -> 7457 (STILL NON-EMPTY at the iteration cap), C1 clamped 137182, frozen 100223, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 1868.00   degenerate tris 0 -> 0   C1 box clamps 4072
+Close_r3.41_COUPLED   3.41    40   4.125  0.3831  0.0105      1156         0     8.75     8.98   0.009    0.036     0.0%        0
+       active set 8629 -> 8529 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 100223, max outward 0.3809 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 149.7608 -> 149.7608 mm2   aspect 18153.81 -> 18153.81   degenerate tris 0 -> 0   C1 box clamps 0
+
+  -- C4 OFF: amplitude removed on the surface that HAS an answer --
+  as exported: cad_rms 0.3582 mm
+operator             r_mm  iters  wall_s   cad_rms_mm  removed%   cad_max_mm   vol%   mass_g
+Close_r0.50_expl      0.50    40   4.092      0.3593     -0.3%       1.7044  0.006    0.023
+Close_r0.50_COUPLED   0.50    40   4.195      0.3582      0.0%       1.7044  0.000    0.000
+Close_r1.00_expl      1.00    40   4.117      0.3716     -3.7%       1.7146  0.417    1.707
+Close_r1.00_COUPLED   1.00    40   4.152      0.3582      0.0%       1.7044  0.000    0.000
+Close_r1.71_expl      1.71    40   4.115      0.3810     -6.4%       1.7928  1.075    4.402
+Close_r1.71_COUPLED   1.71    40   4.150      0.3582      0.0%       1.7044  0.002    0.009
+Close_r3.41_expl      3.41    40   4.134      0.3890     -8.6%       2.0642  1.997    8.177
+Close_r3.41_COUPLED   3.41    40   4.162      0.3582      0.0%       1.7466  0.015    0.061
+Taubin_pairs_20       -    20   0.054      0.3509      2.0%       1.8254  0.013    0.052
+Taubin_pairs_160      -   160   0.269      0.3355      6.3%       1.8198  0.093    0.379
+
+  -- the incumbent, re-run on THIS extraction (PR 314's rows) --
+Taubin_pairs_20       -    20   0.042  0.5351  0.1390     59590         0     8.75     8.61  -0.015   -0.061     0.0%        -
+Taubin_pairs_160      -   160   0.187  0.8045  0.2063     61097         0     8.75     8.06  -0.125   -0.513     0.0%        -
+
+=====================================================================
+RUNG 0.26 — 161546 vertices / 323112 triangles
+=====================================================================
+  CAD-attributed    90155 (55.81%)   ambiguous   3797   OPTIMIZER-CUT    67594 (41.84%)
+
+  as exported: dihedral 9.00 deg, volume 288601 mm3 (357.87 g), CAD dev rms 0.3698 mm
+               min section 84.3313 mm2 (design grid) / 133.7670 mm2 (export cell)
+
+-- ★ S1.1 THE CREVICE RADIUS OF THE CUT POPULATION -----------------
+  A closing at radius r moves exactly the vertices whose crevice
+  radius -1/kappa_min is BELOW r. Over 67594 cut vertices:
+    convex (no crevice at all, unreachable by any closing): 20190 (29.87%)
+    concave: 47404   crevice radius p01 1.0462  p10 2.2986  median 79.4703  p90 80920845.2297 mm
+    fraction of the CUT population a closing reaches, by radius:
+        r =   0.2500 mm (0.15 voxel)  reaches        1  =   0.00%
+        r =   0.5000 mm (0.29 voxel)  reaches       26  =   0.04%
+        r =   1.0000 mm (0.59 voxel)  reaches      308  =   0.46%
+        r =   1.7053 mm (1.00 voxel)  reaches     2890  =   4.28%
+        r =   3.4106 mm (2.00 voxel)  reaches    10717  =  15.85%
+        r =   6.8211 mm (4.00 voxel)  reaches    13719  =  20.30%
+  READ THIS AGAINST THE STAIRCASE: PR 299 measured its amplitude at
+  rms 0.3424 mm on a 1.7053 mm voxel. A terrace that shallow and that
+  wide is an OBTUSE concavity, and an obtuse concavity has a LARGE
+  crevice radius — which is exactly what a closing cannot reach
+  without a ball big enough to swallow the design's own features.
+
+operator             r_mm  iters  wall_s  cutmax  cutrms  cutmoved  cadmoved  dihed_b  dihed_a    vol%   mass_g   cad_rm%   inward
+as exported          -     0    0.000  0.0000  0.0000         0         0     9.00     9.00   0.000    0.000     0.0%        0
+Close_r0.50_expl_C1on  0.50    40   4.097  0.4322  0.0085        27         0     9.00     9.10   0.000    0.002     0.0%        0
+       active set 26 -> 27 (STILL NON-EMPTY at the iteration cap), C1 clamped 1052, frozen 93952, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_C1off  0.50    40   4.075  16.3658  0.1640       107         0     9.00     9.58   0.054    0.194     0.0%        1
+       active set 26 -> 7 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 15.9975 mm, worst inward -2.128329 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_expl_dt.025  0.50    40   4.119  0.4322  0.0085        27         0     9.00     9.10   0.000    0.002     0.0%        0
+       active set 26 -> 27 (STILL NON-EMPTY at the iteration cap), C1 clamped 984, frozen 93952, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r0.50_COUPLED   0.50    40   4.142  0.0000  0.0000         0         0     9.00     9.00   0.000    0.000     0.0%        0
+       active set 26 -> 26 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 0.0000 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_C1on  1.00    40   4.200  0.4865  0.0536      1065         0     9.00    10.58   0.064    0.229     0.0%        0
+       active set 308 -> 1049 (STILL NON-EMPTY at the iteration cap), C1 clamped 34415, frozen 93952, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 286
+Close_r1.00_expl_C1off  1.00    40   4.236  10.8391  0.8304      6079         0     9.00    25.80   4.588   16.419     0.0%      689
+       active set 308 -> 2998 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 10.7454 mm, worst inward -6.528152 mm
+       min section: design grid 84.3313 -> 11.6319 mm2, export cell 133.7670 -> 4.3620 mm2   aspect 6624.45 -> 2837.72   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.00_expl_dt.025  1.00    40   4.137  0.4676  0.0483       890         0     9.00    10.42   0.050    0.180     0.0%        0
+       active set 308 -> 878 (STILL NON-EMPTY at the iteration cap), C1 clamped 21034, frozen 93952, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 191
+Close_r1.00_COUPLED   1.00    40   4.189  0.0179  0.0001         1         0     9.00     9.00   0.000    0.000     0.0%        0
+       active set 308 -> 308 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 0.0179 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_C1on  1.71    40   4.179  0.6633  0.1228      5652         0     9.00    15.21   0.376    1.346     0.0%        0
+       active set 2890 -> 5405 (STILL NON-EMPTY at the iteration cap), C1 clamped 187383, frozen 93952, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 2837.72   degenerate tris 0 -> 0   C1 box clamps 3238
+Close_r1.71_expl_C1off  1.71    40   4.185  10.5218  1.7499     18428         0     9.00    40.94  27.211   97.380     0.0%     3235
+       active set 2890 -> 15016 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 9.2357 mm, worst inward -6.497297 mm
+       min section: design grid 84.3313 -> 17.4479 mm2, export cell 133.7670 -> 19.6288 mm2   aspect 6624.45 -> 9778.14   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r1.71_expl_dt.025  1.71    40   4.175  0.5487  0.1156      5231         0     9.00    14.67   0.337    1.206     0.0%        0
+       active set 2890 -> 5032 (STILL NON-EMPTY at the iteration cap), C1 clamped 115318, frozen 93952, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 2837.72   degenerate tris 0 -> 0   C1 box clamps 1696
+Close_r1.71_COUPLED   1.71    40   4.184  0.2875  0.0035       165         0     9.00     9.04   0.001    0.005     0.0%        0
+       active set 2890 -> 2888 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 0.2875 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 6624.45   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_C1on  3.41    40   4.191  0.7345  0.1771     15544         0     9.00    19.09   0.930    3.330     0.0%        1
+       active set 10717 -> 11200 (STILL NON-EMPTY at the iteration cap), C1 clamped 342692, frozen 93952, max outward 0.4263 mm, worst inward -0.426320 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 135.2210 mm2   aspect 6624.45 -> 2837.72   degenerate tris 0 -> 0   C1 box clamps 25363
+Close_r3.41_expl_C1off  3.41    40   4.251  10.6521  2.1435     30561         0     9.00    47.34  49.413  176.833     0.0%     5492
+       active set 10717 -> 25850 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 9.6654 mm, worst inward -7.339486 mm
+       min section: design grid 84.3313 -> 31.9878 mm2, export cell 133.7670 -> 25.4448 mm2   aspect 6624.45 -> 4768.93   degenerate tris 0 -> 0   C1 box clamps 0
+Close_r3.41_expl_dt.025  3.41    40   4.449  0.5296  0.1479     13390         0     9.00    16.89   0.628    2.249     0.0%        0
+       active set 10717 -> 8715 (STILL NON-EMPTY at the iteration cap), C1 clamped 163336, frozen 93952, max outward 0.4263 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 135.2210 mm2   aspect 6624.45 -> 2837.72   degenerate tris 0 -> 0   C1 box clamps 3907
+Close_r3.41_COUPLED   3.41    40   4.228  0.3398  0.0104      1299         0     9.00     9.23   0.012    0.041     0.0%        0
+       active set 10717 -> 10646 (STILL NON-EMPTY at the iteration cap), C1 clamped 0, frozen 93952, max outward 0.3394 mm, worst inward 0.000000 mm
+       min section: design grid 84.3313 -> 84.3313 mm2, export cell 133.7670 -> 133.7670 mm2   aspect 6624.45 -> 3057.58   degenerate tris 0 -> 0   C1 box clamps 0
+
+  -- C4 OFF: amplitude removed on the surface that HAS an answer --
+  as exported: cad_rms 0.3698 mm
+operator             r_mm  iters  wall_s   cad_rms_mm  removed%   cad_max_mm   vol%   mass_g
+Close_r0.50_expl      0.50    40   4.143      0.3709     -0.3%       1.7052  0.007    0.026
+Close_r0.50_COUPLED   0.50    40   4.165      0.3698      0.0%       1.7052  0.000    0.000
+Close_r1.00_expl      1.00    40   4.325      0.3840     -3.9%       1.8107  0.513    1.836
+Close_r1.00_COUPLED   1.00    40   4.203      0.3698      0.0%       1.7052  0.000    0.001
+Close_r1.71_expl      1.71    40   4.176      0.3917     -5.9%       1.8824  1.297    4.641
+Close_r1.71_COUPLED   1.71    40   4.205      0.3698      0.0%       1.7052  0.003    0.009
+Close_r3.41_expl      3.41    40   4.130      0.3990     -7.9%       2.0648  2.391    8.555
+Close_r3.41_COUPLED   3.41    40   4.236      0.3697      0.0%       1.7466  0.018    0.065
+Taubin_pairs_20       -    20   0.056      0.3628      1.9%       1.8802  0.016    0.057
+Taubin_pairs_160      -   160   0.281      0.3469      6.2%       2.0016  0.127    0.455
+
+  -- the incumbent, re-run on THIS extraction (PR 314's rows) --
+Taubin_pairs_20       -    20   0.044  0.5213  0.1405     65801         0     9.00     8.82  -0.011   -0.041     0.0%        -
+Taubin_pairs_160      -   160   0.204  0.8054  0.2078     67594         0     9.00     8.18  -0.100   -0.358     0.0%        -
+
+=====================================================================
+(f) COST PER STROKE, on rung 068, against the page's 63.3 ms
+=====================================================================
+  141894 vertices / 283784 triangles (the shipped variant_068.stl carries
+  143862 — this is the same field re-extracted, PR 314's note)
+
+operator                       iters   total_ms   ms/iteration   x the 63.3 ms budget
+Closing r1.71 explicit           1      101.1          101.1                  1.6x
+Closing r1.71 explicit           5      453.6           90.7                  7.2x
+Closing r1.71 explicit          40     3494.0           87.3                 55.2x
+Closing r1.71 COUPLED            1      118.7          118.7                  1.9x
+Closing r1.71 COUPLED            5      464.5           92.9                  7.3x
+Closing r1.71 COUPLED           40     3533.9           88.3                 55.8x
+Taubin pairs 20 (the incumbent)    20       45.7            2.3                  0.7x
+
+  NOTE: these are CORE wall times in a release build, not the
+  end-to-end page latency PR 314's 63.3 ms measures — that figure
+  includes the app-side ViewerMesh build (19.7 ms) on top of the
+  34.9 ms of smoothing. The comparison to make is operator against
+  operator: Taubin's 34.9 ms is the budget a successor has to fit.
+
