@@ -1,0 +1,10 @@
+===== R2 GREEN — production as shipped =====
+
+  octet multiscale printed iso = 0.0252350   (classic 0.5)
+  fixture: 64 voxels >= 0.5, 448 more in [0.02524, 0.5)
+  check_v3(iso=0.5000000): 188 tris   marching_cubes: 188 tris
+  check_v3(iso=0.0252350): 764 tris   marching_cubes: 764 tris
+  analyze_fixed_design(printed_iso=0.5000000) -> v3.mesh 188 tris
+  analyze_fixed_design(printed_iso=0.0252350) -> v3.mesh 764 tris
+test_shell_iso_provenance: 7 checks, 0 failures
+exit=0

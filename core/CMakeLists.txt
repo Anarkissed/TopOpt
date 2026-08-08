@@ -1013,6 +1013,15 @@ if(Eigen3_FOUND)
   # converged density, reproduces that variant's certification numbers BIT-FOR-BIT.
   # Drives minimize_plastic + analyze_fixed_design (Eigen), and injects the real
   # settings rule table. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  # The exported shell is cut at the RUN's printed iso, not at a constant (task
+  # 2026-08-09-shell-at-runs-printed-iso). Pins the fact a follow-up task was
+  # filed for getting wrong: analyze.cpp:143's `const double kIso = printed_iso`
+  # SHADOWS the file-scope 0.5, so check_v3 receives the caller's iso. Drives
+  # analyze_fixed_design end to end, so it lives with the other Eigen tests.
+  add_executable(test_shell_iso_provenance tests/unit/test_shell_iso_provenance.cpp)
+  target_link_libraries(test_shell_iso_provenance PRIVATE topopt)
+  add_test(NAME shell_iso_provenance COMMAND test_shell_iso_provenance)
+
   add_executable(test_analyze_fixed_design tests/unit/test_analyze_fixed_design.cpp)
   target_link_libraries(test_analyze_fixed_design PRIVATE topopt)
   target_compile_definitions(test_analyze_fixed_design PRIVATE

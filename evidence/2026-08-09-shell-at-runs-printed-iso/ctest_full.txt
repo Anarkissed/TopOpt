@@ -1,0 +1,11 @@
+=== both CI jobs, this branch ===
+
+100% tests passed out of 117
+
+Total Test time (real) = 854.22 sec
+  (117 = CI's 114 + lattice_clip_shell + mesh_winding + shell_iso_provenance;
+   the lib3mf-gated tests DID register, so the denominator is CI's.)
+
+app-macos equivalent: build_core.sh + swift test
+	 Executed 1367 tests, with 22 tests skipped and 0 failures (0 unexpected) in 309.188 (309.293) seconds
+  build_core.sh exit 0; swift test exit 0.

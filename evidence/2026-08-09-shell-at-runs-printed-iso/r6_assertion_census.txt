@@ -1,0 +1,24 @@
+=== R6 assertion census: 1ac40d0daa4ec459a239cba143d89e40fa2c3c3f → working tree ===
+
+1. TEST ASSERTION MESSAGES   before=3202  after=3224
+   REMOVED:
+   (nothing above = no assertion message disappeared)
+
+2. REGISTERED CTESTS   before=116  after=117
+   REMOVED:
+   ADDED:
+     shell_iso_provenance
+
+3. PRODUCTION REFUSALS   before=397  after=398
+   REMOVED:
+   (nothing above = no production refusal disappeared)
+
+4. COMPARISON KINDS INSIDE CHECK() (before → after; a DROP is the thing to look at)
+     !=         28 →     28  
+     &&        272 →    273  
+     <         206 →    206  
+     <=        134 →    134  
+     ==        821 →    821  
+     >         239 →    242  
+     >=         58 →     58  
+     ||          2 →      2  

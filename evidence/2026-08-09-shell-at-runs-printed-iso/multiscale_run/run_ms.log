@@ -1,0 +1,6 @@
+[multiscale] length scale: floor 5.0 cells x 2.4000 mm = 12.000 mm member => min_feature 6.000 mm (was 2.500 mm) RAISED
+[multiscale] region reachability: active=1080 frozen_solid=0 frozen_void=0 empty=0 (of 1080)
+[multiscale] armed: topology=octet region_voxels=1080 floor_cell=2.4000 mm floor_cells=5.0
+VARIANT vf=0.600000 achieved=0.599989 printed=1.000000 margin=3483.95 accepted=1 mesh=out_ms/variant_060.stl
+LATTICE vf=0.600000 topology=octet cell_mm=2.4 graded=1 rho_min=0.196138 rho_max=0.89988 cells=279 tris=262040 lattice_margin=3484.34 lattice_accepted=1 report=out_ms/variant_060_lattice.report.json mesh=out_ms/variant_060_lattice.stl
+variants: 1 evaluated, 1 accepted
