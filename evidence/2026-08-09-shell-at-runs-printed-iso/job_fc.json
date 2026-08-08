@@ -1,0 +1,67 @@
+{
+ "model": "l-bracket.step",
+ "material": "PLA",
+ "mode": "lattice_variant",
+ "resolution": 40,
+ "simp": {
+  "max_iterations": 25
+ },
+ "fixture_faces": [
+  {
+   "kind": "cylindrical",
+   "radius_mm": 2.5
+  }
+ ],
+ "gravity": {
+  "direction": [
+   0.0,
+   0.0,
+   -1.0
+  ],
+  "magnitude_mm_s2": 9810.0
+ },
+ "ladder": [
+  0.6
+ ],
+ "margin_stop": 0.0,
+ "lattice": {
+  "topology": "octet",
+  "emit_stl": true,
+  "skin": "none",
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "role": "include",
+    "kind": "face",
+    "geometry": {
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "normal": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "half_u_mm": 200.0,
+     "half_w_mm": 200.0,
+     "depth_mm": 12.0
+    }
+   }
+  ],
+  "forecast_only": true,
+  "cell_mm": 4.0,
+  "strut_radius_mm": 0.9
+ },
+ "output": {
+  "report": "report.json",
+  "mesh_format": "stl",
+  "mesh_prefix": "variant"
+ },
+ "variant": {
+  "design": "design.bin",
+  "fingerprint": "5947470873306373445",
+  "achieved_volume_fraction": 0.5999893118541151
+ }
+}

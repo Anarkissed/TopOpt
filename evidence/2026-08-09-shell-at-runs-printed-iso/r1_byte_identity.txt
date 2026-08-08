@@ -1,0 +1,18 @@
+=== R1 — BYTE-IDENTITY on the ONE path this task touches (the forecast) ===
+before binary (1ac40d0) sha256: b006166f64f00630e5f7585cf842b7a040f9fe98ff581e7dd70c7bc19121bf5a
+after  binary (this PR) sha256: 66d1c76ca005b4e8b89f5b2c69384cc0b93c2010226df344411af1ebb958fd30
+(they differ, as they must for this bar to mean anything)
+
+The change replaces three separate 0.5 literals in forecast_uniform with
+ONE resolved iso, and makes exported_shell_for take it as a parameter.
+On a lattice_variant job — which NEVER arms multiscale — the resolved
+value IS 0.5, so the forecast must come out byte-identical.
+
+  IDENTICAL  lattice_forecast.json  94f0f2aba66c492b…
+  IDENTICAL  loadcase.json  9670f551449031d3…
+
+the forecast the run actually produced (uniform branch, cell 4.0 mm):
+    cell_mode                  uniform
+    region_voxels              602
+    would_lattice_voxels       602
+    strut_diameter_mm          1.8

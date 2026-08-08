@@ -1,0 +1,33 @@
+=== S1 — WHICH ISO IS THE EXPORTED SHELL CUT AT? (multiscale run, l-bracket res 40) ===
+
+The task was filed on the claim that check_v3 is called with the file-scope
+constant 0.5 UNCONDITIONALLY, so a multiscale run's shell would be the 0.5
+isosurface while the printed set extends far below it.
+
+THE CLAIM IS FALSE. analyze.cpp:143 declares 'const double kIso = printed_iso;'
+INSIDE analyze_fixed_design (body = lines 133..564, brace-matched), so :389's
+check_v3(grid, density, kIso) binds to the SHADOWING LOCAL. minimize_plastic
+:573 resolves that argument to multiscale_printed_iso() on a multiscale run.
+
+MEASURED on a real multiscale run's own artifacts:
+  multiscale printed iso  = 0.0252350   (= 0.5 x octet rho_min 0.05047)
+  design has 5736 voxels >= 0.5, and 4304 MORE in [0.02524, 0.5)
+    -> the two isos genuinely describe different objects on this design
+  surface at 0.5       :  6884 triangles
+  surface at 0.0252350 : 10336 triangles
+  EXPORTED variant_060.stl : 10336 triangles   <== matches the PRINTED-ISO cut
+
+A CAVEAT STATED RATHER THAN HIDDEN. Only the TOPOLOGY is compared here, not
+the coordinates. This run declared no build_direction, so it CHOSE one and
+ROTATED the exported geometry ('in the file the build direction is +Z'), and
+a model-space reconstruction cannot be compared to a rotated file coordinate
+by coordinate. A reconstruction from design.bin also did not reproduce the
+enclosed volume (40638 vs 35365 mm^3) even though rotation preserves volume,
+so the reconstruction is NOT exact and I am not claiming it is. The iso
+question is settled EXACTLY, on a controlled field, by the ctest
+core/tests/unit/test_shell_iso_provenance.cpp instead.
+
+=== the run itself ===
+[multiscale] length scale: floor 5.0 cells x 2.4000 mm = 12.000 mm member => min_feature 6.000 mm (was 2.500 mm) RAISED
+[multiscale] region reachability: active=1080 frozen_solid=0 frozen_void=0 empty=0 (of 1080)
+[multiscale] armed: topology=octet region_voxels=1080 floor_cell=2.4000 mm floor_cells=5.0

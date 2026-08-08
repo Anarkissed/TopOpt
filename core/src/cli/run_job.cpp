@@ -934,19 +934,38 @@ void fill_grading_subfloor(RunInfo& gi, const GradedField& gf) {
 // ★ THE SHELL THE LATTICED FILE CARRIES (task 2026-08-08-strut-clip-matches-
 // shell). `export_latticed_variant` pushes `variant.v3.mesh` as the solid shell,
 // and `variant.v3.mesh` is
-// `keep_largest_component(marching_cubes(grid, density, 0.5))` — voxelize.cpp
-// :735 + :813, at analyze.cpp:25's `kIso`, which is 0.5 UNCONDITIONALLY: check_v3
-// is called with that constant and not with the run's printed iso, so the shell
-// in the file is the 0.5 isosurface even on a multiscale run. Spelled ONCE here
-// so the surface the struts are clipped against, the surface the invariant is
-// measured against and the surface the file actually carries are the same object
-// by construction, not by three sites agreeing. The forecast path has no
-// `v3.mesh` in hand and calls this to reconstruct it from the stored design,
-// which is why it takes the field rather than the variant.
-constexpr double kExportedShellIso = 0.5;
+// `keep_largest_component(marching_cubes(grid, density, printed_iso))` —
+// voxelize.cpp:735 + :813, from `check_v3(grid, density, kIso)` at
+// analyze.cpp:389.
+//
+// ★★ THAT `kIso` IS THE RUN'S PRINTED ISO, NOT THE CONSTANT 0.5, and an earlier
+// version of this comment said the opposite — confidently, and wrongly, in a way
+// that got a follow-up task filed against a defect that does not exist (task
+// 2026-08-09-shell-at-runs-printed-iso). analyze.cpp declares TWO things called
+// `kIso`: a file-scope `constexpr double kIso = 0.5` at :25, and
+// `const double kIso = printed_iso;` at :143 INSIDE analyze_fixed_design, whose
+// body runs to :564. Line 389 is inside that body, so it binds to the SHADOWING
+// LOCAL. On a multiscale run `minimize_plastic.cpp:573` resolves that argument to
+// `multiscale_printed_iso()` (0.0252 for octet), and the exported shell is cut
+// there — measured, and asserted by the ctest `shell_iso_provenance`.
+//
+// ISO IS A PARAMETER HERE FOR THAT REASON. It was a file-scope constant, which
+// is what let the wrong belief be written down as fact and would silently cut the
+// wrong surface the first time a caller with a non-0.5 iso appeared. A caller
+// must now say which iso it means, and the only caller says
+// `run_printed_iso`-equivalent explicitly.
+//
+// Spelled ONCE so the surface the struts are clipped against, the surface the
+// invariant is measured against and the surface the file carries are the same
+// object by construction rather than by three sites agreeing. The forecast path
+// has no `v3.mesh` in hand and calls this to reconstruct it from the stored
+// design, which is why it takes the field rather than the variant.
 TriangleMesh exported_shell_for(const VoxelGrid& sg,
-                                const std::vector<double>& dens) {
-  return keep_largest_component(marching_cubes(sg, dens, kExportedShellIso));
+                                const std::vector<double>& dens,
+                                double printed_iso) {
+  if (!(printed_iso > 0.0 && printed_iso < 1.0))
+    throw JobError("exported_shell_for: printed_iso must be in (0, 1)");
+  return keep_largest_component(marching_cubes(sg, dens, printed_iso));
 }
 
 LatticeBoundary lattice_boundary_for(const VoxelGrid& sg,
@@ -4384,17 +4403,31 @@ UniformForecast forecast_uniform(const JobDescription& job,
   for (const char c : cand) u.region_voxels += (c != 0);
   const double cell = job.lattice.cell_mm;
   if (!(cell > 0.0)) return u;   // no cell stated ⇒ nothing to forecast uniformly
+  // ★ ONE RESOLVED ISO, READ ONCE, USED BY ALL THREE (task
+  // 2026-08-09-shell-at-runs-printed-iso). The shell, the boundary's voxel base
+  // and the certification mask must describe the SAME printed set; they were
+  // three separate `0.5` literals, which is three chances to drift.
+  //
+  // WHY IT IS 0.5 HERE, and it is not an oversight. This forecast runs inside
+  // `lattice_variant_job`, and that entry point NEVER arms `multiscale_lattice`
+  // — grep it: the flag is set only in `run_job` (~:7422). So the job being
+  // forecast is a classic one and its printed iso IS 0.5. Resolving it through
+  // the same helper the run uses keeps that a stated fact rather than a
+  // coincidence, and makes the forecast follow automatically if the re-lattice
+  // path ever learns multiscale.
+  //
   // The SAME base surface the run will clip and certify against (task
   // 2026-08-08-strut-clip-matches-shell). The forecast holds a stored design and
   // no variant, so it rebuilds the shell the run's export would write, through
   // the one helper. Skipping this would put the forecast back on the surface the
   // run no longer uses — the exact "forecast forecast the WRONG job" failure the
   // comment above this function is about.
-  const TriangleMesh shell = exported_shell_for(grid, sd.density);
-  const LatticeBoundary boundary =
-      lattice_boundary_for(grid, sd.density, cell, kos, roles, 0.5, &shell);
+  const double forecast_iso = run_printed_iso(MinimizePlasticOptions{});
+  const TriangleMesh shell = exported_shell_for(grid, sd.density, forecast_iso);
+  const LatticeBoundary boundary = lattice_boundary_for(
+      grid, sd.density, cell, kos, roles, forecast_iso, &shell);
   const std::vector<char> mask = lattice_certification_mask(
-      boundary, grid, sd.density, 0.5, grid.origin, cell);
+      boundary, grid, sd.density, forecast_iso, grid.origin, cell);
   for (std::size_t e = 0; e < mask.size(); ++e)
     if (mask[e] && e < cand.size() && cand[e]) ++u.latticed_voxels;
   u.strut_diameter_mm = 2.0 * job.lattice.strut_radius_mm;
