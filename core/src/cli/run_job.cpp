@@ -244,6 +244,12 @@ RunInfo build_run_info(const JobDescription& job,
   info.active_domain_band = options.simp.active_domain_band;
   // Handoff 2026-07-25-draft-quality — the armed draft posture (config echo). The
   // per-rung tail-k / gap / escalated vectors are filled post-run (finalize below).
+  // Task 2026-08-08-semdot-does-it-come-out-smoother — the armed mode (config
+  // echo). The per-rung level-set / boundary-layer vectors are filled post-run
+  // (finalize below), like the draft vectors.
+  info.semdot = options.simp.semdot;
+  info.semdot_grid_points =
+      options.simp.semdot ? options.simp.semdot_grid_points : 0;
   info.draft_quality = options.draft_quality;
   info.draft_loose_tol = options.draft_loose_tol;
   info.draft_escalation_c_gap = options.draft_escalation_c_gap;
@@ -6031,6 +6037,18 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
   // build_production_loadcase's own measured rule (handoff 113: load-case runs
   // warm, self-weight runs cold) and is NOT touched here.
   if (job.has_warm_start) options.warm_start_coarse = job.warm_start_coarse;
+
+  // Task 2026-08-08-semdot-does-it-come-out-smoother — map the optional "semdot"
+  // block onto the production options, for BOTH front-ends, exactly like the
+  // "draft" and "warm_start" blocks above. Absent (has_semdot == false, the
+  // default) => options.simp.semdot keeps its OFF default and the run is
+  // byte-identical. run_info echoes the resolved value, so an armed run SAYS it
+  // was armed. This is the LAST thing applied to `options.simp`, so nothing the
+  // mode subsumes can be re-armed behind it.
+  if (job.has_semdot) {
+    options.simp.semdot = job.semdot;
+    options.simp.semdot_grid_points = job.semdot_grid_points;
+  }
   return S;
 }
 
@@ -7934,6 +7952,21 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         result.pipeline.conditional_projection_fired.end());
     run_info.conditional_projection_rung_mnd =
         result.pipeline.rung_grayscale_mnd;
+    // Task 2026-08-08-semdot-does-it-come-out-smoother — finalize the per-rung
+    // SEMDOT outcome from each rung's own SimpOptimizeResult. Empty when the mode
+    // was off, so an unarmed run claims nothing about it.
+    if (options.simp.semdot) {
+      run_info.semdot_rung_level_set.clear();
+      run_info.semdot_rung_fractional_voxels.clear();
+      run_info.semdot_rung_design_voxels.clear();
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
+        run_info.semdot_rung_level_set.push_back(v.optimization.semdot_level_set);
+        run_info.semdot_rung_fractional_voxels.push_back(
+            static_cast<long long>(v.optimization.semdot_fractional_voxels));
+        run_info.semdot_rung_design_voxels.push_back(
+            static_cast<long long>(v.optimization.semdot_design_voxels));
+      }
+    }
     // Handoff 131 — finalize the per-rung infeasibility outcome (one entry per
     // evaluated rung; all-false is the positive statement "no rung lost its load
     // path"). Written only now, like cg_multigrid, so an unfinished run claims

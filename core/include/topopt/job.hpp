@@ -683,6 +683,16 @@ struct JobDescription {
   bool has_warm_start = false;
   bool warm_start_coarse = false;
 
+  // Optional "semdot" block (task 2026-08-08-semdot-does-it-come-out-smoother).
+  // Absent (has_semdot == false, the DEFAULT) => the fields below are ignored and
+  // the run keeps the driver's OFF default (byte-identical). When present, mapped
+  // onto MinimizePlasticOptions::simp.semdot / semdot_grid_points in run_job.
+  // See topopt/semdot.hpp for what the mode is and SimpOptions::semdot for what
+  // it changes and what it refuses.
+  bool has_semdot = false;
+  bool semdot = false;
+  int semdot_grid_points = kSemdotDefaultGridPoints;
+
   // Optional declared load case (the "loads" block). When present the run uses
   // build_production_loadcase (anchors + forces) instead of self-weight.
   JobLoadCase loads;

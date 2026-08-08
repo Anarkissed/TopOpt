@@ -934,9 +934,20 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // (the always-on path), so in both cases the gate is inert and the run is
   // byte-identical to what it would be without this field. Loop-invariant, so
   // computed once. When disarmed the per-rung result vectors below stay EMPTY.
+  // SEMDOT (task 2026-08-08-semdot-does-it-come-out-smoother) DISARMS it too, and
+  // this is the seam that would otherwise kill the run rather than change it:
+  // simp_optimize REFUSES semdot together with a Heaviside projection (the level
+  // set is the sharpening mechanism; a β-continuation on top of it is two
+  // sharpeners fighting, and β is exactly the control parameter SEMDOT claims not
+  // to need), so a fired conditional gate would throw mid-rung. Disarming it here
+  // means the SEMDOT ladder walks the same rungs, ends them by the same plateau
+  // test, and simply never enters the polish phase. Recorded in run_info via
+  // `conditional_projection_fired` staying empty, exactly as any other disarmed
+  // run reports it.
   const bool conditional_projection_armed =
       options.conditional_mma_projection_mnd_threshold > 0.0 &&
-      options.updater == SimpUpdater::MMA && !options.simp.mma_projection;
+      options.updater == SimpUpdater::MMA && !options.simp.mma_projection &&
+      !options.simp.semdot;
 
   // --- Handoff 2026-07-25-draft-quality: the draft posture, resolved once ---
   // ARMED only when draft_quality is set AND the loose endpoint is genuinely looser

@@ -543,6 +543,28 @@ struct RunInfo {
   //                             probe (the escalation signal); < 0 (`null`) when the
   //                             probe did not run (disarmed / cancelled / infeasible).
   //   draft_rung_probe_cg[i]    that probe's CG cost (0 when it did not run).
+  // Task 2026-08-08-semdot-does-it-come-out-smoother — the SEMDOT echo.
+  // `semdot` / `semdot_grid_points` are CONFIG (the armed mode, written
+  // up-front): off => the run is the SIMP path byte-for-byte. The per-rung
+  // vectors are OUTCOME, filled AFTER the run from MinimizePlasticResult (the
+  // same finalize-only discipline as cg_multigrid / rung_infeasible), one entry
+  // per EVALUATED rung in ladder order:
+  //   semdot_rung_level_set[i]           the level-set value rung i's volume
+  //                                      target selected on its FINAL field.
+  //   semdot_rung_fractional_voxels[i]   design voxels that came out strictly
+  //                                      between 0 and 1 — the boundary layer,
+  //                                      and the only population that can carry
+  //                                      sub-voxel content. A zero here says the
+  //                                      mode produced a binary field and cannot
+  //                                      have moved a surface, which is a thing a
+  //                                      run must be able to say about itself.
+  //   semdot_rung_design_voxels[i]       the Active set it was measured against.
+  // All EMPTY when semdot is off.
+  bool semdot = false;
+  int semdot_grid_points = 0;
+  std::vector<double> semdot_rung_level_set;
+  std::vector<long long> semdot_rung_fractional_voxels;
+  std::vector<long long> semdot_rung_design_voxels;
   bool draft_quality = false;
   double draft_loose_tol = 0.0;
   double draft_escalation_c_gap = 0.0;

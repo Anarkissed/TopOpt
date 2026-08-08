@@ -1,0 +1,23 @@
+=== R7 — assertion / static_assert / throw MESSAGE census ===
+base ref   main
+base       552 distinct messages, 596 occurrences
+branch     563 distinct messages, 607 occurrences
+
+--- PRESENT AT BASE, ABSENT ON THE BRANCH (deletions) ---
+  (none — nothing was deleted)
+
+--- OCCURRENCE COUNT DROPPED (weakenings) ---
+  (none — no message lost an occurrence)
+
+--- ADDED ON THE BRANCH ---
+  ADDED    semdot_nodal_density: density.size() != grid.voxel_count()
+  ADDED    semdot_volume_fractions: density.size() != grid.voxel_count()
+  ADDED    semdot_volume_fractions: grid_points must be >= 1
+  ADDED    semdot_volume_fractions: mask.size() != grid.voxel_count()
+  ADDED    semdot_volume_fractions: target_volume exceeds the Active voxel count
+  ADDED    semdot_volume_fractions: target_volume must be finite and >= 0
+  ADDED    simp_optimize: semdot and a Heaviside projection schedule (options.projection) are mutually exclusive — the level set IS the sharpening mechanism; clear options.projection
+  ADDED    simp_optimize: semdot and mma_projection are mutually exclusive — the level set IS the sharpening mechanism; clear options.mma_projection
+  ADDED    simp_optimize: semdot is supported only on the mask-aware overload (the production path); call the overload that takes a DesignMask
+  ADDED    simp_optimize: semdot runs an UNPENALIZED (linear) material law, so a penalty_continuation schedule is meaningless; clear it
+  ADDED    simp_optimize: semdot_grid_points must be >= 1

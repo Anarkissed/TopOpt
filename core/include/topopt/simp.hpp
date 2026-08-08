@@ -8,6 +8,7 @@
 
 #include "topopt/fea.hpp"
 #include "topopt/lattice_material.hpp"
+#include "topopt/semdot.hpp"
 #include "topopt/voxel.hpp"
 
 namespace topopt {
@@ -1425,6 +1426,44 @@ struct SimpOptions {
   // target, so the seed need not hit the target exactly. Throws if the size is
   // neither 0 nor grid.voxel_count().
   std::vector<double> initial_design;
+
+  // --- SEMDOT (task 2026-08-08-semdot-does-it-come-out-smoother) ------------
+  // THE SECOND MODE. Elemental VOLUME FRACTIONS derived from the level set of the
+  // interpolated grid-point field replace the penalized density as the field the
+  // FEA, the certificate, the export and the lattice all see. See
+  // topopt/semdot.hpp for the method and its single discretization parameter.
+  //
+  // FALSE (the DEFAULT) => not one line of the SEMDOT path executes, no field is
+  // derived, and every run is BYTE-FOR-BYTE what it was before this feature —
+  // THE ONE RULE, the same opt-in discipline as min_feature_mm == 0 /
+  // cg_tolerance_loose == 0 / active_domain_band == 0 / adaptive_move == false.
+  //
+  // WHAT IT CHANGES WHEN ARMED, all of it:
+  //   * between the filter (+ pins) and the solve, the physical field is remapped
+  //     to smooth-edged volume fractions at the level set that meets this rung's
+  //     volume budget exactly;
+  //   * the material law over that field is LINEAR — the trajectory and final
+  //     solves run at penalty 1 regardless of params.penalty, because the
+  //     thresholding is what keeps the design from going grey and a second
+  //     penalization on top of it would be double-counting;
+  //   * `physical_density` and `volume_fraction` on the result are the SEMDOT
+  //     field and its achieved fraction, so design.bin, the certificate, the
+  //     export and the lattice all see the same object the optimizer solved.
+  //
+  // WHAT IT REFUSES rather than silently ignores (125 §0 — a feature that quietly
+  // does nothing is the failure mode this codebase keeps re-learning):
+  //   * any Heaviside projection (`projection` schedule or `mma_projection`).
+  //     The level set IS the sharpening mechanism; stacking a β-continuation on
+  //     top of it is two sharpeners fighting, and β is exactly the control
+  //     parameter SEMDOT claims not to need.
+  //   * penalty continuation (`penalty_continuation`). The law is linear.
+  //   * the STRESS path (simp_optimize_stress) and the UNCONSTRAINED overload of
+  //     simp_optimize — out of scope for this task, and out of scope must mean
+  //     refused.
+  bool semdot = false;
+  // Grid points per voxel per axis. A DISCRETIZATION parameter, not a control
+  // parameter — see topopt/semdot.hpp. Must be >= 1; ignored unless `semdot`.
+  int semdot_grid_points = kSemdotDefaultGridPoints;
 };
 
 // One recorded step of the SIMP trajectory.
@@ -1470,6 +1509,22 @@ struct SimpOptimizeResult {
   // entries), but it is a partial optimization: converged is false and
   // initial_compliance is 0 when cancelled before the first iteration.
   bool cancelled = false;
+  // --- SEMDOT (task 2026-08-08-semdot-does-it-come-out-smoother) ------------
+  // All false/zero unless options.semdot armed this run. When it did,
+  // `physical_density` above IS the smooth-edged volume-fraction field (not
+  // filter(design)) and `volume_fraction` is its achieved Active-set fraction —
+  // the two docs on this struct are read with that substitution.
+  //
+  // `semdot_fractional_voxels` is the boundary layer: design voxels that came out
+  // strictly between 0 and 1. It is the population that carries the sub-voxel
+  // content the mode exists to produce, and a run that reports ZERO of them
+  // produced a binary field and cannot have moved a surface — so it is recorded
+  // rather than assumed.
+  bool semdot = false;
+  double semdot_level_set = 0.0;
+  double semdot_tie_fraction = 0.0;
+  std::size_t semdot_fractional_voxels = 0;
+  std::size_t semdot_design_voxels = 0;
   // Handoff 131 — true iff the run ended on the RUNG-INFEASIBILITY signature
   // (`rung_infeasible`: the objective sustained >= infeasible_compliance_ratio ×
   // this run's STARTING compliance, with a >= infeasible_cg_blowup × CG blow-up,
