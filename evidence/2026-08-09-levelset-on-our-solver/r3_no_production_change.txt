@@ -1,0 +1,11 @@
+R3 — THE SHIPPED SIMP PATH IS UNTOUCHED.
+
+$ git diff main --stat -- core/src core/include app/
+(no output above: not one line of production code changed)
+
+$ git diff main --stat   # everything this task touches
+ core/CMakeLists.txt | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+core/CMakeLists.txt carries ONE added target declaration (levelset_probe,
+EXCLUDE_FROM_ALL). core/tests/harness/levelset_probe.cpp is the sandbox.

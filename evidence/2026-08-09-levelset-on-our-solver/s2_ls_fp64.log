@@ -1,0 +1,170 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    1 voxels = 1.705279 mm      seed: simp
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 6, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        SIMP rung 0.68 from evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.679951)
+it   1  c = 0.003037936523  vf = 0.682653 (occ 75414.7)  offset +3.6272 mm  |v|max 5.42e-11  cg 1684  82.36 s
+it   2  c = 0.003031134963  vf = 0.682708 (occ 75414.7)  offset +3.6138 mm  |v|max 5.44e-11  cg 3532  26.43 s
+it   3  c = 0.003021429994  vf = 0.683474 (occ 75414.7)  offset +3.5880 mm  |v|max 7.97e-11  cg 3168  24.54 s
+it   4  c = 0.003014233687  vf = 0.683744 (occ 75414.7)  offset +3.5686 mm  |v|max 7.89e-11  cg 2936  17.51 s
+it   5  c = 0.00300674533  vf = 0.683970 (occ 75414.7)  offset +3.5460 mm  |v|max 7.24e-11  cg 2928  17.40 s
+it   6  c = 0.002998437253  vf = 0.683871 (occ 75414.7)  offset +3.5169 mm  |v|max 6.73e-11  cg 2930  17.42 s
+it   7  c = 0.002990105722  vf = 0.685178 (occ 75414.7)  offset +3.4848 mm  |v|max 5.88e-11  cg 2965  17.68 s
+it   8  c = 0.002980489087  vf = 0.683799 (occ 75414.7)  offset +3.4436 mm  |v|max 5.21e-11  cg 2976  17.94 s
+it   9  c = 0.00296975613  vf = 0.682735 (occ 75414.7)  offset +3.3929 mm  |v|max 5.07e-11  cg 3041  18.02 s
+it  10  c = 0.002959159568  vf = 0.681662 (occ 75414.7)  offset +3.3395 mm  |v|max 4.96e-11  cg 3077  18.19 s
+it  11  c = 0.002949086867  vf = 0.680841 (occ 75414.7)  offset +3.2853 mm  |v|max 4.85e-11  cg 3111  18.33 s
+it  12  c = 0.002940092924  vf = 0.680273 (occ 75414.7)  offset +3.2331 mm  |v|max 4.76e-11  cg 3159  18.63 s
+it  13  c = 0.002930407399  vf = 0.680147 (occ 75414.7)  offset +3.1774 mm  |v|max 4.69e-11  cg 3098  18.38 s
+it  14  c = 0.002920476575  vf = 0.680246 (occ 75414.7)  offset +3.1199 mm  |v|max 4.63e-11  cg 3179  19.07 s
+it  15  c = 0.002910445246  vf = 0.680390 (occ 75414.7)  offset +3.0602 mm  |v|max 4.56e-11  cg 3236  19.21 s
+it  16  c = 0.00290090203  vf = 0.680535 (occ 75414.7)  offset +3.0025 mm  |v|max 4.5e-11  cg 3263  19.31 s
+it  17  c = 0.002890890792  vf = 0.680634 (occ 75414.7)  offset +2.9411 mm  |v|max 4.44e-11  cg 3536  20.68 s
+it  18  c = 0.002881357575  vf = 0.680498 (occ 75414.7)  offset +2.8808 mm  |v|max 4.39e-11  cg 3609  21.21 s
+it  19  c = 0.002871842645  vf = 0.680498 (occ 75414.7)  offset +2.8192 mm  |v|max 4.34e-11  cg 3328  19.63 s
+it  20  c = 0.002862901267  vf = 0.680697 (occ 75414.7)  offset +2.7593 mm  |v|max 4.32e-11  cg 3344  19.91 s
+it  21  c = 0.00285410909  vf = 0.680733 (occ 75414.7)  offset +2.6985 mm  |v|max 4.32e-11  cg 3324  19.63 s
+it  22  c = 0.002845642465  vf = 0.680796 (occ 75414.7)  offset +2.6380 mm  |v|max 4.46e-11  cg 3277  19.29 s
+it  23  c = 0.002837958054  vf = 0.680967 (occ 75414.7)  offset +2.5804 mm  |v|max 4.69e-11  cg 3608  21.10 s
+it  24  c = 0.00283089123  vf = 0.682176 (occ 75414.7)  offset +2.5251 mm  |v|max 5.11e-11  cg 3466  20.22 s
+it  25  c = 0.002824521323  vf = 0.681968 (occ 75414.7)  offset +2.4737 mm  |v|max 5.32e-11  cg 3549  20.90 s
+it  26  c = 0.002818570924  vf = 0.681797 (occ 75414.7)  offset +2.4232 mm  |v|max 5.28e-11  cg 3395  20.14 s
+it  27  c = 0.002812710053  vf = 0.681391 (occ 75414.7)  offset +2.3706 mm  |v|max 5.24e-11  cg 3553  20.94 s
+it  28  c = 0.002807184289  vf = 0.680913 (occ 75414.7)  offset +2.3184 mm  |v|max 5.2e-11  cg 3706  21.65 s
+it  29  c = 0.002802049306  vf = 0.680652 (occ 75414.7)  offset +2.2660 mm  |v|max 5.15e-11  cg 3799  22.22 s
+it  30  c = 0.002797145636  vf = 0.680273 (occ 75414.7)  offset +2.2131 mm  |v|max 5.12e-11  cg 3836  22.42 s
+it  31  c = 0.002792445056  vf = 0.679768 (occ 75414.7)  offset +2.1603 mm  |v|max 5.08e-11  cg 3684  21.57 s
+it  32  c = 0.002787778186  vf = 0.679561 (occ 75414.7)  offset +2.1054 mm  |v|max 5.2e-11  cg 3811  22.21 s
+it  33  c = 0.002783934343  vf = 0.679074 (occ 75414.7)  offset +2.0558 mm  |v|max 4.99e-11  cg 3782  22.10 s
+it  34  c = 0.002779964785  vf = 0.678641 (occ 75414.7)  offset +2.0049 mm  |v|max 4.94e-11  cg 4003  23.51 s
+it  35  c = 0.002776219783  vf = 0.678145 (occ 75414.7)  offset +1.9553 mm  |v|max 4.9e-11  cg 4027  23.59 s
+it  36  c = 0.002772693694  vf = 0.677559 (occ 75414.7)  offset +1.9064 mm  |v|max 4.86e-11  cg 4286  25.17 s
+it  37  c = 0.002769035079  vf = 0.677009 (occ 75414.7)  offset +1.8581 mm  |v|max 4.81e-11  cg 4262  25.05 s
+it  38  c = 0.002765418141  vf = 0.676396 (occ 75414.7)  offset +1.8117 mm  |v|max 4.78e-11  cg 4406  25.68 s
+it  39  c = 0.002761811349  vf = 0.675936 (occ 75414.7)  offset +1.7685 mm  |v|max 4.83e-11  cg 4404  25.68 s
+it  40  c = 0.002758772446  vf = 0.675494 (occ 75414.7)  offset +1.7385 mm  |v|max 4.8e-11  cg 4601  27.01 s
+it  41  c = 0.002755644792  vf = 0.675133 (occ 75414.7)  offset +1.7086 mm  |v|max 4.77e-11  cg 4779  29.55 s
+it  42  c = 0.002752638606  vf = 0.679182 (occ 75414.7)  offset +1.6811 mm  |v|max 4.74e-11  cg 4642  28.90 s
+it  43  c = 0.002749602503  vf = 0.680327 (occ 75414.7)  offset +1.6537 mm  |v|max 4.71e-11  cg 4844  29.65 s
+it  44  c = 0.00274632297  vf = 0.681057 (occ 75414.7)  offset +1.6249 mm  |v|max 4.67e-11  cg 4901  30.11 s
+it  45  c = 0.002743069889  vf = 0.681481 (occ 75414.7)  offset +1.5969 mm  |v|max 4.64e-11  cg 4994  30.65 s
+it  46  c = 0.002739860844  vf = 0.681671 (occ 75414.7)  offset +1.5705 mm  |v|max 4.61e-11  cg 5006  30.66 s
+it  47  c = 0.002736649835  vf = 0.681959 (occ 75414.7)  offset +1.5445 mm  |v|max 4.57e-11  cg 4438  27.25 s
+it  48  c = 0.002733726061  vf = 0.682266 (occ 75414.7)  offset +1.5206 mm  |v|max 4.54e-11  cg 4447  26.97 s
+it  49  c = 0.002730524218  vf = 0.682365 (occ 75414.7)  offset +1.4955 mm  |v|max 4.51e-11  cg 4502  27.22 s
+it  50  c = 0.00272725464  vf = 0.682347 (occ 75414.7)  offset +1.4701 mm  |v|max 4.47e-11  cg 4525  27.75 s
+it  51  c = 0.002724144473  vf = 0.682284 (occ 75414.7)  offset +1.4466 mm  |v|max 4.44e-11  cg 4552  27.46 s
+it  52  c = 0.002721137831  vf = 0.682239 (occ 75414.7)  offset +1.4234 mm  |v|max 4.41e-11  cg 4606  27.45 s
+it  53  c = 0.002717975119  vf = 0.682410 (occ 75414.7)  offset +1.4004 mm  |v|max 4.38e-11  cg 4609  27.46 s
+it  54  c = 0.002714985864  vf = 0.682554 (occ 75414.7)  offset +1.3779 mm  |v|max 4.35e-11  cg 4606  27.57 s
+it  55  c = 0.002712142354  vf = 0.682626 (occ 75414.7)  offset +1.3566 mm  |v|max 4.32e-11  cg 4611  28.10 s
+it  56  c = 0.002709157259  vf = 0.682563 (occ 75414.7)  offset +1.3347 mm  |v|max 4.29e-11  cg 4383  26.56 s
+it  57  c = 0.002706082251  vf = 0.682527 (occ 75414.7)  offset +1.3123 mm  |v|max 4.27e-11  cg 4428  26.51 s
+it  58  c = 0.002703005527  vf = 0.682500 (occ 75414.7)  offset +1.2899 mm  |v|max 4.25e-11  cg 4425  26.28 s
+it  59  c = 0.002700183934  vf = 0.682347 (occ 75414.7)  offset +1.2695 mm  |v|max 4.23e-11  cg 4506  27.21 s
+it  60  c = 0.002697418277  vf = 0.682149 (occ 75414.7)  offset +1.2495 mm  |v|max 4.21e-11  cg 4558  27.21 s
+it  61  c = 0.002694674604  vf = 0.682040 (occ 75414.7)  offset +1.2293 mm  |v|max 4.19e-11  cg 4620  27.72 s
+it  62  c = 0.002691859748  vf = 0.682112 (occ 75414.7)  offset +1.2090 mm  |v|max 4.18e-11  cg 4212  25.48 s
+it  63  c = 0.002689307505  vf = 0.682103 (occ 75414.7)  offset +1.1902 mm  |v|max 4.16e-11  cg 4067  24.80 s
+it  64  c = 0.002686584413  vf = 0.682266 (occ 75414.7)  offset +1.1701 mm  |v|max 4.14e-11  cg 4122  25.05 s
+it  65  c = 0.002684051849  vf = 0.682257 (occ 75414.7)  offset +1.1510 mm  |v|max 4.12e-11  cg 4197  25.46 s
+it  66  c = 0.002681517222  vf = 0.682212 (occ 75414.7)  offset +1.1319 mm  |v|max 4.1e-11  cg 4238  25.54 s
+it  67  c = 0.002678891967  vf = 0.682085 (occ 75414.7)  offset +1.1126 mm  |v|max 4.09e-11  cg 4278  25.63 s
+it  68  c = 0.002676538514  vf = 0.681959 (occ 75414.7)  offset +1.0950 mm  |v|max 4.07e-11  cg 4340  26.35 s
+it  69  c = 0.002674117336  vf = 0.681977 (occ 75414.7)  offset +1.0768 mm  |v|max 4.06e-11  cg 4375  26.15 s
+it  70  c = 0.002671850073  vf = 0.681905 (occ 75414.7)  offset +1.0595 mm  |v|max 4.04e-11  cg 4405  26.59 s
+it  71  c = 0.002669540087  vf = 0.681851 (occ 75414.7)  offset +1.0417 mm  |v|max 4.03e-11  cg 4437  26.54 s
+it  72  c = 0.002667259724  vf = 0.681743 (occ 75414.7)  offset +1.0236 mm  |v|max 4.02e-11  cg 4466  26.56 s
+it  73  c = 0.002665066899  vf = 0.681698 (occ 75414.7)  offset +1.0060 mm  |v|max 4e-11  cg 4477  27.10 s
+it  74  c = 0.002663031299  vf = 0.681544 (occ 75414.7)  offset +0.9895 mm  |v|max 3.99e-11  cg 4502  26.58 s
+it  75  c = 0.002660940849  vf = 0.681517 (occ 75414.7)  offset +0.9725 mm  |v|max 3.98e-11  cg 4091  24.09 s
+it  76  c = 0.002658935035  vf = 0.681508 (occ 75414.7)  offset +0.9557 mm  |v|max 3.97e-11  cg 4096  24.16 s
+it  77  c = 0.002656954761  vf = 0.681418 (occ 75414.7)  offset +0.9385 mm  |v|max 3.96e-11  cg 4177  24.84 s
+it  78  c = 0.002655016468  vf = 0.681454 (occ 75414.7)  offset +0.9224 mm  |v|max 3.95e-11  cg 4240  25.17 s
+it  79  c = 0.0026531946  vf = 0.681418 (occ 75414.7)  offset +0.9067 mm  |v|max 3.95e-11  cg 4281  25.50 s
+it  80  c = 0.002651465224  vf = 0.681508 (occ 75414.7)  offset +0.8920 mm  |v|max 3.94e-11  cg 4267  25.76 s
+it  81  c = 0.00264980839  vf = 0.681391 (occ 75414.7)  offset +0.8773 mm  |v|max 3.93e-11  cg 4372  26.11 s
+it  82  c = 0.002648175775  vf = 0.681229 (occ 75414.7)  offset +0.8626 mm  |v|max 3.92e-11  cg 4276  25.62 s
+it  83  c = 0.002646537002  vf = 0.681256 (occ 75414.7)  offset +0.8478 mm  |v|max 3.94e-11  cg 4512  27.13 s
+it  84  c = 0.002645311917  vf = 0.681265 (occ 75414.7)  offset +0.8382 mm  |v|max 3.94e-11  cg 4367  26.10 s
+it  85  c = 0.002644124907  vf = 0.681220 (occ 75414.7)  offset +0.8291 mm  |v|max 3.94e-11  cg 4653  27.97 s
+it  86  c = 0.002642944001  vf = 0.681175 (occ 75414.7)  offset +0.8197 mm  |v|max 3.94e-11  cg 4677  27.51 s
+it  87  c = 0.002641773193  vf = 0.681373 (occ 75414.7)  offset +0.8099 mm  |v|max 3.93e-11  cg 4523  27.08 s
+it  88  c = 0.002640661237  vf = 0.681274 (occ 75414.7)  offset +0.8005 mm  |v|max 3.93e-11  cg 4733  27.39 s
+it  89  c = 0.002639590525  vf = 0.681175 (occ 75414.7)  offset +0.7918 mm  |v|max 3.92e-11  cg 3951  23.48 s
+it  90  c = 0.002638537442  vf = 0.681184 (occ 75414.7)  offset +0.7823 mm  |v|max 3.92e-11  cg 3838  22.52 s
+it  91  c = 0.00263750355  vf = 0.681283 (occ 75414.7)  offset +0.7731 mm  |v|max 3.92e-11  cg 3876  22.78 s
+it  92  c = 0.002636491317  vf = 0.681211 (occ 75414.7)  offset +0.7642 mm  |v|max 3.92e-11  cg 3932  23.17 s
+it  93  c = 0.002635518345  vf = 0.681184 (occ 75414.7)  offset +0.7559 mm  |v|max 3.91e-11  cg 3960  23.26 s
+it  94  c = 0.002634551345  vf = 0.681184 (occ 75414.7)  offset +0.7473 mm  |v|max 3.91e-11  cg 4047  23.53 s
+it  95  c = 0.002633576835  vf = 0.681157 (occ 75414.7)  offset +0.7385 mm  |v|max 3.91e-11  cg 4121  24.14 s
+it  96  c = 0.002632646847  vf = 0.681238 (occ 75414.7)  offset +0.7300 mm  |v|max 3.9e-11  cg 4203  24.56 s
+it  97  c = 0.002631811493  vf = 0.681256 (occ 75414.7)  offset +0.7221 mm  |v|max 3.9e-11  cg 4308  25.50 s
+it  98  c = 0.002630981767  vf = 0.681283 (occ 75414.7)  offset +0.7143 mm  |v|max 3.9e-11  cg 4221  24.43 s
+it  99  c = 0.002630106907  vf = 0.681328 (occ 75414.7)  offset +0.7058 mm  |v|max 3.9e-11  cg 4413  25.76 s
+it 100  c = 0.002629251038  vf = 0.681328 (occ 75414.7)  offset +0.6978 mm  |v|max 3.9e-11  cg 4291  25.08 s
+it 101  c = 0.002628434019  vf = 0.681364 (occ 75414.7)  offset +0.6898 mm  |v|max 3.89e-11  cg 4449  26.08 s
+it 102  c = 0.002627628819  vf = 0.681292 (occ 75414.7)  offset +0.6817 mm  |v|max 3.89e-11  cg 4448  25.70 s
+it 103  c = 0.002626859884  vf = 0.681274 (occ 75414.7)  offset +0.6741 mm  |v|max 3.89e-11  cg 4384  25.55 s
+it 104  c = 0.002626107999  vf = 0.681265 (occ 75414.7)  offset +0.6668 mm  |v|max 3.89e-11  cg 4373  25.84 s
+it 105  c = 0.002625381597  vf = 0.681274 (occ 75414.7)  offset +0.6592 mm  |v|max 3.89e-11  cg 4573  26.65 s
+it 106  c = 0.002624674103  vf = 0.681328 (occ 75414.7)  offset +0.6518 mm  |v|max 3.89e-11  cg 4586  26.72 s
+it 107  c = 0.002623950965  vf = 0.681238 (occ 75414.7)  offset +0.6442 mm  |v|max 3.89e-11  cg 4608  26.83 s
+it 108  c = 0.00262328438  vf = 0.681193 (occ 75414.7)  offset +0.6374 mm  |v|max 3.89e-11  cg 4647  26.87 s
+it 109  c = 0.002622602541  vf = 0.681211 (occ 75414.7)  offset +0.6300 mm  |v|max 3.89e-11  cg 4646  27.13 s
+it 110  c = 0.0026219234  vf = 0.681274 (occ 75414.7)  offset +0.6227 mm  |v|max 3.88e-11  cg 4681  27.61 s
+it 111  c = 0.00262127189  vf = 0.681274 (occ 75414.7)  offset +0.6153 mm  |v|max 3.88e-11  cg 4597  26.90 s
+it 112  c = 0.002620632534  vf = 0.681274 (occ 75414.7)  offset +0.6079 mm  |v|max 3.88e-11  cg 4262  24.88 s
+it 113  c = 0.002620001463  vf = 0.681265 (occ 75414.7)  offset +0.6006 mm  |v|max 3.88e-11  cg 4538  26.26 s
+it 114  c = 0.002619359155  vf = 0.681274 (occ 75414.7)  offset +0.5930 mm  |v|max 3.88e-11  cg 4578  26.64 s
+it 115  c = 0.002618756195  vf = 0.681301 (occ 75414.7)  offset +0.5862 mm  |v|max 3.88e-11  cg 4649  27.36 s
+it 116  c = 0.002618180137  vf = 0.681328 (occ 75414.7)  offset +0.5796 mm  |v|max 3.88e-11  cg 4701  27.26 s
+it 117  c = 0.002617600741  vf = 0.681247 (occ 75414.7)  offset +0.5735 mm  |v|max 3.88e-11  cg 4770  27.72 s
+it 118  c = 0.002617014161  vf = 0.681247 (occ 75414.7)  offset +0.5668 mm  |v|max 3.87e-11  cg 4664  27.24 s
+it 119  c = 0.002616459204  vf = 0.681265 (occ 75414.7)  offset +0.5599 mm  |v|max 3.87e-11  cg 4285  24.93 s
+it 120  c = 0.002615900622  vf = 0.681319 (occ 75414.7)  offset +0.5533 mm  |v|max 3.87e-11  cg 4316  25.63 s
+
+certifying iteration 120 (best compliance 0.002615900622 of 120 run)
+mesh        143794 vertices, 287584 triangles -> levelset.stl
+
+== levelset_probe summary ==
+seed                 simp
+rung                 0.68
+iterations run       120
+WALL PER ITERATION   25.088 s   (total 3010.5 s over 120 iterations)
+  of which solve     24.833 s/iteration (2980.0 s total)
+certification wall   23.1 s
+state solves         120, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+compliance (best)    0.00261590062166
+compliance (cert)    0.00261590062166
+achieved vf          0.681319  (target 0.68, printed 75561 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.016279485 MPa
+margin in-plane      3378.485259539
+margin interlayer    6883.209330333
+MARGIN worst case    3378.485259539
+margin effective     699.558591951   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    436
+mass                 464.6471 g
+
+wrote evidence/2026-08-09-levelset-on-our-solver/s2_ls_fp64/{iterations.csv,design.bin,rho.f64,rho.meta,levelset.stl,summary.txt}
+
+for the roughness row, on the SAME binary that produced PR 321's:
+  ./build/external_field_surface_probe <ref/design.bin> <part.step> <dir> LS=evidence/2026-08-09-levelset-on-our-solver/s2_ls_fp64/rho

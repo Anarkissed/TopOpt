@@ -1,0 +1,22 @@
+== levelset_probe summary ==
+seed                 simp
+rung                 0.68
+iterations run       120
+WALL PER ITERATION   25.088 s   (total 3010.5 s over 120 iterations)
+  of which solve     24.833 s/iteration (2980.0 s total)
+certification wall   23.1 s
+state solves         120, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+compliance (best)    0.00261590062166
+compliance (cert)    0.00261590062166
+achieved vf          0.681319  (target 0.68, printed 75561 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.016279485 MPa
+margin in-plane      3378.485259539
+margin interlayer    6883.209330333
+MARGIN worst case    3378.485259539
+margin effective     699.558591951   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    436
+mass                 464.6471 g
