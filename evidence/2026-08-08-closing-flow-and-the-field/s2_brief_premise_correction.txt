@@ -1,0 +1,39 @@
+S2(b) — THE BRIEF'S PREMISE, CHECKED AGAINST run_info.json
+==========================================================
+
+The brief states:
+
+    `run_info` records `conditional_projection_fired: [false, true, true, true]`
+    - rung 0.68 was NOT projected toward binary, the other three were. So the
+    grayscale available differs per rung.
+
+THAT IS NOT WHAT THE FILE SAYS. From
+evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/run_info.json,
+the run these four rungs come from:
+
+  $ python3 -c "import json; d=json.load(open('.../run_info.json')); ..."
+  conditional_projection_fired             : [True, True, True, True]
+  conditional_projection_rung_mnd          : [0.1943393864, 0.2912086675,
+                                              0.3427907738, 0.3137704902]
+  conditional_mma_projection_mnd_threshold : 0.07
+  projection (the unconditional flag)      : False
+
+ALL FOUR RUNGS FIRED. The gate is `Mnd > 0.07` and the measured Mnd of the
+loosest rung is 0.194 -- nearly three times the threshold. There is no rung on
+this run that escaped the projection, so the brief's "the grayscale available
+differs per rung" has no basis in this file.
+
+IT DOES NOT CHANGE THE ANSWER, and the measurement was run per rung anyway
+rather than assuming the premise either way. The measured grayscale is close to
+identical across the four, with a mild monotone trend that tracks how much
+optimizer-cut surface each rung has rather than anything about projection:
+
+  rung   boundary voxels   strictly inside the band   as %
+  0.68        54004                 1841              3.41%
+  0.52        58321                 2317              3.97%
+  0.38        60977                 2881              4.73%
+  0.26        61855                 2953              4.77%
+
+If rung 0.68 really had escaped the projection it would be the GRAYEST of the
+four. It is the least gray. The premise is wrong in the file and would have been
+wrong in the direction the brief expected even if it were not.

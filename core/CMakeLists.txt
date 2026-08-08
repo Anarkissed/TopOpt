@@ -1518,6 +1518,29 @@ if(OpenCASCADE_FOUND)
   add_executable(cut_population_probe EXCLUDE_FROM_ALL
     tests/harness/cut_population_probe.cpp)
   target_link_libraries(cut_population_probe PRIVATE topopt)
+
+  # S1 (task 2026-08-08-closing-flow-and-the-field): the CLOSING FLOW of Sellán,
+  # Kesten, Ang Yan Sheng & Jacobson (SIGGRAPH Asia 2020) on the cut population of
+  # his own four rungs. Not a fourth filter — it ADDS material, under a
+  # curvature-based obstacle that makes the motion outward by construction. Scored
+  # with PR 314's metric so its rows land in PR 314's table.
+  #   cmake --build build --target closing_flow_probe
+  #   ./build/closing_flow_probe <design.bin> <part.step> [evidence_dir]
+  add_executable(closing_flow_probe EXCLUDE_FROM_ALL
+    tests/harness/closing_flow_probe.cpp)
+  target_link_libraries(closing_flow_probe PRIVATE topopt)
+
+  # S2 (task 2026-08-08-closing-flow-and-the-field): how much sub-voxel
+  # information the PRE-BINARIZATION density field still carries, and what a
+  # vertex-position optimisation against it recovers. The Wedekind et al. (2021)
+  # analogue: fit the vertices to the field the design was solved on, rather than
+  # filtering the mesh the grid produced.
+  #   cmake --build build --target field_information_probe
+  #   ./build/field_information_probe <design.bin> <part.step> [evidence_dir]
+  add_executable(field_information_probe EXCLUDE_FROM_ALL
+    tests/harness/field_information_probe.cpp)
+  target_link_libraries(field_information_probe PRIVATE topopt)
+
   # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
   # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
   # S3 instrumentation (minimum cross-section, outward excursion, volume, wall
