@@ -1,0 +1,19 @@
+S2 — THE INITIAL-FIELD DIAGNOSIS (R5 item 4/5), full output
+===========================================================
+
+--- diag_reinit_full.jl: does THEIR OWN example seed survive HIS grid? ---
+grid 128 x 31 x 118  h=1.705279  el_Δ=(1.7052793026343613, 1.7052793026343613, 1.7052793026343613)
+their-example-defaults   γ_reinit=0.50 tol=0.00645 : before[-0.3000,0.2000] NaN=0 
+gamma-0.1                γ_reinit=0.10 tol=0.00645 : before[-0.3000,0.2000] NaN=1 
+tol-loose-1e-2           γ_reinit=0.50 tol=0.01000 : before[-0.3000,0.2000] NaN=0 
+
+--- diag_scale.jl: hole spacing and amplitude, on his grid ---
+holes  6h, amp H       before[ -8.5264,  8.5264] init-solid 0.204  NaN=      0  after[  -6.538, 115.148]
+holes  8h, amp H       before[ -8.5264,  8.5264] init-solid 0.206  NaN=      0  after[  -8.420, 115.135]
+holes  8h, amp 2H      before[ -8.5264,  8.5264] init-solid 0.206  NaN=      0  after[  -8.420, 115.107]
+holes 12h, amp H       before[ -8.5264,  8.5264] init-solid 0.203  NaN=      0  after[ -10.988, 115.142]
+
+--- diag_edt.jl: exact Euclidean distance vs the 6-neighbour BFS ---
+EDT part+seed              EDT 0.18s before[ -6.382,  8.526] NaN=     1 after[ NaN]
+EDT whole part (no seed)   EDT 0.02s before[ -8.526,  8.526] NaN=     0 after[-31.505,115.105]
+EDT whole part band 3      EDT 0.03s before[ -5.116,  5.116] NaN=     0 after[-31.505,115.105]

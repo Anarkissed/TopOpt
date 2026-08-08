@@ -1,0 +1,11 @@
+arm,rung,iterations,wall_s,wall_s_per_iteration,converged,achieved_vf_part_relative,target_vf,compliance,solid_outside_part_cells,solid_outside_part_pct,pad_interior_held_pct,note
+SIMP,0.68,27,367.674,13.62,yes,0.679951,0.68,0.002400383709,0,0.0000,100.00,PR 319's run of record; wall under host contention (its README)
+SIMP,0.52,127,1307.911,10.30,yes,0.520005,0.52,0.002517063295,0,0.0000,100.00,
+SIMP,0.38,140,1583.475,11.31,yes,0.380000,0.38,0.002838857518,0,0.0000,100.00,
+SIMP,0.26,153,1729.338,11.30,yes,0.259996,0.26,0.003471936771,0,0.0000,100.00,
+SIMP,ALL,447,4988.398,11.16,yes,,,,,,,four rungs = 1 h 23 m 08 s
+GTO-ALM,0.68,3,1110.922,277.73,NO,0.932952,0.68,0.00263029177,2871,2.5887,99.75,from a hole-seeded start; Vol constraint at 0.309 and moving ~0.003/iteration
+GTO-SDF,0.68,0,5.363,,n/a,0.774451,0.68,NA,2741,2.4715,99.80,representation only: their reinitialiser on an exact SDF of HIS rung; no state solve
+GTO-SDF,0.52,0,5.345,,n/a,0.677321,0.52,NA,2567,2.3146,99.54,
+GTO-SDF,0.38,0,5.310,,n/a,0.584142,0.38,NA,2299,2.0730,99.40,
+GTO-SDF,0.26,0,5.700,,n/a,0.499819,0.26,NA,2122,1.9134,98.88,

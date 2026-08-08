@@ -1,0 +1,39 @@
+S1 POSITIVE CONTROL — the exported problem IS the run of record's problem
+========================================================================
+
+The exporter transcribes eleven scalars of his job document by hand (the
+job.json -> ProductionLoadCase mapping lives inside run_job.cpp's translation
+unit and is not on a public header). A transcription is exactly the kind of
+silent difference this task exists to avoid, so it is CHECKED rather than
+trusted: `build_production_loadcase` is run on the transcription, and the counts
+it produces are compared against the counts the RUN OF RECORD wrote into its own
+`loadcase.json` and `run_info.json`. Any error in the eleven scalars would move
+at least one of these.
+
+  left  = evidence/.../s2_simp_baseline/{loadcase,run_info}.json  (PR 319's run)
+  right = this task's export                                      (s1_problem.json)
+
+  anchor_bc_dofs                  21000            21000   MATCH
+  external_load_nodes              7382             7382   MATCH
+  declared_force_n          22.24113464      22.24113464   MATCH
+  group 0 voxels_tagged            5165             5165   MATCH
+  face 16 voxels_frozen           10554   (inside mask_frozen_solid = 40216, see below)
+  resolution                        128              128   MATCH
+  solved_grid_dofs              1473696          1473696   MATCH
+  min_feature_mm                    2.5              2.5   MATCH
+  margin_stop                       1.5              1.5   MATCH
+
+  face protection: the run of record froze 10,554 voxels for face 16. The export
+  reports mask_frozen_solid = 40216, which is that set UNIONED with the
+  anchor/load structural pad the ladder freezes in both modes
+  (kGrowthPathAnchorPad); `effective_design_mask` also forces every Load and
+  Fixture voxel FrozenSolid. The two numbers are not meant to be equal, and the
+  exporter's stdout names both so neither can be read as the other.
+
+  grid            128 x 31 x 118, spacing 1.7052793026343613 mm
+  part            110904 solid voxels of 468224
+  design freedom  70688 Active, 40216 FrozenSolid, 357320 FrozenVoid
+  material        PLA E=3500 MPa nu=0.33
+  ladder          [0.68, 0.52, 0.38, 0.26]
+
+PASS — every comparable count reproduces the run of record

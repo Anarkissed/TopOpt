@@ -1,0 +1,23 @@
+R6 — THE TWO LIBRARIES, WHERE THEY WERE CLONED AND AT WHICH COMMIT
+====================================================================
+
+NEITHER IS VENDORED INTO THIS REPOSITORY. Both live in the session
+scratch directory, outside the repo:
+
+  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl
+
+GridapTopOpt.jl          6b7b6284a630fe63c702cea0c008dc65586163fa  2026-06-24  Merge pull request #104 from zjwegert/Update-tests
+PicoGK                   14c5384bcac57ede245021bb78e70d1445b40e3f  2026-08-04  v2.3.0
+PicoGKRuntime            0f26321c18ed878a7820ef769c38fd5d49d39242  2026-06-05  Update openvdb
+LEAP71_ShapeKernel       3b9751a0ae0a5686500fd7669f6e34bdd13362a0  2026-08-07  Merge branch 'main' of https://github.com/leap71/LEAP71_ShapeKernel
+LEAP71_LatticeLibrary    81c3c7b2064c19e573c38d76ac09bf1cd2f562d5  2025-07-27  Updated RandomTPMSDeformation Task
+PicoGK_Examples          60cdddac92f9e9aa7ee6f5e262e03367827f9307  2025-08-13  Update README.md
+
+Licences: GridapTopOpt.jl MIT; PicoGK / PicoGKRuntime / ShapeKernel /
+LatticeLibrary Apache-2.0.
+
+Toolchains installed into the same scratch directory, not system-wide:
+  .NET SDK 8.0.423 and 9.0.x  (dotnet-install.sh --install-dir <scratch>/dotnet)
+Installed system-wide via Homebrew (PicoGKRuntime's own Install_Dependencies/Mac.sh):
+  boost 1.90.0_1, c-blosc 1.21.6   (tbb 2023.0.0 was already present)
+Julia 1.12.6 was ALREADY on the machine and was not installed by this task.

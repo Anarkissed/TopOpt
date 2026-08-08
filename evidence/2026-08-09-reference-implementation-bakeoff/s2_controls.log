@@ -1,0 +1,96 @@
+=== eta 0.5 rung 0.68 2026-08-08T07:10:47Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.68.f64 — 88424 of 468224 cells above iso 0.5 (0.7973 of the part)
+initial LSF: inside 88424 cells (0.7973 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 6.674 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.773827  target 0.680000
+★ solid OUTSIDE the part: 2432 cells (2.1929% of the part)
+★ frozen-solid cells still solid: 33799 of 40216 (84.04%)
+★ pad INTERIOR still solid: 9192 of 9201 (99.90%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_eta0.5_0.68
+=== eta 1.0 rung 0.68 2026-08-08T07:11:37Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.68.f64 — 88424 of 468224 cells above iso 0.5 (0.7973 of the part)
+initial LSF: inside 88424 cells (0.7973 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 5.355 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.774585  target 0.680000
+★ solid OUTSIDE the part: 2717 cells (2.4499% of the part)
+★ frozen-solid cells still solid: 34178 of 40216 (84.99%)
+★ pad INTERIOR still solid: 9181 of 9201 (99.78%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_eta1.0_0.68
+=== noreinit rung 0.68 2026-08-08T07:12:30Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.68.f64 — 88424 of 468224 cells above iso 0.5 (0.7973 of the part)
+initial LSF: inside 88424 cells (0.7973 of the part), range [-8.526, 8.526] mm
+
+NO-REINIT CONTROL: φ0 exported as computed, nothing from GridapTopOpt ran on it
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.771463  target 0.680000
+★ solid OUTSIDE the part: 407 cells (0.3670% of the part)
+★ frozen-solid cells still solid: 29523 of 40216 (73.41%)
+★ pad INTERIOR still solid: 9189 of 9201 (99.87%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_noreinit_0.68
+=== eta 0.5 rung 0.26 2026-08-08T07:13:22Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.26.f64 — 58595 of 468224 cells above iso 0.5 (0.5283 of the part)
+initial LSF: inside 58595 cells (0.5283 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 5.281 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.496714  target 0.260000
+★ solid OUTSIDE the part: 1793 cells (1.6167% of the part)
+★ frozen-solid cells still solid: 31124 of 40216 (77.39%)
+★ pad INTERIOR still solid: 9123 of 9201 (99.15%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_eta0.5_0.26
+=== eta 1.0 rung 0.26 2026-08-08T07:14:07Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.26.f64 — 58595 of 468224 cells above iso 0.5 (0.5283 of the part)
+initial LSF: inside 58595 cells (0.5283 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 5.259 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.498234  target 0.260000
+★ solid OUTSIDE the part: 2103 cells (1.8962% of the part)
+★ frozen-solid cells still solid: 31449 of 40216 (78.20%)
+★ pad INTERIOR still solid: 9097 of 9201 (98.87%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_eta1.0_0.26
+=== noreinit rung 0.26 2026-08-08T07:14:53Z ===

@@ -1,0 +1,6 @@
+grid 32 x 8 x 30 (coarsen 4)
+THEIRS   labelling   10.475 s  V free   26970 diri    651   V_reg free    2124 diri    7083
+MINE     labelling    0.078 s  V free   26970 diri    651   V_reg free    2124 diri    7083
+free-dof->node maps identical: V YES   V_reg YES
+IDENTICAL — the substitution is exact for order-1 dof selection
+speedup 134.5x

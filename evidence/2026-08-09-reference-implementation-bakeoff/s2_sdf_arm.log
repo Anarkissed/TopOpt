@@ -1,0 +1,77 @@
+=== SDF rung 0.68 2026-08-08T07:04:49Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.68.f64 — 88424 of 468224 cells above iso 0.5 (0.7973 of the part)
+initial LSF: inside 88424 cells (0.7973 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 5.363 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.774451  target 0.680000
+★ solid OUTSIDE the part: 2741 cells (2.4715% of the part)
+★ frozen-solid cells still solid: 34183 of 40216 (85.00%)
+★ pad INTERIOR still solid: 9183 of 9201 (99.80%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_sdf_0.68
+=== SDF rung 0.52 2026-08-08T07:05:35Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.52.f64 — 76974 of 468224 cells above iso 0.5 (0.6941 of the part)
+initial LSF: inside 76974 cells (0.6941 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 5.345 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.677321  target 0.520000
+★ solid OUTSIDE the part: 2567 cells (2.3146% of the part)
+★ frozen-solid cells still solid: 33460 of 40216 (83.20%)
+★ pad INTERIOR still solid: 9159 of 9201 (99.54%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_sdf_0.52
+=== SDF rung 0.38 2026-08-08T07:06:21Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.38.f64 — 67077 of 468224 cells above iso 0.5 (0.6048 of the part)
+initial LSF: inside 67077 cells (0.6048 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 5.310 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.584142  target 0.380000
+★ solid OUTSIDE the part: 2299 cells (2.0730% of the part)
+★ frozen-solid cells still solid: 32561 of 40216 (80.97%)
+★ pad INTERIOR still solid: 9146 of 9201 (99.40%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_sdf_0.38
+=== SDF rung 0.26 2026-08-08T07:07:07Z ===
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+SEQUENTIAL arm: φ0 from /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.26.f64 — 58595 of 468224 cells above iso 0.5 (0.5283 of the part)
+initial LSF: inside 58595 cells (0.5283 of the part), range [-8.526, 8.526] mm
+
+REPRESENTATION-ONLY ARM: reinitialised in 5.700 s, no optimisation
+
+ITERATIONS 0   WALL 0.000 s
+compliance NaN
+achieved vf (part-relative) 0.499819  target 0.260000
+★ solid OUTSIDE the part: 2122 cells (1.9134% of the part)
+★ frozen-solid cells still solid: 31443 of 40216 (78.19%)
+★ pad INTERIOR still solid: 9098 of 9201 (98.88%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/out_sdf_0.26
+SDF_ARM_DONE

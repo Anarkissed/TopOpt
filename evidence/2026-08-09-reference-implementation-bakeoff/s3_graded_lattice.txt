@@ -1,0 +1,148 @@
+S3 — PICOGK: A GRADED LATTICE FROM HIS OWN FIELD
+=================================================
+Task 2026-08-09-reference-implementation-bakeoff, S3.
+
+Program: `s3_lattice_Program.cs` (committed here; built in the scratch
+directory, see `third_party_commits.txt`). Bounding object: HIS rung-068 design,
+handed over as the STL his own shipped extraction produces (tricubic x2, MC at
+0.5, largest component — 284,704 triangles, 14,235,284 bytes). Machine of record
+as in the README.
+
+
+S3.a — WHAT IT TOOK TO GET IT RUNNING
+--------------------------------------
+  .NET 8 SDK, scripted install into scratch                 16 s
+  .NET 9 SDK (PicoGK targets net9.0)                        19 s
+  brew install boost c-blosc (tbb already present)          20 s
+    — this is PicoGKRuntime's OWN Install_Dependencies/Mac.sh list
+  cmake configure PicoGKRuntime                              2 s
+  cmake --build PicoGKRuntime -j4                           99 s   0 errors, 0 warnings
+  dotnet build (PicoGK + ShapeKernel + LatticeLibrary)      ~8 s
+                                                          -------
+  TOTAL                                                    ~165 s
+
+★ AND THE 99 s WAS OPTIONAL. The PicoGK repository SHIPS a prebuilt
+`native/osx-arm64/picogk.26.2.dylib` (14.8 MB) together with its boost/icu/lzma
+dependencies. Building the runtime from source was done to see whether it would,
+and it does; a real adopter would not need to, and would not need boost, tbb or
+c-blosc either.
+
+★ NOTHING ABOUT APPLE SILICON GOT IN THE WAY, on either library. That is now
+measured for both halves of this task.
+
+
+S3.b — DOES THE THICKNESS VARY CONTINUOUSLY?
+---------------------------------------------
+★ THE MECHANISM IS CONTINUOUS BY CONSTRUCTION, AND IT IS TWENTY LINES.
+LatticeLibrary's `IBeamThickness` is a single method
+
+    float fGetBeamThickness(Vector3 vecPt)
+
+— a thickness at a POINT, not per cell. `FieldBeamThickness` in the program is a
+trilinear read of core's own per-voxel field at that point, which is literally
+what the maintainers prescribe in PicoGK discussion #29 ("look up the simulation
+value at the relevant point in space... use the value you read from the position
+to modulate the wall thickness"). `PicoGK.Lattice.AddBeam(a, b, radiusA, radiusB)`
+then TAPERS each strut between its two end radii, and the assembly function
+queries the thickness `nSubSample` times along every beam (5 here, their default
+is 2). There is no per-cell quantisation anywhere in the path, so there is no
+cell-to-cell seam to measure. ★ PR 302's seam question does not arise for
+THICKNESS grading in this kernel.
+
+★ BUT THE FIELD HE HAS TO DRIVE IT WITH IS BINARY, AND THAT IS WHAT LIMITS IT.
+Sampled 2000 times along the part's x and z mid-lines, the largest thickness
+STEP between adjacent samples ~0.1 mm apart, as a percentage of the full
+0.45-2.4 mm thickness range:
+
+    driver                              along x     along z
+    core's DENSITY field (rung 068)      18.69%      23.33%
+    core's VON MISES field               15.80%       9.63%
+
+A continuous grading over a 0.1 mm step should move the thickness by well under
+1%. It moves by 10-23% because the DENSITY FIELD IS BINARY — PR 315 measured
+96.6% of his boundary voxels sitting at one end of the band or the other — so
+`thickness(rho)` jumps the full range across one voxel however smooth the
+function is. The von Mises field is better (it has real interior variation) and
+still steps, because it too falls to zero outside the solid.
+
+★ THIS IS PR 315'S FINDING ARRIVING FROM THE LATTICE SIDE. The tool can grade
+continuously; the field cannot ask it to. Whatever drives a graded lattice has to
+carry spatial variation the density field does not have — which is exactly why
+core's own `grade_lattice` takes a DEMAND field and not the density.
+
+CELL SIZE, three uniform arrays (von Mises driver, PicoGK voxel = his design
+voxel for this comparison only):
+
+    cell      cells      lookups      generate   fill of the design   peak managed
+    2.00 mm   311,080    19,909,120    36.5 s          85.38%            1,614 MB
+    4.60 mm    28,665     1,834,560     4.0 s          35.62%              267 MB
+    8.00 mm     6,032       386,048     1.0 s           7.42%              249 MB
+
+LatticeLibrary ships `RegularCellArray` and `ConformalCellArray` and NEITHER
+grades the cell size spatially, so the transition BETWEEN two cell sizes could
+not be measured without writing a new `ICellArray` — see R5 item 7.
+
+
+S3.c — WHAT IT HOLDS, WHAT IT WRITES, AND WHAT THE EXPORT WEIGHS
+------------------------------------------------------------------
+★ THE FIRST NUMBER TO GET RIGHT IS THE VOXEL PITCH, and getting it wrong makes
+the whole comparison meaningless. His DESIGN grid is 1.705 mm; his struts are
+0.45 to 2.4 mm. A lattice rendered at the design pitch cannot resolve its own
+struts and produces a triangle count that means nothing. The rows below are at
+LATTICE pitches, rung 068, 4.6026 mm cell, von Mises driver:
+
+  PicoGK    min strut     lattice    mesh          STL          VDB      VDB vs   total   peak
+  voxel     in voxels     gen (s)    triangles     (bytes)      (bytes)  STL      wall    RSS
+  0.45 mm     1.00          9.8      4,862,876    243,143,884   24,422,029  10.0x  18.0 s  1.11 GB
+  0.30 mm     1.50         14.9     11,360,620    568,031,084   71,375,770   8.0x  29.8 s  1.95 GB
+  0.20 mm     2.25         24.6     26,276,120  1,313,806,084  191,146,722   6.9x  62.8 s  3.05 GB
+
+  (for reference, at his DESIGN pitch of 1.705 mm — too coarse to be a lattice —
+   192,420 triangles, 9.6 MB STL, 761,454-byte VDB, 4.8 s, 267 MB.)
+
+★ THE TRIANGLE COUNT IS A PROPERTY OF THE GEOMETRY, NOT OF THE TOOL. At 0.20 mm
+PicoGK produces 26,276,120 triangles for ONE rung. His four variants are
+102,972,348 triangles — 25.7 million per variant. They agree. Nobody is going to
+make that number smaller by changing kernels.
+
+★ WHAT CHANGES IS THAT PICOGK NEVER HAS TO WRITE THEM. The lattice exists as a
+sparse OpenVDB narrow band; the mesh is manufactured only to export. At the same
+0.20 mm pitch the VDB is **182.3 MB against 1252.9 MB of STL — 6.9x** — and the
+VDB is the LIVE form, the one every boolean, offset and fillet operates on.
+Scaled to his four variants, ~5.1 GB of triangles becomes ~0.75 GB of VDB.
+
+★ AND IT IS FAST. The whole graded lattice — read the field, build the cell
+array, taper 28,665 cells' beams against 1.8 million thickness lookups, clip to
+the design, mesh it and write it — is **18 to 63 seconds** depending on pitch.
+
+MEMORY IS BOUNDED AND MODEST: 1.1 to 3.0 GB peak resident for a 26-million-
+triangle lattice, because what is resident is the narrow band and not the
+triangles.
+
+
+S3.d — WHERE THE CERTIFICATE WOULD HAVE TO SIT
+------------------------------------------------
+PicoGK does no FEA, its maintainers say so, and nothing here attempted to
+certify anything with it. Stating it plainly, because the answer is not "add a
+solver to PicoGK":
+
+  * The lattice PicoGK produces is a VOXEL FIELD (an OpenVDB level set), not a
+    density per design voxel. core's certification path takes a density per
+    design voxel: `analyze_fixed_design`
+    (core/include/topopt/analyze.hpp:306) is `(grid, params, density, bcs,
+    loads, material, ...)`, and `grade_lattice`
+    (core/include/topopt/grading.hpp:442) is `(grid, density, demand, region,
+    params, iso)`.
+
+  * So a PicoGK lattice can only be certified TODAY by throwing away what makes
+    it worth having: down-sampling its narrow band back onto the 128 x 31 x 118
+    design lattice and reading a per-voxel occupancy off it. That round trip
+    discards precisely the sub-voxel strut placement the implicit kernel exists
+    to provide, and it is the same trip his own pipeline already makes.
+
+  * The honest place for the certificate is where it already is: on the DESIGN,
+    before the lattice is materialised, with the lattice's homogenised
+    properties standing in for it — which is what core's composite octet tensor
+    path does. PicoGK changes how the lattice is REPRESENTED and EXPORTED. It
+    does not change what is certified, and it does not remove the need for the
+    homogenisation.

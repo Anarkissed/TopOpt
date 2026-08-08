@@ -1,0 +1,162 @@
+S1.b — WHAT DOES NOT SURVIVE THE CROSSING
+=========================================
+Task 2026-08-09-reference-implementation-bakeoff, bar S1(b): "STATE THE FIDELITY
+LOSS EXPLICITLY. A comparison whose differences are unlisted is not a
+comparison."
+
+Ten differences between his run and the GridapTopOpt arm. They are ordered by
+how much they could move the answer, not by how easy they were to find. Three
+of them (1, 3, 7) are STRUCTURAL — no amount of work on the driver script
+removes them, because the method itself has no place to put the constraint.
+
+
+WHAT DOES CROSS, EXACTLY
+------------------------
+Everything in this list is core's own, byte for byte, out of
+`build_production_loadcase` (s1_positive_control.txt):
+
+  the grid            128 x 31 x 118, spacing 1.7052793026343613 mm,
+                      origin (-18.27575073719824, -48.909974716, 0)
+  the discretisation  129 x 32 x 119 nodes, 1,473,696 displacement DOFs —
+                      the SAME number his run_info records as solved_grid_dofs
+  the part            110,904 solid voxels (23.69% of the box)
+  the clamp           21,000 Dirichlet DOFs = 7,000 nodes x 3 components
+  the load            7,382 nodal entries, all z, resultant -22.24113464 N
+  the frozen set      40,216 FrozenSolid voxels; 70,688 Active
+  the material        PLA, E = 3500 MPa, nu = 0.33
+  the ladder          [0.68, 0.52, 0.38, 0.26], part-relative
+
+
+1. ★ THE PART EXTERIOR CANNOT BE REMOVED FROM THE FEA. (structural)
+--------------------------------------------------------------------
+core marks the 357,320 non-part voxels FrozenVoid and they contribute NO ELEMENT
+to the stiffness matrix. A level-set method on a Cartesian background cannot do
+that: the level set has to be defined, evolved and reinitialised over the whole
+box, and the operator has to stay non-singular there, which is what the ersatz
+material is for. In the GridapTopOpt arm the exterior therefore carries
+`ϵ = 1e-3` of PLA's modulus — 76.31% of the box at one part in a thousand.
+
+This is not a driver-script choice. Removing the exterior would mean cutting the
+background mesh, which is the Unfitted/CutFEM formulation — a different code
+path (§S2.4), a different set of examples, and one that needs a conforming
+surface mesh of his part to cut with.
+
+WHAT IT COSTS: the exterior is a soft continuum bridging every gap in his part.
+It cannot carry much, but it is not nothing, and it makes the level-set arm's
+compliance a lower bound on the same design's compliance in core.
+
+
+2. THE LOAD IS DISTRIBUTED DIFFERENTLY WITHIN THE SAME VOXELS.
+---------------------------------------------------------------
+core spreads the group's 22.24113464 N as a consistent distributed traction over
+the EXPOSED FACES of the 5,165 Load-tagged voxels (`topopt::traction_loads`),
+which lands as 7,382 distinct nodal forces ranging from -0.00088 N to -0.00527 N.
+The GridapTopOpt arm applies a statically equivalent BODY FORCE over the same
+5,165 voxels: `l(v,φ) = ∫ χ_load (v ⋅ g) dΩ`, g = (0, 0, -22.24113464 / V_load).
+
+Same support, same resultant, same line of action. Different distribution
+inside the loaded region, so the local stress field differs there. The reason it
+is not carried exactly: `AffineFEStateMap` takes the load as a WEAK FORM, and a
+prescribed nodal vector is not one. Assembling the right-hand side by hand and
+handing it in would mean bypassing their state map, which is the part of the
+library the adjoint and the AD both run through.
+
+
+3. ★ min_feature_mm = 2.5 HAS NO COUNTERPART. (structural)
+------------------------------------------------------------
+core enforces a minimum printable feature with a density filter of radius
+`physical_filter_radius(min_feature_mm, spacing)` and then COUNTS the violations
+on the extracted mesh (`min_feature_now`), which is one of the accept gate's
+inputs.
+
+GridapTopOpt has two length scales, and neither is that:
+  * `η = 2 max(el_Δ)`, the interpolation bandwidth — how wide the ersatz ramp is
+    across the boundary. It smooths the integrand, not the geometry.
+  * `α = 4 max_steps γ max(el_Δ)`, the Hilbertian extension radius — how far a
+    shape sensitivity is smeared before it moves the boundary. It regularises
+    the VELOCITY, so it damps high-frequency boundary motion; it does not bound
+    the thickness of what the boundary encloses.
+
+A level-set method can and does produce members thinner than either. The arm's
+min-feature violation count is therefore MEASURED and reported (it is one of PR
+306's controls and is in every row of the table), but it is not CONSTRAINED, and
+his run's was.
+
+
+4. margin_stop = 1.5 HAS NO COUNTERPART, so no level-set rung is certified.
+----------------------------------------------------------------------------
+His ladder's accept/reject is core's certification: `analyze_fixed_design`
+(core/include/topopt/analyze.hpp:306) solves the fixed design under the declared
+load, computes a worst-case stress margin under the knockdown, and rejects the
+rung below 1.5. GridapTopOpt minimises compliance under a volume constraint. It
+has no stress functional in this formulation and no accept gate.
+
+CONSEQUENCE FOR THE TABLE: the `accepted`, `margin_worst_case`,
+`margin_effective` and `max_von_mises_mpa` columns are EMPTY for every
+GridapTopOpt row, and the probe prints "NOT CERTIFIED BY CORE" rather than a
+zero. A smoother surface at an uncertified margin is not the same product as
+his, and §S4b says what re-certifying one would take.
+
+
+5. THE INTERLAYER KNOCKDOWN DOES NOT CROSS.
+--------------------------------------------
+`z_knockdown` 0.55, `infill_percent` 35, `wall_loops` 5,
+`wall_line_width_mm` 0.45 / `wall_line_width_outer_mm` 0.42 all enter the
+knockdown spec, and the knockdown only enters the certification. Since (4) does
+not cross, neither does this. The two arms are therefore comparing GEOMETRY, not
+printability.
+
+
+6. THE LATTICE GRADING LAW DOES NOT CROSS.
+-------------------------------------------
+`grade_lattice` (core/include/topopt/grading.hpp:442) takes a per-voxel density
+vector and a per-voxel demand field. Nothing downstream of the optimizer is run
+on the GridapTopOpt designs in S2; S3 is where a lattice is put on one.
+
+
+7. ★ THE FROZEN-SOLID SET IS HELD BY A DIFFERENT MECHANISM, AND NOT EXACTLY.
+-----------------------------------------------------------------------------
+core pins a FrozenSolid voxel's density to 1 and excludes it from the update:
+40,216 voxels that the optimizer simply cannot touch.
+
+GridapTopOpt has no mask on the design variable. The nearest thing in its own
+idiom — the one its `elastic_compliance_ALM.jl` uses to hold Gamma_N still — is a
+zero Dirichlet condition on the VELOCITY EXTENSION, so the shape sensitivity is
+never allowed to move the boundary there. This arm pins the velocity at every
+node that does not touch an Active cell (396,797 + 7,000 of his 491,232 nodes)
+AND multiplies the frozen region's stiffness by 1 regardless of φ.
+
+That is exact in the INTERIOR of the pad and inexact at its boundary, and the
+reinitialiser is free to move φ anywhere it likes on every iteration. So the
+arm reports two controls per rung rather than asserting the constraint held:
+
+    frozen-solid cells still solid       (the whole pad, cell-averaged)
+    pad INTERIOR still solid             (pad cells all six of whose
+                                          neighbours are also pad)
+
+If the second is not 100%, the constraint was not carried and the row says so.
+
+
+8. THE OPTIMIZER CANNOT NUCLEATE HOLES, SO IT IS GIVEN SOME.
+-------------------------------------------------------------
+SIMP forms holes anywhere by driving a density down. A level set can only move
+a boundary it already has, so every level-set run needs a seeded initial
+topology. This arm uses GridapTopOpt's own `initial_lsf`, scaled to his units
+(§S2.3) to put a hole every 8 voxels = 13.64 mm. His run has no such parameter
+and no such choice.
+
+
+9. SIMP p = 3 vs A SHARP INTERFACE.
+------------------------------------
+Not a loss, a difference in kind, and the one the whole task is about. core's
+design variable is a density in [0,1] penalised toward the ends; the level set's
+is a boundary position. The `crossing_rms_mm` column measures exactly this: how
+much sub-voxel placement each field actually carries.
+
+
+10. THE LADDER IS WARM-STARTED IN BOTH ARMS, BUT FROM DIFFERENT THINGS.
+------------------------------------------------------------------------
+His run has `warm_start_inherit: true` — rung k+1 starts from rung k's converged
+density. The GridapTopOpt arm seeds rung k+1 from rung k's converged φ, which is
+the same idea in the other representation. Reported per rung, since it changes
+the iteration counts R4 asks for.
