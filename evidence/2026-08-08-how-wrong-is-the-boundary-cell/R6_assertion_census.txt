@@ -1,0 +1,40 @@
+=== R6 assertion census: 382894994cfc352b10896b8350111c30ce550422 -> working tree ===
+
+CORE 1. CHECK() CALL SITES   before=3950  after=3950
+
+CORE 2. ASSERTION / LITERAL MESSAGES   before=11396  after=11508
+   removed:
+     (none)
+
+APP 1. TEST FUNCTIONS   before=1389  after=1389
+   removed:
+     (none)
+
+APP 2. ASSERTION KINDS (before -> after; a kind that DROPPED is the thing to look at)
+     XCTAssertEqual                 2544 ->   2544  
+     XCTAssertFalse                  520 ->    520  
+     XCTAssertGreaterThan            196 ->    196  
+     XCTAssertGreaterThanOrEqual      35 ->     35  
+     XCTAssertLessThan                64 ->     64  
+     XCTAssertLessThanOrEqual         32 ->     32  
+     XCTAssertNil                    355 ->    355  
+     XCTAssertNotEqual                95 ->     95  
+     XCTAssertNotNil                 142 ->    142  
+     XCTAssertThrowsError             15 ->     15  
+     XCTAssertTrue                   991 ->    991  
+     XCTFail                          93 ->     93  
+     XCTSkip                          58 ->     58  
+     XCTSkipIf                         2 ->      2  
+     XCTSkipIfNil                      9 ->      9  
+     XCTSkipUnless                    14 ->     14  
+     XCTUnwrap                       531 ->    531  
+
+3. FILES THIS BRANCH DELETES OR SHRINKS under core/tests or app/.../Tests
+     (no test file changed at all)
+
+4. ctest REGISTRATIONS in core/CMakeLists.txt
+     add_test() sites: before=115  after=115
+     removed test names:
+       (none)
+
+=== VERDICT: R6 PASS -- nothing was weakened or deleted ===

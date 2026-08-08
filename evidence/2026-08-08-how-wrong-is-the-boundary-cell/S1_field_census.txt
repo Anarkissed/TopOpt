@@ -1,0 +1,43 @@
+design.bin v1  grid 128x31x118 = 468224 voxels  spacing 1.7052793026 mm  variants 4
+grid extent: 218.2758 x 52.8637 x 201.2230 mm
+
+--- rung vf=0.68  achieved 0.6799515472  accepted=1  iters=27  fp=17758310849814193205
+    recorded: margin_worst=2169.617170604274  margin_eff=449.24698980272075  max_vm=0.025350094360048595 MPa
+    printed voxels (rho>0.5): 88425   boundary 31707 (35.86% of printed)   interior 56718
+      grey (0.05,0.95)     : boundary    3341 (10.537% of bdry)   interior     850 ( 1.499%)
+      grey (0.01,0.99)     : boundary    3486 (10.994% of bdry)   interior    1974 ( 3.480%)
+      grey (1e-6,1-1e-6)   : boundary    3516 (11.089% of bdry)   interior    2489 ( 4.388%)
+    void-side skin voxels: 22361, of which rho>0.05: 2841 (12.705%)
+    INTERFACE band (bdry+skin, 54068 cells): grey (0.05,0.95) = 6182 (11.434%)
+    INTERFACE band (bdry+skin, 54068 cells): grey (0.01,0.99) = 6458 (11.944%)
+
+--- rung vf=0.52  achieved 0.5200131993  accepted=1  iters=126  fp=9314516262613259668
+    recorded: margin_worst=2259.9528152616044  margin_eff=467.95214063948833  max_vm=0.02433679129430558 MPa
+    printed voxels (rho>0.5): 76974   boundary 34328 (44.60% of printed)   interior 42646
+      grey (0.05,0.95)     : boundary       1 ( 0.003% of bdry)   interior       0 ( 0.000%)
+      grey (0.01,0.99)     : boundary       1 ( 0.003% of bdry)   interior       0 ( 0.000%)
+      grey (1e-6,1-1e-6)   : boundary     199 ( 0.580% of bdry)   interior       0 ( 0.000%)
+    void-side skin voxels: 26260, of which rho>0.05: 3 (0.011%)
+    INTERFACE band (bdry+skin, 60588 cells): grey (0.05,0.95) = 4 (0.007%)
+    INTERFACE band (bdry+skin, 60588 cells): grey (0.01,0.99) = 15 (0.025%)
+
+--- rung vf=0.38  achieved 0.3800070455  accepted=1  iters=140  fp=11926047030729388861
+    recorded: margin_worst=2193.8768329099  margin_eff=454.2702632226105  max_vm=0.025069775647819512 MPa
+    printed voxels (rho>0.5): 67078   boundary 34881 (52.00% of printed)   interior 32197
+      grey (0.05,0.95)     : boundary       1 ( 0.003% of bdry)   interior       0 ( 0.000%)
+      grey (0.01,0.99)     : boundary       1 ( 0.003% of bdry)   interior       0 ( 0.000%)
+      grey (1e-6,1-1e-6)   : boundary     543 ( 1.557% of bdry)   interior       0 ( 0.000%)
+    void-side skin voxels: 28347, of which rho>0.05: 0 (0.000%)
+    INTERFACE band (bdry+skin, 63228 cells): grey (0.05,0.95) = 1 (0.002%)
+    INTERFACE band (bdry+skin, 63228 cells): grey (0.01,0.99) = 1 (0.002%)
+
+--- rung vf=0.26  achieved 0.2599990258  accepted=1  iters=152  fp=15672910300073174360
+    recorded: margin_worst=2008.2783386128367  margin_eff=415.83972072665006  max_vm=0.027386642051813268 MPa
+    printed voxels (rho>0.5): 58595   boundary 34969 (59.68% of printed)   interior 23626
+      grey (0.05,0.95)     : boundary       2 ( 0.006% of bdry)   interior       0 ( 0.000%)
+      grey (0.01,0.99)     : boundary       4 ( 0.011% of bdry)   interior       0 ( 0.000%)
+      grey (1e-6,1-1e-6)   : boundary     710 ( 2.030% of bdry)   interior       0 ( 0.000%)
+    void-side skin voxels: 29668, of which rho>0.05: 0 (0.000%)
+    INTERFACE band (bdry+skin, 64637 cells): grey (0.05,0.95) = 2 (0.003%)
+    INTERFACE band (bdry+skin, 64637 cells): grey (0.01,0.99) = 4 (0.006%)
+

@@ -1,0 +1,84 @@
+[loadcase] load-group 0: faces=22 |F|=33.4N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+[loadcase] load-group 0: faces=22 |F|=33.4N voxels_tagged=20606 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=105413 depth=6 status=ok
+== boundary_cell_probe ==
+job        : /Users/nadim/.topopt-worker/ca62f91cba4b422d (model M2_verticalStand.step, material PLA)
+rung       : index 2, requested vf 0.38, achieved 0.3800070455, fingerprint 11926047030729388861
+mode       : replicate
+refine     : 2x  ->  resolution 256
+coarse grid: 128x31x118 @ 1.70527930263 mm  (468224 voxels)
+solve grid : 256x62x236 @ 0.852639651317 mm  (3745792 voxels, 3837267 nodes, 11511801 dofs)
+tag repair : 0 fine voxels forced solid (design occupied, the 2x CAD voxelization dropped them)
+ceil gap   : 0 coarse children outside the fine grid, of which 0 printed
+bcs        : 123255 dirichlet dofs
+loads      : 27408 nodal loads, resultant (0, 0, -33.3617019653) N
+load path  : connected=true   Load voxels 41320 (0 NOT printed)   Fixture voxels 26784 (0 NOT printed)
+replicated : 26784 Fixture children, 41320 Load children
+posture    : recycling OFF, geneo OFF, solver=2, cg_tol=1e-08, cg_max=0, margin_stop=1.5
+build_dir  : (0, 0, 1) [stored, as certified]
+
+-- WHAT THE GATE READS ------------------------------------
+  peak von Mises        : 0.029432547013051542 MPa
+  max interlayer tension: 0.0074497228650389725 MPa
+  margin in_plane       : 1868.6795939070732
+  margin interlayer     : 4060.5537344162335
+  margin worst_case     : 1868.6795939070732
+  margin effective      : 386.93401483115525
+  ACCEPTED              : true   (load_path_ok=true, margin_effective >= margin_stop 1.5)
+  printed mass          : 412.46618824535221 g
+  compliance f.u        : 0.0064432549050976546 N.mm
+  peak |displacement|   : 0.0015688944093187899 mm
+  printed voxels        : 536624 (fraction 0.604829402)
+  recorded (design.bin) : margin 2193.8768329098998, peak vM 0.025069775647819512
+
+-- SURFACE vs INTERIOR ------------------------------------
+  on the COARSE lattice (comparable across resolutions):
+    peak vM on BOUNDARY cells : 0.029432547013051542   (34881 cells)
+    peak vM on INTERIOR cells : 0.021718809755239096   (32197 cells)
+    boundary / interior       : 1.355163904
+  on the FINE lattice (its own classification):
+    peak vM on BOUNDARY cells : 0.029432547013051542   (151818 cells)
+    peak vM on INTERIOR cells : 0.023320388063140764   (384806 cells)
+
+-- S2: THE SAME SOLVE READ AT THE FREE SURFACE -------------
+  peak vM at the CELL CENTRE (what the gate reads) : 0.029432547013051542 MPa
+  peak vM at the FREE-SURFACE FACE CENTRE          : 0.036268654746069703 MPa
+  surface / centroid                              : 1.232263546
+  margin if the gate read the surface              : 1516.460988 (certified rule gives 1868.679594)
+  boundary cells read: 151818 over 165936 void-facing faces; worst at (253,13,32)
+
+-- WHERE THE PEAK SITS ------------------------------------
+  fine voxel (34,32,120) tag=Surface rho=1
+  coarse voxel (17,16,60)
+  centre (model frame) : (11.140317, -21.199186, 102.743078) mm
+  distance to nearest clamped node : 101.039597 mm (118.5021 fine voxels)
+
+-- COST (R4: separately) ----------------------------------
+  wall            : 566.245 s
+  operator applies: 12406
+  simp_compliance calls in this analysis: 1
+
+wrote CSV row -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/evidence/2026-08-08-how-wrong-is-the-boundary-cell/s1_refine.csv
+      697.18 real      1389.45 user        17.15 sys
+          2317582336  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              287932  page reclaims
+                 119  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  41  voluntary context switches
+             2608090  involuntary context switches
+      14533039961387  instructions retired
+       4370786066879  cycles elapsed
+          2333575592  peak memory footprint

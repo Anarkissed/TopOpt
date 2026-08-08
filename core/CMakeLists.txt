@@ -1518,6 +1518,19 @@ if(OpenCASCADE_FOUND)
   add_executable(cut_population_probe EXCLUDE_FROM_ALL
     tests/harness/cut_population_probe.cpp)
   target_link_libraries(cut_population_probe PRIVATE topopt)
+
+  # S1 (task 2026-08-08-how-wrong-is-the-boundary-cell): re-solve one stored
+  # variant at N x the run's resolution and report what the GATE reads, split
+  # boundary/interior. The reference the whole task hangs on, so it goes through
+  # production_loadcase_from_job + build_production_loadcase + analyze_fixed_design
+  # and re-derives no physics of its own. OCCT-gated: it imports his STEP.
+  #   cmake --build build --target boundary_cell_probe
+  #   ./build/boundary_cell_probe <job_dir> <design.bin> <rung> <refine> <csv>
+  add_executable(boundary_cell_probe EXCLUDE_FROM_ALL
+    tests/harness/boundary_cell_probe.cpp)
+  target_link_libraries(boundary_cell_probe PRIVATE topopt)
+  target_compile_definitions(boundary_cell_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
   # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
   # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
   # S3 instrumentation (minimum cross-section, outward excursion, volume, wall
