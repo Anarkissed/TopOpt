@@ -1,0 +1,31 @@
+S1 — MIXED PRECISION: ARMED, AND PROVABLY A NO-OP ON HIS PART
+
+fea_set_matfree_mixed_precision(true) is called on the sandbox path (--fp32).
+No production file changed to do it: the capability shipped complete in 092
+and has always been opt-in.
+
+FP32 in this codebase is the V-CYCLE PRECONDITIONER only (fine apply, Jacobi
+smoother, restriction, prolongation). The outer CG stays FP64 by design and so
+does the coarse direct solve; the flag selects mf_v_cycle_mixed over
+mf_v_cycle at multigrid.cpp:1191 and changes nothing else.
+
+His part never engages the multigrid hierarchy — his own run_info.json records
+cg_multigrid: false, mg_levels: 0, mg_mode: "stagnated-latched". Both arms of
+this run reproduce that exactly:
+
+state solves         120, of which the V-cycle engaged on 0
+
+THE DECISIVE EVIDENCE IS NOT THE WALL CLOCK. Two 120-iteration arms, same
+binary, one flag differing, produced a BIT-FOR-BIT IDENTICAL design:
+
+  rho.f64     BYTE-IDENTICAL
+  design.bin  BYTE-IDENTICAL
+  sha256      3a9a06aa77940a753143147f107ecf90126f2b4e4b5c339315d63c94d490cea4
+  margin      3378.485259539 on both arms, to every digit printed
+
+That is a structural fact about which branch runs, not a null measurement.
+It is reported this way because this machine's run-to-run wall offset cannot
+resolve a difference of a few percent (the bakeoff's host_contention.txt), so
+the two walls below are given for completeness and carry no conclusion:
+
+  FP32  WALL PER ITERATION   24.368 s   (total 2924.2 s over 120 iterations)

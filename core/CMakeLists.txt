@@ -1643,6 +1643,20 @@ if(OpenCASCADE_FOUND)
     tests/harness/design_rung_dump.cpp)
   target_link_libraries(design_rung_dump PRIVATE topopt)
 
+  # S1/S2/S3 (task 2026-08-09-levelset-on-our-solver): a working LEVEL-SET
+  # topology optimizer driven by OUR OWN matrix-free solver, so PR 321's
+  # 277.7 s/iteration for GridapTopOpt can be read against what the same design
+  # variable costs here. Writes NO FEA: `simp_compliance` runs every state solve
+  # and `analyze_fixed_design` the certification, exactly as the shipped ladder
+  # calls them, and `build_production_loadcase` supplies his problem. What is new
+  # is only the design variable in front of them. Also the arming point for the
+  # opt-in FP32 V-cycle (`--fp32`), which no production path calls.
+  #   cmake --build build --target levelset_probe
+  #   ./build/levelset_probe <part.step> <materials.json> <ref/design.bin> <out>
+  add_executable(levelset_probe EXCLUDE_FROM_ALL
+    tests/harness/levelset_probe.cpp)
+  target_link_libraries(levelset_probe PRIVATE topopt)
+
   # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
   # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
   # S3 instrumentation (minimum cross-section, outward excursion, volume, wall
