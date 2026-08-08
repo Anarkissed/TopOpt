@@ -1,0 +1,51 @@
+design.bin v1  grid 128x31x118  spacing 1.7052793026 mm  variants 4
+sub-sampling the trilinear interpolant at 8^3 = 512 points per cell
+
+--- rung vf=0.68   recorded peak vM 0.02535009436 MPa, margin 2169.617171
+    printed cells 88425   interface band 54068 (boundary 31707 + void-side skin 22361)
+    band cells holding a STRICTLY FRACTIONAL density in (0.05,0.95): 6182 (11.434%)
+    -> a cut-cell scheme has SOMETHING to integrate partially on this rung's density
+    by the TRILINEAR 0.5 LEVEL SET (the surface the export already uses):
+      band cells fully inside 12203, fully outside 6915, genuinely CUT 34950 (64.641%)
+      cut fraction over those: min 0.0020 median 0.5000 max 0.9980
+    VOLUME a cut-cell scheme would MOVE, over the whole band:
+      sum(cut_frac) 30237.25 cells vs sum(printed) 31707 cells -> -7288.383 mm^3 (-1.6621% of printed volume)
+      per-cell |cut_frac - printed|: mean 0.2840, p99 0.7500, max 0.9961
+      cells the two disagree about by more than half a cell: 2813 (5.203%)
+
+--- rung vf=0.52   recorded peak vM 0.02433679129 MPa, margin 2259.952815
+    printed cells 76974   interface band 60588 (boundary 34328 + void-side skin 26260)
+    band cells holding a STRICTLY FRACTIONAL density in (0.05,0.95): 4 (0.007%)
+    -> a cut-cell scheme has ESSENTIALLY NOTHING to integrate partially on this rung's density
+    by the TRILINEAR 0.5 LEVEL SET (the surface the export already uses):
+      band cells fully inside 13416, fully outside 8567, genuinely CUT 38605 (63.717%)
+      cut fraction over those: min 0.0059 median 0.5000 max 0.9941
+    VOLUME a cut-cell scheme would MOVE, over the whole band:
+      sum(cut_frac) 33220.91 cells vs sum(printed) 34328 cells -> -5489.983 mm^3 (-1.4383% of printed volume)
+      per-cell |cut_frac - printed|: mean 0.2813, p99 0.7500, max 0.9668
+      cells the two disagree about by more than half a cell: 3117 (5.145%)
+
+--- rung vf=0.38   recorded peak vM 0.02506977565 MPa, margin 2193.876833
+    printed cells 67078   interface band 63228 (boundary 34881 + void-side skin 28347)
+    band cells holding a STRICTLY FRACTIONAL density in (0.05,0.95): 1 (0.002%)
+    -> a cut-cell scheme has ESSENTIALLY NOTHING to integrate partially on this rung's density
+    by the TRILINEAR 0.5 LEVEL SET (the surface the export already uses):
+      band cells fully inside 13778, fully outside 9373, genuinely CUT 40077 (63.385%)
+      cut fraction over those: min 0.0059 median 0.5000 max 0.9941
+    VOLUME a cut-cell scheme would MOVE, over the whole band:
+      sum(cut_frac) 34122.76 cells vs sum(printed) 34881 cells -> -3760.038 mm^3 (-1.1304% of printed volume)
+      per-cell |cut_frac - printed|: mean 0.2802, p99 0.7500, max 0.9668
+      cells the two disagree about by more than half a cell: 3286 (5.197%)
+
+--- rung vf=0.26   recorded peak vM 0.02738664205 MPa, margin 2008.278339
+    printed cells 58595   interface band 64637 (boundary 34969 + void-side skin 29668)
+    band cells holding a STRICTLY FRACTIONAL density in (0.05,0.95): 2 (0.003%)
+    -> a cut-cell scheme has ESSENTIALLY NOTHING to integrate partially on this rung's density
+    by the TRILINEAR 0.5 LEVEL SET (the surface the export already uses):
+      band cells fully inside 13810, fully outside 9829, genuinely CUT 40998 (63.428%)
+      cut fraction over those: min 0.0059 median 0.5000 max 0.9941
+    VOLUME a cut-cell scheme would MOVE, over the whole band:
+      sum(cut_frac) 34465.34 cells vs sum(printed) 34969 cells -> -2497.588 mm^3 (-0.8596% of printed volume)
+      per-cell |cut_frac - printed|: mean 0.2796, p99 0.7441, max 0.9219
+      cells the two disagree about by more than half a cell: 3536 (5.471%)
+

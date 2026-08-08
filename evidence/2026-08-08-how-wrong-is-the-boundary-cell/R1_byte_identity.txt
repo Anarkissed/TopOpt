@@ -1,0 +1,34 @@
+R1 byte identity
+  branch     : claude/boundary-cell-error-50f585 @ 22340b5
+  merge-base : 382894994cfc352b10896b8350111c30ce550422
+  build dir  : /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build (ONE folder, both arms)
+
+--- the whole tracked diff against main, in core/ and app/ ---
+ core/CMakeLists.txt                        |  13 +
+ core/tests/harness/boundary_cell_probe.cpp | 881 +++++++++++++++++++++++++++++
+ 2 files changed, 894 insertions(+)
+
+--- R1's own statement: git diff main -- core/src core/include app/TopOptKit/Sources ---
+  (empty -- S1 touched no production source)
+
+--- arm A: this branch, as committed
+  topopt-cli  26779d40d54627747499aa93273be527d58d3d2d8112ea72e2b2134b5faaf456
+
+--- arm B: the merge-base's core/CMakeLists.txt, harness parked aside
+  topopt-cli  26779d40d54627747499aa93273be527d58d3d2d8112ea72e2b2134b5faaf456
+
+--- arm C: NEGATIVE CONTROL -- one production string changed
+  topopt-cli  b92a1854662f862895802da2efa247f8b07a935366b89b17ee9e229be9f6dffb
+
+--- arm A2: back to the branch, rebuilt (reproducibility)
+  topopt-cli  26779d40d54627747499aa93273be527d58d3d2d8112ea72e2b2134b5faaf456
+
+== VERDICT ==
+  A  (branch)           26779d40d54627747499aa93273be527d58d3d2d8112ea72e2b2134b5faaf456
+  B  (merge-base)       26779d40d54627747499aa93273be527d58d3d2d8112ea72e2b2134b5faaf456
+  C  (negative control) b92a1854662f862895802da2efa247f8b07a935366b89b17ee9e229be9f6dffb
+  A2 (branch, rebuilt)  26779d40d54627747499aa93273be527d58d3d2d8112ea72e2b2134b5faaf456
+
+  negative control DIFFERS from A: the comparison can see a change.
+  A == A2: the build is reproducible in this folder.
+  R1 PASS -- topopt-cli is BYTE-IDENTICAL to the merge-base.

@@ -1,0 +1,323 @@
+============================================================================================
+POSITIVE CONTROL -- at refine 1 the reference construction is the IDENTITY,
+so it must land on the margin the run RECORDED (and on the shipped setup).
+============================================================================================
+        mode   rung          recorded margin               reproduced    rel delta  band 1e-06
+   replicate   0.68        2169.617170604274       2169.6171633115155    3.361e-09  PASS
+   replicate   0.52       2259.9528152616044       2259.9528131892675    9.170e-10  PASS
+   replicate   0.38          2193.8768329099        2193.876834561551    7.528e-10  PASS
+   replicate   0.26       2008.2783386128367       2008.2783368635692    8.710e-10  PASS
+       retag   0.68        2169.617170604274       2169.6171633115155    3.361e-09  PASS
+       retag   0.52       2259.9528152616044       2259.9528131892675    9.170e-10  PASS
+       retag   0.38          2193.8768329099        2193.876834561551    7.528e-10  PASS
+       retag   0.26       2008.2783386128367       2008.2783368635692    8.710e-10  PASS
+
+  rung 0.68: replicate@1 vs retag@1 on every gate quantity: IDENTICAL
+  rung 0.52: replicate@1 vs retag@1 on every gate quantity: IDENTICAL
+  rung 0.38: replicate@1 vs retag@1 on every gate quantity: IDENTICAL
+  rung 0.26: replicate@1 vs retag@1 on every gate quantity: IDENTICAL
+
+============================================================================================
+R2 -- THE REFERENCE'S OWN NOISE (repeat solves, fresh process each time)
+============================================================================================
+
+  replicate, rung vf=0.68, refine 2x, 3 solves:
+    peak von Mises (MPa)            0.03571338300164791 .. 0.03571338300164791      rel spread 0.000e+00   BIT-IDENTICAL
+    margin worst_case                1540.0389259528326 .. 1540.0389259528326       rel spread 0.000e+00   BIT-IDENTICAL
+    margin effective                    318.88476042556 .. 318.88476042556          rel spread 0.000e+00   BIT-IDENTICAL
+    printed mass (g)                  543.7300261724452 .. 543.7300261724452        rel spread 0.000e+00   BIT-IDENTICAL
+    compliance f.u (N.mm)          0.005438604232526522 .. 0.005438604232526522     rel spread 0.000e+00   BIT-IDENTICAL
+    peak |displacement| (mm)      0.0014176743963377873 .. 0.0014176743963377873    rel spread 0.000e+00   BIT-IDENTICAL
+    peak vM, BOUNDARY cells         0.03571338300164791 .. 0.03571338300164791      rel spread 0.000e+00   BIT-IDENTICAL
+    peak vM, INTERIOR cells        0.020249775489681685 .. 0.020249775489681685     rel spread 0.000e+00   BIT-IDENTICAL
+
+  replicate, rung vf=0.26, refine 2x, 2 solves:
+    peak von Mises (MPa)           0.032122954327837516 .. 0.032122954327837516     rel spread 0.000e+00   BIT-IDENTICAL
+    margin worst_case                1712.1712853271845 .. 1712.1712853271845       rel spread 0.000e+00   BIT-IDENTICAL
+    margin effective                  354.5269674214744 .. 354.5269674214744        rel spread 0.000e+00   BIT-IDENTICAL
+    printed mass (g)                  360.3037702411583 .. 360.3037702411583        rel spread 0.000e+00   BIT-IDENTICAL
+    compliance f.u (N.mm)            0.0078955111845117 .. 0.0078955111845117       rel spread 0.000e+00   BIT-IDENTICAL
+    peak |displacement| (mm)      0.0020578549382680995 .. 0.0020578549382680995    rel spread 0.000e+00   BIT-IDENTICAL
+    peak vM, BOUNDARY cells        0.032122954327837516 .. 0.032122954327837516     rel spread 0.000e+00   BIT-IDENTICAL
+    peak vM, INTERIOR cells         0.02262398940083683 .. 0.02262398940083683      rel spread 0.000e+00   BIT-IDENTICAL
+
+  WORST repeat spread over every quantity and rung: 0.000e+00
+  PR 313 measured the WARM-vs-COLD Krylov path difference on this same
+  machinery at 8.4e-11 .. 6.8e-09 relative. The floor a coarse-vs-fine
+  difference must clear is the LARGER of the two.
+  FLOOR USED: 6.800e-09 relative.
+
+============================================================================================
+S1(b) -- WHAT THE GATE READS: coarse (as certified) against the finer solve
+============================================================================================
+
+--- mode replicate, rung vf=0.68   recorded margin 2169.6171706042742
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x236 @ 0.852640 mm, 11511801 dofs, ACCEPTED=1, load_path_ok=1 (Load voxels 41320, 0 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02535009445          0.035713383        -2.9018e-01     42673443x  MEASUREMENT
+      margin worst_case                     2169.617163          1540.038926        +4.0881e-01     60118633x  MEASUREMENT
+      margin effective                      449.2469883          318.8847604        +4.0881e-01     60118633x  MEASUREMENT
+      printed mass (g)                      543.7300262          543.7300262        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.005400527627       0.005438604233        -7.0012e-03      1029584x  MEASUREMENT
+      peak |displacement| (mm)            0.00140412615       0.001417674396        -9.5567e-03      1405393x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02535009445          0.035713383        -2.9018e-01     42673443x  MEASUREMENT
+      peak vM, INTERIOR cells             0.01952087536        0.02024977549        -3.5995e-02      5293451x  MEASUREMENT
+      ACCEPT verdict                                  1                    1          unchanged
+      peak cell 1x (i,j,k)=(126,6,16) tag=Surface  ->  2x coarse-equivalent (126,6,16) tag=Surface  SAME CELL
+      tag repair 0 voxels; ceil-gap printed cells lost 0; resultant -33.361701965335698 N
+    3x: 384x93x354 @ 0.568426 mm, 38542350 dofs, ACCEPTED=1, load_path_ok=1 (Load voxels 139455, 0 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02535009445         0.0426728134        -4.0594e-01     59697462x  MEASUREMENT
+      margin worst_case                     2169.617163          1288.876819        +6.8334e-01    100491092x  MEASUREMENT
+      margin effective                      449.2469883          266.8784332        +6.8334e-01    100491092x  MEASUREMENT
+      printed mass (g)                      543.7300262          543.7300262        +2.0909e-16            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.005400527627       0.005450099003        -9.0955e-03      1337574x  MEASUREMENT
+      peak |displacement| (mm)            0.00140412615       0.001421712704        -1.2370e-02      1819114x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02535009445         0.0426728134        -4.0594e-01     59697462x  MEASUREMENT
+      peak vM, INTERIOR cells             0.01952087536        0.02358327761        -1.7226e-01     25332022x  MEASUREMENT
+      ACCEPT verdict                                  1                    1          unchanged
+      peak cell 1x (i,j,k)=(126,6,16) tag=Surface  ->  3x coarse-equivalent (126,6,16) tag=Surface  SAME CELL
+      tag repair 0 voxels; ceil-gap printed cells lost 0; resultant -33.361701965381656 N
+
+--- mode replicate, rung vf=0.52   recorded margin 2259.9528152616044
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x236 @ 0.852640 mm, 11511801 dofs, ACCEPTED=1, load_path_ok=1 (Load voxels 41320, 0 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02433679132         0.0338217603        -2.8044e-01     41241153x  MEASUREMENT
+      margin worst_case                     2259.952813          1626.172012        +3.8974e-01     57314391x  MEASUREMENT
+      margin effective                      467.9521402          336.7197177        +3.8974e-01     57314391x  MEASUREMENT
+      printed mass (g)                      473.3172184          473.3172184        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.005663192112       0.005708166735        -7.8790e-03      1158676x  MEASUREMENT
+      peak |displacement| (mm)           0.001378295666       0.001393898225        -1.1193e-02      1646099x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02433679132         0.0338217603        -2.8044e-01     41241153x  MEASUREMENT
+      peak vM, INTERIOR cells               0.018931893        0.01985533609        -4.6509e-02      6839494x  MEASUREMENT
+      ACCEPT verdict                                  1                    1          unchanged
+      peak cell 1x (i,j,k)=(17,14,61) tag=Surface  ->  2x coarse-equivalent (126,6,16) tag=Surface  moved
+      tag repair 0 voxels; ceil-gap printed cells lost 0; resultant -33.361701965335698 N
+
+--- mode replicate, rung vf=0.38   recorded margin 2193.8768329098998
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x236 @ 0.852640 mm, 11511801 dofs, ACCEPTED=1, load_path_ok=1 (Load voxels 41320, 0 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02506977563        0.02943254701        -1.4823e-01     21798454x  MEASUREMENT
+      margin worst_case                     2193.876835          1868.679594        +1.7403e-01     25591933x  MEASUREMENT
+      margin effective                      454.2702636          386.9340148        +1.7403e-01     25591933x  MEASUREMENT
+      printed mass (g)                      412.4661882          412.4661882        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)               0.00638547484       0.006443254905        -8.9675e-03      1318754x  MEASUREMENT
+      peak |displacement| (mm)           0.001551847564       0.001568894409        -1.0866e-02      1597870x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02506977563        0.02943254701        -1.4823e-01     21798454x  MEASUREMENT
+      peak vM, INTERIOR cells             0.01853509508        0.02171880976        -1.4659e-01     21557044x  MEASUREMENT
+      ACCEPT verdict                                  1                    1          unchanged
+      peak cell 1x (i,j,k)=(17,16,61) tag=Surface  ->  2x coarse-equivalent (17,16,60) tag=Surface  moved
+      tag repair 0 voxels; ceil-gap printed cells lost 0; resultant -33.361701965335698 N
+
+--- mode replicate, rung vf=0.26   recorded margin 2008.2783386128367
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x236 @ 0.852640 mm, 11511801 dofs, ACCEPTED=1, load_path_ok=1 (Load voxels 41320, 0 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02738664208        0.03212295433        -1.4744e-01     21682828x  MEASUREMENT
+      margin worst_case                     2008.278337          1712.171285        +1.7294e-01     25432709x  MEASUREMENT
+      margin effective                      415.8397204          354.5269674        +1.7294e-01     25432709x  MEASUREMENT
+      printed mass (g)                      360.3037702          360.3037702        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.007810319124       0.007895511185        -1.0790e-02      1586755x  MEASUREMENT
+      peak |displacement| (mm)            0.00202807833       0.002057854938        -1.4470e-02      2127902x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02738664208        0.03212295433        -1.4744e-01     21682828x  MEASUREMENT
+      peak vM, INTERIOR cells             0.02050363964         0.0226239894        -9.3721e-02     13782545x  MEASUREMENT
+      ACCEPT verdict                                  1                    1          unchanged
+      peak cell 1x (i,j,k)=(17,17,60) tag=Surface  ->  2x coarse-equivalent (17,17,60) tag=Surface  SAME CELL
+      tag repair 0 voxels; ceil-gap printed cells lost 0; resultant -33.361701965335698 N
+    3x: 384x93x354 @ 0.568426 mm, 38542350 dofs, ACCEPTED=1, load_path_ok=1 (Load voxels 139455, 0 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02738664208        0.03558420241        -2.3037e-01     33878055x  MEASUREMENT
+      margin worst_case                     2008.278337          1545.629697        +2.9933e-01     44018671x  MEASUREMENT
+      margin effective                      415.8397204          320.0424012        +2.9933e-01     44018671x  MEASUREMENT
+      printed mass (g)                      360.3037702          360.3037702        +4.7330e-16            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.007810319124       0.007921597288        -1.4047e-02      2065800x  MEASUREMENT
+      peak |displacement| (mm)            0.00202807833        0.00206625365        -1.8476e-02      2717003x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02738664208        0.03558420241        -2.3037e-01     33878055x  MEASUREMENT
+      peak vM, INTERIOR cells             0.02050363964        0.02450306236        -1.6322e-01     24003139x  MEASUREMENT
+      ACCEPT verdict                                  1                    1          unchanged
+      peak cell 1x (i,j,k)=(17,17,60) tag=Surface  ->  3x coarse-equivalent (17,17,60) tag=Surface  SAME CELL
+      tag repair 0 voxels; ceil-gap printed cells lost 0; resultant -33.361701965381656 N
+
+--- mode retag, rung vf=0.68   recorded margin 2169.6171706042742
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x235 @ 0.852640 mm, 11463228 dofs, ACCEPTED=0, load_path_ok=0 (Load voxels 20606, 3446 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02535009445        0.03128073352        -1.8959e-01     27881469x  MEASUREMENT
+      margin worst_case                     2169.617163          1758.270789        +2.3395e-01     34404322x  MEASUREMENT
+      margin effective                      449.2469883          364.0724593        +2.3395e-01     34404322x  MEASUREMENT
+      printed mass (g)                      543.7300262          543.7300262        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.005400527627       0.004690105781        +1.5147e-01     22275361x  MEASUREMENT
+      peak |displacement| (mm)            0.00140412615       0.001480586946        -5.1642e-02      7594444x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02535009445        0.03128073352        -1.8959e-01     27881469x  MEASUREMENT
+      peak vM, INTERIOR cells             0.01952087536        0.02049852344        -4.7694e-02      7013763x  MEASUREMENT
+      ACCEPT verdict                                  1                    0              MOVED
+      peak cell 1x (i,j,k)=(126,6,16) tag=Surface  ->  2x coarse-equivalent (126,6,16) tag=Surface  SAME CELL
+      tag repair 6788 voxels; ceil-gap printed cells lost 0; resultant -33.361701965345773 N
+
+--- mode retag, rung vf=0.52   recorded margin 2259.9528152616044
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x235 @ 0.852640 mm, 11463228 dofs, ACCEPTED=0, load_path_ok=0 (Load voxels 20606, 3446 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02433679132        0.02942717265        -1.7298e-01     25438580x  MEASUREMENT
+      margin worst_case                     2259.952813          1869.020876        +2.0916e-01     30759416x  MEASUREMENT
+      margin effective                      467.9521402          387.0046817        +2.0916e-01     30759416x  MEASUREMENT
+      printed mass (g)                      473.3172184          473.3172184        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.005663192112        0.00494435488        +1.4539e-01     21380212x  MEASUREMENT
+      peak |displacement| (mm)           0.001378295666       0.001470705684        -6.2834e-02      9240264x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02433679132        0.02942717265        -1.7298e-01     25438580x  MEASUREMENT
+      peak vM, INTERIOR cells               0.018931893        0.02035432443        -6.9884e-02     10276985x  MEASUREMENT
+      ACCEPT verdict                                  1                    0              MOVED
+      peak cell 1x (i,j,k)=(17,14,61) tag=Surface  ->  2x coarse-equivalent (17,15,60) tag=Interior  moved
+      tag repair 6059 voxels; ceil-gap printed cells lost 0; resultant -33.361701965345773 N
+
+--- mode retag, rung vf=0.38   recorded margin 2193.8768329098998
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x235 @ 0.852640 mm, 11463228 dofs, ACCEPTED=0, load_path_ok=0 (Load voxels 20606, 3446 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02506977563        0.03037113681        -1.7455e-01     25669501x  MEASUREMENT
+      margin worst_case                     2193.876835          1810.929908        +2.1146e-01     31097683x  MEASUREMENT
+      margin effective                      454.2702636          374.9762037        +2.1146e-01     31097683x  MEASUREMENT
+      printed mass (g)                      412.4661882          412.4661882        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)               0.00638547484       0.005626946896        +1.3480e-01     19823935x  MEASUREMENT
+      peak |displacement| (mm)           0.001551847564       0.001659165708        -6.4682e-02      9512058x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02506977563        0.03037113681        -1.7455e-01     25669501x  MEASUREMENT
+      peak vM, INTERIOR cells             0.01853509508        0.02109288382        -1.2126e-01     17832811x  MEASUREMENT
+      ACCEPT verdict                                  1                    0              MOVED
+      peak cell 1x (i,j,k)=(17,16,61) tag=Surface  ->  2x coarse-equivalent (17,16,60) tag=Interior  moved
+      tag repair 5507 voxels; ceil-gap printed cells lost 0; resultant -33.361701965345773 N
+
+--- mode retag, rung vf=0.26   recorded margin 2008.2783386128367
+    1x: 128x31x118 @ 1.705279 mm, 1473696 dofs, ACCEPTED=1, load_path_ok=1
+    2x: 256x62x235 @ 0.852640 mm, 11463228 dofs, ACCEPTED=0, load_path_ok=0 (Load voxels 20606, 3446 NOT printed)
+      quantity                             as certified            reference  rel err of coarse   vs floor
+      peak von Mises (MPa)                0.02738664208        0.03321974491        -1.7559e-01     25822271x  MEASUREMENT
+      margin worst_case                     2008.278337          1655.641852        +2.1299e-01     31322177x  MEASUREMENT
+      margin effective                      415.8397204          342.8218252        +2.1299e-01     31322177x  MEASUREMENT
+      printed mass (g)                      360.3037702          360.3037702        +0.0000e+00            0x  AT THE FLOOR
+      compliance f.u (N.mm)              0.007810319124        0.00692999997        +1.2703e-01     18680909x  MEASUREMENT
+      peak |displacement| (mm)            0.00202807833       0.002194020482        -7.5634e-02     11122621x  MEASUREMENT
+      peak vM, BOUNDARY cells             0.02738664208        0.03321974491        -1.7559e-01     25822271x  MEASUREMENT
+      peak vM, INTERIOR cells             0.02050363964        0.02339852295        -1.2372e-01     18194231x  MEASUREMENT
+      ACCEPT verdict                                  1                    0              MOVED
+      peak cell 1x (i,j,k)=(17,17,60) tag=Surface  ->  2x coarse-equivalent (17,18,60) tag=Interior  moved
+      tag repair 5292 voxels; ceil-gap printed cells lost 0; resultant -33.361701965345773 N
+
+============================================================================================
+S1(c) -- SURFACE vs INTERIOR (the split a whole-part number would hide)
+============================================================================================
+        mode   rung  refine      peak BOUNDARY      peak INTERIOR  bdry/int   err BOUNDARY   err INTERIOR
+   replicate   0.68      1x      0.02535009445      0.01952087536    1.2986                              
+   replicate   0.68      2x        0.035713383      0.02024977549    1.7636    -2.9018e-01    -3.5995e-02
+   replicate   0.68      3x       0.0426728134      0.02358327761    1.8095    -4.0594e-01    -1.7226e-01
+   replicate   0.52      1x      0.02433679132        0.018931893    1.2855                              
+   replicate   0.52      2x       0.0338217603      0.01985533609    1.7034    -2.8044e-01    -4.6509e-02
+   replicate   0.38      1x      0.02506977563      0.01853509508    1.3526                              
+   replicate   0.38      2x      0.02943254701      0.02171880976    1.3552    -1.4823e-01    -1.4659e-01
+   replicate   0.26      1x      0.02738664208      0.02050363964    1.3357                              
+   replicate   0.26      2x      0.03212295433       0.0226239894    1.4199    -1.4744e-01    -9.3721e-02
+   replicate   0.26      3x      0.03558420241      0.02450306236    1.4522    -2.3037e-01    -1.6322e-01
+       retag   0.68      1x      0.02535009445      0.01952087536    1.2986                              
+       retag   0.68      2x      0.03128073352      0.02049852344    1.5260    -1.8959e-01    -4.7694e-02
+       retag   0.52      1x      0.02433679132        0.018931893    1.2855                              
+       retag   0.52      2x      0.02942717265      0.02035432443    1.4457    -1.7298e-01    -6.9884e-02
+       retag   0.38      1x      0.02506977563      0.01853509508    1.3526                              
+       retag   0.38      2x      0.03037113681      0.02109288382    1.4399    -1.7455e-01    -1.2126e-01
+       retag   0.26      1x      0.02738664208      0.02050363964    1.3357                              
+       retag   0.26      2x      0.03321974491      0.02339852295    1.4197    -1.7559e-01    -1.2372e-01
+
+============================================================================================
+THE THIRD POINT -- is the reference itself converged?
+
+  A CONVERGENT quantity settles: each refinement moves it less than the last, and
+  the successive-refinement exponent q in  peak ~ h^-q  decays toward 0. A
+  SINGULAR one does not: q stays put, and there is no limit to extrapolate to.
+  So this reports q per refinement step rather than fitting a convergent form and
+  quoting an extrapolated value the data may not support.
+
+
+  replicate, rung 0.68:
+    h = 1.705279 mm   peak(centroid) 0.02535009445   peak(surface) 0.03325949272
+    h = 0.852640 mm   peak(centroid) 0.035713383   peak(surface) 0.04520530648
+    h = 0.568426 mm   peak(centroid) 0.0426728134   peak(surface) 0.05355546359
+    refine x2.000: centroid x1.40881 -> q = 0.4945   |   surface x1.35917 -> q = 0.4427
+    refine x1.500: centroid x1.19487 -> q = 0.4391   |   surface x1.18472 -> q = 0.4180
+    q is NOT collapsing (0.4945 -> 0.4391).
+    ** THE PEAK IS NOT CONVERGING. There is no limit to extrapolate to,
+       so 'the correct margin' does not exist for this stress measure on
+       this geometry. What CAN be quoted is how far it moves per
+       refinement, which is what the S1(b) table reports. **
+       For reference, the 2-D re-entrant 90-degree corner exponent is
+       0.4555 and a crack is 0.5.
+
+  replicate, rung 0.52:
+    h = 1.705279 mm   peak(centroid) 0.02433679132   peak(surface) 0.03153290194
+    h = 0.852640 mm   peak(centroid) 0.0338217603   peak(surface) 0.04258055378
+    ONE refinement only -- q = 0.4748, but a single step cannot distinguish convergence from divergence. Not quoted as an order.
+
+  replicate, rung 0.38:
+    h = 1.705279 mm   peak(centroid) 0.02506977563   peak(surface) 0.03006495074
+    h = 0.852640 mm   peak(centroid) 0.02943254701   peak(surface) 0.03626865475
+    ONE refinement only -- q = 0.2315, but a single step cannot distinguish convergence from divergence. Not quoted as an order.
+
+  replicate, rung 0.26:
+    h = 1.705279 mm   peak(centroid) 0.02738664208   peak(surface) 0.03277851384
+    h = 0.852640 mm   peak(centroid) 0.03212295433   peak(surface) 0.039444575
+    h = 0.568426 mm   peak(centroid) 0.03558420241   peak(surface) 0.04437125528
+    refine x2.000: centroid x1.17294 -> q = 0.2301   |   surface x1.20337 -> q = 0.2671
+    refine x1.500: centroid x1.10775 -> q = 0.2524   |   surface x1.12490 -> q = 0.2903
+    q is NOT collapsing (0.2301 -> 0.2524).
+    ** THE PEAK IS NOT CONVERGING. There is no limit to extrapolate to,
+       so 'the correct margin' does not exist for this stress measure on
+       this geometry. What CAN be quoted is how far it moves per
+       refinement, which is what the S1(b) table reports. **
+       For reference, the 2-D re-entrant 90-degree corner exponent is
+       0.4555 and a crack is 0.5.
+
+  retag, rung 0.68:
+    h = 1.705279 mm   peak(centroid) 0.02535009445   peak(surface) 0.03325949272
+    h = 0.852640 mm   peak(centroid) 0.03128073352   peak(surface) 0.03950592864
+    ONE refinement only -- q = 0.3033, but a single step cannot distinguish convergence from divergence. Not quoted as an order.
+
+  retag, rung 0.52:
+    h = 1.705279 mm   peak(centroid) 0.02433679132   peak(surface) 0.03153290194
+    h = 0.852640 mm   peak(centroid) 0.02942717265   peak(surface) 0.03652296925
+    ONE refinement only -- q = 0.2740, but a single step cannot distinguish convergence from divergence. Not quoted as an order.
+
+  retag, rung 0.38:
+    h = 1.705279 mm   peak(centroid) 0.02506977563   peak(surface) 0.03006495074
+    h = 0.852640 mm   peak(centroid) 0.03037113681   peak(surface) 0.03736755696
+    ONE refinement only -- q = 0.2768, but a single step cannot distinguish convergence from divergence. Not quoted as an order.
+
+  retag, rung 0.26:
+    h = 1.705279 mm   peak(centroid) 0.02738664208   peak(surface) 0.03277851384
+    h = 0.852640 mm   peak(centroid) 0.03321974491   peak(surface) 0.04080056379
+    ONE refinement only -- q = 0.2786, but a single step cannot distinguish convergence from divergence. Not quoted as an order.
+
+============================================================================================
+R4 -- ITERATIONS AND WALL, SEPARATELY
+============================================================================================
+        mode   rung  refine         dofs  operator applies   wall (s)  applies x   wall x
+   replicate   0.68      1x      1473696              6355       50.7       1.00     1.00
+   replicate   0.68      2x     11511801             11101      470.8       1.75     9.29
+   replicate   0.68      2x     11511801             11101      494.6       1.75     9.76
+   replicate   0.68      2x     11511801             11101      424.7       1.75     8.38
+   replicate   0.68      3x     38542350             16193     2267.6       2.55    44.73
+   replicate   0.52      1x      1473696              6712       50.7       1.00     1.00
+   replicate   0.52      2x     11511801             11763      526.6       1.75    10.39
+   replicate   0.38      1x      1473696              7000       46.8       1.00     1.00
+   replicate   0.38      2x     11511801             12406      566.2       1.77    12.10
+   replicate   0.26      1x      1473696              7322       47.9       1.00     1.00
+   replicate   0.26      2x     11511801             12953      597.3       1.77    12.48
+   replicate   0.26      2x     11511801             12953      593.2       1.77    12.39
+   replicate   0.26      3x     38542350             18953     2145.2       2.59    44.82
+       retag   0.68      1x      1473696              6355       45.5       1.00     1.00
+       retag   0.68      2x     11463228             11327      539.5       1.78    11.85
+       retag   0.52      1x      1473696              6712       50.6       1.00     1.00
+       retag   0.52      2x     11463228             11737      545.5       1.75    10.79
+       retag   0.38      1x      1473696              7000       46.0       1.00     1.00
+       retag   0.38      2x     11463228             12421      517.5       1.77    11.25
+       retag   0.26      1x      1473696              7322       47.5       1.00     1.00
+       retag   0.26      2x     11463228             13035      525.0       1.78    11.06
