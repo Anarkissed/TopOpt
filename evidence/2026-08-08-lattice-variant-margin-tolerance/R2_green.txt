@@ -1,0 +1,29 @@
+=== R2 GREEN — app (swift test, whole package) ===
+	 Executed 1377 tests, with 23 tests skipped and 8 failures (0 unexpected) in 141.847 (141.965) seconds
+
+The 8 failures are the 3 pre-existing AppModelTests 3MF cases, and they are
+pre-existing because this worktree has no lib3mf in the vendored xcframework.
+Proven by parking every file this task adds and STASHING every app source
+change, then running those three alone:
+     Executed 3 tests, with 8 failures (0 unexpected) in 0.300 s
+     rawMessage: "3MF import requires lib3mf, which is not available in this build"
+(Provisioning lib3mf here breaks the test-bundle LINK with undefined _lib3mf_*;
+ it was tried in this session and reverted. CI configures TOPOPT_REQUIRE_DEPS=ON
+ and has lib3mf, so those three run there.)
+
+=== R2 GREEN — core (ctest, whole suite) ===
+115/115 Test #109: protect_freeze_vs_solidity .......   Passed  389.97 sec
+
+100% tests passed out of 115
+
+Total Test time (real) = 824.19 sec
+
+115 registered here, against CI's 114 + the 1 this task adds
+(margin_reproduction). Configured with -DTOPOPT_REQUIRE_DEPS=ON and lib3mf,
+so the denominator is CI's.
+
+=== the new/changed tests, by name ===
+core  margin_reproduction                          (new ctest target)
+app   RecommendThePrintedObjectTests               8 tests, new
+app   LatticesAreInTheAppGateTests                 2 tests, new (S3 gate)
+app   LatticeVariantsOnScreenTests                 16 tests, 2 re-pinned

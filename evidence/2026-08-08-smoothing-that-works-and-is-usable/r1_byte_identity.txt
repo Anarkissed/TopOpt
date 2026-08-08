@@ -1,0 +1,92 @@
+R1 — BYTE-IDENTICAL WHEN NOT SMOOTHING
+
+merge-base: 966ffa6eaf9bb4608b1be62ee1b04e04815a49f0
+
+==================================================================
+1. CORE — PROVEN STRUCTURALLY, WHICH IS STRONGER THAN A CHECKSUM
+==================================================================
+
+A checksum proves two binaries agreed on the inputs you tried. An empty
+diff over every shipped translation unit proves they cannot disagree on
+any input. This branch changes NO core source at all:
+
+$ git diff --stat $MB...HEAD -- core/src core/include
+(no output = no shipped core file differs)
+
+Every core/ file the branch touches:
+    core/CMakeLists.txt
+    core/tests/harness/cut_population_probe.cpp
+    core/tests/harness/operator_bakeoff_probe.cpp
+    core/tests/harness/surface_instruments.hpp
+
+  core/CMakeLists.txt          — ONE additive block, and the target it adds
+                                 is EXCLUDE_FROM_ALL, so no existing target's
+                                 sources, flags or link line change:
+      +
+      +  # S2 (task 2026-08-08-smoothing-that-works-and-is-usable): the bake-off PR 306
+      +  # stopped short of — Taubin against mean-curvature flow on the OPTIMIZER-CUT
+      +  # population of his own four rungs, with PR 307's classifier deciding which
+      +  # vertices those are and C4 freezing every CAD one. OCCT-gated because it
+      +  # imports his STEP to get the classifier's answer.
+      +  #   cmake --build build --target cut_population_probe
+      +  #   ./build/cut_population_probe <design.bin> <part.step> [evidence_dir]
+      +  add_executable(cut_population_probe EXCLUDE_FROM_ALL
+      +    tests/harness/cut_population_probe.cpp)
+      +  target_link_libraries(cut_population_probe PRIVATE topopt)
+
+  surface_instruments.hpp      — a MOVE out of operator_bakeoff_probe.cpp.
+  operator_bakeoff_probe.cpp     Both are test harnesses; neither is linked
+                                 into topopt or topopt-cli. The move is proved
+                                 behaviour-preserving in r5_instrument_move.txt
+                                 (probe rebuilt, re-run, every geometric figure
+                                 identical to PR 306's committed output).
+
+  cut_population_probe.cpp     — new harness, EXCLUDE_FROM_ALL.
+
+materials.json touched:
+    files:        0
+
+==================================================================
+2. APP — THE ONE SHIPPED VALUE THAT COULD HAVE MOVED SILENTLY
+==================================================================
+
+ViewerMeshSignature.contentHash is the viewer's upload cache key. Adding
+topologyHash beside it must not perturb it by one bit, or every viewer in
+the app would decide differently about when to re-upload a mesh.
+
+Method: the BASE tree's struct and this branch's struct compiled SIDE BY
+SIDE — both lifted verbatim from their trees, neither retyped — and run
+over the same pseudo-random meshes.
+
+    cases compared: 30
+    contentHash / vertexCount / triangleCount mismatches: 0
+    R1 PASS — the shipped signature value is unchanged by this branch
+
+==================================================================
+3. APP — THE TWO PREVIEW ROUTES ARE BIT-IDENTICAL
+==================================================================
+
+The path-taking preview now delegates to a shared body. Its output must not
+have moved. Asserted permanently, not once:
+  SmoothingPreviewNoDiskTests.testTheInMemoryRouteMatchesTheFileRouteExactly
+  — XCTAssertEqual on the full vertex array, both routes, same geometry.
+
+==================================================================
+4. WHAT THIS BRANCH DELIBERATELY DOES CHANGE (not byte-identical,
+   and it would be dishonest to bury these under a checksum)
+==================================================================
+
+  a. A mesh swap whose CONNECTIVITY is unchanged no longer reframes the
+     camera or restarts the settle. That is S1a, and it is the point. It
+     applies to any same-topology swap, so the Original/Smoothed toggle
+     keeps the view too. A different part, a different variant or a
+     re-meshing still reframes — asserted by
+     testANewPartStillReframesTheCamera / testANewPartDoesSettleAgain.
+
+  b. The Smoothed tab is enabled by a preview, not only by a certification
+     (S3d).
+
+  c. The receipt drawer gains one footnote (S3e).
+
+  d. The live preview no longer opens the variant's STL (S1b). Same
+     geometry in, same geometry out — see section 3.

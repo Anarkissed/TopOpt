@@ -1248,6 +1248,15 @@ struct LatticeCertOutcome {
   double solid_margin_effective = 0.0; // the variant's SOLID gated margin
   double solid_margin_reproduced = 0.0;// null-posture re-cert (proves reconstruction)
   bool solid_reproduced = false;       // solid_margin_reproduced == solid_margin?
+  // The same proof read against the band the solver's own convergence tolerance
+  // justifies (analyze.hpp, kMarginReproductionResidualFactor). `solid_reproduced`
+  // above stays the LITERAL bit-equality it always was — it is what the receipt's
+  // long-standing `solid_reconstruction_exact` key means, and on a run whose
+  // solves fall back to Jacobi-CG it is FALSE, because the ladder's certification
+  // solve carried a Krylov recycle subspace this re-certification is denied.
+  double solid_reproduction_relative_delta = 0.0;
+  bool solid_reproduces_within_band = false;
+  double cert_tolerance = 0.0;         // the solve's own relative-residual bound
 };
 
 // The exact certification inputs minimize_plastic certified the SOLID design with
@@ -1381,15 +1390,30 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
 
   oc.solid_margin = variant.report.margin;
   oc.solid_margin_effective = variant.report.margin_effective;
+  oc.cert_tolerance = cx.cert_tol;
 
   // (1) Null-posture re-cert — MUST reproduce the variant's SOLID margin. This is the
   // live proof that the reconstruction above is faithful (so the latticed margin that
-  // shares it is trustworthy). Bit-for-bit by the single-source-of-truth contract.
+  // shares it is trustworthy).
+  //
+  // NOT bit-for-bit, and the receipt now says so with a number instead of asserting
+  // a contract that does not hold (task 2026-08-08-lattice-variant-margin-tolerance,
+  // S1(a)). This solve runs under `ScopedLadderSolverIsolation` — recycling and GenEO
+  // OFF — while the ladder's certification of the same design ran with a warm Krylov
+  // recycle subspace. Two Krylov paths, one operator, both converged to the same
+  // residual tolerance: the margins agree to the band that tolerance justifies, and
+  // no further. On the maintainer's own run `solid_reconstruction_exact` has been
+  // FALSE on every rung since the recycler was armed, and nothing read it.
   const FixedDesignAnalysis solid_recert = analyze_variant_with_posture(
       variant, sg, options, material, bcs, cx, /*post=*/nullptr);
   oc.solid_margin_reproduced = solid_recert.margin.worst_case;
   oc.solid_reproduced =
       (solid_recert.margin.worst_case == variant.report.margin.worst_case);
+  oc.solid_reproduction_relative_delta = margin_reproduction_relative_delta(
+      variant.report.margin.worst_case, solid_recert.margin.worst_case);
+  oc.solid_reproduces_within_band = margin_reproduces(
+      variant.report.margin.worst_case, solid_recert.margin.worst_case,
+      cx.cert_tol);
 
   // (2) Latticed cert — the octet tensor on the shared occupancy. THIS margin
   // describes the exported file. The certifiable BAND is enforced INSIDE
@@ -2120,6 +2144,18 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   s += "  \"solid_margin_reproduced\": " + json_num(c.solid_margin_reproduced) + ",\n";
   s += "  \"solid_reconstruction_exact\": " +
        std::string(c.solid_reproduced ? "true" : "false") + ",\n";
+  // ADDITIVE, and the honest reading of the same proof. `..._exact` above is kept
+  // verbatim (it is a shipped key and it is literally true as named), but on any
+  // run whose solves fall back to Jacobi-CG it is false for a reason that has
+  // nothing to do with the reconstruction — see analyze.hpp's band note. These
+  // three say what actually happened: how far apart the two solves landed, the
+  // band the certification tolerance justifies, and whether it cleared it.
+  s += "  \"solid_reconstruction_relative_delta\": " +
+       json_num(c.solid_reproduction_relative_delta) + ",\n";
+  s += "  \"solid_reconstruction_band\": " +
+       json_num(kMarginReproductionResidualFactor * c.cert_tolerance) + ",\n";
+  s += "  \"solid_reconstruction_reproduces\": " +
+       std::string(c.solid_reproduces_within_band ? "true" : "false") + ",\n";
   // What the LATTICED mesh certifies.
   s += "  \"lattice_margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
   s += "  \"lattice_margin_effective\": " + json_num(a.margin_effective) + ",\n";
@@ -5462,6 +5498,29 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   result.reproduced_margin_worst_case = result.solid.margin.worst_case;
   result.reproduction_exact =
       (result.solid.margin.worst_case == sd.margin_worst_case);
+  // ★ THE RELAXATION, AND WHAT IT IS FOR (task
+  //   2026-08-08-lattice-variant-margin-tolerance, S1(b)). This comparison was a
+  //   bare `==` on a double, and under it this entry point REFUSED all four rungs
+  //   of the maintainer's own run — the run it was built to re-lattice. The cause
+  //   is not the design and not the load case: the RECORDED margin was produced by
+  //   a ladder certification solve carrying a warm Krylov recycle subspace, and
+  //   every re-certification — this one included — is denied that subspace by
+  //   ScopedLadderSolverIsolation. Two Krylov paths, one operator, both stopped at
+  //   the same relative residual. The band is a multiple of THAT tolerance, so it
+  //   is derived from the cause rather than fitted to the symptom; analyze.hpp
+  //   carries the derivation and the measured separation from a real corruption.
+  //
+  //   The protection is unchanged in kind: a mismatch still means the load case,
+  //   the grid or the design is not the one that produced this variant, and it
+  //   still refuses. The smallest such change measured moves the margin two orders
+  //   of magnitude further than the band.
+  result.reproduction_band =
+      kMarginReproductionResidualFactor * options.simp.cg_tolerance;
+  result.reproduction_relative_delta = margin_reproduction_relative_delta(
+      sd.margin_worst_case, result.solid.margin.worst_case);
+  result.reproduction_within_band =
+      margin_reproduces(sd.margin_worst_case, result.solid.margin.worst_case,
+                        options.simp.cg_tolerance);
   if (result.solid.non_convergent)
     throw JobError(
         "lattice_variant: the certification solve of the stored design did not "
@@ -5470,12 +5529,14 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         json_num(result.solid.non_convergent_residual) +
         "). A design whose certification solve the CG cannot resolve is never "
         "certified, and so is never latticed.");
-  if (!result.reproduction_exact)
+  if (!result.reproduction_within_band)
     throw JobError(
         "lattice_variant: the restored design does NOT reproduce the margin the "
         "run recorded for this variant (recorded " +
         json_num(sd.margin_worst_case) + ", reproduced " +
-        json_num(result.solid.margin.worst_case) +
+        json_num(result.solid.margin.worst_case) + ", relative difference " +
+        json_num(result.reproduction_relative_delta) + " against a band of " +
+        json_num(result.reproduction_band) +
         "). That means the load case, the grid or the design is not the one "
         "that produced this variant — refusing to lattice it, because the "
         "certificate would describe a different object than the run's.");
@@ -5731,10 +5792,21 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
           json_num(result.recorded_margin_worst_case) + ",\n";
   prov += "    \"reproduced_margin_worst_case\": " +
           json_num(result.reproduced_margin_worst_case) + ",\n";
-  prov += "    \"exact\": true,\n";
+  // Was hard-coded `"exact": true` under the old bare-`==` gate. It is now the
+  // measured fact, and it is usually FALSE — see the band note in analyze.hpp.
+  prov += "    \"exact\": " +
+          std::string(result.reproduction_exact ? "true" : "false") + ",\n";
+  prov += "    \"relative_delta\": " +
+          json_num(result.reproduction_relative_delta) + ",\n";
+  prov += "    \"band\": " + json_num(result.reproduction_band) + ",\n";
   prov +=
-      "    \"note\": \"ENFORCED, not reported: an inexact reproduction throws "
-      "and nothing is written\"\n";
+      "    \"note\": \"ENFORCED, not reported: a reproduction outside `band` "
+      "throws and nothing is written. `band` is a multiple of the certification "
+      "solve's own relative-residual tolerance, because the recorded margin came "
+      "from a solve carrying a warm Krylov recycle subspace and this one is "
+      "denied it by ScopedLadderSolverIsolation — two Krylov paths on one "
+      "operator, so `exact` is false on any run whose solves fall back to "
+      "Jacobi-CG\"\n";
   prov += "  },\n";
   prov += "  \"model\": " + json_str(job.model) + ",\n";
   prov += "  \"resolution\": " + std::to_string(job.resolution) + ",\n";

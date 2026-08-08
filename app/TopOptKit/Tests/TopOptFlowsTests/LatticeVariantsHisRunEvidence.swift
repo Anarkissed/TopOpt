@@ -104,14 +104,22 @@ final class LatticeVariantsHisRunEvidence: XCTestCase {
                   + "rung \(tab.rungLabel) · \(tab.massLabel)")
         }
 
+        print("      recommendation: \(model.recommendationLine ?? "-")")
+        // The recommendation IS the latticed object now (task 2026-08-08-lattice-
+        // variant-margin-tolerance, S2): the lightest thing that would be printed,
+        // which on his run is the vf=0.68 rung's 215.16 g lattice — and, note, the
+        // 1.95 GB mesh rather than the 740 MB one, which is exactly the trade the
+        // handoff states.
         let recommended = try XCTUnwrap(model.tabs.first { $0.isRecommended })
-        let latticed = try XCTUnwrap(model.tabs.first {
-            $0.isLatticed && $0.variantIndex == recommended.variantIndex })
-        model.select(latticed.index)
-        print("  [3] selected the RECOMMENDED rung's latticed variant: "
-              + "\(model.selected?.massLabel ?? "?") "
-              + "(its solid: \(recommended.massLabel))")
-        XCTAssertEqual(model.selected?.massGrams ?? 0, 246.38, accuracy: 0.01)
+        XCTAssertTrue(recommended.isLatticed,
+                      "the recommendation is the object that would be exported")
+        let solidOfSameRung = try XCTUnwrap(model.tabs.first {
+            !$0.isLatticed && $0.variantIndex == recommended.variantIndex })
+        model.select(recommended.index)
+        print("  [3] selected the RECOMMENDED object: "
+              + "\(model.selected?.massLabel ?? "?") latticed "
+              + "(its rung's solid: \(solidOfSameRung.massLabel))")
+        XCTAssertEqual(model.selected?.massGrams ?? 0, 215.16, accuracy: 0.01)
         print("      provenance: \(model.latticeMassProvenanceLine ?? "-")")
         print("      geometry:   \(model.latticeGeometrySummary ?? "-")")
 
@@ -166,14 +174,15 @@ final class LatticeVariantsHisRunEvidence: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         let wrote = (try FileManager.default.attributesOfItem(
             atPath: url.path)[.size] as? Int) ?? 0
+        let sourceName = try XCTUnwrap(model.selectedLattice?.meshName)
         let source = (try FileManager.default.attributesOfItem(
-            atPath: dir.appendingPathComponent("variant_026_lattice.stl").path)[.size]
+            atPath: dir.appendingPathComponent(sourceName).path)[.size]
             as? Int) ?? 0
         print(String(format: "      wrote %@ (%d bytes) in %.2f s",
                      url.lastPathComponent, wrote, Date().timeIntervalSince(tExport)))
         XCTAssertEqual(wrote, source,
                        "the export must be the worker's latticed file, byte for byte")
-        print("      byte-for-byte the worker's variant_026_lattice.stl ✓")
+        print("      byte-for-byte the worker's \(sourceName) ✓")
     }
 
     /// His run's checkpoint lines, replayed as SSE events (see

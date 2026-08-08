@@ -1,0 +1,73 @@
+R5 — ASSERTION-MESSAGE CENSUS OVER MY OWN DIFF
+
+Not a name grep: every REMOVED line in the diff is examined for anything that
+asserts, registers a test, refuses, skips or throws — and each one is accounted
+for by name, not by a count.
+
+merge-base: 966ffa6eaf9bb4608b1be62ee1b04e04815a49f0
+
+=== every removed assertion-bearing line in the whole diff ===
+
+    -        throw XCTSkip("G1 CONFIRMED FAILING — see s3_reproduction_failing.txt. "
+    -        XCTAssertTrue(hasSmoothedAsShipped,
+
+=== accounting, line by line ===
+
+  1. throw XCTSkip("G1 CONFIRMED FAILING ...")
+     SmoothingPreviewGateTests.testTheSmoothedTabIsReachableAsSoonAsAPreviewExists
+
+     REMOVED BECAUSE THE DEFECT IS FIXED (S3d). A skip is the ABSENCE of an
+     assertion, so deleting it can only strengthen the suite: the test now runs
+     to its end instead of stopping three lines in. The four preconditions above
+     it are untouched and still run.
+
+  2. XCTAssertTrue(hasSmoothedAsShipped, ...)
+     Same test.
+
+     This line was DEAD — it sat after an unconditional `throw XCTSkip`, so it
+     had never executed. It was also a MIRROR: it retyped the view's private
+     expression, and a mirror agrees with the view only until someone edits one
+     of them. It is replaced by
+
+         XCTAssertTrue(page.hasSmoothedToShow, <same message, verbatim>)
+
+     which reads the very property the Smoothed tab's enable condition now
+     reads — so the test and the control the user taps cannot diverge — plus a
+     NEW positive control asserting the tab is OFF when there is nothing to
+     show, so the property cannot pass by returning true forever.
+
+  NOTHING ELSE IS REMOVED anywhere in the diff. No add_test, no ctest
+  registration, no core refusal, no throw, no err.ok = false.
+
+=== the 247-line drop from operator_bakeoff_probe.cpp is a MOVE, not a deletion ===
+
+Every line removed from that probe was checked for presence in the new
+core/tests/harness/surface_instruments.hpp by exact whole-line match:
+
+    removed-from-probe lines (non-blank) : 232
+    not found in the new header          : 0
+
+and the probe was rebuilt and re-run, reproducing PR 306's committed output
+figure for figure. See r5_instrument_move.txt.
+
+=== net ===
+
+    assertion/skip-bearing lines ADDED   : 75
+    assertion/skip-bearing lines REMOVED : 2  (both accounted for above)
+
+=== skips still standing, and why they are not mine to clear ===
+
+  SmoothingPreviewGateTests G2 and G3 remain skipped. They are PR 303's other
+  two reproductions, and both are still genuinely failing:
+
+    G2  after a certification, no later stroke ever reaches the stage
+        (WorkspacePlaceholder.swift, the `.ended` guard
+         `page.receipt == nil, page.kept == nil`)
+    G3  the model prefers a stale certified mesh over a fresher preview
+        (SmoothingPageModel.currentGeometry)
+
+  They are outside this task's S3(d), which named the one-line gate. Unlike G1
+  they change the page's HONESTY RANKING between a certified shape and an
+  uncertified one — an uncertified shape currently can never outrank a certified
+  one on the stage, by design — and re-deciding that deserves its own task
+  rather than a drive-by inside this one. Named here so they are not lost.

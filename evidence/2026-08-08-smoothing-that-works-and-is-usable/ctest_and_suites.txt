@@ -1,0 +1,28 @@
+TEST SUITES
+
+=== core: ctest, CI's FULL denominator ===
+Configured with OpenCASCADE + Eigen + lib3mf (./app/scripts/build_cli_macos.sh),
+so nothing is silently unregistered — 114 is the number CI runs.
+
+        Start 110: designbox_lattice_recert
+110/114 Test #110: designbox_lattice_recert .........   Passed    4.04 sec
+        Start 111: lattice_void_exterior
+111/114 Test #111: lattice_void_exterior ............   Passed    5.92 sec
+        Start 112: selfweight_clearance_void
+112/114 Test #112: selfweight_clearance_void ........   Passed    3.78 sec
+        Start 113: mesh_job
+113/114 Test #113: mesh_job .........................   Passed    6.99 sec
+        Start 114: threemf_import
+114/114 Test #114: threemf_import ...................   Passed    9.79 sec
+
+100% tests passed out of 114
+
+Total Test time (real) = 1995.18 sec
+
+=== app: swift test (debug, full suite) ===
+Executed 1381 tests, with 21 tests skipped and 0 failures (0 unexpected)
+
+The 21 skips are pre-existing and none is mine except the two PR 303
+reproductions G2/G3 that this task deliberately leaves standing (see
+r5_assertion_census.txt). This task REMOVED one skip — PR 303's G1 — by
+fixing the defect behind it.

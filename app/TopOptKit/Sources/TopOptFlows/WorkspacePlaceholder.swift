@@ -1861,25 +1861,12 @@ public struct WorkspacePlaceholder: View {
                 }.value
             },
             // THE LIVE BRUSH PREVIEW (task
-            // 2026-08-04-variant-volume-fraction-mismatch, failure C / bar L4).
-            // Same smoother, no certification: the Smoothed tab shows the brush's
-            // own deformation as soon as a stroke settles, instead of drawing the
-            // original twice under a label that says "smoothed".
-            // `weights` already carries the freeze: `SmoothBrushModel
-            // .normalizedWeights()` zeroes every frozen vertex, and weight 0 is the
-            // smoother's bit-identical copy-verbatim path. Passing the mask again
-            // here would be a second place for the two to disagree.
-            previewer: { path, strength, weights in
-                try await Task.detached(priority: .userInitiated) {
-                    let p = try TopOptKit.smoothBrushPreview(
-                        inputMeshPath: path, strength: strength, weights: weights)
-                    return SmoothingPageModel.BrushPreviewResult(
-                        meshVertices: p.meshVertices, meshIndices: p.meshIndices,
-                        movedVertices: p.movedVertices,
-                        maxDisplacementMM: p.maxDisplacementMM,
-                        seconds: p.seconds)
-                }.value
-            })
+            // 2026-08-04-variant-volume-fraction-mismatch, failure C / bar L4;
+            // moved out of this closure by task 2026-08-08, S1b). Same smoother,
+            // no certification, and NO FILE: see `SmoothingPageWiring`, which
+            // exists so a test can drive the engine the page actually runs
+            // instead of a stand-in that cannot reproduce its I/O.
+            previewer: SmoothingPageWiring.livePreviewer)
 
         // The freeze mask, from CORE's own predicate resolution. Until it arrives
         // the brush is inert and the page says so — it must not paint into the

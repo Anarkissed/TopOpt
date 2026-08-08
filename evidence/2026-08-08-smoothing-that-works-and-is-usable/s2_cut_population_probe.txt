@@ -1,0 +1,244 @@
+== cut_population_probe — S2 on HIS OWN PART ==
+
+design   evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/design.bin
+part     evidence/2026-08-03-multiscale-lattice-to/M2_verticalStand.step
+grid     128 x 31 x 118, spacing 1.705279 mm
+export   shipped tessellation factor 2 (tricubic), so the lattice
+         that PRODUCED the vertices has cell 0.852640 mm and C1's trust
+         radius at 0.5 cells is 0.426320 mm
+rungs    4
+
+CAD      78 faces over 3106 tessellation triangles
+
+=====================================================================
+RUNG 0.68 — 141894 vertices / 283784 triangles (extracted in 0.21 s)
+=====================================================================
+
+-- THE SPLIT (PR 307's classifier, not a second one) ---------------
+  CAD-attributed   113123 (79.72%)   <- C4 freezes every one of these
+  ambiguous          3596 ( 2.53%)   <- on a CAD edge; also frozen
+  OPTIMIZER-CUT     25175 (17.74%)   <- the brush's whole domain
+  (attribution took 0.31 s)
+
+-- S2.1 IS A FINER EXTRACTION OF THE SAME FIELD A REFERENCE? ------
+  factor 2: 141894 verts   factor 4: 567698 verts   (1.7 s)
+  the shipped surface deviates from the finer one by:
+      all vertices   max 0.3479 mm  rms 0.0095 mm  (0.6% of a voxel)
+      CUT vertices   max 0.3479 mm  rms 0.0083 mm  (0.5% of a voxel)
+  READ THIS AGAINST THE STAIRCASE ITSELF: PR 299 measured the
+  stair-step amplitude at rms 0.3424 mm = 21% of its voxel. A finer
+  extraction that moves the surface by far less than that is not
+  removing the staircase, and therefore is not a reference for it.
+
+-- THE BAKE-OFF ON THE CUT POPULATION ------------------------------
+  C4: 116719 vertices frozen (CAD + ambiguous). The `cadmoved` column
+  is a BITWISE count and must read 0 on every row.
+
+operator            iters   wall_s   cutmax   cutrms  cutmoved  cadmoved   dihed_b  dihed_a    vol%   minsec_mm2
+as exported             0    0.000   0.0000   0.0000         0         0      8.36     8.36   0.000     104.6872
+Taubin_pairs_20        20    0.036   0.5093   0.1234     24218         0      8.36     8.30  -0.004     104.6872
+Taubin_pairs_160      160    0.117   0.7595   0.1866     25175         0      8.36     8.09  -0.032     104.6872
+MCF_x5                  5    0.050   0.6047   0.1368     25175         0      8.36    10.99   0.000     104.6872
+MCF_x20                20    0.140   0.6826   0.2124     25175         0      8.36    11.03   0.000     104.6872
+MCF_x40                40    0.262   0.6774   0.2286     25175         0      8.36    10.69   0.000     104.6872
+
+-- THE CALIBRATED READING, ON THE CAD POPULATION -------------------
+  PR 299's metric IS defined here — these vertices have a correct
+  answer. With C4 armed nothing may move, so every row must read
+  UNCHANGED; that is the assertion, not a result. The un-frozen
+  arm below is what the operators would do to his CAD if C4 were off.
+  as exported: rms 0.3270 mm  max 1.7045 mm over 113123 CAD vertices
+  Taubin_pairs_20    rms 0.3270 -> 0.3270 mm   max 1.7045 -> 1.7045 mm
+  Taubin_pairs_160   rms 0.3270 -> 0.3270 mm   max 1.7045 -> 1.7045 mm
+  MCF_x5             rms 0.3270 -> 0.3270 mm   max 1.7045 -> 1.7045 mm
+  MCF_x20            rms 0.3270 -> 0.3270 mm   max 1.7045 -> 1.7045 mm
+  MCF_x40            rms 0.3270 -> 0.3270 mm   max 1.7045 -> 1.7045 mm
+
+-- C4 OFF: WHAT EACH OPERATOR DOES TO SURFACE THAT HAS AN ANSWER ---
+  This is the ONLY place on his part where 'how much stair-step
+  amplitude does this operator remove' is a truthful question, and
+  it is measured with PR 299's metric verbatim. It is NOT a proposal
+  to run either operator here — PR 307's projection owns this surface
+  and is exact. It is the calibration for the cut-population table.
+operator            iters   wall_s   cad_rms_mm   removed%   cad_max_mm
+as exported             0    0.000       0.3270      0.0%       1.7045
+Taubin_pairs_20         20    0.052       0.3187       2.5%       2.0296
+Taubin_pairs_160       160    0.248       0.3009       8.0%       2.1220
+MCF_x5                   5    0.048       0.3134       4.2%       1.9167
+MCF_x20                 20    0.153       0.3392      -3.7%       2.1048
+MCF_x40                 40    0.274       0.3448      -5.5%       2.0342
+
+=====================================================================
+RUNG 0.52 — 144370 vertices / 288736 triangles (extracted in 0.22 s)
+=====================================================================
+
+-- THE SPLIT (PR 307's classifier, not a second one) ---------------
+  CAD-attributed   104313 (72.25%)   <- C4 freezes every one of these
+  ambiguous          3673 ( 2.54%)   <- on a CAD edge; also frozen
+  OPTIMIZER-CUT     36384 (25.20%)   <- the brush's whole domain
+  (attribution took 0.41 s)
+
+-- S2.1 IS A FINER EXTRACTION OF THE SAME FIELD A REFERENCE? ------
+  factor 2: 144370 verts   factor 4: 577668 verts   (1.8 s)
+  the shipped surface deviates from the finer one by:
+      all vertices   max 0.1287 mm  rms 0.0097 mm  (0.6% of a voxel)
+      CUT vertices   max 0.1287 mm  rms 0.0087 mm  (0.5% of a voxel)
+  READ THIS AGAINST THE STAIRCASE ITSELF: PR 299 measured the
+  stair-step amplitude at rms 0.3424 mm = 21% of its voxel. A finer
+  extraction that moves the surface by far less than that is not
+  removing the staircase, and therefore is not a reference for it.
+
+-- THE BAKE-OFF ON THE CUT POPULATION ------------------------------
+  C4: 107986 vertices frozen (CAD + ambiguous). The `cadmoved` column
+  is a BITWISE count and must read 0 on every row.
+
+operator            iters   wall_s   cutmax   cutrms  cutmoved  cadmoved   dihed_b  dihed_a    vol%   minsec_mm2
+as exported             0    0.000   0.0000   0.0000         0         0      8.55     8.55   0.000      84.3313
+Taubin_pairs_20        20    0.039   0.4877   0.1319     35103         0      8.55     8.45  -0.005      84.3313
+Taubin_pairs_160      160    0.155   0.7537   0.1972     36384         0      8.55     8.11  -0.047      84.3313
+MCF_x5                  5    0.052   0.6478   0.1435     36384         0      8.55    12.62   0.000      84.3313
+MCF_x20                20    0.143   0.6827   0.2261     36384         0      8.55    12.31   0.000      84.3313
+MCF_x40                40    0.264   0.6965   0.2441     36384         0      8.55    11.92   0.000      84.3313
+
+-- THE CALIBRATED READING, ON THE CAD POPULATION -------------------
+  PR 299's metric IS defined here — these vertices have a correct
+  answer. With C4 armed nothing may move, so every row must read
+  UNCHANGED; that is the assertion, not a result. The un-frozen
+  arm below is what the operators would do to his CAD if C4 were off.
+  as exported: rms 0.3459 mm  max 1.7050 mm over 104313 CAD vertices
+  Taubin_pairs_20    rms 0.3459 -> 0.3459 mm   max 1.7050 -> 1.7050 mm
+  Taubin_pairs_160   rms 0.3459 -> 0.3459 mm   max 1.7050 -> 1.7050 mm
+  MCF_x5             rms 0.3459 -> 0.3459 mm   max 1.7050 -> 1.7050 mm
+  MCF_x20            rms 0.3459 -> 0.3459 mm   max 1.7050 -> 1.7050 mm
+  MCF_x40            rms 0.3459 -> 0.3459 mm   max 1.7050 -> 1.7050 mm
+
+-- C4 OFF: WHAT EACH OPERATOR DOES TO SURFACE THAT HAS AN ANSWER ---
+  This is the ONLY place on his part where 'how much stair-step
+  amplitude does this operator remove' is a truthful question, and
+  it is measured with PR 299's metric verbatim. It is NOT a proposal
+  to run either operator here — PR 307's projection owns this surface
+  and is exact. It is the calibration for the cut-population table.
+operator            iters   wall_s   cad_rms_mm   removed%   cad_max_mm
+as exported             0    0.000       0.3459      0.0%       1.7050
+Taubin_pairs_20         20    0.050       0.3385       2.2%       1.9139
+Taubin_pairs_160       160    0.254       0.3222       6.9%       1.9328
+MCF_x5                   5    0.052       0.3391       2.0%       2.0456
+MCF_x20                 20    0.155       0.3666      -6.0%       2.0734
+MCF_x40                 40    0.288       0.3726      -7.7%       2.0720
+
+=====================================================================
+RUNG 0.38 — 161320 vertices / 322652 triangles (extracted in 0.20 s)
+=====================================================================
+
+-- THE SPLIT (PR 307's classifier, not a second one) ---------------
+  CAD-attributed    96475 (59.80%)   <- C4 freezes every one of these
+  ambiguous          3748 ( 2.32%)   <- on a CAD edge; also frozen
+  OPTIMIZER-CUT     61097 (37.87%)   <- the brush's whole domain
+  (attribution took 0.36 s)
+
+-- S2.1 IS A FINER EXTRACTION OF THE SAME FIELD A REFERENCE? ------
+  factor 2: 161320 verts   factor 4: 645702 verts   (1.9 s)
+  the shipped surface deviates from the finer one by:
+      all vertices   max 0.0869 mm  rms 0.0102 mm  (0.6% of a voxel)
+      CUT vertices   max 0.0869 mm  rms 0.0098 mm  (0.6% of a voxel)
+  READ THIS AGAINST THE STAIRCASE ITSELF: PR 299 measured the
+  stair-step amplitude at rms 0.3424 mm = 21% of its voxel. A finer
+  extraction that moves the surface by far less than that is not
+  removing the staircase, and therefore is not a reference for it.
+
+-- THE BAKE-OFF ON THE CUT POPULATION ------------------------------
+  C4: 100223 vertices frozen (CAD + ambiguous). The `cadmoved` column
+  is a BITWISE count and must read 0 on every row.
+
+operator            iters   wall_s   cutmax   cutrms  cutmoved  cadmoved   dihed_b  dihed_a    vol%   minsec_mm2
+as exported             0    0.000   0.0000   0.0000         0         0      8.75     8.75   0.000      84.3313
+Taubin_pairs_20        20    0.044   0.5351   0.1390     59590         0      8.75     8.61  -0.015      84.3313
+Taubin_pairs_160      160    0.205   0.8045   0.2063     61097         0      8.75     8.06  -0.125      84.3313
+MCF_x5                  5    0.061   0.6382   0.1459     61097         0      8.75    15.20   0.000      84.3313
+MCF_x20                20    0.256   0.7160   0.2352     61097         0      8.75    14.40   0.000      84.3313
+MCF_x40                40    0.407   0.7132   0.2560     61097         0      8.75    13.55   0.000      84.3313
+
+-- THE CALIBRATED READING, ON THE CAD POPULATION -------------------
+  PR 299's metric IS defined here — these vertices have a correct
+  answer. With C4 armed nothing may move, so every row must read
+  UNCHANGED; that is the assertion, not a result. The un-frozen
+  arm below is what the operators would do to his CAD if C4 were off.
+  as exported: rms 0.3582 mm  max 1.7044 mm over 96475 CAD vertices
+  Taubin_pairs_20    rms 0.3582 -> 0.3582 mm   max 1.7044 -> 1.7044 mm
+  Taubin_pairs_160   rms 0.3582 -> 0.3582 mm   max 1.7044 -> 1.7044 mm
+  MCF_x5             rms 0.3582 -> 0.3582 mm   max 1.7044 -> 1.7044 mm
+  MCF_x20            rms 0.3582 -> 0.3582 mm   max 1.7044 -> 1.7044 mm
+  MCF_x40            rms 0.3582 -> 0.3582 mm   max 1.7044 -> 1.7044 mm
+
+-- C4 OFF: WHAT EACH OPERATOR DOES TO SURFACE THAT HAS AN ANSWER ---
+  This is the ONLY place on his part where 'how much stair-step
+  amplitude does this operator remove' is a truthful question, and
+  it is measured with PR 299's metric verbatim. It is NOT a proposal
+  to run either operator here — PR 307's projection owns this surface
+  and is exact. It is the calibration for the cut-population table.
+operator            iters   wall_s   cad_rms_mm   removed%   cad_max_mm
+as exported             0    0.000       0.3582      0.0%       1.7044
+Taubin_pairs_20         20    0.067       0.3509       2.0%       1.8254
+Taubin_pairs_160       160    0.461       0.3355       6.3%       1.8198
+MCF_x5                   5    0.058       0.3574       0.2%       1.9057
+MCF_x20                 20    0.197       0.3874      -8.1%       2.0772
+MCF_x40                 40    0.321       0.3944     -10.1%       2.0745
+
+=====================================================================
+RUNG 0.26 — 161546 vertices / 323112 triangles (extracted in 0.19 s)
+=====================================================================
+
+-- THE SPLIT (PR 307's classifier, not a second one) ---------------
+  CAD-attributed    90155 (55.81%)   <- C4 freezes every one of these
+  ambiguous          3797 ( 2.35%)   <- on a CAD edge; also frozen
+  OPTIMIZER-CUT     67594 (41.84%)   <- the brush's whole domain
+  (attribution took 0.36 s)
+
+-- S2.1 IS A FINER EXTRACTION OF THE SAME FIELD A REFERENCE? ------
+  factor 2: 161546 verts   factor 4: 646708 verts   (1.9 s)
+  the shipped surface deviates from the finer one by:
+      all vertices   max 0.1195 mm  rms 0.0104 mm  (0.6% of a voxel)
+      CUT vertices   max 0.0952 mm  rms 0.0100 mm  (0.6% of a voxel)
+  READ THIS AGAINST THE STAIRCASE ITSELF: PR 299 measured the
+  stair-step amplitude at rms 0.3424 mm = 21% of its voxel. A finer
+  extraction that moves the surface by far less than that is not
+  removing the staircase, and therefore is not a reference for it.
+
+-- THE BAKE-OFF ON THE CUT POPULATION ------------------------------
+  C4: 93952 vertices frozen (CAD + ambiguous). The `cadmoved` column
+  is a BITWISE count and must read 0 on every row.
+
+operator            iters   wall_s   cutmax   cutrms  cutmoved  cadmoved   dihed_b  dihed_a    vol%   minsec_mm2
+as exported             0    0.000   0.0000   0.0000         0         0      9.00     9.00   0.000      84.3313
+Taubin_pairs_20        20    0.048   0.5213   0.1405     65801         0      9.00     8.82  -0.011      84.3313
+Taubin_pairs_160      160    0.216   0.8054   0.2078     67594         0      9.00     8.18  -0.100      84.3313
+MCF_x5                  5    0.058   0.6598   0.1454     67594         0      9.00    15.65   0.000      84.3313
+MCF_x20                20    0.158   0.7039   0.2375     67594         0      9.00    15.20   0.000      84.3313
+MCF_x40                40    0.297   0.7212   0.2612     67594         0      9.00    14.36   0.000      84.3313
+
+-- THE CALIBRATED READING, ON THE CAD POPULATION -------------------
+  PR 299's metric IS defined here — these vertices have a correct
+  answer. With C4 armed nothing may move, so every row must read
+  UNCHANGED; that is the assertion, not a result. The un-frozen
+  arm below is what the operators would do to his CAD if C4 were off.
+  as exported: rms 0.3698 mm  max 1.7052 mm over 90155 CAD vertices
+  Taubin_pairs_20    rms 0.3698 -> 0.3698 mm   max 1.7052 -> 1.7052 mm
+  Taubin_pairs_160   rms 0.3698 -> 0.3698 mm   max 1.7052 -> 1.7052 mm
+  MCF_x5             rms 0.3698 -> 0.3698 mm   max 1.7052 -> 1.7052 mm
+  MCF_x20            rms 0.3698 -> 0.3698 mm   max 1.7052 -> 1.7052 mm
+  MCF_x40            rms 0.3698 -> 0.3698 mm   max 1.7052 -> 1.7052 mm
+
+-- C4 OFF: WHAT EACH OPERATOR DOES TO SURFACE THAT HAS AN ANSWER ---
+  This is the ONLY place on his part where 'how much stair-step
+  amplitude does this operator remove' is a truthful question, and
+  it is measured with PR 299's metric verbatim. It is NOT a proposal
+  to run either operator here — PR 307's projection owns this surface
+  and is exact. It is the calibration for the cut-population table.
+operator            iters   wall_s   cad_rms_mm   removed%   cad_max_mm
+as exported             0    0.000       0.3698      0.0%       1.7052
+Taubin_pairs_20         20    0.058       0.3628       1.9%       1.8802
+Taubin_pairs_160       160    0.295       0.3469       6.2%       2.0016
+MCF_x5                   5    0.059       0.3711      -0.3%       1.9141
+MCF_x20                 20    0.173       0.4009      -8.4%       2.1014
+MCF_x40                 40    0.324       0.4081     -10.4%       2.0968
+

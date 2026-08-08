@@ -2480,24 +2480,26 @@ public final class ResultsModel: ObservableObject {
     ///   printed part's infill, consistently with the failure load + hot spot.
     static func buildTabs(_ variants: [OptimizeVariant], voxelVolumeMM3: Double,
                           knockdown: Double = 1, remote: Bool = false) -> [ResultVariantVM] {
-        // Variants arrive heaviest-first (ladder order); the LAST accepted rung is
-        // the lightest safe one — the recommendation.
+        // *** THE RECOMMENDATION RANKS THE OBJECT THAT WOULD ACTUALLY BE EXPORTED
+        // (task 2026-08-08-lattice-variant-margin-tolerance, S2). ***
         //
-        // *** THE RULE IS UNCHANGED, AND SECTION 6 OF THE HANDOFF SAYS WHY THAT IS
-        // A FINDING RATHER THAN A DECISION. *** On the maintainer's own run the
-        // latticed masses fall as the SOLID rung gets heavier (246.4 g at vf 0.26,
-        // 215.2 g at vf 0.68), so "the last accepted rung" — which is the lightest
-        // SOLID — is the HEAVIEST latticed object of the four. The recommendation
-        // therefore points away from the lightest thing on the screen once a
-        // lattice exists. That is reported, not silently corrected: which object
-        // the recommendation should rank is the maintainer's ruling to make, and
-        // changing it here would move a verdict he did not ask to move. The
-        // recommendation stays on SOLID tabs only, where its rule is still true.
-        let recommendedIndex = variants.count - 1
+        // The rule used to be `variants.count - 1` — the last accepted rung, i.e.
+        // the lightest SOLID. PR 311 measured what that costs once a lattice
+        // exists: on the maintainer's own run the latticed masses run OPPOSITE to
+        // the solid ones (215.2 g at rung 0.68 rising to 246.4 g at rung 0.26), so
+        // the lightest solid carried the HEAVIEST of his four latticed objects —
+        // 31.22 g, 12.7 %, for following the recommendation. He ruled: rank by
+        // mass, because the point is dropping mass and more lattice is lighter.
+        //
+        // So a rung is ranked on the object it would PRINT — its accepted lattice
+        // where it has one, its solid otherwise — and the recommendation is the
+        // lightest of those, on that object's own tab.
+        let choice = recommendation(variants)
         var tabs: [ResultVariantVM] = []
         for (i, v) in variants.enumerated() {
+            let solidRecommended = (i == choice?.variantIndex && choice?.isLatticed == false)
             tabs.append(solidTab(v, variantIndex: i, tabIndex: tabs.count,
-                                 isRecommended: i == recommendedIndex,
+                                 isRecommended: solidRecommended,
                                  voxelVolumeMM3: voxelVolumeMM3,
                                  knockdown: knockdown, remote: remote))
             // THE RUNG'S OTHER OBJECT (task 2026-08-07-lattice-variants-on-screen).
@@ -2505,11 +2507,103 @@ public final class ResultsModel: ObservableObject {
             // user is making actually happens — 360 g against 246 g — and because
             // the variant list is where he already looks. No new page.
             if let alt = v.latticeAlternative {
+                let latticeRecommended =
+                    (i == choice?.variantIndex && choice?.isLatticed == true)
                 tabs.append(latticedTab(alt, of: tabs[tabs.count - 1],
-                                        variantIndex: i, tabIndex: tabs.count))
+                                        variantIndex: i, tabIndex: tabs.count,
+                                        isRecommended: latticeRecommended))
             }
         }
         return tabs
+    }
+
+    /// THE OBJECT ONE RUNG WOULD ACTUALLY PRINT, and what it weighs.
+    public struct PrintedObject: Equatable, Sendable {
+        /// Position in the accepted ladder (heaviest solid first).
+        public let variantIndex: Int
+        /// True when the rung's lattice is what would be exported.
+        public let isLatticed: Bool
+        public let massGrams: Double
+    }
+
+    /// One entry per accepted rung, in ladder order.
+    ///
+    /// *** THE ACCEPTANCE CONDITION IS NOT OPTIONAL. *** A rung's lattice counts as
+    /// the printable object only when its OWN composite certification accepted it.
+    /// That verdict is core's `lattice_accepted` — `a.accepted && finish_certified`
+    /// at `core/src/cli/run_job.cpp:2171`, where `a` is the LATTICED certification
+    /// solve (`run_job.cpp:1677`) and `finish_certified` refuses a shell-less
+    /// "skin" finish — and it reaches here on the per-variant receipt
+    /// (`LatticeVariantAlternative.receiptFacts`, preferred) or on the rung's
+    /// `LATTICE …` checkpoint line (`lattice_accepted=1`,
+    /// `LatticeCheckpoint.parse`). It is NEVER the rung's own `accepted`: a rung
+    /// whose solid passes can produce a lattice that does not.
+    ///
+    /// A lattice with no readable mass (receipt unreachable → 0 g, rendered "n/a")
+    /// is not a 0 g object and does not displace its solid.
+    public var printedObjectPerRung: [PrintedObject] {
+        ResultsModel.printedObjects(accepted)
+    }
+
+    static func printedObjects(_ variants: [OptimizeVariant]) -> [PrintedObject] {
+        variants.enumerated().map { i, v in
+            if let alt = v.latticeAlternative, alt.accepted, alt.massGrams > 0 {
+                return PrintedObject(variantIndex: i, isLatticed: true,
+                                     massGrams: alt.massGrams)
+            }
+            return PrintedObject(variantIndex: i, isLatticed: false,
+                                 massGrams: v.massGrams)
+        }
+    }
+
+    /// The lightest printed object across the ladder, or nil when there is nothing
+    /// to recommend.
+    ///
+    /// *** WHY THIS CAN DECLINE TO RANK BY MASS. *** A remote run whose `fields.bin`
+    /// scalars never arrived carries `massGrams == 0` on every solid variant, and
+    /// 0 g would win every comparison — recommending the variant we know least
+    /// about. When any rung's printed object has no real mass, the rule falls back
+    /// to the ladder's own ordering (the last accepted rung), which is what it has
+    /// always been and is still true when no lattice exists.
+    ///
+    /// Ties go to the LATER rung, so a run whose masses are all equal — and every
+    /// run with no lattice, where the solid masses descend down the ladder —
+    /// recommends exactly what it recommended before.
+    static func recommendation(_ variants: [OptimizeVariant]) -> PrintedObject? {
+        guard !variants.isEmpty else { return nil }
+        let printed = printedObjects(variants)
+        guard printed.allSatisfy({ $0.massGrams > 0 }) else {
+            return PrintedObject(variantIndex: variants.count - 1, isLatticed: false,
+                                 massGrams: variants[variants.count - 1].massGrams)
+        }
+        return printed.reduce(printed[0]) { best, p in
+            p.massGrams <= best.massGrams ? p : best
+        }
+    }
+
+    /// WHICH OBJECT IS BEING RECOMMENDED, in the words the screen uses (S2(c)).
+    ///
+    /// "−47%, 360 g" and "−20%, 215 g latticed" are different recommendations, and
+    /// a badge alone does not distinguish them. This names the object, its mass and
+    /// the rung it came off — and, when the rung's other object differs, what
+    /// following that one instead would weigh.
+    public var recommendationLine: String? {
+        guard let choice = ResultsModel.recommendation(accepted),
+              let tab = tabs.first(where: { $0.isRecommended }) else { return nil }
+        let noun = choice.isLatticed ? "latticed" : "solid"
+        var line = "Recommended: the \(noun) object of the \(tab.rungLabel) rung, "
+            + "\(ResultsModel.massLabel(choice.massGrams))"
+        // The rung's OTHER object, when there is one, so the number on the screen
+        // is never mistaken for the one it is not.
+        let alt: Double? = choice.isLatticed
+            ? accepted[choice.variantIndex].massGrams
+            : accepted[choice.variantIndex].latticeAlternative
+                .flatMap { $0.accepted && $0.massGrams > 0 ? $0.massGrams : nil }
+        if let other = alt, abs(other - choice.massGrams) > 0.05 {
+            let otherNoun = choice.isLatticed ? "solid" : "latticed"
+            line += " · the same rung's \(otherNoun) is \(ResultsModel.massLabel(other))"
+        }
+        return line
     }
 
     /// The latticed object's tab: its OWN mass, its OWN verdict, its OWN margin.
@@ -2520,7 +2614,8 @@ public final class ResultsModel: ObservableObject {
     private static func latticedTab(_ alt: LatticeVariantAlternative,
                                     of solid: ResultVariantVM,
                                     variantIndex: Int,
-                                    tabIndex: Int) -> ResultVariantVM {
+                                    tabIndex: Int,
+                                    isRecommended: Bool) -> ResultVariantVM {
         ResultVariantVM(
             index: tabIndex, variantIndex: variantIndex, kind: .latticed,
             latticeAlternative: alt,
@@ -2548,7 +2643,7 @@ public final class ResultsModel: ObservableObject {
             // discount the same porosity twice.
             worstCaseMargin: alt.margin,
             minFeatureViolations: 0, minFeatureWarning: "",
-            isRecommended: false,
+            isRecommended: isRecommended,
             isGrowth: solid.isGrowth, addedMaterial: nil,
             growthLabel: solid.growthLabel, growthPercent: solid.growthPercent,
             rungLabel: solid.headlineLabel,

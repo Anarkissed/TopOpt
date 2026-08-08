@@ -1,0 +1,76 @@
+=== vf=0.68 (variant_068) ===
+  exit=0  wall=275.99s
+  mesh: m_0.68/variant_068_lattice.stl
+  wall: 275.88 s
+  on-demand: 1954879484 bytes
+  eager    : 1954879484 bytes
+  DIFFERS from the run's own file
+    sha on-demand 694ca0ec0ae50c80
+    sha eager     f078f1ebf4a63b19
+  receipt solid_margin_worst_case                2169.617169
+  receipt solid_margin_reproduced                2169.617163
+  receipt solid_reconstruction_exact             False
+  receipt solid_reconstruction_relative_delta    2.824072303e-09
+  receipt solid_reconstruction_band              1e-06
+  receipt solid_reconstruction_reproduces        True
+  receipt lattice_margin_worst_case              1183.249537
+  receipt lattice_accepted                       True
+  receipt lattice_mass_grams                     215.1568193
+  dir: 1.8G	m_0.68
+=== vf=0.52 (variant_052) ===
+  exit=0  wall=350.63s
+  mesh: m_0.52/variant_052_lattice.stl
+  wall: 350.47 s
+  on-demand: 1420059884 bytes
+  eager    : 1420059884 bytes
+  DIFFERS from the run's own file
+    sha on-demand ddf3b88c6b28af3d
+    sha eager     be2abece16be5ecf
+  receipt solid_margin_worst_case                2259.952813
+  receipt solid_margin_reproduced                2259.952813
+  receipt solid_reconstruction_exact             False
+  receipt solid_reconstruction_relative_delta    1.267238304e-10
+  receipt solid_reconstruction_band              1e-06
+  receipt solid_reconstruction_reproduces        True
+  receipt lattice_margin_worst_case              1244.67001
+  receipt lattice_accepted                       True
+  receipt lattice_mass_grams                     239.9349267
+  dir: 1.3G	m_0.52
+=== vf=0.38 (variant_038) ===
+  exit=0  wall=353.54s
+  mesh: m_0.38/variant_038_lattice.stl
+  wall: 353.48 s
+  on-demand: 1058859084 bytes
+  eager    : 1058859084 bytes
+  DIFFERS from the run's own file
+    sha on-demand 835464bfc6ab9bca
+    sha eager     67457be26089f70a
+  receipt solid_margin_worst_case                2193.876835
+  receipt solid_margin_reproduced                2193.876835
+  receipt solid_reconstruction_exact             False
+  receipt solid_reconstruction_relative_delta    1.116929657e-11
+  receipt solid_reconstruction_band              1e-06
+  receipt solid_reconstruction_reproduces        True
+  receipt lattice_margin_worst_case              730.5215474
+  receipt lattice_accepted                       True
+  receipt lattice_mass_grams                     244.7773503
+  dir: 1.0G	m_0.38
+=== vf=0.26 (variant_026) ===
+  exit=0  wall=389.56s
+  mesh: m_0.26/variant_026_lattice.stl
+  wall: 389.45 s
+  on-demand: 740360884 bytes
+  eager    : 740360884 bytes
+  DIFFERS from the run's own file
+    sha on-demand 5e2e6246d4b3f702
+    sha eager     f2732908ace69043
+  receipt solid_margin_worst_case                2008.278337
+  receipt solid_margin_reproduced                2008.278337
+  receipt solid_reconstruction_exact             False
+  receipt solid_reconstruction_relative_delta    2.041660557e-10
+  receipt solid_reconstruction_band              1e-06
+  receipt solid_reconstruction_reproduces        True
+  receipt lattice_margin_worst_case              933.0889664
+  receipt lattice_accepted                       True
+  receipt lattice_mass_grams                     246.3776328
+  dir: 729M	m_0.26

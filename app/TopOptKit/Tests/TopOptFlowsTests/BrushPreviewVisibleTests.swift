@@ -52,8 +52,14 @@ final class BrushPreviewVisibleTests: XCTestCase {
     /// is the only property the toggle depends on.
     private func movingPreviewer(counter: Counter)
         -> SmoothingPageModel.Previewer {
-        { _, strength, weights in
+        { verts, idx, strength, weights in
             counter.n += 1
+            // THE PREVIEW IS HANDED THE PAGE'S OWN GEOMETRY, NOT A PATH
+            // (task 2026-08-08, S1b). Asserted here, at every stand-in, so the
+            // model cannot start previewing some other buffer without a failure.
+            XCTAssertEqual(verts, self.originalVertices,
+                           "the previewer must be given the variant the page holds")
+            XCTAssertEqual(idx, self.indices)
             var v: [Float] = []
             for i in 0..<4 {
                 let w = Float(i < weights.count ? weights[i] : 0) * Float(strength)
@@ -170,8 +176,11 @@ final class BrushPreviewVisibleTests: XCTestCase {
         let p = SmoothingPageModel(
             context: context(), variantMeshPath: "/tmp/variant_1.stl",
             smoothedMeshPath: "/tmp/s.stl", runner: neverRuns(),
-            previewer: { _, _, _ in
-                SmoothingPageModel.BrushPreviewResult(
+            previewer: { verts, idx, _, _ in
+                XCTAssertEqual(verts, self.originalVertices,
+                               "the previewer must be given the variant the page holds")
+                XCTAssertEqual(idx, self.indices)
+                return SmoothingPageModel.BrushPreviewResult(
                     meshVertices: self.originalVertices, meshIndices: self.indices,
                     movedVertices: 0, maxDisplacementMM: 0, seconds: 0.01)
             })

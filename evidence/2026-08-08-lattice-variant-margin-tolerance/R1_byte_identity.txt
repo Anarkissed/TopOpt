@@ -1,0 +1,61 @@
+== GUARD: the two binaries must actually differ ==
+  base  cfdb6cb6624aead5d8b203dd41a92621  2706600 bytes
+  head  f9dd9ae0b70ad272edb5e2e9b0e28de7  2706808 bytes
+  binaries DIFFER — the comparison below is real
+
+== A ==
+  CONTROL — files that differ base-vs-base (same binary, so clock only):
+    build_orientation.json iterations.csv run_info.json
+  IDENTICAL once the clock is stripped: build_orientation.json
+  IDENTICAL once the clock is stripped: iterations.csv
+  IDENTICAL once the clock is stripped: run_info.json
+  byte-identical: 8   clock-only: 3   expected: 0   UNEXPECTED: 0
+
+== B ==
+  CONTROL — files that differ base-vs-base (same binary, so clock only):
+    build_orientation.json iterations.csv run_info.json
+  IDENTICAL once the clock is stripped: build_orientation.json
+  IDENTICAL once the clock is stripped: iterations.csv
+  IDENTICAL once the clock is stripped: run_info.json
+  DIFFERS (EXPECTED — this task's added keys): variant_026_lattice.report.json
+         "solid_margin_worst_case": 11877.4692,
+         "solid_margin_reproduced": 11877.4692,
+         "solid_reconstruction_exact": true,
+      +  "solid_reconstruction_relative_delta": 0,
+      +  "solid_reconstruction_band": 1e-06,
+      +  "solid_reconstruction_reproduces": true,
+         "lattice_margin_worst_case": null,
+         "lattice_margin_effective": null,
+         "margin_required": 0,
+  DIFFERS (EXPECTED — this task's added keys): variant_038_lattice.report.json
+         "solid_margin_worst_case": 24432.33542,
+         "solid_margin_reproduced": 24432.33542,
+         "solid_reconstruction_exact": true,
+      +  "solid_reconstruction_relative_delta": 0,
+      +  "solid_reconstruction_band": 1e-06,
+      +  "solid_reconstruction_reproduces": true,
+         "lattice_margin_worst_case": null,
+         "lattice_margin_effective": null,
+         "margin_required": 0,
+  DIFFERS (EXPECTED — this task's added keys): variant_052_lattice.report.json
+         "solid_margin_worst_case": 28397.8661,
+         "solid_margin_reproduced": 28397.8661,
+         "solid_reconstruction_exact": true,
+      +  "solid_reconstruction_relative_delta": 0,
+      +  "solid_reconstruction_band": 1e-06,
+      +  "solid_reconstruction_reproduces": true,
+         "lattice_margin_worst_case": null,
+         "lattice_margin_effective": null,
+         "margin_required": 0,
+  DIFFERS (EXPECTED — this task's added keys): variant_068_lattice.report.json
+         "solid_margin_worst_case": 33359.66714,
+         "solid_margin_reproduced": 33359.66714,
+         "solid_reconstruction_exact": true,
+      +  "solid_reconstruction_relative_delta": 0,
+      +  "solid_reconstruction_band": 1e-06,
+      +  "solid_reconstruction_reproduces": true,
+         "lattice_margin_worst_case": null,
+         "lattice_margin_effective": null,
+         "margin_required": 0,
+  byte-identical: 12   clock-only: 3   expected: 4   UNEXPECTED: 0
+
