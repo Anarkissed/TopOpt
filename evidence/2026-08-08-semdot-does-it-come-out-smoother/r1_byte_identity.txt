@@ -1,0 +1,24 @@
+=== R1 — WHAT DIFFERS, CLASSIFIED ===
+
+--- DESIGN ARTIFACTS: the bar is BYTE-IDENTITY, no exceptions ---
+  IDENTICAL design.bin  3fa83a97cb6d2f9544c8f74de12ab9cc7d6a184fc94b4c080726d8ce204ad278
+  IDENTICAL fields.bin  9b54c5a3507a7f43261f1f032c6db803928767b118faf7ebb24c2665952591db
+  IDENTICAL loadcase.json  9670f551449031d3ee98d7a49d2e30a6a0325b57bb29216723d38113f34f07f9
+  IDENTICAL report.json  bb623f8268416281695997ded7c933d4c3970f80b8eedd69904160b56c2df6e6
+  IDENTICAL variant_045.stl  a28947f52ab8138e19cb497db11fb6aa168196cb3f9e3db006b1b5a3f1c4c4c2
+  IDENTICAL variant_045_lattice.stl  90c48da2f79376ad66b9a7ecf00a5fa46597594552db0c41e90aa45c823c6d8b
+  IDENTICAL variant_060.stl  5e073f6031d28b041f6b9add166b02d2841f3a0fbb0afbaf155f86244c3dc5cb
+  IDENTICAL variant_060_lattice.stl  7f3332329104c4a52f1808314f0a1562d88b077e413a6810076307c94928fcd8
+  => 8 of 8 byte-identical, 0 differing
+
+--- RECEIPTS: identical after wall clock, every remaining difference NAMED ---
+  build_orientation.json: identical once wall-clock fields are removed
+  iterations.csv: 60 rows, all 19 non-timing columns identical (timing columns differ, as they must)
+  run_info.json: KEY ADDED BY THE BRANCH   semdot = False
+  run_info.json: KEY ADDED BY THE BRANCH   semdot_grid_points = 0
+  run_info.json: KEY ADDED BY THE BRANCH   semdot_rung_design_voxels = '[]'
+  run_info.json: KEY ADDED BY THE BRANCH   semdot_rung_fractional_voxels = '[]'
+  run_info.json: KEY ADDED BY THE BRANCH   semdot_rung_level_set = '[]'
+
+=== VERDICT ===
+OFF IS BYTE-IDENTICAL. Every design artifact matches byte for byte; the receipts match once the wall clock is removed, and the only remaining differences are keys the branch ADDS to run_info so an armed run can say it was armed.

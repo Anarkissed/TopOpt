@@ -61,7 +61,12 @@
 // first FEA a solid block in a corner.
 //
 // So the count is not hard. Writing n_gt(e) for the samples of voxel e strictly
-// above phi and n_eq(e) for those exactly at it,
+// above phi and n_eq(e) for those AT it — "at" being within a few ulps, not
+// bit-equal, because a sample is a mean of up to eight densities blended
+// trilinearly and two mathematically equal samples differ in the last bits; an
+// exact test lets that rounding noise sort a uniform field into a binary pattern.
+// semdot.cpp states the band and why it is a floating-point epsilon rather than a
+// control parameter,
 //
 //     V_e = ( n_gt(e) + f * n_eq(e) ) / n^3,     f = (K - N_gt) / N_eq
 //

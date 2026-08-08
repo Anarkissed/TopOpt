@@ -1,0 +1,193 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+[preflight] load path CONNECTED: 5165 load voxels, 3348 anchor voxels, 110904 of 468224 voxels allowed to hold material; narrowest separating cross-section 3840 voxels (1.117e+04 mm^2) at 11/12 steps from the anchor; 4.57 ms
+NOTE: solve grid 128x31x118 has odd axis(es) [y=31] - geometric multigrid pads its INDEX SPACE to 128x32x120 (up to 4 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=4 iter=1
+PROGRESS rung=0 rungs=4 iter=2
+PROGRESS rung=0 rungs=4 iter=3
+PROGRESS rung=0 rungs=4 iter=4
+PROGRESS rung=0 rungs=4 iter=5
+PROGRESS rung=0 rungs=4 iter=6
+PROGRESS rung=0 rungs=4 iter=7
+PROGRESS rung=0 rungs=4 iter=8
+PROGRESS rung=0 rungs=4 iter=9
+PROGRESS rung=0 rungs=4 iter=10
+PROGRESS rung=0 rungs=4 iter=11
+PROGRESS rung=0 rungs=4 iter=12
+PROGRESS rung=0 rungs=4 iter=13
+PROGRESS rung=0 rungs=4 iter=14
+PROGRESS rung=0 rungs=4 iter=15
+PROGRESS rung=0 rungs=4 iter=16
+PROGRESS rung=0 rungs=4 iter=17
+PROGRESS rung=0 rungs=4 iter=18
+PROGRESS rung=0 rungs=4 iter=19
+PROGRESS rung=0 rungs=4 iter=20
+PROGRESS rung=0 rungs=4 iter=21
+PROGRESS rung=0 rungs=4 iter=22
+PROGRESS rung=0 rungs=4 iter=23
+PROGRESS rung=0 rungs=4 iter=24
+PROGRESS rung=0 rungs=4 iter=25
+PROGRESS rung=0 rungs=4 iter=26
+PROGRESS rung=0 rungs=4 iter=27
+PROGRESS rung=0 rungs=4 iter=28
+PROGRESS rung=0 rungs=4 iter=29
+PROGRESS rung=0 rungs=4 iter=30
+PROGRESS rung=0 rungs=4 iter=31
+PROGRESS rung=0 rungs=4 iter=32
+PROGRESS rung=0 rungs=4 iter=33
+PROGRESS rung=0 rungs=4 iter=34
+PROGRESS rung=0 rungs=4 iter=35
+PROGRESS rung=0 rungs=4 iter=36
+VARIANT vf=0.680000 achieved=0.680000 printed=0.786734 margin=3180.13 accepted=1 mesh=s2_semdot/variant_068.stl
+PROGRESS rung=1 rungs=4 iter=1
+PROGRESS rung=1 rungs=4 iter=2
+PROGRESS rung=1 rungs=4 iter=3
+PROGRESS rung=1 rungs=4 iter=4
+PROGRESS rung=1 rungs=4 iter=5
+PROGRESS rung=1 rungs=4 iter=6
+PROGRESS rung=1 rungs=4 iter=7
+PROGRESS rung=1 rungs=4 iter=8
+PROGRESS rung=1 rungs=4 iter=9
+PROGRESS rung=1 rungs=4 iter=10
+PROGRESS rung=1 rungs=4 iter=11
+PROGRESS rung=1 rungs=4 iter=12
+PROGRESS rung=1 rungs=4 iter=13
+PROGRESS rung=1 rungs=4 iter=14
+PROGRESS rung=1 rungs=4 iter=15
+PROGRESS rung=1 rungs=4 iter=16
+PROGRESS rung=1 rungs=4 iter=17
+PROGRESS rung=1 rungs=4 iter=18
+PROGRESS rung=1 rungs=4 iter=19
+PROGRESS rung=1 rungs=4 iter=20
+PROGRESS rung=1 rungs=4 iter=21
+PROGRESS rung=1 rungs=4 iter=22
+PROGRESS rung=1 rungs=4 iter=23
+PROGRESS rung=1 rungs=4 iter=24
+PROGRESS rung=1 rungs=4 iter=25
+PROGRESS rung=1 rungs=4 iter=26
+PROGRESS rung=1 rungs=4 iter=27
+PROGRESS rung=1 rungs=4 iter=28
+PROGRESS rung=1 rungs=4 iter=29
+PROGRESS rung=1 rungs=4 iter=30
+PROGRESS rung=1 rungs=4 iter=31
+PROGRESS rung=1 rungs=4 iter=32
+PROGRESS rung=1 rungs=4 iter=33
+PROGRESS rung=1 rungs=4 iter=34
+PROGRESS rung=1 rungs=4 iter=35
+PROGRESS rung=1 rungs=4 iter=36
+PROGRESS rung=1 rungs=4 iter=37
+PROGRESS rung=1 rungs=4 iter=38
+PROGRESS rung=1 rungs=4 iter=39
+PROGRESS rung=1 rungs=4 iter=40
+PROGRESS rung=1 rungs=4 iter=41
+PROGRESS rung=1 rungs=4 iter=42
+PROGRESS rung=1 rungs=4 iter=43
+PROGRESS rung=1 rungs=4 iter=44
+VARIANT vf=0.520000 achieved=0.520000 printed=0.677631 margin=2164.83 accepted=1 mesh=s2_semdot/variant_052.stl
+PROGRESS rung=2 rungs=4 iter=1
+PROGRESS rung=2 rungs=4 iter=2
+PROGRESS rung=2 rungs=4 iter=3
+PROGRESS rung=2 rungs=4 iter=4
+PROGRESS rung=2 rungs=4 iter=5
+PROGRESS rung=2 rungs=4 iter=6
+PROGRESS rung=2 rungs=4 iter=7
+PROGRESS rung=2 rungs=4 iter=8
+PROGRESS rung=2 rungs=4 iter=9
+PROGRESS rung=2 rungs=4 iter=10
+PROGRESS rung=2 rungs=4 iter=11
+PROGRESS rung=2 rungs=4 iter=12
+PROGRESS rung=2 rungs=4 iter=13
+PROGRESS rung=2 rungs=4 iter=14
+PROGRESS rung=2 rungs=4 iter=15
+PROGRESS rung=2 rungs=4 iter=16
+PROGRESS rung=2 rungs=4 iter=17
+PROGRESS rung=2 rungs=4 iter=18
+PROGRESS rung=2 rungs=4 iter=19
+PROGRESS rung=2 rungs=4 iter=20
+PROGRESS rung=2 rungs=4 iter=21
+PROGRESS rung=2 rungs=4 iter=22
+PROGRESS rung=2 rungs=4 iter=23
+PROGRESS rung=2 rungs=4 iter=24
+PROGRESS rung=2 rungs=4 iter=25
+PROGRESS rung=2 rungs=4 iter=26
+PROGRESS rung=2 rungs=4 iter=27
+PROGRESS rung=2 rungs=4 iter=28
+VARIANT vf=0.380000 achieved=0.380000 printed=0.585290 margin=1008.5 accepted=1 mesh=s2_semdot/variant_038.stl
+PROGRESS rung=3 rungs=4 iter=1
+PROGRESS rung=3 rungs=4 iter=2
+PROGRESS rung=3 rungs=4 iter=3
+PROGRESS rung=3 rungs=4 iter=4
+PROGRESS rung=3 rungs=4 iter=5
+PROGRESS rung=3 rungs=4 iter=6
+PROGRESS rung=3 rungs=4 iter=7
+PROGRESS rung=3 rungs=4 iter=8
+PROGRESS rung=3 rungs=4 iter=9
+PROGRESS rung=3 rungs=4 iter=10
+PROGRESS rung=3 rungs=4 iter=11
+PROGRESS rung=3 rungs=4 iter=12
+PROGRESS rung=3 rungs=4 iter=13
+PROGRESS rung=3 rungs=4 iter=14
+PROGRESS rung=3 rungs=4 iter=15
+PROGRESS rung=3 rungs=4 iter=16
+PROGRESS rung=3 rungs=4 iter=17
+PROGRESS rung=3 rungs=4 iter=18
+PROGRESS rung=3 rungs=4 iter=19
+PROGRESS rung=3 rungs=4 iter=20
+PROGRESS rung=3 rungs=4 iter=21
+PROGRESS rung=3 rungs=4 iter=22
+PROGRESS rung=3 rungs=4 iter=23
+PROGRESS rung=3 rungs=4 iter=24
+PROGRESS rung=3 rungs=4 iter=25
+PROGRESS rung=3 rungs=4 iter=26
+PROGRESS rung=3 rungs=4 iter=27
+PROGRESS rung=3 rungs=4 iter=28
+PROGRESS rung=3 rungs=4 iter=29
+PROGRESS rung=3 rungs=4 iter=30
+PROGRESS rung=3 rungs=4 iter=31
+PROGRESS rung=3 rungs=4 iter=32
+PROGRESS rung=3 rungs=4 iter=33
+PROGRESS rung=3 rungs=4 iter=34
+PROGRESS rung=3 rungs=4 iter=35
+PROGRESS rung=3 rungs=4 iter=36
+PROGRESS rung=3 rungs=4 iter=37
+PROGRESS rung=3 rungs=4 iter=38
+PROGRESS rung=3 rungs=4 iter=39
+PROGRESS rung=3 rungs=4 iter=40
+PROGRESS rung=3 rungs=4 iter=41
+PROGRESS rung=3 rungs=4 iter=42
+VARIANT vf=0.260000 achieved=0.260000 printed=0.502227 margin=303.246 accepted=1 mesh=s2_semdot/variant_026.stl
+WARNING: multigrid solver "MultigridCG_Matfree" fell back to Jacobi-CG on the 128x31x118 solved grid (the hierarchy could not be built, OR the V-cycle stagnated on a high-contrast field) — expect a large slowdown. Linear solves ran Jacobi-CG; run_info.json records cg_multigrid=false. See iterations.csv for the per-solve record.
+model: M2_verticalStand.step (78 B-rep faces, 1 fixture faces matched)
+ladder: REDUCTION [0.68, 0.52, 0.38, 0.26 x the part] — remove as much plastic as possible while holding it
+variants: 4 evaluated, 4 accepted
+  vf 0.68: margin 3.18e+03, accepted
+  vf 0.52: margin 2.16e+03, accepted
+  vf 0.38: margin 1.01e+03, accepted
+  vf 0.26: margin 303, accepted
+report: s2_semdot/report.json
+mesh: s2_semdot/variant_068.stl
+mesh: s2_semdot/variant_052.stl
+mesh: s2_semdot/variant_038.stl
+mesh: s2_semdot/variant_026.stl
+run_info: s2_semdot/run_info.json
+iterations: s2_semdot/iterations.csv
+     1912.41 real      3967.40 user       105.42 sys
+           689537024  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              392632  page reclaims
+                 193  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 782  voluntary context switches
+            17280110  involuntary context switches
+      34500443648642  instructions retired
+      12624918616626  cycles elapsed
+           881444136  peak memory footprint

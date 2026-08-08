@@ -1,0 +1,93 @@
+=== R1, SECOND BUILD OUTPUT — the app (CI job `app-macos`) ===
+
+  ./app/scripts/build_core.sh          exit 0
+  swift test --package-path app/TopOptKit   exit 0
+
+This task changes core/ only; the app LINKS core, so it is BUILT AND TESTED rather
+than assumed. The xcframework was regenerated from this branch
+(CoreFingerprint.generated.swift fingerprint=117ec7e8abd5) and all three slices —
+macos-arm64, ios-arm64-simulator, ios-arm64 — built.
+
+★ THE macOS SLICE HAS lib3mf, AND THE SUITE PROVES IT RATHER THAN THE LOG SAYING
+SO. The lib3mf warnings below are the two iOS slices (they are 3MF-free by
+default). ci.yml's own note — "WITHOUT THIS STEP THE JOB IS A LIE ... three
+AppModelTests fail outright, they assert a real 3MF parse rather than skipping" —
+is the check: those three tests did not fail, so the macOS slice linked lib3mf.
+
+NOTE ON THIS LOG: it is the tail of each phase, not the whole transcript, so the
+per-test roll-up is not in it. The exit codes above are the verdict.
+
+--- transcript tail follows ---------------------------------------------------
+
+    A `ctest` pass here does NOT mean a CI pass. Report N/<CI's total>, not
+    N/N, and say which tests did not run.
+
+
+==> building iOS device slice (Eigen, OCCT-free, arm64)
+CMake Warning at CMakeLists.txt:64 (message):
+  REDUCED TEST SUITE — this configuration registers FEWER TESTS THAN CI.
+
+      OpenCASCADE  -> STEP import + most validation tests will NOT register
+      lib3mf       -> tests `export_3mf` and `threemf_import` will NOT register
+                      fix: ./app/scripts/build_lib3mf_macos.sh   (pins CI's exact 2.5.0#1)
+    A `ctest` pass here does NOT mean a CI pass. Report N/<CI's total>, not
+    N/N, and say which tests did not run.
+
+
+==> created /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/app/TopOptKit/vendor/TopOptCore.xcframework
+==> wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/app/TopOptKit/Sources/TopOptFlows/CoreFingerprint.generated.swift (fingerprint=117ec7e8abd5)
+==> vendored:
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/app/TopOptKit/vendor/TopOptCore.xcframework (macos-arm64, ios-arm64-simulator, ios-arm64)
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/app/TopOptKit/vendor/include   -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/core/include
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/app/TopOptKit/vendor/occt-lib  -> /opt/homebrew/opt/opencascade/lib   (macOS link only)
+    (no vendor/occt-ios — iOS slices are OCCT-free; run build_occt_ios.sh for STEP on iOS)
+    (no vendor/lib3mf-ios — iOS slices are 3MF-free; .3mf import will be UNAVAILABLE on iPad.
+     run 'BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh' then re-run this script to enable 3MF on iOS)
+==> done. Test: (cd /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/app/TopOptKit && xcodebuild test -scheme TopOptKit-Package -destination 'platform=macOS')
+=== build_core exit=0 ===
+BUILD: DEBUG — NOT the configuration the app ships. Re-run with
+       `swift test -c release --filter SmoothingStrokeLatencyEvidence`
+       for the numbers he actually feels.
+
+mesh   variant_068.stl: 14386084 bytes, 143862 vertices / 287720 triangles
+brush  every vertex at weight 1.0, strength 0.49 (Taubin pairs as resolved by taubin_params_for_strength)
+repeats per row: 5; every figure is ms PER STROKE
+
+stage                                  repeats    ms/stroke
+------------------------------------------------------------
+A  preview via PATH   — STL re-import        5     621.2
+A  preview via PATH   — smoothing            5      64.6
+A  preview via PATH   — TOTAL                5     814.3
+B  preview via MEMORY — STL re-import        5       0.0
+B  preview via MEMORY — smoothing            5      67.2
+B  preview via MEMORY — TOTAL                5     328.0
+   ViewerMesh build (app side, both)         5    1980.3
+------------------------------------------------------------
+stroke release -> updated preview, BEFORE:   2794.6 ms
+stroke release -> updated preview, AFTER :   2308.2 ms
+removed: 486.4 ms per stroke (17.4% of the before figure)
+
+
+S1d — WHAT ELSE A PASS REBUILDS (not on the critical path above, but
+      paid on EVERY SwiftUI body evaluation, of which a stroke causes
+      several):
+   smoothBrush.viewerTints()  863160 entries      221.6 ms
+   the coordinator's array compare against the uploaded copy     57.3 ms
+
+The import share of the SHIPPED preview call: 90.6%
+moved vertices 143862 / 143862; max displacement 0.4449 mm
+HIS VARIANT: rung 068 — 143862 vertices / 287720 triangles
+HE SETS HIS VIEW: distance 181.5483, target (84.785, -28.061, 110.690)
+  stroke 1 -> rung 1, 20403 vertices moved, max 0.2681 mm, preview 365 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 2 -> rung 2, 20403 vertices moved, max 0.3715 mm, preview 390 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 3 -> rung 3, 20403 vertices moved, max 0.4221 mm, preview 383 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  toggled back to Original — camera UNCHANGED
+  renderer holds the page's geometry; settle ran ONCE for the whole session
+TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/docs/handoffs/assets/tap_overselect_before.png
+TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/docs/handoffs/assets/tap_overselect_after.png
+STEP-IMPORT-PROOF l-bracket.step triangleCount=236 vertexCount=116 faceCount=10 watertight=true
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+=== swift test exit=0 ===

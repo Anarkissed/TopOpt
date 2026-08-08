@@ -1,0 +1,25 @@
+=== THE THREE CLEANUPS MADE AFTER THE S2 BINARY WAS PINNED, PROVED NEUTRAL ===
+
+WHY THIS FILE EXISTS. The S2 numbers were produced by one binary, whose sha256 is
+in s2_binary_of_record.txt and which BOTH arms ran. Three cleanups landed in
+simp.cpp after that binary was built:
+
+  * the dead `SemdotField semdot_last` carried across the iteration loop — a full
+    copy of the volume-fraction vector (468,224 doubles, 3.7 MB) per iteration,
+    assigned and never read;
+  * `xphys = std::move(sf.volume_fraction)` in the trajectory block;
+  * `xafter = std::move(sf.volume_fraction)` in the post-step block, with the
+    achieved-volume read moved above it.
+
+So the committed source does not byte-match the binary that produced the S2
+table. Asserting "these are obviously neutral" is the kind of claim this project
+has been burned by, so it is MEASURED: the SEMDOT smoke job was re-run through the
+rebuilt binary and its design.bin compared with the one the pinned binary wrote.
+
+  before (pinned binary)   90de90bcc3b67afd20c949253e2cffde40c7b8638b001aa7057a403ddba39eb4
+  after  (rebuilt binary)  90de90bcc3b67afd20c949253e2cffde40c7b8638b001aa7057a403ddba39eb4
+  IDENTICAL
+
+The job is r1_byteid/job_semdot.json (l-bracket, resolution 40, two rungs, SEMDOT
+armed at grid_points 4), which exercises the map on every iteration of both rungs
+and both of the moved assignments. Re-run: r1_byteid/neutrality_semdot/.

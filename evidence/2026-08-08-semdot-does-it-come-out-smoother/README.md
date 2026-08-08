@@ -59,10 +59,28 @@ breaks for the multiscale one**, at two lines with one cause.
 
 | file | bar |
 |---|---|
-| `r1_byte_identity.sh`, `r1_byte_identity.txt`, `r1_byteid/` | R1 — off is byte-identical, base **detached worktree** vs branch, artifact checksums |
+| `r1_byte_identity.sh`, `r1_classify.py`, `r1_byte_identity.txt`, `r1_base_ref.txt` | R1 — off is byte-identical, base **detached worktree** vs branch. The classifier holds DESIGN artifacts to byte identity with no exceptions and RECEIPTS to "identical once the wall clock is out, every remaining difference named", and exits non-zero if either fails |
 | `r1_app_build.txt` | R1 — the second build output (`app/scripts/build_core.sh` + the package tests) |
 | `r1_refactor_neutrality.txt` | the three `std::move` / dead-copy cleanups made after the S2 binary was pinned, proved behaviour-neutral by byte-comparing a re-run of the smoke job |
 | `s2_binary_of_record.txt` | the sha256 of the one `topopt-cli` **both** S2 arms ran |
 | `ctest_full.txt`, `ctest_116.txt` | the suite, at CI's denominator (116 — the local default is 114 because lib3mf is not on the Homebrew path; see the note in `ctest_116.txt`) |
 | `r7_assertion_census.py`, `r7_assertion_census.txt` | R7 — assertion/throw **message** census, comment-stripped and multi-line aware, base vs branch |
 | `host_s2.txt`, `host_contention.txt` | the host, before/between/after, and the contention that was on it |
+
+## what is deliberately NOT committed here
+
+`s2_*/design.bin` IS committed — the probe reads it, so the 11-second geometry
+re-measurement stays reproducible without re-running the two-hour ladder. What
+came out again after the first commit, and why:
+
+* `s2_*/fields.bin` (23 MB each) and `s2_*/variant_*.stl` (~120 MB) — nothing in
+  this task reads them; the probe re-extracts every mesh from `design.bin` at the
+  shipped tessellation factor.
+* `r1_byteid/{base,branch,smoke_*,neutrality_*}/` — throwaway run outputs. Every
+  number taken from them is recorded: `r1_byte_identity.txt` carries the sha256 of
+  all eight compared artifacts, and `r1_refactor_neutrality.txt` carries the
+  before/after design.bin hash.
+
+`reproduce.sh` regenerates all of it. The two most recent tasks in this lineage
+(PR 306, PR 314) committed text-and-CSV evidence only; this follows them, with
+`design.bin` as the one deliberate exception.

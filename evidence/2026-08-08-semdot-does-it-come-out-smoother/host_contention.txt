@@ -326,3 +326,130 @@
      222.6%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
      208.7%  ../../core/build/topopt-cli
      175.1%  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/topopt-cli-wound
+2026-08-08T02:27:32Z  load=9.72 10.40 10.59
+     169.3%  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/topopt-cli-wound
+     104.7%  ../../core/build/topopt-cli
+      99.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:28:32Z  load=7.24 9.60 10.28
+     241.4%  ../../core/build/topopt-cli
+      99.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:29:32Z  load=6.16 8.86 9.96
+     237.7%  ../../core/build/topopt-cli
+      95.5%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:30:32Z  load=7.19 8.67 9.81
+     235.3%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     170.5%  ../../core/build/topopt-cli
+      93.9%  python3
+2026-08-08T02:31:32Z  load=7.61 8.53 9.68
+     232.8%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     202.1%  ../../core/build/topopt-cli
+2026-08-08T02:32:32Z  load=9.15 8.81 9.70
+     238.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     208.9%  ../../core/build/topopt-cli
+2026-08-08T02:33:32Z  load=7.77 8.46 9.51
+     238.2%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     204.8%  ../../core/build/topopt-cli
+      93.4%  ./core/build/test_lattice_clip_shell
+2026-08-08T02:34:33Z  load=8.89 8.69 9.53
+     494.3%  ../../core/build/topopt-cli
+     219.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:35:33Z  load=7.66 8.40 9.36
+     243.2%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     162.7%  ../../core/build/topopt-cli
+2026-08-08T02:36:33Z  load=7.71 8.26 9.24
+     249.1%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     235.8%  ../../core/build/topopt-cli
+2026-08-08T02:37:33Z  load=7.05 7.96 9.06
+     241.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     237.9%  ../../core/build/topopt-cli
+2026-08-08T02:38:33Z  load=6.35 7.61 8.85
+     265.8%  ../../core/build/topopt-cli
+      99.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:39:33Z  load=6.51 7.45 8.70
+     269.8%  ../../core/build/topopt-cli
+      99.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:40:33Z  load=6.80 7.44 8.62
+     245.7%  ../../core/build/topopt-cli
+     214.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:41:33Z  load=10.61 8.30 8.85
+     223.7%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     223.4%  ../../core/build/topopt-cli
+2026-08-08T02:42:33Z  load=7.90 7.96 8.69
+     244.6%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     207.3%  ../../core/build/topopt-cli
+2026-08-08T02:43:33Z  load=7.63 7.80 8.57
+     246.3%  ../../core/build/topopt-cli
+     237.8%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:44:33Z  load=7.45 7.74 8.50
+     245.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     234.9%  ../../core/build/topopt-cli
+2026-08-08T02:45:33Z  load=8.33 7.85 8.48
+     241.8%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     240.9%  ../../core/build/topopt-cli
+      59.1%  /Applications/Google
+2026-08-08T02:46:33Z  load=8.35 7.89 8.45
+     241.7%  ../../core/build/topopt-cli
+     240.1%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:47:33Z  load=7.90 7.81 8.38
+     241.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     159.3%  ../../core/build/topopt-cli
+2026-08-08T02:48:34Z  load=6.46 7.44 8.20
+     246.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     232.1%  ../../core/build/topopt-cli
+2026-08-08T02:49:34Z  load=5.50 7.01 7.99
+     270.8%  ../../core/build/topopt-cli
+2026-08-08T02:50:34Z  load=4.58 6.51 7.73
+     265.1%  ../../core/build/topopt-cli
+      98.3%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+      57.5%  /Applications/Claude.app/Contents/Frameworks/Claude
+2026-08-08T02:51:34Z  load=5.03 6.33 7.58
+     274.7%  ../../core/build/topopt-cli
+     100.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:52:34Z  load=7.05 6.62 7.60
+     288.6%  ../../core/build/topopt-cli
+     239.9%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+      61.8%  /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS
+2026-08-08T02:53:34Z  load=6.57 6.62 7.54
+     200.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+      80.0%  ../../core/build/topopt-cli
+      61.6%  /Applications/Claude.app/Contents/Frameworks/Claude
+      56.7%  /Users/nadim/Library/Application
+2026-08-08T02:54:34Z  load=5.90 6.39 7.39
+     252.2%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+      92.5%  ../../core/build/topopt-cli
+2026-08-08T02:55:34Z  load=5.64 6.18 7.23
+     249.2%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     163.2%  ../../core/build/topopt-cli
+2026-08-08T02:56:34Z  load=6.58 6.33 7.22
+     250.8%  ../../core/build/topopt-cli
+     246.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:57:34Z  load=7.51 6.69 7.29
+     251.1%  ../../core/build/topopt-cli
+     241.6%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:58:34Z  load=7.21 6.74 7.26
+     256.4%  ../../core/build/topopt-cli
+     241.8%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T02:59:34Z  load=7.63 6.87 7.27
+     286.3%  ../../core/build/topopt-cli
+     100.0%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T03:00:34Z  load=8.33 7.18 7.36
+     245.7%  ../../core/build/topopt-cli
+     244.4%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T03:01:34Z  load=8.35 7.34 7.40
+     249.2%  ../../core/build/topopt-cli
+     239.7%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+2026-08-08T03:02:35Z  load=8.72 7.60 7.49
+     220.2%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     215.9%  ../../core/build/topopt-cli
+     109.5%  /Applications/Claude.app/Contents/Frameworks/Claude
+2026-08-08T03:03:35Z  load=9.61 7.99 7.64
+     249.8%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     248.7%  ../../core/build/topopt-cli
+      93.8%  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-active-domain-disarm-prod-30f4a5/7612128b-7320-4ef7-8900-254f3ac42313/scratchpad/topopt-cli-wound
+2026-08-08T03:04:35Z  load=7.70 7.78 7.58
+     251.8%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     128.8%  ../../core/build/topopt-cli
+2026-08-08T03:05:35Z  load=7.48 7.73 7.58
+     252.6%  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cad-face-projection-a1e996/core/build/boundary_cell_probe
+     167.4%  ../../core/build/topopt-cli
+2026-08-08T03:06:35Z  load=6.50 7.42 7.47

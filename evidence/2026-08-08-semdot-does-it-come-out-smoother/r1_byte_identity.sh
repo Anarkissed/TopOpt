@@ -48,16 +48,12 @@ BASE_SHA=$(git rev-parse --short "$BASE_REF")
 git worktree remove --force "$WT" >/dev/null 2>&1
 rm -rf "$BLD"
 
-{
-  echo "=== R1 — base worktree ($BASE_REF = $BASE_SHA) vs branch,"
-  echo "         a lattice+grading job with NO \"semdot\" key ==="
-  echo
-  if diff -u "$W/base.sha256" "$W/branch.sha256" > /dev/null; then
-    echo "IDENTICAL — every artifact matches byte for byte."
-    echo
-    sed 's/^/  /' "$W/branch.sha256"
-  else
-    echo "DIFFERENCES FOUND:"
-    diff -u "$W/base.sha256" "$W/branch.sha256" || true
-  fi
-} | tee "$EV/r1_byte_identity.txt"
+# The REPORT is r1_classify.py, not a bare checksum diff. Three files on this
+# repo always differ between two runs of the same binary because they carry a
+# WALL CLOCK, so a bare diff cries wolf; a whitelist would hide a real change
+# behind a timing field. The classifier holds the DESIGN artifacts to byte
+# identity with no exceptions and the RECEIPTS to "identical once the clock is
+# removed, every remaining difference named". It exits non-zero if either bar
+# fails. See its docstring.
+echo "R1 base worktree: $BASE_REF = $BASE_SHA" > "$EV/r1_base_ref.txt"
+"$EV/r1_classify.py" "$W/base" "$W/branch"

@@ -393,26 +393,65 @@ int main(int argc, char** argv) {
   std::printf("\n\n=====================================================================\n");
   std::printf("THE ANSWER — SEMDOT against SIMP, rung by rung\n");
   std::printf("=====================================================================\n");
-  std::printf("%-6s | %-22s | %-22s | %-22s\n", "rung",
-              "stair-step amp (obl)", "roughness, CUT (deg)", "crossing offset (mm)");
-  std::printf("%-6s | %8s %8s %5s | %8s %8s %5s | %8s %8s %5s\n", "", "SIMP",
-              "SEMDOT", "%", "SIMP", "SEMDOT", "%", "SIMP", "SEMDOT", "%");
-  const std::size_t half = rows.size() / 2;
-  for (std::size_t i = 0; i < half && i + half < rows.size(); ++i) {
-    const ArmRow& a = rows[i];
-    const ArmRow& b = rows[i + half];
-    auto pct = [](double from, double to) {
-      return from > 0.0 ? 100.0 * (from - to) / from : 0.0;
-    };
-    std::printf("%-6s | %8.4f %8.4f %+5.1f | %8.4f %8.4f %+5.1f | %8.4f %8.4f %+5.1f\n",
-                a.rung.c_str(), a.obl_all.rms_mm, b.obl_all.rms_mm,
-                pct(a.obl_all.rms_mm, b.obl_all.rms_mm), a.dih_cut, b.dih_cut,
-                pct(a.dih_cut, b.dih_cut), a.field.crossing_rms_mm,
-                b.field.crossing_rms_mm,
-                pct(a.field.crossing_rms_mm, b.field.crossing_rms_mm));
+  // THE HEADLINE AMPLITUDE IS THE CAD POPULATION, NOT THE WHOLE OBLIQUE SET.
+  // PR 314 settled that the cut surface has no ground truth, so its
+  // distance-to-CAD is a fact about the part's shape and not an error — and on
+  // this part it is 3.7-8.6 mm, an order above the CAD population's 0.43. Folding
+  // it into one "oblique" number would make the headline mostly geometry and
+  // would move for reasons that have nothing to do with staircase.
+  //
+  // AND THE CROSSING COLUMN IS THE MECHANISM, NOT AN OUTCOME — read it the other
+  // way up. PR 315 measured SIMP's marching-cubes crossings landing within 1% of
+  // the edge MIDPOINT 91% of the time, rms |frac-0.5| = 0.1037 mm, and called
+  // that "the whole sub-voxel signal the field supported". A midpoint every time
+  // IS the staircase. So a BIGGER offset here means MORE sub-voxel placement, and
+  // that is what SEMDOT is for. It is signed accordingly: positive = SEMDOT put
+  // more sub-voxel content in the field than SIMP did.
+  std::printf("%-6s | %-24s | %-24s | %-24s\n", "rung",
+              "stair-step amp, CAD (mm)", "roughness, CUT (deg)",
+              "sub-voxel content (mm)");
+  std::printf("%-6s | %8s %8s %6s | %8s %8s %6s | %8s %8s %6s\n", "",
+              "SIMP", "SEMDOT", "%better", "SIMP", "SEMDOT", "%better",
+              "SIMP", "SEMDOT", "%more");
+  // PAIRED BY RUNG LABEL, NOT BY POSITION. The two arms need not evaluate the
+  // same number of rungs — a rung either arm rejects, or one that ends
+  // infeasible, stops that ladder and leaves the other longer. Pairing by index
+  // would then silently compare rung 0.52 of one arm against 0.38 of the other
+  // and print a difference that is a ladder mismatch wearing a smoothness label.
+  // A rung only one arm reached is reported as such rather than dropped.
+  auto find_arm = [&rows](const char* arm, const std::string& rung) -> const ArmRow* {
+    for (const ArmRow& r : rows)
+      if (r.arm == arm && r.rung == rung) return &r;
+    return nullptr;
+  };
+  std::vector<std::string> order;
+  for (const ArmRow& r : rows)
+    if (std::find(order.begin(), order.end(), r.rung) == order.end())
+      order.push_back(r.rung);
+  auto pct = [](double from, double to) {
+    return from > 0.0 ? 100.0 * (from - to) / from : 0.0;
+  };
+  for (const std::string& rung : order) {
+    const ArmRow* a = find_arm("SIMP", rung);
+    const ArmRow* b = find_arm("SEMDOT", rung);
+    if (!a || !b) {
+      std::printf("%-6s | ONLY %s REACHED THIS RUNG — not compared\n", rung.c_str(),
+                  a ? "SIMP" : "SEMDOT");
+      continue;
+    }
+    std::printf("%-6s | %8.4f %8.4f %+6.1f | %8.4f %8.4f %+6.1f | %8.4f %8.4f %+6.0f\n",
+                rung.c_str(), a->obl_cad.rms_mm, b->obl_cad.rms_mm,
+                pct(a->obl_cad.rms_mm, b->obl_cad.rms_mm), a->dih_cut, b->dih_cut,
+                pct(a->dih_cut, b->dih_cut), a->field.crossing_rms_mm,
+                b->field.crossing_rms_mm,
+                -pct(a->field.crossing_rms_mm, b->field.crossing_rms_mm));
   }
-  std::printf("\n(a POSITIVE %% is SEMDOT smoother / less offset; the crossing "
-              "column\n is the mechanism, the first two are the outcome.)\n");
+  std::printf(
+      "\nA POSITIVE %% IS SEMDOT WINNING IN ALL THREE COLUMNS. The first two are\n"
+      "the OUTCOME (lower amplitude, lower roughness); the third is the\n"
+      "MECHANISM (more sub-voxel placement in the field). Positive mechanism with\n"
+      "negative outcome is the interesting failure: the boundary DID get finer\n"
+      "than the grid, and the surface got worse anyway.\n");
   std::printf("\nwrote %s/s2_semdot_vs_simp.csv\n", ev.c_str());
   return 0;
 }
