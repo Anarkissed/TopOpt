@@ -9,9 +9,15 @@
 # vacuously when NO BUILD HAPPENED (make-topopt-cli-silently-noops, three
 # occurrences), so this carries two guards instead of one:
 #
-#   GUARD 1  each arm must actually relink: the build log must contain a
-#            "Linking CXX executable topopt-cli" line and the binary's mtime must
-#            move.
+#   GUARD 1  each arm must actually BUILD FROM SCRATCH. The build folder is wiped
+#            and re-configured per arm, so every arm recompiles the whole library
+#            and relinks; the log must contain a "Linking CXX executable
+#            topopt-cli" line and the binary's mtime must move. An incremental
+#            build is NOT good enough here: this task's only tracked source change
+#            is an EXCLUDE_FROM_ALL target, so `make topopt_cli` legitimately has
+#            nothing to do and would hash a binary no arm produced. (The first run
+#            of this script hit exactly that and GUARD 1 caught it, which is what
+#            the guard is for.)
 #   GUARD 2  a NEGATIVE CONTROL arm with a deliberate one-character change to a
 #            production source. If THAT arm also hashes identical the comparison
 #            is blind and the bar is void -- the script prints R1 INVALID and
@@ -54,12 +60,20 @@ else
 fi
 echo
 
+CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release -DTOPOPT_REQUIRE_DEPS=ON
+  -DOpenCASCADE_DIR=/opt/homebrew/lib/cmake/opencascade
+  -DEigen3_DIR=/opt/homebrew/share/eigen3/cmake
+  -Dlib3mf_DIR=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed/arm64-osx-dynamic/share/lib3mf
+  -DCMAKE_PREFIX_PATH=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg/installed/arm64-osx-dynamic)
+
 build_and_hash() {  # label -> prints sha256 on stdout, diagnostics on stderr
   local label="$1"
   local log="$HERE/r1_build_${label}.log"
   local before after rc
   before="$(stat -f %m "$BUILD/topopt-cli" 2>/dev/null || echo 0)"
-  ( cd "$BUILD" && cmake .. >/dev/null && nice make topopt_cli -j10 ) > "$log" 2>&1
+  rm -rf "$BUILD"
+  mkdir -p "$BUILD"
+  ( cd "$BUILD" && cmake .. "${CMAKE_ARGS[@]}" >/dev/null && nice make topopt_cli -j10 ) > "$log" 2>&1
   rc=$?
   after="$(stat -f %m "$BUILD/topopt-cli" 2>/dev/null || echo 0)"
   if [ "$rc" -ne 0 ]; then echo "BUILD FAILED ($label), see $log" >&2; return 1; fi
