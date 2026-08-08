@@ -1,0 +1,30 @@
+== S3 — PicoGK graded lattice from core's own density field ==
+
+grid          128 x 31 x 118, spacing 1.705279350 mm
+density file  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.68.f64
+bounding STL  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.68.stl  (14,235,284 bytes)
+cell size     4.603 mm  (2.70 voxels)
+driver max    1  (the field value mapped to full strut thickness)
+
+PicoGK        PicoGK Core Library 26.2.0
+voxel size    1.705279350 mm (HIS voxel)
+
+bounding      284,704 triangles in, 443,183 mm3, bbox <-17.98146, -48.83021, 0.09160328> .. <199.91658, 3.8610003, 199.53993>   [0.2 s]
+ScalarField   128 x 31 x 117 active voxels   [0.0 s]
+
+cells         28,665 unit cells of 4.60 mm
+lattice       generated in 4.3 s, 1,834,560 thickness lookups, rho seen [0.0000, 1.0000]
+clipped       to the design in 0.0 s, 382,856 mm3 (86.39% of the design)
+
+MEMORY        managed working set 295 MB (was 73 MB before any geometry)
+MESH          185,780 triangles in 0.0 s
+STL           9,289,084 bytes (8.9 MB)
+VDB           750,116 bytes (0.7 MB) — 12.4x smaller than the STL
+
+TOTAL WALL    5.1 s
+
+── (b) IS THE THICKNESS CONTINUOUS? ─────────────────────────────────
+  along x: 2000 samples 0.1089 mm apart, largest adjacent thickness STEP 0.364502 mm (18.692% of the full thickness range)
+  along z: 2000 samples 0.0997 mm apart, largest adjacent thickness STEP 0.454980 mm (23.332% of the full thickness range)
+Disposing Library
+Done Disposing Library

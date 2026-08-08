@@ -1,0 +1,430 @@
+== external_field_surface_probe — S2 on HIS OWN PART ==
+
+reference  evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin
+part       evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 faces, 3106 tessellation triangles)
+grid       128 x 31 x 118, spacing 1.705279 mm, origin (-18.2758, -48.9100, 0.0000)
+classifier tolerance 1.705279 mm
+
+#####################################################################
+# ARM SIMP — the run of record, re-measured here so no row in this
+#            table is compared against a remembered number
+#####################################################################
+
+---------------------------------------------------------------
+SIMP  rung 0.68   142354 verts / 284704 tris   iterations 27   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.679951   (miss -0.000049)
+  margin worst 3254.3566   effective 673.8562   max vM 0.0169 MPa   accepted yes
+  SPLIT: CAD 112583 (79.09%)  ambiguous 3580 (2.51%)  CUT 26191 (18.40%)   oblique 28365 (19.93%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.0605 mm  max 10.3332  p99 4.7841  (62.2% of a voxel)
+      oblique CAD   rms 0.4293 mm  max 1.6941  p99 1.2484
+      oblique CUT   rms 3.7452 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 8.4075 deg    CUT 7.5521 deg    CAD 7.5842 deg
+  CONTROLS: volume 440550.9 mm3   min section 3.4106 mm2   min-feature 5619
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 54081   binary at a band end 47965 (88.69%)
+      fractional samples (0<v<1): 28374
+      MC crossings 29803   |frac-0.5| rms 0.076042 = 0.1297 mm   within 1% of midpoint 85.28%
+
+---------------------------------------------------------------
+SIMP  rung 0.52   145550 verts / 291100 tris   iterations 127   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.5200   achieved 0.520005   (miss +0.000005)
+  margin worst 3389.4171   effective 701.8222   max vM 0.0162 MPa   accepted yes
+  SPLIT: CAD 102843 (70.66%)  ambiguous 3732 (2.56%)  CUT 38975 (26.78%)   oblique 27041 (18.58%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.6684 mm  max 10.3867  p99 6.1601  (97.8% of a voxel)
+      oblique CAD   rms 0.4507 mm  max 1.7022  p99 1.4363
+      oblique CUT   rms 4.1691 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2353 deg    CUT 9.6338 deg    CAD 7.9023 deg
+  CONTROLS: volume 403282.0 mm3   min section 3.4106 mm2   min-feature 5452
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 60567   binary at a band end 60563 (99.99%)
+      fractional samples (0<v<1): 45194
+      MC crossings 33848   |frac-0.5| rms 0.001329 = 0.0023 mm   within 1% of midpoint 99.96%
+
+---------------------------------------------------------------
+SIMP  rung 0.38   165096 verts / 330212 tris   iterations 140   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.3800   achieved 0.380000   (miss -0.000000)
+  margin worst 3290.9124   effective 681.4255   max vM 0.0167 MPa   accepted yes
+  SPLIT: CAD 94724 (57.38%)  ambiguous 3823 (2.32%)  CUT 66549 (40.31%)   oblique 26963 (16.33%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.9210 mm  max 14.3157  p99 10.8088  (171.3% of a voxel)
+      oblique CAD   rms 0.4394 mm  max 1.6986  p99 1.3356
+      oblique CUT   rms 5.7951 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.8108 deg    CUT 10.4580 deg    CAD 8.0555 deg
+  CONTROLS: volume 330882.2 mm3   min section 3.4106 mm2   min-feature 6142
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 63131   binary at a band end 63130 (100.00%)
+      fractional samples (0<v<1): 55060
+      MC crossings 35386   |frac-0.5| rms 0.003265 = 0.0056 mm   within 1% of midpoint 99.99%
+
+---------------------------------------------------------------
+SIMP  rung 0.26   167778 verts / 335588 tris   iterations 153   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.259996   (miss -0.000004)
+  margin worst 3014.1201   effective 624.1121   max vM 0.0182 MPa   accepted yes
+  SPLIT: CAD 89254 (53.20%)  ambiguous 3878 (2.31%)  CUT 74646 (44.49%)   oblique 26388 (15.73%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.4878 mm  max 15.5992  p99 12.9024  (204.5% of a voxel)
+      oblique CAD   rms 0.4375 mm  max 1.7001  p99 1.4096
+      oblique CUT   rms 6.4195 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.9413 deg    CUT 10.2657 deg    CAD 8.3031 deg
+  CONTROLS: volume 288713.4 mm3   min section 3.4106 mm2   min-feature 6923
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 64679   binary at a band end 64678 (100.00%)
+      fractional samples (0<v<1): 63381
+      MC crossings 36453   |frac-0.5| rms 0.001746 = 0.0030 mm   within 1% of midpoint 99.99%
+
+#####################################################################
+# ARM GTO-SDF — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+GTO-SDF  rung 0.68   137146 verts / 274292 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.774451   (miss +0.094451)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 107439 (78.34%)  ambiguous 2209 (1.61%)  CUT 27498 (20.05%)   oblique 24159 (17.62%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.2523 mm  max 10.3325  p99 4.8408  (73.4% of a voxel)
+      oblique CAD   rms 0.7080 mm  max 1.7049  p99 1.6252
+      oblique CUT   rms 3.3083 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 5.8454 deg    CUT 4.0156 deg    CAD 5.5700 deg
+  CONTROLS: volume 423553.0 mm3   min section 3.4106 mm2   min-feature 4547
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 47894   binary at a band end 8514 (17.78%)
+      fractional samples (0<v<1): 100834
+      MC crossings 27058   |frac-0.5| rms 0.339530 = 0.5790 mm   within 1% of midpoint 7.20%
+
+#####################################################################
+# ARM GTO-SDF — rung 0.52, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+GTO-SDF  rung 0.52   137160 verts / 274328 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.5200   achieved 0.677321   (miss +0.157321)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97070 (70.77%)  ambiguous 1952 (1.42%)  CUT 38138 (27.81%)   oblique 22033 (16.06%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.6918 mm  max 10.3351  p99 5.6514  (99.2% of a voxel)
+      oblique CAD   rms 0.7282 mm  max 1.7029  p99 1.6436
+      oblique CUT   rms 3.6256 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 6.1787 deg    CUT 4.4942 deg    CAD 5.9162 deg
+  CONTROLS: volume 388277.0 mm3   min section 3.4106 mm2   min-feature 4684
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 52854   binary at a band end 6832 (12.93%)
+      fractional samples (0<v<1): 113634
+      MC crossings 30761   |frac-0.5| rms 0.336017 = 0.5730 mm   within 1% of midpoint 4.52%
+
+#####################################################################
+# ARM GTO-SDF — rung 0.38, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+GTO-SDF  rung 0.38   154468 verts / 308968 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.3800   achieved 0.584142   (miss +0.204142)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 88395 (57.23%)  ambiguous 1815 (1.18%)  CUT 64258 (41.60%)   oblique 21578 (13.97%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.1983 mm  max 14.6993  p99 11.0404  (187.6% of a voxel)
+      oblique CAD   rms 0.7386 mm  max 1.7052  p99 1.6640
+      oblique CUT   rms 5.6748 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 6.6812 deg    CUT 5.8108 deg    CAD 6.2798 deg
+  CONTROLS: volume 317342.8 mm3   min section 3.4106 mm2   min-feature 5910
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 54732   binary at a band end 5524 (10.09%)
+      fractional samples (0<v<1): 118496
+      MC crossings 32226   |frac-0.5| rms 0.341453 = 0.5823 mm   within 1% of midpoint 2.75%
+
+#####################################################################
+# ARM GTO-SDF — rung 0.26, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+GTO-SDF  rung 0.26   154916 verts / 309876 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.499819   (miss +0.239819)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 81364 (52.52%)  ambiguous 1645 (1.06%)  CUT 71907 (46.42%)   oblique 20692 (13.36%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.8857 mm  max 15.7663  p99 12.8073  (227.9% of a voxel)
+      oblique CAD   rms 0.7638 mm  max 1.7052  p99 1.6707
+      oblique CUT   rms 6.2755 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 7.0444 deg    CUT 5.8574 deg    CAD 6.6497 deg
+  CONTROLS: volume 269522.5 mm3   min section 3.4106 mm2   min-feature 6615
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 55102   binary at a band end 4488 (8.14%)
+      fractional samples (0<v<1): 120681
+      MC crossings 32981   |frac-0.5| rms 0.341840 = 0.5829 mm   within 1% of midpoint 2.35%
+
+#####################################################################
+# ARM CTRL-eta0.5 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+CTRL-eta0.5  rung 0.68   138382 verts / 276764 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.773827   (miss +0.093827)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 107502 (77.68%)  ambiguous 2604 (1.88%)  CUT 28276 (20.43%)   oblique 24715 (17.86%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.2505 mm  max 10.3325  p99 4.8379  (73.3% of a voxel)
+      oblique CAD   rms 0.7269 mm  max 1.7047  p99 1.6007
+      oblique CUT   rms 3.3778 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 5.4304 deg    CUT 4.1476 deg    CAD 4.8232 deg
+  CONTROLS: volume 424685.4 mm3   min section 3.4106 mm2   min-feature 2965
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 47868   binary at a band end 19285 (40.29%)
+      fractional samples (0<v<1): 42836
+      MC crossings 27198   |frac-0.5| rms 0.379196 = 0.6466 mm   within 1% of midpoint 8.07%
+
+#####################################################################
+# ARM CTRL-eta1.0 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+CTRL-eta1.0  rung 0.68   137560 verts / 275120 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.774585   (miss +0.094585)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 107483 (78.14%)  ambiguous 2284 (1.66%)  CUT 27793 (20.20%)   oblique 24708 (17.96%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.2524 mm  max 10.3325  p99 4.8347  (73.4% of a voxel)
+      oblique CAD   rms 0.7104 mm  max 1.7044  p99 1.6173
+      oblique CUT   rms 3.3121 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 5.6238 deg    CUT 4.0616 deg    CAD 5.2938 deg
+  CONTROLS: volume 424480.8 mm3   min section 3.4106 mm2   min-feature 3203
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 47921   binary at a band end 14510 (30.28%)
+      fractional samples (0<v<1): 68638
+      MC crossings 27071   |frac-0.5| rms 0.342133 = 0.5834 mm   within 1% of midpoint 8.39%
+
+#####################################################################
+# ARM CTRL-EDT-noreinit — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+CTRL-EDT-noreinit  rung 0.68   141394 verts / 282784 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.771463   (miss +0.091463)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 109684 (77.57%)  ambiguous 3730 (2.64%)  CUT 27980 (19.79%)   oblique 27736 (19.62%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.2670 mm  max 10.3327  p99 4.8865  (74.3% of a voxel)
+      oblique CAD   rms 0.7245 mm  max 1.7052  p99 1.5938
+      oblique CUT   rms 3.3389 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 6.2055 deg    CUT 5.5559 deg    CAD 5.4423 deg
+  CONTROLS: volume 424709.8 mm3   min section 3.4106 mm2   min-feature 5274
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 49074   binary at a band end 7921 (16.14%)
+      fractional samples (0<v<1): 106273
+      MC crossings 28885   |frac-0.5| rms 0.436341 = 0.7441 mm   within 1% of midpoint 8.73%
+
+#####################################################################
+# ARM GTO-SDF-nodelattice — rung 0.68, external field 129 x 32 x 119, spacing 1.705279,
+#   iso 0.5000, factor 1 (none), lattice 'node'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+GTO-SDF-nodelattice  rung 0.68   35880 verts / 71756 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.774451   (miss +0.094451)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 27535 (76.74%)  ambiguous 1112 (3.10%)  CUT 7233 (20.16%)   oblique 7039 (19.62%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.2666 mm  max 9.1987  p99 4.6889  (74.3% of a voxel)
+      oblique CAD   rms 0.8426 mm  max 1.7039  p99 1.6245
+      oblique CUT   rms 3.2852 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 27.5159 deg    CUT 30.0400 deg    CAD 24.8304 deg
+  CONTROLS: volume 451665.5 mm3   min section 3.4106 mm2   min-feature 1866
+  ★ THE FIELD, on the node lattice (spacing 1.705279 mm)
+      boundary samples 53895   binary at a band end 10709 (19.87%)
+      fractional samples (0<v<1): 84201
+      MC crossings 29294   |frac-0.5| rms 0.305769 = 0.5214 mm   within 1% of midpoint 25.07%
+
+#####################################################################
+# ARM CTRL-eta0.5 — rung 0.26, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+CTRL-eta0.5  rung 0.26   157502 verts / 315048 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.496714   (miss +0.236714)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 82597 (52.44%)  ambiguous 2023 (1.28%)  CUT 72882 (46.27%)   oblique 21675 (13.76%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.8177 mm  max 15.7698  p99 12.8645  (223.9% of a voxel)
+      oblique CAD   rms 0.7710 mm  max 1.7047  p99 1.6514
+      oblique CUT   rms 6.2995 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 6.5576 deg    CUT 5.7762 deg    CAD 5.6903 deg
+  CONTROLS: volume 270551.6 mm3   min section 3.4106 mm2   min-feature 4282
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 55142   binary at a band end 17447 (31.64%)
+      fractional samples (0<v<1): 55983
+      MC crossings 33241   |frac-0.5| rms 0.385700 = 0.6577 mm   within 1% of midpoint 2.07%
+
+#####################################################################
+# ARM CTRL-eta1.0 — rung 0.26, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+CTRL-eta1.0  rung 0.26   155822 verts / 311688 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.498234   (miss +0.238234)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 81910 (52.57%)  ambiguous 1737 (1.11%)  CUT 72175 (46.32%)   oblique 21344 (13.70%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.8317 mm  max 15.7601  p99 12.7872  (224.7% of a voxel)
+      oblique CAD   rms 0.7598 mm  max 1.7051  p99 1.6649
+      oblique CUT   rms 6.2646 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 6.7943 deg    CUT 5.8388 deg    CAD 6.2817 deg
+  CONTROLS: volume 270628.1 mm3   min section 3.4106 mm2   min-feature 4462
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 55133   binary at a band end 11044 (20.03%)
+      fractional samples (0<v<1): 87854
+      MC crossings 33015   |frac-0.5| rms 0.345138 = 0.5886 mm   within 1% of midpoint 2.49%
+
+#####################################################################
+# ARM CTRL-EDT-noreinit — rung 0.26, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+CTRL-EDT-noreinit  rung 0.26   164794 verts / 329620 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.501913   (miss +0.241913)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 87215 (52.92%)  ambiguous 3697 (2.24%)  CUT 73882 (44.83%)   oblique 25173 (15.28%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.6019 mm  max 15.7596  p99 12.7022  (211.2% of a voxel)
+      oblique CAD   rms 0.7347 mm  max 1.7052  p99 1.6303
+      oblique CUT   rms 6.2522 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 7.5144 deg    CUT 7.1172 deg    CAD 6.3693 deg
+  CONTROLS: volume 272705.1 mm3   min section 3.4106 mm2   min-feature 7679
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 57014   binary at a band end 4163 (7.30%)
+      fractional samples (0<v<1): 124823
+      MC crossings 35297   |frac-0.5| rms 0.451523 = 0.7700 mm   within 1% of midpoint 3.98%
+
+#####################################################################
+# ARM GTO-SDF-nodelattice — rung 0.26, external field 129 x 32 x 119, spacing 1.705279,
+#   iso 0.5000, factor 1 (none), lattice 'node'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+GTO-SDF-nodelattice  rung 0.26   40736 verts / 81520 tris   iterations 0   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.499819   (miss +0.239819)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 21735 (53.36%)  ambiguous 799 (1.96%)  CUT 18202 (44.68%)   oblique 6101 (14.98%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.6370 mm  max 14.9271  p99 12.6976  (213.3% of a voxel)
+      oblique CAD   rms 0.8675 mm  max 1.7045  p99 1.6071
+      oblique CUT   rms 6.6933 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 31.1778 deg    CUT 33.8306 deg    CAD 25.7754 deg
+  CONTROLS: volume 286840.1 mm3   min section 3.4106 mm2   min-feature 2899
+  ★ THE FIELD, on the node lattice (spacing 1.705279 mm)
+      boundary samples 62901   binary at a band end 6897 (10.96%)
+      fractional samples (0<v<1): 103884
+      MC crossings 35390   |frac-0.5| rms 0.320391 = 0.5464 mm   within 1% of midpoint 19.33%
+
+#####################################################################
+# ARM GTO-ALM-3iter-UNCONV — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'design'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+GTO-ALM-3iter-UNCONV  rung 0.68   142216 verts / 284428 tris   iterations 3   wall 1110.9 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.932952   (miss +0.252952)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 131578 (92.52%)  ambiguous 2647 (1.86%)  CUT 7991 (5.62%)   oblique 29082 (20.45%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.1188 mm  max 6.0430  p99 3.4542  (65.6% of a voxel)
+      oblique CAD   rms 0.7635 mm  max 1.7049  p99 1.6665
+      oblique CUT   rms 2.5429 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 5.9783 deg    CUT 11.5102 deg    CAD 4.8348 deg
+  CONTROLS: volume 530884.2 mm3   min section 3.4106 mm2   min-feature 2829
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 50683   binary at a band end 11699 (23.08%)
+      fractional samples (0<v<1): 121141
+      MC crossings 30733   |frac-0.5| rms 0.289327 = 0.4934 mm   within 1% of midpoint 12.53%
+
+
+=====================================================================
+THE ANSWER — every arm against SIMP, rung by rung
+=====================================================================
+The headline amplitude is the CAD population. PR 314 settled that the
+CUT surface has no ground truth, so its distance-to-CAD is a fact about
+the part's shape and not an error; the CUT column here is therefore the
+rms DIHEDRAL, which needs no reference. Sub-voxel content is the
+MECHANISM column and is signed the other way up: bigger = more sub-voxel
+placement, because a crossing at the edge midpoint IS a staircase.
+
+arm                    | rung   | amp CAD (mm)      | rough CUT (deg)   | sub-voxel (mm)   
+                       |        |    value  %better |    value  %better |    value    %more
+SIMP                   | 0.68   |   0.4293      — |   7.5521      — |   0.1297      —
+SIMP                   | 0.52   |   0.4507      — |   9.6338      — |   0.0023      —
+SIMP                   | 0.38   |   0.4394      — |  10.4580      — |   0.0056      —
+SIMP                   | 0.26   |   0.4375      — |  10.2657      — |   0.0030      —
+GTO-SDF                | 0.68   |   0.7080    -64.9 |   4.0156    +46.8 |   0.5790     +347
+GTO-SDF                | 0.52   |   0.7282    -61.6 |   4.4942    +53.3 |   0.5730   +25184
+GTO-SDF                | 0.38   |   0.7386    -68.1 |   5.8108    +44.4 |   0.5823   +10358
+GTO-SDF                | 0.26   |   0.7638    -74.6 |   5.8574    +42.9 |   0.5829   +19475
+CTRL-eta0.5            | 0.68   |   0.7269    -69.3 |   4.1476    +45.1 |   0.6466     +399
+CTRL-eta1.0            | 0.68   |   0.7104    -65.5 |   4.0616    +46.2 |   0.5834     +350
+CTRL-EDT-noreinit      | 0.68   |   0.7245    -68.8 |   5.5559    +26.4 |   0.7441     +474
+GTO-SDF-nodelattice    | 0.68   |   0.8426    -96.3 |  30.0400   -297.8 |   0.5214     +302
+CTRL-eta0.5            | 0.26   |   0.7710    -76.2 |   5.7762    +43.7 |   0.6577   +21986
+CTRL-eta1.0            | 0.26   |   0.7598    -73.7 |   5.8388    +43.1 |   0.5886   +19663
+CTRL-EDT-noreinit      | 0.26   |   0.7347    -67.9 |   7.1172    +30.7 |   0.7700   +25755
+GTO-SDF-nodelattice    | 0.26   |   0.8675    -98.3 |  33.8306   -229.5 |   0.5464   +18246
+GTO-ALM-3iter-UNCONV   | 0.68   |   0.7635    -77.9 |  11.5102    -52.4 |   0.4934     +280
+
+A POSITIVE % IS THE ARM WINNING. THE BAR IS SIMP, not zero.
+
+wrote evidence/2026-08-09-reference-implementation-bakeoff/s2_reference_impl_vs_simp.csv

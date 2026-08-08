@@ -1,0 +1,140 @@
+ctest — core suite, this worktree, after the three harness targets were added
+==============================================================================
+
+  $ cmake --build build -j6 && ctest --test-dir build --output-on-failure
+
+  100% tests passed out of 114
+  Total Test time (real) = 1769.78 sec
+
+★ THE LOCAL DENOMINATOR IS 114 AND CI's IS 116; THE GAP IS NOT THIS TASK'S.
+  This worktree's CMake cache has lib3mf_DIR-NOTFOUND (lib3mf is not on the
+  Homebrew path here), so the lib3mf-gated tests never register. It is the
+  same two-test gap PR 319 recorded — its local default was 114 against CI's
+  116 — and it is a property of the worktree, not of the change. Nothing in
+  this task touches 3MF.
+
+//Fail configure unless OCCT, Eigen and lib3mf are found
+//The directory containing a CMake configuration file for lib3mf.
+lib3mf_DIR:PATH=lib3mf_DIR-NOTFOUND
+
+  registered tests: 114
+
+  Note the suite ran while a Julia solver job was on the machine for part of
+  it (host_contention.txt); the per-test times below are inflated by that and
+  nothing in this task rests on them.
+
+----- every test -----
+  Test   #1: materials_loader
+  Test   #2: stl_import
+  Test   #3: lattice_gen
+  Test   #4: lattice_boundary
+  Test   #5: lattice_clip_shell
+  Test   #6: lattice_void
+  Test   #7: lattice_skin_freeform
+  Test   #8: grading
+  Test   #9: lattice_material_model
+  Test  #10: multiscale_material
+  Test  #11: lattice_dehomog
+  Test  #12: surface_stiffness_model
+  Test  #13: mesh_segmentation
+  Test  #14: face_overrides
+  Test  #15: voxelize
+  Test  #16: hex_element
+  Test  #17: orientation
+  Test  #18: orientation_invariants
+  Test  #19: settings
+  Test  #20: app_core_capability_mirror
+  Test  #21: report
+  Test  #22: export_stl
+  Test  #23: fields
+  Test  #24: job_schema
+  Test  #25: resample
+  Test  #26: warm_start
+  Test  #27: clearance
+  Test  #28: surface_operator
+  Test  #29: smooth
+  Test  #30: cad_project
+  Test  #31: default_arming
+  Test  #32: smooth_brush
+  Test  #33: observability
+  Test  #34: fea_assembly
+  Test  #35: traction_loads
+  Test  #36: fea_cg
+  Test  #37: fea_mgcg
+  Test  #38: fea_matfree
+  Test  #39: fea_mgcg_matfree
+  Test  #40: fea_mg_tuning
+  Test  #41: fea_mg_coarse_hook
+  Test  #42: fea_mg_algebraic_level1
+  Test  #43: fea_matfree_threads
+  Test  #44: fea_mixed_precision
+  Test  #45: krylov_recycling
+  Test  #46: geneo_twolevel
+  Test  #47: matfree_cubic_lattice
+  Test  #48: beam_validation
+  Test  #49: gate_v4
+  Test  #50: gate_v5
+  Test  #51: build_direction
+  Test  #52: gate_diagnosis
+  Test  #53: bake_build_orientation
+  Test  #54: simp
+  Test  #55: rmin
+  Test  #56: mbb_validation
+  Test  #57: gate_v2
+  Test  #58: property_v3
+  Test  #59: variants
+  Test  #60: passive_regions
+  Test  #61: minimize_plastic
+  Test  #62: observability_capture
+  Test  #63: anchor_integrity
+  Test  #64: load_retention_connectivity
+  Test  #65: design_domain
+  Test  #66: galerkin_cache
+  Test  #67: analyze_fixed_design
+  Test  #68: margin_reproduction
+  Test  #69: smooth_recert_loadcase
+  Test  #70: lattice_certification
+  Test  #71: strut_strength
+  Test  #72: strut_report_j6
+  Test  #73: width_aware_knockdown
+  Test  #74: designbox_reduction
+  Test  #75: growth_ladder
+  Test  #76: savings_part_relative
+  Test  #77: ladder_rung_count
+  Test  #78: warm_start_integration
+  Test  #79: designbox_anchor_pad
+  Test  #80: face_protection
+  Test  #81: designbox_padding
+  Test  #82: coarsen_rule
+  Test  #83: designbox_grid_report
+  Test  #84: mma
+  Test  #85: adaptive_move
+  Test  #86: penalty_continuation
+  Test  #87: mma_projection_gate
+  Test  #88: mma_projection
+  Test  #89: conditional_projection
+  Test  #90: rung_infeasible
+  Test  #91: preflight_divergence
+  Test  #92: nonconvergence_rejection
+  Test  #93: active_domain
+  Test  #94: stress
+  Test  #95: step_import
+  Test  #96: segment_vs_step
+  Test  #97: face_tag
+  Test  #98: mask_face
+  Test  #99: job_loadcase_copy
+  Test #100: cli_demo
+  Test #101: design_stream
+  Test #102: production_parity
+  Test #103: clearance_parity
+  Test #104: face_protection_parity
+  Test #105: loadcase_small_face
+  Test #106: loadcase_resolution
+  Test #107: loadcase_analyze
+  Test #108: lattice_hookup
+  Test #109: protect_freeze_vs_solidity
+  Test #110: lattice_variant
+  Test #111: designbox_lattice_recert
+  Test #112: lattice_void_exterior
+  Test #113: selfweight_clearance_void
+  Test #114: mesh_job

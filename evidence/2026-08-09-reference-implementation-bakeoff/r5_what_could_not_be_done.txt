@@ -1,0 +1,183 @@
+R5 — WHAT COULD NOT BE DONE, AND WHAT BROKE
+============================================
+Task 2026-08-09-reference-implementation-bakeoff, bar R5: "REPORT WHAT YOU COULD
+NOT DO. A build that failed, a dependency that would not compile on Apple
+Silicon, a constraint that could not be expressed — each is a finding and
+belongs in the handoff at full size, not in a footnote."
+
+Seven. Two are about scale, three are about the library's own robustness, one is
+a constraint that has no expression, and one is a defect of this task's own.
+
+
+1. ★ HIS FOUR-RUNG LADDER CANNOT BE RUN FROM SCRATCH ON HIS MAC. (the big one)
+-------------------------------------------------------------------------------
+MEASURED, not extrapolated from a guess: 4 ALM iterations on his grid
+(1,473,696 displacement DOFs, matrix 1,452,696 x 1,452,696 with 113,893,146
+nonzeros) took 1110.922 s of loop time — **277.7 s per ALM iteration** — plus
+~130 s of setup. Serial, PETSc GAMG-preconditioned CG, their own solver options
+verbatim. `s2_from_scratch_timing.log` has the run.
+
+Against SIMP on the same grid and the same job: 447 outer iterations in
+4988.398 s = **11.2 s per iteration**. GridapTopOpt costs **24.9x more wall per
+iteration**.
+
+An augmented-Lagrangian level-set run needs its volume constraint to come home,
+and at iteration 3 of this one it was at Vol = 0.309 and moving by ~0.003 per
+iteration. Hundreds of iterations is the realistic figure, and their own
+`AugmentedLagrangian` defaults to `maxiter = 1000`. At 277.7 s that is **21 to
+77 hours for ONE rung**, and his ladder has four.
+
+WHAT WAS NOT TRIED, and would be the first thing to try next:
+  * MPI. Their headline script is the MPI one and the library is built for it;
+    this task ran SERIAL. A 6-rank run on this 10-core machine might give 4-5x,
+    which would bring one rung inside a working day but not four.
+  * `-ksp_rtol 1.0e-12`, which is their example's setting and is very tight for
+    a shape-derivative computation. Loosening it is free and untested here.
+  * Reusing the GAMG hierarchy between ALM iterations.
+None of these changes the order of magnitude, and none was measured, so none is
+claimed.
+
+CONSEQUENCE FOR THIS TASK: the from-scratch arm is reported at 3 iterations,
+UNCONVERGED and labelled as such in every table (`GTO-ALM-3iter-UNCONV`), and
+the four-rung geometry answer comes from the sequential arm instead (§S2.6).
+
+
+2. ★ `update_labels!` IS O(n²) AND DOES NOT RETURN AT HIS SIZE.
+-----------------------------------------------------------------
+GridapTopOpt's `update_labels!` is how the reference scripts declare a Dirichlet
+region. Its 3-D branch promotes the marked vertices to edges, faces and cells
+with (Utilities.jl:130-140)
+
+    edge_entries = [findall(x -> any(x .∈ vtx_edge_connectivity[1:end .!= j]),
+                            vtx_edge_connectivity[j]) for j = 1:n]
+
+— quadratic in the number of MARKED VERTICES, and it allocates a fresh copy of
+the whole connectivity array once per vertex. Their examples tag one face of a
+cube, where n is a few hundred. This problem marks 396,797 of his 491,232 nodes
+(everything the extension velocity must not move). The call did not return: a
+full-resolution run sat at 100% of one core for over twenty minutes without
+reaching iteration 0.
+
+REPLACED, and the replacement PROVED EQUIVALENT. `tag_vertices!` in
+`his_part_ALM.jl` does the VERTEX half and skips the edge/face/cell promotion,
+which is not an approximation for what it is used for: at order 1 every
+Lagrangian dof sits on a vertex, so the Dirichlet dof set is decided by the
+vertex entities alone. `verify_labelling.jl` builds the same three tags BOTH ways
+on his problem at coarsen 4, where theirs is affordable, and compares the FE
+spaces that come out — free dofs, Dirichlet dofs, and the free-dof-to-node maps
+themselves. `s2_labelling_control.txt` is the result: IDENTICAL, and 239.8x
+faster at coarsen 4 alone (the quadratic term is ~3,700x worse again at full
+resolution).
+
+
+3. ★ TWO OVERLAPPING `update_labels!` CALLS SILENTLY ERASE EACH OTHER.
+------------------------------------------------------------------------
+`_update_labels_locally!` writes ONE entity per vertex:
+`labels.d_to_dface_to_entity[1][vtxs_Γ] .= entity`. Two calls whose masks overlap
+do not union — the second overwrites the first. Every anchor node on his part is
+inside the frozen anchor pad and therefore also in the velocity-pin set, so
+tagging anchor-then-pinned left "Gamma_D" with **zero** Dirichlet DOFs, and the
+run went ahead and solved an unclamped structure without complaining.
+
+Caught by printing `num_dirichlet_dofs(V)` and seeing 0 where 21,000 was
+expected. Fixed with three DISJOINT entities recomposed by
+`add_tag_from_tags!`. The printed clamped-DOF count is now a standing check in
+the driver, and at full resolution it reads 21000 — core's own number.
+
+
+4. ★ THEIR REINITIALISER RETURNS NaN, AND `H_η` SWALLOWS IT.
+--------------------------------------------------------------
+`FiniteDifferenceReinitialiser` (first-order upwind eikonal) returns NaN at a
+handful of nodes for several perfectly reasonable initial level sets on his
+geometry. What makes it hard to diagnose is the second half:
+
+    function H_η(t,η)
+      if     t < -η   return zero(M)
+      elseif abs(t)<=η return 1/2*(1+t/η+1/pi*sin(pi*t/η))
+      elseif t > η    return one(M)
+      end
+    end
+
+NaN matches none of the three branches, so the function falls off the end and
+returns **`nothing`**. The run then dies far away with
+`MethodError: no method matching -(::Int64, ::Nothing)` inside Gridap's assembly,
+with nothing in the message pointing at the level set.
+
+MEASURED on his own part at full resolution (`diag_scale.jl`, `diag_edt.jl`):
+
+    initial field                                   NaN nodes (of 491,232)
+    their `initial_lsf(4,0.2)`, unscaled                     0
+    the same scaled by 4h                                    1
+    6-neighbour BFS distance over the whole part          6767
+    6-neighbour BFS + their seeding, band 5                  1
+    6-neighbour BFS + their seeding, band 2                  0
+    EXACT Euclidean distance over the whole part             0
+    exact EDT + their seeding                                1
+    part-envelope EDT + their seeding scaled to h            0   <- used
+
+THE CAUSE, and it is ours as much as theirs: a 6-neighbour BFS distance is an L1
+distance. Its gradient is wrong by up to 73% on diagonals and is DISCONTINUOUS,
+and a first-order upwind eikonal solver assumes |∇φ| ≈ 1. Replacing it with an
+exact Euclidean distance transform (Felzenszwalb & Huttenlocher's separable
+lower-envelope algorithm, `edt.jl`) takes 6767 NaN nodes to 0. Isolated one-cell
+islands from a thresholded hole seeding are the remaining fragility.
+
+★ THIS IS EXACTLY THE FAILURE MODE THE TASK EXISTS TO AVOID, arriving from the
+other direction: a bad initial field of OURS would have looked identical to "the
+method does not work on his part". It is written down here so the next reader
+does not have to rediscover it.
+
+
+5. ★ `initial_lsf` ASSUMES A UNIT-SIZED DOMAIN AND ALIASES ON HIS PART.
+-------------------------------------------------------------------------
+`initial_lsf(ξ,a)` is `-1/4 ∏cos(ξπxᵢ) - a/4`, so its holes repeat with period
+2/ξ IN MODEL UNITS. Their examples run on a 2x1x1 domain where ξ=4 puts four
+holes across it. His part is 218 mm across: ξ=4 there is a **0.5 mm period, four
+times finer than his 1.705 mm voxel**. The reinitialiser collapses the aliased
+field to all-solid (max φ exactly 0.000, `diag_scale.jl`). ξ = 2/(8h) — a hole
+every 8 voxels — is what this task uses.
+
+Nothing in the function's docstring says its argument is in domain units. It is
+not a bug; it is an undocumented assumption that costs an afternoon.
+
+
+6. ★ THE PART EXTERIOR CANNOT BE REMOVED FROM THE FEA, AND THAT IS STRUCTURAL.
+--------------------------------------------------------------------------------
+core marks the 357,320 non-part voxels FrozenVoid and they contribute no element.
+A level-set method on a Cartesian background cannot: the level set is defined,
+evolved and reinitialised over the whole box, and the operator has to stay
+non-singular there. The GridapTopOpt arm therefore carries ϵ = 1e-3 of PLA's
+modulus across 76.31% of the box.
+
+The consequence was not hypothetical. WITHOUT a part mask on the stiffness the
+optimiser grows structure OUTSIDE his part and collects FULL modulus for it:
+8.4% of the part's volume had moved outside the part by iteration 20 of a
+coarse run and was still climbing. With the mask (exterior pinned at the ersatz
+floor whatever φ does) it settles at 1.9-2.6%. It never reaches zero, because
+nothing in the method holds a boundary onto an imported envelope.
+
+The fix that WOULD be structural — cutting the background mesh to the part — is
+the Unfitted/CutFEM path, which needs a conforming surface mesh of his part to
+cut with and is a different set of examples. Not attempted; §S2.7 says what it
+would take.
+
+
+7. THE CELL-SIZE TRANSITION QUESTION IS ONLY HALF-ANSWERED.
+------------------------------------------------------------
+S3(b) asks what happens at the transition between two cell sizes — PR 302
+measured a seam there. LatticeLibrary ships exactly two `ICellArray`
+implementations, `RegularCellArray` and `ConformalCellArray`, and NEITHER grades
+the cell size spatially. So this task measured what it could: three SEPARATE
+uniform cell sizes (2.0, 4.6026, 8.0 mm) and the continuity of the THICKNESS
+grading within each. A graded-cell-size array would have to be written, which
+would make it a build task rather than a measurement — the task's own
+BLOCKED-STOP condition — and it is left as one.
+
+
+AND ONE DEFECT OF THIS TASK'S OWN, since it wasted a run
+---------------------------------------------------------
+`design_rung_dump.cpp` used `char stem[128]` for an output path. The session
+scratch directory is ~140 characters, so `snprintf` truncated the PATH, reported
+success, and wrote four files into a directory that was not the one asked for.
+The next program failed with "No such file or directory" on a path that looked
+right. Fixed to `std::string`, with a comment saying why.

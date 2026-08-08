@@ -1,0 +1,5 @@
+SIMP rungs compared : 0.26, 0.38, 0.52, 0.68
+shared columns      : 24
+fields compared     : 96
+fields differing    : 0
+PASS — this task's SIMP rows ARE PR 319's

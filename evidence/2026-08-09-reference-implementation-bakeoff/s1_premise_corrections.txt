@@ -1,0 +1,97 @@
+S1 — WHERE THE BRIEF'S NUMBERS AND THE RECORD DISAGREE
+======================================================
+Task 2026-08-09-reference-implementation-bakeoff.
+
+Four corrections. None of them changes what the task asks for; all four change
+which numbers a reader should quote, and the second one changes which number
+"the bar" is by a factor of nine.
+
+
+1. THE FINGERPRINT AND THE FORCE ARE FROM A DIFFERENT CAPTURE THAN THE TABLE
+----------------------------------------------------------------------------
+The brief says: fingerprint `d9fe8f768331`, "33.36 N in -Z".
+
+  * `d9fe8f768331` is the run captured in
+    evidence/2026-08-07-lattice-variants-on-screen/run_his/. Its job.json does
+    declare force [0, 0, -33.36170196533203]. That capture has NO design.bin —
+    its fields.bin is a 256-byte stub — so no surface can be extracted from it
+    and no row in any smoothness table stands on it.
+
+  * Every measured row this task must be comparable to — PR 299, 303, 306, 314,
+    315 and 319 — stands on the 22.24 N lineage:
+      - PR 314/315 measured
+        evidence/2026-08-03-multiscale-lattice-to/m2_multiscale_final/design.bin,
+        fingerprint 34175a5fe9fd, declared_force_resultant_n 22.24113464.
+      - PR 319 measured its own re-run of that same document with the
+        lattice/grading blocks removed (job_simp.json here), same 22.24113464 N.
+
+  * EVERYTHING ELSE THE BRIEF QUOTES MATCHES THE 22.24 N RECORD EXACTLY, and
+    this task's own export reproduces all of it (s1_positive_control.txt):
+      anchor face 18                          - matches
+      22 load faces, the same ids             - matches
+      5,165 voxels tagged by the load group   - matches
+      face protection 16, 10,554 voxels       - matches
+      resolution 128, grid 128 x 31 x 118     - matches
+      ladder [0.68, 0.52, 0.38, 0.26]         - matches
+      material PLA                            - matches
+
+  RESOLUTION: this task uses the 22.24 N document (job_simp.json), because a
+  comparison against a row that does not exist is not a comparison. The load
+  magnitude is the ONE declared quantity that differs, and the level-set arm is
+  given core's own summed resultant (-22.24113464 N) rather than either literal.
+
+
+2. ★ 0.4293 mm IS THE CAD POPULATION, NOT THE CUT POPULATION
+-------------------------------------------------------------
+The brief says: "SIMP's rung-068 numbers are 0.4293 mm amplitude and 7.55 deg
+rms dihedral on the cut surface."
+
+Those two numbers come from two DIFFERENT populations of PR 319's table:
+
+    obl_cad_rms_mm    0.429291   <- the CAD population.   THIS is the 0.4293.
+    obl_cut_rms_mm    3.745211   <- the CUT population.
+    dihedral_cut_deg  7.552074   <- the CUT population.   THIS is the 7.55.
+
+So the amplitude figure quoted as "on the cut surface" is the amplitude on the
+CAD surface, and the cut surface's own amplitude is 3.7452 mm — 8.7x larger.
+
+THIS IS NOT A TYPO IN THE TABLE; the two columns measure different things on
+purpose, and PR 314 is why. On the optimizer-CUT population there is no ground
+truth: those vertices are surface the optimizer invented, the CAD says nothing
+about where they should be, and their distance to the nearest CAD triangle is a
+fact about the part's shape rather than an error. That is why PR 319 reports the
+cut population's roughness as an rms DIHEDRAL, which needs no reference, and
+keeps the amplitude column on the CAD population, where "how much staircase is
+there" has a truthful answer.
+
+  RESOLUTION: the bar is read column by column, and both are reported for every
+  arm — amplitude on the CAD population, dihedral on the CUT population — which
+  is exactly what PR 319's table does and what §S4a answers against.
+
+
+3. THE ITERATION COUNTS ARE 27 / 127 / 140 / 153
+-------------------------------------------------
+The brief says 27/126/140/152. PR 319's committed
+`s2_cost_and_verdict.csv` says:
+
+    rung 0.68   27 iterations
+    rung 0.52  127
+    rung 0.38  140
+    rung 0.26  153
+
+Two of the four are off by one in the brief. Nothing turns on it; the numbers
+below are the record's.
+
+
+4. THE FOUR RUNGS TOOK 1 h 23 m 08 s, NOT 1 h 07 m
+---------------------------------------------------
+From the same CSV, wall seconds per rung: 367.674 + 1307.911 + 1583.475 +
+1729.338 = 4988.398 s = 1 h 23 m 08 s.
+
+★ AND THAT RUN WAS NOT ON AN IDLE HOST. PR 319's own evidence README records
+that two other worktrees ran solver jobs throughout it, and samples the load
+once a minute in `host_contention.txt`. Its iteration counts are unaffected and
+are the primary cost reading; its wall is a ceiling, not a clean measurement.
+
+  RESOLUTION: R4 is answered with iterations and wall reported SEPARATELY, and
+  the SIMP wall is quoted as 4988 s with the contention stated beside it.

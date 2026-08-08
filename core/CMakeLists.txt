@@ -1613,6 +1613,36 @@ if(OpenCASCADE_FOUND)
     tests/harness/field_information_probe.cpp)
   target_link_libraries(field_information_probe PRIVATE topopt)
 
+  # S1 (task 2026-08-09-reference-implementation-bakeoff): HIS problem, out of
+  # core in a portable form, so a third-party topology optimiser gets core's own
+  # voxel tags / clamped DOFs / nodal loads rather than a re-derivation of them.
+  # Calls build_production_loadcase — the production builder both front-ends
+  # call — and writes what it returns.
+  #   cmake --build build --target portable_problem_export
+  #   ./build/portable_problem_export <part.step> <materials.json> <out_dir>
+  add_executable(portable_problem_export EXCLUDE_FROM_ALL
+    tests/harness/portable_problem_export.cpp)
+  target_link_libraries(portable_problem_export PRIVATE topopt)
+
+  # S2 (task 2026-08-09-reference-implementation-bakeoff): a third-party design
+  # field, measured on PR 299/306/307's instruments so its rows land in PR
+  # 314/315/319's table beside SIMP's and SEMDOT's. Reads an external scalar
+  # field on his design lattice; includes the instruments, retypes nothing.
+  #   cmake --build build --target external_field_surface_probe
+  add_executable(external_field_surface_probe EXCLUDE_FROM_ALL
+    tests/harness/external_field_surface_probe.cpp)
+  target_link_libraries(external_field_surface_probe PRIVATE topopt)
+
+  # S2 (task 2026-08-09-reference-implementation-bakeoff): his own converged rung
+  # densities out of a design.bin as plain float64, so the SEQUENTIAL arm can
+  # hand a level-set optimiser HIS topology to refine instead of making it find
+  # one. A format change and nothing else.
+  #   cmake --build build --target design_rung_dump
+  #   ./build/design_rung_dump <design.bin> <out_dir>
+  add_executable(design_rung_dump EXCLUDE_FROM_ALL
+    tests/harness/design_rung_dump.cpp)
+  target_link_libraries(design_rung_dump PRIVATE topopt)
+
   # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
   # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
   # S3 instrumentation (minimum cross-section, outward excursion, volume, wall

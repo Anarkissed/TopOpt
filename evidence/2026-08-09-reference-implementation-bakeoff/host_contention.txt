@@ -1,0 +1,39 @@
+HOST, AND WHAT ELSE WAS ON IT
+==============================
+
+Machine of record:
+Apple M2 Pro
+cores: 10
+memory: 16 GB
+ProductName:		macOS
+ProductVersion:		26.5.1
+BuildVersion:		25F80
+Darwin Nadims-Mac-mini.local 25.5.0 Darwin Kernel Version 25.5.0: Mon Apr 27 20:39:09 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T6020 arm64
+
+julia: julia version 1.12.6
+clang: Apple clang version 21.0.0 (clang-2100.1.1.101)
+cmake: cmake version 4.4.0
+
+★ WHICH WALL NUMBERS ARE CLEAN, AND WHICH ARE NOT.
+
+  s2_from_scratch_timing.log — 1110.922 s for 3 ALM iterations, the 277.7 s
+  per-iteration figure §S2.4 and R5 item 1 both rest on. This run had the
+  machine essentially to itself: the only other work in the session was a
+  ~20 s Homebrew download and some file reads. THIS IS THE CLEAN ONE.
+
+  s3 lattice timings (18-63 s) — taken after the Julia timing run finished
+  and before the sequential arm started. Clean.
+
+  s2_sdf_arm.log / s2_controls.log reinitialisation times (~5.3 s each) —
+  these overlapped a PicoGK build and some dotnet work. They are reported
+  because they are small and because nothing in the verdict rests on them;
+  the SDF arm's cost is not a claim this task makes.
+
+  SIMP's 4988.398 s — NOT measured here. It is PR 319's, and PR 319's own
+  evidence README records that TWO OTHER WORKTREES ran solver jobs
+  throughout it. It is a ceiling, not a clean measurement, and the 24.9x
+  ratio in §S2.4 is therefore an UNDER-estimate of GridapTopOpt's relative
+  cost rather than an over-estimate.
+
+load average at the end of the session:
+ 3:26  up 29 days, 10:04, 2 users, load averages: 4.49 5.56 5.04

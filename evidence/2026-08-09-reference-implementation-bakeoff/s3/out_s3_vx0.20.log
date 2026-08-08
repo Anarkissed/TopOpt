@@ -1,0 +1,49 @@
+== S3 — PicoGK graded lattice from core's own density field ==
+
+grid          128 x 31 x 118, spacing 1.705279350 mm
+density file  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/vm_0.68.f64
+bounding STL  /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/simp_rungs/rung_0.68.stl  (14,235,284 bytes)
+cell size     4.603 mm  (2.70 voxels)
+driver max    0.0168868  (the field value mapped to full strut thickness)
+
+PicoGK        PicoGK Core Library 26.2.0
+voxel size    0.200000003 mm  (lattice pitch)
+              min strut 0.45 mm = 2.25 voxels across
+
+bounding      284,704 triangles in, 440,569 mm3, bbox <-18.245098, -48.883728, 0.043982733> .. <199.96968, 3.9010532, 199.60623>   [1.1 s]
+ScalarField   1084 x 257 x 990 active voxels   [0.0 s]
+
+cells         28,665 unit cells of 4.60 mm
+lattice       generated in 24.6 s, 1,834,560 thickness lookups, rho seen [0.0000, 0.9497]
+clipped       to the design in 1.2 s, 131,693 mm3 (29.89% of the design)
+
+MEMORY        managed working set 1,646 MB (was 56 MB before any geometry)
+MESH          26,276,120 triangles in 1.2 s
+STL           1,313,806,084 bytes (1252.9 MB)
+VDB           191,146,722 bytes (182.3 MB) — 6.9x smaller than the STL
+
+TOTAL WALL    62.8 s
+
+── (b) IS THE THICKNESS CONTINUOUS? ─────────────────────────────────
+  along x: 2000 samples 0.1091 mm apart, largest adjacent thickness STEP 0.301328 mm (15.453% of the full thickness range)
+  along z: 2000 samples 0.0998 mm apart, largest adjacent thickness STEP 0.134501 mm (6.898% of the full thickness range)
+Disposing Library
+Done Disposing Library
+       63.48 real       254.54 user        11.88 sys
+          3048079360  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1725112  page reclaims
+                 177  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                  29  messages sent
+                 128  messages received
+                   1  signals received
+                 963  voluntary context switches
+              454228  involuntary context switches
+          4035525852  instructions retired
+          1966124045  cycles elapsed
+           106234744  peak memory footprint

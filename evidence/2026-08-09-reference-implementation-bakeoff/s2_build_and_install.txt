@@ -1,0 +1,80 @@
+S2.a — GRIDAPTOPOPT.JL ON HIS MAC: THE APPLE-SILICON QUESTION
+==============================================================
+Task 2026-08-09-reference-implementation-bakeoff, S2(a): "APPLE SILICON IS A REAL
+RISK AND IT IS THE FIRST THING TO SETTLE... IF IT CANNOT BE BUILT AND RUN ON HIS
+HARDWARE IN A DAY, SAY SO AND STOP."
+
+★ IT BUILDS AND RUNS, IN UNDER FOUR MINUTES, WITH NOTHING TO WORK AROUND.
+The documented risk did not materialise.
+
+Host: Apple M2 Pro (10 cores), 16 GB, macOS 15.5 (Darwin 25.5.0), arm64.
+
+
+WHAT WAS ALREADY THERE
+----------------------
+  julia 1.12.6            /opt/homebrew/bin/julia, native arm64
+  a ~1.5 GB ~/.julia depot from earlier work (Makie etc.); NO Gridap, NO PETSc,
+  NO MPI implementation — `ls ~/.julia/packages | grep -iE '^Gridap|^PETSc'`
+  returned nothing.
+
+  ★ NOTE FOR THE ADOPTION COST: Julia itself was NOT installed by this task, so
+  its install time is not in the numbers below. A machine without it adds one
+  `brew install julia` (a ~200 MB download).
+
+
+WHAT WAS DONE, AND WHAT IT COST
+-------------------------------
+  git clone --depth 50 https://github.com/zjwegert/GridapTopOpt.jl
+      commit 6b7b6284a630fe63c702cea0c008dc65586163fa (2026-06-24)
+      into the session scratch directory, NOT into this repo (bar R6)
+
+  Pkg.develop(path=...) + Pkg.instantiate()          229.6 s
+  Pkg.add of the 13 direct dependencies the scripts
+    import (Gridap, GridapDistributed, GridapPETSc,
+    GridapSolvers, PartitionedArrays, GridapEmbedded,
+    STLCutters, JLD2, SparseMatricesCSR, MPI, ...)      5.6 s
+  Pkg.add("JSON") for the driver                       ~2 s
+                                                    ---------
+  TOTAL INSTALL                                      ~237 s
+
+  Resolved versions of the parts that were expected to be difficult:
+      Gridap            v0.20.8
+      GridapDistributed v0.4.17
+      GridapPETSc       v0.5.8
+      GridapSolvers     v0.7.1
+      GridapEmbedded    v0.9.11
+      MPI               v0.20.26
+      PartitionedArrays v0.3.5
+      STLCutters        v0.3.3
+
+  `Building GridapGmsh` and `Building GridapPETSc` both completed inside that
+  229.6 s. No compiler was invoked by the user: PETSc, MPICH and Gmsh all arrive
+  as prebuilt JLL artifacts.
+
+
+THE SMOKE TEST, WHICH IS THE ACTUAL ANSWER
+-------------------------------------------
+  LOAD_GridapTopOpt_s = 6.7        (first `using`, precompiled)
+  LOAD_Gridap_s       = 0.0
+  LOAD_GridapPETSc_s  = 0.0
+
+  MPI.MPI_LIBRARY = MPICH
+    MPICH Version:   5.0.1
+    MPICH configure: --build=x86_64-linux-musl --host=aarch64-apple-darwin20
+                     --with-device=ch4:ofi:tcp
+    -> a NATIVE aarch64-apple-darwin build, cross-compiled by the JLL system.
+
+  GridapPETSc.with(args=split("-ksp_type cg -pc_type jacobi")) do ... end
+    PETSC_INIT = OK
+
+  ★ JuliaParallel/PETSc.jl issue 184 — the documented M-series difficulty the
+  brief flags — is about building PETSc.jl against a hand-built PETSc. It does
+  not apply here: GridapPETSc consumes `PETSc_jll`, whose arm64 macOS artifact
+  is prebuilt and downloaded. Nothing on this machine compiled PETSc.
+
+
+WHAT IS *NOT* ANSWERED BY "IT BUILDS"
+--------------------------------------
+It builds and it runs; what it cannot do on this machine is finish HIS ladder.
+The per-iteration cost at his resolution is in `s2_cost.csv` and §S2.5 of the
+handoff, and it is the real adoption number. Building was the cheap part.

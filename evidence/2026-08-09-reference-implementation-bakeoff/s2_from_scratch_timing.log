@@ -1,0 +1,91 @@
+KSP Object: 1 MPI processes
+  type: cg
+  maximum iterations=200, initial guess is zero
+  tolerances:  relative=1e-12, absolute=1e-50, divergence=10000.
+  left preconditioning
+  using DEFAULT norm type for convergence test
+PC Object: 1 MPI processes
+  type: gamg
+  PC has not been set up so information may be incomplete
+    type is MULTIPLICATIVE, levels=0 cycles=unknown
+      Cycles per PCApply=0
+      Using externally compute Galerkin coarse grid matrices
+      GAMG specific options
+        Threshold for dropping small values in graph on each level =  
+        Threshold scaling factor for each level not specified = 1.
+        AGG specific options
+          Symmetric graph false
+          Number of levels to square graph 1
+          Number smoothing steps 1
+        Complexity:    grid = 0.
+  linear system matrix = precond matrix:
+  Mat Object: 1 MPI processes
+    type: seqaij
+    rows=1452696, cols=1452696
+    total: nonzeros=113893146, allocated nonzeros=0
+    total number of mallocs used during MatSetValues calls=0
+      has attached near null space
+      using I-node routines: found 484232 nodes, limit used is 5
+KSP Object: 1 MPI processes
+  type: cg
+  maximum iterations=200, initial guess is zero
+  tolerances:  relative=1e-12, absolute=1e-50, divergence=10000.
+  left preconditioning
+  using DEFAULT norm type for convergence test
+PC Object: 1 MPI processes
+  type: gamg
+  PC has not been set up so information may be incomplete
+    type is MULTIPLICATIVE, levels=0 cycles=unknown
+      Cycles per PCApply=0
+      Using externally compute Galerkin coarse grid matrices
+      GAMG specific options
+        Threshold for dropping small values in graph on each level =  
+        Threshold scaling factor for each level not specified = 1.
+        AGG specific options
+          Symmetric graph false
+          Number of levels to square graph 1
+          Number smoothing steps 1
+        Complexity:    grid = 0.
+  linear system matrix = precond matrix:
+  Mat Object: 1 MPI processes
+    type: seqaij
+    rows=1452696, cols=1452696
+    total: nonzeros=113893146, allocated nonzeros=0
+    total number of mallocs used during MatSetValues calls=0
+      has attached near null space
+      using I-node routines: found 484232 nodes, limit used is 5
+Linear solve converged due to CONVERGED_RTOL iterations 65
+Linear solve converged due to CONVERGED_RTOL iterations 57
+Linear solve converged due to CONVERGED_ATOL iterations 0
+Linear solve converged due to CONVERGED_RTOL iterations 10
+Linear solve converged due to CONVERGED_RTOL iterations 65
+Linear solve converged due to CONVERGED_RTOL iterations 59
+Linear solve converged due to CONVERGED_ATOL iterations 0
+Linear solve converged due to CONVERGED_RTOL iterations 10
+Linear solve converged due to CONVERGED_RTOL iterations 65
+Linear solve converged due to CONVERGED_RTOL iterations 61
+Linear solve converged due to CONVERGED_ATOL iterations 0
+Linear solve converged due to CONVERGED_RTOL iterations 10
+Linear solve converged due to CONVERGED_RTOL iterations 65
+Linear solve converged due to CONVERGED_RTOL iterations 61
+Linear solve converged due to CONVERGED_ATOL iterations 0
+Linear solve converged due to CONVERGED_RTOL iterations 10
+grid 128 x 31 x 118 (coarsen 1), h = 1.705279303 mm
+part cells 110904, active 70688, frozen-solid 40216, load-tagged 5165
+anchor nodes 7000, movable nodes 87435 of 491232
+load resultant z = -22.24113464 N
+tagged vertices: AnchorOnly 0, PinOnly 396797, AnchorPin 7000
+displacement DOFs (free) 1452696, clamped 21000
+initial LSF: inside 93990 cells (0.8475 of the part), range [-8.526, 8.526] mm
+Iteration:   0 | L=2.9842e-03, J=2.9095e-03, Vol=2.6416e-01, γ=1.0000e-01, λ1=0.0000e+00, Λ1=2.1430e-03
+Iteration:   1 | L=2.7762e-03, J=2.6762e-03, Vol=3.0548e-01, γ=1.0000e-01, λ1=-6.5463e-04, Λ1=2.1430e-03
+Iteration:   2 | L=2.9468e-03, J=2.6392e-03, Vol=3.1129e-01, γ=1.0000e-01, λ1=-1.3217e-03, Λ1=2.1430e-03
+Iteration:   3 | L=3.1419e-03, J=2.6303e-03, Vol=3.0944e-01, γ=1.0000e-01, λ1=-1.9848e-03, Λ1=2.1430e-03
+
+ITERATIONS 3   WALL 1110.922 s
+compliance 0.00263029177
+achieved vf (part-relative) 0.932952  target 0.680000
+★ solid OUTSIDE the part: 2871 cells (2.5887% of the part)
+★ frozen-solid cells still solid: 37446 of 40216 (93.11%)
+★ pad INTERIOR still solid: 9178 of 9201 (99.75%)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/a867c6b6-9fa2-47ed-954e-5ccb0d8e28db/scratchpad/refimpl/time_full
