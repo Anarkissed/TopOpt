@@ -98,6 +98,11 @@ add_library(topopt
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
+  # SEMDOT's smooth-edged volume-fraction map (task 2026-08-08-semdot-does-it-
+  # come-out-smoother). Pure grid arithmetic over topopt/voxel.hpp — no Eigen, no
+  # solver — so it belongs in the always-built base library beside warm_start.cpp
+  # and is available to the dependency-free slices that read a design field.
+  src/simp/semdot.cpp
   src/simp/grading.cpp
   src/simp/cell_plan.cpp
   src/simp/observability.cpp
@@ -850,6 +855,17 @@ if(Eigen3_FOUND)
   target_link_libraries(test_simp PRIVATE topopt)
   add_test(NAME simp COMMAND test_simp)
 
+  # SEMDOT's smooth-edged volume-fraction map (task 2026-08-08-semdot-does-it-
+  # come-out-smoother): volume exactness, the uniform passthrough the tie rule
+  # buys, the sub-voxel content that is the whole point of the mode, pin
+  # preservation, bit-identical re-derivation, and every REFUSAL of a mechanism
+  # SEMDOT subsumes. semdot.cpp itself is Eigen-free, but the refusal half drives
+  # simp_optimize, so the test is gated on Eigen like test_simp. CI configures
+  # with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_semdot tests/unit/test_semdot.cpp)
+  target_link_libraries(test_semdot PRIVATE topopt)
+  add_test(NAME semdot COMMAND test_semdot)
+
   # Physical filter radius (M7.rmin): the mm->voxel density-filter radius scaling
   # (physical_filter_radius) that makes the minimum member thickness resolution
   # independent. Pure arithmetic, but the symbol lives in simp.cpp (topopt), so
@@ -1531,6 +1547,18 @@ if(OpenCASCADE_FOUND)
   add_executable(cut_population_probe EXCLUDE_FROM_ALL
     tests/harness/cut_population_probe.cpp)
   target_link_libraries(cut_population_probe PRIVATE topopt)
+  # S2 (task 2026-08-08-semdot-does-it-come-out-smoother): the SIMP design and the
+  # SEMDOT design of the SAME job, measured side by side on PR 314/315's own
+  # instruments (stairstep_metric.hpp + surface_instruments.hpp, included not
+  # retyped) with PR 307's classifier deciding which vertices the optimizer cut.
+  # OCCT-gated for the same reason cut_population_probe is: it imports his STEP to
+  # get the classifier's and PR 299's oblique-mask answers.
+  #   cmake --build build --target semdot_surface_probe
+  #   ./build/semdot_surface_probe <simp/design.bin> <semdot/design.bin> \
+  #        <part.step> [evidence_dir]
+  add_executable(semdot_surface_probe EXCLUDE_FROM_ALL
+    tests/harness/semdot_surface_probe.cpp)
+  target_link_libraries(semdot_surface_probe PRIVATE topopt)
 
   # S1 (task 2026-08-08-closing-flow-and-the-field): the CLOSING FLOW of Sellán,
   # Kesten, Ang Yan Sheng & Jacobson (SIGGRAPH Asia 2020) on the cut population of

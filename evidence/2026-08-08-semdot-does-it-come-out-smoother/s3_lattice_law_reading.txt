@@ -1,0 +1,145 @@
+=== S3 — CAN THE LATTICE LAW EAT AN ELEMENTAL VOLUME FRACTION? ===
+    READ ONLY. Nothing below was changed, and nothing below was run: every claim
+    is a line of source. Task 2026-08-08-semdot-does-it-come-out-smoother.
+
+VERDICT, up front:
+
+  * THE CLASSIC LATTICE LAW  — WORKS UNCHANGED. It never reads the design
+    density's MAGNITUDE, only `density[e] > iso`. A SEMDOT volume fraction is a
+    per-voxel number in [0,1] like a SIMP density, and the predicate means the
+    same thing for both: "is there material at this voxel".
+  * THE MULTISCALE LATTICE LAW — BREAKS, in TWO independent places, for the same
+    root cause: it reads the design number as a LATTICE RELATIVE DENSITY, and
+    under SEMDOT that number is a GEOMETRIC FILL FRACTION. Same interval,
+    different quantity.
+  * `local_member_thickness_mm` — WORKS UNCHANGED. It thresholds at the same iso
+    before it measures anything, so it measures the same kind of object. Its
+    READING moves, because the printed set moves sub-voxel — which is the point
+    of the mode, not a defect in the instrument.
+  * THE PRINTED-SET THRESHOLD PARAMETER — the MECHANISM covers this case; the
+    MULTISCALE VALUE does not, and would dilate the printed set by nearly a whole
+    voxel.
+
+
+(a) grade_lattice — EVERY read of `density`, enumerated
+-------------------------------------------------------
+core/src/simp/grading.cpp, the complete list (there are no others):
+
+    188   local_member_thickness_mm(grid, density, iso, ...)   <- passes it on
+    194   density[e] > iso && (!region || (*region)[e] != 0)
+    209   if (!(density[e] > iso)) continue;
+    238   if (!(density[e] > iso && ...)) continue;
+    373   if (!(density[e] > iso && ...)) continue;
+    406   density[e] > iso && (!region || (*region)[e] != 0)
+    525   if (!(density[e] > iso && ...)) continue;
+    626   if (!(density[e] > iso && ...)) continue;
+
+EVERY ONE IS A MASK. The magnitude is never used. `post.relative_density` — the
+number the homogenized tensor and the strut radii are actually built from — comes
+from `rho_of` at grading.cpp:290-303, and in the classic law that is
+
+    299-303   frac = demand[e] / demand_max;  return rho_hi * pow(frac, gamma);
+
+i.e. it is derived from the VON MISES DEMAND FIELD, not from the design density
+at all. So a SEMDOT field maps straight in: the lattice's density comes from
+stress exactly as before, and the design field only decides where the part is.
+
+The SUB-FLOOR RETENTION predicate is the same story. Its qualification test is
+grading.cpp:261 —
+
+    r.qualified = part_demand_max > 0.0 && r.stress_fraction <= subfloor_frac_max;
+
+— and `stress_fraction` is accumulated at grading.cpp:238-253 over voxels selected
+by `density[e] > iso`, from `demand[e]`. Mask plus demand. WORKS UNCHANGED.
+
+The CELLS-PER-MEMBER floor (`lattice_cells_per_member_min`, lattice.hpp:114) is
+compared against `member_width / cell_size`, and the member width is the
+instrument in (b). No density magnitude anywhere in the comparison.
+
+`lattice_boundary_for` / `LatticeBoundary::set_voxel_base` is called at
+run_job.cpp:898 with `printed_iso`, and its own contract
+(lattice_boundary.hpp:95) is "the union of the solid voxel cubes (density >=
+iso)". A mask again. Its base region MOVES with the level set — which is exactly
+what a smoother boundary is — but nothing about how it reads the field changes.
+
+
+(b) local_member_thickness_mm — does a volume-fraction field change what it
+    measures?
+--------------------------------------------------------------------------
+core/src/voxel/voxelize.cpp:559-566:
+
+    printed[idx] = (grid.solid(i,j,k) && density[idx] > iso) ? 1 : 0;
+
+It BINARIZES first and measures the Hildebrand inscribed-sphere thickness of the
+binary set. So the QUANTITY is identical under either field — it is a width of a
+voxel set, in both cases.
+
+What changes is WHICH VOXELS ARE IN THE SET, and it changes by design: a boundary
+voxel that SIMP left at 1.0 may come back from SEMDOT at 0.45 and drop out. The
+member width can therefore move by up to one voxel per side, in the same direction
+and by the same amount as the exported surface moves. That is a change in the
+OBJECT, not a change in the instrument, and it is the correct behaviour: the width
+the lattice is sized against and the width the file carries stay the same number.
+
+The consequence to keep in view is arithmetic, not conceptual: the width feeds
+`member_width / cell_size >= cells_per_member_floor`, so a member that reads one
+voxel narrower can drop below the floor and fall back to SOLID (bar L4). On the
+maintainer's 1.705 mm voxel, one voxel at a 4.60 mm cell is 0.37 cells against a
+floor of 5 — so this can only matter for members already within ~7% of the floor.
+
+
+(c) The printed-set threshold — does that mechanism cover this case?
+--------------------------------------------------------------------
+THE MECHANISM DOES. `analyze_fixed_design`'s `printed_iso` (analyze.hpp:316-328)
+is exactly "a voxel carries material when density > this", it defaults to 0.5,
+and 0.5 is the right value for a SEMDOT field: a voxel more than half full is
+inside. A SEMDOT run needs no new threshold and asks for none.
+
+THE MULTISCALE VALUE DOES NOT. run_job.cpp:533-535:
+
+    double run_printed_iso(const MinimizePlasticOptions& o) {
+      return o.multiscale_lattice ? multiscale_printed_iso(o.multiscale_topology)
+                                  : 0.5;
+    }
+
+and lattice_material.cpp:256-262 returns `0.5 * lattice_rho_min(topo)` — about
+0.025 for octet. Its justification is stated in the source and is correct for what
+it was built for: "a voxel at density 0.30 is a real 30%-dense lattice cell and
+not a half-empty solid voxel". UNDER SEMDOT THAT SENTENCE INVERTS. A SEMDOT voxel
+at 0.30 IS a 30%-full solid voxel — it is the one thing the multiscale comment
+says it is not. Reading such a field at iso 0.025 would call a voxel 2.5% inside
+the part "printed", and the exported surface would balloon outward by close to a
+full voxel: not a smoothness change, a dilation.
+
+
+(d) THE VERDICT, and what it changes for step 3 of the plan
+------------------------------------------------------------
+  CLASSIC LATTICE LAW ............ WORKS UNCHANGED.
+  MULTISCALE LATTICE LAW ......... BREAKS. Two lines, one cause:
+        run_job.cpp:2703   gp.prescribed_relative_density = &dens;
+        run_job.cpp:534    printed_iso = 0.5 * lattice_rho_min(topo)
+     The first hands a geometric fill fraction to the grading law as if it were a
+     lattice cell's relative density; the second reads the same field at an iso
+     chosen for lattice densities.
+
+WHY IT IS NOT A BUG IN EITHER FEATURE, and this is the part that matters for
+planning: SEMDOT and MULTISCALE ARE OPPOSITE BY CONSTRUCTION. Multiscale exists
+so that an INTERIOR voxel can stay grey, because grey means a real printable
+lattice cell and penalising it away would delete the material the lattice pass
+needs. SEMDOT exists so that grey survives ONLY at the geometric boundary,
+because that is what puts the surface between the voxel centres. Multiscale wants
+a grey interior; SEMDOT's whole mechanism is to remove one. They cannot both own
+the same per-voxel number.
+
+So "smooth AND latticed" is not one field. It needs TWO per-voxel numbers — an
+occupancy (SEMDOT's volume fraction, which places the boundary) and a relative
+density (which the lattice is built from) — carried separately, with the
+occupancy driving the export/boundary and the density driving the tensor. Every
+consumer above except the two multiscale lines already reads only the occupancy,
+so the separation is smaller than it sounds; but it is a real design decision and
+it belongs to whoever writes step 3, not to this task. NOTHING WAS CHANGED HERE.
+
+This is also why the S2 measurement is run on the maintainer's CLASSIC captured
+job document rather than the multiscale one: with `lattice.multiscale` on, the
+SEMDOT arm would differ from the SIMP arm by an iso shift and a unit error as
+well as by the optimizer, and the ONE question could not be read out of it.

@@ -1,0 +1,48 @@
+NOTE: solve grid 40x27x40 has odd axis(es) [y=27] - geometric multigrid pads its INDEX SPACE to 40x28x40 (up to 3 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=2 iter=1
+PROGRESS rung=0 rungs=2 iter=2
+PROGRESS rung=0 rungs=2 iter=3
+PROGRESS rung=0 rungs=2 iter=4
+PROGRESS rung=0 rungs=2 iter=5
+PROGRESS rung=0 rungs=2 iter=6
+PROGRESS rung=0 rungs=2 iter=7
+PROGRESS rung=0 rungs=2 iter=8
+PROGRESS rung=0 rungs=2 iter=9
+PROGRESS rung=0 rungs=2 iter=10
+PROGRESS rung=0 rungs=2 iter=11
+PROGRESS rung=0 rungs=2 iter=12
+PROGRESS rung=0 rungs=2 iter=13
+PROGRESS rung=0 rungs=2 iter=14
+PROGRESS rung=0 rungs=2 iter=15
+VARIANT vf=0.600000 achieved=0.600000 printed=0.577092 margin=2556.02 accepted=1 mesh=smoke_semdot/variant_060.stl
+[lattice] vf=0.60 frozen material: printed=50 latticed=10 solid=40 in_include=0 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=6 unexplained=0)
+LATTICE vf=0.600000 topology=octet cell_mm=2.5 graded=1 rho_min=0.05047 rho_max=0.726708 cells=352 tris=331524 lattice_margin=1642.54 lattice_accepted=1 report=smoke_semdot/variant_060_lattice.report.json mesh=smoke_semdot/variant_060_lattice.stl
+PROGRESS rung=1 rungs=2 iter=1
+PROGRESS rung=1 rungs=2 iter=2
+PROGRESS rung=1 rungs=2 iter=3
+PROGRESS rung=1 rungs=2 iter=4
+PROGRESS rung=1 rungs=2 iter=5
+PROGRESS rung=1 rungs=2 iter=6
+PROGRESS rung=1 rungs=2 iter=7
+PROGRESS rung=1 rungs=2 iter=8
+PROGRESS rung=1 rungs=2 iter=9
+PROGRESS rung=1 rungs=2 iter=10
+PROGRESS rung=1 rungs=2 iter=11
+PROGRESS rung=1 rungs=2 iter=12
+VARIANT vf=0.450000 achieved=0.450000 printed=0.425996 margin=638.234 accepted=1 mesh=smoke_semdot/variant_045.stl
+[lattice] vf=0.45 frozen material: printed=50 latticed=2 solid=48 in_include=0 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=2 unexplained=0)
+LATTICE vf=0.450000 topology=octet cell_mm=2.5 graded=1 rho_min=0.05047 rho_max=0.194525 cells=165 tris=158948 lattice_margin=638.233 lattice_accepted=1 report=smoke_semdot/variant_045_lattice.report.json mesh=smoke_semdot/variant_045_lattice.stl
+WARNING: multigrid solver "MultigridCG_Matfree" fell back to Jacobi-CG on the 40x27x40 solved grid (the hierarchy could not be built, OR the V-cycle stagnated on a high-contrast field) — expect a large slowdown. Linear solves ran Jacobi-CG; run_info.json records cg_multigrid=false. See iterations.csv for the per-solve record.
+NOTE: no build_direction was declared, so this run CHOSE one (0.7071, -0.7071, 0) and ROTATED the exported geometry onto it — in the file the build direction is +Z. The verdict describes that orientation. Declare "build_direction" to use your own instead (the export is then left in model coordinates). See build_orientation.json.
+model: l-bracket.step (10 B-rep faces, 2 fixture faces matched)
+ladder: REDUCTION [0.68, 0.52, 0.38, 0.26 x the part] — remove as much plastic as possible while holding it
+variants: 2 evaluated, 2 accepted
+  vf 0.60: margin 2.56e+03, accepted
+  vf 0.45: margin 638, accepted
+report: smoke_semdot/report.json
+mesh: smoke_semdot/variant_060.stl
+mesh: smoke_semdot/variant_045.stl
+mesh: smoke_semdot/variant_060_lattice.stl
+mesh: smoke_semdot/variant_045_lattice.stl
+run_info: smoke_semdot/run_info.json
+iterations: smoke_semdot/iterations.csv

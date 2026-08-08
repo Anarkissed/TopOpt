@@ -165,6 +165,42 @@ void validate_penalty_continuation_options(const SimpOptions& o) {
   }
 }
 
+// Validate the SEMDOT opt-in (task 2026-08-08-semdot-does-it-come-out-smoother).
+// When `semdot` is false (default) nothing here fires and the run is
+// byte-identical. When armed, everything SEMDOT subsumes is REFUSED rather than
+// silently ignored — see SimpOptions::semdot for why each one is subsumed.
+void validate_semdot_options(const SimpOptions& o) {
+  if (!o.semdot) return;
+  if (o.semdot_grid_points < 1)
+    throw std::invalid_argument(
+        "simp_optimize: semdot_grid_points must be >= 1");
+  if (!o.projection.empty())
+    throw std::invalid_argument(
+        "simp_optimize: semdot and a Heaviside projection schedule "
+        "(options.projection) are mutually exclusive — the level set IS the "
+        "sharpening mechanism; clear options.projection");
+  if (o.mma_projection)
+    throw std::invalid_argument(
+        "simp_optimize: semdot and mma_projection are mutually exclusive — the "
+        "level set IS the sharpening mechanism; clear options.mma_projection");
+  if (!o.penalty_continuation.empty())
+    throw std::invalid_argument(
+        "simp_optimize: semdot runs an UNPENALIZED (linear) material law, so a "
+        "penalty_continuation schedule is meaningless; clear it");
+}
+
+// The material law the SEMDOT path solves with: the caller's params with the
+// penalization exponent forced to 1. Called on BOTH the trajectory and the final
+// solve so the optimizer never reports a compliance computed under a law it did
+// not steer with. With `semdot` false this returns the caller's params
+// bit-for-bit and the run is byte-identical.
+SimpParams semdot_law(const SimpParams& params, const SimpOptions& o) {
+  if (!o.semdot) return params;
+  SimpParams out = params;
+  out.penalty = 1.0;
+  return out;
+}
+
 // The SimpParams a given 1-based design iteration's TRAJECTORY solve runs with.
 // With the schedule EMPTY (the default) this returns a COPY of `params` whose
 // every field is the caller's, so the forwarded law is bit-for-bit the shipped
@@ -2014,6 +2050,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
   validate_adaptive_move_options(options);   // adaptive move opt-in (MMA-only)
   validate_penalty_continuation_options(options);  // p-continuation opt-in
+  // SEMDOT is the MASKED overload only (task 2026-08-08-semdot-does-it-come-out-
+  // smoother): the production ladder runs that one, and out of scope must mean
+  // REFUSED, not quietly ignored (125 §0).
+  if (options.semdot)
+    throw std::invalid_argument(
+        "simp_optimize: semdot is supported only on the mask-aware overload "
+        "(the production path); call the overload that takes a DesignMask");
 
   // ACTIVE DOMAIN (active-domain phase 1): resolve the band ONCE per run (an
   // AUTO request reads the filter radius this run uses) and reject a non-zero
@@ -3061,6 +3104,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
   validate_adaptive_move_options(options);   // adaptive move opt-in (MMA-only)
   validate_penalty_continuation_options(options);  // p-continuation opt-in
+  validate_semdot_options(options);  // SEMDOT opt-in (task 2026-08-08-semdot)
 
   // ACTIVE DOMAIN (active-domain phase 1): resolved once per run, exactly as in
   // the unconstrained overload. This is the overload the production design-box
@@ -3225,6 +3269,19 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       sp.mark();
       if (projecting) project_active(eff, xphys, cur_beta, eta);
       apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
+      // SEMDOT (task 2026-08-08-semdot-does-it-come-out-smoother). AFTER the pins,
+      // because the nodal averages the grid points interpolate must see a
+      // FrozenSolid neighbour as full material — otherwise the level set would
+      // read a phantom drop along every mask boundary. The map rewrites the
+      // Active entries only and copies every pinned entry through, so the pins
+      // survive it and are not re-applied. Charged to `project` because it stands
+      // exactly where the Heaviside projection stands and does its job.
+      if (options.semdot) {
+        SemdotField sf = semdot_volume_fractions(grid, xphys, eff,
+                                                 options.volume_fraction * n_active,
+                                                 options.semdot_grid_points);
+        xphys = std::move(sf.volume_fraction);
+      }
       sp.charge(sp.project);
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
       // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
@@ -3232,8 +3289,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // PENALIZATION CONTINUATION (task 2026-08-02-simp-penalization-
       // continuation): as in the unconstrained overload — the stage penalty
       // drives the TRAJECTORY solve, the certified solve below never does.
-      const SimpParams traj_params =
-          penalty_for_iteration(params, options, result.iterations + 1);
+      // SEMDOT then forces p = 1 on top (semdot_law): the thresholding is the
+      // penalization, and continuation is refused under it anyway.
+      const SimpParams traj_params = semdot_law(
+          penalty_for_iteration(params, options, result.iterations + 1), options);
       // ACTIVE DOMAIN: trajectory-only, on the ANALYSIS grid (the design box) —
       // the grid the dilution lives on and the one this feature exists for.
       double af = 1.0;
@@ -3344,9 +3403,27 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       sp.charge(sp.filter);
       sp.mark();
       if (st.project) project_active(eff, xafter, st.beta, eta);
+      // SEMDOT: the post-step PRINTED shape is the smooth-edged field, not the
+      // filtered one — so the achieved fraction this row reports, the playback
+      // keyframe and the density snapshot all describe the object the run would
+      // export. Pinned first for the same reason as the solve field above.
+      double semdot_vf_now = 0.0;
+      if (options.semdot) {
+        apply_mask_pins(eff, xafter);
+        SemdotField sf = semdot_volume_fractions(
+            grid, xafter, eff, options.volume_fraction * n_active,
+            options.semdot_grid_points);
+        semdot_vf_now = n_active > 0.0 ? sf.achieved_volume / n_active : 0.0;
+        xafter = std::move(sf.volume_fraction);
+      }
       sp.charge(sp.project);
       sp.mark();
-      const double vf_now = active_volfrac(xafter);
+      // active_volfrac sums the whole field, which is the Active sum ONLY
+      // because the filter is 0 on frozen/empty voxels. The SEMDOT field is
+      // pinned (FrozenSolid == 1), so it must not go through that lambda; its
+      // achieved volume is summed over the Active set by the map itself.
+      const double vf_now =
+          options.semdot ? semdot_vf_now : active_volfrac(xafter);
       result.history.push_back({c.compliance, change, vf_now});
       cg_history.push_back(c.cg.iterations);  // handoff 131 (index-aligned)
       // Handoff 131 — rung-infeasibility verdict for THIS iteration (see the
@@ -3533,6 +3610,24 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     project_active(eff, result.physical_density, mma_beta, eta);
   std::vector<double> xfinal_unpinned = result.physical_density;
   apply_mask_pins(eff, result.physical_density);
+  // SEMDOT — THE FIELD THE RUN SHIPS. `physical_density` is what reaches
+  // design.bin, the certificate, the export and the lattice, so under SEMDOT it
+  // must be the smooth-edged field and not the filtered one: that is the whole
+  // point of the mode. Derived from the SAME map, at the SAME level-set rule, as
+  // every trajectory iteration.
+  double semdot_final_vf = 0.0;
+  if (options.semdot) {
+    SemdotField sf = semdot_volume_fractions(grid, result.physical_density, eff,
+                                             options.volume_fraction * n_active,
+                                             options.semdot_grid_points);
+    semdot_final_vf = n_active > 0.0 ? sf.achieved_volume / n_active : 0.0;
+    result.semdot = true;
+    result.semdot_level_set = sf.level_set;
+    result.semdot_tie_fraction = sf.tie_fraction;
+    result.semdot_fractional_voxels = sf.fractional_voxels;
+    result.semdot_design_voxels = sf.design_voxels;
+    result.physical_density = std::move(sf.volume_fraction);
+  }
   // Handoff 131 / 2026-07-27-nonconvergence-rejection — an INFEASIBLE or
   // NON_CONVERGENT run skips this final recovery solve; see the unconstrained
   // overload for why (it is both the most expensive solve of the run and the one
@@ -3556,9 +3651,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // the tight tolerance; if IT does not converge the design is reported
     // non_convergent (never certified on an unresolved field), not softened or retried.
     try {
+      // SEMDOT: the SAME linear law the trajectory ran with, so the reported
+      // compliance is the compliance of the design under the physics that
+      // produced it (semdot_law is the identity when the mode is off).
       const SimpCompliance fc = simp_compliance(
-          analysis, params, result.physical_density, bcs, loads,
-          options.cg_tolerance, options.cg_max_iterations, nullptr,
+          analysis, semdot_law(params, options), result.physical_density, bcs,
+          loads, options.cg_tolerance, options.cg_max_iterations, nullptr,
           use_solver ? solver.get() : nullptr, options.solver);
       result.compliance = fc.compliance;
     } catch (const SolverNonConvergence& e) {
@@ -3570,7 +3668,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
           result.history.empty() ? 0.0 : result.history.back().compliance;
     }
   }
-  result.volume_fraction = active_volfrac(xfinal_unpinned);
+  // SEMDOT constrains the volume of the SMOOTH-EDGED field, which is the object
+  // that gets printed; the unpinned filtered field is not what this run means by
+  // its achieved fraction.
+  result.volume_fraction =
+      options.semdot ? semdot_final_vf : active_volfrac(xfinal_unpinned);
   finalize_active_domain(active_domain, result);  // active domain: finalize-only
   // Final playback keyframe: the converged printed shape.
   if (options.keyframe && options.keyframe_stride > 0)

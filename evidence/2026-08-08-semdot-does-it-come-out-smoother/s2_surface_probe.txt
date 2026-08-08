@@ -1,0 +1,175 @@
+== semdot_surface_probe — S2 on HIS OWN PART ==
+
+SIMP     evidence/2026-08-08-semdot-does-it-come-out-smoother/s2_simp/design.bin
+SEMDOT   evidence/2026-08-08-semdot-does-it-come-out-smoother/s2_semdot/design.bin
+part     evidence/2026-08-08-semdot-does-it-come-out-smoother/M2_verticalStand.step (78 faces, 3106 tessellation triangles)
+
+#####################################################################
+# ARM SIMP — grid 128 x 31 x 118, spacing 1.705279 mm, 4 rungs
+#####################################################################
+
+---------------------------------------------------------------
+SIMP  rung 0.68   142354 verts / 284704 tris   iterations 27
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.679951   (miss -0.000049)
+  margin worst 3254.3566   effective 673.8562   max vM 0.0169 MPa   accepted yes
+  SPLIT: CAD 112583 (79.09%)  ambiguous 3580 (2.51%)  CUT 26191 (18.40%)   oblique 28365 (19.93%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.0605 mm  max 10.3332  p99 4.7841  (62.2% of a voxel)
+      oblique CAD   rms 0.4293 mm  max 1.6941  p99 1.2484
+      oblique CUT   rms 3.7452 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 8.4075 deg    CUT 7.5521 deg    CAD 7.5842 deg
+  CONTROLS: volume 440550.9 mm3   min section 3.4106 mm2   min-feature 5619
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 54081   binary at a band end 47965 (88.69%)
+      fractional voxels (0<V<1), whole grid: 28374
+      MC crossings 29803   |frac-0.5| rms 0.076042 = 0.1297 mm   within 1% of midpoint 85.28%
+
+---------------------------------------------------------------
+SIMP  rung 0.52   145550 verts / 291100 tris   iterations 127
+---------------------------------------------------------------
+  vf requested 0.5200   achieved 0.520005   (miss +0.000005)
+  margin worst 3389.4171   effective 701.8222   max vM 0.0162 MPa   accepted yes
+  SPLIT: CAD 102843 (70.66%)  ambiguous 3732 (2.56%)  CUT 38975 (26.78%)   oblique 27041 (18.58%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.6684 mm  max 10.3867  p99 6.1601  (97.8% of a voxel)
+      oblique CAD   rms 0.4507 mm  max 1.7022  p99 1.4363
+      oblique CUT   rms 4.1691 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2353 deg    CUT 9.6338 deg    CAD 7.9023 deg
+  CONTROLS: volume 403282.0 mm3   min section 3.4106 mm2   min-feature 5452
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 60567   binary at a band end 60563 (99.99%)
+      fractional voxels (0<V<1), whole grid: 45194
+      MC crossings 33848   |frac-0.5| rms 0.001329 = 0.0023 mm   within 1% of midpoint 99.96%
+
+---------------------------------------------------------------
+SIMP  rung 0.38   165096 verts / 330212 tris   iterations 140
+---------------------------------------------------------------
+  vf requested 0.3800   achieved 0.380000   (miss -0.000000)
+  margin worst 3290.9124   effective 681.4255   max vM 0.0167 MPa   accepted yes
+  SPLIT: CAD 94724 (57.38%)  ambiguous 3823 (2.32%)  CUT 66549 (40.31%)   oblique 26963 (16.33%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.9210 mm  max 14.3157  p99 10.8088  (171.3% of a voxel)
+      oblique CAD   rms 0.4394 mm  max 1.6986  p99 1.3356
+      oblique CUT   rms 5.7951 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.8108 deg    CUT 10.4580 deg    CAD 8.0555 deg
+  CONTROLS: volume 330882.2 mm3   min section 3.4106 mm2   min-feature 6142
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 63131   binary at a band end 63130 (100.00%)
+      fractional voxels (0<V<1), whole grid: 55060
+      MC crossings 35386   |frac-0.5| rms 0.003265 = 0.0056 mm   within 1% of midpoint 99.99%
+
+---------------------------------------------------------------
+SIMP  rung 0.26   167778 verts / 335588 tris   iterations 153
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.259996   (miss -0.000004)
+  margin worst 3014.1201   effective 624.1121   max vM 0.0182 MPa   accepted yes
+  SPLIT: CAD 89254 (53.20%)  ambiguous 3878 (2.31%)  CUT 74646 (44.49%)   oblique 26388 (15.73%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.4878 mm  max 15.5992  p99 12.9024  (204.5% of a voxel)
+      oblique CAD   rms 0.4375 mm  max 1.7001  p99 1.4096
+      oblique CUT   rms 6.4195 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.9413 deg    CUT 10.2657 deg    CAD 8.3031 deg
+  CONTROLS: volume 288713.4 mm3   min section 3.4106 mm2   min-feature 6923
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 64679   binary at a band end 64678 (100.00%)
+      fractional voxels (0<V<1), whole grid: 63381
+      MC crossings 36453   |frac-0.5| rms 0.001746 = 0.0030 mm   within 1% of midpoint 99.99%
+#####################################################################
+# ARM SEMDOT — grid 128 x 31 x 118, spacing 1.705279 mm, 4 rungs
+#####################################################################
+
+---------------------------------------------------------------
+SEMDOT  rung 0.68   183460 verts / 367316 tris   iterations 36
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.680000   (miss +0.000000)
+  margin worst 3180.1292   effective 658.4864   max vM 0.0173 MPa   accepted yes
+  SPLIT: CAD 118322 (64.49%)  ambiguous 3597 (1.96%)  CUT 61541 (33.54%)   oblique 29933 (16.32%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.7063 mm  max 11.6453  p99 8.2197  (100.1% of a voxel)
+      oblique CAD   rms 0.4731 mm  max 1.7039  p99 1.4366
+      oblique CUT   rms 5.0160 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 13.5933 deg    CUT 20.0126 deg    CAD 7.7207 deg
+  CONTROLS: volume 439632.1 mm3   min section 3.4106 mm2   min-feature 6351
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 64289   binary at a band end 50013 (77.79%)
+      fractional voxels (0<V<1), whole grid: 17284
+      MC crossings 39904   |frac-0.5| rms 0.228319 = 0.3893 mm   within 1% of midpoint 53.56%
+
+---------------------------------------------------------------
+SEMDOT  rung 0.52   203996 verts / 408524 tris   iterations 44
+---------------------------------------------------------------
+  vf requested 0.5200   achieved 0.520000   (miss +0.000000)
+  margin worst 2164.8260   effective 448.2549   max vM 0.0254 MPa   accepted yes
+  SPLIT: CAD 105478 (51.71%)  ambiguous 3619 (1.77%)  CUT 94899 (46.52%)   oblique 32635 (16.00%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.3986 mm  max 17.3538  p99 11.4190  (199.3% of a voxel)
+      oblique CAD   rms 0.5151 mm  max 1.7036  p99 1.5646
+      oblique CUT   rms 6.2752 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 13.1713 deg    CUT 16.3693 deg    CAD 8.2365 deg
+  CONTROLS: volume 379089.6 mm3   min section 3.4106 mm2   min-feature 8715
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 72404   binary at a band end 53171 (73.44%)
+      fractional voxels (0<V<1), whole grid: 23827
+      MC crossings 44954   |frac-0.5| rms 0.190380 = 0.3247 mm   within 1% of midpoint 49.24%
+
+---------------------------------------------------------------
+SEMDOT  rung 0.38   214580 verts / 429760 tris   iterations 28
+---------------------------------------------------------------
+  vf requested 0.3800   achieved 0.380000   (miss -0.000000)
+  margin worst 1008.5020   effective 208.8232   max vM 0.0545 MPa   accepted yes
+  SPLIT: CAD 96446 (44.95%)  ambiguous 3684 (1.72%)  CUT 114450 (53.34%)   oblique 32709 (15.24%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 4.7034 mm  max 17.9342  p99 14.5943  (275.8% of a voxel)
+      oblique CAD   rms 0.4829 mm  max 1.7032  p99 1.5199
+      oblique CUT   rms 7.3265 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 13.4285 deg    CUT 15.7639 deg    CAD 8.8686 deg
+  CONTROLS: volume 327758.4 mm3   min section 3.4106 mm2   min-feature 9869
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 76626   binary at a band end 55093 (71.90%)
+      fractional voxels (0<V<1), whole grid: 27087
+      MC crossings 49065   |frac-0.5| rms 0.205535 = 0.3505 mm   within 1% of midpoint 45.20%
+
+---------------------------------------------------------------
+SEMDOT  rung 0.26   232850 verts / 466604 tris   iterations 42
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.260000   (miss -0.000000)
+  margin worst 303.2456   effective 62.7909   max vM 0.1814 MPa   accepted yes
+  SPLIT: CAD 91192 (39.16%)  ambiguous 3415 (1.47%)  CUT 138243 (59.37%)   oblique 41329 (17.75%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 6.4862 mm  max 18.4433  p99 15.8318  (380.4% of a voxel)
+      oblique CAD   rms 0.4877 mm  max 1.7052  p99 1.5705
+      oblique CUT   rms 8.5968 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 14.4755 deg    CUT 16.3824 deg    CAD 9.8663 deg
+  CONTROLS: volume 283611.2 mm3   min section 3.4106 mm2   min-feature 11425
+  ★ THE FIELD, on the DESIGN lattice (never the shipped one)
+      boundary voxels 81878   binary at a band end 56618 (69.15%)
+      fractional voxels (0<V<1), whole grid: 31680
+      MC crossings 54700   |frac-0.5| rms 0.222781 = 0.3799 mm   within 1% of midpoint 40.43%
+
+
+=====================================================================
+THE ANSWER — SEMDOT against SIMP, rung by rung
+=====================================================================
+rung   | stair-step amp, CAD (mm) | roughness, CUT (deg)     | sub-voxel content (mm)  
+       |     SIMP   SEMDOT %better |     SIMP   SEMDOT %better |     SIMP   SEMDOT  %more
+0.68   |   0.4293   0.4731  -10.2 |   7.5521  20.0126 -165.0 |   0.1297   0.3893   +200
+0.52   |   0.4507   0.5151  -14.3 |   9.6338  16.3693  -69.9 |   0.0023   0.3247 +14225
+0.38   |   0.4394   0.4829   -9.9 |  10.4580  15.7639  -50.7 |   0.0056   0.3505  +6195
+0.26   |   0.4375   0.4877  -11.5 |  10.2657  16.3824  -59.6 |   0.0030   0.3799 +12657
+
+A POSITIVE % IS SEMDOT WINNING IN ALL THREE COLUMNS. The first two are
+the OUTCOME (lower amplitude, lower roughness); the third is the
+MECHANISM (more sub-voxel placement in the field). Positive mechanism with
+negative outcome is the interesting failure: the boundary DID get finer
+than the grid, and the surface got worse anyway.
+
+wrote evidence/2026-08-08-semdot-does-it-come-out-smoother/s2_semdot_vs_simp.csv

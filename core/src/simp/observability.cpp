@@ -783,6 +783,33 @@ std::string run_info_json(const RunInfo& info) {
   // Handoff 2026-07-25-draft-quality — the draft posture echo (config up-front) plus
   // the per-rung outcome (empty until the post-run finalize) and the compact
   // escalation list.
+  // Task 2026-08-08-semdot-does-it-come-out-smoother — the SEMDOT echo (config
+  // up-front) plus the per-rung outcome (empty until the post-run finalize).
+  num("semdot", bool_json(info.semdot));
+  num("semdot_grid_points", fmt_i(info.semdot_grid_points));
+  {
+    std::string ls = "[";
+    for (std::size_t i = 0; i < info.semdot_rung_level_set.size(); ++i) {
+      if (i) ls += ", ";
+      ls += fmt(info.semdot_rung_level_set[i]);
+    }
+    ls += "]";
+    num("semdot_rung_level_set", ls);
+    std::string fv = "[";
+    for (std::size_t i = 0; i < info.semdot_rung_fractional_voxels.size(); ++i) {
+      if (i) fv += ", ";
+      fv += fmt_i(static_cast<int>(info.semdot_rung_fractional_voxels[i]));
+    }
+    fv += "]";
+    num("semdot_rung_fractional_voxels", fv);
+    std::string dv = "[";
+    for (std::size_t i = 0; i < info.semdot_rung_design_voxels.size(); ++i) {
+      if (i) dv += ", ";
+      dv += fmt_i(static_cast<int>(info.semdot_rung_design_voxels[i]));
+    }
+    dv += "]";
+    num("semdot_rung_design_voxels", dv);
+  }
   num("draft_quality", bool_json(info.draft_quality));
   num("draft_loose_tol", fmt(info.draft_loose_tol));
   num("draft_escalation_c_gap", fmt(info.draft_escalation_c_gap));

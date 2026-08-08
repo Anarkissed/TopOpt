@@ -1,0 +1,80 @@
+NOTE: solve grid 40x27x40 has odd axis(es) [y=27] - geometric multigrid pads its INDEX SPACE to 40x28x40 (up to 3 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=2 iter=1
+PROGRESS rung=0 rungs=2 iter=2
+PROGRESS rung=0 rungs=2 iter=3
+PROGRESS rung=0 rungs=2 iter=4
+PROGRESS rung=0 rungs=2 iter=5
+PROGRESS rung=0 rungs=2 iter=6
+PROGRESS rung=0 rungs=2 iter=7
+PROGRESS rung=0 rungs=2 iter=8
+PROGRESS rung=0 rungs=2 iter=9
+PROGRESS rung=0 rungs=2 iter=10
+PROGRESS rung=0 rungs=2 iter=11
+PROGRESS rung=0 rungs=2 iter=12
+PROGRESS rung=0 rungs=2 iter=13
+PROGRESS rung=0 rungs=2 iter=14
+PROGRESS rung=0 rungs=2 iter=15
+PROGRESS rung=0 rungs=2 iter=16
+PROGRESS rung=0 rungs=2 iter=17
+PROGRESS rung=0 rungs=2 iter=18
+PROGRESS rung=0 rungs=2 iter=19
+PROGRESS rung=0 rungs=2 iter=20
+PROGRESS rung=0 rungs=2 iter=21
+PROGRESS rung=0 rungs=2 iter=22
+PROGRESS rung=0 rungs=2 iter=23
+PROGRESS rung=0 rungs=2 iter=24
+PROGRESS rung=0 rungs=2 iter=25
+PROGRESS rung=0 rungs=2 iter=26
+PROGRESS rung=0 rungs=2 iter=27
+PROGRESS rung=0 rungs=2 iter=28
+PROGRESS rung=0 rungs=2 iter=29
+PROGRESS rung=0 rungs=2 iter=30
+VARIANT vf=0.600000 achieved=0.599617 printed=0.559861 margin=3510.7 accepted=1 mesh=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_060.stl
+[lattice] vf=0.60 frozen material: printed=50 latticed=15 solid=35 in_include=0 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=3 unexplained=0)
+LATTICE vf=0.600000 topology=octet cell_mm=2.5 graded=1 rho_min=0.05047 rho_max=0.89988 cells=516 tris=484792 lattice_margin=1696.45 lattice_accepted=1 report=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_060_lattice.report.json mesh=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_060_lattice.stl
+PROGRESS rung=1 rungs=2 iter=1
+PROGRESS rung=1 rungs=2 iter=2
+PROGRESS rung=1 rungs=2 iter=3
+PROGRESS rung=1 rungs=2 iter=4
+PROGRESS rung=1 rungs=2 iter=5
+PROGRESS rung=1 rungs=2 iter=6
+PROGRESS rung=1 rungs=2 iter=7
+PROGRESS rung=1 rungs=2 iter=8
+PROGRESS rung=1 rungs=2 iter=9
+PROGRESS rung=1 rungs=2 iter=10
+PROGRESS rung=1 rungs=2 iter=11
+PROGRESS rung=1 rungs=2 iter=12
+PROGRESS rung=1 rungs=2 iter=13
+PROGRESS rung=1 rungs=2 iter=14
+PROGRESS rung=1 rungs=2 iter=15
+PROGRESS rung=1 rungs=2 iter=16
+PROGRESS rung=1 rungs=2 iter=17
+PROGRESS rung=1 rungs=2 iter=18
+PROGRESS rung=1 rungs=2 iter=19
+PROGRESS rung=1 rungs=2 iter=20
+PROGRESS rung=1 rungs=2 iter=21
+PROGRESS rung=1 rungs=2 iter=22
+PROGRESS rung=1 rungs=2 iter=23
+PROGRESS rung=1 rungs=2 iter=24
+PROGRESS rung=1 rungs=2 iter=25
+PROGRESS rung=1 rungs=2 iter=26
+PROGRESS rung=1 rungs=2 iter=27
+PROGRESS rung=1 rungs=2 iter=28
+PROGRESS rung=1 rungs=2 iter=29
+PROGRESS rung=1 rungs=2 iter=30
+VARIANT vf=0.450000 achieved=0.449678 printed=0.385956 margin=3250.84 accepted=1 mesh=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_045.stl
+[lattice] vf=0.45 frozen material: printed=50 latticed=12 solid=38 in_include=0 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=4 unexplained=0)
+LATTICE vf=0.450000 topology=octet cell_mm=2.5 graded=1 rho_min=0.05047 rho_max=0.89988 cells=292 tris=281408 lattice_margin=1003.56 lattice_accepted=1 report=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_045_lattice.report.json mesh=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_045_lattice.stl
+NOTE: no build_direction was declared, so this run CHOSE one (0, 0, 1) and ROTATED the exported geometry onto it — in the file the build direction is +Z. The verdict describes that orientation. Declare "build_direction" to use your own instead (the export is then left in model coordinates). See build_orientation.json.
+model: l-bracket.step (10 B-rep faces, 2 fixture faces matched)
+ladder: REDUCTION [0.68, 0.52, 0.38, 0.26 x the part] — remove as much plastic as possible while holding it
+variants: 2 evaluated, 2 accepted
+  vf 0.60: margin 3.51e+03, accepted
+  vf 0.45: margin 3.25e+03, accepted
+report: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/report.json
+mesh: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_060.stl
+mesh: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_045.stl
+mesh: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_060_lattice.stl
+mesh: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/variant_045_lattice.stl
+run_info: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/run_info.json
+iterations: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-void-exterior-check-ad2160/evidence/2026-08-08-semdot-does-it-come-out-smoother/r1_byteid/base/iterations.csv

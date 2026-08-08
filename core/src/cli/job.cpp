@@ -392,7 +392,7 @@ JobDescription parse_job(const std::string& json_text) {
                        "margin_stop", "simp", "draft", "warm_start", "output",
                        "lattice", "grading", "loads", "design_box", "keep_outs",
                        "build_direction", "build_orientation_report",
-                       "bake_build_orientation", "variant"},
+                       "bake_build_orientation", "variant", "semdot"},
                       "the job");
 
   JobDescription job;
@@ -784,6 +784,27 @@ JobDescription parse_job(const std::string& json_text) {
     if (c.type != JsonValue::Type::Bool)
       schema_fail("\"warm_start.coarse\" must be a boolean");
     job.warm_start_coarse = (c.num != 0.0);
+  }
+
+  // Optional "semdot" block (task 2026-08-08-semdot-does-it-come-out-smoother):
+  // the SECOND MODE. ABSENT (has_semdot == false, the DEFAULT) => the driver
+  // keeps its OFF default and the run is byte-identical. `enabled` is REQUIRED
+  // inside the block (an empty semdot block is a config mistake, not a silent
+  // no-op — the same rule "draft" carries); `grid_points` is optional and
+  // defaults to kSemdotDefaultGridPoints.
+  if (const JsonValue* sd = find_key(root, "semdot")) {
+    require_object(*sd, "semdot");
+    reject_unknown_keys(*sd, {"enabled", "grid_points"}, "semdot");
+    job.has_semdot = true;
+    const JsonValue& en = require_key(*sd, "enabled", "semdot");
+    if (en.type != JsonValue::Type::Bool)
+      schema_fail("\"semdot.enabled\" must be a boolean");
+    job.semdot = (en.num != 0.0);
+    if (const JsonValue* gp = find_key(*sd, "grid_points")) {
+      const double v = require_number(*gp, "semdot.grid_points");
+      if (v < 1.0) schema_fail("\"semdot.grid_points\" must be >= 1");
+      job.semdot_grid_points = static_cast<int>(v);
+    }
   }
 
   // output block.

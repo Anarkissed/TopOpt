@@ -1,0 +1,40 @@
+=== S2(b)/(c) — COST AND VERDICT, per rung, both arms ===
+
+### ARM SIMP
+  semdot=False grid_points=0  solver=MultigridCG_Matfree cg_multigrid=False
+  conditional_projection_fired=[False, True, True, True]
+  rung_infeasible=[False, False, False, False]  rung_non_convergent=[False, False, False, False]
+
+### ARM SEMDOT
+  semdot=True grid_points=4  solver=MultigridCG_Matfree cg_multigrid=False
+  conditional_projection_fired=[]
+  rung_infeasible=[False, False, False, False]  rung_non_convergent=[False, False, False, False]
+  semdot_rung_level_set=[0.5671269958, 0.5503062228, 0.5322564883, 0.4556744266]
+  semdot_rung_fractional_voxels=[17284, 23827, 27087, 31680] of [70688, 70688, 70688, 70688]
+
+--- PER RUNG, SIMP against SEMDOT ----------------------------------------
+ rung | arm    | iters    wall s   solve s   cg tot |   compliance |     margin      m_eff  ok |   ach vf      miss | minfeat
+-----------------------------------------------------------------------------------------------------------------------------
+ 0.68 | SIMP   |    27     367.7     366.7    22799 |   0.00240038 |       3254      673.9 yes |  0.67995  -0.00005 |     407
+ 0.68 | SEMDOT |    36     352.2     348.8    28902 |   0.00240946 |       3180      658.5 yes |  0.68000  +0.00000 |    3166
+
+ 0.52 | SIMP   |   127    1307.9    1303.4   110518 |   0.00251706 |       3389      701.8 yes |  0.52000  +0.00000 |     591
+ 0.52 | SEMDOT |    44     321.4     317.0    32723 |   0.00252112 |       2165      448.3 yes |  0.52000  +0.00000 |    5271
+
+ 0.38 | SIMP   |   140    1583.5    1578.6   132475 |   0.00283886 |       3291      681.4 yes |  0.38000  -0.00000 |     635
+ 0.38 | SEMDOT |    28     205.3     202.7    25900 |   0.00292106 |       1009      208.8 yes |  0.38000  -0.00000 |    6004
+
+ 0.26 | SIMP   |   153    1729.3    1723.8   153413 |   0.00347194 |       3014      624.1 yes |  0.26000  -0.00000 |     726
+ 0.26 | SEMDOT |    42     390.4     386.1    42450 |   0.00380689 |      303.2      62.79 yes |  0.26000  -0.00000 |    7791
+
+--- TOTALS ----------------------------------------
+  SIMP    rungs 4   iterations 447 (gray 168 + polish 279)   wall 4988.4 s   solve 4972.5 s   CG 419205
+  SEMDOT  rungs 4   iterations 150 (gray 150 + polish 0)   wall 1269.3 s   solve 1254.6 s   CG 129975
+
+  ITERATIONS, ALL:  SEMDOT / SIMP = 0.336x   (the paper's claim is < 1)
+  ITERATIONS, GRAYSCALE PHASE ONLY: SEMDOT / SIMP = 0.893x
+    (the honest like-for-like: SIMP's polish phase has no SEMDOT counterpart,
+     so the ALL row credits SEMDOT with work that simply did not run.)
+  WALL:       SEMDOT / SIMP = 0.254x   (reported SEPARATELY on purpose — bar R6)
+
+wrote s2_cost_and_verdict.csv
