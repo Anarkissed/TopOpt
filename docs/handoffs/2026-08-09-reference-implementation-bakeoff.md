@@ -296,11 +296,13 @@ precisely the question §S4c turns into a recommendation.
 
 ★ **WHAT IS STILL MISSING, AND IT IS NAMED RATHER THAN QUIETLY ABSENT.** An arm
 where the ALM actually refines that boundary — `run_seq_arm.sh`, five iterations
-per rung against his printed fraction — was written and started, and did NOT
-finish inside this task at 277.7 s per iteration. So this handoff says nothing
-about whether optimising on top of the representation helps or hurts, and the
+per rung against his printed fraction — was written and started, and was
+**stopped part-way through rung 068 so the core suite could finish** on a
+machine it was contending with. So this handoff says nothing about whether
+optimising on top of the representation helps or hurts, and the
 `GTO-ALM-3iter-UNCONV` row is the only place an optimiser ran at all. The script
-is committed and the cost of running it is ~100 minutes.
+is committed as `run_seq_arm.sh`; the cost of running it is ~100 minutes, and it
+is the obvious next measurement alongside the CAD projection in §S4c.
 
 ## S2.6 THE FULL TABLE, WITH ITS CONTROLS
 
