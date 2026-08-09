@@ -1,0 +1,12 @@
+== re-certification control ==
+field                evidence/2026-08-09-levelset-match-the-reference/s6_corrected/snap/it0020.f64
+binarized            no
+fractional samples   24655 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75158 of 110904  (vf 0.677685)
+max von Mises        0.016175011 MPa
+MARGIN worst case    3400.306765045
+margin effective     704.077013816   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    663
+load path connected  yes

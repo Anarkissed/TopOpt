@@ -1,0 +1,354 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       6 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/snap/it0001.f64
+binarized            no
+fractional samples   28019 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75790 of 110904  (vf 0.683384)
+max von Mises        0.021543610 MPa
+MARGIN worst case    2552.961216731
+margin effective     528.623278447   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    852
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/snap/it0005.f64
+binarized            no
+fractional samples   24611 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75320 of 110904  (vf 0.679146)
+max von Mises        0.015991129 MPa
+MARGIN worst case    3439.406859044
+margin effective     712.173188463   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    837
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/snap/it0010.f64
+binarized            no
+fractional samples   24024 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75289 of 110904  (vf 0.678866)
+max von Mises        0.016153153 MPa
+MARGIN worst case    3404.908071270
+margin effective     705.029773131   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    689
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/snap/it0015.f64
+binarized            no
+fractional samples   24471 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75263 of 110904  (vf 0.678632)
+max von Mises        0.016170559 MPa
+MARGIN worst case    3401.242974467
+margin effective     704.270867953   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    673
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/snap/it0020.f64
+binarized            no
+fractional samples   23876 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75374 of 110904  (vf 0.679633)
+max von Mises        0.027758255 MPa
+MARGIN worst case    1981.392571194
+margin effective     410.272678649   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    752
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/snap/it0025.f64
+binarized            no
+fractional samples   24787 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75291 of 110904  (vf 0.678884)
+max von Mises        0.016174510 MPa
+MARGIN worst case    3400.412229813
+margin effective     704.098851645   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    733
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/rho.f64
+binarized            no
+fractional samples   24787 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75291 of 110904  (vf 0.678884)
+max von Mises        0.016174510 MPa
+MARGIN worst case    3400.412229813
+margin effective     704.098851645   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    733
+load path connected  yes
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       6 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/snap/it0001.f64
+binarized            no
+fractional samples   28019 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75790 of 110904  (vf 0.683384)
+max von Mises        0.021543610 MPa
+MARGIN worst case    2552.961216731
+margin effective     528.623278447   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    852
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/snap/it0005.f64
+binarized            no
+fractional samples   22935 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75404 of 110904  (vf 0.679903)
+max von Mises        0.027122926 MPa
+MARGIN worst case    2027.804788515
+margin effective     419.882921969   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    680
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/snap/it0010.f64
+binarized            no
+fractional samples   20208 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75315 of 110904  (vf 0.679101)
+max von Mises        0.021367880 MPa
+MARGIN worst case    2573.956832051
+margin effective     532.970689183   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    538
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/snap/it0015.f64
+binarized            no
+fractional samples   19575 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75384 of 110904  (vf 0.679723)
+max von Mises        0.020716658 MPa
+MARGIN worst case    2654.868385650
+margin effective     549.724461410   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    509
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/snap/it0020.f64
+binarized            no
+fractional samples   19460 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75393 of 110904  (vf 0.679804)
+max von Mises        0.017339145 MPa
+MARGIN worst case    3172.013388612
+margin effective     656.805949803   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    507
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/snap/it0025.f64
+binarized            no
+fractional samples   19250 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.027295830 MPa
+MARGIN worst case    2014.959772234
+margin effective     417.223197030   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    500
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/rho.f64
+binarized            no
+fractional samples   19615 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75346 of 110904  (vf 0.679380)
+max von Mises        0.018052789 MPa
+MARGIN worst case    3046.620633570
+margin effective     630.841775796   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    516
+load path connected  yes
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       6 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0001.f64
+binarized            no
+fractional samples   28019 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75790 of 110904  (vf 0.683384)
+max von Mises        0.021543610 MPa
+MARGIN worst case    2552.961216731
+margin effective     528.623278447   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    852
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0005.f64
+binarized            no
+fractional samples   21270 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75652 of 110904  (vf 0.682140)
+max von Mises        0.068921842 MPa
+MARGIN worst case    798.005372057
+margin effective     165.237220695   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    564
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0010.f64
+binarized            no
+fractional samples   19089 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75665 of 110904  (vf 0.682257)
+max von Mises        0.037552068 MPa
+MARGIN worst case    1464.633037786
+margin effective     303.271006658   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    486
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0015.f64
+binarized            no
+fractional samples   18138 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75632 of 110904  (vf 0.681959)
+max von Mises        0.027423429 MPa
+MARGIN worst case    2005.584360160
+margin effective     415.281898025   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    452
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0020.f64
+binarized            no
+fractional samples   17616 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75610 of 110904  (vf 0.681761)
+max von Mises        0.030742284 MPa
+MARGIN worst case    1789.066798158
+margin effective     370.449167032   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    457
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0025.f64
+binarized            no
+fractional samples   17336 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75594 of 110904  (vf 0.681617)
+max von Mises        0.046842512 MPa
+MARGIN worst case    1174.147096600
+margin effective     243.122176520   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    460
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/rho.f64
+binarized            no
+fractional samples   23408 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75803 of 110904  (vf 0.683501)
+max von Mises        0.049745504 MPa
+MARGIN worst case    1105.627566363
+margin effective     228.934331255   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    649
+load path connected  yes

@@ -1,0 +1,12 @@
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s2_alpha_min/snap/it0075.f64
+binarized            no
+fractional samples   26708 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       74923 of 110904  (vf 0.675566)
+max von Mises        0.016144714 MPa
+MARGIN worst case    3406.687776201
+margin effective     705.398283804   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1573
+load path connected  yes

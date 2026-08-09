@@ -1,0 +1,12 @@
+-- --gridap-auto min: their rule, evaluated here --
+   el_size            128 x 31 x 118   (min 31, max 128)
+   axis used          31  = their minimum(el_size) — THE THIN AXIS on this part
+   max_steps          2*floor(1*31/10) = 6
+   alpha              4*6*0.1 = 2.4 voxels   (their 2D example 8.0, their 3D example 12.0)
+
+-- --gridap-auto max: their rule, evaluated here --
+   el_size            128 x 31 x 118   (min 31, max 128)
+   axis used          128  = the RESOLUTION axis (the corrected transfer)
+   max_steps          2*floor(1*128/10) = 24
+   alpha              4*24*0.1 = 9.6 voxels   (their 2D example 8.0, their 3D example 12.0)
+
