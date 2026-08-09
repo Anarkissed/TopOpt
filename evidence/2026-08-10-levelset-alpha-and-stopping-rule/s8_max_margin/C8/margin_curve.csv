@@ -1,0 +1,8 @@
+field,printed_voxels,achieved_vf,fractional_samples,max_von_mises_mpa,margin_worst_case,margin_effective,accepted,min_feature_violations,load_path_connected
+evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0001,75790,0.683383827454,28019,0.0215436096873,2552.96121673,528.623278447,1,852,1
+evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0005,75652,0.682139508043,21270,0.0689218417894,798.005372057,165.237220695,1,564,1
+evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0010,75665,0.682256726538,19089,0.0375520683892,1464.63303779,303.271006658,1,486,1
+evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0015,75632,0.681959171896,18138,0.0274234288483,2005.58436016,415.281898025,1,452,1
+evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0020,75610,0.681760802135,17616,0.0307422842214,1789.06679816,370.449167032,1,457,1
+evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/snap/it0025,75594,0.681616533218,17336,0.046842512458,1174.1470966,243.12217652,1,460,1
+evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C8/rho,75803,0.68350104595,23408,0.0497455035251,1105.62756636,228.934331255,1,649,1

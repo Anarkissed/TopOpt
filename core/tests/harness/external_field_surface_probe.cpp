@@ -199,6 +199,12 @@ struct ArmRow {
   std::size_t n_cad = 0, n_cut = 0, n_amb = 0, n_oblique = 0;
   Deviation obl_all, obl_cad, obl_cut;
   double dih_all = 0.0, dih_cut = 0.0, dih_cad = 0.0;
+  // The like-for-like columns (see ref_region_mask): the dihedral RMS over the
+  // region the REFERENCE classified CUT / CAD, so every arm is measured over the
+  // SAME part of space and a changed cut population cannot move the number.
+  // 0 when no reference mask was supplied.
+  double dih_refcut = 0.0, dih_refcad = 0.0;
+  std::size_t n_refcut = 0, n_refcad = 0;
   double volume_mm3 = 0.0, min_section_mm2 = 0.0;
   int min_feature = 0;
   FieldStats field;
@@ -237,12 +243,92 @@ std::string meta_s(const std::map<std::string, std::string>& m, const char* k,
   return it == m.end() ? std::string(dflt) : it->second;
 }
 
+// ── A FIXED TRIANGLE SET, SO ONE COLUMN COMPARES LIKE WITH LIKE ────────────
+//
+// ★ WHY THIS EXISTS. `dih_cut` restricts each arm to the triangles THAT ARM's
+// own classifier called CUT, and the two arms do not have the same cut
+// population: PR 323 measured the level set's cut share at 36.2% against SIMP's
+// 18.4% ON ITS FIRST ITERATION, before the optimiser had moved anything of
+// consequence. An eta = 2 ersatz offsets the extracted surface away from the CAD
+// faces, so triangles that are CAD for SIMP are CUT for the level set, and part
+// of "+2.2 deg of cut roughness" is therefore two different sets of triangles
+// being compared rather than two different surfaces.
+//
+// The honest fix is not to make the two meshes share triangles — they cannot,
+// they are different meshes — but to measure both over THE SAME PART OF SPACE.
+// This builds an occupancy mask of the voxels the REFERENCE's cut surface
+// passes through, dilated by one voxel so a surface that has moved sub-voxel is
+// still inside it, and every arm then reports a dihedral RMS restricted to the
+// triangles whose vertices fall in that mask.
+//
+// ★ WHAT IT IS AND IS NOT. It is a SPATIAL restriction, so it answers "over the
+// region SIMP cuts, is our surface rougher than SIMP's?" — a question with one
+// population and one answer. It is NOT a claim that the two meshes are
+// triangle-for-triangle comparable, and it does not replace `dih_all`, which is
+// already population-independent and is reported beside it.
+std::vector<char> ref_region_mask(const TriangleMesh& ref,
+                                  const std::vector<char>& ref_sel,
+                                  const VoxelGrid& g) {
+  const std::size_t n = g.voxel_count();
+  std::vector<char> hit(n, 0);
+  auto vox = [&](const Vec3& p, int& i, int& j, int& k) {
+    i = static_cast<int>(std::floor((p.x - g.origin.x) / g.spacing));
+    j = static_cast<int>(std::floor((p.y - g.origin.y) / g.spacing));
+    k = static_cast<int>(std::floor((p.z - g.origin.z) / g.spacing));
+  };
+  for (std::size_t v = 0; v < ref.vertices.size(); ++v) {
+    if (!ref_sel[v]) continue;
+    int i, j, k;
+    vox(ref.vertices[v], i, j, k);
+    // Dilate by one voxel on each axis: the comparison surface has moved by up
+    // to a band width, and a mask that excluded it would measure emptiness.
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di) {
+          const int a = i + di, b = j + dj, c = k + dk;
+          if (a < 0 || a >= g.nx || b < 0 || b >= g.ny || c < 0 || c >= g.nz)
+            continue;
+          hit[static_cast<std::size_t>(a) +
+              static_cast<std::size_t>(g.nx) *
+                  (static_cast<std::size_t>(b) +
+                   static_cast<std::size_t>(g.ny) * static_cast<std::size_t>(c))] = 1;
+        }
+  }
+  return hit;
+}
+
+// The vertices of `subject` that fall inside a mask built by ref_region_mask.
+std::vector<char> in_region(const TriangleMesh& subject,
+                            const std::vector<char>& mask, const VoxelGrid& g) {
+  std::vector<char> sel(subject.vertices.size(), 0);
+  for (std::size_t v = 0; v < subject.vertices.size(); ++v) {
+    const Vec3& p = subject.vertices[v];
+    const int i = static_cast<int>(std::floor((p.x - g.origin.x) / g.spacing));
+    const int j = static_cast<int>(std::floor((p.y - g.origin.y) / g.spacing));
+    const int k = static_cast<int>(std::floor((p.z - g.origin.z) / g.spacing));
+    if (i < 0 || i >= g.nx || j < 0 || j >= g.ny || k < 0 || k >= g.nz) continue;
+    sel[v] = mask[static_cast<std::size_t>(i) +
+                  static_cast<std::size_t>(g.nx) *
+                      (static_cast<std::size_t>(j) +
+                       static_cast<std::size_t>(g.ny) *
+                           static_cast<std::size_t>(k))];
+  }
+  return sel;
+}
+
 // ── the measurement, shared by every arm ───────────────────────────────────
 // One function, so a SIMP row and a GridapTopOpt row cannot diverge by which
 // branch built them.
+//
+// `ref_cut_mask` / `ref_cad_mask`, when non-null, are the spatial masks above:
+// the arm additionally reports its dihedral RMS over the region the REFERENCE
+// classified CUT (and CAD), which is the one column in this table that compares
+// the same part of space across arms.
 void measure(ArmRow& row, const TriangleMesh& subject, const StepModel& model,
              const TriGrid& cad_ref, const CadProjectOptions& copts,
-             const VoxelGrid& his_grid) {
+             const VoxelGrid& his_grid,
+             const std::vector<char>* ref_cut_mask = nullptr,
+             const std::vector<char>* ref_cad_mask = nullptr) {
   row.verts = subject.vertices.size();
   row.tris = subject.triangles.size();
   if (subject.vertices.empty()) return;
@@ -277,6 +363,19 @@ void measure(ArmRow& row, const TriangleMesh& subject, const StepModel& model,
   row.dih_all = dihedral_rms_deg(subject);
   row.dih_cut = dihedral_rms_deg(submesh(subject, cut));
   row.dih_cad = dihedral_rms_deg(submesh(subject, cad));
+  // The like-for-like columns: the SAME REGION OF SPACE on every arm.
+  if (ref_cut_mask) {
+    const std::vector<char> sel = in_region(subject, *ref_cut_mask, his_grid);
+    row.n_refcut = 0;
+    for (char c : sel) row.n_refcut += c ? 1u : 0u;
+    row.dih_refcut = dihedral_rms_deg(submesh(subject, sel));
+  }
+  if (ref_cad_mask) {
+    const std::vector<char> sel = in_region(subject, *ref_cad_mask, his_grid);
+    row.n_refcad = 0;
+    for (char c : sel) row.n_refcad += c ? 1u : 0u;
+    row.dih_refcad = dihedral_rms_deg(submesh(subject, sel));
+  }
   row.volume_mm3 = std::fabs(signed_volume(subject));
   // ALWAYS HIS GRID for the two controls, never the arm's own lattice: a
   // min-feature count measured against a finer reference is a different
@@ -315,6 +414,11 @@ void print_row(const ArmRow& r, double his_spacing) {
   std::printf("  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)\n");
   std::printf("      whole mesh %.4f deg    CUT %.4f deg    CAD %.4f deg\n",
               r.dih_all, r.dih_cut, r.dih_cad);
+  if (r.n_refcut || r.n_refcad)
+    std::printf("      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of\n"
+                "        space on every arm): refCUT %.4f deg (%zu verts)   "
+                "refCAD %.4f deg (%zu verts)\n",
+                r.dih_refcut, r.n_refcut, r.dih_refcad, r.n_refcad);
   std::printf("  CONTROLS: volume %.1f mm3   min section %.4f mm2   min-feature %d\n",
               r.volume_mm3, r.min_section_mm2, r.min_feature);
   std::printf("  ★ THE FIELD, on the %s lattice (spacing %.6f mm)\n",
@@ -367,6 +471,40 @@ int main(int argc, char** argv) {
 
   std::vector<ArmRow> rows;
 
+  // ── THE LIKE-FOR-LIKE REGION, built from the reference's TOP rung ─────────
+  //
+  // The masks are built ONCE, from the first (heaviest) rung in the reference
+  // design.bin — his 0.68, the rung every arm in this table targets — and then
+  // handed to every arm including the SIMP rows themselves. So the SIMP 0.68 row
+  // reports its own roughness over its own cut region, which is the control that
+  // makes the column readable: it is by construction the number `dih_cut`
+  // already gives it, up to the one-voxel dilation.
+  std::vector<char> ref_cut_mask, ref_cad_mask;
+  bool have_masks = false;
+  if (!store.variants.empty()) {
+    const StoredDesign& ref0 = store.variants.front();
+    const TriangleMesh rm = extract(grid.nx, grid.ny, grid.nz, grid.spacing,
+                                    grid.origin, ref0.density, 0.5,
+                                    kShippedFactor, true);
+    const CadAttribution ratt = attribute_to_cad_faces(rm, model, copts);
+    std::vector<char> rcut(rm.vertices.size(), 0), rcad(rm.vertices.size(), 0);
+    for (std::size_t v = 0; v < rm.vertices.size(); ++v) {
+      if (ratt.face_of_vertex[v] >= 0) rcad[v] = 1;
+      else if (!ratt.ambiguous_at(v)) rcut[v] = 1;
+    }
+    ref_cut_mask = ref_region_mask(rm, rcut, grid);
+    ref_cad_mask = ref_region_mask(rm, rcad, grid);
+    have_masks = true;
+    std::size_t ncut = 0, ncad = 0;
+    for (char c : ref_cut_mask) ncut += c ? 1u : 0u;
+    for (char c : ref_cad_mask) ncad += c ? 1u : 0u;
+    std::printf("like-for-like  reference rung %.2f: CUT region %zu voxels, "
+                "CAD region %zu voxels (dilated 1)\n",
+                ref0.requested_volume_fraction, ncut, ncad);
+  }
+  const std::vector<char>* pcut = have_masks ? &ref_cut_mask : nullptr;
+  const std::vector<char>* pcad = have_masks ? &ref_cad_mask : nullptr;
+
   // ── the SIMP baseline, from the reference design.bin ──────────────────────
   std::printf("\n#####################################################################\n");
   std::printf("# ARM SIMP — the run of record, re-measured here so no row in this\n");
@@ -393,7 +531,7 @@ int main(int argc, char** argv) {
     const TriangleMesh subject = extract(grid.nx, grid.ny, grid.nz, grid.spacing,
                                          grid.origin, d.density, 0.5,
                                          kShippedFactor, true);
-    measure(row, subject, model, cad_ref, copts, grid);
+    measure(row, subject, model, cad_ref, copts, grid, pcut, pcad);
     print_row(row, grid.spacing);
     rows.push_back(row);
   }
@@ -480,7 +618,7 @@ int main(int argc, char** argv) {
     row.field = field_stats(fnx, fny, fnz, fh, f, iso, 0.05047, 0.89988);
     const TriangleMesh subject =
         extract(fnx, fny, fnz, fh, forig, f, iso, factor, interp != "trilinear");
-    measure(row, subject, model, cad_ref, copts, grid);
+    measure(row, subject, model, cad_ref, copts, grid, pcut, pcad);
     print_row(row, grid.spacing);
     rows.push_back(row);
   }
@@ -491,7 +629,8 @@ int main(int argc, char** argv) {
          "margin_worst_case,margin_effective,max_von_mises_mpa,accepted,verts,"
          "tris,n_cad,n_cut,n_ambiguous,n_oblique,obl_all_rms_mm,obl_all_max_mm,"
          "obl_all_p99_mm,obl_cad_rms_mm,obl_cut_rms_mm,dihedral_all_deg,"
-         "dihedral_cut_deg,dihedral_cad_deg,volume_mm3,min_section_mm2,"
+         "dihedral_cut_deg,dihedral_cad_deg,dihedral_refcut_deg,"
+         "dihedral_refcad_deg,n_refcut,n_refcad,volume_mm3,min_section_mm2,"
          "min_feature_violations,field_lattice,field_spacing_mm,"
          "boundary_samples,binary_boundary,fractional_samples,crossings,"
          "crossing_rms_frac,crossing_rms_mm,midpoint_share\n";
@@ -505,7 +644,9 @@ int main(int argc, char** argv) {
         << r.n_cad << ',' << r.n_cut << ',' << r.n_amb << ',' << r.n_oblique << ','
         << r.obl_all.rms_mm << ',' << r.obl_all.max_mm << ',' << r.obl_all.p99_mm
         << ',' << r.obl_cad.rms_mm << ',' << r.obl_cut.rms_mm << ',' << r.dih_all
-        << ',' << r.dih_cut << ',' << r.dih_cad << ',' << r.volume_mm3 << ','
+        << ',' << r.dih_cut << ',' << r.dih_cad << ',' << r.dih_refcut << ','
+        << r.dih_refcad << ',' << r.n_refcut << ',' << r.n_refcad << ','
+        << r.volume_mm3 << ','
         << r.min_section_mm2 << ',' << r.min_feature << ',' << r.lattice << ','
         << r.field_spacing << ',' << r.field.boundary_voxels << ','
         << r.field.binary_boundary << ',' << r.field.fractional_voxels << ','

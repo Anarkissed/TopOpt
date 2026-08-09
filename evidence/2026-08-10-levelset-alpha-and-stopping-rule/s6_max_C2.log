@@ -1,0 +1,106 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+
+-- --gridap-auto max: their rule, evaluated here --
+   el_size            128 x 31 x 118   (min 31, max 128)
+   axis used          128  = the RESOLUTION axis (the corrected transfer)
+   max_steps          2*floor(1*128/10) = 24
+   alpha              4*24*0.1 = 9.6 voxels   (their 2D example 8.0, their 3D example 12.0)
+
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       24 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 9.6 voxels = 16.370681 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        SIMP rung 0.68 from evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.679951)
+it   1  c = 0.002871489168  vf = 0.683384 (occ 75414.7)  offset +3.5686 mm  |v|max 7.52e-13  band 28010  hilb 363 (9.7e-13)  |grad|-1 1.67e-01  cg 1579  115.53 s
+it   2  c = 0.002761681954  vf = 0.685304 (occ 75414.7)  offset -0.1347 mm  |v|max 3.58e-13  band 25939  hilb 363 (9.9e-13)  |grad|-1 1.60e-01  cg 3079  37.81 s
+it   3  c = 0.00268183136  vf = 0.682681 (occ 75414.7)  offset -0.2233 mm  |v|max 1.8e-13  band 24605  hilb 362 (9.6e-13)  |grad|-1 1.59e-01  cg 2887  36.97 s
+it   4  c = 0.002642874829  vf = 0.680228 (occ 75414.7)  offset -0.3005 mm  |v|max 2.86e-13  band 23249  hilb 353 (9.5e-13)  |grad|-1 1.58e-01  cg 2810  29.02 s
+it   5  c = 0.00263292998  vf = 0.679903 (occ 75414.7)  offset -0.1171 mm  |v|max 1.51e-13  band 22935  hilb 353 (9.4e-13)  |grad|-1 1.55e-01  cg 2734  28.42 s
+it   6  c = 0.002621856475  vf = 0.680057 (occ 75414.7)  offset -0.1727 mm  |v|max 8.86e-14  band 22464  hilb 352 (9.8e-13)  |grad|-1 1.52e-01  cg 2731  28.35 s
+it   7  c = 0.002611371569  vf = 0.679299 (occ 75414.7)  offset -0.2280 mm  |v|max 7.9e-14  band 20815  hilb 337 (9.6e-13)  |grad|-1 1.44e-01  cg 2741  28.29 s
+it   8  c = 0.002606784897  vf = 0.679471 (occ 75414.7)  offset -0.1408 mm  |v|max 1.55e-13  band 20432  hilb 335 (9.9e-13)  |grad|-1 1.42e-01  cg 2732  27.96 s
+it   9  c = 0.002605197478  vf = 0.679507 (occ 75414.7)  offset -0.0601 mm  |v|max 6.7e-14  band 20180  hilb 335 (9.5e-13)  |grad|-1 1.40e-01  cg 2738  28.05 s
+it  10  c = 0.002601964866  vf = 0.679101 (occ 75414.7)  offset -0.1049 mm  |v|max 1.98e-13  band 20208  hilb 339 (9.9e-13)  |grad|-1 1.38e-01  cg 2693  28.02 s
+it  11  c = 0.002601071687  vf = 0.679480 (occ 75414.7)  offset -0.0161 mm  |v|max 5.49e-14  band 19983  hilb 334 (9.2e-13)  |grad|-1 1.38e-01  cg 2730  28.75 s
+it  12  c = 0.002600989135  vf = 0.678921 (occ 75414.7)  offset -0.0942 mm  |v|max 2.54e-13  band 19972  hilb 345 (9.8e-13)  |grad|-1 1.37e-01  cg 2669  28.02 s
+it  13  c = 0.002599127269  vf = 0.679380 (occ 75414.7)  offset +0.0059 mm  |v|max 9.07e-14  band 19722  hilb 335 (9.5e-13)  |grad|-1 1.37e-01  cg 2700  28.39 s
+it  14  c = 0.002598099717  vf = 0.679335 (occ 75414.7)  offset -0.0271 mm  |v|max 6.74e-14  band 19762  hilb 333 (8.9e-13)  |grad|-1 1.36e-01  cg 2712  27.85 s
+it  15  c = 0.002599543183  vf = 0.679723 (occ 75414.7)  offset +0.0004 mm  |v|max 1.91e-13  band 19575  hilb 333 (9.3e-13)  |grad|-1 1.36e-01  cg 2702  28.07 s
+it  16  c = 0.002598581232  vf = 0.679443 (occ 75414.7)  offset -0.0297 mm  |v|max 8.18e-14  band 19587  hilb 331 (9.6e-13)  |grad|-1 1.35e-01  cg 2702  28.23 s
+it  17  c = 0.002597494371  vf = 0.679380 (occ 75414.7)  offset -0.0227 mm  |v|max 7.16e-14  band 19615  hilb 330 (9.3e-13)  |grad|-1 1.34e-01  cg 2708  28.15 s
+it  18  c = 0.002602927795  vf = 0.679930 (occ 75414.7)  offset +0.0160 mm  |v|max 1.75e-13  band 19448  hilb 335 (9.7e-13)  |grad|-1 1.33e-01  cg 2707  28.27 s
+   ↳ oscillation detected: gamma 0.1 -> 0.075
+it  19  c = 0.002600757471  vf = 0.679543 (occ 75414.7)  offset -0.0455 mm  |v|max 8.28e-14  band 19449  hilb 334 (9.6e-13)  |grad|-1 1.33e-01  cg 2712  28.26 s
+it  20  c = 0.002599781505  vf = 0.679804 (occ 75414.7)  offset +0.0065 mm  |v|max 5.31e-14  band 19460  hilb 332 (9.6e-13)  |grad|-1 1.31e-01  cg 2702  27.95 s
+it  21  c = 0.002600506571  vf = 0.679570 (occ 75414.7)  offset -0.0340 mm  |v|max 1.01e-13  band 19432  hilb 334 (9.3e-13)  |grad|-1 1.32e-01  cg 2714  28.16 s
+it  22  c = 0.002600378558  vf = 0.679840 (occ 75414.7)  offset +0.0210 mm  |v|max 5.61e-14  band 19410  hilb 334 (9.7e-13)  |grad|-1 1.30e-01  cg 2724  28.74 s
+it  23  c = 0.002603219148  vf = 0.680012 (occ 75414.7)  offset -0.0052 mm  |v|max 2.36e-13  band 19397  hilb 336 (9.4e-13)  |grad|-1 1.31e-01  cg 2712  27.87 s
+   ↳ oscillation detected: gamma 0.075 -> 0.05625
+it  24  c = 0.002600420048  vf = 0.679849 (occ 75414.7)  offset -0.0017 mm  |v|max 4.94e-14  band 19376  hilb 329 (9.5e-13)  |grad|-1 1.31e-01  cg 2714  28.02 s
+it  25  c = 0.002601077873  vf = 0.680021 (occ 75414.7)  offset +0.0027 mm  |v|max 1.16e-13  band 19250  hilb 332 (8.9e-13)  |grad|-1 1.31e-01  cg 2710  28.60 s
+
+certifying iteration 17 (best compliance 0.002597494371 of 25 run)
+mesh        154856 vertices, 309728 triangles -> levelset.stl
+
+== levelset_probe summary ==
+seed                 simp
+rung                 0.68
+THREADS              3
+iterations run       25
+WALL PER ITERATION   32.471 s   (total 811.8 s over 25 iterations)
+  of which solve     25.631 s/iteration (640.8 s total)
+  of which extension 0.715 s/iteration (17.9 s total)
+certification wall   30.4 s
+state solves         25, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.05625 (damper ARMED, fired 2)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         2 voxels = 3.410559 mm
+reinit |grad phi|-1  rms 0.130916 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.998454 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00259749437083   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00270558957507
+achieved vf          0.679380  (target 0.68, printed 75346 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.018052789 MPa
+margin in-plane      3046.620633570
+margin interlayer    7379.850040030
+MARGIN worst case    3046.620633570
+margin effective     630.841775796   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    516
+mass                 463.3250 g
+
+wrote evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/{iterations.csv,design.bin,rho.f64,rho.meta,levelset.stl,summary.txt}
+
+for the roughness row, on the SAME binary that produced PR 321's:
+  ./build/external_field_surface_probe <ref/design.bin> <part.step> <dir> LS=evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C2/rho

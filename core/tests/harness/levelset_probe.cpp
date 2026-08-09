@@ -392,7 +392,8 @@ void fast_sweep(const Dims& d, std::vector<double>& mag,
 // is pinned first by linear interpolation of phi's own crossings — so the
 // interface does not drift while it is being re-distanced — and the sweep fills
 // outward from there.
-void reinitialise(const Dims& d, std::vector<double>& phi, double h, int passes) {
+void reinitialise(const Dims& d, std::vector<double>& phi, double h, int passes,
+                  bool russo_smereka = false) {
   const std::size_t n = d.count();
   std::vector<char> frozen(n, 0);
   std::vector<double> mag(n, kFar);
@@ -402,6 +403,7 @@ void reinitialise(const Dims& d, std::vector<double>& phi, double h, int passes)
       for (int i = 0; i < d.nx; ++i) {
         const std::size_t v = d.at(i, j, k);
         const double pv = phi[v];
+        bool crosses = false;
         double best = kFar;
         const int off[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0},
                                {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
@@ -412,11 +414,76 @@ void reinitialise(const Dims& d, std::vector<double>& phi, double h, int passes)
             continue;
           const double pw = phi[d.at(ii, jj, kk)];
           if ((pv > 0.0) == (pw > 0.0)) continue;  // no crossing on this edge
+          crosses = true;
           const double denom = std::fabs(pv) + std::fabs(pw);
           // A crossing with both ends at zero carries no sub-voxel information;
           // half a cell is the only defensible reading of it.
           const double t = denom > 0.0 ? std::fabs(pv) / denom : 0.5;
           best = std::min(best, t * h);
+        }
+        if (!crosses) continue;
+        if (russo_smereka) {
+          // ── RUSSO-SMEREKA SUBCELL FIX (J. Comput. Phys. 163:51-67, 2000) ──
+          //
+          // ★ WHY THE EDGE RATIO IS NOT GOOD ENOUGH, AND WHY IT SHOWS UP IN THE
+          // SUB-VOXEL METRIC. The `best` above is the smallest ALONG-AXIS
+          // distance to a crossing. For an interface that runs obliquely through
+          // the cell — which on this part is most of it — the axis distance
+          // OVERESTIMATES the true perpendicular distance by up to sqrt(3). The
+          // sweep then propagates that overestimate outward, and the whole field
+          // ends up with |grad phi| < 1: measured RMS error 0.20 on the run of
+          // record, against the reference's own reinitialisation tolerance of
+          // 0.00645.
+          //
+          // That is not cosmetic. rho = H_eta(-phi) maps phi linearly through the
+          // band, so a phi whose gradient is 20% wrong puts the iso-0.5 crossing
+          // in the wrong place inside the cell — and "where the crossing sits
+          // inside the cell" IS the sub-voxel measurement (`midpoint_share`).
+          // PR 321's Gridap arm spread its crossings 0.5790 mm rms against our
+          // 0.2601 on the same lattice with the same band, which is the
+          // signature of a cleaner distance function.
+          //
+          // Russo-Smereka's fix replaces the axis distance with the FIRST-ORDER
+          // PERPENDICULAR one, |phi| / |grad phi|, using a robust one-sided
+          // gradient so a crossing on either side is seen:
+          //
+          //     D_i = h * phi_i / max(|phi_{i+1}-phi_{i-1}|/2,
+          //                           |phi_{i+1}-phi_i|, |phi_i-phi_{i-1}|)
+          //
+          // generalised to 3D by taking that per axis and combining in L2. The
+          // result is the distance to the LINEARISED interface through the cell,
+          // which is exact for a plane and is what the sweep should propagate.
+          double g2 = 0.0;
+          const int ax[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+          for (const auto& a3 : ax) {
+            const int im = i - a3[0], jm = j - a3[1], km = k - a3[2];
+            const int ip = i + a3[0], jp = j + a3[1], kp = k + a3[2];
+            const bool okm = im >= 0 && jm >= 0 && km >= 0;
+            const bool okp = ip < d.nx && jp < d.ny && kp < d.nz;
+            const double pm = okm ? phi[d.at(im, jm, km)] : pv;
+            const double pp = okp ? phi[d.at(ip, jp, kp)] : pv;
+            // ★ CENTRAL, NOT THE MAX — AND THIS WAS MEASURED, NOT ASSUMED.
+            // Russo-Smereka's Delta_i takes max(central, forward, backward),
+            // but that is a STABILISER for their reinitialisation PDE, where an
+            // over-large denominator damps the update. Used here as a direct
+            // distance seed it is BIASED: at a kink the max overshoots the true
+            // |grad phi|, so |phi|/|grad phi| undershoots the true distance, and
+            // the sweep propagates the shortfall over the whole field. Measured
+            // with the max, 6 iterations: interface area 28073 -> 26606 against
+            // the baseline's 24057, and | |grad phi|-1 | rising 0.173 -> 0.190
+            // against 0.171 — both the signature of a uniformly shrunk distance
+            // field (phi too flat, so more cells fall inside the band). The
+            // central difference is the unbiased estimate for the smooth field
+            // this is applied to.
+            const double gc = (okm && okp) ? std::fabs(pp - pm) / 2.0
+                                           : std::max(okp ? std::fabs(pp - pv) : 0.0,
+                                                      okm ? std::fabs(pv - pm) : 0.0);
+            g2 += gc * gc;
+          }
+          const double gmag = std::sqrt(g2);
+          // The clamp is the degenerate case only: a cell whose neighbours are
+          // all equal carries no direction, and the axis reading is all there is.
+          if (gmag > 1e-30) best = std::min(best, std::fabs(pv) * h / gmag);
         }
         if (best < kFar) {
           frozen[v] = 1;
@@ -465,6 +532,74 @@ void smooth_field(const Dims& d, std::vector<double>& f, int passes) {
         }
     f.swap(tmp);
   }
+}
+
+// ── A PERIMETER PENALTY, VIA MEAN CURVATURE ─────────────────────────────────
+//
+// ★ WHY. PR 324 measured the mechanism behind the roughness: the level set does
+// NOT roughen the surface SIMP already has — over a fixed region of space it is
+// slightly SMOOTHER than SIMP — it ADDS internal cut surface, roughly doubling
+// it (18.4% of triangles -> 36.8%), and the added surface is what is rough.
+// Raising alpha halves the rate of addition and does not stop it.
+//
+// Nothing in GridapTopOpt's formulation prices surface area: the paper has no
+// perimeter term and no feature-size constraint, and alpha — a regularity
+// length on the VELOCITY — only limits how fast fine structure can be driven,
+// not whether it pays for itself. So this adds the term the formulation is
+// missing, which is classical for level-set topology optimisation (Allaire,
+// Jouve & Toader 2004; Osher & Santosa 2001): penalise the perimeter
+//
+//     J_total(Omega) = J(Omega) + ell * Per(Omega)
+//
+// whose shape derivative on the interface is the MEAN CURVATURE kappa, so the
+// velocity picks up a -ell*kappa term and the flow resists creating interface.
+//
+// ★ THIS IS NOT THE SMOOTHING THIS PROJECT HAS ALREADY REFUSED. The two prior
+// curvature no-gos (MCF, and the closing flow) were POST-PROCESSING operators
+// applied to a finished design, and were refused because the staircase is in the
+// GRID and no curvature operator can remove it without eating real features.
+// This is a term in the OBJECTIVE: it changes which design the optimiser walks
+// to, so no already-earned geometry is smoothed away — the structure is never
+// built. Whether that is worth its stiffness is a MEASUREMENT, and the margin
+// column is what answers it.
+//
+// kappa = div(grad phi / |grad phi|), the standard conservative 3D form:
+//
+//   kappa = [ pxx(py^2+pz^2) + pyy(px^2+pz^2) + pzz(px^2+py^2)
+//             - 2(px py pxy + px pz pxz + py pz pyz) ] / (px^2+py^2+pz^2)^{3/2}
+//
+// Curvature is capped at 1/h: on a grid, a radius below one voxel is not
+// resolvable, and an uncapped kappa there is noise amplified by a division by a
+// vanishing gradient.
+double mean_curvature(const Dims& d, const std::vector<double>& phi, int i, int j,
+                      int k, double h) {
+  auto P = [&](int a, int b, int c) {
+    a = std::min(std::max(a, 0), d.nx - 1);
+    b = std::min(std::max(b, 0), d.ny - 1);
+    c = std::min(std::max(c, 0), d.nz - 1);
+    return phi[d.at(a, b, c)];
+  };
+  const double c0 = P(i, j, k);
+  const double px = (P(i + 1, j, k) - P(i - 1, j, k)) / (2.0 * h);
+  const double py = (P(i, j + 1, k) - P(i, j - 1, k)) / (2.0 * h);
+  const double pz = (P(i, j, k + 1) - P(i, j, k - 1)) / (2.0 * h);
+  const double pxx = (P(i + 1, j, k) - 2.0 * c0 + P(i - 1, j, k)) / (h * h);
+  const double pyy = (P(i, j + 1, k) - 2.0 * c0 + P(i, j - 1, k)) / (h * h);
+  const double pzz = (P(i, j, k + 1) - 2.0 * c0 + P(i, j, k - 1)) / (h * h);
+  const double pxy = (P(i + 1, j + 1, k) - P(i + 1, j - 1, k) -
+                      P(i - 1, j + 1, k) + P(i - 1, j - 1, k)) / (4.0 * h * h);
+  const double pxz = (P(i + 1, j, k + 1) - P(i + 1, j, k - 1) -
+                      P(i - 1, j, k + 1) + P(i - 1, j, k - 1)) / (4.0 * h * h);
+  const double pyz = (P(i, j + 1, k + 1) - P(i, j + 1, k - 1) -
+                      P(i, j - 1, k + 1) + P(i, j - 1, k - 1)) / (4.0 * h * h);
+  const double g2 = px * px + py * py + pz * pz;
+  if (g2 < 1e-24) return 0.0;
+  const double num = pxx * (py * py + pz * pz) + pyy * (px * px + pz * pz) +
+                     pzz * (px * px + py * py) -
+                     2.0 * (px * py * pxy + px * pz * pxz + py * pz * pyz);
+  const double kap = num / std::pow(g2, 1.5);
+  const double cap = 1.0 / h;
+  return std::max(-cap, std::min(cap, kap));
 }
 
 // ── (4) HILBERTIAN VELOCITY EXTENSION ───────────────────────────────────────
@@ -618,6 +753,78 @@ double godunov_grad(const Dims& d, const std::vector<double>& phi, int i, int j,
     g2 += sq(std::min(dxm, 0.0)) + sq(std::max(dxp, 0.0));
     g2 += sq(std::min(dym, 0.0)) + sq(std::max(dyp, 0.0));
     g2 += sq(std::min(dzm, 0.0)) + sq(std::max(dzp, 0.0));
+  }
+  return std::sqrt(g2);
+}
+
+// ── WENO5 + TVD-RK3: the sharp-interface Hamilton-Jacobi scheme ─────────────
+//
+// ★ WHY. The advection so far is FIRST-ORDER upwind (Godunov with plain one-sided
+// differences) and forward Euler in time. That is the scheme GridapTopOpt uses
+// too — its `FirstOrderStencil` — so matching it was right for PR 323/324. But
+// first order is DIFFUSIVE: each sub-step smears the level set by O(h), and the
+// interface's sub-voxel position is exactly what the roughness and midpoint
+// metrics read. With 24 sub-steps per iteration the smearing compounds before
+// reinitialisation gets a chance to correct it.
+//
+// WENO5 (Jiang & Peng 2000; Osher & Fedkiw, "Level Set Methods and Dynamic
+// Implicit Surfaces", §3.4) is the standard fix: a fifth-order essentially
+// non-oscillatory reconstruction of the one-sided derivatives, which keeps the
+// interface sharp without ringing at kinks — and a level set of a real part is
+// all kinks, so the non-oscillatory part is not optional. TVD-RK3 (Shu & Osher)
+// is its time-stepping partner; forward Euler would throw away the spatial order.
+//
+// This is a DEPARTURE from the reference, not a match to it, and it is the one
+// piece of the max-effort arm that no longer claims to be what Gridap does.
+double weno_deriv(double v1, double v2, double v3, double v4, double v5) {
+  const double s1 = 13.0 / 12.0 * (v1 - 2.0 * v2 + v3) * (v1 - 2.0 * v2 + v3) +
+                    0.25 * (v1 - 4.0 * v2 + 3.0 * v3) * (v1 - 4.0 * v2 + 3.0 * v3);
+  const double s2 = 13.0 / 12.0 * (v2 - 2.0 * v3 + v4) * (v2 - 2.0 * v3 + v4) +
+                    0.25 * (v2 - v4) * (v2 - v4);
+  const double s3 = 13.0 / 12.0 * (v3 - 2.0 * v4 + v5) * (v3 - 2.0 * v4 + v5) +
+                    0.25 * (3.0 * v3 - 4.0 * v4 + v5) * (3.0 * v3 - 4.0 * v4 + v5);
+  // Jiang-Peng's scale-aware epsilon: relative to the local magnitude, so the
+  // weights do not collapse on a flat stretch or blow up on a steep one.
+  double m = v1 * v1;
+  m = std::max(m, v2 * v2);
+  m = std::max(m, v3 * v3);
+  m = std::max(m, v4 * v4);
+  m = std::max(m, v5 * v5);
+  const double eps = 1e-6 * m + 1e-99;
+  const double a1 = 0.1 / ((s1 + eps) * (s1 + eps));
+  const double a2 = 0.6 / ((s2 + eps) * (s2 + eps));
+  const double a3 = 0.3 / ((s3 + eps) * (s3 + eps));
+  const double sum = a1 + a2 + a3;
+  return (a1 * (v1 / 3.0 - 7.0 * v2 / 6.0 + 11.0 * v3 / 6.0) +
+          a2 * (-v2 / 6.0 + 5.0 * v3 / 6.0 + v4 / 3.0) +
+          a3 * (v3 / 3.0 + 5.0 * v4 / 6.0 - v5 / 6.0)) / sum;
+}
+
+// |grad phi| by the Godunov selection, with WENO5 one-sided derivatives.
+// Upwinding follows sign(v), exactly as the first-order `godunov_grad` does —
+// only the derivative estimates change.
+double weno_grad(const Dims& d, const std::vector<double>& phi, int i, int j,
+                 int k, double v, double h) {
+  auto P = [&](int a, int b, int c) {
+    a = std::min(std::max(a, 0), d.nx - 1);
+    b = std::min(std::max(b, 0), d.ny - 1);
+    c = std::min(std::max(c, 0), d.nz - 1);
+    return phi[d.at(a, b, c)];
+  };
+  auto sq = [](double x) { return x * x; };
+  double g2 = 0.0;
+  const int ax[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  for (const auto& e : ax) {
+    // The seven samples the two five-point stencils are built from.
+    double s[7];
+    for (int m = -3; m <= 3; ++m)
+      s[m + 3] = P(i + e[0] * m, j + e[1] * m, k + e[2] * m);
+    double dd[6];
+    for (int m = 0; m < 6; ++m) dd[m] = (s[m + 1] - s[m]) / h;
+    const double dm = weno_deriv(dd[0], dd[1], dd[2], dd[3], dd[4]);  // backward
+    const double dp = weno_deriv(dd[5], dd[4], dd[3], dd[2], dd[1]);  // forward
+    if (v > 0.0) g2 += sq(std::max(dm, 0.0)) + sq(std::min(dp, 0.0));
+    else         g2 += sq(std::min(dm, 0.0)) + sq(std::max(dp, 0.0));
   }
   return std::sqrt(g2);
 }
@@ -789,7 +996,7 @@ struct Args {
   // moved because the certificate is reading a wider gray band" are two different
   // findings with the same number, and nothing in the run of record separates
   // them. This does, for the price of one analyze_fixed_design call on a file.
-  std::string certify_field;
+  std::vector<std::string> certify_field;
   bool binarize = false;
 
   // ── THEIR OWN PARAMETER RULE, MADE EXECUTABLE ─────────────────────────────
@@ -823,6 +1030,42 @@ struct Args {
   // The coupling alpha = 4 * max_steps * gamma * h is preserved either way, so
   // this is their rule with one substitution, not a tuned number.
   std::string gridap_auto;
+
+  // ── THE MAX-EFFORT ARM'S PIECES, each independently switchable so the arm
+  // can be ATTRIBUTED afterwards rather than only celebrated. All default OFF,
+  // so every earlier run reproduces byte-for-byte.
+  //
+  // --russo-smereka   the subcell-fix reinitialisation (see `reinitialise`)
+  // --perimeter C     the mean-curvature / perimeter penalty. C is
+  //                   DIMENSIONLESS: the term enters as ell*kappa with
+  //                   ell = C * lambda * h, so it is scaled to the energy
+  //                   multiplier the flow is already using and to the grid. C=0
+  //                   is off; C=1 makes a one-voxel-radius feature cost about
+  //                   what one band-mean of strain energy buys.
+  // --reinit-substeps reinitialise between HJ sub-steps, not only after the
+  //                   last one — keeps |grad phi| near 1 through a 24-step
+  //                   advection instead of letting it drift and correcting once.
+  bool russo_smereka = false;
+  double perimeter = 0.0;
+  bool reinit_substeps = false;
+  // --weno   WENO5 one-sided derivatives in the Godunov gradient (5th order,
+  //          essentially non-oscillatory) instead of plain first-order ones.
+  // --rk3    TVD-RK3 time stepping instead of forward Euler. Pairs with --weno;
+  //          Euler would throw away WENO5's spatial order. Costs 3 gradient
+  //          evaluations per sub-step.
+  bool weno = false;
+  bool rk3 = false;
+  // --no-surface-delta  restore PR 322's VOLUME velocity: v = (energy - lambda)
+  //   over the whole active domain, WITHOUT the DH_eta(phi)*|grad phi| factor.
+  //   ★ Why this exists: PR 322 — written before the reference paper was read —
+  //   still owns the best surface of any arm (cut 6.7080, whole 8.1797) at
+  //   margin 3378.49, and DOMINATES both SIMP and every arm from the three
+  //   sessions spent matching the reference. It ran 120 iterations and never
+  //   converged, and PR 325 then showed margin saturates around iteration 20.
+  //   So the best configuration we own has never been run with the stopping
+  //   rule, nor without the offset defect PR 323 fixed. This flag makes that
+  //   run possible.
+  bool no_surface_delta = false;
 
   // Their gamma damper (see has_oscillations above). Off by default so the run
   // of record is unchanged.
@@ -879,11 +1122,17 @@ int main(int argc, char** argv) {
     else if (s == "--simp") a.simp = true;
     else if (s == "--binarize") a.binarize = true;
     else if (s == "--damp") a.damp = true;
+    else if (s == "--russo-smereka") a.russo_smereka = true;
+    else if (s == "--perimeter") next(a.perimeter);
+    else if (s == "--reinit-substeps") a.reinit_substeps = true;
+    else if (s == "--weno") a.weno = true;
+    else if (s == "--rk3") a.rk3 = true;
+    else if (s == "--no-surface-delta") a.no_surface_delta = true;
     else if (s == "--damp-factor") next(a.damp_factor);
     else if (s == "--damp-window") nexti(a.damp_window);
     else if (s == "--gridap-auto" && i + 1 < argc) a.gridap_auto = argv[++i];
     else if (s == "--rules" && i + 1 < argc) a.rules = argv[++i];
-    else if (s == "--certify-field" && i + 1 < argc) a.certify_field = argv[++i];
+    else if (s == "--certify-field" && i + 1 < argc) a.certify_field.push_back(argv[++i]);
     else if (s == "--seed" && i + 1 < argc) a.seed = argv[++i];
     else { std::printf("FATAL: unknown argument %s\n", s.c_str()); return 2; }
   }
@@ -1119,19 +1368,34 @@ int main(int argc, char** argv) {
   //
   // This does not touch and cannot change the run of record's certificate — it
   // is a separate invocation on a file the run of record already wrote.
+  // ★ MANY FIELDS PER PROCESS. `--certify-field` may be repeated. Each
+  // invocation of this program pays ~40 s to import the STEP, voxelize and build
+  // the load case before it can certify anything, and a margin CURVE needs
+  // twenty-odd certifications — so the setup is amortised rather than paid
+  // twenty-odd times. The certifications themselves are independent and
+  // identical to one-per-process: the posture is disarmed once, below, and
+  // `analyze_fixed_design` carries no state between calls once recycling and
+  // GenEO are off, which is exactly the isolation production certifies under.
+  // A `margin_curve.csv` is written alongside so the curve is one file.
   if (!a.certify_field.empty()) {
+  std::ofstream mcsv(a.out + "/margin_curve.csv");
+  mcsv.precision(12);
+  mcsv << "field,printed_voxels,achieved_vf,fractional_samples,max_von_mises_mpa,"
+          "margin_worst_case,margin_effective,accepted,min_feature_violations,"
+          "load_path_connected\n";
+  for (const std::string& cf : a.certify_field) {
     std::vector<double> f(n, 0.0);
     {
-      std::ifstream in(a.certify_field + ".f64", std::ios::binary);
+      std::ifstream in(cf + ".f64", std::ios::binary);
       if (!in) {
-        std::printf("FATAL: cannot read %s.f64\n", a.certify_field.c_str());
+        std::printf("FATAL: cannot read %s.f64\n", cf.c_str());
         return 2;
       }
       in.read(reinterpret_cast<char*>(f.data()),
               static_cast<std::streamsize>(n * sizeof(double)));
       if (static_cast<std::size_t>(in.gcount()) != n * sizeof(double)) {
         std::printf("FATAL: %s.f64 is %lld bytes, this grid needs %zu\n",
-                    a.certify_field.c_str(),
+                    cf.c_str(),
                     static_cast<long long>(in.gcount()), n * sizeof(double));
         return 2;
       }
@@ -1174,7 +1438,7 @@ int main(int argc, char** argv) {
                   "fractional samples   %zu (before any thresholding)\n"
                   "certification penalty %.4g (production)\n"
                   "printed voxels       %zu of %.0f  (vf %.6f)\n",
-                  a.certify_field.c_str(), a.binarize ? "YES (0/1 at iso 0.5)" : "no",
+                  cf.c_str(), a.binarize ? "YES (0/1 at iso 0.5)" : "no",
                   frac, params.penalty, cprinted, part_solid,
                   cprinted / part_solid);
     std::string cs = cbuf;
@@ -1196,7 +1460,21 @@ int main(int argc, char** argv) {
       cs += "certification        DID NOT RUN\n";
     }
     std::printf("\n%s", cs.c_str());
+    std::fflush(stdout);
+    // One row per field, so the CURVE is one file rather than N directories.
+    mcsv << cf << ',' << cprinted << ',' << (cprinted / part_solid) << ','
+         << frac << ',';
+    if (cdone && !ca.non_convergent)
+      mcsv << ca.max_von_mises << ',' << ca.margin.worst_case << ','
+           << ca.margin_effective << ',' << (ca.accepted ? 1 : 0) << ','
+           << ca.v3.min_feature_violations << ',' << (cok ? 1 : 0) << '\n';
+    else
+      mcsv << ",,,,," << (cok ? 1 : 0) << '\n';
+    mcsv.flush();
+    // `recert.txt` keeps its single-field meaning: the LAST field certified.
+    // The curve is `margin_curve.csv`.
     { std::ofstream s(a.out + "/recert.txt"); s << cs; }
+  }
     fea_set_matfree_threads(prev_threads);
     fea_set_matfree_mixed_precision(prev_mixed);
     fea_set_geneo_twolevel(prev_geneo);
@@ -1371,7 +1649,14 @@ int main(int argc, char** argv) {
     std::printf("FATAL: --seed must be simp or holes\n");
     return 2;
   }
-  reinitialise(d, phi, h, a.sweeps);
+  // ★ NOT russo_smereka HERE. The seed is phi = 0.5 - rho, a near-binary step
+  // field saturated at +-0.5: its per-cell differences are ~1.0 rather than ~h,
+  // so |phi|/|grad phi| is not a distance and returns ~0.29h where the true
+  // distance is ~0.5h on an oblique interface. The edge-ratio crossing
+  // interpolation is well defined for ANY monotone field and is what the seed
+  // needs; RS applies from the first advected reinitialisation onward, once phi
+  // genuinely is a distance function.
+  reinitialise(d, phi, h, a.sweeps, false);
 
   // ── the ersatz, and the volume it measures ────────────────────────────────
   //
@@ -1435,7 +1720,8 @@ int main(int argc, char** argv) {
   csv << "iteration,compliance,occupancy_volume,printed_voxels,achieved_vf,"
          "offset_mm,dt_mm_per_unit_v,max_abs_v,lambda,cg_iterations,converged,"
          "used_multigrid,solve_ms,sensitivity_ms,band_cells,hilb_iterations,"
-         "hilb_relres,reinit_rms,reinit_max,hj_steps,gamma,iteration_wall_s\n";
+         "hilb_relres,reinit_rms,reinit_max,hj_steps,gamma,kappa_rms,"
+         "iteration_wall_s\n";
 
   // ── THE DIRICHLET SET FOR THE HILBERTIAN EXTENSION (difference 4) ──────────
   //
@@ -1555,8 +1841,13 @@ int main(int argc, char** argv) {
             raw_vel[v] = 0.0;
             continue;
           }
-          const double dh = dheaviside(phi[v], eta);  // the offset is IN phi
-          delta[v] = dh > 0.0 ? dh * grad_mag(d, phi, i, j, k, h) : 0.0;
+          if (a.no_surface_delta) {
+            // PR 322's measure: a VOLUME field over the whole active domain.
+            delta[v] = 1.0;
+          } else {
+            const double dh = dheaviside(phi[v], eta);  // the offset is IN phi
+            delta[v] = dh > 0.0 ? dh * grad_mag(d, phi, i, j, k, h) : 0.0;
+          }
           if (delta[v] > 0.0) ++band_n;
           raw_vel[v] = energy_from(sc.dcompliance[v], rho[v], traj_params.penalty,
                                    traj_params.youngs_modulus);
@@ -1574,7 +1865,44 @@ int main(int argc, char** argv) {
       wsum += raw_vel[v] * delta[v];
       w += delta[v];
     }
-    const double lambda = w > 0.0 ? wsum / w : 0.0;
+    double lambda = w > 0.0 ? wsum / w : 0.0;
+
+    // ── THE PERIMETER PENALTY (see mean_curvature above) ────────────────────
+    //
+    // ell = perimeter * lambda * h makes the coefficient DIMENSIONLESS and ties
+    // it to the energy scale the flow is already working in, so it needs no
+    // retuning per part or per rung. Zero by default.
+    //
+    // ★ ORDER MATTERS AND IT IS NOT THE OBVIOUS ONE. lambda is the multiplier
+    // that makes the flow volume-neutral: the unique value for which
+    // integral (v - lambda) * DH * |grad phi| vanishes. Subtracting the
+    // curvature AFTER fixing lambda leaves a residual -ell * integral kappa*delta,
+    // which is not zero for a general surface — the penalty would then fight the
+    // volume constraint and the offset bisection would spend every iteration
+    // undoing it. So ell is sized from the ENERGY-ONLY lambda (breaking the
+    // circularity), the curvature is folded into the driving field, and lambda
+    // is RECOMPUTED on the combined field before it is applied.
+    double kappa_rms = 0.0;
+    if (a.perimeter > 0.0) {
+      const double ell = a.perimeter * lambda * h;
+      double k2 = 0.0;
+      std::size_t kn = 0;
+      for (int k = 0; k < d.nz; ++k)
+        for (int j = 0; j < d.ny; ++j)
+          for (int i = 0; i < d.nx; ++i) {
+            const std::size_t v = d.at(i, j, k);
+            if (delta[v] <= 0.0) continue;
+            const double kap = mean_curvature(d, phi, i, j, k, h);
+            raw_vel[v] -= ell * kap;
+            k2 += kap * kap;
+            ++kn;
+          }
+      kappa_rms = kn ? std::sqrt(k2 / static_cast<double>(kn)) : 0.0;
+      double wsum2 = 0.0;
+      for (std::size_t v = 0; v < n; ++v) wsum2 += raw_vel[v] * delta[v];
+      lambda = w > 0.0 ? wsum2 / w : 0.0;
+    }
+
     for (std::size_t v = 0; v < n; ++v)
       raw_vel[v] = (raw_vel[v] - lambda) * delta[v];
 
@@ -1620,26 +1948,53 @@ int main(int argc, char** argv) {
       // gamma_now, not a.gamma: the oscillation damper below may have pulled it
       // in on a previous iteration, exactly as theirs does.
       dt = gamma_now * h / vmax;
-      std::vector<double> next(n);
-      for (int step = 0; step < a.hj_steps; ++step) {
+      std::vector<double> next(n), rk1(n), rk2(n);
+      // L(phi) = -v * |grad phi|, with the gradient scheme the arm selected.
+      auto apply_L = [&](const std::vector<double>& src, std::vector<double>& dst) {
         for (int k = 0; k < d.nz; ++k)
           for (int j = 0; j < d.ny; ++j)
             for (int i = 0; i < d.nx; ++i) {
               const std::size_t v = d.at(i, j, k);
               const double vv = vel[v];
-              next[v] = vv == 0.0
-                            ? phi[v]
-                            : phi[v] - dt * vv * godunov_grad(d, phi, i, j, k, vv, h);
+              if (vv == 0.0) { dst[v] = 0.0; continue; }
+              dst[v] = -vv * (a.weno ? weno_grad(d, src, i, j, k, vv, h)
+                                     : godunov_grad(d, src, i, j, k, vv, h));
             }
+      };
+      for (int step = 0; step < a.hj_steps; ++step) {
+        if (a.rk3) {
+          // ── TVD-RK3 (Shu & Osher). Three L evaluations per step; forward
+          // Euler would discard WENO5's spatial order, so the two go together.
+          apply_L(phi, next);
+          for (std::size_t v = 0; v < n; ++v) rk1[v] = phi[v] + dt * next[v];
+          apply_L(rk1, next);
+          for (std::size_t v = 0; v < n; ++v)
+            rk2[v] = 0.75 * phi[v] + 0.25 * (rk1[v] + dt * next[v]);
+          apply_L(rk2, next);
+          for (std::size_t v = 0; v < n; ++v)
+            next[v] = phi[v] / 3.0 + 2.0 / 3.0 * (rk2[v] + dt * next[v]);
+        } else {
+          apply_L(phi, next);
+          for (std::size_t v = 0; v < n; ++v) next[v] = phi[v] + dt * next[v];
+        }
         phi.swap(next);
         ++hj_done;
+        // ── REINITIALISE BETWEEN SUB-STEPS ──────────────────────────────────
+        // With 24 sub-steps the interface travels ~2.4 voxels on ONE velocity
+        // field, and |grad phi| drifts the whole way; correcting once at the end
+        // means the last sub-steps advected a field that was no longer a
+        // distance function, and the Godunov gradient they used was wrong by
+        // that much. This keeps it near 1 throughout. Costs one sweep per
+        // sub-step — pure grid work, no FEA.
+        if (a.reinit_substeps && step + 1 < a.hj_steps)
+          reinitialise(d, phi, h, a.sweeps, a.russo_smereka);
       }
     }
 
     // ── (f) reinitialisation ────────────────────────────────────────────────
     ReinitResidual rresid;
     if (a.reinit_every > 0 && it % a.reinit_every == 0) {
-      reinitialise(d, phi, h, a.sweeps);
+      reinitialise(d, phi, h, a.sweeps, a.russo_smereka);
       // Their reinitialisation-by-PDE runs to tol = 1/(5 order^2)/min(el_size) =
       // 0.00645 on his grid. Ours is a direct Eikonal sweep with no time step, so
       // that tolerance has nothing to apply to — this is the PROPERTY both are
@@ -1658,7 +2013,7 @@ int main(int argc, char** argv) {
         << ',' << (sc.cg.used_multigrid ? 1 : 0) << ',' << sc.t_solve_ms << ','
         << sc.t_sensitivity_ms << ',' << band_n << ',' << hilb_it << ','
         << hilb_rel << ',' << rresid.rms << ',' << rresid.max << ',' << hj_done
-        << ',' << gamma_now << ',' << it_wall << '\n';
+        << ',' << gamma_now << ',' << kappa_rms << ',' << it_wall << '\n';
     csv.flush();
 
     std::printf("it %3d  c = %.10g  vf = %.6f (occ %.1f)  offset %+.4f mm  "

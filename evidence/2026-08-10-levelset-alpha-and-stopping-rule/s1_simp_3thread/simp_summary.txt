@@ -1,0 +1,13 @@
+== SIMP baseline (the shipped minimize_plastic) ==
+rung                 0.68
+threads              3
+iterations           27
+WALL PER ITERATION   11.525 s   (trajectory 311.2 s over 27 iterations)
+whole-call wall      343.5 s   (of which analysis 32.3 s)
+compliance           0.00240022841727
+achieved vf          0.679951
+MARGIN worst case    3254.356637182
+margin effective     673.856172788
+VERDICT              ACCEPTED
+max von Mises        0.016900422 MPa
+printed fraction     0.797302

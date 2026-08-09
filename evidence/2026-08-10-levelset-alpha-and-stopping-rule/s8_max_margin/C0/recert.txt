@@ -1,0 +1,12 @@
+== re-certification control ==
+field                evidence/2026-08-10-levelset-alpha-and-stopping-rule/s6_max_C0/rho.f64
+binarized            no
+fractional samples   24787 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75291 of 110904  (vf 0.678884)
+max von Mises        0.016174510 MPa
+MARGIN worst case    3400.412229813
+margin effective     704.098851645   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    733
+load path connected  yes
