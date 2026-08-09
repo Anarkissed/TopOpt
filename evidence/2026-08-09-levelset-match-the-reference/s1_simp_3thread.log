@@ -1,0 +1,64 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+
+== SIMP BASELINE: the shipped minimize_plastic, ladder [0.68], 3 threads ==
+
+simp it   1  c = 0.0042011018  vf = 0.633478  cg 881  98.84 s
+simp it   2  c = 0.003363267927  vf = 0.642622  cg 1095  16.78 s
+simp it   3  c = 0.00271717069  vf = 0.652093  cg 939  15.66 s
+simp it   4  c = 0.002522719838  vf = 0.663893  cg 999  8.45 s
+simp it   5  c = 0.002454032329  vf = 0.675471  cg 850  7.32 s
+simp it   6  c = 0.002427871812  vf = 0.678148  cg 745  6.62 s
+simp it   7  c = 0.002418675285  vf = 0.678763  cg 866  7.57 s
+simp it   8  c = 0.002414043521  vf = 0.679086  cg 807  6.84 s
+simp it   9  c = 0.002410994922  vf = 0.679209  cg 733  6.34 s
+simp it  10  c = 0.002408679538  vf = 0.679343  cg 667  5.87 s
+simp it  11  c = 0.00240680237  vf = 0.679565  cg 741  6.39 s
+simp it  12  c = 0.002405487887  vf = 0.679699  cg 656  5.84 s
+simp it  13  c = 0.002404627084  vf = 0.679768  cg 783  6.66 s
+simp it  14  c = 0.002403985097  vf = 0.679816  cg 794  6.86 s
+simp it  15  c = 0.002403462862  vf = 0.679836  cg 799  7.13 s
+simp it  16  c = 0.00240300462  vf = 0.679873  cg 1442  11.91 s
+simp it  17  c = 0.002402616796  vf = 0.679893  cg 950  8.48 s
+simp it  18  c = 0.002402301669  vf = 0.679914  cg 712  6.42 s
+simp it  19  c = 0.002402046912  vf = 0.679919  cg 822  7.41 s
+simp it  20  c = 0.002401821703  vf = 0.679925  cg 687  6.38 s
+simp it  21  c = 0.002401591165  vf = 0.679929  cg 833  7.26 s
+simp it  22  c = 0.002401351037  vf = 0.679932  cg 854  7.31 s
+simp it  23  c = 0.002401122971  vf = 0.679937  cg 836  7.35 s
+simp it  24  c = 0.002400920911  vf = 0.679939  cg 741  6.74 s
+simp it  25  c = 0.00240073668  vf = 0.679941  cg 730  6.33 s
+simp it  26  c = 0.002400556137  vf = 0.679943  cg 931  7.95 s
+simp it  27  c = 0.002400383709  vf = 0.679951  cg 906  7.87 s
+
+== SIMP baseline (the shipped minimize_plastic) ==
+rung                 0.68
+threads              3
+iterations           27
+WALL PER ITERATION   11.281 s   (trajectory 304.6 s over 27 iterations)
+whole-call wall      336.6 s   (of which analysis 32.1 s)
+compliance           0.00240022841727
+achieved vf          0.679951
+MARGIN worst case    3254.356637182
+margin effective     673.856172788
+VERDICT              ACCEPTED
+max von Mises        0.016900422 MPa
+printed fraction     0.797302
+
+wrote evidence/2026-08-09-levelset-match-the-reference/s1_simp_3thread/{simp_iterations.csv,simp_summary.txt,design.bin}
