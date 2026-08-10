@@ -8383,13 +8383,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           export_variant_mesh(v, out_dir, job.output, solved_grid,
                               run_printed_iso(options), &result.model);
       streamed_paths.push_back(p);
-      // The analytic design beside the mesh (S1(d)). Empty string on a SIMP
-      // rung: nothing is written and nothing is pushed.
-      {
-        const std::string ap =
-            export_variant_alpha(v, out_dir, job.output, solved_grid);
-        if (!ap.empty()) streamed_paths.push_back(ap);
-      }
+      // The analytic design, written BESIDE the mesh into out_dir (S1(d)).
+      // ★ AND DELIBERATELY NOT PUSHED INTO THE PATH LIST. `mesh_paths` means
+      // "one exported MESH per accepted variant" — test_cli asserts exactly
+      // that, by count and by filename pattern, and then re-imports each entry
+      // as a mesh. An `alpha.f64` in that list breaks all three, which is what
+      // it did until this line changed. The file still lands in out_dir and the
+      // worker still serves out_dir; it simply is not a mesh and does not claim
+      // to be one.
+      (void)export_variant_alpha(v, out_dir, job.output, solved_grid);
       // `achieved` is the optimizer-achieved (continuous) fraction — the stream's
       // join key against the report's volume_fraction; `printed` is the printed/count
       // basis the app's savings uses (handoff 104, additive — a new field; older
@@ -8849,12 +8851,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid,
           run_printed_iso(options), &result.model));
-      // The analytic design beside the mesh (S1(d)). A no-op on a SIMP rung.
-      {
-        const std::string ap = export_variant_alpha(
-            variant, out_dir, job.output, result.pipeline.solved_grid);
-        if (!ap.empty()) result.mesh_paths.push_back(ap);
-      }
+      // The analytic design, written beside the mesh (S1(d)) and NOT added to
+      // `mesh_paths` — see the streaming branch above for why.
+      (void)export_variant_alpha(variant, out_dir, job.output,
+                                 result.pipeline.solved_grid);
       emit_lattice(variant, /*stream_lines=*/false);  // batch: no stdout lines
     }
   }

@@ -927,12 +927,50 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
   return result;
 }
 
+// ── ★ A STANDALONE CERTIFICATION MUST NOT DEPEND ON WHAT SOLVED BEFORE IT ──
+// (task 2026-08-10-plsm-production.)
+//
+// THE BUG THIS FIXES, which CI caught and which is a genuine correctness defect
+// rather than a test artefact: `ProjectStoreSidecarTests.testQ3...` runs the SAME
+// analysis twice in one process and asserts the results are bit-identical. They
+// were not — 1.4e-09 on max stress, 5.7e-10 on margin.
+//
+// THE CAUSE. The Krylov recycle basis is THREAD-LOCAL AND STICKY ACROSS SOLVES
+// (fea.hpp: "the driver resets it at each run/rung boundary with
+// fea_reset_krylov_recycle_space()"). `minimize_plastic` does exactly that at run
+// start (minimize_plastic.cpp:538), so the OPTIMIZE path is protected. The
+// STANDALONE ANALYSIS path had no such reset and no solver isolation, so the
+// second analysis in a process starts from the subspace the first one harvested,
+// takes a different Krylov route, and lands somewhere else inside the same
+// tolerance. In a fresh process the first analysis has no basis to inherit, which
+// is why the test passes in isolation and fails in a full suite.
+//
+// ★ WHY THE RESET IS HERE AND NOT IN `analyze_fixed_design`. That function serves
+// BOTH the standalone analysis and the per-rung certification inside
+// minimize_plastic, and the per-rung one runs while the trajectory is deliberately
+// BUILDING a recycle basis across iterations. Resetting there would throw away
+// the basis the optimiser is paying for and change the optimize path's numbers and
+// speed — a much larger blast radius than the defect. The app's contract is that
+// pressing RUN SIM twice gives the same answer; this is the narrowest place that
+// makes it true.
+//
+// ★ WHY A RESET AND NOT `ScopedLadderSolverIsolation`'s disable-and-restore. In a
+// fresh process the first analysis already runs with an EMPTY basis, so a reset
+// makes every analysis behave like that first one — no change to the reference
+// behaviour, only the removal of cross-call carry-over. Disabling recycling
+// outright would change the first call too, and with it every pinned expectation
+// in the app suite, for no gain.
+void isolate_standalone_certification() {
+  topopt::fea_reset_krylov_recycle_space();
+}
+
 AnalyzeResult analyze_selfweight(const std::string& model_path,
                                  const std::string& analyze_mesh_path,
                                  const std::string& material_name,
                                  const std::string& materials_path,
                                  const std::string& rules_path, int resolution,
                                  double margin_stop, BridgeError& err) {
+  isolate_standalone_certification();
   AnalyzeResult result;
   try {
     bridge_log("analyze: ENTER res=" + std::to_string(resolution) + " model='" +
@@ -1081,6 +1119,7 @@ AnalyzeResult smooth_and_recertify_selfweight(
     const std::string& materials_path, const std::string& rules_path,
     int resolution, double margin_stop, double strength, bool enforce_min_feature,
     const BridgeFreezeRegions& freeze, BridgeError& err) {
+  isolate_standalone_certification();
   try {
     bridge_log("smooth+recertify: ENTER strength=" + std::to_string(strength) +
                " mesh='" + input_mesh_path + "'");
@@ -1268,6 +1307,7 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
                                const std::string& materials_path,
                                const std::string& rules_path, int resolution,
                                const BridgeLoadCase& load_case, BridgeError& err) {
+  isolate_standalone_certification();
   AnalyzeResult result;
   try {
     bridge_log("analyze_loadcase: ENTER res=" + std::to_string(resolution) +
@@ -1584,6 +1624,7 @@ AnalyzeResult smooth_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     BridgeError& err) {
+  isolate_standalone_certification();
   // The uniform seam IS the brush seam with no brush — one implementation, so the
   // two can never diverge (and PR 200's callers stay byte-identical).
   return smooth_brush_and_recertify_loadcase(
@@ -1599,6 +1640,7 @@ AnalyzeResult smooth_brush_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     const BridgeVertexWeights& brush, BridgeError& err) {
+  isolate_standalone_certification();
   try {
     bridge_log("smooth+recertify(loadcase): ENTER strength=" +
                std::to_string(strength) + " mesh='" + input_mesh_path +
