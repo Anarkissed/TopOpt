@@ -682,6 +682,11 @@ struct JobDescription {
   // ARMING switch, not a default change: the driver default stays false.
   bool has_warm_start = false;
   bool warm_start_coarse = false;
+  // Task 2026-08-10-plsm-production, S3(b): arm the TRAJECTORY warm start on the
+  // matrix-free solver (SimpOptions::matfree_warm_start). Absent => false, the
+  // byte-identical default. Trajectory-only — the certification solve is never
+  // warm-started, whatever this says.
+  bool warm_start_matfree = false;
 
   // Optional "semdot" block (task 2026-08-08-semdot-does-it-come-out-smoother).
   // Absent (has_semdot == false, the DEFAULT) => the fields below are ignored and
@@ -692,6 +697,32 @@ struct JobDescription {
   bool has_semdot = false;
   bool semdot = false;
   int semdot_grid_points = kSemdotDefaultGridPoints;
+
+  // Optional "plsm" block (task 2026-08-10-plsm-production): THE PARAMETRIC
+  // LEVEL SET as the design representation, in place of SIMP's density field.
+  // ABSENT (has_plsm == false, the DEFAULT) => the fields below are ignored and
+  // the run keeps MinimizePlasticOptions::plsm.mode == PlsmMode::Off, which is
+  // byte-identical to every run made before this feature existed. When present
+  // they are mapped onto MinimizePlasticOptions::plsm in run_job.
+  //
+  // ★ `plsm_knots` IS THREE NUMBERS, PER AXIS, IN VOXELS, AND ALL-ZERO IS THE
+  // RIGHT ANSWER. Zero means "derive the spacing from the grid"
+  // (plsm_knots_for_grid) — the production rule, and the only setting that
+  // follows a change of resolution. The schema offers no scalar form: a single
+  // knot spacing for three axes is exactly the shape of the trap PR 323 lost a
+  // day to (GridapTopOpt's alpha rule reading `minimum(el_size)` on a 4:1 slab).
+  bool has_plsm = false;
+  bool plsm_enabled = false;
+  std::string plsm_basis = "gaussian";
+  double plsm_knots[3] = {0.0, 0.0, 0.0};  // VOXELS, per axis; 0 = derive
+  double plsm_support = 2.0;
+  double plsm_eta_voxels = 2.0;
+  int plsm_max_iterations = 60;
+  std::string plsm_seed = "inherit";
+  int plsm_refit_every = 5;
+  double plsm_move = 1.0;
+  double plsm_cg_tolerance_loose = 1e-4;
+  bool plsm_warm_start = true;
 
   // Optional declared load case (the "loads" block). When present the run uses
   // build_production_loadcase (anchors + forces) instead of self-weight.
@@ -745,6 +776,21 @@ struct RunObservability {
   // run_info.json so the era is provable (the 113 lesson). The CLI passes its
   // compiled TOPOPT_BUILD_FINGERPRINT; other callers may leave it empty.
   std::string fingerprint = "unknown";
+
+  // ★ HOW MUCH OF THE MACHINE THIS RUN MAY TAKE (task 2026-08-10-plsm-production).
+  // 0 (the DEFAULT) = leave the production rule alone: run_job applies
+  // production_matfree_thread_count(), the performance-core pin, and the run is
+  // byte-for-byte what it was. > 0 overrides the matrix-free apply's thread count
+  // AFTER configure_production_options has run (which is why it lives here and
+  // not in a global the caller sets before the run — that would be overwritten).
+  //
+  // It is a PURE PERFORMANCE CONTROL and CANNOT MOVE A NUMBER: the apply threads
+  // a deterministic 8-colour (2x2x2) partition of the voxel grid, so no two
+  // threads touch the same node and the accumulation order is fixed regardless of
+  // the count — fea.hpp states the result is BIT-IDENTICAL for any thread count.
+  // It is here because a run that pins every performance core makes the machine
+  // unusable for the hours it takes, and "wait until tonight" is not a setting.
+  int matfree_threads = 0;
 };
 
 // The outcome of run_job, exposing enough for callers (the CLI main and the

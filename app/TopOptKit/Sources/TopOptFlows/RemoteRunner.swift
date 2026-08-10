@@ -683,6 +683,30 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                        "smooth_factor": Self.smoothExportFactor,
                        "project_cad_faces": request.projectCADFaces],
         ]
+        // ── ★ THE PARAMETRIC LEVEL SET IS THE APP'S OPTIMISER (task
+        // 2026-08-10-plsm-production, maintainer request) ────────────────────
+        //
+        // SENT EXPLICITLY, ALWAYS, for the same reason `project_cad_faces` is:
+        // `run_info` echoes the job it was given, and "the key was absent" and
+        // "the user asked for this" are the same bytes there. A run months from
+        // now has to be attributable to the algorithm that made it.
+        //
+        // ★ THIS IS THE MIRROR OF `opts.plsm.mode = PlsmMode::Parametric` IN
+        // bridge.cpp's run_minimize_plastic. The on-device path and the LAN path
+        // must produce the same part; this codebase has already paid for one
+        // drift between them. THE TWO MOVE TOGETHER — change one, change the
+        // other in the same commit, exactly as `bake_build_orientation` below.
+        //
+        // Only `enabled` is sent. Everything else is left to core's own
+        // PlsmOptions defaults, and the knot spacing in particular is DELIBERATELY
+        // ABSENT: omitting it is what asks for `plsm_knots_for_grid`, the
+        // production rule that derives the spacing from the grid's voxel size,
+        // per axis. Naming three numbers here would pin the feature scale to one
+        // resolution and would be a second opinion about a rule core owns.
+        //
+        // Core's DEFAULT is still SIMP (`PlsmMode::Off`), so `topopt-cli` and
+        // every existing job document are unaffected. The front-end opts in.
+        job["plsm"] = ["enabled": true]
         // The true source format when `model` is a working copy in another format
         // (a 3MF normalised to STL at import, handoff 2026-07-26-3mf-optimize-path).
         // The worker echoes it into run_info so the record names the real source even

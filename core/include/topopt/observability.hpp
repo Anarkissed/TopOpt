@@ -565,6 +565,34 @@ struct RunInfo {
   std::vector<double> semdot_rung_level_set;
   std::vector<long long> semdot_rung_fractional_voxels;
   std::vector<long long> semdot_rung_design_voxels;
+
+  // ── THE PARAMETRIC LEVEL SET (task 2026-08-10-plsm-production) ────────────
+  // ★ AN ARMED RUN MUST SAY IT WAS ARMED, and must say WHAT IT WAS ARMED WITH.
+  // The knot spacing is the feature-scale control on this path, so a run whose
+  // record did not carry it would be unreadable a week later. THREE numbers, per
+  // axis, in voxels — a receipt that collapsed them to one would have thrown away
+  // the fact R4 exists to protect.
+  //
+  // `plsm_frozen_floor_occupancy` is the LOAD-PATH GUARANTEE, measured on this
+  // run: the smallest ersatz occupancy any FrozenSolid voxel took under the
+  // smooth boolean. Above 0.5 is the guarantee (plsm_optimize refuses to run
+  // below it), and it is recorded because PR 324 measured that 40 leaked frozen
+  // voxels of 40,216 reject every certification on the LOAD PATH.
+  //
+  // All zero / false when the mode is Off, which is every existing run.
+  bool plsm = false;
+  std::string plsm_basis;
+  double plsm_knots_vox[3] = {0.0, 0.0, 0.0};
+  double plsm_support = 0.0;
+  double plsm_eta_voxels = 0.0;
+  int plsm_max_iterations = 0;
+  std::string plsm_seed;
+  int plsm_refit_every = 0;
+  double plsm_cg_tolerance_loose = 0.0;
+  bool plsm_warm_start = false;
+  long long plsm_coefficients = 0;
+  double plsm_frozen_floor_occupancy = 0.0;
+
   bool draft_quality = false;
   double draft_loose_tol = 0.0;
   double draft_escalation_c_gap = 0.0;

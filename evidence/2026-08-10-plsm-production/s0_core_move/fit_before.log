@@ -1,0 +1,46 @@
+== plsm_probe — ARM 1, the gate ==
+
+source     /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/src/C2it25
+lattice    128 x 31 x 118 = 468224 voxels, spacing 1.705279 mm
+origin     (-18.2758, -48.9100, 0.0000)
+threads    3
+eta        2.000 voxels = 3.410559 mm  (the arms' band, unchanged)
+clamp      +-6.000 voxels on the fit target
+reinit     8 sweeps, 0.20 s
+source     75417 voxels inside {phi < 0} (0.1611 of the lattice)
+band       88557 voxels with |phi| <= eta
+
+
+#####################################################################
+# FIT W4 — Wendland C2 CSRBF, knot spacing (4, 4, 4) voxels PER AXIS,
+#   support 2 x spacing = (8, 8, 8) voxels = (13.642, 13.642, 13.642) mm
+#####################################################################
+  knots      36 x 12 x 34 = 14688 coefficients
+  ★ COMPRESSION 31.9x — 14688 coefficients against 468224 voxels
+  A          468224 x 14688, nnz 15367904 (32.8 knots per voxel), 175.9 MB
+  CG         824 iterations, relative residual 9.639e-11, 9.0 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.32498 voxels = 0.55418 mm
+      whole domain (clamped target)  : rms 0.19002 voxels, max 1.62522
+  volume     as fitted 75652 voxels inside, source 75417 (+0.312%)
+  ★ VOLUME-MATCHED offset +0.008608 voxels = +0.014680 mm -> 75417 inside
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/evidence/2026-08-10-plsm-production/s0_core_move/fit_before/W4_af_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/evidence/2026-08-10-plsm-production/s0_core_move/fit_before/W4_vm_f1
+
+#####################################################################
+# FIT G2 — Gaussian (3-sigma), knot spacing (2, 2, 2) voxels PER AXIS,
+#   support 2 x spacing = (4, 4, 4) voxels = (6.821, 6.821, 6.821) mm
+#####################################################################
+  knots      68 x 20 x 63 = 85680 coefficients
+  ★ COMPRESSION 5.5x — 85680 coefficients against 468224 voxels
+  A          468224 x 85680, nnz 14665984 (31.3 knots per voxel), 167.8 MB
+  CG         2000 iterations, relative residual 2.160e-07, 16.9 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.12599 voxels = 0.21485 mm
+      whole domain (clamped target)  : rms 0.06681 voxels, max 0.72960
+  volume     as fitted 75675 voxels inside, source 75417 (+0.342%)
+  ★ VOLUME-MATCHED offset +0.043089 voxels = +0.073479 mm -> 75418 inside
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/evidence/2026-08-10-plsm-production/s0_core_move/fit_before/G2_af_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/evidence/2026-08-10-plsm-production/s0_core_move/fit_before/G2_vm_f1
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/evidence/2026-08-10-plsm-production/s0_core_move/fit_before/fits.csv

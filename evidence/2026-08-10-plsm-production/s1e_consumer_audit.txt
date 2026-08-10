@@ -1,0 +1,89 @@
+=== S1(e) — WHAT EACH CONSUMER ACTUALLY READS ===
+
+-- THE LADDER: the field it certifies
+1785:    const std::vector<double>& rho = variant.optimization.physical_density;
+
+-- THE LADDER: the certification call that consumes it
+1857:    FixedDesignAnalysis fda = analyze_fixed_design(
+1858-        G, params, rho, B, loads, material, build_dir, opt.cg_tolerance,
+1859-        opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
+1860-        load_path_ok, part_solid,
+
+-- achieved_vf: the TWO bases, and which is which
+1558:      const double printed_fraction =
+1563:      vr.volume_fraction = report_fraction(printed_fraction);
+1564:      vr.printed_fraction = report_fraction(printed_fraction);
+1632:      const double printed_fraction =
+1637:      vr.volume_fraction = report_fraction(printed_fraction);
+1638:      vr.printed_fraction = report_fraction(printed_fraction);
+1928:      vr.volume_fraction = report_fraction(printed_fraction_nc);
+1929:      vr.printed_fraction = report_fraction(printed_fraction_nc);
+2001:    const double printed_fraction =
+2024:    vr.volume_fraction = variant.optimization.volume_fraction;
+2025:    vr.printed_fraction = printed_fraction;
+
+-- achieved_vf on the PARAMETRIC path: simp's own basis, Sum(occ)/n_active
+637-    if (grid.tags[v] != VoxelTag::Empty && eff[v] == MaskValue::Active)
+638-      active_sum += best_occ[v];
+639:  r.volume_fraction =
+
+-- THE FROZEN / PROTECT MASKS: the parametric path calls the SAME function
+core/src/simp/plsm.cpp:203:  // `effective_design_mask` is the SAME function `simp_optimize`'s loop calls, so
+core/src/simp/plsm.cpp:205:  const DesignMask eff = effective_design_mask(grid, mask);
+core/src/simp/simp.cpp:2644:// Declared in simp.hpp as `effective_design_mask` (task 2026-08-04-protect-freeze-
+core/src/simp/simp.cpp:2652:DesignMask effective_design_mask(const VoxelGrid& grid, const DesignMask& mask) {
+core/src/simp/simp.cpp:2655:        "effective_design_mask: mask size != grid.voxel_count()");
+core/src/simp/simp.cpp:3148:  const DesignMask eff = effective_design_mask(grid, mask);
+
+-- THE CLEARANCES: folded into the mask BEFORE the optimiser
+281-          "minimize_plastic: clearance_void size != solved grid voxel_count()");
+282-    for (std::size_t idx = 0; idx < mask.size(); ++idx)
+283:      if (options.clearance_void[idx] == MaskValue::FrozenVoid &&
+284-          mask[idx] != MaskValue::FrozenSolid)
+285-        mask[idx] = MaskValue::FrozenVoid;
+286-  }
+287-  return mask;
+
+-- THE DESIGN BOX: one mask builder, shared
+305:      effective_design_mask(G, design_domain_mask(domain, options));
+344:  return masked_self_weight_loads(domain.grid, design_domain_mask(domain, options),
+670:  DesignMask mask = design_domain_mask(domain, options);
+
+-- THE LATTICE PASS: the field it grades
+447:        variant.optimization.physical_density, printed_iso, sf,
+1295:  const std::vector<double>& dens = variant.optimization.physical_density;
+1687:      load_path_connected(sg, variant.optimization.physical_density,
+1718:                              variant.optimization.physical_density, bcs,
+2995:  const std::vector<double>& dens = v.optimization.physical_density;
+6034:  v.optimization.physical_density = sd.density;
+7972:                               v.optimization.physical_density,
+
+=== S1(c) — NOTHING REUSES A MARGIN COMPUTED ON A DIFFERENT FIELD ===
+
+-- the certification solve is NEVER warm-started (initial_guess = nullptr)
+269-      sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
+270:                           cg_max_iterations, /*initial_guess=*/nullptr,
+271-                           /*solver=*/nullptr, solver_kind);
+272-    }
+
+-- lattice_variant RE-CERTIFIES and REFUSES unless the recorded margin reproduces
+6004:  result.reproduction_within_band =
+6015:  if (!result.reproduction_within_band)
+6017:        "lattice_variant: the restored design does NOT reproduce the margin the "
+
+-- the analytic export says, IN THE FILE, that it is not certified
+417:    << "# NOT CERTIFIED. The certificate in report.json belongs to the voxel "
+7189:                     "here — CONNECTED but NOT CERTIFIED. The margin over it is "
+
+-- the parametric path's own final compliance is a TIGHT solve on the SHIPPED field
+638-      active_sum += best_occ[v];
+639-  r.volume_fraction =
+640-      fb.n_active > 0 ? active_sum / static_cast<double>(fb.n_active) : 0.0;
+641-
+642:  // ── THE FINAL COMPLIANCE, TIGHT AND COLD ────────────────────────────────
+643-  //
+644-  // `simp_optimize`'s contract is that `compliance == compliance(physical_density)`
+645-  // — a final solve on the converged field at the TIGHT tolerance, not the last
+646-  // trajectory value. It is honoured here for the same reason it exists there:
+647-  // the number a caller reads must belong to the field it reads beside it. It is
+648-  // also the only compliance a loosened trajectory may be compared against, which

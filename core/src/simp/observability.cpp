@@ -787,6 +787,25 @@ std::string run_info_json(const RunInfo& info) {
   // up-front) plus the per-rung outcome (empty until the post-run finalize).
   num("semdot", bool_json(info.semdot));
   num("semdot_grid_points", fmt_i(info.semdot_grid_points));
+  // Task 2026-08-10-plsm-production — the PARAMETRIC LEVEL SET echo. All
+  // zero/false/empty on every run that did not arm it, which is every run made
+  // before this feature existed.
+  num("plsm", bool_json(info.plsm));
+  str("plsm_basis", info.plsm_basis);
+  // ★ THREE NUMBERS. A receipt that collapsed the knot spacing to one would have
+  // thrown away exactly the fact R4 exists to protect.
+  num("plsm_knots_vox",
+      "[" + fmt(info.plsm_knots_vox[0]) + ", " + fmt(info.plsm_knots_vox[1]) +
+          ", " + fmt(info.plsm_knots_vox[2]) + "]");
+  num("plsm_support", fmt(info.plsm_support));
+  num("plsm_eta_voxels", fmt(info.plsm_eta_voxels));
+  num("plsm_max_iterations", fmt_i(info.plsm_max_iterations));
+  str("plsm_seed", info.plsm_seed);
+  num("plsm_refit_every", fmt_i(info.plsm_refit_every));
+  num("plsm_cg_tolerance_loose", fmt(info.plsm_cg_tolerance_loose));
+  num("plsm_warm_start", bool_json(info.plsm_warm_start));
+  num("plsm_coefficients", fmt_ll(info.plsm_coefficients));
+  num("plsm_frozen_floor_occupancy", fmt(info.plsm_frozen_floor_occupancy));
   {
     std::string ls = "[";
     for (std::size_t i = 0; i < info.semdot_rung_level_set.size(); ++i) {

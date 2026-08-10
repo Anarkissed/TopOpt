@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "topopt/build_frame.hpp"        // BakeBuildOrientation
+#include "topopt/plsm.hpp"               // PlsmOptions / PlsmMode (default Off)
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport
 #include "topopt/fea.hpp"        // DirichletBC
 #include "topopt/materials.hpp"  // Material
@@ -304,6 +305,30 @@ struct MinimizePlasticOptions {
   // to MMA's optimum while every driver contract (volume constraint, margins,
   // V3 suite, viz fields) is unchanged.
   SimpUpdater updater = SimpUpdater::MMA;
+
+  // ── THE PARAMETRIC LEVEL SET (task 2026-08-10-plsm-production) ────────────
+  //
+  // When `plsm.mode` is PlsmMode::Parametric the driver runs each rung through
+  // `plsm_optimize` (plsm.hpp) INSTEAD of `simp_optimize`: the design variable
+  // becomes a vector of RBF coefficients and the voxel field becomes a value of
+  // the analytic function they define. PR 324 measured that from a plain array of
+  // holes, with SIMP nowhere in the pipeline, it beats his shipped rung 0.68 on
+  // margin (+4.2%), peak stress (-4%) and mass (-15%) and is ACCEPTED.
+  //
+  // ★ PlsmMode::Off IS THE DEFAULT AND IS THE ENTIRE EXISTING WORLD. The driver
+  // branches on this field and on nothing else; with it Off not one line of
+  // plsm.cpp executes and the run is BYTE-FOR-BYTE what it was — the same opt-in
+  // discipline as min_feature_mm == 0 / cg_tolerance_loose == 0 / semdot. R1 of
+  // that task is a stash-rebuild checksum of exactly that, on both binaries built
+  // from one folder.
+  //
+  // EVERYTHING DOWNSTREAM IS UNCHANGED, because a PLSM rung produces the same
+  // SimpOptimizeResult a SIMP rung does: the certification, `achieved_vf`, the
+  // frozen/protect masks, the clearances, the design box and the lattice pass all
+  // read `optimization.physical_density` and cannot tell the difference. What is
+  // ADDED is the analytic export — `MinimizePlasticVariant::plsm_alpha` and the
+  // lattice beside it — which is the design itself rather than a sampling of it.
+  PlsmOptions plsm;
 
   // Handoff 123 — CONDITIONAL MMA Heaviside projection ("polish only when gray").
   // The design-region grayness threshold (Mnd; see design_discreteness_mnd) above
@@ -890,6 +915,35 @@ inline constexpr const char* kRungTimeBudgetReason =
     "iteration time budget exceeded";
 
 // One ladder rung actually evaluated by the driver.
+// THE CONDITIONAL MMA-PROJECTION GATE'S ARMING PREDICATE (handoff 123), as a
+// pure function of the options — the ONE definition, which `minimize_plastic`
+// itself calls, so it cannot be reconstructed differently anywhere else.
+//
+// The gate polishes a CONVERGED GRAYSCALE MMA rung into a beta-projection when
+// its design-region grayness (design_discreteness_mnd) exceeds the threshold. It
+// is armed only on the MMA grayscale path, and three modes DISARM it:
+//
+//   * `simp.mma_projection` already true — every rung projects unconditionally,
+//     so the conditional gate is inert by construction.
+//   * SEMDOT — `simp_optimize` REFUSES semdot together with a Heaviside
+//     projection (two sharpeners fighting, and beta is exactly the control
+//     parameter SEMDOT claims not to need), so a fired gate would THROW mid-rung.
+//   * ★ THE PARAMETRIC LEVEL SET (task 2026-08-10-plsm-production). Found by
+//     running the production path, not by reading it: a PLSM ersatz is gray over
+//     its whole band BY CONSTRUCTION — the band IS the smoothing law, not
+//     optimiser indecision — so `design_discreteness_mnd` always clears the
+//     threshold and the gate always fires. What it then does is the defect: it
+//     re-runs `simp_optimize` SEEDED FROM the parametric field, which discards
+//     the RBF coefficients and continues the rung as a voxel design. The run
+//     would report a parametric rung and ship a SIMP one. There is also nothing
+//     to project: the design variable is a coefficient, not a density, and a
+//     Heaviside continuation on the ersatz would sharpen the very band the
+//     representation's smoothness comes from.
+//
+// A disarmed run reports it the same way any other does — `rung_grayscale_mnd`
+// and `conditional_projection_fired` stay EMPTY.
+bool conditional_mma_projection_armed(const MinimizePlasticOptions& options);
+
 struct MinimizePlasticVariant {
   // The ladder rung this variant targeted (options.volume_fraction_ladder[i]).
   double requested_volume_fraction = 0.0;
@@ -905,6 +959,32 @@ struct MinimizePlasticVariant {
   // The driver appends only accepted variants to the JobReport, and stops after
   // the first rejected (too-weak) rung.
   bool accepted = false;
+
+  // ── THE ANALYTIC DESIGN (task 2026-08-10-plsm-production, S1(d)) ──────────
+  //
+  // EMPTY on every SIMP rung, and non-empty exactly when this rung ran under
+  // MinimizePlasticOptions::plsm. `plsm_alpha` is the RBF coefficient vector and
+  // `plsm_lattice` the knot lattice it lives on; together with `plsm_basis_kind`
+  // and `plsm_eta_voxels` they are the WHOLE design — 685 KB against
+  // physical_density's 3.75 MB on his part, and re-evaluable at ANY resolution
+  // through `plsm_evaluate` rather than only at the one it was optimised on.
+  //
+  // WHAT READS IT: `run_job` writes it beside the meshes as
+  // `<mesh_prefix>_<vf>_alpha.f64` + `.meta` on the CLI path (see the writer in
+  // run_job.cpp), and `plsm_evaluate(plsm_lattice, plsm_basis_kind, plsm_alpha,
+  // nx, ny, nz, factor, threads)` reconstructs phi on any lattice from it. The
+  // ersatz is then `H_eta(-phi)` at `plsm_eta_voxels * spacing`. Nothing in the
+  // ladder, the certification or the lattice pass reads it — those all read
+  // `optimization.physical_density`, which is why they needed no changes.
+  std::vector<double> plsm_alpha;
+  PlsmKnotLattice plsm_lattice;
+  PlsmBasisKind plsm_basis_kind = PlsmBasisKind::Gaussian;
+  double plsm_eta_voxels = 0.0;
+  // The load-path guarantee the smooth frozen boolean gives, MEASURED on this
+  // rung: the smallest ersatz occupancy any FrozenSolid voxel took. > 0.5 is the
+  // guarantee; plsm_optimize refuses to run if it is not, so a shipped variant
+  // always carries a number above it and the receipt can say so.
+  double plsm_frozen_floor_occupancy = 0.0;
 
   // Handoff 131 — true iff this rung was ENDED on the rung-infeasibility signature
   // (simp.hpp rung_infeasible): the optimizer severed the load path, so the design

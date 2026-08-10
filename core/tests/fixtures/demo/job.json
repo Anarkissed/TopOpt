@@ -1,6 +1,8 @@
 {
   "_comment": "M6.2 demo job (maintainer-authored fixture). This file DEFINES the topopt-cli job schema: the CLI must implement exactly these keys and reject unknown keys or missing required ones with a diagnostic (same strictness as the materials loader). Face selection is GEOMETRIC, never by OCCT face index — face enumeration order is not stable across OCCT versions (handoff 009 warning). Units: mm, mm/s^2; material properties per materials.json.",
   "model": "l-bracket.step",
+  "_plsm_note": "topopt-cli run has NO SIMP route (task 2026-08-10-plsm-production): it arms the parametric level set and REFUSES enabled:false. This block is here so the IN-PROCESS run_job() half of test_cli runs the SAME algorithm the binary half does — the test asserts the two produce byte-identical report.json, and without it they would be comparing two different optimisers. max_iterations is capped because the uncapped parametric ladder takes 90 minutes on this demo part.",
+  "plsm": {"enabled": true, "max_iterations": 6},
   "material": "PLA",
   "mode": "minimize_plastic",
   "resolution": 48,

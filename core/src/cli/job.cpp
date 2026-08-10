@@ -392,7 +392,8 @@ JobDescription parse_job(const std::string& json_text) {
                        "margin_stop", "simp", "draft", "warm_start", "output",
                        "lattice", "grading", "loads", "design_box", "keep_outs",
                        "build_direction", "build_orientation_report",
-                       "bake_build_orientation", "variant", "semdot"},
+                       "bake_build_orientation", "variant", "semdot",
+                       "plsm"},
                       "the job");
 
   JobDescription job;
@@ -778,12 +779,23 @@ JobDescription parse_job(const std::string& json_text) {
   // changing any default.
   if (const JsonValue* ws = find_key(root, "warm_start")) {
     require_object(*ws, "warm_start");
-    reject_unknown_keys(*ws, {"coarse"}, "warm_start");
+    reject_unknown_keys(*ws, {"coarse", "matfree"}, "warm_start");
     job.has_warm_start = true;
     const JsonValue& c = require_key(*ws, "coarse", "warm_start");
     if (c.type != JsonValue::Type::Bool)
       schema_fail("\"warm_start.coarse\" must be a boolean");
     job.warm_start_coarse = (c.num != 0.0);
+    // ── THE MATRIX-FREE TRAJECTORY WARM START (task 2026-08-10-plsm-production).
+    // Optional inside the block; absent => OFF, the byte-identical default. It
+    // arms SimpOptions::matfree_warm_start, which lets the loop's ALREADY-HELD
+    // previous displacement field reach the matrix-free solver — the one branch
+    // that dropped it until this task. Trajectory-only: the certification solve
+    // passes nullptr unconditionally, so no verdict can move.
+    if (const JsonValue* mf = find_key(*ws, "matfree")) {
+      if (mf->type != JsonValue::Type::Bool)
+        schema_fail("\"warm_start.matfree\" must be a boolean");
+      job.warm_start_matfree = (mf->num != 0.0);
+    }
   }
 
   // Optional "semdot" block (task 2026-08-08-semdot-does-it-come-out-smoother):
@@ -804,6 +816,95 @@ JobDescription parse_job(const std::string& json_text) {
       const double v = require_number(*gp, "semdot.grid_points");
       if (v < 1.0) schema_fail("\"semdot.grid_points\" must be >= 1");
       job.semdot_grid_points = static_cast<int>(v);
+    }
+  }
+
+  // ── Optional "plsm" block (task 2026-08-10-plsm-production) ───────────────
+  //
+  // ★ ABSENT (has_plsm == false, THE DEFAULT) => the driver keeps PlsmMode::Off
+  // and the run is BYTE-IDENTICAL — R1 of that task is a stash-rebuild checksum
+  // of exactly that. `enabled` is REQUIRED inside the block (an empty plsm block
+  // is a config mistake, not a silent no-op — the rule "draft" and "semdot"
+  // carry).
+  //
+  // Every other key is OPTIONAL and defaults to the production posture in
+  // PlsmOptions. `knots` is the one to read twice: it is THREE numbers, PER AXIS,
+  // in VOXELS, and OMITTING it is the right thing — the run then derives the
+  // spacing from the grid with `plsm_knots_for_grid`, which is the rule the S2
+  // frontier chose and the only thing that follows a change of resolution. A job
+  // that names one number for all three axes is refused: there is no scalar knot
+  // spacing in this schema, because a scalar is how PR 323 lost a day to
+  // `minimum(el_size)` on a 4:1 slab.
+  if (const JsonValue* pl = find_key(root, "plsm")) {
+    require_object(*pl, "plsm");
+    reject_unknown_keys(*pl,
+                        {"enabled", "basis", "knots", "support", "eta_voxels",
+                         "max_iterations", "seed", "refit_every", "move",
+                         "cg_tolerance_loose", "warm_start"},
+                        "plsm");
+    job.has_plsm = true;
+    const JsonValue& en = require_key(*pl, "enabled", "plsm");
+    if (en.type != JsonValue::Type::Bool)
+      schema_fail("\"plsm.enabled\" must be a boolean");
+    job.plsm_enabled = (en.num != 0.0);
+    if (const JsonValue* b = find_key(*pl, "basis")) {
+      job.plsm_basis = require_nonempty_string(*b, "plsm.basis");
+      if (job.plsm_basis != "gaussian" && job.plsm_basis != "wendland")
+        schema_fail("\"plsm.basis\" must be \"gaussian\" or \"wendland\"");
+    }
+    if (const JsonValue* k = find_key(*pl, "knots")) {
+      if (k->type != JsonValue::Type::Array || k->arr.size() != 3)
+        schema_fail(
+            "\"plsm.knots\" must be an array of exactly 3 numbers — the knot "
+            "spacing in VOXELS, PER AXIS. There is no scalar form: one number "
+            "for three axes is the slab trap this schema refuses to offer. Omit "
+            "the key to let the run derive the spacing from the grid.");
+      double* dst[3] = {&job.plsm_knots[0], &job.plsm_knots[1], &job.plsm_knots[2]};
+      for (std::size_t i = 0; i < 3; ++i) {
+        const double v = require_number(k->arr[i], "plsm.knots");
+        if (!(v > 0.0)) schema_fail("\"plsm.knots\" entries must be > 0");
+        *dst[i] = v;
+      }
+    }
+    if (const JsonValue* v = find_key(*pl, "support")) {
+      const double x = require_number(*v, "plsm.support");
+      if (!(x >= 1.0)) schema_fail("\"plsm.support\" must be >= 1");
+      job.plsm_support = x;
+    }
+    if (const JsonValue* v = find_key(*pl, "eta_voxels")) {
+      const double x = require_number(*v, "plsm.eta_voxels");
+      if (!(x > 0.0)) schema_fail("\"plsm.eta_voxels\" must be > 0");
+      job.plsm_eta_voxels = x;
+    }
+    if (const JsonValue* v = find_key(*pl, "max_iterations")) {
+      const double x = require_number(*v, "plsm.max_iterations");
+      if (x < 1.0) schema_fail("\"plsm.max_iterations\" must be >= 1");
+      job.plsm_max_iterations = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "seed")) {
+      job.plsm_seed = require_nonempty_string(*v, "plsm.seed");
+      if (job.plsm_seed != "inherit" && job.plsm_seed != "holes")
+        schema_fail("\"plsm.seed\" must be \"inherit\" or \"holes\"");
+    }
+    if (const JsonValue* v = find_key(*pl, "refit_every")) {
+      const double x = require_number(*v, "plsm.refit_every");
+      if (x < 0.0) schema_fail("\"plsm.refit_every\" must be >= 0");
+      job.plsm_refit_every = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "move")) {
+      const double x = require_number(*v, "plsm.move");
+      if (!(x > 0.0)) schema_fail("\"plsm.move\" must be > 0");
+      job.plsm_move = x;
+    }
+    if (const JsonValue* v = find_key(*pl, "cg_tolerance_loose")) {
+      const double x = require_number(*v, "plsm.cg_tolerance_loose");
+      if (!(x >= 0.0)) schema_fail("\"plsm.cg_tolerance_loose\" must be >= 0");
+      job.plsm_cg_tolerance_loose = x;
+    }
+    if (const JsonValue* v = find_key(*pl, "warm_start")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("\"plsm.warm_start\" must be a boolean");
+      job.plsm_warm_start = (v->num != 0.0);
     }
   }
 

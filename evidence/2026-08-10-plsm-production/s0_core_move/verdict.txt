@@ -1,0 +1,27 @@
+== THE THREE HEADER MOVES INTO CORE ARE NO-OPS ==
+
+BEFORE: 55a2ce9 (the pre-task commit), extracted with 'git archive HEAD' into
+        a scratch tree OUTSIDE the repository and built there. Nothing is
+        stashed and nothing is cloned.
+AFTER : this tree, with plsm_basis / plsm_kernel / plsm_mma in core and the
+        three harness headers reduced to shims over them.
+Both at 3 threads. Wall-clock columns are excluded and nothing else is.
+
+-- (1) THE KERNEL. levelset_probe, 3 iterations, --gridap-auto min.
+   every COMPUTED column of iterations.csv (all but the three wall clocks)
+   IDENTICAL (the diff above is empty)
+
+   the final ersatz occupancy, 468224 float64
+   rho.f64 BYTE-IDENTICAL
+
+-- (2) THE BASIS. plsm_probe, W4 wendland 4,4,4 s2 and G2 gaussian 2,2,2 s2.
+   every column of fits.csv but fit_wall_s
+   IDENTICAL (the diff above is empty)
+
+   the emitted voxel-lattice occupancy of each fit
+   W4_vm_f1.f64 BYTE-IDENTICAL
+   G2_vm_f1.f64 BYTE-IDENTICAL
+
+-- (3) THE MMA STEP is exercised by --plsm-mma, which the S2 frontier runs.
+   core/tests/harness/plsm_mma.hpp now DEFINES nothing (it is two
+   using-declarations), so there is no second copy left to drift.

@@ -80,7 +80,25 @@ int main(int argc, char** argv) {
 
     std::ofstream m(met);
     m.precision(17);
-    m << "rung " << d.requested_volume_fraction << "\n"
+    // ★ `rung` IS A LABEL AND MUST BE WRITTEN AS ONE — TWO DECIMALS, NOT THE
+    // FULL DOUBLE (task 2026-08-10-plsm-production).
+    //
+    // `external_field_surface_probe` matches an arm's rung against the SIMP rows
+    // it formats itself with "%.2f", AS A STRING. At precision(17) this line
+    // spells 0.68 as "0.68000000000000005", which never matches — and the probe
+    // does not fail, it prints "NO SIMP ROW AT THIS RUNG — not compared" and
+    // carries on. The measurement is correct and simply never gets a baseline
+    // beside it, which is the most expensive kind of silent no-op: a comparison
+    // that looks like it ran.
+    //
+    // PR 324 hit this from the other side and fixed `levelset_probe`'s writer;
+    // this writer still carried it, so anything chaining design_rung_dump into
+    // that probe lost its baseline. `requested_vf` below keeps FULL precision —
+    // it is the number, not the label.
+    char rung_label[32];
+    std::snprintf(rung_label, sizeof rung_label, "%.2f",
+                  d.requested_volume_fraction);
+    m << "rung " << rung_label << "\n"
       << "requested_vf " << d.requested_volume_fraction << "\n"
       << "achieved_vf " << d.achieved_volume_fraction << "\n"
       << "iterations " << d.iterations << "\n"

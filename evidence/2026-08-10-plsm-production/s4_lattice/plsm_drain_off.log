@@ -1,0 +1,19 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+lattice-variant: rung vf=0.68 (index 0 of /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/plsm_prod/design.bin) — NO ladder ran
+  design: fingerprint 10269657151732322201, 40 optimizer iterations originally
+  reproduction: recorded margin 3297.3 == reproduced 3297.3 (enforced)
+  solves: 3 certification (design iterations 0, variant meshes 0)
+  lattice: graded cell 4 mm, rho 0.06665..0.879 over 1167 voxels
+  solid margin 3297 -> latticed margin 3093 (effective 640.4)
+  strut strength (REPORT, not gated): in-plane 768.6   interlayer 484.6   [OUT OF REGIME]
+  verdict: ACCEPTED
+mesh: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/s4_plsm_drain/variant_068_lattice.stl
+receipt: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/s4_plsm_drain/variant_068_lattice.report.json
+report: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/s4_plsm_drain/lattice_variant_report.json
+provenance: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/s4_plsm_drain/lattice_variant.json
+loadcase: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/s4_plsm_drain/loadcase.json
+fields: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/dcd9bde4-1671-45d8-a03b-a0ca32171ff9/scratchpad/s4_plsm_drain/fields.bin
+wall: 338.11 s

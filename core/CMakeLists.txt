@@ -230,6 +230,12 @@ if(Eigen3_FOUND)
   # it is gated on Eigen like simp.cpp. CI has Eigen (DEPS=ON), so it always
   # builds in CI.
   target_sources(topopt PRIVATE src/simp/minimize_plastic.cpp)
+  # THE PARAMETRIC LEVEL-SET OPTIMISER (task 2026-08-10-plsm-production): the
+  # alternative to simp_optimize that minimize_plastic dispatches to when a job
+  # arms PlsmMode::Parametric. DEFAULT OFF — with the mode Off not one line of it
+  # executes and the SIMP path is byte-identical (R1). It drives simp_compliance
+  # for its state solve, so it is Eigen-gated exactly like simp.cpp.
+  target_sources(topopt PRIVATE src/simp/plsm.cpp)
   # analyze_fixed_design (handoff 2026-07-26-constrained-smooth): ONE certification
   # solve on a fixed design, no optimization. minimize_plastic's recovery block
   # calls it (single source of truth), and the CLI `analyze` verb / bridge re-run it
@@ -875,6 +881,18 @@ if(Eigen3_FOUND)
   add_executable(test_semdot tests/unit/test_semdot.cpp)
   target_link_libraries(test_semdot PRIVATE topopt)
   add_test(NAME semdot COMMAND test_semdot)
+
+  # THE PARAMETRIC LEVEL SET on the production path (task
+  # 2026-08-10-plsm-production): the frozen set held above the iso by the smooth
+  # boolean (the load-path guarantee PR 324's every-fit-rejected finding paid
+  # for), Empty NOT being a keep-out, the per-axis knot rule refusing the slab
+  # trap, the conditional Heaviside projection staying DISARMED on a parametric
+  # rung, and every refusal. Drives plsm_optimize and minimize_plastic's arming
+  # predicate, so it is Eigen-gated like test_simp. CI configures with
+  # -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_plsm tests/unit/test_plsm.cpp)
+  target_link_libraries(test_plsm PRIVATE topopt)
+  add_test(NAME plsm COMMAND test_plsm)
 
   # Physical filter radius (M7.rmin): the mm->voxel density-filter radius scaling
   # (physical_filter_radius) that makes the minimum member thickness resolution
