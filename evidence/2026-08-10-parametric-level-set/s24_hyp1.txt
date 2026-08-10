@@ -1,0 +1,32 @@
+== plsm_probe — ARM 1, the gate ==
+
+source     /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/arm3/B1_scratch_max/rho
+lattice    128 x 31 x 118 = 468224 voxels, spacing 1.705279 mm
+origin     (-18.2758, -48.9100, 0.0000)
+threads    3
+eta        2.000 voxels = 3.410559 mm  (the arms' band, unchanged)
+clamp      +-6.000 voxels on the fit target
+reinit     8 sweeps, 0.20 s
+source     75286 voxels inside {phi < 0} (0.1608 of the lattice)
+frozen      40216 FrozenSolid and 357320 FrozenVoid voxels, each turned
+            into a signed distance by the same reinitialise()
+band       100747 voxels with |phi| <= eta
+
+
+#####################################################################
+# FIT G2 — Gaussian (3-sigma), knot spacing (2, 2, 2) voxels PER AXIS,
+#   support 2 x spacing = (4, 4, 4) voxels = (6.821, 6.821, 6.821) mm
+#####################################################################
+  knots      68 x 20 x 63 = 85680 coefficients
+  ★ COMPRESSION 5.5x — 85680 coefficients against 468224 voxels
+  A          468224 x 85680, nnz 14665984 (31.3 knots per voxel), 167.8 MB
+  CG         2000 iterations, relative residual 3.693e-07, 17.1 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.13951 voxels = 0.23790 mm
+      whole domain (clamped target)  : rms 0.07555 voxels, max 0.97999
+  volume     as fitted 75643 voxels inside, source 75286 (+0.474%)
+  ★ VOLUME-MATCHED offset +0.029170 voxels = +0.049742 mm -> 75286 inside
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/hyp1/G2_af_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/hyp1/G2_vm_f1
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/hyp1/fits.csv

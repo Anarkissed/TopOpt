@@ -1,0 +1,12 @@
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/sources/simp/rung_0.68.f64
+binarized            no
+fractional samples   28374 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       88424 of 110904  (vf 0.797302)
+max von Mises        0.016900494 MPa
+MARGIN worst case    3254.342744897
+margin effective     673.853296213   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    407
+load path connected  yes

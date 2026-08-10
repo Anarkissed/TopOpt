@@ -1,0 +1,86 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       24 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        SIMP rung 0.68 from /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.679951)
+PLSM        phi = sum alpha_i psi_i  —  wendland basis, knots (2, 2, 2) voxels PER AXIS
+            68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
+            support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
+            seed fit: 1120 CG iterations, rel resid 9.84e-11, band rms 0.24440 mm, 9.5 s
+            volume offset moves phi by offset * sum_i psi_i, which is 2.3470..2.4746 in the part
+            update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: off
+PLSM        coefficient box +-1365.1029 (4x the largest seed coefficient); a unit move of every
+            coefficient carries phi by at most 2.4746 mm, which is what sizes the MMA move
+PROBE       solver kind 0, warm start ON, early tol 0.001 for 5 iterations
+it   1  c = 0.002867286209  vf = 0.683907 (occ 75414.7)  offset +1.4924 mm  |v|max 3.86e-11  band 28224  hilb 0 (0.0e+00)  |grad|-1 3.16e-01  cg 3019  38.24 s
+it   2  c = 0.002837994516  vf = 0.684754 (occ 75414.7)  offset +0.0021 mm  |v|max 3.79e-11  band 28184  hilb 0 (0.0e+00)  |grad|-1 3.16e-01  cg 1311  18.06 s
+it   3  c = 0.002809799554  vf = 0.684664 (occ 75414.7)  offset +0.0017 mm  |v|max 3.63e-11  band 28141  hilb 0 (0.0e+00)  |grad|-1 3.17e-01  cg 1328  18.48 s
+it   4  c = 0.002783581981  vf = 0.683979 (occ 75414.7)  offset +0.0012 mm  |v|max 3.39e-11  band 27995  hilb 0 (0.0e+00)  |grad|-1 3.18e-01  cg 1313  17.92 s
+it   5  c = 0.002758791333  vf = 0.682293 (occ 75414.7)  offset +0.0002 mm  |v|max 3.1e-11  band 28210  hilb 0 (0.0e+00)  |grad|-1 3.20e-01  cg 1286  17.98 s
+
+certifying iteration 5 (best compliance 0.002758791333 of 5 run)
+mesh        158828 vertices, 317680 triangles -> levelset.stl
+
+== levelset_probe summary ==
+seed                 simp
+rung                 0.68
+THREADS              3
+iterations run       5
+WALL PER ITERATION   22.135 s   (total 110.7 s over 5 iterations)
+  of which solve     21.960 s/iteration (109.8 s total)
+  of which extension 0.001 s/iteration (0.0 s total)
+certification wall   40.3 s
+state solves         5, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         2 voxels = 3.410559 mm
+reinit |grad phi|-1  rms 0.319603 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.996895 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00275879133286   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00303398589381
+achieved vf          0.682293  (target 0.68, printed 75669 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.020328129 MPa
+margin in-plane      2705.610472456
+margin interlayer    4016.338738511
+MARGIN worst case    2705.610472456
+margin effective     560.231259596   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    813
+mass                 465.3419 g
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/speed/P1b_loose_warm/{iterations.csv,design.bin,rho.f64,rho.meta,levelset.stl,summary.txt}
+
+for the roughness row, on the SAME binary that produced PR 321's:
+  ./build/external_field_surface_probe <ref/design.bin> <part.step> <dir> LS=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/speed/P1b_loose_warm/rho

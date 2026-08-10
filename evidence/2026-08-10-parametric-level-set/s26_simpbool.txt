@@ -1,0 +1,64 @@
+== plsm_probe — ARM 1, the gate ==
+
+source     /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/sources/simp/rung_0.68
+lattice    128 x 31 x 118 = 468224 voxels, spacing 1.705279 mm
+origin     (-18.2758, -48.9100, 0.0000)
+threads    3
+eta        2.000 voxels = 3.410559 mm  (the arms' band, unchanged)
+clamp      +-6.000 voxels on the fit target
+reinit     8 sweeps, 0.22 s
+source     88424 voxels inside {phi < 0} (0.1888 of the lattice)
+frozen      40216 FrozenSolid and 357320 FrozenVoid voxels, each turned
+            into a signed distance by the same reinitialise()
+band       82972 voxels with |phi| <= eta
+
+
+#####################################################################
+# FIT G2 — Gaussian (3-sigma), knot spacing (2, 2, 2) voxels PER AXIS,
+#   support 2 x spacing = (4, 4, 4) voxels = (6.821, 6.821, 6.821) mm
+#####################################################################
+  knots      68 x 20 x 63 = 85680 coefficients
+  ★ COMPRESSION 5.5x — 85680 coefficients against 468224 voxels
+  A          468224 x 85680, nnz 14665984 (31.3 knots per voxel), 167.8 MB
+  CG         2000 iterations, relative residual 2.606e-07, 17.1 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.12973 voxels = 0.22122 mm
+      whole domain (clamped target)  : rms 0.06788 voxels, max 1.00586
+  volume     as fitted 88679 voxels inside, source 88424 (+0.288%)
+  ★ VOLUME-MATCHED offset +0.085211 voxels = +0.145308 mm -> 88424 inside
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/simpbool/G2_af_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/simpbool/G2_vm_f1
+
+#####################################################################
+# FIT A424 — Wendland C2 CSRBF, knot spacing (4, 2, 4) voxels PER AXIS,
+#   support 2 x spacing = (8, 4, 8) voxels = (13.642, 6.821, 13.642) mm
+#####################################################################
+  knots      36 x 20 x 34 = 24480 coefficients
+  ★ COMPRESSION 19.1x — 24480 coefficients against 468224 voxels
+  A          468224 x 24480, nnz 15049536 (32.1 knots per voxel), 172.2 MB
+  CG         850 iterations, relative residual 9.678e-11, 9.0 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.24654 voxels = 0.42042 mm
+      whole domain (clamped target)  : rms 0.15482 voxels, max 1.44642
+  volume     as fitted 89148 voxels inside, source 88424 (+0.819%)
+  ★ VOLUME-MATCHED offset +0.049988 voxels = +0.085244 mm -> 88425 inside
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/simpbool/A424_af_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/simpbool/A424_vm_f1
+
+#####################################################################
+# FIT W2 — Wendland C2 CSRBF, knot spacing (2, 2, 2) voxels PER AXIS,
+#   support 2 x spacing = (4, 4, 4) voxels = (6.821, 6.821, 6.821) mm
+#####################################################################
+  knots      68 x 20 x 63 = 85680 coefficients
+  ★ COMPRESSION 5.5x — 85680 coefficients against 468224 voxels
+  A          468224 x 85680, nnz 14665984 (31.3 knots per voxel), 167.8 MB
+  CG         1122 iterations, relative residual 9.930e-11, 9.8 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.14332 voxels = 0.24440 mm
+      whole domain (clamped target)  : rms 0.10388 voxels, max 1.03947
+  volume     as fitted 88836 voxels inside, source 88424 (+0.466%)
+  ★ VOLUME-MATCHED offset +0.089151 voxels = +0.152028 mm -> 88425 inside
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/simpbool/W2_af_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/simpbool/W2_vm_f1
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/simpbool/fits.csv

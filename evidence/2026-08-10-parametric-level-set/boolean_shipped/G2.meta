@@ -1,0 +1,17 @@
+rung 0.68
+requested_vf 0.68
+nx 128
+ny 31
+nz 118
+spacing 1.7052793026343613
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+iso 0.5
+factor 2
+interp tricubic
+achieved_vf 0.68002957512803874
+iterations 0
+wall_s 0
+compliance 0
+# analytic phi = sum alpha_i psi_i, evaluated at the F=1 lattice; VOLUME-MATCHED; 85680 coefficients

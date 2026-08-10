@@ -1657,6 +1657,19 @@ if(OpenCASCADE_FOUND)
     tests/harness/levelset_probe.cpp)
   target_link_libraries(levelset_probe PRIVATE topopt)
 
+  # ARM 1 (task 2026-08-10-parametric-level-set): THE GATE. Fits an ANALYTIC
+  # phi(x) = sum_i alpha_i psi_i(x) to a design we already have, and extracts the
+  # surface FROM THE FUNCTION on a refined lattice rather than from a resample of
+  # it onto the voxel grid. Answers "is the roughness in the REPRESENTATION or in
+  # the DESIGN?" without writing a parametric optimiser first. Contains no FEA and
+  # no sensitivity: `external_field_surface_probe` and `levelset_probe
+  # --certify-field` measure and certify what it writes.
+  #   cmake --build build --target plsm_probe
+  #   ./build/plsm_probe <src_prefix> <out_dir> --fit L:wendland:4,4,4:2 ...
+  add_executable(plsm_probe EXCLUDE_FROM_ALL
+    tests/harness/plsm_probe.cpp)
+  target_link_libraries(plsm_probe PRIVATE topopt)
+
   # S1/S3 (task 2026-08-06-smoothing-operator-bakeoff): the bake-off between
   # mean-curvature flow and ramp reconstruction on the ANALYTIC SPHERE, plus the
   # S3 instrumentation (minimum cross-section, outward excursion, volume, wall

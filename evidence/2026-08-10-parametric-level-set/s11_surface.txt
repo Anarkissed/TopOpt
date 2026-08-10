@@ -1,0 +1,1086 @@
+== external_field_surface_probe — S2 on HIS OWN PART ==
+
+reference  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin
+part       /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 faces, 3106 tessellation triangles)
+grid       128 x 31 x 118, spacing 1.705279 mm, origin (-18.2758, -48.9100, 0.0000)
+classifier tolerance 1.705279 mm
+like-for-like  reference rung 0.68: CUT region 24366 voxels, CAD region 77698 voxels (dilated 1)
+
+#####################################################################
+# ARM SIMP — the run of record, re-measured here so no row in this
+#            table is compared against a remembered number
+#####################################################################
+
+---------------------------------------------------------------
+SIMP  rung 0.68   142354 verts / 284704 tris   iterations 27   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.679951   (miss -0.000049)
+  margin worst 3254.3566   effective 673.8562   max vM 0.0169 MPa   accepted yes
+  SPLIT: CAD 112583 (79.09%)  ambiguous 3580 (2.51%)  CUT 26191 (18.40%)   oblique 28365 (19.93%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.0605 mm  max 10.3332  p99 4.7841  (62.2% of a voxel)
+      oblique CAD   rms 0.4293 mm  max 1.6941  p99 1.2484
+      oblique CUT   rms 3.7452 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 8.4075 deg    CUT 7.5521 deg    CAD 7.5842 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.1891 deg (40928 verts)   refCAD 8.5905 deg (121418 verts)
+  CONTROLS: volume 440550.9 mm3   min section 3.4106 mm2   min-feature 5464
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 54081   binary at a band end 47965 (88.69%)
+      fractional samples (0<v<1): 28374
+      MC crossings 29803   |frac-0.5| rms 0.076042 = 0.1297 mm   within 1% of midpoint 85.28%
+
+---------------------------------------------------------------
+SIMP  rung 0.52   145550 verts / 291100 tris   iterations 127   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.5200   achieved 0.520005   (miss +0.000005)
+  margin worst 3389.4171   effective 701.8222   max vM 0.0162 MPa   accepted yes
+  SPLIT: CAD 102843 (70.66%)  ambiguous 3732 (2.56%)  CUT 38975 (26.78%)   oblique 27041 (18.58%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 1.6684 mm  max 10.3867  p99 6.1601  (97.8% of a voxel)
+      oblique CAD   rms 0.4507 mm  max 1.7022  p99 1.4363
+      oblique CUT   rms 4.1691 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2353 deg    CUT 9.6338 deg    CAD 7.9023 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.0885 deg (37474 verts)   refCAD 9.1704 deg (116749 verts)
+  CONTROLS: volume 403282.0 mm3   min section 3.4106 mm2   min-feature 5047
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 60567   binary at a band end 60563 (99.99%)
+      fractional samples (0<v<1): 45194
+      MC crossings 33848   |frac-0.5| rms 0.001329 = 0.0023 mm   within 1% of midpoint 99.96%
+
+---------------------------------------------------------------
+SIMP  rung 0.38   165096 verts / 330212 tris   iterations 140   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.3800   achieved 0.380000   (miss -0.000000)
+  margin worst 3290.9124   effective 681.4255   max vM 0.0167 MPa   accepted yes
+  SPLIT: CAD 94724 (57.38%)  ambiguous 3823 (2.32%)  CUT 66549 (40.31%)   oblique 26963 (16.33%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.9210 mm  max 14.3157  p99 10.8088  (171.3% of a voxel)
+      oblique CAD   rms 0.4394 mm  max 1.6986  p99 1.3356
+      oblique CUT   rms 5.7951 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.8108 deg    CUT 10.4580 deg    CAD 8.0555 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9378 deg (36429 verts)   refCAD 9.5168 deg (109262 verts)
+  CONTROLS: volume 330882.2 mm3   min section 3.4106 mm2   min-feature 5134
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 63131   binary at a band end 63130 (100.00%)
+      fractional samples (0<v<1): 55060
+      MC crossings 35386   |frac-0.5| rms 0.003265 = 0.0056 mm   within 1% of midpoint 99.99%
+
+---------------------------------------------------------------
+SIMP  rung 0.26   167778 verts / 335588 tris   iterations 153   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.2600   achieved 0.259996   (miss -0.000004)
+  margin worst 3014.1201   effective 624.1121   max vM 0.0182 MPa   accepted yes
+  SPLIT: CAD 89254 (53.20%)  ambiguous 3878 (2.31%)  CUT 74646 (44.49%)   oblique 26388 (15.73%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 3.4878 mm  max 15.5992  p99 12.9024  (204.5% of a voxel)
+      oblique CAD   rms 0.4375 mm  max 1.7001  p99 1.4096
+      oblique CUT   rms 6.4195 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.9413 deg    CUT 10.2657 deg    CAD 8.3031 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.8659 deg (35896 verts)   refCAD 9.8312 deg (104643 verts)
+  CONTROLS: volume 288713.4 mm3   min section 3.4106 mm2   min-feature 5523
+  ★ THE FIELD, on the design lattice (spacing 1.705279 mm)
+      boundary samples 64679   binary at a band end 64678 (100.00%)
+      fractional samples (0<v<1): 63381
+      MC crossings 36453   |frac-0.5| rms 0.001746 = 0.0030 mm   within 1% of midpoint 99.99%
+
+#####################################################################
+# ARM A1_mma_w2-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-voxel  rung 0.68   163164 verts / 326376 tris   iterations 40   wall 1021.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681409   (miss +0.001409)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 99917 (61.24%)  ambiguous 3602 (2.21%)  CUT 59645 (36.56%)   oblique 26899 (16.49%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3319 mm  max 12.0754  p99 8.0441  (136.7% of a voxel)
+      oblique CAD   rms 0.6329 mm  max 1.7053  p99 1.6776
+      oblique CUT   rms 4.1423 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.9903 deg    CUT 11.9133 deg    CAD 7.5070 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9805 deg (36824 verts)   refCAD 8.7987 deg (116115 verts)
+  CONTROLS: volume 373072.5 mm3   min section 3.4106 mm2   min-feature 4897
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 59313   binary at a band end 46297 (78.06%)
+      fractional samples (0<v<1): 27838
+      MC crossings 34002   |frac-0.5| rms 0.149753 = 0.2554 mm   within 1% of midpoint 65.15%
+
+#####################################################################
+# ARM A1_mma_w2-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-analytic-f2  rung 0.68   168720 verts / 337544 tris   iterations 40   wall 1021.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681409   (miss +0.001409)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 100001 (59.27%)  ambiguous 4035 (2.39%)  CUT 64684 (38.34%)   oblique 27839 (16.50%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.4810 mm  max 12.1453  p99 8.0733  (145.5% of a voxel)
+      oblique CAD   rms 0.7023 mm  max 1.7051  p99 1.6747
+      oblique CUT   rms 4.2689 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 15.2150 deg    CUT 17.5462 deg    CAD 12.2733 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 14.0814 deg (36542 verts)   refCAD 13.5631 deg (111655 verts)
+  CONTROLS: volume 374702.4 mm3   min section 3.4106 mm2   min-feature 3661
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 260361   binary at a band end 197476 (75.85%)
+      fractional samples (0<v<1): 224693
+      MC crossings 141649   |frac-0.5| rms 0.174653 = 0.1489 mm   within 1% of midpoint 61.41%
+
+#####################################################################
+# ARM A2_max-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A2_max-voxel  rung 0.68   162266 verts / 324576 tris   iterations 40   wall 1129.2 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.683799   (miss +0.003799)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 98361 (60.62%)  ambiguous 3608 (2.22%)  CUT 60297 (37.16%)   oblique 26614 (16.40%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3574 mm  max 12.3161  p99 8.1457  (138.2% of a voxel)
+      oblique CAD   rms 0.5487 mm  max 1.7051  p99 1.6817
+      oblique CUT   rms 4.0433 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.5849 deg    CUT 10.7249 deg    CAD 7.5951 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.0074 deg (36838 verts)   refCAD 8.9348 deg (116554 verts)
+  CONTROLS: volume 374117.2 mm3   min section 3.4106 mm2   min-feature 5393
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58768   binary at a band end 47047 (80.06%)
+      fractional samples (0<v<1): 25306
+      MC crossings 33851   |frac-0.5| rms 0.151990 = 0.2592 mm   within 1% of midpoint 67.88%
+
+#####################################################################
+# ARM A2_max-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A2_max-analytic-f2  rung 0.68   168588 verts / 337288 tris   iterations 40   wall 1129.2 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.683799   (miss +0.003799)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 98565 (58.47%)  ambiguous 3962 (2.35%)  CUT 66061 (39.18%)   oblique 27644 (16.40%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.5208 mm  max 12.3257  p99 8.1047  (147.8% of a voxel)
+      oblique CAD   rms 0.6288 mm  max 1.7052  p99 1.6744
+      oblique CUT   rms 4.1572 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 15.3072 deg    CUT 17.1590 deg    CAD 12.5986 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 14.0633 deg (36795 verts)   refCAD 14.0097 deg (112749 verts)
+  CONTROLS: volume 376084.6 mm3   min section 3.4106 mm2   min-feature 3580
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 257501   binary at a band end 201781 (78.36%)
+      fractional samples (0<v<1): 203371
+      MC crossings 141357   |frac-0.5| rms 0.162723 = 0.1387 mm   within 1% of midpoint 65.09%
+
+#####################################################################
+# ARM A3_descent_w2-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A3_descent_w2-voxel  rung 0.68   157474 verts / 314960 tris   iterations 20   wall 547.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684736   (miss +0.004736)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97039 (61.62%)  ambiguous 3433 (2.18%)  CUT 57002 (36.20%)   oblique 25569 (16.24%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3833 mm  max 11.5424  p99 7.4130  (139.8% of a voxel)
+      oblique CAD   rms 0.4091 mm  max 1.6986  p99 1.2360
+      oblique CUT   rms 4.0419 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2511 deg    CUT 9.9048 deg    CAD 7.4795 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7398 deg (35981 verts)   refCAD 9.1546 deg (115650 verts)
+  CONTROLS: volume 373992.5 mm3   min section 3.4106 mm2   min-feature 5634
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57069   binary at a band end 45816 (80.28%)
+      fractional samples (0<v<1): 28129
+      MC crossings 32511   |frac-0.5| rms 0.147149 = 0.2509 mm   within 1% of midpoint 68.40%
+
+#####################################################################
+# ARM A3_descent_w2-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A3_descent_w2-analytic-f2  rung 0.68   160128 verts / 320284 tris   iterations 20   wall 547.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684736   (miss +0.004736)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 96846 (60.48%)  ambiguous 3881 (2.42%)  CUT 59401 (37.10%)   oblique 25353 (15.83%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3898 mm  max 11.5653  p99 7.4338  (140.1% of a voxel)
+      oblique CAD   rms 0.4996 mm  max 1.6959  p99 1.2360
+      oblique CUT   rms 4.0235 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 14.1641 deg    CUT 14.8428 deg    CAD 12.3638 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 13.8998 deg (35680 verts)   refCAD 13.7313 deg (111817 verts)
+  CONTROLS: volume 376290.8 mm3   min section 3.4106 mm2   min-feature 4483
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 247058   binary at a band end 194768 (78.83%)
+      fractional samples (0<v<1): 223589
+      MC crossings 132987   |frac-0.5| rms 0.162158 = 0.1383 mm   within 1% of midpoint 66.34%
+
+#####################################################################
+# ARM A4_hilb-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A4_hilb-voxel  rung 0.68   159584 verts / 319188 tris   iterations 20   wall 561.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.682076   (miss +0.002076)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97249 (60.94%)  ambiguous 3438 (2.15%)  CUT 58897 (36.91%)   oblique 25946 (16.26%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3772 mm  max 11.7725  p99 7.8562  (139.4% of a voxel)
+      oblique CAD   rms 0.4092 mm  max 1.7014  p99 1.2360
+      oblique CUT   rms 3.9758 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.3260 deg    CUT 9.8457 deg    CAD 7.7384 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.8941 deg (36646 verts)   refCAD 8.9887 deg (115838 verts)
+  CONTROLS: volume 373968.7 mm3   min section 3.4106 mm2   min-feature 5573
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58039   binary at a band end 45901 (79.09%)
+      fractional samples (0<v<1): 28188
+      MC crossings 33396   |frac-0.5| rms 0.168418 = 0.2872 mm   within 1% of midpoint 66.41%
+
+#####################################################################
+# ARM A4_hilb-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A4_hilb-analytic-f2  rung 0.68   161670 verts / 323372 tris   iterations 20   wall 561.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.682076   (miss +0.002076)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97261 (60.16%)  ambiguous 3777 (2.34%)  CUT 60632 (37.50%)   oblique 26226 (16.22%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.4243 mm  max 12.0012  p99 7.8542  (142.2% of a voxel)
+      oblique CAD   rms 0.4992 mm  max 1.6997  p99 1.2360
+      oblique CUT   rms 3.9604 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 14.0982 deg    CUT 14.0736 deg    CAD 12.5278 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 14.0657 deg (36359 verts)   refCAD 13.8996 deg (111583 verts)
+  CONTROLS: volume 376036.5 mm3   min section 3.4106 mm2   min-feature 4293
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 251091   binary at a band end 195630 (77.91%)
+      fractional samples (0<v<1): 225338
+      MC crossings 134910   |frac-0.5| rms 0.159360 = 0.1359 mm   within 1% of midpoint 65.24%
+
+#####################################################################
+# ARM A5_a424-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A5_a424-voxel  rung 0.68   160462 verts / 320940 tris   iterations 20   wall 541.9 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.682599   (miss +0.002599)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97327 (60.65%)  ambiguous 3489 (2.17%)  CUT 59646 (37.17%)   oblique 26155 (16.30%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3512 mm  max 11.7018  p99 7.6003  (137.9% of a voxel)
+      oblique CAD   rms 0.4126 mm  max 1.7042  p99 1.2360
+      oblique CUT   rms 3.9072 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.5934 deg    CUT 10.5187 deg    CAD 7.7181 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9757 deg (36737 verts)   refCAD 9.0468 deg (116367 verts)
+  CONTROLS: volume 373906.4 mm3   min section 3.4106 mm2   min-feature 5510
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58295   binary at a band end 46275 (79.38%)
+      fractional samples (0<v<1): 28426
+      MC crossings 33518   |frac-0.5| rms 0.161916 = 0.2761 mm   within 1% of midpoint 66.13%
+
+#####################################################################
+# ARM A5_a424-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A5_a424-analytic-f2  rung 0.68   162960 verts / 325952 tris   iterations 20   wall 541.9 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.682599   (miss +0.002599)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97123 (59.60%)  ambiguous 3958 (2.43%)  CUT 61879 (37.97%)   oblique 26227 (16.09%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3896 mm  max 11.7077  p99 7.6105  (140.1% of a voxel)
+      oblique CAD   rms 0.5032 mm  max 1.7020  p99 1.2989
+      oblique CUT   rms 3.9062 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 14.2750 deg    CUT 15.0806 deg    CAD 12.2422 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 14.0358 deg (36549 verts)   refCAD 13.7544 deg (112109 verts)
+  CONTROLS: volume 375943.9 mm3   min section 3.4106 mm2   min-feature 4216
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 252712   binary at a band end 196784 (77.87%)
+      fractional samples (0<v<1): 227913
+      MC crossings 136257   |frac-0.5| rms 0.160948 = 0.1372 mm   within 1% of midpoint 64.53%
+
+#####################################################################
+# ARM A4b_hilb_descent-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A4b_hilb_descent-voxel  rung 0.68   157380 verts / 314768 tris   iterations 20   wall 551.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684682   (miss +0.004682)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97044 (61.66%)  ambiguous 3459 (2.20%)  CUT 56877 (36.14%)   oblique 25551 (16.24%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3854 mm  max 11.7502  p99 7.3688  (139.9% of a voxel)
+      oblique CAD   rms 0.4091 mm  max 1.6986  p99 1.2360
+      oblique CUT   rms 4.0482 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2213 deg    CUT 9.7913 deg    CAD 7.4709 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7388 deg (35999 verts)   refCAD 9.1501 deg (115707 verts)
+  CONTROLS: volume 373934.3 mm3   min section 3.4106 mm2   min-feature 5641
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 56995   binary at a band end 45872 (80.48%)
+      fractional samples (0<v<1): 28011
+      MC crossings 32451   |frac-0.5| rms 0.147174 = 0.2510 mm   within 1% of midpoint 68.52%
+
+#####################################################################
+# ARM A4b_hilb_descent-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A4b_hilb_descent-analytic-f2  rung 0.68   159970 verts / 319964 tris   iterations 20   wall 551.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684682   (miss +0.004682)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 96850 (60.54%)  ambiguous 3881 (2.43%)  CUT 59239 (37.03%)   oblique 25361 (15.85%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3961 mm  max 11.6544  p99 7.4131  (140.5% of a voxel)
+      oblique CAD   rms 0.4996 mm  max 1.6959  p99 1.2360
+      oblique CUT   rms 4.0333 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 14.1084 deg    CUT 14.6896 deg    CAD 12.3650 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 13.9138 deg (35709 verts)   refCAD 13.7024 deg (111871 verts)
+  CONTROLS: volume 376228.7 mm3   min section 3.4106 mm2   min-feature 4479
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 246768   binary at a band end 194845 (78.96%)
+      fractional samples (0<v<1): 222814
+      MC crossings 132788   |frac-0.5| rms 0.162626 = 0.1387 mm   within 1% of midpoint 66.40%
+
+#####################################################################
+# ARM A6_step24-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A6_step24-voxel  rung 0.68   165736 verts / 331520 tris   iterations 30   wall 775.8 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.663403   (miss -0.016597)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 103930 (62.71%)  ambiguous 3689 (2.23%)  CUT 58117 (35.07%)   oblique 29259 (17.65%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.2226 mm  max 12.6532  p99 8.4146  (130.3% of a voxel)
+      oblique CAD   rms 0.4889 mm  max 1.7041  p99 1.5536
+      oblique CUT   rms 4.7715 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.8858 deg    CUT 11.2225 deg    CAD 7.7701 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.2676 deg (37029 verts)   refCAD 9.2323 deg (118435 verts)
+  CONTROLS: volume 364340.5 mm3   min section 3.4106 mm2   min-feature 4969
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 60681   binary at a band end 49229 (81.13%)
+      fractional samples (0<v<1): 29710
+      MC crossings 34522   |frac-0.5| rms 0.148961 = 0.2540 mm   within 1% of midpoint 66.37%
+
+#####################################################################
+# ARM A6_step24-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A6_step24-analytic-f2  rung 0.68   165430 verts / 330916 tris   iterations 30   wall 775.8 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.663403   (miss -0.016597)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 103833 (62.77%)  ambiguous 4096 (2.48%)  CUT 57501 (34.76%)   oblique 29491 (17.83%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.2801 mm  max 12.7816  p99 8.5785  (133.7% of a voxel)
+      oblique CAD   rms 0.5546 mm  max 1.7047  p99 1.5498
+      oblique CUT   rms 4.7471 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 14.0470 deg    CUT 13.8242 deg    CAD 12.6720 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 14.0770 deg (36362 verts)   refCAD 14.1510 deg (113491 verts)
+  CONTROLS: volume 364350.6 mm3   min section 3.4106 mm2   min-feature 4576
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 262862   binary at a band end 207218 (78.83%)
+      fractional samples (0<v<1): 239668
+      MC crossings 140675   |frac-0.5| rms 0.157222 = 0.1341 mm   within 1% of midpoint 64.10%
+
+#####################################################################
+# ARM A7_max_step24-voxel — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A7_max_step24-voxel  rung 0.68   169286 verts / 338700 tris   iterations 30   wall 883.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681680   (miss +0.001680)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 102600 (60.61%)  ambiguous 3642 (2.15%)  CUT 63044 (37.24%)   oblique 28645 (16.92%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3515 mm  max 12.6289  p99 8.7984  (137.9% of a voxel)
+      oblique CAD   rms 0.4644 mm  max 1.7042  p99 1.5041
+      oblique CUT   rms 4.9611 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 10.2500 deg    CUT 12.1695 deg    CAD 7.7030 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.1075 deg (37698 verts)   refCAD 9.0316 deg (116958 verts)
+  CONTROLS: volume 373380.0 mm3   min section 3.4106 mm2   min-feature 4518
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 60882   binary at a band end 49696 (81.63%)
+      fractional samples (0<v<1): 23338
+      MC crossings 35635   |frac-0.5| rms 0.150614 = 0.2568 mm   within 1% of midpoint 66.95%
+
+#####################################################################
+# ARM A7_max_step24-analytic-f2 — rung 0.68, external field 256 x 62 x 236, spacing 0.852640,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A7_max_step24-analytic-f2  rung 0.68   171930 verts / 344032 tris   iterations 30   wall 883.4 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681680   (miss +0.001680)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 102266 (59.48%)  ambiguous 4079 (2.37%)  CUT 65585 (38.15%)   oblique 28871 (16.79%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.4256 mm  max 12.7428  p99 8.9165  (142.2% of a voxel)
+      oblique CAD   rms 0.5364 mm  max 1.7023  p99 1.5092
+      oblique CUT   rms 4.9587 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 14.5705 deg    CUT 15.3854 deg    CAD 12.6105 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 14.0809 deg (37632 verts)   refCAD 13.9960 deg (112142 verts)
+  CONTROLS: volume 375326.3 mm3   min section 3.4106 mm2   min-feature 3993
+  ★ THE FIELD, on the external lattice (spacing 0.852640 mm)
+      boundary samples 264116   binary at a band end 212165 (80.33%)
+      fractional samples (0<v<1): 180965
+      MC crossings 145081   |frac-0.5| rms 0.154457 = 0.1317 mm   within 1% of midpoint 65.81%
+
+#####################################################################
+# ARM A1_mma_w2-analytic-f3 — rung 0.68, external field 384 x 93 x 354, spacing 0.568426,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [-0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-analytic-f3  rung 0.68   383818 verts / 767740 tris   iterations 40   wall 1021.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681409   (miss +0.001409)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 226545 (59.02%)  ambiguous 8017 (2.09%)  CUT 149256 (38.89%)   oblique 62688 (16.33%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.4868 mm  max 12.2207  p99 7.9504  (145.8% of a voxel)
+      oblique CAD   rms 0.7108 mm  max 1.7053  p99 1.6736
+      oblique CUT   rms 4.2374 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 12.0960 deg    CUT 12.8622 deg    CAD 10.9015 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 11.7687 deg (82672 verts)   refCAD 11.4671 deg (252064 verts)
+  CONTROLS: volume 374313.0 mm3   min section 3.4106 mm2   min-feature 1616
+  ★ THE FIELD, on the external lattice (spacing 0.568426 mm)
+      boundary samples 605917   binary at a band end 455816 (75.23%)
+      fractional samples (0<v<1): 757982
+      MC crossings 323257   |frac-0.5| rms 0.172879 = 0.0983 mm   within 1% of midpoint 60.22%
+
+#####################################################################
+# ARM A6_step24-analytic-f3 — rung 0.68, external field 384 x 93 x 354, spacing 0.568426,
+#   iso 0.5000, factor 1 (none), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A6_step24-analytic-f3  rung 0.68   373568 verts / 747192 tris   iterations 30   wall 775.8 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.663403   (miss -0.016597)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 235091 (62.93%)  ambiguous 8202 (2.20%)  CUT 130275 (34.87%)   oblique 66059 (17.68%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.2867 mm  max 12.9344  p99 8.6528  (134.1% of a voxel)
+      oblique CAD   rms 0.5669 mm  max 1.7050  p99 1.5566
+      oblique CUT   rms 4.7431 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 11.5714 deg    CUT 11.2581 deg    CAD 10.9224 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 11.7030 deg (82480 verts)   refCAD 11.7019 deg (256230 verts)
+  CONTROLS: volume 363930.4 mm3   min section 3.4106 mm2   min-feature 3026
+  ★ THE FIELD, on the external lattice (spacing 0.568426 mm)
+      boundary samples 607007   binary at a band end 475410 (78.32%)
+      fractional samples (0<v<1): 823383
+      MC crossings 318155   |frac-0.5| rms 0.160502 = 0.0912 mm   within 1% of midpoint 63.45%
+
+#####################################################################
+# ARM A1_mma_w2-it0001 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-it0001  rung 0.68   157206 verts / 314420 tris   iterations 1   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.683907   (miss +0.003907)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 96910 (61.65%)  ambiguous 3471 (2.21%)  CUT 56825 (36.15%)   oblique 25373 (16.14%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3854 mm  max 11.4936  p99 7.2282  (139.9% of a voxel)
+      oblique CAD   rms 0.4091 mm  max 1.6986  p99 1.2360
+      oblique CUT   rms 4.0757 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2459 deg    CUT 9.8908 deg    CAD 7.4749 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7427 deg (36588 verts)   refCAD 9.1719 deg (114597 verts)
+  CONTROLS: volume 374146.3 mm3   min section 3.4106 mm2   min-feature 5680
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57021   binary at a band end 45942 (80.57%)
+      fractional samples (0<v<1): 28224
+      MC crossings 32510   |frac-0.5| rms 0.147032 = 0.2507 mm   within 1% of midpoint 68.67%
+
+#####################################################################
+# ARM A1_mma_w2-it0010 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-it0010  rung 0.68   157996 verts / 315996 tris   iterations 10   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684222   (miss +0.004222)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97414 (61.66%)  ambiguous 3399 (2.15%)  CUT 57183 (36.19%)   oblique 25480 (16.13%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3894 mm  max 11.7066  p99 7.5967  (140.1% of a voxel)
+      oblique CAD   rms 0.4088 mm  max 1.6992  p99 1.2343
+      oblique CUT   rms 4.0657 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2502 deg    CUT 9.3688 deg    CAD 7.7464 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7916 deg (36542 verts)   refCAD 9.1960 deg (115983 verts)
+  CONTROLS: volume 374319.5 mm3   min section 3.4106 mm2   min-feature 5282
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57291   binary at a band end 45797 (79.94%)
+      fractional samples (0<v<1): 28118
+      MC crossings 32574   |frac-0.5| rms 0.144635 = 0.2466 mm   within 1% of midpoint 68.44%
+
+#####################################################################
+# ARM A1_mma_w2-it0020 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-it0020  rung 0.68   159584 verts / 319188 tris   iterations 20   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.682076   (miss +0.002076)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97249 (60.94%)  ambiguous 3438 (2.15%)  CUT 58897 (36.91%)   oblique 25946 (16.26%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3772 mm  max 11.7725  p99 7.8562  (139.4% of a voxel)
+      oblique CAD   rms 0.4092 mm  max 1.7014  p99 1.2360
+      oblique CUT   rms 3.9758 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.3260 deg    CUT 9.8457 deg    CAD 7.7384 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.8941 deg (36646 verts)   refCAD 8.9887 deg (115838 verts)
+  CONTROLS: volume 373968.7 mm3   min section 3.4106 mm2   min-feature 5573
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58039   binary at a band end 45901 (79.09%)
+      fractional samples (0<v<1): 28188
+      MC crossings 33396   |frac-0.5| rms 0.168418 = 0.2872 mm   within 1% of midpoint 66.41%
+
+#####################################################################
+# ARM A1_mma_w2-it0030 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-it0030  rung 0.68   161100 verts / 322216 tris   iterations 30   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.683176   (miss +0.003176)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97441 (60.48%)  ambiguous 3439 (2.13%)  CUT 60220 (37.38%)   oblique 26289 (16.32%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3442 mm  max 11.9217  p99 7.9686  (137.5% of a voxel)
+      oblique CAD   rms 0.4132 mm  max 1.7046  p99 1.2360
+      oblique CUT   rms 3.8767 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.4587 deg    CUT 10.3987 deg    CAD 7.5798 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9602 deg (36762 verts)   refCAD 8.8390 deg (115933 verts)
+  CONTROLS: volume 373573.5 mm3   min section 3.4106 mm2   min-feature 4946
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58716   binary at a band end 46093 (78.50%)
+      fractional samples (0<v<1): 27810
+      MC crossings 33495   |frac-0.5| rms 0.155726 = 0.2656 mm   within 1% of midpoint 66.09%
+
+#####################################################################
+# ARM A1_mma_w2-it0040 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A1_mma_w2-it0040  rung 0.68   163164 verts / 326376 tris   iterations 40   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681409   (miss +0.001409)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 99917 (61.24%)  ambiguous 3602 (2.21%)  CUT 59645 (36.56%)   oblique 26899 (16.49%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3319 mm  max 12.0754  p99 8.0441  (136.7% of a voxel)
+      oblique CAD   rms 0.6329 mm  max 1.7053  p99 1.6776
+      oblique CUT   rms 4.1423 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.9903 deg    CUT 11.9133 deg    CAD 7.5070 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9805 deg (36824 verts)   refCAD 8.7987 deg (116115 verts)
+  CONTROLS: volume 373072.5 mm3   min section 3.4106 mm2   min-feature 4897
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 59313   binary at a band end 46297 (78.06%)
+      fractional samples (0<v<1): 27838
+      MC crossings 34002   |frac-0.5| rms 0.149753 = 0.2554 mm   within 1% of midpoint 65.15%
+
+#####################################################################
+# ARM A2_max-it0001 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A2_max-it0001  rung 0.68   157336 verts / 314676 tris   iterations 1   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684466   (miss +0.004466)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 96983 (61.64%)  ambiguous 3401 (2.16%)  CUT 56952 (36.20%)   oblique 25346 (16.11%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3786 mm  max 11.4741  p99 7.1622  (139.5% of a voxel)
+      oblique CAD   rms 0.4093 mm  max 1.7038  p99 1.2360
+      oblique CUT   rms 4.0686 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.1646 deg    CUT 9.6701 deg    CAD 7.4790 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7370 deg (36499 verts)   refCAD 9.1722 deg (114624 verts)
+  CONTROLS: volume 374308.7 mm3   min section 3.4106 mm2   min-feature 5681
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57075   binary at a band end 45914 (80.45%)
+      fractional samples (0<v<1): 28196
+      MC crossings 32486   |frac-0.5| rms 0.145052 = 0.2474 mm   within 1% of midpoint 68.85%
+
+#####################################################################
+# ARM A2_max-it0010 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A2_max-it0010  rung 0.68   157858 verts / 315728 tris   iterations 10   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684799   (miss +0.004799)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97363 (61.68%)  ambiguous 3420 (2.17%)  CUT 57075 (36.16%)   oblique 25454 (16.12%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3722 mm  max 11.6267  p99 7.4911  (139.1% of a voxel)
+      oblique CAD   rms 0.4093 mm  max 1.6986  p99 1.2360
+      oblique CUT   rms 4.0407 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2494 deg    CUT 9.2896 deg    CAD 7.7954 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7876 deg (36273 verts)   refCAD 9.2441 deg (115893 verts)
+  CONTROLS: volume 374301.1 mm3   min section 3.4106 mm2   min-feature 5312
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57199   binary at a band end 46210 (80.79%)
+      fractional samples (0<v<1): 26747
+      MC crossings 32608   |frac-0.5| rms 0.143099 = 0.2440 mm   within 1% of midpoint 70.03%
+
+#####################################################################
+# ARM A2_max-it0020 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A2_max-it0020  rung 0.68   159608 verts / 319244 tris   iterations 20   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.683438   (miss +0.003438)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97093 (60.83%)  ambiguous 3467 (2.17%)  CUT 59048 (37.00%)   oblique 25854 (16.20%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3826 mm  max 11.9011  p99 7.9421  (139.7% of a voxel)
+      oblique CAD   rms 0.4095 mm  max 1.6986  p99 1.2360
+      oblique CUT   rms 3.9991 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.4066 deg    CUT 9.9869 deg    CAD 7.7818 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.8850 deg (36401 verts)   refCAD 9.0970 deg (116059 verts)
+  CONTROLS: volume 374046.7 mm3   min section 3.4106 mm2   min-feature 5519
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57893   binary at a band end 46531 (80.37%)
+      fractional samples (0<v<1): 26885
+      MC crossings 33262   |frac-0.5| rms 0.154188 = 0.2629 mm   within 1% of midpoint 69.03%
+
+#####################################################################
+# ARM A2_max-it0030 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A2_max-it0030  rung 0.68   160868 verts / 321760 tris   iterations 30   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684105   (miss +0.004105)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 97287 (60.48%)  ambiguous 3462 (2.15%)  CUT 60119 (37.37%)   oblique 26255 (16.32%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3688 mm  max 12.0805  p99 8.0244  (138.9% of a voxel)
+      oblique CAD   rms 0.4412 mm  max 1.7052  p99 1.5927
+      oblique CUT   rms 3.9504 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.4441 deg    CUT 10.2354 deg    CAD 7.6836 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9540 deg (36608 verts)   refCAD 8.9836 deg (116261 verts)
+  CONTROLS: volume 373990.0 mm3   min section 3.4106 mm2   min-feature 4936
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58397   binary at a band end 46810 (80.16%)
+      fractional samples (0<v<1): 25549
+      MC crossings 33550   |frac-0.5| rms 0.148771 = 0.2537 mm   within 1% of midpoint 68.51%
+
+#####################################################################
+# ARM A2_max-it0040 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A2_max-it0040  rung 0.68   162266 verts / 324576 tris   iterations 40   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.683799   (miss +0.003799)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 98361 (60.62%)  ambiguous 3608 (2.22%)  CUT 60297 (37.16%)   oblique 26614 (16.40%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3574 mm  max 12.3161  p99 8.1457  (138.2% of a voxel)
+      oblique CAD   rms 0.5487 mm  max 1.7051  p99 1.6817
+      oblique CUT   rms 4.0433 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.5849 deg    CUT 10.7249 deg    CAD 7.5951 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.0074 deg (36838 verts)   refCAD 8.9348 deg (116554 verts)
+  CONTROLS: volume 374117.2 mm3   min section 3.4106 mm2   min-feature 5393
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58768   binary at a band end 47047 (80.06%)
+      fractional samples (0<v<1): 25306
+      MC crossings 33851   |frac-0.5| rms 0.151990 = 0.2592 mm   within 1% of midpoint 67.88%
+
+#####################################################################
+# ARM A6_step24-it0001 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A6_step24-it0001  rung 0.68   157206 verts / 314420 tris   iterations 1   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.683907   (miss +0.003907)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 96910 (61.65%)  ambiguous 3471 (2.21%)  CUT 56825 (36.15%)   oblique 25373 (16.14%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3854 mm  max 11.4936  p99 7.2282  (139.9% of a voxel)
+      oblique CAD   rms 0.4091 mm  max 1.6986  p99 1.2360
+      oblique CUT   rms 4.0757 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.2459 deg    CUT 9.8908 deg    CAD 7.4749 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7427 deg (36588 verts)   refCAD 9.1719 deg (114597 verts)
+  CONTROLS: volume 374146.3 mm3   min section 3.4106 mm2   min-feature 5680
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57021   binary at a band end 45942 (80.57%)
+      fractional samples (0<v<1): 28224
+      MC crossings 32510   |frac-0.5| rms 0.147032 = 0.2507 mm   within 1% of midpoint 68.67%
+
+#####################################################################
+# ARM A6_step24-it0010 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A6_step24-it0010  rung 0.68   162220 verts / 324472 tris   iterations 10   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681995   (miss +0.001995)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 98979 (61.02%)  ambiguous 3566 (2.20%)  CUT 59675 (36.79%)   oblique 26702 (16.46%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3289 mm  max 12.0254  p99 7.9823  (136.6% of a voxel)
+      oblique CAD   rms 0.5712 mm  max 1.7053  p99 1.6802
+      oblique CUT   rms 4.0020 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.7709 deg    CUT 11.3492 deg    CAD 7.5202 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9397 deg (36848 verts)   refCAD 8.7923 deg (115976 verts)
+  CONTROLS: volume 373346.7 mm3   min section 3.4106 mm2   min-feature 5045
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 59142   binary at a band end 46258 (78.22%)
+      fractional samples (0<v<1): 27675
+      MC crossings 33791   |frac-0.5| rms 0.149620 = 0.2551 mm   within 1% of midpoint 65.68%
+
+#####################################################################
+# ARM A6_step24-it0020 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A6_step24-it0020  rung 0.68   169206 verts / 338476 tris   iterations 20   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.670463   (miss -0.009537)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 103330 (61.07%)  ambiguous 3656 (2.16%)  CUT 62220 (36.77%)   oblique 28731 (16.98%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3286 mm  max 12.3283  p99 8.0224  (136.6% of a voxel)
+      oblique CAD   rms 0.4931 mm  max 1.7040  p99 1.5521
+      oblique CUT   rms 4.8506 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 10.2670 deg    CUT 12.2296 deg    CAD 7.6297 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.2534 deg (36974 verts)   refCAD 9.0842 deg (117685 verts)
+  CONTROLS: volume 367318.9 mm3   min section 3.4106 mm2   min-feature 4830
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 61330   binary at a band end 48430 (78.97%)
+      fractional samples (0<v<1): 29371
+      MC crossings 35256   |frac-0.5| rms 0.155951 = 0.2659 mm   within 1% of midpoint 61.83%
+
+#####################################################################
+# ARM A6_step24-it0030 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A6_step24-it0030  rung 0.68   165736 verts / 331520 tris   iterations 30   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.663403   (miss -0.016597)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 103930 (62.71%)  ambiguous 3689 (2.23%)  CUT 58117 (35.07%)   oblique 29259 (17.65%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.2226 mm  max 12.6532  p99 8.4146  (130.3% of a voxel)
+      oblique CAD   rms 0.4889 mm  max 1.7041  p99 1.5536
+      oblique CUT   rms 4.7715 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.8858 deg    CUT 11.2225 deg    CAD 7.7701 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.2676 deg (37029 verts)   refCAD 9.2323 deg (118435 verts)
+  CONTROLS: volume 364340.5 mm3   min section 3.4106 mm2   min-feature 4969
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 60681   binary at a band end 49229 (81.13%)
+      fractional samples (0<v<1): 29710
+      MC crossings 34522   |frac-0.5| rms 0.148961 = 0.2540 mm   within 1% of midpoint 66.37%
+
+#####################################################################
+# ARM A7_max_step24-it0001 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A7_max_step24-it0001  rung 0.68   157336 verts / 314676 tris   iterations 1   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684466   (miss +0.004466)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 96983 (61.64%)  ambiguous 3401 (2.16%)  CUT 56952 (36.20%)   oblique 25346 (16.11%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3786 mm  max 11.4741  p99 7.1622  (139.5% of a voxel)
+      oblique CAD   rms 0.4093 mm  max 1.7038  p99 1.2360
+      oblique CUT   rms 4.0686 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.1646 deg    CUT 9.6701 deg    CAD 7.4790 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.7370 deg (36499 verts)   refCAD 9.1722 deg (114624 verts)
+  CONTROLS: volume 374308.7 mm3   min section 3.4106 mm2   min-feature 5681
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 57075   binary at a band end 45914 (80.45%)
+      fractional samples (0<v<1): 28196
+      MC crossings 32486   |frac-0.5| rms 0.145052 = 0.2474 mm   within 1% of midpoint 68.85%
+
+#####################################################################
+# ARM A7_max_step24-it0010 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A7_max_step24-it0010  rung 0.68   161556 verts / 323120 tris   iterations 10   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684628   (miss +0.004628)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 98752 (61.13%)  ambiguous 3614 (2.24%)  CUT 59190 (36.64%)   oblique 26662 (16.50%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3273 mm  max 12.0768  p99 8.0698  (136.5% of a voxel)
+      oblique CAD   rms 0.5492 mm  max 1.7051  p99 1.6807
+      oblique CUT   rms 3.9652 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 9.3757 deg    CUT 10.3830 deg    CAD 7.5143 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.8929 deg (36857 verts)   refCAD 8.7852 deg (116081 verts)
+  CONTROLS: volume 374393.4 mm3   min section 3.4106 mm2   min-feature 5058
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 58818   binary at a band end 46577 (79.19%)
+      fractional samples (0<v<1): 25508
+      MC crossings 33628   |frac-0.5| rms 0.145860 = 0.2487 mm   within 1% of midpoint 67.61%
+
+#####################################################################
+# ARM A7_max_step24-it0020 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A7_max_step24-it0020  rung 0.68   168792 verts / 337696 tris   iterations 20   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.684763   (miss +0.004763)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 103007 (61.03%)  ambiguous 3659 (2.17%)  CUT 62126 (36.81%)   oblique 28475 (16.87%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3829 mm  max 12.3942  p99 8.5826  (139.7% of a voxel)
+      oblique CAD   rms 0.4833 mm  max 1.7050  p99 1.5199
+      oblique CUT   rms 4.9367 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 10.3398 deg    CUT 12.5843 deg    CAD 7.5395 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 9.9645 deg (37280 verts)   refCAD 8.9320 deg (117069 verts)
+  CONTROLS: volume 374073.5 mm3   min section 3.4106 mm2   min-feature 4486
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 60756   binary at a band end 48626 (80.03%)
+      fractional samples (0<v<1): 24052
+      MC crossings 35271   |frac-0.5| rms 0.153998 = 0.2626 mm   within 1% of midpoint 64.51%
+
+#####################################################################
+# ARM A7_max_step24-it0030 — rung 0.68, external field 128 x 31 x 118, spacing 1.705279,
+#   iso 0.5000, factor 2 (tricubic), lattice 'external'
+#####################################################################
+  field range [0.000000, 1.000000]   (an occupancy, as required)
+
+---------------------------------------------------------------
+A7_max_step24-it0030  rung 0.68   169286 verts / 338700 tris   iterations 30   wall 0.0 s
+---------------------------------------------------------------
+  vf requested 0.6800   achieved 0.681680   (miss +0.001680)
+  margin — NOT CERTIFIED BY CORE (external arm; see the handoff's §S4b)
+  SPLIT: CAD 102600 (60.61%)  ambiguous 3642 (2.15%)  CUT 63044 (37.24%)   oblique 28645 (16.92%)
+  ★ STAIR-STEP AMPLITUDE (PR 299's metric, oblique CAD surface)
+      oblique ALL   rms 2.3515 mm  max 12.6289  p99 8.7984  (137.9% of a voxel)
+      oblique CAD   rms 0.4644 mm  max 1.7042  p99 1.5041
+      oblique CUT   rms 4.9611 mm  (NOT an error — no reference exists there; PR 314)
+  ★ ROUGHNESS (rms dihedral, same instrument, restricted populations)
+      whole mesh 10.2500 deg    CUT 12.1695 deg    CAD 7.7030 deg
+      ★ LIKE-FOR-LIKE, over the REFERENCE's regions (same part of
+        space on every arm): refCUT 10.1075 deg (37698 verts)   refCAD 9.0316 deg (116958 verts)
+  CONTROLS: volume 373380.0 mm3   min section 3.4106 mm2   min-feature 4518
+  ★ THE FIELD, on the external lattice (spacing 1.705279 mm)
+      boundary samples 60882   binary at a band end 49696 (81.63%)
+      fractional samples (0<v<1): 23338
+      MC crossings 35635   |frac-0.5| rms 0.150614 = 0.2568 mm   within 1% of midpoint 66.95%
+
+
+=====================================================================
+THE ANSWER — every arm against SIMP, rung by rung
+=====================================================================
+The headline amplitude is the CAD population. PR 314 settled that the
+CUT surface has no ground truth, so its distance-to-CAD is a fact about
+the part's shape and not an error; the CUT column here is therefore the
+rms DIHEDRAL, which needs no reference. Sub-voxel content is the
+MECHANISM column and is signed the other way up: bigger = more sub-voxel
+placement, because a crossing at the edge midpoint IS a staircase.
+
+arm                    | rung   | amp CAD (mm)      | rough CUT (deg)   | sub-voxel (mm)   
+                       |        |    value  %better |    value  %better |    value    %more
+SIMP                   | 0.68   |   0.4293      — |   7.5521      — |   0.1297      —
+SIMP                   | 0.52   |   0.4507      — |   9.6338      — |   0.0023      —
+SIMP                   | 0.38   |   0.4394      — |  10.4580      — |   0.0056      —
+SIMP                   | 0.26   |   0.4375      — |  10.2657      — |   0.0030      —
+A1_mma_w2-voxel        | 0.68   |   0.6329    -47.4 |  11.9133    -57.7 |   0.2554      +97
+A1_mma_w2-analytic-f2  | 0.68   |   0.7023    -63.6 |  17.5462   -132.3 |   0.1489      +15
+A2_max-voxel           | 0.68   |   0.5487    -27.8 |  10.7249    -42.0 |   0.2592     +100
+A2_max-analytic-f2     | 0.68   |   0.6288    -46.5 |  17.1590   -127.2 |   0.1387       +7
+A3_descent_w2-voxel    | 0.68   |   0.4091     +4.7 |   9.9048    -31.2 |   0.2509      +94
+A3_descent_w2-analytic-f2 | 0.68   |   0.4996    -16.4 |  14.8428    -96.5 |   0.1383       +7
+A4_hilb-voxel          | 0.68   |   0.4092     +4.7 |   9.8457    -30.4 |   0.2872     +121
+A4_hilb-analytic-f2    | 0.68   |   0.4992    -16.3 |  14.0736    -86.4 |   0.1359       +5
+A5_a424-voxel          | 0.68   |   0.4126     +3.9 |  10.5187    -39.3 |   0.2761     +113
+A5_a424-analytic-f2    | 0.68   |   0.5032    -17.2 |  15.0806    -99.7 |   0.1372       +6
+A4b_hilb_descent-voxel | 0.68   |   0.4091     +4.7 |   9.7913    -29.7 |   0.2510      +94
+A4b_hilb_descent-analytic-f2 | 0.68   |   0.4996    -16.4 |  14.6896    -94.5 |   0.1387       +7
+A6_step24-voxel        | 0.68   |   0.4889    -13.9 |  11.2225    -48.6 |   0.2540      +96
+A6_step24-analytic-f2  | 0.68   |   0.5546    -29.2 |  13.8242    -83.1 |   0.1341       +3
+A7_max_step24-voxel    | 0.68   |   0.4644     -8.2 |  12.1695    -61.1 |   0.2568      +98
+A7_max_step24-analytic-f2 | 0.68   |   0.5364    -25.0 |  15.3854   -103.7 |   0.1317       +2
+A1_mma_w2-analytic-f3  | 0.68   |   0.7108    -65.6 |  12.8622    -70.3 |   0.0983      -24
+A6_step24-analytic-f3  | 0.68   |   0.5669    -32.1 |  11.2581    -49.1 |   0.0912      -30
+A1_mma_w2-it0001       | 0.68   |   0.4091     +4.7 |   9.8908    -31.0 |   0.2507      +93
+A1_mma_w2-it0010       | 0.68   |   0.4088     +4.8 |   9.3688    -24.1 |   0.2466      +90
+A1_mma_w2-it0020       | 0.68   |   0.4092     +4.7 |   9.8457    -30.4 |   0.2872     +121
+A1_mma_w2-it0030       | 0.68   |   0.4132     +3.7 |  10.3987    -37.7 |   0.2656     +105
+A1_mma_w2-it0040       | 0.68   |   0.6329    -47.4 |  11.9133    -57.7 |   0.2554      +97
+A2_max-it0001          | 0.68   |   0.4093     +4.7 |   9.6701    -28.0 |   0.2474      +91
+A2_max-it0010          | 0.68   |   0.4093     +4.6 |   9.2896    -23.0 |   0.2440      +88
+A2_max-it0020          | 0.68   |   0.4095     +4.6 |   9.9869    -32.2 |   0.2629     +103
+A2_max-it0030          | 0.68   |   0.4412     -2.8 |  10.2354    -35.5 |   0.2537      +96
+A2_max-it0040          | 0.68   |   0.5487    -27.8 |  10.7249    -42.0 |   0.2592     +100
+A6_step24-it0001       | 0.68   |   0.4091     +4.7 |   9.8908    -31.0 |   0.2507      +93
+A6_step24-it0010       | 0.68   |   0.5712    -33.1 |  11.3492    -50.3 |   0.2551      +97
+A6_step24-it0020       | 0.68   |   0.4931    -14.9 |  12.2296    -61.9 |   0.2659     +105
+A6_step24-it0030       | 0.68   |   0.4889    -13.9 |  11.2225    -48.6 |   0.2540      +96
+A7_max_step24-it0001   | 0.68   |   0.4093     +4.7 |   9.6701    -28.0 |   0.2474      +91
+A7_max_step24-it0010   | 0.68   |   0.5492    -27.9 |  10.3830    -37.5 |   0.2487      +92
+A7_max_step24-it0020   | 0.68   |   0.4833    -12.6 |  12.5843    -66.6 |   0.2626     +103
+A7_max_step24-it0030   | 0.68   |   0.4644     -8.2 |  12.1695    -61.1 |   0.2568      +98
+
+A POSITIVE % IS THE ARM WINNING. THE BAR IS SIMP, not zero.
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/s11_surface/s2_reference_impl_vs_simp.csv

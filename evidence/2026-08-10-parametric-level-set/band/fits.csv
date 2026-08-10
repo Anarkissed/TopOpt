@@ -1,0 +1,2 @@
+label,basis,knot_dx_vox,knot_dy_vox,knot_dz_vox,support_mult,support_rx_mm,support_ry_mm,support_rz_mm,lambda,knots_x,knots_y,knots_z,n_coeff,n_voxels,compression,nnz_A,cg_iters,cg_rel_resid,resid_band_rms_vox,resid_band_rms_mm,resid_all_rms_vox,resid_all_max_vox,inside_asfit,inside_src,offset_vox,offset_mm,fit_wall_s
+BW,wendland,2,2,2,2,6.82111721054,6.82111721054,6.82111721054,1e-06,68,20,63,85680,468224,5.46479925303,14665984,1093,9.96618152712e-11,0.141850395382,0.241894543315,0.103066421227,0.774730869201,75851,75417,0.0563242964259,0.0960486569305,9.3675809158

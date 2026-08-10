@@ -1,0 +1,13 @@
+== THE SHIPPED VOXEL ARMS STILL REPRODUCE, ON THE FINAL BINARY ==
+
+levelset_probe, 3 iterations, --gridap-auto min, 3 threads.
+BEFORE: the pre-task binary. AFTER: this tree, with --plsm, --plsm-mma,
+--plsm-lbfgs, --plsm-export, --respect-frozen, --dump-mask, --dump-masked,
+--warm-start, --solver-kind, --penalized-solver, --cg-tol-early and the
+off_shape generalisation of the volume offset ALL present and all default OFF.
+
+-- every COMPUTED column of iterations.csv (all but the three wall clocks)
+   IDENTICAL (the diff above is empty)
+
+-- the final ersatz occupancy, 468224 float64
+   rho.f64 BYTE-IDENTICAL

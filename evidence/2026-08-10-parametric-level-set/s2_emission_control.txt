@@ -1,0 +1,32 @@
+== THE EMISSION CONTROL ==
+
+`SIMPf2` is HIS rung 0.68 written out by plsm_probe at factor 2 (tricubic, by
+core's own resample_field) and extracted by external_field_surface_probe with
+`factor 1` / `interp none`. That is the SAME operation as the probe's OWN
+built-in SIMP row, which extracts the design.bin at factor 2 tricubic. So the
+two rows must agree exactly, and if the lattice, the origin or the resample
+convention were wrong by half a cell they would not.
+
+column                   built-in SIMP row        emitted SIMPf2 row       
+verts                    142354                   142354                   
+tris                     284704                   284704                   
+n_cad                    112583                   112583                   
+n_cut                    26191                    26191                    
+n_ambiguous              3580                     3580                     
+n_oblique                28365                    28365                    
+obl_all_rms_mm           1.060542                 1.060542                 
+obl_cad_rms_mm           0.429291                 0.429291                 
+obl_cut_rms_mm           3.745211                 3.745211                 
+dihedral_all_deg         8.407493                 8.407493                 
+dihedral_cut_deg         7.552074                 7.552074                 
+dihedral_cad_deg         7.584248                 7.584248                 
+dihedral_refcut_deg      10.189099                10.189099                
+dihedral_refcad_deg      8.590452                 8.590452                 
+n_refcut                 40928                    40928                    
+n_refcad                 121418                   121418                   
+volume_mm3               440550.901897            440550.901897            
+min_section_mm2          3.410559                 3.410559                 
+min_feature_violations   5464                     5464                     
+
+19 columns compared, 0 mismatches.
+NOTHING ELSE IN THIS TASK MEANS ANYTHING WITHOUT THIS ROW.
