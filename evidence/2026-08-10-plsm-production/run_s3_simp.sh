@@ -31,18 +31,32 @@
 # ★ THREE THREADS, and the machine otherwise quiet. Every wall clock here is
 # compared against another wall clock from this same script.
 #
-# ★ AND AN ITERATION CAP, STATED RATHER THAN HIDDEN. His ladder runs 27 / 127 /
-# 140 / 153 iterations to convergence — 447 in all, about 2.5 hours per arm at
-# three threads, and four arms of that do not fit. `simp_max_iterations` is
-# therefore capped at $CAP (default 40) on EVERY arm, so all four are the same
-# experiment and the comparison between them is exact. RUNG 0.68 IS UNAFFECTED:
-# it converges in 27 iterations, below the cap, and it is the rung every bar in
-# this task lives at. Rungs 0.52 / 0.38 / 0.26 are truncated, so their designs are
-# not the shipped ones — what is measured there is the SOLVER, which is the
-# question, on four fields that are identical across arms by construction.
-# Set CAP=0 to run the full ladder.
+# ★ AND A CAP THAT DID NOT WORK, LEFT IN THE RECORD RATHER THAN TIDIED AWAY.
+# The first pass of this script capped `simp.max_iterations` at 40 so four arms
+# would fit. IT DID NOTHING. `run_job.cpp:6481` applies `job.simp_max_iterations`
+# only on the SELF-WEIGHT branch; this is a LOAD-CASE job, so the key is accepted
+# by the schema, mapped onto nothing, and silently dropped. The arms ran the full
+# 381-iteration ladder and the first one took nearly an hour.
 #
-# Cost on the machine of record (10 cores, 3 threads): ~50 / 35 / 45 / 25 min.
+# That is a defect in the shipped CLI, not just a mistake here: the load-case
+# schema REFUSES `ladder` and `margin_stop` with a message explaining that the
+# production ladder and margin apply, and then accepts `simp.max_iterations` and
+# drops it. It should be honoured (it is a budget, not something the load case
+# determines) or refused. It is reported in the handoff and NOT fixed here.
+#
+# ★ SO THESE ARMS ARE UNCAPPED AND FULL-FIDELITY, which is better evidence than
+# what was planned — and THREE arms rather than four, because four did not fit:
+#
+#   base    what runs today
+#   loose   the draft block, WHICH ALREADY SHIPS — the control that says whether
+#           this task's change adds anything to what he already has
+#   both    loose + the new warm start
+#
+# `warm` alone is dropped. PR 324 already measured it at 4% alone and the
+# mechanism is understood; what is NOT known is whether the PAIR transfers to
+# SIMP, and `base`/`loose`/`both` answer that.
+#
+# Cost on the machine of record (10 cores, 3 threads): ~55 / 35 / 20 min.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -57,29 +71,24 @@ cp "$BAKE/M2_verticalStand.step" "$SCRATCH/s3jobs/"
 # The four job documents, from HIS job document and differing ONLY in the block
 # under test. Written by a script rather than by hand so no other key can drift
 # between arms.
-CAP="${CAP:-40}"
-python3 - "$BAKE/job_simp.json" "$SCRATCH/s3jobs" "$CAP" <<'PY'
+python3 - "$BAKE/job_simp.json" "$SCRATCH/s3jobs" <<'PY'
 import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 base = json.load(open(src))
-cap = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 arms = {
     "base":  {},
     "loose": {"draft": {"quality": True}},
-    "warm":  {"warm_start": {"coarse": False, "matfree": True}},
     "both":  {"draft": {"quality": True},
               "warm_start": {"coarse": False, "matfree": True}},
 }
 for name, extra in arms.items():
     j = dict(base)
-    if cap > 0:
-        j["simp"] = {"max_iterations": cap}
     j.update(extra)
     json.dump(j, open(f"{dst}/simp_{name}.json", "w"), indent=1)
-print("wrote", len(arms), "job documents, iteration cap", cap or "none")
+print("wrote", len(arms), "job documents, UNCAPPED (see the header)")
 PY
 
-for arm in base loose warm both; do
+for arm in base loose both; do
   [ -d "$SCRATCH/s3_$arm" ] && rm -rf "$SCRATCH/s3_$arm"
   /usr/bin/time -p ./build/topopt-cli run "$SCRATCH/s3jobs/simp_$arm.json" \
       --out "$SCRATCH/s3_$arm" --materials core/src/materials/materials.json \

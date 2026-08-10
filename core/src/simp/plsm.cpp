@@ -402,6 +402,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   bool cancelled = false;
   int done_iters = 0;
 
+  // Bound BEFORE the loop, because the per-iteration record is part of
+  // `SimpOptimizeResult`'s contract and is filled as the loop runs.
+  SimpOptimizeResult& r = out.optimization;
+
   const double tol_tight = options.cg_tolerance;
   const double tol_loose = plsm.cg_tolerance_loose > tol_tight
                                ? plsm.cg_tolerance_loose
@@ -556,6 +560,24 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     }
 
     done_iters = it;
+    // ── ★ THE APP'S TWO READ-ONLY FEEDS, WHICH A NEW OPTIMISER SILENTLY LOSES ─
+    //
+    // Found by wiring this path into the front-end: `run_minimize_plastic` in
+    // the app bridge sets `keyframe_count = 12` and the driver turns that into a
+    // `keyframe` callback plus a stride, so the app can play the shape back as it
+    // evolves. `simp_optimize` calls it (simp.cpp:2444); an optimiser that did
+    // not would hand the app an EMPTY playback and nothing would say why.
+    // `density_observer` is the same story for the CLI's `--snapshots`.
+    //
+    // Both are READ-ONLY — they take the field by const reference and cannot
+    // change the design — and both fire on the SAME schedule the SIMP loop uses:
+    // the keyframe on iteration 1 and every `keyframe_stride` after it, the
+    // observer every iteration. `occ` is the analysis field at this point (the
+    // ersatz the certificate will read), which is what both consumers want.
+    if (options.keyframe && options.keyframe_stride > 0 &&
+        (it == 1 || it % options.keyframe_stride == 0))
+      options.keyframe(rho);
+    if (options.density_observer) options.density_observer(it, rho);
     // ── OBSERVABILITY: the SAME hook the SIMP loop fills ────────────────────
     //
     // ★ A RUN THAT REPORTS NOTHING IS NOT A PRODUCTION PATH. `iterations.csv` is
@@ -580,6 +602,18 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       ob.cg_recycle_dim = sc.cg.recycle_dim;
       ob.cg_recycle_setup_matvecs = sc.cg.recycle_setup_matvecs;
       options.observe(ob);
+    }
+    // `SimpOptimizeResult::history` is part of the contract — "history has
+    // `iterations` entries" — and a consumer that found it empty would read a
+    // parametric rung as a rung that never ran. `change` has no analogue here
+    // (there is no per-voxel design variable to difference) and is left at 0
+    // rather than filled with a lookalike; the handoff says so.
+    {
+      SimpIteration h;
+      h.compliance = sc.compliance;
+      h.change = 0.0;
+      h.volume_fraction = achieved;
+      r.history.push_back(h);
     }
     out.history_compliance.push_back(sc.compliance);
     out.history_volume_fraction.push_back(achieved);
@@ -606,7 +640,6 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   out.total_wall_s = steady_s() - t_run0;
   out.best_iteration = best_iter;
 
-  SimpOptimizeResult& r = out.optimization;
   r.iterations = done_iters;
   r.cancelled = cancelled;
   r.non_convergent = non_convergent;
@@ -661,6 +694,11 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   }
   r.initial_compliance =
       out.history_compliance.empty() ? 0.0 : out.history_compliance.front();
+  // The FINAL converged state, as `simp_optimize` emits it (simp.cpp:2631): the
+  // playback's last frame is the design that is actually shipped, not whatever
+  // iteration the stride last landed on.
+  if (options.keyframe && options.keyframe_stride > 0)
+    options.keyframe(r.physical_density);
   return out;
 }
 

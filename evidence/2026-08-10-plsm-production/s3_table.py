@@ -46,28 +46,36 @@ def totals(path):
 
 
 def variants(path):
+    """Every EVALUATED variant, accepted and rejected, in ladder order.
+
+    ★ REJECTED RUNGS ARE PART OF THE COMPARISON. A run whose ladder stopped one
+    rung earlier has moved a verdict even if every margin it did report matches,
+    and reading only `variants` would hide exactly that.
+    """
     with open(path) as f:
         rep = json.load(f)
     out = []
-    for v in rep.get("variants", []):
+    for v in rep.get("variants", []) + rep.get("rejected_variants", []):
+        m = v.get("margin")
         out.append({
             "vf": v.get("volume_fraction"),
-            "requested": v.get("requested_volume_fraction", v.get("volume_fraction")),
-            "margin": v.get("margin", {}).get("worst_case")
-                      if isinstance(v.get("margin"), dict) else v.get("margin_worst_case"),
+            "requested": v.get("printed_fraction", v.get("volume_fraction")),
+            "margin": m.get("worst_case") if isinstance(m, dict)
+                      else v.get("margin_worst_case"),
             "margin_effective": v.get("margin_effective"),
             "accepted": v.get("accepted"),
-            "mass": v.get("mass_grams"),
             "max_stress": v.get("max_stress_mpa"),
         })
+    # Ladder order is descending volume fraction; sort so the two sides line up
+    # even if a rejected rung is appended out of order.
+    out.sort(key=lambda d: -(d["vf"] or 0.0))
     return out
 
 
-ARMS = ["base", "loose", "warm", "both"]
+ARMS = ["base", "loose", "both"]
 LABEL = {
     "base": "tight + cold  (what runs today)",
     "loose": "loose + cold  (the draft block)",
-    "warm": "tight + warm  (the matrix-free warm start)",
     "both": "loose + warm  ★",
 }
 
@@ -152,7 +160,7 @@ def main(out_dir):
                     "★ OUTSIDE PR 313's 1e-06")
             if rel > REPRO_TOL:
                 ok = False
-            print(f"   rung {bv['requested']:.2f}  margin {bm:.9g} -> {am:.9g}  "
+            print(f"   vf {bv['vf']:.4f}  margin {bm:.9g} -> {am:.9g}  "
                   f"rel {rel:.3e}  {band}   accept {bv['accepted']}->"
                   f"{av['accepted']} {flag}")
         print()

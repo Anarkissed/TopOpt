@@ -394,7 +394,40 @@ int main(int argc, char** argv) {
   }
 
   try {
-    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    topopt::JobDescription job = topopt::load_job_file(job_path);
+    // ── ★ THIS VERB RUNS THE PARAMETRIC LEVEL SET AND NOTHING ELSE ──────────
+    // (task 2026-08-10-plsm-production; maintainer instruction, confirmed.)
+    //
+    // `topopt-cli run` has NO SIMP ROUTE. The maintainer's reason, in his words:
+    // the CLI is the fastest test loop for the new algorithm, and leaving it on
+    // the old one leaves that loop unusable for the thing being tested. The
+    // front-end already runs the parametric path exclusively — on-device via
+    // TopOptBridge and remotely via this binary — so this closes the last gap
+    // rather than opening one.
+    //
+    // ★ IT IS A HARD BLOCK, NOT A DEFAULT. A job asking for `plsm.enabled:
+    // false` is REFUSED, loudly, rather than silently overridden. This task has
+    // already turned up three settings that were accepted and dropped on the
+    // floor (`simp.max_iterations` on a load-case job among them), and adding a
+    // fourth — one that silently ran a DIFFERENT ALGORITHM than the job asked
+    // for — would be the worst of the set.
+    //
+    // ★ SCOPE IS THIS VERB. `analyze`, `preflight` and `lattice-variant` do not
+    // optimise, so there is nothing in them to select. `run_job` and
+    // `minimize_plastic` keep their `PlsmMode::Off` default, because 22 test
+    // files call them IN-PROCESS with values pinned from SIMP designs (margins,
+    // masses, reproduction bands) and those tests are the evidence that the SIMP
+    // code is unmoved. Nothing a user or the app can invoke reaches that default.
+    if (job.has_plsm && !job.plsm_enabled) {
+      std::fprintf(stderr,
+                   "topopt-cli run: \"plsm.enabled\": false was requested, but "
+                   "this CLI has no SIMP route to fall back to — it runs the "
+                   "parametric level set only. Remove the key (or set it true) "
+                   "to run; the \"plsm\" block's other keys still tune it.\n");
+      return 2;
+    }
+    job.has_plsm = true;
+    job.plsm_enabled = true;
     const topopt::MaterialLibrary materials =
         topopt::load_materials_file(materials_path);
     const topopt::SettingsRules rules =

@@ -836,6 +836,36 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     // both call, so they cannot drift into producing different parts (handoff
     // 093). The self-weight LOAD CASE (gravity, ladder, keyframes) is set below.
     topopt::configure_production_options(opts);
+    // ── ★ THE PARAMETRIC LEVEL SET IS THE APP'S OPTIMISER (task
+    // 2026-08-10-plsm-production, maintainer request) ───────────────────────
+    //
+    // The FRONT-END runs the parametric level set and nothing else: the design
+    // variable is a vector of RBF coefficients and the voxel field is a value of
+    // the analytic function they define (topopt/plsm.hpp). PR 324 measured it
+    // from a plain array of holes, with SIMP nowhere in the pipeline, beating
+    // his shipped rung 0.68 on margin and peak stress and certifying.
+    //
+    // ★ THIS IS AN APP DECISION, NOT A CORE DEFAULT, AND THE DISTINCTION IS
+    // LOAD-BEARING. `MinimizePlasticOptions::plsm.mode` defaults to Off and
+    // `configure_production_options` does NOT touch it, so `topopt-cli` and
+    // every existing job document still run SIMP and are byte-for-byte what they
+    // were — which is what that task's R1 checks by stash-rebuild checksum. The
+    // front-end opts IN, here.
+    //
+    // ★ AND IT IS MIRRORED IN RemoteRunner.buildJobJSON, WHICH SENDS
+    // "plsm": {"enabled": true} TO THE WORKER. The two MUST move together: the
+    // on-device path and the LAN path have to produce the same part, and this
+    // codebase has already paid for one drift between them. If you change this
+    // line, change that one in the same commit — the same rule
+    // `bake_build_orientation` below carries.
+    //
+    // Everything else is left at PlsmOptions' own defaults ON PURPOSE. The knot
+    // spacing in particular is NOT set: leaving it at zero is what asks for
+    // `plsm_knots_for_grid`, the production rule that derives the spacing from
+    // the grid's own voxel size, PER AXIS. Naming three numbers here would pin
+    // the feature scale to one resolution and would be a second opinion about a
+    // rule core already owns.
+    opts.plsm.mode = topopt::PlsmMode::Parametric;
     // ── BAKING IS OFF ON THE ON-DEVICE PATH, DELIBERATELY (handoff
     // 2026-08-01-bake-build-orientation) ────────────────────────────────────
     // The core's default is "auto": with no declared build direction it CHOOSES
@@ -1715,6 +1745,21 @@ OptimizeResult run_minimize_plastic_loadcase(
     // exported file, so a chosen-and-baked orientation would certify something
     // the returned mesh does not carry (handoff 2026-08-01-bake-build-orientation).
     setup.options.bake_build_orientation = topopt::BakeBuildOrientation::Off;
+    // ── ★ THE PARAMETRIC LEVEL SET, ON THE LOAD-CASE PATH TOO ───────────────
+    // (task 2026-08-10-plsm-production.)
+    //
+    // ★ THIS IS THE SECOND OF TWO ON-DEVICE OPTIMISE ENTRY POINTS AND IT IS THE
+    // ONE HIS REAL JOBS USE. `run_minimize_plastic` above is the SELF-WEIGHT
+    // path; this is the DECLARED LOAD CASE path. They are separate functions
+    // with separate option objects, and arming only the first would have given
+    // the front-end a parametric optimiser for self-weight parts and SIMP for
+    // every part with a declared load — silently, with both reporting success.
+    // Caught by grepping for the entry points rather than by reading the one I
+    // had already edited.
+    //
+    // Mirrored in `run_minimize_plastic` above and in
+    // RemoteRunner.buildJobJSON. ALL THREE MOVE TOGETHER.
+    setup.options.plsm.mode = topopt::PlsmMode::Parametric;
     for (const auto& pr : setup.face_protection_reports)
       bridge_log("loadcase: face-protection face=" + std::to_string(pr.face_id) +
                  " voxels_frozen=" + std::to_string(pr.voxels_frozen) +

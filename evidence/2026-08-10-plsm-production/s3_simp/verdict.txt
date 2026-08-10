@@ -1,0 +1,83 @@
+== S3(b) — THE SOLVER WIN ON SIMP, HIS OWN JOB, FOUR RUNGS, 3 THREADS ==
+
+UNCAPPED and full-fidelity: both arms walked the complete ladder. The
+iteration cap the first pass tried to impose was silently dropped by the
+CLI on a load-case job (see the handoff, defect (c)), which turned out to
+be luck — this is better evidence than what was planned.
+
+Wall is iterations.csv's own `total_ms` summed, so it excludes import,
+voxelization and the four certifications — the parts neither arm changes.
+
+arm                                 iters   solver steps    wall s   vs base
+tight + cold  (what runs today)       447        419,205    3776.5         —
+loose + warm                          441        128,264    1832.3    0.485x
+
+★ 69.4% FEWER SOLVER STEPS, 51.5% LESS WALL CLOCK.
+  PR 324 measured 76% / 59% on the probe; it transfers to the shipped
+  ladder at 69% / 52%.
+
+-- per rung (iterations / solver steps)
+   rung 0:  base   27 /   22,799     both   26 /    7,369
+   rung 1:  base  127 /  110,518     both  126 /   32,720
+   rung 2:  base  140 /  132,475     both  143 /   36,378
+   rung 3:  base  153 /  153,413     both  146 /   51,797
+
+== ★ AND HERE IT FAILS THE BRIEF'S OWN BAR. THIS IS A BLOCKED-STOP. ==
+
+      vf     margin base   margin loose+warm   rel delta   verdict
+  0.6800     3254.356637         3254.689339   1.022e-04   True -> True  SAME
+  0.5200     3389.417071         3389.617960   5.927e-05   True -> True  SAME
+  0.3800     3290.912400         3291.015473   3.132e-05   True -> True  SAME
+  0.2600     3014.120054         3011.506053   8.673e-04   True -> True  SAME
+
+worst relative margin change            8.673e-04
+PR 313 margin-reproduction tolerance    1.0e-06   -> ★ EXCEEDED, 867x
+warm-vs-cold noise floor                3.0e-09   -> ★ EXCEEDED, 289084x
+verdicts                                none moved — all four rungs still ACCEPTED
+
+★ THE FIRST DIAGNOSIS IN THIS FILE WAS WRONG. THE CORRECTION IS BELOW.
+
+It read: the arms follow the same trajectory and merely stop at different
+iterations, so the margin gap is a termination artefact. The per-iteration
+data refutes it. Compliance compared at MATCHED iterations:
+
+                          rung 0        rung 3
+  iteration 1             0.00e+00      1.45e-03  (inherited from rung 2)
+  iteration 2             5.69e-05      1.34e-03
+  worst, mid-run          3.16e-04      8.60e-02
+  last matched iteration  3.67e-04      9.54e-05
+
+The trajectories diverge by up to 8.6% in compliance. That is a DIFFERENT
+OPTIMISATION, not a perturbation at the noise floor.
+
+The mechanism should have been predicted. The sensitivity field is computed
+from the displacement field; loosening the solve from 1e-8 to 1e-3 admits a
+displacement wrong by ~1e-3, so the design update is wrong by ~1e-3 and the
+next iteration starts somewhere else. Rung 0 iteration 1 is bit-identical
+because both arms start from the same uniform design; from iteration 2 they
+are on different paths.
+
+SO THE HONEST STATEMENT IS: loose+warm does not reproduce the shipped design.
+It converges to a DIFFERENT design that is JUST AS GOOD — margins within
+0.09%, every verdict unchanged. That is a defensible property of a
+well-conditioned problem. It is NOT "the same design to seven significant
+figures", and this task must not repeat that claim for the ladder.
+
+★ AND THE ATTRIBUTION IS UNRESOLVED. The failing arm combines TWO changes:
+the loosened tolerance (the `draft` block, WHICH ALREADY SHIPS and is not part
+of this task) and the matrix-free warm start (the only thing this task added).
+The mechanism above points at the tolerance: a warm-started solve converges to
+the SAME tolerance and so cannot move the sensitivity field by more than that
+tolerance. If that is right, the blocked-stop belongs to a feature that already
+exists and this task's change is exact and free. The `loose`-alone arm — one
+35-minute run — decides it, and was cut when four arms did not fit.
+
+WHAT WOULD SETTLE IT, in order:
+  1. the `loose`-alone arm, ~35 min — is the divergence the pre-existing
+     draft posture, or this task's warm start? DO THIS FIRST.
+  2. both arms with the termination pinned to a fixed iteration count,
+     ~2 h — do the two solvers agree on the SAME iterate sequence?
+  3. a second part, ~2 h — is 0.09% margin agreement a property of this
+     problem or of the method? One part is one data point.
+
+See BLOCKED_STOP_REVIEW.md for the decision this is asking for.

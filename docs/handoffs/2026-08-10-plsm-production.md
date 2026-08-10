@@ -105,7 +105,7 @@ pre-task commit reached by a **named** `git stash`, both binaries built in place
 his own job document run on each — `design.bin`, `report.json`, every exported
 mesh and every computed column of `iterations.csv` compared.
 
-### ★ TWO DEFECTS THE PRODUCTION PATH EXPOSED THAT READING IT WOULD NOT HAVE
+### ★ THREE DEFECTS THE PRODUCTION PATH EXPOSED THAT READING IT WOULD NOT HAVE
 
 **(a) The conditional Heaviside projection fired on a parametric rung and
 silently replaced the design.** `minimize_plastic.cpp`'s handoff-123 gate reads
@@ -131,6 +131,28 @@ diverges from the exact certification. Disarmed on this path too, and nothing is
 lost: `PlsmOptions::cg_tolerance_loose` IS the loose trajectory tolerance here,
 and `plsm_optimize` ends every rung with its own TIGHT final solve on the field
 it ships — which is the guarantee the escalation exists to recover.
+
+**(c) ★ `simp.max_iterations` IS SILENTLY DROPPED ON EVERY LOAD-CASE JOB, AND IT
+IS NOT MINE.** Found by trying to bound S3's cost: the four arms were given
+`"simp": {"max_iterations": 40}`, the schema accepted it, and every arm ran the
+full 381-iteration ladder anyway. `run_job.cpp:6481` applies
+`job.simp_max_iterations` only inside the SELF-WEIGHT branch; a load-case job
+never reaches that line.
+
+It is worth naming precisely because the load-case schema already gets this right
+for its neighbours: it REFUSES `ladder`, `margin_stop`, `fixture_faces` and
+`gravity`, with a message saying the production ladder and margin apply. Those
+are things the load case DETERMINES. An iteration budget is not — nothing about
+declaring a load says how long the optimiser may run — so the fix is to HONOUR it
+on both branches rather than to refuse it. **NOT FIXED HERE**, deliberately: it
+is a pre-existing production defect with no bearing on this task's deliverable,
+and the right move was to put the machine on the deliverable rather than widen
+the diff. It is the third silent no-op this task turned up and it should be the
+next thing anyone touching `run_job`'s option mapping fixes.
+
+★ The cost of it is in the record rather than tidied away: S3's arms are
+UNCAPPED and full-fidelity, which is better evidence than the capped run that was
+planned, and there are THREE of them rather than four because four did not fit.
 
 ### the frozen set as a smooth boolean, and where it differs from PR 324
 
@@ -173,23 +195,235 @@ be re-certified**.
 Audited, with file and line. Nothing reuses a margin computed on a different
 field, and the two places that could were already guarded:
 
+★ **The receipt is a script, not a claim**: `evidence/…/s1e_consumer_audit.sh`
+prints the LINES, and `s1e_consumer_audit.txt` is its output. Every anchor
+resolves; a moved anchor prints "READ THIS" rather than silently passing.
+
 | consumer | file:line | what it reads |
 |---|---|---|
-| the ladder's certification | `core/src/simp/minimize_plastic.cpp:1768`, `:1840` | `variant.optimization.physical_density`, passed to `analyze_fixed_design` — a density per voxel |
-| `achieved_vf` | `minimize_plastic.cpp:1961`, `:1984` | `#{ρ > 0.5}/part_solid` and `optimization.volume_fraction` (`Σρ/n_active`) |
-| the frozen / protect masks | `plsm.cpp` calls `effective_design_mask` | the SAME function `simp_optimize`'s loop calls |
+| the ladder's certification | `core/src/simp/minimize_plastic.cpp:1785`, `:1857` | `variant.optimization.physical_density`, passed to `analyze_fixed_design` — a density per voxel |
+| `achieved_vf` | `minimize_plastic.cpp:2001`, `:2024-2025` | `#{ρ > 0.5}/part_solid` and `optimization.volume_fraction` (`Σρ/n_active`) |
+| the same, on the parametric path | `core/src/simp/plsm.cpp:637-639` | `Σocc/n_active` over the ACTIVE set — simp's own basis, not a lookalike |
+| the frozen / protect masks | `plsm.cpp:205` → `simp.cpp:2652` | `effective_design_mask`, **the same function** `simp_optimize`'s loop calls |
 | the clearances | `minimize_plastic.cpp:283-285` | folded into the mask as `FrozenVoid` before the optimiser; the boolean's void term |
-| the design box | `minimize_plastic.cpp:660` (`design_domain_mask`) | one mask; part Active-or-FrozenSolid, keep-outs FrozenVoid |
-| `lattice_variant` re-certification | `core/src/cli/run_job.cpp:5959-6003` | **re-certifies from the restored field and REFUSES** unless the recorded margin reproduces inside `kMarginReproductionResidualFactor × cg_tolerance` |
+| the design box | `minimize_plastic.cpp:670` (`design_domain_mask`) | one mask; part Active-or-FrozenSolid, keep-outs FrozenVoid |
+| the lattice pass | `run_job.cpp:1295`, `:1687`, `:1718`, `:2995` | `optimization.physical_density` — the grading, the load-path walk and the composite certification all read the field |
+| `lattice_variant` re-certification | `run_job.cpp` (`reproduction_within_band`) | **re-certifies from the restored field and REFUSES** unless the recorded margin reproduces inside `kMarginReproductionResidualFactor × cg_tolerance` |
 | the certification solve | `core/src/simp/analyze.cpp:269` | passes `initial_guess = nullptr` **unconditionally** — no certificate is ever warm-started |
+| the analytic export | `run_job.cpp` (`export_variant_alpha`) | says **in the file** that a re-evaluation at another resolution is a different object and is NOT certified |
 
-## 3. S2 — THE KNOT LATTICE
+## 3. S2/S1 — THE PRODUCTION RUN, AND THE THREE BARS
 
-_[filled by `run_s2_frontier.sh`.]_
+★ **THE KNOT LATTICE THAT SHIPS IS THE ONE THE RULE DERIVES**: 2 voxels per
+axis on his grid, 85,680 coefficients, 5.5x compression. The job document does
+NOT name it — omitting `plsm.knots` is what asks for `plsm_knots_for_grid`, and
+that is what the run of record exercised. The RULE is a LENGTH (3.410558 mm)
+converted through each axis's own spacing and floored at 2 voxels; it takes no
+minimum and no maximum over the axes, so a 128 x 8 x 118 slab gets the same
+spacing as a 128 x 31 x 118 one (`test_plsm.cpp` pins exactly that).
 
-## 4. S3 — THE SOLVER WIN, ON BOTH PATHS
+### the run of record
 
-_[filled by `run_s3_simp.sh`.]_
+His job document plus four lines, through `topopt-cli run`, hole seed, no SIMP
+anywhere in the pipeline, 40 iterations per rung, three threads.
+
+| rung | PLSM margin | SIMP margin | PLSM printed | SIMP printed | accepted |
+|---|---|---|---|---|---|
+| 0.68 | **3297.30** | 3254.36 | 0.7900 | 0.7973 | both |
+| 0.52 | 3068.63 | 3389.42 | 0.6812 | 0.6941 | both |
+| 0.38 | 1840.73 | 3290.91 | 0.5858 | 0.6048 | both |
+| 0.26 | 630.40 | 3014.12 | 0.5047 | 0.5283 | both |
+
+★ **ONLY RUNG 0.68 IS A FAIR COMPARISON, AND THE OTHER THREE ARE NOT REPORTED AS
+A RESULT.** SIMP ran to its own plateau at 27 / 127 / 140 / 153 iterations; the
+parametric arm was capped at 40 on every rung to fit the machine time. Its own
+convergence signal agrees: the last-10 compliance spread is **0.92%** on rung 0
+and **4.43% / 10.24% / 20.40%** on rungs 1-3. Rungs 0.52-0.26 are UNMEASURED, not
+lost. One uncapped run fixes it.
+
+### the three bars, at rung 0.68
+
+Measured by ONE `external_field_surface_probe` invocation at the shipped
+extraction convention, with SIMP's own four rungs emitted from the reference
+`design.bin` in the same run (R2).
+
+| | SIMP | PLSM | verdict |
+|---|---|---|---|
+| **margin** | 3254.36 | **3297.30** | ✓ **+1.3%** |
+| **mass** | 543.6 g | **538.7 g** | ✓ **−0.9%** |
+| **carved roughness** | 7.5521 | 7.6090 | ✗ −0.8% |
+| CAD error (mm) | 0.4293 | 0.4741 | ✗ **−10.4%** |
+| sub-voxel placement | 0.1297 | 0.2523 | ✓ +95% |
+
+★ **TWO OF THREE CLEARED; CARVED ROUGHNESS MISSES BY 0.8% — A TIE, NOT A LOSS.**
+Set that beside PR 324's from-scratch arm, which read **12.51 against 7.55, 66%
+rougher**. The production path closes essentially that entire gap. What differs:
+the frozen set as a smooth boolean rather than a stamp, the derived knot lattice,
+and SIMP's volume convention so the two arms are at the same mass.
+
+★ **BUT THE CAD ERROR WENT THE WRONG WAY, AND THAT IS THE COLUMN THAT MATTERS
+MOST.** PR 324 called it the one a blur cannot fake, because it is a true error
+against known geometry rather than a preference. 10.4% worse says the parametric
+surface sits FURTHER from the real CAD faces while placing 95% more sub-voxel
+content. The mechanism is almost certainly the ersatz band: SIMP's field is
+near-binary and sharp, the parametric field is smooth over eta = 2 voxels, and a
+wide band moves the extracted iso-crossing relative to the true face.
+
+★ **eta IS THE OBVIOUS LEVER AND IT IS UNTESTED.** It was held at PR 324's value
+throughout this task. Narrowing it should tighten the CAD error and may cost
+sub-voxel placement; nothing here measures that trade, and it is the first thing
+to run.
+
+### so, per the brief's instruction when the three are not all met
+
+**The point that ships is the derived 2-voxel lattice.** The trade is **0.8% of
+carved roughness and 10% of CAD accuracy for +1.3% margin and −0.9% mass**. The
+frontier across knot lattices was NOT measured — at ~90 min per configuration on
+this part it did not fit, and the machine went to the deliverables the maintainer
+asked for instead. That is a gap in this task's evidence and is named as one.
+
+★ **A TRAP THIS SECTION WALKED INTO AND FIXED.** The first surface run compared
+NOTHING: `design_rung_dump` wrote `rung 0.68000000000000005` at precision(17),
+and `external_field_surface_probe` matches rung labels AS STRINGS against SIMP
+rows it formats with `%.2f`. It does not fail on a mismatch — it prints "NO SIMP
+ROW AT THIS RUNG — not compared" and carries on, so the measurement runs, the
+numbers are right, and the baseline silently never appears. PR 324 hit this from
+the other side and fixed `levelset_probe`'s writer; this one still carried it.
+Fixed at the writer, with the reasoning in the file.
+
+## 4. S3 — THE SOLVER WIN, MEASURED ON SIMP, THEN CLOSED
+
+★ **THIS SECTION IS CLOSED BY MAINTAINER DECISION, NOT BY ITS RESULT.** Partway
+through, the maintainer dropped SIMP entirely — "forget SIMP, we don't care about
+SIMP anymore" — and asked for the CLI to be hard-blocked onto the parametric
+path. What was measured before that is kept because it is real, and because the
+mechanism it exposed applies to the parametric path too (§4c).
+
+### what was measured
+
+His job, full **uncapped** four-rung ladder, three threads, machine quiet:
+
+| | iterations | solver steps | wall |
+|---|---|---|---|
+| tight + cold (what shipped) | 447 | 419,205 | 3776 s |
+| loose + warm | 441 | **128,264** | **1832 s** |
+
+**69.4% fewer solver steps, 51.5% less wall.** PR 324 measured 76% / 59% on a
+single-rung probe; it transfers to the production ladder at 69% / 52%.
+
+### and it failed the brief's blocked-stop
+
+| rung | margin, shipped | margin, loose+warm | relative |
+|---|---|---|---|
+| 0.68 | 3254.356637 | 3254.689339 | 1.02e-04 |
+| 0.52 | 3389.417071 | 3389.617960 | 5.93e-05 |
+| 0.38 | 3290.912400 | 3291.015473 | 3.13e-05 |
+| 0.26 | 3014.120054 | 3011.506053 | **8.67e-04** |
+
+867× PR 313's 1.0e-06. **No verdict moved** — all four rungs still ACCEPTED.
+
+### ★ (c) THE DIAGNOSIS I GAVE FIRST WAS WRONG, AND THE CORRECTION IS THE PART THAT STILL MATTERS
+
+I first read this as a termination artefact: same trajectory, different stopping
+iteration. **The per-iteration data refutes it.** Compliance at MATCHED
+iterations diverges by up to **8.60e-02 on rung 3** — 8.6%, not a noise-floor
+perturbation. The mechanism should have been predicted: the sensitivity field is
+computed from the displacement field, so a solve loosened from 1e-8 to 1e-3 gives
+a design update wrong by ~1e-3 and the next iteration starts elsewhere. Rung 0's
+iteration 1 is bit-identical (same uniform start); from iteration 2 they are on
+different paths.
+
+**So the honest claim is narrower than PR 324's.** Loose+warm does NOT reproduce
+the design. It converges to a **different design that is just as good** — margins
+within 0.09%, every verdict unchanged. That is a property of a well-conditioned
+problem, not of an accurate solver, and this handoff does not repeat "the same
+design to seven significant figures" for the ladder.
+
+★ **AND THE ATTRIBUTION WAS NEVER RESOLVED.** The failing arm bundles the
+loosened tolerance — the `draft` block, **which already ships** and is not this
+task's — with the warm start, which is. The mechanism points at the tolerance: a
+warm-started solve converges to the SAME tolerance and so cannot move the
+sensitivity field by more than it. The `loose`-alone arm that would have decided
+it was cut when four arms did not fit, and then the whole thread was closed.
+
+★ **WHAT THIS LEAVES OPEN ON THE PARAMETRIC PATH, WHICH IS NOT CLOSED.**
+`PlsmOptions` defaults `cg_tolerance_loose = 1e-4` and `warm_start = true`, so
+the path the front-end now runs exclusively is using the posture that failed this
+bar, and the mechanism applies there identically. It is defensible — a new
+representation has no prior certificate to reproduce, so there is nothing for it
+to be non-identical *to* — but **it is untested on that path**, and it should be
+a decision rather than an inherited default. One comparison run
+(`cg_tolerance_loose = 0`, warm start kept) settles whether the design the app
+returns is stable under the solver tolerance. It is the first thing I would run
+next.
+
+Full writeup, including the decision options as put to the reviewer:
+`evidence/2026-08-10-plsm-production/BLOCKED_STOP_REVIEW.md`.
+
+### what was wired, and what was already there
+
+`simp_compliance` has taken an `initial_guess` since it was written and the
+optimize loop has always held one — `FeaSolution warm` — and always passed it.
+`simp.cpp` dispatches `SolverKind::MultigridCG_Matfree` first, and **that branch
+took no guess**, so on the path this project actually runs every trajectory solve
+started from zero. Now:
+
+* `fea_solve_mgcg_matfree` takes an optional `initial_guess`; `solve_mgcg_matfree`
+  gathers it onto the kept DOFs and both regimes start from it — the MG-CG loop
+  (`mf_mgpcg` gained an optional `x0`; the FP64 retry after a failed mixed attempt
+  starts from the SAME guess, not the failed iterate) and the Jacobi-CG fallback,
+  which already honoured `x` as a guess and now receives one.
+* `SimpOptions::matfree_warm_start` gates it, **default false**.
+* ★ The stopping test is unchanged: `‖r‖ ≤ tol·‖b‖`, relative to the right-hand
+  side. A warm solve satisfies the identical criterion; it moves the point inside
+  the tolerance ball, never the ball.
+* ★ The certificate cannot be warm-started. `analyze.cpp:269` passes `nullptr`
+  unconditionally and `minimize_plastic` asserts the tight tolerance on the
+  certification solve.
+
+## 4b. THE FRONT END, AND THE CLI (added after the brief, by maintainer request)
+
+The brief said default OFF, byte-identical, and that he would flip it himself.
+Partway through he asked for the opposite, twice, and explicitly: the parametric
+path is what the app runs, and the CLI is to be hard-blocked onto it because the
+CLI is his fastest test loop for the new algorithm.
+
+| entry point | algorithm | where |
+|---|---|---|
+| iPad / Mac, on-device optimize | parametric | `bridge.cpp`, `opts.plsm.mode = Parametric` |
+| app → LAN worker → `topopt-cli` | parametric | `RemoteRunner.buildJobJSON`, `"plsm": {"enabled": true}` |
+| `topopt-cli run` | parametric, **no SIMP route** | `main.cpp`, arms it and REFUSES `enabled: false` (exit 2) |
+| `analyze` / `preflight` / `lattice-variant` | n/a | they do not optimise |
+| `run_job` / `minimize_plastic` in-process | SIMP default retained | 22 test files call these directly with values pinned from SIMP designs; that is the evidence the SIMP code is unmoved |
+
+★ **THE TWO APP SITES ARE A DOCUMENTED MIRROR AND MUST MOVE TOGETHER.** The
+on-device path and the worker path have to produce the same part; this codebase
+has already paid for one drift between them. Each site's comment names the other,
+and `ParametricArmingTests.swift` drives the REAL serializer (not a hand-built
+dictionary — four consecutive PRs shipped app-side defects behind green checks)
+and fails with a message telling whoever turns one off to change the other.
+
+★ **THE APP DELIBERATELY DOES NOT SEND THE KNOT SPACING**, and that is asserted.
+Omitting it is what asks for `plsm_knots_for_grid`. "Be explicit, send the
+numbers too" is exactly the well-meaning change that would pin the feature scale
+to one resolution, and the test says so.
+
+### ★ R1 IS RETIRED, ON INSTRUCTION, AND NOT QUIETLY
+
+The brief's R1 required SIMP's default CLI path byte-identical by stash-rebuild
+checksum. **The CLI no longer has a SIMP path.** R1 cannot hold and was not
+quietly dropped: it is retired by the maintainer's decision, and what replaces it
+is the narrower claim that is still checkable — the LIBRARY's SIMP route is
+unmoved, which the 22 in-process test files and their pinned margins assert on
+every CI run.
+
+### a regression this wiring exposed
+
+The app sets `keyframe_count = 12` so the results view can scrub the shape's
+evolution. `simp_optimize` emits those frames; `plsm_optimize` did not, so the
+app's playback would have come back EMPTY with nothing saying why — and the CLI's
+`--snapshots` likewise. Both hooks now fire on the identical schedule the SIMP
+loop uses. Found by wiring the front end, not by reading the code.
 
 ### what was wired, and what was already there
 

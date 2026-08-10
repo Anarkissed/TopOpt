@@ -1,0 +1,385 @@
+{
+  "material": "PLA",
+  "variants": [
+    {
+      "volume_fraction": 0.68,
+      "printed_fraction": 0.7900165909,
+      "volume_saved_fraction": 0.2099834091,
+      "max_stress_mpa": 0.0166803342,
+      "max_interlayer_tension_mpa": 0.00529859239,
+      "margin": {
+        "in_plane": 3297.296047,
+        "interlayer": 5709.063421,
+        "worst_case": 3297.296047
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 3,
+        "top_layers": 5,
+        "bottom_layers": 3,
+        "infill_percent": 35,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 434,
+      "min_feature_warning": "434 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 682.7473268,
+      "rejection_reason": "",
+      "diagnosis": {
+        "binding_term": "min_feature",
+        "binding_value": 2,
+        "required_value": 2,
+        "ratio": 1,
+        "margin_worst_case_raw": 3297.296047,
+        "margin_in_plane_raw": 3297.296047,
+        "margin_interlayer_raw": 5709.063421,
+        "margin_effective": 682.7473268,
+        "knockdown_factor": 0.2070627924,
+        "infill_percent": 35,
+        "min_feature_violations": 434,
+        "inherits_unsourced_z_knockdown": false,
+        "provenance": "",
+        "no_setting_fixes_this": false,
+        "no_fix_reason": "",
+        "recommendations": [
+          {
+            "lever": "infill",
+            "parameter": "infill_percent",
+            "current_value": 35,
+            "proposed_value": 36,
+            "proposed_label": "36%",
+            "margin_effective_at_proposal": 712.2159461,
+            "margin_required": 1.5,
+            "verified_through_gate": true,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "the stress field does not depend on infill (infill never enters the solver), so this is the real gate's verdict at 36% infill, not an extrapolation"
+          },
+          {
+            "lever": "resolution",
+            "parameter": "voxel_spacing_mm",
+            "current_value": 1.705279303,
+            "proposed_value": 1.705279303,
+            "proposed_label": "1.705 mm or finer",
+            "margin_effective_at_proposal": 682.7473268,
+            "margin_required": 1.5,
+            "verified_through_gate": false,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "checked against the §7 V3 min-feature criterion (feature span >= 2 voxels) on THIS design's measured thinnest member (3.411 mm), not against the strength gate — the strength gate already passes. Assumes a finer run reproduces at least this geometry; the optimizer may converge somewhere else."
+          }
+        ],
+        "levers": [
+          { "lever": "infill", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" },
+          { "lever": "wall_loops", "evaluable": true, "candidates_tried": 1, "passed": false, "reason": "INERT IN THIS POSTURE: the width-aware knockdown is not armed, so the gate credits wall loops with exactly nothing (gate_margin_effective never reads wall_thickness_mm on the scalar path). More walls would make the part stronger in reality and would not move this verdict by one bit, so nothing is recommended." },
+          { "lever": "build_orientation", "evaluable": true, "candidates_tried": 0, "passed": false, "reason": "not offered: the build direction enters the gate through the INTERLAYER term alone, and that term is not what binds here" },
+          { "lever": "volume_fraction", "evaluable": true, "candidates_tried": 0, "passed": false, "reason": "no heavier rung this run solved was accepted. A rung HEAVIER than the ladder's top is a different design and pricing it needs a full re-solve, so none is offered." },
+          { "lever": "resolution", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" }
+        ]
+      }
+    },
+    {
+      "volume_fraction": 0.52,
+      "printed_fraction": 0.6811927433,
+      "volume_saved_fraction": 0.3188072567,
+      "max_stress_mpa": 0.01792332002,
+      "max_interlayer_tension_mpa": 0.003317067329,
+      "margin": {
+        "in_plane": 3068.627907,
+        "interlayer": 9119.501355,
+        "worst_case": 3068.627907
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 3,
+        "top_layers": 5,
+        "bottom_layers": 3,
+        "infill_percent": 35,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 661,
+      "min_feature_warning": "661 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 635.3986633,
+      "rejection_reason": "",
+      "diagnosis": {
+        "binding_term": "min_feature",
+        "binding_value": 2,
+        "required_value": 2,
+        "ratio": 1,
+        "margin_worst_case_raw": 3068.627907,
+        "margin_in_plane_raw": 3068.627907,
+        "margin_interlayer_raw": 9119.501355,
+        "margin_effective": 635.3986633,
+        "knockdown_factor": 0.2070627924,
+        "infill_percent": 35,
+        "min_feature_violations": 661,
+        "inherits_unsourced_z_knockdown": false,
+        "provenance": "",
+        "no_setting_fixes_this": false,
+        "no_fix_reason": "",
+        "recommendations": [
+          {
+            "lever": "infill",
+            "parameter": "infill_percent",
+            "current_value": 35,
+            "proposed_value": 36,
+            "proposed_label": "36%",
+            "margin_effective_at_proposal": 662.8236279,
+            "margin_required": 1.5,
+            "verified_through_gate": true,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "the stress field does not depend on infill (infill never enters the solver), so this is the real gate's verdict at 36% infill, not an extrapolation"
+          },
+          {
+            "lever": "volume_fraction",
+            "parameter": "volume_fraction",
+            "current_value": 0.52,
+            "proposed_value": 0.68,
+            "proposed_label": "0.680",
+            "margin_effective_at_proposal": 682.7473268,
+            "margin_required": 1.5,
+            "verified_through_gate": true,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "this rung was SOLVED and gated in this same run — the margin is its own measured verdict, not an extrapolation"
+          },
+          {
+            "lever": "resolution",
+            "parameter": "voxel_spacing_mm",
+            "current_value": 1.705279303,
+            "proposed_value": 1.705279303,
+            "proposed_label": "1.705 mm or finer",
+            "margin_effective_at_proposal": 635.3986633,
+            "margin_required": 1.5,
+            "verified_through_gate": false,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "checked against the §7 V3 min-feature criterion (feature span >= 2 voxels) on THIS design's measured thinnest member (3.411 mm), not against the strength gate — the strength gate already passes. Assumes a finer run reproduces at least this geometry; the optimizer may converge somewhere else."
+          }
+        ],
+        "levers": [
+          { "lever": "infill", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" },
+          { "lever": "wall_loops", "evaluable": true, "candidates_tried": 1, "passed": false, "reason": "INERT IN THIS POSTURE: the width-aware knockdown is not armed, so the gate credits wall loops with exactly nothing (gate_margin_effective never reads wall_thickness_mm on the scalar path). More walls would make the part stronger in reality and would not move this verdict by one bit, so nothing is recommended." },
+          { "lever": "build_orientation", "evaluable": true, "candidates_tried": 0, "passed": false, "reason": "not offered: the build direction enters the gate through the INTERLAYER term alone, and that term is not what binds here" },
+          { "lever": "volume_fraction", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" },
+          { "lever": "resolution", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" }
+        ]
+      }
+    },
+    {
+      "volume_fraction": 0.38,
+      "printed_fraction": 0.585830989,
+      "volume_saved_fraction": 0.414169011,
+      "max_stress_mpa": 0.02987942364,
+      "max_interlayer_tension_mpa": 0.003044098676,
+      "margin": {
+        "in_plane": 1840.731624,
+        "interlayer": 9937.259997,
+        "worst_case": 1840.731624
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 3,
+        "top_layers": 5,
+        "bottom_layers": 3,
+        "infill_percent": 35,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 740,
+      "min_feature_warning": "740 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 381.1470302,
+      "rejection_reason": "",
+      "diagnosis": {
+        "binding_term": "min_feature",
+        "binding_value": 2,
+        "required_value": 2,
+        "ratio": 1,
+        "margin_worst_case_raw": 1840.731624,
+        "margin_in_plane_raw": 1840.731624,
+        "margin_interlayer_raw": 9937.259997,
+        "margin_effective": 381.1470302,
+        "knockdown_factor": 0.2070627924,
+        "infill_percent": 35,
+        "min_feature_violations": 740,
+        "inherits_unsourced_z_knockdown": false,
+        "provenance": "",
+        "no_setting_fixes_this": false,
+        "no_fix_reason": "",
+        "recommendations": [
+          {
+            "lever": "infill",
+            "parameter": "infill_percent",
+            "current_value": 35,
+            "proposed_value": 36,
+            "proposed_label": "36%",
+            "margin_effective_at_proposal": 397.5980308,
+            "margin_required": 1.5,
+            "verified_through_gate": true,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "the stress field does not depend on infill (infill never enters the solver), so this is the real gate's verdict at 36% infill, not an extrapolation"
+          },
+          {
+            "lever": "volume_fraction",
+            "parameter": "volume_fraction",
+            "current_value": 0.38,
+            "proposed_value": 0.52,
+            "proposed_label": "0.520",
+            "margin_effective_at_proposal": 635.3986633,
+            "margin_required": 1.5,
+            "verified_through_gate": true,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "this rung was SOLVED and gated in this same run — the margin is its own measured verdict, not an extrapolation"
+          },
+          {
+            "lever": "resolution",
+            "parameter": "voxel_spacing_mm",
+            "current_value": 1.705279303,
+            "proposed_value": 1.705279303,
+            "proposed_label": "1.705 mm or finer",
+            "margin_effective_at_proposal": 381.1470302,
+            "margin_required": 1.5,
+            "verified_through_gate": false,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "checked against the §7 V3 min-feature criterion (feature span >= 2 voxels) on THIS design's measured thinnest member (3.411 mm), not against the strength gate — the strength gate already passes. Assumes a finer run reproduces at least this geometry; the optimizer may converge somewhere else."
+          }
+        ],
+        "levers": [
+          { "lever": "infill", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" },
+          { "lever": "wall_loops", "evaluable": true, "candidates_tried": 1, "passed": false, "reason": "INERT IN THIS POSTURE: the width-aware knockdown is not armed, so the gate credits wall loops with exactly nothing (gate_margin_effective never reads wall_thickness_mm on the scalar path). More walls would make the part stronger in reality and would not move this verdict by one bit, so nothing is recommended." },
+          { "lever": "build_orientation", "evaluable": true, "candidates_tried": 0, "passed": false, "reason": "not offered: the build direction enters the gate through the INTERLAYER term alone, and that term is not what binds here" },
+          { "lever": "volume_fraction", "evaluable": true, "candidates_tried": 2, "passed": true, "reason": "" },
+          { "lever": "resolution", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" }
+        ]
+      }
+    },
+    {
+      "volume_fraction": 0.26,
+      "printed_fraction": 0.504724807,
+      "volume_saved_fraction": 0.495275193,
+      "max_stress_mpa": 0.08724659994,
+      "max_interlayer_tension_mpa": 0.009725127166,
+      "margin": {
+        "in_plane": 630.3970589,
+        "interlayer": 3110.499172,
+        "worst_case": 630.3970589
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 3,
+        "top_layers": 5,
+        "bottom_layers": 3,
+        "infill_percent": 35,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 724,
+      "min_feature_warning": "724 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 130.5317753,
+      "rejection_reason": "",
+      "diagnosis": {
+        "binding_term": "min_feature",
+        "binding_value": 2,
+        "required_value": 2,
+        "ratio": 1,
+        "margin_worst_case_raw": 630.3970589,
+        "margin_in_plane_raw": 630.3970589,
+        "margin_interlayer_raw": 3110.499172,
+        "margin_effective": 130.5317753,
+        "knockdown_factor": 0.2070627924,
+        "infill_percent": 35,
+        "min_feature_violations": 724,
+        "inherits_unsourced_z_knockdown": false,
+        "provenance": "",
+        "no_setting_fixes_this": false,
+        "no_fix_reason": "",
+        "recommendations": [
+          {
+            "lever": "infill",
+            "parameter": "infill_percent",
+            "current_value": 35,
+            "proposed_value": 36,
+            "proposed_label": "36%",
+            "margin_effective_at_proposal": 136.1657647,
+            "margin_required": 1.5,
+            "verified_through_gate": true,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "the stress field does not depend on infill (infill never enters the solver), so this is the real gate's verdict at 36% infill, not an extrapolation"
+          },
+          {
+            "lever": "volume_fraction",
+            "parameter": "volume_fraction",
+            "current_value": 0.26,
+            "proposed_value": 0.38,
+            "proposed_label": "0.380",
+            "margin_effective_at_proposal": 381.1470302,
+            "margin_required": 1.5,
+            "verified_through_gate": true,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "this rung was SOLVED and gated in this same run — the margin is its own measured verdict, not an extrapolation"
+          },
+          {
+            "lever": "resolution",
+            "parameter": "voxel_spacing_mm",
+            "current_value": 1.705279303,
+            "proposed_value": 1.705279303,
+            "proposed_label": "1.705 mm or finer",
+            "margin_effective_at_proposal": 130.5317753,
+            "margin_required": 1.5,
+            "verified_through_gate": false,
+            "inherits_unsourced_z_knockdown": false,
+            "provenance": "",
+            "note": "checked against the §7 V3 min-feature criterion (feature span >= 2 voxels) on THIS design's measured thinnest member (3.411 mm), not against the strength gate — the strength gate already passes. Assumes a finer run reproduces at least this geometry; the optimizer may converge somewhere else."
+          }
+        ],
+        "levers": [
+          { "lever": "infill", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" },
+          { "lever": "wall_loops", "evaluable": true, "candidates_tried": 1, "passed": false, "reason": "INERT IN THIS POSTURE: the width-aware knockdown is not armed, so the gate credits wall loops with exactly nothing (gate_margin_effective never reads wall_thickness_mm on the scalar path). More walls would make the part stronger in reality and would not move this verdict by one bit, so nothing is recommended." },
+          { "lever": "build_orientation", "evaluable": true, "candidates_tried": 0, "passed": false, "reason": "not offered: the build direction enters the gate through the INTERLAYER term alone, and that term is not what binds here" },
+          { "lever": "volume_fraction", "evaluable": true, "candidates_tried": 3, "passed": true, "reason": "" },
+          { "lever": "resolution", "evaluable": true, "candidates_tried": 1, "passed": true, "reason": "" }
+        ]
+      }
+    }
+  ],
+  "rejected_variants": []
+}

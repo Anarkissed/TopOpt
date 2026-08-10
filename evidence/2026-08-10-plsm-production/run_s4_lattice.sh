@@ -55,8 +55,11 @@ PY
 
 for side in plsm simp; do
   rm -rf "$SCRATCH/s4_$side"
+  # No --threads here: `lattice-variant` does not take it (this task added the
+  # flag to `run` only), and nothing below is a compared wall clock — it is a
+  # short post-process whose numbers are geometry and verdicts.
   ./build/topopt-cli lattice-variant "$SCRATCH/s4jobs/lat_$side.json" \
-      --out "$SCRATCH/s4_$side" --materials "$MATS" --threads 3 \
+      --out "$SCRATCH/s4_$side" --materials "$MATS" \
       > "$OUT/$side.log" 2>&1 || echo "$side exited nonzero (see the log)"
   for f in lattice_variant_report.json lattice_variant.json report.json \
            run_info.json loadcase.json; do

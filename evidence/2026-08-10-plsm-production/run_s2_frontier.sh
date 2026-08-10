@@ -20,8 +20,8 @@
 # THE MASS COLUMN. PR 324's probe targets `rung x part_solid` over every non-Empty
 # voxel; `simp_optimize`'s mask-aware overload — and therefore the shipped ladder —
 # targets `volume_fraction x n_active` with the frozen solid OUTSIDE the budget.
-# On his job those are 75,415 and 88,284 printed voxels at the same nominal rung
-# 0.68. So the probe's arms and SIMP's rungs were never at the same mass, and a
+# On his job those are 75,281 and 88,424 printed voxels at the same nominal rung
+# 0.68 — 462.9 g and 543.6 g, the two masses PR 324's section 0 put side by side. So the probe's arms and SIMP's rungs were never at the same mass, and a
 # frontier measured there could not be read against the 543.7 g bar. The
 # production path uses simp's convention, so a rung means the same thing on both.
 #
@@ -39,18 +39,19 @@
 # same iteration cap, same solver posture, three threads. Only the knot spacing
 # moves.
 #
-# ★ ONE RUNG, AND WHY. `margin_stop` is set above rung 0.68's margin, so the
-# ladder evaluates that rung, certifies it, and stops. Rung 0.68 is where SIMP's
-# 7.5521 / 3254.34 / 543.7 g bar lives, so it is the rung the frontier has to be
-# read at; running the other three at four lattices would cost four times as much
-# and answer a question nobody asked.
+# ★ THE FULL LADDER, AND AN ITERATION CAP, BOTH STATED. A loadcase job may not
+# carry a `margin_stop` key — the schema refuses it, because in loadcase mode the
+# production ladder and margin apply — so there is no way to ask for one rung.
+# Each arm therefore walks all four rungs, and `plsm.max_iterations` is capped at
+# $ITERS (default 40) so four arms fit. PR 324's from-scratch arm ran 60, so rung
+# 0.68 here is NOT fully converged and the frontier is read as a comparison
+# BETWEEN arms at an identical budget rather than as four converged designs.
+# Raise ITERS to close that; it costs about 30 s per iteration per arm.
 #
-# The rung is REJECTED by construction (its margin is far below the raised stop),
-# so the run does not export a mesh for it — every number below is read from
-# `design.bin`, which carries evaluated rungs whether or not they were accepted,
-# via `design_rung_dump` and then `external_field_surface_probe`. Both are
-# INVOKED, not retyped (R2), and the surface probe emits SIMP's own rows from the
-# reference design.bin in the same run at the same extraction factor.
+# Every number below is read from `design.bin` — which carries every evaluated
+# rung — via `design_rung_dump` and then `external_field_surface_probe`. Both are
+# INVOKED, not retyped (R2), and the surface probe emits SIMP's own four rungs
+# from the reference design.bin in the same run at the same extraction factor.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -77,8 +78,6 @@ base = json.load(open(src))
 arms = {"K2": [2, 2, 2], "K424": [4, 2, 4], "K4": [4, 4, 4], "K8": [8, 8, 8]}
 for name, knots in arms.items():
     j = dict(base)
-    # Above rung 0.68's margin_effective (673.86), so the ladder stops after it.
-    j["margin_stop"] = 1000.0
     j["plsm"] = {"enabled": True, "basis": "gaussian", "knots": knots,
                  "support": 2, "seed": "holes", "max_iterations": iters,
                  "refit_every": 5}
@@ -99,7 +98,6 @@ for arm in $ARMS; do
   mkdir -p "$SCRATCH/s2_$arm/dump"
   ./build/design_rung_dump "$SCRATCH/s2_$arm/design.bin" "$SCRATCH/s2_$arm/dump" \
       > "$OUT/$arm.dump.txt" 2>&1
-  cp "$SCRATCH/s2_$arm/dump"/rung_*.meta "$OUT/" 2>/dev/null || true
   for m in "$SCRATCH/s2_$arm/dump"/rung_*.meta; do
     cp "$m" "$OUT/$arm.$(basename "$m")"
   done
