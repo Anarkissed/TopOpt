@@ -32,9 +32,13 @@ curve is FLAT from iteration 30 (3390 / 3394 / 3387 / 3389). It is not the bar �
 carved is still 22% above SIMP's — but it is the first arm in this line of work
 to move the surface materially without paying for it.
 
-**2. Did the perimeter penalty behave differently on a parametric φ, as PR 324
-§10.3 predicted? — YES, AND MORE THAN PREDICTED, BUT NOT FOR THE STATED REASON.**
-§5.
+**2. Did the perimeter penalty behave differently on a parametric φ "because
+there is no reinitialisation to fight it", as PR 324 §10.3 predicted? — NO.**
+Turning the reinitialisation OFF at the same weight changes the emitted internal
+surface by 2.3% and makes it slightly WORSE. ★ The premise was also false as
+written: every arm in the frontier runs one. The term IS effective here — a
+quarter of the surface at C=1 — but the reason it was expected to be is not the
+reason. §3(d).
 
 **3. What is still generating surface? — HOLE NUCLEATION, which is the property
 the method was adopted for.** Eight times fewer seed holes removed only 8.9% of
