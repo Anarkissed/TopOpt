@@ -1,0 +1,32 @@
+=== R8 assertion census: main -> working tree ===
+
+1. TEST ASSERTION MESSAGES   before=3304  after=3344
+   REMOVED:
+   (nothing above = no assertion message disappeared)
+
+2. REGISTERED CTESTS   before=119  after=120
+   REMOVED:
+   ADDED:
+     plsm
+
+3. PRODUCTION REFUSALS   before=409  after=418
+   REMOVED:
+   (nothing above = no production refusal disappeared)
+
+4. COMPARISON KINDS INSIDE CHECK() (before -> after; a DROP is the thing to look at)
+     !=         31 ->     31  
+     &&        282 ->    289  
+     <         221 ->    225  
+     <=        136 ->    136  
+     ==        829 ->    842  
+     >         254 ->    260  
+     >=         60 ->     60  
+     ||          2 ->      2  
+
+5. HARNESS MESSAGES (the whole of core/tests/harness as ONE bag)
+   before=6177  after=6202
+   REMOVED:
+   (nothing above = the two header moves dropped no refusal and no message)
+
+6. THE REMOVED HARNESS STRINGS, TRIAGED
+     nothing was removed

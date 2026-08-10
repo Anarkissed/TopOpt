@@ -1,0 +1,3 @@
+FAIL (line 234): the conditional Heaviside projection must be DISARMED on a PLSM rung — otherwise it re-runs simp_optimize on the parametric field and the run silently ships a voxel design
+test_plsm: 24 checks, 1 failures
+EXIT=1

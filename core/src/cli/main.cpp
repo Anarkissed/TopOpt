@@ -40,6 +40,7 @@ int usage(const char* argv0) {
                "[--rules PATH]\n"
                "              [--no-iteration-csv] [--snapshots] "
                "[--snapshot-every N] [--snapshot-cap N]\n"
+               "              [--threads N]\n"
                "       %s analyze <job.json> [--mesh PATH] [--smooth S] "
                "[--no-min-feature] [--out DIR]\n"
                "              [--materials PATH] [--rules PATH]\n"
@@ -350,6 +351,16 @@ int main(int argc, char** argv) {
   // TOPOPT_BUILD_FINGERPRINT) is stamped into run_info.json so the era is provable.
   topopt::RunObservability obs;
   obs.fingerprint = TOPOPT_BUILD_FINGERPRINT;
+  // ★ --threads N: HOW MUCH OF THE MACHINE THIS RUN MAY TAKE. 0 (the DEFAULT)
+  // leaves the production rule alone — production_matfree_thread_count(), the
+  // performance-core pin. It is a PURE PERFORMANCE CONTROL and cannot move a
+  // number: the matrix-free apply threads a deterministic 8-colour partition of
+  // the voxel grid, so no two threads ever touch the same node and the
+  // accumulation order is fixed regardless of the count (fea.hpp on
+  // fea_set_matfree_threads: "BIT-IDENTICAL for any thread count"). It exists
+  // because a run that pins every performance core makes the machine unusable
+  // for the hours it takes, and "wait until tonight" is not a setting.
+  int threads = 0;
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
     // Value-less flags first.
@@ -374,6 +385,9 @@ int main(int argc, char** argv) {
       if (obs.snapshot_every < 1) return usage(argv[0]);
     } else if (arg == "--snapshot-cap") {
       obs.snapshot_cap = std::atoi(argv[++i]);
+    } else if (arg == "--threads") {
+      threads = std::atoi(argv[++i]);
+      if (threads < 1) return usage(argv[0]);
     } else {
       return usage(argv[0]);
     }
@@ -389,9 +403,17 @@ int main(int argc, char** argv) {
     // emit_progress = true: stream PROGRESS/VARIANT checkpoint lines to stdout and
     // export each accepted variant as it completes, so a wrapper (the LAN worker,
     // handoff 093) can forward live progress + progressive artifacts.
+    // Applied AFTER the job is loaded and BEFORE the run, which is where
+    // fea.hpp says a caller wanting a non-default count applies it: run_job
+    // calls configure_production_options (which sets the production count) at
+    // its start, so setting it here would be overwritten. The override therefore
+    // rides RunObservability's sibling channel — an explicit field on the run —
+    // rather than a global set at the wrong moment.
+    topopt::RunObservability obs_run = obs;
+    obs_run.matfree_threads = threads;
     const topopt::RunJobResult result =
         topopt::run_job(job, dirname_of(job_path), out_dir, materials, rules,
-                        /*emit_progress=*/true, obs);
+                        /*emit_progress=*/true, obs_run);
 
     // "B-rep faces" only for a STEP part; an STL/3MF part carries manufactured
     // PSEUDO-faces (handoff 2026-07-24-mesh-optimize-path), so name them honestly.

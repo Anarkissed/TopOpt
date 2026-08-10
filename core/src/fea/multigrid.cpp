@@ -1180,7 +1180,8 @@ void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
 // All work vectors come from `S` (sized once), so the loop heap-allocates nothing.
 bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
               int max_it, Vec& x, int& iters, double& resid, bool mixed,
-              fea_detail::RecycleReport* rec = nullptr) {
+              fea_detail::RecycleReport* rec = nullptr,
+              const Vec* x0 = nullptr) {
   // The ONLY thing `mixed` changes is which V-cycle preconditions the residual:
   // FP32 (mf_v_cycle_mixed) vs FP64 (mf_v_cycle). Every quantity that defines
   // convergence — r, x, p, rz, alpha, beta, the residual norm and the stopping
@@ -1214,8 +1215,22 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
     rec->setup_matvecs += recycle.setup_matvecs();
   }
 
-  x = Vec::Zero(n);
-  Vec r = b;                              // r = b - A*0
+  // WARM START (task 2026-08-10-plsm-production, S3): x0 == nullptr is the
+  // pre-feature path, byte-for-byte — `x = 0` and `r = b - A*0 = b`, with no
+  // matvec spent. With a guess, one extra fine matvec buys the true initial
+  // residual; everything after this is the identical recurrence, and the
+  // stopping test below is still ||r|| <= tol*||b|| — relative to the RHS, not
+  // to the initial residual — so a warm solve satisfies the same criterion a
+  // cold one does.
+  Vec r(n);
+  if (x0 != nullptr && x0->size() == n && x0->allFinite()) {
+    x = *x0;
+    mf_fine_matvec(H, x, S.Ap);
+    r = b - S.Ap;
+  } else {
+    x = Vec::Zero(n);
+    r = b;                                // r = b - A*0
+  }
   Vec z(n);
   precondition(r, z);                      // z = M^{-1} r
   recycle.augment(r.data(), z.data());     // + U E^-1 U^T r
@@ -2057,7 +2072,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                double tolerance, int max_iterations, CgInfo* info,
                                const std::vector<double>* elem_youngs,
                                const std::vector<char>* active_mask,
-                               const MfLatticeArrays* lattice = nullptr) {
+                               const MfLatticeArrays* lattice = nullptr,
+                               const FeaSolution* initial_guess = nullptr) {
   // Build the reduced, void-gated matrix-free system (throws + sets *info on a
   // void-gate rejection, exactly like solve_reduced_mgcg's gate). `active_mask`
   // (active-domain phase 1) restricts WHICH solid voxels contribute an element;
@@ -2107,6 +2123,26 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     diag.hier_built = have_h;
 
     std::vector<double> xkept(static_cast<std::size_t>(m.ng), 0.0);
+    // WARM START (task 2026-08-10-plsm-production, S3). `m.kept_global[k]` is the
+    // GLOBAL dof the kept index k stands for, so a previous solution on the same
+    // grid seeds the reduced vector by a gather and nothing else. A guess of the
+    // wrong length is IGNORED rather than diagnosed: the caller holds a solution
+    // from a grid it may since have changed, a silently-cold solve is correct,
+    // and throwing here would turn an accelerator into a failure mode. Null (the
+    // default) leaves xkept at zero — the pre-feature path, byte-for-byte.
+    bool warm = false;
+    if (initial_guess != nullptr && initial_guess->u.size() == u.size()) {
+      warm = true;
+      for (int k = 0; k < m.ng; ++k) {
+        const double g =
+            initial_guess
+                ->u[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])];
+        if (!std::isfinite(g)) { warm = false; break; }
+        xkept[static_cast<std::size_t>(k)] = g;
+      }
+      if (!warm)
+        std::fill(xkept.begin(), xkept.end(), 0.0);
+    }
     // Krylov recycling accounting for THIS solve (handoff 133). A solve that
     // attempts MG-CG and then falls back to Jacobi-CG pays the k setup matvecs
     // twice; the report ACCUMULATES them so the charged cost is honest.
@@ -2133,11 +2169,18 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       const bool mixed = fea_detail::mf_mixed_precision_enabled() &&
                          H.fine_dinv_f.size() == m.ng && !m.has_cubic;
       if (mixed) scratch.resize_f(m.ng, static_cast<int>(H.P0.cols()));
-      bool ok =
-          mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed, &rec);
+      // The warm guess, as an Eigen vector the MG-CG loop can start from.
+      // Held here (not inside mf_mgpcg) so the FP64 RETRY after a failed mixed
+      // attempt starts from the SAME guess rather than from the failed iterate.
+      Vec x0;
+      if (warm) x0 = Eigen::Map<const Vec>(xkept.data(),
+                                           static_cast<Eigen::Index>(m.ng));
+      const Vec* x0p = warm ? &x0 : nullptr;
+      bool ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed,
+                         &rec, x0p);
       if (!ok && mixed)
         ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res,
-                      /*mixed=*/false, &rec);
+                      /*mixed=*/false, &rec, x0p);
       // Cycles this solve burned on MG-CG (the last attempt's count when a mixed
       // attempt was retried in FP64): honest whether it converged or stagnated.
       diag.mg_cycles_attempted = it;
@@ -2442,9 +2485,11 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    const std::vector<NodalLoad>& loads,
                                    double tolerance, int max_iterations,
                                    CgInfo* info,
-                                   const std::vector<char>* active_mask) {
+                                   const std::vector<char>* active_mask,
+                                   const FeaSolution* initial_guess) {
   return solve_mgcg_matfree(grid, 1.0, poisson, bcs, loads, tolerance,
-                            max_iterations, info, &youngs_per_voxel, active_mask);
+                            max_iterations, info, &youngs_per_voxel, active_mask,
+                            nullptr, initial_guess);
 }
 
 // Matrix-free CUBIC LATTICE solve (multiscale production wiring): the composite

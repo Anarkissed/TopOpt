@@ -7,6 +7,7 @@
 // alongside simp.cpp.
 
 #include "topopt/pipeline.hpp"
+#include "topopt/plsm.hpp"
 
 #include <algorithm>
 #include <array>
@@ -368,6 +369,15 @@ VoxelGrid minimize_plastic_solved_grid(const VoxelGrid& grid,
   // With no design box the solved grid IS the caller's grid.
   if (!options.design_box.has_value()) return grid;
   return resolve_design_domain(grid, /*bcs=*/{}, options).grid;
+}
+
+// The gate's arming predicate. Declared in pipeline.hpp; see the reasoning
+// there. Defined here because this is the only place that consults it, so the
+// declaration and the use cannot drift.
+bool conditional_mma_projection_armed(const MinimizePlasticOptions& options) {
+  return options.conditional_mma_projection_mnd_threshold > 0.0 &&
+         options.updater == SimpUpdater::MMA && !options.simp.mma_projection &&
+         !options.simp.semdot && options.plsm.mode != PlsmMode::Parametric;
 }
 
 MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
@@ -945,9 +955,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // `conditional_projection_fired` staying empty, exactly as any other disarmed
   // run reports it.
   const bool conditional_projection_armed =
-      options.conditional_mma_projection_mnd_threshold > 0.0 &&
-      options.updater == SimpUpdater::MMA && !options.simp.mma_projection &&
-      !options.simp.semdot;
+      conditional_mma_projection_armed(options);
 
   // --- Handoff 2026-07-25-draft-quality: the draft posture, resolved once ---
   // ARMED only when draft_quality is set AND the loose endpoint is genuinely looser
@@ -959,8 +967,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // band: a trajectory tolerance at/below it counts as "tight" (within one decade of
   // the certification floor) for the tail measurement.
   const double kCertTol = options.simp.cg_tolerance;
-  const bool draft_armed =
-      options.draft_quality && options.draft_loose_tol > kCertTol;
+  // ★ AND THE PARAMETRIC PATH DISARMS THE DRAFT POSTURE TOO, for the same reason
+  // it disarms the projection gate: the escalation re-runs `simp_optimize` from
+  // the rung's own warm-start seed, which on this path would replace the
+  // parametric design with a voxel one. It is not a loss of the feature —
+  // `PlsmOptions::cg_tolerance_loose` IS the loose trajectory tolerance on this
+  // path, and `plsm_optimize` ends every rung with its own TIGHT final solve on
+  // the shipped field, which is the guarantee the draft escalation exists to
+  // recover. Nothing is silently ignored: the draft_rung_* vectors stay empty,
+  // exactly as on any un-armed run.
+  const bool draft_armed = options.plsm.mode != PlsmMode::Parametric &&
+                           options.draft_quality &&
+                           options.draft_loose_tol > kCertTol;
   const double kDraftTightBand = kCertTol * 10.0;
   // Record one draft-outcome entry per EVALUATED rung, so the three vectors stay
   // aligned with `evaluated` / `rung_infeasible` across every terminal branch
@@ -1245,7 +1263,29 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       };
     }
 
-    variant.optimization = simp_optimize(G, params, B, loads, opt, mask);
+    // ── THE ONE BRANCH (task 2026-08-10-plsm-production) ────────────────────
+    //
+    // ★ PlsmMode::Off IS THE DEFAULT AND IS THE ENTIRE EXISTING WORLD. This `if`
+    // is the ONLY place the parametric level set enters the driver; with the mode
+    // Off the `else` is the historical line, unmoved, and not one line of
+    // plsm.cpp executes. Everything AFTER this block — the draft escalation, the
+    // conditional projection, the certification, the ladder walk — reads
+    // `variant.optimization` and cannot tell which optimiser filled it, which is
+    // the point: a PLSM rung produces the same SimpOptimizeResult a SIMP rung
+    // does, on the same volume constraint over the same Active set.
+    if (options.plsm.mode == PlsmMode::Parametric) {
+      PlsmRunResult pr =
+          plsm_optimize(G, params, B, loads, opt, mask, options.plsm);
+      variant.optimization = std::move(pr.optimization);
+      // The analytic design, carried out beside the voxel field (S1(d)).
+      variant.plsm_alpha = std::move(pr.alpha);
+      variant.plsm_lattice = pr.lattice;
+      variant.plsm_basis_kind = pr.basis_kind;
+      variant.plsm_eta_voxels = pr.eta_voxels;
+      variant.plsm_frozen_floor_occupancy = pr.frozen_floor_occupancy;
+    } else {
+      variant.optimization = simp_optimize(G, params, B, loads, opt, mask);
+    }
 
     // --- Handoff 2026-07-25-draft-quality (d): THE ESCALATION GATE ------------
     // The draft grayscale rung is done. Its self-contained divergence signal is the

@@ -251,6 +251,28 @@ RunInfo build_run_info(const JobDescription& job,
   info.semdot = options.simp.semdot;
   info.semdot_grid_points =
       options.simp.semdot ? options.simp.semdot_grid_points : 0;
+  // Task 2026-08-10-plsm-production — the armed PARAMETRIC posture (config
+  // echo). `plsm_coefficients` and `plsm_frozen_floor_occupancy` are the RUN's
+  // own measurements and are filled post-run from the first evaluated variant,
+  // like the semdot per-rung vectors.
+  info.plsm = options.plsm.mode == PlsmMode::Parametric;
+  if (info.plsm) {
+    info.plsm_basis = options.plsm.basis;
+    // The REQUESTED spacing; all-zero means "derive from the grid". The
+    // RESOLVED spacing — the number actually in force — is overwritten post-run
+    // from the variant's own knot lattice, so the receipt states what ran and
+    // not what was asked for.
+    info.plsm_knots_vox[0] = options.plsm.knots.dx;
+    info.plsm_knots_vox[1] = options.plsm.knots.dy;
+    info.plsm_knots_vox[2] = options.plsm.knots.dz;
+    info.plsm_support = options.plsm.support;
+    info.plsm_eta_voxels = options.plsm.eta_voxels;
+    info.plsm_max_iterations = options.plsm.max_iterations;
+    info.plsm_seed = options.plsm.seed;
+    info.plsm_refit_every = options.plsm.refit_every;
+    info.plsm_cg_tolerance_loose = options.plsm.cg_tolerance_loose;
+    info.plsm_warm_start = options.plsm.warm_start;
+  }
   info.draft_quality = options.draft_quality;
   info.draft_loose_tol = options.draft_loose_tol;
   info.draft_escalation_c_gap = options.draft_escalation_c_gap;
@@ -305,6 +327,98 @@ std::optional<BuildFrameRotation> variant_bake_rotation(
     const MinimizePlasticVariant& variant) {
   if (!variant.export_baked) return std::nullopt;
   return build_frame_rotation(variant.applied_build_dir);
+}
+
+// ── THE ANALYTIC EXPORT (task 2026-08-10-plsm-production, S1(d)) ───────────
+//
+// ★ THE DESIGN, RATHER THAN A SAMPLING OF IT. A PLSM rung's design IS the
+// coefficient vector: 685 KB on his part against `rho.f64`'s 3.75 MB, and
+// re-evaluable at ANY resolution instead of only at the one it was optimised on.
+// The voxel field stays the thing everything downstream reads — the certificate,
+// the mesh, the lattice — because that is what makes the mode a drop-in; this is
+// written BESIDE it so a later pass can re-evaluate the same design finer without
+// re-running the optimisation.
+//
+// WHAT READS IT: `topopt::plsm_evaluate(lattice, basis, alpha, nx, ny, nz,
+// factor, threads)` reconstructs phi on any lattice from `<stem>_alpha.f64` plus
+// the `<stem>_alpha.meta` beside it, and the ersatz is `plsm_heaviside(-phi,
+// eta_voxels * spacing)`. `external_field_surface_probe` reads the resulting
+// occupancy field directly. Nothing in the shipped pipeline consumes it yet, and
+// that is stated rather than implied: it is an OUTPUT, not an input, until a
+// consumer exists.
+//
+// A NO-OP on every SIMP rung — `plsm_alpha` is empty there and this writes
+// nothing, so a default run's out_dir is byte-for-byte what it was.
+std::string export_variant_alpha(const MinimizePlasticVariant& variant,
+                                 const std::string& out_dir, const JobOutput& out,
+                                 const VoxelGrid& sg) {
+  if (variant.plsm_alpha.empty()) return {};
+  char digits[8];
+  std::snprintf(digits, sizeof(digits), "%03d",
+                static_cast<int>(std::lround(variant.requested_volume_fraction *
+                                             100.0)));
+  const std::string stem =
+      join_path(out_dir, out.mesh_prefix + "_" + digits + "_alpha");
+  {
+    std::ofstream f(stem + ".f64", std::ios::binary);
+    if (!f) throw JobError("cannot open output file for writing: " + stem + ".f64");
+    f.write(reinterpret_cast<const char*>(variant.plsm_alpha.data()),
+            static_cast<std::streamsize>(variant.plsm_alpha.size() *
+                                         sizeof(double)));
+    f.flush();
+    if (!f) throw JobError("failed writing output file: " + stem + ".f64");
+  }
+  const PlsmKnotLattice& L = variant.plsm_lattice;
+  std::ostringstream m;
+  m.precision(17);
+  m << "# THE ANALYTIC DESIGN: phi(x) = sum_i alpha_i psi(|x - x_i|_R).\n"
+    << "# alpha is " << stem << ".f64, " << variant.plsm_alpha.size()
+    << " float64 in x-fastest knot order.\n"
+    << "# Rebuild with topopt::plsm_make_lattice(nx, ny, nz, knots_vox..., "
+       "support)\n"
+    << "# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, "
+       "threads);\n"
+    << "# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).\n"
+    << "basis " << (variant.plsm_basis_kind == PlsmBasisKind::Gaussian
+                        ? "gaussian" : "wendland") << "\n"
+    // ★ THREE NUMBERS, PER AXIS. A reader that collapses these to one has
+    // reintroduced the slab trap R4 exists to forbid.
+    << "knots_vox " << L.dx << " " << L.dy << " " << L.dz << "\n"
+    << "support_vox " << L.rx << " " << L.ry << " " << L.rz << "\n"
+    << "counts " << L.mx << " " << L.my << " " << L.mz << "\n"
+    << "pad " << L.padx << " " << L.pady << " " << L.padz << "\n"
+    << "n_coeff " << variant.plsm_alpha.size() << "\n"
+    << "n_voxels " << sg.voxel_count() << "\n"
+    << "compression "
+    << (variant.plsm_alpha.empty()
+            ? 0.0
+            : static_cast<double>(sg.voxel_count()) /
+                  static_cast<double>(variant.plsm_alpha.size()))
+    << "\n"
+    << "eta_voxels " << variant.plsm_eta_voxels << "\n"
+    << "nx " << sg.nx << "\nny " << sg.ny << "\nnz " << sg.nz << "\n"
+    << "spacing " << sg.spacing << "\n"
+    << "ox " << sg.origin.x << "\noy " << sg.origin.y << "\noz " << sg.origin.z
+    << "\n"
+    << "requested_vf " << variant.requested_volume_fraction << "\n"
+    << "achieved_vf " << variant.optimization.volume_fraction << "\n"
+    // ★ THE LOAD-PATH GUARANTEE, MEASURED. The smallest ersatz occupancy any
+    // FrozenSolid voxel took under the smooth boolean. PR 324 measured that 40
+    // leaked frozen voxels of 40,216 break the anchor-to-load walk and reject
+    // every certification; this number being above 0.5 is why that cannot happen,
+    // and plsm_optimize refuses to run when it is not.
+    << "frozen_floor_occupancy " << variant.plsm_frozen_floor_occupancy << "\n"
+    // ★ AND THE FIELD IT IS NOT. This is the analytic design; the CERTIFIED
+    // object is the voxel field in design.bin and the mesh beside it. A margin
+    // computed on one is not a margin for the other — re-describing a design
+    // moved its certified margin 3254 -> 1667 on one design and 2015 -> 3221 on
+    // another (PR 324 §5). Re-evaluating this at a different resolution produces
+    // a DIFFERENT OBJECT and it must be re-certified.
+    << "# NOT CERTIFIED. The certificate in report.json belongs to the voxel "
+       "field this was optimised on, at this resolution, and does NOT carry over "
+       "to a re-evaluation at another one.\n";
+  write_text_file(stem + ".meta", m.str());
+  return stem + ".f64";
 }
 
 // Write one accepted variant's mesh into out_dir and return its path. Smooth-
@@ -6399,7 +6513,11 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
   // NOTE this arms only Part B; warm_start_inherit (Part A) is resolved by
   // build_production_loadcase's own measured rule (handoff 113: load-case runs
   // warm, self-weight runs cold) and is NOT touched here.
-  if (job.has_warm_start) options.warm_start_coarse = job.warm_start_coarse;
+  if (job.has_warm_start) {
+    options.warm_start_coarse = job.warm_start_coarse;
+    // S3(b): the matrix-free trajectory warm start. OFF unless the job says so.
+    options.simp.matfree_warm_start = job.warm_start_matfree;
+  }
 
   // Task 2026-08-08-semdot-does-it-come-out-smoother — map the optional "semdot"
   // block onto the production options, for BOTH front-ends, exactly like the
@@ -6411,6 +6529,36 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
   if (job.has_semdot) {
     options.simp.semdot = job.semdot;
     options.simp.semdot_grid_points = job.semdot_grid_points;
+  }
+
+  // Task 2026-08-10-plsm-production — map the optional "plsm" block onto the
+  // production options, for BOTH front-ends, exactly like the three blocks
+  // above. Absent (has_plsm == false, the default) => options.plsm.mode keeps
+  // its Off default and the run is byte-identical; R1 of that task is a
+  // stash-rebuild checksum of exactly that.
+  //
+  // ★ THE KNOTS PASS THROUGH AS THREE NUMBERS AND ARE NEVER REDUCED TO ONE. All
+  // three zero (the job's default, and what a job that omits the key gets) means
+  // "derive from the grid" — plsm_optimize calls plsm_knots_for_grid, which is
+  // the ONE place the production rule lives.
+  if (job.has_plsm && job.plsm_enabled) {
+    options.plsm.mode = PlsmMode::Parametric;
+    options.plsm.basis = job.plsm_basis;
+    options.plsm.knots.dx = job.plsm_knots[0];
+    options.plsm.knots.dy = job.plsm_knots[1];
+    options.plsm.knots.dz = job.plsm_knots[2];
+    options.plsm.support = job.plsm_support;
+    options.plsm.eta_voxels = job.plsm_eta_voxels;
+    options.plsm.max_iterations = job.plsm_max_iterations;
+    options.plsm.seed = job.plsm_seed;
+    options.plsm.refit_every = job.plsm_refit_every;
+    options.plsm.move = job.plsm_move;
+    options.plsm.cg_tolerance_loose = job.plsm_cg_tolerance_loose;
+    options.plsm.warm_start = job.plsm_warm_start;
+    // The parametric path's own trajectory threads follow the solver's, so a
+    // job that asked for three threads gets three here too rather than the
+    // hardware's full count (which is what "he needs his machine" means).
+    options.plsm.threads = production_matfree_thread_count();
   }
   return S;
 }
@@ -8235,6 +8383,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           export_variant_mesh(v, out_dir, job.output, solved_grid,
                               run_printed_iso(options), &result.model);
       streamed_paths.push_back(p);
+      // The analytic design beside the mesh (S1(d)). Empty string on a SIMP
+      // rung: nothing is written and nothing is pushed.
+      {
+        const std::string ap =
+            export_variant_alpha(v, out_dir, job.output, solved_grid);
+        if (!ap.empty()) streamed_paths.push_back(ap);
+      }
       // `achieved` is the optimizer-achieved (continuous) fraction — the stream's
       // join key against the report's volume_fraction; `printed` is the printed/count
       // basis the app's savings uses (handoff 104, additive — a new field; older
@@ -8250,6 +8405,19 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     };
   }
 
+  // ★ THE THREAD OVERRIDE, APPLIED HERE AND NOWHERE EARLIER (task
+  // 2026-08-10-plsm-production). `configure_production_options` sets the
+  // matrix-free apply's thread count to the performance-core pin, so a caller
+  // that set it before run_job would have been silently overwritten. 0 (the
+  // default) leaves the production rule alone and this line does nothing. It is
+  // a pure performance control — fea.hpp guarantees the apply is BIT-IDENTICAL
+  // for any thread count, because it colours the grid deterministically — so it
+  // cannot move a number, only how much of the machine the run takes.
+  if (obs.matfree_threads > 0) {
+    fea_set_matfree_threads(obs.matfree_threads);
+    if (options.plsm.mode == PlsmMode::Parametric)
+      options.plsm.threads = obs.matfree_threads;
+  }
   result.pipeline =
       minimize_plastic(grid, material, job.material, bcs, rules, options);
 
@@ -8329,6 +8497,23 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         run_info.semdot_rung_design_voxels.push_back(
             static_cast<long long>(v.optimization.semdot_design_voxels));
       }
+    }
+    // Task 2026-08-10-plsm-production — finalize the PARAMETRIC posture from the
+    // run's own first evaluated rung: the RESOLVED knot spacing (three numbers,
+    // per axis), the coefficient count, and the measured load-path floor. The
+    // resolved spacing overwrites the requested one, because a receipt has to
+    // state what ran; a job that left the knots at zero asked for the derived
+    // rule, and this is what the rule gave. Untouched (and zero) when the mode
+    // was off, so an unarmed run claims nothing about it.
+    if (options.plsm.mode == PlsmMode::Parametric &&
+        !result.pipeline.evaluated.empty()) {
+      const MinimizePlasticVariant& v0 = result.pipeline.evaluated.front();
+      run_info.plsm_knots_vox[0] = v0.plsm_lattice.dx;
+      run_info.plsm_knots_vox[1] = v0.plsm_lattice.dy;
+      run_info.plsm_knots_vox[2] = v0.plsm_lattice.dz;
+      run_info.plsm_coefficients =
+          static_cast<long long>(v0.plsm_lattice.count());
+      run_info.plsm_frozen_floor_occupancy = v0.plsm_frozen_floor_occupancy;
     }
     // Handoff 131 — finalize the per-rung infeasibility outcome (one entry per
     // evaluated rung; all-false is the positive statement "no rung lost its load
@@ -8664,6 +8849,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid,
           run_printed_iso(options), &result.model));
+      // The analytic design beside the mesh (S1(d)). A no-op on a SIMP rung.
+      {
+        const std::string ap = export_variant_alpha(
+            variant, out_dir, job.output, result.pipeline.solved_grid);
+        if (!ap.empty()) result.mesh_paths.push_back(ap);
+      }
       emit_lattice(variant, /*stream_lines=*/false);  // batch: no stdout lines
     }
   }

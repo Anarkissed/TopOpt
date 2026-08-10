@@ -673,6 +673,37 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
 // See docs/handoffs/2026-07-23-active-domain-phase-1.md; the mask itself is
 // derived by the SIMP layer (active_domain_mask, simp.hpp), which owns the
 // density field it is a pure function of.
+//
+// ── WARM START (task 2026-08-10-plsm-production, S3) ────────────────────────
+//
+// ★ `initial_guess` IS THE ONE THING THIS SOLVER DID NOT TAKE, AND IT COST 76%
+// OF THE SOLVER STEPS. `simp_compliance` has accepted an `initial_guess` since it
+// was written, and core also has a `PenalizedSolver` whose header says it
+// warm-starts automatically — but `simp.cpp` dispatches MultigridCG_Matfree FIRST
+// and that branch took neither, so on the path this project actually runs every
+// solve started from zero. PR 324 measured the cost on a design that moves by a
+// bounded fraction of a voxel per iteration: 21,513 solver steps and 369 s cold
+// against 5,238 and 151 s warm at a loosened tolerance, on the same design to
+// seven significant figures. The two mechanisms are MULTIPLICATIVE — a tight
+// solve is dominated by a tail a good starting point does not help, and loosening
+// removes the tail so the head start becomes most of what is left.
+//
+// nullptr (the DEFAULT) is the pre-feature path, byte-for-byte. When supplied,
+// the guess seeds the kept-DOF vector of BOTH regimes — the MG-CG loop and the
+// exact Jacobi-CG fallback — by reading `initial_guess->u` at the global DOF each
+// kept index maps to. A guess of the wrong length is IGNORED rather than
+// diagnosed, because the caller that supplies one holds a solution from a solve
+// on a grid it may since have changed; a silently-cold solve is correct, and a
+// throw here would turn a performance feature into a failure mode.
+//
+// ★ IT IS AN ACCELERATOR AND NOTHING ELSE. The stopping test is unchanged —
+// ||r|| <= tol * ||b||, relative to the RIGHT-HAND SIDE and not to the initial
+// residual — so a warm-started solve satisfies the IDENTICAL criterion a cold one
+// does and lands inside the same tolerance ball. It changes the iteration count
+// and the point inside that ball, never the criterion. The task's bar for "the
+// same design" is PR 313's margin-reproduction tolerance of 1.0e-06 relative,
+// against a measured warm-vs-cold noise floor of 3e-10 to 3e-9; see the S3 table
+// in the task handoff for what it actually moved.
 FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    const std::vector<double>& youngs_per_voxel,
                                    double poisson,
@@ -680,7 +711,8 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    const std::vector<NodalLoad>& loads,
                                    double tolerance = 1e-8,
                                    int max_iterations = 0, CgInfo* info = nullptr,
-                                   const std::vector<char>* active_mask = nullptr);
+                                   const std::vector<char>* active_mask = nullptr,
+                                   const FeaSolution* initial_guess = nullptr);
 
 // Memory evidence (diagnostic): total nonzeros stored across the ASSEMBLED
 // operators of the multigrid hierarchy each solver builds for (grid, E, nu, bcs,
