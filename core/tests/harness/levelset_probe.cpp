@@ -1029,6 +1029,38 @@ struct Args {
   // The volume offset is still added to every coefficient, because that is a
   // rigid move of the surface and not a design change.
   double nucleation_band = 0.0;   // VOXELS from the interface; 0 = off
+
+  // ── ★ A MARGIN-AWARE STOPPING RULE, AND A WALL-CLOCK CAP ──────────────────
+  //
+  // ★ THIS EXISTS BECAUSE THIS TASK MEASURED THAT THE STOPPING RULE WE HAVE IS
+  // WATCHING THE WRONG THING. Every arm here stops on a compliance plateau
+  // (window 10, tol 1e-3, the shipped MMA termination). But the certified
+  // MARGIN settles far later than the compliance does: the re-baseline moved
+  // 27% in margin between iterations 40 and 60 while its compliance moved
+  // 0.05%, and C=8 DOUBLED its margin over the same span. So a compliance
+  // plateau is not evidence that the design is finished, and every arm in §3
+  // stopped while its margin was still climbing.
+  //
+  //   --certify-every N   certify the CURRENT design every N iterations, with
+  //                       the posture disarmed exactly as a re-certification
+  //                       disarms it, and RE-ARMED afterwards so the trajectory
+  //                       is not altered by having been measured.
+  //   --margin-stop M     stop as soon as that certified margin reaches M.
+  //   --wall-cap S        stop when the run has used S seconds. Checked after
+  //                       an iteration completes, so the cap is a floor on the
+  //                       wall clock, not a guillotine mid-solve.
+  //
+  // ★ THE CERTIFICATION IS NOT FREE AND ITS COST IS REPORTED SEPARATELY, so a
+  // timing produced with this on is not silently inflated.
+  int certify_every = 0;
+  // ★ AND A FLOOR ON WHEN TO START. Certifying an unconverged design costs 26x
+  // what certifying a converged one costs (20.9 s at iteration 5 against
+  // 537.9 s at iteration 10, measured), and an early certificate cannot pass
+  // the target anyway. Starting the cadence late is what makes a margin-aware
+  // stopping rule affordable at all.
+  int certify_from = 0;
+  double margin_stop = 0.0;
+  double wall_cap = 0.0;
   // --weno   WENO5 one-sided derivatives in the Godunov gradient (5th order,
   //          essentially non-oscillatory) instead of plain first-order ones.
   // --rk3    TVD-RK3 time stepping instead of forward Euler. Pairs with --weno;
@@ -1161,6 +1193,10 @@ int main(int argc, char** argv) {
     else if (s == "--willmore-full") a.willmore_full = true;
     else if (s == "--robust") next(a.robust);
     else if (s == "--nucleation-band") next(a.nucleation_band);
+    else if (s == "--certify-every") nexti(a.certify_every);
+    else if (s == "--certify-from") nexti(a.certify_from);
+    else if (s == "--margin-stop") next(a.margin_stop);
+    else if (s == "--wall-cap") next(a.wall_cap);
     else if (s == "--seed-period") next(a.seed_period);
     else if (s == "--reinit-substeps") a.reinit_substeps = true;
     else if (s == "--weno") a.weno = true;
@@ -1231,6 +1267,15 @@ int main(int argc, char** argv) {
   }
   if (a.robust < 0.0) {
     std::printf("FATAL: --robust takes an erosion depth in VOXELS >= 0\n");
+    return 2;
+  }
+  if (a.margin_stop > 0.0 && a.certify_every <= 0) {
+    std::printf(
+        "FATAL: --margin-stop needs --certify-every N. The margin is not\n"
+        "       computed by the optimisation loop — it comes from\n"
+        "       analyze_fixed_design, which has to be CALLED. Without a\n"
+        "       cadence there is nothing for the rule to read and the flag\n"
+        "       would silently never fire.\n");
     return 2;
   }
   // ★ REFUSED RATHER THAN IGNORED, and the number it is checked against is the
@@ -2228,6 +2273,13 @@ int main(int argc, char** argv) {
   std::vector<double> best_occ, best_rho;
   double best_compliance = std::numeric_limits<double>::infinity();
   int best_iter = -1;
+  // In-loop certification bookkeeping, so its cost is reported apart from the
+  // optimisation's and a timing produced with it on is not silently inflated.
+  double cert_wall_inloop = 0.0;
+  long long cert_calls_inloop = 0;
+  double margin_stop_hit = 0.0;
+  int margin_stop_iter = -1;
+  bool wall_cap_hit = false;
 
   // The previous iterate's displacement field, for --warm-start.
   FeaSolution warm;
@@ -3098,6 +3150,87 @@ int main(int argc, char** argv) {
       std::fflush(stdout);
     }
 
+    // ── ★ THE MARGIN-AWARE STOP, AND THE WALL CAP ──────────────────────────
+    //
+    // The certification is `analyze_fixed_design` at the PRODUCTION penalty on
+    // the CURRENT design, with recycling / GenEO / mixed precision disarmed —
+    // the same isolation a re-certification uses — and RE-ARMED immediately
+    // afterwards. ★ Re-arming is not tidiness: leaving the posture disarmed
+    // would change every state solve after the first certification, so an arm
+    // measured this way would not be the arm without it.
+    if (a.certify_every > 0 && it >= a.certify_from && it % a.certify_every == 0) {
+      const double t_c0 = now_s();
+      std::vector<double> crho(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v)
+        crho[v] = params.density_min + (1.0 - params.density_min) * occ[v];
+      fea_set_krylov_recycling(false);
+      fea_set_geneo_twolevel(false);
+      fea_set_matfree_mixed_precision(false);
+      // ★ THE SAME CALL, WITH THE SAME ARGUMENTS, AS THE END-OF-RUN
+      // CERTIFICATION BELOW — production tolerance, production solver,
+      // production penalty. A stopping rule that certified on a cheaper path
+      // than the certificate would stop on a number the certificate does not
+      // agree with.
+      const bool cok = load_path_connected(grid, crho, 0.5);
+      double cm = 0.0;
+      bool cacc = false;
+      try {
+        const FixedDesignAnalysis ca = analyze_fixed_design(
+            grid, params, crho, bcs, loads, material, options.build_direction,
+            options.simp.cg_tolerance, options.simp.cg_max_iterations,
+            options.simp.solver, options.margin_stop, knockdown_spec_for(options),
+            cok, part_solid);
+        cm = ca.margin.worst_case;
+        cacc = ca.accepted && !ca.non_convergent;
+      } catch (const std::exception& e) {
+        std::printf("   ↳ certification at iteration %d failed: %s\n", it, e.what());
+      }
+      fea_set_krylov_recycling(prev_recycle);
+      fea_set_geneo_twolevel(prev_geneo);
+      fea_set_matfree_mixed_precision(prev_mixed);
+      cert_wall_inloop += now_s() - t_c0;
+      ++cert_calls_inloop;
+      std::printf("   ↳ certified at iteration %d: margin %.2f  %s  "
+                  "(%.1f s, %.1f s of run so far is certification)\n",
+                  it, cm, cacc ? "ACCEPTED" : "not accepted",
+                  now_s() - t_c0, cert_wall_inloop);
+      std::fflush(stdout);
+      if (a.margin_stop > 0.0 && cm >= a.margin_stop && cacc) {
+        // ★ AND THE DESIGN THAT MET THE BAR IS THE ONE THAT GETS CERTIFIED AND
+        // WRITTEN, not the best-compliance iterate. Otherwise the summary would
+        // report a different design from the one the stopping rule fired on —
+        // which is exactly the mismatch that cost this task its first set of
+        // tables (§2).
+        best_occ = occ;
+        best_rho = rho;
+        best_iter = it;
+        best_compliance = sc.compliance;
+        margin_stop_hit = cm;
+        margin_stop_iter = it;
+        std::printf("\n★ STOPPING: certified margin %.2f reached the target "
+                    "%.2f at iteration %d.\n", cm, a.margin_stop, it);
+        done_iters = it;
+        break;
+      }
+    }
+    // ★ THE CAP EXCLUDES THE IN-LOOP CERTIFICATION, AND THE FIRST ATTEMPT AT
+    // THIS RUN IS WHY. Certifying an UNCONVERGED design is wildly expensive —
+    // measured here, 20.9 s at iteration 5 and 537.9 s at iteration 10, a 26x
+    // spread — so a cap on total wall clock is a cap on the MEASURING
+    // INSTRUMENT, not on the method. The first attempt spent 559 s of its 1912 s
+    // budget on two certifications and would have reported the optimiser as
+    // slow. The cap is on optimisation time; the instrument's cost is reported
+    // beside it and never inside it.
+    const double opt_wall = (now_s() - t_run0) - cert_wall_inloop;
+    if (a.wall_cap > 0.0 && opt_wall >= a.wall_cap) {
+      std::printf("\n★ STOPPING: wall cap %.1f s of OPTIMISATION reached at "
+                  "iteration %d (%.1f s optimisation, %.1f s certification).\n",
+                  a.wall_cap, it, opt_wall, cert_wall_inloop);
+      wall_cap_hit = true;
+      done_iters = it;
+      break;
+    }
+
     if (history.size() >= 10) {
       double lo = history[history.size() - 10], hi = lo;
       for (std::size_t q = history.size() - 10; q < history.size(); ++q) {
@@ -3350,6 +3483,11 @@ int main(int argc, char** argv) {
       "  of which solve     %.3f s/iteration (%.1f s total)\n"
       "  of which extension %.3f s/iteration (%.1f s total)\n"
       "certification wall   %.1f s\n"
+      "★ IN-LOOP CERT       %lld calls, %.1f s total (%.1f%% of the run)\n"
+      "★ OPTIMISATION ONLY  %.1f s   (run wall minus in-loop certification —\n"
+      "                     THIS is the method's cost; the certifications are a\n"
+      "                     stopping rule and would not be paid in production)\n"
+      "★ STOPPED BECAUSE    %s\n"
       "state solves         %lld, of which the V-cycle engaged on %lld\n"
       "trajectory posture   %s\n"
       "mixed precision      %s\n"
@@ -3375,6 +3513,14 @@ int main(int argc, char** argv) {
       converged_early ? " (converged)" : "", per_iter, run_wall, done_iters,
       done_iters ? total_solve_wall / done_iters : 0.0, total_solve_wall,
       done_iters ? total_hilb_wall / done_iters : 0.0, total_hilb_wall, cert_wall,
+      cert_calls_inloop, cert_wall_inloop,
+      run_wall > 0.0 ? 100.0 * cert_wall_inloop / run_wall : 0.0,
+      run_wall - cert_wall_inloop,
+      margin_stop_iter > 0
+          ? "the certified margin reached the target"
+          : (wall_cap_hit ? "the wall-clock cap was reached"
+                          : (converged_early ? "the compliance plateau"
+                                             : "the iteration count ran out")),
       solves_total, solves_multigrid,
       a.isolate ? "ISOLATED (recycling/geneo OFF) — a control"
                 : "PRODUCTION (recycling/geneo as configure_production_options "

@@ -407,6 +407,71 @@ that mattered most.**
 pair as the correction.** A full sweep of the two jointly is the obvious next
 run and is ranked in §9.
 
+## 3b. ★★ THE TWO WINNING KNOBS, ON SIX CORES, STOPPED AT SIMP PARITY, TIMED
+
+One run, asked for directly. C=1 and η=1 — the two knobs §3 and §3(e) found —
+on all six performance cores, stopping at whichever came first: the CERTIFIED
+margin reaching SIMP's 3254.34, or the optimisation using the 1911.6 s the same
+two knobs cost on 3 threads over 60 iterations.
+
+★ **IT STOPPED ON THE MARGIN, AT ITERATION 25, IN 582 SECONDS OF OPTIMISATION.**
+
+| | W1, stopped at parity | E1, the same knobs run to 60 | SIMP |
+|---|---|---|---|
+| iterations | **25** | 60 | 27 |
+| ★ **optimisation wall** | **582.1 s** | 1911.6 s | ~311 s |
+| certified margin | **3388.1** (+4.1%) | 3388.6 (+4.1%) | 3254.3 |
+| ★ internal surface | 56,637 | **53,243** | 26,191 |
+| carved | 11.0409 | **9.2460** | 7.5521 |
+| CAD error | **0.4275** | 0.4268 | 0.4293 |
+| mass | 463.74 g | 463.74 g | 543.7 g |
+| verdict | ACCEPTED, load path yes | ACCEPTED | ACCEPTED |
+
+★ **SIMP-PARITY STRENGTH IN 582 s OF OPTIMISATION — a third of what the same
+configuration spends running to 60 iterations, and it lands on the same margin
+to four significant figures (3388.1 against 3388.6).** Against SIMP's own ~311 s
+it is **1.9×**, for 15% less mass and a design the ladder does not produce.
+
+★ **AND THE LAST 35 ITERATIONS ARE NOT WASTED — THEY BUY SURFACE, NOT STRENGTH.**
+Stopping at parity costs 6.4% more internal surface (56,637 against 53,243) and
+19% more carved roughness. **The margin is finished at 25; the surface is not.**
+That is the same asymmetry §2 found from the other side, and it says the
+stopping rule should watch whichever quantity the run is FOR.
+
+### ★ what the six cores actually bought — 26% on the solve, not 2×
+
+| | 3 threads (E1) | 6 threads (W1) |
+|---|---|---|
+| state solve | 28.28 s/iteration | **20.88 s/iteration** |
+| optimisation, all in | 31.86 s/iteration | **23.28 s/iteration** |
+| parallelism achieved | — | 2171 s user / 849 s real = **2.56×** |
+
+★ **Doubling the threads bought 26% on the solve, not 100%** — the matrix-free
+operator is memory-bandwidth-bound, which this repository already measured
+directly (STREAM 76%, matvec 27% gather-bound). Speed is out of this task's
+scope and no conclusion rests on it; the number is here because the run was
+asked for and timed.
+
+★ **The thread count did not move the design.** W1 on 6 threads certifies 2420.14
+at iteration 20 where E1 on 3 threads certifies 2429.7 — 0.4% apart, on
+trajectories that differ only in the solver's summation order.
+
+### ★ THE STOPPING RULE COST MORE THAN THE FIRST DESIGN OF THIS RUN SURVIVED
+
+★ **Certifying an UNCONVERGED design is 26× more expensive than certifying a
+converged one.** Measured in the first attempt at this run: **20.9 s at iteration
+5, 537.9 s at iteration 10.** That attempt capped TOTAL wall clock, spent 559 s
+of its 1912 s budget on two certifications, and would have reported the optimiser
+as slow — **it was timing the measuring instrument.** Killed and rebuilt: the cap
+is on optimisation time, the instrument's cost is reported beside it and never
+inside it, and `--certify-from 20` skips the certificates that cannot pass
+anyway. The surviving run spent 211.0 s on two certifications against 582.1 s of
+optimisation.
+
+★ **This is the practical answer to §9's item 3.** A margin-aware stopping rule
+is affordable — but only if it starts late, and only if nobody counts it as part
+of the method's cost.
+
 ## 4. ★★ WHAT IS STILL GENERATING SURFACE: NUCLEATION, NOT THE SEED
 
 PR 324 §6 refuted a coarser BASIS as a smoothness lever and left "it is the

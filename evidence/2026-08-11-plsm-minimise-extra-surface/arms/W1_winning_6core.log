@@ -1,0 +1,136 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    1 voxels = 1.705279 mm      seed: holes
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       24 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       1 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 6, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        regular hole array, period 8 voxels
+PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels PER AXIS
+            68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
+            support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
+            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.16985 mm, 11.5 s
+            volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
+            update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
+PLSM        coefficient box +-462.1415 (4x the largest seed coefficient); a unit move of every
+            coefficient carries phi by at most 4.2335 mm, which is what sizes the MMA move
+VOLUME      constraint measures #{phi + c < 0} — the PRINTED count (S1: occupancy_volume and printed_voxels agree by construction)
+PERIMETER   C = 1, FIXED from iteration 1
+it   1  c = 0.0045250712  vf = 0.680003 (occ 75415.0)  offset +0.5148 mm  |v|max 2.81e-10  band 57176  hilb 0 (0.0e+00)  |grad|-1 4.12e-01  cg 1172  83.82 s
+it   2  c = 0.003925978201  vf = 0.680003 (occ 75415.0)  offset -0.0284 mm  |v|max 2.42e-10  band 56919  hilb 0 (0.0e+00)  |grad|-1 4.00e-01  cg 2240  20.24 s
+it   3  c = 0.003452714735  vf = 0.679994 (occ 75414.0)  offset -0.0458 mm  |v|max 2.63e-10  band 59137  hilb 0 (0.0e+00)  |grad|-1 3.95e-01  cg 2205  20.25 s
+it   4  c = 0.00339808326  vf = 0.680003 (occ 75415.0)  offset +0.0237 mm  |v|max 2.63e-10  band 57916  hilb 0 (0.0e+00)  |grad|-1 3.97e-01  cg 2196  14.11 s
+it   5  c = 0.003180986668  vf = 0.679994 (occ 75414.0)  offset -0.0278 mm  |v|max 2.39e-10  band 54177  hilb 0 (0.0e+00)  |grad|-1 3.64e-01  cg 2200  25.21 s
+it   6  c = 0.003199092801  vf = 0.680003 (occ 75415.0)  offset -0.0289 mm  |v|max 2.2e-10  band 38382  hilb 0 (0.0e+00)  |grad|-1 3.57e-01  cg 2272  14.48 s
+it   7  c = 0.003124085107  vf = 0.680003 (occ 75415.0)  offset +0.0097 mm  |v|max 2.22e-10  band 38644  hilb 0 (0.0e+00)  |grad|-1 3.57e-01  cg 2525  15.58 s
+it   8  c = 0.00291507833  vf = 0.679994 (occ 75414.0)  offset -0.0395 mm  |v|max 1.86e-10  band 39484  hilb 0 (0.0e+00)  |grad|-1 3.45e-01  cg 2524  15.62 s
+it   9  c = 0.002886067509  vf = 0.679994 (occ 75414.0)  offset +0.0057 mm  |v|max 1.56e-10  band 37856  hilb 0 (0.0e+00)  |grad|-1 3.49e-01  cg 2712  17.31 s
+it  10  c = 0.002820886708  vf = 0.680003 (occ 75415.0)  offset -0.0055 mm  |v|max 1.23e-10  band 32262  hilb 0 (0.0e+00)  |grad|-1 3.55e-01  cg 2865  28.66 s
+it  11  c = 0.002851922097  vf = 0.680003 (occ 75415.0)  offset +0.0061 mm  |v|max 1.23e-10  band 26914  hilb 0 (0.0e+00)  |grad|-1 3.55e-01  cg 3063  18.92 s
+it  12  c = 0.002795573074  vf = 0.680003 (occ 75415.0)  offset +0.0078 mm  |v|max 1.16e-10  band 25406  hilb 0 (0.0e+00)  |grad|-1 3.56e-01  cg 3107  20.04 s
+it  13  c = 0.002750125892  vf = 0.680003 (occ 75415.0)  offset +0.0059 mm  |v|max 1.03e-10  band 23873  hilb 0 (0.0e+00)  |grad|-1 3.58e-01  cg 3147  19.17 s
+it  14  c = 0.002684485785  vf = 0.680003 (occ 75415.0)  offset -0.0195 mm  |v|max 8.18e-11  band 21122  hilb 0 (0.0e+00)  |grad|-1 3.58e-01  cg 3158  19.03 s
+it  15  c = 0.002660935464  vf = 0.680003 (occ 75415.0)  offset +0.0033 mm  |v|max 6.86e-11  band 20169  hilb 0 (0.0e+00)  |grad|-1 3.73e-01  cg 3197  33.57 s
+it  16  c = 0.00264095613  vf = 0.680003 (occ 75415.0)  offset +0.0077 mm  |v|max 5.12e-11  band 14381  hilb 0 (0.0e+00)  |grad|-1 3.74e-01  cg 3376  20.59 s
+it  17  c = 0.002631616468  vf = 0.680003 (occ 75415.0)  offset +0.0065 mm  |v|max 4.49e-11  band 13158  hilb 0 (0.0e+00)  |grad|-1 3.75e-01  cg 3385  20.35 s
+it  18  c = 0.002621112755  vf = 0.680003 (occ 75415.0)  offset +0.0002 mm  |v|max 4.16e-11  band 12509  hilb 0 (0.0e+00)  |grad|-1 3.76e-01  cg 3385  20.70 s
+it  19  c = 0.002612865192  vf = 0.680003 (occ 75415.0)  offset +0.0001 mm  |v|max 3.75e-11  band 12031  hilb 0 (0.0e+00)  |grad|-1 3.76e-01  cg 3371  20.25 s
+it  20  c = 0.002606662234  vf = 0.679994 (occ 75414.0)  offset +0.0008 mm  |v|max 3.71e-11  band 11500  hilb 0 (0.0e+00)  |grad|-1 3.74e-01  cg 3369  31.93 s
+   ↳ certified at iteration 20: margin 2420.14  ACCEPTED  (182.2 s, 182.2 s of run so far is certification)
+it  21  c = 0.002600952207  vf = 0.680003 (occ 75415.0)  offset +0.0048 mm  |v|max 3.26e-11  band 9180  hilb 0 (0.0e+00)  |grad|-1 3.75e-01  cg 2952  17.92 s
+it  22  c = 0.002596811267  vf = 0.680003 (occ 75415.0)  offset -0.0007 mm  |v|max 3.51e-11  band 8907  hilb 0 (0.0e+00)  |grad|-1 3.75e-01  cg 2957  18.15 s
+it  23  c = 0.002593799358  vf = 0.680003 (occ 75415.0)  offset +0.0009 mm  |v|max 3.53e-11  band 8691  hilb 0 (0.0e+00)  |grad|-1 3.75e-01  cg 2966  18.21 s
+it  24  c = 0.002591062965  vf = 0.679994 (occ 75414.0)  offset +0.0006 mm  |v|max 3.3e-11  band 8434  hilb 0 (0.0e+00)  |grad|-1 3.75e-01  cg 2966  18.20 s
+it  25  c = 0.002588914622  vf = 0.680003 (occ 75415.0)  offset +0.0016 mm  |v|max 2.91e-11  band 8206  hilb 0 (0.0e+00)  |grad|-1 3.71e-01  cg 2956  29.76 s
+   ↳ certified at iteration 25: margin 3388.12  ACCEPTED  (28.8 s, 211.0 s of run so far is certification)
+
+★ STOPPING: certified margin 3388.12 reached the target 3254.34 at iteration 25.
+
+certifying iteration 25 (best compliance 0.002588914622 of 25 run)
+analytic    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/W1_winning_6core/plsm_f1.f64  (128 x 31 x 118, spacing 1.705279 mm)
+analytic    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/W1_winning_6core/plsm_f2.f64  (256 x 62 x 236, spacing 0.852640 mm)
+mesh        165370 vertices, 330780 triangles -> levelset.stl
+
+== levelset_probe summary ==
+seed                 holes
+rung                 0.68
+THREADS              6
+iterations run       25
+WALL PER ITERATION   31.724 s   (total 793.1 s over 25 iterations)
+  of which solve     20.877 s/iteration (521.9 s total)
+  of which extension 0.000 s/iteration (0.0 s total)
+certification wall   28.9 s
+★ IN-LOOP CERT       2 calls, 211.0 s total (26.6% of the run)
+★ OPTIMISATION ONLY  582.1 s   (run wall minus in-loop certification —
+                     THIS is the method's cost; the certifications are a
+                     stopping rule and would not be paid in production)
+★ STOPPED BECAUSE    the certified margin reached the target
+state solves         25, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         1 voxels = 1.705279 mm
+reinit |grad phi|-1  rms 0.370625 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.999898 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00258891462195   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00264574287341
+achieved vf          0.680003  (target 0.68, printed 75415 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.016233204 MPa
+margin in-plane      3388.117292004
+margin interlayer    6850.311091261
+MARGIN worst case    3388.117292004
+margin effective     701.553027490   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    827
+mass                 463.7431 g
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/W1_winning_6core/{iterations.csv,design.bin,rho.f64,rho.meta,levelset.stl,summary.txt}
+
+for the roughness row, on the SAME binary that produced PR 321's:
+  ./build/external_field_surface_probe <ref/design.bin> <part.step> <dir> LS=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/W1_winning_6core/rho
+      848.87 real      2171.33 user        62.54 sys
+           903659520  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              880686  page reclaims
+                1093  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  63  voluntary context switches
+            10354487  involuntary context switches
+      22376336820021  instructions retired
+       7121728669817  cycles elapsed
+          1010713896  peak memory footprint
