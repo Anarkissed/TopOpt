@@ -1,0 +1,10 @@
+total 89784
+drwxr-xr-x@  9 nadim  wheel       288 Aug 10 01:10 .
+drwx------@ 19 nadim  wheel       608 Aug 10 01:04 ..
+-rw-r--r--@  1 nadim  wheel   7767792 Aug 10 01:10 fields.bin
+-rw-r--r--@  1 nadim  wheel      2401 Aug 10 01:10 lattice_variant.json
+-rw-r--r--@  1 nadim  wheel      1132 Aug 10 01:10 lattice_variant_report.json
+-rw-r--r--@  1 nadim  wheel       643 Aug 10 01:04 loadcase.json
+-rw-r--r--@  1 nadim  wheel      5500 Aug 10 01:10 run_info.json
+-rw-r--r--@  1 nadim  wheel     12170 Aug 10 01:10 variant_068_lattice.report.json
+-rw-r--r--@  1 nadim  wheel  38166084 Aug 10 01:08 variant_068_lattice.stl

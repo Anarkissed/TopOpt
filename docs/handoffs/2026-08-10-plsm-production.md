@@ -450,9 +450,113 @@ started from zero. Now:
   `nullptr` unconditionally and `minimize_plastic` asserts the tight tolerance on
   the certification solve. R5 is structural, not a promise.
 
-## 5. S4 — IT MUST STILL LATTICE
+## 5. S4 — IT MUST STILL LATTICE. IT DOES, WITH ONE NAMED CAVEAT.
 
-_[filled by `run_s4_lattice.sh`.]_
+Two `lattice-variant` runs, his lattice and grading blocks lifted verbatim,
+differing ONLY in which `design.bin` they name. Rung 0.68 on both.
+
+### pass 1: the parametric design is REFUSED, and the refusal is right
+
+> the void space inside this lattice does not reach the exterior. 7 of 215
+> lattice cells (68 of 1167 latticed voxels) sit in 1 SEALED cavity holding
+> 337.206 mm³ of trapped space with no path out of the part.
+
+SIMP's rung 0.68, same recipe, latticed and was ACCEPTED. **So it is a property
+of the DESIGN, not of the pipeline.**
+
+★ **AND IT IS THE DIRECT CONSEQUENCE OF THE THING THAT MAKES THE METHOD WORTH
+HAVING.** PR 324's case for dropping the SIMP seed was that a coefficient in the
+middle of solid material can be driven negative ON ITS OWN and open a hole there
+— which a per-voxel φ cannot do, because its velocity is zero away from the band.
+**A hole opened in the interior IS a sealed cavity until it merges with the
+outside.** On this part, seven cells' worth never merged. Expect it on every
+from-scratch parametric run, scaling with how much interior nucleation it does.
+
+The check did its job exactly: named the cavity, gave its bounding box and
+volume, refused to auto-correct geometry nobody asked it to change, and stated
+both ways out.
+
+### pass 2: with the check off, it latticed and certified
+
+| | SIMP 0.68 | PLSM 0.68 |
+|---|---|---|
+| recorded → reproduced margin | enforced | **3297.3 → 3297.3, EXACT** |
+| latticed voxels | 1221 | 1167 |
+| graded cell / rho range | 4 mm | 4 mm / 0.06665–0.879 |
+| solid → latticed margin | — | 3297 → 3093 |
+| lattice margin (worst case) | 3090.49 | 3093 |
+| lattice margin effective | 639.926 | 640.4 |
+| strut in-plane / interlayer | — | 768.6 / 484.6 |
+| out of regime | yes | yes |
+| **verdict** | **ACCEPTED** | **ACCEPTED** |
+
+★ **THE MARGIN REPRODUCTION IS EXACT.** `lattice_variant` REFUSES to lattice a
+design whose recorded margin does not reproduce within 100 × `cg_tolerance`; the
+parametric `design.bin` round-trips through the store, the grid and the load case
+with **no drift at all**. That is the strongest single check in this task that
+the certificate belongs to its own field — demonstrated, not argued.
+
+★ **AND THE TWO LATTICES LAND IN THE SAME PLACE.** Nothing in `grade_lattice`,
+`lattice_boundary_for`, the cells-per-member floor or the sub-floor predicate
+behaves differently on a parametric field. **The blocked-stop ("cannot be
+latticed without changing the grading law") is NOT triggered** — the grading law
+is untouched.
+
+### what still needs an answer
+
+A manufacturability refusal SIMP does not hit. Candidates, cheapest first:
+
+1. **drain the cavity geometrically** after optimisation;
+2. ★ **PR 325's PERIMETER PENALTY** — the one term that prices interface AREA. It
+   has never been tried on a parametric φ, and unlike the voxel arms there is no
+   reinitialisation there to fight it. PR 324 ranked it third for the carved-
+   surface problem; it is now a candidate for TWO problems at once, which moves
+   it up;
+3. **run the void-reachability walk INSIDE the optimiser** so cavities never
+   form. Only this one prevents it, and it is the expensive one.
+
+`require_lattice_void_reaches_exterior: false` exports anyway and ships trapped
+powder or resin. **A trade to price, not a fix.**
+
+## 5b. ★ ONE OPEN FAILURE, LEFT OPEN HONESTLY
+
+`ProjectStoreSidecarTests.testQ3RoundTripRunSimResolvesDeclaredLoad` — "the same
+analysis run twice in one process is bit-identical" — FAILS on this branch in
+full-suite order and PASSES twice in isolation. The delta is **1.4e-09** on max
+stress and **5.7e-10** on margin, with the displacement bit-identical and both
+runs ACCEPTED at margin 21.9 against a required 1.5. **No verdict is anywhere
+near moving.** App suite is 1372/1373.
+
+★ **IT IS NOT THE KNOWN FLAKE.** `app-swift-test-gpu-flake` covers SIGTRAP
+process deaths; this is an `XCTAssertEqual` failure, which that note explicitly
+distinguishes. And it PASSED in four prior full-suite logs (2026-08-01/03/05).
+
+**Three attempts to attribute it, each inconclusive for a different reason:**
+
+1. Bisect against 55a2ce9 via a `git archive` scratch tree — the test passed
+   there. **CONFOUNDED:** `git archive` omits ignored paths, so that tree had no
+   `.vcpkg`, built 3MF-free, and failed three 3MF tests. A different failure set
+   is a different process landscape. Not a valid baseline.
+2. Hypothesis: the new `ParametricArmingTests.swift` shifted xctest's
+   class-to-worker distribution (it sorts immediately before
+   `ProjectStoreSidecarTests`). **REFUTED** — held the file out, still fails.
+3. Clean bisect with `.vcpkg` copied in — the pre-task tree then DETECTS lib3mf
+   but fails to LINK it. Scratch-copy dylib plumbing, not a signal.
+
+**Still suspected:** the Krylov recycle basis is thread-local and STICKY across
+solves, so call 2 starts from the subspace call 1 harvested. That is pre-existing
+behaviour; what changed on this branch is whether it bites.
+
+★ **THE NEXT STEP IS CHEAPER THAN ANY OF THE ABOVE AND AVOIDS THE APP ENTIRELY:**
+a core harness that calls `analyze_fixed_design` TWICE in one process on the same
+input and asserts bit-identity, built in this tree and in the already-extracted
+pre-task tree. That isolates core from the app, the xcframework and the
+dependency set — and it is worth having as a permanent test whatever the verdict,
+because "two identical analyses agree" is a property this repository assumes
+everywhere and tests nowhere.
+
+I stopped here rather than take a fourth run at it: it is 1e-9, it moves nothing,
+and the maintainer has a front end waiting. **It is open, not closed.**
 
 ## 6. WHAT WAS TRIED, CHANGED OR REFUSED ALONG THE WAY
 
