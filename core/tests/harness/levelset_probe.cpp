@@ -245,257 +245,36 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace topopt;
 
 namespace {
-
-constexpr double kPi = 3.14159265358979323846;
-// Larger than any distance on his part (the grid is ~218 x 53 x 201 mm), so an
-// unreached cell is unambiguously "far" and the sweep's min() always improves.
-constexpr double kFar = 1e30;
-
-double now_s() {
-  return std::chrono::duration<double>(
-             std::chrono::steady_clock::now().time_since_epoch())
-      .count();
-}
-
-// ── the grid index, x-fastest then y then z: core's own ordering ────────────
-struct Dims {
-  int nx = 0, ny = 0, nz = 0;
-  std::size_t at(int i, int j, int k) const {
-    return static_cast<std::size_t>(i) +
-           static_cast<std::size_t>(nx) *
-               (static_cast<std::size_t>(j) +
-                static_cast<std::size_t>(ny) * static_cast<std::size_t>(k));
-  }
-  std::size_t count() const {
-    return static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
-           static_cast<std::size_t>(nz);
-  }
-};
-
-// ── (b) THE SMOOTHED HEAVISIDE ──────────────────────────────────────────────
-// C1, compactly supported on [-eta, eta], H(0) = 0.5 exactly. `s` is -phi, so
-// s > 0 is inside the material.
-double heaviside(double s, double eta) {
-  if (s <= -eta) return 0.0;
-  if (s >= eta) return 1.0;
-  return 0.5 * (1.0 + s / eta + std::sin(kPi * s / eta) / kPi);
-}
-
-// ── (1) THE SURFACE DELTA: DH_eta, their DERIVATIVE of the same Heaviside ────
+// ── THE FIELD KERNEL ────────────────────────────────────────────────────────
+// Dims, heaviside, dheaviside, grad_mag, eikonal_update, fast_sweep and
+// reinitialise used to be written out here. They were MOVED VERBATIM to
+// `levelset_kernel.hpp` when `plsm_probe` needed the same seed path — it turns a
+// density into a signed distance exactly as this file's `--simp` seed does, and
+// two copies of a reinitialisation is how the two stop agreeing. Included from
+// INSIDE this anonymous namespace, so nothing about linkage changes.
 //
-// GridapTopOpt, src/Utilities.jl:
-//     H_eta(t, eta)  = 1/2 (1 + t/eta + sin(pi t/eta)/pi)   for |t| <= eta
-//     DH_eta(t, eta) = 1/(2 eta) (1 + cos(pi t/eta))        for |t| <= eta, else 0
-// and DH is exactly d/dt of H, which is the consistency this file relies on:
-// `heaviside` above IS their H_eta, so the delta below is its own derivative and
-// there is no second smoothing law anywhere in this program.
-//
-// DH is EVEN in t, so it does not matter whether it is evaluated at phi (their
-// sign convention) or at -phi (the argument `heaviside` takes here). It is
-// written at phi, as theirs is.
-double dheaviside(double t, double eta) {
-  if (t <= -eta || t >= eta) return 0.0;
-  return (1.0 + std::cos(kPi * t / eta)) / (2.0 * eta);
-}
+// ★ The move is verified, not asserted: `evidence/2026-08-10-parametric-level-set/
+// s0_kernel_move/` holds a 3-iteration trajectory from before it and one from
+// after, and they are byte-identical.
+#include "levelset_kernel.hpp"
 
-// |grad phi|, central differences, one-sided at the box face. This is their
-// `norm ∘ ∇(φ)`. After reinitialisation it is ~1 by construction — which is the
-// point: it is carried anyway so the delta stays a correct surface measure on
-// the iterations where phi has drifted from a true distance.
-double grad_mag(const Dims& d, const std::vector<double>& phi, int i, int j,
-                int k, double h) {
-  const double xm = phi[d.at(i > 0 ? i - 1 : 0, j, k)];
-  const double xp = phi[d.at(i + 1 < d.nx ? i + 1 : d.nx - 1, j, k)];
-  const double ym = phi[d.at(i, j > 0 ? j - 1 : 0, k)];
-  const double yp = phi[d.at(i, j + 1 < d.ny ? j + 1 : d.ny - 1, k)];
-  const double zm = phi[d.at(i, j, k > 0 ? k - 1 : 0)];
-  const double zp = phi[d.at(i, j, k + 1 < d.nz ? k + 1 : d.nz - 1)];
-  // The divisor is the ACTUAL span sampled: 2h in the interior, h against a face
-  // where the two reads collapsed onto the same cell.
-  const double sx = (i > 0 && i + 1 < d.nx) ? 2.0 * h : h;
-  const double sy = (j > 0 && j + 1 < d.ny) ? 2.0 * h : h;
-  const double sz = (k > 0 && k + 1 < d.nz) ? 2.0 * h : h;
-  const double gx = (xp - xm) / sx, gy = (yp - ym) / sy, gz = (zp - zm) / sz;
-  return std::sqrt(gx * gx + gy * gy + gz * gz);
-}
+// ── ARM 2 (task 2026-08-10-parametric-level-set): THE PARAMETRIC LEVEL SET.
+// phi stops being a per-voxel array and becomes phi(x) = sum_i alpha_i psi_i(x).
+// The basis is the SAME header `plsm_probe` fits with, so the function ARM 2
+// optimises over and the function ARM 1 measured are the same function.
+// `--plsm` arms it; without the flag not one line of it executes and every
+// earlier arm reproduces byte for byte.
+#include "plsm_basis.hpp"
+#include "plsm_mma.hpp"
 
-// ── (f) REINITIALISATION: fast sweeping for the Eikonal |grad d| = 1 ────────
-//
-// The Godunov update at one cell, given the smallest |d| already known across
-// each axis. Standard 3D form: try the 1-D solution, and only bring in the
-// second and third axes when the candidate overtakes them.
-double eikonal_update(double a, double b, double c, double h) {
-  // sort ascending
-  if (a > b) std::swap(a, b);
-  if (b > c) std::swap(b, c);
-  if (a > b) std::swap(a, b);
-
-  double x = a + h;
-  if (x <= b) return x;
-
-  // two-axis solution
-  const double s2 = 2.0 * h * h - (a - b) * (a - b);
-  if (s2 < 0.0) return x;  // no real two-axis root; keep the one-axis value
-  x = 0.5 * (a + b + std::sqrt(s2));
-  if (x <= c) return x;
-
-  // three-axis solution
-  const double sum = a + b + c;
-  const double disc = sum * sum - 3.0 * (a * a + b * b + c * c - h * h);
-  if (disc < 0.0) return x;
-  return (sum + std::sqrt(disc)) / 3.0;
-}
-
-// Fill |phi| by fast sweeping, holding the cells flagged in `frozen` (the
-// interface band) at the values they already carry. 8 sweep directions in 3D,
-// `passes` times over the whole set of 8.
-void fast_sweep(const Dims& d, std::vector<double>& mag,
-                const std::vector<char>& frozen, double h, int passes) {
-  const int dirs[8][3] = {{1, 1, 1},   {-1, 1, 1},  {1, -1, 1},  {-1, -1, 1},
-                          {1, 1, -1},  {-1, 1, -1}, {1, -1, -1}, {-1, -1, -1}};
-  for (int p = 0; p < passes; ++p) {
-    for (const auto& dir : dirs) {
-      const int i0 = dir[0] > 0 ? 0 : d.nx - 1, i1 = dir[0] > 0 ? d.nx : -1;
-      const int j0 = dir[1] > 0 ? 0 : d.ny - 1, j1 = dir[1] > 0 ? d.ny : -1;
-      const int k0 = dir[2] > 0 ? 0 : d.nz - 1, k1 = dir[2] > 0 ? d.nz : -1;
-      for (int k = k0; k != k1; k += dir[2])
-        for (int j = j0; j != j1; j += dir[1])
-          for (int i = i0; i != i1; i += dir[0]) {
-            const std::size_t v = d.at(i, j, k);
-            if (frozen[v]) continue;
-            // The domain boundary is an OPEN boundary, not a wall: an
-            // out-of-range neighbour contributes no constraint (kFar), so the
-            // distance is measured to the interface and never to the box.
-            const double ax =
-                std::min(i > 0 ? mag[d.at(i - 1, j, k)] : kFar,
-                         i + 1 < d.nx ? mag[d.at(i + 1, j, k)] : kFar);
-            const double ay =
-                std::min(j > 0 ? mag[d.at(i, j - 1, k)] : kFar,
-                         j + 1 < d.ny ? mag[d.at(i, j + 1, k)] : kFar);
-            const double az =
-                std::min(k > 0 ? mag[d.at(i, j, k - 1)] : kFar,
-                         k + 1 < d.nz ? mag[d.at(i, j, k + 1)] : kFar);
-            const double cand = eikonal_update(ax, ay, az, h);
-            if (cand < mag[v]) mag[v] = cand;
-          }
-    }
-  }
-}
-
-// Re-make `phi` a signed distance, keeping its SIGN and its zero set. The band
-// is pinned first by linear interpolation of phi's own crossings — so the
-// interface does not drift while it is being re-distanced — and the sweep fills
-// outward from there.
-void reinitialise(const Dims& d, std::vector<double>& phi, double h, int passes,
-                  bool russo_smereka = false) {
-  const std::size_t n = d.count();
-  std::vector<char> frozen(n, 0);
-  std::vector<double> mag(n, kFar);
-
-  for (int k = 0; k < d.nz; ++k)
-    for (int j = 0; j < d.ny; ++j)
-      for (int i = 0; i < d.nx; ++i) {
-        const std::size_t v = d.at(i, j, k);
-        const double pv = phi[v];
-        bool crosses = false;
-        double best = kFar;
-        const int off[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0},
-                               {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
-        for (const auto& o : off) {
-          const int ii = i + o[0], jj = j + o[1], kk = k + o[2];
-          if (ii < 0 || ii >= d.nx || jj < 0 || jj >= d.ny || kk < 0 ||
-              kk >= d.nz)
-            continue;
-          const double pw = phi[d.at(ii, jj, kk)];
-          if ((pv > 0.0) == (pw > 0.0)) continue;  // no crossing on this edge
-          crosses = true;
-          const double denom = std::fabs(pv) + std::fabs(pw);
-          // A crossing with both ends at zero carries no sub-voxel information;
-          // half a cell is the only defensible reading of it.
-          const double t = denom > 0.0 ? std::fabs(pv) / denom : 0.5;
-          best = std::min(best, t * h);
-        }
-        if (!crosses) continue;
-        if (russo_smereka) {
-          // ── RUSSO-SMEREKA SUBCELL FIX (J. Comput. Phys. 163:51-67, 2000) ──
-          //
-          // ★ WHY THE EDGE RATIO IS NOT GOOD ENOUGH, AND WHY IT SHOWS UP IN THE
-          // SUB-VOXEL METRIC. The `best` above is the smallest ALONG-AXIS
-          // distance to a crossing. For an interface that runs obliquely through
-          // the cell — which on this part is most of it — the axis distance
-          // OVERESTIMATES the true perpendicular distance by up to sqrt(3). The
-          // sweep then propagates that overestimate outward, and the whole field
-          // ends up with |grad phi| < 1: measured RMS error 0.20 on the run of
-          // record, against the reference's own reinitialisation tolerance of
-          // 0.00645.
-          //
-          // That is not cosmetic. rho = H_eta(-phi) maps phi linearly through the
-          // band, so a phi whose gradient is 20% wrong puts the iso-0.5 crossing
-          // in the wrong place inside the cell — and "where the crossing sits
-          // inside the cell" IS the sub-voxel measurement (`midpoint_share`).
-          // PR 321's Gridap arm spread its crossings 0.5790 mm rms against our
-          // 0.2601 on the same lattice with the same band, which is the
-          // signature of a cleaner distance function.
-          //
-          // Russo-Smereka's fix replaces the axis distance with the FIRST-ORDER
-          // PERPENDICULAR one, |phi| / |grad phi|, using a robust one-sided
-          // gradient so a crossing on either side is seen:
-          //
-          //     D_i = h * phi_i / max(|phi_{i+1}-phi_{i-1}|/2,
-          //                           |phi_{i+1}-phi_i|, |phi_i-phi_{i-1}|)
-          //
-          // generalised to 3D by taking that per axis and combining in L2. The
-          // result is the distance to the LINEARISED interface through the cell,
-          // which is exact for a plane and is what the sweep should propagate.
-          double g2 = 0.0;
-          const int ax[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-          for (const auto& a3 : ax) {
-            const int im = i - a3[0], jm = j - a3[1], km = k - a3[2];
-            const int ip = i + a3[0], jp = j + a3[1], kp = k + a3[2];
-            const bool okm = im >= 0 && jm >= 0 && km >= 0;
-            const bool okp = ip < d.nx && jp < d.ny && kp < d.nz;
-            const double pm = okm ? phi[d.at(im, jm, km)] : pv;
-            const double pp = okp ? phi[d.at(ip, jp, kp)] : pv;
-            // ★ CENTRAL, NOT THE MAX — AND THIS WAS MEASURED, NOT ASSUMED.
-            // Russo-Smereka's Delta_i takes max(central, forward, backward),
-            // but that is a STABILISER for their reinitialisation PDE, where an
-            // over-large denominator damps the update. Used here as a direct
-            // distance seed it is BIASED: at a kink the max overshoots the true
-            // |grad phi|, so |phi|/|grad phi| undershoots the true distance, and
-            // the sweep propagates the shortfall over the whole field. Measured
-            // with the max, 6 iterations: interface area 28073 -> 26606 against
-            // the baseline's 24057, and | |grad phi|-1 | rising 0.173 -> 0.190
-            // against 0.171 — both the signature of a uniformly shrunk distance
-            // field (phi too flat, so more cells fall inside the band). The
-            // central difference is the unbiased estimate for the smooth field
-            // this is applied to.
-            const double gc = (okm && okp) ? std::fabs(pp - pm) / 2.0
-                                           : std::max(okp ? std::fabs(pp - pv) : 0.0,
-                                                      okm ? std::fabs(pv - pm) : 0.0);
-            g2 += gc * gc;
-          }
-          const double gmag = std::sqrt(g2);
-          // The clamp is the degenerate case only: a cell whose neighbours are
-          // all equal carries no direction, and the axis reading is all there is.
-          if (gmag > 1e-30) best = std::min(best, std::fabs(pv) * h / gmag);
-        }
-        if (best < kFar) {
-          frozen[v] = 1;
-          mag[v] = best;
-        }
-      }
-
-  fast_sweep(d, mag, frozen, h, passes);
-
-  for (std::size_t v = 0; v < n; ++v)
-    phi[v] = (phi[v] > 0.0 ? 1.0 : -1.0) * (mag[v] >= kFar ? 1e6 : mag[v]);
-}
 
 // ── (d) VELOCITY EXTENSION: separable [1 2 1]/4, `passes` times ─────────────
 void smooth_field(const Dims& d, std::vector<double>& f, int passes) {
@@ -997,6 +776,45 @@ struct Args {
   // findings with the same number, and nothing in the run of record separates
   // them. This does, for the price of one analyze_fixed_design call on a file.
   std::vector<std::string> certify_field;
+  bool respect_frozen = false;
+  std::string dump_masked;
+  std::string dump_mask;
+  // ── ARM 2: the parametric level set ───────────────────────────────────────
+  bool plsm = false;               // phi = sum alpha_i psi_i, alpha is the design
+  bool plsm_mma = false;           // drive alpha with MMA rather than descent
+  bool plsm_hilb = false;          // keep the Hilbertian extension (an ablation)
+  std::string plsm_basis = "wendland";
+  double plsm_dx = 2.0, plsm_dy = 2.0, plsm_dz = 2.0;   // knots, VOXELS, PER AXIS
+  double plsm_support = 2.0;       // support radius = support * spacing, per axis
+  double plsm_ridge = 1e-6;
+  double plsm_band_weight = 1.0;
+  double plsm_clamp = 6.0;
+  double plsm_move = 0.05;         // MMA move limit, fraction of the alpha range
+  double plsm_bound = 4.0;         // alpha box = +- bound * max|alpha_seed|
+  int plsm_refit_every = 0;        // approximate re-initialisation, 0 = never
+  std::vector<int> plsm_export;    // export the ANALYTIC surface at these factors
+  int plsm_cg_iters = 2000;
+  // ★ THE STATE SOLVE'S INITIAL GUESS. `simp_compliance` has taken one since it
+  // was written — `const FeaSolution* initial_guess` — and every level-set arm
+  // in PR 322/323/324/325 and in ARM 2 above passes nullptr, so every solve
+  // starts from zero. Measured on A1: 2817 CG iterations per solve, FLAT across
+  // all 40 iterations, and 99.5% of the wall clock. A design that moves by a
+  // bounded 2.4 voxels of interface per iteration has a displacement field that
+  // barely moves with it, so the previous one should be a very good guess.
+  bool warm_start = false;
+  // ── THE THREE SPEED PROBES (task 2026-08-10-parametric-level-set, S17) ─────
+  //
+  // ★ 99.5% OF AN ITERATION IS THE STATE SOLVE. Measured on A1: 25.412 s of
+  // 25.526, with the whole parametric machinery — basis evaluation, two sparse
+  // applies, MMA over 85,680 variables, the volume bisection — costing 0.114 s.
+  // So there is nothing to win in the representation, and every speed idea has
+  // to attack the solve or the NUMBER of solves. These three do, and none of
+  // them touches a line of production code.
+  int solver_kind = -1;         // -1 = whatever build_production_loadcase armed
+  bool penalized_solver = false;  // core's cached solver, which warm-starts itself
+  double cg_tol_early = 0.0;    // inexact early solves; 0 = off
+  int cg_tol_until = 0;         // ... for this many iterations
+  int plsm_lbfgs = 0;           // L-BFGS memory on the coefficients; 0 = MMA
   bool binarize = false;
 
   // ── THEIR OWN PARAMETER RULE, MADE EXECUTABLE ─────────────────────────────
@@ -1092,7 +910,24 @@ int main(int argc, char** argv) {
         "       [--damp] [--damp-factor 0.75] [--damp-window 5]  their gamma "
         "damper\n"
         "       [--simp --rules <rules.json>]   the 3-thread SIMP baseline\n"
-        "       [--certify-field <prefix> [--binarize]]   a re-cert control\n");
+        "  ARM 2 — THE PARAMETRIC LEVEL SET (phi = sum alpha_i psi_i):\n"
+        "       [--plsm] [--plsm-mma] [--plsm-hilb]\n"
+        "       [--plsm-basis wendland|gaussian] [--plsm-knots dx,dy,dz]\n"
+        "       [--plsm-support S] [--plsm-ridge L] [--plsm-band-weight W]\n"
+        "       [--plsm-move M] [--plsm-bound B] [--plsm-refit-every N]\n"
+        "  SPEED PROBES (S17) — none of them touches production:\n"
+        "       [--warm-start]       seed each state solve with the PREVIOUS\n"
+        "                            iteration's displacement field\n"
+        "       [--solver-kind N]    0 JacobiCG / 1 MultigridCG / 2 matrix-free\n"
+        "       [--penalized-solver] core's cached PenalizedSolver, which warm\n"
+        "                            starts itself\n"
+        "       [--cg-tol-early T --cg-tol-until N]   INEXACT early solves\n"
+        "       [--plsm-lbfgs M]     L-BFGS on the coefficients instead of MMA\n"
+        "       [--plsm-export F]    write the ANALYTIC surface on the F-refined\n"
+        "                            lattice, not a resample of the voxel field\n"
+        "       [--certify-field <prefix> [--binarize] [--respect-frozen]]\n"
+        "                            a re-cert control; --respect-frozen restores\n"
+        "                            the FrozenSolid/FrozenVoid mask first\n");
     return 2;
   }
   a.step = argv[1];
@@ -1133,6 +968,36 @@ int main(int argc, char** argv) {
     else if (s == "--gridap-auto" && i + 1 < argc) a.gridap_auto = argv[++i];
     else if (s == "--rules" && i + 1 < argc) a.rules = argv[++i];
     else if (s == "--certify-field" && i + 1 < argc) a.certify_field.push_back(argv[++i]);
+    else if (s == "--respect-frozen") a.respect_frozen = true;
+    else if (s == "--dump-masked" && i + 1 < argc) a.dump_masked = argv[++i];
+    else if (s == "--dump-mask" && i + 1 < argc) a.dump_mask = argv[++i];
+    else if (s == "--plsm") a.plsm = true;
+    else if (s == "--plsm-mma") { a.plsm = true; a.plsm_mma = true; }
+    else if (s == "--plsm-hilb") a.plsm_hilb = true;
+    else if (s == "--plsm-basis" && i + 1 < argc) a.plsm_basis = argv[++i];
+    else if (s == "--plsm-knots" && i + 1 < argc) {
+      if (std::sscanf(argv[++i], "%lf,%lf,%lf", &a.plsm_dx, &a.plsm_dy,
+                      &a.plsm_dz) != 3) {
+        std::printf("FATAL: --plsm-knots wants dx,dy,dz (VOXELS, PER AXIS)\n");
+        std::exit(1);
+      }
+    }
+    else if (s == "--plsm-support") next(a.plsm_support);
+    else if (s == "--plsm-ridge") next(a.plsm_ridge);
+    else if (s == "--plsm-band-weight") next(a.plsm_band_weight);
+    else if (s == "--plsm-clamp") next(a.plsm_clamp);
+    else if (s == "--plsm-move") next(a.plsm_move);
+    else if (s == "--plsm-bound") next(a.plsm_bound);
+    else if (s == "--plsm-refit-every") nexti(a.plsm_refit_every);
+    else if (s == "--plsm-export" && i + 1 < argc)
+      a.plsm_export.push_back(std::atoi(argv[++i]));
+    else if (s == "--plsm-cg-iters") nexti(a.plsm_cg_iters);
+    else if (s == "--warm-start") a.warm_start = true;
+    else if (s == "--solver-kind") nexti(a.solver_kind);
+    else if (s == "--penalized-solver") a.penalized_solver = true;
+    else if (s == "--cg-tol-early") next(a.cg_tol_early);
+    else if (s == "--cg-tol-until") nexti(a.cg_tol_until);
+    else if (s == "--plsm-lbfgs") nexti(a.plsm_lbfgs);
     else if (s == "--seed" && i + 1 < argc) a.seed = argv[++i];
     else { std::printf("FATAL: unknown argument %s\n", s.c_str()); return 2; }
   }
@@ -1292,6 +1157,34 @@ int main(int argc, char** argv) {
   // fea_set_matfree_threads). It can only change the wall clock — which is
   // exactly why the SIMP baseline has to be re-measured at the SAME count before
   // any seconds-per-iteration row is put beside another.
+  // ★ A REFUSAL ADDED BECAUSE THE ABLATION IT GUARDS WAS RUN AND WAS A NO-OP.
+  //
+  // `--plsm-hilb` puts the Hilbertian velocity extension back, to test the
+  // literature's claim that the RBF support already does that job. Under
+  // `--plsm-mma` it did NOTHING, and the run that proved it is on disk: A4_hilb's
+  // compliance matched A1's to twelve digits at every iteration.
+  //
+  // The reason is structural, not a slip. The MMA branch needs the SENSITIVITIES
+  // dJ/dalpha and dV/dalpha, which it builds from `raw_vel` and `delta` by the
+  // chain rule; the extended field `vel` is a DESCENT DIRECTION, not a gradient,
+  // and feeding it to MMA would hand the subproblem something that is not the
+  // derivative of anything. So the extension is meaningful only against steepest
+  // descent, where a velocity is a velocity — and the honest ablation is
+  // `--plsm --plsm-hilb` against `--plsm`.
+  //
+  // Refusing is better than silently ignoring: a flag that appears in a command
+  // line and changes nothing is how an ablation gets reported as a result.
+  if (a.plsm_mma && a.plsm_hilb) {
+    std::printf(
+        "FATAL: --plsm-hilb has no meaning under --plsm-mma and will not be\n"
+        "       silently ignored. MMA consumes the SENSITIVITIES, which are built\n"
+        "       from the un-extended field by the chain rule; the Hilbertian\n"
+        "       extension produces a DESCENT DIRECTION, which is not a derivative.\n"
+        "       Run the extension ablation against steepest descent:\n"
+        "         --plsm --plsm-hilb   against   --plsm\n");
+    return 1;
+  }
+
   const int prev_threads = fea_matfree_thread_count();
   if (a.threads > 0) fea_set_matfree_threads(a.threads);
   const int threads_now = fea_matfree_thread_count();
@@ -1359,6 +1252,41 @@ int main(int argc, char** argv) {
                                                                    : "off (FP64)");
   std::fflush(stdout);
 
+  // ── THE DESIGN MASK ITSELF, AS A FIELD ────────────────────────────────────
+  //
+  // ★ SO THE FROZEN SET CAN BE COMBINED WITH AN ANALYTIC PHI ANALYTICALLY,
+  // INSTEAD OF STAMPED OVER IT. Stamping 40,216 voxels to hard 0/1 is a
+  // staircase by construction, and it costs the parametric representation about
+  // a fifth of its measured advantage and pins `midpoint_share` at 51%. The
+  // alternative is a boolean on the level sets — phi_eff = min(phi, phi_frozen)
+  // is the UNION, and it needs the frozen set as a FUNCTION rather than a set of
+  // tags. This writes the tags; `plsm_probe --frozen-*` turns them into one.
+  //
+  // 1.0 = FrozenSolid, 0.5 = Active, 0.0 = FrozenVoid or Empty.
+  if (!a.dump_mask.empty()) {
+    std::vector<double> mk(n, 0.5);
+    for (std::size_t v = 0; v < n; ++v) {
+      if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid)
+        mk[v] = 0.0;
+      else if (eff[v] == MaskValue::FrozenSolid) mk[v] = 1.0;
+    }
+    std::ofstream f(a.dump_mask + ".f64", std::ios::binary);
+    f.write(reinterpret_cast<const char*>(mk.data()),
+            static_cast<std::streamsize>(n * sizeof(double)));
+    std::ofstream m(a.dump_mask + ".meta");
+    m.precision(17);
+    m << "rung 0.68\nrequested_vf 0.68\n";
+    m << "nx " << d.nx << "\nny " << d.ny << "\nnz " << d.nz << "\n";
+    m << "spacing " << h << "\n";
+    m << "ox " << grid.origin.x << "\noy " << grid.origin.y << "\noz "
+      << grid.origin.z << "\n";
+    m << "iso 0.5\nfactor 2\ninterp tricubic\nachieved_vf 0\n";
+    m << "iterations 0\nwall_s 0\ncompliance 0\n";
+    m << "# 1.0 FrozenSolid (" << n_fsolid << "), 0.5 Active (" << n_active
+      << "), 0.0 FrozenVoid/Empty (" << n_fvoid << ")\n";
+    std::printf("wrote the design mask to %s.f64\n", a.dump_mask.c_str());
+  }
+
   // ── A CONTROL: RE-CERTIFY A FIELD ALREADY ON DISK ─────────────────────────
   //
   // Reads `<prefix>.f64` as an occupancy on this grid and certifies it at the
@@ -1382,7 +1310,8 @@ int main(int argc, char** argv) {
   mcsv.precision(12);
   mcsv << "field,printed_voxels,achieved_vf,fractional_samples,max_von_mises_mpa,"
           "margin_worst_case,margin_effective,accepted,min_feature_violations,"
-          "load_path_connected\n";
+          "load_path_connected,frozen_solid_below_iso,frozen_solid_total,"
+          "frozen_void_above_iso,frozen_restored,mass_grams\n";
   for (const std::string& cf : a.certify_field) {
     std::vector<double> f(n, 0.0);
     {
@@ -1406,6 +1335,72 @@ int main(int argc, char** argv) {
       if (f[v] > 0.0 && f[v] < 1.0) ++frac;
     if (a.binarize)
       for (std::size_t v = 0; v < n; ++v) f[v] = f[v] > cert_iso ? 1.0 : 0.0;
+
+    // ── THE FROZEN SET, MEASURED AND (OPTIONALLY) RESTORED ────────────────
+    //
+    // ★ ADDED BY task 2026-08-10-parametric-level-set, ARM 1, BECAUSE EVERY
+    // FITTED FIELD CAME BACK "REJECTED — load path not connected" AND THE
+    // MARGIN NUMBER DID NOT SAY WHY. A field this program produces itself
+    // always honours the mask (the ersatz composes it at line ~1442), so until
+    // an EXTERNAL field arrived that did not, there was nothing here to see.
+    //
+    // His job freezes material: the Load/Fixture pad, the anchor (face 18) and
+    // face protection 16 are the voxels core tags FrozenSolid, 10554 of them.
+    // A level set stored per voxel can hold that set exactly. An ANALYTIC phi
+    // cannot — a smooth function has no way to be discontinuous at the pad's
+    // boundary — so a fitted phi drops some of those voxels below the iso, and
+    // `load_path_connected` walks from the anchor set and finds no route.
+    //
+    // The counts below are reported for EVERY field, always. `--respect-frozen`
+    // then restores the mask before certifying, which is exactly the masking
+    // Arm 2(e) proposes for the coefficient update; running both is what turns
+    // "REJECTED" into an ATTRIBUTION.
+    std::size_t fs_lost = 0, fv_gained = 0;
+    for (std::size_t v = 0; v < n; ++v) {
+      if (eff[v] == MaskValue::FrozenSolid && !(f[v] > cert_iso)) ++fs_lost;
+      else if (eff[v] == MaskValue::FrozenVoid && f[v] > cert_iso) ++fv_gained;
+    }
+    if (a.respect_frozen) {
+      for (std::size_t v = 0; v < n; ++v) {
+        if (eff[v] == MaskValue::FrozenSolid) f[v] = 1.0;
+        else if (eff[v] == MaskValue::FrozenVoid) f[v] = 0.0;
+      }
+    }
+    // ★ WRITE THE FIELD THE CERTIFICATE ACTUALLY READ, so the SURFACE can be
+    // measured on the SAME OBJECT the margin belongs to.
+    //
+    // This exists because ARM 2's exports came back rougher than SIMP while
+    // ARM 1's fits came back far smoother, and the two differ by exactly this:
+    // ARM 1's fitted fields were measured WITHOUT the frozen mask — which is
+    // why they were REJECTED — and ARM 2's carry it. 40,216 voxels stamped hard
+    // to 0 or 1 is 53% of the printed material, and a hard stamp is a staircase
+    // by construction. A roughness number measured on the unmasked field is a
+    // number about an object that does not certify.
+    if (!a.dump_masked.empty()) {
+      char pfx[512];
+      std::snprintf(pfx, sizeof pfx, "%s/%s", a.dump_masked.c_str(),
+                    cf.substr(cf.find_last_of('/') + 1).c_str());
+      std::ofstream mf(std::string(pfx) + ".f64", std::ios::binary);
+      mf.write(reinterpret_cast<const char*>(f.data()),
+               static_cast<std::streamsize>(n * sizeof(double)));
+      std::ofstream mm(std::string(pfx) + ".meta");
+      mm.precision(17);
+      char rl[32];
+      std::snprintf(rl, sizeof rl, "%.2f", a.rung);
+      mm << "rung " << rl << "\nrequested_vf " << a.rung << "\n";
+      mm << "nx " << d.nx << "\nny " << d.ny << "\nnz " << d.nz << "\n";
+      mm << "spacing " << h << "\n";
+      mm << "ox " << grid.origin.x << "\noy " << grid.origin.y << "\noz "
+         << grid.origin.z << "\n";
+      mm << "iso 0.5\nfactor 2\ninterp tricubic\n";
+      std::size_t masked_printed = 0;
+      for (std::size_t v2 = 0; v2 < n; ++v2)
+        if (f[v2] > cert_iso) ++masked_printed;
+      mm << "achieved_vf " << (masked_printed / part_solid) << "\n";
+      mm << "iterations 0\nwall_s 0\ncompliance 0\n";
+      mm << "# THE FIELD THE CERTIFICATE READ" << (a.respect_frozen
+             ? ", frozen mask restored" : ", mask NOT restored") << "\n";
+    }
 
     std::vector<double> crho(n, 0.0);
     for (std::size_t v = 0; v < n; ++v)
@@ -1437,10 +1432,13 @@ int main(int argc, char** argv) {
                   "binarized            %s\n"
                   "fractional samples   %zu (before any thresholding)\n"
                   "certification penalty %.4g (production)\n"
-                  "printed voxels       %zu of %.0f  (vf %.6f)\n",
+                  "printed voxels       %zu of %.0f  (vf %.6f)\n"
+                  "FrozenSolid BELOW iso %zu of %zu   FrozenVoid above %zu\n"
+                  "frozen set restored  %s\n",
                   cf.c_str(), a.binarize ? "YES (0/1 at iso 0.5)" : "no",
                   frac, params.penalty, cprinted, part_solid,
-                  cprinted / part_solid);
+                  cprinted / part_solid, fs_lost, n_fsolid, fv_gained,
+                  a.respect_frozen ? "YES (--respect-frozen)" : "no");
     std::string cs = cbuf;
     if (cdone && !ca.non_convergent) {
       std::snprintf(cbuf, sizeof cbuf,
@@ -1449,10 +1447,12 @@ int main(int argc, char** argv) {
                     "margin effective     %.9f   (gate: >= %.4g)\n"
                     "VERDICT              %s\n"
                     "min-feature viols    %d\n"
+                    "mass                 %.4f g\n"
                     "load path connected  %s\n",
                     ca.max_von_mises, ca.margin.worst_case, ca.margin_effective,
                     options.margin_stop, ca.accepted ? "ACCEPTED" : "REJECTED",
-                    ca.v3.min_feature_violations, cok ? "yes" : "NO");
+                    ca.v3.min_feature_violations, ca.mass_grams,
+                    cok ? "yes" : "NO");
       cs += cbuf;
     } else if (cdone) {
       cs += "certification        NON-CONVERGENT — NOT a certificate\n";
@@ -1467,9 +1467,16 @@ int main(int argc, char** argv) {
     if (cdone && !ca.non_convergent)
       mcsv << ca.max_von_mises << ',' << ca.margin.worst_case << ','
            << ca.margin_effective << ',' << (ca.accepted ? 1 : 0) << ','
-           << ca.v3.min_feature_violations << ',' << (cok ? 1 : 0) << '\n';
+           << ca.v3.min_feature_violations << ',' << (cok ? 1 : 0) << ',';
     else
-      mcsv << ",,,,," << (cok ? 1 : 0) << '\n';
+      mcsv << ",,,,," << (cok ? 1 : 0) << ',';
+    mcsv << fs_lost << ',' << n_fsolid << ',' << fv_gained << ','
+         << (a.respect_frozen ? 1 : 0) << ',';
+    // The task asks for MASS beside the margin. It is `analyze_fixed_design`'s
+    // own `mass_grams` — the same field the trajectory's summary prints — and not
+    // a printed-voxel count multiplied by a density recovered from an old log.
+    if (cdone && !ca.non_convergent) mcsv << ca.mass_grams;
+    mcsv << '\n';
     mcsv.flush();
     // `recert.txt` keeps its single-field meaning: the LAST field certified.
     // The curve is `margin_curve.csv`.
@@ -1658,6 +1665,104 @@ int main(int argc, char** argv) {
   // genuinely is a distance function.
   reinitialise(d, phi, h, a.sweeps, false);
 
+  // ── ARM 2: THE REPRESENTATION CHANGE, AND THE ONLY PLACE IT HAPPENS ───────
+  //
+  // ★ FROM HERE ON, IN --plsm MODE, phi IS NOT A DESIGN VARIABLE. It is the
+  // VALUE of an analytic function, phi(x) = sum_i alpha_i psi_i(x), on this
+  // grid, and `alpha` is what the optimiser moves. Everything downstream — the
+  // ersatz, the mask, the state solve, the shape derivative, the volume target,
+  // `analyze_fixed_design` — reads `phi` and `rho` exactly as it did before and
+  // does not know the difference. That is the task's constraint (c) and it is
+  // enforced structurally: `phi` is only ever WRITTEN by `plsm_sync` below.
+  //
+  // What the change DELETES, and this is the point: no Hamilton-Jacobi PDE, no
+  // Godunov or WENO gradient, no CFL sub-stepping, no gamma damper, and no
+  // reinitialisation. `--plsm-refit-every` is available as the literature's
+  // "approximate re-initialisation" and is OFF by default, so the default arm
+  // runs with none of it and the claim can be tested rather than assumed.
+  KnotLattice L;
+  Basis pbasis = Basis::Wendland;
+  Csr Psi, PsiT;
+  std::vector<double> alpha, psi_sum;
+  const int plsm_threads = a.threads > 0 ? a.threads : 3;
+  // The offset the volume constraint bisects is added to EVERY coefficient, so
+  // it moves phi by offset * psi_sum(x) and STAYS IN THE SPAN OF THE BASIS. In
+  // the voxel mode `off_shape` is all ones and `phi + offset * 1` is the
+  // existing line, unchanged — which is why the generalisation is a no-op there.
+  std::vector<double> off_shape(n, 1.0);
+  auto plsm_sync = [&]() {
+    spmv(Psi, alpha, phi, plsm_threads);
+  };
+  if (a.plsm) {
+    if (a.plsm_basis == "gaussian") pbasis = Basis::Gaussian;
+    else if (a.plsm_basis != "wendland") {
+      std::printf("FATAL: --plsm-basis must be wendland or gaussian\n");
+      return 1;
+    }
+    // ★ R4 — PER AXIS, NOT MINIMUM. The knot spacing is three numbers and the
+    // support is an ellipsoid R_a = support * Delta_a. Deriving one spacing from
+    // min(nx,ny,nz) on this 128 x 31 x 118 slab is the trap that cost PR 324 a
+    // day, and nothing here can do it: there is no minimum taken anywhere.
+    L = make_lattice(d, a.plsm_dx, a.plsm_dy, a.plsm_dz, a.plsm_support);
+    const double t_p0 = now_s();
+    Psi = build_A(d, L, pbasis, plsm_threads);
+    PsiT = transpose(Psi, plsm_threads);
+    psi_sum.assign(n, 0.0);
+    {
+      const std::vector<double> ones(L.count(), 1.0);
+      spmv(Psi, ones, psi_sum, plsm_threads);
+    }
+    off_shape = psi_sum;
+    // The seed: the SAME weighted least-squares fit `plsm_probe` runs, on the
+    // SAME clamped target, from `plsm_basis.hpp`. So ARM 2 starts from exactly
+    // the object ARM 1 measured.
+    std::vector<double> target(n, 0.0), wts(n, 1.0);
+    for (std::size_t v = 0; v < n; ++v) {
+      target[v] = std::max(-a.plsm_clamp * h, std::min(a.plsm_clamp * h, phi[v]));
+      if (a.plsm_band_weight != 1.0) {
+        const double t = phi[v] / eta;
+        wts[v] = 1.0 + (a.plsm_band_weight - 1.0) * std::exp(-std::min(60.0, t * t));
+      }
+    }
+    const FitResult fr = solve_normal(Psi, PsiT, target, wts, a.plsm_ridge,
+                                      a.plsm_cg_iters, 1e-10, plsm_threads);
+    alpha = fr.alpha;
+    plsm_sync();
+    double rb = 0.0;
+    std::size_t bn = 0;
+    for (std::size_t v = 0; v < n; ++v)
+      if (std::fabs(target[v]) <= eta) { rb += (phi[v] - target[v]) * (phi[v] - target[v]); ++bn; }
+    double smin = 1e30, smax = -1e30;
+    for (std::size_t v = 0; v < n; ++v) {
+      if (grid.tags[v] == VoxelTag::Empty) continue;
+      smin = std::min(smin, psi_sum[v]);
+      smax = std::max(smax, psi_sum[v]);
+    }
+    std::printf(
+        "PLSM        phi = sum alpha_i psi_i  —  %s basis, knots (%.3g, %.3g, "
+        "%.3g) voxels PER AXIS\n"
+        "            %d x %d x %d = %zu COEFFICIENTS against %zu voxels "
+        "(compression %.1fx)\n"
+        "            support %.3g x spacing = (%.3f, %.3f, %.3f) mm, "
+        "nnz(Psi) %zu (%.1f per voxel)\n"
+        "            seed fit: %d CG iterations, rel resid %.2e, band rms "
+        "%.5f mm, %.1f s\n"
+        "            volume offset moves phi by offset * sum_i psi_i, which is "
+        "%.4f..%.4f in the part\n"
+        "            update: %s;  Hilbertian extension: %s;  "
+        "approximate re-init: %s\n",
+        a.plsm_basis.c_str(), a.plsm_dx, a.plsm_dy, a.plsm_dz, L.mx, L.my, L.mz,
+        L.count(), n, static_cast<double>(n) / static_cast<double>(L.count()),
+        a.plsm_support, L.rx * h, L.ry * h, L.rz * h, Psi.nnz(),
+        static_cast<double>(Psi.nnz()) / static_cast<double>(n), fr.cg_iters,
+        fr.rel_resid, bn ? std::sqrt(rb / static_cast<double>(bn)) : 0.0,
+        now_s() - t_p0, smin, smax,
+        a.plsm_mma ? "MMA on the coefficients" : "steepest descent on the coefficients",
+        a.plsm_hilb ? "ON (ablation)" : "off — the RBF support is the extension",
+        a.plsm_refit_every > 0 ? "every N iterations" : "off");
+    std::fflush(stdout);
+  }
+
   // ── the ersatz, and the volume it measures ────────────────────────────────
   //
   // `occ` is the OCCUPANCY (0..1) the volume target and every downstream
@@ -1672,7 +1777,7 @@ int main(int argc, char** argv) {
       double o;
       if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) o = 0.0;
       else if (eff[v] == MaskValue::FrozenSolid) o = 1.0;
-      else o = heaviside(-(phi[v] + offset), eta);
+      else o = heaviside(-(phi[v] + offset * off_shape[v]), eta);
       occ[v] = o;
       rho[v] = rho_min + (1.0 - rho_min) * o;
     }
@@ -1683,7 +1788,7 @@ int main(int argc, char** argv) {
     for (std::size_t v = 0; v < n; ++v) {
       if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) continue;
       if (eff[v] == MaskValue::FrozenSolid) { s += 1.0; continue; }
-      s += heaviside(-(phi[v] + offset), eta);
+      s += heaviside(-(phi[v] + offset * off_shape[v]), eta);
     }
     return s;
   };
@@ -1706,6 +1811,10 @@ int main(int argc, char** argv) {
   };
 
   // ── the run ───────────────────────────────────────────────────────────────
+  {
+    std::error_code ec;
+    std::filesystem::create_directories(a.out, ec);
+  }
   if (a.snapshot_every > 0) {
     std::error_code ec;
     std::filesystem::create_directories(a.out + "/snap", ec);
@@ -1734,9 +1843,65 @@ int main(int argc, char** argv) {
     if (eff[v] == MaskValue::FrozenSolid) pinned[v] = 1;
 
   std::vector<double> vel(n, 0.0), raw_vel(n, 0.0), delta(n, 0.0);
+  // ARM 2's optimiser state. The coefficient box is sized from the SEED, because
+  // an RBF coefficient is scaled like the distance it interpolates (mm here) and
+  // there is no universal bound to write down; +-4x the largest seed coefficient
+  // is wide enough that the box is never the active constraint on this part, and
+  // `--plsm-bound` moves it.
+  PlsmMmaState mma_state;
+  int plsm_mma_iter = 0;
+  // L-BFGS history (PROBE 3): the last `--plsm-lbfgs` (step, gradient-change)
+  // pairs, plus the previous step and gradient the next pair is built from.
+  std::vector<std::vector<double>> lb_hist_s, lb_hist_y, lb_s, lb_y;
+  std::vector<double> lb_prev_step, lb_prev_g;
+  double plsm_alpha_bound = 1.0, plsm_psi_max = 1.0;
+  if (a.plsm) {
+    for (double c : alpha) plsm_alpha_bound = std::max(plsm_alpha_bound, std::fabs(c));
+    plsm_alpha_bound *= a.plsm_bound;
+    plsm_psi_max = 0.0;
+    for (std::size_t v = 0; v < n; ++v)
+      if (grid.tags[v] != VoxelTag::Empty)
+        plsm_psi_max = std::max(plsm_psi_max, psi_sum[v]);
+    if (!(plsm_psi_max > 0.0)) plsm_psi_max = 1.0;
+    std::printf("PLSM        coefficient box +-%.4f (%.3gx the largest seed "
+                "coefficient); a unit move of every\n"
+                "            coefficient carries phi by at most %.4f mm, which is "
+                "what sizes the MMA move\n", plsm_alpha_bound, a.plsm_bound,
+                plsm_psi_max);
+  }
   std::vector<double> best_occ, best_rho;
   double best_compliance = std::numeric_limits<double>::infinity();
   int best_iter = -1;
+
+  // The previous iterate's displacement field, for --warm-start.
+  FeaSolution warm;
+  bool have_warm = false;
+
+  // ★ PROBE 1 — WARM START, AND WHERE IT IS ACTUALLY HONOURED. `simp_compliance`
+  // has taken an `initial_guess` since it was written, and core ALSO has a
+  // `PenalizedSolver` whose header says it "warm-starts from the previous solve
+  // automatically". Neither reaches the solver this project runs:
+  // `simp.cpp` dispatches MultigridCG_Matfree FIRST and that branch takes
+  // neither argument. So a --warm-start measured on the production path is
+  // exactly a no-op — which is what it measured, to the digit, over six
+  // iterations — and the honest test is to run the paths that DO honour it and
+  // report what warm starting is worth, so the value of wiring it into the
+  // matrix-free solver is a number rather than a hope.
+  const SolverKind solver_now =
+      a.solver_kind < 0 ? options.simp.solver
+                        : static_cast<SolverKind>(a.solver_kind);
+  std::unique_ptr<PenalizedSolver> pen_solver;
+  if (a.penalized_solver) {
+    pen_solver = std::make_unique<PenalizedSolver>(grid, traj_params.poisson,
+                                                   bcs, loads);
+    std::printf("PROBE       PenalizedSolver constructed, usable = %s\n",
+                pen_solver->usable() ? "yes" : "NO");
+  }
+  if (a.solver_kind >= 0 || a.cg_tol_early > 0.0 || a.warm_start)
+    std::printf("PROBE       solver kind %d, warm start %s, early tol %.3g for "
+                "%d iterations\n",
+                static_cast<int>(solver_now), a.warm_start ? "ON" : "off",
+                a.cg_tol_early, a.cg_tol_until);
 
   const double t_run0 = now_s();
   double total_solve_wall = 0.0, total_hilb_wall = 0.0;
@@ -1777,7 +1942,17 @@ int main(int argc, char** argv) {
     // structure the reference has, where there is no offset at all and the
     // interface is always {phi = 0}.
     const double offset = solve_offset(target_volume);
-    for (std::size_t v = 0; v < n; ++v) phi[v] += offset;
+    if (a.plsm) {
+      // ★ IN --plsm MODE THE OFFSET IS ADDED TO EVERY COEFFICIENT, not to phi.
+      // That keeps phi inside the span of the basis — the whole representation
+      // claim would be void if the design carried a per-voxel term beside it —
+      // and it moves the surface by offset * sum_i psi_i, which the header above
+      // reports as a range so the reader can see how near a rigid move it is.
+      for (double& c : alpha) c += offset;
+      plsm_sync();
+    } else {
+      for (std::size_t v = 0; v < n; ++v) phi[v] += offset;
+    }
     build_fields(0.0);
 
     // ── THE STATE SOLVE. Core's, unmodified. ────────────────────────────────
@@ -1787,10 +1962,20 @@ int main(int argc, char** argv) {
       // ★ traj_params, not params — difference 2. At penalty 1 this is
       // E(rho) = rho * E0, their linear interpolation. The certificate below is
       // the only place `params` (penalty 3) is used, and it is untouched.
-      sc = simp_compliance(grid, traj_params, rho, bcs, loads,
-                           options.simp.cg_tolerance,
-                           options.simp.cg_max_iterations, nullptr, nullptr,
-                           options.simp.solver);
+      // ★ PROBE 2 — INEXACT EARLY SOLVES. The literature reports up to 2.32x
+      // from loosening the state solve while the design is still far from
+      // converged. Nothing about this needs production to change: the tolerance
+      // is already an argument, and the CERTIFICATION is a separate call that
+      // keeps the production tolerance regardless. What has to be checked is
+      // that the design it lands on is the same one, which is why every arm is
+      // certified and measured, not just timed.
+      const double tol_now =
+          (a.cg_tol_early > 0.0 && it <= a.cg_tol_until) ? a.cg_tol_early
+                                                        : options.simp.cg_tolerance;
+      sc = simp_compliance(grid, traj_params, rho, bcs, loads, tol_now,
+                           options.simp.cg_max_iterations,
+                           (a.warm_start && have_warm) ? &warm : nullptr,
+                           pen_solver.get(), solver_now);
     } catch (const std::exception& e) {
       std::printf("\n*** STATE SOLVE FAILED at iteration %d: %s\n"
                   "*** Stopping here; everything already written stands.\n", it,
@@ -1798,6 +1983,7 @@ int main(int argc, char** argv) {
       break;
     }
     const double solve_wall = now_s() - t_s0;
+    if (a.warm_start) { warm = sc.solution; have_warm = true; }
     total_solve_wall += solve_wall;
     ++solves_total;
     if (sc.cg.used_multigrid) ++solves_multigrid;
@@ -1910,7 +2096,18 @@ int main(int argc, char** argv) {
     int hilb_it = 0;
     double hilb_rel = 0.0;
     const double t_h0 = now_s();
-    if (a.alpha_coeff > 0.0) {
+    if (a.plsm && !a.plsm_hilb) {
+      // ★ ARM 2 DELETES DIFFERENCE 4, AND THE LITERATURE SAYS WHY. The step
+      // below is alpha <- alpha - dt * Psi^T v, so the motion of phi is
+      // Psi Psi^T v — the velocity spread over every knot whose support the
+      // interface passes through, which is a positive semi-definite smoothing of
+      // v and therefore still a descent direction. Gao et al. state it directly
+      // of the parametric form: the velocity "is naturally extended to the whole
+      // design domain, and there is no need to employ additional schemes to
+      // extend the velocity field." `--plsm-hilb` puts the Hilbertian solve back
+      // so the claim is ABLATABLE rather than believed.
+      vel = raw_vel;
+    } else if (a.alpha_coeff > 0.0) {
       // ★ DIFFERENCE 4. A velocity that is zero off the interface — which is what
       // difference 1 just made it — cannot advect a level set on its own: the
       // Godunov step would only move the band and would leave phi's far field
@@ -1944,7 +2141,194 @@ int main(int argc, char** argv) {
     // rather than merely a longer one.
     double dt = 0.0;
     int hj_done = 0;
-    if (vmax > 0.0 && a.hj_steps > 0) {
+    if (a.plsm) {
+      // ══ ARM 2: THE COEFFICIENT UPDATE ═══════════════════════════════════
+      //
+      // The chain rule the task states, and nothing else:
+      //
+      //     dJ/dalpha_i = integral (C:eps(u):eps(u)) psi_i DH_eta(phi) |grad phi|
+      //     dV/dalpha_i = integral            -1     psi_i DH_eta(phi) |grad phi|
+      //
+      // Both carry the identical factor, which is exactly `delta` — the SAME
+      // `delta` the voxel arms built two blocks up, unchanged. So the two
+      // sensitivities differ only in replacing the energy by a constant, the
+      // multiplier lambda is the delta-weighted mean that was already computed,
+      // and `raw_vel` = (e - lambda) * delta IS the combined shape derivative in
+      // phi-space. Projecting it onto the basis is one transpose apply.
+      std::vector<double> g(L.count(), 0.0);
+      spmv(PsiT, vel, g, plsm_threads);
+
+      if (a.plsm_lbfgs > 0) {
+        // ══ PROBE 3 — L-BFGS ON THE COEFFICIENTS ═══════════════════════════
+        //
+        // ★ THIS LEVER EXISTS ONLY BECAUSE THE REPRESENTATION IS PARAMETRIC.
+        // A voxel level set has 468,224 design variables and a second-order
+        // method is out of the question; the coefficients are 85,680 at the
+        // finest lattice here and 3,040 at the coarsest that still fits, which
+        // is small enough to carry curvature. If it halves the ITERATION COUNT
+        // it halves the wall clock, because 99.5% of an iteration is one state
+        // solve and L-BFGS needs exactly one per iteration too.
+        //
+        // Limited-memory BFGS, two-loop recursion, on the same descent
+        // direction MMA is given: g = Psi^T v with v = (e - lambda) * delta, so
+        // the volume multiplier is already folded in and the constraint is held
+        // by the SAME offset bisection every other arm uses. That keeps this a
+        // test of the SEARCH DIRECTION and nothing else.
+        lb_s.push_back(std::vector<double>());   // filled after the step
+        lb_y.push_back(std::vector<double>());
+        std::vector<double> q = g;
+        const int m = static_cast<int>(lb_hist_s.size());
+        std::vector<double> al(static_cast<std::size_t>(m), 0.0);
+        for (int kk = m - 1; kk >= 0; --kk) {
+          const auto& sv = lb_hist_s[static_cast<std::size_t>(kk)];
+          const auto& yv = lb_hist_y[static_cast<std::size_t>(kk)];
+          double sy = 0.0, sq = 0.0;
+          for (std::size_t i2 = 0; i2 < sv.size(); ++i2) { sy += sv[i2]*yv[i2]; sq += sv[i2]*q[i2]; }
+          if (std::fabs(sy) < 1e-300) continue;
+          al[static_cast<std::size_t>(kk)] = sq / sy;
+          for (std::size_t i2 = 0; i2 < sv.size(); ++i2) q[i2] -= al[static_cast<std::size_t>(kk)] * yv[i2];
+        }
+        if (m > 0) {
+          const auto& sv = lb_hist_s.back();
+          const auto& yv = lb_hist_y.back();
+          double sy = 0.0, yy = 0.0;
+          for (std::size_t i2 = 0; i2 < sv.size(); ++i2) { sy += sv[i2]*yv[i2]; yy += yv[i2]*yv[i2]; }
+          const double gamma_bfgs = (yy > 0.0) ? sy / yy : 1.0;
+          for (double& v2 : q) v2 *= gamma_bfgs;
+        }
+        for (int kk = 0; kk < m; ++kk) {
+          const auto& sv = lb_hist_s[static_cast<std::size_t>(kk)];
+          const auto& yv = lb_hist_y[static_cast<std::size_t>(kk)];
+          double sy = 0.0, yq = 0.0;
+          for (std::size_t i2 = 0; i2 < sv.size(); ++i2) { sy += sv[i2]*yv[i2]; yq += yv[i2]*q[i2]; }
+          if (std::fabs(sy) < 1e-300) continue;
+          const double beta_bfgs = yq / sy;
+          for (std::size_t i2 = 0; i2 < sv.size(); ++i2)
+            q[i2] += (al[static_cast<std::size_t>(kk)] - beta_bfgs) * sv[i2];
+        }
+        lb_s.pop_back(); lb_y.pop_back();
+        // The SAME step normalisation the descent branch uses, so the two are
+        // comparable and the only difference is the direction.
+        std::vector<double> pfield(n, 0.0);
+        spmv(Psi, q, pfield, plsm_threads);
+        double smax2 = 0.0;
+        for (int k = 0; k < d.nz; ++k)
+          for (int j = 0; j < d.ny; ++j)
+            for (int i = 0; i < d.nx; ++i) {
+              const std::size_t v = d.at(i, j, k);
+              if (delta[v] <= 0.0) continue;
+              const double gm = grad_mag(d, phi, i, j, k, h);
+              if (gm > 1e-12) smax2 = std::max(smax2, std::fabs(pfield[v]) / gm);
+            }
+        if (smax2 > 0.0) {
+          const int steps = a.hj_steps > 0 ? a.hj_steps : 1;
+          dt = gamma_now * steps * h / smax2;
+          std::vector<double> step(L.count());
+          for (std::size_t i2 = 0; i2 < L.count(); ++i2) {
+            step[i2] = -dt * q[i2];
+            alpha[i2] += step[i2];
+          }
+          if (!lb_prev_g.empty()) {
+            std::vector<double> yv(L.count());
+            for (std::size_t i2 = 0; i2 < L.count(); ++i2) yv[i2] = g[i2] - lb_prev_g[i2];
+            lb_hist_s.push_back(lb_prev_step);
+            lb_hist_y.push_back(yv);
+            while (static_cast<int>(lb_hist_s.size()) > a.plsm_lbfgs) {
+              lb_hist_s.erase(lb_hist_s.begin());
+              lb_hist_y.erase(lb_hist_y.begin());
+            }
+          }
+          lb_prev_step = step;
+          lb_prev_g = g;
+          hj_done = steps;
+        }
+      } else if (a.plsm_mma) {
+        // ── MMA on the coefficients (plsm_mma.hpp — core's mma_update step for
+        // step, with the design set changed). beta = -alpha so that "design up"
+        // means "material in", which is the sign convention core's MMA assumes.
+        //
+        // dc and dv are recovered from `raw_vel` without a second pass: at this
+        // point raw_vel = (e - lambda) * delta, so e * delta = raw_vel +
+        // lambda * delta exactly.
+        std::vector<double> edelta(n, 0.0);
+        for (std::size_t v = 0; v < n; ++v) edelta[v] = raw_vel[v] + lambda * delta[v];
+        std::vector<double> dc(L.count(), 0.0), dv(L.count(), 0.0);
+        spmv(PsiT, edelta, dc, plsm_threads);
+        spmv(PsiT, delta, dv, plsm_threads);
+        for (double& c : dc) c = -c;   // material IN lowers compliance
+        std::vector<double> beta(L.count(), 0.0);
+        for (std::size_t i2 = 0; i2 < L.count(); ++i2) beta[i2] = -alpha[i2];
+        // g0 is the constraint residual. The offset bisection at the top of this
+        // iteration has already driven it to ~0, so MMA is optimising ON the
+        // constraint surface and its multiplier sets the trade-off within the
+        // step; the bisection then re-projects at the top of the next one. The
+        // two do not fight: one is a projection, the other a search direction.
+        const double g0 = occ_vol - target_volume;
+        // ★ THE MOVE LIMIT IS A LENGTH, NOT A FRACTION, AND THE FIRST MMA RUN IS
+        // WHY. Core's MMA takes `move` as a fraction of the design range because
+        // its design range is [rho_min, 1] — a fraction of it is a density step
+        // and means something. An RBF coefficient's range is set by the SEED and
+        // is ~1365 mm wide on this part, so the inherited default of 0.05 is a
+        // 68 mm step per coefficient per iteration. Measured: compliance went
+        // 0.00287 -> 0.00848 in ONE iteration and | |grad phi|-1 | reached 86.
+        //
+        // So the fraction is DERIVED from the motion a step is meant to buy — the
+        // same gamma * hj_steps * h the descent branch uses — divided by how far a
+        // unit coefficient move carries phi, which is max_i sum psi (`psi_max`).
+        // `--plsm-move` then multiplies that, defaulting to 1, so the flag means
+        // "how many voxel-arm steps' worth" rather than a number with no scale.
+        const int steps = a.hj_steps > 0 ? a.hj_steps : 1;
+        const double want_dphi = gamma_now * steps * h;
+        const double xrange = 2.0 * plsm_alpha_bound;
+        const double mv = a.plsm_move * want_dphi / (xrange * plsm_psi_max);
+        beta = plsm_mma_update(mma_state, ++plsm_mma_iter, beta, dc, dv, g0,
+                               -plsm_alpha_bound, plsm_alpha_bound, mv);
+        for (std::size_t i2 = 0; i2 < L.count(); ++i2) alpha[i2] = -beta[i2];
+        dt = mv * xrange;   // the coefficient move limit actually applied, in mm
+        hj_done = steps;
+      } else {
+        // ── Steepest descent in the coefficients, with the SAME step rule the
+        // voxel arms use: the largest movement of phi anywhere is gamma * h. In
+        // the voxel arms that is dt = gamma*h/max|v| because |grad phi| = 1; here
+        // the step moves phi by -dt * Psi Psi^T v, so the normalisation is taken
+        // on THAT field and the two arms take comparable-sized steps.
+        std::vector<double> q(n, 0.0);
+        spmv(Psi, g, q, plsm_threads);
+        // ★ THE STEP IS NORMALISED ON INTERFACE DISPLACEMENT, NOT ON |Delta phi|,
+        // AND THE FIRST SMOKE RUN IS WHY. The voxel arms move the interface by
+        // gamma*h per Hamilton-Jacobi sub-step and take `hj_steps` of them on one
+        // state solve, so a state solve buys hj_steps*gamma*h of motion. Sizing
+        // the parametric step by max|Delta phi| instead gave one sub-step's worth
+        // and the objective fell about a third as fast per solve — which would
+        // have been reported as "the parametric arm converges slowly" when it was
+        // only taking a smaller step.
+        //
+        // A level set moves its interface by Delta phi / |grad phi|, and the
+        // parametric phi is NOT a distance function (|grad phi| - 1 measured 0.32
+        // on the seed, and there is no reinitialisation to fix it), so the
+        // division is not optional here the way it is in the voxel arms. It is
+        // taken over the BAND only: outside it Delta phi moves no surface, and
+        // |grad phi| there can be small enough to dominate a maximum meaninglessly.
+        double smax = 0.0;
+        for (int k = 0; k < d.nz; ++k)
+          for (int j = 0; j < d.ny; ++j)
+            for (int i = 0; i < d.nx; ++i) {
+              const std::size_t v = d.at(i, j, k);
+              if (delta[v] <= 0.0) continue;
+              const double gm = grad_mag(d, phi, i, j, k, h);
+              if (gm <= 1e-12) continue;
+              smax = std::max(smax, std::fabs(q[v]) / gm);
+            }
+        if (smax > 0.0) {
+          const int steps = a.hj_steps > 0 ? a.hj_steps : 1;
+          dt = gamma_now * steps * h / smax;
+          for (std::size_t i2 = 0; i2 < L.count(); ++i2) alpha[i2] -= dt * g[i2];
+          hj_done = steps;   // the motion this step is worth, for the CSV
+        }
+      }
+      plsm_sync();
+      hj_done = 0;
+    } else if (vmax > 0.0 && a.hj_steps > 0) {
       // gamma_now, not a.gamma: the oscillation damper below may have pulled it
       // in on a previous iteration, exactly as theirs does.
       dt = gamma_now * h / vmax;
@@ -1993,7 +2377,28 @@ int main(int argc, char** argv) {
 
     // ── (f) reinitialisation ────────────────────────────────────────────────
     ReinitResidual rresid;
-    if (a.reinit_every > 0 && it % a.reinit_every == 0) {
+    if (a.plsm) {
+      // ★ NO REINITIALISATION, AND THE RESIDUAL IS REPORTED ANYWAY. The claim
+      // being tested is that a parametric level set does not need one; the honest
+      // way to test it is to keep measuring | |grad phi| - 1 | and let the number
+      // say whether phi drifts. `--plsm-refit-every N` is the literature's
+      // "approximate re-initialisation": re-distance phi ON THE GRID and then
+      // RE-PROJECT it onto the basis, so the design variable stays the
+      // coefficients. OFF by default.
+      if (a.plsm_refit_every > 0 && it % a.plsm_refit_every == 0) {
+        std::vector<double> pr = phi;
+        reinitialise(d, pr, h, a.sweeps, false);
+        std::vector<double> tgt(n, 0.0), wts(n, 1.0);
+        for (std::size_t v = 0; v < n; ++v)
+          tgt[v] = std::max(-a.plsm_clamp * h, std::min(a.plsm_clamp * h, pr[v]));
+        const FitResult rf = solve_normal(Psi, PsiT, tgt, wts, a.plsm_ridge,
+                                          a.plsm_cg_iters, 1e-10, plsm_threads);
+        alpha = rf.alpha;
+        plsm_sync();
+      }
+      rresid = reinit_residual(d, phi, h, eta);
+      last_rresid = rresid;
+    } else if (a.reinit_every > 0 && it % a.reinit_every == 0) {
       reinitialise(d, phi, h, a.sweeps, a.russo_smereka);
       // Their reinitialisation-by-PDE runs to tol = 1/(5 order^2)/min(el_size) =
       // 0.00645 on his grid. Ours is a direct Eikonal sweep with no time step, so
@@ -2198,6 +2603,86 @@ int main(int argc, char** argv) {
     m << "iterations " << done_iters << "\n";
     m << "wall_s " << run_wall << "\n";
     m << "compliance " << compliance_final << "\n";
+  }
+
+  // ── ARM 2's REAL OUTPUT: THE SURFACE OF THE FUNCTION ─────────────────────
+  //
+  // ★ `rho.f64` above is the design SAMPLED ONTO THE VOXEL GRID, which is what
+  // every arm since PR 322 has been measured on and is therefore the row that
+  // belongs beside them in the handoff's table. But it is NOT what a parametric
+  // level set is for. phi here is an analytic function; it can be evaluated
+  // anywhere, and the surface that should be exported is ITS zero set, not the
+  // zero set of a tricubic interpolation of its samples. `--plsm-export F`
+  // writes exactly that, at the lattice `external_field_surface_probe` reads
+  // with `factor 1` / `interp none`, so that probe extracts the function and
+  // interpolates nothing.
+  //
+  // ★ THE FROZEN MASK IS STAMPED AT THE REFINED LATTICE TOO, by the containing
+  // coarse voxel. It has to be: `build_fields` stamps it on every iteration of
+  // every arm, the certificate reads a field that has it, and an exported
+  // surface that omitted it would be a different object from the certified one —
+  // which is the gap this project has been bitten by before. The mask is a VOXEL
+  // object, so the stamp is voxel-blocky at its boundary at any refinement. That
+  // is a true statement about the job, not an artefact of this export.
+  if (a.plsm && !alpha.empty()) {
+    for (int F : a.plsm_export) {
+      if (F < 1) continue;
+      const int fx = d.nx * F, fy = d.ny * F, fz = d.nz * F;
+      const std::vector<double> pf =
+          evaluate(L, pbasis, alpha, fx, fy, fz, F, plsm_threads);
+      std::vector<double> fo(pf.size(), 0.0);
+      for (int k = 0; k < fz; ++k)
+        for (int j = 0; j < fy; ++j)
+          for (int i = 0; i < fx; ++i) {
+            const std::size_t fv =
+                static_cast<std::size_t>(i) +
+                static_cast<std::size_t>(fx) *
+                    (static_cast<std::size_t>(j) +
+                     static_cast<std::size_t>(fy) * static_cast<std::size_t>(k));
+            const std::size_t cv = d.at(i / F, j / F, k / F);
+            if (grid.tags[cv] == VoxelTag::Empty ||
+                eff[cv] == MaskValue::FrozenVoid) fo[fv] = 0.0;
+            else if (eff[cv] == MaskValue::FrozenSolid) fo[fv] = 1.0;
+            else fo[fv] = heaviside(-pf[fv], eta);
+          }
+      char stem[512];
+      std::snprintf(stem, sizeof stem, "%s/plsm_f%d", a.out.c_str(), F);
+      std::ofstream f(std::string(stem) + ".f64", std::ios::binary);
+      f.write(reinterpret_cast<const char*>(fo.data()),
+              static_cast<std::streamsize>(fo.size() * sizeof(double)));
+      std::ofstream m(std::string(stem) + ".meta");
+      m.precision(17);
+      char rung_label[32];
+      std::snprintf(rung_label, sizeof rung_label, "%.2f", a.rung);
+      m << "rung " << rung_label << "\nrequested_vf " << a.rung << "\n";
+      m << "nx " << fx << "\nny " << fy << "\nnz " << fz << "\n";
+      m << "spacing " << (h / F) << "\n";
+      m << "ox " << grid.origin.x << "\noy " << grid.origin.y << "\noz "
+        << grid.origin.z << "\n";
+      m << "iso 0.5\nfactor 1\ninterp none\n";
+      m << "achieved_vf " << achieved_vf << "\niterations " << done_iters
+        << "\nwall_s " << run_wall << "\ncompliance " << compliance_final << "\n";
+      m << "# ANALYTIC: phi = sum alpha_i psi_i evaluated at the F=" << F
+        << " lattice; " << L.count() << " coefficients; frozen mask stamped by "
+        << "the containing coarse voxel\n";
+      std::printf("analytic    %s.f64  (%d x %d x %d, spacing %.6f mm)\n", stem,
+                  fx, fy, fz, h / F);
+    }
+    // The coefficients themselves, so the design can be re-evaluated at any
+    // resolution later without re-running the optimisation.
+    std::ofstream af(a.out + "/alpha.f64", std::ios::binary);
+    af.write(reinterpret_cast<const char*>(alpha.data()),
+             static_cast<std::streamsize>(alpha.size() * sizeof(double)));
+    std::ofstream am(a.out + "/alpha.meta");
+    am.precision(17);
+    am << "basis " << a.plsm_basis << "\n";
+    am << "knots_vox " << a.plsm_dx << " " << a.plsm_dy << " " << a.plsm_dz << "\n";
+    am << "support " << a.plsm_support << "\n";
+    am << "counts " << L.mx << " " << L.my << " " << L.mz << "\n";
+    am << "pad " << L.padx << " " << L.pady << " " << L.padz << "\n";
+    am << "n_coeff " << L.count() << "\nn_voxels " << n << "\n";
+    am << "compression " << (static_cast<double>(n) / static_cast<double>(L.count()))
+       << "\n";
   }
 
   // The design in the shipped container, so design_rung_dump and every viewer

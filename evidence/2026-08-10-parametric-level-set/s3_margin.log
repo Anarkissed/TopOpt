@@ -1,0 +1,365 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       6 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/W2_vm_f1.f64
+binarized            no
+fractional samples   89289 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.042817438 MPa
+MARGIN worst case    1284.523362992
+margin effective     265.976994455   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    455
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/W4_vm_f1.f64
+binarized            no
+fractional samples   90297 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.064989686 MPa
+MARGIN worst case    846.288138726
+margin effective     175.234785187   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    1134
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/W6_vm_f1.f64
+binarized            no
+fractional samples   96712 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.048351704 MPa
+MARGIN worst case    1137.498684914
+margin effective     235.533654059   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    690
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/W8_vm_f1.f64
+binarized            no
+fractional samples   99007 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.106166111 MPa
+MARGIN worst case    518.056085105
+margin effective     107.270139606   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    677
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/W4s3_vm_f1.f64
+binarized            no
+fractional samples   90033 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.059027079 MPa
+MARGIN worst case    931.775742957
+margin effective     192.936087235   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    553
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/W4s15_vm_f1.f64
+binarized            no
+fractional samples   96949 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.082096715 MPa
+MARGIN worst case    669.941541347
+margin effective     138.719966302   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    1553
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/G2_vm_f1.f64
+binarized            no
+fractional samples   89260 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.041350015 MPa
+MARGIN worst case    1330.108339003
+margin effective     275.415946880   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    454
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/G4_vm_f1.f64
+binarized            no
+fractional samples   90142 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.061460630 MPa
+MARGIN worst case    894.881815265
+margin effective     185.296727544   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    906
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/A424_vm_f1.f64
+binarized            no
+fractional samples   90133 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.069546199 MPa
+MARGIN worst case    790.841207172
+margin effective     163.753788709   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    924
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/fields/TRAP-min_vm_f1.f64
+binarized            no
+fractional samples   90163 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.043683355 MPa
+MARGIN worst case    1259.060813870
+margin effective     260.704647932   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    729
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/G2i0005_vm_f1.f64
+binarized            no
+fractional samples   89643 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75404 of 110904  (vf 0.679903)
+max von Mises        0.041651668 MPa
+MARGIN worst case    1320.475324121
+margin effective     273.421307919   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    585
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/A424i0005_vm_f1.f64
+binarized            no
+fractional samples   90594 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75404 of 110904  (vf 0.679903)
+max von Mises        0.073699257 MPa
+MARGIN worst case    746.276183569
+margin effective     154.526030478   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    987
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/G2i0010_vm_f1.f64
+binarized            no
+fractional samples   89586 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75315 of 110904  (vf 0.679101)
+max von Mises        0.042163613 MPa
+MARGIN worst case    1304.442306752
+margin effective     270.101466572   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    497
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/A424i0010_vm_f1.f64
+binarized            no
+fractional samples   90622 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75315 of 110904  (vf 0.679101)
+max von Mises        0.070045579 MPa
+MARGIN worst case    785.203018991
+margin effective     162.586329720   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    946
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/G2i0015_vm_f1.f64
+binarized            no
+fractional samples   89483 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75384 of 110904  (vf 0.679723)
+max von Mises        0.041845358 MPa
+MARGIN worst case    1314.363247318
+margin effective     272.155724229   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    466
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/A424i0015_vm_f1.f64
+binarized            no
+fractional samples   90432 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75384 of 110904  (vf 0.679723)
+max von Mises        0.069929783 MPa
+MARGIN worst case    786.503222525
+margin effective     162.855553494   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    965
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/G2i0020_vm_f1.f64
+binarized            no
+fractional samples   89370 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75393 of 110904  (vf 0.679804)
+max von Mises        0.041704382 MPa
+MARGIN worst case    1318.806271260
+margin effective     273.075709173   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    459
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/A424i0020_vm_f1.f64
+binarized            no
+fractional samples   90310 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75393 of 110904  (vf 0.679804)
+max von Mises        0.069635968 MPa
+MARGIN worst case    789.821723151
+margin effective     163.542691500   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    947
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/G2i0025_vm_f1.f64
+binarized            no
+fractional samples   89260 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.041350015 MPa
+MARGIN worst case    1330.108339003
+margin effective     275.415946880   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    454
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/traj/A424i0025_vm_f1.f64
+binarized            no
+fractional samples   90133 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.069546199 MPa
+MARGIN worst case    790.841207172
+margin effective     163.753788709   (gate: >= 1.5)
+VERDICT              REJECTED
+min-feature viols    924
+load path connected  NO
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/sources/C2it0005.f64
+binarized            no
+fractional samples   22935 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75404 of 110904  (vf 0.679903)
+max von Mises        0.027122926 MPa
+MARGIN worst case    2027.804788515
+margin effective     419.882921969   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    680
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/sources/C2it0010.f64
+binarized            no
+fractional samples   20208 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75315 of 110904  (vf 0.679101)
+max von Mises        0.021367880 MPa
+MARGIN worst case    2573.956832051
+margin effective     532.970689183   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    538
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/sources/C2it0015.f64
+binarized            no
+fractional samples   19575 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75384 of 110904  (vf 0.679723)
+max von Mises        0.020716658 MPa
+MARGIN worst case    2654.868385650
+margin effective     549.724461410   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    509
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/sources/C2it0020.f64
+binarized            no
+fractional samples   19460 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75393 of 110904  (vf 0.679804)
+max von Mises        0.017339145 MPa
+MARGIN worst case    3172.013388612
+margin effective     656.805949803   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    507
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/sources/C2it25.f64
+binarized            no
+fractional samples   19250 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75417 of 110904  (vf 0.680021)
+max von Mises        0.027295830 MPa
+MARGIN worst case    2014.959772234
+margin effective     417.223197030   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    500
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-10-parametric-level-set/sources/simp/rung_0.68.f64
+binarized            no
+fractional samples   28374 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       88424 of 110904  (vf 0.797302)
+max von Mises        0.016900494 MPa
+MARGIN worst case    3254.342744897
+margin effective     673.853296213   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    407
+load path connected  yes

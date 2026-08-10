@@ -1,0 +1,11 @@
+== THE BASIS MOVE IS A NO-OP ==
+
+plsm_probe, two fits (W4 wendland 4,4,4 s2 and G2 gaussian 2,2,2 s2),
+run BEFORE the extraction of plsm_basis.hpp and again AFTER it.
+
+-- every column of fits.csv but the wall clock:
+   IDENTICAL
+
+-- the emitted voxel-lattice occupancy of each fit:
+   W4_vm_f1.f64 BYTE-IDENTICAL
+   G2_vm_f1.f64 BYTE-IDENTICAL

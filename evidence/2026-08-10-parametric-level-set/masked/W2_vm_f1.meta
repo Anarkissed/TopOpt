@@ -1,0 +1,17 @@
+rung 0.68
+requested_vf 0.68000000000000005
+nx 128
+ny 31
+nz 118
+spacing 1.7052793026343613
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+iso 0.5
+factor 2
+interp tricubic
+achieved_vf 0.67997547428406546
+iterations 0
+wall_s 0
+compliance 0
+# THE FIELD THE CERTIFICATE READ, frozen mask restored

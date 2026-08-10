@@ -1,0 +1,50 @@
+== plsm_probe — ARM 1, the gate ==
+
+source     evidence/2026-08-10-parametric-level-set/sources/C2it0020
+lattice    128 x 31 x 118 = 468224 voxels, spacing 1.705279 mm
+origin     (-18.2758, -48.9100, 0.0000)
+threads    3
+eta        2.000 voxels = 3.410559 mm  (the arms' band, unchanged)
+clamp      +-6.000 voxels on the fit target
+reinit     8 sweeps, 0.21 s
+source     75393 voxels inside {phi < 0} (0.1610 of the lattice)
+band       88736 voxels with |phi| <= eta
+
+
+#####################################################################
+# FIT G2i0020 — Gaussian (3-sigma), knot spacing (2, 2, 2) voxels PER AXIS,
+#   support 2 x spacing = (4, 4, 4) voxels = (6.821, 6.821, 6.821) mm
+#####################################################################
+  knots      68 x 20 x 63 = 85680 coefficients
+  ★ COMPRESSION 5.5x — 85680 coefficients against 468224 voxels
+  A          468224 x 85680, nnz 14665984 (31.3 knots per voxel), 167.8 MB
+  CG         2000 iterations, relative residual 2.238e-07, 16.8 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.12604 voxels = 0.21493 mm
+      whole domain (clamped target)  : rms 0.06685 voxels, max 0.72960
+  volume     as fitted 75690 voxels inside, source 75393 (+0.394%)
+  ★ VOLUME-MATCHED offset +0.048756 voxels = +0.083143 mm -> 75393 inside
+  wrote evidence/2026-08-10-parametric-level-set/traj/G2i0020_af_f1
+  wrote evidence/2026-08-10-parametric-level-set/traj/G2i0020_vm_f1
+  wrote evidence/2026-08-10-parametric-level-set/traj/G2i0020_af_f2
+  wrote evidence/2026-08-10-parametric-level-set/traj/G2i0020_vm_f2
+
+#####################################################################
+# FIT A424i0020 — Wendland C2 CSRBF, knot spacing (4, 2, 4) voxels PER AXIS,
+#   support 2 x spacing = (8, 4, 8) voxels = (13.642, 6.821, 13.642) mm
+#####################################################################
+  knots      36 x 20 x 34 = 24480 coefficients
+  ★ COMPRESSION 19.1x — 24480 coefficients against 468224 voxels
+  A          468224 x 24480, nnz 15049536 (32.1 knots per voxel), 172.2 MB
+  CG         864 iterations, relative residual 9.896e-11, 9.2 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.25871 voxels = 0.44118 mm
+      whole domain (clamped target)  : rms 0.15918 voxels, max 1.67971
+  volume     as fitted 76305 voxels inside, source 75393 (+1.210%)
+  ★ VOLUME-MATCHED offset +0.047129 voxels = +0.080369 mm -> 75393 inside
+  wrote evidence/2026-08-10-parametric-level-set/traj/A424i0020_af_f1
+  wrote evidence/2026-08-10-parametric-level-set/traj/A424i0020_vm_f1
+  wrote evidence/2026-08-10-parametric-level-set/traj/A424i0020_af_f2
+  wrote evidence/2026-08-10-parametric-level-set/traj/A424i0020_vm_f2
+
+wrote evidence/2026-08-10-parametric-level-set/traj/fits.csv

@@ -1,0 +1,103 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       6 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        SIMP rung 0.68 from /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.679951)
+PLSM        phi = sum alpha_i psi_i  —  wendland basis, knots (2, 2, 2) voxels PER AXIS
+            68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
+            support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
+            seed fit: 1120 CG iterations, rel resid 9.84e-11, band rms 0.24440 mm, 9.8 s
+            volume offset moves phi by offset * sum_i psi_i, which is 2.3470..2.4746 in the part
+            update: steepest descent on the coefficients;  Hilbertian extension: ON (ablation);  approximate re-init: off
+PLSM        coefficient box +-1365.1029 (4x the largest seed coefficient); a unit move of every
+            coefficient carries phi by at most 2.4746 mm, which is what sizes the MMA move
+it   1  c = 0.002867288904  vf = 0.683907 (occ 75414.7)  offset +1.4924 mm  |v|max 6.89e-12  band 28224  hilb 112 (8.5e-13)  |grad|-1 3.16e-01  cg 1574  109.52 s
+it   2  c = 0.002864917073  vf = 0.683925 (occ 75414.7)  offset -0.0004 mm  |v|max 6.86e-12  band 28220  hilb 112 (8.5e-13)  |grad|-1 3.16e-01  cg 3095  31.90 s
+it   3  c = 0.002862409624  vf = 0.683916 (occ 75414.7)  offset -0.0004 mm  |v|max 6.83e-12  band 28213  hilb 112 (8.5e-13)  |grad|-1 3.16e-01  cg 3071  31.55 s
+it   4  c = 0.002859754533  vf = 0.683916 (occ 75414.7)  offset -0.0005 mm  |v|max 6.8e-12  band 28209  hilb 112 (8.5e-13)  |grad|-1 3.16e-01  cg 2937  23.55 s
+it   5  c = 0.002856939273  vf = 0.684051 (occ 75414.7)  offset -0.0005 mm  |v|max 6.76e-12  band 28203  hilb 112 (8.5e-13)  |grad|-1 3.16e-01  cg 2818  22.38 s
+it   6  c = 0.002853950796  vf = 0.684096 (occ 75414.7)  offset -0.0005 mm  |v|max 6.71e-12  band 28198  hilb 112 (8.5e-13)  |grad|-1 3.16e-01  cg 2813  22.58 s
+it   7  c = 0.002850775519  vf = 0.684105 (occ 75414.7)  offset -0.0006 mm  |v|max 6.66e-12  band 28189  hilb 112 (8.5e-13)  |grad|-1 3.16e-01  cg 2767  22.22 s
+it   8  c = 0.00284739932  vf = 0.684249 (occ 75414.7)  offset -0.0006 mm  |v|max 6.6e-12  band 28183  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2768  22.28 s
+it   9  c = 0.002843807545  vf = 0.684304 (occ 75414.7)  offset -0.0007 mm  |v|max 6.54e-12  band 28173  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2766  21.87 s
+it  10  c = 0.002839985026  vf = 0.684286 (occ 75414.7)  offset -0.0007 mm  |v|max 6.46e-12  band 28168  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2766  22.32 s
+it  11  c = 0.002835916103  vf = 0.684222 (occ 75414.7)  offset -0.0008 mm  |v|max 6.38e-12  band 28155  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2766  22.18 s
+it  12  c = 0.002831584659  vf = 0.684096 (occ 75414.7)  offset -0.0009 mm  |v|max 6.29e-12  band 28146  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2765  22.18 s
+it  13  c = 0.002827424565  vf = 0.683997 (occ 75414.7)  offset -0.0009 mm  |v|max 6.22e-12  band 28137  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2764  21.86 s
+it  14  c = 0.002823523575  vf = 0.683916 (occ 75414.7)  offset -0.0008 mm  |v|max 6.14e-12  band 28123  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2767  22.17 s
+it  15  c = 0.002819830768  vf = 0.683898 (occ 75414.7)  offset -0.0008 mm  |v|max 6.07e-12  band 28104  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2765  21.91 s
+it  16  c = 0.002816296619  vf = 0.684024 (occ 75414.7)  offset -0.0008 mm  |v|max 5.99e-12  band 28084  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2766  22.53 s
+it  17  c = 0.002812872592  vf = 0.684114 (occ 75414.7)  offset -0.0008 mm  |v|max 5.94e-12  band 28060  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2766  22.49 s
+it  18  c = 0.002809510679  vf = 0.684304 (occ 75414.7)  offset -0.0008 mm  |v|max 5.91e-12  band 28039  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2765  22.03 s
+it  19  c = 0.002806162861  vf = 0.684556 (occ 75414.7)  offset -0.0008 mm  |v|max 5.91e-12  band 28027  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2766  21.86 s
+it  20  c = 0.002802780442  vf = 0.684682 (occ 75414.7)  offset -0.0008 mm  |v|max 5.9e-12  band 28011  hilb 112 (8.6e-13)  |grad|-1 3.16e-01  cg 2766  22.00 s
+
+certifying iteration 20 (best compliance 0.002802780442 of 20 run)
+analytic    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/arm2/A4b_hilb_descent/plsm_f1.f64  (128 x 31 x 118, spacing 1.705279 mm)
+analytic    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/arm2/A4b_hilb_descent/plsm_f2.f64  (256 x 62 x 236, spacing 0.852640 mm)
+analytic    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/arm2/A4b_hilb_descent/plsm_f3.f64  (384 x 93 x 354, spacing 0.568426 mm)
+mesh        157380 vertices, 314768 triangles -> levelset.stl
+
+== levelset_probe summary ==
+seed                 simp
+rung                 0.68
+THREADS              3
+iterations run       20
+WALL PER ITERATION   27.569 s   (total 551.4 s over 20 iterations)
+  of which solve     27.243 s/iteration (544.9 s total)
+  of which extension 0.239 s/iteration (4.8 s total)
+certification wall   29.5 s
+state solves         20, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         6 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         2 voxels = 3.410559 mm
+reinit |grad phi|-1  rms 0.316004 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.997136 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00280278044174   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00311218172788
+achieved vf          0.684682  (target 0.68, printed 75934 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.027473381 MPa
+margin in-plane      2001.937777901
+margin interlayer    4200.731551114
+MARGIN worst case    2001.937777901
+margin effective     414.526826520   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    757
+mass                 466.9652 g
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/arm2/A4b_hilb_descent/{iterations.csv,design.bin,rho.f64,rho.meta,levelset.stl,summary.txt}
+
+for the roughness row, on the SAME binary that produced PR 321's:
+  ./build/external_field_surface_probe <ref/design.bin> <part.step> <dir> LS=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/arm2/A4b_hilb_descent/rho

@@ -1,0 +1,15 @@
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-10-parametric-level-set/fields/W8_vm_f1.f64
+binarized            YES (0/1 at iso 0.5)
+fractional samples   99007 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       82383 of 110904  (vf 0.742832)
+FrozenSolid BELOW iso 9979 of 40216   FrozenVoid above 3013
+frozen set restored  YES (--respect-frozen)
+max von Mises        0.016486858 MPa
+MARGIN worst case    3335.990428175
+margin effective     690.759493506   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    488
+mass                 506.5774 g
+load path connected  yes

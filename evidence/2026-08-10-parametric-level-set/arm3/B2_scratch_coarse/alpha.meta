@@ -1,0 +1,8 @@
+basis gaussian
+knots_vox 4 2 4
+support 2
+counts 36 20 34
+pad 2 2 2
+n_coeff 24480
+n_voxels 468224
+compression 19.126797385620915

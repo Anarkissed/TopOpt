@@ -1,0 +1,42 @@
+== plsm_probe — ARM 1, the gate ==
+
+source     evidence/2026-08-10-parametric-level-set/sources/C2it25
+lattice    128 x 31 x 118 = 468224 voxels, spacing 1.705279 mm
+origin     (-18.2758, -48.9100, 0.0000)
+threads    3
+eta        2.000 voxels = 3.410559 mm  (the arms' band, unchanged)
+clamp      +-6.000 voxels on the fit target
+reinit     8 sweeps, 0.22 s
+source     75417 voxels inside {phi < 0} (0.1611 of the lattice)
+band       88557 voxels with |phi| <= eta
+
+resolution controls — the SOURCE occupancy at every factor:
+  wrote evidence/2026-08-10-parametric-level-set/band/SRC_f1  (128 x 31 x 118)
+  wrote evidence/2026-08-10-parametric-level-set/band/SRC_f2  (256 x 62 x 236)
+  wrote evidence/2026-08-10-parametric-level-set/band/SRC_f3  (384 x 93 x 354)
+★ the BAND CONTROL — the SOURCE's own phi re-banded at the same eta as the fits:
+  wrote evidence/2026-08-10-parametric-level-set/band/SRCPHI_f1  (128 x 31 x 118)
+  wrote evidence/2026-08-10-parametric-level-set/band/SRCPHI_f2  (256 x 62 x 236)
+  wrote evidence/2026-08-10-parametric-level-set/band/SRCPHI_f3  (384 x 93 x 354)
+
+#####################################################################
+# FIT BW — Wendland C2 CSRBF, knot spacing (2, 2, 2) voxels PER AXIS,
+#   support 2 x spacing = (4, 4, 4) voxels = (6.821, 6.821, 6.821) mm
+#####################################################################
+  knots      68 x 20 x 63 = 85680 coefficients
+  ★ COMPRESSION 5.5x — 85680 coefficients against 468224 voxels
+  A          468224 x 85680, nnz 14665984 (31.3 knots per voxel), 167.8 MB
+  CG         1093 iterations, relative residual 9.966e-11, 9.4 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 0.14185 voxels = 0.24189 mm
+      whole domain (clamped target)  : rms 0.10307 voxels, max 0.77473
+  volume     as fitted 75851 voxels inside, source 75417 (+0.575%)
+  ★ VOLUME-MATCHED offset +0.056324 voxels = +0.096049 mm -> 75417 inside
+  wrote evidence/2026-08-10-parametric-level-set/band/BW_af_f1
+  wrote evidence/2026-08-10-parametric-level-set/band/BW_vm_f1
+  wrote evidence/2026-08-10-parametric-level-set/band/BW_af_f2
+  wrote evidence/2026-08-10-parametric-level-set/band/BW_vm_f2
+  wrote evidence/2026-08-10-parametric-level-set/band/BW_af_f3
+  wrote evidence/2026-08-10-parametric-level-set/band/BW_vm_f3
+
+wrote evidence/2026-08-10-parametric-level-set/band/fits.csv

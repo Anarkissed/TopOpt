@@ -1,0 +1,16 @@
+== THE KERNEL MOVE IS A NO-OP, AND THIS IS THE PROOF ==
+
+levelset_probe, 3 iterations, --gridap-auto min, 3 threads, run BEFORE the
+extraction of levelset_kernel.hpp and again AFTER it.
+
+-- every COMPUTED column of iterations.csv (all but the three wall clocks)
+   IDENTICAL (the diff above is empty)
+
+-- the final ersatz occupancy, 468224 float64
+   rho.f64 BYTE-IDENTICAL
+
+-- what DID move, and it is the only thing that moved:
+   solve_ms, sensitivity_ms, iteration_wall_s — wall clocks on a shared
+   machine. They are not computation and they are not expected to repeat.
+   before: 114.684582875 33.2363347919 31.82063775 
+   after : 110.372631042 32.2471512919 30.6985894158 
