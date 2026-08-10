@@ -1,0 +1,48 @@
+== plsm_probe — ARM 1, the gate ==
+
+source     /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/RB1_volcount/plsm_f1
+lattice    128 x 31 x 118 = 468224 voxels, spacing 1.705279 mm
+origin     (-18.2758, -48.9100, 0.0000)
+threads    3
+eta        2.000 voxels = 3.410559 mm  (the arms' band, unchanged)
+clamp      +-6.000 voxels on the fit target
+alpha      /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/RB1_volcount/alpha: 85680 coefficients on 68 x 20 x 63 knots, gaussian basis, spacing (2, 2, 2) voxels, support 2
+reinit     8 sweeps, 0.21 s
+source     75227 voxels inside {phi < 0} (0.1607 of the lattice)
+frozen      40216 FrozenSolid and 357320 FrozenVoid voxels, each turned
+            into a signed distance by the same reinitialise()
+band       100727 voxels with |phi| <= eta
+
+resolution controls — the SOURCE occupancy at every factor:
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/SRC_f1  (128 x 31 x 118)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/SRC_f2  (256 x 62 x 236)
+★ the BAND CONTROL — the SOURCE's own phi re-banded at the same eta as the fits:
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/SRCPHI_f1  (128 x 31 x 118)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/SRCPHI_f2  (256 x 62 x 236)
+resolution controls — SIMP at every factor:
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/SIMP_f1  (128 x 31 x 118)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/SIMP_f2  (256 x 62 x 236)
+
+#####################################################################
+# FIT ALPHA — Gaussian (3-sigma), knot spacing (2, 2, 2) voxels PER AXIS,
+#   support 2 x spacing = (4, 4, 4) voxels = (6.821, 6.821, 6.821) mm
+#####################################################################
+  knots      68 x 20 x 63 = 85680 coefficients
+  ★ COMPRESSION 5.5x — 85680 coefficients against 468224 voxels
+  A          468224 x 85680, nnz 14665984 (31.3 knots per voxel), 167.8 MB
+  ★ NO FIT — the 85680 coefficients come from ALPHA, an optimiser
+    run's own design. The residual columns below are against
+    the SOURCE occupancy and describe how far that design's
+    phi is from a signed distance, not a fit quality.
+  CG         0 iterations, relative residual 0.000e+00, 0.5 s
+  ★ RESIDUAL against the source signed distance:
+      in the band (|phi| <= 2 vox): rms 3.75620 voxels = 6.40536 mm
+      whole domain (clamped target)  : rms 6.47864 voxels, max 11.24967
+  volume     as fitted 337365 voxels inside, source 75227 (+348.463%)
+  ★ VOLUME-MATCHED offset +2.998953 voxels = +5.114052 mm -> 75228 inside
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/ALPHA_af_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/ALPHA_vm_f1
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/ALPHA_af_f2
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/ALPHA_vm_f2
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-tags/fits.csv

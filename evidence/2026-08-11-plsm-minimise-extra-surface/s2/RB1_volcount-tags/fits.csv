@@ -1,0 +1,2 @@
+label,basis,knot_dx_vox,knot_dy_vox,knot_dz_vox,support_mult,support_rx_mm,support_ry_mm,support_rz_mm,lambda,knots_x,knots_y,knots_z,n_coeff,n_voxels,compression,nnz_A,cg_iters,cg_rel_resid,resid_band_rms_vox,resid_band_rms_mm,resid_all_rms_vox,resid_all_max_vox,inside_asfit,inside_src,offset_vox,offset_mm,fit_wall_s
+ALPHA,gaussian,2,2,2,2,6.82111721054,6.82111721054,6.82111721054,1e-06,68,20,63,85680,468224,5.46479925303,14665984,0,0,3.75619521656,6.40536195946,6.47863807137,11.2496712493,337365,75227,2.99895265205,5.11405188713,0.466480166186

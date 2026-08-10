@@ -426,6 +426,29 @@ std::vector<double> occupancy(const std::vector<double>& phi, double offset,
   return occ;
 }
 
+// ★ S2 — THE SAME BOOLEAN WITH THE FROZEN SET GIVEN ON THE **FINE** LATTICE.
+//
+// The overload above samples `fsolid`/`fvoid` by the CONTAINING COARSE VOXEL —
+// which is the whole limitation PR 324 §5 named: "the boolean is smooth, but it
+// is smoothly voxel-shaped". When the frozen region is derived from the CAD it
+// is a function, so it is evaluated at the SAME fine points phi is, and this
+// overload is where that difference lands. Everything else — the union/
+// intersection algebra, the heaviside, the eta — is identical, so the two rows
+// differ in one thing only.
+std::vector<double> occupancy_fine(const std::vector<double>& phi, double offset,
+                                   double eta,
+                                   const std::vector<double>& fsolid,
+                                   const std::vector<double>& fvoid) {
+  std::vector<double> occ(phi.size(), 0.0);
+  for (std::size_t v = 0; v < phi.size(); ++v) {
+    double p = phi[v] + offset;
+    p = std::min(p, fsolid[v]);
+    p = std::max(p, -fvoid[v]);
+    occ[v] = heaviside(-p, eta);
+  }
+  return occ;
+}
+
 std::size_t inside_count(const std::vector<double>& phi, double offset) {
   std::size_t c = 0;
   for (double p : phi)

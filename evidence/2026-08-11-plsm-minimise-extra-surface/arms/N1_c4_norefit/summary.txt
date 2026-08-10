@@ -1,0 +1,35 @@
+== levelset_probe summary ==
+seed                 holes
+rung                 0.68
+THREADS              3
+iterations run       60
+WALL PER ITERATION   20.735 s   (total 1244.1 s over 60 iterations)
+  of which solve     20.625 s/iteration (1237.5 s total)
+  of which extension 0.000 s/iteration (0.0 s total)
+certification wall   33.8 s
+state solves         60, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         2 voxels = 3.410559 mm
+reinit |grad phi|-1  rms 0.433449 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     2.57642 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00254537769135   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00310231698298
+achieved vf          0.680003  (target 0.68, printed 75415 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.042965884 MPa
+margin in-plane      1280.085378361
+margin interlayer    6663.330161022
+MARGIN worst case    1280.085378361
+margin effective     265.058052965   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    608
+mass                 463.7431 g
