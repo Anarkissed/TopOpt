@@ -545,7 +545,55 @@ costs exactly nothing architecturally. It is not the full anisotropy — a scala
 cannot be — but it is the part of it the COMPLIANCE sees, which is the part the
 objective is made of. §8 ranks building it.
 
-*(the measured answer is filled from `probe/aniso`)*
+★★ **MEASURED, ON PR 326's CONVERGED DESIGN, AND THE ANSWER IS "NOT WORTH THE
+ARCHITECTURE, WORTH THE SCALAR".**
+
+| | |
+|---|---|
+| cut cells | **10,112** |
+| their strain energy, **Voigt** (`rho_e * K0`, what we do) | 2.8318e-09 — **3.903%** of the part's 7.2550e-08 |
+| their strain energy, **rank-one laminate** | 2.3814e-09 |
+| ★ **the scalar ersatz over-stiffens the cut cells by** | ★ **18.91%** |
+| ★ **which is, of the WHOLE part's strain energy** | ★ **0.621%** |
+
+★ **THE DISTRIBUTION IS THE PART THAT MATTERS, WHICH IS WHY IT IS PRINTED AND NOT
+JUST THE MEAN.** `W_laminate / W_Voigt`, by twentieths — 1.00 means the scalar is
+exact in that cell:
+
+| bucket | 0.00–0.05 | 0.05–0.25 | 0.25–0.50 | 0.50–0.75 | 0.75–0.95 | **0.95–1.00** |
+|---|---|---|---|---|---|---|
+| cells | 75 | 389 | 1,107 | 1,124 | 2,375 | **5,428** |
+
+★ **54% of cut cells are within 5% of exact and 15.5% are worse than a factor of
+two, with a tail where the scalar is TWENTY TIMES too stiff.** The near-exact
+majority are cells whose strain lies mostly ALONG the interface, where Voigt is
+the right answer; the tail is cells loaded ACROSS the cut, which is exactly where
+a thin member's boundary sits. **A mean of 18.91% would have hidden both facts.**
+
+★ **THE VERDICT, IN THE BRIEF'S OWN TERMS.** "Say whether an anisotropic
+correction can be had without that cost."
+
+* ★ **PR 320's REJECTION OF THE CUT-CELL FAMILY STANDS — and now for a measured
+  reason on a smooth phi, rather than for the half-voxel-staircase reason that no
+  longer applies.** The whole anisotropy is worth **0.62% of the compliance**.
+  That does not buy a per-element `Ke`, O(cut cells) storage and a voided
+  Galerkin block cache. ★ **And the search found a second architectural reason
+  PR 320 did not have**: even the correct cut integral `∫ α(x) BᵀCB` is not
+  proportional to `K_ref` for a trilinear hexahedron, so a laminate TENSOR fixes
+  only half of what the scalar discards — the other half is collapsing a varying
+  `B` onto one reference matrix, and no material model fixes that.
+* ★ **BUT THE SCALAR VERSION COSTS NOTHING AND IS NOT REFUTED.** The ratio above
+  is a per-cell SCALAR and `rho_e` is already a per-cell scalar, so
+  `rho_e -> ratio * rho_e` needs no `Ke`, no storage change and no cache-key
+  change. It captures the 18.91% on the cut cells — the part the COMPLIANCE
+  sees — and leaves the rest. It needs the strain, so it must be lagged one
+  iteration, which is the standard secant treatment. §8 ranks it second.
+
+★ **What this measurement is NOT.** The rank-one laminate is the exact two-phase
+construction for uniform fields in each phase; a real cut cell is one plane cut
+inside a structure, not an infinite laminate, and the two agree in the regime
+that matters here but are not the same object. The number is a price, not a
+prediction of what the correction would buy in a run.
 
 ★ **AND THE LITERATURE HAS THE CLOSED FORM, IN A FIELD NOBODY IN THIS PROJECT
 HAS BEEN READING.** Kabel, Merkert & Schneider, *Use of composite voxels in

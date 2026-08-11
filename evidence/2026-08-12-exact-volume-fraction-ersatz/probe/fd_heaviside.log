@@ -29,36 +29,6 @@ seed        regular hole array, period 8 voxels
 PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels PER AXIS
             68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
             support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
-            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 18.0 s
+            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 22.0 s
             volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
             update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
-PLSM        coefficient box +-462.1415 (4x the largest seed coefficient); a unit move of every
-            coefficient carries phi by at most 4.2335 mm, which is what sizes the MMA move
-VOLUME      constraint measures #{phi + c < 0} — the PRINTED count (S1: occupancy_volume and printed_voxels agree by construction)
-ALPHA       85680 coefficients read from /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/probe/RB1_alpha.f64 — the seed fit above is DISCARDED
-
-══ R4 — THE SENSITIVITY AGAINST A CENTRAL DIFFERENCE ═══════
-design: H_eta AT THE CELL CENTRE (PR 326's) ersatz, Psi^T gradient, k = 0, eps_q mult 1
-C0 = 0.0025130524546   V0 = 35325.318345 (active cells only)
-
-random dir 0  step    0.001   dV pred       -264.776  fd       -265.991  rel    +0.459%   (no state solve at this step)
-random dir 0  step     0.01   dV pred       -264.776  fd       -265.992  rel    +0.459%   dC pred   5.67532e-06  fd   6.27914e-06  rel   +10.639%
-random dir 0  step      0.1   dV pred       -264.776  fd       -266.118  rel    +0.507%   dC pred   5.67532e-06  fd   6.27395e-06  rel   +10.548%
-random dir 0  step      0.3   dV pred       -264.776  fd       -267.148  rel    +0.896%   (no state solve at this step)
-random dir 0  step        1   dV pred       -264.776  fd       -270.646  rel    +2.217%   (no state solve at this step)
-random dir 1  step    0.001   dV pred        -116.25  fd       -124.688  rel    +7.258%   (no state solve at this step)
-random dir 1  step     0.01   dV pred        -116.25  fd       -124.684  rel    +7.255%   dC pred   2.43955e-06  fd   2.45726e-06  rel    +0.726%
-random dir 1  step      0.1   dV pred        -116.25  fd       -124.303  rel    +6.927%   dC pred   2.43955e-06  fd   2.46862e-06  rel    +1.192%
-random dir 1  step      0.3   dV pred        -116.25  fd       -121.218  rel    +4.273%   (no state solve at this step)
-random dir 1  step        1   dV pred        -116.25  fd       -92.7697  rel   -20.198%   (no state solve at this step)
-coeff  73654  step     0.01   dV pred       -6.04976  fd       -6.49525  rel    +7.364%   (no state solve at this step)
-coeff  73654  step      0.1   dV pred       -6.04976  fd       -6.49457  rel    +7.352%   (no state solve at this step)
-coeff  73654  step        1   dV pred       -6.04976  fd        -6.4281  rel    +6.254%   dC pred   1.11306e-07  fd    1.2566e-07  rel   +12.897%
-coeff   8856  step     0.01   dV pred       -6.04159  fd       -7.08463  rel   +17.264%   (no state solve at this step)
-coeff   8856  step      0.1   dV pred       -6.04159  fd       -7.08375  rel   +17.250%   (no state solve at this step)
-coeff   8856  step        1   dV pred       -6.04159  fd        -6.9977  rel   +15.825%   dC pred   1.07174e-07  fd   1.30658e-07  rel   +21.913%
-coeff   8904  step     0.01   dV pred       -6.03941  fd       -7.22708  rel   +19.665%   (no state solve at this step)
-coeff   8904  step      0.1   dV pred       -6.03941  fd       -7.22636  rel   +19.654%   (no state solve at this step)
-coeff   8904  step        1   dV pred       -6.03941  fd        -7.1554  rel   +18.479%   dC pred   9.21701e-08  fd   1.13247e-07  rel   +22.868%
-
-wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/probe/fd_heaviside/frac_fd.csv
