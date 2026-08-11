@@ -130,7 +130,101 @@ not eta wearing a different hat:
 
 ## 3. THE RUN
 
-*(filled from `tables.txt`)*
+Three arms, rung 0.68, his captured job, from PR 326's re-baseline
+configuration — `--seed holes` with no SIMP anywhere, the gaussian basis at
+85,680 coefficients, MMA, `--volume-count`, `--plsm-refit-every 5`, 24 HJ steps,
+★ **no perimeter penalty**. They differ in one flag each:
+
+| arm | ersatz | gradient |
+|---|---|---|
+| `H1_heaviside` | `H_eta(-phi(cell centre))`, eta = 2 voxels | `DH_eta(phi)*|grad phi|`, `Psi^T` |
+| `F1_frac4` | the exact volume fraction, 4x4x4 | the quadrature band, sample-scatter |
+| `A2_all` | the MOLLIFIED fraction (`--frac-soft`) | the same, on the L1 bandwidth (`--frac-eps-l1`) |
+
+★ **ONE THING CHANGES FROM PR 326 IN ALL THREE AND IT IS DECLARED: 120 iterations
+instead of 60.** PR 326 §2 measured every unsettled arm still climbing in margin
+at 60 — the re-baseline by 26.7% between 40 and 60 while its compliance moved
+0.05% — and its §9 ranks running longer first. The brief asks for MARGIN
+convergence, and 60 is known not to reach it. It is applied to all three, so it
+is not a variable between them.
+
+### (a) ★★ THE FIRST RESULT IS THAT TWO OF THEM STOPPED ON THEIR OWN
+
+| arm | iterations | why it stopped | best compliance | optimisation wall |
+|---|---|---|---|---|
+| `H1_heaviside` | **120** | ★ **the iteration count ran out** | 0.002505390 | 58.7 min |
+| `F1_frac4` | **57** | compliance flat within 1e-3 over 10 iterations | 0.002528286 | 30.5 min |
+| `A2_all` | **61** | compliance flat within 1e-3 over 10 iterations | 0.002527541 | 27.6 min |
+
+★★ **BOTH FRACTION ARMS REACHED THE SHIPPED CONVERGENCE CRITERION IN ABOUT HALF
+THE ITERATIONS, AND THE CONTROL NEVER REACHED IT AT ALL IN 120.** They land on
+the same compliance — 0.0025283 and 0.0025275 against 0.0025054, within 0.9% —
+so this is the same answer reached sooner, not a different and easier one.
+
+★ **This is what §4 predicted before the arms ran.** PR 326's gradient is wrong by
+up to 23% and flat across step sizes; the fraction's is verified to 2%, and the
+mollified one to 1.3–5.2% on the compliance itself. A descent direction that is
+20% off does not fail — it converges, slowly, which is exactly the shape of
+"120 iterations and the plateau rule never fires".
+
+★ **The wall clock is stated with the caveat PR 326's P10 states.** Another
+worktree's optimiser ran on this host throughout, so 29.6 / 32.7 / 27.6 seconds
+per iteration are not comparable to each other at better than about 10%. **The
+ITERATION COUNTS are not subject to that** — the designs are deterministic — and
+they are what the row above rests on.
+
+### (b) what the fraction costs, as a share of an iteration
+
+| arm | sampling | sensitivity | state solve | iteration | the fraction is |
+|---|---|---|---|---|---|
+| `F1_frac4` | 543.1 ms | 85.0 ms | 28,312 ms | 32,659 ms | **1.92%** |
+| `A2_all` | 545.5 ms | 106.3 ms | 23,319 ms | 27,562 ms | **2.36%** |
+
+★ PR 324 measured **99.5% of an iteration as the state solve**. With the exact
+fraction it is about **97.6%**. The sub-cell sampling of every active cell at
+k = 4 costs half a second; the sensitivity's scatter costs another tenth.
+★ **Nothing about the solver moved**: no per-cell `Ke`, no O(cut cells) storage,
+no cache-key change, and `frac_cut_cells` — the cells that are actually cut — is
+in the CSV every iteration.
+
+### (c) the surface, at a matched iteration, SIMP in the same run (R2)
+
+★ **Iteration 50 is the last snapshot present in all three arms** (F1 stopped at
+57 and A2 at 61), derived by `measure.sh` rather than assumed. One
+`external_field_surface_probe` invocation, SIMP's row produced in the same run at
+the same extraction factor.
+
+| | carved | ★ n_cut | whole | ★ CAD mm | ★ mid % | min-feature | volume mm³ |
+|---|---|---|---|---|---|---|---|
+| **SIMP rung 0.68** | **7.5521** | **26,191** | 8.4075 | **0.4293** | 85.28% | 5,464 | 440,551 |
+| `H1_heaviside` (control) | 14.0857 | 79,542 | 11.6024 | **0.4908** | 57.79% | 7,273 | 371,080 |
+| `F1_frac4` | 15.3541 | 80,962 | 12.2208 | **0.4701** | 57.50% | **5,337** | 373,616 |
+| `A2_all` | 14.9895 | 78,553 | 11.9612 | **0.4708** | 58.78% | **5,517** | 373,008 |
+
+★ **THE CAD ERROR IMPROVES BY 4.2%** — 0.4908 → 0.4701 — which is the brief's
+first headline question and the claim it was testing: a continuous density
+carries sub-voxel boundary position and should improve dimensional accuracy. **It
+does.** It does not reach SIMP's 0.4293 and it does not reach PR 326's best arm's
+0.3232, which was a *frozen-region* result on the CAD faces (S2) and is
+complementary to this, not competing with it.
+
+★ **THE MIDPOINT SHARE DOES NOT MOVE** — 57.79% → 57.50% → 58.78%, all far below
+SIMP's 85.28%. **That is the brief's second headline question and the answer is
+no**, and the reason was written into `frac_ersatz.hpp` before the run: the
+midpoint share is a property of the FIELD MARCHING CUBES IS HANDED, and under R5
+all three arms export the same `H_eta` field. The density change cannot move it.
+§5 M3 measures what changing the export does instead.
+
+★ **THE INTERNAL SURFACE DOES NOT MOVE EITHER** — 79,542 / 80,962 / 78,553,
+a 3% spread. **The exact fraction is not a smoothness lever.** Said plainly
+because it is the thing the brief hoped for.
+
+★ **AND ONE COLUMN MOVES A LOT AND WAS NOT ASKED FOR: min-feature violations,
+7,273 → 5,337, a 27% drop that takes the fraction arms BELOW SIMP's 5,464.** The
+control is 33% above SIMP. A density that steps when the boundary crosses a cell
+centre cannot see a member thinner than a voxel; a volume fraction can, and
+prices it. That is a manufacturability column, not a roughness one, and it is the
+largest single change in the table.
 
 ## 4. ★ R4 — THE SENSITIVITY AGAINST A FINITE DIFFERENCE
 
@@ -389,7 +483,61 @@ already runs. Defaults OFF so ARM 1's arithmetic is unchanged by inspection.
 
 ## 6. WHAT WAS TRIED AND ABANDONED
 
-*(filled)*
+* ★ **BRANCHING FROM PR 326.** The brief says "same sandbox as PR 324/325/326"
+  and R5 asks for one variable to change from PR 326's re-baseline — but PR 326
+  is OPEN and branched from PR 324's merge, before PR 325 shipped the production
+  parametric optimiser. A branch taken from it would report PR 325's entire
+  production path as DELETED, which is exactly what R6 forbids. **Replaced by
+  MERGING PR 326 into main**, with the merge verified by re-running PR 326's own
+  re-baseline for three iterations and diffing to twelve digits. P1.
+
+* ★ **A GEOMETRIC CLASSIFIER FOR WHICH CELLS NEED SUB-SAMPLING.** S1(b) asks for
+  one, and the obvious form — all eight corners the same sign AND `|phi|` beyond
+  a support bound — needs a MARGIN, and a margin is one more thing that can be
+  wrong. **Replaced by sampling every ACTIVE cell and COUNTING the cut ones.**
+  It is exact by construction, the count is in the CSV every iteration, and it is
+  affordable for a reason the brief did not anticipate: `Empty`, `FrozenSolid`
+  and `FrozenVoid` cells are stamped by the MASK, so 397,536 of the 468,224 are
+  excluded before any test on `phi` is made at all.
+
+* ★ **MOVING THE VOLUME CONSTRAINT ONTO THE FRACTION.** It would have made
+  `printed_voxels`, the mass and the certificate mean something different from
+  PR 326's, which is a second variable — and it would have made the offset
+  bisection re-sample every active cell about a hundred times per iteration.
+  **The constraint stays on `{H_eta(-phi) > 0.5} = {phi < 0}`**, which is
+  provably eta-free as a SET. §2, P6, P7.
+
+* ★ **A SINGLE FINITE-DIFFERENCE STEP SIZE.** The first `--frac` difference came
+  back at **+182%** and looked for ten minutes like a broken quadrature. It is
+  the 1/64 staircase, and only a SWEEP says so: +182% / −17.6% / **−2.03%** /
+  +6.85% / +19.5% across five steps is the textbook shape, and the minimum is the
+  answer. P13.
+
+* **`Psi^T` for the fraction's sensitivity.** Kept reachable as
+  `--frac-sens centre` and priced rather than removed, because "the exact form is
+  better" is a claim and 15 percentage points is a number. §5 M2.
+
+* ★ **THE PARTITION-OF-UNITY ARGUMENT FOR `eps_q` AS WRITTEN.** It is correct for
+  an axis-aligned interface and false for an oblique one, and I could not see it.
+  **Replaced by the L1-norm bandwidth** the level-set delta literature proves is
+  required. §5 M5, P14. ★ This is the one entry here that ARM 2's research
+  produced rather than confirmed.
+
+* **`--robust`, `--plsm-hilb`, `--no-surface-delta`, the descent branch and
+  L-BFGS under `--frac`.** Not abandoned for lack of interest — **REFUSED**, each
+  with a message naming the quantity that would be inconsistent. PR 326's P7 is
+  the precedent: a mis-localised sensitivity produces a converged arm reporting
+  "the mechanism does nothing", which is believable and wrong. P8.
+
+* ★ **CORRECTING PR 326's `|grad phi|` FACTOR IN THE CONTROL.** §4(a) measures it
+  at up to 23%, and fixing it is one line. **Not done here, deliberately** — it
+  would have been a second variable and the control would no longer have been
+  PR 326's arm. §8 ranks it first.
+
+* ★ **A GAUSS–BONNET EULER-CHARACTERISTIC PENALTY.** Considered for the standing
+  smoothness item and **rejected on theory rather than on time**: `INT K dS` is
+  topologically quantised, so its derivative is zero almost everywhere and any
+  discrete gradient is an artefact. §8.
 
 ## 7. THE PROBLEMS I ACTUALLY HIT
 
@@ -443,6 +591,18 @@ they happened. It is reproduced here in full.
 
 6. **Move the fraction into the export path if §3 says the export is worth it.**
    The measurement is in this handoff; the work is mechanical.
+
+7. ★ **CLOSE THE 1e-9 THAT PR 325's MOVE LEFT IN THE REFIT, OR AT LEAST BOUND
+   IT.** §7 P15: this tree reproduces PR 326's re-baseline to twelve digits for
+   FIVE iterations and then diverges by 9.4e-10 in compliance and ONE VOXEL in
+   the printed count — and iteration 5 is exactly where `--plsm-refit-every 5`
+   first fires, on the `reinitialise` / `plsm_solve_normal` path PR 325 moved
+   into core. The move is byte-identical in SOURCE and is being compiled in a
+   different translation unit. PR 325's own commit log records an open "1e-9
+   determinism failure"; this is a second sighting with a located cause.
+   ★ **It is a floor on how finely any A/B in this line of work can be read**,
+   and until it is closed, every comparison has to be run in one batch on one
+   binary — which is a real constraint on how this project can be worked.
 
 ### ★ AND FIVE FROM THE LITERATURE, RANKED BY WHAT THEY WOULD COST HERE
 
