@@ -1,5 +1,24 @@
 # plsm-monotone-no-nucleation
 
+★★ **RETRACTION, SAME DAY, BY A LATER MEASUREMENT — READ THIS FIRST.**
+Answer 2 below calls the gyroid seed "the result of this task": −12.0% internal
+surface at no cost. **At the volume that actually ships it is +5.3% WORSE than
+doing nothing**, and the worst of four arms measured against SIMP. See
+`docs/handoffs/2026-08-12-plsm-matched-volume.md` §2. Every arm in this handoff
+ran at the probe volume convention — ~372,000 mm³ against the shipped path's
+~440,551 — and **the gyroid's advantage does not shrink across that gap, it
+changes sign.** A minimal surface is only minimal at its own volume fraction.
+
+★ **What survives:** the constraint is still nearly nothing (answer 1); the
+component count still falls rather than rises (answer 4); splitting still
+dominates nucleation 422 to 3 (answer 5); the stress seed still fails the margin
+(answer 3); compliance is still not a proxy for margin (answer 8). Those are
+within-task comparisons at one convention and are unaffected.
+
+★ **What is withdrawn:** answer 2, and §7 item 1 ("sweep the gyroid period").
+The right first move was not to refine the mechanism but to check whether it
+worked at the volume that ships.
+
 Evidence: `evidence/2026-08-12-plsm-monotone-no-nucleation/`. Eight arms, 60
 iterations each, six threads, one binary, no failures. `measure.sh` reproduces
 every table; `topology_tables.py` reproduces every curve.

@@ -38,7 +38,18 @@ material that is not near the interface.
 **Confidence: high on direction, medium on magnitude.** A/B at matched
 everything, but at the probe volume.
 
-### 2. `hole_period_voxels = 8.0` → **16.0**
+### 2. ~~`hole_period_voxels = 8.0` → **16.0**~~ ★ WITHDRAWN
+
+★★ **WITHDRAWN on 2026-08-12 by `plsm-matched-volume`.** Every measurement
+behind this item is at the probe volume convention, and that task showed a seed
+mechanism — the gyroid — **reverse sign** between that volume and production's:
+−12.0% became +5.3% worse than nothing. **Seed conclusions demonstrably do not
+transfer across volumes**, and the period-16 result has never been measured at
+production's. It may still be right; it is no longer supported.
+
+The original text is kept below so the withdrawal can be checked.
+
+### 2 (withdrawn). `hole_period_voxels = 8.0` → 16.0
 
 The initial hole-seed spacing. PR 326, same conditions:
 
@@ -82,11 +93,13 @@ own.
 
 ## What I am NOT proposing
 
-★ **Not the perimeter penalty.** I recommended it in the decision request and
-**withdrew it** after the convention correction: −29.6% internal surface was
-measured against a baseline 9× rougher than the shipped path's. Whether it buys
-anything at production's volume is one hour of machine time and it has not been
-spent.
+★★ **THE PERIMETER PENALTY IS NOW PROPOSED — the hour was spent and it earned
+it.** I withdrew it here after the convention correction, because −29.6% had been
+measured against a baseline 9× rougher than the shipped path's. Measured AT the
+shipped volume (`plsm-matched-volume`): **+20.3% → +7.1% internal surface, margin
+parity, mass identical to 0.1 g, and CAD accuracy improved** 0.4611 → 0.4385
+against SIMP's 0.4293. It is now the **first-ranked** production change, ahead of
+the two eta/iteration items below.
 
 ★ **Not a restriction operator of any kind.** Production has none, and at +20.4%
 it is not obvious it needs one. That is the ranked-first open question, not a
