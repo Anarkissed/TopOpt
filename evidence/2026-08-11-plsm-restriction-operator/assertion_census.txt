@@ -1,4 +1,36 @@
-core/tests/harness/levelset_probe.cpp: main=18 now=32
-  ★ CHANGED OR REMOVED: FATAL: --seed must be simp or holes
+=== R7 assertion census: main -> working tree ===
 
-core/tests/harness/plsm_probe.cpp: main=12 now=21
+1. TEST ASSERTION MESSAGES   before=3344  after=3344
+   REMOVED:
+   (nothing above = no assertion message disappeared)
+
+2. REGISTERED CTESTS   before=120  after=120
+   REMOVED:
+   ADDED:
+
+3. PRODUCTION REFUSALS   before=418  after=418
+   REMOVED:
+   (nothing above = no production refusal disappeared)
+
+4. COMPARISON KINDS INSIDE CHECK() (before -> after; a DROP is the thing to look at)
+     !=         31 ->     31  
+     &&        289 ->    289  
+     <         225 ->    225  
+     <=        136 ->    136  
+     ==        842 ->    842  
+     >         260 ->    260  
+     >=         60 ->     60  
+     ||          2 ->      2  
+
+5. HARNESS MESSAGES (the whole of core/tests/harness as ONE bag)
+   before=6180  after=6406
+   REMOVED:
+     "FATAL: --seed must be simp or holes\n"
+     "lattice; %s; %zu coefficients"
+     "seed        regular hole array, period %.0f voxels\n"
+   (nothing above = the two header moves dropped no refusal and no message)
+
+6. THE REMOVED HARNESS STRINGS, TRIAGED
+     REWRITTEN (its first 20 chars still occur — read it): "FATAL: --seed must be simp or holes\n"
+     EXTENDED (a superset is still present): "lattice; %s; %zu coefficients"
+     EXTENDED (a superset is still present): "seed        regular hole array, period %.0f voxels\n"
