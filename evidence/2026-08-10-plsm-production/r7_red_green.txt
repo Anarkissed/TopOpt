@@ -1,0 +1,28 @@
+== R7 — THE FAILING TEST FIRST, ON THE DEFECT THE PRODUCTION PATH EXPOSED ==
+
+THE DEFECT. `minimize_plastic`'s conditional Heaviside projection (handoff 123)
+reads `design_discreteness_mnd` — the fraction of the design that is neither 0
+nor 1 — and a parametric ersatz is gray over its whole band BY CONSTRUCTION: the
+band IS the smoothing law, not optimiser indecision. So the gate always cleared
+its threshold, and what it then did is the defect: it re-ran `simp_optimize`
+SEEDED FROM the parametric field, discarding the RBF coefficients and continuing
+the rung as a voxel design. The run would have reported a parametric rung and
+shipped a SIMP one. It was found by reading `iterations.csv` after a 2-iteration
+smoke run and finding rows 3, 4 and 5 with SIMP's `filter_ms` and `beta` columns
+filled.
+
+RED — the fix reverted in place (the `options.plsm.mode != PlsmMode::Parametric`
+term removed from `conditional_mma_projection_armed`), everything else identical:
+
+FAIL (line 234): the conditional Heaviside projection must be DISARMED on a PLSM rung — otherwise it re-runs simp_optimize on the parametric field and the run silently ships a voxel design
+test_plsm: 24 checks, 1 failures
+EXIT=1
+
+GREEN — the term restored:
+
+test_plsm: 24 checks, 0 failures
+EXIT=0
+
+★ THE POSITIVE CONTROL IS PART OF THE TEST, not of this file. The check
+immediately above the failing one asserts the SAME predicate is ARMED on the
+default SIMP path. Without it a disarm-everywhere bug would pass both colours.

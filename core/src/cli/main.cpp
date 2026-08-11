@@ -40,6 +40,7 @@ int usage(const char* argv0) {
                "[--rules PATH]\n"
                "              [--no-iteration-csv] [--snapshots] "
                "[--snapshot-every N] [--snapshot-cap N]\n"
+               "              [--threads N]\n"
                "       %s analyze <job.json> [--mesh PATH] [--smooth S] "
                "[--no-min-feature] [--out DIR]\n"
                "              [--materials PATH] [--rules PATH]\n"
@@ -350,6 +351,16 @@ int main(int argc, char** argv) {
   // TOPOPT_BUILD_FINGERPRINT) is stamped into run_info.json so the era is provable.
   topopt::RunObservability obs;
   obs.fingerprint = TOPOPT_BUILD_FINGERPRINT;
+  // ★ --threads N: HOW MUCH OF THE MACHINE THIS RUN MAY TAKE. 0 (the DEFAULT)
+  // leaves the production rule alone — production_matfree_thread_count(), the
+  // performance-core pin. It is a PURE PERFORMANCE CONTROL and cannot move a
+  // number: the matrix-free apply threads a deterministic 8-colour partition of
+  // the voxel grid, so no two threads ever touch the same node and the
+  // accumulation order is fixed regardless of the count (fea.hpp on
+  // fea_set_matfree_threads: "BIT-IDENTICAL for any thread count"). It exists
+  // because a run that pins every performance core makes the machine unusable
+  // for the hours it takes, and "wait until tonight" is not a setting.
+  int threads = 0;
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
     // Value-less flags first.
@@ -374,13 +385,49 @@ int main(int argc, char** argv) {
       if (obs.snapshot_every < 1) return usage(argv[0]);
     } else if (arg == "--snapshot-cap") {
       obs.snapshot_cap = std::atoi(argv[++i]);
+    } else if (arg == "--threads") {
+      threads = std::atoi(argv[++i]);
+      if (threads < 1) return usage(argv[0]);
     } else {
       return usage(argv[0]);
     }
   }
 
   try {
-    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    topopt::JobDescription job = topopt::load_job_file(job_path);
+    // ── ★ THIS VERB RUNS THE PARAMETRIC LEVEL SET AND NOTHING ELSE ──────────
+    // (task 2026-08-10-plsm-production; maintainer instruction, confirmed.)
+    //
+    // `topopt-cli run` has NO SIMP ROUTE. The maintainer's reason, in his words:
+    // the CLI is the fastest test loop for the new algorithm, and leaving it on
+    // the old one leaves that loop unusable for the thing being tested. The
+    // front-end already runs the parametric path exclusively — on-device via
+    // TopOptBridge and remotely via this binary — so this closes the last gap
+    // rather than opening one.
+    //
+    // ★ IT IS A HARD BLOCK, NOT A DEFAULT. A job asking for `plsm.enabled:
+    // false` is REFUSED, loudly, rather than silently overridden. This task has
+    // already turned up three settings that were accepted and dropped on the
+    // floor (`simp.max_iterations` on a load-case job among them), and adding a
+    // fourth — one that silently ran a DIFFERENT ALGORITHM than the job asked
+    // for — would be the worst of the set.
+    //
+    // ★ SCOPE IS THIS VERB. `analyze`, `preflight` and `lattice-variant` do not
+    // optimise, so there is nothing in them to select. `run_job` and
+    // `minimize_plastic` keep their `PlsmMode::Off` default, because 22 test
+    // files call them IN-PROCESS with values pinned from SIMP designs (margins,
+    // masses, reproduction bands) and those tests are the evidence that the SIMP
+    // code is unmoved. Nothing a user or the app can invoke reaches that default.
+    if (job.has_plsm && !job.plsm_enabled) {
+      std::fprintf(stderr,
+                   "topopt-cli run: \"plsm.enabled\": false was requested, but "
+                   "this CLI has no SIMP route to fall back to — it runs the "
+                   "parametric level set only. Remove the key (or set it true) "
+                   "to run; the \"plsm\" block's other keys still tune it.\n");
+      return 2;
+    }
+    job.has_plsm = true;
+    job.plsm_enabled = true;
     const topopt::MaterialLibrary materials =
         topopt::load_materials_file(materials_path);
     const topopt::SettingsRules rules =
@@ -389,9 +436,17 @@ int main(int argc, char** argv) {
     // emit_progress = true: stream PROGRESS/VARIANT checkpoint lines to stdout and
     // export each accepted variant as it completes, so a wrapper (the LAN worker,
     // handoff 093) can forward live progress + progressive artifacts.
+    // Applied AFTER the job is loaded and BEFORE the run, which is where
+    // fea.hpp says a caller wanting a non-default count applies it: run_job
+    // calls configure_production_options (which sets the production count) at
+    // its start, so setting it here would be overwritten. The override therefore
+    // rides RunObservability's sibling channel — an explicit field on the run —
+    // rather than a global set at the wrong moment.
+    topopt::RunObservability obs_run = obs;
+    obs_run.matfree_threads = threads;
     const topopt::RunJobResult result =
         topopt::run_job(job, dirname_of(job_path), out_dir, materials, rules,
-                        /*emit_progress=*/true, obs);
+                        /*emit_progress=*/true, obs_run);
 
     // "B-rep faces" only for a STEP part; an STL/3MF part carries manufactured
     // PSEUDO-faces (handoff 2026-07-24-mesh-optimize-path), so name them honestly.

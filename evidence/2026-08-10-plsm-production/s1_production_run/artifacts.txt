@@ -1,0 +1,22 @@
+total 220888
+drwxr-xr-x@ 21 nadim  wheel       672 Aug 10 00:51 .
+drwx------@ 16 nadim  wheel       512 Aug  9 23:15 ..
+-rw-r--r--@  1 nadim  wheel     13265 Aug 10 00:51 build_orientation.json
+-rw-r--r--@  1 nadim  wheel  14983608 Aug 10 00:51 design.bin
+-rw-r--r--@  1 nadim  wheel  31070976 Aug 10 00:51 fields.bin
+-rw-r--r--@  1 nadim  wheel     35930 Aug 10 00:47 iterations.csv
+-rw-r--r--@  1 nadim  wheel       643 Aug  9 23:15 loadcase.json
+-rw-r--r--@  1 nadim  wheel     18167 Aug 10 00:51 report.json
+-rw-r--r--@  1 nadim  wheel      7142 Aug 10 00:51 run_info.json
+-rw-r--r--@  1 nadim  wheel  16279484 Aug 10 00:51 variant_026.stl
+-rw-r--r--@  1 nadim  wheel    685440 Aug 10 00:51 variant_026_alpha.f64
+-rw-r--r--@  1 nadim  wheel      1056 Aug 10 00:51 variant_026_alpha.meta
+-rw-r--r--@  1 nadim  wheel  16929084 Aug 10 00:15 variant_038.stl
+-rw-r--r--@  1 nadim  wheel    685440 Aug 10 00:15 variant_038_alpha.f64
+-rw-r--r--@  1 nadim  wheel      1026 Aug 10 00:15 variant_038_alpha.meta
+-rw-r--r--@  1 nadim  wheel  16351684 Aug  9 23:50 variant_052.stl
+-rw-r--r--@  1 nadim  wheel    685440 Aug  9 23:50 variant_052_alpha.f64
+-rw-r--r--@  1 nadim  wheel      1056 Aug  9 23:50 variant_052_alpha.meta
+-rw-r--r--@  1 nadim  wheel  14607484 Aug  9 23:28 variant_068.stl
+-rw-r--r--@  1 nadim  wheel    685440 Aug  9 23:28 variant_068_alpha.f64
+-rw-r--r--@  1 nadim  wheel      1056 Aug  9 23:28 variant_068_alpha.meta

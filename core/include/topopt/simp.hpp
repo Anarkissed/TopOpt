@@ -1035,6 +1035,34 @@ struct SimpOptions {
   // a value <= cg_tolerance (or 0) leaves the tight tolerance everywhere.
   double cg_tolerance_loose = 0.0;
 
+  // --- MATRIX-FREE WARM START (task 2026-08-10-plsm-production, S3) ---------
+  //
+  // ★ THE LOOP HAS ALWAYS HELD THE PREVIOUS ITERATE'S DISPLACEMENT FIELD AND HAS
+  // ALWAYS PASSED IT TO `simp_compliance`. On the path production actually runs
+  // it was DROPPED: `simp.cpp` dispatches SolverKind::MultigridCG_Matfree first,
+  // and until this task that branch took no `initial_guess`, so every trajectory
+  // solve started from zero. PR 324 measured 4% from warm starting alone and 76%
+  // from warm starting a LOOSENED solve — the two are multiplicative, because a
+  // tight solve is dominated by a tail a good starting point does not help and
+  // loosening removes the tail.
+  //
+  // false (the DEFAULT) => the loop passes nullptr on the matrix-free path and
+  // the run is BYTE-FOR-BYTE what it was — THE ONE RULE, the same opt-in
+  // discipline as cg_tolerance_loose == 0 and active_domain_band == 0. R1 of this
+  // task is a stash-rebuild checksum of exactly that.
+  //
+  // TRAJECTORY-ONLY. The final compliance solve and every certification solve
+  // pass `initial_guess = nullptr` already (analyze.cpp:269, simp.cpp's B2 solve),
+  // so the CERTIFICATE is never warm-started whatever this is set to — which is
+  // what keeps R5 ("no verdict moves") structural rather than a promise.
+  //
+  // It is an ACCELERATOR: the stopping test stays ||r|| <= tol*||b||, relative to
+  // the RIGHT-HAND SIDE, so a warm solve satisfies the identical criterion. It
+  // moves the point inside the tolerance ball, never the ball. See the S3 table
+  // in the task handoff for the measured deviation against PR 313's 1.0e-06 bar
+  // and against the machinery's own 3e-10..3e-9 warm-vs-cold noise floor.
+  bool matfree_warm_start = false;
+
   // --- ACTIVE DOMAIN (active-domain phase 1) -------------------------------
   // Restrict every TRAJECTORY penalized solve to the active set (the material
   // plus a `band`-voxel growth band — see active_domain_mask above).

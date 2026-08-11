@@ -1,0 +1,71 @@
+== S4 — DOES A PARAMETRIC DESIGN STILL LATTICE? YES, WITH ONE NAMED CAVEAT. ==
+
+Two `lattice-variant` runs, HIS lattice and grading blocks lifted verbatim from
+evidence/2026-08-07-lattice-recipe-not-triangles/job_his_2mm_skinnone.json,
+differing ONLY in which design.bin they name. Rung 0.68 on both.
+
+-- PASS 1: THE PARAMETRIC DESIGN IS REFUSED, AND THE REFUSAL IS CORRECT
+
+  "the void space inside this lattice does not reach the exterior. 7 of 215
+   lattice cells (68 of 1167 latticed voxels) sit in 1 SEALED cavity holding
+   337.206 mm^3 of trapped space with no path out of the part."
+
+SIMP's rung 0.68, same recipe, latticed and was ACCEPTED. So this is a property
+of the DESIGN, not of the pipeline.
+
+★ AND IT IS THE DIRECT CONSEQUENCE OF THE THING THAT MAKES THE METHOD WORTH
+HAVING. PR 324's case for dropping the SIMP seed was that a coefficient in the
+middle of solid material can be driven negative ON ITS OWN and open a hole there
+— which a per-voxel phi cannot do, because its velocity is zero away from the
+band. A hole opened in the INTERIOR *is* a sealed cavity until it merges with
+the outside. On this part seven cells' worth never merged.
+
+The check did its job exactly: it named the cavity, gave its bounding box and
+volume, refused to auto-correct geometry nobody asked it to change, and stated
+both ways out. Nothing about the grading law, the boundary rule, the
+cells-per-member floor or the sub-floor predicate is implicated.
+
+-- PASS 2: WITH require_lattice_void_reaches_exterior=false, IT LATTICES AND
+   CERTIFIES. So the cavity is the ONLY thing between a parametric design and a
+   latticed part.
+
+                                          SIMP 0.68        PLSM 0.68
+  recorded -> reproduced margin           enforced         3297.3 -> 3297.3 EXACT
+  latticed voxels                              1221             1167
+  graded cell                                  4 mm             4 mm
+  graded rho range                                —    0.06665 .. 0.879
+  solid -> latticed margin                        —    3297 -> 3093
+  lattice margin (worst case)               3090.49             3093
+  lattice margin effective                  639.926            640.4
+  strut in-plane / interlayer                     —    768.6 / 484.6
+  out of regime                                 yes              yes
+  VERDICT                                  ACCEPTED         ACCEPTED
+  wall                                            —           338 s
+
+★ THE MARGIN REPRODUCTION IS EXACT (3297.3 == 3297.3). `lattice-variant` REFUSES
+to lattice a design whose recorded margin does not reproduce within
+100 x cg_tolerance; the parametric design.bin round-trips through the store, the
+grid and the load case with no drift at all. That is the strongest single check
+in this task that the parametric path's certificate belongs to its own field.
+
+★ AND THE TWO LATTICES LAND IN THE SAME PLACE: 1167 against 1221 latticed voxels,
+lattice margin 3093 against 3090.49, effective 640.4 against 639.926, both OUT OF
+REGIME on strut strength (a REPORT, not a gate, on both). Nothing in the lattice
+path behaves differently on a parametric field.
+
+-- SO, AGAINST THE TASK'S BLOCKED-STOP ("a PLSM design cannot be latticed without
+   changing the grading law"): NOT TRIGGERED. The grading law is untouched. What
+   IS triggered is a manufacturability refusal that SIMP does not hit, and it
+   needs an answer before a from-scratch parametric part can be latticed by
+   default.
+
+   Candidates, cheapest first:
+     (a) drain the cavity geometrically after optimisation;
+     (b) PR 325's PERIMETER PENALTY — the one term that prices interface AREA,
+         never tried on a parametric phi, and there is no reinitialisation there
+         to fight it;
+     (c) run the void-reachability walk INSIDE the optimiser so cavities never
+         form. Only (c) prevents it, and it is the expensive one.
+
+   Setting require_lattice_void_reaches_exterior=false ships trapped powder or
+   resin. It is a trade to price, not a fix.

@@ -1,0 +1,4 @@
+total 8
+drwxr-xr-x@  3 nadim  wheel   96 Aug 10 01:02 .
+drwx------@ 18 nadim  wheel  576 Aug 10 01:02 ..
+-rw-r--r--@  1 nadim  wheel  643 Aug 10 01:02 loadcase.json

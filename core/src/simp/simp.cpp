@@ -657,9 +657,17 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
     // contribute an element. Everything downstream of mf_build_elems — void
     // gate, kept-DOF numbering, Jacobi diagonal, hierarchy, V-cycle — is
     // unchanged code running exactly on the surviving system.
+    // WARM START (task 2026-08-10-plsm-production, S3): `initial_guess` used to
+    // stop here — the comment above still says "the cached PenalizedSolver /
+    // warm start are bypassed", and for the PenalizedSolver it remains true. It
+    // is now FORWARDED, and it is null on every path that has not opted in:
+    // SimpOptions::matfree_warm_start gates the two trajectory call sites, and
+    // the final compliance solve and every certification solve pass nullptr
+    // unconditionally. So a default run reaches this line with
+    // initial_guess == nullptr and is byte-for-byte what it was.
     out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson, bcs,
                                           loads, tolerance, max_iterations,
-                                          &out.cg, active_mask);
+                                          &out.cg, active_mask, initial_guess);
   } else if (solver_kind == SolverKind::MultigridCG) {
     // Opt-in accelerator (handoff 073): the geometric-multigrid-preconditioned
     // CG solves the identical system to the same tolerance. It is stateless, so
@@ -1814,6 +1822,23 @@ int resolve_active_domain_band(const SimpOptions& options, const char* who) {
   return band;
 }
 
+// ── THE TRAJECTORY SOLVE'S INITIAL GUESS (task 2026-08-10-plsm-production) ──
+//
+// In ONE place, so the two optimize loops cannot drift into gating it
+// differently. Null unless the run OPTED IN (SimpOptions::matfree_warm_start,
+// default false — R1 rests on that) AND a previous solve has actually happened:
+// `warm` is empty on iteration 1, and on every iteration of a PenalizedSolver
+// run, which keeps its own internal guess.
+//
+// The loop has always held this field and always passed it; until this task the
+// matrix-free branch of `simp_compliance` dropped it, so on the path production
+// runs every trajectory solve started from zero.
+const FeaSolution* matfree_trajectory_guess(const SimpOptions& options,
+                                            const FeaSolution& warm) {
+  if (!options.matfree_warm_start) return nullptr;
+  return warm.u.empty() ? nullptr : &warm;
+}
+
 // One TRAJECTORY penalized solve under the active domain. Returns the solve and
 // writes the active element fraction actually assembled (1.0 whenever the full
 // domain ran, so the observability column means the same thing on every run).
@@ -2243,7 +2268,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                                           : 0.0);
         c = active_domain_solve(
             active_domain, grid, traj_params, xphys, bcs, loads, traj_tol,
-            options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
+            options.cg_max_iterations,
+            // MATRIX-FREE WARM START (task 2026-08-10-plsm-production, S3):
+            // OPT-IN. The guess has always been held and passed; until this task
+            // the matrix-free branch dropped it. Gated here so the default run
+            // still hands it a null pointer and is byte-for-byte unchanged.
+            matfree_trajectory_guess(options, warm),
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
         sp.charge(sp.solve);
@@ -3310,7 +3340,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                                           : 0.0);
         c = active_domain_solve(
             active_domain, analysis, traj_params, xphys, bcs, loads, traj_tol,
-            options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
+            options.cg_max_iterations,
+            // MATRIX-FREE WARM START (task 2026-08-10-plsm-production, S3):
+            // OPT-IN. The guess has always been held and passed; until this task
+            // the matrix-free branch dropped it. Gated here so the default run
+            // still hands it a null pointer and is byte-for-byte unchanged.
+            matfree_trajectory_guess(options, warm),
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
         sp.charge(sp.solve);

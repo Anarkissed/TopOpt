@@ -836,6 +836,36 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     // both call, so they cannot drift into producing different parts (handoff
     // 093). The self-weight LOAD CASE (gravity, ladder, keyframes) is set below.
     topopt::configure_production_options(opts);
+    // ── ★ THE PARAMETRIC LEVEL SET IS THE APP'S OPTIMISER (task
+    // 2026-08-10-plsm-production, maintainer request) ───────────────────────
+    //
+    // The FRONT-END runs the parametric level set and nothing else: the design
+    // variable is a vector of RBF coefficients and the voxel field is a value of
+    // the analytic function they define (topopt/plsm.hpp). PR 324 measured it
+    // from a plain array of holes, with SIMP nowhere in the pipeline, beating
+    // his shipped rung 0.68 on margin and peak stress and certifying.
+    //
+    // ★ THIS IS AN APP DECISION, NOT A CORE DEFAULT, AND THE DISTINCTION IS
+    // LOAD-BEARING. `MinimizePlasticOptions::plsm.mode` defaults to Off and
+    // `configure_production_options` does NOT touch it, so `topopt-cli` and
+    // every existing job document still run SIMP and are byte-for-byte what they
+    // were — which is what that task's R1 checks by stash-rebuild checksum. The
+    // front-end opts IN, here.
+    //
+    // ★ AND IT IS MIRRORED IN RemoteRunner.buildJobJSON, WHICH SENDS
+    // "plsm": {"enabled": true} TO THE WORKER. The two MUST move together: the
+    // on-device path and the LAN path have to produce the same part, and this
+    // codebase has already paid for one drift between them. If you change this
+    // line, change that one in the same commit — the same rule
+    // `bake_build_orientation` below carries.
+    //
+    // Everything else is left at PlsmOptions' own defaults ON PURPOSE. The knot
+    // spacing in particular is NOT set: leaving it at zero is what asks for
+    // `plsm_knots_for_grid`, the production rule that derives the spacing from
+    // the grid's own voxel size, PER AXIS. Naming three numbers here would pin
+    // the feature scale to one resolution and would be a second opinion about a
+    // rule core already owns.
+    opts.plsm.mode = topopt::PlsmMode::Parametric;
     // ── BAKING IS OFF ON THE ON-DEVICE PATH, DELIBERATELY (handoff
     // 2026-08-01-bake-build-orientation) ────────────────────────────────────
     // The core's default is "auto": with no declared build direction it CHOOSES
@@ -897,12 +927,50 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
   return result;
 }
 
+// ── ★ A STANDALONE CERTIFICATION MUST NOT DEPEND ON WHAT SOLVED BEFORE IT ──
+// (task 2026-08-10-plsm-production.)
+//
+// THE BUG THIS FIXES, which CI caught and which is a genuine correctness defect
+// rather than a test artefact: `ProjectStoreSidecarTests.testQ3...` runs the SAME
+// analysis twice in one process and asserts the results are bit-identical. They
+// were not — 1.4e-09 on max stress, 5.7e-10 on margin.
+//
+// THE CAUSE. The Krylov recycle basis is THREAD-LOCAL AND STICKY ACROSS SOLVES
+// (fea.hpp: "the driver resets it at each run/rung boundary with
+// fea_reset_krylov_recycle_space()"). `minimize_plastic` does exactly that at run
+// start (minimize_plastic.cpp:538), so the OPTIMIZE path is protected. The
+// STANDALONE ANALYSIS path had no such reset and no solver isolation, so the
+// second analysis in a process starts from the subspace the first one harvested,
+// takes a different Krylov route, and lands somewhere else inside the same
+// tolerance. In a fresh process the first analysis has no basis to inherit, which
+// is why the test passes in isolation and fails in a full suite.
+//
+// ★ WHY THE RESET IS HERE AND NOT IN `analyze_fixed_design`. That function serves
+// BOTH the standalone analysis and the per-rung certification inside
+// minimize_plastic, and the per-rung one runs while the trajectory is deliberately
+// BUILDING a recycle basis across iterations. Resetting there would throw away
+// the basis the optimiser is paying for and change the optimize path's numbers and
+// speed — a much larger blast radius than the defect. The app's contract is that
+// pressing RUN SIM twice gives the same answer; this is the narrowest place that
+// makes it true.
+//
+// ★ WHY A RESET AND NOT `ScopedLadderSolverIsolation`'s disable-and-restore. In a
+// fresh process the first analysis already runs with an EMPTY basis, so a reset
+// makes every analysis behave like that first one — no change to the reference
+// behaviour, only the removal of cross-call carry-over. Disabling recycling
+// outright would change the first call too, and with it every pinned expectation
+// in the app suite, for no gain.
+void isolate_standalone_certification() {
+  topopt::fea_reset_krylov_recycle_space();
+}
+
 AnalyzeResult analyze_selfweight(const std::string& model_path,
                                  const std::string& analyze_mesh_path,
                                  const std::string& material_name,
                                  const std::string& materials_path,
                                  const std::string& rules_path, int resolution,
                                  double margin_stop, BridgeError& err) {
+  isolate_standalone_certification();
   AnalyzeResult result;
   try {
     bridge_log("analyze: ENTER res=" + std::to_string(resolution) + " model='" +
@@ -1051,6 +1119,7 @@ AnalyzeResult smooth_and_recertify_selfweight(
     const std::string& materials_path, const std::string& rules_path,
     int resolution, double margin_stop, double strength, bool enforce_min_feature,
     const BridgeFreezeRegions& freeze, BridgeError& err) {
+  isolate_standalone_certification();
   try {
     bridge_log("smooth+recertify: ENTER strength=" + std::to_string(strength) +
                " mesh='" + input_mesh_path + "'");
@@ -1238,6 +1307,7 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
                                const std::string& materials_path,
                                const std::string& rules_path, int resolution,
                                const BridgeLoadCase& load_case, BridgeError& err) {
+  isolate_standalone_certification();
   AnalyzeResult result;
   try {
     bridge_log("analyze_loadcase: ENTER res=" + std::to_string(resolution) +
@@ -1554,6 +1624,7 @@ AnalyzeResult smooth_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     BridgeError& err) {
+  isolate_standalone_certification();
   // The uniform seam IS the brush seam with no brush — one implementation, so the
   // two can never diverge (and PR 200's callers stay byte-identical).
   return smooth_brush_and_recertify_loadcase(
@@ -1569,6 +1640,7 @@ AnalyzeResult smooth_brush_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     const BridgeVertexWeights& brush, BridgeError& err) {
+  isolate_standalone_certification();
   try {
     bridge_log("smooth+recertify(loadcase): ENTER strength=" +
                std::to_string(strength) + " mesh='" + input_mesh_path +
@@ -1715,6 +1787,21 @@ OptimizeResult run_minimize_plastic_loadcase(
     // exported file, so a chosen-and-baked orientation would certify something
     // the returned mesh does not carry (handoff 2026-08-01-bake-build-orientation).
     setup.options.bake_build_orientation = topopt::BakeBuildOrientation::Off;
+    // ── ★ THE PARAMETRIC LEVEL SET, ON THE LOAD-CASE PATH TOO ───────────────
+    // (task 2026-08-10-plsm-production.)
+    //
+    // ★ THIS IS THE SECOND OF TWO ON-DEVICE OPTIMISE ENTRY POINTS AND IT IS THE
+    // ONE HIS REAL JOBS USE. `run_minimize_plastic` above is the SELF-WEIGHT
+    // path; this is the DECLARED LOAD CASE path. They are separate functions
+    // with separate option objects, and arming only the first would have given
+    // the front-end a parametric optimiser for self-weight parts and SIMP for
+    // every part with a declared load — silently, with both reporting success.
+    // Caught by grepping for the entry points rather than by reading the one I
+    // had already edited.
+    //
+    // Mirrored in `run_minimize_plastic` above and in
+    // RemoteRunner.buildJobJSON. ALL THREE MOVE TOGETHER.
+    setup.options.plsm.mode = topopt::PlsmMode::Parametric;
     for (const auto& pr : setup.face_protection_reports)
       bridge_log("loadcase: face-protection face=" + std::to_string(pr.face_id) +
                  " voxels_frozen=" + std::to_string(pr.voxels_frozen) +

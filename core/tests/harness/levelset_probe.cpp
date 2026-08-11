@@ -228,6 +228,13 @@
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/pipeline.hpp"
+// ★ AT FILE SCOPE, DELIBERATELY. `plsm_basis.hpp` below is a SHIM over this
+// header and is included from inside an anonymous namespace; core's basis must
+// keep EXTERNAL linkage so this probe and the production optimiser share one
+// definition of the function they fit.
+#include "topopt/plsm_basis.hpp"
+#include "topopt/plsm_kernel.hpp"
+#include "topopt/plsm_mma.hpp"
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
 #include "topopt/settings.hpp"
