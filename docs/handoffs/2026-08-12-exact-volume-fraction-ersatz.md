@@ -474,6 +474,29 @@ and is now a number rather than an intention.
 mechanism below is named with the problem from §7 it answers, where it came from,
 what it cost, and what it measured — including the ones that lost.
 
+### ★ THE TWO ARMS SIDE BY SIDE, SAME INSTRUMENTS, SAME RUN
+
+| | ARM 1 — `F1_frac4` | ARM 2 — `A2_all` |
+|---|---|---|
+| ersatz | the hard sampled fraction | + M1 `--frac-soft` |
+| bandwidth | `eps_q ∝ \|grad phi\|_2` | + M5 `--frac-eps-l1` |
+| carved | 15.3541 | **14.9895** |
+| n_cut | 80,962 | **78,553** |
+| CAD mm | **0.4701** | 0.4708 |
+| mid % | **57.50%** | 58.78% |
+| min-feature | **5,337** | 5,517 |
+| iterations to the shipped stop | **57** | 61 |
+| ★ margin | 3379 @50, still rising | ★ **3391.1 SETTLED @50, +4.2% over SIMP** |
+| gradient, dV at the plateau | −2.03 / +0.56% | ★ **−0.29 / +0.82% at step 0.001** |
+| gradient, ★ **dC** | noise-dominated, ±25% | ★ **−1.33 / +3.18%** |
+
+★★ **ARM 2 IS BETTER ON THE TWO COLUMNS THAT DECIDE WHETHER THE WORK IS SOUND —
+it is the only arm in this task whose MARGIN SETTLES, and the only one whose
+COMPLIANCE GRADIENT CAN BE VERIFIED AT ALL** — and it is a wash on the geometry
+columns (2–3% either way, inside the run-to-run floor §7 P15 measures). **The two
+mechanisms bought correctness, not surface.** Said that way round because that is
+what the numbers say.
+
 ### M1 — the CONSISTENTLY MOLLIFIED value (`--frac-soft`)
 
 **Problem: P2 and P13.** `f_v` is a hard count of sample signs, so it is
@@ -499,6 +522,13 @@ sub-sampling refines. `H_eta` at a fixed 2 voxels converges to nothing.
 
 **Cost:** nothing — the same samples, one branch.
 
+★ **RESULT: §4(c)(ii) and the table above.** Its gradient is the only one in this
+study that can be finite-differenced on the COMPLIANCE (1.3–5.2% against the
+control's 10.6–22.9%), and `A2_all` is the only arm whose margin settles. ★ **The
+geometry is a wash** — 78,553 triangles against 79,542 and 80,962, inside the
+run-to-run floor. **SEMDOT's published pair predicted the fluctuation and the
+extra iterations, and both showed up.**
+
 ### M2 — the SUB-CELL psi, priced (`--frac-sens centre`)
 
 **Problem: P4.** `Psi` is built on the cell-centre lattice, so `Psi^T` factors
@@ -512,7 +542,12 @@ matters" becomes a number instead of an argument for having written the harder
 code.
 
 **Cost:** the scatter is one extra walk of the knot lists the sampling already
-built; measured as a share of an iteration in §3.
+built — 85 ms of a 32.7 s iteration, 0.26%.
+
+★ **RESULT: §4(c)(i). The sub-cell psi is worth about 15 percentage points**, the
+same order as the `|grad phi|` error the whole task turns on — and NOTHING on a
+single coefficient, so a single-coefficient check would have said the scatter was
+unnecessary. It was worth writing.
 
 ### M3 — the EXPORT convention as its own axis (`--frac-export`)
 
