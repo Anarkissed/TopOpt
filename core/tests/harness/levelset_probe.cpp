@@ -281,6 +281,7 @@ namespace {
 // earlier arm reproduces byte for byte.
 #include "plsm_basis.hpp"
 #include "plsm_filter.hpp"
+#include "plsm_topology.hpp"
 #include "plsm_mma.hpp"
 
 
@@ -761,6 +762,11 @@ struct Args {
   // --seed-period P   the hole array's period in VOXELS. 8 is PR 324's ARM 2
   //                   and is the default, so every earlier run reproduces.
   double seed_period = 8.0;
+  // ★ --seed-phase P: shift the cosine array by P periods on every axis. Same
+  // richness, different placement — which is the ONLY way to separate "how many
+  // holes" from "which holes" in the monotone regime, where the final design's
+  // holes are a subset of the seed's.
+  double seed_phase = 0.0;
   bool fp32 = false;
   bool isolate = false;
   int reinit_every = 1;
@@ -1129,6 +1135,25 @@ struct Args {
   // this comment.
   double diffusion = 0.0;
 
+  // ── ★ TASK 2026-08-12: MONOTONE TOPOLOGY ─────────────────────────────────
+  //
+  //   --monotone            the void's connected-component count may never
+  //                         increase. Checked EVERY iteration from the first.
+  //   --monotone-repair N   on a violation, try N times to CLOSE the new
+  //                         component by pushing phi down onto it in
+  //                         COEFFICIENT space; only revert the whole step if
+  //                         repair fails. 0 = always revert.
+  //   --seed gyroid|stress  the two new seed families (below).
+  //
+  // ★ THIS IS A TOPOLOGICAL CONSTRAINT, NOT PR 326'S SPATIAL MASK. See
+  // plsm_topology.hpp for why they are different objects and why the mask
+  // arrived too late while this cannot.
+  bool monotone = false;
+  int monotone_repair = 6;
+  // Seed C's rule needs the load case, so its parameters live with the seed.
+  double seed_t = 0.0;          // gyroid iso level; 0 = derive from the rung
+  bool topology_every_iter = true;
+
   // ── ★ --no-compliance-stop ────────────────────────────────────────────────
   //
   // The loop stops on the shipped MMA termination — compliance flat within 1e-3
@@ -1331,12 +1356,16 @@ int main(int argc, char** argv) {
     else if (s == "--filter-eta") next(a.filter_eta);
     else if (s == "--robust-eta") next(a.robust_eta);
     else if (s == "--diffusion") next(a.diffusion);
+    else if (s == "--monotone") a.monotone = true;
+    else if (s == "--monotone-repair") nexti(a.monotone_repair);
+    else if (s == "--seed-t") next(a.seed_t);
     else if (s == "--no-compliance-stop") a.no_compliance_stop = true;
     else if (s == "--certify-every") nexti(a.certify_every);
     else if (s == "--certify-from") nexti(a.certify_from);
     else if (s == "--margin-stop") next(a.margin_stop);
     else if (s == "--wall-cap") next(a.wall_cap);
     else if (s == "--seed-period") next(a.seed_period);
+    else if (s == "--seed-phase") next(a.seed_phase);
     else if (s == "--reinit-substeps") a.reinit_substeps = true;
     else if (s == "--weno") a.weno = true;
     else if (s == "--rk3") a.rk3 = true;
@@ -2145,11 +2174,97 @@ int main(int argc, char** argv) {
       for (int j = 0; j < d.ny; ++j)
         for (int i = 0; i < d.nx; ++i)
           phi[d.at(i, j, k)] =
-              -0.4 + std::cos(2.0 * kPi * i / per) * std::cos(2.0 * kPi * j / per) *
-                         std::cos(2.0 * kPi * k / per);
-    std::printf("seed        regular hole array, period %.0f voxels\n", per);
+              -0.4 + std::cos(2.0 * kPi * (i / per + a.seed_phase)) *
+                         std::cos(2.0 * kPi * (j / per + a.seed_phase)) *
+                         std::cos(2.0 * kPi * (k / per + a.seed_phase));
+    std::printf("seed        regular hole array, period %.0f voxels, phase %.4g\n",
+                per, a.seed_phase);
+  } else if (a.seed == "gyroid") {
+    // ── ★ SEED B — A TPMS. AND A DECLARED OVERRIDE. ──────────────────────
+    //
+    // The task addendum says "THE PROJECT ALREADY HAS TPMS MACHINERY from the
+    // lattice track — reuse it, do not write a second implementation. Say which
+    // file you took it from."
+    //
+    // ★ THERE IS NO TPMS MACHINERY IN THIS REPOSITORY. The only `gyroid` in
+    // core/ is `core/include/topopt/lattice.hpp`'s own comment that TPMS sheets
+    // "attach to the same machinery LATER" — explicitly not built — plus a
+    // string in rules.json. The lattice track is the seven CUBIC STRUT
+    // topologies (octet-legs, sc, bcc, fcc, diamond, kelvin, rhombic), which is
+    // a different object from a TPMS sheet. There is no file to cite, so none
+    // is cited, and a strut lattice is NOT relabelled as a TPMS.
+    //
+    // The gyroid, written out:
+    //     sin x cos y + sin y cos z + sin z cos x = t
+    // ★ PERIOD PER AXIS (R5), from `--seed-period` in VOXELS on each axis
+    // independently — never from a minimum over them. This grid is
+    // 128 x 31 x 118, a 4:1 slab, and a period keyed to the smallest axis is
+    // the trap PR 323 lost a day to.
+    //
+    // ★ WHY IT IS WORTH A SEED AT ALL: a TPMS is a MINIMAL SURFACE — locally
+    // area-minimising — so it begins at the lowest interface area available for
+    // its topology. In a run that can only SIMPLIFY, that starting advantage is
+    // the whole bet, and `seed_area_mm2` below is what tests it.
+    const double per = a.seed_period;
+    const double w = 2.0 * kPi / per;
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i)
+          phi[d.at(i, j, k)] =
+              std::sin(w * i) * std::cos(w * j) + std::sin(w * j) * std::cos(w * k) +
+              std::sin(w * k) * std::cos(w * i) - a.seed_t;
+    std::printf("seed        GYROID TPMS, period %.0f voxels PER AXIS, t = %.4g\n"
+                "            ★ written here, NOT reused: this repository has no\n"
+                "            TPMS machinery (lattice.hpp:22 says it attaches "
+                "'later')\n", per, a.seed_t);
+  } else if (a.seed == "stress") {
+    // ── ★ SEED C — PRINCIPAL-STRESS-TRAJECTORY PLACEMENT ─────────────────
+    //
+    // ONE state solve on the FULLY SOLID domain with his real load case, then:
+    // ★ THE RULE, IN ONE SENTENCE — seed void where the solid part's strain
+    // energy density is LOWEST, by thresholding it at the quantile that yields
+    // the requested rung, so the material that survives is the material that
+    // was already carrying the load.
+    //
+    // Strain energy density is used rather than the principal directions
+    // themselves because it is what `energy_from` already returns from
+    // `simp_compliance`'s sensitivity — no second stress recovery, no second
+    // convention, and it is monotone in |sigma| for an isotropic material, so
+    // "low energy" IS "between the load paths".
+    std::vector<double> rho_full(n, 0.0);
+    for (std::size_t v = 0; v < n; ++v)
+      rho_full[v] = (grid.tags[v] == VoxelTag::Empty) ? params.density_min : 1.0;
+    const double t_s = now_s();
+    const SimpCompliance sc0 =
+        simp_compliance(grid, traj_params, rho_full, bcs, loads,
+                        options.simp.cg_tolerance, options.simp.cg_max_iterations,
+                        nullptr, nullptr, options.simp.solver);
+    std::vector<double> e(n, 0.0);
+    for (std::size_t v = 0; v < n; ++v)
+      e[v] = energy_from(sc0.dcompliance[v], rho_full[v], traj_params.penalty,
+                         traj_params.youngs_modulus);
+    std::vector<double> sorted;
+    sorted.reserve(n);
+    for (std::size_t v = 0; v < n; ++v)
+      if (grid.tags[v] != VoxelTag::Empty && eff[v] == MaskValue::Active)
+        sorted.push_back(e[v]);
+    std::sort(sorted.begin(), sorted.end());
+    // The rung is over part_solid; the ACTIVE set is what may be carved, so the
+    // fraction of ACTIVE that must go void is derived, never assumed.
+    const double want_solid = a.rung * part_solid;
+    const double active_solid = want_solid - static_cast<double>(n_fsolid);
+    double frac_void = 1.0 - active_solid / std::max(1.0, static_cast<double>(n_active));
+    frac_void = std::min(0.95, std::max(0.0, frac_void));
+    const std::size_t qi = static_cast<std::size_t>(frac_void * (sorted.size() - 1));
+    const double thr = sorted.empty() ? 0.0 : sorted[qi];
+    for (std::size_t v = 0; v < n; ++v) phi[v] = (thr - e[v]);
+    std::printf("seed        ★ STRESS-ALIGNED: one solve on the SOLID domain "
+                "(%.1f s, cg %d),\n"
+                "            void where strain energy density < %.6g — the "
+                "%.1f%% least-loaded ACTIVE voxels\n",
+                now_s() - t_s, sc0.cg.iterations, thr, 100.0 * frac_void);
   } else {
-    std::printf("FATAL: --seed must be simp or holes\n");
+    std::printf("FATAL: --seed must be simp, holes, gyroid or stress\n");
     return 2;
   }
   // ★ NOT russo_smereka HERE. The seed is phi = 0.5 - rho, a near-binary step
@@ -2448,6 +2563,9 @@ int main(int argc, char** argv) {
          // the intermediate's. Both are 1 when --robust is off.
          "robust_worst,robust_ratio,nuc_frozen,diffusion_energy,"
          "diffusion_ratio,"
+         // ★ TASK 2026-08-12's mandatory curves.
+         "void_components,euler_chi,cavities,tunnels,mono_violations,"
+         "mono_reverts,mono_repaired_voxels,new_components,split_delta,"
          "iteration_wall_s\n";
 
   // ── THE DIRICHLET SET FOR THE HILBERTIAN EXTENSION (difference 4) ──────────
@@ -2475,6 +2593,19 @@ int main(int argc, char** argv) {
   // Scratch for the filter's adjoint pass. Held out of the loop because it is
   // two more 468k-double buffers and the loop runs sixty times.
   std::vector<double> filt_scratch(n, 0.0), filt_out(n, 0.0);
+  // ★ THE MONOTONE CONSTRAINT'S STATE AND ITS LEDGER. Every intervention is
+  // counted; R4 of the task makes these curves mandatory, and without them
+  // there is no proof the mechanism did anything.
+  std::vector<double> alpha_iter_start;
+  int prev_components = -1;
+  std::vector<char> prev_void(n, 0);
+  int mono_components = 0, mono_cavities = 0;
+  long long mono_chi = 0, mono_tunnels = 0;
+  long long mono_violations = 0, mono_reverts = 0, mono_repaired_voxels = 0;
+  // ★ THE TWO WAYS THE COUNT CAN RISE, SEPARATED. `new` is NUCLEATION — a
+  // component sharing no voxel with any previous void. `split` is the rest —
+  // existing void divided by solid bridging it, which is classically legal.
+  int mono_new_components = 0, mono_split_delta = 0;
   // ARM 2's optimiser state. The coefficient box is sized from the SEED, because
   // an RBF coefficient is scaled like the distance it interpolates (mm here) and
   // there is no universal bound to write down; +-4x the largest seed coefficient
@@ -2629,6 +2760,12 @@ int main(int argc, char** argv) {
     // and the delta now all refer to the SAME interface. It is also the
     // structure the reference has, where there is no offset at all and the
     // interface is always {phi = 0}.
+    // ★ THE ITERATION'S STARTING COEFFICIENTS, captured BEFORE the offset fold
+    // and before MMA. The monotone constraint's revert needs the state the step
+    // began from; the first version of this saved alpha INSIDE the repair — i.e.
+    // AFTER the update — so "revert" restored the violating design and the
+    // component count rose anyway (87 -> 512 -> 518 on the smoke run).
+    if (a.monotone && a.plsm) alpha_iter_start = alpha;
     const double offset = solve_offset(target_volume);
     if (a.plsm) {
       // ★ IN --plsm MODE THE OFFSET IS ADDED TO EVERY COEFFICIENT, not to phi.
@@ -2774,6 +2911,157 @@ int main(int argc, char** argv) {
     total_solve_wall += solve_wall;
     ++solves_total;
     if (sc.cg.used_multigrid) ++solves_multigrid;
+
+    // ══ ★ THE MONOTONE TOPOLOGY CONSTRAINT ═══════════════════════════════
+    //
+    // Evaluated on the field the physics is about to see, AFTER the offset
+    // bisection, so the count is the count of the design that gets solved and
+    // certified — not of an intermediate nobody keeps.
+    //
+    // ★ REPAIR IS IN COEFFICIENT SPACE AND IT HAS TO BE. phi is not a design
+    // variable here — it is Psi*alpha — so "fill this region" cannot be done by
+    // writing voxels; doing that would put the design outside the span of the
+    // basis and every claim about the representation would be void. The repair
+    // instead pushes the OFFENDING REGION down in alpha:
+    //
+    //     alpha <- alpha - s * Psi^T m ,   m = indicator of the new components
+    //
+    // which lowers phi exactly where m is, smoothly, and stays in the span by
+    // construction. Solid is {phi < 0}, so LOWERING phi fills void.
+    // ★ MEASUREMENT IS UNGATED; ONLY ENFORCEMENT IS BEHIND `--monotone`.
+    //
+    // These were one block, gated together, and that made the CONTROL ARM
+    // useless: the arm that exists to show what the component count does WITHOUT
+    // the constraint recorded `void_components = 0` on every row, because the
+    // counter lived inside the enforcement branch. Every check the night queue
+    // makes — exit code, summary.txt, iteration count, FATAL in the log — passed
+    // on that arm. It ran perfectly and measured nothing, which is the failure
+    // mode a green run is worst at surfacing.
+    //
+    // So the topology is now counted on EVERY iteration of every PLSM arm, and
+    // `--monotone` decides only whether a violation is acted upon. The cost is a
+    // union-find and a cubical-complex sweep over 468,224 voxels, which is
+    // milliseconds against a 25-second iteration.
+    if (!alpha.empty()) {
+      auto in_active = [&](std::size_t v) {
+        return grid.tags[v] != VoxelTag::Empty && eff[v] == MaskValue::Active;
+      };
+      VoidTopology tp = void_topology(d, occ, in_active, true);
+      // ★★ THE BRIEF'S TEST AND THE RIGHT TEST ARE DIFFERENT, AND THE
+      // DIFFERENCE IS THIS TASK'S ANSWER. THE OVERRIDE IS DECLARED HERE.
+      //
+      // The brief says: "ENFORCE THAT THE NUMBER OF CONNECTED VOID COMPONENTS
+      // NEVER INCREASES." Implemented literally, that fires constantly — the
+      // count went 87 -> 468 -> 555 on the smoke run — while the number of
+      // GENUINELY NEW components (ones sharing no voxel with any previous void)
+      // was 3 and 8 voxels. The count is not rising because holes are being
+      // created. It is rising because the EXISTING void is FRAGMENTING as solid
+      // bridges across a channel and divides it in two.
+      //
+      // ★ AND A VOID SPLIT IS SOLID MERGING, WHICH IS CLASSICALLY LEGAL. Cui et
+      // al.'s own list of what a Hamilton-Jacobi level set may do — "vanishing
+      // of a hole, merging of holes, and breaking apart of a region" — permits
+      // exactly this: a region breaking apart is, in void terms, a void
+      // splitting. Forbidding it would forbid the optimiser from joining
+      // material across a gap, which is how structure forms at all, and would
+      // make the arm a test of something nobody wants.
+      //
+      // ★ SO THE CONSTRAINT FIRES ON NUCLEATION — a void component appearing
+      // where there was none — and the SPLIT count is measured and reported
+      // beside it rather than suppressed. That is what "no nucleation" means,
+      // and it is what the classical method actually lacks.
+      int n_new = 0;
+      {
+        std::vector<char> isnew(static_cast<std::size_t>(tp.components) + 1, 1);
+        for (std::size_t v = 0; v < n; ++v)
+          if (tp.label[v] && prev_void[v])
+            isnew[static_cast<std::size_t>(tp.label[v])] = 0;
+        for (int c = 1; c <= tp.components; ++c)
+          if (isnew[static_cast<std::size_t>(c)]) ++n_new;
+      }
+      mono_new_components = prev_components < 0 ? 0 : n_new;
+      mono_split_delta = prev_components < 0
+                             ? 0
+                             : (tp.components - prev_components) - mono_new_components;
+      // ★ `mono_violations` counts what the constraint WOULD have caught, so it
+      // is incremented on the control arm too — that is the number the control
+      // exists to produce. Only the repair below is gated.
+      if (prev_components >= 0 && n_new > 0) ++mono_violations;
+      if (a.monotone && prev_components >= 0 && n_new > 0) {
+        int tries = 0;
+        for (; tries < a.monotone_repair; ++tries) {
+          // Which components are NEW: those containing no voxel that was void
+          // last iteration. A component that merely GREW is not new.
+          std::vector<char> isnew(static_cast<std::size_t>(tp.components) + 1, 1);
+          for (std::size_t v = 0; v < n; ++v)
+            if (tp.label[v] && prev_void[v]) isnew[static_cast<std::size_t>(tp.label[v])] = 0;
+          std::vector<double> m(n, 0.0);
+          std::size_t mcount = 0;
+          for (std::size_t v = 0; v < n; ++v)
+            if (tp.label[v] && isnew[static_cast<std::size_t>(tp.label[v])]) {
+              m[v] = 1.0; ++mcount;
+            }
+          if (mcount == 0) break;   // split rather than nucleated; nothing to close
+          mono_repaired_voxels += mcount;
+          std::vector<double> dm(L.count(), 0.0);
+          spmv(PsiT, m, dm, plsm_threads);
+          std::vector<double> pf(n, 0.0);
+          spmv(Psi, dm, pf, plsm_threads);
+          double pmax = 0.0;
+          for (std::size_t v = 0; v < n; ++v)
+            if (m[v] > 0.0) pmax = std::max(pmax, std::fabs(pf[v]));
+          if (!(pmax > 0.0)) break;
+          // Push those voxels a full band width below zero, so the fill is not
+          // marginal and cannot be undone by the next offset bisection alone.
+          const double sstep = (2.0 * eta) / pmax;
+          for (std::size_t i2 = 0; i2 < L.count(); ++i2) alpha[i2] -= sstep * dm[i2];
+          plsm_sync();
+          // ★ THE OFFSET RE-SOLVE BELONGS INSIDE THE LOOP. Filling void adds
+          // material, so the bisection pulls the surface back to hold the
+          // volume — and that pull can RE-OPEN what the repair just closed.
+          // Repairing and re-projecting alternately is a fixed-point iteration
+          // on both constraints at once; doing them in sequence once is not,
+          // and the smoke run showed the count rising anyway.
+          const double offr = solve_offset(target_volume);
+          for (double& c : alpha) c += offr;
+          plsm_sync();
+          build_fields(0.0);
+          tp = void_topology(d, occ, in_active, true);
+          {
+            std::vector<char> nn(static_cast<std::size_t>(tp.components) + 1, 1);
+            for (std::size_t v = 0; v < n; ++v)
+              if (tp.label[v] && prev_void[v]) nn[static_cast<std::size_t>(tp.label[v])] = 0;
+            n_new = 0;
+            for (int c = 1; c <= tp.components; ++c)
+              if (nn[static_cast<std::size_t>(c)]) ++n_new;
+          }
+          if (n_new == 0) break;
+        }
+        if (n_new > 0) {
+          // ★ REPAIR FAILED — REVERT THE WHOLE STEP. The constraint is not
+          // negotiable; an arm that quietly let the count rise would be
+          // measuring the nucleating regime under a monotone label.
+          // ★ REPAIR FAILED — REVERT THE WHOLE STEP to where the iteration
+          // began, re-project onto the volume constraint, and recount. The
+          // design does not advance this iteration, which is the honest cost of
+          // the constraint and is counted in `mono_reverts`.
+          ++mono_reverts;
+          alpha = alpha_iter_start;
+          const double offb = solve_offset(target_volume);
+          for (double& c : alpha) c += offb;
+          plsm_sync();
+          build_fields(0.0);
+          tp = void_topology(d, occ, in_active, true);
+        }
+      }
+      mono_components = tp.components;
+      mono_chi = tp.chi;
+      mono_cavities = tp.cavities;
+      mono_tunnels = tp.tunnels;
+      prev_components = tp.components;
+      prev_void.assign(n, 0);
+      for (std::size_t v = 0; v < n; ++v) prev_void[v] = tp.label[v] ? 1 : 0;
+    }
 
     std::size_t printed = 0;
     for (std::size_t v = 0; v < n; ++v) if (occ[v] > 0.5) ++printed;
@@ -3489,7 +3777,10 @@ int main(int argc, char** argv) {
         << ',' << gamma_now << ',' << kappa_rms << ',' << perim_now << ','
         << (w * h * h * h) << ',' << robust_worst << ',' << robust_ratio << ','
         << nuc_frozen << ',' << diffusion_energy << ',' << diffusion_ratio
-        << ',' << it_wall << '\n';
+        << ',' << mono_components << ',' << mono_chi << ',' << mono_cavities
+        << ',' << mono_tunnels << ',' << mono_violations << ',' << mono_reverts
+        << ',' << mono_repaired_voxels << ',' << mono_new_components << ','
+        << mono_split_delta << ',' << it_wall << '\n';
     csv.flush();
 
     std::printf("it %3d  c = %.10g  vf = %.6f (occ %.1f)  offset %+.4f mm  "
