@@ -1,0 +1,5 @@
+field,printed_voxels,achieved_vf,fractional_samples,max_von_mises_mpa,margin_worst_case,margin_effective,accepted,min_feature_violations,load_path_connected,frozen_solid_below_iso,frozen_solid_total,frozen_void_above_iso,frozen_restored,mass_grams
+evidence/2026-08-12-plsm-matched-volume/arms/V0_none/snap/it0060,88424,0.797302171247,13118,0.0169118987132,3252.14814331,673.39887588,1,1070,1,0,40216,0,0,543.742324279
+evidence/2026-08-12-plsm-matched-volume/arms/V1_perim1/snap/it0060,88423,0.79729315444,6064,0.0169130321887,3251.93019124,673.353746116,1,506,1,0,40216,0,0,543.730026172
+evidence/2026-08-12-plsm-matched-volume/arms/V2_gyr20/snap/it0060,88423,0.79729315444,9850,0.0168763064734,3259.00694484,674.819078478,1,618,1,0,40216,0,0,543.748473332
+evidence/2026-08-12-plsm-matched-volume/sources/rung_0.68,88424,0.797302171247,28374,0.0169004939895,3254.3427449,673.853296213,1,407,1,0,40216,0,0,543.723877119

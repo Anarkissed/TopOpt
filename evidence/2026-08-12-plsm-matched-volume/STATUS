@@ -1,0 +1,7 @@
+17:58:22 START V0_none
+18:16:19 OK V0_none 60 iterations, printed_voxels=88424 (target ~88424)
+18:16:19 START V1_perim1
+18:34:21 OK V1_perim1 60 iterations, printed_voxels=88423 (target ~88424)
+18:34:21 START V2_gyr20
+18:54:55 OK V2_gyr20 60 iterations, printed_voxels=88423 (target ~88424)
+18:54:55 QUEUE_DONE
