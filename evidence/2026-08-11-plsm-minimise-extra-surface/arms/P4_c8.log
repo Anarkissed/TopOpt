@@ -1,0 +1,144 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: holes
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       24 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        regular hole array, period 8 voxels
+PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels PER AXIS
+            68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
+            support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
+            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 17.0 s
+            volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
+            update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
+PLSM        coefficient box +-462.1415 (4x the largest seed coefficient); a unit move of every
+            coefficient carries phi by at most 4.2335 mm, which is what sizes the MMA move
+VOLUME      constraint measures #{phi + c < 0} — the PRINTED count (S1: occupancy_volume and printed_voxels agree by construction)
+PERIMETER   C = 8, FIXED from iteration 1
+it   1  c = 0.004138030586  vf = 0.680003 (occ 75415.0)  offset +0.5148 mm  |v|max 1.62e-10  band 70109  hilb 0 (0.0e+00)  |grad|-1 3.94e-01  cg 1124  108.22 s
+it   2  c = 0.00383760157  vf = 0.680003 (occ 75415.0)  offset -0.0199 mm  |v|max 1.58e-10  band 70109  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 2021  23.77 s
+it   3  c = 0.003511701601  vf = 0.679994 (occ 75414.0)  offset -0.0391 mm  |v|max 1.45e-10  band 70394  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 1991  23.39 s
+it   4  c = 0.003391174976  vf = 0.679994 (occ 75414.0)  offset +0.0030 mm  |v|max 1.38e-10  band 70402  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 1983  15.48 s
+it   5  c = 0.003220323497  vf = 0.680003 (occ 75415.0)  offset -0.0181 mm  |v|max 1.23e-10  band 70373  hilb 0 (0.0e+00)  |grad|-1 3.84e-01  cg 1968  31.99 s
+it   6  c = 0.003046227636  vf = 0.679994 (occ 75414.0)  offset -0.0335 mm  |v|max 1.13e-10  band 70307  hilb 0 (0.0e+00)  |grad|-1 3.83e-01  cg 1991  15.80 s
+it   7  c = 0.003008447508  vf = 0.679994 (occ 75414.0)  offset +0.0040 mm  |v|max 1.04e-10  band 69970  hilb 0 (0.0e+00)  |grad|-1 3.80e-01  cg 1999  15.60 s
+it   8  c = 0.002926815489  vf = 0.679994 (occ 75414.0)  offset -0.0222 mm  |v|max 9.66e-11  band 68938  hilb 0 (0.0e+00)  |grad|-1 3.79e-01  cg 1976  15.49 s
+it   9  c = 0.002855839221  vf = 0.679994 (occ 75414.0)  offset -0.0269 mm  |v|max 8.83e-11  band 66630  hilb 0 (0.0e+00)  |grad|-1 3.78e-01  cg 1952  15.80 s
+it  10  c = 0.002896256696  vf = 0.680003 (occ 75415.0)  offset +0.0157 mm  |v|max 8.85e-11  band 65028  hilb 0 (0.0e+00)  |grad|-1 3.90e-01  cg 1956  32.13 s
+it  11  c = 0.003325356603  vf = 0.680003 (occ 75415.0)  offset +0.0241 mm  |v|max 9.85e-11  band 60493  hilb 0 (0.0e+00)  |grad|-1 3.89e-01  cg 2086  17.20 s
+it  12  c = 0.003325890519  vf = 0.680003 (occ 75415.0)  offset -0.0127 mm  |v|max 1.86e-10  band 58063  hilb 0 (0.0e+00)  |grad|-1 3.85e-01  cg 2149  25.98 s
+it  13  c = 0.003330643133  vf = 0.679994 (occ 75414.0)  offset -0.0084 mm  |v|max 2.45e-10  band 54548  hilb 0 (0.0e+00)  |grad|-1 3.82e-01  cg 2242  20.65 s
+it  14  c = 0.003399682859  vf = 0.679994 (occ 75414.0)  offset +0.0123 mm  |v|max 3.67e-10  band 48508  hilb 0 (0.0e+00)  |grad|-1 3.81e-01  cg 2433  21.35 s
+it  15  c = 0.003395840997  vf = 0.680003 (occ 75415.0)  offset -0.0026 mm  |v|max 4.59e-10  band 41897  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 2555  41.47 s
+it  16  c = 0.00354777245  vf = 0.679994 (occ 75414.0)  offset -0.0414 mm  |v|max 2.1e-09  band 30200  hilb 0 (0.0e+00)  |grad|-1 3.92e-01  cg 3036  31.98 s
+it  17  c = 0.003487405391  vf = 0.679994 (occ 75414.0)  offset -0.0058 mm  |v|max 1.42e-09  band 27676  hilb 0 (0.0e+00)  |grad|-1 3.92e-01  cg 3069  27.28 s
+it  18  c = 0.003444129418  vf = 0.679994 (occ 75414.0)  offset +0.0000 mm  |v|max 8.43e-10  band 25534  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 3055  26.95 s
+it  19  c = 0.003402587261  vf = 0.680003 (occ 75415.0)  offset +0.0002 mm  |v|max 5.17e-10  band 23114  hilb 0 (0.0e+00)  |grad|-1 3.95e-01  cg 3058  26.41 s
+it  20  c = 0.003354190127  vf = 0.680003 (occ 75415.0)  offset -0.0045 mm  |v|max 4.54e-10  band 20900  hilb 0 (0.0e+00)  |grad|-1 3.88e-01  cg 3100  43.85 s
+it  21  c = 0.003438743777  vf = 0.680003 (occ 75415.0)  offset -0.0099 mm  |v|max 6.41e-10  band 10445  hilb 0 (0.0e+00)  |grad|-1 3.87e-01  cg 3220  26.16 s
+it  22  c = 0.003411044566  vf = 0.679994 (occ 75414.0)  offset +0.0046 mm  |v|max 5.55e-10  band 10034  hilb 0 (0.0e+00)  |grad|-1 3.87e-01  cg 3248  26.07 s
+it  23  c = 0.003374500239  vf = 0.679994 (occ 75414.0)  offset -0.0002 mm  |v|max 5.13e-10  band 9716  hilb 0 (0.0e+00)  |grad|-1 3.87e-01  cg 3266  26.23 s
+it  24  c = 0.003346342189  vf = 0.679994 (occ 75414.0)  offset +0.0038 mm  |v|max 4.84e-10  band 9405  hilb 0 (0.0e+00)  |grad|-1 3.88e-01  cg 3281  27.81 s
+it  25  c = 0.003315486925  vf = 0.680003 (occ 75415.0)  offset +0.0007 mm  |v|max 4.44e-10  band 9137  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 3290  46.53 s
+it  26  c = 0.003309979824  vf = 0.679994 (occ 75414.0)  offset -0.0008 mm  |v|max 3.83e-10  band 8410  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 3009  26.37 s
+it  27  c = 0.003274288212  vf = 0.680003 (occ 75415.0)  offset -0.0055 mm  |v|max 3.24e-10  band 8282  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 3014  23.79 s
+it  28  c = 0.00324859632  vf = 0.679994 (occ 75414.0)  offset +0.0006 mm  |v|max 2.82e-10  band 8178  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 3035  24.44 s
+it  29  c = 0.003223498288  vf = 0.679994 (occ 75414.0)  offset -0.0010 mm  |v|max 2.49e-10  band 8092  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 3046  31.47 s
+it  30  c = 0.003200169165  vf = 0.680003 (occ 75415.0)  offset -0.0002 mm  |v|max 2.15e-10  band 7999  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 3060  43.87 s
+it  31  c = 0.003194988517  vf = 0.680003 (occ 75415.0)  offset +0.0036 mm  |v|max 2.23e-10  band 8035  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 3038  26.86 s
+it  32  c = 0.003178325713  vf = 0.679994 (occ 75414.0)  offset +0.0041 mm  |v|max 2.06e-10  band 7943  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 3003  23.78 s
+it  33  c = 0.003163979835  vf = 0.680003 (occ 75415.0)  offset +0.0061 mm  |v|max 1.97e-10  band 7896  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 2980  24.43 s
+it  34  c = 0.003145858117  vf = 0.680003 (occ 75415.0)  offset +0.0008 mm  |v|max 1.79e-10  band 7880  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 2984  24.42 s
+it  35  c = 0.003128765845  vf = 0.680003 (occ 75415.0)  offset +0.0010 mm  |v|max 1.6e-10  band 7907  hilb 0 (0.0e+00)  |grad|-1 4.08e-01  cg 2921  40.30 s
+it  36  c = 0.003127068212  vf = 0.680003 (occ 75415.0)  offset +0.0004 mm  |v|max 1.7e-10  band 7763  hilb 0 (0.0e+00)  |grad|-1 4.08e-01  cg 2844  22.45 s
+it  37  c = 0.003112624382  vf = 0.680003 (occ 75415.0)  offset +0.0006 mm  |v|max 1.62e-10  band 7776  hilb 0 (0.0e+00)  |grad|-1 4.08e-01  cg 2843  23.48 s
+it  38  c = 0.003096492878  vf = 0.680003 (occ 75415.0)  offset -0.0016 mm  |v|max 1.51e-10  band 7847  hilb 0 (0.0e+00)  |grad|-1 4.08e-01  cg 2934  26.94 s
+it  39  c = 0.003082197072  vf = 0.680003 (occ 75415.0)  offset -0.0007 mm  |v|max 1.39e-10  band 7901  hilb 0 (0.0e+00)  |grad|-1 4.08e-01  cg 2894  25.80 s
+it  40  c = 0.00307077426  vf = 0.680003 (occ 75415.0)  offset +0.0029 mm  |v|max 1.32e-10  band 7937  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 2883  40.85 s
+it  41  c = 0.003076365385  vf = 0.680003 (occ 75415.0)  offset +0.0012 mm  |v|max 1.48e-10  band 7576  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 2896  22.50 s
+it  42  c = 0.003066574348  vf = 0.679994 (occ 75414.0)  offset +0.0025 mm  |v|max 1.42e-10  band 7649  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 2868  22.28 s
+it  43  c = 0.00305449584  vf = 0.680003 (occ 75415.0)  offset -0.0007 mm  |v|max 1.35e-10  band 7745  hilb 0 (0.0e+00)  |grad|-1 4.10e-01  cg 2850  22.40 s
+it  44  c = 0.003044446476  vf = 0.679994 (occ 75414.0)  offset +0.0004 mm  |v|max 1.3e-10  band 7849  hilb 0 (0.0e+00)  |grad|-1 4.11e-01  cg 2834  22.03 s
+it  45  c = 0.003031301739  vf = 0.679994 (occ 75414.0)  offset -0.0029 mm  |v|max 1.22e-10  band 7963  hilb 0 (0.0e+00)  |grad|-1 4.05e-01  cg 2833  38.97 s
+it  46  c = 0.003038044671  vf = 0.680003 (occ 75415.0)  offset -0.0021 mm  |v|max 1.31e-10  band 7497  hilb 0 (0.0e+00)  |grad|-1 4.05e-01  cg 2884  22.25 s
+it  47  c = 0.003028563431  vf = 0.679994 (occ 75414.0)  offset -0.0017 mm  |v|max 1.32e-10  band 7605  hilb 0 (0.0e+00)  |grad|-1 4.04e-01  cg 2900  22.37 s
+it  48  c = 0.003020311384  vf = 0.680003 (occ 75415.0)  offset -0.0008 mm  |v|max 1.3e-10  band 7710  hilb 0 (0.0e+00)  |grad|-1 4.04e-01  cg 2927  22.75 s
+it  49  c = 0.003011876533  vf = 0.680003 (occ 75415.0)  offset -0.0024 mm  |v|max 1.26e-10  band 7846  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 2931  22.74 s
+it  50  c = 0.003007671627  vf = 0.680003 (occ 75415.0)  offset +0.0033 mm  |v|max 1.21e-10  band 8006  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 2938  49.80 s
+it  51  c = 0.00302325493  vf = 0.680003 (occ 75415.0)  offset -0.0008 mm  |v|max 1.3e-10  band 7429  hilb 0 (0.0e+00)  |grad|-1 4.03e-01  cg 2929  28.58 s
+it  52  c = 0.003016413545  vf = 0.680003 (occ 75415.0)  offset -0.0031 mm  |v|max 1.28e-10  band 7516  hilb 0 (0.0e+00)  |grad|-1 4.01e-01  cg 2936  22.77 s
+it  53  c = 0.0030112539  vf = 0.679994 (occ 75414.0)  offset -0.0004 mm  |v|max 1.24e-10  band 7685  hilb 0 (0.0e+00)  |grad|-1 4.02e-01  cg 2930  22.56 s
+it  54  c = 0.003006016545  vf = 0.679994 (occ 75414.0)  offset +0.0001 mm  |v|max 1.2e-10  band 7855  hilb 0 (0.0e+00)  |grad|-1 4.02e-01  cg 2944  22.67 s
+it  55  c = 0.002999962832  vf = 0.679994 (occ 75414.0)  offset -0.0018 mm  |v|max 1.17e-10  band 8055  hilb 0 (0.0e+00)  |grad|-1 4.02e-01  cg 2943  39.82 s
+it  56  c = 0.003026596152  vf = 0.680003 (occ 75415.0)  offset -0.0001 mm  |v|max 1.28e-10  band 7368  hilb 0 (0.0e+00)  |grad|-1 4.02e-01  cg 2966  23.39 s
+it  57  c = 0.003023932794  vf = 0.680003 (occ 75415.0)  offset +0.0014 mm  |v|max 1.28e-10  band 7472  hilb 0 (0.0e+00)  |grad|-1 4.02e-01  cg 2956  22.79 s
+it  58  c = 0.003016319723  vf = 0.680003 (occ 75415.0)  offset -0.0066 mm  |v|max 1.25e-10  band 7634  hilb 0 (0.0e+00)  |grad|-1 4.02e-01  cg 2936  23.73 s
+it  59  c = 0.003010347573  vf = 0.679994 (occ 75414.0)  offset -0.0029 mm  |v|max 1.21e-10  band 7848  hilb 0 (0.0e+00)  |grad|-1 4.02e-01  cg 2954  22.84 s
+it  60  c = 0.003006669617  vf = 0.680003 (occ 75415.0)  offset +0.0010 mm  |v|max 1.15e-10  band 8032  hilb 0 (0.0e+00)  |grad|-1 4.00e-01  cg 2942  44.00 s
+
+certifying iteration 9 (best compliance 0.002855839221 of 60 run)
+analytic    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/P4_c8/plsm_f1.f64  (128 x 31 x 118, spacing 1.705279 mm)
+analytic    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/P4_c8/plsm_f2.f64  (256 x 62 x 236, spacing 0.852640 mm)
+mesh        232010 vertices, 464764 triangles -> levelset.stl
+
+== levelset_probe summary ==
+seed                 holes
+rung                 0.68
+THREADS              3
+iterations run       60
+WALL PER ITERATION   28.403 s   (total 1704.2 s over 60 iterations)
+  of which solve     24.611 s/iteration (1476.7 s total)
+  of which extension 0.001 s/iteration (0.0 s total)
+certification wall   32.7 s
+state solves         60, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         2 voxels = 3.410559 mm
+reinit |grad phi|-1  rms 0.400413 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.999753 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00285583922141   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00482432836893
+achieved vf          0.679994  (target 0.68, printed 75414 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.053590638 MPa
+margin in-plane      1026.298658462
+margin interlayer    2601.624872814
+MARGIN worst case    1026.298658462
+margin effective     212.508266066   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    5283
+mass                 463.8046 g
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/P4_c8/{iterations.csv,design.bin,rho.f64,rho.meta,levelset.stl,summary.txt}
+
+for the roughness row, on the SAME binary that produced PR 321's:
+  ./build/external_field_surface_probe <ref/design.bin> <part.step> <dir> LS=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/P4_c8/rho

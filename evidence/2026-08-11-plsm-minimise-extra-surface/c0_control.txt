@@ -1,0 +1,8 @@
+rows compared        5
+columns compared     20  (excluded as wall clocks: iteration_wall_s, sensitivity_ms, solve_ms)
+columns DROPPED      none
+columns ADDED        ['perim_weight', 'interface_area_mm2']
+perim_weight         0 on every row (the flag is OFF)
+interface_area_mm2   61729.0009752 .. 57820.7552192  (new, positive)
+
+PASS — every computed column reproduces PR 324's ARM 2 exactly.

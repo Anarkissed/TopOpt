@@ -1,0 +1,15 @@
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/arms/A4_mask/snap/it0060.f64
+binarized            no
+fractional samples   26281 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016235390 MPa
+MARGIN worst case    3387.661098497
+margin effective     701.458566788   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1171
+mass                 463.7985 g
+load path connected  yes

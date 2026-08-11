@@ -282,6 +282,16 @@ namespace {
 #include "plsm_basis.hpp"
 #include "plsm_mma.hpp"
 
+// ── ★ TASK 2026-08-12: THE ERSATZ DENSITY AS THE EXACT VOLUME FRACTION.
+// `rho_e = H_eta(-phi(x_centre))` becomes `rho_e = |{phi<0} cap cell| / |cell|`,
+// computed by sub-cell sampling of the SAME analytic phi, with the SAME
+// sub-cell lattice `plsm_evaluate` and `marching_cubes_resampled` use. The
+// sensitivity moves with it — a mismatched gradient here looks like slow
+// convergence and is believed. `--frac` arms it; without the flag not one line
+// of it executes and PR 326's arms reproduce bit for bit (`--frac 0` is the
+// control that proves it).
+#include "frac_ersatz.hpp"
+
 
 // ── (d) VELOCITY EXTENSION: separable [1 2 1]/4, `passes` times ─────────────
 void smooth_field(const Dims& d, std::vector<double>& f, int passes) {
@@ -757,6 +767,9 @@ struct Args {
   // accumulation order), so this can only change the wall clock.
   int threads = 3;
   std::string seed = "simp";
+  // --seed-period P   the hole array's period in VOXELS. 8 is PR 324's ARM 2
+  //                   and is the default, so every earlier run reproduces.
+  double seed_period = 8.0;
   bool fp32 = false;
   bool isolate = false;
   int reinit_every = 1;
@@ -873,6 +886,198 @@ struct Args {
   bool russo_smereka = false;
   double perimeter = 0.0;
   bool reinit_substeps = false;
+
+  // ── S1 (task 2026-08-11-plsm-minimise-extra-surface): THE HONEST VOLUME
+  // CONSTRAINT. ★ PR 324 §6 found the defect and did not fix it, on the grounds
+  // that fixing it would make ARM 2 incomparable to everything it was measured
+  // against. This task re-baselines ARM 2, so it is fixed here.
+  //
+  // The constraint measures `∫ H_eta(-phi)` — a SMOOTHED volume. The part that
+  // gets printed, that `analyze_fixed_design` certifies and that the mass is
+  // computed from, is `#{rho > 0.5}` = `#{phi + c < 0}`. Those two agree only
+  // when the band is symmetric about the interface; as INTERFACE AREA grows they
+  // diverge, because a band cell contributes its H value to one and a hard 0/1
+  // to the other. Measured in PR 324: one arm held `occupancy_volume` pinned at
+  // 75,414.7 for 30 consecutive iterations — the bisection doing its job to the
+  // digit — while `achieved_vf` slid 0.6839 -> 0.6634, giving up 3.0% of the
+  // printed material and 12.3 g without ever violating its own constraint.
+  //
+  // ★ AND THE DRIFT IS IN THE DIRECTION THAT MATTERS FOR THIS TASK: it is
+  // proportional to interface area, so left in it silently REWARDS the very
+  // thing S3 is trying to suppress. Every measurement downstream of here is
+  // about interface area. That is why it is fixed first.
+  //
+  // `--volume-count` makes the constrained quantity the hard count. It is one
+  // line in `volume_at` (below); everything else — the bisection, MMA's g0, the
+  // reported `occupancy_volume` — reads that one function and follows.
+  bool volume_count = false;
+
+  // ── S3: PERIMETER CONTINUATION ────────────────────────────────────────────
+  //
+  // ★ THE LITERATURE IS CONSISTENT THAT AN AREA TERM MUST BE RELAXED EARLY.
+  // A perimeter penalty inhibits topological change — it is a cost on creating
+  // interface, and nucleating a hole creates interface before it creates any
+  // compliance benefit. Allaire, Jouve & Toader (2004) §5 note the perimeter
+  // term "penalizes" topology changes and use small or vanishing weights;
+  // Osher & Santosa (2001), who introduced it, ramp it. ★ AND FOR THIS ARM IT
+  // MATTERS MORE THAN USUAL: hole nucleation from a plain array is exactly what
+  // makes the parametric form able to replace SIMP with no seed (PR 324 §6). A
+  // full-strength penalty from iteration 1 would buy smoothness by taking away
+  // the property the method was adopted for.
+  //
+  // `--perimeter-ramp START,LEN`: the weight is 0 for it < START, ramps
+  // linearly to the full `--perimeter` value at it = START+LEN, and holds. The
+  // default 0,0 is a step at iteration 1 — i.e. exactly the fixed weight, so
+  // the flag defaulted off changes nothing.
+  int perimeter_ramp_start = 0;
+  int perimeter_ramp_len = 0;
+
+  // ── ARM 2 MECHANISM — LOCAL PERIMETER / CURVATURE CONCENTRATION ───────────
+  //
+  // ★ THE PROBLEM THIS EXISTS FOR, NAMED FIRST. PR 325 measured what a global
+  // perimeter penalty costs: at C=2 it took interface area down 22% and the
+  // certified margin down 6.4%; at C=8, area −30% and margin −66%. It taxes
+  // EVERY square millimetre of interface at the same rate, including the large,
+  // smooth, load-bearing outer shell, which is exactly the surface we want to
+  // keep. The structure it removes is load-bearing — PR 325 checked, and its own
+  // prediction that margin had saturated was refuted by the certificate.
+  //
+  // ★ THE LITERATURE'S ANSWER IS TO PRICE CURVATURE, NOT AREA. The Willmore
+  // energy W = ∫_Γ kappa^2 ds is the standard curvature-concentration
+  // functional; the survey framing is that it "controls curvature concentration
+  // and promotes smoothness WITHOUT inducing shrinkage, in contrast to area
+  // minimisation which risks topological collapse". A smooth shell of large
+  // radius costs almost nothing under W and its full area under Per.
+  //
+  // For a functional ∫_Γ f ds with f a field defined on the whole level-set
+  // family, the shape derivative is ∫_Γ (∂f/∂n + f*kappa) v_n ds. With f =
+  // kappa^2 that is ∫ (2*kappa*∂_n kappa + kappa^3) v_n ds. So
+  //
+  //     ell * kappa * (1 + beta * (kappa/kappa_rms)^2)          [--perimeter-local]
+  //
+  // is the gradient of  Per + (beta/kappa_rms^2) * W  WITH THE ∂_n kappa TERM
+  // DROPPED — and that dropped term is the expensive, noisy one on a 128^3 grid,
+  // because it differentiates a quantity that is already two differences deep.
+  // ★ THE OMISSION IS MEASURED RATHER THAN ASSUMED: `--willmore-full` puts
+  // 2*kappa*(grad kappa . n) back, by central differences on the curvature field
+  // this loop already builds, so the two can be run against each other.
+  //
+  // kappa is normalised by the band's own rms curvature (the `kappa_rms` the CSV
+  // has always carried), so beta is dimensionless and needs no retuning per part
+  // — the same discipline `--perimeter`'s ell = C*lambda*h follows.
+  double perimeter_local = 0.0;
+  bool willmore_full = false;
+
+  // ── ARM 2 MECHANISM — THE ROBUST FORMULATION (Sigmund 2009) ───────────────
+  //
+  // ★ THE PROBLEM: fine branching pays. A thin member contributes stiffness in
+  // proportion to its area and surface in proportion to its perimeter, and
+  // nothing in the formulation notices that it is thin. A perimeter penalty
+  // prices its SURFACE; this prices its FRAGILITY instead.
+  //
+  // Sigmund (2009) "Manufacturing tolerant topology optimization" and Wang,
+  // Lazarov & Sigmund (2011) optimise the WORST of three designs — eroded,
+  // intermediate and dilated — so a member that disappears under erosion buys
+  // nothing at all. In a density method that needs three projections of a
+  // filtered field; ★ ON A LEVEL SET IT IS FREE OF MACHINERY, because eroding by
+  // delta is just {phi < -delta}: one constant, the same phi, no filter and no
+  // projection. That is the reason to try it here rather than there.
+  //
+  // ★ AND IT IS NOT A MINIMUM-FEATURE CONSTRAINT, which this task's brief rules
+  // out on the evidence that the measured problem is AREA and that min-feature
+  // violations already IMPROVE in the level-set arms (4,717 against SIMP's
+  // 5,464). A thickness rule FORBIDS thin members. This one lets the optimiser
+  // build them and declines to pay for them, so it acts on the branching rate
+  // rather than on a width.
+  //
+  // ★ WHAT IT COSTS: three state solves per iteration instead of one, so ~3x the
+  // wall clock. Speed is out of scope for this task and this is said plainly
+  // rather than hidden.
+  //
+  // ★ ONE DEVIATION FROM THE PAPER, DECLARED. The robust formulation normally
+  // puts the volume constraint on the DILATED design and rescales so the
+  // intermediate lands on target. Here the constraint stays on the INTERMEDIATE,
+  // because the intermediate is the part that gets printed, certified and
+  // weighed, and every other row in this task's tables holds that same volume.
+  // Moving the constraint would make the mass column incomparable, which is the
+  // one thing the brief's bar is written against.
+  double robust = 0.0;   // erosion/dilation depth in VOXELS; 0 = off
+
+  // ── ARM 2 MECHANISM — THE NUCLEATION BAND (`--nucleation-band W`) ─────────
+  //
+  // ★ THIS TASK'S OWN §4 FOUND THE CAUSE: the surface is NUCLEATED, not seeded.
+  // Eight times fewer seed holes removed only 8.9% of it, so the fine structure
+  // is created during the run. The mechanism is the one PR 324 celebrated as the
+  // reason this method needs no SIMP seed — a coefficient away from the
+  // interface can be driven negative on its own and open a hole. ★THE CAPABILITY
+  // AND THE DEFECT ARE THE SAME MECHANISM. This is the knob that separates them.
+  //
+  // Luo & Tong (2008, IJNME 76(6):862-892) is the reference point, via Dunning &
+  // Kim (IJNME 93(1):118-134): holes "can also emerge NEAR THE BOUNDARY in an RBF
+  // type approach if a VOLUME INTEGRAL METHOD is used to compute shape
+  // sensitivities WITHIN A NARROW BAND around the boundary." Everywhere against
+  // band is the distinction, and it is a statement about WHICH COEFFICIENTS MOVE.
+  //
+  // ★★ AND IT HAS TO BE APPLIED IN COEFFICIENT SPACE, NOT TO THE INTEGRAND —
+  // WHICH IS AN OVERRIDE OF THE RECOMMENDATION AS IT WAS GIVEN TO ME, AND THE
+  // REASON IS ONE LINE OF `levelset_kernel.hpp`:
+  //
+  //     double dheaviside(double t, double eta) {
+  //       if (t <= -eta || t >= eta) return 0.0;   // <- compact support
+  //
+  // The shape-derivative integrand here is ALREADY exactly zero outside
+  // |phi| < eta = 2 voxels. Masking it to a tube |phi| < omega with the
+  // recommended omega >= 2*eta = 4 voxels is a SUPERSET of where it is already
+  // non-zero: it would change nothing, on any arm, at any weight.
+  //
+  // ★ THE LEAK IS THE SUPPORT RADIUS, NOT THE BAND. The gradient MMA consumes is
+  // g = Psi^T v. A knot contributes iff its SUPPORT overlaps the band, and the
+  // support radius here is 2 x spacing = 4 voxels. So every knot whose CENTRE is
+  // up to 4 voxels inside solid receives a gradient and can be driven negative —
+  // and once it opens a hole, the knots 4 voxels beyond THAT become live, so
+  // nucleation marches inward. Masking by knot-to-interface distance is what
+  // closes it, and to bite at all W must be BELOW the support radius of 4.
+  //
+  // ★ IT IS A RESTRICTION, NOT A FALSIFIED GRADIENT. Zeroing components of g
+  // makes each iteration a search over the SUBSPACE of near-interface
+  // coefficients — a restricted problem, which is exactly what a band method is.
+  // The masked coefficients are held EXACTLY (the MMA result is overwritten with
+  // their current value) rather than left to drift on the regulariser alone.
+  // The volume offset is still added to every coefficient, because that is a
+  // rigid move of the surface and not a design change.
+  double nucleation_band = 0.0;   // VOXELS from the interface; 0 = off
+
+  // ── ★ A MARGIN-AWARE STOPPING RULE, AND A WALL-CLOCK CAP ──────────────────
+  //
+  // ★ THIS EXISTS BECAUSE THIS TASK MEASURED THAT THE STOPPING RULE WE HAVE IS
+  // WATCHING THE WRONG THING. Every arm here stops on a compliance plateau
+  // (window 10, tol 1e-3, the shipped MMA termination). But the certified
+  // MARGIN settles far later than the compliance does: the re-baseline moved
+  // 27% in margin between iterations 40 and 60 while its compliance moved
+  // 0.05%, and C=8 DOUBLED its margin over the same span. So a compliance
+  // plateau is not evidence that the design is finished, and every arm in §3
+  // stopped while its margin was still climbing.
+  //
+  //   --certify-every N   certify the CURRENT design every N iterations, with
+  //                       the posture disarmed exactly as a re-certification
+  //                       disarms it, and RE-ARMED afterwards so the trajectory
+  //                       is not altered by having been measured.
+  //   --margin-stop M     stop as soon as that certified margin reaches M.
+  //   --wall-cap S        stop when the run has used S seconds. Checked after
+  //                       an iteration completes, so the cap is a floor on the
+  //                       wall clock, not a guillotine mid-solve.
+  //
+  // ★ THE CERTIFICATION IS NOT FREE AND ITS COST IS REPORTED SEPARATELY, so a
+  // timing produced with this on is not silently inflated.
+  int certify_every = 0;
+  // ★ AND A FLOOR ON WHEN TO START. Certifying an unconverged design costs 26x
+  // what certifying a converged one costs (20.9 s at iteration 5 against
+  // 537.9 s at iteration 10, measured), and an early certificate cannot pass
+  // the target anyway. Starting the cadence late is what makes a margin-aware
+  // stopping rule affordable at all.
+  int certify_from = 0;
+  double margin_stop = 0.0;
+  double wall_cap = 0.0;
   // --weno   WENO5 one-sided derivatives in the Godunov gradient (5th order,
   //          essentially non-oscillatory) instead of plain first-order ones.
   // --rk3    TVD-RK3 time stepping instead of forward Euler. Pairs with --weno;
@@ -897,6 +1102,63 @@ struct Args {
   bool damp = false;
   double damp_factor = 0.75;  // theirs: "reduce ... by 25%"
   int damp_window = 5;        // theirs: the 5-iteration stopping window
+
+  // ══ TASK 2026-08-12 — THE EXACT VOLUME FRACTION ERSATZ ═══════════════════
+  //
+  // ★ THE ONE CHANGE. `rho_e = H_eta(-phi(x_centre))` becomes the exact fraction
+  // of the cell inside {phi < 0}, by k x k x k sub-cell sampling of the SAME
+  // analytic phi. Everything about the solver is untouched: the cell stiffness
+  // is still rho_e * K0, so the 24x24 reference block, the matrix-free stencil,
+  // the multigrid, GenEO, the recycler and the Galerkin block cache never learn
+  // that anything changed. What changes is that rho_e now varies CONTINUOUSLY as
+  // the interface moves inside a cell instead of stepping when it crosses the
+  // centre. `frac_ersatz.hpp` holds the sampling, the band and the projection.
+  //
+  //   --frac K            arm it, with K sub-samples per axis (K=0 is OFF and is
+  //                       the control: every PR 326 arm reproduces bit for bit)
+  //   --frac-eps M        the QUADRATURE bandwidth multiplier. eps_q =
+  //                       M * |grad phi| * h/K — tied to the SAMPLE SPACING, so
+  //                       it shrinks like 1/K. It is not eta wearing a hat and
+  //                       `frac_ersatz.hpp` says why at length.
+  //   --frac-sens MODE    `exact` (default) evaluates psi_i AT THE SAMPLES and
+  //                       scatters; `centre` factors psi_i out at the cell
+  //                       centre and reuses Psi^T. The second is the ablation
+  //                       that prices the sub-cell psi.
+  //   --frac-soft         the CONSISTENTLY MOLLIFIED variant: the hard sample
+  //                       indicator becomes the exact antiderivative of the
+  //                       quadrature mollifier, so the value and the gradient
+  //                       are two facts about ONE function. It removes the
+  //                       piecewise-constant wart; see frac_ersatz.hpp.
+  //   --frac-export       ALSO write the emitted occupancy as the volume
+  //                       fraction, beside the H_eta one. R5 keeps the H_eta
+  //                       export as the row of record; this is the named
+  //                       control for what the EXPORT convention is worth.
+  //   --frac-kreport      k = 2/4/8 on THIS design, then exit. S1(a).
+  //   --frac-fd N         ★ R4. Finite-difference the volume and the compliance
+  //                       sensitivities against the analytic ones on N
+  //                       coefficients and on random directions, then exit.
+  int frac = 0;
+  double frac_eps = 1.0;
+  std::string frac_sens = "exact";
+  bool frac_soft = false;
+  bool frac_export = false;
+  bool frac_kreport = false;
+  int frac_fd = 0;
+  // --frac-aniso   ARM 2: price the cut cell's ANISOTROPY against the scalar
+  //                volume fraction, by the rank-one laminate. A 3x3 solve per
+  //                cut cell; no element matrix anywhere.
+  bool frac_aniso = false;
+  // --frac-eps-l1  ★ ARM 2 M5. Scale the quadrature bandwidth by |grad phi|_1
+  //                instead of |grad phi|_2, which is what Engquist, Tornberg &
+  //                Tsai (JCP 207(1):28-51, 2005) prove is required for the
+  //                mollified surface delta to converge at all in 2D or 3D. See
+  //                frac_ersatz.hpp. Defaults OFF so ARM 1 is unchanged.
+  bool frac_eps_l1 = false;
+  // --alpha PREFIX   read `<PREFIX>.f64` as this basis's coefficients, in place
+  //                  of the seed fit. `plsm_probe` has had this since PR 326 and
+  //                  this file has not, so every question about a FINISHED
+  //                  design needed the run that produced it re-run.
+  std::string alpha_in;
 };
 
 }  // namespace
@@ -922,6 +1184,41 @@ int main(int argc, char** argv) {
         "       [--plsm-basis wendland|gaussian] [--plsm-knots dx,dy,dz]\n"
         "       [--plsm-support S] [--plsm-ridge L] [--plsm-band-weight W]\n"
         "       [--plsm-move M] [--plsm-bound B] [--plsm-refit-every N]\n"
+        "  ★ THE EXACT VOLUME FRACTION ERSATZ (task 2026-08-12):\n"
+        "       [--frac K]           rho_e = |{phi<0} cap cell| / |cell| by KxKxK\n"
+        "                            sub-cell sampling, instead of H_eta at the\n"
+        "                            cell CENTRE. 0 = off (the control).\n"
+        "       [--frac-eps M]       quadrature bandwidth eps_q = M*|grad phi|*h/K\n"
+        "       [--frac-sens exact|centre]   psi_i at the SAMPLES (default) or\n"
+        "                            factored out at the cell centre (ablation)\n"
+        "       [--frac-soft]        consistently mollified: the value is the\n"
+        "                            antiderivative of the gradient's mollifier\n"
+        "       [--frac-export]      also emit the fraction field beside H_eta's\n"
+        "       [--frac-kreport]     K = 2/4/8 on this design, then exit\n"
+        "       [--frac-fd N]        finite-difference the sensitivity, then exit\n"
+        "  SMOOTHNESS (task 2026-08-11-plsm-minimise-extra-surface):\n"
+        "       [--volume-count]     constrain #{phi + c < 0} — the PRINTED\n"
+        "                            count — instead of the smoothed integral\n"
+        "                            int H_eta(-phi). Closes PR 324 §6's silent\n"
+        "                            drift, which grows with INTERFACE AREA.\n"
+        "       [--perimeter C]      the perimeter penalty, ell = C*lambda*h\n"
+        "       [--perimeter-ramp START,LEN]  ramp C on from 0: zero until\n"
+        "                            START, linear to full over LEN. An area\n"
+        "                            term inhibits hole nucleation, which is the\n"
+        "                            property that lets this arm replace SIMP.\n"
+        "       [--perimeter-local B] price CURVATURE, not area: the Willmore\n"
+        "                            gradient with the d_n(kappa) term dropped\n"
+        "       [--willmore-full]     put that dropped term back, so the\n"
+        "                            omission is measured rather than assumed\n"
+        "       [--robust DELTA]      Sigmund 2009: optimise the WORST of the\n"
+        "                            eroded/intermediate/dilated designs. DELTA\n"
+        "                            in voxels. THREE state solves per iteration.\n"
+        "       [--nucleation-band W] only coefficients within W voxels of the\n"
+        "                            interface may move. Closes interior hole\n"
+        "                            nucleation, which is what generates the\n"
+        "                            surface. Must be < the RBF support radius.\n"
+        "       [--seed-period P]     the hole array's period in voxels (8 =\n"
+        "                            PR 324's ARM 2). The seed's topology scale.\n"
         "  SPEED PROBES (S17) — none of them touches production:\n"
         "       [--warm-start]       seed each state solve with the PREVIOUS\n"
         "                            iteration's displacement field\n"
@@ -966,6 +1263,38 @@ int main(int argc, char** argv) {
     else if (s == "--damp") a.damp = true;
     else if (s == "--russo-smereka") a.russo_smereka = true;
     else if (s == "--perimeter") next(a.perimeter);
+    else if (s == "--perimeter-ramp" && i + 1 < argc) {
+      if (std::sscanf(argv[++i], "%d,%d", &a.perimeter_ramp_start,
+                      &a.perimeter_ramp_len) != 2) {
+        std::printf("FATAL: --perimeter-ramp wants START,LEN (iterations)\n");
+        std::exit(1);
+      }
+      if (a.perimeter_ramp_start < 0 || a.perimeter_ramp_len < 0) {
+        std::printf("FATAL: --perimeter-ramp START and LEN must be >= 0\n");
+        std::exit(1);
+      }
+    }
+    else if (s == "--volume-count") a.volume_count = true;
+    // ── the exact volume fraction ersatz (task 2026-08-12)
+    else if (s == "--frac") nexti(a.frac);
+    else if (s == "--frac-eps") next(a.frac_eps);
+    else if (s == "--frac-sens" && i + 1 < argc) a.frac_sens = argv[++i];
+    else if (s == "--frac-soft") a.frac_soft = true;
+    else if (s == "--frac-export") a.frac_export = true;
+    else if (s == "--frac-kreport") a.frac_kreport = true;
+    else if (s == "--frac-fd") nexti(a.frac_fd);
+    else if (s == "--frac-aniso") a.frac_aniso = true;
+    else if (s == "--frac-eps-l1") a.frac_eps_l1 = true;
+    else if (s == "--alpha" && i + 1 < argc) a.alpha_in = argv[++i];
+    else if (s == "--perimeter-local") next(a.perimeter_local);
+    else if (s == "--willmore-full") a.willmore_full = true;
+    else if (s == "--robust") next(a.robust);
+    else if (s == "--nucleation-band") next(a.nucleation_band);
+    else if (s == "--certify-every") nexti(a.certify_every);
+    else if (s == "--certify-from") nexti(a.certify_from);
+    else if (s == "--margin-stop") next(a.margin_stop);
+    else if (s == "--wall-cap") next(a.wall_cap);
+    else if (s == "--seed-period") next(a.seed_period);
     else if (s == "--reinit-substeps") a.reinit_substeps = true;
     else if (s == "--weno") a.weno = true;
     else if (s == "--rk3") a.rk3 = true;
@@ -1008,9 +1337,146 @@ int main(int argc, char** argv) {
     else if (s == "--seed" && i + 1 < argc) a.seed = argv[++i];
     else { std::printf("FATAL: unknown argument %s\n", s.c_str()); return 2; }
   }
+  // ★ REFUSED, NOT IGNORED — the lesson PR 324 §9 paid for. `--plsm-hilb` under
+  // `--plsm-mma` changed nothing at all, to twelve digits, and would have been
+  // written up as an ablation that "measured no effect" if the run had not been
+  // read closely. A flag that cannot act must say so.
+  if (a.perimeter_local > 0.0 && !(a.perimeter > 0.0)) {
+    std::printf(
+        "FATAL: --perimeter-local scales the SAME ell as --perimeter\n"
+        "       (ell = C*lambda*h, term = ell*kappa*(1 + beta*(kappa/kappa_rms)^2)),\n"
+        "       so with C = 0 it multiplies zero and would measure nothing.\n"
+        "       Give it a --perimeter C > 0.\n");
+    return 2;
+  }
+  if (a.willmore_full && !(a.perimeter_local > 0.0)) {
+    std::printf(
+        "FATAL: --willmore-full restores the 2*kappa*(grad kappa . n) term that\n"
+        "       --perimeter-local drops. With beta = 0 there is no Willmore term\n"
+        "       to complete. Give it a --perimeter-local BETA > 0.\n");
+    return 2;
+  }
+  if (!(a.seed_period > 1.0)) {
+    std::printf("FATAL: --seed-period must be > 1 voxel (got %.4g); at or below\n"
+                "       one voxel the cosine array is not resolved by the grid\n"
+                "       and the seed is aliasing, not holes.\n", a.seed_period);
+    return 2;
+  }
+  if (a.robust < 0.0) {
+    std::printf("FATAL: --robust takes an erosion depth in VOXELS >= 0\n");
+    return 2;
+  }
+  if (a.margin_stop > 0.0 && a.certify_every <= 0) {
+    std::printf(
+        "FATAL: --margin-stop needs --certify-every N. The margin is not\n"
+        "       computed by the optimisation loop — it comes from\n"
+        "       analyze_fixed_design, which has to be CALLED. Without a\n"
+        "       cadence there is nothing for the rule to read and the flag\n"
+        "       would silently never fire.\n");
+    return 2;
+  }
+  // ★ REFUSED RATHER THAN IGNORED, and the number it is checked against is the
+  // RBF support radius, because that is what the mask has to beat. A knot
+  // contributes to the gradient iff its support reaches the band; with support
+  // = `--plsm-support` x spacing, a mask at or above that radius cannot remove
+  // a single non-zero component and would measure nothing at all. This is
+  // exactly the trap PR 324 §9 hit with `--plsm-hilb` under `--plsm-mma`.
+  if (a.nucleation_band > 0.0) {
+    const double support_vox =
+        a.plsm_support * std::max({a.plsm_dx, a.plsm_dy, a.plsm_dz});
+    if (a.nucleation_band >= support_vox) {
+      std::printf(
+          "FATAL: --nucleation-band %.4g voxels is at or beyond the RBF support\n"
+          "       radius (%.4g x max spacing %.4g = %.4g voxels). Every knot with a\n"
+          "       non-zero gradient already lies inside that radius, so the mask\n"
+          "       would zero nothing and the arm would measure the control.\n",
+          a.nucleation_band, a.plsm_support,
+          std::max({a.plsm_dx, a.plsm_dy, a.plsm_dz}), support_vox);
+      return 2;
+    }
+  }
   if (a.simp && a.rules.empty()) {
     std::printf("FATAL: --simp needs --rules <settings/rules.json> (the shipped\n"
                 "       ladder takes the rule table the CLI takes)\n");
+    return 2;
+  }
+
+  // ── ★ THE EXACT-FRACTION ERSATZ REFUSES WHAT IT HAS NOT MADE CONSISTENT ───
+  //
+  // A density and a sensitivity that describe different objects is the single
+  // most likely way this run is wasted, so every combination whose gradient this
+  // task has NOT rewritten is refused outright rather than run and believed.
+  if (a.frac > 0) {
+    if (!a.plsm) {
+      std::printf(
+          "FATAL: --frac needs --plsm. The fraction is an integral of the\n"
+          "       ANALYTIC phi over the cell; a per-voxel phi has no value\n"
+          "       between its samples to integrate, and interpolating one would\n"
+          "       measure the interpolant. The voxel arms keep H_eta.\n");
+      return 2;
+    }
+    if (a.frac < 2 || a.frac > 16) {
+      std::printf("FATAL: --frac K must be between 2 and 16 (K=%d given). K=1 is\n"
+                  "       the cell centre, i.e. the H_eta arm with a hard step.\n",
+                  a.frac);
+      return 2;
+    }
+    if (!a.plsm_mma && a.frac_fd == 0 && !a.frac_kreport) {
+      std::printf(
+          "FATAL: --frac needs --plsm-mma. The steepest-descent and L-BFGS\n"
+          "       branches consume `g = Psi^T v`, which evaluates psi_i at the\n"
+          "       CELL CENTRE — the approximation the fraction's derivative\n"
+          "       exists to remove. Refused rather than run with a gradient that\n"
+          "       does not belong to the density.\n");
+      return 2;
+    }
+    if (a.frac_sens != "exact" && a.frac_sens != "centre") {
+      std::printf("FATAL: --frac-sens must be `exact` or `centre` (got '%s')\n",
+                  a.frac_sens.c_str());
+      return 2;
+    }
+    if (a.robust > 0.0) {
+      std::printf(
+          "FATAL: --frac and --robust are not consistent in this build. The\n"
+          "       robust formulation reads the objective's sensitivity on the\n"
+          "       ERODED surface {phi = -delta} (PR 326 P7), which needs a second\n"
+          "       shifted quadrature this task has not written. Refused rather\n"
+          "       than run with the intermediate's band, which is the exact bug\n"
+          "       PR 326 caught by reading.\n");
+      return 2;
+    }
+    if (a.plsm_hilb) {
+      std::printf(
+          "FATAL: --frac and --plsm-hilb are not consistent in this build. The\n"
+          "       Hilbertian extension is a solve on the VOXEL field, so the\n"
+          "       sensitivity it returns cannot carry the sub-cell psi the\n"
+          "       fraction's derivative is an integral of.\n");
+      return 2;
+    }
+    if (a.no_surface_delta) {
+      std::printf(
+          "FATAL: --frac and --no-surface-delta contradict each other. The\n"
+          "       second replaces the surface measure by a volume one over the\n"
+          "       whole active domain; the first IS a surface measure.\n");
+      return 2;
+    }
+    if (!(a.frac_eps > 0.0)) {
+      std::printf("FATAL: --frac-eps must be > 0 (the quadrature mollifier would\n"
+                  "       have zero width and the sum would alias to nothing)\n");
+      return 2;
+    }
+  } else if (a.frac_kreport || a.frac_soft || a.frac_export) {
+    std::printf("FATAL: --frac-kreport / --frac-soft / --frac-export all need\n"
+                "       --frac K.\n");
+    return 2;
+  } else if (a.frac_fd > 0 && !a.plsm) {
+    // ★ --frac-fd WITHOUT --frac IS DELIBERATELY ALLOWED, and it is the control
+    // that makes R4 worth reading: it differences PR 326's OWN gradient —
+    // DH_eta(phi)*|grad phi| projected by Psi^T — against the same functions, on
+    // the same design, with the same steps. "The new gradient checks out" means
+    // nothing without knowing what the old one does.
+    std::printf("FATAL: --frac-fd needs --plsm (there are no coefficients to\n"
+                "       differentiate with respect to otherwise)\n");
     return 2;
   }
 
@@ -1651,7 +2117,23 @@ int main(int argc, char** argv) {
     // cosines, negative (solid) between the holes. The period is 8 voxels and the
     // holes are centred on the lattice, so the start is the same object at any
     // resolution of his part.
-    const double per = 8.0;
+    //
+    // ★ ARM 2 MECHANISM — THE SEED'S TOPOLOGY SCALE, AND IT IS NOT THE BASIS.
+    // PR 324 §6(ii) refuted a COARSER BASIS as a smoothness lever: 24,480
+    // coefficients against 85,680 moved carved share only 42.9% -> 40.9% and
+    // HALVED the margin. That is a statement about the DESIGN SPACE. This is a
+    // statement about the STARTING POINT, which is a different object: at period
+    // 8 on a 128 x 31 x 118 grid the seed contains on the order of a thousand
+    // holes, and a level set — parametric or not — is initial-design dependent.
+    // Wei, Li, Wang & Gao claim the parametric form has "LESS dependency on
+    // initial designs", not none. So the run inherits a topology roughly as fine
+    // as its seed, and every one of those interfaces is surface.
+    //
+    // ★ AND IT COSTS NOTHING. It adds no term, no state solve and no constraint,
+    // so unlike the perimeter penalty it cannot buy smoothness by removing
+    // load-bearing material — whatever it does to the margin it does by finding
+    // a different structure, not by taxing the one it found.
+    const double per = a.seed_period;
     for (int k = 0; k < d.nz; ++k)
       for (int j = 0; j < d.ny; ++j)
         for (int i = 0; i < d.nx; ++i)
@@ -1697,6 +2179,11 @@ int main(int argc, char** argv) {
   // the voxel mode `off_shape` is all ones and `phi + offset * 1` is the
   // existing line, unchanged — which is why the generalisation is a no-op there.
   std::vector<double> off_shape(n, 1.0);
+  // ★ THE NUCLEATION BAND's bookkeeping: which coefficients were allowed to
+  // move this iteration, and how many were held. `nuc_frozen` goes in the CSV
+  // so a mask that froze nothing (or everything) is visible rather than assumed.
+  std::vector<char> nuc_mask;
+  std::size_t nuc_frozen = 0;
   auto plsm_sync = [&]() {
     spmv(Psi, alpha, phi, plsm_threads);
   };
@@ -1714,6 +2201,7 @@ int main(int argc, char** argv) {
     const double t_p0 = now_s();
     Psi = build_A(d, L, pbasis, plsm_threads);
     PsiT = transpose(Psi, plsm_threads);
+    nuc_mask.assign(L.count(), 1);
     psi_sum.assign(n, 0.0);
     {
       const std::vector<double> ones(L.count(), 1.0);
@@ -1779,6 +2267,68 @@ int main(int argc, char** argv) {
   std::vector<double> occ(n, 0.0), rho(n, 0.0);
   const double rho_min = params.density_min;
 
+  // ══ ★ THE EXACT VOLUME FRACTION ERSATZ (task 2026-08-12) ═════════════════
+  //
+  // ★ TWO OCCUPANCIES, AND KEEPING THEM APART IS WHAT MAKES R5 HOLD.
+  //
+  //   occ[v]   the PRINTED occupancy. H_eta(-phi) at the cell centre, exactly
+  //            as PR 326 wrote it. It is what the volume constraint counts,
+  //            what `printed_voxels` counts, what is EXPORTED at F=1 and what
+  //            `analyze_fixed_design` certifies. ★ IT IS UNCHANGED, DELIBERATELY:
+  //            the printed set is `{H_eta(-phi) > 0.5}` = `{phi < 0}` — provably
+  //            eta-free, because H_eta is monotone with H(0) = 0.5 exactly (PR
+  //            326 §3(e) proves and measures it) — so the part this run makes,
+  //            weighs and certifies is defined bit-identically to PR 326's. One
+  //            variable changes and it is not the definition of the part.
+  //
+  //   frho[v]  the ERSATZ the STATE SOLVE sees. The exact fraction of the cell
+  //            inside {phi < 0}, sampled k x k x k. THIS is the one variable.
+  //
+  // Everything about the solver is untouched — the cell stiffness is still
+  // rho_e * K0 — but rho_e now moves continuously as the interface crosses the
+  // cell instead of stepping when it passes the centre.
+  const bool frac_on = a.frac > 0;
+  FracCache fcache;
+  std::vector<char> frac_sample(n, 0);
+  std::vector<double> frac_gm(n, 0.0);      // |grad phi|_2 per cell, for the AREA
+  // ★ THE BANDWIDTH SCALE, HELD APART FROM THE AREA'S |grad phi|. Equal to
+  // `frac_gm` unless --frac-eps-l1 moves it to the L1 norm; frac_ersatz.hpp says
+  // at length why the L1 norm is the one the quadrature needs and the L2 norm is
+  // the one the co-area area needs, and they are not the same number.
+  std::vector<double> frac_gs(n, 0.0);
+  std::vector<double> dfrac(n, 0.0);        // the quadrature band, 1/mm
+  std::size_t frac_boundary = 0;
+  double frac_build_s = 0.0, frac_sens_s = 0.0, frac_area = 0.0;
+  {
+    // ★ ONLY THE ACTIVE CELLS ARE EVER SAMPLED, and S1(b)'s "a few per cent" is
+    // an understatement on this part: `Empty`, `FrozenSolid` and `FrozenVoid`
+    // cells are stamped by the MASK and the optimiser has no say over them, so
+    // 397,536 of the 468,224 are excluded before any test on phi. The cells that
+    // are actually CUT are then COUNTED every iteration (`FracCache::n_boundary`)
+    // rather than bounded by a classifier — a classifier would need a margin,
+    // and a margin is one more thing that can be wrong.
+    for (std::size_t v = 0; v < n; ++v)
+      frac_sample[v] = (grid.tags[v] != VoxelTag::Empty &&
+                        eff[v] == MaskValue::Active) ? 1 : 0;
+  }
+  // Rebuilt from the CURRENT alpha, after the volume offset has been folded in
+  // and phi resynced, so the samples describe the phi the solve is about to see.
+  auto frac_refresh = [&]() {
+    if (!frac_on) return;
+    frac_build(d, L, pbasis, alpha, frac_sample, a.frac, plsm_threads, fcache);
+    frac_boundary = fcache.n_boundary;
+    frac_build_s = fcache.build_s;
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i) {
+          const std::size_t v = d.at(i, j, k);
+          frac_gm[v] = frac_sample[v] ? grad_mag(d, phi, i, j, k, h) : 0.0;
+          frac_gs[v] = (frac_sample[v] && a.frac_eps_l1)
+                           ? frac_grad_l1(d, phi, i, j, k, h)
+                           : frac_gm[v];
+        }
+  };
+
   auto build_fields = [&](double offset) {
     for (std::size_t v = 0; v < n; ++v) {
       double o;
@@ -1786,7 +2336,68 @@ int main(int argc, char** argv) {
       else if (eff[v] == MaskValue::FrozenSolid) o = 1.0;
       else o = heaviside(-(phi[v] + offset * off_shape[v]), eta);
       occ[v] = o;
-      rho[v] = rho_min + (1.0 - rho_min) * o;
+      // ★ rho FOLLOWS THE FRACTION WHEN IT IS ARMED, occ NEVER DOES. The frozen
+      // classes are stamped identically in both — they are the mask's statement
+      // and not the level set's — so the fraction only ever touches the 70,688
+      // cells the optimiser actually owns.
+      double e = o;
+      if (frac_on && offset != 0.0) {
+        // The cache is sampled from the CURRENT alpha, so a non-zero offset here
+        // would apply to `occ` and not to the fraction and the two would
+        // describe different surfaces. The loop folds the offset into alpha and
+        // calls this with 0; nothing else may.
+        std::printf("\n*** FATAL: build_fields(%.17g) under --frac. The fraction "
+                    "is sampled from\n*** alpha, so the offset must be folded in "
+                    "before this is called.\n", offset);
+        std::exit(3);
+      }
+      if (frac_on && grid.tags[v] != VoxelTag::Empty &&
+          eff[v] == MaskValue::Active) {
+        e = a.frac_soft
+                ? frac_of_soft(fcache, v,
+                               frac_eps(frac_gs[v], h, a.frac, a.frac_eps))
+                : frac_of(fcache, v);
+      }
+      rho[v] = rho_min + (1.0 - rho_min) * e;
+    }
+  };
+
+  // ★ S1 — WHAT THE CONSTRAINT ACTUALLY MEASURES. This is the one line PR 324
+  // §6 named and did not change.
+  //
+  // ★ AND THE PREDICATE IS `H_eta(-p) > 0.5`, NOT `p < 0`, WHICH IS NOT THE SAME
+  // TEST IN FLOATING POINT AND THE FIRST RUN CAUGHT IT. Mathematically the two
+  // sets are identical: `heaviside` is monotone with H(0) = 0.5 exactly. But for
+  // |p| below about 1e-16*eta the smoothed form evaluates
+  // 0.5*(1 + p/eta + sin(...)/pi) and ROUNDS BACK TO EXACTLY 0.5, so a voxel a
+  // rounding error inside the surface counts as printed by one test and not by
+  // the other. The re-baseline stopped on iteration 1 with 75,415 against
+  // 75,414 — one voxel — and the assertion is what stopped it.
+  //
+  // Writing the constraint as the printed predicate ITSELF is also the more
+  // honest statement of intent: PR 324 §6 says "the part is #{rho > 0.5}", the
+  // extraction takes iso 0.5, `analyze_fixed_design` reads that same field, and
+  // this now constrains exactly that set rather than an algebraically equal
+  // surrogate. `occupancy_volume` and `printed_voxels` agree bit for bit, which
+  // the loop asserts every iteration; without the flag they are free to
+  // separate and the CSV shows them doing it.
+  // ★ ARM 2 — THE ERODED AND DILATED DESIGNS, and the ONE thing that makes the
+  // robust formulation cheap on a level set. `build_fields` scales its offset by
+  // `off_shape` (which is `psi_sum` in parametric mode) because the volume
+  // offset has to stay inside the span of the basis. An EROSION must not: it is
+  // a rigid inward move of the surface by `dphi` millimetres, the same everywhere,
+  // and it is never a design — it is evaluated, solved, and thrown away. So this
+  // adds a plain constant. The frozen classes are copied through untouched:
+  // frozen material is not the optimiser's to erode, and eroding it would break
+  // the load path for a reason that has nothing to do with the design.
+  std::vector<double> rho_eroded(n, 0.0), rho_dilated(n, 0.0);
+  auto build_rho_shift = [&](double dphi, std::vector<double>& out) {
+    for (std::size_t v = 0; v < n; ++v) {
+      double o;
+      if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) o = 0.0;
+      else if (eff[v] == MaskValue::FrozenSolid) o = 1.0;
+      else o = heaviside(-(phi[v] + dphi), eta);
+      out[v] = rho_min + (1.0 - rho_min) * o;
     }
   };
 
@@ -1795,7 +2406,8 @@ int main(int argc, char** argv) {
     for (std::size_t v = 0; v < n; ++v) {
       if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) continue;
       if (eff[v] == MaskValue::FrozenSolid) { s += 1.0; continue; }
-      s += heaviside(-(phi[v] + offset * off_shape[v]), eta);
+      const double o = heaviside(-(phi[v] + offset * off_shape[v]), eta);
+      s += a.volume_count ? (o > 0.5 ? 1.0 : 0.0) : o;
     }
     return s;
   };
@@ -1837,6 +2449,30 @@ int main(int argc, char** argv) {
          "offset_mm,dt_mm_per_unit_v,max_abs_v,lambda,cg_iterations,converged,"
          "used_multigrid,solve_ms,sensitivity_ms,band_cells,hilb_iterations,"
          "hilb_relres,reinit_rms,reinit_max,hj_steps,gamma,kappa_rms,"
+         // ★ S3 — the two columns that make the penalty legible per iteration.
+         // `perim_weight` is the RAMPED weight actually applied (not the flag),
+         // so a continuation shows up in the file rather than only in the
+         // command line. `interface_area_mm2` is the quantity being penalised,
+         // measured as the functional itself: Per = ∫ DH_eta(phi)|grad phi| dΩ,
+         // which is `sum_v delta[v] * h^3` — `delta` is exactly that integrand
+         // and is already built for the shape derivative. So the objective term
+         // and its diagnostic are the same expression, not two.
+         "perim_weight,interface_area_mm2,"
+         // ARM 2: which of the eroded / intermediate / dilated designs the
+         // worst-case objective landed on (0/1/2), and its compliance against
+         // the intermediate's. Both are 1 when --robust is off.
+         "robust_worst,robust_ratio,nuc_frozen,"
+         // ★ THE EXACT-FRACTION COLUMNS (task 2026-08-12). All zero when --frac
+         // is off, so a PR 326 arm's file gains four zero columns and nothing
+         // else. `frac_cut_cells` is S1(b)'s question answered by COUNTING it
+         // every iteration; `frac_area_mm2` is the interface area measured on
+         // the new band (dfrac * |grad phi| * h^3), which is what
+         // `interface_area_mm2` means on the OLD one — the two columns are the
+         // same physical quantity through two different measures and are
+         // reported side by side rather than one being silently redefined.
+         // `frac_ms` is the whole per-iteration cost of the fraction: the
+         // sampling, the band and the scatter.
+         "frac_cut_cells,frac_area_mm2,frac_build_ms,frac_sens_ms,"
          "iteration_wall_s\n";
 
   // ── THE DIRICHLET SET FOR THE HILBERTIAN EXTENSION (difference 4) ──────────
@@ -1850,6 +2486,17 @@ int main(int argc, char** argv) {
     if (eff[v] == MaskValue::FrozenSolid) pinned[v] = 1;
 
   std::vector<double> vel(n, 0.0), raw_vel(n, 0.0), delta(n, 0.0);
+  // The band's mean-curvature field, built once per iteration when the perimeter
+  // term is on. Held out here rather than allocated inside the loop because the
+  // curvature-concentration term reads NEIGHBOURS of it (`--willmore-full`), so
+  // it has to exist as a field and not as a per-voxel scalar.
+  std::vector<double> curv_field(n, 0.0);
+  // The perimeter/curvature term, held apart from the energy so the two can
+  // ride DIFFERENT bands when --robust moves the objective's surface.
+  std::vector<double> pen(n, 0.0);
+  // The band of whichever design the objective landed on. Equal to `delta`
+  // unless --robust is on; see where it is filled.
+  std::vector<double> delta_obj(n, 0.0);
   // ARM 2's optimiser state. The coefficient box is sized from the SEED, because
   // an RBF coefficient is scaled like the distance it interpolates (mm here) and
   // there is no universal bound to write down; +-4x the largest seed coefficient
@@ -1876,9 +2523,83 @@ int main(int argc, char** argv) {
                 "what sizes the MMA move\n", plsm_alpha_bound, a.plsm_bound,
                 plsm_psi_max);
   }
+  // ★ SAID OUT LOUD IN THE LOG, because both of these change what the run
+  // OPTIMISES rather than only how fast it gets there, and a table row is
+  // meaningless without knowing which convention produced it.
+  std::printf("VOLUME      constraint measures %s\n",
+              a.volume_count
+                  ? "#{phi + c < 0} — the PRINTED count (S1: occupancy_volume "
+                    "and printed_voxels agree by construction)"
+                  : "int H_eta(-phi) — the SMOOTHED integral (PR 324's "
+                    "convention; drifts from the printed part with area)");
+  if (a.perimeter > 0.0) {
+    if (a.perimeter_ramp_start > 0 || a.perimeter_ramp_len > 0)
+      std::printf("PERIMETER   C = %.4g, RAMPED: zero until iteration %d, full "
+                  "at %d\n", a.perimeter, a.perimeter_ramp_start,
+                  a.perimeter_ramp_start + a.perimeter_ramp_len);
+    else
+      std::printf("PERIMETER   C = %.4g, FIXED from iteration 1\n", a.perimeter);
+  }
+  // ★ SAID OUT LOUD, BECAUSE IT IS THE ONE VARIABLE. A table row produced with
+  // this on and one produced with it off are two different formulations, and the
+  // log must not leave that to be inferred from a command line.
+  if (frac_on) {
+    std::size_t nact = 0;
+    for (std::size_t v = 0; v < n; ++v) nact += frac_sample[v] ? 1 : 0;
+    std::printf(
+        "★ ERSATZ    THE EXACT VOLUME FRACTION, not H_eta at the cell centre.\n"
+        "            rho_e = |{phi<0} cap cell| / |cell|, by %d x %d x %d = %d\n"
+        "            sub-samples of the ANALYTIC phi per cell, on the SAME\n"
+        "            sub-cell lattice marching_cubes_resampled uses.\n"
+        "            %zu of %zu cells are sampled (the ACTIVE ones); the rest are\n"
+        "            stamped 0/1 by the mask and were never the level set's.\n"
+        "            value    %s\n"
+        "            gradient %s\n"
+        "            eps_q    %.4g x |grad phi|_%d x h/%d = %.5f mm at |grad phi| = 1\n"
+        "                     — a QUADRATURE bandwidth tied to the sample spacing,\n"
+        "                       so it shrinks like 1/K. It is not eta: eta is a\n"
+        "                       fixed 2 voxels and appears in the density; this\n"
+        "                       appears in no density at all.\n"
+        "            export   %s\n",
+        a.frac, a.frac, a.frac, a.frac * a.frac * a.frac, nact, n,
+        a.frac_soft ? "MOLLIFIED — the antiderivative of the gradient's own "
+                      "mollifier (--frac-soft)"
+                    : "the HARD sample count (piecewise constant in alpha; see "
+                      "frac_ersatz.hpp)",
+        a.frac_sens == "exact"
+            ? "EXACT — psi_i evaluated AT THE SAMPLES and scattered"
+            : "CENTRE — psi_i factored out at the cell centre, Psi^T (ABLATION)",
+        a.frac_eps, a.frac_eps_l1 ? 1 : 2, a.frac,
+        frac_eps(1.0, h, a.frac, a.frac_eps),
+        a.frac_export ? "H_eta (the row of record, R5) AND the fraction, side by side"
+                      : "H_eta only — R5, bit-identical to PR 326's convention");
+    std::printf(
+        "            ★ WHAT STILL READS eta, stated rather than left to be found:\n"
+        "              * the PRINTED predicate {H_eta(-phi) > 0.5}. Provably\n"
+        "                eta-free as a SET (H is monotone, H(0) = 0.5 exactly),\n"
+        "                so the part, its mass and its certificate are defined\n"
+        "                identically to PR 326's. R5.\n"
+        "              * the F>=1 EXPORT's field values, where eta DOES move\n"
+        "                vertex placement. Kept as the row of record; --frac-export\n"
+        "                emits the fraction beside it as the named control.\n"
+        "              * the reinit residual's reporting band and the refit's fit\n"
+        "                weight — diagnostics and the approximate reinitialisation,\n"
+        "                neither of which is the variable under test.\n"
+        "              * Per = INT DH_eta(phi)|grad phi| — GONE with the density.\n"
+        "                Under --frac the perimeter term rides the QUADRATURE band\n"
+        "                and no longer contains eta at all.\n");
+  }
+
   std::vector<double> best_occ, best_rho;
   double best_compliance = std::numeric_limits<double>::infinity();
   int best_iter = -1;
+  // In-loop certification bookkeeping, so its cost is reported apart from the
+  // optimisation's and a timing produced with it on is not silently inflated.
+  double cert_wall_inloop = 0.0;
+  long long cert_calls_inloop = 0;
+  double margin_stop_hit = 0.0;
+  int margin_stop_iter = -1;
+  bool wall_cap_hit = false;
 
   // The previous iterate's displacement field, for --warm-start.
   FeaSolution warm;
@@ -1910,6 +2631,493 @@ int main(int argc, char** argv) {
                 static_cast<int>(solver_now), a.warm_start ? "ON" : "off",
                 a.cg_tol_early, a.cg_tol_until);
 
+  // ══ ★ --alpha: READ A DESIGN'S COEFFICIENTS BACK IN ══════════════════════
+  //
+  // `plsm_probe` has had this since PR 326 and this file has not, so every
+  // question about a FINISHED design had to be answered by re-running the
+  // optimiser that produced it. The two report modes below are exactly such
+  // questions — S1(a)'s k-convergence and R4's finite difference are both
+  // statements about ONE design — and asking them of a converged arm costs
+  // nothing this way and an hour the other.
+  if (!a.alpha_in.empty()) {
+    if (!a.plsm) {
+      std::printf("FATAL: --alpha needs --plsm; there are no coefficients "
+                  "otherwise\n");
+      return 2;
+    }
+    std::ifstream ain(a.alpha_in + ".f64", std::ios::binary);
+    if (!ain) {
+      std::printf("FATAL: cannot read %s.f64\n", a.alpha_in.c_str());
+      return 2;
+    }
+    std::vector<double> ain_v(L.count(), 0.0);
+    ain.read(reinterpret_cast<char*>(ain_v.data()),
+             static_cast<std::streamsize>(ain_v.size() * sizeof(double)));
+    // ★ THE COUNT IS CHECKED, NOT ASSUMED. A coefficient file from a different
+    // knot spacing would load silently, fit nothing, and produce a plausible
+    // table. It is exactly the shape of failure R2 exists to prevent.
+    if (static_cast<std::size_t>(ain.gcount()) != ain_v.size() * sizeof(double)) {
+      std::printf("FATAL: %s.f64 is %lld bytes; this knot lattice (%d x %d x %d)\n"
+                  "       needs %zu. The coefficients are not this basis's.\n",
+                  a.alpha_in.c_str(), static_cast<long long>(ain.gcount()), L.mx,
+                  L.my, L.mz, ain_v.size() * sizeof(double));
+      return 2;
+    }
+    alpha = ain_v;
+    plsm_sync();
+    std::printf("ALPHA       %zu coefficients read from %s.f64 — the seed fit "
+                "above is DISCARDED\n", alpha.size(), a.alpha_in.c_str());
+  }
+
+  // ══ ★ S1(a) — THE k-CONVERGENCE REPORT ═══════════════════════════════════
+  //
+  // The fraction against k = 2, 4 and 8 on ONE fixed design, so the sub-sampling
+  // error and its cost are a measurement rather than a choice. Nothing is
+  // optimised here.
+  if (a.frac_kreport) {
+    const int ks[3] = {2, 4, 8};
+    std::vector<double> f[3];
+    double wall[3] = {0.0, 0.0, 0.0};
+    std::size_t cut[3] = {0, 0, 0};
+    std::printf("\n══ THE FRACTION AGAINST k ══════════════════════════════════\n");
+    for (int q = 0; q < 3; ++q) {
+      FracCache C;
+      frac_build(d, L, pbasis, alpha, frac_sample, ks[q], plsm_threads, C);
+      wall[q] = C.build_s;
+      cut[q] = C.n_boundary;
+      f[q].assign(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v)
+        if (frac_sample[v]) f[q][v] = frac_of(C, v);
+      double sum = 0.0;
+      for (std::size_t v = 0; v < n; ++v) sum += f[q][v];
+      std::printf("k = %-2d  %8zu cut cells of %8zu sampled   sum f_v = %14.6f"
+                  "   %.3f s\n",
+                  ks[q], C.n_boundary, C.ncell, sum, C.build_s);
+    }
+    std::printf("\n  differences, over the CUT cells only (an uncut cell is 0 or "
+                "1 at every k):\n");
+    for (int q = 1; q < 3; ++q) {
+      double s2 = 0.0, mx = 0.0, dsum = 0.0;
+      std::size_t cnt = 0;
+      for (std::size_t v = 0; v < n; ++v) {
+        if (!frac_sample[v]) continue;
+        const double e = f[q][v] - f[q - 1][v];
+        dsum += e;
+        if (f[q][v] > 0.0 && f[q][v] < 1.0) { s2 += e * e; mx = std::max(mx, std::fabs(e)); ++cnt; }
+      }
+      std::printf("  k=%d against k=%d: rms %.6f, max %.6f over %zu cells; "
+                  "sum f_v moves %+.4f voxels (%.4f%% of the part)\n",
+                  ks[q], ks[q - 1], cnt ? std::sqrt(s2 / static_cast<double>(cnt)) : 0.0,
+                  mx, cnt, dsum, 100.0 * dsum / target_volume);
+    }
+    std::printf("\n  cut cells: %zu / %zu / %zu at k = 2 / 4 / 8; "
+                "build %.3f / %.3f / %.3f s\n",
+                cut[0], cut[1], cut[2], wall[0], wall[1], wall[2]);
+    std::ofstream kc(a.out + "/frac_kreport.csv");
+    kc.precision(12);
+    kc << "k,cut_cells,sampled_cells,sum_f,build_s\n";
+    for (int q = 0; q < 3; ++q) {
+      double sum = 0.0;
+      for (std::size_t v = 0; v < n; ++v) sum += f[q][v];
+      kc << ks[q] << ',' << cut[q] << ',' << fcache.ncell << ',' << sum << ','
+         << wall[q] << '\n';
+    }
+    std::printf("wrote %s/frac_kreport.csv\n", a.out.c_str());
+  }
+
+  // ══ ★ R4 — THE SENSITIVITY AGAINST A FINITE DIFFERENCE ═══════════════════
+  //
+  // ★ A WRONG GRADIENT HERE IS THE SINGLE MOST LIKELY WAY THIS RUN IS WASTED,
+  // and it would not announce itself: a mismatched derivative converges, just
+  // slowly and to somewhere else. So both sensitivities MMA consumes are
+  // differenced against the functions they claim to be derivatives of.
+  //
+  //   dV/dalpha  V(alpha) = SUM over ACTIVE cells of f_v. No state solve.
+  //   dC/dalpha  C(alpha) = the compliance of the ersatz. Two state solves per
+  //              probe direction, which is why N is small.
+  //
+  // ★ THE SIGN CONVENTION, WRITTEN OUT SO IT CANNOT BE THE BUG. MMA's design is
+  // beta = -alpha, so `dv` and `dc` are derivatives with respect to BETA:
+  //     dV/dalpha_i = -dv_i
+  //     dC/dalpha_i = -(1 - rho_min) * E0 * dc_i
+  // the second because `energy_from` un-does the SIMP interpolation, so
+  // dC/drho_v = -e_v * E0 and drho_v/dalpha_i = (1-rho_min) * df_v/dalpha_i.
+  //
+  // ★ AND THE STEP SIZE IS SWEPT RATHER THAN CHOSEN, because the HARD-sampled
+  // fraction is PIECEWISE CONSTANT in alpha: it jumps by 1/k^3 as each sample
+  // crosses. A step too small differences a flat, a step too large leaves the
+  // linear regime, and the plateau between them is the answer. A single step
+  // would have produced one number and no way to know which of the three it was.
+  // `--frac-soft` has no staircase and its plateau should reach machine
+  // precision; that difference IS the measurement.
+  if (a.frac_fd > 0) {
+    // The design as it stands, on the constraint surface, exactly as an
+    // iteration would see it.
+    const double off0 = solve_offset(target_volume);
+    for (double& c : alpha) c += off0;
+    plsm_sync();
+    frac_refresh();
+    build_fields(0.0);
+
+    // V and C, and the analytic gradients of both, at this point.
+    auto volume_functional = [&]() {
+      double s = 0.0;
+      for (std::size_t v = 0; v < n; ++v) {
+        if (!frac_sample[v]) continue;
+        s += frac_on ? (a.frac_soft
+                            ? frac_of_soft(fcache, v,
+                                           frac_eps(frac_gs[v], h, a.frac, a.frac_eps))
+                            : frac_of(fcache, v))
+                     : heaviside(-phi[v], eta);
+      }
+      return s;
+    };
+    auto compliance_now = [&]() {
+      const SimpCompliance s =
+          simp_compliance(grid, traj_params, rho, bcs, loads,
+                          options.simp.cg_tolerance,
+                          options.simp.cg_max_iterations, nullptr,
+                          pen_solver.get(), solver_now);
+      return s;
+    };
+
+    const SimpCompliance sc0 = compliance_now();
+    const double V0 = volume_functional();
+
+    // The band and the two projections, built exactly as the loop builds them.
+    if (frac_on) frac_band(fcache, frac_gs, h, a.frac_eps, dfrac, plsm_threads);
+    std::vector<double> dlt(n, 0.0), ev(n, 0.0);
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i) {
+          const std::size_t v = d.at(i, j, k);
+          if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active) continue;
+          dlt[v] = frac_on ? dfrac[v]
+                           : (dheaviside(phi[v], eta) > 0.0
+                                  ? dheaviside(phi[v], eta) *
+                                        grad_mag(d, phi, i, j, k, h)
+                                  : 0.0);
+          ev[v] = energy_from(sc0.dcompliance[v], rho[v], traj_params.penalty,
+                              traj_params.youngs_modulus);
+        }
+    std::vector<double> dc(L.count(), 0.0), dv(L.count(), 0.0);
+    if (frac_on && a.frac_sens == "exact") {
+      std::vector<double> wv(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v) wv[v] = dlt[v] > 0.0 ? 1.0 : 0.0;
+      frac_scatter(fcache, d, L, pbasis, frac_gs, h, a.frac_eps, ev, dc, wv, dv,
+                   plsm_threads);
+    } else {
+      std::vector<double> ed(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v) ed[v] = ev[v] * dlt[v];
+      spmv(PsiT, ed, dc, plsm_threads);
+      spmv(PsiT, dlt, dv, plsm_threads);
+    }
+    for (double& c : dc) c = -c;   // MMA's convention: material IN lowers C
+
+    const double e0_mod = traj_params.youngs_modulus;
+    auto pred_V = [&](const std::vector<double>& u) {
+      double s = 0.0;
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2) s -= dv[i2] * u[i2];
+      return s;
+    };
+    auto pred_C = [&](const std::vector<double>& u) {
+      double s = 0.0;
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2) s -= dc[i2] * u[i2];
+      return s * (1.0 - rho_min) * e0_mod;
+    };
+
+    const std::vector<double> alpha0 = alpha;
+    // Perturb, WITHOUT re-solving the offset: the finite difference is of the
+    // UNCONSTRAINED functions, which is what the gradients are gradients of.
+    auto at = [&](const std::vector<double>& u, double s, bool want_c,
+                  double& Vout, double& Cout) {
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2)
+        alpha[i2] = alpha0[i2] + s * u[i2];
+      plsm_sync();
+      frac_refresh();
+      build_fields(0.0);
+      Vout = volume_functional();
+      Cout = want_c ? compliance_now().compliance : 0.0;
+    };
+
+    std::ofstream fd(a.out + "/frac_fd.csv");
+    fd.precision(12);
+    fd << "kind,which,step,pred_dV,fd_dV,relerr_V,pred_dC,fd_dC,relerr_C\n";
+    std::printf("\n══ R4 — THE SENSITIVITY AGAINST A CENTRAL DIFFERENCE ═══════\n");
+    std::printf("design: %s ersatz, %s gradient, k = %d, eps_q mult %.3g\n",
+                frac_on ? (a.frac_soft ? "MOLLIFIED FRACTION" : "EXACT FRACTION")
+                        : "H_eta AT THE CELL CENTRE (PR 326's)",
+                frac_on && a.frac_sens == "exact" ? "sample-scatter" : "Psi^T",
+                a.frac, a.frac_eps);
+    std::printf("C0 = %.12g   V0 = %.6f (active cells only)\n\n", sc0.compliance, V0);
+
+    // ── (i) RANDOM DIRECTIONS. The cleanest check, because a direction that
+    // touches every knot averages the staircase over ~10^4 cut cells.
+    // ★ THE DIRECTIONS ARE DETERMINISTIC (a fixed LCG seeded per index), so this
+    // report reproduces exactly. A random_device here would make R4 unrepeatable.
+    const double steps[5] = {1e-3, 1e-2, 1e-1, 3e-1, 1.0};
+    for (int r = 0; r < 2; ++r) {
+      std::vector<double> u(L.count(), 0.0);
+      unsigned long long st = 88172645463325252ULL + static_cast<unsigned long long>(r) * 7919ULL;
+      double nrm = 0.0;
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2) {
+        st ^= st << 13; st ^= st >> 7; st ^= st << 17;
+        u[i2] = (static_cast<double>(st >> 11) * (1.0 / 9007199254740992.0)) - 0.5;
+        nrm += u[i2] * u[i2];
+      }
+      nrm = std::sqrt(nrm / static_cast<double>(L.count()));
+      for (double& x : u) x /= nrm;   // unit RMS, so a step is "mm of coefficient"
+      const double pV = pred_V(u), pC = pred_C(u);
+      for (double s : steps) {
+        // ★ THE VOLUME DIFFERENCE IS FREE AND THE COMPLIANCE ONE COSTS TWO STATE
+        // SOLVES, so the step sweep is run in full on the volume — which is the
+        // sharper test, because it isolates d f_v / d alpha with no energy chain
+        // in the way — and the compliance is differenced only where the volume
+        // sweep says the linear regime is. Both are reported; neither is
+        // extrapolated from the other.
+        const bool want_c = (s == 1e-2 || s == 1e-1);
+        double Vp, Cp, Vm, Cm;
+        at(u, +s, want_c, Vp, Cp);
+        at(u, -s, want_c, Vm, Cm);
+        const double fV = (Vp - Vm) / (2.0 * s);
+        const double fC = want_c ? (Cp - Cm) / (2.0 * s) : 0.0;
+        const double rV = pV != 0.0 ? (fV - pV) / pV : 0.0;
+        const double rC = (want_c && pC != 0.0) ? (fC - pC) / pC : 0.0;
+        if (want_c)
+          std::printf("random dir %d  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   dC pred %13.6g  fd %13.6g  rel %+9.3f%%\n",
+                      r, s, pV, fV, 100.0 * rV, pC, fC, 100.0 * rC);
+        else
+          std::printf("random dir %d  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   (no state solve at this step)\n",
+                      r, s, pV, fV, 100.0 * rV);
+        fd << "random," << r << ',' << s << ',' << pV << ',' << fV << ',' << rV
+           << ',' << (want_c ? pC : 0.0) << ',' << fC << ',' << rC << '\n';
+        fd.flush();
+      }
+    }
+
+    // ── (ii) SINGLE COEFFICIENTS, near the interface, where the derivative is
+    // non-zero. The staircase is at its worst here — one coefficient moves only
+    // the cells inside ONE support — and it is reported rather than avoided.
+    std::vector<std::pair<double, std::size_t>> rank;
+    for (std::size_t i2 = 0; i2 < L.count(); ++i2)
+      rank.emplace_back(std::fabs(dv[i2]), i2);
+    std::sort(rank.begin(), rank.end(),
+              [](const std::pair<double, std::size_t>& x,
+                 const std::pair<double, std::size_t>& y) { return x.first > y.first; });
+    const int nfd = std::min<int>(a.frac_fd, static_cast<int>(rank.size()));
+    for (int q = 0; q < nfd; ++q) {
+      const std::size_t i2 = rank[static_cast<std::size_t>(q * 37 % std::max(1, nfd))].second;
+      std::vector<double> u(L.count(), 0.0);
+      u[i2] = 1.0;
+      const double pV = pred_V(u), pC = pred_C(u);
+      for (double s : {1e-2, 1e-1, 1.0}) {
+        const bool want_c = (s == 1.0);   // one solve pair per coefficient
+        double Vp, Cp, Vm, Cm;
+        at(u, +s, want_c, Vp, Cp);
+        at(u, -s, want_c, Vm, Cm);
+        const double fV = (Vp - Vm) / (2.0 * s);
+        const double fC = want_c ? (Cp - Cm) / (2.0 * s) : 0.0;
+        const double rV = pV != 0.0 ? (fV - pV) / pV : 0.0;
+        const double rC = (want_c && pC != 0.0) ? (fC - pC) / pC : 0.0;
+        if (want_c)
+          std::printf("coeff %6zu  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   dC pred %13.6g  fd %13.6g  rel %+9.3f%%\n",
+                      i2, s, pV, fV, 100.0 * rV, pC, fC, 100.0 * rC);
+        else
+          std::printf("coeff %6zu  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   (no state solve at this step)\n",
+                      i2, s, pV, fV, 100.0 * rV);
+        fd << "coeff," << i2 << ',' << s << ',' << pV << ',' << fV << ',' << rV
+           << ',' << (want_c ? pC : 0.0) << ',' << fC << ',' << rC << '\n';
+        fd.flush();
+      }
+    }
+    alpha = alpha0;
+    plsm_sync();
+    std::printf("\nwrote %s/frac_fd.csv\n", a.out.c_str());
+  }
+  // ══ ★ ARM 2 — WHAT THE SCALAR ERSATZ COSTS: THE ANISOTROPY, PRICED ═══════
+  //
+  // ★ THE PROBLEM. A partially-filled cell is genuinely ANISOTROPIC — stiffer
+  // ALONG the material than ACROSS it — and a scalar volume fraction cannot
+  // represent that. Using rho_e * K0 is the VOIGT (arithmetic) average, which is
+  // the upper bound on the cell's stiffness in every direction, so a cut cell is
+  // modelled STIFFER than it is, and most stiffly exactly across the cut, which
+  // is where a thin member's boundary lies.
+  //
+  // ★ PR 320 PRICED THE CUT-CELL FAMILY AND REJECTED IT, and its architectural
+  // objection stands: a per-element Ke takes storage from O(1) to O(cut cells)
+  // and voids the Galerkin block cache. ★ BUT ITS *NUMERICAL* REASON NO LONGER
+  // APPLIES — it found cut-cell pointless because the median cut fraction was
+  // EXACTLY 0.5000, a half-voxel-shifted staircase with nothing fractional to
+  // integrate. On a smooth analytic phi the cuts are genuinely fractional, and
+  // the k-report above measures the distribution.
+  //
+  // ★ SO THIS PRICES THE CORRECTION WITHOUT BUILDING IT. For a cell cut by a
+  // plane with normal n at fraction f, the exact two-phase construction with
+  // uniform fields in each phase is the RANK-ONE LAMINATE: the strain differs
+  // between the phases by a rank-one symmetric jump sym(a (x) n), fixed by
+  // traction continuity across the interface. That is a 3x3 solve per cell —
+  // NO 24x24 anything, no assembly, no element matrix.
+  //
+  //     eps1 = eps + (1-f) sym(a (x) n)        (the solid layer)
+  //     eps0 = eps -    f  sym(a (x) n)        (the void layer)
+  //     [(1-f) Q + f rho_min Q] a = -(1-rho_min) (C eps) . n
+  //     Q_ik = C_ijkl n_j n_l = mu I + (lambda+mu) n (x) n   (isotropic)
+  //
+  // and the ratio W_laminate / W_voigt is exactly "how much strain energy the
+  // scalar ersatz misplaces in this cell, under the strain it actually carries".
+  // Summed over the cut cells and against the whole part, that is the number the
+  // brief asks for: whether an anisotropic correction is worth having, and how
+  // much of the compliance is at stake.
+  //
+  // ★ AND IT IS ALSO A MECHANISM, NOT ONLY A DIAGNOSTIC. The ratio is a per-cell
+  // SCALAR. rho_e is ALREADY a per-cell scalar. So the correction rho_e ->
+  // ratio * rho_e costs exactly nothing architecturally — no per-cell Ke, no
+  // cache-key change, no stencil change. It is not the full anisotropy (a scalar
+  // cannot be), but it is the part of it the compliance actually sees.
+  if (a.frac_aniso) {
+    const double off0 = solve_offset(target_volume);
+    for (double& c : alpha) c += off0;
+    plsm_sync();
+    frac_refresh();
+    build_fields(0.0);
+    const SimpCompliance scA =
+        simp_compliance(grid, traj_params, rho, bcs, loads,
+                        options.simp.cg_tolerance, options.simp.cg_max_iterations,
+                        nullptr, pen_solver.get(), solver_now);
+    const double nu = traj_params.poisson;
+    // Lame constants at E = 1: the strain is recovered with a UNIT modulus, so
+    // rho never enters twice.
+    const double lam = nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
+    const double mu = 1.0 / (2.0 * (1.0 + nu));
+    std::ofstream ac(a.out + "/frac_aniso.csv");
+    ac.precision(12);
+    ac << "voxel,f,nx,ny,nz,W_voigt,W_lam,ratio\n";
+    double sumW_voigt = 0.0, sumW_lam = 0.0, sumW_all = 0.0;
+    std::size_t ncut = 0;
+    // The ratio's distribution, in twenty buckets, so a mean cannot hide a tail.
+    std::size_t hist[20] = {0};
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i) {
+          const std::size_t v = d.at(i, j, k);
+          if (grid.tags[v] == VoxelTag::Empty) continue;
+          // ── the element's 24 nodal displacements, in core's own ordering
+          const int cx[8] = {0, 1, 1, 0, 0, 1, 1, 0};
+          const int cy[8] = {0, 0, 1, 1, 0, 0, 1, 1};
+          const int cz[8] = {0, 0, 0, 0, 1, 1, 1, 1};
+          std::array<double, 24> ue{};
+          for (int q = 0; q < 8; ++q) {
+            const int nd = fea_node_index(grid, i + cx[q], j + cy[q], k + cz[q]);
+            for (int c = 0; c < 3; ++c)
+              ue[static_cast<std::size_t>(3 * q + c)] = scA.solution.at(nd, c);
+          }
+          // sigma = C(1, nu) : eps, so eps is recovered by the unit-modulus
+          // compliance. `hex8_stress` is core's own recovery — INVOKED, not a
+          // second B matrix in this file (R2).
+          const Hex8Stress st = hex8_stress(1.0, nu, h, ue);
+          const double sxx = st.sigma[0], syy = st.sigma[1], szz = st.sigma[2];
+          const double txy = st.sigma[3], tyz = st.sigma[4], tzx = st.sigma[5];
+          double e[3][3];
+          e[0][0] = sxx - nu * (syy + szz);
+          e[1][1] = syy - nu * (sxx + szz);
+          e[2][2] = szz - nu * (sxx + syy);
+          e[0][1] = e[1][0] = (1.0 + nu) * txy;
+          e[1][2] = e[2][1] = (1.0 + nu) * tyz;
+          e[2][0] = e[0][2] = (1.0 + nu) * tzx;
+          const double tr = e[0][0] + e[1][1] + e[2][2];
+          double ee = 0.0;
+          for (int p = 0; p < 3; ++p)
+            for (int q = 0; q < 3; ++q) ee += e[p][q] * e[p][q];
+          const double W_solid = 0.5 * (lam * tr * tr + 2.0 * mu * ee);
+          const double rho_v = rho[v];
+          sumW_all += rho_v * W_solid;
+          if (eff[v] != MaskValue::Active) continue;
+          const double f = frac_on ? frac_of(fcache, v) : heaviside(-phi[v], eta);
+          if (!(f > 0.0 && f < 1.0)) continue;   // not a cut cell
+          // the interface normal, from the same phi everything else reads
+          double gx = 0.0, gy = 0.0, gz = 0.0;
+          {
+            auto P = [&](int A, int B, int C) {
+              A = std::min(std::max(A, 0), d.nx - 1);
+              B = std::min(std::max(B, 0), d.ny - 1);
+              C = std::min(std::max(C, 0), d.nz - 1);
+              return phi[d.at(A, B, C)];
+            };
+            gx = (P(i + 1, j, k) - P(i - 1, j, k)) / (2.0 * h);
+            gy = (P(i, j + 1, k) - P(i, j - 1, k)) / (2.0 * h);
+            gz = (P(i, j, k + 1) - P(i, j, k - 1)) / (2.0 * h);
+          }
+          const double gn = std::sqrt(gx * gx + gy * gy + gz * gz);
+          if (!(gn > 1e-12)) continue;
+          const double nvec[3] = {gx / gn, gy / gn, gz / gn};
+          // t = (C eps) . n
+          double t[3];
+          for (int p = 0; p < 3; ++p) {
+            double s = lam * tr * nvec[p];
+            for (int q = 0; q < 3; ++q) s += 2.0 * mu * e[p][q] * nvec[q];
+            t[p] = s;
+          }
+          // a = -(1-rho_min)/[(1-f) + f rho_min] * Q^{-1} t,
+          // Q^{-1} = (1/mu)[I - ((lambda+mu)/(lambda+2mu)) n (x) n]
+          const double den = (1.0 - f) + f * rho_min;
+          const double coef = -(1.0 - rho_min) / (den > 1e-300 ? den : 1e-300);
+          const double tn = t[0] * nvec[0] + t[1] * nvec[1] + t[2] * nvec[2];
+          double av[3];
+          for (int p = 0; p < 3; ++p)
+            av[p] = coef * (t[p] - ((lam + mu) / (lam + 2.0 * mu)) * tn * nvec[p]) / mu;
+          double jump[3][3];
+          for (int p = 0; p < 3; ++p)
+            for (int q = 0; q < 3; ++q)
+              jump[p][q] = 0.5 * (av[p] * nvec[q] + av[q] * nvec[p]);
+          auto energy_of = [&](double scale) {
+            double tr2 = 0.0, ee2 = 0.0;
+            for (int p = 0; p < 3; ++p) {
+              const double dpp = e[p][p] + scale * jump[p][p];
+              tr2 += dpp;
+            }
+            for (int p = 0; p < 3; ++p)
+              for (int q = 0; q < 3; ++q) {
+                const double dpq = e[p][q] + scale * jump[p][q];
+                ee2 += dpq * dpq;
+              }
+            return 0.5 * (lam * tr2 * tr2 + 2.0 * mu * ee2);
+          };
+          const double W_lam = f * energy_of(1.0 - f) +
+                               (1.0 - f) * rho_min * energy_of(-f);
+          const double W_voigt = rho_v * W_solid;
+          const double ratio = W_voigt > 0.0 ? W_lam / W_voigt : 1.0;
+          sumW_voigt += W_voigt;
+          sumW_lam += W_lam;
+          ++ncut;
+          int b = static_cast<int>(ratio * 20.0);
+          hist[std::min(19, std::max(0, b))]++;
+          ac << v << ',' << f << ',' << nvec[0] << ',' << nvec[1] << ','
+             << nvec[2] << ',' << W_voigt << ',' << W_lam << ',' << ratio << '\n';
+        }
+    std::printf("\n══ ARM 2 — THE ANISOTROPY OF A CUT CELL, PRICED ════════════\n");
+    std::printf("cut cells                       %zu\n", ncut);
+    std::printf("their strain energy, VOIGT      %.10g  (%.3f%% of the part's "
+                "%.10g)\n", sumW_voigt,
+                sumW_all > 0.0 ? 100.0 * sumW_voigt / sumW_all : 0.0, sumW_all);
+    std::printf("their strain energy, LAMINATE   %.10g\n", sumW_lam);
+    std::printf("★ the scalar ersatz over-stiffens the cut cells by %.2f%%, which "
+                "is %.3f%%\n  of the whole part's strain energy\n",
+                sumW_lam > 0.0 ? 100.0 * (sumW_voigt / sumW_lam - 1.0) : 0.0,
+                sumW_all > 0.0 ? 100.0 * (sumW_voigt - sumW_lam) / sumW_all : 0.0);
+    std::printf("\n  W_lam / W_voigt, by twentieths (1.00 = the scalar is exact, "
+                "0 = it is all error):\n");
+    for (int b = 0; b < 20; ++b)
+      if (hist[b])
+        std::printf("    %.2f - %.2f : %6zu\n", b * 0.05, (b + 1) * 0.05, hist[b]);
+    std::printf("\nwrote %s/frac_aniso.csv\n", a.out.c_str());
+  }
+
+  if (a.frac_kreport || a.frac_fd > 0 || a.frac_aniso) return 0;
+
   const double t_run0 = now_s();
   double total_solve_wall = 0.0, total_hilb_wall = 0.0;
   ReinitResidual last_rresid;
@@ -1923,6 +3131,20 @@ int main(int argc, char** argv) {
 
   for (int it = 1; it <= a.iters; ++it) {
     const double t_it0 = now_s();
+    // Which of the three robust designs the objective landed on this iteration,
+    // and how much worse it is than the intermediate. 1 / 1.0 when --robust is
+    // off, which is what the CSV then carries.
+    int robust_worst = 1;
+    double robust_ratio = 1.0;
+    // How far the OBJECTIVE's surface sits from the printed one, in mm. Zero
+    // unless --robust picked the eroded or dilated design; see the assignment.
+    double delta_shift = 0.0;
+    // The density field the SENSITIVITY belongs to. `energy_from` un-does the
+    // SIMP interpolation to recover a strain energy density, so it must be given
+    // the rho the dcompliance was computed on — which under --robust is the
+    // argmax design, not the intermediate. Getting this wrong would silently
+    // mis-scale the whole velocity, so it is a pointer with one assignment.
+    const std::vector<double>* rho_sens = &rho;
 
     // ── (g) THE VOLUME CONSTRAINT, AND WHY THE OFFSET IS FOLDED IN ──────────
     //
@@ -1960,6 +3182,11 @@ int main(int argc, char** argv) {
     } else {
       for (std::size_t v = 0; v < n; ++v) phi[v] += offset;
     }
+    // ★ AND THE SUB-CELL SAMPLES ARE REBUILT HERE, after the fold and before the
+    // ersatz, so the fraction, the printed occupancy, the band, the sensitivity
+    // and the reinitialiser all refer to ONE surface — the same reason PR 323
+    // folded the offset into phi in the first place.
+    frac_refresh();
     build_fields(0.0);
 
     // ── THE STATE SOLVE. Core's, unmodified. ────────────────────────────────
@@ -1983,6 +3210,69 @@ int main(int argc, char** argv) {
                            options.simp.cg_max_iterations,
                            (a.warm_start && have_warm) ? &warm : nullptr,
                            pen_solver.get(), solver_now);
+
+      // ══ ARM 2 — THE ROBUST WORST-CASE OBJECTIVE (Sigmund 2009) ═══════════
+      //
+      // Two more state solves, on the ERODED and DILATED versions of the SAME
+      // phi. Eroding by delta is `{phi < -delta}`, so the eroded rho is
+      // `H_eta(-(phi + delta))` and the dilated is `H_eta(-(phi - delta))` —
+      // one constant each, no filter, no projection, no second design variable.
+      // The frozen classes are untouched in both, because frozen material is
+      // not the optimiser's to erode.
+      //
+      // The objective becomes max(J_e, J_i, J_d) and its sensitivity is the
+      // ARGMAX's — a valid subgradient of a max of smooth functions, and the
+      // standard choice. `robust_worst` records which one won so the log can
+      // say whether the erosion is actually binding or the flag is decoration.
+      if (a.robust > 0.0) {
+        const double dlt = a.robust * h;
+        build_rho_shift(+dlt, rho_eroded);   // ERODED: phi + delta, smaller solid
+        const SimpCompliance sc_e = simp_compliance(
+            grid, traj_params, rho_eroded, bcs, loads, tol_now,
+            options.simp.cg_max_iterations, nullptr, pen_solver.get(), solver_now);
+        build_rho_shift(-dlt, rho_dilated);  // DILATED: phi - delta, larger solid
+        const SimpCompliance sc_d = simp_compliance(
+            grid, traj_params, rho_dilated, bcs, loads, tol_now,
+            options.simp.cg_max_iterations, nullptr, pen_solver.get(), solver_now);
+        solves_total += 2;
+        if (sc_e.cg.used_multigrid) ++solves_multigrid;
+        if (sc_d.cg.used_multigrid) ++solves_multigrid;
+        // ★ WHICH DESIGN WINS IS RECORDED, NOT ASSUMED. The eroded one should
+        // dominate — that is the whole mechanism — but "should" is how a flag
+        // becomes decoration. `robust_worst` goes in the CSV every iteration, so
+        // an arm where the erosion never binds is visible rather than inferred.
+        robust_worst = 1;                       // 0 eroded / 1 intermediate / 2 dilated
+        double worst = sc.compliance;
+        if (sc_e.compliance > worst) { worst = sc_e.compliance; robust_worst = 0; }
+        if (sc_d.compliance > worst) { worst = sc_d.compliance; robust_worst = 2; }
+        robust_ratio = sc.compliance > 0.0 ? worst / sc.compliance : 1.0;
+        if (robust_worst == 0) {
+          sc.compliance = sc_e.compliance;
+          sc.dcompliance = sc_e.dcompliance;
+          rho_sens = &rho_eroded;
+          // ★ AND THE SURFACE THE SENSITIVITY LIVES ON MOVES WITH IT. This is
+          // the one line that decides whether the mechanism works at all, and
+          // it was wrong in the first draft — caught by reading, before the arm
+          // ever ran, which is the only reason it is not a table of nulls.
+          //
+          // The eroded design's boundary is {phi = -delta}, not {phi = 0}. Its
+          // shape derivative is an integral OVER THAT SURFACE: the eroded and
+          // intermediate surfaces are rigid offsets of one another, so a change
+          // in phi moves both by the same normal amount, and the energy density
+          // that multiplies it must be read where the eroded MATERIAL is.
+          // Localising it with the intermediate's band instead samples the
+          // eroded design at {phi = 0} — which is delta OUTSIDE its solid, in
+          // its ersatz void, where the strain energy is ~rho_min noise. The arm
+          // would have converged, reported "the robust formulation does
+          // nothing", and been believed.
+          delta_shift = +dlt;
+        } else if (robust_worst == 2) {
+          sc.compliance = sc_d.compliance;
+          sc.dcompliance = sc_d.dcompliance;
+          rho_sens = &rho_dilated;
+          delta_shift = -dlt;
+        }
+      }
     } catch (const std::exception& e) {
       std::printf("\n*** STATE SOLVE FAILED at iteration %d: %s\n"
                   "*** Stopping here; everything already written stands.\n", it,
@@ -1998,6 +3288,20 @@ int main(int argc, char** argv) {
     std::size_t printed = 0;
     for (std::size_t v = 0; v < n; ++v) if (occ[v] > 0.5) ++printed;
     const double occ_vol = volume_at(0.0);  // the offset is already IN phi
+
+    // ★ S1's INVARIANT, CHECKED EVERY ITERATION RATHER THAN ARGUED ONCE. Under
+    // `--volume-count` the constrained quantity IS the printed count, so the two
+    // columns the PR 324 defect showed drifting apart must be the same number.
+    // If they are not, the flag is not doing what this task claims it does and
+    // the run must stop rather than produce a table.
+    if (a.volume_count && occ_vol != static_cast<double>(printed)) {
+      std::printf("\n*** FATAL at iteration %d: --volume-count is on but the\n"
+                  "*** constrained volume %.10g != printed voxels %zu. The\n"
+                  "*** constraint and the part have separated, which is exactly\n"
+                  "*** the defect this flag exists to close.\n",
+                  it, occ_vol, printed);
+      return 3;
+    }
 
     if (sc.compliance < best_compliance) {
       best_compliance = sc.compliance;
@@ -2024,6 +3328,40 @@ int main(int argc, char** argv) {
     // already been folded into it above — so {phi = 0} IS the interface the
     // ersatz, the volume constraint, the reinitialiser and this delta all read.
     // That single interface is the point of folding it in.
+    //
+    // ══ ★ AND THIS IS WHERE THE SENSITIVITY FOLLOWS THE DENSITY ═════════════
+    //
+    // ★ S1(c). Leaving `DH_eta(phi)*|grad phi|` in place against a volume-
+    // fraction density would be a MISMATCHED GRADIENT — it would look like slow
+    // convergence and would be believed, and it is the single most likely way
+    // this run is wasted. The fraction's derivative is a surface integral over
+    // the part of the interface inside the cell, which the co-area formula turns
+    // into a volume integral of a Dirac in phi:
+    //
+    //     d f_v / d alpha_i = -(1/|C|) INT_{Gamma cap C} psi_i / |grad phi| dS
+    //                       = -(1/|C|) INT_C delta(phi) psi_i dx
+    //                      ~= -(1/k^3) SUM_s delta_q(phi_s) psi_i(x_s)
+    //
+    // `dfrac[v]` is that sum WITHOUT psi — the per-cell factor the old `delta`
+    // played — and it is what lambda is weighted by, what the perimeter term
+    // rides and what the CSV's band column counts. ★ THE `|grad phi|` IS GONE
+    // AND ITS ABSENCE IS THE CORRECTION: the old measure is `dS`, this one is
+    // `dS/|grad phi|`, and the second is what the derivative of a VOLUME
+    // fraction actually is. On a true signed distance they coincide; this phi
+    // is not one (‖∇φ‖−1 runs 0.35–0.39 rms here, PR 326 P3), so the difference
+    // is real and it is the reason the projection is a scatter and not Psi^T.
+    if (frac_on) {
+      const double t_fs = now_s();
+      frac_band(fcache, frac_gs, h, a.frac_eps, dfrac, plsm_threads);
+      frac_sens_s = now_s() - t_fs;
+      // The interface AREA on this measure. `dfrac` integrates to dS/|grad phi|
+      // by the co-area formula, so the area is the |grad phi|-weighted sum — the
+      // same physical quantity `interface_area_mm2` reports on the old band, and
+      // reported beside it rather than in place of it.
+      frac_area = 0.0;
+      for (std::size_t v = 0; v < n; ++v) frac_area += dfrac[v] * frac_gm[v];
+      frac_area *= h * h * h;
+    }
     std::size_t band_n = 0;
     for (int k = 0; k < d.nz; ++k)
       for (int j = 0; j < d.ny; ++j)
@@ -2031,18 +3369,42 @@ int main(int argc, char** argv) {
           const std::size_t v = d.at(i, j, k);
           if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active) {
             delta[v] = 0.0;
+            delta_obj[v] = 0.0;
             raw_vel[v] = 0.0;
+            continue;
+          }
+          if (frac_on) {
+            delta[v] = dfrac[v];
+            delta_obj[v] = dfrac[v];   // --robust is refused under --frac
+            if (delta[v] > 0.0) ++band_n;
+            raw_vel[v] = energy_from(sc.dcompliance[v], (*rho_sens)[v],
+                                     traj_params.penalty,
+                                     traj_params.youngs_modulus);
             continue;
           }
           if (a.no_surface_delta) {
             // PR 322's measure: a VOLUME field over the whole active domain.
             delta[v] = 1.0;
+            delta_obj[v] = 1.0;
           } else {
+            const double gm = grad_mag(d, phi, i, j, k, h);
             const double dh = dheaviside(phi[v], eta);  // the offset is IN phi
-            delta[v] = dh > 0.0 ? dh * grad_mag(d, phi, i, j, k, h) : 0.0;
+            delta[v] = dh > 0.0 ? dh * gm : 0.0;
+            // ★ THE OBJECTIVE'S BAND. Identical to `delta` unless --robust put
+            // the worst case on the eroded or dilated design, whose interface
+            // is {phi = -delta_shift}. Same |grad phi| — the two surfaces are a
+            // rigid offset apart, so a change in phi moves them by the same
+            // normal amount and only WHERE the energy is read changes.
+            if (delta_shift == 0.0) {
+              delta_obj[v] = delta[v];
+            } else {
+              const double dho = dheaviside(phi[v] + delta_shift, eta);
+              delta_obj[v] = dho > 0.0 ? dho * gm : 0.0;
+            }
           }
           if (delta[v] > 0.0) ++band_n;
-          raw_vel[v] = energy_from(sc.dcompliance[v], rho[v], traj_params.penalty,
+          raw_vel[v] = energy_from(sc.dcompliance[v], (*rho_sens)[v],
+                                   traj_params.penalty,
                                    traj_params.youngs_modulus);
         }
 
@@ -2053,9 +3415,17 @@ int main(int argc, char** argv) {
     // which is exactly the statement that dJ + lambda*dVol has no volume
     // component. The residual it leaves is what the offset bisection removes at
     // the top of the next iteration, so the two pieces still do not fight.
+    // ★ THE NUMERATOR IS OVER delta_obj AND THE DENOMINATOR OVER delta, and the
+    // two are the same vector unless --robust is on. lambda is the multiplier
+    // that makes the flow volume-neutral to first order: the value for which
+    // ∫ e*delta_obj - lambda*delta vanishes. The VOLUME term is a statement
+    // about the printed part, so it is measured on the printed part's band; the
+    // OBJECTIVE term is a statement about whichever design the worst case
+    // landed on. With --robust off, delta_obj == delta and this is the identical
+    // expression PR 324 ran — which `C0_control` checks to twelve digits.
     double wsum = 0.0, w = 0.0;
     for (std::size_t v = 0; v < n; ++v) {
-      wsum += raw_vel[v] * delta[v];
+      wsum += raw_vel[v] * delta_obj[v];
       w += delta[v];
     }
     double lambda = w > 0.0 ? wsum / w : 0.0;
@@ -2075,29 +3445,114 @@ int main(int argc, char** argv) {
     // undoing it. So ell is sized from the ENERGY-ONLY lambda (breaking the
     // circularity), the curvature is folded into the driving field, and lambda
     // is RECOMPUTED on the combined field before it is applied.
+    //
+    // ★ S3(b) — THE WEIGHT IS RAMPED, NOT FIXED, AND `perim_now` IS WHAT THE
+    // CSV RECORDS. `--perimeter-ramp START,LEN` holds the weight at zero for
+    // the first START iterations, ramps it linearly to `--perimeter` over the
+    // next LEN, and holds it there. The default 0,0 makes `frac` 1 from
+    // iteration 1, which is the fixed weight the flag replaced.
+    double perim_now = a.perimeter;
+    if (a.perimeter > 0.0 && (a.perimeter_ramp_start > 0 || a.perimeter_ramp_len > 0)) {
+      const double over = static_cast<double>(it - a.perimeter_ramp_start);
+      double frac;
+      if (over <= 0.0) frac = 0.0;
+      else if (a.perimeter_ramp_len <= 0) frac = 1.0;
+      else frac = std::min(1.0, over / static_cast<double>(a.perimeter_ramp_len));
+      perim_now = a.perimeter * frac;
+    }
     double kappa_rms = 0.0;
-    if (a.perimeter > 0.0) {
-      const double ell = a.perimeter * lambda * h;
+    std::fill(pen.begin(), pen.end(), 0.0);
+    if (perim_now > 0.0) {
+      const double ell = perim_now * lambda * h;
+      // ★ TWO PASSES, BECAUSE THE LOCAL WEIGHT NEEDS kappa_rms AND kappa_rms
+      // NEEDS THE FIELD. Pass 1 builds the curvature field over the band and its
+      // rms; pass 2 applies the term. With `--perimeter-local 0` pass 2 is
+      // ell*kappa exactly, so the split changes no arithmetic — the fixed
+      // penalty is bit-for-bit what PR 325 ran, and `C0_control` proves it.
+      std::vector<double>& kfield = curv_field;   // reused across iterations
       double k2 = 0.0;
       std::size_t kn = 0;
       for (int k = 0; k < d.nz; ++k)
         for (int j = 0; j < d.ny; ++j)
           for (int i = 0; i < d.nx; ++i) {
             const std::size_t v = d.at(i, j, k);
-            if (delta[v] <= 0.0) continue;
+            if (delta[v] <= 0.0) { kfield[v] = 0.0; continue; }
             const double kap = mean_curvature(d, phi, i, j, k, h);
-            raw_vel[v] -= ell * kap;
+            kfield[v] = kap;
             k2 += kap * kap;
             ++kn;
           }
       kappa_rms = kn ? std::sqrt(k2 / static_cast<double>(kn)) : 0.0;
+      const double kref = kappa_rms > 0.0 ? kappa_rms : 1.0;
+      for (int k = 0; k < d.nz; ++k)
+        for (int j = 0; j < d.ny; ++j)
+          for (int i = 0; i < d.nx; ++i) {
+            const std::size_t v = d.at(i, j, k);
+            if (delta[v] <= 0.0) continue;
+            const double kap = kfield[v];
+            // Per + (beta/kappa_rms^2) * Willmore, gradient, ∂_n kappa dropped.
+            double term = kap;
+            if (a.perimeter_local > 0.0) {
+              const double kn2 = (kap / kref) * (kap / kref);
+              term = kap * (1.0 + a.perimeter_local * kn2);
+              if (a.willmore_full) {
+                // ★ THE DROPPED TERM, PUT BACK SO THE OMISSION IS A NUMBER.
+                // 2*kappa*(grad kappa . n) with n = grad phi / |grad phi|, by
+                // central differences on `kfield`. Off the band kfield is zero,
+                // so this is one-sided there by construction — which is correct:
+                // outside the band the functional has no integrand.
+                auto K = [&](int A, int B, int C) {
+                  A = std::min(std::max(A, 0), d.nx - 1);
+                  B = std::min(std::max(B, 0), d.ny - 1);
+                  C = std::min(std::max(C, 0), d.nz - 1);
+                  return kfield[d.at(A, B, C)];
+                };
+                auto P = [&](int A, int B, int C) {
+                  A = std::min(std::max(A, 0), d.nx - 1);
+                  B = std::min(std::max(B, 0), d.ny - 1);
+                  C = std::min(std::max(C, 0), d.nz - 1);
+                  return phi[d.at(A, B, C)];
+                };
+                const double kx = (K(i+1,j,k) - K(i-1,j,k)) / (2.0 * h);
+                const double ky = (K(i,j+1,k) - K(i,j-1,k)) / (2.0 * h);
+                const double kz = (K(i,j,k+1) - K(i,j,k-1)) / (2.0 * h);
+                const double px = (P(i+1,j,k) - P(i-1,j,k)) / (2.0 * h);
+                const double py = (P(i,j+1,k) - P(i,j-1,k)) / (2.0 * h);
+                const double pz = (P(i,j,k+1) - P(i,j,k-1)) / (2.0 * h);
+                const double gm = std::sqrt(px*px + py*py + pz*pz);
+                if (gm > 1e-12) {
+                  const double dnk = (kx*px + ky*py + kz*pz) / gm;
+                  term += a.perimeter_local * 2.0 * kap * dnk / (kref * kref);
+                }
+              }
+            }
+            // ★ THE PENALTY IS HELD SEPARATELY FROM THE ENERGY, and under
+            // --robust that is not bookkeeping. The energy belongs to whichever
+            // design the worst case landed on and rides `delta_obj`; the
+            // perimeter belongs to the PRINTED part — it is the area of the
+            // thing that gets made — and rides `delta`. Folding the penalty
+            // into `raw_vel` would put it on the eroded surface instead.
+            pen[v] = ell * term;
+          }
+      // With --robust off the two bands coincide and this is the ORIGINAL
+      // expression, grouped exactly as PR 325 grouped it, so the fixed-weight
+      // penalty is bit-for-bit what that arm ran. The branch exists to keep
+      // that true rather than to save arithmetic.
       double wsum2 = 0.0;
-      for (std::size_t v = 0; v < n; ++v) wsum2 += raw_vel[v] * delta[v];
+      if (delta_shift == 0.0) {
+        for (std::size_t v = 0; v < n; ++v)
+          wsum2 += (raw_vel[v] - pen[v]) * delta[v];
+      } else {
+        for (std::size_t v = 0; v < n; ++v)
+          wsum2 += raw_vel[v] * delta_obj[v] - pen[v] * delta[v];
+      }
       lambda = w > 0.0 ? wsum2 / w : 0.0;
     }
 
     for (std::size_t v = 0; v < n; ++v)
-      raw_vel[v] = (raw_vel[v] - lambda) * delta[v];
+      raw_vel[v] = (delta_shift == 0.0)
+                       ? (raw_vel[v] - pen[v] - lambda) * delta[v]
+                       : raw_vel[v] * delta_obj[v] - (pen[v] + lambda) * delta[v];
 
     // ── (d) + (4) THE VELOCITY EXTENSION ────────────────────────────────────
     int hilb_it = 0;
@@ -2164,6 +3619,52 @@ int main(int argc, char** argv) {
       // phi-space. Projecting it onto the basis is one transpose apply.
       std::vector<double> g(L.count(), 0.0);
       spmv(PsiT, vel, g, plsm_threads);
+
+      // ── ★ THE NUCLEATION BAND. Which coefficients are allowed to move. ─────
+      //
+      // `phi` at the knot's own centre, trilinearly off the grid it was just
+      // synced onto, clamped at the faces because the lattice is padded by a
+      // full ring of knots that sit OUTSIDE the domain (`make_lattice`).
+      //
+      // ★ |phi| IS USED AS THE DISTANCE AND THAT IS APPROXIMATE, SAID PLAINLY.
+      // phi here is not a signed distance — | |grad phi| - 1 | runs about 0.35
+      // to 0.43 rms — so W is a distance only up to that factor. It is a knob
+      // to sweep, not a length to trust, and the CSV records how many
+      // coefficients it actually froze so the setting is legible after the fact.
+      if (a.nucleation_band > 0.0) {
+        const double wmm = a.nucleation_band * h;
+        auto phi_at = [&](double x, double y, double z) {
+          x = std::min(std::max(x, 0.0), static_cast<double>(d.nx - 1));
+          y = std::min(std::max(y, 0.0), static_cast<double>(d.ny - 1));
+          z = std::min(std::max(z, 0.0), static_cast<double>(d.nz - 1));
+          const int i0 = static_cast<int>(x), j0 = static_cast<int>(y),
+                    k0 = static_cast<int>(z);
+          const int i1 = std::min(i0 + 1, d.nx - 1),
+                    j1 = std::min(j0 + 1, d.ny - 1),
+                    k1 = std::min(k0 + 1, d.nz - 1);
+          const double fx = x - i0, fy = y - j0, fz = z - k0;
+          double acc = 0.0;
+          for (int dk = 0; dk < 2; ++dk)
+            for (int dj = 0; dj < 2; ++dj)
+              for (int di = 0; di < 2; ++di) {
+                const double w3 = (di ? fx : 1.0 - fx) * (dj ? fy : 1.0 - fy) *
+                                  (dk ? fz : 1.0 - fz);
+                acc += w3 * phi[d.at(di ? i1 : i0, dj ? j1 : j0, dk ? k1 : k0)];
+              }
+          return acc;
+        };
+        nuc_frozen = 0;
+        for (int c = 0; c < L.mz; ++c)
+          for (int b = 0; b < L.my; ++b)
+            for (int aa = 0; aa < L.mx; ++aa) {
+              const std::size_t i2 = L.at(aa, b, c);
+              nuc_mask[i2] =
+                  std::fabs(phi_at(L.ux(aa), L.uy(b), L.uz(c))) <= wmm ? 1 : 0;
+              if (!nuc_mask[i2]) ++nuc_frozen;
+            }
+        for (std::size_t i2 = 0; i2 < L.count(); ++i2)
+          if (!nuc_mask[i2]) g[i2] = 0.0;
+      }
 
       if (a.plsm_lbfgs > 0) {
         // ══ PROBE 3 — L-BFGS ON THE COEFFICIENTS ═══════════════════════════
@@ -2260,9 +3761,39 @@ int main(int argc, char** argv) {
         std::vector<double> edelta(n, 0.0);
         for (std::size_t v = 0; v < n; ++v) edelta[v] = raw_vel[v] + lambda * delta[v];
         std::vector<double> dc(L.count(), 0.0), dv(L.count(), 0.0);
-        spmv(PsiT, edelta, dc, plsm_threads);
-        spmv(PsiT, delta, dv, plsm_threads);
+        if (frac_on && a.frac_sens == "exact") {
+          // ★ THE SCATTER. `Psi^T` evaluates psi_i at the CELL CENTRE and factors
+          // it out of the sub-cell sum; the fraction's derivative has psi_i
+          // INSIDE that sum, at the samples. The two weights ride the same
+          // measure — the identity the whole level-set formulation rests on — so
+          // one pass over the samples produces both.
+          //
+          // `edelta` and `delta` already carry the per-cell factor `dfrac`, and
+          // the scatter recomputes delta_q itself, so the weights handed over are
+          // the ENERGY-like ones with dfrac divided back out. Cells where dfrac
+          // is zero contribute nothing either way.
+          const double t_fs = now_s();
+          std::vector<double> wc(n, 0.0), wv(n, 0.0);
+          for (std::size_t v = 0; v < n; ++v) {
+            if (!(delta[v] > 0.0)) continue;
+            wc[v] = edelta[v] / delta[v];   // = e_v - pen_v
+            wv[v] = 1.0;
+          }
+          frac_scatter(fcache, d, L, pbasis, frac_gs, h, a.frac_eps, wc, dc, wv,
+                       dv, plsm_threads);
+          frac_sens_s += now_s() - t_fs;
+        } else {
+          spmv(PsiT, edelta, dc, plsm_threads);
+          spmv(PsiT, delta, dv, plsm_threads);
+        }
         for (double& c : dc) c = -c;   // material IN lowers compliance
+        // ★ THE SAME RESTRICTION, ON THE SENSITIVITIES MMA ACTUALLY READS. `g`
+        // above drives the descent branch; MMA is handed dc and dv separately,
+        // so masking only `g` would leave this branch unrestricted — which is
+        // the shape of bug PR 324 §9 caught, a flag that silently does nothing.
+        if (a.nucleation_band > 0.0)
+          for (std::size_t i2 = 0; i2 < L.count(); ++i2)
+            if (!nuc_mask[i2]) { dc[i2] = 0.0; dv[i2] = 0.0; }
         std::vector<double> beta(L.count(), 0.0);
         for (std::size_t i2 = 0; i2 < L.count(); ++i2) beta[i2] = -alpha[i2];
         // g0 is the constraint residual. The offset bisection at the top of this
@@ -2288,8 +3819,15 @@ int main(int argc, char** argv) {
         const double want_dphi = gamma_now * steps * h;
         const double xrange = 2.0 * plsm_alpha_bound;
         const double mv = a.plsm_move * want_dphi / (xrange * plsm_psi_max);
+        const std::vector<double> beta_before = beta;
         beta = plsm_mma_update(mma_state, ++plsm_mma_iter, beta, dc, dv, g0,
                                -plsm_alpha_bound, plsm_alpha_bound, mv);
+        // ★ HELD EXACTLY, not left to the regulariser. With dc = dv = 0 the MMA
+        // minimiser lands back on x only up to its raa0 term and its asymptote
+        // asymmetry; restoring the value makes "frozen" mean frozen.
+        if (a.nucleation_band > 0.0)
+          for (std::size_t i2 = 0; i2 < L.count(); ++i2)
+            if (!nuc_mask[i2]) beta[i2] = beta_before[i2];
         for (std::size_t i2 = 0; i2 < L.count(); ++i2) alpha[i2] = -beta[i2];
         dt = mv * xrange;   // the coefficient move limit actually applied, in mm
         hj_done = steps;
@@ -2425,7 +3963,11 @@ int main(int argc, char** argv) {
         << ',' << (sc.cg.used_multigrid ? 1 : 0) << ',' << sc.t_solve_ms << ','
         << sc.t_sensitivity_ms << ',' << band_n << ',' << hilb_it << ','
         << hilb_rel << ',' << rresid.rms << ',' << rresid.max << ',' << hj_done
-        << ',' << gamma_now << ',' << kappa_rms << ',' << it_wall << '\n';
+        << ',' << gamma_now << ',' << kappa_rms << ',' << perim_now << ','
+        << (w * h * h * h) << ',' << robust_worst << ',' << robust_ratio << ','
+        << nuc_frozen << ',' << frac_boundary << ',' << frac_area << ','
+        << (frac_build_s * 1000.0) << ',' << (frac_sens_s * 1000.0) << ','
+        << it_wall << '\n';
     csv.flush();
 
     std::printf("it %3d  c = %.10g  vf = %.6f (occ %.1f)  offset %+.4f mm  "
@@ -2486,6 +4028,87 @@ int main(int argc, char** argv) {
       std::printf("   ↳ oscillation detected: gamma %.5g -> %.5g\n", was,
                   gamma_now);
       std::fflush(stdout);
+    }
+
+    // ── ★ THE MARGIN-AWARE STOP, AND THE WALL CAP ──────────────────────────
+    //
+    // The certification is `analyze_fixed_design` at the PRODUCTION penalty on
+    // the CURRENT design, with recycling / GenEO / mixed precision disarmed —
+    // the same isolation a re-certification uses — and RE-ARMED immediately
+    // afterwards. ★ Re-arming is not tidiness: leaving the posture disarmed
+    // would change every state solve after the first certification, so an arm
+    // measured this way would not be the arm without it.
+    if (a.certify_every > 0 && it >= a.certify_from && it % a.certify_every == 0) {
+      const double t_c0 = now_s();
+      std::vector<double> crho(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v)
+        crho[v] = params.density_min + (1.0 - params.density_min) * occ[v];
+      fea_set_krylov_recycling(false);
+      fea_set_geneo_twolevel(false);
+      fea_set_matfree_mixed_precision(false);
+      // ★ THE SAME CALL, WITH THE SAME ARGUMENTS, AS THE END-OF-RUN
+      // CERTIFICATION BELOW — production tolerance, production solver,
+      // production penalty. A stopping rule that certified on a cheaper path
+      // than the certificate would stop on a number the certificate does not
+      // agree with.
+      const bool cok = load_path_connected(grid, crho, 0.5);
+      double cm = 0.0;
+      bool cacc = false;
+      try {
+        const FixedDesignAnalysis ca = analyze_fixed_design(
+            grid, params, crho, bcs, loads, material, options.build_direction,
+            options.simp.cg_tolerance, options.simp.cg_max_iterations,
+            options.simp.solver, options.margin_stop, knockdown_spec_for(options),
+            cok, part_solid);
+        cm = ca.margin.worst_case;
+        cacc = ca.accepted && !ca.non_convergent;
+      } catch (const std::exception& e) {
+        std::printf("   ↳ certification at iteration %d failed: %s\n", it, e.what());
+      }
+      fea_set_krylov_recycling(prev_recycle);
+      fea_set_geneo_twolevel(prev_geneo);
+      fea_set_matfree_mixed_precision(prev_mixed);
+      cert_wall_inloop += now_s() - t_c0;
+      ++cert_calls_inloop;
+      std::printf("   ↳ certified at iteration %d: margin %.2f  %s  "
+                  "(%.1f s, %.1f s of run so far is certification)\n",
+                  it, cm, cacc ? "ACCEPTED" : "not accepted",
+                  now_s() - t_c0, cert_wall_inloop);
+      std::fflush(stdout);
+      if (a.margin_stop > 0.0 && cm >= a.margin_stop && cacc) {
+        // ★ AND THE DESIGN THAT MET THE BAR IS THE ONE THAT GETS CERTIFIED AND
+        // WRITTEN, not the best-compliance iterate. Otherwise the summary would
+        // report a different design from the one the stopping rule fired on —
+        // which is exactly the mismatch that cost this task its first set of
+        // tables (§2).
+        best_occ = occ;
+        best_rho = rho;
+        best_iter = it;
+        best_compliance = sc.compliance;
+        margin_stop_hit = cm;
+        margin_stop_iter = it;
+        std::printf("\n★ STOPPING: certified margin %.2f reached the target "
+                    "%.2f at iteration %d.\n", cm, a.margin_stop, it);
+        done_iters = it;
+        break;
+      }
+    }
+    // ★ THE CAP EXCLUDES THE IN-LOOP CERTIFICATION, AND THE FIRST ATTEMPT AT
+    // THIS RUN IS WHY. Certifying an UNCONVERGED design is wildly expensive —
+    // measured here, 20.9 s at iteration 5 and 537.9 s at iteration 10, a 26x
+    // spread — so a cap on total wall clock is a cap on the MEASURING
+    // INSTRUMENT, not on the method. The first attempt spent 559 s of its 1912 s
+    // budget on two certifications and would have reported the optimiser as
+    // slow. The cap is on optimisation time; the instrument's cost is reported
+    // beside it and never inside it.
+    const double opt_wall = (now_s() - t_run0) - cert_wall_inloop;
+    if (a.wall_cap > 0.0 && opt_wall >= a.wall_cap) {
+      std::printf("\n★ STOPPING: wall cap %.1f s of OPTIMISATION reached at "
+                  "iteration %d (%.1f s optimisation, %.1f s certification).\n",
+                  a.wall_cap, it, opt_wall, cert_wall_inloop);
+      wall_cap_hit = true;
+      done_iters = it;
+      break;
     }
 
     if (history.size() >= 10) {
@@ -2674,6 +4297,53 @@ int main(int argc, char** argv) {
         << "the containing coarse voxel\n";
       std::printf("analytic    %s.f64  (%d x %d x %d, spacing %.6f mm)\n", stem,
                   fx, fy, fz, h / F);
+
+      // ── ★ THE SAME SURFACE, EXPORTED AS A VOLUME FRACTION ────────────────
+      //
+      // Identical design, identical lattice, identical frozen stamp; the ONE
+      // difference is what number each fine cell carries. So the pair isolates
+      // the EXPORT convention from the design, which is the only way to say
+      // whether the sub-voxel position the fraction carries survives marching
+      // cubes or is thrown away by it.
+      if (a.frac_export) {
+        std::vector<double> ff;
+        const double t_fe = now_s();
+        frac_export_field(L, pbasis, alpha, fx, fy, fz, F, a.frac, ff,
+                          plsm_threads);
+        for (int k = 0; k < fz; ++k)
+          for (int j = 0; j < fy; ++j)
+            for (int i = 0; i < fx; ++i) {
+              const std::size_t fv =
+                  static_cast<std::size_t>(i) +
+                  static_cast<std::size_t>(fx) *
+                      (static_cast<std::size_t>(j) +
+                       static_cast<std::size_t>(fy) * static_cast<std::size_t>(k));
+              const std::size_t cv = d.at(i / F, j / F, k / F);
+              if (grid.tags[cv] == VoxelTag::Empty ||
+                  eff[cv] == MaskValue::FrozenVoid) ff[fv] = 0.0;
+              else if (eff[cv] == MaskValue::FrozenSolid) ff[fv] = 1.0;
+            }
+        char fstem[512];
+        std::snprintf(fstem, sizeof fstem, "%s/plsmfrac_f%d", a.out.c_str(), F);
+        std::ofstream ffo(std::string(fstem) + ".f64", std::ios::binary);
+        ffo.write(reinterpret_cast<const char*>(ff.data()),
+                  static_cast<std::streamsize>(ff.size() * sizeof(double)));
+        std::ofstream fm(std::string(fstem) + ".meta");
+        fm.precision(17);
+        fm << "rung " << rung_label << "\nrequested_vf " << a.rung << "\n";
+        fm << "nx " << fx << "\nny " << fy << "\nnz " << fz << "\n";
+        fm << "spacing " << (h / F) << "\n";
+        fm << "ox " << grid.origin.x << "\noy " << grid.origin.y << "\noz "
+           << grid.origin.z << "\n";
+        fm << "iso 0.5\nfactor 1\ninterp none\n";
+        fm << "achieved_vf " << achieved_vf << "\niterations " << done_iters
+           << "\nwall_s " << run_wall << "\ncompliance " << compliance_final << "\n";
+        fm << "# ANALYTIC, VOLUME FRACTION: each fine cell carries the fraction "
+           << "of ITSELF inside {phi<0}, by " << a.frac << "^3 sub-samples; "
+           << "same design and same frozen stamp as plsm_f" << F << "\n";
+        std::printf("fraction    %s.f64  (%d x %d x %d, %.1f s)\n", fstem, fx, fy,
+                    fz, now_s() - t_fe);
+      }
     }
     // The coefficients themselves, so the design can be re-evaluated at any
     // resolution later without re-running the optimisation.
@@ -2740,6 +4410,11 @@ int main(int argc, char** argv) {
       "  of which solve     %.3f s/iteration (%.1f s total)\n"
       "  of which extension %.3f s/iteration (%.1f s total)\n"
       "certification wall   %.1f s\n"
+      "★ IN-LOOP CERT       %lld calls, %.1f s total (%.1f%% of the run)\n"
+      "★ OPTIMISATION ONLY  %.1f s   (run wall minus in-loop certification —\n"
+      "                     THIS is the method's cost; the certifications are a\n"
+      "                     stopping rule and would not be paid in production)\n"
+      "★ STOPPED BECAUSE    %s\n"
       "state solves         %lld, of which the V-cycle engaged on %lld\n"
       "trajectory posture   %s\n"
       "mixed precision      %s\n"
@@ -2765,6 +4440,14 @@ int main(int argc, char** argv) {
       converged_early ? " (converged)" : "", per_iter, run_wall, done_iters,
       done_iters ? total_solve_wall / done_iters : 0.0, total_solve_wall,
       done_iters ? total_hilb_wall / done_iters : 0.0, total_hilb_wall, cert_wall,
+      cert_calls_inloop, cert_wall_inloop,
+      run_wall > 0.0 ? 100.0 * cert_wall_inloop / run_wall : 0.0,
+      run_wall - cert_wall_inloop,
+      margin_stop_iter > 0
+          ? "the certified margin reached the target"
+          : (wall_cap_hit ? "the wall-clock cap was reached"
+                          : (converged_early ? "the compliance plateau"
+                                             : "the iteration count ran out")),
       solves_total, solves_multigrid,
       a.isolate ? "ISOLATED (recycling/geneo OFF) — a control"
                 : "PRODUCTION (recycling/geneo as configure_production_options "
