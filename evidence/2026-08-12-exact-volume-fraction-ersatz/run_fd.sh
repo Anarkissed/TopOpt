@@ -40,4 +40,10 @@ fd frac_k4      --frac 4
 # and the consistently mollified value (which has no staircase to average over).
 fd frac_centre  --frac 4 --frac-sens centre
 fd frac_soft    --frac 4 --frac-soft
+
+# ── ★ ARM 2 M5 — the QUADRATURE BANDWIDTH ON THE NORM THE LITERATURE SAYS,
+# |grad phi|_1 rather than |grad phi|_2 (Engquist, Tornberg & Tsai, JCP
+# 207(1):28-51, 2005; frac_ersatz.hpp carries the argument). Same design, same
+# probe, same steps as `frac_k4`, so the pair isolates the norm and nothing else.
+fd frac_l1      --frac 4 --frac-eps-l1
 echo FD_DONE

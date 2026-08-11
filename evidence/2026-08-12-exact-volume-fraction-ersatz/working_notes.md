@@ -315,6 +315,33 @@ so if ITS compliance FD lands on the prediction with the same quadrature and the
 same scatter, the quadrature and the scatter are right and the hard variant's
 residual is entirely the staircase. That arm is run for exactly this reason.
 
+★★ **AND IT DID. THE SAME QUADRATURE, THE SAME SCATTER, THE SAME DESIGN, THE
+SAME STEPS — ONLY THE VALUE FUNCTION SMOOTHED:**
+
+| probe | dV at step 0.001 | dV at 0.01 | dC at 0.01 | dC at 0.1 |
+|---|---|---|---|---|
+| random dir 0 | **−0.294%** | −0.374% | **−1.33%** | −2.89% |
+| random dir 1 | **+0.815%** | +0.959% | **+3.18%** | +5.17% |
+| coefficient 8991 | — | **+0.143%** | — | — |
+| coefficient 8990 | — | **+0.082%** | — | — |
+
+★ **Sub-1% on the volume at exactly the steps where the HARD variant read +182%
+and −45.7%, and 1.3–5.2% on the COMPLIANCE where the hard variant was
+noise-dominated at every affordable step.** So:
+
+1. **the quadrature and the scatter are correct** — nothing was wrong with the
+   implementation;
+2. **the hard variant's residual is entirely the 1/64 staircase**, which is what
+   P13 claimed and could not previously prove;
+3. **`--frac-soft` is the only formulation in this study whose gradient can be
+   verified on BOTH functionals.** The control's compliance error is a consistent
+   10.6–22.9%; this is 1.3–5.2%.
+
+★ And the two value functions agree to **0.037%** on the volume they measure
+(34,972.3 against 34,959.5 active-cell voxels), so the mollification is buying
+the differentiability without moving the geometry — which is the whole design
+intent and is now a number rather than an intention.
+
 ---
 
 ## P12 — 120 iterations is a change from PR 326, and it applies to BOTH arms

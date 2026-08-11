@@ -4,7 +4,7 @@
 [loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
 == levelset_probe — a level set on our own solver ==
 
-part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
 grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
 origin      (-18.275750737, -48.909974716, 0.000000000) mm
 dofs        491232 nodes, 1473696 displacement DOFs
@@ -29,7 +29,7 @@ seed        regular hole array, period 8 voxels
 PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels PER AXIS
             68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
             support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
-            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 17.4 s
+            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 18.6 s
             volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
             update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
 PLSM        coefficient box +-462.1415 (4x the largest seed coefficient); a unit move of every
@@ -41,7 +41,7 @@ VOLUME      constraint measures #{phi + c < 0} — the PRINTED count (S1: occupa
             sub-cell lattice marching_cubes_resampled uses.
             70688 of 468224 cells are sampled (the ACTIVE ones); the rest are
             stamped 0/1 by the mask and were never the level set's.
-            value    MOLLIFIED — the antiderivative of the gradient's own mollifier (--frac-soft)
+            value    the HARD sample count (piecewise constant in alpha; see frac_ersatz.hpp)
             gradient EXACT — psi_i evaluated AT THE SAMPLES and scattered
             eps_q    1 x |grad phi|_2 x h/4 = 0.42632 mm at |grad phi| = 1
                      — a QUADRATURE bandwidth tied to the sample spacing,
@@ -63,30 +63,54 @@ VOLUME      constraint measures #{phi + c < 0} — the PRINTED count (S1: occupa
               * Per = INT DH_eta(phi)|grad phi| — GONE with the density.
                 Under --frac the perimeter term rides the QUADRATURE band
                 and no longer contains eta at all.
-ALPHA       85680 coefficients read from /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/probe/RB1_alpha.f64 — the seed fit above is DISCARDED
+it   1  c = 0.004458677835  vf = 0.680003 (occ 75415.0)  offset +0.5148 mm  |v|max 2.36e-09  band 53401  hilb 0 (0.0e+00)  |grad|-1 3.94e-01  cg 1187  131.89 s
+it   2  c = 0.003790174781  vf = 0.680003 (occ 75415.0)  offset -0.0302 mm  |v|max 6.5e-10  band 50136  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 2421  35.87 s
 
-══ R4 — THE SENSITIVITY AGAINST A CENTRAL DIFFERENCE ═══════
-design: MOLLIFIED FRACTION ersatz, sample-scatter gradient, k = 4, eps_q mult 1
-C0 = 0.00253906656977   V0 = 34972.342016 (active cells only)
+certifying iteration 2 (best compliance 0.003790174781 of 2 run)
+mesh        321210 vertices, 646768 triangles -> levelset.stl
 
-random dir 0  step    0.001   dV pred       -185.724  fd       -185.177  rel    -0.294%   (no state solve at this step)
-random dir 0  step     0.01   dV pred       -185.724  fd       -185.028  rel    -0.374%   dC pred   3.36267e-06  fd    3.3181e-06  rel    -1.326%
-random dir 0  step      0.1   dV pred       -185.724  fd       -188.463  rel    +1.475%   dC pred   3.36267e-06  fd   3.26552e-06  rel    -2.889%
-random dir 0  step      0.3   dV pred       -185.724  fd       -192.701  rel    +3.757%   (no state solve at this step)
-random dir 0  step        1   dV pred       -185.724  fd       -221.001  rel   +18.994%   (no state solve at this step)
-random dir 1  step    0.001   dV pred       -185.452  fd       -186.964  rel    +0.815%   (no state solve at this step)
-random dir 1  step     0.01   dV pred       -185.452  fd        -187.23  rel    +0.959%   dC pred   3.83639e-06  fd   3.95856e-06  rel    +3.184%
-random dir 1  step      0.1   dV pred       -185.452  fd       -188.976  rel    +1.900%   dC pred   3.83639e-06  fd   4.03463e-06  rel    +5.167%
-random dir 1  step      0.3   dV pred       -185.452  fd       -190.161  rel    +2.539%   (no state solve at this step)
-random dir 1  step        1   dV pred       -185.452  fd       -131.091  rel   -29.313%   (no state solve at this step)
-coeff   8991  step     0.01   dV pred       -13.1406  fd       -13.1594  rel    +0.143%   (no state solve at this step)
-coeff   8991  step      0.1   dV pred       -13.1406  fd       -13.0605  rel    -0.609%   (no state solve at this step)
-coeff   8991  step        1   dV pred       -13.1406  fd       -11.7323  rel   -10.717%   dC pred   2.19452e-07  fd   2.24745e-07  rel    +2.412%
-coeff   8990  step     0.01   dV pred       -12.8629  fd       -12.8734  rel    +0.082%   (no state solve at this step)
-coeff   8990  step      0.1   dV pred       -12.8629  fd       -12.5976  rel    -2.062%   (no state solve at this step)
-coeff   8990  step        1   dV pred       -12.8629  fd       -10.5243  rel   -18.181%   dC pred   1.84497e-07  fd    1.6431e-07  rel   -10.942%
-coeff   5999  step     0.01   dV pred       -12.2802  fd       -12.3505  rel    +0.572%   (no state solve at this step)
-coeff   5999  step      0.1   dV pred       -12.2802  fd       -12.2489  rel    -0.256%   (no state solve at this step)
-coeff   5999  step        1   dV pred       -12.2802  fd       -10.3554  rel   -15.674%   dC pred   2.90052e-07  fd   2.38009e-07  rel   -17.943%
+== levelset_probe summary ==
+seed                 holes
+rung                 0.68
+THREADS              3
+iterations run       2
+WALL PER ITERATION   83.885 s   (total 167.8 s over 2 iterations)
+  of which solve     82.990 s/iteration (166.0 s total)
+  of which extension 0.001 s/iteration (0.0 s total)
+certification wall   50.2 s
+★ IN-LOOP CERT       0 calls, 0.0 s total (0.0% of the run)
+★ OPTIMISATION ONLY  167.8 s   (run wall minus in-loop certification —
+                     THIS is the method's cost; the certifications are a
+                     stopping rule and would not be paid in production)
+★ STOPPED BECAUSE    the iteration count ran out
+state solves         2, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         2 voxels = 3.410559 mm
+reinit |grad phi|-1  rms 0.393433 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.999882 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00379017478141   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00476491327818
+achieved vf          0.680003  (target 0.68, printed 75415 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.033647627 MPa
+margin in-plane      1634.587796591
+margin interlayer    2018.601395443
+MARGIN worst case    1634.587796591
+margin effective     338.462313599   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    6593
+mass                 469.1974 g
 
-wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/probe/fd_frac_soft/frac_fd.csv
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-variant-margin-tolerance-f0902f/3ff458d2-106a-43d0-bd48-cf9f98fdbdc3/scratchpad/smoke/{iterations.csv,design.bin,rho.f64,rho.meta,levelset.stl,summary.txt}
+
+for the roughness row, on the SAME binary that produced PR 321's:
+  ./build/external_field_surface_probe <ref/design.bin> <part.step> <dir> LS=/private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-variant-margin-tolerance-f0902f/3ff458d2-106a-43d0-bd48-cf9f98fdbdc3/scratchpad/smoke/rho
