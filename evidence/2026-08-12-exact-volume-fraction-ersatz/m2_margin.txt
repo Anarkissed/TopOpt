@@ -57,3 +57,211 @@ VERDICT              ACCEPTED
 min-feature viols    5444
 mass                 464.0444 g
 load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0020.f64
+binarized            no
+fractional samples   35260 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.027983206 MPa
+MARGIN worst case    1965.464555833
+margin effective     406.974579311   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2520
+mass                 463.7677 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0030.f64
+binarized            no
+fractional samples   27276 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.026131725 MPa
+MARGIN worst case    2104.721381174
+margin effective     435.809486428   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2612
+mass                 463.7923 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0040.f64
+binarized            no
+fractional samples   27178 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.022747546 MPa
+MARGIN worst case    2417.843256980
+margin effective     500.645376396   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2692
+mass                 463.7985 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0050.f64
+binarized            no
+fractional samples   27368 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.020116465 MPa
+MARGIN worst case    2734.078766577
+margin effective     566.125984072   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2838
+mass                 463.7923 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0060.f64
+binarized            no
+fractional samples   27601 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.018816262 MPa
+MARGIN worst case    2923.003521356
+margin effective     605.245271352   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2870
+mass                 463.8169 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0070.f64
+binarized            no
+fractional samples   27703 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.017009601 MPa
+MARGIN worst case    3233.468058383
+margin effective     669.530925332   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2870
+mass                 463.7677 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0080.f64
+binarized            no
+fractional samples   27760 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016787044 MPa
+MARGIN worst case    3276.336114061
+margin effective     678.407304646   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2916
+mass                 463.8108 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0090.f64
+binarized            no
+fractional samples   27762 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016802985 MPa
+MARGIN worst case    3273.227990684
+margin effective     677.763727941   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2826
+mass                 463.8231 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0100.f64
+binarized            no
+fractional samples   27825 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.017200563 MPa
+MARGIN worst case    3197.569705028
+margin effective     662.097712044   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2801
+mass                 463.7923 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0110.f64
+binarized            no
+fractional samples   27841 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.017397814 MPa
+MARGIN worst case    3161.316754535
+margin effective     654.591074882   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2793
+mass                 463.7800 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/H1_heaviside/snap/it0120.f64
+binarized            no
+fractional samples   27800 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.020829997 MPa
+MARGIN worst case    2640.422841573
+margin effective     546.733326715   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2727
+mass                 463.7739 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/F1_frac4/snap/it0001.f64
+binarized            no
+fractional samples   70109 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.087522394 MPa
+MARGIN worst case    628.410597396
+margin effective     130.120453076   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    4814
+mass                 465.0406 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/F1_frac4/snap/it0010.f64
+binarized            no
+fractional samples   66943 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.024309475 MPa
+MARGIN worst case    2262.492326315
+margin effective     468.477978890   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    5002
+mass                 463.8046 g
+load path connected  yes

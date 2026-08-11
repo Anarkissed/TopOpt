@@ -92,18 +92,35 @@ def table_margin():
         # tight enough to exclude an arm that is still climbing.
         m = [fnum(d[i], "margin_worst_case") for i in its]
         last = m[-1]
+        # ★ AT LEAST TWO CERTIFICATES, or the last one always "settles" against
+        # itself and every arm reports a settling iteration equal to its own
+        # endpoint — which is a tautology dressed as a measurement.
         settle = None
-        for a in range(len(its)):
+        for a in range(len(its) - 1):
             if all(abs(x - last) <= 0.01 * abs(last) for x in m[a:]):
                 settle = its[a]
                 break
         print("| | |")
         if settle is None:
-            print("SETTLED: NO — still moving more than 1%% at iteration %d "
-                  "(the margin is a LOWER BOUND)" % its[-1])
+            print("SETTLED: NO — still moving more than 1%% at iteration %d"
+                  % its[-1])
         else:
             print("SETTLED at iteration %d (every later certificate within 1%% "
                   "of %.1f)" % (settle, last))
+        # ★ THE PEAK AND WHERE IT IS, BECAUSE THE CURVES IN THIS TASK ARE NOT
+        # MONOTONE. PR 326 measured margins still CLIMBING at iteration 60 and
+        # ranked "run longer" first. Run longer, and the margin turns over: a
+        # "settling iteration" is the wrong statistic for a curve with a
+        # maximum, and reporting only the endpoint would report the far side of
+        # it. Both are printed; §3 says which conclusion rests on which.
+        pk = max(range(len(m)), key=lambda a: m[a])
+        print("PEAK %.1f at iteration %d; ENDPOINT %.1f at iteration %d "
+              "(%+.1f%% from the peak)"
+              % (m[pk], its[pk], m[-1], its[-1],
+                 100.0 * (m[-1] - m[pk]) / m[pk] if m[pk] else 0.0))
+        print("vs SIMP's 3254.34: peak %+.1f%%, endpoint %+.1f%%"
+              % (100.0 * (m[pk] - 3254.34) / 3254.34,
+                 100.0 * (m[-1] - 3254.34) / 3254.34))
     print()
 
 
