@@ -29,7 +29,7 @@ seed        regular hole array, period 8 voxels
 PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels PER AXIS
             68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
             support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
-            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 17.4 s
+            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 22.2 s
             volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
             update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
 PLSM        coefficient box +-462.1415 (4x the largest seed coefficient); a unit move of every

@@ -414,7 +414,59 @@ against the control's consistent +10.6% on both steps of one direction).
 
 ### (c) the two ablations, and what they separate
 
-*(filled from `probe/fd_frac_centre` and `probe/fd_frac_soft`)*
+**(i) `--frac-sens centre` — what the SUB-CELL psi is worth.** Identical
+everything, except `psi_i` is factored out at the cell centre and `Psi^T` does
+the projection instead of the scatter:
+
+| probe, at the plateau step 0.1 | scatter (the arm) | centre (`Psi^T`) |
+|---|---|---|
+| random dir 0, dV | **−2.03%** | **−14.87%** |
+| random dir 1, dV | **+0.56%** | **+17.35%** |
+| random dir 0, dC | −25.50% | −46.39% |
+| random dir 1, dC | +24.86% | +100.74% |
+| single coefficients, dV | −1.90 / −0.39 / −0.12% | −2.24 / +0.30 / +2.44% |
+
+★ **THE SUB-CELL psi IS WORTH ABOUT 15 PERCENTAGE POINTS OF GRADIENT ACCURACY ON
+A GENERAL DIRECTION** — the same order as the `|grad phi|` error in §4(a). On a
+SINGLE coefficient the two are indistinguishable, which is the mechanism made
+visible: one knot's `psi` is smooth over its own support, and the difference only
+appears once many knots combine over the sub-cell sum. **A single-coefficient
+check would have said the scatter was unnecessary.**
+
+**(ii) `--frac-soft` — the discriminator P13 needed, and the strongest row in the
+study.** Same quadrature, same scatter, same design, same steps; only the value
+function smoothed:
+
+| probe | 0.001 | 0.01 | 0.1 |
+|---|---|---|---|
+| random dir 0, dV | **−0.294%** | **−0.374%** | +1.475% |
+| random dir 1, dV | **+0.815%** | **+0.959%** | +1.900% |
+| coefficient 8991, dV | — | **+0.143%** | −0.609% |
+| coefficient 8990, dV | — | **+0.082%** | −2.062% |
+| coefficient 5999, dV | — | **+0.572%** | −0.256% |
+| random dir 0, ★ **dC** | — | ★ **−1.326%** | −2.889% |
+| random dir 1, ★ **dC** | — | ★ **+3.184%** | +5.167% |
+| coefficient 8991, ★ **dC** | — | — | ★ **+2.412%** (step 1.0) |
+
+★★ **SUB-1% ON THE VOLUME AT EXACTLY THE STEPS WHERE THE HARD VARIANT READ +182%
+AND −45.7%, AND 1.3–5.2% ON THE COMPLIANCE WHERE THE HARD VARIANT WAS
+NOISE-DOMINATED AT EVERY AFFORDABLE STEP.** Three things follow, and the third is
+the one that licenses ARM 1:
+
+1. **the quadrature and the scatter are CORRECT.** Nothing is wrong with the
+   implementation — the two variants share every line except the value function.
+2. **the hard variant's residual is entirely its own 1/64 staircase.** P13
+   claimed this and could not prove it; this is the proof.
+3. ★ **`--frac-soft` is the only formulation in this study whose gradient can be
+   verified on BOTH functionals.** The control's compliance error is a consistent
+   10.6–22.9%; this is 1.3–5.2%.
+
+★ **And the two value functions agree to 0.037% on the volume they measure**
+(34,972.3 against 34,959.5 active-cell voxels), so the mollification buys the
+differentiability **without moving the geometry** — which was the design intent
+and is now a number rather than an intention.
+
+★ **This is why `A2_all` carries it, and why `A2_all` is the arm that settles.**
 
 ## 5. ARM 2 — "THE BEST I CAN DO"
 
