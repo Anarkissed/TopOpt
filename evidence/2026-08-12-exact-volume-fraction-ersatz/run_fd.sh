@@ -46,4 +46,12 @@ fd frac_soft    --frac 4 --frac-soft
 # 207(1):28-51, 2005; frac_ersatz.hpp carries the argument). Same design, same
 # probe, same steps as `frac_k4`, so the pair isolates the norm and nothing else.
 fd frac_l1      --frac 4 --frac-eps-l1
+
+# ── ★ AND THE PAIRING THAT ACTUALLY RESOLVES M5. On the HARD fraction the
+# difference is quantisation-dominated at every affordable step (P13), so
+# `frac_k4` against `frac_l1` cannot separate the two norms — both read the same
+# noise. On the MOLLIFIED value function the difference is clean to sub-1%, so
+# `frac_soft` against `frac_soft_l1` is the pair that isolates the norm and
+# nothing else. It is ALSO the exact configuration `A2_all` runs.
+fd frac_soft_l1 --frac 4 --frac-soft --frac-eps-l1
 echo FD_DONE
