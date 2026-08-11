@@ -1,0 +1,34 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: holes
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       24 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        regular hole array, period 8 voxels
+PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels PER AXIS
+            68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
+            support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
+            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 17.4 s
+            volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
+            update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
