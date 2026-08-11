@@ -127,7 +127,7 @@ def table_export():
 def table_fd():
     print("== 4. R4 — THE SENSITIVITY AGAINST A CENTRAL DIFFERENCE ==")
     any_found = False
-    for name in ("heaviside", "frac_k4", "frac_centre", "frac_soft"):
+    for name in ("heaviside", "frac_k4", "frac_centre", "frac_soft", "frac_l1"):
         rs = rows(f"probe/fd_{name}/frac_fd.csv")
         if rs is None:
             continue
