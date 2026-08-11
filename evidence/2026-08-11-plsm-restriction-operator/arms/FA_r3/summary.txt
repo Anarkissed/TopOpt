@@ -1,0 +1,41 @@
+== levelset_probe summary ==
+seed                 holes
+rung                 0.68
+THREADS              3
+iterations run       60
+WALL PER ITERATION   34.208 s   (total 2052.5 s over 60 iterations)
+  of which solve     18.669 s/iteration (1120.1 s total)
+  of which extension 0.000 s/iteration (0.0 s total)
+certification wall   27.0 s
+★ FILTER             2100 applies, 256305 CG iterations, 618.5 s total (30.14% of the run)
+★ IN-LOOP CERT       4 calls, 108.7 s total (5.3% of the run)
+★ OPTIMISATION ONLY  1943.8 s   (run wall minus in-loop certification —
+                     THIS is the method's cost; the certifications are a
+                     stopping rule and would not be paid in production)
+★ STOPPED BECAUSE    the iteration count ran out
+state solves         60, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         1 voxels = 1.705279 mm
+reinit |grad phi|-1  rms 0.280184 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.999326 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00263798555019   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00329544329541
+achieved vf          0.680003  (target 0.68, printed 75415 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.029935105 MPa
+margin in-plane      1837.307760341
+margin interlayer    4928.078734384
+MARGIN worst case    1837.307760341
+margin effective     380.438075370   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    705
+mass                 463.8354 g

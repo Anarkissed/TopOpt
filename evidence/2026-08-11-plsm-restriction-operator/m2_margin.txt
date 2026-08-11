@@ -1,0 +1,283 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       6 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/C0b/snap/it0001.f64
+binarized            no
+fractional samples   70109 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       79984 of 110904  (vf 0.721200)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.081932128 MPa
+MARGIN worst case    671.287337166
+margin effective     138.998630542   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    5154
+mass                 491.8259 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/C0c/snap/it0001.f64
+binarized            no
+fractional samples   70109 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       79984 of 110904  (vf 0.721200)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.081932128 MPa
+MARGIN worst case    671.287337166
+margin effective     138.998630542   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    5154
+mass                 491.8259 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/F0_none/snap/it0001.f64
+binarized            no
+fractional samples   57176 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.080747341 MPa
+MARGIN worst case    681.136982280
+margin effective     141.038125564   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    4835
+mass                 464.2105 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/F0_none/snap/it0010.f64
+binarized            no
+fractional samples   36774 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.032394387 MPa
+MARGIN worst case    1697.825001992
+margin effective     351.556385933   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    5063
+mass                 463.8846 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/F0_none/snap/it0020.f64
+binarized            no
+fractional samples   18607 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.023093984 MPa
+MARGIN worst case    2381.572572826
+margin effective     493.135067253   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2317
+mass                 463.7554 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/F0_none/snap/it0030.f64
+binarized            no
+fractional samples   15945 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.023687876 MPa
+MARGIN worst case    2321.862861656
+margin effective     480.771407724   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1929
+mass                 463.7739 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/F0_none/snap/it0040.f64
+binarized            no
+fractional samples   16315 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.017215416 MPa
+MARGIN worst case    3194.811059565
+margin effective     661.526499211   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1714
+mass                 463.7739 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/F0_none/snap/it0050.f64
+binarized            no
+fractional samples   16527 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016202378 MPa
+MARGIN worst case    3394.563426545
+margin effective     702.887782108   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1592
+mass                 463.7677 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r1/snap/it0001.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.079239175 MPa
+MARGIN worst case    694.101119799
+margin effective     143.722516079   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    5300
+mass                 463.9891 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r1/snap/it0010.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.020229976 MPa
+MARGIN worst case    2718.737804781
+margin effective     562.949441685   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1810
+mass                 463.7677 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r1/snap/it0020.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.019536252 MPa
+MARGIN worst case    2815.279001973
+margin effective     582.939531558   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1363
+mass                 463.7677 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r1/snap/it0030.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.019574606 MPa
+MARGIN worst case    2809.762753177
+margin effective     581.797321678   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1169
+mass                 463.7616 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r1/snap/it0040.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.017692189 MPa
+MARGIN worst case    3108.716592757
+margin effective     643.699538503   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1026
+mass                 463.7616 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r1/snap/it0050.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016505117 MPa
+MARGIN worst case    3332.300012474
+margin effective     689.995345726   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    907
+mass                 463.7616 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r1/snap/it0060.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016511868 MPa
+MARGIN worst case    3330.937499463
+margin effective     689.713219977   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    835
+mass                 463.7616 g
+load path connected  yes
+
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r2/snap/it0001.f64
+binarized            no
+fractional samples   70688 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.149411597 MPa
+MARGIN worst case    368.110650325
+margin effective     76.222019172   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    3646
+mass                 463.9584 g
+load path connected  yes

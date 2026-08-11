@@ -273,6 +273,7 @@ namespace {
 // `--plsm` arms it; without the flag not one line of it executes and every
 // earlier arm reproduces byte for byte.
 #include "plsm_basis.hpp"
+#include "plsm_filter.hpp"
 #include "plsm_mma.hpp"
 
 
@@ -1030,6 +1031,111 @@ struct Args {
   // rigid move of the surface and not a design change.
   double nucleation_band = 0.0;   // VOXELS from the interface; 0 = off
 
+  // ── ★ CANDIDATE A — THE HELMHOLTZ DENSITY FILTER (plsm_filter.hpp) ────────
+  //
+  //   --filter-radius rx,ry,rz   PER AXIS, in VOXELS (R5 — never a minimum).
+  //                              A single number is accepted and expanded to
+  //                              three, which is the isotropic special case.
+  //   --filter-beta B            the projection sharpness. Fixed, not a
+  //                              schedule: Aage, Giele & Andreasen (2021)
+  //                              report length scale controlled "without the
+  //                              need for beta-continuation" at 62M elements.
+  //   --filter-eta E             the projection THRESHOLD. 0.5 is the
+  //                              intermediate design; Candidate B moves it.
+  //
+  // ★ THE FILTER ACTS ON THE ERSATZ DENSITY, NOT ON THE COEFFICIENTS. Filtering
+  // the coefficient field is PR 324 §6(ii)'s coarse basis re-derived, and that
+  // halved the margin. The distinction is the whole point of this task.
+  double filter_rx = 0.0, filter_ry = 0.0, filter_rz = 0.0;
+  double filter_beta = 8.0;
+  double filter_eta = 0.5;
+  // ── ★ CANDIDATE B — the robust triple's threshold offset `d`. The three
+  // designs are eta+d / eta / eta-d on the SAME filtered field. 0 = off.
+  // Costs THREE state solves per iteration; PR 324 measured 99.5% of an
+  // iteration as the state solve, so expect ~3x wall. Said plainly.
+  double robust_eta = 0.0;
+
+  // ── ★ CANDIDATE C — THE DIFFUSION ENERGY, AS AN OBJECTIVE TERM ────────────
+  //
+  //     E(phi) = (tau/2) * integral |grad phi|^2 dOmega
+  //
+  // Yamada, Izui, Nishiwaki & Takezawa (2010), CMAME 199(45-48):2876-2891
+  // introduce it as a fictitious interface energy borrowed from the phase-field
+  // method, giving free nucleation "without dependence on the initial layout";
+  // Otomori et al. (2015) report that "the geometrical complexity of optimized
+  // configurations can be easily controlled by appropriately setting a
+  // regularization parameter". ★ THE DIFFUSION TERM IS THE RESTRICTION
+  // OPERATOR, and tau plays the role of r^2.
+  //
+  // ★ THE FORM USED HERE IS RDBLS's, NOT THE NATIVE ONE, AND THAT IS DELIBERATE.
+  // Yamada's own update solves a reaction-diffusion PDE each step and DISPLACES
+  // the mathematical programme. Wang, Xie, Lin & Zhou (2022), CMAME 398:115252
+  // — a B-spline-COEFFICIENT parametric level set, which is this
+  // representation — instead minimise "diffusion energy together with mean
+  // compliance under a volume constraint to control the structural
+  // complexity", i.e. as an OBJECTIVE TERM, so MMA still drives it. That is the
+  // only version that fits here without throwing away the optimiser.
+  //
+  // dE/dphi = -tau * grad^2 phi, so in coefficient space
+  //     dE/dalpha_i = -tau * integral (grad^2 phi) psi_i dOmega
+  // which is ONE Laplacian and ONE transpose apply — the transpose is already
+  // computed each iteration, so this is nearly free. No extra solve, unlike
+  // Candidate A; no extra state solve, unlike Candidate B.
+  //
+  // ★ AND IT IS NOT THE PERIMETER PENALTY WITH A NEW NAME, THOUGH IT IS CLOSE
+  // ENOUGH THAT THE DIFFERENCE HAS TO BE STATED. For a SIGNED DISTANCE function
+  // grad^2 phi IS the mean curvature, so the two would coincide. Two things
+  // separate them here: (1) the perimeter term is multiplied by `delta` and so
+  // acts ONLY in the band, while this acts over the WHOLE DOMAIN — it
+  // regularises the representation, not just the interface; and (2) this phi is
+  // NOT a distance function (| |grad phi| - 1 | runs about 0.35), so grad^2 phi
+  // and kappa are genuinely different fields here.
+  //
+  // ★★ THE SCALING, AND THE FIRST VERSION OF IT WAS WRONG BY FOUR ORDERS OF
+  // MAGNITUDE. I first scaled this the way the perimeter penalty is scaled —
+  // tau = T * lambda * h — and swept T at 1, 4 and 16. Every arm was destroyed:
+  // certified margin 467 at T=4 and 830 at T=16 against SIMP's 3254, and the
+  // diffusion energy the term is supposed to MINIMISE rose for thirty
+  // iterations before falling. I reported that I could not separate "the
+  // mechanism is wrong for this part" from "I scaled it wrong".
+  //
+  // ★ READING YAMADA (2010) SETTLED IT, AND IT IS THE SECOND SENTENCE OF THEIR
+  // EQ. 9 DISCUSSION: tau is "a regularization parameter representing THE RATIO
+  // OF THE FICTITIOUS INTERFACE ENERGY AND THE OBJECTIVE FUNCTIONAL". It is not
+  // a coefficient with units. Their §3.2 then says they "introduce a
+  // characteristic length L and an extended parameter C_t to NORMALIZE THE
+  // SENSITIVITIES", so tau is a ratio applied to DIMENSIONLESS sensitivities,
+  // and every value in the paper is between 1e-5 and 5e-4.
+  //
+  // ★ SO THE TERM IS NORMALISED AGAINST THE OBJECTIVE'S OWN GRADIENT AND `T` IS
+  // THE RATIO ITSELF:
+  //
+  //     g_diffusion  <-  T * (||g_objective|| / ||g_diffusion||) * g_diffusion
+  //
+  // T = 0.1 then means "the smoothing term pulls a tenth as hard as
+  // compliance", on any part, at any rung, with no unit anywhere. That is as
+  // close to Yamada's semantics as a gradient-space implementation gets, and it
+  // removes the lambda*h factor, which was mine and not theirs.
+  //
+  // ★ AND THE ACHIEVED RATIO IS WRITTEN TO THE CSV EVERY ITERATION, so a future
+  // reader can see that the normalisation actually held rather than trusting
+  // this comment.
+  double diffusion = 0.0;
+
+  // ── ★ --no-compliance-stop ────────────────────────────────────────────────
+  //
+  // The loop stops on the shipped MMA termination — compliance flat within 1e-3
+  // over ten iterations. ★ THAT RULE IS WRONG FOR THESE ARMS AND THE CONTROL
+  // ARM OF THIS TASK PROVED IT: `F0_none` hit the plateau at iteration 56 while
+  // its certified margin was still climbing, 3194.81 at iteration 40 to 3394.56
+  // at 50. PR 326 §2 measured the same thing from the other side — one arm moved
+  // 27% in margin while moving 0.05% in compliance. Compliance is not a
+  // convergence proxy for the margin.
+  //
+  // It also makes arms stop at DIFFERENT iterations, which destroys the matched
+  // comparison the brief's S(c) and PR 326 §2 both insist on.
+  bool no_compliance_stop = false;
+
   // ── ★ A MARGIN-AWARE STOPPING RULE, AND A WALL-CLOCK CAP ──────────────────
   //
   // ★ THIS EXISTS BECAUSE THIS TASK MEASURED THAT THE STOPPING RULE WE HAVE IS
@@ -1127,6 +1233,16 @@ int main(int argc, char** argv) {
         "       [--robust DELTA]      Sigmund 2009: optimise the WORST of the\n"
         "                            eroded/intermediate/dilated designs. DELTA\n"
         "                            in voxels. THREE state solves per iteration.\n"
+        "  ★ RESTRICTION OPERATORS (task 2026-08-11-plsm-restriction-operator):\n"
+        "       [--filter-radius R | rx,ry,rz]  CANDIDATE A. Helmholtz filter on\n"
+        "                            the ERSATZ DENSITY, radius in VOXELS PER\n"
+        "                            AXIS. Filters the DENSITY, never the\n"
+        "                            coefficients — the latter is PR 324's\n"
+        "                            refuted coarse basis re-derived.\n"
+        "       [--filter-beta B] [--filter-eta E]   the projection after it\n"
+        "       [--robust-eta D]     CANDIDATE B. Worst of the filtered field\n"
+        "                            projected at eta+D / eta / eta-D. THREE\n"
+        "                            state solves per iteration. Needs a filter.\n"
         "       [--nucleation-band W] only coefficients within W voxels of the\n"
         "                            interface may move. Closes interior hole\n"
         "                            nucleation, which is what generates the\n"
@@ -1193,6 +1309,22 @@ int main(int argc, char** argv) {
     else if (s == "--willmore-full") a.willmore_full = true;
     else if (s == "--robust") next(a.robust);
     else if (s == "--nucleation-band") next(a.nucleation_band);
+    else if (s == "--filter-radius" && i + 1 < argc) {
+      const std::string spec = argv[++i];
+      const int got = std::sscanf(spec.c_str(), "%lf,%lf,%lf", &a.filter_rx,
+                                  &a.filter_ry, &a.filter_rz);
+      if (got == 1) { a.filter_ry = a.filter_rx; a.filter_rz = a.filter_rx; }
+      else if (got != 3) {
+        std::printf("FATAL: --filter-radius wants R or rx,ry,rz (VOXELS, PER "
+                    "AXIS — R5 forbids deriving one from a minimum)\n");
+        std::exit(1);
+      }
+    }
+    else if (s == "--filter-beta") next(a.filter_beta);
+    else if (s == "--filter-eta") next(a.filter_eta);
+    else if (s == "--robust-eta") next(a.robust_eta);
+    else if (s == "--diffusion") next(a.diffusion);
+    else if (s == "--no-compliance-stop") a.no_compliance_stop = true;
     else if (s == "--certify-every") nexti(a.certify_every);
     else if (s == "--certify-from") nexti(a.certify_from);
     else if (s == "--margin-stop") next(a.margin_stop);
@@ -1267,6 +1399,50 @@ int main(int argc, char** argv) {
   }
   if (a.robust < 0.0) {
     std::printf("FATAL: --robust takes an erosion depth in VOXELS >= 0\n");
+    return 2;
+  }
+  // ★ REFUSED RATHER THAN IGNORED — the discipline PR 324 §9 paid for.
+  if (a.robust_eta > 0.0 &&
+      !(a.filter_rx > 0.0 || a.filter_ry > 0.0 || a.filter_rz > 0.0)) {
+    std::printf(
+        "FATAL: --robust-eta moves the PROJECTION THRESHOLD on the FILTERED\n"
+        "       density, and with no --filter-radius there is no filtered\n"
+        "       density: rho_til is the raw ersatz, which is already\n"
+        "       near-binary, so all three thresholds would select nearly the\n"
+        "       same set and the arm would measure its own control.\n"
+        "       Give it a --filter-radius, or use --robust (the phi-shift\n"
+        "       form PR 326 built) if a filter is genuinely not wanted.\n");
+    return 2;
+  }
+  if (a.robust_eta > 0.0 && a.robust > 0.0) {
+    std::printf("FATAL: --robust and --robust-eta are two robust formulations.\n"
+                "       Running both would erode twice by different rules.\n");
+    return 2;
+  }
+  if (a.robust_eta >= a.filter_eta || a.filter_eta + a.robust_eta >= 1.0) {
+    if (a.robust_eta > 0.0) {
+      std::printf("FATAL: --robust-eta %.4g puts a threshold outside (0,1) "
+                  "around eta %.4g\n", a.robust_eta, a.filter_eta);
+      return 2;
+    }
+  }
+  // ★ THE GUARD THIS TASK EARNED. `--diffusion` is now a RATIO against the
+  // objective's gradient, so a value at or above 1 means "smooth harder than
+  // you optimise". My first sweep ran 1, 4 and 16 on a scaling of my own
+  // invention and destroyed three arms before I read the paper that says the
+  // parameter is a ratio between 1e-5 and 5e-4. The refusal is here so the
+  // units cannot be misread twice.
+  if (a.diffusion >= 1.0) {
+    std::printf(
+        "FATAL: --diffusion is a RATIO of the diffusion gradient to the\n"
+        "       OBJECTIVE's gradient (Yamada 2010: tau is \"the ratio of the\n"
+        "       fictitious interface energy and the objective functional\",\n"
+        "       swept there between 1e-5 and 5e-4). %.4g means the smoothing\n"
+        "       term pulls at least as hard as compliance does, which is not a\n"
+        "       regularisation — it is a different problem.\n"
+        "       ★ An earlier scaling of mine took 1, 4 and 16 and certified at\n"
+        "       467 and 830 against SIMP's 3254. Use something below 1.\n",
+        a.diffusion);
     return 2;
   }
   if (a.margin_stop > 0.0 && a.certify_every <= 0) {
@@ -2091,45 +2267,60 @@ int main(int argc, char** argv) {
   std::vector<double> occ(n, 0.0), rho(n, 0.0);
   const double rho_min = params.density_min;
 
+  // ★ CANDIDATE A's operator, and the two intermediate fields the chain rule
+  // needs to keep. `rho_til` is the FILTERED density and is what the projection
+  // derivative is evaluated at; without it the adjoint cannot be formed.
+  HelmholtzFilter hfilter;
+  hfilter.d = d;
+  hfilter.rx = a.filter_rx; hfilter.ry = a.filter_ry; hfilter.rz = a.filter_rz;
+  std::vector<double> occ_raw(n, 0.0), rho_til(n, 0.0);
+
+  // ── THE ERSATZ, NOW A CHAIN ───────────────────────────────────────────────
+  //
+  //   phi -> occ_raw = H_eta(-phi)   the ersatz PR 322-326 all used, unchanged
+  //       -> rho_til = F occ_raw     ★ THE RESTRICTION OPERATOR
+  //       -> occ     = P_beta(rho_til)  back to a part, so it certifies
+  //
+  // ★ THE FROZEN CLASSES ARE RE-IMPOSED AFTER THE FILTER, NOT BEFORE. A filter
+  // is a smear, and smearing across the pad boundary would bleed the anchor and
+  // the load pads into the void — which is PR 324 §5's load-path failure with a
+  // new cause. FrozenSolid is 1 and FrozenVoid is 0 in the field the physics
+  // sees, whatever the filter did in between.
+  //
+  // With no radius this is the identity and `occ` is bit-for-bit what every
+  // earlier arm produced, which `C0` checks.
   auto build_fields = [&](double offset) {
     for (std::size_t v = 0; v < n; ++v) {
       double o;
       if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) o = 0.0;
       else if (eff[v] == MaskValue::FrozenSolid) o = 1.0;
       else o = heaviside(-(phi[v] + offset * off_shape[v]), eta);
+      occ_raw[v] = o;
+    }
+    if (!hfilter.active()) {
+      for (std::size_t v = 0; v < n; ++v) {
+        occ[v] = occ_raw[v];
+        rho[v] = rho_min + (1.0 - rho_min) * occ_raw[v];
+      }
+      return;
+    }
+    hfilter.apply(occ_raw, rho_til);
+    for (std::size_t v = 0; v < n; ++v) {
+      double o;
+      if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) o = 0.0;
+      else if (eff[v] == MaskValue::FrozenSolid) o = 1.0;
+      else o = project(rho_til[v], a.filter_beta, a.filter_eta);
       occ[v] = o;
       rho[v] = rho_min + (1.0 - rho_min) * o;
     }
   };
 
-  // ★ S1 — WHAT THE CONSTRAINT ACTUALLY MEASURES. This is the one line PR 324
-  // §6 named and did not change.
-  //
-  // ★ AND THE PREDICATE IS `H_eta(-p) > 0.5`, NOT `p < 0`, WHICH IS NOT THE SAME
-  // TEST IN FLOATING POINT AND THE FIRST RUN CAUGHT IT. Mathematically the two
-  // sets are identical: `heaviside` is monotone with H(0) = 0.5 exactly. But for
-  // |p| below about 1e-16*eta the smoothed form evaluates
-  // 0.5*(1 + p/eta + sin(...)/pi) and ROUNDS BACK TO EXACTLY 0.5, so a voxel a
-  // rounding error inside the surface counts as printed by one test and not by
-  // the other. The re-baseline stopped on iteration 1 with 75,415 against
-  // 75,414 — one voxel — and the assertion is what stopped it.
-  //
-  // Writing the constraint as the printed predicate ITSELF is also the more
-  // honest statement of intent: PR 324 §6 says "the part is #{rho > 0.5}", the
-  // extraction takes iso 0.5, `analyze_fixed_design` reads that same field, and
-  // this now constrains exactly that set rather than an algebraically equal
-  // surrogate. `occupancy_volume` and `printed_voxels` agree bit for bit, which
-  // the loop asserts every iteration; without the flag they are free to
-  // separate and the CSV shows them doing it.
-  // ★ ARM 2 — THE ERODED AND DILATED DESIGNS, and the ONE thing that makes the
-  // robust formulation cheap on a level set. `build_fields` scales its offset by
-  // `off_shape` (which is `psi_sum` in parametric mode) because the volume
-  // offset has to stay inside the span of the basis. An EROSION must not: it is
-  // a rigid inward move of the surface by `dphi` millimetres, the same everywhere,
-  // and it is never a design — it is evaluated, solved, and thrown away. So this
-  // adds a plain constant. The frozen classes are copied through untouched:
-  // frozen material is not the optimiser's to erode, and eroding it would break
-  // the load path for a reason that has nothing to do with the design.
+  // ★ PR 326's ROBUST DESIGNS — the eroded and dilated versions, built by a
+  // RIGID SHIFT of phi. Kept exactly as they were so `--robust` reproduces, and
+  // ★ NOT what Candidate B uses: the robust formulation this task transplants
+  // moves the PROJECTION THRESHOLD on the FILTERED field, which is a different
+  // and better-founded object (Wang, Lazarov & Sigmund 2011). See
+  // `build_rho_threshold` below.
   std::vector<double> rho_eroded(n, 0.0), rho_dilated(n, 0.0);
   auto build_rho_shift = [&](double dphi, std::vector<double>& out) {
     for (std::size_t v = 0; v < n; ++v) {
@@ -2141,13 +2332,53 @@ int main(int argc, char** argv) {
     }
   };
 
+  // ── ★ CANDIDATE B — THE ROBUST TRIPLE, BY THE PROJECTION THRESHOLD ────────
+  //
+  // Wang, Lazarov & Sigmund (2011): "a modified robust topology optimization
+  // formulation based on erosion, intermediate and dilation projections that
+  // ensures both global and local mesh-convergence." The three designs are the
+  // SAME filtered field at three thresholds — eta_p + d (eroded, harder to be
+  // solid), eta_p (intermediate), eta_p - d (dilated) — so they cost THREE
+  // PROJECTIONS, not three filters, and the filter solve is shared.
+  //
+  // ★ IT ONLY MEANS ANYTHING ON TOP OF A FILTER. With no filter `rho_til` is
+  // the raw ersatz, which is already near-binary, and moving a threshold on a
+  // near-binary field moves almost nothing. The probe refuses the combination
+  // rather than running an arm that measures its own control.
+  auto build_rho_threshold = [&](double eta_p, std::vector<double>& out) {
+    for (std::size_t v = 0; v < n; ++v) {
+      double o;
+      if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) o = 0.0;
+      else if (eff[v] == MaskValue::FrozenSolid) o = 1.0;
+      else o = project(rho_til[v], a.filter_beta, eta_p);
+      out[v] = rho_min + (1.0 - rho_min) * o;
+    }
+  };
+
+  // ★ S1 — WHAT THE CONSTRAINT ACTUALLY MEASURES, AND WITH A FILTER IT HAS TO
+  // MEASURE THE FILTERED THING. See PR 326 §1 for why the predicate is
+  // `H_eta(-p) > 0.5` and not `p < 0`: they are the same set in mathematics and
+  // not the same test in floating point.
+  //
+  // ★ THE CONSTRAINT COUNTS THE PHYSICAL DENSITY. The part that gets printed,
+  // certified and weighed is P_beta(F occ_raw). Constraining the PRE-filter
+  // field would hold a quantity nothing downstream reads — which is exactly
+  // PR 326 §1's defect with a new cause, and that one cost 8.9% of the part.
+  //
+  // ★ SO THE BISECTION RE-FILTERS, AND THAT COST IS REAL AND REPORTED. The
+  // filter is not linear in `offset`, so there is no closed form to fold it
+  // into. `build_fields` is therefore the ONE function that builds the chain,
+  // and `volume_at` calls it — which also means the bisection leaves the fields
+  // in exactly the state its last trial produced, so no state can disagree.
+  // With no radius `build_fields` is the identity chain and this is bit-for-bit
+  // PR 326's arm, which `C0` checks.
   auto volume_at = [&](double offset) {
+    build_fields(offset);
     double s = 0.0;
     for (std::size_t v = 0; v < n; ++v) {
       if (grid.tags[v] == VoxelTag::Empty || eff[v] == MaskValue::FrozenVoid) continue;
       if (eff[v] == MaskValue::FrozenSolid) { s += 1.0; continue; }
-      const double o = heaviside(-(phi[v] + offset * off_shape[v]), eta);
-      s += a.volume_count ? (o > 0.5 ? 1.0 : 0.0) : o;
+      s += a.volume_count ? (occ[v] > 0.5 ? 1.0 : 0.0) : occ[v];
     }
     return s;
   };
@@ -2162,7 +2393,14 @@ int main(int argc, char** argv) {
     double lo = -400.0, hi = 400.0;
     if (volume_at(lo) < target) return lo;   // cannot fill enough: fullest wins
     if (volume_at(hi) > target) return hi;   // cannot empty enough: emptiest wins
-    for (int it = 0; it < 100; ++it) {
+    // ★ 100 HALVINGS WITHOUT A FILTER, 30 WITH ONE, AND THE REASON IS COST.
+    // Each trial now runs a filter solve, so 100 of them per iteration is real
+    // money. 30 halvings of a +-400 bracket reach 7.5e-7 mm — five orders below
+    // a voxel and far below anything the predicate can resolve — so nothing is
+    // given up. Without a filter the loop is unchanged at 100 and every earlier
+    // arm reproduces bit-for-bit.
+    const int halvings = hfilter.active() ? 30 : 100;
+    for (int it = 0; it < halvings; ++it) {
       const double mid = 0.5 * (lo + hi);
       if (volume_at(mid) > target) lo = mid; else hi = mid;
     }
@@ -2201,7 +2439,8 @@ int main(int argc, char** argv) {
          // ARM 2: which of the eroded / intermediate / dilated designs the
          // worst-case objective landed on (0/1/2), and its compliance against
          // the intermediate's. Both are 1 when --robust is off.
-         "robust_worst,robust_ratio,nuc_frozen,"
+         "robust_worst,robust_ratio,nuc_frozen,diffusion_energy,"
+         "diffusion_ratio,"
          "iteration_wall_s\n";
 
   // ── THE DIRICHLET SET FOR THE HILBERTIAN EXTENSION (difference 4) ──────────
@@ -2226,6 +2465,9 @@ int main(int argc, char** argv) {
   // The band of whichever design the objective landed on. Equal to `delta`
   // unless --robust is on; see where it is filled.
   std::vector<double> delta_obj(n, 0.0);
+  // Scratch for the filter's adjoint pass. Held out of the loop because it is
+  // two more 468k-double buffers and the loop runs sixty times.
+  std::vector<double> filt_scratch(n, 0.0), filt_out(n, 0.0);
   // ARM 2's optimiser state. The coefficient box is sized from the SEED, because
   // an RBF coefficient is scaled like the distance it interpolates (mm here) and
   // there is no universal bound to write down; +-4x the largest seed coefficient
@@ -2255,6 +2497,21 @@ int main(int argc, char** argv) {
   // ★ SAID OUT LOUD IN THE LOG, because both of these change what the run
   // OPTIMISES rather than only how fast it gets there, and a table row is
   // meaningless without knowing which convention produced it.
+  if (hfilter.active())
+    std::printf("FILTER      ★ HELMHOLTZ on the ERSATZ DENSITY (Candidate A): "
+                "radius (%.4g, %.4g, %.4g) voxels PER AXIS\n"
+                "            = (%.4f, %.4f, %.4f) mm; projection beta %.4g, "
+                "threshold %.4g\n"
+                "            chain: phi -> H_eta(-phi) -> F -> P_beta -> the "
+                "density the physics and the certificate read\n"
+                "            adjoint: P' then the SAME solve — F is "
+                "self-adjoint, so no transpose exists or is needed%s\n",
+                a.filter_rx, a.filter_ry, a.filter_rz, a.filter_rx * h,
+                a.filter_ry * h, a.filter_rz * h, a.filter_beta, a.filter_eta,
+                a.robust_eta > 0.0 ? "\n            ★ ROBUST TRIPLE "
+                                     "(Candidate B): thresholds eta +- the "
+                                     "offset, THREE state solves per iteration"
+                                   : "");
   std::printf("VOLUME      constraint measures %s\n",
               a.volume_count
                   ? "#{phi + c < 0} — the PRINTED count (S1: occupancy_volume "
@@ -2329,6 +2586,8 @@ int main(int argc, char** argv) {
     // off, which is what the CSV then carries.
     int robust_worst = 1;
     double robust_ratio = 1.0;
+    double diffusion_energy = 0.0;
+    double diffusion_ratio = 0.0;
     // How far the OBJECTIVE's surface sits from the printed one, in mm. Zero
     // unless --robust picked the eroded or dilated design; see the assignment.
     double delta_shift = 0.0;
@@ -2412,7 +2671,43 @@ int main(int argc, char** argv) {
       // ARGMAX's — a valid subgradient of a max of smooth functions, and the
       // standard choice. `robust_worst` records which one won so the log can
       // say whether the erosion is actually binding or the flag is decoration.
-      if (a.robust > 0.0) {
+      if (a.robust_eta > 0.0) {
+        // ★ CANDIDATE B. Three PROJECTIONS of one filtered field: a higher
+        // threshold selects less material (eroded), a lower one selects more
+        // (dilated). The filter solve is shared, so this costs three state
+        // solves and three projections — not three filters.
+        build_rho_threshold(a.filter_eta + a.robust_eta, rho_eroded);
+        const SimpCompliance sc_e = simp_compliance(
+            grid, traj_params, rho_eroded, bcs, loads, tol_now,
+            options.simp.cg_max_iterations, nullptr, pen_solver.get(), solver_now);
+        build_rho_threshold(a.filter_eta - a.robust_eta, rho_dilated);
+        const SimpCompliance sc_d = simp_compliance(
+            grid, traj_params, rho_dilated, bcs, loads, tol_now,
+            options.simp.cg_max_iterations, nullptr, pen_solver.get(), solver_now);
+        solves_total += 2;
+        if (sc_e.cg.used_multigrid) ++solves_multigrid;
+        if (sc_d.cg.used_multigrid) ++solves_multigrid;
+        robust_worst = 1;
+        double worst = sc.compliance;
+        if (sc_e.compliance > worst) { worst = sc_e.compliance; robust_worst = 0; }
+        if (sc_d.compliance > worst) { worst = sc_d.compliance; robust_worst = 2; }
+        robust_ratio = sc.compliance > 0.0 ? worst / sc.compliance : 1.0;
+        // ★ NO `delta_shift` HERE, AND THAT IS THE DIFFERENCE FROM PR 326's
+        // --robust. The three designs share ONE interface — they are three
+        // thresholds of the same field, not three offset surfaces — so the
+        // sensitivity is read at the same place for all of them. PR 326's
+        // phi-shift form genuinely moves the surface and needs the shift; this
+        // one does not, and applying it would be wrong.
+        if (robust_worst == 0) {
+          sc.compliance = sc_e.compliance;
+          sc.dcompliance = sc_e.dcompliance;
+          rho_sens = &rho_eroded;
+        } else if (robust_worst == 2) {
+          sc.compliance = sc_d.compliance;
+          sc.dcompliance = sc_d.dcompliance;
+          rho_sens = &rho_dilated;
+        }
+      } else if (a.robust > 0.0) {
         const double dlt = a.robust * h;
         build_rho_shift(+dlt, rho_eroded);   // ERODED: phi + delta, smaller solid
         const SimpCompliance sc_e = simp_compliance(
@@ -2552,6 +2847,41 @@ int main(int argc, char** argv) {
                                    traj_params.penalty,
                                    traj_params.youngs_modulus);
         }
+
+    // ── ★ THE ADJOINT OF THE RESTRICTION OPERATOR ──────────────────────────
+    //
+    // ★ THIS IS THE ONE PLACE A DENSITY FILTER CAN BE SILENTLY WRONG, AND
+    // NOTHING DOWNSTREAM WOULD SAY SO — the objective would still fall, the arm
+    // would still converge, and the design would be the optimum of a problem
+    // nobody posed. PR 326 shipped one bug of exactly that shape (the robust
+    // sensitivity read at the wrong surface) and caught it by reading.
+    //
+    // The forward chain is  phi -> occ_raw -> rho_til = F occ_raw ->
+    // occ = P(rho_til), so the derivative of anything w.r.t. the RAW ersatz is
+    //
+    //     d/d occ_raw  =  F^T  o  P'(rho_til)  o  d/d occ
+    //
+    // and F is SELF-ADJOINT — (I - r^2 grad^2) with Neumann data is symmetric —
+    // so F^T is the SAME `apply`. No transpose operator exists, and needing
+    // none is a property of the PDE form, not an approximation.
+    //
+    // `raw_vel` at this point is the strain energy density, which is d/d occ up
+    // to the factor the shape derivative supplies below. So: scale by P', then
+    // filter. The frozen classes are zeroed first — their density is pinned, so
+    // they have no derivative, and letting them contribute would smear a
+    // sensitivity out of a region the optimiser cannot move.
+    if (hfilter.active()) {
+      std::vector<double>& sens = filt_scratch;
+      for (std::size_t v = 0; v < n; ++v) {
+        const bool movable = !(grid.tags[v] == VoxelTag::Empty ||
+                               eff[v] != MaskValue::Active);
+        sens[v] = movable ? raw_vel[v] * project_d(rho_til[v], a.filter_beta,
+                                                   a.filter_eta)
+                          : 0.0;
+      }
+      hfilter.apply(sens, filt_out);
+      for (std::size_t v = 0; v < n; ++v) raw_vel[v] = filt_out[v];
+    }
 
     // ★ LAMBDA UNDER THE SAME MEASURE. PR 322 used the mean energy over a flat
     // two-voxel band. Now that the descent is weighted by `delta`, the multiplier
@@ -2765,6 +3095,65 @@ int main(int argc, char** argv) {
       std::vector<double> g(L.count(), 0.0);
       spmv(PsiT, vel, g, plsm_threads);
 
+      // ── ★ CANDIDATE C — THE DIFFUSION ENERGY'S GRADIENT ────────────────
+      //
+      // dE/dalpha_i = -tau * integral (grad^2 phi) psi_i dOmega, with
+      // tau = T * lambda * h so T is dimensionless on the same scale the
+      // perimeter weight uses. The Laplacian is the plain 7-point stencil with
+      // the same face reflection `mean_curvature` uses, and the integral is the
+      // transpose apply times the cell volume.
+      //
+      // ★ ACTS OVER THE WHOLE DOMAIN, NOT THE BAND — which is the entire
+      // difference from the perimeter penalty and the reason it is worth a
+      // separate arm. It is NOT multiplied by `delta`.
+      std::vector<double> g_diff;
+      if (a.diffusion > 0.0) {
+        std::vector<double>& lap = filt_scratch;
+        for (int k = 0; k < d.nz; ++k)
+          for (int j = 0; j < d.ny; ++j)
+            for (int i = 0; i < d.nx; ++i) {
+              auto P = [&](int A, int B, int C) {
+                A = std::min(std::max(A, 0), d.nx - 1);
+                B = std::min(std::max(B, 0), d.ny - 1);
+                C = std::min(std::max(C, 0), d.nz - 1);
+                return phi[d.at(A, B, C)];
+              };
+              const double c0 = P(i, j, k);
+              lap[d.at(i, j, k)] =
+                  (P(i + 1, j, k) + P(i - 1, j, k) + P(i, j + 1, k) +
+                   P(i, j - 1, k) + P(i, j, k + 1) + P(i, j, k - 1) -
+                   6.0 * c0) / (h * h);
+            }
+        // Frozen material has no derivative — its density is pinned — so it
+        // must not contribute, exactly as it must not for the filter's adjoint.
+        for (std::size_t v = 0; v < n; ++v)
+          if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active)
+            lap[v] = 0.0;
+        g_diff.assign(L.count(), 0.0);
+        spmv(PsiT, lap, g_diff, plsm_threads);
+        // ★ THE RATIO NORMALISATION. `g` at this point is the objective's
+        // gradient and nothing else, which is the only moment it can be used as
+        // the reference — after this line it is the sum of both.
+        double n_obj = 0.0, n_dif = 0.0;
+        for (std::size_t i2 = 0; i2 < L.count(); ++i2) {
+          n_obj += g[i2] * g[i2];
+          n_dif += g_diff[i2] * g_diff[i2];
+        }
+        n_obj = std::sqrt(n_obj);
+        n_dif = std::sqrt(n_dif);
+        const double sc_d = (n_dif > 0.0) ? -a.diffusion * n_obj / n_dif : 0.0;
+        for (std::size_t i2 = 0; i2 < L.count(); ++i2) g_diff[i2] *= sc_d;
+        for (std::size_t i2 = 0; i2 < L.count(); ++i2) g[i2] += g_diff[i2];
+        diffusion_ratio = (n_obj > 0.0) ? a.diffusion : 0.0;
+        diffusion_energy = 0.0;
+        for (std::size_t v = 0; v < n; ++v) {
+          if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active) continue;
+          const double gm = grad_mag(d, phi, v % d.nx,
+                                     (v / d.nx) % d.ny, v / (d.nx * d.ny), h);
+          diffusion_energy += 0.5 * gm * gm * h * h * h;
+        }
+      }
+
       // ── ★ THE NUCLEATION BAND. Which coefficients are allowed to move. ─────
       //
       // `phi` at the knot's own centre, trilinearly off the grid it was just
@@ -2909,6 +3298,11 @@ int main(int argc, char** argv) {
         spmv(PsiT, edelta, dc, plsm_threads);
         spmv(PsiT, delta, dv, plsm_threads);
         for (double& c : dc) c = -c;   // material IN lowers compliance
+        // ★ CANDIDATE C's TERM IS AN OBJECTIVE TERM, so it belongs in `dc` and
+        // NOT in `dv`. `dc` is in BETA space and beta = -alpha, so the sign
+        // flips exactly once here.
+        if (a.diffusion > 0.0 && !g_diff.empty())
+          for (std::size_t i2 = 0; i2 < L.count(); ++i2) dc[i2] += -g_diff[i2];
         // ★ THE SAME RESTRICTION, ON THE SENSITIVITIES MMA ACTUALLY READS. `g`
         // above drives the descent branch; MMA is handed dc and dv separately,
         // so masking only `g` would leave this branch unrestricted — which is
@@ -3087,7 +3481,8 @@ int main(int argc, char** argv) {
         << hilb_rel << ',' << rresid.rms << ',' << rresid.max << ',' << hj_done
         << ',' << gamma_now << ',' << kappa_rms << ',' << perim_now << ','
         << (w * h * h * h) << ',' << robust_worst << ',' << robust_ratio << ','
-        << nuc_frozen << ',' << it_wall << '\n';
+        << nuc_frozen << ',' << diffusion_energy << ',' << diffusion_ratio
+        << ',' << it_wall << '\n';
     csv.flush();
 
     std::printf("it %3d  c = %.10g  vf = %.6f (occ %.1f)  offset %+.4f mm  "
@@ -3231,7 +3626,7 @@ int main(int argc, char** argv) {
       break;
     }
 
-    if (history.size() >= 10) {
+    if (history.size() >= 10 && !a.no_compliance_stop) {
       double lo = history[history.size() - 10], hi = lo;
       for (std::size_t q = history.size() - 10; q < history.size(); ++q) {
         lo = std::min(lo, history[q]);
@@ -3483,6 +3878,8 @@ int main(int argc, char** argv) {
       "  of which solve     %.3f s/iteration (%.1f s total)\n"
       "  of which extension %.3f s/iteration (%.1f s total)\n"
       "certification wall   %.1f s\n"
+      "★ FILTER             %lld applies, %lld CG iterations, %.1f s total "
+      "(%.2f%% of the run)\n"
       "★ IN-LOOP CERT       %lld calls, %.1f s total (%.1f%% of the run)\n"
       "★ OPTIMISATION ONLY  %.1f s   (run wall minus in-loop certification —\n"
       "                     THIS is the method's cost; the certifications are a\n"
@@ -3513,6 +3910,8 @@ int main(int argc, char** argv) {
       converged_early ? " (converged)" : "", per_iter, run_wall, done_iters,
       done_iters ? total_solve_wall / done_iters : 0.0, total_solve_wall,
       done_iters ? total_hilb_wall / done_iters : 0.0, total_hilb_wall, cert_wall,
+      hfilter.applies, hfilter.cg_iters, hfilter.wall_s,
+      run_wall > 0.0 ? 100.0 * hfilter.wall_s / run_wall : 0.0,
       cert_calls_inloop, cert_wall_inloop,
       run_wall > 0.0 ? 100.0 * cert_wall_inloop / run_wall : 0.0,
       run_wall - cert_wall_inloop,
