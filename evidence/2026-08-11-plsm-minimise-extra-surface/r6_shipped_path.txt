@@ -1,0 +1,10 @@
+ok: git diff main -- core/src is 0 lines
+ok: git diff main -- core/include is 0 lines
+ok: git diff main -- app is 0 lines
+ok: materials.json untouched
+--- what DID change ---
+ core/tests/harness/levelset_probe.cpp | 641 +++++++++++++++++++++++++++++++++-
+ core/tests/harness/plsm_basis.hpp     |  23 ++
+ core/tests/harness/plsm_probe.cpp     | 533 +++++++++++++++++++++++++++-
+ 3 files changed, 1174 insertions(+), 23 deletions(-)
+R6 PASS

@@ -1,0 +1,15 @@
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-minimise-extra-surface/s2/RB1_volcount-cad/ALPHA_vm_f1.f64
+binarized            no
+fractional samples   107839 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75227 of 110904  (vf 0.678307)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.052180298 MPa
+MARGIN worst case    1054.037683859
+margin effective     218.251986124   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    2753
+mass                 462.6117 g
+load path connected  yes

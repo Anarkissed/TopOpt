@@ -1,0 +1,40 @@
+== levelset_probe summary ==
+seed                 holes
+rung                 0.68
+THREADS              3
+iterations run       5
+WALL PER ITERATION   39.743 s   (total 198.7 s over 5 iterations)
+  of which solve     36.194 s/iteration (181.0 s total)
+  of which extension 0.001 s/iteration (0.0 s total)
+certification wall   27.3 s
+★ IN-LOOP CERT       0 calls, 0.0 s total (0.0% of the run)
+★ OPTIMISATION ONLY  198.7 s   (run wall minus in-loop certification —
+                     THIS is the method's cost; the certifications are a
+                     stopping rule and would not be paid in production)
+★ STOPPED BECAUSE    the iteration count ran out
+state solves         5, of which the V-cycle engaged on 0
+trajectory posture   PRODUCTION (recycling/geneo as configure_production_options armed them)
+mixed precision      off (FP64)
+-- the five differences, as they ran --
+(1) surface delta    DH_eta(phi)*|grad phi| on the compliance AND volume terms
+(2) trajectory law   penalty 1 = their LINEAR I(phi);  CERTIFICATION penalty 3 (production, unchanged)
+(3) HJ steps         24 per state solve at gamma 0.1 -> 0.1 (damper off, fired 0)
+(4) extension        HILBERTIAN screened-Poisson, Dirichlet on the load/anchor/protection set
+(5) band eta         2 voxels = 3.410559 mm
+reinit |grad phi|-1  rms 0.387149 in band at the last reinitialisation
+                     (their reinit-by-PDE tolerance is 0.00645; the MAX is
+                     0.999939 and is pinned at 1 by medial-axis kinks, which
+                     the exact distance function has too)
+compliance (best)    0.00315304871284   ★ ON THE TRAJECTORY LAW — not comparable to
+                     SIMP's or to PR 322's, which are penalty 3
+compliance (cert)    0.00453801633597
+achieved vf          0.681021  (target 0.68, printed 75528 of 110904 part voxels)
+load path connected  yes
+max von Mises        0.029312877 MPa
+margin in-plane      1876.308477325
+margin interlayer    4643.623855050
+MARGIN worst case    1876.308477325
+margin effective     388.513672735   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    7317
+mass                 464.5487 g
