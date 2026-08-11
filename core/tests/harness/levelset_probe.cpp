@@ -1148,6 +1148,12 @@ struct Args {
   //                volume fraction, by the rank-one laminate. A 3x3 solve per
   //                cut cell; no element matrix anywhere.
   bool frac_aniso = false;
+  // --frac-eps-l1  ★ ARM 2 M5. Scale the quadrature bandwidth by |grad phi|_1
+  //                instead of |grad phi|_2, which is what Engquist, Tornberg &
+  //                Tsai (JCP 207(1):28-51, 2005) prove is required for the
+  //                mollified surface delta to converge at all in 2D or 3D. See
+  //                frac_ersatz.hpp. Defaults OFF so ARM 1 is unchanged.
+  bool frac_eps_l1 = false;
   // --alpha PREFIX   read `<PREFIX>.f64` as this basis's coefficients, in place
   //                  of the seed fit. `plsm_probe` has had this since PR 326 and
   //                  this file has not, so every question about a FINISHED
@@ -1278,6 +1284,7 @@ int main(int argc, char** argv) {
     else if (s == "--frac-kreport") a.frac_kreport = true;
     else if (s == "--frac-fd") nexti(a.frac_fd);
     else if (s == "--frac-aniso") a.frac_aniso = true;
+    else if (s == "--frac-eps-l1") a.frac_eps_l1 = true;
     else if (s == "--alpha" && i + 1 < argc) a.alpha_in = argv[++i];
     else if (s == "--perimeter-local") next(a.perimeter_local);
     else if (s == "--willmore-full") a.willmore_full = true;
@@ -2283,7 +2290,12 @@ int main(int argc, char** argv) {
   const bool frac_on = a.frac > 0;
   FracCache fcache;
   std::vector<char> frac_sample(n, 0);
-  std::vector<double> frac_gm(n, 0.0);      // |grad phi| per cell, for eps_q
+  std::vector<double> frac_gm(n, 0.0);      // |grad phi|_2 per cell, for the AREA
+  // ★ THE BANDWIDTH SCALE, HELD APART FROM THE AREA'S |grad phi|. Equal to
+  // `frac_gm` unless --frac-eps-l1 moves it to the L1 norm; frac_ersatz.hpp says
+  // at length why the L1 norm is the one the quadrature needs and the L2 norm is
+  // the one the co-area area needs, and they are not the same number.
+  std::vector<double> frac_gs(n, 0.0);
   std::vector<double> dfrac(n, 0.0);        // the quadrature band, 1/mm
   std::size_t frac_boundary = 0;
   double frac_build_s = 0.0, frac_sens_s = 0.0, frac_area = 0.0;
@@ -2311,6 +2323,9 @@ int main(int argc, char** argv) {
         for (int i = 0; i < d.nx; ++i) {
           const std::size_t v = d.at(i, j, k);
           frac_gm[v] = frac_sample[v] ? grad_mag(d, phi, i, j, k, h) : 0.0;
+          frac_gs[v] = (frac_sample[v] && a.frac_eps_l1)
+                           ? frac_grad_l1(d, phi, i, j, k, h)
+                           : frac_gm[v];
         }
   };
 
@@ -2340,7 +2355,7 @@ int main(int argc, char** argv) {
           eff[v] == MaskValue::Active) {
         e = a.frac_soft
                 ? frac_of_soft(fcache, v,
-                               frac_eps(frac_gm[v], h, a.frac, a.frac_eps))
+                               frac_eps(frac_gs[v], h, a.frac, a.frac_eps))
                 : frac_of(fcache, v);
       }
       rho[v] = rho_min + (1.0 - rho_min) * e;
@@ -2540,7 +2555,7 @@ int main(int argc, char** argv) {
         "            stamped 0/1 by the mask and were never the level set's.\n"
         "            value    %s\n"
         "            gradient %s\n"
-        "            eps_q    %.4g x |grad phi| x h/%d = %.5f mm at |grad phi| = 1\n"
+        "            eps_q    %.4g x |grad phi|_%d x h/%d = %.5f mm at |grad phi| = 1\n"
         "                     — a QUADRATURE bandwidth tied to the sample spacing,\n"
         "                       so it shrinks like 1/K. It is not eta: eta is a\n"
         "                       fixed 2 voxels and appears in the density; this\n"
@@ -2554,7 +2569,8 @@ int main(int argc, char** argv) {
         a.frac_sens == "exact"
             ? "EXACT — psi_i evaluated AT THE SAMPLES and scattered"
             : "CENTRE — psi_i factored out at the cell centre, Psi^T (ABLATION)",
-        a.frac_eps, a.frac, frac_eps(1.0, h, a.frac, a.frac_eps),
+        a.frac_eps, a.frac_eps_l1 ? 1 : 2, a.frac,
+        frac_eps(1.0, h, a.frac, a.frac_eps),
         a.frac_export ? "H_eta (the row of record, R5) AND the fraction, side by side"
                       : "H_eta only — R5, bit-identical to PR 326's convention");
     std::printf(
@@ -2750,7 +2766,7 @@ int main(int argc, char** argv) {
         if (!frac_sample[v]) continue;
         s += frac_on ? (a.frac_soft
                             ? frac_of_soft(fcache, v,
-                                           frac_eps(frac_gm[v], h, a.frac, a.frac_eps))
+                                           frac_eps(frac_gs[v], h, a.frac, a.frac_eps))
                             : frac_of(fcache, v))
                      : heaviside(-phi[v], eta);
       }
@@ -2769,7 +2785,7 @@ int main(int argc, char** argv) {
     const double V0 = volume_functional();
 
     // The band and the two projections, built exactly as the loop builds them.
-    if (frac_on) frac_band(fcache, frac_gm, h, a.frac_eps, dfrac, plsm_threads);
+    if (frac_on) frac_band(fcache, frac_gs, h, a.frac_eps, dfrac, plsm_threads);
     std::vector<double> dlt(n, 0.0), ev(n, 0.0);
     for (int k = 0; k < d.nz; ++k)
       for (int j = 0; j < d.ny; ++j)
@@ -2788,7 +2804,7 @@ int main(int argc, char** argv) {
     if (frac_on && a.frac_sens == "exact") {
       std::vector<double> wv(n, 0.0);
       for (std::size_t v = 0; v < n; ++v) wv[v] = dlt[v] > 0.0 ? 1.0 : 0.0;
-      frac_scatter(fcache, d, L, pbasis, frac_gm, h, a.frac_eps, ev, dc, wv, dv,
+      frac_scatter(fcache, d, L, pbasis, frac_gs, h, a.frac_eps, ev, dc, wv, dv,
                    plsm_threads);
     } else {
       std::vector<double> ed(n, 0.0);
@@ -3336,7 +3352,7 @@ int main(int argc, char** argv) {
     // is real and it is the reason the projection is a scatter and not Psi^T.
     if (frac_on) {
       const double t_fs = now_s();
-      frac_band(fcache, frac_gm, h, a.frac_eps, dfrac, plsm_threads);
+      frac_band(fcache, frac_gs, h, a.frac_eps, dfrac, plsm_threads);
       frac_sens_s = now_s() - t_fs;
       // The interface AREA on this measure. `dfrac` integrates to dS/|grad phi|
       // by the co-area formula, so the area is the |grad phi|-weighted sum — the
@@ -3763,7 +3779,7 @@ int main(int argc, char** argv) {
             wc[v] = edelta[v] / delta[v];   // = e_v - pen_v
             wv[v] = 1.0;
           }
-          frac_scatter(fcache, d, L, pbasis, frac_gm, h, a.frac_eps, wc, dc, wv,
+          frac_scatter(fcache, d, L, pbasis, frac_gs, h, a.frac_eps, wc, dc, wv,
                        dv, plsm_threads);
           frac_sens_s += now_s() - t_fs;
         } else {

@@ -310,9 +310,63 @@ inline double frac_of_soft(const FracCache& C, std::size_t v, double eps) {
 // saturating at 1.0 for exactly that reason). A vanishing ε_q there would make
 // the mollifier a spike between samples and the sum would alias badly. The floor
 // is a tenth of the isotropic sample spacing.
-inline double frac_eps(double gradmag, double h, int k, double eps_mult) {
+// ★ AND `gradscale` IS THE L1 NORM OF grad phi, NOT THE L2 NORM, WHEN
+// `--frac-eps-l1` IS ARMED — WHICH IS A DEFECT IN THE FIRST VERSION OF THIS
+// FILE THAT THE LITERATURE FOUND FOR ME. ARM 2, §5 M5.
+//
+// The partition-of-unity argument at the top of this file is exactly right for
+// an interface whose normal is a GRID AXIS, and only then: along the axis the
+// sample spacing in phi is |grad phi| * h/k, the tent at that half-width tiles,
+// and the estimator is exact for every position of the interface. For an
+// OBLIQUE interface the k^3 samples project onto the normal at spacings that are
+// not the axis spacing, the tent no longer tiles, and the error does not vanish
+// with refinement.
+//
+// Engquist, Tornberg & Tsai (JCP 207(1):28-51, 2005) prove exactly this and give
+// the fix. Their §3-4: an implicit mollifier delta_eps(phi) whose bandwidth
+// scales with |grad phi|_2 is NOT CONVERGENT in two or more dimensions — their
+// closed-form counterexample is a straight line at 45 degrees, where the narrow
+// hat at eps = h leaves a 12.1% error that does not decrease with h. Scaling
+// instead by the L1 norm,
+//
+//     eps_q = eps_0 * (h/k) * (|phi_x| + |phi_y| + |phi_z|)
+//
+// makes it FIRST ORDER, and their Theorem 4 is the reason it is the right norm
+// rather than a tuned one: for a plane orthogonal to a relatively prime (p,q,r),
+// the hat with half-width (p+q+r)/sqrt(p^2+q^2+r^2) sample spacings gives the
+// EXACT area, invariant under translation of the interface relative to the
+// lattice. That ratio IS |n|_1 / |n|_2, and multiplying through by |grad phi|_2
+// to get back into phi-units leaves |grad phi|_1 exactly.
+//
+// The two norms coincide on an axis-aligned interface and differ by up to
+// sqrt(3) on a diagonal one, so the original choice was systematically NARROW,
+// worst on exactly the oblique surfaces this part is mostly made of.
+//
+// ★ IT IS A FLAG AND IT DEFAULTS OFF, so ARM 1's arithmetic is unchanged by
+// inspection and the arms that were already running are still the arms that were
+// finite-differenced. Its cost is measured against the L2 version on the same
+// design, with the same probe, in §5 M5.
+inline double frac_eps(double gradscale, double h, int k, double eps_mult) {
   const double sp = h / static_cast<double>(k);
-  return std::max(0.1 * sp, eps_mult * gradmag * sp);
+  return std::max(0.1 * sp, eps_mult * gradscale * sp);
+}
+
+// |grad phi|_1, central differences, the same stencil `grad_mag` uses for the
+// L2 norm. Held beside it rather than replacing it: the L2 norm is still what
+// converts the quadrature band into an interface AREA (co-area), and only the
+// BANDWIDTH moves to L1.
+inline double frac_grad_l1(const Dims& d, const std::vector<double>& phi, int i,
+                           int j, int k, double h) {
+  auto P = [&](int A, int B, int C) {
+    A = std::min(std::max(A, 0), d.nx - 1);
+    B = std::min(std::max(B, 0), d.ny - 1);
+    C = std::min(std::max(C, 0), d.nz - 1);
+    return phi[d.at(A, B, C)];
+  };
+  const double gx = (P(i + 1, j, k) - P(i - 1, j, k)) / (2.0 * h);
+  const double gy = (P(i, j + 1, k) - P(i, j - 1, k)) / (2.0 * h);
+  const double gz = (P(i, j, k + 1) - P(i, j, k - 1)) / (2.0 * h);
+  return std::fabs(gx) + std::fabs(gy) + std::fabs(gz);
 }
 
 // ── the band: dfrac[v] = (1/k³) Σ_s δ_q(φ_s) ───────────────────────────────
