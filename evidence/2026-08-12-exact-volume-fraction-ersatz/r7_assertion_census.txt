@@ -23,7 +23,7 @@
      ||          2 ->      2  
 
 5. HARNESS MESSAGES (the whole of core/tests/harness as ONE bag)
-   before=6180  after=6474
+   before=6180  after=6475
    REMOVED:
      "lattice; %s; %zu coefficients"
    (nothing above = the two header moves dropped no refusal and no message)
