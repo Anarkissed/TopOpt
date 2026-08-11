@@ -22,9 +22,12 @@ filter r=1 **65,863 (−12.8%)** · robust triple **53,378 (−29.3%)** · diffu
 ★ *Do not read these against SIMP's 26,191 — different volume convention, see
 answer 5.*
 
-**2. What did it cost in margin? — THE ONLY OPERATOR THAT CLEARS R4 IS THE
-FILTER AT r=1.** Filter r=2/r=3 and the robust triple all fall below SIMP's
-3254.3. The perimeter penalty clears it at 3383.7 (+4.0%).
+**2. What did it cost in margin? — OF THE THREE CANDIDATES, ONLY FILTER r=1 AND
+DIFFUSION T=0.03 CLEAR R4, AND DIFFUSION MAKES THE SURFACE WORSE.** So the only
+candidate that both clears the bar and helps at all is the filter at r=1, and it
+delivers less than half the penalty's surface reduction. Filter r=2 (2095.4),
+filter r=3 (1955.1), the robust triple (3209.4) and diffusion T=0.30 (2991.6) all
+fall below SIMP's 3254.3. The perimeter penalty clears it at 3383.7 (+4.0%).
 
 **3. Does any arm clear carved ≤ 7.5521 with margin ≥ 3254.3? — NO.** The best
 carved is the perimeter penalty's 9.1077, +20.6% over SIMP.
@@ -78,10 +81,10 @@ plateau and has no it0060 snapshot — see §4.
 | F0_none | no operator | 14.3167 | 75,488 | — | 1,006 | 0.4726 | 3394.6 | +4.3% |
 | FA_r1 | **A** filter r=1 | 12.4014 | 65,863 | −12.8% | 878 | 0.4614 | 3332.3 | +2.4% ✓ |
 | FA_r2 | A filter r=2 | 11.6480 | 62,728 | −16.9% | 836 | 0.4901 | 2095.4 | −35.6% ✗ |
-| FA_r3 | A filter r=3 | 11.0810 | 57,471 | −23.9% | 766 | 0.5331 | 1837.3 | −43.5% ✗ |
-| FB_robust | **B** robust triple | 12.3516 | 53,378 | −29.3% | 711 | 0.4726 | 3212.6 | −1.3% ✗ |
-| FC_r03 | **C** diffusion T=0.03 | 14.5449 | 76,848 | **+1.8%** | 1,024 | 0.4694 | 3385.3 | +4.0% |
-| FC_r30 | C diffusion T=0.30 | 15.4396 | 81,144 | **+7.5%** | 1,082 | 0.4807 | 3378.3 | +3.8% |
+| FA_r3 | A filter r=3 | 11.0810 | 57,471 | −23.9% | 766 | 0.5331 | **1955.1** | −39.9% ✗ |
+| FB_robust | **B** robust triple | 12.3516 | 53,378 | −29.3% | 711 | 0.4726 | **3209.4** | −1.4% ✗ |
+| FC_r03 | **C** diffusion T=0.03 | 14.5449 | 76,848 | **+1.8%** | 1,024 | 0.4694 | **3389.5** | +4.2% |
+| FC_r30 | C diffusion T=0.30 | 15.4396 | 81,144 | **+7.5%** | 1,082 | 0.4807 | **2991.6** | **−8.1% ✗** |
 | ★ **FP_perim1** | **perimeter C=1** | **9.1077** | **53,175** | **−29.6%** | **709** | **0.4261** | **3383.7** | **+4.0%** ✓ |
 | FX_best_perim | A r=1 + perimeter | 10.4316 | 56,281 | −25.4% | 750 | 0.4311 | 3367.9 | +3.5% ✓ |
 
@@ -181,6 +184,56 @@ cannot split them from data on disk. **The 17.1% volume difference is establishe
 its share of the surface gap is not.** That is precisely what the ranked-first arm
 in §7 measures, and it is why I have not launched it as a footnote to this task —
 it deserves to be the whole of the next one.
+
+## 5b. ★ A CORRECTION TO §1, AND THE CONTROL THAT LICENSES IT
+
+★ **I PUBLISHED FOUR WRONG MARGINS IN THE FIRST VERSION OF §1, AND ONE OF THEM
+FLIPPED A VERDICT.** The certification sweep was still running when I wrote the
+table; I read four arms from whichever snapshot was on disk rather than from
+iteration 50. Corrected above and recorded here:
+
+| arm | I published | it0050, true | it0060 | effect |
+|---|---|---|---|---|
+| FA_r3 | 1837.3 | **1955.1** | 1899.9 | none — fails either way |
+| FB_robust | 3212.6 | **3209.4** | 3209.9 | none — fails either way |
+| FC_r03 | 3385.3 | **3389.5** | 3385.3 | none — I had quoted it0060 |
+| ★ **FC_r30** | 3378.3 | **2991.6** | 3378.3 | ★ **PASS → FAIL** |
+
+★ **Diffusion at T=0.30 does not clear the margin bar.** It is −8.1% against SIMP
+at matched iteration 50, not +3.8%. The candidate's verdict is unchanged in
+direction and worse in degree: **it increases the internal surface by 7.5% AND
+fails R4.**
+
+★ **This is the same error I made in PR 326 and wrote down as a lesson** —
+reading arms at whichever iteration each happened to stop at. The lesson did not
+survive contact with a table written against a live sweep. The rule that would
+have caught it: **do not write a comparison table until the sweep that feeds it
+has exited.**
+
+### the C0 inertness control — R1, against the merged tree
+
+Two runs of the merged binary with every new flag in its inert setting:
+
+| | printed voxels | margin | mass |
+|---|---|---|---|
+| C0b | 79,984 | 671.287337166 | 491.825868401 g |
+| C0c | 79,984 | 671.287337166 | 491.825868401 g |
+
+★ **Byte-identical.** The filter, robust, diffusion, monotone and seed flags are
+inert when unset, so every difference in §1 is attributable to the flag that was
+set. **This is what licenses the whole comparison chain**, and it is re-run here
+against the MERGED tree rather than inherited from before the merge.
+
+### and the margin does settle — 20 of 20 certified iterates
+
+The curve also answers a question left open in PR 326, where I twice asserted the
+margin was "a coin flip" and was twice refuted by measurement. Across iterations
+40–60 the settled arms move very little: FP_perim1 spans 3383.3–3394.2 (0.3%),
+FX_best_perim 3363.6–3370.7 (0.2%), FB_robust 3203.7–3209.9 (0.2%). **The margin
+is stable once settled; what is slow is getting there** — F0_none climbs
+1697.8 → 2381.6 → 2321.9 → 3194.8 → 3394.6 across iterations 10–50, i.e. it gains
+6.3% of its final margin between iterations 40 and 50 while compliance is flat
+enough to trip a plateau stop at 56 (§4).
 
 ## 6. ★ THE PROBLEMS I HIT — the list ARM 2 was built from
 
