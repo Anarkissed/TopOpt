@@ -206,6 +206,53 @@ from one build. Cost: nine minutes.
 
 ---
 
+## P15 — ★★ THE CONTROL REPRODUCES PR 326 FOR FIVE ITERATIONS AND THEN DOES NOT, AND THE FIFTH IS NOT A COINCIDENCE
+
+`check_merge.sh` passes: three iterations of PR 326's own re-baseline
+configuration on the merged tree are identical to PR 326's committed
+`iterations.csv` to all twelve printed digits. The full-length control arm
+extends that check by accident, and it is identical through **iteration 5** and
+then not:
+
+| iteration | H1 (this tree) | RB1 (PR 326's tree) |
+|---|---|---|
+| 1-5 | identical to 12 digits | identical to 12 digits |
+| 6 | 0.00298558**531538**, 75,414 printed | 0.00298558**252065**, 75,415 printed |
+
+★ **A 9.4e-10 relative difference in compliance, and ONE VOXEL in the printed
+count.** The count is an integer, so from iteration 6 on the two runs are
+solving slightly different problems and the trajectories separate for good.
+
+★★ **AND THE ITERATION IT HAPPENS ON IS THE TELL: every arm here runs
+`--plsm-refit-every 5`, so iteration 5 is the FIRST TIME the approximate
+reinitialisation fires.** That path — `reinitialise` and `plsm_solve_normal` —
+is exactly what PR 325 MOVED from the harness into `core/include/topopt/`. The
+move was verified byte-identical at the source level, and it is: this is the same
+arithmetic compiled in a different translation unit, which is free to inline and
+vectorise it differently. A three-iteration identity check could not have caught
+it, because at three iterations the moved code has not run.
+
+★ **THE CONSEQUENCE, AND IT IS THE REASON THIS TASK RAN ITS OWN CONTROL RATHER
+THAN QUOTING PR 326's TABLE.** PR 326's published `14.1322 / 79,577 / 2859.5` for
+the re-baseline were produced on a tree whose refit is not this tree's to the last
+bit. Putting them in a column beside numbers produced here would have been a
+comparison across two binaries — subtle, invisible, and exactly the class of
+error R2 exists to prevent. **Every row in §3 is produced on THIS tree, in the
+same batch, by the same binary.** PR 326's numbers appear only as quoted history,
+clearly marked.
+
+★ **What it does NOT license.** It does not make PR 326's numbers wrong, and it
+does not make the two trees' designs materially different — PR 326 §3b measured
+two trajectories that differ only in summation order landing 0.4% apart in
+certified margin at iteration 20, and §2 measured a settled tail spanning 0.15%.
+It is a floor on how finely any A/B in this line of work can be read, and it is
+now a measured floor instead of an assumed one.
+
+**Not solved and not solvable here** — it is a property of the shipped tree.
+Ranked in §8.
+
+---
+
 ## P14 — ★★ MY BANDWIDTH USED THE WRONG NORM, AND THE LITERATURE FOUND IT, NOT ME
 
 P5 named `eps_q` and justified it with a partition-of-unity argument: at

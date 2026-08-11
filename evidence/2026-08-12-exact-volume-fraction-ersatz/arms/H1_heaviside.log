@@ -32,3 +32,17 @@ PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels
             seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 18.3 s
             volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
             update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
+PLSM        coefficient box +-462.1415 (4x the largest seed coefficient); a unit move of every
+            coefficient carries phi by at most 4.2335 mm, which is what sizes the MMA move
+VOLUME      constraint measures #{phi + c < 0} — the PRINTED count (S1: occupancy_volume and printed_voxels agree by construction)
+it   1  c = 0.004138030586  vf = 0.680003 (occ 75415.0)  offset +0.5148 mm  |v|max 1.26e-10  band 70109  hilb 0 (0.0e+00)  |grad|-1 3.94e-01  cg 1124  113.55 s
+it   2  c = 0.003768042293  vf = 0.679994 (occ 75414.0)  offset -0.0293 mm  |v|max 1.25e-10  band 70084  hilb 0 (0.0e+00)  |grad|-1 3.94e-01  cg 2016  26.92 s
+it   3  c = 0.003413521935  vf = 0.679994 (occ 75414.0)  offset -0.0466 mm  |v|max 1.17e-10  band 70331  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 1990  26.37 s
+it   4  c = 0.003378919323  vf = 0.680003 (occ 75415.0)  offset +0.0306 mm  |v|max 1.14e-10  band 68856  hilb 0 (0.0e+00)  |grad|-1 3.92e-01  cg 2012  19.65 s
+it   5  c = 0.00315916509  vf = 0.680003 (occ 75415.0)  offset -0.0328 mm  |v|max 9.75e-11  band 68866  hilb 0 (0.0e+00)  |grad|-1 3.87e-01  cg 1992  37.12 s
+it   6  c = 0.002985585315  vf = 0.679994 (occ 75414.0)  offset -0.0289 mm  |v|max 8.53e-11  band 69975  hilb 0 (0.0e+00)  |grad|-1 3.85e-01  cg 2024  18.24 s
+it   7  c = 0.002931728121  vf = 0.680003 (occ 75415.0)  offset +0.0091 mm  |v|max 7.6e-11  band 68995  hilb 0 (0.0e+00)  |grad|-1 3.83e-01  cg 1940  18.41 s
+it   8  c = 0.00281186618  vf = 0.680003 (occ 75415.0)  offset -0.0321 mm  |v|max 6.74e-11  band 68791  hilb 0 (0.0e+00)  |grad|-1 3.82e-01  cg 2007  18.97 s
+it   9  c = 0.002764264383  vf = 0.680003 (occ 75415.0)  offset +0.0006 mm  |v|max 6.23e-11  band 65819  hilb 0 (0.0e+00)  |grad|-1 3.81e-01  cg 1998  19.74 s
+it  10  c = 0.002710919642  vf = 0.679994 (occ 75414.0)  offset -0.0085 mm  |v|max 5.62e-11  band 64803  hilb 0 (0.0e+00)  |grad|-1 3.93e-01  cg 2012  41.45 s
+it  11  c = 0.002682516233  vf = 0.679994 (occ 75414.0)  offset -0.0092 mm  |v|max 5.02e-11  band 64041  hilb 0 (0.0e+00)  |grad|-1 3.90e-01  cg 2129  21.30 s
