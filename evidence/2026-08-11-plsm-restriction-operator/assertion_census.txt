@@ -1,0 +1,4 @@
+core/tests/harness/levelset_probe.cpp: main=18 now=32
+  ★ CHANGED OR REMOVED: FATAL: --seed must be simp or holes
+
+core/tests/harness/plsm_probe.cpp: main=12 now=21

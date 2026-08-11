@@ -1,15 +1,15 @@
 == re-certification control ==
-field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FA_r2/snap/it0001.f64
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/arms/FX_best_perim/snap/it0040.f64
 binarized            no
 fractional samples   70688 (before any thresholding)
 certification penalty 3 (production)
-printed voxels       75414 of 110904  (vf 0.679994)
+printed voxels       75415 of 110904  (vf 0.680003)
 FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
 frozen set restored  no
-max von Mises        0.149411597 MPa
-MARGIN worst case    368.110650325
-margin effective     76.222019172   (gate: >= 1.5)
+max von Mises        0.016320138 MPa
+MARGIN worst case    3370.069520708
+margin effective     697.816005569   (gate: >= 1.5)
 VERDICT              ACCEPTED
-min-feature viols    3646
-mass                 463.9584 g
+min-feature viols    660
+mass                 463.7431 g
 load path connected  yes
