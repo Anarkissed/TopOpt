@@ -491,6 +491,12 @@ columns (2–3% either way, inside the run-to-run floor §7 P15 measures). **The
 mechanisms bought correctness, not surface.** Said that way round because that is
 what the numbers say.
 
+★ **AND THE CREDIT GOES TO M1, NOT TO BOTH.** R4 finite-differenced each flag
+alone: `--frac-soft` on its own verifies at −1.33 / +3.18% on the compliance, and
+adding `--frac-eps-l1` takes it to −2.32 / +7.61%. **M5 is mixed-to-negative on
+this part and is along for the ride.** The arm that should have been run is
+`--frac-soft` alone; it was not, and §8 ranks it. §5 M5 has the full pairing.
+
 ### M1 — the CONSISTENTLY MOLLIFIED value (`--frac-soft`)
 
 **Problem: P2 and P13.** `f_v` is a hard count of sample signs, so it is
@@ -755,6 +761,55 @@ choice to compute a FRACTION rather than a band was independently the right one.
 **Cost:** three central differences per cut cell — the same stencil `grad_mag`
 already runs. Defaults OFF so ARM 1's arithmetic is unchanged by inspection.
 
+### ★★ RESULT: MIXED, AND ON THIS PART IT IS NOT A WIN. REPORTED AS MEASURED.
+
+★ **The first pairing could not answer it at all.** `frac_k4` against `frac_l1`
+is the hard fraction with the two norms, and on the hard fraction the difference
+is quantisation-dominated at every affordable step (P13) — both read the same
+noise (−17.6% / −20.3% at step 0.01, −45.7% / −44.2% on the other direction).
+**A comparison that reads its own noise on both sides is not a comparison**, and
+running it and quoting the difference would have been exactly that.
+
+★ **So the pairing that resolves it is on the MOLLIFIED value function**, where
+the difference is clean to sub-1% — `frac_soft` against `frac_soft_l1`, which is
+also the exact configuration `A2_all` runs:
+
+| probe (volume) | soft, `|grad phi|_2` | soft, ★ `|grad phi|_1` |
+|---|---|---|
+| random dir 0 @ 0.001 / 0.01 / 0.1 | −0.294 / −0.374 / +1.475% | ★ **+0.084 / +0.034 / +0.778%** |
+| random dir 1 @ 0.001 / 0.01 / 0.1 | **+0.815 / +0.959 / +1.900%** | +1.866 / +1.936 / +2.681% |
+| coefficient 8991 @ 0.01 / 0.1 | +0.143 / −0.609% | ★ **−0.083 / −0.286%** |
+| coefficient 8990 @ 0.01 / 0.1 | +0.082 / −2.062% | +0.090 / ★ **−1.517%** |
+| coefficient 5999 @ 0.01 / 0.1 | +0.572 / **−0.256%** | ★ **+0.077%** / +3.387% |
+| dir 0, ★ **compliance** @ 0.01 / 0.1 | **−1.326 / −2.889%** | −2.321 / +2.080% |
+| dir 1, ★ **compliance** @ 0.01 / 0.1 | **+3.184 / +5.167%** | +7.612 / +9.437% |
+
+★ **BETTER ON FOUR VOLUME PROBES BY THREE TO SEVEN TIMES, WORSE ON TWO, AND
+WORSE ON THE COMPLIANCE FOR ONE OF THE TWO DIRECTIONS. On this part it is not a
+win.**
+
+★ **The likely reason, and it is a limitation of the theorem rather than of the
+implementation.** ETX's result is about the ALIASING error of an implicit
+mollifier, and the L1 norm removes it by making the band up to `sqrt(3)` times
+WIDER. A wider band also BLURS more, and their analysis is of a PLANE, where
+there is nothing to blur. This part's interface is finely branched with curvature
+on the scale of the band itself — PR 326 §4 measured the fine structure as
+nucleated during the run — so the blurring error the wider band adds can exceed
+the aliasing error it removes. **The theory is right about planes and this design
+is not planes.**
+
+★★ **AND THE CONSEQUENCE FOR `A2_all`, STATED RATHER THAN LEFT TO BE INFERRED.**
+The arm that settles at +4.2% carries BOTH M1 and M5. R4 attributes the gradient
+quality to **M1**: `frac_soft` alone verifies at −1.33 / +3.18% on the compliance
+and adding M5 takes it to −2.32 / +7.61%. **So `A2_all`'s result is M1's, and M5
+is along for the ride and may be costing a little.** ★ The arm that should have
+been run is `--frac-soft` ALONE, and it was not — §8 ranks it. Attributing the
+settled margin to "all mechanisms" without saying this would have been the kind
+of claim PR 326's §5 caught itself making.
+
+★ **It stays in the tree, defaulted off, with this pair as its documentation** —
+the same disposition PR 326 gave its own measured-harmful continuation flag.
+
 ## 6. WHAT WAS TRIED AND ABANDONED
 
 * ★ **BRANCHING FROM PR 326.** The brief says "same sandbox as PR 324/325/326"
@@ -796,6 +851,22 @@ already runs. Defaults OFF so ARM 1's arithmetic is unchanged by inspection.
   **Replaced by the L1-norm bandwidth** the level-set delta literature proves is
   required. §5 M5, P14. ★ This is the one entry here that ARM 2's research
   produced rather than confirmed.
+
+* ★★ **AND THEN THE L1 BANDWIDTH ITSELF, AS A DEFAULT.** The theory is sound and
+  the implementation is right, and the measurement on this part is MIXED — better
+  on four volume probes by 3–7x, worse on two, worse on the compliance for one of
+  two directions. ETX's theorem is about a PLANE and removes aliasing by making
+  the band up to `sqrt(3)` WIDER; this design's interface is finely branched with
+  curvature on the scale of the band, so the blur the wider band adds can exceed
+  the aliasing it removes. **Kept, defaulted OFF, with the pairing as its
+  documentation** — the disposition PR 326 gave its own measured-harmful
+  continuation flag. §5 M5.
+
+* ★ **COMPARING THE TWO BANDWIDTH NORMS ON THE HARD FRACTION.** Run first, and it
+  reads its own quantisation noise on BOTH sides (−17.6% against −20.3%). A
+  comparison that reads its own noise on both sides is not a comparison. Replaced
+  by the pairing on the MOLLIFIED value function, where the difference is clean
+  to sub-1%.
 
 * **`--robust`, `--plsm-hilb`, `--no-surface-delta`, the descent branch and
   L-BFGS under `--frac`.** Not abandoned for lack of interest — **REFUSED**, each
@@ -1248,10 +1319,14 @@ reported as a number rather than assumed.
    and finite-differenced at one value; it is the only free number in the new
    formulation and it has not been swept.
 
-4. **The `--frac-soft` arm to convergence** if it was not run here. Its value and
-   its gradient are two facts about one function, so it is the only variant whose
-   COMPLIANCE sensitivity can be finite-differenced at an affordable step — and
-   it removes the quantisation that makes MMA's objective a staircase.
+4. ★★ **RUN `--frac-soft` ALONE — IT IS THE ARM THIS TASK SHOULD HAVE RUN AND DID
+   NOT.** `A2_all` combines M1 and M5, it is the only arm whose margin settles
+   (+4.2% over SIMP), and R4 says the gradient quality is M1's: `--frac-soft`
+   alone verifies at −1.33 / +3.18% on the compliance and adding `--frac-eps-l1`
+   takes it to −2.32 / +7.61%. **So the settled arm is carrying a mechanism that
+   the finite difference says is not helping**, and one 30-minute run separates
+   them. It is ranked this high because it is cheap and because the headline
+   number in §0 currently rests on a combination rather than on a mechanism.
 
 5. **Combine the fraction with PR 326's two winning knobs.** PR 326's best point
    was `C = 1` with `eta = 1`, and its §9 item 1 asks for a joint sweep of the
@@ -1263,7 +1338,14 @@ reported as a number rather than assumed.
 6. **Move the fraction into the export path if §3 says the export is worth it.**
    The measurement is in this handoff; the work is mechanical.
 
-7. ★ **CLOSE THE 1e-9 THAT PR 325's MOVE LEFT IN THE REFIT, OR AT LEAST BOUND
+7. ★ **RUN `F1` AND `A2` PAST THEIR OWN MAXIMA.** Both stopped on the shipped
+   compliance rule at 57 and 61, so **whether the fraction arms turn over the way
+   the control does at iteration 80 is NOT established by this task.** They are
+   settled at their endpoints and the control is not, which is the comparison
+   that can be made — but "the fraction does not turn over" is a claim this task
+   cannot support, and it is the obvious next question given §3(d).
+
+8. ★ **CLOSE THE 1e-9 THAT PR 325's MOVE LEFT IN THE REFIT, OR AT LEAST BOUND
    IT.** §7 P15: this tree reproduces PR 326's re-baseline to twelve digits for
    FIVE iterations and then diverges by 9.4e-10 in compliance and ONE VOXEL in
    the printed count — and iteration 5 is exactly where `--plsm-refit-every 5`
