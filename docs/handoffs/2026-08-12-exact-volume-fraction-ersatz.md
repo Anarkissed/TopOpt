@@ -18,7 +18,70 @@ assertion census removed nothing (`assertion_census.sh`).
 
 ## 0. THE ANSWERS, IN ORDER — one line each
 
-*(filled from `tables.txt`)*
+Every row at **matched iteration 50**, the last snapshot present in all three
+arms, in ONE probe invocation with SIMP produced in the same run (R2).
+
+| | ★ CAD mm | ★ mid % | ★ n_cut | carved | margin | mass |
+|---|---|---|---|---|---|---|
+| **SIMP rung 0.68** | **0.4293** | **85.28%** | **26,191** | 7.5521 | **3254.3** | 543.7 g |
+| PR 326 re-baseline *(quoted, other tree)* | — | 57.7% | 79,577 | 14.1322 | 2859.5 ↑ | 463.8 g |
+| PR 326 best, C=1 η=1 *(quoted)* | 0.3232 | 80.4% | 53,243 | 9.2460 | 3388.6 | 463.7 g |
+| `H1_heaviside` — **this task's control** | 0.4908 | 57.79% | 79,542 | 14.0857 | peak **3276** @80, then −19.4% | 463.8 g |
+| `F1_frac4` — **the arm** | **0.4701** | 57.50% | 80,962 | 15.3541 | **3379** @50, rising | 463.8 g |
+| ★ `A2_all` — all mechanisms | **0.4708** | 58.78% | 78,553 | 14.9895 | ★ **3391 SETTLED** @50 | 463.8 g |
+
+1. ★ **CAD ERROR IN MM — IT IMPROVES, 4.2%.** 0.4908 → 0.4701 against SIMP's
+   0.4293. The brief's claim — a continuous density carries sub-voxel boundary
+   position and should improve dimensional accuracy — **holds**. It does not
+   reach PR 326's 0.3232, which was a *frozen-region* result on the CAD faces and
+   is complementary to this, not competing with it. §3(c).
+
+2. ★ **MIDPOINT SHARE — IT DOES NOT MOVE.** 57.79% → 57.50% → 58.78%, all far
+   below SIMP's 85.28%. **The answer to the brief's second headline question is
+   no**, and the reason was written into the source before the run: the midpoint
+   share is a property of the field MARCHING CUBES IS HANDED, and under R5 all
+   three arms export the same `H_eta` field. §5 M3 changed the export instead and
+   made it **8.7 points WORSE** — as predicted. §3(c), §5 M3.
+
+3. ★ **INTERNAL SURFACE — IT DOES NOT MOVE EITHER.** 79,542 → 80,962 → 78,553,
+   a 3% spread against SIMP's 26,191. **The exact volume fraction is not a
+   smoothness lever.** Said first and plainly, because it is what the brief hoped
+   for. §3(c).
+
+4. ★★ **THE MARGIN: `A2_all` IS THE ONLY ARM HERE THAT SETTLES, AT ITERATION 50,
+   AT 3391.1 — +4.2% OVER SIMP, WITH NO PERIMETER PENALTY AT ALL.** PR 326's best
+   point reached +4.1% and needed a perimeter weight AND a halved eta. ★ **And the
+   CONTROL's margin PEAKS at 3276 (iteration 80, +0.7%) and then FALLS 19.4% to
+   2640 by 120** while its compliance is flat — which revises PR 326 §9's
+   top-ranked "run them longer than 60": run longer and the curve turns over.
+   §3(d).
+
+5. ★★ **THE RESULT NOBODY ASKED FOR, AND IT IS THE BIGGEST ONE: BOTH FRACTION
+   ARMS REACHED THE SHIPPED CONVERGENCE CRITERION IN 57 AND 61 ITERATIONS AND THE
+   CONTROL NEVER REACHED IT IN 120** — at the same compliance within 0.9%. §3(a).
+   ★ **§4 predicted it before the arms ran**: PR 326's gradient is wrong by up to
+   **23%**, flat across two decades of step size, in every level-set arm since
+   PR 322 **and in the shipped `--plsm` job mode**. A 20%-wrong descent direction
+   does not fail; it converges slowly.
+
+6. ★ **THE SECOND RESULT NOBODY ASKED FOR: MIN-FEATURE VIOLATIONS 7,273 → 5,337,
+   a 27% drop that takes the fraction arms BELOW SIMP's 5,464** where the control
+   is 33% above. A density that steps when the boundary crosses a cell centre
+   cannot see a member thinner than a voxel; a volume fraction can. §3(c).
+
+7. ★ **WHAT IT COSTS: 1.92% of an iteration.** Sampling every active cell at
+   k = 4 is 543 ms and the sensitivity's scatter is 85 ms against a 28.3 s state
+   solve. PR 324 measured **99.5%** of an iteration as the state solve; it is now
+   about **97.6%**. Nothing about the solver moved — no per-cell `Ke`, no
+   O(cut cells) storage, no cache-key change. §3(b).
+
+8. ★ **AND ONE FOUND WHILE BUILDING IT, WHICH IS WHY ARM 2 EXISTS: the smeared
+   ersatz was carrying 365.8 voxels of material that are not there** — 1.05% of
+   the region the optimiser owns, and 1.08% of extra stiffness. `H_eta` is
+   antisymmetric about a PLANE, so that bias is exactly zero on a flat boundary
+   and non-zero only where the surface is curved. **A more branched design was
+   being credited with more phantom stiffness, for free**, because the volume
+   constraint counts the printed set and never saw it. §7 O1.
 
 ## 1. THE ONE CHANGE, AND WHAT IT LEAVES ALONE
 
@@ -226,6 +289,59 @@ centre cannot see a member thinner than a voxel; a volume fraction can, and
 prices it. That is a manufacturability column, not a roughness one, and it is the
 largest single change in the table.
 
+### (d) ★★ THE MARGIN AS A CURVE — AND THE CONTROL'S TURNS OVER
+
+★ **R3 ASKS FOR THE CURVE AND ITS SETTLING ITERATION, AND THE HONEST ANSWER
+NEEDED A THIRD STATISTIC.** Every snapshot of every arm, certified by
+`analyze_fixed_design` in ONE process. `accepted` = 1 and
+`load_path_connected` = 1 on all 26 certificates; mass is 463.8 g on every row of
+every arm.
+
+| iteration | 1 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `H1_heaviside` | 628 | 1915 | 1965 | 2105 | 2418 | 2734 | 2923 | 3233 | **3276** | 3273 | 3198 | 3161 | **2640** |
+| `F1_frac4` | 628 | 2262 | 2372 | 2606 | 3068 | **3379** | — | | | | | | |
+| `A2_all` | 628 | 2295 | 2560 | 2968 | 3076 | **3392** | **3391** | | | | | | |
+
+| arm | peak | at | endpoint | settled? | vs SIMP's 3254.34 |
+|---|---|---|---|---|---|
+| `H1_heaviside` | 3276.3 | **80** | **2640.4** at 120 | ★ **NO** | peak **+0.7%**, endpoint **−18.9%** |
+| `F1_frac4` | 3379.4 | 50 | 3379.4 at 50 | no (still rising) | **+3.8%** |
+| ★ `A2_all` | 3392.4 | 50 | **3391.1** at 60 | ★ **YES, at 50** | ★ **+4.2%** |
+
+★★ **`A2_all` IS THE ONLY ARM IN THIS TASK WHOSE MARGIN SETTLES, IT SETTLES AT
+ITERATION 50, AND IT SETTLES 4.2% ABOVE SIMP — WITH NO PERIMETER PENALTY AT
+ALL.** PR 326's best point reached +4.1% (3388.6) and needed a perimeter weight
+AND a halved eta to get there. This lands on the same number — 3391.1 against
+3388.6 — from the ersatz and the gradient alone.
+
+★★ **AND THE CONTROL'S CURVE TURNS OVER, WHICH REVISES PR 326's OWN TOP-RANKED
+RECOMMENDATION.** PR 326 §2 measured every unsettled arm still CLIMBING at
+iteration 60 and §9 ranked "run them longer than 60" first. Run longer: the
+control climbs to **3276 at iteration 80** — just past SIMP — and then **FALLS
+19.4% to 2640 by 120**, while its compliance is flat to 0.9% over the same span
+and every one of those certificates says ACCEPTED.
+
+★ **So "run longer" is right up to a point and wrong after it, and NEITHER
+compliance NOR iteration count finds that point.** A stopping rule that watches
+compliance stops too early (PR 326's finding); one that just runs to a fixed
+budget can stop on the far side of the maximum (this one). The margin has a
+maximum and only a margin-aware rule can find it — which is PR 326 §9 item 3,
+now with a second and sharper reason to build it.
+
+★ **This is also why the tables report a PEAK and its iteration beside the
+endpoint.** A "settling iteration" is the wrong statistic for a curve with a
+maximum, and reporting only the endpoint would have reported the far side of it —
+the control would have read as a catastrophic −18.9% arm when at its own best
+iterate it is +0.7%. PR 326's P11 is the same trap in a different costume and it
+reversed a conclusion there too.
+
+★ **What this does NOT say.** `F1` and `A2` stopped at 57 and 61 on the shipped
+compliance rule, so neither was run past its own maximum. **Whether the fraction
+arms turn over too is NOT established by this task** — they are settled at their
+endpoints and the control is not, which is the comparison that can be made. It is
+ranked in §8.
+
 ## 4. ★ R4 — THE SENSITIVITY AGAINST A FINITE DIFFERENCE
 
 ★ **RUN BEFORE THE ARMS WERE SPENT, ON PR 326's OWN CONVERGED DESIGN**, read
@@ -361,6 +477,35 @@ interface. PR 324 §3's band control showed that a narrow band MANUFACTURES a
 staircase. **So the more faithful field may well be the worse one to hand
 marching cubes**, and the row of record stays the `H_eta` export (R5) with the
 fraction beside it.
+
+★★ **MEASURED, AND THE PREDICTION IS CONFIRMED — THE MORE FAITHFUL FIELD IS THE
+WORSE ONE TO EXTRACT FROM.** Same design, same lattice, same frozen stamp, F = 2
+throughout (R2: these rows may be read against each other and NOT against §3(c)'s
+F = 1 rows):
+
+| field | carved | n_cut | whole | CAD mm | ★ mid % | volume mm³ |
+|---|---|---|---|---|---|---|
+| SIMP rung 0.68 | 7.5521 | 26,191 | 8.4075 | 0.4293 | 85.28% | 440,551 |
+| `F1_frac4`, **H_eta** export | **17.6591** | 83,313 | 15.8996 | 0.5403 | **56.41%** | 375,496 |
+| `F1_frac4`, **fraction** export | **23.3588** | 82,808 | 19.1215 | 0.5379 | **65.07%** | 374,641 |
+| `A2_all`, **H_eta** export | **17.4127** | 79,242 | 15.6827 | 0.5424 | **58.34%** | 375,036 |
+| `A2_all`, **fraction** export | **23.2033** | 78,902 | 18.7825 | 0.5393 | **66.80%** | 374,279 |
+
+★ **Carved roughness is 32% WORSE and the midpoint share climbs 8.7 points**, on
+the identical geometry — `n_cut` moves by 0.6% and the enclosed volume by 0.2%,
+so it is not a different object, it is the same object with its vertices placed
+worse. **A volume fraction saturates at 0 and 1 within about a half-cell, so a
+crossing edge more often has both endpoints saturated and marching cubes' linear
+interpolation puts the vertex at the midpoint** — which is the staircase, and is
+PR 324 §3's band control arriving from the other direction.
+
+★ **CAD error moves the other way, and by almost nothing** — 0.5403 → 0.5379.
+The CAD faces are frozen, so their field is stamped 0/1 in both exports and there
+is nothing for the convention to change.
+
+★ **So the export stays `H_eta` and the mechanism is a measured negative with a
+mechanism.** The value of writing the prediction down first is that this is a
+confirmation rather than a rationalisation.
 
 ### M4 — ★ THE ANISOTROPY OF A CUT CELL, PRICED (`--frac-aniso`)
 

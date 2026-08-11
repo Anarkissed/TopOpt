@@ -1,0 +1,15 @@
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/A2_all/plsmfrac_f1.f64
+binarized            no
+fractional samples   10051 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75150 of 110904  (vf 0.677613)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016214317 MPa
+MARGIN worst case    3392.063985678
+margin effective     702.370240903   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1680
+mass                 464.2597 g
+load path connected  yes

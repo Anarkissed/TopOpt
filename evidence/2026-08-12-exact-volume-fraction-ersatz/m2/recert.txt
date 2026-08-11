@@ -1,15 +1,15 @@
 == re-certification control ==
-field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/F1_frac4/snap/it0010.f64
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/arms/A2_all/snap/it0060.f64
 binarized            no
-fractional samples   66943 (before any thresholding)
+fractional samples   27380 (before any thresholding)
 certification penalty 3 (production)
-printed voxels       75414 of 110904  (vf 0.679994)
+printed voxels       75415 of 110904  (vf 0.680003)
 FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
 frozen set restored  no
-max von Mises        0.024309475 MPa
-MARGIN worst case    2262.492326315
-margin effective     468.477978890   (gate: >= 1.5)
+max von Mises        0.016218879 MPa
+MARGIN worst case    3391.109908532
+margin effective     702.172687025   (gate: >= 1.5)
 VERDICT              ACCEPTED
-min-feature viols    5002
-mass                 463.8046 g
+min-feature viols    1796
+mass                 463.8169 g
 load path connected  yes
