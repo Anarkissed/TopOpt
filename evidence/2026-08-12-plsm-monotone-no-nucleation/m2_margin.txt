@@ -1,0 +1,171 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: simp
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       6 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 6, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MN_nucleating/snap/it0060.f64
+binarized            no
+fractional samples   16712 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016209235 MPa
+MARGIN worst case    3393.127533088
+margin effective     702.590461999   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1605
+mass                 463.7739 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MA_holes8/snap/it0060.f64
+binarized            no
+fractional samples   15990 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016209051 MPa
+MARGIN worst case    3393.166034980
+margin effective     702.598434309   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1418
+mass                 463.7493 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MC_stress/snap/it0060.f64
+binarized            no
+fractional samples   8865 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.030308800 MPa
+MARGIN worst case    1814.654511740
+margin effective     375.747430458   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    626
+mass                 463.7431 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MB_gyr12/snap/it0060.f64
+binarized            no
+fractional samples   14553 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016255148 MPa
+MARGIN worst case    3383.543478548
+margin effective     700.605960904   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1002
+mass                 463.7493 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MB_gyr20/snap/it0060.f64
+binarized            no
+fractional samples   13862 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016280267 MPa
+MARGIN worst case    3378.322903411
+margin effective     699.524974038   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    852
+mass                 463.7431 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MA_poor12/snap/it0060.f64
+binarized            no
+fractional samples   15822 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016288835 MPa
+MARGIN worst case    3376.545887041
+margin effective     699.157020066   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1256
+mass                 463.7431 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MA_rich6/snap/it0060.f64
+binarized            no
+fractional samples   14322 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75414 of 110904  (vf 0.679994)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016240395 MPa
+MARGIN worst case    3386.617228755
+margin effective     701.242420205   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1043
+mass                 463.7370 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MA_phase/snap/it0060.f64
+binarized            no
+fractional samples   16009 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016279455 MPa
+MARGIN worst case    3378.491523488
+margin effective     699.559888982   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    1490
+mass                 463.7677 g
+load path connected  yes
+
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/sources/rung_0.68.f64
+binarized            no
+fractional samples   28374 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       88424 of 110904  (vf 0.797302)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016900494 MPa
+MARGIN worst case    3254.342744897
+margin effective     673.853296213   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    407
+mass                 543.7239 g
+load path connected  yes

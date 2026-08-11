@@ -1,1 +1,17 @@
 06:09:55 START MN_nucleating
+06:42:29 OK MN_nucleating 60 iterations
+06:42:29 START MA_holes8
+07:05:23 OK MA_holes8 60 iterations
+07:05:23 START MC_stress
+07:27:02 OK MC_stress 60 iterations
+07:27:02 START MB_gyr12
+07:53:16 OK MB_gyr12 60 iterations
+07:53:16 START MB_gyr20
+08:17:40 OK MB_gyr20 60 iterations
+08:17:40 START MA_poor12
+08:39:12 OK MA_poor12 60 iterations
+08:39:12 START MA_rich6
+08:59:37 OK MA_rich6 60 iterations
+08:59:37 START MA_phase
+09:21:55 OK MA_phase 60 iterations
+09:21:55 QUEUE_DONE

@@ -71,15 +71,19 @@ echo "M1 done -> m1_matched.csv (iteration $MATCH)"
 # ── M2 — the margin curves. mkdir FIRST: --certify-field opens
 # <out>/margin_curve.csv WITHOUT creating <out> and fails silently if absent.
 mkdir -p "$HERE/m2"
+# ★ `--certify-field` MUST BE REPEATED PER FIELD — it consumes exactly one
+# argument. Passing the flag once followed by N paths makes the probe reject
+# path 2 with "FATAL: unknown argument", after doing all of M1's work.
 set --
 for A in $ARMS; do
-  for s in "$HERE/arms/$A"/snap/it*.f64; do
-    [ -f "$s" ] && set -- "$@" "${s%.f64}"
+  for S in "$HERE/arms/$A"/snap/it*.f64; do
+    [ -f "$S" ] || continue
+    set -- "$@" --certify-field "${S%.f64}"
   done
 done
-set -- "$@" "$HERE/sources/rung_0.68"
+set -- "$@" --certify-field "$HERE/sources/rung_0.68"
 ./build/levelset_probe "$STEP" "$REPO/core/src/materials/materials.json" "$REF" \
-    "$HERE/m2" --certify-field "$@" > "$HERE/m2_margin.txt" 2>&1
+    "$HERE/m2" --rung 0.68 --threads 6 "$@" > "$HERE/m2_margin.txt" 2>&1
 [ -s "$HERE/m2/margin_curve.csv" ] || { echo "FATAL: margin_curve.csv empty"; exit 1; }
 echo "M2 done -> m2/margin_curve.csv ($(( $(wc -l < "$HERE/m2/margin_curve.csv") - 1 )) certifications)"
 

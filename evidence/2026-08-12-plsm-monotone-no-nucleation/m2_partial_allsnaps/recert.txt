@@ -1,0 +1,15 @@
+== re-certification control ==
+field                evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MN_nucleating/snap/it0001.f64
+binarized            no
+fractional samples   57176 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       75415 of 110904  (vf 0.680003)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.080747341 MPa
+MARGIN worst case    681.136982280
+margin effective     141.038125564   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    4835
+mass                 464.2105 g
+load path connected  yes
