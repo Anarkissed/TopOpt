@@ -709,4 +709,55 @@ count, member count or internal surface as a function of `E_void/E_solid`; 1e-3
 
 ## 9. IN PLAIN LANGUAGE
 
-*(filled)*
+**The change.** When the optimiser works out how stiff a chunk of the part is, it
+has to decide how much material is in each little cube of the grid. Until now it
+guessed, by looking at the single point at the middle of the cube and smearing
+the answer over a few cubes' width. Now it works out the actual fraction of the
+cube that is inside the part, by testing 64 points inside it. That is a small
+change and it touches nothing else — the solver, the fast maths, the caches all
+carry on unaware.
+
+**Was it worth it? Partly, and not in the way we hoped.**
+
+★ **The part comes out more dimensionally accurate — 4% closer to the drawing.**
+That was the main thing this was supposed to buy, and it does.
+
+★ **It converges in about half the number of steps.** The old method ran for 120
+steps and never met our own "it has stopped improving" test. The new one met it
+at 57, at the same stiffness. **That is the biggest practical result here.**
+
+★ **It makes far fewer parts that are too thin to print** — a third fewer, which
+takes it below the old SIMP method for the first time. Nobody asked for that.
+
+★ **It does NOT make the part smoother.** The fussy branched interior is the same
+size to within 3%. Said plainly, because that is what we were hoping for.
+
+**The two things found along the way that matter more than the change itself.**
+
+★ **The old method's gradient — the thing that tells the optimiser which way to
+go — has been wrong by up to 23% this whole time.** In every level-set run we have
+done, and in the version that shipped. A wrong gradient does not fail; it walks
+to the right answer slowly, which is exactly what we have been seeing. Fixing it
+is one line. **We only found it because this task built a way to check gradients
+that we did not have before**, and ran the old one through it as a control.
+
+★ **The old way of estimating material was quietly flattering branchy designs.**
+Its smearing cancels out on a flat surface and does not on a curved one — and the
+error goes the wrong way, crediting the part with material it does not have. The
+more branched the design, the more free stiffness it was awarded. About 1% here.
+Nothing in the run could see it, because the volume budget counts the real part.
+
+**And one thing I built wrong, that a paper had already solved.** The width of a
+smoothing used inside the new calculation was set by an argument I checked
+carefully — and had only checked for surfaces lying flat along the grid, which is
+the one case where it happens not to matter. For angled surfaces it is wrong, and
+a 2005 paper proves it never converges and gives the fix. Implemented, measured,
+and it is in the "all mechanisms" run.
+
+**What I would do next, in order.** Fix the 23% gradient — it is one line and it
+affects the shipped product. Then replace the 64-point sampling with an exact
+formula that is consistent with the mesh we actually measure, which removes three
+separate problems at once. Then cap how much new hole the optimiser may punch per
+step, from the very first step — a 2013 paper reports that moves the hole count a
+lot for about 1% of stiffness, and our own earlier attempt failed for a reason
+that paper independently explains.
