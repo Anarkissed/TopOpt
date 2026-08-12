@@ -116,6 +116,12 @@
 // `external_field_surface_probe` reads and what `levelset_probe` writes.
 
 #include "topopt/mesh.hpp"
+// ★ AT FILE SCOPE, DELIBERATELY. `plsm_basis.hpp` below is a SHIM over this
+// header and is included from inside an anonymous namespace; core's basis must
+// keep EXTERNAL linkage so this probe and the production optimiser share one
+// definition of the function they fit.
+#include "topopt/plsm_basis.hpp"
+#include "topopt/plsm_kernel.hpp"
 // S2 (task 2026-08-11-plsm-minimise-extra-surface): the frozen region from the
 // CAD faces. `MeshDistance` is core's OWN exact signed distance to a closed
 // triangle mesh (task 2026-08-08-strut-clip-matches-shell), accelerated by a
@@ -124,12 +130,6 @@
 #include "topopt/face_overrides.hpp"
 #include "topopt/mesh_distance.hpp"
 #include "topopt/step.hpp"
-// ★ AT FILE SCOPE, DELIBERATELY. `plsm_basis.hpp` below is a SHIM over this
-// header and is included from inside an anonymous namespace; core's basis must
-// keep EXTERNAL linkage so this probe and the production optimiser share one
-// definition of the function they fit.
-#include "topopt/plsm_basis.hpp"
-#include "topopt/plsm_kernel.hpp"
 
 #include <algorithm>
 #include <atomic>

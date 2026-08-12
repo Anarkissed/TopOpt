@@ -284,6 +284,16 @@ namespace {
 #include "plsm_topology.hpp"
 #include "plsm_mma.hpp"
 
+// ── ★ TASK 2026-08-12: THE ERSATZ DENSITY AS THE EXACT VOLUME FRACTION.
+// `rho_e = H_eta(-phi(x_centre))` becomes `rho_e = |{phi<0} cap cell| / |cell|`,
+// computed by sub-cell sampling of the SAME analytic phi, with the SAME
+// sub-cell lattice `plsm_evaluate` and `marching_cubes_resampled` use. The
+// sensitivity moves with it — a mismatched gradient here looks like slow
+// convergence and is believed. `--frac` arms it; without the flag not one line
+// of it executes and PR 326's arms reproduce bit for bit (`--frac 0` is the
+// control that proves it).
+#include "frac_ersatz.hpp"
+
 
 // ── (d) VELOCITY EXTENSION: separable [1 2 1]/4, `passes` times ─────────────
 void smooth_field(const Dims& d, std::vector<double>& f, int passes) {
@@ -1234,6 +1244,63 @@ struct Args {
   bool damp = false;
   double damp_factor = 0.75;  // theirs: "reduce ... by 25%"
   int damp_window = 5;        // theirs: the 5-iteration stopping window
+
+  // ══ TASK 2026-08-12 — THE EXACT VOLUME FRACTION ERSATZ ═══════════════════
+  //
+  // ★ THE ONE CHANGE. `rho_e = H_eta(-phi(x_centre))` becomes the exact fraction
+  // of the cell inside {phi < 0}, by k x k x k sub-cell sampling of the SAME
+  // analytic phi. Everything about the solver is untouched: the cell stiffness
+  // is still rho_e * K0, so the 24x24 reference block, the matrix-free stencil,
+  // the multigrid, GenEO, the recycler and the Galerkin block cache never learn
+  // that anything changed. What changes is that rho_e now varies CONTINUOUSLY as
+  // the interface moves inside a cell instead of stepping when it crosses the
+  // centre. `frac_ersatz.hpp` holds the sampling, the band and the projection.
+  //
+  //   --frac K            arm it, with K sub-samples per axis (K=0 is OFF and is
+  //                       the control: every PR 326 arm reproduces bit for bit)
+  //   --frac-eps M        the QUADRATURE bandwidth multiplier. eps_q =
+  //                       M * |grad phi| * h/K — tied to the SAMPLE SPACING, so
+  //                       it shrinks like 1/K. It is not eta wearing a hat and
+  //                       `frac_ersatz.hpp` says why at length.
+  //   --frac-sens MODE    `exact` (default) evaluates psi_i AT THE SAMPLES and
+  //                       scatters; `centre` factors psi_i out at the cell
+  //                       centre and reuses Psi^T. The second is the ablation
+  //                       that prices the sub-cell psi.
+  //   --frac-soft         the CONSISTENTLY MOLLIFIED variant: the hard sample
+  //                       indicator becomes the exact antiderivative of the
+  //                       quadrature mollifier, so the value and the gradient
+  //                       are two facts about ONE function. It removes the
+  //                       piecewise-constant wart; see frac_ersatz.hpp.
+  //   --frac-export       ALSO write the emitted occupancy as the volume
+  //                       fraction, beside the H_eta one. R5 keeps the H_eta
+  //                       export as the row of record; this is the named
+  //                       control for what the EXPORT convention is worth.
+  //   --frac-kreport      k = 2/4/8 on THIS design, then exit. S1(a).
+  //   --frac-fd N         ★ R4. Finite-difference the volume and the compliance
+  //                       sensitivities against the analytic ones on N
+  //                       coefficients and on random directions, then exit.
+  int frac = 0;
+  double frac_eps = 1.0;
+  std::string frac_sens = "exact";
+  bool frac_soft = false;
+  bool frac_export = false;
+  bool frac_kreport = false;
+  int frac_fd = 0;
+  // --frac-aniso   ARM 2: price the cut cell's ANISOTROPY against the scalar
+  //                volume fraction, by the rank-one laminate. A 3x3 solve per
+  //                cut cell; no element matrix anywhere.
+  bool frac_aniso = false;
+  // --frac-eps-l1  ★ ARM 2 M5. Scale the quadrature bandwidth by |grad phi|_1
+  //                instead of |grad phi|_2, which is what Engquist, Tornberg &
+  //                Tsai (JCP 207(1):28-51, 2005) prove is required for the
+  //                mollified surface delta to converge at all in 2D or 3D. See
+  //                frac_ersatz.hpp. Defaults OFF so ARM 1 is unchanged.
+  bool frac_eps_l1 = false;
+  // --alpha PREFIX   read `<PREFIX>.f64` as this basis's coefficients, in place
+  //                  of the seed fit. `plsm_probe` has had this since PR 326 and
+  //                  this file has not, so every question about a FINISHED
+  //                  design needed the run that produced it re-run.
+  std::string alpha_in;
 };
 
 }  // namespace
@@ -1259,6 +1326,18 @@ int main(int argc, char** argv) {
         "       [--plsm-basis wendland|gaussian] [--plsm-knots dx,dy,dz]\n"
         "       [--plsm-support S] [--plsm-ridge L] [--plsm-band-weight W]\n"
         "       [--plsm-move M] [--plsm-bound B] [--plsm-refit-every N]\n"
+        "  ★ THE EXACT VOLUME FRACTION ERSATZ (task 2026-08-12):\n"
+        "       [--frac K]           rho_e = |{phi<0} cap cell| / |cell| by KxKxK\n"
+        "                            sub-cell sampling, instead of H_eta at the\n"
+        "                            cell CENTRE. 0 = off (the control).\n"
+        "       [--frac-eps M]       quadrature bandwidth eps_q = M*|grad phi|*h/K\n"
+        "       [--frac-sens exact|centre]   psi_i at the SAMPLES (default) or\n"
+        "                            factored out at the cell centre (ablation)\n"
+        "       [--frac-soft]        consistently mollified: the value is the\n"
+        "                            antiderivative of the gradient's mollifier\n"
+        "       [--frac-export]      also emit the fraction field beside H_eta's\n"
+        "       [--frac-kreport]     K = 2/4/8 on this design, then exit\n"
+        "       [--frac-fd N]        finite-difference the sensitivity, then exit\n"
         "  SMOOTHNESS (task 2026-08-11-plsm-minimise-extra-surface):\n"
         "       [--volume-count]     constrain #{phi + c < 0} — the PRINTED\n"
         "                            count — instead of the smoothed integral\n"
@@ -1348,6 +1427,17 @@ int main(int argc, char** argv) {
       }
     }
     else if (s == "--volume-count") a.volume_count = true;
+    // ── the exact volume fraction ersatz (task 2026-08-12)
+    else if (s == "--frac") nexti(a.frac);
+    else if (s == "--frac-eps") next(a.frac_eps);
+    else if (s == "--frac-sens" && i + 1 < argc) a.frac_sens = argv[++i];
+    else if (s == "--frac-soft") a.frac_soft = true;
+    else if (s == "--frac-export") a.frac_export = true;
+    else if (s == "--frac-kreport") a.frac_kreport = true;
+    else if (s == "--frac-fd") nexti(a.frac_fd);
+    else if (s == "--frac-aniso") a.frac_aniso = true;
+    else if (s == "--frac-eps-l1") a.frac_eps_l1 = true;
+    else if (s == "--alpha" && i + 1 < argc) a.alpha_in = argv[++i];
     else if (s == "--perimeter-local") next(a.perimeter_local);
     else if (s == "--willmore-full") a.willmore_full = true;
     else if (s == "--robust") next(a.robust);
@@ -1528,6 +1618,85 @@ int main(int argc, char** argv) {
   if (a.simp && a.rules.empty()) {
     std::printf("FATAL: --simp needs --rules <settings/rules.json> (the shipped\n"
                 "       ladder takes the rule table the CLI takes)\n");
+    return 2;
+  }
+
+  // ── ★ THE EXACT-FRACTION ERSATZ REFUSES WHAT IT HAS NOT MADE CONSISTENT ───
+  //
+  // A density and a sensitivity that describe different objects is the single
+  // most likely way this run is wasted, so every combination whose gradient this
+  // task has NOT rewritten is refused outright rather than run and believed.
+  if (a.frac > 0) {
+    if (!a.plsm) {
+      std::printf(
+          "FATAL: --frac needs --plsm. The fraction is an integral of the\n"
+          "       ANALYTIC phi over the cell; a per-voxel phi has no value\n"
+          "       between its samples to integrate, and interpolating one would\n"
+          "       measure the interpolant. The voxel arms keep H_eta.\n");
+      return 2;
+    }
+    if (a.frac < 2 || a.frac > 16) {
+      std::printf("FATAL: --frac K must be between 2 and 16 (K=%d given). K=1 is\n"
+                  "       the cell centre, i.e. the H_eta arm with a hard step.\n",
+                  a.frac);
+      return 2;
+    }
+    if (!a.plsm_mma && a.frac_fd == 0 && !a.frac_kreport) {
+      std::printf(
+          "FATAL: --frac needs --plsm-mma. The steepest-descent and L-BFGS\n"
+          "       branches consume `g = Psi^T v`, which evaluates psi_i at the\n"
+          "       CELL CENTRE — the approximation the fraction's derivative\n"
+          "       exists to remove. Refused rather than run with a gradient that\n"
+          "       does not belong to the density.\n");
+      return 2;
+    }
+    if (a.frac_sens != "exact" && a.frac_sens != "centre") {
+      std::printf("FATAL: --frac-sens must be `exact` or `centre` (got '%s')\n",
+                  a.frac_sens.c_str());
+      return 2;
+    }
+    if (a.robust > 0.0) {
+      std::printf(
+          "FATAL: --frac and --robust are not consistent in this build. The\n"
+          "       robust formulation reads the objective's sensitivity on the\n"
+          "       ERODED surface {phi = -delta} (PR 326 P7), which needs a second\n"
+          "       shifted quadrature this task has not written. Refused rather\n"
+          "       than run with the intermediate's band, which is the exact bug\n"
+          "       PR 326 caught by reading.\n");
+      return 2;
+    }
+    if (a.plsm_hilb) {
+      std::printf(
+          "FATAL: --frac and --plsm-hilb are not consistent in this build. The\n"
+          "       Hilbertian extension is a solve on the VOXEL field, so the\n"
+          "       sensitivity it returns cannot carry the sub-cell psi the\n"
+          "       fraction's derivative is an integral of.\n");
+      return 2;
+    }
+    if (a.no_surface_delta) {
+      std::printf(
+          "FATAL: --frac and --no-surface-delta contradict each other. The\n"
+          "       second replaces the surface measure by a volume one over the\n"
+          "       whole active domain; the first IS a surface measure.\n");
+      return 2;
+    }
+    if (!(a.frac_eps > 0.0)) {
+      std::printf("FATAL: --frac-eps must be > 0 (the quadrature mollifier would\n"
+                  "       have zero width and the sum would alias to nothing)\n");
+      return 2;
+    }
+  } else if (a.frac_kreport || a.frac_soft || a.frac_export) {
+    std::printf("FATAL: --frac-kreport / --frac-soft / --frac-export all need\n"
+                "       --frac K.\n");
+    return 2;
+  } else if (a.frac_fd > 0 && !a.plsm) {
+    // ★ --frac-fd WITHOUT --frac IS DELIBERATELY ALLOWED, and it is the control
+    // that makes R4 worth reading: it differences PR 326's OWN gradient —
+    // DH_eta(phi)*|grad phi| projected by Psi^T — against the same functions, on
+    // the same design, with the same steps. "The new gradient checks out" means
+    // nothing without knowing what the old one does.
+    std::printf("FATAL: --frac-fd needs --plsm (there are no coefficients to\n"
+                "       differentiate with respect to otherwise)\n");
     return 2;
   }
 
@@ -2490,6 +2659,68 @@ int main(int argc, char** argv) {
   //
   // With no radius this is the identity and `occ` is bit-for-bit what every
   // earlier arm produced, which `C0` checks.
+  // ══ ★ THE EXACT VOLUME FRACTION ERSATZ (task 2026-08-12) ═════════════════
+  //
+  // ★ TWO OCCUPANCIES, AND KEEPING THEM APART IS WHAT MAKES R5 HOLD.
+  //
+  //   occ[v]   the PRINTED occupancy. H_eta(-phi) at the cell centre, exactly
+  //            as PR 326 wrote it. It is what the volume constraint counts,
+  //            what `printed_voxels` counts, what is EXPORTED at F=1 and what
+  //            `analyze_fixed_design` certifies. ★ IT IS UNCHANGED, DELIBERATELY:
+  //            the printed set is `{H_eta(-phi) > 0.5}` = `{phi < 0}` — provably
+  //            eta-free, because H_eta is monotone with H(0) = 0.5 exactly (PR
+  //            326 §3(e) proves and measures it) — so the part this run makes,
+  //            weighs and certifies is defined bit-identically to PR 326's. One
+  //            variable changes and it is not the definition of the part.
+  //
+  //   frho[v]  the ERSATZ the STATE SOLVE sees. The exact fraction of the cell
+  //            inside {phi < 0}, sampled k x k x k. THIS is the one variable.
+  //
+  // Everything about the solver is untouched — the cell stiffness is still
+  // rho_e * K0 — but rho_e now moves continuously as the interface crosses the
+  // cell instead of stepping when it passes the centre.
+  const bool frac_on = a.frac > 0;
+  FracCache fcache;
+  std::vector<char> frac_sample(n, 0);
+  std::vector<double> frac_gm(n, 0.0);      // |grad phi|_2 per cell, for the AREA
+  // ★ THE BANDWIDTH SCALE, HELD APART FROM THE AREA'S |grad phi|. Equal to
+  // `frac_gm` unless --frac-eps-l1 moves it to the L1 norm; frac_ersatz.hpp says
+  // at length why the L1 norm is the one the quadrature needs and the L2 norm is
+  // the one the co-area area needs, and they are not the same number.
+  std::vector<double> frac_gs(n, 0.0);
+  std::vector<double> dfrac(n, 0.0);        // the quadrature band, 1/mm
+  std::size_t frac_boundary = 0;
+  double frac_build_s = 0.0, frac_sens_s = 0.0, frac_area = 0.0;
+  {
+    // ★ ONLY THE ACTIVE CELLS ARE EVER SAMPLED, and S1(b)'s "a few per cent" is
+    // an understatement on this part: `Empty`, `FrozenSolid` and `FrozenVoid`
+    // cells are stamped by the MASK and the optimiser has no say over them, so
+    // 397,536 of the 468,224 are excluded before any test on phi. The cells that
+    // are actually CUT are then COUNTED every iteration (`FracCache::n_boundary`)
+    // rather than bounded by a classifier — a classifier would need a margin,
+    // and a margin is one more thing that can be wrong.
+    for (std::size_t v = 0; v < n; ++v)
+      frac_sample[v] = (grid.tags[v] != VoxelTag::Empty &&
+                        eff[v] == MaskValue::Active) ? 1 : 0;
+  }
+  // Rebuilt from the CURRENT alpha, after the volume offset has been folded in
+  // and phi resynced, so the samples describe the phi the solve is about to see.
+  auto frac_refresh = [&]() {
+    if (!frac_on) return;
+    frac_build(d, L, pbasis, alpha, frac_sample, a.frac, plsm_threads, fcache);
+    frac_boundary = fcache.n_boundary;
+    frac_build_s = fcache.build_s;
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i) {
+          const std::size_t v = d.at(i, j, k);
+          frac_gm[v] = frac_sample[v] ? grad_mag(d, phi, i, j, k, h) : 0.0;
+          frac_gs[v] = (frac_sample[v] && a.frac_eps_l1)
+                           ? frac_grad_l1(d, phi, i, j, k, h)
+                           : frac_gm[v];
+        }
+  };
+
   auto build_fields = [&](double offset) {
     for (std::size_t v = 0; v < n; ++v) {
       double o;
@@ -2512,7 +2743,29 @@ int main(int argc, char** argv) {
       else if (eff[v] == MaskValue::FrozenSolid) o = 1.0;
       else o = project(rho_til[v], a.filter_beta, a.filter_eta);
       occ[v] = o;
-      rho[v] = rho_min + (1.0 - rho_min) * o;
+      // ★ rho FOLLOWS THE FRACTION WHEN IT IS ARMED, occ NEVER DOES. The frozen
+      // classes are stamped identically in both — they are the mask's statement
+      // and not the level set's — so the fraction only ever touches the 70,688
+      // cells the optimiser actually owns.
+      double e = o;
+      if (frac_on && offset != 0.0) {
+        // The cache is sampled from the CURRENT alpha, so a non-zero offset here
+        // would apply to `occ` and not to the fraction and the two would
+        // describe different surfaces. The loop folds the offset into alpha and
+        // calls this with 0; nothing else may.
+        std::printf("\n*** FATAL: build_fields(%.17g) under --frac. The fraction "
+                    "is sampled from\n*** alpha, so the offset must be folded in "
+                    "before this is called.\n", offset);
+        std::exit(3);
+      }
+      if (frac_on && grid.tags[v] != VoxelTag::Empty &&
+          eff[v] == MaskValue::Active) {
+        e = a.frac_soft
+                ? frac_of_soft(fcache, v,
+                               frac_eps(frac_gs[v], h, a.frac, a.frac_eps))
+                : frac_of(fcache, v);
+      }
+      rho[v] = rho_min + (1.0 - rho_min) * e;
     }
   };
 
@@ -2648,6 +2901,8 @@ int main(int argc, char** argv) {
          // ★ the renucleation counters. Emitted because a mechanism whose
          // counters never reach the CSV is a mechanism nobody can check fired.
          "renuc_events,renuc_voxels,"
+         // ★ THE EXACT-FRACTION COLUMNS (PR 327). All zero when --frac is off.
+         "frac_cut_cells,frac_area_mm2,frac_build_ms,frac_sens_ms,"
          "iteration_wall_s\n";
 
   // ── THE DIRICHLET SET FOR THE HILBERTIAN EXTENSION (difference 4) ──────────
@@ -2747,6 +3002,55 @@ int main(int argc, char** argv) {
     else
       std::printf("PERIMETER   C = %.4g, FIXED from iteration 1\n", a.perimeter);
   }
+  // ★ SAID OUT LOUD, BECAUSE IT IS THE ONE VARIABLE. A table row produced with
+  // this on and one produced with it off are two different formulations, and the
+  // log must not leave that to be inferred from a command line.
+  if (frac_on) {
+    std::size_t nact = 0;
+    for (std::size_t v = 0; v < n; ++v) nact += frac_sample[v] ? 1 : 0;
+    std::printf(
+        "★ ERSATZ    THE EXACT VOLUME FRACTION, not H_eta at the cell centre.\n"
+        "            rho_e = |{phi<0} cap cell| / |cell|, by %d x %d x %d = %d\n"
+        "            sub-samples of the ANALYTIC phi per cell, on the SAME\n"
+        "            sub-cell lattice marching_cubes_resampled uses.\n"
+        "            %zu of %zu cells are sampled (the ACTIVE ones); the rest are\n"
+        "            stamped 0/1 by the mask and were never the level set's.\n"
+        "            value    %s\n"
+        "            gradient %s\n"
+        "            eps_q    %.4g x |grad phi|_%d x h/%d = %.5f mm at |grad phi| = 1\n"
+        "                     — a QUADRATURE bandwidth tied to the sample spacing,\n"
+        "                       so it shrinks like 1/K. It is not eta: eta is a\n"
+        "                       fixed 2 voxels and appears in the density; this\n"
+        "                       appears in no density at all.\n"
+        "            export   %s\n",
+        a.frac, a.frac, a.frac, a.frac * a.frac * a.frac, nact, n,
+        a.frac_soft ? "MOLLIFIED — the antiderivative of the gradient's own "
+                      "mollifier (--frac-soft)"
+                    : "the HARD sample count (piecewise constant in alpha; see "
+                      "frac_ersatz.hpp)",
+        a.frac_sens == "exact"
+            ? "EXACT — psi_i evaluated AT THE SAMPLES and scattered"
+            : "CENTRE — psi_i factored out at the cell centre, Psi^T (ABLATION)",
+        a.frac_eps, a.frac_eps_l1 ? 1 : 2, a.frac,
+        frac_eps(1.0, h, a.frac, a.frac_eps),
+        a.frac_export ? "H_eta (the row of record, R5) AND the fraction, side by side"
+                      : "H_eta only — R5, bit-identical to PR 326's convention");
+    std::printf(
+        "            ★ WHAT STILL READS eta, stated rather than left to be found:\n"
+        "              * the PRINTED predicate {H_eta(-phi) > 0.5}. Provably\n"
+        "                eta-free as a SET (H is monotone, H(0) = 0.5 exactly),\n"
+        "                so the part, its mass and its certificate are defined\n"
+        "                identically to PR 326's. R5.\n"
+        "              * the F>=1 EXPORT's field values, where eta DOES move\n"
+        "                vertex placement. Kept as the row of record; --frac-export\n"
+        "                emits the fraction beside it as the named control.\n"
+        "              * the reinit residual's reporting band and the refit's fit\n"
+        "                weight — diagnostics and the approximate reinitialisation,\n"
+        "                neither of which is the variable under test.\n"
+        "              * Per = INT DH_eta(phi)|grad phi| — GONE with the density.\n"
+        "                Under --frac the perimeter term rides the QUADRATURE band\n"
+        "                and no longer contains eta at all.\n");
+  }
 
   std::vector<double> best_occ, best_rho;
   double best_compliance = std::numeric_limits<double>::infinity();
@@ -2788,6 +3092,493 @@ int main(int argc, char** argv) {
                 "%d iterations\n",
                 static_cast<int>(solver_now), a.warm_start ? "ON" : "off",
                 a.cg_tol_early, a.cg_tol_until);
+
+  // ══ ★ --alpha: READ A DESIGN'S COEFFICIENTS BACK IN ══════════════════════
+  //
+  // `plsm_probe` has had this since PR 326 and this file has not, so every
+  // question about a FINISHED design had to be answered by re-running the
+  // optimiser that produced it. The two report modes below are exactly such
+  // questions — S1(a)'s k-convergence and R4's finite difference are both
+  // statements about ONE design — and asking them of a converged arm costs
+  // nothing this way and an hour the other.
+  if (!a.alpha_in.empty()) {
+    if (!a.plsm) {
+      std::printf("FATAL: --alpha needs --plsm; there are no coefficients "
+                  "otherwise\n");
+      return 2;
+    }
+    std::ifstream ain(a.alpha_in + ".f64", std::ios::binary);
+    if (!ain) {
+      std::printf("FATAL: cannot read %s.f64\n", a.alpha_in.c_str());
+      return 2;
+    }
+    std::vector<double> ain_v(L.count(), 0.0);
+    ain.read(reinterpret_cast<char*>(ain_v.data()),
+             static_cast<std::streamsize>(ain_v.size() * sizeof(double)));
+    // ★ THE COUNT IS CHECKED, NOT ASSUMED. A coefficient file from a different
+    // knot spacing would load silently, fit nothing, and produce a plausible
+    // table. It is exactly the shape of failure R2 exists to prevent.
+    if (static_cast<std::size_t>(ain.gcount()) != ain_v.size() * sizeof(double)) {
+      std::printf("FATAL: %s.f64 is %lld bytes; this knot lattice (%d x %d x %d)\n"
+                  "       needs %zu. The coefficients are not this basis's.\n",
+                  a.alpha_in.c_str(), static_cast<long long>(ain.gcount()), L.mx,
+                  L.my, L.mz, ain_v.size() * sizeof(double));
+      return 2;
+    }
+    alpha = ain_v;
+    plsm_sync();
+    std::printf("ALPHA       %zu coefficients read from %s.f64 — the seed fit "
+                "above is DISCARDED\n", alpha.size(), a.alpha_in.c_str());
+  }
+
+  // ══ ★ S1(a) — THE k-CONVERGENCE REPORT ═══════════════════════════════════
+  //
+  // The fraction against k = 2, 4 and 8 on ONE fixed design, so the sub-sampling
+  // error and its cost are a measurement rather than a choice. Nothing is
+  // optimised here.
+  if (a.frac_kreport) {
+    const int ks[3] = {2, 4, 8};
+    std::vector<double> f[3];
+    double wall[3] = {0.0, 0.0, 0.0};
+    std::size_t cut[3] = {0, 0, 0};
+    std::printf("\n══ THE FRACTION AGAINST k ══════════════════════════════════\n");
+    for (int q = 0; q < 3; ++q) {
+      FracCache C;
+      frac_build(d, L, pbasis, alpha, frac_sample, ks[q], plsm_threads, C);
+      wall[q] = C.build_s;
+      cut[q] = C.n_boundary;
+      f[q].assign(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v)
+        if (frac_sample[v]) f[q][v] = frac_of(C, v);
+      double sum = 0.0;
+      for (std::size_t v = 0; v < n; ++v) sum += f[q][v];
+      std::printf("k = %-2d  %8zu cut cells of %8zu sampled   sum f_v = %14.6f"
+                  "   %.3f s\n",
+                  ks[q], C.n_boundary, C.ncell, sum, C.build_s);
+    }
+    std::printf("\n  differences, over the CUT cells only (an uncut cell is 0 or "
+                "1 at every k):\n");
+    for (int q = 1; q < 3; ++q) {
+      double s2 = 0.0, mx = 0.0, dsum = 0.0;
+      std::size_t cnt = 0;
+      for (std::size_t v = 0; v < n; ++v) {
+        if (!frac_sample[v]) continue;
+        const double e = f[q][v] - f[q - 1][v];
+        dsum += e;
+        if (f[q][v] > 0.0 && f[q][v] < 1.0) { s2 += e * e; mx = std::max(mx, std::fabs(e)); ++cnt; }
+      }
+      std::printf("  k=%d against k=%d: rms %.6f, max %.6f over %zu cells; "
+                  "sum f_v moves %+.4f voxels (%.4f%% of the part)\n",
+                  ks[q], ks[q - 1], cnt ? std::sqrt(s2 / static_cast<double>(cnt)) : 0.0,
+                  mx, cnt, dsum, 100.0 * dsum / target_volume);
+    }
+    std::printf("\n  cut cells: %zu / %zu / %zu at k = 2 / 4 / 8; "
+                "build %.3f / %.3f / %.3f s\n",
+                cut[0], cut[1], cut[2], wall[0], wall[1], wall[2]);
+    std::ofstream kc(a.out + "/frac_kreport.csv");
+    kc.precision(12);
+    kc << "k,cut_cells,sampled_cells,sum_f,build_s\n";
+    for (int q = 0; q < 3; ++q) {
+      double sum = 0.0;
+      for (std::size_t v = 0; v < n; ++v) sum += f[q][v];
+      kc << ks[q] << ',' << cut[q] << ',' << fcache.ncell << ',' << sum << ','
+         << wall[q] << '\n';
+    }
+    std::printf("wrote %s/frac_kreport.csv\n", a.out.c_str());
+  }
+
+  // ══ ★ R4 — THE SENSITIVITY AGAINST A FINITE DIFFERENCE ═══════════════════
+  //
+  // ★ A WRONG GRADIENT HERE IS THE SINGLE MOST LIKELY WAY THIS RUN IS WASTED,
+  // and it would not announce itself: a mismatched derivative converges, just
+  // slowly and to somewhere else. So both sensitivities MMA consumes are
+  // differenced against the functions they claim to be derivatives of.
+  //
+  //   dV/dalpha  V(alpha) = SUM over ACTIVE cells of f_v. No state solve.
+  //   dC/dalpha  C(alpha) = the compliance of the ersatz. Two state solves per
+  //              probe direction, which is why N is small.
+  //
+  // ★ THE SIGN CONVENTION, WRITTEN OUT SO IT CANNOT BE THE BUG. MMA's design is
+  // beta = -alpha, so `dv` and `dc` are derivatives with respect to BETA:
+  //     dV/dalpha_i = -dv_i
+  //     dC/dalpha_i = -(1 - rho_min) * E0 * dc_i
+  // the second because `energy_from` un-does the SIMP interpolation, so
+  // dC/drho_v = -e_v * E0 and drho_v/dalpha_i = (1-rho_min) * df_v/dalpha_i.
+  //
+  // ★ AND THE STEP SIZE IS SWEPT RATHER THAN CHOSEN, because the HARD-sampled
+  // fraction is PIECEWISE CONSTANT in alpha: it jumps by 1/k^3 as each sample
+  // crosses. A step too small differences a flat, a step too large leaves the
+  // linear regime, and the plateau between them is the answer. A single step
+  // would have produced one number and no way to know which of the three it was.
+  // `--frac-soft` has no staircase and its plateau should reach machine
+  // precision; that difference IS the measurement.
+  if (a.frac_fd > 0) {
+    // The design as it stands, on the constraint surface, exactly as an
+    // iteration would see it.
+    const double off0 = solve_offset(target_volume);
+    for (double& c : alpha) c += off0;
+    plsm_sync();
+    frac_refresh();
+    build_fields(0.0);
+
+    // V and C, and the analytic gradients of both, at this point.
+    auto volume_functional = [&]() {
+      double s = 0.0;
+      for (std::size_t v = 0; v < n; ++v) {
+        if (!frac_sample[v]) continue;
+        s += frac_on ? (a.frac_soft
+                            ? frac_of_soft(fcache, v,
+                                           frac_eps(frac_gs[v], h, a.frac, a.frac_eps))
+                            : frac_of(fcache, v))
+                     : heaviside(-phi[v], eta);
+      }
+      return s;
+    };
+    auto compliance_now = [&]() {
+      const SimpCompliance s =
+          simp_compliance(grid, traj_params, rho, bcs, loads,
+                          options.simp.cg_tolerance,
+                          options.simp.cg_max_iterations, nullptr,
+                          pen_solver.get(), solver_now);
+      return s;
+    };
+
+    const SimpCompliance sc0 = compliance_now();
+    const double V0 = volume_functional();
+
+    // The band and the two projections, built exactly as the loop builds them.
+    if (frac_on) frac_band(fcache, frac_gs, h, a.frac_eps, dfrac, plsm_threads);
+    std::vector<double> dlt(n, 0.0), ev(n, 0.0);
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i) {
+          const std::size_t v = d.at(i, j, k);
+          if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active) continue;
+          dlt[v] = frac_on ? dfrac[v]
+                           : (dheaviside(phi[v], eta) > 0.0
+                                  ? dheaviside(phi[v], eta) *
+                                        grad_mag(d, phi, i, j, k, h)
+                                  : 0.0);
+          ev[v] = energy_from(sc0.dcompliance[v], rho[v], traj_params.penalty,
+                              traj_params.youngs_modulus);
+        }
+    std::vector<double> dc(L.count(), 0.0), dv(L.count(), 0.0);
+    if (frac_on && a.frac_sens == "exact") {
+      std::vector<double> wv(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v) wv[v] = dlt[v] > 0.0 ? 1.0 : 0.0;
+      frac_scatter(fcache, d, L, pbasis, frac_gs, h, a.frac_eps, ev, dc, wv, dv,
+                   plsm_threads);
+    } else {
+      std::vector<double> ed(n, 0.0);
+      for (std::size_t v = 0; v < n; ++v) ed[v] = ev[v] * dlt[v];
+      spmv(PsiT, ed, dc, plsm_threads);
+      spmv(PsiT, dlt, dv, plsm_threads);
+    }
+    for (double& c : dc) c = -c;   // MMA's convention: material IN lowers C
+
+    const double e0_mod = traj_params.youngs_modulus;
+    auto pred_V = [&](const std::vector<double>& u) {
+      double s = 0.0;
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2) s -= dv[i2] * u[i2];
+      return s;
+    };
+    auto pred_C = [&](const std::vector<double>& u) {
+      double s = 0.0;
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2) s -= dc[i2] * u[i2];
+      return s * (1.0 - rho_min) * e0_mod;
+    };
+
+    const std::vector<double> alpha0 = alpha;
+    // Perturb, WITHOUT re-solving the offset: the finite difference is of the
+    // UNCONSTRAINED functions, which is what the gradients are gradients of.
+    auto at = [&](const std::vector<double>& u, double s, bool want_c,
+                  double& Vout, double& Cout) {
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2)
+        alpha[i2] = alpha0[i2] + s * u[i2];
+      plsm_sync();
+      frac_refresh();
+      build_fields(0.0);
+      Vout = volume_functional();
+      Cout = want_c ? compliance_now().compliance : 0.0;
+    };
+
+    std::ofstream fd(a.out + "/frac_fd.csv");
+    fd.precision(12);
+    fd << "kind,which,step,pred_dV,fd_dV,relerr_V,pred_dC,fd_dC,relerr_C\n";
+    std::printf("\n══ R4 — THE SENSITIVITY AGAINST A CENTRAL DIFFERENCE ═══════\n");
+    std::printf("design: %s ersatz, %s gradient, k = %d, eps_q mult %.3g\n",
+                frac_on ? (a.frac_soft ? "MOLLIFIED FRACTION" : "EXACT FRACTION")
+                        : "H_eta AT THE CELL CENTRE (PR 326's)",
+                frac_on && a.frac_sens == "exact" ? "sample-scatter" : "Psi^T",
+                a.frac, a.frac_eps);
+    std::printf("C0 = %.12g   V0 = %.6f (active cells only)\n\n", sc0.compliance, V0);
+
+    // ── (i) RANDOM DIRECTIONS. The cleanest check, because a direction that
+    // touches every knot averages the staircase over ~10^4 cut cells.
+    // ★ THE DIRECTIONS ARE DETERMINISTIC (a fixed LCG seeded per index), so this
+    // report reproduces exactly. A random_device here would make R4 unrepeatable.
+    const double steps[5] = {1e-3, 1e-2, 1e-1, 3e-1, 1.0};
+    for (int r = 0; r < 2; ++r) {
+      std::vector<double> u(L.count(), 0.0);
+      unsigned long long st = 88172645463325252ULL + static_cast<unsigned long long>(r) * 7919ULL;
+      double nrm = 0.0;
+      for (std::size_t i2 = 0; i2 < L.count(); ++i2) {
+        st ^= st << 13; st ^= st >> 7; st ^= st << 17;
+        u[i2] = (static_cast<double>(st >> 11) * (1.0 / 9007199254740992.0)) - 0.5;
+        nrm += u[i2] * u[i2];
+      }
+      nrm = std::sqrt(nrm / static_cast<double>(L.count()));
+      for (double& x : u) x /= nrm;   // unit RMS, so a step is "mm of coefficient"
+      const double pV = pred_V(u), pC = pred_C(u);
+      for (double s : steps) {
+        // ★ THE VOLUME DIFFERENCE IS FREE AND THE COMPLIANCE ONE COSTS TWO STATE
+        // SOLVES, so the step sweep is run in full on the volume — which is the
+        // sharper test, because it isolates d f_v / d alpha with no energy chain
+        // in the way — and the compliance is differenced only where the volume
+        // sweep says the linear regime is. Both are reported; neither is
+        // extrapolated from the other.
+        const bool want_c = (s == 1e-2 || s == 1e-1);
+        double Vp, Cp, Vm, Cm;
+        at(u, +s, want_c, Vp, Cp);
+        at(u, -s, want_c, Vm, Cm);
+        const double fV = (Vp - Vm) / (2.0 * s);
+        const double fC = want_c ? (Cp - Cm) / (2.0 * s) : 0.0;
+        const double rV = pV != 0.0 ? (fV - pV) / pV : 0.0;
+        const double rC = (want_c && pC != 0.0) ? (fC - pC) / pC : 0.0;
+        if (want_c)
+          std::printf("random dir %d  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   dC pred %13.6g  fd %13.6g  rel %+9.3f%%\n",
+                      r, s, pV, fV, 100.0 * rV, pC, fC, 100.0 * rC);
+        else
+          std::printf("random dir %d  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   (no state solve at this step)\n",
+                      r, s, pV, fV, 100.0 * rV);
+        fd << "random," << r << ',' << s << ',' << pV << ',' << fV << ',' << rV
+           << ',' << (want_c ? pC : 0.0) << ',' << fC << ',' << rC << '\n';
+        fd.flush();
+      }
+    }
+
+    // ── (ii) SINGLE COEFFICIENTS, near the interface, where the derivative is
+    // non-zero. The staircase is at its worst here — one coefficient moves only
+    // the cells inside ONE support — and it is reported rather than avoided.
+    std::vector<std::pair<double, std::size_t>> rank;
+    for (std::size_t i2 = 0; i2 < L.count(); ++i2)
+      rank.emplace_back(std::fabs(dv[i2]), i2);
+    std::sort(rank.begin(), rank.end(),
+              [](const std::pair<double, std::size_t>& x,
+                 const std::pair<double, std::size_t>& y) { return x.first > y.first; });
+    const int nfd = std::min<int>(a.frac_fd, static_cast<int>(rank.size()));
+    for (int q = 0; q < nfd; ++q) {
+      const std::size_t i2 = rank[static_cast<std::size_t>(q * 37 % std::max(1, nfd))].second;
+      std::vector<double> u(L.count(), 0.0);
+      u[i2] = 1.0;
+      const double pV = pred_V(u), pC = pred_C(u);
+      for (double s : {1e-2, 1e-1, 1.0}) {
+        const bool want_c = (s == 1.0);   // one solve pair per coefficient
+        double Vp, Cp, Vm, Cm;
+        at(u, +s, want_c, Vp, Cp);
+        at(u, -s, want_c, Vm, Cm);
+        const double fV = (Vp - Vm) / (2.0 * s);
+        const double fC = want_c ? (Cp - Cm) / (2.0 * s) : 0.0;
+        const double rV = pV != 0.0 ? (fV - pV) / pV : 0.0;
+        const double rC = (want_c && pC != 0.0) ? (fC - pC) / pC : 0.0;
+        if (want_c)
+          std::printf("coeff %6zu  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   dC pred %13.6g  fd %13.6g  rel %+9.3f%%\n",
+                      i2, s, pV, fV, 100.0 * rV, pC, fC, 100.0 * rC);
+        else
+          std::printf("coeff %6zu  step %8.3g   dV pred %14.6g  fd %14.6g  "
+                      "rel %+9.3f%%   (no state solve at this step)\n",
+                      i2, s, pV, fV, 100.0 * rV);
+        fd << "coeff," << i2 << ',' << s << ',' << pV << ',' << fV << ',' << rV
+           << ',' << (want_c ? pC : 0.0) << ',' << fC << ',' << rC << '\n';
+        fd.flush();
+      }
+    }
+    alpha = alpha0;
+    plsm_sync();
+    std::printf("\nwrote %s/frac_fd.csv\n", a.out.c_str());
+  }
+  // ══ ★ ARM 2 — WHAT THE SCALAR ERSATZ COSTS: THE ANISOTROPY, PRICED ═══════
+  //
+  // ★ THE PROBLEM. A partially-filled cell is genuinely ANISOTROPIC — stiffer
+  // ALONG the material than ACROSS it — and a scalar volume fraction cannot
+  // represent that. Using rho_e * K0 is the VOIGT (arithmetic) average, which is
+  // the upper bound on the cell's stiffness in every direction, so a cut cell is
+  // modelled STIFFER than it is, and most stiffly exactly across the cut, which
+  // is where a thin member's boundary lies.
+  //
+  // ★ PR 320 PRICED THE CUT-CELL FAMILY AND REJECTED IT, and its architectural
+  // objection stands: a per-element Ke takes storage from O(1) to O(cut cells)
+  // and voids the Galerkin block cache. ★ BUT ITS *NUMERICAL* REASON NO LONGER
+  // APPLIES — it found cut-cell pointless because the median cut fraction was
+  // EXACTLY 0.5000, a half-voxel-shifted staircase with nothing fractional to
+  // integrate. On a smooth analytic phi the cuts are genuinely fractional, and
+  // the k-report above measures the distribution.
+  //
+  // ★ SO THIS PRICES THE CORRECTION WITHOUT BUILDING IT. For a cell cut by a
+  // plane with normal n at fraction f, the exact two-phase construction with
+  // uniform fields in each phase is the RANK-ONE LAMINATE: the strain differs
+  // between the phases by a rank-one symmetric jump sym(a (x) n), fixed by
+  // traction continuity across the interface. That is a 3x3 solve per cell —
+  // NO 24x24 anything, no assembly, no element matrix.
+  //
+  //     eps1 = eps + (1-f) sym(a (x) n)        (the solid layer)
+  //     eps0 = eps -    f  sym(a (x) n)        (the void layer)
+  //     [(1-f) Q + f rho_min Q] a = -(1-rho_min) (C eps) . n
+  //     Q_ik = C_ijkl n_j n_l = mu I + (lambda+mu) n (x) n   (isotropic)
+  //
+  // and the ratio W_laminate / W_voigt is exactly "how much strain energy the
+  // scalar ersatz misplaces in this cell, under the strain it actually carries".
+  // Summed over the cut cells and against the whole part, that is the number the
+  // brief asks for: whether an anisotropic correction is worth having, and how
+  // much of the compliance is at stake.
+  //
+  // ★ AND IT IS ALSO A MECHANISM, NOT ONLY A DIAGNOSTIC. The ratio is a per-cell
+  // SCALAR. rho_e is ALREADY a per-cell scalar. So the correction rho_e ->
+  // ratio * rho_e costs exactly nothing architecturally — no per-cell Ke, no
+  // cache-key change, no stencil change. It is not the full anisotropy (a scalar
+  // cannot be), but it is the part of it the compliance actually sees.
+  if (a.frac_aniso) {
+    const double off0 = solve_offset(target_volume);
+    for (double& c : alpha) c += off0;
+    plsm_sync();
+    frac_refresh();
+    build_fields(0.0);
+    const SimpCompliance scA =
+        simp_compliance(grid, traj_params, rho, bcs, loads,
+                        options.simp.cg_tolerance, options.simp.cg_max_iterations,
+                        nullptr, pen_solver.get(), solver_now);
+    const double nu = traj_params.poisson;
+    // Lame constants at E = 1: the strain is recovered with a UNIT modulus, so
+    // rho never enters twice.
+    const double lam = nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
+    const double mu = 1.0 / (2.0 * (1.0 + nu));
+    std::ofstream ac(a.out + "/frac_aniso.csv");
+    ac.precision(12);
+    ac << "voxel,f,nx,ny,nz,W_voigt,W_lam,ratio\n";
+    double sumW_voigt = 0.0, sumW_lam = 0.0, sumW_all = 0.0;
+    std::size_t ncut = 0;
+    // The ratio's distribution, in twenty buckets, so a mean cannot hide a tail.
+    std::size_t hist[20] = {0};
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i) {
+          const std::size_t v = d.at(i, j, k);
+          if (grid.tags[v] == VoxelTag::Empty) continue;
+          // ── the element's 24 nodal displacements, in core's own ordering
+          const int cx[8] = {0, 1, 1, 0, 0, 1, 1, 0};
+          const int cy[8] = {0, 0, 1, 1, 0, 0, 1, 1};
+          const int cz[8] = {0, 0, 0, 0, 1, 1, 1, 1};
+          std::array<double, 24> ue{};
+          for (int q = 0; q < 8; ++q) {
+            const int nd = fea_node_index(grid, i + cx[q], j + cy[q], k + cz[q]);
+            for (int c = 0; c < 3; ++c)
+              ue[static_cast<std::size_t>(3 * q + c)] = scA.solution.at(nd, c);
+          }
+          // sigma = C(1, nu) : eps, so eps is recovered by the unit-modulus
+          // compliance. `hex8_stress` is core's own recovery — INVOKED, not a
+          // second B matrix in this file (R2).
+          const Hex8Stress st = hex8_stress(1.0, nu, h, ue);
+          const double sxx = st.sigma[0], syy = st.sigma[1], szz = st.sigma[2];
+          const double txy = st.sigma[3], tyz = st.sigma[4], tzx = st.sigma[5];
+          double e[3][3];
+          e[0][0] = sxx - nu * (syy + szz);
+          e[1][1] = syy - nu * (sxx + szz);
+          e[2][2] = szz - nu * (sxx + syy);
+          e[0][1] = e[1][0] = (1.0 + nu) * txy;
+          e[1][2] = e[2][1] = (1.0 + nu) * tyz;
+          e[2][0] = e[0][2] = (1.0 + nu) * tzx;
+          const double tr = e[0][0] + e[1][1] + e[2][2];
+          double ee = 0.0;
+          for (int p = 0; p < 3; ++p)
+            for (int q = 0; q < 3; ++q) ee += e[p][q] * e[p][q];
+          const double W_solid = 0.5 * (lam * tr * tr + 2.0 * mu * ee);
+          const double rho_v = rho[v];
+          sumW_all += rho_v * W_solid;
+          if (eff[v] != MaskValue::Active) continue;
+          const double f = frac_on ? frac_of(fcache, v) : heaviside(-phi[v], eta);
+          if (!(f > 0.0 && f < 1.0)) continue;   // not a cut cell
+          // the interface normal, from the same phi everything else reads
+          double gx = 0.0, gy = 0.0, gz = 0.0;
+          {
+            auto P = [&](int A, int B, int C) {
+              A = std::min(std::max(A, 0), d.nx - 1);
+              B = std::min(std::max(B, 0), d.ny - 1);
+              C = std::min(std::max(C, 0), d.nz - 1);
+              return phi[d.at(A, B, C)];
+            };
+            gx = (P(i + 1, j, k) - P(i - 1, j, k)) / (2.0 * h);
+            gy = (P(i, j + 1, k) - P(i, j - 1, k)) / (2.0 * h);
+            gz = (P(i, j, k + 1) - P(i, j, k - 1)) / (2.0 * h);
+          }
+          const double gn = std::sqrt(gx * gx + gy * gy + gz * gz);
+          if (!(gn > 1e-12)) continue;
+          const double nvec[3] = {gx / gn, gy / gn, gz / gn};
+          // t = (C eps) . n
+          double t[3];
+          for (int p = 0; p < 3; ++p) {
+            double s = lam * tr * nvec[p];
+            for (int q = 0; q < 3; ++q) s += 2.0 * mu * e[p][q] * nvec[q];
+            t[p] = s;
+          }
+          // a = -(1-rho_min)/[(1-f) + f rho_min] * Q^{-1} t,
+          // Q^{-1} = (1/mu)[I - ((lambda+mu)/(lambda+2mu)) n (x) n]
+          const double den = (1.0 - f) + f * rho_min;
+          const double coef = -(1.0 - rho_min) / (den > 1e-300 ? den : 1e-300);
+          const double tn = t[0] * nvec[0] + t[1] * nvec[1] + t[2] * nvec[2];
+          double av[3];
+          for (int p = 0; p < 3; ++p)
+            av[p] = coef * (t[p] - ((lam + mu) / (lam + 2.0 * mu)) * tn * nvec[p]) / mu;
+          double jump[3][3];
+          for (int p = 0; p < 3; ++p)
+            for (int q = 0; q < 3; ++q)
+              jump[p][q] = 0.5 * (av[p] * nvec[q] + av[q] * nvec[p]);
+          auto energy_of = [&](double scale) {
+            double tr2 = 0.0, ee2 = 0.0;
+            for (int p = 0; p < 3; ++p) {
+              const double dpp = e[p][p] + scale * jump[p][p];
+              tr2 += dpp;
+            }
+            for (int p = 0; p < 3; ++p)
+              for (int q = 0; q < 3; ++q) {
+                const double dpq = e[p][q] + scale * jump[p][q];
+                ee2 += dpq * dpq;
+              }
+            return 0.5 * (lam * tr2 * tr2 + 2.0 * mu * ee2);
+          };
+          const double W_lam = f * energy_of(1.0 - f) +
+                               (1.0 - f) * rho_min * energy_of(-f);
+          const double W_voigt = rho_v * W_solid;
+          const double ratio = W_voigt > 0.0 ? W_lam / W_voigt : 1.0;
+          sumW_voigt += W_voigt;
+          sumW_lam += W_lam;
+          ++ncut;
+          int b = static_cast<int>(ratio * 20.0);
+          hist[std::min(19, std::max(0, b))]++;
+          ac << v << ',' << f << ',' << nvec[0] << ',' << nvec[1] << ','
+             << nvec[2] << ',' << W_voigt << ',' << W_lam << ',' << ratio << '\n';
+        }
+    std::printf("\n══ ARM 2 — THE ANISOTROPY OF A CUT CELL, PRICED ════════════\n");
+    std::printf("cut cells                       %zu\n", ncut);
+    std::printf("their strain energy, VOIGT      %.10g  (%.3f%% of the part's "
+                "%.10g)\n", sumW_voigt,
+                sumW_all > 0.0 ? 100.0 * sumW_voigt / sumW_all : 0.0, sumW_all);
+    std::printf("their strain energy, LAMINATE   %.10g\n", sumW_lam);
+    std::printf("★ the scalar ersatz over-stiffens the cut cells by %.2f%%, which "
+                "is %.3f%%\n  of the whole part's strain energy\n",
+                sumW_lam > 0.0 ? 100.0 * (sumW_voigt / sumW_lam - 1.0) : 0.0,
+                sumW_all > 0.0 ? 100.0 * (sumW_voigt - sumW_lam) / sumW_all : 0.0);
+    std::printf("\n  W_lam / W_voigt, by twentieths (1.00 = the scalar is exact, "
+                "0 = it is all error):\n");
+    for (int b = 0; b < 20; ++b)
+      if (hist[b])
+        std::printf("    %.2f - %.2f : %6zu\n", b * 0.05, (b + 1) * 0.05, hist[b]);
+    std::printf("\nwrote %s/frac_aniso.csv\n", a.out.c_str());
+  }
+
+  if (a.frac_kreport || a.frac_fd > 0 || a.frac_aniso) return 0;
 
   const double t_run0 = now_s();
   double total_solve_wall = 0.0, total_hilb_wall = 0.0;
@@ -2861,6 +3652,11 @@ int main(int argc, char** argv) {
     } else {
       for (std::size_t v = 0; v < n; ++v) phi[v] += offset;
     }
+    // ★ AND THE SUB-CELL SAMPLES ARE REBUILT HERE, after the fold and before the
+    // ersatz, so the fraction, the printed occupancy, the band, the sensitivity
+    // and the reinitialiser all refer to ONE surface — the same reason PR 323
+    // folded the offset into phi in the first place.
+    frac_refresh();
     build_fields(0.0);
 
     // ── THE STATE SOLVE. Core's, unmodified. ────────────────────────────────
@@ -3255,6 +4051,40 @@ int main(int argc, char** argv) {
     // already been folded into it above — so {phi = 0} IS the interface the
     // ersatz, the volume constraint, the reinitialiser and this delta all read.
     // That single interface is the point of folding it in.
+    //
+    // ══ ★ AND THIS IS WHERE THE SENSITIVITY FOLLOWS THE DENSITY ═════════════
+    //
+    // ★ S1(c). Leaving `DH_eta(phi)*|grad phi|` in place against a volume-
+    // fraction density would be a MISMATCHED GRADIENT — it would look like slow
+    // convergence and would be believed, and it is the single most likely way
+    // this run is wasted. The fraction's derivative is a surface integral over
+    // the part of the interface inside the cell, which the co-area formula turns
+    // into a volume integral of a Dirac in phi:
+    //
+    //     d f_v / d alpha_i = -(1/|C|) INT_{Gamma cap C} psi_i / |grad phi| dS
+    //                       = -(1/|C|) INT_C delta(phi) psi_i dx
+    //                      ~= -(1/k^3) SUM_s delta_q(phi_s) psi_i(x_s)
+    //
+    // `dfrac[v]` is that sum WITHOUT psi — the per-cell factor the old `delta`
+    // played — and it is what lambda is weighted by, what the perimeter term
+    // rides and what the CSV's band column counts. ★ THE `|grad phi|` IS GONE
+    // AND ITS ABSENCE IS THE CORRECTION: the old measure is `dS`, this one is
+    // `dS/|grad phi|`, and the second is what the derivative of a VOLUME
+    // fraction actually is. On a true signed distance they coincide; this phi
+    // is not one (‖∇φ‖−1 runs 0.35–0.39 rms here, PR 326 P3), so the difference
+    // is real and it is the reason the projection is a scatter and not Psi^T.
+    if (frac_on) {
+      const double t_fs = now_s();
+      frac_band(fcache, frac_gs, h, a.frac_eps, dfrac, plsm_threads);
+      frac_sens_s = now_s() - t_fs;
+      // The interface AREA on this measure. `dfrac` integrates to dS/|grad phi|
+      // by the co-area formula, so the area is the |grad phi|-weighted sum — the
+      // same physical quantity `interface_area_mm2` reports on the old band, and
+      // reported beside it rather than in place of it.
+      frac_area = 0.0;
+      for (std::size_t v = 0; v < n; ++v) frac_area += dfrac[v] * frac_gm[v];
+      frac_area *= h * h * h;
+    }
     std::size_t band_n = 0;
     for (int k = 0; k < d.nz; ++k)
       for (int j = 0; j < d.ny; ++j)
@@ -3264,6 +4094,15 @@ int main(int argc, char** argv) {
             delta[v] = 0.0;
             delta_obj[v] = 0.0;
             raw_vel[v] = 0.0;
+            continue;
+          }
+          if (frac_on) {
+            delta[v] = dfrac[v];
+            delta_obj[v] = dfrac[v];   // --robust is refused under --frac
+            if (delta[v] > 0.0) ++band_n;
+            raw_vel[v] = energy_from(sc.dcompliance[v], (*rho_sens)[v],
+                                     traj_params.penalty,
+                                     traj_params.youngs_modulus);
             continue;
           }
           if (a.no_surface_delta) {
@@ -3739,8 +4578,31 @@ int main(int argc, char** argv) {
         std::vector<double> edelta(n, 0.0);
         for (std::size_t v = 0; v < n; ++v) edelta[v] = raw_vel[v] + lambda * delta[v];
         std::vector<double> dc(L.count(), 0.0), dv(L.count(), 0.0);
-        spmv(PsiT, edelta, dc, plsm_threads);
-        spmv(PsiT, delta, dv, plsm_threads);
+        if (frac_on && a.frac_sens == "exact") {
+          // ★ THE SCATTER. `Psi^T` evaluates psi_i at the CELL CENTRE and factors
+          // it out of the sub-cell sum; the fraction's derivative has psi_i
+          // INSIDE that sum, at the samples. The two weights ride the same
+          // measure — the identity the whole level-set formulation rests on — so
+          // one pass over the samples produces both.
+          //
+          // `edelta` and `delta` already carry the per-cell factor `dfrac`, and
+          // the scatter recomputes delta_q itself, so the weights handed over are
+          // the ENERGY-like ones with dfrac divided back out. Cells where dfrac
+          // is zero contribute nothing either way.
+          const double t_fs = now_s();
+          std::vector<double> wc(n, 0.0), wv(n, 0.0);
+          for (std::size_t v = 0; v < n; ++v) {
+            if (!(delta[v] > 0.0)) continue;
+            wc[v] = edelta[v] / delta[v];   // = e_v - pen_v
+            wv[v] = 1.0;
+          }
+          frac_scatter(fcache, d, L, pbasis, frac_gs, h, a.frac_eps, wc, dc, wv,
+                       dv, plsm_threads);
+          frac_sens_s += now_s() - t_fs;
+        } else {
+          spmv(PsiT, edelta, dc, plsm_threads);
+          spmv(PsiT, delta, dv, plsm_threads);
+        }
         for (double& c : dc) c = -c;   // material IN lowers compliance
         // ★ CANDIDATE C's TERM IS AN OBJECTIVE TERM, so it belongs in `dc` and
         // NOT in `dv`. `dc` is in BETA space and beta = -alpha, so the sign
@@ -3930,7 +4792,9 @@ int main(int argc, char** argv) {
         << ',' << mono_tunnels << ',' << mono_violations << ',' << mono_reverts
         << ',' << mono_repaired_voxels << ',' << mono_new_components << ','
         << mono_split_delta << ',' << renuc_events << ',' << renuc_voxels
-        << ',' << it_wall << '\n';
+        << ',' << frac_boundary << ',' << frac_area << ','
+        << (frac_build_s * 1000.0) << ',' << (frac_sens_s * 1000.0) << ','
+        << it_wall << '\n';
     csv.flush();
 
     std::printf("it %3d  c = %.10g  vf = %.6f (occ %.1f)  offset %+.4f mm  "
@@ -4260,6 +5124,53 @@ int main(int argc, char** argv) {
         << "the containing coarse voxel\n";
       std::printf("analytic    %s.f64  (%d x %d x %d, spacing %.6f mm)\n", stem,
                   fx, fy, fz, h / F);
+
+      // ── ★ THE SAME SURFACE, EXPORTED AS A VOLUME FRACTION ────────────────
+      //
+      // Identical design, identical lattice, identical frozen stamp; the ONE
+      // difference is what number each fine cell carries. So the pair isolates
+      // the EXPORT convention from the design, which is the only way to say
+      // whether the sub-voxel position the fraction carries survives marching
+      // cubes or is thrown away by it.
+      if (a.frac_export) {
+        std::vector<double> ff;
+        const double t_fe = now_s();
+        frac_export_field(L, pbasis, alpha, fx, fy, fz, F, a.frac, ff,
+                          plsm_threads);
+        for (int k = 0; k < fz; ++k)
+          for (int j = 0; j < fy; ++j)
+            for (int i = 0; i < fx; ++i) {
+              const std::size_t fv =
+                  static_cast<std::size_t>(i) +
+                  static_cast<std::size_t>(fx) *
+                      (static_cast<std::size_t>(j) +
+                       static_cast<std::size_t>(fy) * static_cast<std::size_t>(k));
+              const std::size_t cv = d.at(i / F, j / F, k / F);
+              if (grid.tags[cv] == VoxelTag::Empty ||
+                  eff[cv] == MaskValue::FrozenVoid) ff[fv] = 0.0;
+              else if (eff[cv] == MaskValue::FrozenSolid) ff[fv] = 1.0;
+            }
+        char fstem[512];
+        std::snprintf(fstem, sizeof fstem, "%s/plsmfrac_f%d", a.out.c_str(), F);
+        std::ofstream ffo(std::string(fstem) + ".f64", std::ios::binary);
+        ffo.write(reinterpret_cast<const char*>(ff.data()),
+                  static_cast<std::streamsize>(ff.size() * sizeof(double)));
+        std::ofstream fm(std::string(fstem) + ".meta");
+        fm.precision(17);
+        fm << "rung " << rung_label << "\nrequested_vf " << a.rung << "\n";
+        fm << "nx " << fx << "\nny " << fy << "\nnz " << fz << "\n";
+        fm << "spacing " << (h / F) << "\n";
+        fm << "ox " << grid.origin.x << "\noy " << grid.origin.y << "\noz "
+           << grid.origin.z << "\n";
+        fm << "iso 0.5\nfactor 1\ninterp none\n";
+        fm << "achieved_vf " << achieved_vf << "\niterations " << done_iters
+           << "\nwall_s " << run_wall << "\ncompliance " << compliance_final << "\n";
+        fm << "# ANALYTIC, VOLUME FRACTION: each fine cell carries the fraction "
+           << "of ITSELF inside {phi<0}, by " << a.frac << "^3 sub-samples; "
+           << "same design and same frozen stamp as plsm_f" << F << "\n";
+        std::printf("fraction    %s.f64  (%d x %d x %d, %.1f s)\n", fstem, fx, fy,
+                    fz, now_s() - t_fe);
+      }
     }
     // The coefficients themselves, so the design can be re-evaluated at any
     // resolution later without re-running the optimisation.

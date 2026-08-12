@@ -158,10 +158,9 @@ inline std::vector<double> occupancy(const std::vector<double>& phi, double offs
 // intersection algebra, the heaviside, the eta — is identical, so the two rows
 // differ in one thing only.
 inline std::vector<double> occupancy_fine(const std::vector<double>& phi,
-                                   double offset,
-                                   double eta,
-                                   const std::vector<double>& fsolid,
-                                   const std::vector<double>& fvoid) {
+                                          double offset, double eta,
+                                          const std::vector<double>& fsolid,
+                                          const std::vector<double>& fvoid) {
   std::vector<double> occ(phi.size(), 0.0);
   for (std::size_t v = 0; v < phi.size(); ++v) {
     double p = phi[v] + offset;

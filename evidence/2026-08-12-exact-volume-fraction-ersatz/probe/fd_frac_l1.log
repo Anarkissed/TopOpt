@@ -1,0 +1,92 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== levelset_probe — a level set on our own solver ==
+
+part        /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+origin      (-18.275750737, -48.909974716, 0.000000000) mm
+dofs        491232 nodes, 1473696 displacement DOFs
+bcs         21000 clamped DOFs
+loads       7382 nodal loads, Fz = -22.24113464 N
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+rung        0.68  ->  target 75414.7 printed voxels
+band eta    2 voxels = 3.410559 mm      seed: holes
+
+-- the five differences from PR 322 --
+(1) surface delta  DH_eta(phi) * |grad phi| on BOTH the compliance and volume terms
+(2) trajectory law penalty 1  = their LINEAR I(phi)   (certification stays at 3)
+(3) HJ steps       24 per state solve, gamma 0.1  (their floor(order*min(el_size)/5) = 6)
+(4) extension      HILBERTIAN screened-Poisson
+                   alpha = 2.4 voxels = 4.092670 mm, rtol 1e-12, Dirichlet v=0 on 40216 FrozenSolid cells
+(5) band eta       2 voxels (their eta_coeff = 2)
+
+posture     PRODUCTION (as SIMP's 11.2 s/iteration was measured): recycling ON (dim 16), geneo ON, galerkin cache ON,
+            threads 3, solver=2, cg_tol=1e-08, cg_max=0
+mixed prec  off (FP64)  (V-cycle preconditioner only; the outer CG is FP64 by design)
+seed        regular hole array, period 8 voxels
+PLSM        phi = sum alpha_i psi_i  —  gaussian basis, knots (2, 2, 2) voxels PER AXIS
+            68 x 20 x 63 = 85680 COEFFICIENTS against 468224 voxels (compression 5.5x)
+            support 2 x spacing = (6.821, 6.821, 6.821) mm, nnz(Psi) 14665984 (31.3 per voxel)
+            seed fit: 2000 CG iterations, rel resid 1.29e-05, band rms 0.20254 mm, 18.8 s
+            volume offset moves phi by offset * sum_i psi_i, which is 4.1981..4.2335 in the part
+            update: MMA on the coefficients;  Hilbertian extension: off — the RBF support is the extension;  approximate re-init: every N iterations
+PLSM        coefficient box +-462.1415 (4x the largest seed coefficient); a unit move of every
+            coefficient carries phi by at most 4.2335 mm, which is what sizes the MMA move
+VOLUME      constraint measures #{phi + c < 0} — the PRINTED count (S1: occupancy_volume and printed_voxels agree by construction)
+★ ERSATZ    THE EXACT VOLUME FRACTION, not H_eta at the cell centre.
+            rho_e = |{phi<0} cap cell| / |cell|, by 4 x 4 x 4 = 64
+            sub-samples of the ANALYTIC phi per cell, on the SAME
+            sub-cell lattice marching_cubes_resampled uses.
+            70688 of 468224 cells are sampled (the ACTIVE ones); the rest are
+            stamped 0/1 by the mask and were never the level set's.
+            value    the HARD sample count (piecewise constant in alpha; see frac_ersatz.hpp)
+            gradient EXACT — psi_i evaluated AT THE SAMPLES and scattered
+            eps_q    1 x |grad phi|_1 x h/4 = 0.42632 mm at |grad phi| = 1
+                     — a QUADRATURE bandwidth tied to the sample spacing,
+                       so it shrinks like 1/K. It is not eta: eta is a
+                       fixed 2 voxels and appears in the density; this
+                       appears in no density at all.
+            export   H_eta only — R5, bit-identical to PR 326's convention
+            ★ WHAT STILL READS eta, stated rather than left to be found:
+              * the PRINTED predicate {H_eta(-phi) > 0.5}. Provably
+                eta-free as a SET (H is monotone, H(0) = 0.5 exactly),
+                so the part, its mass and its certificate are defined
+                identically to PR 326's. R5.
+              * the F>=1 EXPORT's field values, where eta DOES move
+                vertex placement. Kept as the row of record; --frac-export
+                emits the fraction beside it as the named control.
+              * the reinit residual's reporting band and the refit's fit
+                weight — diagnostics and the approximate reinitialisation,
+                neither of which is the variable under test.
+              * Per = INT DH_eta(phi)|grad phi| — GONE with the density.
+                Under --frac the perimeter term rides the QUADRATURE band
+                and no longer contains eta at all.
+ALPHA       85680 coefficients read from /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/probe/RB1_alpha.f64 — the seed fit above is DISCARDED
+
+══ R4 — THE SENSITIVITY AGAINST A CENTRAL DIFFERENCE ═══════
+design: EXACT FRACTION ersatz, sample-scatter gradient, k = 4, eps_q mult 1
+C0 = 0.00254012282784   V0 = 34959.515625 (active cells only)
+
+random dir 0  step    0.001   dV pred       -192.137  fd       -523.438  rel  +172.429%   (no state solve at this step)
+random dir 0  step     0.01   dV pred       -192.137  fd       -153.125  rel   -20.304%   dC pred   3.70899e-06  fd     2.306e-06  rel   -37.827%
+random dir 0  step      0.1   dV pred       -192.137  fd       -181.953  rel    -5.300%   dC pred   3.70899e-06  fd   2.60266e-06  rel   -29.828%
+random dir 0  step      0.3   dV pred       -192.137  fd       -198.438  rel    +3.279%   (no state solve at this step)
+random dir 0  step        1   dV pred       -192.137  fd       -221.922  rel   +15.502%   (no state solve at this step)
+random dir 1  step    0.001   dV pred       -180.751  fd       -203.125  rel   +12.379%   (no state solve at this step)
+random dir 1  step     0.01   dV pred       -180.751  fd       -100.781  rel   -44.243%   dC pred   3.02351e-06  fd    1.2147e-06  rel   -59.825%
+random dir 1  step      0.1   dV pred       -180.751  fd       -186.484  rel    +3.172%   dC pred   3.02351e-06  fd   4.34522e-06  rel   +43.714%
+random dir 1  step      0.3   dV pred       -180.751  fd        -188.75  rel    +4.426%   (no state solve at this step)
+random dir 1  step        1   dV pred       -180.751  fd       -130.734  rel   -27.671%   (no state solve at this step)
+coeff   8991  step     0.01   dV pred       -13.0452  fd          -12.5  rel    -4.179%   (no state solve at this step)
+coeff   8991  step      0.1   dV pred       -13.0452  fd       -12.8906  rel    -1.185%   (no state solve at this step)
+coeff   8991  step        1   dV pred       -13.0452  fd         -11.75  rel    -9.929%   dC pred   2.30604e-07  fd   2.28907e-07  rel    -0.736%
+coeff   8990  step     0.01   dV pred       -12.6968  fd       -11.7188  rel    -7.703%   (no state solve at this step)
+coeff   8990  step      0.1   dV pred       -12.6968  fd       -12.8125  rel    +0.911%   (no state solve at this step)
+coeff   8990  step        1   dV pred       -12.6968  fd       -10.6875  rel   -15.825%   dC pred   1.92337e-07  fd   1.65677e-07  rel   -13.861%
+coeff   7667  step     0.01   dV pred       -12.0538  fd       -14.0625  rel   +16.665%   (no state solve at this step)
+coeff   7667  step      0.1   dV pred       -12.0538  fd        -13.125  rel    +8.887%   (no state solve at this step)
+coeff   7667  step        1   dV pred       -12.0538  fd       -9.30469  rel   -22.807%   dC pred   2.71296e-07  fd   2.22562e-07  rel   -17.963%
+
+wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-variant-margin-tolerance-f0902f/evidence/2026-08-12-exact-volume-fraction-ersatz/probe/fd_frac_l1/frac_fd.csv
