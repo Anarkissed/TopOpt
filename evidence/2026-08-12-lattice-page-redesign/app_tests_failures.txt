@@ -1,0 +1,128 @@
+	 Executed 31 tests, with 0 failures (0 unexpected) in 421.708 (421.712) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.024 (0.024) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+	 Executed 24 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.090 (0.090) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.025 (0.026) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.439 (0.440) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 36 tests, with 0 failures (0 unexpected) in 0.157 (0.159) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.056 (0.057) seconds
+	 Executed 45 tests, with 0 failures (0 unexpected) in 0.006 (0.008) seconds
+	 Executed 22 tests, with 0 failures (0 unexpected) in 0.203 (0.205) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.182 (0.182) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeCellFitModeTests.swift:244: error: -[TopOptFlowsTests.LatticeCellFitModeTests testDefaultCellModeIsUnchangedAndEmitsNoModeKey] : XCTAssertEqual failed: ("auto") is not equal to ("fixed") - the default cell mode is NOT changed by this task
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeCellFitModeTests.swift:248: error: -[TopOptFlowsTests.LatticeCellFitModeTests testDefaultCellModeIsUnchangedAndEmitsNoModeKey] : XCTAssertNil failed: "auto" - an absent cell_mode IS fixed — the untouched job is unchanged
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeCellFitModeTests.swift:250: error: -[TopOptFlowsTests.LatticeCellFitModeTests testDefaultCellModeIsUnchangedAndEmitsNoModeKey] : XCTAssertNotNil failed
+Test Case '-[TopOptFlowsTests.LatticeCellFitModeTests testDefaultCellModeIsUnchangedAndEmitsNoModeKey]' failed (0.366 seconds).
+	 Executed 12 tests, with 3 failures (0 unexpected) in 0.369 (0.369) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.051 (0.051) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+	 Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeModeTests.swift:152: error: -[TopOptFlowsTests.LatticeModeTests testRunSpecGating] : XCTUnwrap failed: expected non-nil value of type "LatticeSpec" - an enabled certifiable octet run has a spec
+Test Case '-[TopOptFlowsTests.LatticeModeTests testRunSpecGating]' failed (0.001 seconds).
+	 Executed 17 tests, with 1 failure (0 unexpected) in 0.036 (0.037) seconds
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticePageRound2Tests.swift:271: error: -[TopOptFlowsTests.LatticePageRound2Tests testCoreCLIParsesTheEmittedRegions] : XCTUnwrap failed: expected non-nil value of type "LatticeSpec"
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testCoreCLIParsesTheEmittedRegions]' failed (0.003 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticePageRound2Tests.swift:206: error: -[TopOptFlowsTests.LatticePageRound2Tests testIncludeAndExcludeRegionsReachTheEmittedJobJSON] : XCTAssertEqual failed: ("1") is not equal to ("2")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticePageRound2Tests.swift:208: error: -[TopOptFlowsTests.LatticePageRound2Tests testIncludeAndExcludeRegionsReachTheEmittedJobJSON] : XCTAssertEqual failed: ("[TopOptFlows.LatticeGroupRole.include]") is not equal to ("[TopOptFlows.LatticeGroupRole.include, TopOptFlows.LatticeGroupRole.exclude]") - BOTH roles are emitted
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticePageRound2Tests.swift:212: error: -[TopOptFlowsTests.LatticePageRound2Tests testIncludeAndExcludeRegionsReachTheEmittedJobJSON] : XCTUnwrap failed: expected non-nil value of type "LatticeSpec" - an octet lattice with regions produces a run spec
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testIncludeAndExcludeRegionsReachTheEmittedJobJSON]' failed (0.002 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticePageRound2Tests.swift:327: error: -[TopOptFlowsTests.LatticePageRound2Tests testRoleGroupPrimitivesLeaveClearancesAndJoinRegions] : XCTAssertTrue failed - …and became an exclude region
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testRoleGroupPrimitivesLeaveClearancesAndJoinRegions]' failed (0.002 seconds).
+	 Executed 15 tests, with 5 failures (0 unexpected) in 0.050 (0.052) seconds
+	 Executed 25 tests, with 0 failures (0 unexpected) in 0.416 (0.418) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:305: error: -[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalJob] : XCTAssertEqual failed: ("764 bytes") is not equal to ("771 bytes") - controls untouched ⇒ the SAME job document, byte for byte
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalJob]' failed (0.002 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeRetentionControlTests.swift:330: error: -[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalRelatticeJob] : XCTAssertEqual failed: ("871 bytes") is not equal to ("878 bytes") - controls untouched ⇒ the SAME re-lattice document
+Test Case '-[TopOptFlowsTests.LatticeRetentionControlTests testUntouchedControlsSerializeToTheIdenticalRelatticeJob]' failed (0.001 seconds).
+	 Executed 44 tests, with 2 failures (0 unexpected) in 0.014 (0.017) seconds
+	 Executed 7 tests, with 1 test skipped and 0 failures (0 unexpected) in 7.848 (7.849) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.095 (0.096) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.401 (0.402) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.586 (0.587) seconds
+	 Executed 24 tests, with 0 failures (0 unexpected) in 0.028 (0.030) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.228 (0.228) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.009 (0.010) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+	 Executed 20 tests, with 0 failures (0 unexpected) in 0.045 (0.046) seconds
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.054 (0.056) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 34 tests, with 0 failures (0 unexpected) in 0.025 (0.028) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.113 (0.113) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.624 (0.625) seconds
+	 Executed 28 tests, with 0 failures (0 unexpected) in 0.008 (0.010) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.702 (0.702) seconds
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.043 (0.043) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.295 (0.296) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 34 tests, with 0 failures (0 unexpected) in 0.134 (0.138) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.076 (0.077) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 1.102 (1.103) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.023 (0.023) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.048 (0.049) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.212 (0.213) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.026 (0.027) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.087 (0.087) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 79 tests, with 0 failures (0 unexpected) in 0.013 (0.018) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.082 (0.082) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 51 tests, with 0 failures (0 unexpected) in 67.976 (67.979) seconds
+	 Executed 18 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPageRound2Tests.swift:355: error: -[TopOptFlowsTests.SmoothingPageRound2Tests testWhileAPageIsUpTheWorkspaceDrawsNoChromeOfItsOwn] : XCTAssertTrue failed - ONE predicate names the state, so a page cannot be half-hidden
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testWhileAPageIsUpTheWorkspaceDrawsNoChromeOfItsOwn]' failed (0.059 seconds).
+	 Executed 21 tests, with 1 failure (0 unexpected) in 0.170 (0.171) seconds
+	 Executed 32 tests, with 0 failures (0 unexpected) in 0.129 (0.131) seconds
+	 Executed 3 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.009 (0.009) seconds
+	 Executed 27 tests, with 0 failures (0 unexpected) in 0.129 (0.131) seconds
+	 Executed 29 tests, with 0 failures (0 unexpected) in 0.618 (0.621) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 1.057 (1.057) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.020 (0.021) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 1.712 (1.712) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.142 (0.144) seconds
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 30 tests, with 0 failures (0 unexpected) in 55.915 (55.918) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.002 (0.004) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.608 (0.609) seconds
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.211 (0.212) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.061 (0.062) seconds
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.000 (0.001) seconds
+	 Executed 33 tests, with 0 failures (0 unexpected) in 0.218 (0.220) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.030 (0.030) seconds
+	 Executed 23 tests, with 0 failures (0 unexpected) in 0.022 (0.023) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 1429 tests, with 21 tests skipped and 12 failures (0 unexpected) in 656.439 (656.549) seconds
+	 Executed 1429 tests, with 21 tests skipped and 12 failures (0 unexpected) in 656.439 (656.552) seconds

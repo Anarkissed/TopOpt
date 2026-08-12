@@ -221,6 +221,35 @@ int64_t mask_step_face(const std::string& step_path, int face_id,
                        int mask_value, int depth_voxels, int resolution,
                        BridgeError& err);
 
+// ★ HOW MUCH MATERIAL SURVIVES TO THE LATTICE PASS, PER FACE, BEFORE ANY RUN
+// (task 2026-08-12-lattice-page-redesign §0b).
+//
+// The face card has to state a NUMBER — "at 7 mm this wall hands the lattice
+// N mm³" — and it has to do it while the user drags. `mask_step_face` answers for
+// ONE face and re-imports + re-voxelizes every call, so a part with nine role
+// faces paid nine voxelizations for one drag. This answers for ALL of them in
+// ONE, at whatever resolution the caller can afford.
+//
+// `depths_mm` is parallel to `face_ids` — each face's OWN dragged depth, which is
+// the whole point (the depths are no longer one global number). Each is converted
+// to voxel layers against the grid this call builds, floored at 1, EXACTLY as
+// build_production_loadcase does, so the previewed number and the run's number
+// come from the same rule.
+//
+// Fills `voxels_out` (one count per face, part-solid voxels the protection would
+// pin) and `spacing_mm_out` (the grid spacing, so the caller turns counts into
+// mm³ without assuming anything). On failure returns false and sets `err`.
+struct FaceSlabPreview {
+  // in — parallel arrays: each face and the depth ITS primitive was dragged to
+  std::vector<int32_t> face_ids;
+  std::vector<double> depths_mm;
+  // out
+  std::vector<int64_t> voxels;   // part-solid voxels the protection would pin
+  double spacing_mm = 0.0;       // the grid spacing the counts are in
+};
+bool face_slab_preview(const std::string& step_path, FaceSlabPreview& io,
+                       int resolution, BridgeError& err);
+
 // ---------------------------------------------------------------------------
 // minimize_plastic (ROADMAP M5.3) with M7.0a progress + cancellation.
 //
@@ -731,6 +760,12 @@ struct BridgeLoadCase {
   // has_design_box: a protection preserves a face's skin on any run.
   std::vector<int32_t> face_protection_face_ids;
   double face_protection_depth_mm = -1.0;  // <= 0 => core default
+  // ★ PER-FACE depths (task 2026-08-12 §0a). Either empty (every protection uses
+  // the global depth — the pre-task POD, byte-identical) or parallel to
+  // `face_protection_face_ids`. For a face that is BOTH protected and latticed
+  // this is the depth the user dragged its lattice primitive to, so the device
+  // freezes exactly the slab the lattice will fill. An entry <= 0 => the global.
+  std::vector<double> face_protection_depths_mm;
 };
 
 // Voxelize the STEP part once, tag the anchor faces Fixture (clamped) and each

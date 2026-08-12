@@ -81,17 +81,33 @@ public struct LoadCaseTagger {
 
     /// Apply the load case: tag + mask every anchor/load face of every group.
     ///
-    /// Validates first — if any group is still `.pending`, throws
-    /// `.pendingGroup` before any bridge call, so a run never half-applies. Anchors
-    /// tag as Fixture, loads as Load; both freeze as a `frozenSolid` passive shell.
+    /// Validates first — if any group is still UNDECLARED, throws `.pendingGroup`
+    /// before any bridge call, so a run never half-applies. Anchors tag as
+    /// Fixture, loads as Load; both freeze as a `frozenSolid` passive shell.
+    ///
+    /// ★ UNDECLARED IS NARROWER THAN `.pending` (task 2026-08-12 §1e — the L5
+    /// blocker). `.pending` is the absence of an ANCHOR/LOAD role, and three other
+    /// declarations are complete without one: "Keep clear" (keep-clear v2),
+    /// "Protect" (handoff 124) and — the one that sent the user round in circles —
+    /// a LATTICE ROLE, "lattice here" / "no lattice here". `ForceModel.hasPending`
+    /// has known this since bar Z10; this seam did not, so the whole lattice flow
+    /// was unreachable: the user declared something and the app insisted he had
+    /// not. `latticeRoleGroups` defaults to empty, so every existing caller is
+    /// unchanged.
     ///
     /// - Returns: one `GroupApplyResult` per group, in `groups` order.
     @discardableResult
     public func apply(force: ForceModel,
                       groups: [SelectionGroup],
+                      latticeRoleGroups: Set<UUID> = [],
                       stepPath: String,
                       resolution: Int) throws -> [GroupApplyResult] {
-        for g in groups where force.kind(for: g.id).isPending {
+        if let g = groups.first(where: {
+            force.kind(for: $0.id).isPending
+                && !force.isKeepClearOnly($0.id)
+                && !force.isProtectOnly($0.id)
+                && !latticeRoleGroups.contains($0.id)
+        }) {
             throw LoadCaseError.pendingGroup(g.id)
         }
         var results: [GroupApplyResult] = []

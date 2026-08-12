@@ -1,0 +1,261 @@
+[lattice] 5 of 8 declared lattice include regions will come back SOLID at the planned 4.602619932 mm cell.
+[lattice] A cell of 1.4000 mm at relative density 0.4105 (strut 0.4200 mm) puts 5.00 cells across your thinnest region and certifies — set it, or set "cell_mode": "fit" and core derives exactly that, per region.
+[lattice] 
+[lattice]   region        thinnest   cells
+[lattice]   1 (face)       7.000    1.52  SOLID: under the floor
+[lattice]   2 (bolt)       7.385    1.60  SOLID: under the floor
+[lattice]   3 (bolt)      31.263    6.79  certifiable
+[lattice]   4 (bolt)      30.503    6.63  certifiable
+[lattice]   5 (bolt)      30.739    6.68  certifiable
+[lattice]   6 (face)       7.000    1.52  SOLID: under the floor
+[lattice]   7 (face)       7.000    1.52  SOLID: under the floor
+[lattice]   8 (face)       7.000    1.52  SOLID: under the floor
+[lattice]   ("cells" = the region's thinnest extent across the planned 4.6026 mm cell)
+[lattice] 
+[lattice] Why: your thinnest declared region (7.000 mm) IS thick enough for a CERTIFIED lattice — it needs 5.475 mm — but the planned 4.6026 mm cell puts only 1.52 cells across it, under the 5.00-cell accuracy floor, so the grading law will reject it and emit no lattice. The cell is what is wrong, not the part. ("cell_mode": "auto" will NOT fix it: it selects the printability floor at the band's LIGHTEST density, 4.6026 mm, which is how you got here.)
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+[preflight] load path CONNECTED: 5165 load voxels, 3348 anchor voxels, 110904 of 468224 voxels allowed to hold material; narrowest separating cross-section 3840 voxels (1.117e+04 mm^2) at 11/12 steps from the anchor; 4.33 ms
+NOTE: solve grid 128x31x118 has odd axis(es) [y=31] - geometric multigrid pads its INDEX SPACE to 128x32x120 (up to 4 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=4 iter=1
+PROGRESS rung=0 rungs=4 iter=2
+PROGRESS rung=0 rungs=4 iter=3
+PROGRESS rung=0 rungs=4 iter=4
+PROGRESS rung=0 rungs=4 iter=5
+PROGRESS rung=0 rungs=4 iter=6
+PROGRESS rung=0 rungs=4 iter=7
+PROGRESS rung=0 rungs=4 iter=8
+PROGRESS rung=0 rungs=4 iter=9
+PROGRESS rung=0 rungs=4 iter=10
+PROGRESS rung=0 rungs=4 iter=11
+PROGRESS rung=0 rungs=4 iter=12
+PROGRESS rung=0 rungs=4 iter=13
+PROGRESS rung=0 rungs=4 iter=14
+PROGRESS rung=0 rungs=4 iter=15
+PROGRESS rung=0 rungs=4 iter=16
+PROGRESS rung=0 rungs=4 iter=17
+PROGRESS rung=0 rungs=4 iter=18
+PROGRESS rung=0 rungs=4 iter=19
+PROGRESS rung=0 rungs=4 iter=20
+PROGRESS rung=0 rungs=4 iter=21
+PROGRESS rung=0 rungs=4 iter=22
+PROGRESS rung=0 rungs=4 iter=23
+PROGRESS rung=0 rungs=4 iter=24
+PROGRESS rung=0 rungs=4 iter=25
+PROGRESS rung=0 rungs=4 iter=26
+PROGRESS rung=0 rungs=4 iter=27
+PROGRESS rung=0 rungs=4 iter=28
+PROGRESS rung=0 rungs=4 iter=29
+PROGRESS rung=0 rungs=4 iter=30
+PROGRESS rung=0 rungs=4 iter=31
+PROGRESS rung=0 rungs=4 iter=32
+PROGRESS rung=0 rungs=4 iter=33
+PROGRESS rung=0 rungs=4 iter=34
+PROGRESS rung=0 rungs=4 iter=35
+PROGRESS rung=0 rungs=4 iter=36
+PROGRESS rung=0 rungs=4 iter=37
+PROGRESS rung=0 rungs=4 iter=38
+PROGRESS rung=0 rungs=4 iter=39
+PROGRESS rung=0 rungs=4 iter=40
+PROGRESS rung=0 rungs=4 iter=41
+PROGRESS rung=0 rungs=4 iter=42
+PROGRESS rung=0 rungs=4 iter=43
+PROGRESS rung=0 rungs=4 iter=44
+PROGRESS rung=0 rungs=4 iter=45
+PROGRESS rung=0 rungs=4 iter=46
+PROGRESS rung=0 rungs=4 iter=47
+PROGRESS rung=0 rungs=4 iter=48
+PROGRESS rung=0 rungs=4 iter=49
+PROGRESS rung=0 rungs=4 iter=50
+PROGRESS rung=0 rungs=4 iter=51
+PROGRESS rung=0 rungs=4 iter=52
+PROGRESS rung=0 rungs=4 iter=53
+PROGRESS rung=0 rungs=4 iter=54
+PROGRESS rung=0 rungs=4 iter=55
+PROGRESS rung=0 rungs=4 iter=56
+PROGRESS rung=0 rungs=4 iter=57
+PROGRESS rung=0 rungs=4 iter=58
+PROGRESS rung=0 rungs=4 iter=59
+PROGRESS rung=0 rungs=4 iter=60
+VARIANT vf=0.680000 achieved=0.680000 printed=0.790017 margin=3297.3 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_068.stl
+[lattice] vf=0.68 frozen material: printed=40216 latticed=68 solid=40148 in_include=10094 in_exclude=0/1680 latticed (audit: cells_not_emitted=0 strut_and_solid=60 unexplained=0)
+LATTICE vf=0.680000 topology=octet cell_mm=4.60262 graded=1 rho_min=0.138782 rho_max=0.275192 cells=43 tris=44760 lattice_margin=3297.27 lattice_accepted=1 report=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_068_lattice.report.json mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_068_lattice.stl
+PROGRESS rung=1 rungs=4 iter=1
+PROGRESS rung=1 rungs=4 iter=2
+PROGRESS rung=1 rungs=4 iter=3
+PROGRESS rung=1 rungs=4 iter=4
+PROGRESS rung=1 rungs=4 iter=5
+PROGRESS rung=1 rungs=4 iter=6
+PROGRESS rung=1 rungs=4 iter=7
+PROGRESS rung=1 rungs=4 iter=8
+PROGRESS rung=1 rungs=4 iter=9
+PROGRESS rung=1 rungs=4 iter=10
+PROGRESS rung=1 rungs=4 iter=11
+PROGRESS rung=1 rungs=4 iter=12
+PROGRESS rung=1 rungs=4 iter=13
+PROGRESS rung=1 rungs=4 iter=14
+PROGRESS rung=1 rungs=4 iter=15
+PROGRESS rung=1 rungs=4 iter=16
+PROGRESS rung=1 rungs=4 iter=17
+PROGRESS rung=1 rungs=4 iter=18
+PROGRESS rung=1 rungs=4 iter=19
+PROGRESS rung=1 rungs=4 iter=20
+PROGRESS rung=1 rungs=4 iter=21
+PROGRESS rung=1 rungs=4 iter=22
+PROGRESS rung=1 rungs=4 iter=23
+PROGRESS rung=1 rungs=4 iter=24
+PROGRESS rung=1 rungs=4 iter=25
+PROGRESS rung=1 rungs=4 iter=26
+PROGRESS rung=1 rungs=4 iter=27
+PROGRESS rung=1 rungs=4 iter=28
+PROGRESS rung=1 rungs=4 iter=29
+PROGRESS rung=1 rungs=4 iter=30
+PROGRESS rung=1 rungs=4 iter=31
+PROGRESS rung=1 rungs=4 iter=32
+PROGRESS rung=1 rungs=4 iter=33
+PROGRESS rung=1 rungs=4 iter=34
+PROGRESS rung=1 rungs=4 iter=35
+PROGRESS rung=1 rungs=4 iter=36
+PROGRESS rung=1 rungs=4 iter=37
+PROGRESS rung=1 rungs=4 iter=38
+PROGRESS rung=1 rungs=4 iter=39
+PROGRESS rung=1 rungs=4 iter=40
+PROGRESS rung=1 rungs=4 iter=41
+PROGRESS rung=1 rungs=4 iter=42
+PROGRESS rung=1 rungs=4 iter=43
+PROGRESS rung=1 rungs=4 iter=44
+PROGRESS rung=1 rungs=4 iter=45
+PROGRESS rung=1 rungs=4 iter=46
+PROGRESS rung=1 rungs=4 iter=47
+PROGRESS rung=1 rungs=4 iter=48
+PROGRESS rung=1 rungs=4 iter=49
+PROGRESS rung=1 rungs=4 iter=50
+PROGRESS rung=1 rungs=4 iter=51
+PROGRESS rung=1 rungs=4 iter=52
+PROGRESS rung=1 rungs=4 iter=53
+PROGRESS rung=1 rungs=4 iter=54
+PROGRESS rung=1 rungs=4 iter=55
+PROGRESS rung=1 rungs=4 iter=56
+PROGRESS rung=1 rungs=4 iter=57
+PROGRESS rung=1 rungs=4 iter=58
+PROGRESS rung=1 rungs=4 iter=59
+PROGRESS rung=1 rungs=4 iter=60
+VARIANT vf=0.520000 achieved=0.520000 printed=0.680183 margin=3357.75 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_052.stl
+[lattice] vf=0.52 NO LATTICE EMITTED — the grading law could lattice NONE of this variant's 11622 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=11622, strut_unprintable_at_every_cell=0, irrecoverable_by_any_cell_size=11622. The widest member the law rejected is 20.46335163 mm; at this cell size a member must be at least 5.474809359 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.42 mm sets the printability floor at 4.602619932 mm) — run the pre-flight forecast for the evaluated remedies.
+PROGRESS rung=2 rungs=4 iter=1
+PROGRESS rung=2 rungs=4 iter=2
+PROGRESS rung=2 rungs=4 iter=3
+PROGRESS rung=2 rungs=4 iter=4
+PROGRESS rung=2 rungs=4 iter=5
+PROGRESS rung=2 rungs=4 iter=6
+PROGRESS rung=2 rungs=4 iter=7
+PROGRESS rung=2 rungs=4 iter=8
+PROGRESS rung=2 rungs=4 iter=9
+PROGRESS rung=2 rungs=4 iter=10
+PROGRESS rung=2 rungs=4 iter=11
+PROGRESS rung=2 rungs=4 iter=12
+PROGRESS rung=2 rungs=4 iter=13
+PROGRESS rung=2 rungs=4 iter=14
+PROGRESS rung=2 rungs=4 iter=15
+PROGRESS rung=2 rungs=4 iter=16
+PROGRESS rung=2 rungs=4 iter=17
+PROGRESS rung=2 rungs=4 iter=18
+PROGRESS rung=2 rungs=4 iter=19
+PROGRESS rung=2 rungs=4 iter=20
+PROGRESS rung=2 rungs=4 iter=21
+PROGRESS rung=2 rungs=4 iter=22
+PROGRESS rung=2 rungs=4 iter=23
+PROGRESS rung=2 rungs=4 iter=24
+PROGRESS rung=2 rungs=4 iter=25
+PROGRESS rung=2 rungs=4 iter=26
+PROGRESS rung=2 rungs=4 iter=27
+PROGRESS rung=2 rungs=4 iter=28
+PROGRESS rung=2 rungs=4 iter=29
+PROGRESS rung=2 rungs=4 iter=30
+PROGRESS rung=2 rungs=4 iter=31
+PROGRESS rung=2 rungs=4 iter=32
+PROGRESS rung=2 rungs=4 iter=33
+PROGRESS rung=2 rungs=4 iter=34
+PROGRESS rung=2 rungs=4 iter=35
+PROGRESS rung=2 rungs=4 iter=36
+PROGRESS rung=2 rungs=4 iter=37
+PROGRESS rung=2 rungs=4 iter=38
+PROGRESS rung=2 rungs=4 iter=39
+PROGRESS rung=2 rungs=4 iter=40
+PROGRESS rung=2 rungs=4 iter=41
+PROGRESS rung=2 rungs=4 iter=42
+PROGRESS rung=2 rungs=4 iter=43
+PROGRESS rung=2 rungs=4 iter=44
+PROGRESS rung=2 rungs=4 iter=45
+PROGRESS rung=2 rungs=4 iter=46
+PROGRESS rung=2 rungs=4 iter=47
+PROGRESS rung=2 rungs=4 iter=48
+PROGRESS rung=2 rungs=4 iter=49
+PROGRESS rung=2 rungs=4 iter=50
+PROGRESS rung=2 rungs=4 iter=51
+PROGRESS rung=2 rungs=4 iter=52
+PROGRESS rung=2 rungs=4 iter=53
+PROGRESS rung=2 rungs=4 iter=54
+PROGRESS rung=2 rungs=4 iter=55
+PROGRESS rung=2 rungs=4 iter=56
+PROGRESS rung=2 rungs=4 iter=57
+PROGRESS rung=2 rungs=4 iter=58
+PROGRESS rung=2 rungs=4 iter=59
+PROGRESS rung=2 rungs=4 iter=60
+VARIANT vf=0.380000 achieved=0.380000 printed=0.586038 margin=2377.99 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_038.stl
+[lattice] vf=0.38 NO LATTICE EMITTED — the grading law could lattice NONE of this variant's 11049 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=11049, strut_unprintable_at_every_cell=0, irrecoverable_by_any_cell_size=11049. The widest member the law rejected is 17.05279303 mm; at this cell size a member must be at least 5.474809359 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.42 mm sets the printability floor at 4.602619932 mm) — run the pre-flight forecast for the evaluated remedies.
+PROGRESS rung=3 rungs=4 iter=1
+PROGRESS rung=3 rungs=4 iter=2
+PROGRESS rung=3 rungs=4 iter=3
+PROGRESS rung=3 rungs=4 iter=4
+PROGRESS rung=3 rungs=4 iter=5
+PROGRESS rung=3 rungs=4 iter=6
+PROGRESS rung=3 rungs=4 iter=7
+PROGRESS rung=3 rungs=4 iter=8
+PROGRESS rung=3 rungs=4 iter=9
+PROGRESS rung=3 rungs=4 iter=10
+PROGRESS rung=3 rungs=4 iter=11
+PROGRESS rung=3 rungs=4 iter=12
+PROGRESS rung=3 rungs=4 iter=13
+PROGRESS rung=3 rungs=4 iter=14
+PROGRESS rung=3 rungs=4 iter=15
+PROGRESS rung=3 rungs=4 iter=16
+PROGRESS rung=3 rungs=4 iter=17
+PROGRESS rung=3 rungs=4 iter=18
+PROGRESS rung=3 rungs=4 iter=19
+PROGRESS rung=3 rungs=4 iter=20
+PROGRESS rung=3 rungs=4 iter=21
+PROGRESS rung=3 rungs=4 iter=22
+PROGRESS rung=3 rungs=4 iter=23
+PROGRESS rung=3 rungs=4 iter=24
+PROGRESS rung=3 rungs=4 iter=25
+PROGRESS rung=3 rungs=4 iter=26
+PROGRESS rung=3 rungs=4 iter=27
+PROGRESS rung=3 rungs=4 iter=28
+PROGRESS rung=3 rungs=4 iter=29
+PROGRESS rung=3 rungs=4 iter=30
+PROGRESS rung=3 rungs=4 iter=31
+PROGRESS rung=3 rungs=4 iter=32
+PROGRESS rung=3 rungs=4 iter=33
+PROGRESS rung=3 rungs=4 iter=34
+PROGRESS rung=3 rungs=4 iter=35
+PROGRESS rung=3 rungs=4 iter=36
+PROGRESS rung=3 rungs=4 iter=37
+PROGRESS rung=3 rungs=4 iter=38
+PROGRESS rung=3 rungs=4 iter=39
+PROGRESS rung=3 rungs=4 iter=40
+PROGRESS rung=3 rungs=4 iter=41
+PROGRESS rung=3 rungs=4 iter=42
+PROGRESS rung=3 rungs=4 iter=43
+PROGRESS rung=3 rungs=4 iter=44
+PROGRESS rung=3 rungs=4 iter=45
+PROGRESS rung=3 rungs=4 iter=46
+PROGRESS rung=3 rungs=4 iter=47
+PROGRESS rung=3 rungs=4 iter=48
+PROGRESS rung=3 rungs=4 iter=49
+PROGRESS rung=3 rungs=4 iter=50
+PROGRESS rung=3 rungs=4 iter=51
+PROGRESS rung=3 rungs=4 iter=52

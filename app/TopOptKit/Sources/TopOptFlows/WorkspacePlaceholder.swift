@@ -98,6 +98,15 @@ public struct WorkspacePlaceholder: View {
     @State private var chipsRevealedGroup: UUID?
     @FocusState private var renameFieldFocused: Bool
 
+    // ★ THE BARRIER MODEL on the face page (task 2026-08-12 §0b / §5a).
+    // `latticeFaceCards` is what each role face hands the lattice at its CURRENT
+    // dragged depth, plus the per-region verdict core's own bounds produce —
+    // computed off the main thread from ONE voxelization and cached, so a drag
+    // never blocks. `latticeDepthDragSeed` holds the depth a drag started from.
+    @State private var latticeFaceCards: [UUID: LatticeFaceCard] = [:]
+    @State private var latticeDepthDragSeed: Double?
+    @State private var latticeCardsToken = 0
+
     // DEFECT 2 — the manual-primitive TRANSFORM GIZMO. `gizmoTarget` is the primitive the
     // gizmo is attached to (nil = no gizmo shown). `gizmoDrag` captures the grab context of
     // the handle currently being dragged (a value type on @State so it survives the
@@ -124,6 +133,11 @@ public struct WorkspacePlaceholder: View {
     // components as the manual primitives (renderer + SDF pick + PrimitiveGizmo.Drag),
     // committing to `project.lattice.region` instead of a force-group primitive.
     @State private var showLatticePage = false
+    /// ★ PAGE 2 — the LATTICE SETTINGS wizard (task 2026-08-12 §2). Opened by the
+    /// top-right entry button on the SETUP path. The variant path keeps
+    /// `showLatticePage`: that page relattices a finished design and carries the
+    /// ladder, the sim and the receipt, which the wizard deliberately does not.
+    @State private var showLatticeWizard = false
     /// The variants-entry demand field (that run's own von Mises); nil from the
     /// workspace entry (bar B6's two paths).
     @State private var latticePageVariantField: LatticeDemandField?
@@ -332,7 +346,7 @@ public struct WorkspacePlaceholder: View {
     /// `!showLatticePage` at each site, so the third page had to remember to add
     /// itself to eight separate conditions, and it did not. ONE predicate,
     /// gating every site, is what makes a fourth page correct by default.
-    private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage }
+    private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard }
 
     /// THE BRUSH GESTURE, AS ONE VALUE (task 2026-08-05, bar D1). The SMOOTHING
     /// PAGE OWNS IT while it is up: its brush is the page's whole point, so it
@@ -552,6 +566,13 @@ public struct WorkspacePlaceholder: View {
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
+            if showLatticeWizard {
+                LatticeSetupWizard(project: project) {
+                    showLatticeWizard = false
+                    refreshLatticeFaceCards()
+                }
+                .transition(.opacity)
+            }
             // Round-2 L18: the ONE Selections library, mounted OVER the lattice page
             // when its Regions & faces row opens it — the SAME `selectionsPanel`
             // view over the SAME `project.selection` the TO page uses. Never a
@@ -1553,7 +1574,12 @@ public struct WorkspacePlaceholder: View {
         } message: {
             Text(pendingReplacement?.message ?? "")
         }
-        .onAppear { syncLatticeProxy() }
+        .onAppear {
+            syncLatticeProxy()
+            // A reopened project already carries roles and depths — the cards
+            // must be there on arrival, not only after the user touches a chip.
+            refreshLatticeFaceCards()
+        }
     }
 
     // MARK: the lattice page (handoff 2026-07-30-lattice-page)
@@ -2230,12 +2256,17 @@ public struct WorkspacePlaceholder: View {
                                                    loads: force.loadCount(in: selection.groups))
         return Button {
             guard entry.enabled else { return }
-            openLatticePage(variantIndex: nil)
+            // ★ §1g / §2 — the entry opens the SETTINGS WIZARD, not the ladder
+            // page. Page 1 is where the faces are declared and Optimize is
+            // pressed; page 2 is where the lattice is configured, and it comes
+            // back here.
+            showLatticeWizard = true
         } label: {
             VStack(spacing: 2) {
                 HStack(spacing: DS.Space.s) {
                     Image(systemName: "square.grid.3x3.fill").font(.system(size: 14, weight: .bold))
-                    Text(project.lattice.enabled ? "Lattice · on" : "Lattice")
+                    Text(project.lattice.enabled ? "Lattice settings · on"
+                                                : "Lattice settings")
                         .dsStyle(DS.TypeScale.headline)
                 }
                 Text(entry.subtitle)
@@ -4110,10 +4141,14 @@ public struct WorkspacePlaceholder: View {
                 }
             }
           }
-          // Round-2 L22: in the lattice context every group row carries the ROLE
-          // control — "Lattice here" (include) / "No lattice" (exclude), tap the
-          // lit chip again to clear. An attribute on the ONE model's group.
-          if showLatticePage { latticeRoleControl(g) }
+          // ★ THE LATTICE FLOW OPENS HERE (task 2026-08-12 §1). The role control
+          // is on the FACE SELECTION page now, not only under the lattice page —
+          // "don't TO here, lattice here" is one decision about one face, taken
+          // where the faces are. Gated by `LatticeFaceRoleGate` (§1a/§1d).
+          latticeRoleControl(g)
+          // The ONE dragged depth + what the barrier hands the lattice (§0a/§0b)
+          // and the per-region verdict core already computes (§5a).
+          if project.lattice.groupRoles[g.id] != nil { latticeSlabControl(g) }
           // Item 4: the clearance chips (+ per-row Sync box) sit right-aligned to the row's
           // trailing edge, directly below the trash icon — not left-aligned in the name column.
           clearanceEditor(g)
@@ -4258,24 +4293,63 @@ public struct WorkspacePlaceholder: View {
     /// Round-2 L22: the per-group LATTICE ROLE control, shown only in the lattice
     /// context. Roles live in `LatticeSettings.groupRoles` keyed by the group's id
     /// — an attribute over the ONE selection model, never a second group store.
-    private func latticeRoleControl(_ g: SelectionGroup) -> some View {
+    @ViewBuilder private func latticeRoleControl(_ g: SelectionGroup) -> some View {
         let current = project.lattice.groupRoles[g.id]
-        return HStack(spacing: DS.Space.xs) {
-            latticeRoleChip(g, .include, label: "Lattice here", on: current == .include)
-            latticeRoleChip(g, .exclude, label: "No lattice", on: current == .exclude)
+        let block = latticeRoleBlock(g)
+        HStack(spacing: DS.Space.xs) {
+            latticeRoleChip(g, .include, label: "Lattice here",
+                            on: current == .include, block: block)
+            latticeRoleChip(g, .exclude, label: "No lattice",
+                            on: current == .exclude, block: block)
+            if let b = block {
+                // ★ SAY WHY, IN FIVE WORDS (R3). Never a paragraph, never silence.
+                Text(b.reason)
+                    .dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Why this group may not carry a lattice role, or nil (§1a/§1d). Reads the
+    /// group's EFFECTIVE keep-clear, auto rule included, so an auto-cleared bore
+    /// is blocked for the reason it is actually blocked.
+    private func latticeRoleBlock(_ g: SelectionGroup) -> LatticeFaceRoleGate.Block? {
+        LatticeFaceRoleGate.block(
+            kind: force.kind(for: g.id),
+            protected: force.isProtected(g.id),
+            // EXPLICIT only — an anchored bore's AUTO bolt clearance is a derived
+            // default, not a declaration, and must not refuse a real anchor.
+            keepClearOn: force.keepClearAffix(for: g.id) == .on)
+    }
+
     private func latticeRoleChip(_ g: SelectionGroup, _ role: LatticeGroupRole,
-                                 label: String, on: Bool) -> some View {
+                                 label: String, on: Bool,
+                                 block: LatticeFaceRoleGate.Block? = nil) -> some View {
         let tint = role == .include
             ? LatticeDensityProxy.densityColor(fraction: 0.5)
             : LatticeDensityProxy.densityColor(fraction: 0.8)
         return Button {
+            guard block == nil else { return }
             // Tap the lit chip again to CLEAR the role — always additive to the
             // group itself (M2: nothing here touches faces or membership).
             project.lattice.groupRoles[g.id] = on ? nil : role
+            if !on {
+                // ★ SETTING A FACE TO LATTICE SPAWNS ITS SLAB (§1b): a region the
+                // exact size of the face, extending into the part, at a starting
+                // depth the user then drags. THE SAME NUMBER protects it (§0a).
+                if project.lattice.groupDepthMM[g.id] == nil {
+                    project.lattice.groupDepthMM[g.id] =
+                        LatticeSlabDepth.clamp(project.lattice.paintDepthMM)
+                }
+                // Lattice mode is ON the moment a face says "lattice here" — the
+                // declaration IS the switch.
+                if role == .include { project.lattice.enabled = true }
+            } else {
+                project.lattice.groupDepthMM[g.id] = nil
+            }
+            refreshLatticeFaceCards()
         } label: {
             HStack(spacing: DS.Space.xs) {
                 Image(systemName: role == .include ? "square.grid.3x3.fill" : "square.fill")
@@ -4289,8 +4363,137 @@ public struct WorkspacePlaceholder: View {
                                                 lineWidth: 1)))
         }
         .buttonStyle(.plain)
+        .disabled(block != nil)
+        .opacity(block == nil ? 1 : 0.35)
         .accessibilityLabel("\(label)\(on ? " — on, tap to clear" : "")")
         .accessibilityIdentifier("lattice-role-\(role.rawValue)-\(g.id.uuidString)")
+    }
+
+    // MARK: ★ the ONE dragged depth, and what it hands the lattice (§0a/§0b/§5a)
+
+    /// The slab row for a group carrying a lattice role: the depth the user drags
+    /// — WHICH IS ALSO THE PROTECTION DEPTH — and the numbers that depth produces.
+    /// Everything here is a number and a short label; nothing is a paragraph (R3).
+    @ViewBuilder private func latticeSlabControl(_ g: SelectionGroup) -> some View {
+        let depth = project.latticeSlabDepthMM(g.id)
+        let card = latticeFaceCards[g.id]
+        HStack(spacing: DS.Space.sm) {
+            Image(systemName: "arrow.down.to.line")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Self.clearanceTint)
+            // DRAG the number to set the depth — the primitive's own extent.
+            Text(String(format: "%.1f mm", depth))
+                .dsStyle(DS.TypeScale.bodyStrong).monospacedDigit()
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.vertical, 4).padding(.horizontal, DS.Space.sm)
+                .background(Capsule().fill(DS.Color.fillSelected.color))
+                .gesture(DragGesture(minimumDistance: 1)
+                    .onChanged { v in
+                        let seed = latticeDepthDragSeed ?? depth
+                        if latticeDepthDragSeed == nil { latticeDepthDragSeed = depth }
+                        project.lattice.groupDepthMM[g.id] =
+                            LatticeSlabDepth.clamp(seed + Double(v.translation.width) * 0.05)
+                    }
+                    .onEnded { _ in
+                        latticeDepthDragSeed = nil
+                        refreshLatticeFaceCards()
+                    })
+                .accessibilityIdentifier("lattice-depth-\(g.id.uuidString)")
+            if force.isProtected(g.id) {
+                // ★ THE BARRIER, NAMED. Protect + lattice is ONE slab (§1c).
+                Label("held", systemImage: "lock.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
+            Spacer(minLength: 0)
+            if let c = card { latticeFaceCardChips(c) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The per-region verdict core computes and the app used to discard (§5a):
+    /// material handed over, derived cell, density, strut, and the verdict as
+    /// COLOUR. Four numbers, no sentence.
+    private func latticeFaceCardChips(_ c: LatticeFaceCard) -> some View {
+        let tint: RGBA = c.verdict == .certified ? DS.Color.okGreen
+            : (c.verdict == .outOfRegime ? DS.Color.warning : DS.Color.textQuaternary)
+        return HStack(spacing: DS.Space.xs) {
+            metricChip(c.heldText, "hands over")
+            metricChip(c.cellText, "cell")
+            metricChip(c.densityText, "density")
+            metricChip(c.strutText, "strut")
+            Text(c.verdict.label)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(tint.color)
+                .padding(.vertical, 3).padding(.horizontal, DS.Space.xs)
+                .background(Capsule().fill(tint.opacity(0.16).color))
+        }
+    }
+
+    /// Recompute every role face's card. ONE voxelization for all of them
+    /// (`TopOptKit.faceSlabPreview`) at a PREVIEW resolution, off the main thread.
+    /// The resolution is the preview's, not the run's — it is stated on the card
+    /// row as the material figure it is, and the depth→layers rounding is core's
+    /// own, so the number tracks the run's rule at the run's grid too.
+    private func refreshLatticeFaceCards() {
+        let roleGroups = selection.groups.filter { project.lattice.groupRoles[$0.id] != nil }
+        guard !roleGroups.isEmpty, let path = project.importedFile?.path else {
+            latticeFaceCards = [:]
+            return
+        }
+        // One face per group — the first, which is the face the slab is built on.
+        var groupForFace: [Int: UUID] = [:]
+        var ids: [Int] = []
+        var depths: [Double] = []
+        for g in roleGroups {
+            guard let f = g.faces.first else { continue }
+            let rid = Int(project.runFaceID(f))
+            groupForFace[rid] = g.id
+            ids.append(rid)
+            depths.append(project.latticeSlabDepthMM(g.id))
+        }
+        guard !ids.isEmpty else { latticeFaceCards = [:]; return }
+        latticeCardsToken += 1
+        let token = latticeCardsToken
+        let resolution = Self.latticeCardPreviewResolution
+        let topology = project.lattice.lattice
+        let widthMM = project.printParams.strutLineWidthMM
+        let densityGCM3 = model.densityGCm3(for: project.material)
+        let depthsCopy = depths
+        Task.detached(priority: .userInitiated) {
+            let bounds = TopOptKit.latticeCellBounds(topology: topology.id,
+                                                     minExtrudableWidthMM: widthMM)
+            let limits = TopOptKit.latticeLimits(topology: topology.id)
+            guard let preview = try? TopOptKit.faceSlabPreview(
+                stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
+                resolution: resolution) else { return }
+            var cards: [UUID: LatticeFaceCard] = [:]
+            for (i, fid) in ids.enumerated() where i < preview.voxels.count {
+                guard let gid = groupForFace[fid] else { continue }
+                cards[gid] = LatticeFaceCardDerivation.card(
+                    faceID: fid, depthMM: depthsCopy[i],
+                    heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
+                    densityGCM3: densityGCM3, topology: topology,
+                    bounds: bounds, limits: limits)
+            }
+            await MainActor.run {
+                guard token == latticeCardsToken else { return }   // a newer drag won
+                latticeFaceCards = cards
+            }
+        }
+    }
+
+    /// The face-card preview grid. Coarse ON PURPOSE: the card answers "does this
+    /// barrier hand the lattice anything", which does not need the run's 128.
+    static let latticeCardPreviewResolution = 48
+
+    private func metricChip(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 0) {
+            Text(value).font(.system(size: 11, weight: .bold)).monospacedDigit()
+                .foregroundStyle(DS.Color.textPrimary.color)
+            Text(label).font(.system(size: 8.5, weight: .semibold))
+                .foregroundStyle(DS.Color.textQuaternary.color)
+        }
     }
 
     /// The compact (unlocked) clearance summary — the pre-handoff layout, unchanged.
@@ -4897,7 +5100,10 @@ public struct WorkspacePlaceholder: View {
     /// or "no lattice here" is a COMPLETE declaration, like keep-clear and
     /// Protect — it must not leave the group PENDING and refuse Optimize.
     private var latticeRoleGroupIDs: Set<UUID> {
-        Set(project.lattice.groupRoles.keys)
+        // ELIGIBLE roles only (task 2026-08-12 §1a/§1d) — a role stored against a
+        // group that has since become ineligible must not satisfy the pending
+        // check, because it will not reach the job either.
+        Set(project.latticeEligibleRoles().keys)
     }
 
     /// Optimize is enabled once gravity is set and no group is pending, AND either

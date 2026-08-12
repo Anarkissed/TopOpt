@@ -67,15 +67,32 @@ void log_clearance(int face_id, ClearanceKind kind, std::size_t voxels_frozen,
 // depth (so it froze what exists, no silent over-claim). A protection that tags no
 // solid voxels is flagged SKIP so the log surfaces the no-op rather than hiding it.
 void log_face_protection(int face_id, std::size_t voxels_frozen, int depth_voxels,
-                         bool thinner_than_depth) {
+                         bool thinner_than_depth, double requested_mm,
+                         double effective_mm) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  char buf[320];
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] face-protection face=%d voxels_frozen=%zu depth=%d "
+                "requested=%.4gmm effective=%.4gmm %s%s",
+                face_id, voxels_frozen, depth_voxels, requested_mm, effective_mm,
+                voxels_frozen == 0 ? "SKIP=no-solid-tagged" : "status=ok",
+                thinner_than_depth ? " thinner-than-depth" : "");
+  sink(std::string(buf));
+}
+
+// The anchor/load structural pad, logged as ITS OWN thing (task 2026-08-12 §1f).
+// It is not a Face protection and must never again read as one: the maintainer
+// protected ONE wall and saw all 21 load faces frozen at depth 3.
+void log_anchor_pad(int depth_voxels, std::size_t anchor_faces,
+                    std::size_t load_faces, std::size_t voxels_frozen) {
   const LoadcaseLogFn& sink = loadcase_sink();
   if (!sink) return;
   char buf[256];
   std::snprintf(buf, sizeof(buf),
-                "[loadcase] face-protection face=%d voxels_frozen=%zu depth=%d %s%s",
-                face_id, voxels_frozen, depth_voxels,
-                voxels_frozen == 0 ? "SKIP=no-solid-tagged" : "status=ok",
-                thinner_than_depth ? " thinner-than-depth" : "");
+                "[loadcase] anchor-pad depth=%d anchor_faces=%zu load_faces=%zu "
+                "voxels_frozen=%zu (structural pad, NOT a face protection)",
+                depth_voxels, anchor_faces, load_faces, voxels_frozen);
   sink(std::string(buf));
 }
 
@@ -416,16 +433,35 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       for (int fid : retained_load_faces)
         mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
                        kProductionAnchorPadDepthVoxels, pad);
+      // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
+      // is the pad and only the pad — the protections below run after this.
+      std::size_t pad_voxels = 0;
+      for (std::size_t idx = 0; idx < pad.size(); ++idx)
+        if (pad[idx] == MaskValue::FrozenSolid) ++pad_voxels;
+      setup.anchor_pad_report = {true, kProductionAnchorPadDepthVoxels,
+                                 lc.anchor_face_ids.size(),
+                                 retained_load_faces.size(), pad_voxels};
+      log_anchor_pad(kProductionAnchorPadDepthVoxels, lc.anchor_face_ids.size(),
+                     retained_load_faces.size(), pad_voxels);
     }
     if (want_protect) {
-      // ONE global depth (mm) → voxel layers on THIS run's grid; floored at 1 so a
-      // protection always freezes a real skin. mask_step_face walks part-SOLID
-      // layers, so this NEVER frees void — it only pins existing part material.
-      const int depth_vox = std::max(
-          1, static_cast<int>(std::lround(lc.face_protection_depth_mm / grid.spacing)));
+      // ★ THE DEPTH IS PER FACE (task 2026-08-12 §0a). A face the user marked
+      // protect AND lattice is ONE slab: the depth he dragged the primitive to
+      // governs both, and `face_protection_depths_mm[i]` carries it. Absent (or
+      // <= 0) falls back to the global depth — the pre-task behaviour, unchanged.
+      // Each depth → voxel layers on THIS run's grid, floored at 1 so a protection
+      // always freezes a real skin. mask_step_face walks part-SOLID layers, so
+      // this NEVER frees void — it only pins existing part material.
       setup.face_protection_reports.reserve(lc.face_protection_face_ids.size());
-      for (int fid : lc.face_protection_face_ids) {
+      for (std::size_t pi = 0; pi < lc.face_protection_face_ids.size(); ++pi) {
+        const int fid = lc.face_protection_face_ids[pi];
         if (fid < 0 || fid >= model.face_count) continue;
+        const double requested_mm = lc.face_protection_depth_for(pi);
+        const int depth_vox =
+            std::max(1, static_cast<int>(std::lround(requested_mm / grid.spacing)));
+        // What `depth_vox` LAYERS actually reach, by mask_step_face's own rule
+        // (a voxel is in iff its centre is within (depth - 0.5) spacings).
+        const double effective_mm = depth_vox * grid.spacing;
         // Freeze this face's skin into a PER-FACE mask so the report counts THIS
         // face's frozen voxels (not ones an anchor pad or an earlier protection
         // already froze — both are the same FrozenSolid value). Freeze once more a
@@ -441,8 +477,10 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
           if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
         const bool thin = frozen_deeper == frozen;
-        setup.face_protection_reports.push_back({fid, frozen, depth_vox, thin});
-        log_face_protection(fid, frozen, depth_vox, thin);
+        setup.face_protection_reports.push_back(
+            {fid, frozen, depth_vox, thin, requested_mm, effective_mm});
+        log_face_protection(fid, frozen, depth_vox, thin, requested_mm,
+                            effective_mm);
       }
     }
     opts.design_mask = std::move(pad);

@@ -72,12 +72,15 @@ public enum LatticeRegionEmission {
 
     /// One resolved B-rep face → one region entry with `role`. A cylinder becomes a
     /// bolt region over its exact axial span; a plane becomes a face slab reaching
-    /// `depthMM` into the part (the page's region depth setting).
+    /// `depthMM` into the part (the depth the user dragged that face's primitive
+    /// to). `faceID` rides along so core can check the depth tie (§0a).
     public static func spec(for face: ResolvedFace, role: LatticeGroupRole,
-                            depthMM: Double) -> LatticeRegionSpec? {
+                            depthMM: Double, faceID: Int? = nil)
+        -> LatticeRegionSpec? {
         switch face {
         case .cylinder(let axisPoint, let axisDir, let radius, let lo, let hi):
             var s = LatticeRegionSpec(role: role, kind: .bolt)
+            s.faceID = faceID
             let dir = ManualPrimitive.unit(axisDir)
             let mid = 0.5 * (lo + hi)
             s.axisPoint = axisPoint + dir * mid
@@ -87,6 +90,7 @@ public enum LatticeRegionEmission {
             return s.isValid ? s : nil
         case .plane(let center, let normal, let halfU, let halfW):
             var s = LatticeRegionSpec(role: role, kind: .face)
+            s.faceID = faceID
             // Core's slab runs origin + s·normal, s ∈ [0, depth]. The part's
             // material lies OPPOSITE the outward face normal, so flip it — the
             // slab must reach INTO the part, not out of it.
@@ -104,11 +108,18 @@ public enum LatticeRegionEmission {
     /// the same metric chain the chips do); `resolve` supplies each face's exact
     /// geometry (nil → skipped + counted). Group order and face order are the
     /// selection's own, so the emission is deterministic.
+    ///
+    /// ★ `groupDepthMM` is THE ONE NUMBER (task 2026-08-12 §0a): the depth the
+    /// user dragged THAT group's primitive to, which is also the depth its faces
+    /// are protected to. `faceDepthMM` remains only as the fallback for a group
+    /// the user has never dragged.
     public static func regions(groups: [SelectionGroup],
                                roles: [UUID: LatticeGroupRole],
                                primitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)],
                                includePrimitives: [(prim: ManualPrimitive, depthMM: Double)],
                                faceDepthMM: Double,
+                               groupDepthMM: (UUID) -> Double = { _ in .nan },
+                               runFaceID: @escaping (FaceID) -> Int = { Int($0) },
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -117,11 +128,15 @@ public enum LatticeRegionEmission {
         }
         for g in groups {
             guard let role = roles[g.id] else { continue }
+            let gd = groupDepthMM(g.id)
+            let depth = gd.isFinite ? gd : faceDepthMM
             for (p, d) in primitives(g.id) {
                 if let s = spec(for: p, role: role, depthMM: d) { out.append(s) }
             }
             for f in g.faces {
-                if let r = resolve(f), let s = spec(for: r, role: role, depthMM: faceDepthMM) {
+                if let r = resolve(f),
+                   let s = spec(for: r, role: role, depthMM: depth,
+                                faceID: runFaceID(f)) {
                     out.append(s)
                 } else {
                     skipped += 1

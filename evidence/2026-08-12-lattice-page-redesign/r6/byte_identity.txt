@@ -1,0 +1,106 @@
+=== BAR 1 — face protection + NO lattice, base vs branch ===
+base   cli: /private/tmp/claude-501/base-r6/build/topopt-cli
+branch cli: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/build/topopt-cli
+
+--- base artifacts ---
+8097767058d1b6e6dbaac33d9a61d60f46a5d7e725c57f106823a62c76fea326  ./design.bin
+ba6328ac7897aa7ba8e4c6096b9c45a9cab50fb1cfbcd7d2a8f304cffb321cf0  ./fields.bin
+b9448bdd4c18c34acceee34a778476a2436e09575eab991afcaac5e028926e22  ./iterations.csv
+420361e3d49bebaa5c3c9de2942319dcad87705f3ef8db2e8b3604653d6428ab  ./loadcase.json
+f6df476a27b2112fdddc1981e61cbb9696afde2c6065333cd0c826859262f148  ./report.json
+4a34109c3cbe9f90ade5356c1904dbde643379768702effac34e8a62274c2060  ./run_info.json
+8a897b14da4ebc462e44f897b27c8394d3d528ff0c11d3fefa896a31392f7953  ./variant_026.stl
+d481e8f6c11509b1458dc2ac8127b72e88c5e8120b56b2bece4f1f3d27fc6261  ./variant_026_alpha.f64
+41667c0a35ab1f325235514b2fa9134cf8c382800e37718579f1b5658250bd36  ./variant_026_alpha.meta
+ecd065b1ae2e2107fa5a9f114df077842c3f8272497c77f394956d417df1c52a  ./variant_038.stl
+2fd4f3c178280c691eefcbeeb19a28411060b361c2c408d3566bbba46a9beec2  ./variant_038_alpha.f64
+be35dca42987057d521c3769c1c428592e9da6d28abd6a2ab65f56bc5f9d24ba  ./variant_038_alpha.meta
+fd18cb47f41ba3f595dc5f8692a86a645c38eebb56b1de4cef6774b963b6e6d4  ./variant_052.stl
+704e328af086c90e87accc5380bbf96e1b230fbaf734c230e5247ed44c0247ea  ./variant_052_alpha.f64
+38039fe37f981c529571e7feceb87075673ed1ece1c2ec5971ec850791a55e67  ./variant_052_alpha.meta
+39ef45a537d28bb96d45f8cf11708588c2c84a5dcd5d4524d8be5dd810e79af5  ./variant_068.stl
+3c638ef97c5a9e1378f5790d753b0d3f52fe657de2f08a18fc40637bf413ee1c  ./variant_068_alpha.f64
+41075ae3fcf90b02f84b21f5309f91e687d4517a533a0122b46d63294c7d533d  ./variant_068_alpha.meta
+
+--- branch artifacts ---
+8097767058d1b6e6dbaac33d9a61d60f46a5d7e725c57f106823a62c76fea326  ./design.bin
+ba6328ac7897aa7ba8e4c6096b9c45a9cab50fb1cfbcd7d2a8f304cffb321cf0  ./fields.bin
+1b1ecab3977c0008d69a20fef1a910a67afbe7850676bff255115f51ba233690  ./iterations.csv
+f3c4fa617d83a824ad21707ecfe9f1cfe29866a80b6965049eae1102f77ca930  ./loadcase.json
+f6df476a27b2112fdddc1981e61cbb9696afde2c6065333cd0c826859262f148  ./report.json
+e4b0fefef2aff88bdf9ae3065f108828e92e49d2fe2767860ac536d0ead3667b  ./run_info.json
+8a897b14da4ebc462e44f897b27c8394d3d528ff0c11d3fefa896a31392f7953  ./variant_026.stl
+d481e8f6c11509b1458dc2ac8127b72e88c5e8120b56b2bece4f1f3d27fc6261  ./variant_026_alpha.f64
+41828327a3a6e7075a94d41fbec384dd76efa3dfbb976dc8e2699d29478f8977  ./variant_026_alpha.meta
+ecd065b1ae2e2107fa5a9f114df077842c3f8272497c77f394956d417df1c52a  ./variant_038.stl
+2fd4f3c178280c691eefcbeeb19a28411060b361c2c408d3566bbba46a9beec2  ./variant_038_alpha.f64
+7a00d7297d2e52779a976322e3a2131d5e0901ade981f91e59a35c97c4164ebc  ./variant_038_alpha.meta
+fd18cb47f41ba3f595dc5f8692a86a645c38eebb56b1de4cef6774b963b6e6d4  ./variant_052.stl
+704e328af086c90e87accc5380bbf96e1b230fbaf734c230e5247ed44c0247ea  ./variant_052_alpha.f64
+089d79126a503288fddf8dfcc571bf384222683f88eed91cc661334b3d94c6f7  ./variant_052_alpha.meta
+39ef45a537d28bb96d45f8cf11708588c2c84a5dcd5d4524d8be5dd810e79af5  ./variant_068.stl
+3c638ef97c5a9e1378f5790d753b0d3f52fe657de2f08a18fc40637bf413ee1c  ./variant_068_alpha.f64
+1bfe9777c2ab8d446cf74a8e2caf915ce1e5a6b596ab93c5154ec216755e4db7  ./variant_068_alpha.meta
+
+--- the bar's named artifacts ---
+IDENTICAL  report.json  f6df476a27b2112fdddc1981e61cbb9696afde2c6065333cd0c826859262f148
+IDENTICAL  fields.bin  ba6328ac7897aa7ba8e4c6096b9c45a9cab50fb1cfbcd7d2a8f304cffb321cf0
+IDENTICAL  design.bin  8097767058d1b6e6dbaac33d9a61d60f46a5d7e725c57f106823a62c76fea326
+DIFFERS    loadcase.json
+  base   420361e3d49bebaa5c3c9de2942319dcad87705f3ef8db2e8b3604653d6428ab
+  branch f3c4fa617d83a824ad21707ecfe9f1cfe29866a80b6965049eae1102f77ca930
+IDENTICAL  variant_026.stl  8a897b14da4ebc462e44f897b27c8394d3d528ff0c11d3fefa896a31392f7953
+IDENTICAL  variant_038.stl  ecd065b1ae2e2107fa5a9f114df077842c3f8272497c77f394956d417df1c52a
+IDENTICAL  variant_052.stl  fd18cb47f41ba3f595dc5f8692a86a645c38eebb56b1de4cef6774b963b6e6d4
+IDENTICAL  variant_068.stl  39ef45a537d28bb96d45f8cf11708588c2c84a5dcd5d4524d8be5dd810e79af5
+
+--- clock-bearing artifacts, compared with the clock removed ---
+DIFFERS    run_info.json beyond the timestamp:
+--- /dev/fd/63	2026-08-11 20:13:57
++++ /dev/fd/62	2026-08-11 20:13:57
+@@ -128,7 +128,7 @@
+  "preflight_forbidden_voxels": 17536,
+  "preflight_geodesic_levels": 9,
+  "preflight_load_voxels": 672,
+- "preflight_ms": 0.2052922249,
++ "preflight_ms": 0.2083330154,
+  "preflight_narrowest_separator_mm2": 421.875,
+  "preflight_narrowest_separator_voxels": 120,
+  "preflight_ran": true,
+IDENTICAL  iterations.csv (physics columns; timestamps + ms timings dropped)
+
+BAR 1 FAIL.
+34a35,36
+>             "depth_requested_mm": 3,
+>             "depth_effective_mm": 3.75,
+37a40,47
+>     "anchor_pad": {
+>         "applied": false,
+>         "depth_voxels": 0,
+>         "anchor_faces": 0,
+>         "load_faces": 0,
+>         "voxels_frozen": 0,
+>         "note": "the structural pad the boundary conditions sit on; NOT a user face protection"
+>     },
+
+=== R6 VERDICT (task 2026-08-12-lattice-page-redesign) ===
+
+The script's own "BAR 1 FAIL" counts ANY byte difference, including added
+observability. Read against R6 as this task states it — "NO VERDICT MOVES on the
+shipped SIMP path. Byte-identity where nothing changed" — this run PASSES:
+
+  design.bin          IDENTICAL   the design field itself
+  variant_0{26,38,52,68}.stl  IDENTICAL   every exported mesh
+  iterations.csv      IDENTICAL   every physics column
+  run_info.json       differs ONLY in preflight_ms — a wall clock, not a result
+  loadcase.json       differs ONLY by keys this task ADDED (diff above):
+                        depth_requested_mm / depth_effective_mm — what the
+                          protection asked for and what its voxel layers reach
+                        anchor_pad — the structural pad, counted apart from the
+                          user's Face protections (§1f)
+                      No existing key changed value. `applied: false` here
+                      because this job runs minimize_plastic with no pad on the
+                      demo configuration; the pad's own positive control is in
+                      test_lattice_depth_tie.
+
+Nothing the run DECIDES moved. What changed is what the receipt SAYS.

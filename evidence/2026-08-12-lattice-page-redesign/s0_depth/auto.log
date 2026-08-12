@@ -1,0 +1,230 @@
+[lattice] all 8 declared lattice include regions certify at the cell FIT derived for them (finest 1.4 mm).
+[lattice] 
+[lattice]   region        thinnest      cell   density    strut  cells
+[lattice]   1 (face)       7.000    1.4000   0.4105   0.4200   5.00  certifiable
+[lattice]   2 (bolt)       7.385    1.4771   0.3786   0.4200   5.00  certifiable
+[lattice]   3 (bolt)      31.263    6.2526   0.0505   0.5706   5.00  certifiable
+[lattice]   4 (bolt)      30.503    6.1005   0.0505   0.5567   5.00  certifiable
+[lattice]   5 (bolt)      30.739    6.1478   0.0505   0.5610   5.00  certifiable
+[lattice]   6 (face)       7.000    1.4000   0.4105   0.4200   5.00  certifiable
+[lattice]   7 (face)       7.000    1.4000   0.4105   0.4200   5.00  certifiable
+[lattice]   8 (face)       7.000    1.4000   0.4105   0.4200   5.00  certifiable
+[lattice] 
+[lattice] Why: fit derives cell = max(region extent / 5, the finest printable cell) per declared region, then raises the density with it so the strut still clears your strut line width. A region with fewer than 5 cells across is BUILDABLE and its homogenized tensor stops describing the member, so the certificate over it is OUT OF REGIME — reported, never silently certified. A row marked SOLID has no (cell, density) pair that both prints and percolates at any setting.
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=16696 depth=4 requested=7mm effective=6.821mm status=ok
+[preflight] load path CONNECTED: 5165 load voxels, 3348 anchor voxels, 110904 of 468224 voxels allowed to hold material; narrowest separating cross-section 3840 voxels (1.117e+04 mm^2) at 11/12 steps from the anchor; 5.00 ms
+NOTE: solve grid 128x31x118 has odd axis(es) [y=31] - geometric multigrid pads its INDEX SPACE to 128x32x120 (up to 4 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=4 iter=1
+PROGRESS rung=0 rungs=4 iter=2
+PROGRESS rung=0 rungs=4 iter=3
+PROGRESS rung=0 rungs=4 iter=4
+PROGRESS rung=0 rungs=4 iter=5
+PROGRESS rung=0 rungs=4 iter=6
+PROGRESS rung=0 rungs=4 iter=7
+PROGRESS rung=0 rungs=4 iter=8
+PROGRESS rung=0 rungs=4 iter=9
+PROGRESS rung=0 rungs=4 iter=10
+PROGRESS rung=0 rungs=4 iter=11
+PROGRESS rung=0 rungs=4 iter=12
+PROGRESS rung=0 rungs=4 iter=13
+PROGRESS rung=0 rungs=4 iter=14
+PROGRESS rung=0 rungs=4 iter=15
+PROGRESS rung=0 rungs=4 iter=16
+PROGRESS rung=0 rungs=4 iter=17
+PROGRESS rung=0 rungs=4 iter=18
+PROGRESS rung=0 rungs=4 iter=19
+PROGRESS rung=0 rungs=4 iter=20
+PROGRESS rung=0 rungs=4 iter=21
+PROGRESS rung=0 rungs=4 iter=22
+PROGRESS rung=0 rungs=4 iter=23
+PROGRESS rung=0 rungs=4 iter=24
+PROGRESS rung=0 rungs=4 iter=25
+PROGRESS rung=0 rungs=4 iter=26
+PROGRESS rung=0 rungs=4 iter=27
+PROGRESS rung=0 rungs=4 iter=28
+PROGRESS rung=0 rungs=4 iter=29
+PROGRESS rung=0 rungs=4 iter=30
+PROGRESS rung=0 rungs=4 iter=31
+PROGRESS rung=0 rungs=4 iter=32
+PROGRESS rung=0 rungs=4 iter=33
+PROGRESS rung=0 rungs=4 iter=34
+PROGRESS rung=0 rungs=4 iter=35
+PROGRESS rung=0 rungs=4 iter=36
+PROGRESS rung=0 rungs=4 iter=37
+PROGRESS rung=0 rungs=4 iter=38
+PROGRESS rung=0 rungs=4 iter=39
+PROGRESS rung=0 rungs=4 iter=40
+PROGRESS rung=0 rungs=4 iter=41
+PROGRESS rung=0 rungs=4 iter=42
+PROGRESS rung=0 rungs=4 iter=43
+PROGRESS rung=0 rungs=4 iter=44
+PROGRESS rung=0 rungs=4 iter=45
+PROGRESS rung=0 rungs=4 iter=46
+PROGRESS rung=0 rungs=4 iter=47
+PROGRESS rung=0 rungs=4 iter=48
+PROGRESS rung=0 rungs=4 iter=49
+PROGRESS rung=0 rungs=4 iter=50
+PROGRESS rung=0 rungs=4 iter=51
+PROGRESS rung=0 rungs=4 iter=52
+PROGRESS rung=0 rungs=4 iter=53
+PROGRESS rung=0 rungs=4 iter=54
+PROGRESS rung=0 rungs=4 iter=55
+PROGRESS rung=0 rungs=4 iter=56
+PROGRESS rung=0 rungs=4 iter=57
+PROGRESS rung=0 rungs=4 iter=58
+PROGRESS rung=0 rungs=4 iter=59
+PROGRESS rung=0 rungs=4 iter=60
+VARIANT vf=0.680000 achieved=0.680000 printed=0.802279 margin=3279.24 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_068.stl
+[lattice] vf=0.68 frozen material: printed=45611 latticed=14524 solid=31087 in_include=14524 in_exclude=0/1680 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+LATTICE vf=0.680000 topology=octet cell_mm=1.4 graded=1 rho_min=0.410488 rho_max=0.89988 cells=16009 tris=14959524 lattice_margin=2948.65 lattice_accepted=1 report=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_068_lattice.report.json mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_068_lattice.stl
+PROGRESS rung=1 rungs=4 iter=1
+PROGRESS rung=1 rungs=4 iter=2
+PROGRESS rung=1 rungs=4 iter=3
+PROGRESS rung=1 rungs=4 iter=4
+PROGRESS rung=1 rungs=4 iter=5
+PROGRESS rung=1 rungs=4 iter=6
+PROGRESS rung=1 rungs=4 iter=7
+PROGRESS rung=1 rungs=4 iter=8
+PROGRESS rung=1 rungs=4 iter=9
+PROGRESS rung=1 rungs=4 iter=10
+PROGRESS rung=1 rungs=4 iter=11
+PROGRESS rung=1 rungs=4 iter=12
+PROGRESS rung=1 rungs=4 iter=13
+PROGRESS rung=1 rungs=4 iter=14
+PROGRESS rung=1 rungs=4 iter=15
+PROGRESS rung=1 rungs=4 iter=16
+PROGRESS rung=1 rungs=4 iter=17
+PROGRESS rung=1 rungs=4 iter=18
+PROGRESS rung=1 rungs=4 iter=19
+PROGRESS rung=1 rungs=4 iter=20
+PROGRESS rung=1 rungs=4 iter=21
+PROGRESS rung=1 rungs=4 iter=22
+PROGRESS rung=1 rungs=4 iter=23
+PROGRESS rung=1 rungs=4 iter=24
+PROGRESS rung=1 rungs=4 iter=25
+PROGRESS rung=1 rungs=4 iter=26
+PROGRESS rung=1 rungs=4 iter=27
+PROGRESS rung=1 rungs=4 iter=28
+PROGRESS rung=1 rungs=4 iter=29
+PROGRESS rung=1 rungs=4 iter=30
+PROGRESS rung=1 rungs=4 iter=31
+PROGRESS rung=1 rungs=4 iter=32
+PROGRESS rung=1 rungs=4 iter=33
+PROGRESS rung=1 rungs=4 iter=34
+PROGRESS rung=1 rungs=4 iter=35
+PROGRESS rung=1 rungs=4 iter=36
+PROGRESS rung=1 rungs=4 iter=37
+PROGRESS rung=1 rungs=4 iter=38
+PROGRESS rung=1 rungs=4 iter=39
+PROGRESS rung=1 rungs=4 iter=40
+PROGRESS rung=1 rungs=4 iter=41
+PROGRESS rung=1 rungs=4 iter=42
+PROGRESS rung=1 rungs=4 iter=43
+PROGRESS rung=1 rungs=4 iter=44
+PROGRESS rung=1 rungs=4 iter=45
+PROGRESS rung=1 rungs=4 iter=46
+PROGRESS rung=1 rungs=4 iter=47
+PROGRESS rung=1 rungs=4 iter=48
+PROGRESS rung=1 rungs=4 iter=49
+PROGRESS rung=1 rungs=4 iter=50
+PROGRESS rung=1 rungs=4 iter=51
+PROGRESS rung=1 rungs=4 iter=52
+PROGRESS rung=1 rungs=4 iter=53
+PROGRESS rung=1 rungs=4 iter=54
+PROGRESS rung=1 rungs=4 iter=55
+PROGRESS rung=1 rungs=4 iter=56
+PROGRESS rung=1 rungs=4 iter=57
+PROGRESS rung=1 rungs=4 iter=58
+PROGRESS rung=1 rungs=4 iter=59
+PROGRESS rung=1 rungs=4 iter=60
+VARIANT vf=0.520000 achieved=0.520000 printed=0.701435 margin=3305.23 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_052.stl
+[lattice] vf=0.52 frozen material: printed=45611 latticed=14524 solid=31087 in_include=14524 in_exclude=0/1680 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+LATTICE vf=0.520000 topology=octet cell_mm=1.4 graded=1 rho_min=0.410488 rho_max=0.89988 cells=15340 tris=14127256 lattice_margin=2773.14 lattice_accepted=1 report=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_052_lattice.report.json mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_052_lattice.stl
+PROGRESS rung=2 rungs=4 iter=1
+PROGRESS rung=2 rungs=4 iter=2
+PROGRESS rung=2 rungs=4 iter=3
+PROGRESS rung=2 rungs=4 iter=4
+PROGRESS rung=2 rungs=4 iter=5
+PROGRESS rung=2 rungs=4 iter=6
+PROGRESS rung=2 rungs=4 iter=7
+PROGRESS rung=2 rungs=4 iter=8
+PROGRESS rung=2 rungs=4 iter=9
+PROGRESS rung=2 rungs=4 iter=10
+PROGRESS rung=2 rungs=4 iter=11
+PROGRESS rung=2 rungs=4 iter=12
+PROGRESS rung=2 rungs=4 iter=13
+PROGRESS rung=2 rungs=4 iter=14
+PROGRESS rung=2 rungs=4 iter=15
+PROGRESS rung=2 rungs=4 iter=16
+PROGRESS rung=2 rungs=4 iter=17
+PROGRESS rung=2 rungs=4 iter=18
+PROGRESS rung=2 rungs=4 iter=19
+PROGRESS rung=2 rungs=4 iter=20
+PROGRESS rung=2 rungs=4 iter=21
+PROGRESS rung=2 rungs=4 iter=22
+PROGRESS rung=2 rungs=4 iter=23
+PROGRESS rung=2 rungs=4 iter=24
+PROGRESS rung=2 rungs=4 iter=25
+PROGRESS rung=2 rungs=4 iter=26
+PROGRESS rung=2 rungs=4 iter=27
+PROGRESS rung=2 rungs=4 iter=28
+PROGRESS rung=2 rungs=4 iter=29
+PROGRESS rung=2 rungs=4 iter=30
+PROGRESS rung=2 rungs=4 iter=31
+PROGRESS rung=2 rungs=4 iter=32
+PROGRESS rung=2 rungs=4 iter=33
+PROGRESS rung=2 rungs=4 iter=34
+PROGRESS rung=2 rungs=4 iter=35
+PROGRESS rung=2 rungs=4 iter=36
+PROGRESS rung=2 rungs=4 iter=37
+PROGRESS rung=2 rungs=4 iter=38
+PROGRESS rung=2 rungs=4 iter=39
+PROGRESS rung=2 rungs=4 iter=40
+PROGRESS rung=2 rungs=4 iter=41
+PROGRESS rung=2 rungs=4 iter=42
+PROGRESS rung=2 rungs=4 iter=43
+PROGRESS rung=2 rungs=4 iter=44
+PROGRESS rung=2 rungs=4 iter=45
+PROGRESS rung=2 rungs=4 iter=46
+PROGRESS rung=2 rungs=4 iter=47
+PROGRESS rung=2 rungs=4 iter=48
+PROGRESS rung=2 rungs=4 iter=49
+PROGRESS rung=2 rungs=4 iter=50
+PROGRESS rung=2 rungs=4 iter=51
+PROGRESS rung=2 rungs=4 iter=52
+PROGRESS rung=2 rungs=4 iter=53
+PROGRESS rung=2 rungs=4 iter=54
+PROGRESS rung=2 rungs=4 iter=55
+PROGRESS rung=2 rungs=4 iter=56
+PROGRESS rung=2 rungs=4 iter=57
+PROGRESS rung=2 rungs=4 iter=58
+PROGRESS rung=2 rungs=4 iter=59
+PROGRESS rung=2 rungs=4 iter=60
+VARIANT vf=0.380000 achieved=0.380000 printed=0.614550 margin=1993.21 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_038.stl
+[lattice] vf=0.38 frozen material: printed=45611 latticed=14524 solid=31087 in_include=14524 in_exclude=0/1680 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+LATTICE vf=0.380000 topology=octet cell_mm=1.4 graded=1 rho_min=0.410488 rho_max=0.89988 cells=15164 tris=13822816 lattice_margin=1274.37 lattice_accepted=1 report=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_038_lattice.report.json mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_038_lattice.stl
+PROGRESS rung=3 rungs=4 iter=1
+PROGRESS rung=3 rungs=4 iter=2
+PROGRESS rung=3 rungs=4 iter=3
+PROGRESS rung=3 rungs=4 iter=4
+PROGRESS rung=3 rungs=4 iter=5
+PROGRESS rung=3 rungs=4 iter=6
+PROGRESS rung=3 rungs=4 iter=7
+PROGRESS rung=3 rungs=4 iter=8
+PROGRESS rung=3 rungs=4 iter=9
+PROGRESS rung=3 rungs=4 iter=10
+PROGRESS rung=3 rungs=4 iter=11
+PROGRESS rung=3 rungs=4 iter=12
+PROGRESS rung=3 rungs=4 iter=13
+PROGRESS rung=3 rungs=4 iter=14
+PROGRESS rung=3 rungs=4 iter=15
+PROGRESS rung=3 rungs=4 iter=16
+PROGRESS rung=3 rungs=4 iter=17
+PROGRESS rung=3 rungs=4 iter=18
+PROGRESS rung=3 rungs=4 iter=19
+PROGRESS rung=3 rungs=4 iter=20
+PROGRESS rung=3 rungs=4 iter=21
