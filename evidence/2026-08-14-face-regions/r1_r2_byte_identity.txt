@@ -1,3 +1,44 @@
 === R1 — no regions: BASE cli vs BRANCH cli ===
 base   /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/basebuild/topopt-cli
 branch /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/face-regions-union-split-grid-c52969/build/topopt-cli
+-- the DESIGN set, raw (design.bin, fields.bin, report.json, meshes, alpha) --
+   identical, byte for byte (      15 files)
+-- the receipts, with the timestamps/fingerprint stripped --
+R1 PASS — every artifact identical (      18 files)
+
+=== R2 — face_ids vs an equivalent identity REGION, same (branch) cli ===
+-- the DESIGN set, raw --
+R2 PASS — a region tags exactly what its face tags, to the byte
+         (      15 design artifacts identical)
+
+-- and the RECEIPTS, which SHOULD differ: they record the declaration --
+--- /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/r1r2/branch_faces.norm.sha256	2026-08-12 19:29:58
++++ /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/r1r2/branch_regions.norm.sha256	2026-08-12 19:32:09
+@@ -1,7 +1,7 @@
+ 8097767058d1b6e6dbaac33d9a61d60f46a5d7e725c57f106823a62c76fea326  ./design.bin
+ ba6328ac7897aa7ba8e4c6096b9c45a9cab50fb1cfbcd7d2a8f304cffb321cf0  ./fields.bin
+ 7565e029da76fbdbee8e44ee5d1131431101b78ec4cfe7ca8c8dfcf92d2a4abb  ./iterations.csv
+-1b53832e2753a8a3e1e305f8d7c323cdf9d64a8bdacc2b181b0547c502a3954c  ./loadcase.json
++3b17f973ce8a1972c2450a51c25b5bf2bc41e8f03feb6e69f887c0c0a21c48af  ./loadcase.json
+ f6df476a27b2112fdddc1981e61cbb9696afde2c6065333cd0c826859262f148  ./report.json
+ a78fa5c38032b162f68f411010b6b39a21fa4fb17f73b65768f69d3f0efe1871  ./run_info.json
+ 8a897b14da4ebc462e44f897b27c8394d3d528ff0c11d3fefa896a31392f7953  ./variant_026.stl
+   the differing files, and the lines that differ:
+   --- run_info.json
+62c62
+---
+133c133
+---
+   --- loadcase.json
+12c12
+<     {"index": 0, "face_ids": [2], "force_mag_n": 60, "voxels_tagged": 672, "status": "ok"}
+---
+>     {"index": 0, "face_ids": [], "region_ids": [100], "force_mag_n": 60, "voxels_tagged": 672, "status": "ok"}
+18a19,21
+>   "face_regions": [
+>     {"id": 100, "name": "load wall", "parent_id": -1, "member_faces": 1, "cuts": 0, "area_mm2": 2400, "filter_matched": 0}
+>   ],
+
+=== R5 — the sliver guard refuses BEFORE anything runs ===
+R5 PASS — refused. The message:
+topopt-cli: run: cannot build the declared load case against model "l-bracket.step": region 101 "wall 1" holds 0 voxels at resolution 32 — under the floor of 16. It is a SPLIT of a selection holding 672 voxels, so at most 42 sub-regions can clear the floor here. Split it into fewer pieces, or run at a finer resolution. (The floor is the size of the smallest face this part's own CAD produced; a sub-region below it selects too little to carry a role.)
