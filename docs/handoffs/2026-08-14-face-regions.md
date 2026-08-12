@@ -364,10 +364,26 @@ shows, as a pure value type), `FaceRegionSheet.swift` (layout only). The layer
 reaches BOTH the LAN `job.json` and the on-device bridge — a user who unions and
 splits and then taps Optimize locally must not get a run that ignored all of it.
 
-**Tests.** `core/tests/unit/test_face_region.cpp` (64 checks, OCCT-free, gates
-every CI config) and `app/…/FaceRegionTests.swift` (23 tests). Both drive the
+**Tests.** `core/tests/unit/test_face_region.cpp` (68 checks, OCCT-free, gates
+every CI config) and `app/…/FaceRegionTests.swift` (26 tests). Both drive the
 same banded-cube fixture, so the two implementations are checked against one
 shape.
+
+**Suites, with their denominators** (`evidence/…/suites.txt`). The app suite is
+1457 tests with **8 failures, all of them the same environmental gap**: this
+machine's core slice has no lib3mf, so the three `AppModelTests` 3MF-import
+cases refuse before they test anything ("3MF import requires lib3mf, which is
+not available in this build"). `build_core.sh` says so at configure time. The
+honest reading is 1449/1457 HERE and 1457/1457 in CI, and the three 3MF tests
+DID NOT RUN. Core registers 120 tests locally against CI's 122 for the same
+reason — report N/122, never N/N.
+
+★ **A trap this branch walked into, recorded so the next session does not.**
+`cmake --build build --target topopt-cli` (hyphen) is a SILENT NO-OP: the target
+is `topopt_cli` and the hyphen is the OUTPUT NAME, which make considers already
+up to date. It prints nothing and exits 0. The first R1/R2 evidence was produced
+by a binary three receipt-changes stale, and only a `ls -la` on the binary's
+timestamp caught it.
 
 **The instrument.** `core/tests/harness/face_region_probe.cpp` is what produced
 §0. It is a probe, not a test — it runs on a real part and prints what it finds,
