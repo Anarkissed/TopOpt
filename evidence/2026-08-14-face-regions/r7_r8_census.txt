@@ -17,20 +17,24 @@ words; the longest is 11.
 
   38 on-screen strings added; LONGEST = 11 words.
 
-The longest CLI DIAGNOSTIC is the sliver refusal, which runs ~70 words. It is a
-terminal/log message, not UI copy, and it is deliberately long for the same
-reason every other refusal in loadcase.cpp is: it names the number, the floor,
-the budget, and the two ways out. The UI shows the SHORT form of the same
-verdict ("Smallest piece: N voxels, floor 16." + "N voxels fits N pieces.").
+The longest CLI DIAGNOSTIC is the sliver refusal, ~70 words. It is a terminal /
+run-log message, not UI copy, and it is long for the same reason every other
+refusal in loadcase.cpp is: it names the number, the floor, the budget, and the
+two ways out. The UI shows the SHORT form of the same verdict
+("Smallest piece: N voxels, floor 16." + "N voxels fits N pieces.").
 
 === R8 — ASSERTION CENSUS ===
-Counted by MESSAGE, not by name: every distinct assertion/refusal text in
-core and the app tests, base vs branch. A deletion shows up as a message
-that exists on base and not on the branch.
+Counted by MESSAGE-BEARING CONSTRUCT, base vs branch, over core/ and app/.
+A weakened or deleted assertion shows up as a category that FELL.
 
-  CHECK\                   base  4059   branch  4059   +0
-  XCTAssert\w*\            base  5104   branch  5104   +0
-  schema_fail\             base   133   branch   133   +0
-  throw std::\w+\          base   426   branch   426   +0
+  CHECK( (core tests)      base  4059   branch  4124   +65
+  XCTAssert*               base  5104   branch  5164   +60
+  schema_fail(             base   133   branch   142   +9
+  throw std::              base   426   branch   441   +15
 
   No category fell. Nothing was weakened or deleted.
+
+=== DELETED-TEST SWEEP (own diff) ===
+  341	0	app/TopOptKit/Tests/TopOptFlowsTests/FaceRegionTests.swift
+  447	0	core/tests/harness/face_region_probe.cpp
+  411	0	core/tests/unit/test_face_region.cpp

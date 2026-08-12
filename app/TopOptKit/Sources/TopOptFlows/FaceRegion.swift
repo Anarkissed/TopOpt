@@ -222,6 +222,14 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
     /// `filter` and `filterMatchedAtAuthor` make the union RE-EVALUABLE after a
     /// CAD edit; pass an unset filter for a hand-picked union, whose members are
     /// then the explicit `add` list and nothing else.
+    ///
+    /// ★ WHEN A FILTER DEFINES THE UNION, ITS MATCHES ARE **NOT** COPIED INTO
+    /// `add`. That mistake was caught by the evidence rather than by review:
+    /// storing the match list made the union's members a stale id list wearing a
+    /// filter's clothes, and a simulated CAD edit (face_region_probe §5) grew a
+    /// 24-face union to 32 — the exact silent-renumber failure §3(c) exists to
+    /// prevent. The filter IS the membership; `add` holds only what the user
+    /// tapped in on top of it.
     @discardableResult
     public mutating func union(faces: [FaceID], named name: String,
                                filter: RegionFilter = RegionFilter(),
@@ -230,7 +238,8 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
         nextID += 1
         regions.append(FaceRegion(id: id, name: name, filter: filter,
                                   filterMatchedAtAuthor: matchedAtAuthor,
-                                  add: faces.sorted(), collapsed: false))
+                                  add: filter.any ? [] : faces.sorted(),
+                                  collapsed: false))
         return id
     }
 

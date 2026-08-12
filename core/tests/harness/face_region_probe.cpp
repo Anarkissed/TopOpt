@@ -336,7 +336,11 @@ int main(int argc, char** argv) {
   u.name = "blends";
   u.filter = blend;
   u.filter_matched_at_author = static_cast<int>(blend_hit.size());
-  u.add = union_members;
+  // ★ THE FILTER IS THE MEMBERSHIP. Its matches are deliberately NOT copied
+  // into `add` — that would make the union a stale id list wearing a filter's
+  // clothes, and §5 below is what caught it: doing so grew a 24-face union to
+  // 32 across a simulated CAD edit. `add` carries only a hand correction.
+  if (!blend.any()) u.add = union_members;
   FaceRegionSpec parent;
   parent.id = 200;
   parent.name = "wall";
@@ -439,6 +443,53 @@ int main(int argc, char** argv) {
               worst_flat(flat_after), flat_after.size());
   std::printf("  CAD ERROR  roundness %.12g mm (worst bore, %zu measured)\n",
               worst_bore(bore_after), bore_after.size());
+
+  // ── 5. ★ R6 — A RE-IMPORT AFTER A CAD EDIT ────────────────────────────────
+  //
+  // A CAD edit renumbers B-rep faces. Simulated here by DELETING one face from
+  // the model and shifting every id above it down — which is exactly what
+  // suppressing a feature does to OCCT's TopExp_Explorer order.
+  //
+  // The union is persisted as its FILTER plus an add/remove list, so what is
+  // measured is: does the filter still find the same population, and is the
+  // difference REPORTED? An id list would have silently pointed at whatever
+  // inherited the number, and nothing downstream could have noticed.
+  std::printf("\n=== 5. AFTER A CAD EDIT (one face deleted, ids renumbered) ===\n");
+  {
+    const int dropped = blend_hit.empty() ? 0 : blend_hit.front();
+    StepModel edited;
+    edited.mesh.vertices = model.mesh.vertices;
+    edited.faces_are_fitted = model.faces_are_fitted;
+    for (std::size_t t = 0; t < model.mesh.triangles.size(); ++t) {
+      const int f = model.triangle_face[t];
+      if (f == dropped) continue;
+      edited.mesh.triangles.push_back(model.mesh.triangles[t]);
+      edited.triangle_face.push_back(f > dropped ? f - 1 : f);
+    }
+    for (int f = 0; f < model.face_count; ++f)
+      if (f != dropped) edited.faces.push_back(model.faces[static_cast<std::size_t>(f)]);
+    edited.face_count = model.face_count - 1;
+
+    FaceRegionSpec again = u;  // the SAME persisted definition
+    const std::vector<int> matched_now = match_region_filter(edited, again.filter);
+    // The stored add-list may now name an id past the end; a member that no
+    // longer exists is refused loudly rather than resolved to the wrong face.
+    std::vector<int> kept;
+    for (int f : again.add)
+      if (f < edited.face_count) kept.push_back(f);
+    again.add = kept;
+    const std::vector<ResolvedFaceRegion> after = resolve_face_regions(edited, {again});
+    std::printf("deleted face     %d   (ids above it shift down by one)\n", dropped);
+    std::printf("filter matched   %d at authoring -> %zu now   drift %+d\n",
+                again.filter_matched_at_author, matched_now.size(),
+                static_cast<int>(matched_now.size()) - again.filter_matched_at_author);
+    std::printf("region members   %zu (was %zu)\n", after[0].member_faces.size(),
+                resolved[0].member_faces.size());
+    std::printf("reported?        %s\n",
+                after[0].filter_drift_known ? "YES — filter_drift is carried on the "
+                                              "resolved region and logged by the run"
+                                            : "NO");
+  }
 
   std::printf("\n%s (%d failed check%s)\n",
               g_failures == 0 ? "ALL LAYER-1 CHECKS PASSED" : "LAYER 1 MOVED",

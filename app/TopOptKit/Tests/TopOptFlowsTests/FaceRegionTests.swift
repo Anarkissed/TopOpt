@@ -171,6 +171,26 @@ final class FaceRegionTests: XCTestCase {
         XCTAssertEqual(drift[0].now, 1)
     }
 
+    /// ★ THE DEFECT THE EVIDENCE CAUGHT (face_region_probe §5). A filter-defined
+    /// union must NOT copy its matches into the explicit `add` list: doing so
+    /// makes its members a stale id list wearing a filter's clothes, and a CAD
+    /// edit that renumbers faces then grows the union instead of re-evaluating
+    /// it. On the maintainer's part that turned a 24-face union into 32.
+    func testAFilterDefinedUnionStoresNoIdList() {
+        let mesh = bandedCube()
+        var model = FaceRegionModel()
+        let id = model.union(faces: [8], named: "blends",
+                             filter: .blend(maxAreaMM2: 20), matchedAtAuthor: 1)
+        XCTAssertTrue(model.region(id)!.add.isEmpty,
+                      "the filter IS the membership; nothing is frozen into add")
+        XCTAssertEqual(FaceRegionGeometry.members(of: model.region(id)!, in: mesh), [8],
+                       "and it still resolves to the same face")
+        // A hand-picked union (no filter) DOES store its ids — there is nothing
+        // else it could be.
+        let hand = model.union(faces: [3, 8], named: "picked")
+        XCTAssertEqual(model.region(hand)!.add, [3, 8])
+    }
+
     func testNoAuthorCountMeansNoDriftClaim() {
         var model = FaceRegionModel()
         _ = model.union(faces: [3], named: "hand-picked")

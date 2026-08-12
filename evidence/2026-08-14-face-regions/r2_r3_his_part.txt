@@ -55,4 +55,10 @@ refusal          smallest cell (1x1) holds 0 voxels, under the floor of 16. This
   CAD ERROR  flatness  1.2124389394e-15 mm (worst face, 17 measured)
   CAD ERROR  roundness 3.59712259979e-14 mm (worst bore, 4 measured)
 
+=== 5. AFTER A CAD EDIT (one face deleted, ids renumbered) ===
+deleted face     5   (ids above it shift down by one)
+filter matched   24 at authoring -> 23 now   drift -1
+region members   23 (was 24)
+reported?        YES — filter_drift is carried on the resolved region and logged by the run
+
 ALL LAYER-1 CHECKS PASSED (0 failed checks)
