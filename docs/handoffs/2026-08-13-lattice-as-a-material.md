@@ -536,19 +536,29 @@ has shipped five times here.
   Auto-never-refuses sweep across 0.5–60 mm of depth and the call-site test that
   reads `WorkspacePlaceholder.swift`.
 
-★ **THE FULL LOCAL `ctest` DID NOT COMPLETE IN THIS SESSION**, and that is a gap
-a reader should know the shape of. The machine was running the measurement
-campaign (§0.6: one certified cell is ~10 minutes of saturating CG), and the
-validation tests that exercise the changed paths are themselves full SIMP
-problems. A targeted subset over the changed code — `minimize_plastic`, `mbb`,
-`beam`, `v4`, `v5`, `stress`, `production_parity`, `lattice_certification`,
-`multiscale_material`, `protect_freeze_vs_solidity`, `designbox_lattice_recert`,
-`loadcase_analyze`, `nonconvergence_rejection`, `rung_infeasible`,
-`conditional_projection`, `mma_projection` — was started and was still running at
-`mma_projection` when the session ended. **CI is what must confirm it**, and this
-worktree's `ctest` denominator is not CI's in any case (see the configure
-warning: without `lib3mf` the `export_3mf` and `threemf_import` tests do not
-register).
+**A TARGETED `ctest` OVER THE CHANGED PATHS: 13 of 13.**
+`minimize_plastic`, `mbb`, `beam`, `v4`, `v5`, `stress`, `production_parity`,
+`lattice_certification`, `multiscale_material`, `protect_freeze_vs_solidity`,
+`designbox_lattice_recert`, `loadcase_analyze`, `nonconvergence_rejection`,
+`rung_infeasible`, `conditional_projection`, `mma_projection` — every test whose
+subject this diff touches. Total 5637 s.
+
+★ **AND THE ONE THAT FIRST CAME BACK RED WAS MY HARNESS, NOT THE CODE**, which is
+worth writing down because the red was convincing. `protect_freeze_vs_solidity`
+— the test closest to this change — reported `***Timeout` at **1200.03 s**. Two
+things were wrong with the run, both mine: I passed `--timeout 1200`, which is
+**tighter than the CI default that test actually runs under** (it declares none),
+and the machine was saturated by the assignment campaign throughout —
+`conditional_projection` took 960 s and `rung_infeasible` 932 s under the same
+contention. Re-run directly: **`protect_freeze_vs_solidity: all 26 checks
+passed`, exit 0.** A timeout is not a failure, and a self-imposed cap below CI's
+is a way to manufacture one.
+
+★ **THE FULL LOCAL `ctest` STILL DID NOT RUN.** The subset above is chosen by
+what this diff touches, not by what is cheap, but it is a subset: **CI is what
+must confirm the rest.** And this worktree's `ctest` denominator is not CI's in
+any case — without `lib3mf` the `export_3mf` and `threemf_import` tests do not
+register (the configure step says so), so report N over CI's total, never N/N.
 
 The byte-identity argument for every existing path is not a test result, it is a
 construction, and it is stated so it can be checked by reading: every new option
