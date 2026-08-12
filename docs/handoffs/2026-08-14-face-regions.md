@@ -328,11 +328,11 @@ Until then, a grid split grades what is FROZEN, not what is LATTICED.
 
 | bar | verdict | where |
 |---|---|---|
-| **R1** day-one byte-identity, base vs branch cli | see below | `evidence/…/r1_r2_byte_identity.{sh,txt}` |
+| **R1** day-one byte-identity, base vs branch cli | **MET** — 15 design artifacts byte-identical raw; all 18 identical once the three named clock/fingerprint fields are stripped | `evidence/…/r1_r2_byte_identity.{sh,txt}` |
 | **R2** CAD error + attributed share unchanged to the digit with a union and a grid split | **MET** — flatness 1.2124389394e-15 mm, roundness 3.59712259979e-14 mm, attribution per vertex identical; and the DESIGN artifacts byte-identical between a `face_ids` job and an equivalent `region_ids` job | `r2_r3_his_part.txt` §4, `r1_r2_byte_identity.txt` |
 | **R3** demonstrably usable on his own part, tap count reported | **MET** — 22 → 9 → 2 taps, with the coplanar walk honestly refuted | `r2_r3_his_part.txt` §2, §3 |
 | **R4** every consumer of a face id enumerated, file + line, what it reads now | **MET** — 21 sites, one gap stated | `r4_consumers.md` |
-| **R5** sliver guard refuses with the number, before doing anything | **MET** — app preview and core, both | `r2_r3_his_part.txt` §4, `r1_r2_byte_identity.txt` |
+| **R5** sliver guard refuses with the number, before doing anything | **MET** — app preview and core, both. The run's refusal: *"region 101 \"wall 1\" holds 0 voxels at resolution 32 — under the floor of 16. It is a SPLIT of a selection holding 672 voxels, so at most 42 sub-regions can clear the floor here."* | `r2_r3_his_part.txt` §4, `r1_r2_byte_identity.txt` |
 | **R6** persistence: re-import survives; edited STEP reports what changed | **MET** — 24 → 23 members, `drift -1`, reported | `r2_r3_his_part.txt` §5 |
 | **R7** no wall of text | **MET** — longest on-screen string **11 words** | `r7_r8_census.txt` |
 | **R8** never weaken or delete an assertion | **MET** — every category rose | `r7_r8_census.txt` |
