@@ -14,7 +14,7 @@ number that stopped it are all in §0.6 and §7. Nothing below is estimated.
 
 ## 0. THE ANSWERS, IN ORDER — one line each
 
-### 0.1 ★ The single most consequential number: **the law does not reach his regions at his cell.**
+### 0.1 ★ The law's reach at his cell — and it clears, barely, on the median only.
 
 At a **0.45 mm** nozzle the thinnest member that can hold a CERTIFIABLE octet
 lattice — at *any* (cell, density) pair in the band — is **5.8659 mm**. At his
@@ -23,23 +23,62 @@ a **10 mm** member, and the lightest density whose strut still prints at that
 cell is **0.2651**, not the band floor of 0.0505.
 
 His face protection is declared at **5.0 mm** depth (3 voxels at his 1.705 mm
-spacing). So *the collar itself*, read as its own member, is **half** the
-thinnest certifiable member at his nozzle. Whether his regions clear the floor
-therefore turns entirely on whether the collar sits inside a thicker printed
-member — which is a measurement, is §0.2, and is what the campaign was for.
-`evidence/…/m0/law.txt`, §2.
+spacing), which read as its own member would be **half** the thinnest certifiable
+member at his nozzle. Measured, it is not its own member — it is 26-connected to
+the load pad, and the combined region's **median** thickness is 10.2317 mm, which
+clears the floor by 2.4%. **60.2% of that region's voxels clear it; 39.8% do
+not.** §0.2b. `evidence/…/m0/law.txt`, `evidence/…/m1/regions_r0.68.txt`.
 
-### 0.2 ★ How much of the 247.3 g sits in QUIET regions — **NOT MEASURED.**
+### 0.2 ★ How much of the 247.3 g sits in QUIET regions: **NONE OF IT.**
 
-The instrument is built and runs (`frozen_lattice_probe --stage regions`): it
-decomposes the frozen set into 26-connected components, labels each by whether it
-carries Fixture or Load tags, and reads each one's strain energy and peak macro
-von Mises off a certification solve that is being run anyway, classifying against
-**core's own** quiet predicate (`lattice_subfloor_retention_stress_fraction` — the
-same one `grade_lattice` arms sub-floor retention on, so the probe and the
-shipped grading law cannot disagree about which regions are quiet).
+`evidence/…/m1/regions_r0.68.txt`. Measured on his converged rung 0.68 with one
+certification solve, against **core's own** quiet predicate
+(`lattice_subfloor_retention_stress_fraction` = 0.20 — the same one
+`grade_lattice` arms sub-floor retention on, so the probe and the shipped grading
+law cannot disagree about which regions are quiet).
 
-It did not complete inside this session's budget. §0.6 is why.
+| region | voxels | mass | strain energy | share | peak vM | vM / part peak | verdict |
+|---|---|---|---|---|---|---|---|
+| **load-pad-1** | 29,250 | **179.860 g** | 5.450e-04 | **45.42%** | 0.0169 | ★ **100.00%** | LOAD-BEARING |
+| **anchor-2** | 10,966 | **67.431 g** | 3.003e-05 | 2.50% | 0.0087 | **51.60%** | LOAD-BEARING |
+
+> frozen mass **247.290 g** of 543.724 g printed (**45.48%**) — the brief's 247.3 g,
+> reproduced independently
+> **QUIET 0.000 g (0.00%) · LOAD-BEARING 247.290 g (100.00%)**
+
+★ **This is the opposite of the outcome §2 hoped for, and it matters.** The brief
+said: *if most of the prize is in quiet regions, most of the risk in this task
+evaporates.* None of it is. The larger region **contains the part's peak von
+Mises** and carries **45% of the printed part's entire strain energy**; the
+smaller sits at half the part peak. So the accuracy problem does **not** dissolve,
+the 5-cell floor is aimed exactly where it needs to be, and §3's buttressing
+coupling is fully in play. The mass-neutral posture (`freed_mass_return = 1.0`)
+is therefore not a variant to try — it is the one the measurement demands.
+
+★ **And his declared face protection is not a separately addressable region.**
+The frozen set is **TWO** 26-connected components, not the ~5 the brief
+anticipated. Face 16's protection collar (10,554 voxels) is 26-connected to the
+load-face structural pad, so `load-pad-1` is both of them as one piece of
+material: 29,250 + 10,966 = 40,216, exactly the FrozenSolid count. A user who
+wants to lattice "just the protected face" cannot — it is one member with the
+load pad, and any density assigned to it is assigned to both.
+
+### 0.2b ★ The law's validity, per region (bar R5) — and the median hides the tail
+
+| region | median member | cells/member | **p10 cells** | **% of voxels clearing N\*** | verdict |
+|---|---|---|---|---|---|
+| load-pad-1 | 10.2317 mm | **5.12** | **1.71** | ★ **60.2%** | IN RANGE |
+| anchor-2 | 27.2845 mm | 13.64 | 5.12 | 97.8% | IN RANGE |
+
+Both clear the 5-cell floor **at the median**, so bar B4 as pre-registered passes
+— and `load-pad-1` clears it by **2.4%**, with **39.8% of its voxels below the
+floor** and a tenth percentile of 1.71 cells, a third of what the certificate
+needs. ★ **The bound was pre-registered on the median and the median is the wrong
+statistic here**; it is reported as passing because that is what was written down
+before the run, and the p10 and the fraction are reported beside it because they
+are what a reader needs. On the next pass the bound should key on the FRACTION
+below the floor, not the median — that is a change to make deliberately and in
+advance, not now.
 
 ### 0.3 ★ The NET mass saved at the best assignment, at both rungs — **NOT MEASURED.**
 
@@ -70,6 +109,9 @@ What is NOT built is β joining the MMA design vector — §7.2.
 ### 0.6 ★ What stopped the campaign, measured: **a cold certification of his part is tens of minutes, and arming GenEO for it makes that worse, not better.**
 
 This is a real finding and it is the reason the rest of §0 says NOT MEASURED.
+
+**One certification of his rung 0.68, isolated, at 8 threads: 590.6 s.** That is
+the measured unit cost of every cell of the assignment table.
 
 `analyze_fixed_design` on his 128 × 31 × 118 grid (1,473,696 displacement DOFs)
 is a **cold** solve: there is no Krylov recycle subspace to reuse and no
