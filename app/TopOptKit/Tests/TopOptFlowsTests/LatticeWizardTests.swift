@@ -237,27 +237,43 @@ final class LatticeWizardTests: XCTestCase {
                       "§5: Auto asks for the per-region breakdown")
     }
 
-    /// ★ §4c, THE SHARPEST VERSION. Auto is the DEFAULT now, so "Auto produces
-    /// no job" is "the lattice silently does nothing on a fresh project". Core's
-    /// grading schema needs the strut line width, and without one the app cannot
-    /// state a graded job — so it emits the UNIFORM one rather than nothing, and
-    /// says so through `graded`. (In production the width always exists:
-    /// PrintParams derives it by rule. This is the belt.)
-    func testAutoWithNoLineWidthStillProducesAJobAndSaysItIsNotGraded() throws {
+    /// ★ §4c AND BAR B6. Auto is the DEFAULT now, so "Auto produces no job" would
+    /// mean a fresh project's lattice is silently off — which is why I first made
+    /// `runSpec` fall back to uniform. `LatticePageTests
+    /// .testStaleFieldIsFlaggedAndAutoNeverSilentlyUniform` refused that, and it
+    /// was right: B6 says auto must never become uniform behind the user's back.
+    ///
+    /// So the guarantee is pinned where it actually holds — a real project ALWAYS
+    /// has a strut line width, because PrintParams derives it by rule from the
+    /// wall beads. There is no configuration a user can reach in which the new
+    /// default emits nothing.
+    func testARealProjectAlwaysHasTheWidthAutoNeeds() {
+        // Every process default, plus a hand-built params with no strut width
+        // stated: the rule fills it in from the wall beads, never zero.
+        let cases: [PrintParams] = [
+            .fdmDefault,
+            PrintParams(layerHeightMM: 0.2, wallLoops: 3, topLayers: 4,
+                        bottomLayers: 4, infillPercent: 20, infillPattern: "grid"),
+        ]
+        for p in cases {
+            XCTAssertGreaterThan(p.strutLineWidthMM, 0,
+                                 "§4b/§4c: the default posture always has the "
+                                 + "width Auto needs — the rule never yields 0")
+        }
+
         var s = LatticeSettings(enabled: true)
         s.densityMode = .auto
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5
+        let spec = s.runSpec(lineWidthMM: PrintParams.fdmDefault.strutLineWidthMM)
+        XCTAssertNotNil(spec, "§4c: at a real project's width, Auto emits a job")
+        XCTAssertEqual(spec?.graded, true, "B6: and it is GRADED, never uniform")
 
-        let graded = s.runSpec(lineWidthMM: 0.45)
-        XCTAssertNotNil(graded, "with a width, Auto is graded")
-        XCTAssertEqual(graded?.graded, true)
-
-        let noWidth = try XCTUnwrap(s.runSpec(lineWidthMM: 0),
-                                    "§4c: Auto must NEVER produce no job at all")
-        XCTAssertFalse(noWidth.graded,
-                       "§4c: it falls back to the buildable option AND says so — "
-                       + "bar B6 forbids a SILENT uniform, not an honest one")
+        // And the B6 contract itself, restated here so this file cannot drift
+        // from it: with NO width there is no grading floor, so no spec — the page
+        // gates Optimize with that reason rather than shipping a uniform job.
+        XCTAssertNil(s.runSpec(lineWidthMM: 0),
+                     "B6: auto without a line width has no grading floor — no spec")
     }
 
     func testAutoLeavesAnExplicitChoiceAlone() {

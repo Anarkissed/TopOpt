@@ -671,17 +671,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // grading schema REQUIRES the stated minimum extrudable width (its
         // printability floor), so without a line width the spec stays nil and
         // Optimize is gated with that reason.
-        // ★ §4c (task 2026-08-12) — AUTO MUST NEVER PRODUCE A REFUSAL. Core's
-        // grading schema REQUIRES the stated minimum extrudable width, so without
-        // one the app cannot emit a GRADED job. It used to return nil, which — now
-        // that Auto is the DEFAULT (§4b) — would mean a project with no strut width
-        // emits no lattice block at all: the feature silently off. So Auto falls
-        // through to the UNIFORM spec instead, which is emittable.
+        // ★ §4c AND BAR B6, RECONCILED (task 2026-08-12). I briefly made this fall
+        // through to the UNIFORM spec so Auto — now the DEFAULT — could never
+        // produce "no lattice at all". `LatticePageTests
+        // .testStaleFieldIsFlaggedAndAutoNeverSilentlyUniform` refused it, and it
+        // was right to: B6 is an explicit decision that auto must never become
+        // uniform behind the user's back, and a `graded: false` flag is not the
+        // same as a refusal the page states.
         //
-        // This does not breach bar B6 ("auto never SILENTLY means uniform"): the
-        // emitted spec carries `graded: false`, which is the flag the page and the
-        // receipt both read, so the downgrade is stated wherever the job is.
-        if densityMode == .auto && lineWidthMM > 0 {
+        // §4c is about a region that cannot be CERTIFIED — there Auto takes the
+        // buildable cell and reports the region out of regime (see
+        // LatticeFaceCardDerivation). A missing strut line width is a missing
+        // INPUT, not an uncertifiable region: nil here, and the page names the
+        // reason. In production the width always exists — PrintParams derives it
+        // by rule from the wall beads — which is pinned below.
+        if densityMode == .auto {
+            guard lineWidthMM > 0 else { return nil }
             // Cell-size mode (bar R6). Only the GRADED job can carry a mode other than
             // fixed, and both sweep ends are pushed up onto CORE's printability floor —
             // the app never states a cell core would refuse.

@@ -10,24 +10,24 @@ repeats per row: 5; every figure is ms PER STROKE
 
 stage                                  repeats    ms/stroke
 ------------------------------------------------------------
-A  preview via PATH   — STL re-import        5     664.0
-A  preview via PATH   — smoothing            5      71.2
-A  preview via PATH   — TOTAL                5     874.7
+A  preview via PATH   — STL re-import        5     681.0
+A  preview via PATH   — smoothing            5      73.1
+A  preview via PATH   — TOTAL                5     932.9
 B  preview via MEMORY — STL re-import        5       0.0
-B  preview via MEMORY — smoothing            5      71.4
-B  preview via MEMORY — TOTAL                5     348.9
-   ViewerMesh build (app side, both)         5    2073.4
+B  preview via MEMORY — smoothing            5      70.1
+B  preview via MEMORY — TOTAL                5     353.8
+   ViewerMesh build (app side, both)         5    2183.8
 ------------------------------------------------------------
-stroke release -> updated preview, BEFORE:   2948.1 ms
-stroke release -> updated preview, AFTER :   2422.3 ms
-removed: 525.8 ms per stroke (17.8% of the before figure)
+stroke release -> updated preview, BEFORE:   3116.7 ms
+stroke release -> updated preview, AFTER :   2537.5 ms
+removed: 579.1 ms per stroke (18.6% of the before figure)
 
 
 S1d — WHAT ELSE A PASS REBUILDS (not on the critical path above, but
       paid on EVERY SwiftUI body evaluation, of which a stroke causes
       several):
-   smoothBrush.viewerTints()  863160 entries      231.6 ms
-   the coordinator's array compare against the uploaded copy     60.7 ms
+   smoothBrush.viewerTints()  863160 entries      252.8 ms
+   the coordinator's array compare against the uploaded copy     63.7 ms
 
 The import share of the SHIPPED preview call: 90.3%
 moved vertices 143862 / 143862; max displacement 0.4449 mm

@@ -9,17 +9,24 @@ B  depths matched (7 mm / 7 mm)                 7 mm  6.821 mm       4        16
 C  matched + Auto per-region cell               7 mm  6.821 mm       4        16,696
 
 THE ANCHOR PAD, counted apart (§1f) — NOT a face protection
-  depth 0 voxels · 0 anchor + 0 load faces · 0 voxels frozen
+  depth 3 voxels · 1 anchor + 22 load faces · 32,648 voxels frozen   [from the LOG]
+  (these arms ran the snapshot binary, built before the echo carried
+   the pad into loadcase.json — fixed and verified separately in
+   r7/receipt_matches_log.txt)
 
-THE LATTICE — per rung, from each rung's own receipt
-arm                                 rung  latticed vox  region vox  frozen part     verdict
-A  his run (5 mm protect / 7                                  (still running / no rung yet)
-B  depths matched (7 mm / 7                                   (still running / no rung yet)
-C  matched + Auto per-region                                  (still running / no rung yet)
+THE LATTICE — per rung, from that rung's own receipt
+arm                               rung  latticed  region vox  solid fallback   mass g  cell mm
+A  his run (5 mm protect / 7 m    0.68       370      12,817          12,447    536.9    4.603
+B  depths matched (7 mm / 7 mm    0.68       190      16,009          15,819    546.2    4.603
+C  matched + Auto per-region c    0.68    16,009      16,009               0    490.6      1.4
 
-AGAINST HIS LAST RUN (13,034 / 12% / 507 g): no arm has produced a
-lattice receipt yet — the ladder is still running. The barrier table
-above is complete and is what §0(a)/§0(b) ask for.
+INCLUDE REGIONS OVER VOID — 'a lattice cannot conjure material there'
+  A  his run (5 mm protect / 7 mm lattice)      include_void_by_optimizer =   120,726
+  B  depths matched (7 mm / 7 mm)               include_void_by_optimizer =   117,534
+  C  matched + Auto per-region cell             include_void_by_optimizer =   117,534
+
+AGAINST HIS LAST RUN: 13,034 latticed voxels · 12% of the part · 507 g (solid 543.7 g)
+(his include_void_by_optimizer was 120,821)
 
 §0(c) — CORE'S OWN PRE-FLIGHT ON ARM A (quoted):
   Why: your thinnest declared region (7.000 mm) IS thick enough for a CERTIFIED lattice — it needs 5.475 mm — but the planned 4.6026 mm cell puts only 1.52 cells across it, under the 5.00-cell accuracy floor, so the grading law will reject it and emit no lattice. The cell is what is wrong, not the part. ("cell_mode": "auto" will NOT fix it: it selects the printability floor at the band's LIGHTEST density, 4.6026 mm, which is how you got here.)
