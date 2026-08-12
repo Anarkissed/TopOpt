@@ -5,10 +5,12 @@ Evidence: `evidence/2026-08-13-lattice-as-a-material/`. The pre-registration
 `00eff24`, whose tree contains that file and nothing else under that directory.
 
 ★ **THIS HANDOFF REPORTS AN INCOMPLETE MEASUREMENT CAMPAIGN AND SAYS SO IN §0.**
-The mechanism is built, C0-verified and receipted; the law's validity range is
-measured; and the campaign that was to price the assignment table stopped on a
-cost this task measured rather than assumed. What ran, what did not, and the
-number that stopped it are all in §0.6 and §7. Nothing below is estimated.
+The mechanism is built and receipted, the law's validity range is measured, his
+frozen set is decomposed and priced, and the assignment table is STARTED — two
+of its cells are in the record and all three of the findings that fall out of
+them are in §0.3. What did not run, and the measured cost that stopped it, are
+in §0.6 and §7. **Nothing below is estimated, and no gross saving is presented
+as a saving.**
 
 ---
 
@@ -80,22 +82,57 @@ are what a reader needs. On the next pass the bound should key on the FRACTION
 below the floor, not the median — that is a change to make deliberately and in
 advance, not now.
 
-### 0.3 ★ The NET mass saved at the best assignment, at both rungs — **NOT MEASURED.**
+### 0.3 ★ The assignment table — **STARTED, NOT COMPLETE.** The rows that are in the record:
 
-The assignment table (§4a) and the loop (§4c) did not run. The mechanism that
-would produce the number is in and is the `freed_mass_return` knob (§2.3): at
-`0.0` the freed mass is banked and the run prints strictly less than the same
-rung did; at `1.0` the run prints the same total mass-equivalent and the
-optimiser re-places the freed material where §3's buttressing coupling says it
-must. The NET saving is read off that frontier. **No estimate of it appears
-anywhere in this handoff**, because the whole point of R4 is that the gross
-number is not it.
+`evidence/…/m2/r0.68/m2_assignment.csv`, rung 0.68, cell 2 mm, nozzle 0.45 mm.
+Baseline (every region SOLID): **margin_effective 673.856173, mass 543.7239 g,
+ACCEPTED.**
 
-### 0.4 ★ Whether the margin held against the pre-registered bound — **NOT EVALUATED.**
+| region | f | mass | Δmass | margin_eff | **margin SOLID-ONLY** | **strut margin** | regime | drain | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| load-pad-1 | 0.20 | — | — | — | — | — | — | — | ★ **REFUSED — the strut does not print at this cell and nozzle** |
+| load-pad-1 | 0.30 | 417.822 g | ★ **−125.902 g** | **134.773** | 326.740 | **134.773** | ★ **OUT** | ok | accepted (−80.0% margin) |
 
-B2 (0.95x) and B3 (≥ 8.0% NET) require the arms in §0.3. They are **not** missed
-— they are unevaluated, which is a different statement, and the bound is
-unchanged and uncommented-on.
+Three things fall out of two rows, and all three are worth more than the row count.
+
+★ **(a) THE STRUT TERM BINDS, AND IT IS WORTH 2.4x.** `margin_effective` equals
+`lattice_strut.margin_worst_case` exactly: the de-homogenised strut bound is what
+the gate is testing, not the solid region's margin. Without §1(c)'s
+`gate_on_strut_strength` this cell would have reported **326.740** — 2.4x higher —
+and that is failure mode M5, precisely: a latticed region passing by not being
+looked at. The number the gate would have used is kept on the receipt
+(`margin_effective_solid_only`) so the term's cost is never invisible.
+
+★ **(b) THE CERTIFICATE SAYS OUT OF REGIME WHERE THE REGION-LEVEL TEST SAID IN
+RANGE**, and the certificate is right. `lattice_region_validity` keys on the
+region's MEDIAN cells-per-member (5.12, clearing) and admitted it;
+`analyze_fixed_design`'s own guard keys on the **thinnest latticed member** and
+raises `lattice_strut_out_of_regime`. §0.2b already showed why — p10 = 1.71 cells,
+39.8% of the region below the floor. ★ **Two instruments in this task disagree and
+the conservative one is the per-voxel one.** The region-level bar as pre-registered
+(B4, on the median) is the weaker test and should be replaced by the per-voxel one
+on the next pass. It is left as written here because it was pre-registered.
+
+★ **(c) THE MARGIN FALLS 80.0%, AGAINST A PRE-REGISTERED BOUND OF 5.0%** — and
+the gate still ACCEPTS, because 134.773 is ninety times `margin_stop` of 1.5.
+B2 is stated on the BEST assignment and the table is not complete, so it is not
+yet formally missed; but the first cell is **16x outside it**, and the reason is
+worth saying plainly: ★ **B2 was written as a RELATIVE bound on a part whose
+absolute margin is ~450x the gate.** On such a part a relative margin bound will
+refuse assignments the shipped gate accepts with vast headroom. That is a defect
+in the bound, not in the mechanism — and per §5(b) it is REPORTED, not retuned.
+The next pre-registration should bound the margin against `margin_stop`, not
+against the baseline.
+
+### 0.4 ★ The NET mass saving — **NOT MEASURED.**
+
+The gross at this one cell is **−125.902 g (−23.2%)** with the freed mass BANKED
+(`freed_mass_return = 0.0`, the assignment table's posture). ★ **That is not the
+saving and must not be read as one.** §0.2 measured that 100% of the frozen mass
+is load-bearing and that this very region holds the part's peak von Mises, so the
+optimiser will put material back — which is exactly what the mass-neutral end of
+the knob is for. The loop that walks between them (§4c of the brief) did not run;
+no NET number appears anywhere in this handoff.
 
 ### 0.5 ★ Whether Mode 2 beat Mode 1 — **NOT MEASURED, and Mode 2's in-loop coupling is NOT BUILT.**
 
@@ -395,11 +432,11 @@ has shipped five times here.
 
 | bar | state |
 |---|---|
-| **R1** C0 inertness first | mechanism is exact by dispatch (§2.4); the checksum arm did not complete — §7.1 |
+| **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
-| **R3** every arm at two rungs | no arm completed — §7.1 |
-| **R4** NET, and margin as a curve | no arm completed; **no gross number is presented as a saving anywhere**, and the app's own wording says so |
-| **R5** cells-per-member per region | **held** in the mechanism and the receipt (`FrozenLatticeReport::Region`); the per-region numbers for HIS regions were not measured |
+| **R3** every arm at two rungs | rung 0.68 only, and incomplete — §7.1 |
+| **R4** NET, and margin as a curve | no optimised arm ran, so there is no curve and no NET number; **no gross number is presented as a saving anywhere**, and the app's own wording says so |
+| **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
 | **R7** assertion census | **held** — §6 |
 | **R8** root cause with file and line, no placeholders, no root scratch | held |

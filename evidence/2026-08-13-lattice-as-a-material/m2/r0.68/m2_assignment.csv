@@ -1,0 +1,3 @@
+rung,region,region_voxels,f,cells_per_member,in_range,mass_g,dmass_g,margin_effective,margin_solid_only,dmargin_pct,strut_margin,out_of_regime,sealed,accepted,load_path,refused
+0.68,load-pad-1,29250,0.2,5.115837908,1,,,,,,,,,,1
+0.68,load-pad-1,29250,0.3,5.115837908,1,417.8220136,-125.9018636,134.7729224,326.7402244,-79.99974952,134.7729224,1,0,1,1,0
