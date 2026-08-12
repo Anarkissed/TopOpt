@@ -496,6 +496,46 @@ the brief that defect is raised separately with its own measurement; **what ship
 here does not carry it**, and the difference is written at the top of the
 production header so the next reader does not "fix" it back.
 
+### ★★ AND THE COUNTERS THEMSELVES HAD A DEFECT, WHICH THE UNIT TEST FOUND
+
+The sandbox header computed `tunnels = b0 + b2 - chi` with **`b2` set to the
+number of undrainable pockets**. `b2` is a BETTI NUMBER — the solid islands the
+void encloses — and drainability is not a Betti number. They are not the same
+quantity and not even the same kind of quantity.
+
+★ **The one-line disproof is now a unit test.** A single convex 3×3×3 pocket in a
+solid block has `V,E,F,C = 64,144,108,27`, so **chi = 1** (it is contractible),
+with `b0 = 1`, `b1 = 0`, `b2 = 0` — and **one sealed pocket**. The substitution
+reported `chi = 2` and one phantom tunnel. **Every tunnel count taken that way is
+off by the number of sealed pockets.**
+
+`enclosed_solid` (26-connected, complementary to the 6-connected void) and
+`sealed_pockets` are now separate fields with separate names, and the test pins
+both with a drilled-out positive control beside them — because "no sealed
+cavities" must not be a verdict the function returns regardless of its input.
+
+### ★ the counters cross-checked on a REAL design, not only on a 9³ block
+
+A union-find and an alternating sum are easy to get subtly wrong in a way a
+toy-shape test cannot see. `crosscheck_topology.py` recomputes all of it with
+different code — BFS instead of union-find, explicit cell enumeration instead of
+the anchored scan — on SIMP's own rungs:
+
+| SIMP rung | b0 | chi | b2 | b1 | sealed pockets | sealed voxels |
+|---|---|---|---|---|---|---|
+| 0.68 shipped — shipped C++ | 16 | 16 | 0 | 0 | 10 | 1034 |
+| 0.68 shipped — independent | **16** | **16** | **0** | **0** | **10** | **1034** |
+| 0.26 light — shipped C++ | 2 | −7 | 0 | 9 | 0 | 0 |
+| 0.26 light — independent | **2** | **−7** | **0** | **9** | **0** | **0** |
+
+★ **Every field agrees.** The script says in its own docstring that it is a
+one-off and must never become the shipped number.
+
+★ **AND IT REPRODUCES R6's OWN CAVEAT INDEPENDENTLY, ON SIMP.** Sealed void is
+**4.60% of the void at the shipped rung and 0.00% at the light one** (1034 voxels
+/ 5127.5 mm³ against nothing at all). Trapped powder is a HIGH-DENSITY problem,
+so a light rung passing the enclosed-void check says nothing about a heavy one.
+
 ## 5. WHAT IS NOT IN THIS TASK
 
 * ★ **THE PERIMETER PENALTY (C).** Waits for Stage B. When it lands the decision
