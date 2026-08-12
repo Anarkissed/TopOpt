@@ -82,7 +82,29 @@ send both to one side and hand back 48 empty sub-regions out of a 10×5 grid
 split. The cut is evaluated at the **voxel centre**, which is what §4 says in the
 first place ("voxels of the region on each side become sub-regions").
 
-### (c) Day one is byte-identical
+### (c) Day one is byte-identical, and what "identical" is measured over
+
+Three things in a run's output are properties of WHEN and WHERE the binary ran,
+not of what it computed: `created_wall_ms`, the build `fingerprint`, and every
+`*_ms` timing (plus `iterations.csv`'s per-row wall clock). They are named,
+stripped in one place, and that list is the whole list — everything else is
+compared raw. A receipt cannot hold a wall clock.
+
+The comparison is therefore in two parts, and the split is not a convenience:
+
+* **the DESIGN set** — `design.bin`, `fields.bin`, `report.json`, every
+  `variant_*.stl`, every `*_alpha.f64` — compared **raw**;
+* **the RECEIPTS** — `run_info.json`, `loadcase.json` — compared with the three
+  fields above stripped.
+
+★ For **R2** the two receipts SHOULD differ, and do: one job declares `face_ids`,
+the other declares `region_ids`, and both receipts say so (`loadcase.json` gains
+`region_ids` on the group; `run_info.json` gains a `face_regions` block with each
+region's member count, area, filter match and drift). A receipt that did NOT
+differ there would be the defect — it would mean the run could not tell the user
+which selection it had resolved. **The design must not move; the receipt must.**
+
+### (c1) The materialisation rule
 
 Conceptually there is one region per CAD face on import. **Materially the model
 stores nothing until the user unions, filters or splits**: an IDENTITY region —
@@ -306,8 +328,8 @@ Until then, a grid split grades what is FROZEN, not what is LATTICED.
 
 | bar | verdict | where |
 |---|---|---|
-| **R1** day-one byte-identity, base vs branch cli | see `r1_r2_byte_identity.txt` | `evidence/…/r1_r2_byte_identity.{sh,txt}` |
-| **R2** CAD error + attributed share unchanged to the digit with a union and a grid split | **MET** — flatness 1.2124389394e-15 mm, roundness 3.59712259979e-14 mm, attribution per vertex identical | `r2_r3_his_part.txt` §4 |
+| **R1** day-one byte-identity, base vs branch cli | see below | `evidence/…/r1_r2_byte_identity.{sh,txt}` |
+| **R2** CAD error + attributed share unchanged to the digit with a union and a grid split | **MET** — flatness 1.2124389394e-15 mm, roundness 3.59712259979e-14 mm, attribution per vertex identical; and the DESIGN artifacts byte-identical between a `face_ids` job and an equivalent `region_ids` job | `r2_r3_his_part.txt` §4, `r1_r2_byte_identity.txt` |
 | **R3** demonstrably usable on his own part, tap count reported | **MET** — 22 → 9 → 2 taps, with the coplanar walk honestly refuted | `r2_r3_his_part.txt` §2, §3 |
 | **R4** every consumer of a face id enumerated, file + line, what it reads now | **MET** — 21 sites, one gap stated | `r4_consumers.md` |
 | **R5** sliver guard refuses with the number, before doing anything | **MET** — app preview and core, both | `r2_r3_his_part.txt` §4, `r1_r2_byte_identity.txt` |

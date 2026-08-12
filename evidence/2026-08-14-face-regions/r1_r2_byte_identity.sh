@@ -7,12 +7,18 @@
 #
 #   R2  A REGION IS THE SAME SELECTION. The SAME job expressed two ways —
 #       `face_ids: [N]` and an equivalent one-member `face_regions` +
-#       `region_ids` — produces byte-identical artifacts on the BRANCH cli.
-#       ★ That is the strongest possible form of "CAD error and the
+#       `region_ids` — produces byte-identical DESIGN artifacts on the BRANCH
+#       cli. ★ That is the strongest possible form of "CAD error and the
 #       CAD-attributed triangle share are unchanged to the digit": if every
 #       exported byte matches, every derived measure matches trivially. The
 #       digit-level comparison of the CAD numbers themselves, WITH a union and a
 #       10x5 grid split applied, is `face_region_probe` (r2_r3_his_part.txt).
+#
+#       ★ THE TWO RECEIPTS LEGITIMATELY DIFFER, and are compared separately.
+#       `run_info.json` and `loadcase.json` record WHAT WAS DECLARED, and the
+#       two jobs declare different things — one a face id, one a region. A
+#       receipt that did NOT differ there would be the defect: it would mean the
+#       run could not tell the user which selection it had resolved.
 #
 #   usage: ./r1_r2_byte_identity.sh <base-cli> <branch-cli> <out-dir>
 set -euo pipefail
@@ -76,6 +82,10 @@ run() {  # run <cli> <job> <arm>
   cp "$OUT/l-bracket.step" "$OUT/$job" "$OUT/$arm/"
   ( cd "$OUT/$arm" && "$cli" run "$job" --out run > "$arm.log" 2>&1 ) || {
     echo "RUN FAILED ($arm) — tail of log:"; tail -20 "$OUT/$arm/$arm.log"; exit 1; }
+  # THE DESIGN SET: everything the optimizer produced. No timings, no receipts.
+  ( cd "$OUT/$arm/run" && find . -type f ! -name '*.log' ! -name 'run_info.json' \
+      ! -name 'loadcase.json' ! -name 'iterations.csv' | sort \
+      | xargs shasum -a 256 ) > "$OUT/$arm.design.sha256"
   ( cd "$OUT/$arm/run" && find . -type f ! -name '*.log' | sort \
       | xargs shasum -a 256 ) > "$OUT/$arm.sha256"
 
@@ -125,23 +135,38 @@ echo "base   $BASE_CLI"
 echo "branch $BRANCH_CLI"
 run "$BASE_CLI"   job_faces.json base_faces
 run "$BRANCH_CLI" job_faces.json branch_faces
-echo "-- raw comparison (a difference here is either the design or a clock) --"
-diff -u "$OUT/base_faces.sha256" "$OUT/branch_faces.sha256" || true
-echo "-- with the timestamps/fingerprint stripped --"
+echo "-- the DESIGN set, raw (design.bin, fields.bin, report.json, meshes, alpha) --"
+if diff -u "$OUT/base_faces.design.sha256" "$OUT/branch_faces.design.sha256"; then
+  echo "   identical, byte for byte ($(wc -l < "$OUT/base_faces.design.sha256") files)"
+else
+  echo "R1 FAIL — the DESIGN moved"; exit 1
+fi
+echo "-- the receipts, with the timestamps/fingerprint stripped --"
 if diff -u "$OUT/base_faces.norm.sha256" "$OUT/branch_faces.norm.sha256"; then
   echo "R1 PASS — every artifact identical ($(wc -l < "$OUT/base_faces.norm.sha256") files)"
 else
-  echo "R1 FAIL"; exit 1
+  echo "R1 FAIL — a receipt moved"; exit 1
 fi
 
 echo
 echo "=== R2 — face_ids vs an equivalent identity REGION, same (branch) cli ==="
 run "$BRANCH_CLI" job_regions.json branch_regions
-if diff -u "$OUT/branch_faces.norm.sha256" "$OUT/branch_regions.norm.sha256"; then
+echo "-- the DESIGN set, raw --"
+if diff -u "$OUT/branch_faces.design.sha256" "$OUT/branch_regions.design.sha256"; then
   echo "R2 PASS — a region tags exactly what its face tags, to the byte"
+  echo "         ($(wc -l < "$OUT/branch_faces.design.sha256") design artifacts identical)"
 else
-  echo "R2 FAIL"; exit 1
+  echo "R2 FAIL — the DESIGN moved"; exit 1
 fi
+echo
+echo "-- and the RECEIPTS, which SHOULD differ: they record the declaration --"
+diff -u "$OUT/branch_faces.norm.sha256" "$OUT/branch_regions.norm.sha256" || true
+echo "   the differing files, and the lines that differ:"
+for f in run_info.json loadcase.json; do
+  echo "   --- $f"
+  diff "$OUT/branch_faces/run/$f" "$OUT/branch_regions/run/$f" \
+    | grep -vE '_ms|created_wall|fingerprint' | head -12 || true
+done
 
 echo
 echo "=== R5 — the sliver guard refuses BEFORE anything runs ==="

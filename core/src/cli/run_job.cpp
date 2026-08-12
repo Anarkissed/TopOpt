@@ -4308,7 +4308,16 @@ std::string loadcase_receipt_json(const JobDescription& job,
       s += "    {\"index\": " + std::to_string(g.index) + ", \"face_ids\": [";
       for (std::size_t f = 0; f < g.face_ids.size(); ++f)
         s += (f ? ", " : "") + std::to_string(g.face_ids[f]);
-      s += "], \"force_mag_n\": " + json_num(g.force_mag) +
+      s += "]";
+      // ★ AND THE REGIONS IT DECLARED (task 2026-08-14-face-regions). Written
+      // only when there are some, so a pre-region run's receipt is unchanged.
+      if (!g.region_ids.empty()) {
+        s += ", \"region_ids\": [";
+        for (std::size_t r = 0; r < g.region_ids.size(); ++r)
+          s += (r ? ", " : "") + std::to_string(g.region_ids[r]);
+        s += "]";
+      }
+      s += ", \"force_mag_n\": " + json_num(g.force_mag) +
            ", \"voxels_tagged\": " + std::to_string(g.voxels_tagged) +
            ", \"status\": \"" +
            (g.status == LoadGroupReport::Status::Ok
@@ -4356,6 +4365,33 @@ std::string loadcase_receipt_json(const JobDescription& job,
       s += (i + 1 < setup->face_protection_reports.size()) ? ",\n" : "\n";
     }
     s += "  ],\n";
+    // ★ WHAT EACH DECLARED REGION RESOLVED TO ON THIS IMPORT (task
+    // 2026-08-14-face-regions §3c). A union is persisted as a FILTER plus a hand
+    // add/remove list and re-evaluated on every import, so the receipt has to
+    // carry what it found — and `filter_drift`, which is the only place a CAD
+    // edit that renumbered faces becomes visible after the fact.
+    //
+    // The block is written ONLY when regions were declared, so a pre-region run
+    // produces the run_info.json it always produced (bar R1).
+    if (!setup->face_region_reports.empty()) {
+      s += "  \"face_regions\": [\n";
+      for (std::size_t i = 0; i < setup->face_region_reports.size(); ++i) {
+        const ProductionRunSetup::FaceRegionReport& r =
+            setup->face_region_reports[i];
+        s += "    {\"id\": " + std::to_string(r.id) +
+             ", \"name\": " + json_str(r.name) +
+             ", \"parent_id\": " + std::to_string(r.parent_id) +
+             ", \"member_faces\": " + std::to_string(r.member_faces) +
+             ", \"cuts\": " + std::to_string(r.cuts) +
+             ", \"area_mm2\": " + json_num(r.area_mm2) +
+             ", \"filter_matched\": " + std::to_string(r.filter_matched) +
+             (r.filter_drift_known
+                  ? ", \"filter_drift\": " + std::to_string(r.filter_drift)
+                  : std::string()) + "}";
+        s += (i + 1 < setup->face_region_reports.size()) ? ",\n" : "\n";
+      }
+      s += "  ],\n";
+    }
     // ★ THE ANCHOR/LOAD STRUCTURAL PAD, ON ITS OWN LINE (task 2026-08-12 §1f).
     // It freezes with the same FrozenSolid value at the same depth 3 as a
     // protection, and reading the two together is how "I protected one wall"
