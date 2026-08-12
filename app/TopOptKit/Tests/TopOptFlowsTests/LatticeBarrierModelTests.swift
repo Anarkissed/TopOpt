@@ -218,6 +218,31 @@ final class LatticeBarrierModelTests: XCTestCase {
                       + "on the path the run is built from")
     }
 
+    // MARK: §1a/§1d — the gate AT THE CALL SITE, not only on the value type
+
+    /// A role stored against a group that has since lost its eligibility must not
+    /// reach the job. Checked on `ProjectModel`, the object the run is built from.
+    func testAnIneligibleGroupsRoleNeverReachesTheJob() {
+        let (p, gid) = projectWithProtectedLatticeWall(depthMM: 7.0)
+        XCTAssertEqual(p.latticeEligibleRoles()[gid], .include,
+                       "a protected, latticed wall is eligible")
+        XCTAssertFalse(p.latticeJobRegions().regions.isEmpty,
+                       "and it emits a region")
+
+        // The user clears Protect. The group now declares nothing, so its stored
+        // lattice role is inert — not carried into the run behind their back.
+        p.force.setProtected(gid, false)
+        XCTAssertNil(p.latticeEligibleRoles()[gid], "§1a")
+        XCTAssertTrue(p.latticeJobRegions().regions.isEmpty,
+                      "§1a: and it emits nothing")
+
+        // Keep clear blocks it even with a real role.
+        p.force.makeAnchor(gid)
+        XCTAssertNotNil(p.latticeEligibleRoles()[gid], "an anchor is eligible")
+        p.force.setKeepClearAffix(gid, .on)
+        XCTAssertNil(p.latticeEligibleRoles()[gid], "§1d: keep clear blocks it")
+    }
+
     // MARK: §1f — load and anchor faces are NOT auto-protected
 
     func testLoadAndAnchorFacesAreNeverDeclaredAsProtections() {

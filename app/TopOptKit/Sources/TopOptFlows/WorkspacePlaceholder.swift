@@ -1574,7 +1574,12 @@ public struct WorkspacePlaceholder: View {
         } message: {
             Text(pendingReplacement?.message ?? "")
         }
-        .onAppear { syncLatticeProxy() }
+        .onAppear {
+            syncLatticeProxy()
+            // A reopened project already carries roles and depths — the cards
+            // must be there on arrival, not only after the user touches a chip.
+            refreshLatticeFaceCards()
+        }
     }
 
     // MARK: the lattice page (handoff 2026-07-30-lattice-page)
@@ -4314,7 +4319,9 @@ public struct WorkspacePlaceholder: View {
         LatticeFaceRoleGate.block(
             kind: force.kind(for: g.id),
             protected: force.isProtected(g.id),
-            keepClearOn: project.keepClearIsOn(g))
+            // EXPLICIT only — an anchored bore's AUTO bolt clearance is a derived
+            // default, not a declaration, and must not refuse a real anchor.
+            keepClearOn: force.keepClearAffix(for: g.id) == .on)
     }
 
     private func latticeRoleChip(_ g: SelectionGroup, _ role: LatticeGroupRole,
@@ -5093,7 +5100,10 @@ public struct WorkspacePlaceholder: View {
     /// or "no lattice here" is a COMPLETE declaration, like keep-clear and
     /// Protect — it must not leave the group PENDING and refuse Optimize.
     private var latticeRoleGroupIDs: Set<UUID> {
-        Set(project.lattice.groupRoles.keys)
+        // ELIGIBLE roles only (task 2026-08-12 §1a/§1d) — a role stored against a
+        // group that has since become ineligible must not satisfy the pending
+        // check, because it will not reach the job either.
+        Set(project.latticeEligibleRoles().keys)
     }
 
     /// Optimize is enabled once gravity is set and no group is pending, AND either

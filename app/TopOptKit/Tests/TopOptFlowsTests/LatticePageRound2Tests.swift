@@ -216,7 +216,11 @@ final class LatticePageRound2Tests: XCTestCase {
         let regions = try XCTUnwrap(lat["regions"] as? [[String: Any]])
         XCTAssertEqual(regions.count, 2)
         for entry in regions {
-            XCTAssertEqual(Set(entry.keys), ["role", "kind", "geometry"],
+            // `face_id` joined the allowed set in task 2026-08-12 §0a — core's
+            // `reject_unknown_keys` accepts it and USES it, to refuse a job whose
+            // protection depth and lattice depth for the same face disagree. The
+            // assertion is still exact set-equality against what core allows.
+            XCTAssertEqual(Set(entry.keys), ["role", "kind", "geometry", "face_id"],
                            "exactly the keys core's strict parser allows")
             let role = try XCTUnwrap(entry["role"] as? String)
             let kind = try XCTUnwrap(entry["kind"] as? String)

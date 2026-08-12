@@ -40,8 +40,6 @@ public struct LatticeSetupWizard: View {
     @State private var tileProgress: Double = 1
     /// The stress wipe, 0…1 — the renderer's own `reveal`.
     @State private var wipe: Double = 0
-    /// True while the dive is held, so the camera stays in close.
-    @State private var dived = false
     /// Last measured build+upload time for the centre object, in ms (R4).
     @State private var lastLatencyMS: Double = 0
     @State private var mesh: ViewerMesh?
@@ -333,10 +331,7 @@ public struct LatticeSetupWizard: View {
         let target: SIMD3<Float> =
             LatticeWizardSample.densestPoint(for: mesh ?? model.stageMesh())
         camera.pan(dx: -target.x, dy: -target.z, viewportHeight: 800)
-        withAnimation(.easeInOut(duration: 0.9)) {
-            camera.zoom(0.45)
-            dived = true
-        }
+        withAnimation(.easeInOut(duration: 0.9)) { camera.zoom(0.45) }
     }
 
     /// Step the tile expansion so the block grows ring by ring rather than

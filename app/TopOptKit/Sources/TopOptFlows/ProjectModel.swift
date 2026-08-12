@@ -833,6 +833,23 @@ public final class ProjectModel: ObservableObject {
         }
     }
 
+    /// ★ THE ROLE GATE, APPLIED WHERE THE RUN IS BUILT (task 2026-08-12 §1a/§1d).
+    /// A stored role whose group has since lost its eligibility — the user cleared
+    /// its Protect, or affixed Keep clear — must not reach the job. Filtering here
+    /// rather than pruning at each of the six places a role can change means no
+    /// call site can forget: this is the ONE function the emission goes through.
+    public func latticeEligibleRoles() -> [UUID: LatticeGroupRole] {
+        var byID: [UUID: SelectionGroup] = [:]
+        for g in selection.groups { byID[g.id] = g }
+        return LatticeFaceRoleGate.pruned(roles: lattice.groupRoles) { id in
+            guard let g = byID[id] else { return false }
+            return LatticeFaceRoleGate.allowed(
+                kind: force.kind(for: id), protected: force.isProtected(id),
+                // EXPLICIT only — see LatticeFaceRoleGate.block.
+                keepClearOn: force.keepClearAffix(for: id) == .on)
+        }
+    }
+
     public func latticeJobRegions() -> LatticeRegionEmission.Result {
         guard lattice.enabled else { return .init(regions: [], skippedFaces: 0) }
         let resolvedPrims: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)] = { gid in
@@ -845,7 +862,7 @@ public final class ProjectModel: ObservableObject {
         }
         return LatticeRegionEmission.regions(
             groups: selection.groups,
-            roles: lattice.groupRoles,
+            roles: latticeEligibleRoles(),
             primitives: resolvedPrims,
             includePrimitives: lattice.includePrimitives.map { ($0, $0.resolvedDepthMM) },
             faceDepthMM: lattice.paintDepthMM,

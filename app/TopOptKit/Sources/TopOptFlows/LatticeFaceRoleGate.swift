@@ -47,9 +47,12 @@ public enum LatticeFaceRoleGate {
     /// Whether `group` may be set to "Lattice here" / "No lattice here", and why
     /// not when it may not.
     ///
-    /// `keepClearOn` is the group's EFFECTIVE keep-clear (including the anchored-
-    /// bore auto), which only the caller can resolve — `ForceModel.keepClearIsOn`
-    /// takes the auto default the workspace computes.
+    /// ★ `keepClearOn` is the EXPLICIT affix, NOT the effective value. An anchored
+    /// bore gets an AUTOMATIC bolt clearance (design 095) that the user never
+    /// declared, and blocking on it would refuse a legitimate ANCHOR group —
+    /// which is exactly what `LatticePageRound2Tests` caught when this read the
+    /// effective value. §1d blocks "Keep clear" the DECLARATION; an inferred
+    /// bolt-clearance is not one.
     public static func block(kind: GroupKind, protected: Bool,
                              keepClearOn: Bool) -> Block? {
         if keepClearOn { return .keepClear }

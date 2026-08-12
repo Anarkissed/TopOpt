@@ -237,6 +237,29 @@ final class LatticeWizardTests: XCTestCase {
                       "§5: Auto asks for the per-region breakdown")
     }
 
+    /// ★ §4c, THE SHARPEST VERSION. Auto is the DEFAULT now, so "Auto produces
+    /// no job" is "the lattice silently does nothing on a fresh project". Core's
+    /// grading schema needs the strut line width, and without one the app cannot
+    /// state a graded job — so it emits the UNIFORM one rather than nothing, and
+    /// says so through `graded`. (In production the width always exists:
+    /// PrintParams derives it by rule. This is the belt.)
+    func testAutoWithNoLineWidthStillProducesAJobAndSaysItIsNotGraded() throws {
+        var s = LatticeSettings(enabled: true)
+        s.densityMode = .auto
+        s.minRelativeDensity = 0.2
+        s.maxRelativeDensity = 0.5
+
+        let graded = s.runSpec(lineWidthMM: 0.45)
+        XCTAssertNotNil(graded, "with a width, Auto is graded")
+        XCTAssertEqual(graded?.graded, true)
+
+        let noWidth = try XCTUnwrap(s.runSpec(lineWidthMM: 0),
+                                    "§4c: Auto must NEVER produce no job at all")
+        XCTAssertFalse(noWidth.graded,
+                       "§4c: it falls back to the buildable option AND says so — "
+                       + "bar B6 forbids a SILENT uniform, not an honest one")
+    }
+
     func testAutoLeavesAnExplicitChoiceAlone() {
         var s = LatticeSettings()
         s.cellSizeMode = .fixed

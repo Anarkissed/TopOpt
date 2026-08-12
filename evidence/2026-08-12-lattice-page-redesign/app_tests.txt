@@ -1,0 +1,60 @@
+Test Suite 'WorkspaceInteractionTests' passed at 2026-08-11 20:35:51.371.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-11 20:35:51.371.
+	 Executed 1428 tests, with 21 tests skipped and 11 failures (0 unexpected) in 1235.226 (1235.344) seconds
+Test Suite 'All tests' failed at 2026-08-11 20:35:51.372.
+	 Executed 1428 tests, with 21 tests skipped and 11 failures (0 unexpected) in 1235.226 (1235.348) seconds
+essing-reachability-852264/evidence/2026-07-26-plane-extents/01_plane_row_length_width_depth.png
+Q3 EVIDENCE: |F|=58.839900970458984 N, load voxels=1024, anchor voxels=1024, maxStress=1.3260047014896772 MPa, maxDisp=0.0021794815385106484 mm, accepted=true
+Q4 EVIDENCE: analyze: the declared load case produced NO external load — every declared load group contributed nothing at resolution 32: group 0 (face 0, |F|=0 N): zero force — set a non-zero force on this load — nothing to certify under
+ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/round6_3_gizmo_rotation.png
+ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/round6_2_panel_no_wrap.png
+ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/round6_1_chips_off_handles.png
+GATE-DIAGNOSIS-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/evidence/2026-08-02-gate-diagnosis-recommendations/wallmount_dialog_before_after.txt
+STROKE LATENCY ON HIS OWN VARIANT — rung 068
+
+BUILD: DEBUG — NOT the configuration the app ships. Re-run with
+       `swift test -c release --filter SmoothingStrokeLatencyEvidence`
+       for the numbers he actually feels.
+
+mesh   variant_068.stl: 14386084 bytes, 143862 vertices / 287720 triangles
+brush  every vertex at weight 1.0, strength 0.49 (Taubin pairs as resolved by taubin_params_for_strength)
+repeats per row: 5; every figure is ms PER STROKE
+
+stage                                  repeats    ms/stroke
+------------------------------------------------------------
+A  preview via PATH   — STL re-import        5     699.5
+A  preview via PATH   — smoothing            5      71.1
+A  preview via PATH   — TOTAL                5     922.5
+B  preview via MEMORY — STL re-import        5       0.0
+B  preview via MEMORY — smoothing            5      71.7
+B  preview via MEMORY — TOTAL                5     354.3
+   ViewerMesh build (app side, both)         5    2397.9
+------------------------------------------------------------
+stroke release -> updated preview, BEFORE:   3320.5 ms
+stroke release -> updated preview, AFTER :   2752.2 ms
+removed: 568.2 ms per stroke (17.1% of the before figure)
+
+
+S1d — WHAT ELSE A PASS REBUILDS (not on the critical path above, but
+      paid on EVERY SwiftUI body evaluation, of which a stroke causes
+      several):
+   smoothBrush.viewerTints()  863160 entries      239.3 ms
+   the coordinator's array compare against the uploaded copy     64.7 ms
+
+The import share of the SHIPPED preview call: 90.8%
+moved vertices 143862 / 143862; max displacement 0.4449 mm
+HIS VARIANT: rung 068 — 143862 vertices / 287720 triangles
+HE SETS HIS VIEW: distance 181.5483, target (84.785, -28.061, 110.690)
+  stroke 1 -> rung 1, 20403 vertices moved, max 0.2681 mm, preview 389 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 2 -> rung 2, 20403 vertices moved, max 0.3715 mm, preview 411 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 3 -> rung 3, 20403 vertices moved, max 0.4221 mm, preview 409 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  toggled back to Original — camera UNCHANGED
+  renderer holds the page's geometry; settle ran ONCE for the whole session
+TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/tap_overselect_before.png
+TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/tap_overselect_after.png
+STEP-IMPORT-PROOF l-bracket.step triangleCount=236 vertexCount=116 faceCount=10 watertight=true
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

@@ -1,16 +1,16 @@
 R4 — preview latency per interaction, median of 9 builds
 task 2026-08-12-lattice-page-redesign §3c
-machine: Apple M2 Pro; build: RELEASE
+machine: Apple M2 Pro; build: DEBUG (a release build is faster; the bar is met in the slower one)
 NOTE: this is the TRIANGLE BUILD, which is what a change costs.
 3MF would not move any of these numbers: the sample being SMALL is
 what makes them small.
 
 interaction                                        ms   triangles
-stage A · type morph (octet→bcc)                 0.05        1432
-stage A · cell size                              0.15        1432
-stage A · strut thickness                        0.15        1432
-stage B · tiled sample (one frame)              13.04      118920
-stage B · density mode                          15.36      118920
-stage B · boundary finish                       13.54      118920
-stage B · worst case (cap 5³)                   12.90      118920
-stage C · baked stress field (sample)            0.01        1728
+stage A · type morph (octet→bcc)                 3.62        1432
+stage A · cell size                             12.30        1432
+stage A · strut thickness                       12.01        1432
+stage B · tiled sample (one frame)             950.94      118920
+stage B · density mode                         950.22      118920
+stage B · boundary finish                      947.91      118920
+stage B · worst case (cap 5³)                  952.56      118920
+stage C · baked stress field (sample)            0.54        1728
