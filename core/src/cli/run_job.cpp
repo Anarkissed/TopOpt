@@ -6511,6 +6511,18 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
       // it was right, and I still missed it. `s0_table.py` reading a 0 is what
       // caught it.)
       echo.anchor_pad_report = setup.anchor_pad_report;
+      // ★ AND IT BIT AGAIN (task 2026-08-14-face-regions). This branch added
+      // `face_region_reports`, emitted the block that writes them, watched
+      // loadcase.json come out WITHOUT it, and found the missing line here —
+      // three warnings deep in comments that all said "every new setup field
+      // has to be added here too". A hand-copied list cannot notice a field it
+      // was never told about. THE FIX IS THE ONE `production_loadcase_from_job`
+      // ALREADY USES: decompose by structured binding so the language forces
+      // every member to be named. It is not done here because the echo copies a
+      // deliberate SUBSET (setup.options has been moved from by this point), so
+      // the binding needs a `(void)` line per skipped field — worth doing, and
+      // out of scope for this branch's diff.
+      echo.face_region_reports = setup.face_region_reports;
       // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
       // onto the echo too, or the receipt would silently report a growth run as a
       // reduction one (the echo is a hand-copied subset, so every new setup field

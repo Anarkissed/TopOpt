@@ -378,12 +378,25 @@ honest reading is 1449/1457 HERE and 1457/1457 in CI, and the three 3MF tests
 DID NOT RUN. Core registers 120 tests locally against CI's 122 for the same
 reason — report N/122, never N/N.
 
-★ **A trap this branch walked into, recorded so the next session does not.**
-`cmake --build build --target topopt-cli` (hyphen) is a SILENT NO-OP: the target
-is `topopt_cli` and the hyphen is the OUTPUT NAME, which make considers already
-up to date. It prints nothing and exits 0. The first R1/R2 evidence was produced
-by a binary three receipt-changes stale, and only a `ls -la` on the binary's
-timestamp caught it.
+★ **TWO traps this branch walked into, recorded so the next session does not.**
+
+1. `cmake --build build --target topopt-cli` (hyphen) is a SILENT NO-OP: the
+   target is `topopt_cli`; the hyphen is the OUTPUT NAME, which make considers
+   already up to date. It prints nothing and exits 0. The first R1/R2 evidence
+   was produced by a binary three receipt-changes stale, and only `ls -la` on
+   the binary's timestamp caught it.
+
+2. The run receipt is assembled from a **hand-copied `echo` block**
+   (`run_job.cpp:6501`) that carries a deliberate subset of `ProductionRunSetup`.
+   Its own comments warn about this **three times** — including "it was right,
+   and I still missed it" from the last person who did — and this branch missed
+   it too: `face_region_reports` was populated, the emitter that writes them was
+   correct, and `loadcase.json` came out without the block. What caught it was
+   grepping the produced artifact, not reading the code.
+   **The fix is the one `production_loadcase_from_job` already uses**: decompose
+   by structured binding so the language refuses to compile until every member is
+   named. It needs a `(void)` line per deliberately-skipped field (`setup.options`
+   has been moved from by that point) and is worth doing on its own.
 
 **The instrument.** `core/tests/harness/face_region_probe.cpp` is what produced
 §0. It is a probe, not a test — it runs on a real part and prints what it finds,
