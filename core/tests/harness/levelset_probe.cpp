@@ -2901,6 +2901,10 @@ int main(int argc, char** argv) {
          // ★ the renucleation counters. Emitted because a mechanism whose
          // counters never reach the CSV is a mechanism nobody can check fired.
          "renuc_events,renuc_voxels,"
+         // ★ THE MANUFACTURING READING of drainability, beside `cavities`,
+         // which is the OPTIMISER reading. The two answer different
+         // questions and neither is a substitute for the other.
+         "sealed_pockets_manuf,sealed_voxels_manuf,sealed_mm3_manuf,"
          // ★ THE EXACT-FRACTION COLUMNS (PR 327). All zero when --frac is off.
          "frac_cut_cells,frac_area_mm2,frac_build_ms,frac_sens_ms,"
          "iteration_wall_s\n";
@@ -2940,6 +2944,8 @@ int main(int argc, char** argv) {
   long long mono_chi = 0, mono_tunnels = 0;
   long long mono_violations = 0, mono_reverts = 0, mono_repaired_voxels = 0;
   long long renuc_events = 0, renuc_voxels = 0;
+  // ★ the MANUFACTURING drainability reading, beside the optimiser one.
+  long long drain_sealed_pockets = 0, drain_sealed_voxels = 0;
   // ★ THE TWO WAYS THE COUNT CAN RISE, SEPARATED. `new` is NUCLEATION — a
   // component sharing no voxel with any previous void. `split` is the rest —
   // existing void divided by solid bridging it, which is classically legal.
@@ -3892,6 +3898,56 @@ int main(int argc, char** argv) {
         return grid.tags[v] != VoxelTag::Empty && eff[v] == MaskValue::Active;
       };
       VoidTopology tp = void_topology(d, occ, in_active, true);
+
+      // ── ★ THE SECOND READING: DRAINABILITY, WHICH IS A DIFFERENT QUESTION ──
+      //
+      // `tp.cavities` above is the OPTIMISER's reading. `void_topology` scores a
+      // component open when it touches a lattice face OR a voxel outside the
+      // region, and `in_active` puts the FROZEN set outside the region — so a
+      // pocket walled in entirely by a bolt boss is scored DRAINABLE.
+      //
+      // ★ THAT IS NOT A BUG IN `void_topology`, WHICH TAKES THE PREDICATE AS A
+      // PARAMETER AND IS CORRECT FOR BOTH. It is the right answer to the
+      // question the optimiser asks — the optimiser does not own the frozen set
+      // and its component bookkeeping is right to ignore it. It is the wrong
+      // question for a printer, because powder does not pass through a boss.
+      // `test_plsm_topology_drainability` pins both readings on one fixture.
+      //
+      // ★ AND REPORTING ONLY THE FIRST IS WHAT MISLED THIS BRANCH: PR 327's
+      // cavity counts read 5 / 0 / 2 where the manufacturing reading gives
+      // 51 / 21 / 32, and the discrepancy was chased as a defect before it was
+      // understood as two questions. So BOTH are emitted, always, side by side.
+      //
+      // The predicate is the WHOLE PART — every non-Empty voxel, frozen
+      // included — and 'outside' is therefore only the true exterior.
+      auto in_part = [&](std::size_t v) {
+        return grid.tags[v] != VoxelTag::Empty;
+      };
+      const VoidTopology tp_manuf = void_topology(d, occ, in_part, true);
+      drain_sealed_pockets = tp_manuf.cavities;
+      drain_sealed_voxels = 0;
+      if (tp_manuf.cavities > 0) {
+        // Which labels are sealed: recompute the open set the same way
+        // `void_topology` does, then total the voxels in the closed components.
+        std::vector<char> open(static_cast<std::size_t>(tp_manuf.components) + 1, 0);
+        for (int k = 0; k < d.nz; ++k)
+          for (int j = 0; j < d.ny; ++j)
+            for (int i = 0; i < d.nx; ++i) {
+              const std::size_t v = d.at(i, j, k);
+              if (!tp_manuf.label[v]) continue;
+              bool out = (i == 0 || j == 0 || k == 0 || i == d.nx - 1 ||
+                          j == d.ny - 1 || k == d.nz - 1);
+              if (!out) {
+                const int nb[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
+                for (auto& o : nb)
+                  if (!in_part(d.at(i + o[0], j + o[1], k + o[2]))) { out = true; break; }
+              }
+              if (out) open[static_cast<std::size_t>(tp_manuf.label[v])] = 1;
+            }
+        for (std::size_t v = 0; v < n; ++v)
+          if (tp_manuf.label[v] && !open[static_cast<std::size_t>(tp_manuf.label[v])])
+            ++drain_sealed_voxels;
+      }
       // ★★ THE BRIEF'S TEST AND THE RIGHT TEST ARE DIFFERENT, AND THE
       // DIFFERENCE IS THIS TASK'S ANSWER. THE OVERRIDE IS DECLARED HERE.
       //
@@ -4792,6 +4848,8 @@ int main(int argc, char** argv) {
         << ',' << mono_tunnels << ',' << mono_violations << ',' << mono_reverts
         << ',' << mono_repaired_voxels << ',' << mono_new_components << ','
         << mono_split_delta << ',' << renuc_events << ',' << renuc_voxels
+        << ',' << drain_sealed_pockets << ',' << drain_sealed_voxels << ','
+        << (static_cast<double>(drain_sealed_voxels) * h * h * h)
         << ',' << frac_boundary << ',' << frac_area << ','
         << (frac_build_s * 1000.0) << ',' << (frac_sens_s * 1000.0) << ','
         << it_wall << '\n';
