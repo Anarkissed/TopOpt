@@ -2,17 +2,27 @@
 # THE MECHANISM PROBES — three solves each, because three solves is the whole
 # question.
 #
-# ★ WHY THREE. `kMgLatchThreshold = 3`: the latch is decided by whether the FIRST
-# THREE solves of a run contract, and his run's first three each burned the full
-# 300-cycle budget (multigrid.cpp:145, and §2a's table). So "does this posture
-# make the V-cycle carry on his part?" is answered by three solves of rung 0 and
-# is not made more true by four hundred. A posture that does not change the first
-# three cannot change the run, because after them the latch closes and every
-# later solve takes the identical Jacobi path.
+# ★ WHY SO FEW. `kMgLatchThreshold = 3`: the latch is decided by whether the
+# FIRST THREE solves of a run contract, and his run's three attempts were
+# IDENTICAL — 300 cycles each, the whole budget, no contraction
+# (multigrid.cpp:145, and §2a's table). A posture that does not change the first
+# attempt cannot change the run, because after the third the latch closes and
+# every later solve takes the identical Jacobi path. So "does this posture make
+# the V-cycle carry on his part?" is answered by the attempts, and the attempts
+# all happen at the start.
 #
-# That is what makes these affordable: each probe is ~3 solves of rung 0 rather
-# than a 4-rung ladder, and the arms in run_arms.sh are reserved for the postures
-# whose cost has to be priced over a whole run rather than merely detected.
+# At `ITERS=1` the ladder yields ONE multigrid attempt in iterations.csv — rung
+# 0, iteration 1, the same solve his run burned 300 cycles on — because the
+# other two stagnations that close the latch are the rung-boundary certification
+# solves, which the per-iteration CSV does not carry a row for. One attempt
+# against his one attempt, same solve, same field, is the comparison. `ITERS` is
+# overridable and 3 gives three rung-0 attempts if the machine can afford them.
+#
+# ★ AND WHY IT IS ONE AND NOT THREE HERE, said plainly: the host was running four
+# other agents' TopOpt jobs throughout (host_load.txt records load averages of
+# 108-122 on a 10-core box), and a 4-rung ladder per probe would not have
+# finished. The reduction is in COVERAGE, not in the comparison — every probe is
+# measured against a control produced the same way, at the same ITERS.
 #
 # ★ AND THE ONE THING THREE SOLVES CANNOT ANSWER, said here rather than in the
 # handoff's small print: a posture that does NOT rescue rung 0 might still have
@@ -41,7 +51,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 cd "$REPO"
 
-ITERS=${ITERS:-3}
+ITERS=${ITERS:-1}
 THREADS=${THREADS:-6}
 WORK=${WORK:-"$HERE/probes"}
 mkdir -p "$WORK"

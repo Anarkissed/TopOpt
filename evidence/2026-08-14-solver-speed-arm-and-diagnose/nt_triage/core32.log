@@ -1,0 +1,1 @@
+ARM core=32  job=evidence/2026-08-14-solver-speed-arm-and-diagnose/arms/job/job.json  out=/private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-solver-speed-accelerators-diagnose-436a6d/97a1c895-755b-4076-a692-884f6d50f63f/scratchpad/nt32  threads=6  plsm_max_iterations=1

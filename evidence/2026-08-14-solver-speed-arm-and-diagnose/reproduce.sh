@@ -34,14 +34,18 @@ bash "$HERE/assertion_census.sh" | tee "$HERE/r6_assertion_census.txt"
 # ── 4. R2 — the harness is inert: `--arm base` reproduces `topopt-cli run`.
 sh "$HERE/check_r2.sh" | tee "$HERE/r2_byte_identity.txt"
 
-# ── 5. THE MECHANISM PROBES. Three solves each; see run_probes.sh for why
+# ── 5. §1(b) TRIAGE — N_t at each tiling, one solve per point. Cheap, and it
+# is what decides whether a smaller-basis ARM is worth running at all.
+sh "$HERE/run_nt_triage.sh" | tee "$HERE/nt_triage.txt"
+
+# ── 6. THE MECHANISM PROBES. Three solves each; see run_probes.sh for why
 # three is the whole question.
 sh "$HERE/run_probes.sh" all | tee "$HERE/probes.txt"
 
-# ── 6. THE ARMS. A 4-rung ladder each, capped identically. The long part.
+# ── 7. THE ARMS. A 4-rung ladder each, capped identically. The long part.
 sh "$HERE/run_arms.sh" all
 
-# ── 7. the tables again, now with the arms in them.
+# ── 8. the tables again, now with the arms in them.
 python3 "$HERE/tables.py" > "$HERE/tables.txt"
 cat "$HERE/tables.txt"
 

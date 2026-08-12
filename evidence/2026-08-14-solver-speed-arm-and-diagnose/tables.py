@@ -226,14 +226,18 @@ def gate_distribution():
 
 # ── The mechanism probes: three solves each, because three is the latch. ─────
 def probes():
-    section("§4(a) / §3  THE MECHANISM PROBES — the three solves that set the latch")
+    section("§4(a) / §3  THE MECHANISM PROBES — the solves multigrid is ATTEMPTED on")
     P = os.path.join(HERE, "probes")
     if not os.path.isdir(P):
         print("no probes/ directory yet")
         return
-    print("kMgLatchThreshold = 3: whether a posture changes the run is decided by")
-    print("whether it changes these three solves. 300 cycles = the full budget =")
-    print("the V-cycle never contracted.\n")
+    print("kMgLatchThreshold = 3: the latch is decided by the first three ATTEMPTS,")
+    print("and his three were identical — 300 cycles each, the whole budget, no")
+    print("contraction. So a posture that does not change the FIRST attempt cannot")
+    print("change the run. At ITERS=1 the ladder yields one attempt (rung 0 iter 1);")
+    print("the other two stagnations that close the latch are rung-boundary")
+    print("certification solves, which iterations.csv carries no row for.")
+    print("mg_cycles 300 = the full budget = the V-cycle never contracted.\n")
     print(f"{'probe':>8} {'solve':>6} {'cg_iters':>9} {'hier_built':>11} "
           f"{'mg_cycles':>10} {'used_mg':>8}")
     for n in ("ctl", "alg1", "eta05", "eta40"):

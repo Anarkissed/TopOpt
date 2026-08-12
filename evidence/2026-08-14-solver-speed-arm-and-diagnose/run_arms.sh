@@ -29,7 +29,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 cd "$REPO"
 
-ITERS=${ITERS:-6}
+ITERS=${ITERS:-2}
 THREADS=${THREADS:-3}
 WORK=${WORK:-"$HERE/arms"}
 mkdir -p "$WORK"
