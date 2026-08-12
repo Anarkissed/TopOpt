@@ -49,13 +49,22 @@ opens this file cannot plan against −11.7%.
 
 ### (b) ★ what eta 2 → 1 ALSO does, which the surface tables do not show
 
-`plsm_heaviside` is GridapTopOpt's, and `H(0.5h, eta)` is what a FrozenSolid
+`plsm_heaviside` is GridapTopOpt's, and `H(h/2, eta)` is what a FrozenSolid
 voxel's ersatz occupancy comes out at under the smooth boolean, because
-`phi_eff <= -h/2` there by construction. At eta = 2 voxels that is **0.7375**; at
-eta = 1 it is **0.9088**. So on the `Heaviside` path, halving eta also stiffens
-the whole frozen set by 23% — the anchor pad, the load pad and the protected
-face. It is reported because the arms measure the two changes together and the
-margin column belongs partly to this one.
+`phi_eff <= -h/2` there by construction. At eta = 2 voxels that is **0.737540**;
+at eta = 1 it is **0.909155**. ★ So on the `Heaviside` path, halving eta also
+stiffens the WHOLE FROZEN SET by 23% — the anchor pad, the load pad and the
+protected face — and by the same arithmetic it empties the keep-outs, whose
+occupancy falls from **0.262460** to **0.090845**.
+
+★ **IT IS NOT AN ARGUMENT: THE RUN PRINTS IT.** `run_info.json` on the shipped
+default reads `plsm_frozen_floor_occupancy: 0.9091549431`, which is `H(h/2, 1·h)`
+to ten digits (`evidence/.../path_validation`). That is how item 1 is verified to
+be in force rather than merely written down.
+
+★ **It is reported here because the arms measure the two changes together**, so
+the margin column between `B_heaviside` and `C_eta1` belongs partly to this one
+and not only to the band the shape derivative sees.
 
 ★ **Under the volume fraction it stops existing**: a frozen cell is STAMPED to
 1.0 and the guarantee is exact rather than a band-width argument. §2(c).
@@ -153,8 +162,10 @@ representation later, and it is now a measurement rather than a paragraph.
 
 ★ **A second thing falls out of it and is reported rather than buried:** under
 the old ersatz a FrozenVoid (keep-out) voxel carried occupancy `H_eta(-h/2)` —
-**0.2625 at eta = 2, 0.0912 at eta = 1** — so keep-outs were never actually
-empty. Under the fraction they are exactly 0.
+**0.262460 at eta = 2, 0.090845 at eta = 1** — so a keep-out was never actually
+empty, it was a quarter full. Under the fraction it is exactly 0. Nothing in this
+task's arms isolates what that was worth; it is named as a consequence, not
+claimed as a result.
 
 ### (e) ★ THE SENSITIVITY, WHICH IS THE PART THAT CAN WASTE THE RUN
 
