@@ -350,10 +350,22 @@ the cap ended up being chosen by measurement rather than by taste.
   auto must never become uniform behind the user's back, and a `graded: false`
   flag is not the same as a refusal the page states. §4c is about a region that
   cannot be CERTIFIED; a missing print parameter is a missing INPUT, and refusing
-  with a named reason is correct there. Reverted. The guarantee is pinned where it
-  actually holds instead: `PrintParams` derives the strut width by rule from the
-  wall beads, so it is never 0 and there is no configuration a user can reach in
-  which the new default emits nothing (`testARealProjectAlwaysHasTheWidthAutoNeeds`).
+  with a named reason is correct there. Reverted.
+
+  Reverting it re-broke three tests that assert "an enabled octet lattice HAS
+  a spec" from a bare `LatticeSettings(enabled: true)` — a fixture that meant
+  UNIFORM until §4b moved the default. Each now names the mode it is actually
+  about (`testRunSpecGating` asserts `generateRelativeDensity` and
+  `strutRadiusMM`, which only a uniform spec carries; the two round-2 tests
+  are about region emission reaching core's parser). But pinning them to
+  uniform would have left NOTHING checking that the new default posture emits
+  anything at all — which is precisely the failure §4b makes possible, and why
+  I reached for the fallback in the first place. So that coverage is REPLACED,
+  not dropped: `testTheNewDefaultPostureEmitsALatticeBlockWithItsRegions`
+  drives the default settings at a real `PrintParams` width and requires a
+  GRADED spec carrying the declared region and its `face_id`; and
+  `testARealProjectAlwaysHasTheWidthAutoNeeds` pins why the nil is unreachable
+  in production — the strut width is derived by rule and is never 0.
 * **(d) WHICH STRESS FIELD, ON A REAL JOB — resolved, not blocking.** There is no
   deadlock on the RUN path: the field Auto grades from is computed INSIDE the run,
   per accepted variant, from that variant's OWN final von Mises field, and the
