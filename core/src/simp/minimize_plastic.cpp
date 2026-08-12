@@ -715,6 +715,24 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       throw std::invalid_argument(
           "minimize_plastic: frozen_lattice_region_id size != solved-grid "
           "voxel_count (build it against minimize_plastic_solved_grid)");
+    // ★ PRINTABILITY IS ENTIRELY USER INPUT — REFUSE, NEVER ASSUME. The minimum
+    // extrudable strut width comes from the project's print profile, which the
+    // user chose and the software may not change. There is no default that is
+    // right for two different nozzles, and a strut narrower than one bead does
+    // not come out of ANY of them. A run that cannot state the number cannot
+    // decide printability, and a lattice whose printability was never decided is
+    // not something to emit.
+    if (!(options.frozen_lattice_min_extrudable_width_mm > 0.0) ||
+        !std::isfinite(options.frozen_lattice_min_extrudable_width_mm))
+      throw std::invalid_argument(
+          "minimize_plastic: frozen_lattice is armed but "
+          "frozen_lattice_min_extrudable_width_mm is not set (it must be finite "
+          "and > 0). This is the MINIMUM EXTRUDABLE STRUT WIDTH from the "
+          "project's own print profile — the job's "
+          "\"min_extrudable_width_mm\" / the app's strut line width. It has no "
+          "default: a 0.25 mm nozzle and a 0.8 mm nozzle disagree about the "
+          "printability floor by more than 3x, so assuming one would either "
+          "refuse a lattice that prints or approve one that comes out as gaps.");
 
     // The frozen set the LOOP holds — `effective_design_mask`, not the caller's
     // raw mask, for the reason that function's own comment gives: a receipt built

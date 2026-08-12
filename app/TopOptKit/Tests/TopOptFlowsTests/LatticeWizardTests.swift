@@ -321,6 +321,15 @@ final class LatticeWizardTests: XCTestCase {
 
     // MARK: §5 — per-region verdicts
 
+    /// ★ THE PROJECT'S PRINT PROFILE, stated rather than defaulted. Printability
+    /// is entirely user input: `LatticeFaceCardDerivation.card` takes the minimum
+    /// extrudable strut width and has NO default for it, because a 0.25 mm and a
+    /// 0.80 mm nozzle disagree about the printability floor by more than 3x. The
+    /// cards below are AUTO cards, whose cell is chosen at or above the floor
+    /// this width produced, so they are printable by construction — but they still
+    /// have to say which profile they mean.
+    private let profileWidthMM = 0.45
+
     private func bounds(floor: Double, cpm: Double) -> TopOptKit.LatticeCellBounds {
         TopOptKit.LatticeCellBounds(printabilityFloorMM: floor,
                                     cellsPerMemberFloor: cpm, valid: true)
@@ -335,7 +344,8 @@ final class LatticeWizardTests: XCTestCase {
         let thick = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 40, heldVoxels: 5_000, spacingMM: 1.705,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits)
+            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
+            minExtrudableWidthMM: profileWidthMM)
         XCTAssertEqual(thick.verdict, .certified)
         XCTAssertEqual(thick.cellMM, 8, accuracy: 1e-9)
         XCTAssertGreaterThan(thick.strutDiameterMM, 0)
@@ -345,7 +355,8 @@ final class LatticeWizardTests: XCTestCase {
         let thin = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 7, heldVoxels: 10_554, spacingMM: 1.705,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 4.6026, cpm: 5), limits: limits)
+            bounds: bounds(floor: 4.6026, cpm: 5), limits: limits,
+            minExtrudableWidthMM: profileWidthMM)
         XCTAssertEqual(thin.verdict, .outOfRegime)
         XCTAssertEqual(thin.cellMM, 4.6026, accuracy: 1e-9,
                        "§4c: Auto still picks the BUILDABLE cell — it does not "
@@ -357,7 +368,8 @@ final class LatticeWizardTests: XCTestCase {
         let c = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 5, heldVoxels: 10_554, spacingMM: 1.70527,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits)
+            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
+            minExtrudableWidthMM: profileWidthMM)
         let expectVolume = 10_554.0 * pow(1.70527, 3)
         XCTAssertEqual(c.heldVolumeMM3, expectVolume, accuracy: 1e-6)
         XCTAssertEqual(c.heldMassG, expectVolume * 1.24 / 1000, accuracy: 1e-9)
@@ -368,7 +380,8 @@ final class LatticeWizardTests: XCTestCase {
         let c = LatticeFaceCardDerivation.card(
             faceID: 9, depthMM: 7, heldVoxels: 0, spacingMM: 1.7,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits)
+            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
+            minExtrudableWidthMM: profileWidthMM)
         XCTAssertEqual(c.verdict, .noMaterial)
         XCTAssertEqual(c.cellText, "—")
         XCTAssertEqual(c.heldText, "—")
@@ -378,11 +391,13 @@ final class LatticeWizardTests: XCTestCase {
         let ok = LatticeFaceCardDerivation.card(
             faceID: 1, depthMM: 40, heldVoxels: 100, spacingMM: 1.7,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits)
+            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
+            minExtrudableWidthMM: profileWidthMM)
         let bad = LatticeFaceCardDerivation.card(
             faceID: 2, depthMM: 7, heldVoxels: 100, spacingMM: 1.7,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 4.6, cpm: 5), limits: limits)
+            bounds: bounds(floor: 4.6, cpm: 5), limits: limits,
+            minExtrudableWidthMM: profileWidthMM)
         let s = LatticeFaceCardDerivation.partSummary([ok, bad, ok])
         XCTAssertEqual(s.verdict, .outOfRegime, "§5b: the part verdict is stated")
         XCTAssertEqual(s.certified, 2, "§5b: AND the breakdown that produced it")

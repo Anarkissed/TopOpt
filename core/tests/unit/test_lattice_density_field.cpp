@@ -285,6 +285,40 @@ int main() {
                  "no answer");
   }
 
+  // ── ★ PRINTABILITY IS ENTIRELY USER INPUT — no default, ever ─────────────
+  //
+  // Every project carries a print profile the user chose and the software may not
+  // change. The minimum extrudable strut width comes from THERE. A hardcoded one
+  // is wrong for everybody whose nozzle differs, and the two ends of the common
+  // range disagree by more than 3x — so "unset" must be a REFUSAL and never a
+  // number the code picked. (`frozen_lattice_min_extrudable_width_mm` defaulted
+  // to 0.45 — his nozzle — in an earlier cut of this task. This is that bug's
+  // gravestone.)
+  {
+    // The SAME density, the SAME cell, three different profiles: the verdicts
+    // must differ, which is the whole reason the number cannot be assumed.
+    CHECK(lattice_density_printable(T, 0.30, 2.0, 0.25),
+          "a 0.25 mm nozzle prints a 30% lattice at a 2 mm cell");
+    CHECK(lattice_density_printable(T, 0.30, 2.0, 0.45),
+          "and so does a 0.45 mm one");
+    CHECK(!lattice_density_printable(T, 0.30, 2.0, 0.80),
+          "★ and a 0.80 mm one does NOT — same lattice, same cell, opposite "
+          "verdict. That is why there is no default width.");
+
+    // The FLOOR moves with the profile too, monotonically: a fatter bead needs a
+    // bigger cell before the band's lightest strut prints.
+    const double f25 = lattice_cell_printability_floor_mm(T, 0.25);
+    const double f45 = lattice_cell_printability_floor_mm(T, 0.45);
+    const double f80 = lattice_cell_printability_floor_mm(T, 0.80);
+    CHECK(f25 < f45 && f45 < f80,
+          "the printability floor is a function of the USER'S width and moves "
+          "with it");
+    CHECK(f80 / f25 > 3.0,
+          "★ across the common nozzle range the floor moves by more than 3x — a "
+          "hardcoded width would refuse a lattice that prints, or approve one "
+          "that comes out as gaps");
+  }
+
   // ── ★ the law reaches SOLID exactly at rho = 1 ───────────────────────────
   // The claim R1's dispatch rule rests beside: routing f = 1.0 through the cubic
   // law would ALSO have been right, to machine precision. Measured here so the

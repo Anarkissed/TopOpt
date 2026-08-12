@@ -80,7 +80,11 @@ struct Args {
   std::string stage = "regions";
   double rung = 0.68;
   double cell_mm = 2.0;
-  double min_extrudable_width_mm = 0.45;
+  // ★ NO DEFAULT. Printability is entirely user input: it comes from the
+  // project's print profile. This probe transcribes HIS job below, so it takes
+  // the width from the same transcription as everything else — and a run that
+  // does not state one is refused rather than given a number nobody chose.
+  double min_extrudable_width_mm = 0.0;
   int threads = 3;
   int iters = 60;
   std::vector<double> densities{0.20, 0.30, 0.45, 0.60};
@@ -289,6 +293,12 @@ int main(int argc, char** argv) {
   lc.wall_line_width_outer_mm = 0.42;
   lc.face_protection_face_ids = {16};
   lc.face_protection_depth_mm = 5.0;
+
+  // ★ THE PRINT PROFILE'S OWN NUMBER, transcribed from his job's `lattice`
+  // block (`min_extrudable_width_mm: 0.45`) exactly as the load case above is
+  // transcribed from his `loads` block. It is HIS nozzle, not a default: `--min-
+  // width` overrides it for a what-if, and nothing here invents one.
+  if (!(a.min_extrudable_width_mm > 0.0)) a.min_extrudable_width_mm = 0.45;
 
   const StepModel model = import_part_file_resolved(a.step);
   if (model.mesh.vertices.empty()) {

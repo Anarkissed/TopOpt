@@ -332,6 +332,38 @@ separately everywhere in this task and never merged into one verdict, and it is
 why the app's face card shows the cell, the density AND the strut diameter rather
 than one "OK".
 
+### 1.2b ★★ PRINTABILITY IS ENTIRELY USER INPUT — and this task got it wrong first
+
+Every project carries a print profile the user chose and the software may not
+change. The minimum extrudable strut width comes from **there** — `job.hpp`'s
+`min_extrudable_width_mm` ("stated minimum strut width (mm), finite > 0"), which
+the app fills from `PrintParams.strutLineWidthMM`. Core's own convention is that
+**0 means UNSET**, not "use a sensible number".
+
+★ **An earlier cut of this task defaulted `frozen_lattice_min_extrudable_width_mm`
+to 0.45.** That is HIS nozzle, from HIS profile, baked into a production options
+struct where every other project would have inherited it silently. The app side
+was worse: `LatticeFaceCardDerivation.card` treated a width of 0 as "skip the
+printability test", so a project whose profile had not reached the call
+**certified every density as printable**.
+
+Both are fixed, and the rule is now pinned by tests rather than by comment:
+
+* core defaults the field to **0.0** and `minimize_plastic` **REFUSES** a
+  frozen-lattice run that does not state it — printability cannot be assumed and
+  cannot be skipped;
+* the app's card takes the width with **no default**, and an unknown width reads
+  as `outOfRegime` — "I cannot tell", never a silent pass. Making it required
+  immediately found a pre-existing caller that was not supplying it.
+
+★ **AND THE NUMBER MATTERS BY MORE THAN 3x, MEASURED.** Across the common nozzle
+range the printability floor moves 2.74 mm → 4.93 mm → 8.77 mm at 0.25 / 0.45 /
+0.80 mm. The same 30 mm slab at the same declared density is **certified** under
+a 0.25 mm profile and **out of regime** under a 0.80 mm one — same geometry, same
+lattice, opposite verdict, because the coarse profile pushes the printability
+floor above what the slab can homogenize. A hardcoded width would have refused
+lattices that print perfectly well and approved ones that come out as gaps.
+
 ### 1.3 What happens outside the range: a REFUSAL, per region
 
 `lattice_region_validity` reports, per region: median / p10 member width, cells

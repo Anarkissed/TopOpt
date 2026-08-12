@@ -577,14 +577,34 @@ struct MinimizePlasticOptions {
   double frozen_lattice_beta_steepness = 1.0;
   std::string frozen_lattice_beta_basis = "gaussian";  // or "wendland"
 
-  // The lattice CELL the cells-per-member validity is judged at, and the nozzle
-  // the printability floor is judged at. A non-positive cell disables the
-  // per-region validity measurement — and with `frozen_lattice_refuse_below_floor`
-  // armed that is a REFUSAL of the whole feature, not a silent pass, because a
-  // law used outside its validity range with nothing measuring the range is the
-  // failure mode §1(d) exists to prevent.
+  // The lattice CELL the cells-per-member validity is judged at. A non-positive
+  // cell disables the per-region validity measurement — and with
+  // `frozen_lattice_refuse_below_floor` armed that is a REFUSAL of the whole
+  // feature, not a silent pass, because a law used outside its validity range
+  // with nothing measuring the range is the failure mode §1(d) exists to prevent.
   double frozen_lattice_cell_mm = 0.0;
-  double frozen_lattice_min_extrudable_width_mm = 0.45;
+
+  // ── ★ THE MINIMUM EXTRUDABLE STRUT WIDTH (mm) — 0 MEANS UNSET, AND UNSET IS A
+  // REFUSAL. NEVER A DEFAULT.
+  //
+  // ★ PRINTABILITY IS ENTIRELY USER INPUT. Every project carries a print profile
+  // the user chose and the software may not change, and this number comes from
+  // it — `job.hpp`'s `min_extrudable_width_mm` ("stated minimum strut width (mm),
+  // finite > 0"), which the app fills from `PrintParams.strutLineWidthMM`. There
+  // is no such thing as a sensible default here: a 0.25 mm nozzle and a 0.8 mm
+  // nozzle disagree about the printability floor by more than 3x, so a hardcoded
+  // number would either refuse a lattice that prints perfectly well or approve
+  // one that comes out as gaps.
+  //
+  // This field defaulted to 0.45 in an earlier cut of this task. That is HIS
+  // nozzle, from HIS profile, and baking it in is exactly the drift
+  // `lan-job-drops-outer-line-width` and `infill-knockdown-duplicated-app-core`
+  // record: a slicer number that reaches one code path and not another, or is
+  // invented by the code, and is wrong for everybody else.
+  //
+  // `minimize_plastic` REFUSES a frozen-lattice run that does not state it.
+  // Printability cannot be assumed and it cannot be skipped.
+  double frozen_lattice_min_extrudable_width_mm = 0.0;
 
   // Refuse any region whose median cells-per-member is below
   // `lattice_cells_per_member_min` (5 for octet). true is the shipped posture and

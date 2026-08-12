@@ -183,6 +183,60 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         XCTAssertEqual(s.outOfRegime, 1)
     }
 
+    // ── ★ PRINTABILITY IS ENTIRELY USER INPUT ────────────────────────────────
+
+    /// The width comes from the project's print profile
+    /// (`PrintParams.strutLineWidthMM`), which the user chose and the app may not
+    /// change. The SAME region and the SAME density must produce DIFFERENT
+    /// verdicts under different profiles — which is the whole reason the number
+    /// cannot have a default.
+    func testTheVerdictFollowsTheUsersPrintProfile() {
+        // ★ The slab is 30 mm ON PURPOSE. The coupling runs through core's
+        // PRINTABILITY FLOOR, which is itself a function of the user's width — so
+        // the fixture has to be thick enough that the two bounds do not cross for
+        // a fine nozzle and thin enough that they DO for a coarse one. A slab
+        // that crosses at every width would report out-of-regime three times and
+        // this test would pass while measuring nothing.
+        func cardAt(_ width: Double) -> LatticeFaceCard {
+            LatticeFaceCardDerivation.card(
+                faceID: 16, depthMM: 30, heldVoxels: 1000, spacingMM: 1.0,
+                densityGCM3: 1.24, topology: topology,
+                bounds: TopOptKit.latticeCellBounds(topology: topology.id,
+                                                    minExtrudableWidthMM: width),
+                limits: limits, declaredDensity: 0.30,
+                minExtrudableWidthMM: width)
+        }
+        // Same slab, same declared density, three profiles.
+        let fine = cardAt(0.25), mid = cardAt(0.45), coarse = cardAt(0.80)
+        XCTAssertEqual(fine.relativeDensity, 0.30, accuracy: 1e-9)
+        XCTAssertEqual(coarse.relativeDensity, 0.30, accuracy: 1e-9)
+        XCTAssertEqual(fine.verdict, .certified,
+                       "a 0.25 mm profile leaves room for a 30 mm slab")
+        XCTAssertEqual(mid.verdict, .certified, "and so does a 0.45 mm one")
+        XCTAssertEqual(coarse.verdict, .outOfRegime,
+                       "★ a 0.80 mm profile pushes core's printability floor above "
+                     + "what a 30 mm slab can homogenize, and the SAME lattice "
+                     + "stops being certifiable — that is why the width has no "
+                     + "default")
+        XCTAssertNotEqual(fine.verdict, coarse.verdict,
+                          "the SAME lattice must be judged differently under a "
+                        + "0.25 mm and a 0.80 mm profile (fine \(fine.verdict), "
+                        + "mid \(mid.verdict), coarse \(coarse.verdict))")
+    }
+
+    /// ★ AN UNKNOWN WIDTH IS NOT A PASS. An earlier cut read `<= 0` as "skip the
+    /// printability test", so a project whose profile had not reached the call
+    /// certified every density as printable. Unknown must read as out-of-regime.
+    func testAnUnknownWidthDoesNotCertifyAsPrintable() {
+        let unknown = LatticeFaceCardDerivation.card(
+            faceID: 16, depthMM: 40, heldVoxels: 10_000, spacingMM: 1.705279303,
+            densityGCM3: 1.24, topology: topology, bounds: bounds,
+            limits: limits, declaredDensity: nil, minExtrudableWidthMM: 0)
+        XCTAssertEqual(unknown.verdict, .outOfRegime,
+                       "with no stated width the card must say it cannot tell, "
+                     + "not silently certify")
+    }
+
     // ── ★ THE CALL SITE ──────────────────────────────────────────────────────
 
     func testTheCardRowRendersTheNewNumbersAndTheControlIsWired() throws {
@@ -201,5 +255,10 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         XCTAssertTrue(src.contains("declaredDensity: declaredCopy[fid]"),
                       "the declaration must reach the card derivation, or the "
                     + "control is decoration")
+        XCTAssertTrue(src.contains("minExtrudableWidthMM: widthMM"),
+                      "★ the printability width must come from the PROJECT'S "
+                    + "PRINT PROFILE at the call site — it is user input, it has "
+                    + "no default, and a card that invented one would judge a "
+                    + "0.25 mm and a 0.80 mm nozzle identically")
     }
 }

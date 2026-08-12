@@ -177,7 +177,17 @@ public enum LatticeFaceCardDerivation {
                             bounds: TopOptKit.LatticeCellBounds,
                             limits: TopOptKit.LatticeLimits,
                             declaredDensity: Double? = nil,
-                            minExtrudableWidthMM: Double = 0) -> LatticeFaceCard {
+                            // ★ PRINTABILITY IS ENTIRELY USER INPUT, and this is
+                            // it: the minimum extrudable strut width from the
+                            // project's own print profile
+                            // (`PrintParams.strutLineWidthMM`), which the user
+                            // chose and the app may not change. There is NO
+                            // default — a 0.25 mm nozzle and a 0.8 mm nozzle
+                            // disagree about the printability floor by more than
+                            // 3x. 0 means UNKNOWN, and an unknown printability
+                            // does not certify: the card falls to `outOfRegime`
+                            // rather than quietly passing the strut test.
+                            minExtrudableWidthMM: Double) -> LatticeFaceCard {
         let voxelMM3 = spacingMM * spacingMM * spacingMM
         let volume = Double(heldVoxels) * voxelMM3
         let mass = volume * densityGCM3 / 1000.0          // mm³ · g/cm³ → g
@@ -229,7 +239,13 @@ public enum LatticeFaceCardDerivation {
         // cell was chosen at or above core's printability floor, which is defined
         // at the band's LIGHTEST density — but a DECLARED density can, and when it
         // does the card says out-of-regime rather than quietly raising it.
-        let printable = minExtrudableWidthMM <= 0 || diameter >= minExtrudableWidthMM
+        //
+        // ★ AND AN UNKNOWN WIDTH IS NOT A PASS. An earlier cut read
+        // `minExtrudableWidthMM <= 0` as "skip the test", so a project whose print
+        // profile had not reached this call certified every density as printable.
+        // Unknown printability is `outOfRegime`: the card says it cannot tell,
+        // which is the honest verdict and the one a user can act on.
+        let printable = minExtrudableWidthMM > 0 && diameter >= minExtrudableWidthMM
         return LatticeFaceCard(faceID: faceID, depthMM: depthMM,
                                heldVoxels: heldVoxels, heldVolumeMM3: volume,
                                heldMassG: mass, cellMM: cell,
