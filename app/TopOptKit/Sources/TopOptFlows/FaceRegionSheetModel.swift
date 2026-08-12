@@ -155,9 +155,12 @@ public struct FaceRegionSheetModel: Equatable, Sendable {
             var voxels = FaceRegionGeometry.memberVoxelEstimate(
                 members: members, in: mesh, spacingMM: spacingMM)
             if r.isCut {
-                let cells = [FaceRegionGeometry.GridCell(i: r.id, j: 0, cuts: r.cuts)]
+                // A split cell's own share of its members, priced through the
+                // same sampler the grid preview uses.
+                let cell = FaceRegionGeometry.GridCell(i: 0, j: 0, cuts: r.cuts)
                 voxels = FaceRegionGeometry.cellVoxelCounts(
-                    members: members, in: mesh, cells: cells, spacingMM: spacingMM).first ?? 0
+                    members: members, in: mesh, cells: [cell],
+                    spacingMM: spacingMM).first ?? 0
             }
             return Row(id: r.id, name: r.name, depth: depth,
                        memberFaces: members.count, voxels: voxels,
