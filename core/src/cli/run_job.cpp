@@ -4139,6 +4139,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // missing.
   const auto& [j_present, j_anchors, j_anchor_face_ids, j_groups, j_clearances,
                j_face_protection_face_ids, j_face_protection_depth_mm,
+               j_face_protection_depths_mm,
                j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
@@ -4210,6 +4211,9 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.face_protection_face_ids = j_face_protection_face_ids;
   if (j_face_protection_depth_mm > 0.0)
     lc.face_protection_depth_mm = j_face_protection_depth_mm;
+  // COPIED: the PER-FACE depths (task 2026-08-12 §0a). Empty => every protection
+  // uses the global depth, byte-identical to before the task.
+  lc.face_protection_depths_mm = j_face_protection_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
@@ -4321,11 +4325,29 @@ std::string loadcase_receipt_json(const JobDescription& job,
       s += "    {\"face_id\": " + std::to_string(f.face_id) +
            ", \"voxels_frozen\": " + std::to_string(f.voxels_frozen) +
            ", \"depth_voxels\": " + std::to_string(f.depth_voxels) +
+           ", \"depth_requested_mm\": " + json_num(f.depth_requested_mm) +
+           ", \"depth_effective_mm\": " + json_num(f.depth_effective_mm) +
            ", \"thinner_than_depth\": " +
            (f.thinner_than_depth ? "true" : "false") + "}";
       s += (i + 1 < setup->face_protection_reports.size()) ? ",\n" : "\n";
     }
-    s += "  ]";
+    s += "  ],\n";
+    // ★ THE ANCHOR/LOAD STRUCTURAL PAD, ON ITS OWN LINE (task 2026-08-12 §1f).
+    // It freezes with the same FrozenSolid value at the same depth 3 as a
+    // protection, and reading the two together is how "I protected one wall"
+    // became "21 faces are frozen". `face_protections` above is now EXACTLY what
+    // the user declared; this is the pad, which is core's, not the user's.
+    {
+      const ProductionRunSetup::AnchorPadReport& ap = setup->anchor_pad_report;
+      s += "  \"anchor_pad\": {\"applied\": " +
+           std::string(ap.applied ? "true" : "false") +
+           ", \"depth_voxels\": " + std::to_string(ap.depth_voxels) +
+           ", \"anchor_faces\": " + std::to_string(ap.anchor_faces) +
+           ", \"load_faces\": " + std::to_string(ap.load_faces) +
+           ", \"voxels_frozen\": " + std::to_string(ap.voxels_frozen) +
+           ", \"note\": \"the structural pad the boundary conditions sit on; "
+           "NOT a user face protection\"}";
+    }
     // ── WHICH LADDER, AND WHAT IT NEEDED (task 2026-08-03-growth-ladder) ─────
     // `ladder_mode` is emitted in BOTH modes, deliberately: NAMING THE MODE IS
     // THE POINT (bar G7). Unticking "minimize plastic" used to change the search,

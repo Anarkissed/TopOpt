@@ -1897,6 +1897,19 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME face_protection_parity COMMAND test_face_protection_parity)
 
+  # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
+  # redesign). §0a/R2: a face that is both protected and a lattice region carries
+  # ONE depth, and a job stating two is refused with both figures; per-face depths
+  # freeze different slabs and an empty list is the pre-task global behaviour.
+  # §1f: `face_protection_reports` is EXACTLY what the user declared, and the
+  # anchor/load structural pad is reported separately — with a positive control
+  # proving the pad is still applied, so the check cannot pass by its removal.
+  add_executable(test_lattice_depth_tie tests/validation/test_lattice_depth_tie.cpp)
+  target_link_libraries(test_lattice_depth_tie PRIVATE topopt)
+  target_compile_definitions(test_lattice_depth_tie PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
+  add_test(NAME lattice_depth_tie COMMAND test_lattice_depth_tie)
+
   # Small-face load loss (handoff 099): a load face smaller than a voxel footprint
   # at a coarse resolution tags ZERO voxels, so build_production_loadcase skips the
   # group and external_loads arrives empty. This locks the new per-group

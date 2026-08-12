@@ -1,0 +1,1 @@
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticeBarrierModelTests.swift:53:59: error: extra argument 'latticeRoleGroups' in call

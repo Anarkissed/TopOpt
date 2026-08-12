@@ -1,0 +1,25 @@
+R7 — ASSERTION-MESSAGE CENSUS (task 2026-08-12-lattice-page-redesign)
+Never weaken or delete an assertion. Counted over every tracked test and
+source file, base (HEAD, c618a90) vs this branch.
+
+kind                              base  branch   delta
+CHECK                             4184    4204     +20
+XCTAssertEqual                    2545    2611     +66
+XCTAssertFalse                     520     524      +4
+XCTAssertGreaterThan               196     198      +2
+XCTAssertGreaterThanOrEqual         35      35      +0
+XCTAssertLessThan                   64      68      +4
+XCTAssertLessThanOrEqual            32      35      +3
+XCTAssertNil                       356     361      +5
+XCTAssertNotEqual                   95      97      +2
+XCTAssertNotNil                    142     142      +0
+XCTAssertThrowsError                15      16      +1
+XCTAssertTrue                      992    1000      +8
+assert                             103     103      +0
+precondition                        53      53      +0
+schema_fail                        126     133      +7
+throw std::invalid_argument        340     341      +1
+throw std::logic_error              24      24      +0
+throw std::runtime_error            62      62      +0
+
+WEAKENED OR DELETED: NONE — every count is unchanged or up

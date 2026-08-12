@@ -800,8 +800,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                             "radius_mm": r.radiusMM,
                             "half_length_mm": r.halfLengthMM,
                         ]
-                    return ["role": r.role.rawValue, "kind": r.kind.rawValue,
-                            "geometry": geometry]
+                    var entry: [String: Any] = ["role": r.role.rawValue,
+                                                "kind": r.kind.rawValue,
+                                                "geometry": geometry]
+                    // ★ The face this region was spawned from (task 2026-08-12
+                    // §0a). Core uses it to REFUSE a job whose protection depth
+                    // and lattice depth for the same face disagree — the check
+                    // that makes "one control, one value, one slab" enforceable
+                    // rather than merely intended.
+                    if let fid = r.faceID { entry["face_id"] = fid }
+                    return entry
                 }
             }
             job["lattice"] = block
@@ -926,10 +934,26 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // ONE global depth. The worker's build_production_loadcase freezes each
         // face's part-solid skin FrozenSolid, identically to the local bridge
         // path. Empty list → omitted → byte-identical to a pre-124 job.
+        //
+        // ★ When any face carries its OWN dragged depth (task 2026-08-12 §0a) the
+        // OBJECT form goes out instead — {"face_id", "depth_mm"} per face — so the
+        // worker freezes exactly the slab that face's lattice region will fill.
+        // With no per-face depth the bare-id form is emitted, unchanged.
         if !request.faceProtections.isEmpty {
-            loads["face_protections"] = request.faceProtections
-            if request.faceProtectionDepthMM > 0 {
-                loads["face_protection_depth_mm"] = request.faceProtectionDepthMM
+            let depths = request.faceProtectionDepthsMM
+            let perFace = depths.count == request.faceProtections.count
+                && zip(request.faceProtections, depths).contains {
+                    $0.1 > 0 && abs($0.1 - request.faceProtectionDepthMM) > 1e-9
+                }
+            if perFace {
+                loads["face_protections"] = zip(request.faceProtections, depths).map {
+                    ["face_id": $0.0, "depth_mm": $0.1] as [String: Any]
+                }
+            } else {
+                loads["face_protections"] = request.faceProtections
+                if request.faceProtectionDepthMM > 0 {
+                    loads["face_protection_depth_mm"] = request.faceProtectionDepthMM
+                }
             }
         }
         job["loads"] = loads

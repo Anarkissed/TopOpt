@@ -66,6 +66,11 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var halfUMM: Double = 0
     public var halfWMM: Double = 0
     public var depthMM: Double = 0
+    /// ★ The B-rep face this region was spawned from (task 2026-08-12 §0a), or
+    /// nil for a hand-placed primitive. Emitted as the job's `face_id` so CORE
+    /// can check the depth tie: a face that is both protected and latticed must
+    /// carry ONE depth, and core refuses the job when it carries two.
+    public var faceID: Int? = nil
 
     public init(role: LatticeGroupRole, kind: Kind) {
         self.role = role
@@ -362,8 +367,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var groupRoles: [UUID: LatticeGroupRole]
     /// Depth (mm) a face-role lattice region reaches into the part — the
     /// `depth_mm` the emitted `lattice.regions` face entries carry (round-2),
-    /// and the legacy painted-include preview depth.
+    /// and the legacy painted-include preview depth. Since the depth redesign
+    /// this is the FALLBACK: the per-group depth below is what the user drags.
     public var paintDepthMM: Double
+
+    /// ★ THE ONE NUMBER, PER GROUP (task 2026-08-12 §0a). How far the user
+    /// dragged that group's lattice primitive out from its face, in mm. It is
+    /// BOTH the lattice region depth and — when the group is also protected —
+    /// the protection depth. Absent ⇒ `paintDepthMM`, so every existing
+    /// snapshot decodes to exactly the depth it had. Read only through
+    /// `LatticeSlabDepth`, never directly at a call site.
+    public var groupDepthMM: [UUID: Double]
 
     // ── SUB-FLOOR RETENTION, the user's raw choices (task
     // 2026-08-05-lattice-retention-app-control). All OFF / absent by default, so
@@ -414,7 +428,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
 
     public init(enabled: Bool = false, topologyID: String = LatticeType.octet.id,
                 cellMM: Double = LatticeSettings.defaultCellMM,
-                cellSizeMode: LatticeCellSizeMode = .fixed,
+                cellSizeMode: LatticeCellSizeMode = .auto,
                 cellMinMM: Double = LatticeSettings.defaultCellMinMM,
                 cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
                 minRelativeDensity: Double = 0, maxRelativeDensity: Double = 1,
@@ -427,10 +441,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 // schema has always defaulted to "diagrid" (`job.hpp`); the app was
                 // the one overriding it with the choice that does nothing.
                 boundary: LatticeBoundaryTreatment = .fullSkin,
-                densityMode: LatticeDensityMode = .uniform,
+                // ★ §4b (task 2026-08-12) — AUTO IS THE DEFAULT. A user who sets
+                // his faces and presses Auto on everything must get a lattice
+                // with no further questions. The DECODE fallbacks below stay
+                // `.uniform` / `.fixed` on purpose: those describe what an OLD
+                // snapshot actually had, and a default must never rewrite
+                // history (the `boundary` precedent).
+                densityMode: LatticeDensityMode = .auto,
                 paintedIncludeFaces: [Int] = [],
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
+                groupDepthMM: [UUID: Double] = [:],
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
@@ -458,6 +479,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.paintedIncludeFaces = paintedIncludeFaces
         self.paintDepthMM = paintDepthMM
         self.groupRoles = groupRoles
+        self.groupDepthMM = groupDepthMM
         if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
     }
 
@@ -471,6 +493,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
+        case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction
@@ -509,6 +532,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
+        // Absent from every pre-task snapshot ⇒ empty ⇒ every group falls back to
+        // `paintDepthMM`, which is exactly the depth those projects emitted.
+        groupDepthMM = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDepthMM) ?? [:]
         // Absent from every snapshot written before this task ⇒ off / core's own
         // number ⇒ those projects keep emitting exactly the job they emitted.
         retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
@@ -542,6 +568,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
+        try c.encode(groupDepthMM, forKey: .groupDepthMM)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,

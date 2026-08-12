@@ -106,9 +106,16 @@ public struct RunRequest: Equatable, Sendable {
     /// alike. Part of the request identity, so protecting/un-protecting a face (or
     /// editing the global depth) re-enables Optimize (it changes what is preserved).
     public let faceProtections: [Int]
-    /// The ONE global preserve-depth (mm) governing every Face protection; <= 0
-    /// means "use the core default". Part of the request identity.
+    /// The global preserve-depth (mm) — the fallback for a protect-only face;
+    /// <= 0 means "use the core default". Part of the request identity.
     public let faceProtectionDepthMM: Double
+    /// ★ PER-FACE preserve-depths (task 2026-08-12 §0a), parallel to
+    /// `faceProtections`. For a face that is BOTH protected and latticed this is
+    /// the depth the user dragged its lattice primitive to — the same number the
+    /// region carries, so the barrier is exactly as deep as the lattice it feeds.
+    /// Empty ⇒ every protection uses the global depth (the pre-task request,
+    /// byte-identical). Part of the request identity.
+    public let faceProtectionDepthsMM: [Double]
     /// The lattice block (handoff 2026-07-29-lattice-mode-ui), or nil for a non-lattice
     /// run (byte-identical to today, BAR U1). Present only when lattice mode is on AND the
     /// settings are runnable-as-certified (a core-certifiable topology within the core band
@@ -162,6 +169,7 @@ public struct RunRequest: Equatable, Sendable {
                 keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
                 clearances: [TopOptKit.ClearanceSpec] = [],
                 faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
+                faceProtectionDepthsMM: [Double] = [],
                 projectID: UUID? = nil, sourceFormat: String = "",
                 lattice: LatticeSpec? = nil,
                 // Defaults to core's own default. A caller that says nothing gets
@@ -189,6 +197,7 @@ public struct RunRequest: Equatable, Sendable {
         self.clearances = clearances
         self.faceProtections = faceProtections
         self.faceProtectionDepthMM = faceProtectionDepthMM
+        self.faceProtectionDepthsMM = faceProtectionDepthsMM
         self.projectID = projectID
         self.lattice = lattice
         self.projectCADFaces = projectCADFaces
@@ -1070,6 +1079,7 @@ public final class RunModel: ObservableObject {
                 clearances: request.clearances,
                 faceProtections: request.faceProtections,
                 faceProtectionDepthMM: request.faceProtectionDepthMM,
+                faceProtectionDepthsMM: request.faceProtectionDepthsMM,
                 progress: progress, onVariant: onVariant)
         }
         return try TopOptKit.minimizePlastic(

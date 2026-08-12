@@ -440,6 +440,10 @@ public final class ProjectModel: ObservableObject {
     /// painted ids (`≥ baseFaceCount`) pack densely from `baseFaceCount` in the sidecar, native ids
     /// are unchanged. The run + tagging operate on the RE-IMPORTED model, so they must target this
     /// id, not the live overlay id. Identity when there is no paint (`resolvedFaceID` handles both).
+    /// The face id the RUN will use for `id` — public since the face card must
+    /// preview the same face the run freezes (task 2026-08-12 §0b).
+    public func runFaceID(_ id: FaceID) -> FaceID { resolvedRunFaceID(id) }
+
     private func resolvedRunFaceID(_ id: FaceID) -> FaceID {
         paint?.resolvedFaceID(id) ?? id
     }
@@ -543,17 +547,43 @@ public final class ProjectModel: ObservableObject {
     /// core freezes each face's OWN part-solid skin FrozenSolid to that depth. Empty
     /// for an STL project (no B-rep faces) or when nothing is protected → the run is
     /// byte-identical. Face ids are deduped (a face never appears twice).
-    public func faceProtectionSpecs() -> (faceIDs: [Int], depthMM: Double) {
-        guard viewerMesh != nil else { return ([], force.faceProtectDepthMM) }
+    ///
+    /// ★ THE DEPTH IS THE ONE THE USER DRAGGED (task 2026-08-12 §0a). `depthsMM`
+    /// is parallel to `faceIDs`: for a group that also carries a lattice role it
+    /// is that group's `LatticeSlabDepth` — the SAME number its lattice region
+    /// carries — so the barrier is exactly as deep as the lattice it feeds. For a
+    /// protect-only group it is the project's global depth, unchanged.
+    public func faceProtectionSpecs()
+        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double]) {
+        guard viewerMesh != nil else {
+            return ([], force.faceProtectDepthMM, [])
+        }
         var ids: [Int] = []
+        var depths: [Double] = []
         var seen = Set<FaceID>()
         for g in selection.groups where force.isProtected(g.id) {
+            // A protected group that is ALSO a lattice region is one slab; a
+            // protect-only group keeps the project's global depth.
+            let latticed = lattice.enabled && lattice.groupRoles[g.id] != nil
+            let d = latticed
+                ? LatticeSlabDepth.depthMM(group: g.id,
+                                           perGroup: lattice.groupDepthMM,
+                                           fallbackMM: lattice.paintDepthMM)
+                : force.faceProtectDepthMM
             for f in g.faces where !seen.contains(f) {
                 seen.insert(f)
                 ids.append(Int(resolvedRunFaceID(f)))
+                depths.append(d)
             }
         }
-        return (ids, force.faceProtectDepthMM)
+        return (ids, force.faceProtectDepthMM, depths)
+    }
+
+    /// The lattice region depth for `group`, in mm — the ONE number, read through
+    /// `LatticeSlabDepth` so no call site can invent a second one.
+    public func latticeSlabDepthMM(_ group: UUID) -> Double {
+        LatticeSlabDepth.depthMM(group: group, perGroup: lattice.groupDepthMM,
+                                 fallbackMM: lattice.paintDepthMM)
     }
 
     /// Whether the anchored-bore AUTO clearance rule applies to a group (keep-clear
@@ -819,6 +849,10 @@ public final class ProjectModel: ObservableObject {
             primitives: resolvedPrims,
             includePrimitives: lattice.includePrimitives.map { ($0, $0.resolvedDepthMM) },
             faceDepthMM: lattice.paintDepthMM,
+            groupDepthMM: { [weak self] gid in
+                self?.latticeSlabDepthMM(gid) ?? .nan
+            },
+            runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
             resolve: { [weak self] f in
                 guard let mesh = self?.viewerMesh, let geo = mesh.faceGeometry(f) else { return nil }
                 if geo.isCylinder {
