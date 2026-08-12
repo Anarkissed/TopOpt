@@ -35,7 +35,9 @@ mkdir -p "$OUT" "$WORK"
 # the table's own first row is the number his run reports and the comparison is
 # not against a remembered value.
 for c in ${CORES:-8 16 32}; do
-  if [ -s "$OUT/core$c.txt" ]; then
+  # ★ -s is not enough: a "NOT MEASURED" row is non-empty and must NOT count as
+  # done, or a killed run blocks its own retry forever.
+  if [ -s "$OUT/core$c.txt" ] && ! grep -q "NOT MEASURED" "$OUT/core$c.txt"; then
     echo "core=$c already present, skipping"
     continue
   fi
@@ -51,6 +53,18 @@ except Exception as e:
     print(f"core={core}  NOT MEASURED ({e.__class__.__name__})")
     raise SystemExit(0)
 nt = d["geneo_basis_dim"]
+# ★ N_t == 0 MEANS NO BASIS WAS EVER BUILT — it is not a measurement of zero, and
+# it must never be fed into the cost model. An earlier version of this script did
+# exactly that on a run that was killed mid-eigensolve and printed
+# "N_t=0 ... implied_threshold=1354", which is a fabricated answer to the very
+# question the sweep exists to ask, sitting in a file named like a result. The
+# run_info written UP FRONT always parses; only the basis dimension distinguishes
+# "built" from "never got there".
+if nt <= 0:
+    print(f"core={core}  NOT MEASURED — the basis was never built "
+          f"(geneo_basis_dim = 0). This row is the ABSENCE of a measurement, "
+          f"not a measurement of zero; no threshold is derivable from it.")
+    raise SystemExit(0)
 # The threshold the engagement gate would compute, from the SAME cost model the
 # solver uses (geneo.cpp:897): 2*N_t + engaged_burn + 2*engaged_tail. The two
 # measured legs are held at his run's values so the ONLY thing moving between

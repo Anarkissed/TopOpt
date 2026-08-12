@@ -26,3 +26,5 @@ ARM_RUNG arm=rearm=1 vf_requested=0.260000 margin=232.153157 accepted=1
 ARM_SUMMARY arm=rearm=1 total_cg=14465 design_iters=8 wall_s=911.3 hier_attempts=8 rearm_attempts=13 rearm_carries=0 geneo_armed=1 geneo_declined=15 geneo_dim=1674 geneo_builds=1 alg1=0
 ### ARMS DONE Wed Aug 12 07:05:06 EDT 2026
 ### N_t TRIAGE RETRY (quieter host)  Wed Aug 12 07:05:26 EDT 2026
+evidence/2026-08-14-solver-speed-arm-and-diagnose/run_nt_triage.sh: line 37: 92533 Terminated: 15          ./build/solver_arm_sweep "$HERE/arms/job/job.json" "$WORK/nt$c" --arm "core=$c" --threads "$THREADS" --iters 1 > "$OUT/core$c.log" 2>&1
+core=16  N_t=0  basis_MB=0.00  refresh(2*N_t)=0  implied_threshold=1354  builds=0  armed=0  declined=0
