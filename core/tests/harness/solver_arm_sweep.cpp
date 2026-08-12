@@ -19,7 +19,13 @@
 //   geneo_set_probe_config             the harness-only GenEO recipe surface
 //                                      whose DEFAULTS ARE the shipped tripwire
 //                                      constants (the §1b/§1c levers)
-//   fea_set_mixed_precision            public, production-blocked (the §4d lever)
+//   fea_set_matfree_mixed_precision    public, production-blocked (the §4d lever)
+//
+// ★ THE FIRST AND LAST OF THOSE RIDE `RunObservability`, NOT A DIRECT SETTER.
+// `configure_production_options` re-asserts both at run start, so setting them
+// here would be silently overwritten and would measure the shipped posture while
+// reporting an armed one. See THE POSTURE below — that is where it cost this
+// task an arm before the artifact caught it.
 //
 // WHY run_job AND NOT A SYNTHETIC FIXTURE. Every prior measurement of these two
 // accelerators was taken on a proxy, and every one of them named the same gap in
@@ -62,9 +68,9 @@
 //   trig=N      kGeneoTriggerIters -> N (the §1c question).
 //   thr=N       the engagement gate's threshold, forced to N plain iterations.
 //               0 engages the deflation the moment a basis is held.
-//   mixed       fea_set_mixed_precision(true). §4d says do not run this before
-//               §2 resolves; the arm exists so the order can be honoured
-//               explicitly rather than by omission.
+//   mixed       fea_set_matfree_mixed_precision(true), via RunObservability.
+//               §4d says do not run this before §2 resolves; the arm exists so
+//               that ordering can be honoured explicitly rather than by omission.
 //
 // Output: whatever run_job writes to <out_dir> (run_info.json + iterations.csv
 // are the load-bearing ones) plus a one-line ARM_SUMMARY on stdout carrying the
