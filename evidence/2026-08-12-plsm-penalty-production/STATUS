@@ -1,0 +1,10 @@
+00:34:13 START L0_none (rung 0.5283, 120 it)
+01:22:26 OK L0_none 120 it, printed=58590, b0 distinct=60
+01:22:26 START L1_perim1 (rung 0.5283, 120 it)
+02:32:53 OK L1_perim1 120 it, printed=58590, b0 distinct=31
+02:32:53 START E2_c1_eta2 (rung 0.7973, 120 it)
+03:34:07 OK E2_c1_eta2 120 it, printed=88424, b0 distinct=43
+03:34:07 START E1_c1_eta1 (rung 0.7973, 120 it)
+04:35:09 OK E1_c1_eta1 120 it, printed=88424, b0 distinct=51
+04:35:09 STAGE_A_DONE
+04:37:08 START BL_r2 (rung 0.5283)

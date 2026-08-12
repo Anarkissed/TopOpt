@@ -1,0 +1,6 @@
+part 110904 voxels, voxel 4.9589 mm3
+arm              void  sealed  sealed mm3   % void    n
+L0_none         52314      21       104.1    0.04%    8
+L1_perim1       52314      12        59.5    0.02%    5
+E2_c1_eta2      22480    2499     12392.3   11.12%   28
+E1_c1_eta1      22480    1923      9536.0    8.55%   17
