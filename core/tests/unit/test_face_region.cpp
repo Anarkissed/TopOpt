@@ -383,6 +383,41 @@ void cylindrical_frame() {
         "★ a mixed union falls back to PCA — 'equal' is then not intrinsic");
 }
 
+// ★ §6 — WHAT A GRID SPLIT UNLOCKS, asserted rather than claimed: two sectors of
+// ONE face, frozen to DIFFERENT depths, freezing different material and never
+// the same voxel twice. That is hand-authored grading on the protection side,
+// with the optimiser deciding nothing.
+void sectors_carry_their_own_depth() {
+  const StepModel m = banded_cube();
+  const VoxelGrid grid = voxelize(m.mesh, 10);
+  const ResolvedFaceRegion whole = resolve_face_regions(m, {spec_of(0, {3})})[0];
+  const RegionFrame frame = region_frame(m, whole);
+  const std::vector<GridSplitCell> cells = grid_split_cells(frame, 2, 1);
+  CHECK(cells.size() == 2, "two sectors across the long axis");
+
+  FaceRegionSpec a = spec_of(1, {3});
+  a.cuts = cells[0].cuts;
+  FaceRegionSpec b = spec_of(2, {3});
+  b.cuts = cells[1].cuts;
+  const std::vector<ResolvedFaceRegion> two = resolve_face_regions(m, {a, b});
+
+  DesignMask shallow = make_active_mask(grid), deep = make_active_mask(grid);
+  const std::size_t na =
+      mask_step_region(grid, m, two[0], MaskValue::FrozenSolid, 1, shallow);
+  const std::size_t nb =
+      mask_step_region(grid, m, two[1], MaskValue::FrozenSolid, 3, deep);
+  CHECK(na == 45, "sector A at depth 1 freezes its own half of the skin");
+  CHECK(nb > na, "★ sector B at depth 3 freezes DEEPER — the depths are per sector");
+
+  std::size_t overlap = 0;
+  for (std::size_t i = 0; i < shallow.size(); ++i)
+    if (shallow[i] == MaskValue::FrozenSolid && deep[i] == MaskValue::FrozenSolid)
+      ++overlap;
+  CHECK(overlap == 0,
+        "★ and the two sectors never claim the same voxel — the cut is a plane "
+        "through space, so it separates the deep layers too, not just the skin");
+}
+
 void snap_candidates() {
   const StepModel m = banded_cube();
   const ResolvedFaceRegion whole = resolve_face_regions(m, {spec_of(0, {3})})[0];
@@ -404,6 +439,7 @@ int main() {
   manual_split_partitions();
   grid_split_and_sliver();
   cylindrical_frame();
+  sectors_carry_their_own_depth();
   snap_candidates();
   std::printf("test_face_region: %d checks, %d failures\n", g_checks,
               g_failures);
