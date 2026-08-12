@@ -286,6 +286,39 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertTrue(out.retainSubfloorInUnloadedRegions)
     }
 
+    /// ★ THE COVERAGE THE OLD FIXTURES USED TO GIVE. Three tests asserted "an
+    /// enabled octet lattice HAS a spec" using a bare `LatticeSettings(enabled:
+    /// true)`, which meant uniform until §4b moved the default to auto. Pinning
+    /// them to `.uniform` (which is what they were each about) would have left
+    /// nothing checking that the NEW default posture emits anything at all — and
+    /// "the default silently emits no lattice" is the exact failure §4b makes
+    /// possible. So it is checked here, end to end, at a REAL project's width.
+    func testTheNewDefaultPostureEmitsALatticeBlockWithItsRegions() throws {
+        var s = LatticeSettings(enabled: true)          // auto density, auto cell
+        XCTAssertEqual(s.densityMode, .auto)
+        XCTAssertEqual(s.cellSizeMode, .auto)
+        s.minRelativeDensity = 0.2
+        s.maxRelativeDensity = 0.5
+
+        var region = LatticeRegionSpec(role: .include, kind: .face)
+        region.origin = .zero
+        region.normal = SIMD3(0, 0, -1)
+        region.halfUMM = 10
+        region.halfWMM = 10
+        region.depthMM = 7
+        region.faceID = 16
+
+        let spec = try XCTUnwrap(
+            s.runSpec(lineWidthMM: PrintParams.fdmDefault.strutLineWidthMM,
+                      regions: [region]),
+            "§4b/§4c: the DEFAULT posture emits a lattice block — it is not "
+            + "silently off on a fresh project")
+        XCTAssertTrue(spec.graded, "B6: the default is GRADED, never uniform")
+        XCTAssertEqual(spec.regions.count, 1, "and it carries the declared region")
+        XCTAssertEqual(spec.regions.first?.faceID, 16,
+                       "§0a: with the face id core needs for the depth tie")
+    }
+
     // MARK: §5 — per-region verdicts
 
     private func bounds(floor: Double, cpm: Double) -> TopOptKit.LatticeCellBounds {
