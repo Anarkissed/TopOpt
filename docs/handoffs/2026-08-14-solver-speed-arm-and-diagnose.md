@@ -725,9 +725,16 @@ tried, and it did not carry either.**
 Every arm is his job through `run_job`, capped at **2 PLSM design iterations per
 rung** (4 rungs, 8 design solves) — identically, `base` included.
 
-| arm | TOTAL CG | vs base | matvecs | vs base | wall s *(indicative)* | `mg_mode` | MG carried | GenEO armed / declined | `N_t` |
-|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
-| `base` | **14,465** | 1.000x | **18,674** | 1.000x | 683.0 | `stagnated-latched` | 0 | 1 / 15 | 1674 |
+| arm | TOTAL CG | vs base | matvecs | vs base | `mg_mode` | MG carried | GenEO armed / declined | `N_t` |
+|---|---:|---:|---:|---:|---|---:|---:|---:|
+| `base` | **14,465** | 1.000x | **18,674** | 1.000x | `stagnated-latched` | 0 / 8 attempts 2 | 1 / 15 | 1674 |
+| `rearm=1` | **14,465** | **1.000x** | **25,895** | **1.386x** | `stagnated-latched` | **0 / 8 attempts 8** | 1 / 15 | 1674 |
+| `alg1` *(probe, 1 iter/rung)* | 5,256 | — | — | — | `stagnated-latched` | 0 | 1 / 11 | 1674 |
+
+*(`base` wall 683.0 s; the `rearm` arm's wall is several times that and is not
+quoted — §6a, the host was shared. The `alg1` row is a 1-iteration probe and its
+total is NOT comparable to the two 2-iteration arms; it is here for its posture
+columns, and its per-solve numbers are in §6c.)*
 
 ★ **`matvecs` sits beside `total_cg` and is not decoration.** 18,674 against
 14,465 is a **4,209-apply gap the CG counter cannot see**, and almost all of it is
@@ -773,26 +780,31 @@ developed-rung verdict is OBSERVED rather than inferred.**
 `--arm rearm=1` re-opens the latch before every solve, so a hierarchy is built
 and attempted on all of them.
 
-| solve | `base` cg / hier / matvecs | `rearm=1` cg / hier / cycles / matvecs | Δ matvecs |
-|---|---|---|---:|
-| rung 0 it 1 | 927 / 1 / 3806 | 927 / 1 / 300 / 3806 | **0** |
-| rung 0 it 2 | 970 / 1 / 2192 | 970 / 1 / 300 / 2192 | **0** |
-| rung 1 it 1 | 2451 / **0** / 2469 | 2451 / **1** / 300 / 3672 | **+1203** |
-| rung 1 it 2 | 1522 / **0** / 1540 | 1522 / **1** / 300 / 2744 | **+1204** |
-| rung 2 it 1 | 2122 / **0** / 2140 | 2122 / **1** / 300 / 3343 | **+1203** |
-| rung 2 it 2 | 2335 / **0** / 2353 | 2335 / **1** / 300 / 3557 | **+1204** |
+| solve | vf | `base` cg / hier / matvecs | `rearm=1` cg / hier / cycles / matvecs | Δ matvecs |
+|---|---:|---|---|---:|
+| rung 0 it 1 | 0.68 | 927 / 1 / 3806 | 927 / 1 / 300 / 3806 | 0 |
+| rung 0 it 2 | 0.68 | 970 / 1 / 2192 | 970 / 1 / 300 / 2192 | 0 |
+| rung 1 it 1 | 0.52 | 2451 / **0** / 2469 | 2451 / **1** / 300 / 3672 | **+1203** |
+| rung 1 it 2 | 0.52 | 1522 / **0** / 1540 | 1522 / **1** / 300 / 2744 | **+1204** |
+| rung 2 it 1 | 0.38 | 2122 / **0** / 2140 | 2122 / **1** / 300 / 3343 | **+1203** |
+| rung 2 it 2 | 0.38 | 2335 / **0** / 2353 | 2335 / **1** / 300 / 3557 | **+1204** |
+| rung 3 it 1 | **0.26** | 1936 / **0** / 1954 | 1936 / **1** / 300 / 3157 | **+1203** |
+| rung 3 it 2 | **0.26** | 2202 / **0** / 2220 | 2202 / **1** / 300 / 3424 | **+1204** |
+| **TOTAL** | | **14,465 CG / 18,674 mv** | **14,465 CG / 25,895 mv** | **+7,221 (+38.7 %)** |
 
-**Every retry built a hierarchy. Every retry burned the entire 300-cycle budget.
-Not one of them carried.** `cg_multigrid` is 0 on every row of both arms.
+**All eight solves. All four rungs, down to `vf 0.26`. Every retry built a
+hierarchy, every retry burned the entire 300-cycle budget, and not one of them
+carried** — `cg_multigrid` is 0 on every row of both arms.
 
 ★ **THE CG COLUMN IS BIT-IDENTICAL AND THE MATVEC COLUMN IS NOT — that is the
 whole point, and it is why §5's instrument fix was worth making.** The re-arm
 costs **~1,203 operator applies per solve** — one wasted hierarchy build plus 300
 wasted V-cycles — and buys **exactly nothing**, because the Jacobi fallback that
-actually solves the system is unchanged. R1's headline unit, total CG iterations,
-would report the re-arm as **free**. It is not free; it is a **~50 % increase in
-operator applies for zero benefit**, and no production `iterations.csv` written
-before this task could have shown that, because the `matvecs` column was 0.
+actually solves the system is unchanged. **Total CG is 14,465 either way — R1's headline
+unit reports the re-arm as exactly free.** It is not free: it is **+7,221
+operator applies, +38.7 %, for zero benefit**, and no production
+`iterations.csv` written before this task could have shown that, because the
+`matvecs` column was 0 on every row (§5).
 
 ★ **AND IT MEETS PHASE 0'S OWN REOPEN CONDITION.** That handoff asked for
 `used_mg=0` with `hier_built=1` on a **`vf ≤ 0.4`, structure-formed field**, with
