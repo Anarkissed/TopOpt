@@ -221,34 +221,38 @@ print()
 print("=" * 100)
 print("TABLE 5 — ITEM 2(e), WHAT THE FRACTION COSTS ON THE PRODUCTION PATH")
 print("=" * 100)
-hdr = ("arm", "rung", "sampling s", "sensitivity s", "run wall s", "share %",
-       "cut cells")
-print(f"{hdr[0]:<14}{hdr[1]:<7}{hdr[2]:>12}{hdr[3]:>15}{hdr[4]:>12}"
-      f"{hdr[5]:>9}{hdr[6]:>11}")
-print("-" * 90)
+# ★ THE DENOMINATOR IS THE RUNG'S OWN ITERATION WALL, SUMMED FROM
+# `iterations.csv`'s `total_ms`, and NOT a run-level figure — `run_info.json`
+# does not carry one, and PR 327 quoted this as a share OF AN ITERATION (1.92%).
+# Taking it against a whole run would have made the number look smaller for the
+# arm that ran longer, which is the opposite of a cost.
+hdr = ("arm", "rung", "iters", "sampling s", "sensitivity s", "rung wall s",
+       "share %", "cut cells")
+print(f"{hdr[0]:<14}{hdr[1]:<7}{hdr[2]:>7}{hdr[3]:>12}{hdr[4]:>15}"
+      f"{hdr[5]:>13}{hdr[6]:>9}{hdr[7]:>11}")
+print("-" * 92)
+RUNG_INDEX = {"0.68": "0", "0.52": "1", "0.38": "2", "0.26": "3"}
 for arm in ARMS:
-    ri = os.path.join(HERE, "arms", f"{arm}.run_info.json")
-    total = None
-    if os.path.exists(ri):
-        info = json.load(open(ri))
-        total = info.get("optimize_wall_ms") or info.get("total_wall_ms")
-        if total:
-            total = total / 1000.0
-    for digits, rung in (("068", "0.68"), ("026", "0.26")):
+    iters = read_csv(os.path.join(HERE, "arms", f"{arm}.iterations.csv"))
+    for digits, rung in (("068", "0.68"), ("052", "0.52"), ("038", "0.38"),
+                         ("026", "0.26")):
         if rung not in RUNGS:
             continue
         meta = read_meta(os.path.join(
             HERE, "arms", f"{arm}.variant_{digits}_alpha.meta"))
         if not meta:
             continue
+        rows_r = [r for r in iters if r.get("rung") == RUNG_INDEX[rung]]
+        wall = sum(fnum(r.get("total_ms"), 0.0) for r in rows_r) / 1000.0
         smp = fnum(one(meta, "frac_sample_wall_s"), 0.0)
         sen = fnum(one(meta, "frac_sens_wall_s"), 0.0)
-        share = (smp + sen) / total * 100.0 if total else float("nan")
-        print(f"{arm:<14}{rung:<7}{smp:>12.2f}{sen:>15.2f}"
-              f"{(total or 0):>12.1f}{share:>8.2f}%"
+        share = (smp + sen) / wall * 100.0 if wall > 0 else float("nan")
+        print(f"{arm:<14}{rung:<7}{len(rows_r):>7}{smp:>12.2f}{sen:>15.2f}"
+              f"{wall:>13.1f}{share:>8.2f}%"
               f"{one(meta,'frac_cut_cells','0'):>11}")
 print()
-print("★ The share is against the WHOLE RUN's optimise wall clock, which covers")
-print("  every rung; the per-rung sampling and sensitivity columns beside it are")
-print("  what that rung actually spent. PR 327 measured 1.92% of an iteration on")
-print("  the probe path.")
+print("★ `sampling` is the sub-cell build (one per iteration over the ACTIVE")
+print("  cells); `sensitivity` is the quadrature band plus the sample scatter.")
+print("  Both are ZERO on the Heaviside arms by construction — that is the")
+print("  positive control for the column, not a missing measurement.")
+print("★ PR 327 measured 1.92% of an iteration on the probe path at k = 4.")
