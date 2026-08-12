@@ -79,6 +79,45 @@ refusal, which is exactly what item 4 said the counters were for.
 
 ---
 
+## arm C — item 1 alone (heaviside, **eta 1**, continuum, cap 60)
+
+Finished 09:58, about **1 h 50 min**. All four rungs again on
+`iteration-ceiling`: eta does not make the Heaviside path converge.
+
+| rung | B (eta 2) printed / margin | C (eta 1) printed / margin | Δ margin | SIMP printed / margin |
+|---|---|---|---|---|
+| 0.68 | 0.7900 / 3297.3 | 0.7928 / 3255.5 | −1.3% | 0.7973 / 3254.4 |
+| 0.52 | 0.6802 / 3357.7 | 0.6889 / 3347.8 | −0.3% | 0.6941 / 3389.4 |
+| 0.38 | 0.5860 / 2378.0 | 0.5977 / 2751.6 | **+15.7%** | 0.6048 / 3290.9 |
+| 0.26 | 0.5047 / 777.5 | 0.5199 / **1619.2** | ★ **+108.3%** | 0.5283 / 3014.1 |
+
+★★ **eta = 1 MORE THAN DOUBLES THE LIGHT RUNG'S MARGIN** and is a wash at the
+shipped one (−1.3%). Stage A measured this pairing at the shipped volume only,
+where it found the margins identical to three digits; **the shipped rung is not
+where eta's margin effect lives.** It lives where the margin can move at all —
+which is the whole reason R3 asks for both rungs.
+
+★ **BUT IT IS NOT A CLEAN COMPARISON AND THE REASON IS ITSELF A FINDING.**
+eta = 1 prints MORE material at every rung (0.5047 → 0.5199 at the light one,
++3.0%), so part of that +108% is bought rather than free. The mechanism:
+
+> the Heaviside path's volume constraint targets `volume_fraction × n_active` on
+> the SMOOTHED OCCUPANCY SUM, while `printed_fraction` counts `{occ > 0.5}`. Those
+> are the same number only when the band is narrow. A WIDER band drifts further —
+> Stage A measured that drift at 8.9% — so halving eta does not only narrow the
+> band the shape derivative sees, **it moves the achieved volume closer to the
+> one that was asked for.**
+
+★ **Under the volume fraction the two coincide by construction** (summing `f_v`
+IS summing the volume), so arms D and A should land closer to the nominal target
+than either Heaviside arm. That is a prediction, written before D finished.
+
+★ topology, rung 0.68: eta = 1 gives **fewer, larger** pockets — 24 void
+components against 34, 9 sealed pockets against 22, 8 tunnels against 9, but MORE
+trapped voxels (1979 against 1603).
+
+---
+
 ## the host
 
 ★ **NOT MINE.** Other worktrees ran `levelset_probe`, `solver_arm_sweep`,
