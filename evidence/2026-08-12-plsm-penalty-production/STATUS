@@ -8,3 +8,19 @@
 04:35:09 OK E1_c1_eta1 120 it, printed=88424, b0 distinct=51
 04:35:09 STAGE_A_DONE
 04:37:08 START BL_r2 (rung 0.5283)
+06:02:55 OK BL_r2 120 it, printed=58591, b0 distinct=45
+06:02:55 START BL_r3 (rung 0.5283)
+07:52:01 OK BL_r3 120 it, printed=58590, b0 distinct=22
+07:52:01 START BL_robust (rung 0.5283)
+10:09:03 OK BL_robust 120 it, printed=58591, b0 distinct=39
+10:09:03 START BL_stress (rung 0.5283)
+11:07:27 OK BL_stress 120 it, printed=58591, b0 distinct=20
+11:07:27 START BS_r2 (rung 0.7973)
+12:09:20 OK BS_r2 120 it, printed=88424, b0 distinct=50
+12:09:20 START BS_r3 (rung 0.7973)
+13:18:43 OK BS_r3 120 it, printed=88424, b0 distinct=29
+13:18:43 START BS_robust (rung 0.7973)
+14:46:58 OK BS_robust 120 it, printed=88423, b0 distinct=49
+14:46:58 START BS_stress (rung 0.7973)
+15:21:48 OK BS_stress 120 it, printed=88423, b0 distinct=34
+15:21:48 STAGE_B_DONE
