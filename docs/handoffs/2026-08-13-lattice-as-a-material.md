@@ -7,8 +7,10 @@ Evidence: `evidence/2026-08-13-lattice-as-a-material/`. The pre-registration
 ★ **THIS HANDOFF REPORTS AN INCOMPLETE MEASUREMENT CAMPAIGN AND SAYS SO IN §0.**
 The mechanism is built and receipted, the law's validity range is measured, his
 frozen set is decomposed and priced, and the assignment table is COMPLETE at the
-shipped rung — all 8 cells, failures included — with five findings in §0.3. The
-LIGHT rung did not run. ★ **Under the certificate's own per-voxel regime guard,
+shipped rung — all 8 cells, failures included — with five findings in §0.3. ★ The
+LIGHT rung then **refused the region holding 73% of the prize** (§0.3b), which is
+the finding the two-rung bar exists to produce and which revises the shipped
+rung's advice. ★ **Under the certificate's own per-voxel regime guard,
 NONE of the assignments measured is certifiable** (§0.3b), and the pre-registered
 margin bound is missed at every cell for a reason that is a defect in the bound
 (§0.3e). What did not run, and the measured cost that stopped it, are
@@ -151,13 +153,38 @@ gate with 90–240x headroom. A relative margin bound on such a part refuses
 assignments the shipped gate accepts comfortably. The next pre-registration
 should bound the margin against `margin_stop`, not against the baseline.
 
-★ **WHAT IS STILL MISSING FROM THE TABLE: THE LIGHT RUNG.** Bar R3 and §4(b)
-require both rungs. Rung **0.26** was started —
-`evidence/…/m2/r0.26/m2_assignment.csv` and `m2/assign_r0.26.txt`, same six
-certified cells — and did not finish inside the session. ★ **If those files exist
-and are short, they are PARTIAL**: the CSV is flushed per row and the run appends
-`EXIT=` to the log when it completes, so a log without that line is a run that was
-cut off, not a run that found nothing. Re-run it with `queue.sh`. That is not a formality — Proposal 1 §3
+### 0.3b ★★ THE LIGHT RUNG, AND IT IS WHY §4(b) EXISTS
+
+`evidence/…/m2/r0.26/m2_assignment.csv`, rung **0.26**, everything else identical.
+The brief warned that a table measured only at the shipped rung would show every
+assignment passing. Measured, it does something stronger than that:
+
+| region | cells/member @ 0.68 | **cells/member @ 0.26** | in range? |
+|---|---|---|---|
+| **load-pad-1** (179.9 g, 73% of the prize) | 5.12 | ★ **3.41** | ★ **NO — REFUSED at every density** |
+| anchor-2 (67.4 g) | 13.64 | ★ **5.12** | yes, by 2.4% |
+
+★ **THE BIG REGION IS REFUSED AT THE LIGHT RUNG, AT ALL THREE DENSITIES.** A
+lighter rung carves material from around the frozen collar, its members get
+thinner, and its cells-per-member falls from 5.12 to **3.41** — through the
+5-cell homogenisation floor. `anchor-2` falls 13.64 → 5.12 and only just
+survives. ★ **Region validity is RUNG-DEPENDENT, and it moves by a factor of
+~2.7 across this ladder.** A single-rung assignment table is not a conservative
+approximation of a two-rung one; it is a different answer.
+
+The one certified cell so far: `anchor-2` at 0.30 — mass 313.102 g
+(**−47.201 g**), margin_effective **128.856**, solid-only 624.094, strut 128.856,
+OUT OF REGIME, drainable, accepted (−79.35%). The remaining `anchor-2` cells were
+still certifying when the session ended. ★ **A short file here is PARTIAL**: the
+CSV is flushed per row and the log gains `EXIT=` only on completion, so a log
+without that line is a run that was cut off, not one that found nothing.
+
+★ **AND IT REVISES §0.3(d).** At the shipped rung the advice was "assign density
+by the strut bound, not by how quiet the region looks", and `load-pad-1` was the
+better trade. At the light rung `load-pad-1` is not a trade at all — it is
+refused. So the honest combined reading over both rungs is that **the only region
+that survives the ladder is the anchor pad**, worth 67.4 g gross, and even it
+clears the floor by 2.4% at the bottom rung. That is not a formality — Proposal 1 §3
 measured the margin spread at 1.1% across ten arms at a heavy rung, which is
 exactly why a light rung is required, and every verdict above is a heavy-rung
 verdict.
@@ -474,7 +501,7 @@ has shipped five times here.
 |---|---|
 | **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
-| **R3** every arm at two rungs | **MISSED** — rung 0.68 complete (8/8 cells), rung 0.26 did not run. §7.1 |
+| **R3** every arm at two rungs | **PARTLY HELD, and it paid for itself** — rung 0.68 complete (8/8), rung 0.26 started and its refusals are decisive (§0.3b); its last two certified cells did not finish |
 | **R4** NET, and margin as a curve | no optimised arm ran, so there is no curve and no NET number; **no gross number is presented as a saving anywhere**, and the app's own wording says so |
 | **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
