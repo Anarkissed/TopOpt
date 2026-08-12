@@ -6443,6 +6443,14 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
       echo.load_group_reports = setup.load_group_reports;
       echo.clearance_reports = setup.clearance_reports;
       echo.face_protection_reports = setup.face_protection_reports;
+      // Task 2026-08-12 §1f — the anchor pad, counted apart. Missing this line
+      // wrote `anchor_pad: {applied: false, voxels_frozen: 0}` into the receipt
+      // while the log said 32,648 on the maintainer's own job: the receipt
+      // contradicting the log about the very thing the block exists to explain.
+      // (The comment above says every new setup field has to be added here too;
+      // it was right, and I still missed it. `s0_table.py` reading a 0 is what
+      // caught it.)
+      echo.anchor_pad_report = setup.anchor_pad_report;
       // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
       // onto the echo too, or the receipt would silently report a growth run as a
       // reduction one (the echo is a hand-copied subset, so every new setup field

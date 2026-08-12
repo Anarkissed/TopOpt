@@ -1,60 +1,40 @@
-Test Suite 'WorkspaceInteractionTests' passed at 2026-08-11 20:35:51.371.
-	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
-Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-11 20:35:51.371.
-	 Executed 1428 tests, with 21 tests skipped and 11 failures (0 unexpected) in 1235.226 (1235.344) seconds
-Test Suite 'All tests' failed at 2026-08-11 20:35:51.372.
-	 Executed 1428 tests, with 21 tests skipped and 11 failures (0 unexpected) in 1235.226 (1235.348) seconds
-essing-reachability-852264/evidence/2026-07-26-plane-extents/01_plane_row_length_width_depth.png
-Q3 EVIDENCE: |F|=58.839900970458984 N, load voxels=1024, anchor voxels=1024, maxStress=1.3260047014896772 MPa, maxDisp=0.0021794815385106484 mm, accepted=true
-Q4 EVIDENCE: analyze: the declared load case produced NO external load — every declared load group contributed nothing at resolution 32: group 0 (face 0, |F|=0 N): zero force — set a non-zero force on this load — nothing to certify under
-ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/round6_3_gizmo_rotation.png
-ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/round6_2_panel_no_wrap.png
-ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/round6_1_chips_off_handles.png
-GATE-DIAGNOSIS-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/evidence/2026-08-02-gate-diagnosis-recommendations/wallmount_dialog_before_after.txt
-STROKE LATENCY ON HIS OWN VARIANT — rung 068
-
-BUILD: DEBUG — NOT the configuration the app ships. Re-run with
-       `swift test -c release --filter SmoothingStrokeLatencyEvidence`
-       for the numbers he actually feels.
-
-mesh   variant_068.stl: 14386084 bytes, 143862 vertices / 287720 triangles
-brush  every vertex at weight 1.0, strength 0.49 (Taubin pairs as resolved by taubin_params_for_strength)
-repeats per row: 5; every figure is ms PER STROKE
-
-stage                                  repeats    ms/stroke
-------------------------------------------------------------
-A  preview via PATH   — STL re-import        5     699.5
-A  preview via PATH   — smoothing            5      71.1
-A  preview via PATH   — TOTAL                5     922.5
-B  preview via MEMORY — STL re-import        5       0.0
-B  preview via MEMORY — smoothing            5      71.7
-B  preview via MEMORY — TOTAL                5     354.3
-   ViewerMesh build (app side, both)         5    2397.9
-------------------------------------------------------------
-stroke release -> updated preview, BEFORE:   3320.5 ms
-stroke release -> updated preview, AFTER :   2752.2 ms
-removed: 568.2 ms per stroke (17.1% of the before figure)
-
-
-S1d — WHAT ELSE A PASS REBUILDS (not on the critical path above, but
-      paid on EVERY SwiftUI body evaluation, of which a stroke causes
-      several):
-   smoothBrush.viewerTints()  863160 entries      239.3 ms
-   the coordinator's array compare against the uploaded copy     64.7 ms
-
-The import share of the SHIPPED preview call: 90.8%
-moved vertices 143862 / 143862; max displacement 0.4449 mm
-HIS VARIANT: rung 068 — 143862 vertices / 287720 triangles
-HE SETS HIS VIEW: distance 181.5483, target (84.785, -28.061, 110.690)
-  stroke 1 -> rung 1, 20403 vertices moved, max 0.2681 mm, preview 389 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
-  stroke 2 -> rung 2, 20403 vertices moved, max 0.3715 mm, preview 411 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
-  stroke 3 -> rung 3, 20403 vertices moved, max 0.4221 mm, preview 409 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
-  toggled back to Original — camera UNCHANGED
-  renderer holds the page's geometry; settle ran ONCE for the whole session
-TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/tap_overselect_before.png
-TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/docs/handoffs/assets/tap_overselect_after.png
-STEP-IMPORT-PROOF l-bracket.step triangleCount=236 vertexCount=116 faceCount=10 watertight=true
-◇ Test run started.
-↳ Testing Library Version: 1902
-↳ Target Platform: arm64e-apple-macos14.0
-✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+	 Executed 31 tests, with 0 failures (0 unexpected) in 601.972 (601.976) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.011 (0.012) seconds
+	 Executed 24 tests, with 0 failures (0 unexpected) in 0.003 (0.005) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.092 (0.092) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.037 (0.038) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.487 (0.488) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 36 tests, with 0 failures (0 unexpected) in 0.202 (0.204) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.006 (0.006) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.058 (0.059) seconds
+	 Executed 45 tests, with 0 failures (0 unexpected) in 0.007 (0.010) seconds
+	 Executed 22 tests, with 0 failures (0 unexpected) in 0.229 (0.231) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.266 (0.266) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.049 (0.050) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.008 (0.009) seconds
+	 Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.040 (0.042) seconds
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.190 (0.191) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/LatticePageTests.swift:388: error: -[TopOptFlowsTests.LatticePageTests testStaleFieldIsFlaggedAndAutoNeverSilentlyUniform] : XCTAssertNil failed: "LatticeSpec(topologyID: "octet", cellMM: 8.0, strutRadiusMM: 1.0953720829015134, generateRelativeDensity: 0.89988, minRelativeDensity: 0.05047, maxRelativeDensity: 0.89988, emitSTL: true, emit3MF: false, regionScoped: false, skin: "diagrid", minExtrudableWidthMM: nil, graded: false, regions: [], cellSizeMode: "fixed", cellMinMM: 0.0, cellMaxMM: 0.0, retainSubfloorInUnloadedRegions: false, subfloorStressFraction: nil, subfloorPerRegion: false, reportRegionCells: false, requireVoidReachesExterior: true)" - auto without a line width has no grading floor — no spec
+	 Executed 25 tests, with 1 failure (0 unexpected) in 0.834 (0.836) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.005 (0.007) seconds
+	 Executed 44 tests, with 0 failures (0 unexpected) in 0.018 (0.022) seconds
+	 Executed 7 tests, with 1 test skipped and 0 failures (0 unexpected) in 8.667 (8.671) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.096 (0.097) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.434 (0.435) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds

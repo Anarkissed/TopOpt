@@ -74,3 +74,16 @@ PROGRESS rung=0 rungs=4 iter=51
 PROGRESS rung=0 rungs=4 iter=52
 PROGRESS rung=0 rungs=4 iter=53
 PROGRESS rung=0 rungs=4 iter=54
+PROGRESS rung=0 rungs=4 iter=55
+PROGRESS rung=0 rungs=4 iter=56
+PROGRESS rung=0 rungs=4 iter=57
+PROGRESS rung=0 rungs=4 iter=58
+PROGRESS rung=0 rungs=4 iter=59
+PROGRESS rung=0 rungs=4 iter=60
+VARIANT vf=0.680000 achieved=0.680000 printed=0.790017 margin=3297.3 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_068.stl
+[lattice] vf=0.68 frozen material: printed=40216 latticed=68 solid=40148 in_include=10094 in_exclude=0/1680 latticed (audit: cells_not_emitted=0 strut_and_solid=60 unexplained=0)
+LATTICE vf=0.680000 topology=octet cell_mm=4.60262 graded=1 rho_min=0.138782 rho_max=0.275192 cells=43 tris=44760 lattice_margin=3297.27 lattice_accepted=1 report=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_068_lattice.report.json mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_mismatch/variant_068_lattice.stl
+PROGRESS rung=1 rungs=4 iter=1
+PROGRESS rung=1 rungs=4 iter=2
+PROGRESS rung=1 rungs=4 iter=3
+PROGRESS rung=1 rungs=4 iter=4
