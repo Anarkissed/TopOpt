@@ -24,17 +24,18 @@ else here exists to test what to *do* about them.
 | --- | --- |
 | `tables.py` / `tables.txt` | every table the handoff prints, from committed artifacts only |
 | `assertion_census.sh` / `r6_assertion_census.txt` | R6 — message census across tests, ctest names, production refusals, CHECK-operator histogram, `static_assert` messages, and the harness bag |
-| `check_r2.sh` / `r2_byte_identity.txt` | R2 — `--arm base` reproduces `topopt-cli run` bit for bit, with the stale-binary guard first |
+| `check_r2.py` / `r2_byte_identity.txt` / `r2/` | R2 — `--arm base` reproduces `topopt-cli run`, and this tree reproduces HIS captured run for 13 solves. Compares the COMMON PREFIX; the script header explains why neither a positional zip nor a `(rung, iter)` key is the right rule |
 | `run_probes.sh` / `probes/` | the mechanism probes — §4(a) algebraic level, §3 ersatz sharpness both ways |
 | `run_arms.sh` / `arms/` | the full-ladder arms — the R1 table |
-| `nt_triage/` | §1(b) — what the GenEO basis dimension `N_t` actually is at each subdomain tiling, from one solve per point |
+| `run_nt_triage.sh` / `nt_triage/` | §1(b) — the GenEO basis dimension `N_t` at each subdomain tiling, one solve per point. **`nt_triage/RESULT.md` is where this task's one BLOCKED measurement is reported as blocked** |
+| `probes/NOTE_ctl.md`, `probes/NOTE_eta.md` | what was stopped early, why, and the command that finishes it |
 | `host_load.txt` | the host was SHARED throughout; this is why no wall figure is cited as evidence |
 | `queue.log` | the measurement queue's own transcript, in order, with timestamps |
 
 ## Two things to read before reading a number
 
 **Wall is not the signal.** The host ran other agents' `topopt-cli` processes for
-the whole measurement window (`host_load.txt`: load averages 22–31 on a 10-core
+the whole measurement window (`host_load.txt`: load averages 22–122 on a 10-core
 box). CG iteration counts, matvec counts and `N_t` are deterministic and
 unaffected. Wall is printed beside them and is indicative only — the same
 discipline `2026-08-02-warm-start-coarse-experiment` §3 and `2026-07-29-geneo-arming`

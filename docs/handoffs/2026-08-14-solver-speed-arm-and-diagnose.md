@@ -1,4 +1,4 @@
-# The two accelerators are armed and not running — why, and what to do about it
+# The two accelerators are armed and not running — why, and why the third one does not save it either
 
 **Task:** `solver-speed-arm-and-diagnose` ·
 **Evidence:** `evidence/2026-08-14-solver-speed-arm-and-diagnose/`
@@ -32,15 +32,17 @@ GEOMETRY, and PR 283 already measured it: the geometric coarse space captures
 **1.6 %** of the exact solution's energy on this field. §2.
 
 **Total CG iterations across the run, before and after everything armed.**
-★ **The most useful answer to this is not one of the two accelerators the task
-names.** There is a THIRD — the algebraic level-1 coarse space — which is built,
-DISARMED rather than idle, and already measured on this class of field at
-**ladder CG 85,536 → 15,595 (5.5×), latch quiet, zero verdict flips**, with
-GenEO's decline problem *dissolving* (1 build / 1 armed / 167 declines → 0/0/0)
-because the solves stop being hard. Its stated blocking reason is a memory
-projection that binds **above ~5.5M DOF**; his grid is **1.47M**. §4(a), and the
-scale gap is named there rather than glossed. §6 reports what this task's own
-run of it did.
+★ **The most promising candidate was a THIRD accelerator the brief does not name
+— and it was measured here, on his job, and it does not work.** The algebraic
+level-1 coarse space is built and DISARMED rather than idle, and it had been
+measured on this class of field at **ladder CG 85,536 → 15,595 (5.5×)** with
+GenEO's decline problem *dissolving* (1 build / 1 armed / 167 declines → 0/0/0).
+Its stated blocking reason is a memory projection binding above ~5.5M DOF, and
+his grid is 1.47M — so it **builds** here (5,199 aggregates, 112.4 MB, not
+refused). **And the V-cycle still burns all 300 cycles**, latches at the same
+place, and every CG count down all four rungs is identical to the control.
+Geometric and algebraic coarse spaces have now both been observed to fail on his
+part. §4(a) for the case, **§6c for the measurement**.
 
 **Whether the exact volume fraction made the stagnation worse.**
 ★ **It cannot have, because it is not in production.** PR 327 changed **four
@@ -457,6 +459,10 @@ is the reason to expect it to matter here rather than not**:
 `run_info.json`) — the 128³ *resolution* names a 468,224-voxel box of which only
 110,904 voxels may hold material. At 355 bytes/DOF that projects to **~520 MB**,
 a quarter of the cap.
+
+★ **THE VERDICT IS IN §6c AND IT IS A NO-GO — read this section as the case for
+running the experiment, not as its result.** The algebraic level does build here,
+and it does not help. Everything below is what was believed before the run.
 
 **So the prediction, stated before the measurement:** the algebraic level should
 be BUILT and not refused on this job, `mg_algebraic_level1_refused` should read

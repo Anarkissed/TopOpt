@@ -31,8 +31,10 @@ cmake --build build -j8 --target topopt_cli solver_arm_sweep test_mg_tuning
 # ── 3. R6 — the assertion census. Nothing removed.
 bash "$HERE/assertion_census.sh" | tee "$HERE/r6_assertion_census.txt"
 
-# ── 4. R2 — the harness is inert: `--arm base` reproduces `topopt-cli run`.
-sh "$HERE/check_r2.sh" | tee "$HERE/r2_byte_identity.txt"
+# ── 4. R2 — the harness is inert: `--arm base` reproduces `topopt-cli run`,
+# and this tree reproduces HIS captured run. Compares the COMMON PREFIX; see the
+# script header for why neither a positional zip nor a (rung,iter) key is right.
+python3 "$HERE/check_r2.py" | tee "$HERE/r2_byte_identity.txt"
 
 # ── 5. §1(b) TRIAGE — N_t at each tiling, one solve per point. Cheap, and it
 # is what decides whether a smaller-basis ARM is worth running at all.
