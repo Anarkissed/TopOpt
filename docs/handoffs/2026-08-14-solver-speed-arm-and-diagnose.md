@@ -24,9 +24,15 @@ break-even and `N_t` is the only term with room in it. §1.
 At **rung 0, design iteration 4** — the first three solves of a 160-solve run each
 burned the full 300-cycle budget and tripped `kMgLatchThreshold`. Reproduced on
 this tree to the iteration (927 / 970 / 1420 / 1591 CG, `hier_built` 1/1/1/0).
-Re-arming is tested on his part rather than inferred, which is what §7 of
-`2026-07-27-mg-stagnation-phase0` asked for and could not do. ★ And §2(d)'s
-premise is corrected: PLSM's `rho_min = 1e-3` does **not** put the contrast at
+★ **Re-arming does not help, measured on his part rather than inferred** — which
+is what §7 of `2026-07-27-mg-stagnation-phase0` asked for and could not do. With
+the latch re-opened before every solve, a hierarchy is built and attempted on
+every rung, **every attempt burns the full budget, none carries**, and the CG
+counts come out **bit-identical** to the latched control while costing **~1,203
+extra operator applies per solve**. §6e — including the rung at `vf 0.38`, which
+is exactly the structure-formed field phase 0's reopen condition named.
+
+★ And §2(d)'s premise is corrected: PLSM's `rho_min = 1e-3` does **not** put the contrast at
 1e3 — through `E = rho³E₀` it is **1e9**, the same as SIMP's. The cause is the
 GEOMETRY, and PR 283 already measured it: the geometric coarse space captures
 **1.6 %** of the exact solution's energy on this field. §2.
@@ -195,7 +201,8 @@ gate engage more often" but **"can the basis be made cheap enough that engaging
 is obviously right"**, and the only lever measured to move `N_t` at all is the
 subdomain tiling: the same handoff's W3 swept `lambda_cut` over 50× and moved
 `N_t` by **0.7 %**, while W4's tiling sweep moved it 313 → 47 going from 8³ to
-16³ cores. §6 runs that sweep on his job.
+16³ cores. **§6b attempted that sweep on his job and it did not finish** — it is
+this task's one blocked measurement, and it is the one that decides §1.
 
 ---
 
@@ -758,6 +765,53 @@ by 120) and those remain the references.
 
 ---
 
+### 6e. ★ §2(b) MEASURED — the re-arm attempts a hierarchy on every rung, and it never carries
+
+This is the measurement `2026-07-27-mg-stagnation-phase0` §7 asked for and could
+not take: **the maintainer's actual part, with the latch disabled, so the
+developed-rung verdict is OBSERVED rather than inferred.**
+`--arm rearm=1` re-opens the latch before every solve, so a hierarchy is built
+and attempted on all of them.
+
+| solve | `base` cg / hier / matvecs | `rearm=1` cg / hier / cycles / matvecs | Δ matvecs |
+|---|---|---|---:|
+| rung 0 it 1 | 927 / 1 / 3806 | 927 / 1 / 300 / 3806 | **0** |
+| rung 0 it 2 | 970 / 1 / 2192 | 970 / 1 / 300 / 2192 | **0** |
+| rung 1 it 1 | 2451 / **0** / 2469 | 2451 / **1** / 300 / 3672 | **+1203** |
+| rung 1 it 2 | 1522 / **0** / 1540 | 1522 / **1** / 300 / 2744 | **+1204** |
+| rung 2 it 1 | 2122 / **0** / 2140 | 2122 / **1** / 300 / 3343 | **+1203** |
+| rung 2 it 2 | 2335 / **0** / 2353 | 2335 / **1** / 300 / 3557 | **+1204** |
+
+**Every retry built a hierarchy. Every retry burned the entire 300-cycle budget.
+Not one of them carried.** `cg_multigrid` is 0 on every row of both arms.
+
+★ **THE CG COLUMN IS BIT-IDENTICAL AND THE MATVEC COLUMN IS NOT — that is the
+whole point, and it is why §5's instrument fix was worth making.** The re-arm
+costs **~1,203 operator applies per solve** — one wasted hierarchy build plus 300
+wasted V-cycles — and buys **exactly nothing**, because the Jacobi fallback that
+actually solves the system is unchanged. R1's headline unit, total CG iterations,
+would report the re-arm as **free**. It is not free; it is a **~50 % increase in
+operator applies for zero benefit**, and no production `iterations.csv` written
+before this task could have shown that, because the `matvecs` column was 0.
+
+★ **AND IT MEETS PHASE 0'S OWN REOPEN CONDITION.** That handoff asked for
+`used_mg=0` with `hier_built=1` on a **`vf ≤ 0.4`, structure-formed field**, with
+the latch disabled, on a real part. **Rung 2 is `vf 0.38`** and both of its solves
+are exactly that. The forecast it made in July — that developing structure makes
+geometric multigrid monotonically worse and a re-arm's upside set is empty — is
+now confirmed on the maintainer's own geometry rather than on a synthetic
+bracket. **Do not ship a re-arm.** The shipped never-re-arm policy is the cheapest
+correct one, and `fea_matfree_set_mg_rearm_period` stays at its default 0.
+
+*(Honest scope: the arm's rungs are 2 design iterations deep, not 60, so "rung 2
+at vf 0.38" is a structure-formed field but not his converged one. What that
+cannot weaken is the direction — phase 0 measured the cycle count climbing
+monotonically as the field develops, and his own run shows solves getting 3.7×
+more expensive from rung 0 to rung 3, so a more developed field is a HARDER one,
+not an easier one. A re-arm that fails here fails there.)*
+
+---
+
 ## 7. NOT IN THIS TASK — and the one line worth carrying forward
 
 **Resolution continuation is the strongest remaining lever, and the exact volume
@@ -842,7 +896,11 @@ was measured: the blurred version captures **1.6 %** of the answer's energy, whe
 a well-behaved part gives **99.3 %**. And it only gets worse as the optimiser
 removes material — his own run shows solves getting **3.7× more expensive** from
 the first rung to the last. **The moment it was judged was the moment it had its
-best chance.** Switching it off was right.
+best chance.** Switching it off was right — and switching it back on later,
+which the brief asks about, was tried here on his own part rather than on a
+stand-in: multigrid was made to try again on **every** solve of **every** rung,
+it failed every single time, and the run came out with **exactly the same
+iteration counts** while doing about **50 % more arithmetic** to get there.
 
 **And there is a third accelerator that nobody asked about. It looked like the
 answer. It is not.** Instead of blurring the grid, it groups voxels by how they
