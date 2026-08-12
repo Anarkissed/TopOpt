@@ -726,18 +726,38 @@ struct JobDescription {
   // follows a change of resolution. The schema offers no scalar form: a single
   // knot spacing for three axes is exactly the shape of the trap PR 323 lost a
   // day to (GridapTopOpt's alpha rule reading `minimum(el_size)` on a 4:1 slab).
+  //
+  // ★★ EVERY DEFAULT BELOW IS READ OUT OF `PlsmOptions` AND NOT RETYPED, AND
+  // THAT IS A DEFECT CLASS THIS TASK FOUND RATHER THAN A STYLE CHOICE. These
+  // fields are copied onto `MinimizePlasticOptions::plsm` WHENEVER a job carries
+  // a plsm block, so a hand-written default here SILENTLY OVERRIDES the
+  // production one for every job that uses the feature. `eta_voxels` and
+  // `max_iterations` were both duplicated as literals here; changing the
+  // production defaults alone would have shipped two no-ops.
   bool has_plsm = false;
   bool plsm_enabled = false;
-  std::string plsm_basis = "gaussian";
+  std::string plsm_basis = PlsmOptions{}.basis;
   double plsm_knots[3] = {0.0, 0.0, 0.0};  // VOXELS, per axis; 0 = derive
-  double plsm_support = 2.0;
-  double plsm_eta_voxels = 2.0;
-  int plsm_max_iterations = 60;
-  std::string plsm_seed = "inherit";
-  int plsm_refit_every = 5;
-  double plsm_move = 1.0;
-  double plsm_cg_tolerance_loose = 1e-4;
-  bool plsm_warm_start = true;
+  double plsm_support = PlsmOptions{}.support;
+  double plsm_eta_voxels = PlsmOptions{}.eta_voxels;
+  int plsm_max_iterations = PlsmOptions{}.max_iterations;
+  std::string plsm_seed = PlsmOptions{}.seed;
+  int plsm_refit_every = PlsmOptions{}.refit_every;
+  double plsm_move = PlsmOptions{}.move;
+  double plsm_cg_tolerance_loose = PlsmOptions{}.cg_tolerance_loose;
+  bool plsm_warm_start = PlsmOptions{}.warm_start;
+  // ── the volume-fraction ersatz and the margin-plateau stop (2026-08-13) ────
+  // "fraction" | "heaviside". The second is PR 324/325/326's centre-sampled
+  // smoothed Heaviside, kept reachable so the change is an A/B on this path.
+  std::string plsm_ersatz = "fraction";
+  int plsm_frac_samples = PlsmOptions{}.frac_samples;
+  double plsm_frac_eps_mult = PlsmOptions{}.frac_eps_mult;
+  bool plsm_frac_mollified = PlsmOptions{}.frac_mollified;
+  bool plsm_frac_sens_exact = PlsmOptions{}.frac_sens_exact;
+  bool plsm_frac_eps_l1 = PlsmOptions{}.frac_eps_l1;
+  int plsm_margin_probe_every = PlsmOptions{}.margin_probe_every;
+  int plsm_margin_plateau_probes = PlsmOptions{}.margin_plateau_probes;
+  double plsm_margin_plateau_tol = PlsmOptions{}.margin_plateau_tol;
 
   // Optional declared load case (the "loads" block). When present the run uses
   // build_production_loadcase (anchors + forces) instead of self-weight.

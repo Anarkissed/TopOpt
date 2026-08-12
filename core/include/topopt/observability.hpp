@@ -592,6 +592,36 @@ struct RunInfo {
   bool plsm_warm_start = false;
   long long plsm_coefficients = 0;
   double plsm_frozen_floor_occupancy = 0.0;
+  // ── ★ THE ERSATZ AND THE STOPPING RULE (task 2026-08-13) ─────────────────
+  // "fraction" | "heaviside" — WHICH DENSITY the solver saw. The two are
+  // different objects and a receipt that did not say which would make every
+  // number beside it unreadable.
+  std::string plsm_ersatz;
+  int plsm_frac_samples = 0;
+  double plsm_frac_eps_mult = 0.0;
+  bool plsm_frac_mollified = false;
+  bool plsm_frac_sens_exact = false;
+  bool plsm_frac_eps_l1 = false;
+  long long plsm_frac_cut_cells = 0;
+  double plsm_frac_sample_wall_s = 0.0;
+  double plsm_frac_sens_wall_s = 0.0;
+  // ★ WHY THE RUN STOPPED, on the FIRST rung. "iteration-ceiling" and
+  // "margin-plateau" are different runs and must not read alike.
+  int plsm_margin_probe_every = 0;
+  int plsm_margin_plateau_probes = 0;
+  double plsm_margin_plateau_tol = 0.0;
+  std::string plsm_stop_reason;
+  int plsm_margin_peak_iteration = 0;
+  double plsm_margin_peak = 0.0;
+  double plsm_margin_probe_wall_s = 0.0;
+  // ── ★ THE TOPOLOGY COUNTERS. The constraint that produced them does not
+  // ship; these do, because they made every other finding legible.
+  long long plsm_void_components = 0;
+  long long plsm_void_chi = 0;
+  long long plsm_void_cavities = 0;
+  long long plsm_void_tunnels = 0;
+  long long plsm_void_sealed_voxels = 0;
+  double plsm_void_sealed_volume_mm3 = 0.0;
 
   bool draft_quality = false;
   double draft_loose_tol = 0.0;

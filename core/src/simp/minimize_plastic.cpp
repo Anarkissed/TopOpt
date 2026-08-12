@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -1274,8 +1275,57 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // the point: a PLSM rung produces the same SimpOptimizeResult a SIMP rung
     // does, on the same volume constraint over the same Active set.
     if (options.plsm.mode == PlsmMode::Parametric) {
+      // ── ★★ THE MARGIN PROBE THE STOPPING RULE WATCHES ────────────────────
+      //
+      // Built HERE and not in `plsm_optimize`, because certifying needs a
+      // material, a build direction, a knockdown posture and an acceptance
+      // threshold — four job-level facts an optimiser has no business learning.
+      // The optimiser gets a function from a density to a margin and a
+      // connectivity verdict, and nothing else.
+      //
+      // ★ IT IS THE SAME CALL THE PER-RUNG CERTIFICATION MAKES, with the same
+      // arguments, so an in-loop probe and the rung's own certificate are the
+      // same measurement of the same object and not two conventions. The two
+      // post-passes that can MOVE a verdict — the orientation scorer and its
+      // auto-apply — are passed FALSE: a probe is a reading, and a reading may
+      // not re-seal the direction the run is certifying against.
+      //
+      // ★ AND `load_path_connected` IS CALLED ON THE CANDIDATE, not assumed. A
+      // severed design measures ~zero stress and therefore an enormous margin;
+      // without this the rule would select the worst design in the run.
+      // ★ AND IT IS REFUSED, NOT DEGRADED, UNDER MULTISCALE. A multiscale rung's
+      // certificate is taken against the LatticePosture built from THAT rung's
+      // own design, which does not exist until after this call returns. A probe
+      // could only pass the PREVIOUS rung's posture or none at all, and either
+      // would certify a different object than the rung's own certificate — the
+      // loop/export disagreement this repository has already paid for once. The
+      // run then keeps the compliance-plateau rule and says so.
+      PlsmOptions plsm_opts = options.plsm;
+      if (plsm_opts.margin_probe_every > 0 && !options.multiscale_lattice) {
+        plsm_opts.margin_probe =
+            [&](const std::vector<double>& density) -> PlsmMarginProbe {
+          PlsmMarginProbe mp;
+          const auto t0 = std::chrono::steady_clock::now();
+          mp.load_path_ok = load_path_connected(G, density, kIso);
+          const FixedDesignAnalysis a = analyze_fixed_design(
+              G, params, density, B, loads, material, build_dir, kCertTol,
+              opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
+              mp.load_path_ok, part_solid, /*lattice=*/nullptr,
+              /*score_build_orientation=*/false,
+              /*build_direction_inferred=*/false,
+              /*auto_apply_build_orientation=*/false, kIso);
+          mp.margin = a.margin.worst_case;
+          mp.non_convergent = a.non_convergent;
+          mp.wall_s = std::chrono::duration<double>(
+                          std::chrono::steady_clock::now() - t0)
+                          .count();
+          return mp;
+        };
+      } else {
+        plsm_opts.margin_probe_every = 0;
+      }
       PlsmRunResult pr =
-          plsm_optimize(G, params, B, loads, opt, mask, options.plsm);
+          plsm_optimize(G, params, B, loads, opt, mask, plsm_opts);
       variant.optimization = std::move(pr.optimization);
       // The analytic design, carried out beside the voxel field (S1(d)).
       variant.plsm_alpha = std::move(pr.alpha);
@@ -1283,6 +1333,21 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       variant.plsm_basis_kind = pr.basis_kind;
       variant.plsm_eta_voxels = pr.eta_voxels;
       variant.plsm_frozen_floor_occupancy = pr.frozen_floor_occupancy;
+      variant.plsm_ersatz = pr.ersatz;
+      variant.plsm_frac_samples = pr.frac_samples;
+      variant.plsm_frac_cut_cells = pr.frac_cut_cells;
+      variant.plsm_frac_sample_wall_s = pr.frac_sample_wall_s;
+      variant.plsm_frac_sens_wall_s = pr.frac_sens_wall_s;
+      variant.plsm_topology = pr.topology;
+      variant.plsm_stop_reason = pr.stop_reason;
+      variant.plsm_margin_probe_iterations =
+          std::move(pr.margin_probe_iterations);
+      variant.plsm_margin_probe_values = std::move(pr.margin_probe_values);
+      variant.plsm_margin_probe_load_path_ok =
+          std::move(pr.margin_probe_load_path_ok);
+      variant.plsm_margin_probe_wall_s = pr.margin_probe_wall_s;
+      variant.plsm_margin_peak_iteration = pr.margin_peak_iteration;
+      variant.plsm_margin_peak = pr.margin_peak;
     } else {
       variant.optimization = simp_optimize(G, params, B, loads, opt, mask);
     }

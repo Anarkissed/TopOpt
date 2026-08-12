@@ -806,6 +806,30 @@ std::string run_info_json(const RunInfo& info) {
   num("plsm_warm_start", bool_json(info.plsm_warm_start));
   num("plsm_coefficients", fmt_ll(info.plsm_coefficients));
   num("plsm_frozen_floor_occupancy", fmt(info.plsm_frozen_floor_occupancy));
+  // Task 2026-08-13-plsm-production-settings — the ersatz, the stopping rule
+  // and the topology counters. Empty/zero on every run that did not arm PLSM.
+  str("plsm_ersatz", info.plsm_ersatz);
+  num("plsm_frac_samples", fmt_i(info.plsm_frac_samples));
+  num("plsm_frac_eps_mult", fmt(info.plsm_frac_eps_mult));
+  num("plsm_frac_mollified", bool_json(info.plsm_frac_mollified));
+  num("plsm_frac_sens_exact", bool_json(info.plsm_frac_sens_exact));
+  num("plsm_frac_eps_l1", bool_json(info.plsm_frac_eps_l1));
+  num("plsm_frac_cut_cells", fmt_ll(info.plsm_frac_cut_cells));
+  num("plsm_frac_sample_wall_s", fmt(info.plsm_frac_sample_wall_s));
+  num("plsm_frac_sens_wall_s", fmt(info.plsm_frac_sens_wall_s));
+  num("plsm_margin_probe_every", fmt_i(info.plsm_margin_probe_every));
+  num("plsm_margin_plateau_probes", fmt_i(info.plsm_margin_plateau_probes));
+  num("plsm_margin_plateau_tol", fmt(info.plsm_margin_plateau_tol));
+  str("plsm_stop_reason", info.plsm_stop_reason);
+  num("plsm_margin_peak_iteration", fmt_i(info.plsm_margin_peak_iteration));
+  num("plsm_margin_peak", fmt(info.plsm_margin_peak));
+  num("plsm_margin_probe_wall_s", fmt(info.plsm_margin_probe_wall_s));
+  num("plsm_void_components", fmt_ll(info.plsm_void_components));
+  num("plsm_void_chi", fmt_ll(info.plsm_void_chi));
+  num("plsm_void_cavities", fmt_ll(info.plsm_void_cavities));
+  num("plsm_void_tunnels", fmt_ll(info.plsm_void_tunnels));
+  num("plsm_void_sealed_voxels", fmt_ll(info.plsm_void_sealed_voxels));
+  num("plsm_void_sealed_volume_mm3", fmt(info.plsm_void_sealed_volume_mm3));
   {
     std::string ls = "[";
     for (std::size_t i = 0; i < info.semdot_rung_level_set.size(); ++i) {

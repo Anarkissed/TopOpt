@@ -878,7 +878,11 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(*pl,
                         {"enabled", "basis", "knots", "support", "eta_voxels",
                          "max_iterations", "seed", "refit_every", "move",
-                         "cg_tolerance_loose", "warm_start"},
+                         "cg_tolerance_loose", "warm_start", "ersatz",
+                         "frac_samples", "frac_eps_mult", "frac_mollified",
+                         "frac_sens_exact", "frac_eps_l1",
+                         "margin_probe_every", "margin_plateau_probes",
+                         "margin_plateau_tol"},
                         "plsm");
     job.has_plsm = true;
     const JsonValue& en = require_key(*pl, "enabled", "plsm");
@@ -943,6 +947,60 @@ JobDescription parse_job(const std::string& json_text) {
       if (v->type != JsonValue::Type::Bool)
         schema_fail("\"plsm.warm_start\" must be a boolean");
       job.plsm_warm_start = (v->num != 0.0);
+    }
+    // ── the volume-fraction ersatz (task 2026-08-13, item 2) ────────────────
+    if (const JsonValue* v = find_key(*pl, "ersatz")) {
+      job.plsm_ersatz = require_nonempty_string(*v, "plsm.ersatz");
+      if (job.plsm_ersatz != "fraction" && job.plsm_ersatz != "heaviside")
+        schema_fail(
+            "\"plsm.ersatz\" must be \"fraction\" (the exact cell volume "
+            "fraction inside {phi < 0}, the production default) or "
+            "\"heaviside\" (the centre-sampled smoothed step it replaces)");
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_samples")) {
+      const double x = require_number(*v, "plsm.frac_samples");
+      if (x < 2.0 || x > 16.0)
+        schema_fail(
+            "\"plsm.frac_samples\" must be in [2, 16] — 1 would put the only "
+            "sample back at the cell centre, which is the approximation the "
+            "volume fraction replaces");
+      job.plsm_frac_samples = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_eps_mult")) {
+      const double x = require_number(*v, "plsm.frac_eps_mult");
+      if (!(x > 0.0)) schema_fail("\"plsm.frac_eps_mult\" must be > 0");
+      job.plsm_frac_eps_mult = x;
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_mollified")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("\"plsm.frac_mollified\" must be a boolean");
+      job.plsm_frac_mollified = (v->num != 0.0);
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_sens_exact")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("\"plsm.frac_sens_exact\" must be a boolean");
+      job.plsm_frac_sens_exact = (v->num != 0.0);
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_eps_l1")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("\"plsm.frac_eps_l1\" must be a boolean");
+      job.plsm_frac_eps_l1 = (v->num != 0.0);
+    }
+    // ── the margin-plateau stop (task 2026-08-13, item 3) ───────────────────
+    if (const JsonValue* v = find_key(*pl, "margin_probe_every")) {
+      const double x = require_number(*v, "plsm.margin_probe_every");
+      if (x < 0.0) schema_fail("\"plsm.margin_probe_every\" must be >= 0 (0 = off)");
+      job.plsm_margin_probe_every = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "margin_plateau_probes")) {
+      const double x = require_number(*v, "plsm.margin_plateau_probes");
+      if (x < 1.0) schema_fail("\"plsm.margin_plateau_probes\" must be >= 1");
+      job.plsm_margin_plateau_probes = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "margin_plateau_tol")) {
+      const double x = require_number(*v, "plsm.margin_plateau_tol");
+      if (!(x >= 0.0)) schema_fail("\"plsm.margin_plateau_tol\" must be >= 0");
+      job.plsm_margin_plateau_tol = x;
     }
   }
 
