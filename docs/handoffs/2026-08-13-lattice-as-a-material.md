@@ -205,15 +205,27 @@ one of its cells out of regime.
 
 ### 0.4 ★★ The NET mass saving — not measured, but **B3 is decided against without it**
 
-The largest gross in the table is **−125.902 g (−23.2%)**, at the cell with the
-worst margin; the best-margin cell's gross is **−26.972 g (−5.0%)**. Both are with
-the freed mass BANKED
-(`freed_mass_return = 0.0`, the assignment table's posture). ★ **That is not the
-saving and must not be read as one.** §0.2 measured that 100% of the frozen mass
-is load-bearing and that this very region holds the part's peak von Mises, so the
-optimiser will put material back — which is exactly what the mass-neutral end of
-the knob is for. The loop that walks between them (§4c of the brief) did not run;
-no NET number appears anywhere in this handoff.
+No optimised arm ran, so there is no NET number and none is estimated. But the
+two completed tables settle **B3 (>= 8.0% NET at the shipped rung)** anyway:
+
+* the only region surviving BOTH rungs is `anchor-2` (§0.3b);
+* its GROSS saving at the shipped rung is **4.96% / 6.82% / 8.68%** of 543.724 g
+  at densities 0.60 / 0.45 / 0.30 — all with the freed mass BANKED
+  (`freed_mass_return = 0.0`, the assignment table's posture);
+* so only its **0.30** cell clears 8.0% *on gross alone*, and that is the cell
+  with the worst margin of the three (−79.35%);
+* NET is strictly smaller than gross, because §0.2 measured **100% of the frozen
+  mass load-bearing** and §3's coupling says the optimiser puts material back.
+
+★ **So B3 cannot be met by any assignment that survives the ladder.** It is not
+"unmeasured" — it is decided against, and the loop would only quantify by how
+much. ★ That is a verdict on **this part at this cell**, not on the mechanism:
+§0.1's arithmetic says a finer cell or a thicker collar moves it, and §0.3b says
+the ladder rung alone moves region validity by 2.7x.
+
+★ **AND NO GROSS NUMBER IS PRESENTED AS A SAVING ANYWHERE** — not here, not in the
+tables, and not on the app's face card, whose own label says the difference is
+"before the optimiser re-places material".
 
 ### 0.5 ★ Whether Mode 2 beat Mode 1 — **NOT MEASURED, and Mode 2's in-loop coupling is NOT BUILT.**
 
@@ -224,9 +236,10 @@ compliance sensitivity dc/dρ_e at a frozen latticed voxel, which
 `simp_compliance` now returns and which is the other half of the chain rule.
 What is NOT built is β joining the MMA design vector — §7.2.
 
-### 0.6 ★ What stopped the campaign, measured: **a cold certification of his part is tens of minutes, and arming GenEO for it makes that worse, not better.**
+### 0.6 ★ What the campaign cost, measured: **a cold certification of his part is tens of minutes, and arming GenEO for it makes that worse, not better.**
 
-This is a real finding and it is the reason the rest of §0 says NOT MEASURED.
+This is a real finding, it is why the tables above are 14 cells rather than 40,
+and it is why the loop (§7.1) is the piece that did not fit.
 
 **One certification of his rung 0.68, isolated, at 8 threads: 590.6 s.** That is
 the measured unit cost of every cell of the assignment table.
@@ -473,8 +486,10 @@ could not be fixed here and it is not being left silently.
 A frozen region declared as lattice moves from the BLOCKING set into the ESCAPE
 network. That is correct — a latticed boss really does let powder through — and
 it means the check must be re-evaluated per assignment, which is what the
-assignment table's `sealed` column does (bar B7). It is a per-assignment
-measurement, and it did not run (§0.6).
+assignment table's `sealed` column does (bar B7). ★ **Measured on every certified
+cell at both rungs: `sealed = 0` throughout.** Latticing either of his frozen
+regions at any admissible density leaves the pore space connected to the exterior,
+so B7 is HELD on all nine certified assignments.
 
 ---
 
@@ -680,9 +695,26 @@ densities you would actually pick and under-predicts by 26% at the light end. Th
 optimiser never sees that formula here — it uses the 19 real measurements — but
 it is worth writing down, because that formula is what most tools use.
 
-What is *not* answered: how much weight this actually saves. The reason is
-honest and slightly boring — checking one candidate takes tens of minutes of
-computation on this part, the plan called for about forty of them, and that did
-not fit. The machinery, the safety checks and the on-screen numbers are all in;
-the arithmetic that says "this saves N grams and costs M% of margin" is the next
-sitting, and `queue.sh` is the button.
+**Three, and this is the answer to the question that was actually asked: on his
+part, at his settings, it is not worth doing.** Every candidate was checked at
+two settings of the optimiser — a heavy one and a light one — and the result is
+blunt. At the light setting the big frozen region, which holds three quarters of
+the weight on offer, becomes too thin to lattice at all: the optimiser has carved
+material away from around it, and the collar drops from just over the five-cell
+minimum to well under it. What is left is the anchor pad, worth 67 grams, and the
+best it can do while keeping a sensible strength margin is about 27 grams — five
+percent of the part — *before* the optimiser puts material back, which it will,
+because the region carrying the peak stress is exactly the one being lightened.
+
+That is a verdict on **this part with this nozzle and this cell size**, not on the
+idea. The arithmetic says what would change it: a finer lattice cell, a thicker
+protected collar, or a smaller nozzle. And one number is worth remembering — how
+much of a region can be latticed changes by nearly a factor of three between the
+heavy and light settings of the same run, so checking at one setting tells you
+almost nothing about the other.
+
+What is genuinely still open is the last loop: give the freed weight back to the
+optimiser and see how much of it comes back as material. That would sharpen the
+"27 grams" to a true net figure. It does not change the verdict — the gross is
+already below the line that was set in advance — and `queue.sh` is the button
+when someone wants the number.
