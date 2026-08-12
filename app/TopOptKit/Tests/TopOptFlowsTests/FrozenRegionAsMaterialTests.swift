@@ -87,11 +87,15 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
     }
 
     func testAnOlderSnapshotWithoutTheKeyDecodesToAuto() throws {
+        // ★ `groupRoles` is `[]` and not `{}`: a Swift dictionary with a
+        // non-String key encodes as a FLAT ARRAY, so this is what a real old
+        // snapshot on disk looks like. Writing `{}` would have tested a document
+        // the app never produced.
         let json = Data("""
         {"enabled":true,"topologyID":"octet","cellMM":2,
          "minRelativeDensity":0,"maxRelativeDensity":1,
          "includePrimitives":[],"boundary":"fullSkin","densityMode":"uniform",
-         "paintedIncludeFaces":[],"paintDepthMM":4,"groupRoles":{}}
+         "paintedIncludeFaces":[],"paintDepthMM":4,"groupRoles":[]}
         """.utf8)
         let s = try JSONDecoder().decode(LatticeSettings.self, from: json)
         XCTAssertTrue(s.frozenRegionDensity.isEmpty)

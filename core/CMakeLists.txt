@@ -379,6 +379,17 @@ add_executable(test_multiscale_material tests/unit/test_multiscale_material.cpp)
 target_link_libraries(test_multiscale_material PRIVATE topopt)
 add_test(NAME multiscale_material COMMAND test_multiscale_material)
 
+# THE LATTICE DENSITY FIELD over a frozen region (task 2026-08-13-lattice-as-a-
+# material). The C0 bar R1 rests on, decided at the resolver where it needs no
+# solve; the two floors (homogenisation and printability) that bind in OPPOSITE
+# directions and are never merged into one verdict; the beta field's analytic
+# Jacobian against a central difference; and every refusal.
+add_executable(test_lattice_density_field tests/unit/test_lattice_density_field.cpp)
+target_link_libraries(test_lattice_density_field PRIVATE topopt)
+target_compile_definitions(test_lattice_density_field PRIVATE
+  MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+add_test(NAME lattice_density_field COMMAND test_lattice_density_field)
+
 # De-homogenization probe instrument (lattice-dehomogenization probe,
 # 2026-07-31). The probe itself (tests/harness/lattice_dehomog_probe.cpp,
 # Eigen, offline) measures macro->strut stress amplification; this test pins

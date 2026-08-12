@@ -711,14 +711,24 @@ int main(int argc, char** argv) {
         for (std::size_t vx : r.voxels) only[vx] = 1;
         std::vector<int> refused;
         if (!v.in_validity_range && !a.allow_below_floor) refused.push_back(r.id);
+        // ★ THE SECOND BAR, AND IT BINDS THE OTHER WAY: PRINTABILITY. A strut
+        // thinner than one bead does not come out of the nozzle at any member
+        // width, so this refusal is independent of the homogenisation floor and
+        // is reported as its own cell rather than folded into it.
+        const bool printable = lattice_density_printable(topo, f, a.cell_mm,
+                                                         a.min_extrudable_width_mm);
+        if (!printable && !a.allow_below_floor) refused.push_back(r.id);
 
         const ResolvedLatticeDensityField F = resolve_lattice_density_field(
             grid, rid, spec1, topo, nullptr, &only, refused);
         if (F.empty()) {
           std::printf("   %-14s %6.2f %8.2f %9s %9s %10s %10s %8s %7s %6s  "
-                      "REFUSED (below N* = %.1f)\n", r.name.c_str(), f,
+                      "REFUSED (%s)\n", r.name.c_str(), f,
                       v.cells_per_member_median, "-", "-", "-", "-", "-", "-",
-                      "-", v.floor_certifiable);
+                      "-",
+                      !printable
+                          ? "the strut does not print at this cell and nozzle"
+                          : "below the cells-per-member floor");
           csv << a.rung << "," << r.name << "," << r.voxels.size() << "," << f
               << "," << v.cells_per_member_median << "," << (v.in_validity_range ? 1 : 0)
               << ",,,,,,,,,,1\n";
