@@ -1,0 +1,4 @@
+# arm snapshots are large and regenerable from run_stage_a.sh; the CSVs, logs and
+# summaries are the measurement record and ARE tracked.
+arms/*/snap/
+arms/failed/*/snap/
