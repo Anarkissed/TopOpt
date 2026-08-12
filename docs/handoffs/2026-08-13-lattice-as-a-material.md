@@ -444,6 +444,38 @@ has shipped five times here.
 
 ---
 
+## 5b. The test suites
+
+**New, and green:**
+
+* `core` — `test_lattice_density_field` (registered as ctest `lattice_density_field`):
+  the C0 dispatch, the two floors, every refusal, and **the β field's analytic
+  Jacobian against a central difference — worst relative error 6.013e-10**.
+* `app` — `FrozenRegionAsMaterialTests`, **11 tests, 0 failures**, including the
+  Auto-never-refuses sweep across 0.5–60 mm of depth and the call-site test that
+  reads `WorkspacePlaceholder.swift`.
+
+★ **THE FULL LOCAL `ctest` DID NOT COMPLETE IN THIS SESSION**, and that is a gap
+a reader should know the shape of. The machine was running the measurement
+campaign (§0.6: one certified cell is ~10 minutes of saturating CG), and the
+validation tests that exercise the changed paths are themselves full SIMP
+problems. A targeted subset over the changed code — `minimize_plastic`, `mbb`,
+`beam`, `v4`, `v5`, `stress`, `production_parity`, `lattice_certification`,
+`multiscale_material`, `protect_freeze_vs_solidity`, `designbox_lattice_recert`,
+`loadcase_analyze`, `nonconvergence_rejection`, `rung_infeasible`,
+`conditional_projection`, `mma_projection` — was started and was still running at
+`mma_projection` when the session ended. **CI is what must confirm it**, and this
+worktree's `ctest` denominator is not CI's in any case (see the configure
+warning: without `lib3mf` the `export_3mf` and `threemf_import` tests do not
+register).
+
+The byte-identity argument for every existing path is not a test result, it is a
+construction, and it is stated so it can be checked by reading: every new option
+defaults to the value that takes no new branch, `vf_target` reduces to
+`options.volume_fraction` by adding exactly 0.0, `SimpParams::lattice_relative_density`
+is null on every existing caller, and `gate_on_strut_strength` is false unless a
+run actually latticed something.
+
 ## 6. R7 — the assertion census
 
 `evidence/…/assertion_census.sh`, run `BASE_REF=main`. Message census, not a name
