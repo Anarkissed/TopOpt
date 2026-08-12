@@ -95,11 +95,32 @@ straight back to solid, because at a 4.6 mm cell a 7 mm slab is 1.52 cells acros
 and the certifier needs 5. **More material at a cell that cannot lattice it is
 heavier, not lighter.** That is why §0(c) had to be answered before R1 could be.
 
+**THE THREE ARMS ISOLATE EXACTLY TWO VARIABLES, and the run says so itself.**
+The `VARIANT` lines:
+
+```
+A  vf=0.68 printed=0.790017 margin=3297.30      vf=0.52 printed=0.680183 margin=3357.75
+B  vf=0.68 printed=0.802279 margin=3279.24      vf=0.52 printed=0.701435 margin=3305.23
+C  vf=0.68 printed=0.802279 margin=3279.24      vf=0.52 printed=0.701435 margin=3305.23
+```
+
+**A vs B differ in the DESIGN** — printed 0.790017 → 0.802279. That is the
+barrier doing its job upstream of the lattice: a deeper protection means TO
+removes less, so more material reaches the lattice pass at all. **B vs C are
+IDENTICAL, to every digit.** Same design, same margin, same everything the
+optimizer produced — the ONLY difference is the cell the lattice pass used. So
+the whole of the gap between "no lattice, 546.2 g" and "fully latticed, 490.6 g"
+is attributable to the cell mode and to nothing else. That is not an argument,
+it is what the two runs printed.
+
 **And at the NEXT rung, arm A emits nothing at all.** At vf 0.52 core refuses
 outright: "the grading law could lattice NONE of this variant's 11622 candidate
 voxels… refusing rather than writing a file with zero struts in it and calling it
 a lattice." So his configuration does not merely under-lattice — one rung down it
 produces no lattice whatsoever, which is the state he has been living with.
+**Arm B refuses there too** (15,340 candidate voxels, all
+`member_too_thin_for_cell`), which is the same lesson again: the depth alone
+does not make a latticeable part.
 
 **Arm C is R1.** Auto takes core's own prescription — the per-region cell, 1.4 mm
 — and the same 16,009 voxels lattice **completely**: zero solid fallback, 43,816
