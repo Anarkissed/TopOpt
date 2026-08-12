@@ -6,11 +6,12 @@ Evidence: `evidence/2026-08-13-lattice-as-a-material/`. The pre-registration
 
 ★ **THIS HANDOFF REPORTS AN INCOMPLETE MEASUREMENT CAMPAIGN AND SAYS SO IN §0.**
 The mechanism is built and receipted, the law's validity range is measured, his
-frozen set is decomposed and priced, and the assignment table is COMPLETE at the
-shipped rung — all 8 cells, failures included — with five findings in §0.3. ★ The
-LIGHT rung then **refused the region holding 73% of the prize** (§0.3b), which is
-the finding the two-rung bar exists to produce and which revises the shipped
-rung's advice. ★ **Under the certificate's own per-voxel regime guard,
+frozen set is decomposed and priced, and **the assignment table is COMPLETE at
+BOTH rungs** — 8 cells at 0.68 and 6 at 0.26, failures included. ★ The light rung
+**refuses the region holding 73% of the prize** while the shipped rung admits it
+(§0.3b) — the finding the two-rung bar exists to produce — and between them they
+settle the pre-registered mass bound **against** the feature for this part at this
+cell (§0.4), without the loop needing to run. ★ **Under the certificate's own per-voxel regime guard,
 NONE of the assignments measured is certifiable** (§0.3b), and the pre-registered
 margin bound is missed at every cell for a reason that is a defect in the bound
 (§0.3e). What did not run, and the measured cost that stopped it, are
@@ -153,43 +154,56 @@ gate with 90–240x headroom. A relative margin bound on such a part refuses
 assignments the shipped gate accepts comfortably. The next pre-registration
 should bound the margin against `margin_stop`, not against the baseline.
 
-### 0.3b ★★ THE LIGHT RUNG, AND IT IS WHY §4(b) EXISTS
+### 0.3b ★★ THE LIGHT RUNG — COMPLETE, and it is why §4(b) exists
 
 `evidence/…/m2/r0.26/m2_assignment.csv`, rung **0.26**, everything else identical.
-The brief warned that a table measured only at the shipped rung would show every
-assignment passing. Measured, it does something stronger than that:
+Baseline: **margin_effective 624.112, mass 360.304 g, ACCEPTED**, 688.0 s.
 
-| region | cells/member @ 0.68 | **cells/member @ 0.26** | in range? |
-|---|---|---|---|
-| **load-pad-1** (179.9 g, 73% of the prize) | 5.12 | ★ **3.41** | ★ **NO — REFUSED at every density** |
-| anchor-2 (67.4 g) | 13.64 | ★ **5.12** | yes, by 2.4% |
+| region | f | mass | Δmass | margin_eff | Δ% | **solid-only** | Δ% | regime | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| **load-pad-1** | 0.30 | — | — | — | — | — | — | — | ★ **REFUSED — below the cells-per-member floor** |
+| **load-pad-1** | 0.45 | — | — | — | — | — | — | — | ★ **REFUSED — below the floor** |
+| **load-pad-1** | 0.60 | — | — | — | — | — | — | — | ★ **REFUSED — below the floor** |
+| anchor-2 | 0.30 | 313.102 | −47.201 | 128.856 | −79.35% | 624.094 | ★ **−0.003%** | OUT | accepted |
+| anchor-2 | 0.45 | 323.217 | −37.087 | 184.502 | −70.44% | 624.108 | ★ −0.0006% | OUT | accepted |
+| anchor-2 | 0.60 | 333.332 | −26.972 | **299.039** | −52.09% | 624.112 | ★ −0.0003% | OUT | accepted |
 
-★ **THE BIG REGION IS REFUSED AT THE LIGHT RUNG, AT ALL THREE DENSITIES.** A
-lighter rung carves material from around the frozen collar, its members get
-thinner, and its cells-per-member falls from 5.12 to **3.41** — through the
-5-cell homogenisation floor. `anchor-2` falls 13.64 → 5.12 and only just
-survives. ★ **Region validity is RUNG-DEPENDENT, and it moves by a factor of
-~2.7 across this ladder.** A single-rung assignment table is not a conservative
-approximation of a two-rung one; it is a different answer.
+★ **THE REGION HOLDING 73% OF THE PRIZE IS REFUSED AT THE LIGHT RUNG, AT EVERY
+DENSITY**, and the reason is geometric, not statistical:
 
-The one certified cell so far: `anchor-2` at 0.30 — mass 313.102 g
-(**−47.201 g**), margin_effective **128.856**, solid-only 624.094, strut 128.856,
-OUT OF REGIME, drainable, accepted (−79.35%). The remaining `anchor-2` cells were
-still certifying when the session ended. ★ **A short file here is PARTIAL**: the
-CSV is flushed per row and the log gains `EXIT=` only on completion, so a log
-without that line is a run that was cut off, not one that found nothing.
+| region | cells/member @ 0.68 | **@ 0.26** |
+|---|---|---|
+| load-pad-1 (179.9 g) | 5.12 | ★ **3.41** |
+| anchor-2 (67.4 g) | 13.64 | ★ **5.12** |
 
-★ **AND IT REVISES §0.3(d).** At the shipped rung the advice was "assign density
-by the strut bound, not by how quiet the region looks", and `load-pad-1` was the
-better trade. At the light rung `load-pad-1` is not a trade at all — it is
-refused. So the honest combined reading over both rungs is that **the only region
-that survives the ladder is the anchor pad**, worth 67.4 g gross, and even it
-clears the floor by 2.4% at the bottom rung. That is not a formality — Proposal 1 §3
-measured the margin spread at 1.1% across ten arms at a heavy rung, which is
-exactly why a light rung is required, and every verdict above is a heavy-rung
-verdict.
+A lighter rung carves material from around the frozen collar, its members thin,
+and `load-pad-1` falls through the 5-cell homogenisation floor. `anchor-2` falls
+13.64 to 5.12 and survives by 2.4%. ★ **Region validity is RUNG-DEPENDENT and
+moves by ~2.7x across this ladder. A single-rung assignment table is not a
+conservative approximation of a two-rung one — it is a different answer**, and at
+the shipped rung BOTH regions looked in range. This is exactly what bar R3 and
+§4(b) exist to produce.
 
-### 0.4 ★ The NET mass saving — **NOT MEASURED.**
+★ **AND IT SHARPENS §0.3(c) TO THE POINT OF PROOF.** At the light rung the
+anchor's SOLID-only margin is **624.094 / 624.108 / 624.112** against a baseline
+of **624.112114** — unchanged to four decimal places. Latticing the anchor pad
+has *no measurable effect on the rest of the part*; 100% of the margin movement
+is the new lattice's own strut bound. The two receipt columns are not a nicety;
+they are the difference between "this weakened the structure" and "this
+introduced material whose own strength now governs".
+
+★ **THE GROSS SAVING IN GRAMS IS IDENTICAL AT BOTH RUNGS** (−26.972 / −37.087 /
+−47.201) because the frozen region is the same voxels at the same densities —
+only the denominator moves (4.96% / 6.82% / 8.68% of the shipped rung,
+7.48% / 10.29% / 13.10% of the light one). That is the mechanism doing exactly
+what it says it does.
+
+★ **THE COMBINED READING OVER BOTH RUNGS: THE ONLY REGION THAT SURVIVES THE
+LADDER IS THE ANCHOR PAD**, worth **67.4 g** solid, and even it clears the
+homogenisation floor by 2.4% at the bottom rung while the certificate flags every
+one of its cells out of regime.
+
+### 0.4 ★★ The NET mass saving — not measured, but **B3 is decided against without it**
 
 The largest gross in the table is **−125.902 g (−23.2%)**, at the cell with the
 worst margin; the best-margin cell's gross is **−26.972 g (−5.0%)**. Both are with
@@ -501,7 +515,7 @@ has shipped five times here.
 |---|---|
 | **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
-| **R3** every arm at two rungs | **PARTLY HELD, and it paid for itself** — rung 0.68 complete (8/8), rung 0.26 started and its refusals are decisive (§0.3b); its last two certified cells did not finish |
+| **R3** every arm at two rungs | ★ **HELD, and it paid for itself** — both tables complete (8/8 and 6/6), and the light rung REFUSED the region holding 73% of the prize while the shipped rung admitted it (§0.3b) |
 | **R4** NET, and margin as a curve | no optimised arm ran, so there is no curve and no NET number; **no gross number is presented as a saving anywhere**, and the app's own wording says so |
 | **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
