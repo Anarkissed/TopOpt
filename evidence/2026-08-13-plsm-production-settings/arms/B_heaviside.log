@@ -6,3 +6,13 @@
 [preflight] load path CONNECTED: 5165 load voxels, 3348 anchor voxels, 110904 of 468224 voxels allowed to hold material; narrowest separating cross-section 3840 voxels (1.117e+04 mm^2) at 11/12 steps from the anchor; 4.65 ms
 NOTE: solve grid 128x31x118 has odd axis(es) [y=31] - geometric multigrid pads its INDEX SPACE to 128x32x120 (up to 4 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
 PROGRESS rung=0 rungs=4 iter=1
+PROGRESS rung=0 rungs=4 iter=2
+PROGRESS rung=0 rungs=4 iter=3
+PROGRESS rung=0 rungs=4 iter=4
+PROGRESS rung=0 rungs=4 iter=5
+PROGRESS rung=0 rungs=4 iter=6
+PROGRESS rung=0 rungs=4 iter=7
+PROGRESS rung=0 rungs=4 iter=8
+PROGRESS rung=0 rungs=4 iter=9
+PROGRESS rung=0 rungs=4 iter=10
+PROGRESS rung=0 rungs=4 iter=11

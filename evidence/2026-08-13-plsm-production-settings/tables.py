@@ -30,6 +30,28 @@ SIMP_REPORT = os.path.join(
 LABEL = {"0.68": "0.7973 SHIPPED", "0.26": "0.5283 LIGHT",
          "0.52": "0.6941", "0.38": "0.6048"}
 
+# ★ MASS IS DERIVED, AND THE DERIVATION IS HERE RATHER THAN IN A COMMENT,
+# because `report.json` carries `printed_fraction` and not a mass. On his job
+# `part_solid` = grid.solid_count() = 110,904 voxels (the loadcase line
+# "110904 of 468224 voxels allowed to hold material"), the voxel is
+# 1.705279 mm on a side and PLA is 1.24 g/cm3, so
+#
+#   mass_g = printed_fraction * 110904 * 1.705279^3 mm3 * 0.00124 g/mm3
+#          = printed_fraction * 682.0 g
+#
+# ★ CHECKED AGAINST THE KNOWN ROW: SIMP's rung 0.68 prints 88,424 voxels at
+# printed_fraction 0.7973 and its recorded mass is 543.7 g; 0.7973 * 682.0 =
+# 543.7. If that check ever fails the constant is wrong for the job in hand and
+# every mass below with it.
+PART_SOLID = 110904
+VOXEL_MM = 1.705279
+DENSITY_G_MM3 = 1.24e-3
+MASS_PER_FRACTION_G = PART_SOLID * VOXEL_MM ** 3 * DENSITY_G_MM3
+
+
+def mass_g(printed_fraction):
+    return (printed_fraction or 0.0) * MASS_PER_FRACTION_G
+
 
 def read_csv(path):
     if not os.path.exists(path):
@@ -107,7 +129,7 @@ for pf in sorted(simp, reverse=True):
     v = simp[pf]
     m = (v.get("margin") or {}).get("worst_case")
     print(f"{'SIMP (run of record)':<22}{LABEL.get('', ''):<16}{pf:>13.4f}"
-          f"{m:>11.2f}{'—':>9}{fnum(v.get('printed_mass_g'), 0):>9.1f}"
+          f"{m:>11.2f}{'—':>9}{mass_g(pf):>9.1f}"
           f"{'—':>7}  {v.get('accepted')}")
 for arm in ARMS:
     path = os.path.join(HERE, "arms", f"{arm}.report.json")
@@ -124,7 +146,7 @@ for arm in ARMS:
         # same rung, which is the whole reason the two conventions are named.
         print(f"{arm:<22}{('%.4f' % pf) if pf else '?':<16}{pf if pf else 0:>13.4f}"
               f"{(m or 0):>11.2f}{'':>9}"
-              f"{fnum(v.get('printed_mass_g'), 0):>9.1f}"
+              f"{mass_g(pf):>9.1f}"
               f"{v.get('iterations') or 0:>7}  {v.get('accepted')}")
 print()
 print("★ The margin column is the WORST-CASE margin the run's own")
@@ -180,17 +202,18 @@ rows = read_csv(os.path.join(HERE, "m2_topology.csv"))
 if not rows:
     print("  (m2_topology.csv absent — run measure.sh)")
 else:
-    hdr = ("field", "b0 comps", "chi", "b2 cavities", "b1 tunnels",
-           "sealed vox", "sealed %", "sealed mm3")
-    print(f"{hdr[0]:<44}{hdr[1]:>9}{hdr[2]:>9}{hdr[3]:>12}{hdr[4]:>11}"
-          f"{hdr[5]:>11}{hdr[6]:>9}{hdr[7]:>12}")
-    print("-" * 118)
+    hdr = ("field", "b0 comps", "chi", "b2 solid", "b1 tunnels",
+           "sealed pk", "sealed vox", "sealed %", "sealed mm3")
+    print(f"{hdr[0]:<40}{hdr[1]:>9}{hdr[2]:>9}{hdr[3]:>9}{hdr[4]:>11}"
+          f"{hdr[5]:>10}{hdr[6]:>11}{hdr[7]:>9}{hdr[8]:>12}")
+    print("-" * 122)
     for r in rows:
         vv = fnum(r.get("void_voxels"), 0) or 1
         sv = fnum(r.get("sealed_voxels"), 0)
-        print(f"{os.path.basename(r.get('field','')):<44}"
+        print(f"{os.path.basename(r.get('field','')):<40}"
               f"{r.get('b0_components',''):>9}{r.get('chi',''):>9}"
-              f"{r.get('b2_cavities',''):>12}{r.get('b1_tunnels',''):>11}"
+              f"{r.get('b2_enclosed_solid',''):>9}{r.get('b1_tunnels',''):>11}"
+              f"{r.get('sealed_pockets',''):>10}"
               f"{r.get('sealed_voxels',''):>11}{sv / vv * 100:>8.2f}%"
               f"{fnum(r.get('sealed_volume_mm3'), 0):>12.1f}")
 print()

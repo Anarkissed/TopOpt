@@ -411,6 +411,36 @@ cadence-10 run, and `L0_none` runs out of samples before it can fire at all. (2)
 margin rule could accumulate a window, so their rows say the two rules agree
 where they both fire, not that the margin rule was tested there.
 
+### (f) ★★ WHAT THIS COSTS ON THE DEVICE — SURFACED, NOT BURIED
+
+`bridge.cpp` arms the parametric mode and then says, deliberately, *"Everything
+else is left at `PlsmOptions`' own defaults ON PURPOSE"* — so the on-device and
+LAN paths inherit **every** default this task changes, which is the right
+architecture (core owns the rule) and also means the maintainer should see the
+bill before it arrives.
+
+★ **THE ITERATION CEILING DOUBLES, 60 → 120,** and **a certification lands every
+10 iterations**. A 128³ re-certification on the device was measured at **101 s**
+(`smoothing-is-on-device`), so a four-rung run that used its whole budget would
+add roughly **12 probes × 4 rungs × 101 s ≈ 80 minutes** on top of a doubled
+optimise budget.
+
+★ **In practice it will be much less than that**, and the reason is the rule
+itself: the plateau stops the run, and §3(e) shows it stopping at iteration 100
+on the shipped rung while returning iteration 40's design. But "much less" is a
+prediction and 80 minutes is the ceiling, so the ceiling is what is written here.
+
+★ **It is diagnosable rather than mysterious**: `run_info.json` carries
+`plsm_margin_probe_every`, `plsm_margin_probe_wall_s`, `plsm_stop_reason` and
+`plsm_margin_peak_iteration`, so a run that took longer than expected says which
+of the two reasons it was.
+
+★ **A device that wants the old budget sets `margin_probe_every: 0` and
+`max_iterations: 60`** and gets the historical rule back, byte for byte. That is
+an app-track decision and this task does not make it; it is named here because
+shipping the core default silently would have made someone find it with a
+stopwatch.
+
 ## 4. ITEM 4 — the counters ship, the enforcement does not
 
 ★ **The verdict is accepted as the brief states it.** The monotone topological
