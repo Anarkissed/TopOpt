@@ -1304,6 +1304,25 @@ public enum TopOptKit {
         return Int(n)
     }
 
+    /// ★ HOW MUCH MATERIAL EACH FACE HANDS THE LATTICE, before any run (task
+    /// 2026-08-12 §0b). One voxelization for every face, at the caller's
+    /// resolution; `depthsMM` is each face's OWN dragged depth. Returns the
+    /// part-solid voxel count per face plus the grid spacing, so the caller turns
+    /// counts into mm³ and grams without assuming a spacing.
+    public static func faceSlabPreview(stepPath: String, faceIDs: [Int],
+                                       depthsMM: [Double],
+                                       resolution: Int)
+        throws -> (voxels: [Int], spacingMM: Double) {
+        var err = topoptbridge.BridgeError()
+        var io = topoptbridge.FaceSlabPreview()
+        for f in faceIDs { io.face_ids.push_back(Int32(f)) }
+        for d in depthsMM { io.depths_mm.push_back(d) }
+        _ = topoptbridge.face_slab_preview(std.string(stepPath), &io,
+                                           Int32(resolution), &err)
+        try throwIfFailed(err)
+        return (Array(io.voxels).map { Int($0) }, io.spacing_mm)
+    }
+
     /// Persist the face-overrides sidecar next to `modelPath` (handoff
     /// 2026-07-24). `dihedralDeg <= 0` and `coneDeg < 0` mean "leave the core
     /// default"; `paintFaces` is one triangle-index set per painted pseudo-face.
@@ -1546,6 +1565,7 @@ public enum TopOptKit {
         designBox: DesignBoxSpec? = nil, keepOutBoxes: [DesignBoxSpec] = [],
         clearances: [ClearanceSpec] = [],
         faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
+        faceProtectionDepthsMM: [Double] = [],
         progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
         onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
@@ -1586,6 +1606,10 @@ public enum TopOptKit {
         // means "use the core default". Empty list → byte-identical.
         for f in faceProtections { lc.face_protection_face_ids.push_back(Int32(f)) }
         lc.face_protection_depth_mm = faceProtectionDepthMM
+        // ★ PER-FACE depths (task 2026-08-12 §0a): the depth the user dragged for
+        // a face that is both protected and latticed. Empty => the global depth
+        // governs every protection, exactly as before.
+        for d in faceProtectionDepthsMM { lc.face_protection_depths_mm.push_back(d) }
         lc.minimize_plastic = minimizePlastic
         lc.build_dir_x = buildDirection.x
         lc.build_dir_y = buildDirection.y

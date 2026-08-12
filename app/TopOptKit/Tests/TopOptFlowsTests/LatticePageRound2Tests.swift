@@ -197,6 +197,14 @@ final class LatticePageRound2Tests: XCTestCase {
     func testIncludeAndExcludeRegionsReachTheEmittedJobJSON() throws {
         let (p, bore, plane) = makeProject()
         p.lattice.enabled = true
+        // ★ STATED, not inherited. Task 2026-08-12 §4b moved the DENSITY
+        // default to `.auto`, and an auto spec needs a strut line width
+        // (core's grading floor) that these fixtures do not supply. This
+        // test is about REGION EMISSION reaching the wire, not about which density mode is default —
+        // so it names the mode it means. The new default's own end-to-end
+        // coverage is `LatticeWizardTests
+        // .testTheNewDefaultPostureEmitsALatticeBlockWithItsRegions`.
+        p.lattice.densityMode = .uniform
         p.lattice.groupRoles[bore] = .exclude     // the bore face → a bolt region
         p.lattice.groupRoles[plane] = .include    // the plane face → a face region
         p.lattice.paintDepthMM = 4
@@ -216,7 +224,11 @@ final class LatticePageRound2Tests: XCTestCase {
         let regions = try XCTUnwrap(lat["regions"] as? [[String: Any]])
         XCTAssertEqual(regions.count, 2)
         for entry in regions {
-            XCTAssertEqual(Set(entry.keys), ["role", "kind", "geometry"],
+            // `face_id` joined the allowed set in task 2026-08-12 §0a — core's
+            // `reject_unknown_keys` accepts it and USES it, to refuse a job whose
+            // protection depth and lattice depth for the same face disagree. The
+            // assertion is still exact set-equality against what core allows.
+            XCTAssertEqual(Set(entry.keys), ["role", "kind", "geometry", "face_id"],
                            "exactly the keys core's strict parser allows")
             let role = try XCTUnwrap(entry["role"] as? String)
             let kind = try XCTUnwrap(entry["kind"] as? String)
@@ -266,6 +278,14 @@ final class LatticePageRound2Tests: XCTestCase {
 
         let (p, bore, plane) = makeProject()
         p.lattice.enabled = true
+        // ★ STATED, not inherited. Task 2026-08-12 §4b moved the DENSITY
+        // default to `.auto`, and an auto spec needs a strut line width
+        // (core's grading floor) that these fixtures do not supply. This
+        // test is about core's PARSER accepting the emitted regions, not about which density mode is default —
+        // so it names the mode it means. The new default's own end-to-end
+        // coverage is `LatticeWizardTests
+        // .testTheNewDefaultPostureEmitsALatticeBlockWithItsRegions`.
+        p.lattice.densityMode = .uniform
         p.lattice.groupRoles[bore] = .exclude
         p.lattice.groupRoles[plane] = .include
         let spec = try XCTUnwrap(p.lattice.runSpec(topology: "octet",

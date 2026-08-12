@@ -167,6 +167,14 @@ struct JobLatticeRegion {
   double half_u_mm = 0.0;
   double half_w_mm = 0.0;
   double depth_mm = 0.0;
+  // ★ WHICH B-REP FACE THIS REGION CAME FROM (task 2026-08-12 §0a). Optional,
+  // -1 = "not from a face" (a hand-placed primitive). It exists so the ONE
+  // number the user drags can be CHECKED: when a face region names a face that
+  // is also in `loads.face_protections`, the job REFUSES unless the protection
+  // depth for that face equals this `depth_mm`. Without the id the two numbers
+  // were unrelatable and drifted silently — 5 mm of protection under a 7 mm
+  // lattice region, on the maintainer's own run.
+  int face_id = -1;
 };
 
 struct JobLattice {
@@ -546,6 +554,13 @@ struct JobLoadCase {
   // (kFaceProtectionDepthDefaultMm). Empty => no protection => byte-identical.
   std::vector<int> face_protection_face_ids;
   double face_protection_depth_mm = -1.0;   // <= 0 => core default
+  // ★ PER-FACE protection depth (task 2026-08-12 §0a). Either empty (every
+  // protection uses the global depth — the pre-task wire, byte-identical) or
+  // parallel to `face_protection_face_ids`. An entry <= 0 means "use the global".
+  // Produced by the object form of "face_protections":
+  //     "face_protections": [ {"face_id": 16, "depth_mm": 7} ]
+  // alongside the legacy integer form, which is still accepted unchanged.
+  std::vector<double> face_protection_depths_mm;
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
   bool minimize_plastic = true;             // true = reduction ladder + pad

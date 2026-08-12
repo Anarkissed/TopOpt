@@ -606,9 +606,47 @@ JobDescription parse_job(const std::string& json_text) {
     // not be touched, plus ONE global depth (mm). A protection freezes the part-
     // solid skin behind the face FrozenSolid. Omitted / empty => no protection =>
     // byte-identical. A depth <= 0 (or omitted) means "use the core default".
-    if (const JsonValue* fp = find_key(lv, "face_protections"))
-      job.loads.face_protection_face_ids =
-          parse_int_array(*fp, "face_protections");
+    //
+    // TWO FORMS (task 2026-08-12 §0a). The legacy array of ids —
+    //     "face_protections": [16]
+    // — every protection at the global depth. Or an array of objects carrying a
+    // PER-FACE depth, which is what a face marked protect AND "lattice here"
+    // emits so its protection is exactly as deep as its lattice region:
+    //     "face_protections": [{"face_id": 16, "depth_mm": 7}]
+    // Mixing the two forms in one array is REFUSED, never guessed at.
+    if (const JsonValue* fp = find_key(lv, "face_protections")) {
+      if (fp->type != JsonValue::Type::Array)
+        schema_fail("\"face_protections\" must be an array");
+      if (fp->arr.empty())
+        schema_fail("\"face_protections\" must contain at least one id");
+      const bool object_form = fp->arr.front().type == JsonValue::Type::Object;
+      for (const JsonValue& e : fp->arr)
+        if ((e.type == JsonValue::Type::Object) != object_form)
+          schema_fail("\"face_protections\" must be ALL bare face ids or ALL "
+                      "{\"face_id\", \"depth_mm\"} objects, never a mix");
+      if (!object_form) {
+        job.loads.face_protection_face_ids =
+            parse_int_array(*fp, "face_protections");
+      } else {
+        for (const JsonValue& e : fp->arr) {
+          reject_unknown_keys(e, {"face_id", "depth_mm"}, "a face protection");
+          const double id = require_number(
+              require_key(e, "face_id", "a face protection"),
+              "face_protections face_id");
+          if (id < 0.0 || id != std::floor(id))
+            schema_fail("every \"face_protections\" face_id must be a "
+                        "non-negative integer");
+          job.loads.face_protection_face_ids.push_back(static_cast<int>(id));
+          double depth = -1.0;  // absent => the global depth
+          if (const JsonValue* dv = find_key(e, "depth_mm")) {
+            depth = require_number(*dv, "face_protections depth_mm");
+            if (!(depth > 0.0))
+              schema_fail("a \"face_protections\" depth_mm must be > 0");
+          }
+          job.loads.face_protection_depths_mm.push_back(depth);
+        }
+      }
+    }
     if (const JsonValue* fpd = find_key(lv, "face_protection_depth_mm")) {
       job.loads.face_protection_depth_mm =
           require_number(*fpd, "loads.face_protection_depth_mm");
@@ -998,8 +1036,18 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("\"lattice.regions\" must be an array");
       for (const JsonValue& rv : regs->arr) {
         require_object(rv, "a lattice region");
-        reject_unknown_keys(rv, {"role", "kind", "geometry"}, "a lattice region");
+        reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id"},
+                            "a lattice region");
         JobLatticeRegion reg;
+        // Optional provenance: the B-rep face this region was spawned from, so
+        // the depth tie below can be CHECKED (task 2026-08-12 §0a).
+        if (const JsonValue* fv = find_key(rv, "face_id")) {
+          const double d = require_number(*fv, "lattice region face_id");
+          if (d < 0.0 || d != std::floor(d))
+            schema_fail("a lattice region \"face_id\" must be a non-negative "
+                        "integer");
+          reg.face_id = static_cast<int>(d);
+        }
         reg.role = require_nonempty_string(
             require_key(rv, "role", "a lattice region"), "lattice region role");
         if (reg.role != "include" && reg.role != "exclude")
@@ -1393,6 +1441,7 @@ JobDescription parse_job(const std::string& json_text) {
           "\"role\": \"include\" — fit derives the cell from what each declared "
           "region has to fit into, and a job that declares none states no "
           "requirement to fit. Use \"auto\" or \"fixed\" for a whole-part lattice.");
+    // (see also the depth tie below — it applies to every mode, not just fit)
     // (2) Two mechanisms for the same voxel, with two receipts. See grade_lattice.
     if (job.grading.retain_subfloor_in_unloaded_regions)
       schema_fail(
@@ -1400,6 +1449,39 @@ JobDescription parse_job(const std::string& json_text) {
           "\"retain_subfloor_in_unloaded_regions\" are mutually exclusive — fit "
           "already derives a cell per region and reports the out-of-regime material "
           "it emits");
+  }
+
+  // ★★ THE DEPTH TIE (task 2026-08-12 §0a, bar R2). A face marked protect AND
+  // "lattice here" is ONE slab: the depth the user drags is how deep TO may not
+  // cut AND how deep the lattice is allowed. When a face-kind lattice region
+  // NAMES the protected face it came from, the two must be the SAME NUMBER.
+  // They must not differ silently, so a job stating two is refused with both
+  // figures rather than run into the failure it encodes — TO removing everything
+  // past the shallower one, and the lattice pass then finding material only in
+  // the frozen skin (79% of everything latticed, on the maintainer's own run).
+  //
+  // Checked only when the region carries `face_id`; the app always emits it. A
+  // hand-authored job with no id keeps the pre-task freedom, unchecked.
+  for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.kind != "face" || r.face_id < 0) continue;
+    for (std::size_t i = 0; i < job.loads.face_protection_face_ids.size(); ++i) {
+      if (job.loads.face_protection_face_ids[i] != r.face_id) continue;
+      double prot = job.loads.face_protection_depth_mm;   // <= 0 => core default
+      if (i < job.loads.face_protection_depths_mm.size() &&
+          job.loads.face_protection_depths_mm[i] > 0.0)
+        prot = job.loads.face_protection_depths_mm[i];
+      if (!(prot > 0.0)) prot = kFaceProtectionDepthDefaultMm;
+      if (std::abs(prot - r.depth_mm) > 1e-9)
+        schema_fail(
+            "face " + std::to_string(r.face_id) + " is BOTH protected and a "
+            "lattice region, at two different depths: the protection is " +
+            std::to_string(prot) + " mm and the lattice region is " +
+            std::to_string(r.depth_mm) +
+            " mm. They are one slab — the depth the face is held to IS the depth "
+            "the lattice is allowed. A protection shallower than its region "
+            "leaves the rest of that region as void the optimizer removed, and a "
+            "lattice cannot conjure material there.");
+    }
   }
 
   return job;

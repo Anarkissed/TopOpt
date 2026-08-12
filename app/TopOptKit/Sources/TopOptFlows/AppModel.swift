@@ -268,13 +268,22 @@ public final class AppModel: ObservableObject {
         // setting, never a hardcoded number; see PrintParams.strutLineWidthMM.
         // THIS IS THE SITE THAT REACHES THE JOB AND THE BRIDGE; the other five are
         // display, and all six must agree or the page describes a different run.
-        let latticeSpec = project.lattice.runSpec(
+        // ★ AUTO, RESOLVED (task 2026-08-12 §4). "Auto" is not a job field: it
+        // becomes core's per-region `fit` when regions are declared and `swept`
+        // otherwise, and it never emits a combination core refuses. Resolved from
+        // the EMITTED regions, not the role map, so a role whose face has no
+        // usable B-rep geometry cannot select a mode with nothing to fit into.
+        let emitted = project.latticeJobRegions()
+        let includeCount = emitted.regions.filter { $0.role == .include }.count
+        let resolvedLattice = LatticeAutoPosture.applied(to: project.lattice,
+                                                         includeRegionCount: includeCount)
+        let latticeSpec = resolvedLattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
             lineWidthMM: project.printParams.strutLineWidthMM,
             // Round-2 (M3): the include/exclude regions — role groups' primitives +
             // faces and the legacy include primitives — ride `lattice.regions`.
-            regions: project.latticeJobRegions().regions)
+            regions: emitted.regions)
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
@@ -297,6 +306,7 @@ public final class AppModel: ObservableObject {
                           clearances: project.clearanceSpecs(),
                           faceProtections: protections.faceIDs,
                           faceProtectionDepthMM: protections.depthMM,
+                          faceProtectionDepthsMM: protections.depthsMM,
                           projectID: project.id,
                           sourceFormat: file.sourceFormat,
                           lattice: latticeSpec,

@@ -170,11 +170,38 @@ struct ProductionLoadCase {
   // face): a protection NEVER frees void, it only freezes EXISTING part solid, so
   // the handoff-100 part-membership precedence runs in reverse — a protection
   // overlapping a clearance margin keeps the part solid (FrozenSolid wins over
-  // FrozenVoid; see the merge in minimize_plastic). ONE global depth governs ALL
-  // protections. Empty (the default) → no protection → byte-identical to the run
-  // before this handoff (THE ONE RULE).
+  // FrozenVoid; see the merge in minimize_plastic). Empty (the default) → no
+  // protection → byte-identical to the run before this handoff (THE ONE RULE).
   std::vector<int> face_protection_face_ids;
   double face_protection_depth_mm = kFaceProtectionDepthDefaultMm;
+
+  // ★ PER-FACE PROTECTION DEPTH (task 2026-08-12-lattice-page-redesign §0).
+  //
+  // WHY THE GLOBAL DEPTH WAS NOT ENOUGH. A face marked "protect" AND "lattice
+  // here" is ONE slab in the user's head: the depth he drags the primitive to is
+  // both how deep TO may not cut and how deep the lattice is allowed. The global
+  // depth made them two independent numbers, and on the maintainer's own run they
+  // DIFFERED: 5 mm of protection (3 voxel layers at 1.705 mm spacing = 5.115 mm)
+  // feeding a 7 mm lattice region. TO removed everything past 5.115 mm, so the
+  // lattice pass found material only in the frozen skin — 79% of everything it
+  // latticed was the protected skin, and the rest of the declared region was void
+  // a lattice cannot conjure material into.
+  //
+  // Parallel to `face_protection_face_ids`: either EMPTY (every protection uses
+  // the global depth — the pre-task behaviour, byte-identical) or exactly the same
+  // length, one depth in mm per face. An entry <= 0 means "use the global depth"
+  // for that face. Each depth converts to voxel layers against THIS run's grid
+  // independently, so two faces dragged to different depths freeze different
+  // slabs.
+  std::vector<double> face_protection_depths_mm;
+
+  // The depth (mm) in force for protection `i`, honouring the per-face override.
+  double face_protection_depth_for(std::size_t i) const {
+    if (i < face_protection_depths_mm.size() &&
+        face_protection_depths_mm[i] > 0.0)
+      return face_protection_depths_mm[i];
+    return face_protection_depth_mm;
+  }
 };
 
 // Permanent per-load-group instrumentation (handoff 099, small-face load loss).
@@ -273,8 +300,34 @@ struct ProductionRunSetup {
     std::size_t voxels_frozen = 0;   // part voxels this protection set FrozenSolid
     int depth_voxels = 0;            // the depth (layers) used on this run's grid
     bool thinner_than_depth = false; // the face's solid was shallower than depth
+    // The depth REQUESTED in mm (per-face override, else the global) and what
+    // `depth_voxels` layers actually reach on this grid. They differ by the
+    // rounding to whole voxel layers, and that difference is exactly what made a
+    // 5 mm protection feed a 7 mm lattice region with 5.115 mm of material — so
+    // both are reported, never just the request (task 2026-08-12 §0).
+    double depth_requested_mm = 0.0;
+    double depth_effective_mm = 0.0;
   };
   std::vector<FaceProtectionReport> face_protection_reports;
+
+  // ★ THE ANCHOR/LOAD STRUCTURAL PAD, REPORTED SEPARATELY (task 2026-08-12 §1f).
+  //
+  // build_production_loadcase freezes a kProductionAnchorPadDepthVoxels skin
+  // behind every anchor and retained load face. That is NOT a user "Face
+  // protection" — it is the structural pad the boundary conditions sit on, and
+  // removing it FLIPS run verdicts (evidence/2026-08-03-growth-ladder). But it
+  // freezes with the same FrozenSolid value at the same depth 3, so a maintainer
+  // reading "21 faces frozen at depth 3" when he had protected ONE wall could not
+  // tell the two apart. They are now counted apart: `face_protection_reports`
+  // holds ONLY what the user declared, and this holds the pad.
+  struct AnchorPadReport {
+    bool applied = false;              // want_pad was true for this run
+    int depth_voxels = 0;              // kProductionAnchorPadDepthVoxels
+    std::size_t anchor_faces = 0;      // anchor faces padded
+    std::size_t load_faces = 0;        // retained load faces padded
+    std::size_t voxels_frozen = 0;     // voxels the pad alone set FrozenSolid
+  };
+  AnchorPadReport anchor_pad_report;
 
   // Task analyze-loadcase-resolution — one report per DECLARED load group (in
   // declaration order, always parallel to lc.load_groups), the structured twin

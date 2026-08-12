@@ -69,6 +69,13 @@ final class LatticeRetentionControlTests: XCTestCase {
     private static func gradedSettings() -> LatticeSettings {
         var s = LatticeSettings(enabled: true)
         s.densityMode = .auto
+        // ★ STATED, not inherited (task 2026-08-12 §4b moved the default to
+        // `.auto`). These tests are about the SUB-FLOOR controls being untouched;
+        // the cell mode is a different control, and a fixture that silently
+        // tracks a default measures whichever default is current rather than the
+        // thing it names. The legacy-snapshot side decodes to `.fixed` as it
+        // always has, so the comparison is still like for like.
+        s.cellSizeMode = .fixed
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5
         return s

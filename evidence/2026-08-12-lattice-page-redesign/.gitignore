@@ -1,0 +1,15 @@
+# The lattice meshes and fields are the POINT of §0 but they are not committable:
+# arm C's rung-0.68 lattice STL alone is 755 MB — which is itself the maintainer's
+# file-size complaint, and why beam-lattice 3MF is worth its own task. Their SIZES
+# and every figure derived from them live in s0_table.txt and in the .report.json
+# receipts, which ARE committed. Regenerate with the commands in README.md.
+*.stl
+*_alpha.f64
+*_alpha.meta
+design.bin
+fields.bin
+iterations.csv
+# The snapshot binary is 2.7 MB. It is identified by its fingerprint instead —
+# `topopt-cli --version` prints it, and README.md records which one produced these
+# numbers, so a rebuild can be checked rather than trusted.
+topopt-cli.snapshot

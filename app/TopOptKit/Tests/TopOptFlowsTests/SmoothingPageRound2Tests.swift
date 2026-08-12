@@ -353,7 +353,7 @@ final class SmoothingPageRound2Tests: XCTestCase {
         let body = try bodyOf(ws)
 
         XCTAssertTrue(
-            ws.contains("private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage }"),
+            ws.contains("private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard }"),
             "ONE predicate names the state, so a page cannot be half-hidden")
 
         // The maintainer's own list, verbatim from the handoff.

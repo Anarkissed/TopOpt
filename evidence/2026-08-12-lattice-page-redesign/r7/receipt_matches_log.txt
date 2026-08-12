@@ -1,0 +1,3 @@
+log:     [loadcase] anchor-pad depth=3 anchor_faces=2 load_faces=1 voxels_frozen=1356 (structural pad, NOT a face protection)
+receipt: {"applied": true, "depth_voxels": 3, "anchor_faces": 2, "load_faces": 1, "voxels_frozen": 1356}
+PASS — the receipt says what the log says

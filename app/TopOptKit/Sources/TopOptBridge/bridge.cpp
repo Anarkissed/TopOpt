@@ -543,6 +543,8 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
                                      load_case.face_protection_face_ids.end());
   if (load_case.face_protection_depth_mm > 0.0)
     lc.face_protection_depth_mm = load_case.face_protection_depth_mm;
+  lc.face_protection_depths_mm.assign(load_case.face_protection_depths_mm.begin(),
+                                      load_case.face_protection_depths_mm.end());
   return lc;
 }
 
@@ -779,6 +781,41 @@ int64_t mask_step_face(const std::string& step_path, int face_id,
     err.ok = false;
     err.message = e.what();
     return 0;
+  }
+}
+
+bool face_slab_preview(const std::string& step_path, FaceSlabPreview& io,
+                       int resolution, BridgeError& err) {
+  const std::vector<int32_t>& face_ids = io.face_ids;
+  const std::vector<double>& depths_mm = io.depths_mm;
+  std::vector<int64_t>& voxels_out = io.voxels;
+  voxels_out.clear();
+  io.spacing_mm = 0.0;
+  try {
+    if (face_ids.size() != depths_mm.size())
+      throw std::invalid_argument(
+          "face_slab_preview: depths_mm must be parallel to face_ids");
+    topopt::StepModel model = topopt::import_part_file_resolved(step_path);
+    topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
+    io.spacing_mm = g.spacing;
+    voxels_out.reserve(face_ids.size());
+    for (std::size_t i = 0; i < face_ids.size(); ++i) {
+      const int fid = face_ids[i];
+      if (fid < 0 || fid >= model.face_count) { voxels_out.push_back(0); continue; }
+      // The SAME conversion build_production_loadcase uses — round to layers,
+      // floor at 1 — so the previewed number is the number the run will freeze.
+      const int depth_vox = std::max(
+          1, static_cast<int>(std::lround(depths_mm[i] / g.spacing)));
+      topopt::DesignMask one = topopt::make_active_mask(g);
+      voxels_out.push_back(static_cast<int64_t>(topopt::mask_step_face(
+          g, model, fid, topopt::MaskValue::FrozenSolid, depth_vox, one)));
+    }
+    return true;
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    voxels_out.clear();
+    return false;
   }
 }
 

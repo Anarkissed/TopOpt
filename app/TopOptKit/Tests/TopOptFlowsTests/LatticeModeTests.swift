@@ -147,6 +147,16 @@ final class LatticeModeTests: XCTestCase {
         XCTAssertNil(s.runSpec())
         // Enabled, certifiable octet → a spec whose radius is the grading law at the dense end.
         s.enabled = true
+        // ★ STATED, not inherited. Task 2026-08-12 §4b moved the DENSITY
+        // default to `.auto`, and an auto spec needs a strut line width
+        // (core's grading floor) that these fixtures do not supply. This
+        // test is about the UNIFORM run spec — it asserts
+        // `generateRelativeDensity` and `strutRadiusMM`, which only a uniform
+        // spec carries, not about which density mode is default —
+        // so it names the mode it means. The new default's own end-to-end
+        // coverage is `LatticeWizardTests
+        // .testTheNewDefaultPostureEmitsALatticeBlockWithItsRegions`.
+        s.densityMode = .uniform
         let core = TopOptKit.latticeLimits(topology: "octet")
         s.minRelativeDensity = 0.0; s.maxRelativeDensity = 1.0
         let spec = try XCTUnwrap(s.runSpec(), "an enabled certifiable octet run has a spec")

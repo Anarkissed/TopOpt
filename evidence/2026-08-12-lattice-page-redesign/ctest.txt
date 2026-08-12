@@ -1,0 +1,40 @@
+        Start  13: surface_stiffness_model
+101/119 Test  #13: surface_stiffness_model ..........   Passed    0.36 sec
+        Start  18: orientation
+102/119 Test  #18: orientation ......................   Passed    0.24 sec
+        Start  35: fea_assembly
+103/119 Test  #35: fea_assembly .....................   Passed    0.28 sec
+        Start   7: lattice_void
+104/119 Test   #7: lattice_void .....................   Passed    0.24 sec
+        Start  34: observability
+105/119 Test  #34: observability ....................   Passed    0.26 sec
+        Start  17: hex_element
+106/119 Test  #17: hex_element ......................   Passed    0.26 sec
+        Start  58: rmin
+107/119 Test  #58: rmin .............................   Passed    0.54 sec
+        Start  36: traction_loads
+108/119 Test  #36: traction_loads ...................   Passed    0.27 sec
+        Start  28: clearance
+109/119 Test  #28: clearance ........................   Passed    0.45 sec
+        Start  25: job_schema
+110/119 Test  #25: job_schema .......................   Passed    0.26 sec
+        Start  23: export_stl
+111/119 Test  #23: export_stl .......................   Passed    0.33 sec
+        Start  20: settings
+112/119 Test  #20: settings .........................   Passed    0.25 sec
+        Start  22: report
+113/119 Test  #22: report ...........................   Passed    0.25 sec
+        Start  77: width_aware_knockdown
+114/119 Test  #77: width_aware_knockdown ............   Passed    0.27 sec
+        Start  21: app_core_capability_mirror
+115/119 Test  #21: app_core_capability_mirror .......   Passed    0.01 sec
+        Start  57: plsm
+116/119 Test  #57: plsm .............................   Passed    0.32 sec
+        Start 109: lattice_depth_tie
+117/119 Test #109: lattice_depth_tie ................   Passed    0.14 sec
+118/119 Test #105: design_stream ....................   Passed  265.90 sec
+119/119 Test #104: cli_demo .........................   Passed  1949.30 sec
+
+100% tests passed out of 119
+
+Total Test time (real) = 1949.31 sec

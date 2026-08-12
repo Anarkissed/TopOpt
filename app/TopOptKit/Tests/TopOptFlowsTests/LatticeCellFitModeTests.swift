@@ -236,14 +236,37 @@ final class LatticeCellFitModeTests: XCTestCase {
         XCTAssertTrue(ok.enabled, "the exclusion must be scoped to fit alone")
     }
 
-    // MARK: - S2e · the DEFAULT is unchanged — that decision is the maintainer's
+    // MARK: - S2e · the DEFAULT — the maintainer's decision, and he changed it
 
-    /// A project built from untouched controls emits exactly the document this app
-    /// produced before this task: fixed, with `cell_mm` and no `cell_mode` key.
-    func testDefaultCellModeIsUnchangedAndEmitsNoModeKey() throws {
-        XCTAssertEqual(LatticeSettings(enabled: true).cellSizeMode, .fixed,
-                       "the default cell mode is NOT changed by this task")
-        let job = try Self.optimizeJob(lattice: try Self.spec(Self.gradedSettings()))
+    /// S2e ORIGINALLY pinned `.fixed` ("the default cell mode is NOT changed by
+    /// this task") because the default was the maintainer's call, not the
+    /// cell-fit task's. He has since made that call the other way: task
+    /// 2026-08-12-lattice-page-redesign §4b — "AUTO IS THE DEFAULT ON EVERY
+    /// CONTROL… a user should be able to simply press Auto on everything after
+    /// setting the faces section and it should work". So this pins the NEW
+    /// default, at the same strength.
+    func testDefaultCellModeIsAutoForANewProject() throws {
+        XCTAssertEqual(LatticeSettings(enabled: true).cellSizeMode, .auto,
+                       "§4b: Auto is the default on a NEW project")
+        XCTAssertEqual(LatticeSettings(enabled: true).densityMode, .auto,
+                       "§4b: on EVERY control, not just the cell")
+    }
+
+    /// ★ AND THE HALF THAT MUST NOT HAVE MOVED. A default describes a NEW
+    /// project; it must never rewrite what an existing one had. A snapshot
+    /// written before the flip still decodes to `.fixed` and still emits the
+    /// identical document — no `cell_mode` key, `cell_mm` present.
+    func testAnOlderSnapshotStillDecodesToFixedAndEmitsNoModeKey() throws {
+        let legacyJSON = Data(#"""
+        {"enabled": true, "topologyID": "octet", "cellMM": 8,
+         "densityMode": "auto", "minRelativeDensity": 0.2,
+         "maxRelativeDensity": 0.5, "boundary": "fullSkin"}
+        """#.utf8)
+        let legacy = try JSONDecoder().decode(LatticeSettings.self,
+                                              from: legacyJSON)
+        XCTAssertEqual(legacy.cellSizeMode, .fixed,
+                       "an absent cell_mode key IS fixed — history is not rewritten")
+        let job = try Self.optimizeJob(lattice: try Self.spec(legacy))
         let grading = try XCTUnwrap(job["grading"] as? [String: Any])
         XCTAssertNil(grading["cell_mode"],
                      "an absent cell_mode IS fixed — the untouched job is unchanged")
