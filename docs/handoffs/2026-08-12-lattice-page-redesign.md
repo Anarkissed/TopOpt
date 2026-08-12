@@ -95,6 +95,12 @@ straight back to solid, because at a 4.6 mm cell a 7 mm slab is 1.52 cells acros
 and the certifier needs 5. **More material at a cell that cannot lattice it is
 heavier, not lighter.** That is why §0(c) had to be answered before R1 could be.
 
+**And at the NEXT rung, arm A emits nothing at all.** At vf 0.52 core refuses
+outright: "the grading law could lattice NONE of this variant's 11622 candidate
+voxels… refusing rather than writing a file with zero struts in it and calling it
+a lattice." So his configuration does not merely under-lattice — one rung down it
+produces no lattice whatsoever, which is the state he has been living with.
+
 **Arm C is R1.** Auto takes core's own prescription — the per-region cell, 1.4 mm
 — and the same 16,009 voxels lattice **completely**: zero solid fallback, 43,816
 clipped struts, 14,959,524 triangles, margin 2949 against a required 1.5,
