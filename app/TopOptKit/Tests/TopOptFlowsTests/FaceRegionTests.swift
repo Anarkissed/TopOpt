@@ -412,6 +412,51 @@ final class FaceRegionTests: XCTestCase {
         XCTAssertNil(g["face_ids"], "a region-only group ships no empty face array")
     }
 
+    /// ★ THE ADAPTER TO THE BRIDGE carries EVERY field. It is the one place the
+    /// flows-layer `FaceRegion` and the transport record meet, and this repo has
+    /// already lost a field to a hand-written copy once (the outer wall line
+    /// width, dropped for 71 minutes and a release).
+    func testTheBridgeAdapterCarriesEveryField() {
+        var f = RegionFilter()
+        f.maxAreaMM2 = 41.95
+        f.minAreaMM2 = 1.5
+        f.minLargerNeighbours = 2
+        f.largerRatio = 3
+        f.kind = "cylinder"
+        f.cylinderRadiusMM = 2.5
+        f.cylinderRadiusTolMM = 0.07
+        let r = FaceRegion(id: 118, name: "blends 3·2", filter: f,
+                           filterMatchedAtAuthor: 24, add: [7, 9], remove: [4],
+                           cuts: [RegionCut(point: SIMD3(1, 2, 3),
+                                            normal: SIMD3(0, -1, 0), strict: true)],
+                           parentID: 100)
+        let spec = TopOptKit.FaceRegionSpec(region: r)
+        XCTAssertEqual(spec.id, 118)
+        XCTAssertEqual(spec.parentID, 100)
+        XCTAssertEqual(spec.addFaces, [7, 9])
+        XCTAssertEqual(spec.removeFaces, [4])
+        XCTAssertEqual(spec.maxAreaMM2, 41.95)
+        XCTAssertEqual(spec.minAreaMM2, 1.5)
+        XCTAssertEqual(spec.minLargerNeighbours, 2)
+        XCTAssertEqual(spec.largerRatio, 3)
+        XCTAssertEqual(spec.kindCode, 1, "cylinder == 1, the bridge's own code")
+        XCTAssertEqual(spec.cylinderRadiusMM, 2.5)
+        XCTAssertEqual(spec.cylinderRadiusTolMM, 0.07)
+        XCTAssertEqual(spec.filterMatchedAtAuthor, 24)
+        XCTAssertEqual(spec.cuts.count, 1)
+        XCTAssertEqual(spec.cuts[0].point, SIMD3(1, 2, 3))
+        XCTAssertEqual(spec.cuts[0].normal, SIMD3(0, -1, 0))
+        XCTAssertTrue(spec.cuts[0].strict)
+        // The three kind codes, so a rename cannot silently remap one.
+        for (k, code) in [("plane", 0), ("cylinder", 1), ("other", 2), ("", -1)] {
+            var g = RegionFilter()
+            g.kind = k
+            g.maxAreaMM2 = 1  // keep the filter non-empty for the "" case
+            XCTAssertEqual(TopOptKit.FaceRegionSpec(
+                region: FaceRegion(id: 1, name: "x", filter: g)).kindCode, code)
+        }
+    }
+
     func testAProjectSavedBeforeRegionsStillDecodes() throws {
         // A SelectionGroup written before `regionIDs` existed.
         let legacy = """
