@@ -1,0 +1,2 @@
+field,printed_voxels,achieved_vf,fractional_samples,max_von_mises_mpa,margin_worst_case,margin_effective,accepted,min_feature_violations,load_path_connected,frozen_solid_below_iso,frozen_solid_total,frozen_void_above_iso,frozen_restored,mass_grams
+evidence/2026-08-12-plsm-matched-volume/arms/V3_stress/snap/it0060,88423,0.79729315444,8800,0.0167695246991,3279.75902639,679.116062431,1,911,1,0,40216,0,0,543.748473332

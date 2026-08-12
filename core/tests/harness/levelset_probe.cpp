@@ -767,6 +767,17 @@ struct Args {
   // holes" from "which holes" in the monotone regime, where the final design's
   // holes are a subset of the seed's.
   double seed_phase = 0.0;
+  // ★ --seed rods: which axis the cylinders run along. R5 — named, never
+  // derived from "the smallest axis", which is the trap PR 323 lost a day to.
+  std::string seed_axis = "y";
+  // ★ --renucleate N: every N iterations, open holes where the topological
+  // sensitivity is lowest. 0 = off. The literature's standard answer to the
+  // level set's inability to nucleate (Burger/Allaire topological derivative;
+  // BESO-hybrid variants). --renucleate-frac is the fraction of ACTIVE SOLID
+  // voxels opened at each event.
+  int renucleate = 0;
+  double renucleate_frac = 0.02;
+  int renucleate_until = 1000000;
   bool fp32 = false;
   bool isolate = false;
   int reinit_every = 1;
@@ -1366,6 +1377,10 @@ int main(int argc, char** argv) {
     else if (s == "--wall-cap") next(a.wall_cap);
     else if (s == "--seed-period") next(a.seed_period);
     else if (s == "--seed-phase") next(a.seed_phase);
+    else if (s == "--seed-axis" && i + 1 < argc) a.seed_axis = argv[++i];
+    else if (s == "--renucleate") nexti(a.renucleate);
+    else if (s == "--renucleate-frac") next(a.renucleate_frac);
+    else if (s == "--renucleate-until") nexti(a.renucleate_until);
     else if (s == "--reinit-substeps") a.reinit_substeps = true;
     else if (s == "--weno") a.weno = true;
     else if (s == "--rk3") a.rk3 = true;
@@ -2263,8 +2278,72 @@ int main(int argc, char** argv) {
                 "            void where strain energy density < %.6g — the "
                 "%.1f%% least-loaded ACTIVE voxels\n",
                 now_s() - t_s, sc0.cg.iterations, thr, 100.0 * frac_void);
+  } else if (a.seed == "rods") {
+    // ── ★ SEED D — HEXAGONALLY PACKED CYLINDERS ──────────────────────────
+    //
+    // ★ WHY THIS AND NOT WIDER SPHERES. At a FIXED volume fraction the width
+    // of a cosine seed's blobs is not a free parameter: the seed is
+    // `c + P(x)` and the volume bisection adds an offset `o`, so the field
+    // optimised is `P(x) + (c + o)` and `c` is absorbed EXACTLY. There is no
+    // dial that widens the dots. Overlapping void at 20% needs a different
+    // FUNCTION, not a different constant.
+    //
+    // ★ AND THE BLOCK-COPOLYMER PHASE SEQUENCE SAYS WHICH FUNCTION. Minimising
+    // interfacial area between two phases at a fixed minority fraction is the
+    // same variational problem, and its answer is known: BCC spheres below
+    // ~25%, hexagonal cylinders near ~30%, gyroid near ~38%, lamellae at ~50%.
+    // At rung 0.68 the void is 32% — cylinder/gyroid territory, which is why
+    // the gyroid won there. At rung 0.7973 the void is 20% — SPHERE territory,
+    // which is why the gyroid REVERSED. Cylinders are the neighbouring phase
+    // and are therefore the honest next probe: predicted WORSE than blobs on
+    // area, and drainable by construction, which blobs are not.
+    //
+    // ★ THE RADIUS IS NOT A PARAMETER EITHER, AND THAT IS THE POINT. phi is
+    // MINUS the distance to the nearest cylinder axis, so {phi + o < 0} is
+    // {dist > o}: the volume bisection picks the radius that hits the rung.
+    // One parameter only — the axis spacing.
+    //
+    // R5: the grid spacing is isotropic here (1.705279 mm on all three axes),
+    // so a hexagonal lattice in voxels IS hexagonal in millimetres. The
+    // assertion below refuses the case where that stops being true rather than
+    // silently emitting a sheared lattice.
+    const double per = a.seed_period;
+    const int ax = (a.seed_axis == "x") ? 0 : (a.seed_axis == "y") ? 1 : 2;
+    const double row = per * 0.8660254037844386;  // sqrt(3)/2
+    auto axis_dist = [&](int i, int j, int k) {
+      // coordinates in the plane PERPENDICULAR to the rod axis
+      double p, q;
+      if (ax == 0) { p = j; q = k; }
+      else if (ax == 1) { p = i; q = k; }
+      else { p = i; q = j; }
+      // nearest hexagonal lattice site: rows spaced `row` in q, every other
+      // row offset by half a period in p.
+      double best = 1e30;
+      const double q0 = std::floor(q / row);
+      for (int dq = -1; dq <= 1; ++dq) {
+        const double qi = q0 + dq;
+        const double qc = qi * row;
+        const double shift = (static_cast<long long>(std::llround(qi)) & 1) ? 0.5 * per : 0.0;
+        const double p0 = std::floor((p - shift) / per);
+        for (int dp = -1; dp <= 1; ++dp) {
+          const double pc = (p0 + dp) * per + shift;
+          const double dpp = p - pc, dqq = q - qc;
+          best = std::min(best, std::sqrt(dpp * dpp + dqq * dqq));
+        }
+      }
+      return best;
+    };
+    for (int k = 0; k < d.nz; ++k)
+      for (int j = 0; j < d.ny; ++j)
+        for (int i = 0; i < d.nx; ++i)
+          phi[d.at(i, j, k)] = -axis_dist(i, j, k);
+    std::printf("seed        ★ HEXAGONAL RODS along %s, spacing %.0f voxels, "
+                "row pitch %.2f\n"
+                "            the RADIUS is set by the volume bisection, not by "
+                "a parameter\n",
+                a.seed_axis.c_str(), per, row);
   } else {
-    std::printf("FATAL: --seed must be simp, holes, gyroid or stress\n");
+    std::printf("FATAL: --seed must be simp, holes, gyroid, stress or rods\n");
     return 2;
   }
   // ★ NOT russo_smereka HERE. The seed is phi = 0.5 - rho, a near-binary step
@@ -2566,6 +2645,9 @@ int main(int argc, char** argv) {
          // ★ TASK 2026-08-12's mandatory curves.
          "void_components,euler_chi,cavities,tunnels,mono_violations,"
          "mono_reverts,mono_repaired_voxels,new_components,split_delta,"
+         // ★ the renucleation counters. Emitted because a mechanism whose
+         // counters never reach the CSV is a mechanism nobody can check fired.
+         "renuc_events,renuc_voxels,"
          "iteration_wall_s\n";
 
   // ── THE DIRICHLET SET FOR THE HILBERTIAN EXTENSION (difference 4) ──────────
@@ -2602,6 +2684,7 @@ int main(int argc, char** argv) {
   int mono_components = 0, mono_cavities = 0;
   long long mono_chi = 0, mono_tunnels = 0;
   long long mono_violations = 0, mono_reverts = 0, mono_repaired_voxels = 0;
+  long long renuc_events = 0, renuc_voxels = 0;
   // ★ THE TWO WAYS THE COUNT CAN RISE, SEPARATED. `new` is NUCLEATION — a
   // component sharing no voxel with any previous void. `split` is the rest —
   // existing void divided by solid bridging it, which is classically legal.
@@ -2928,6 +3011,72 @@ int main(int argc, char** argv) {
     //
     // which lowers phi exactly where m is, smoothly, and stays in the span by
     // construction. Solid is {phi < 0}, so LOWERING phi fills void.
+    // ── ★ PERIODIC HOLE NUCLEATION BY TOPOLOGICAL SENSITIVITY ─────────────
+    //
+    // ★ AND IT IS THE EXACT OPPOSITE OF `--monotone`, WHICH THIS FILE ALSO
+    // IMPLEMENTS. That is deliberate: the monotone task forbade nucleation and
+    // bought 1.7%. The literature's answer to the level set's inability to
+    // nucleate goes the other way — insert holes where the topological
+    // derivative is lowest (Burger/Hackl/Ring; Allaire; the BESO hybrids), or
+    // continuously via a density field (Barrera/Maute). Both arms are worth
+    // measuring on the same binary and now can be.
+    //
+    // ★ AND IT CORRECTS A CLAIM I MADE OUT LOUD. I said the stress seed "goes
+    // stale" because it solves once on the solid part and never re-derives the
+    // load paths. That was wrong: the shape derivative recomputes the strain
+    // energy EVERY iteration — the optimiser has never been steering by a stale
+    // map. What it cannot do is ACT on it by opening a hole in solid material.
+    // So the useful thing is not recomputing the field, it is nucleating from
+    // it, which is what this does.
+    if (a.renucleate > 0 && a.plsm && !alpha.empty() && it % a.renucleate == 0 &&
+        it <= a.renucleate_until) {
+      std::vector<std::pair<double, std::size_t>> cand;
+      cand.reserve(n / 4);
+      for (std::size_t v = 0; v < n; ++v) {
+        if (grid.tags[v] == VoxelTag::Empty || eff[v] != MaskValue::Active) continue;
+        if (!(occ[v] > 0.5)) continue;  // already void; nothing to nucleate
+        cand.emplace_back(energy_from(sc.dcompliance[v], (*rho_sens)[v],
+                                      params.penalty, params.youngs_modulus),
+                          v);
+      }
+      const std::size_t take =
+          static_cast<std::size_t>(a.renucleate_frac * static_cast<double>(cand.size()));
+      if (take > 0 && take < cand.size()) {
+        std::nth_element(cand.begin(), cand.begin() + static_cast<std::ptrdiff_t>(take),
+                         cand.end(),
+                         [](const std::pair<double, std::size_t>& x,
+                            const std::pair<double, std::size_t>& y) {
+                           return x.first < y.first;
+                         });
+        std::vector<double> m(n, 0.0);
+        for (std::size_t q = 0; q < take; ++q) m[cand[q].second] = 1.0;
+        std::vector<double> dm(L.count(), 0.0), pf(n, 0.0);
+        spmv(PsiT, m, dm, plsm_threads);
+        spmv(Psi, dm, pf, plsm_threads);
+        double pmax = 0.0;
+        for (std::size_t v = 0; v < n; ++v)
+          if (m[v] > 0.0) pmax = std::max(pmax, std::fabs(pf[v]));
+        if (pmax > 0.0) {
+          // ★ RAISE phi, the opposite sign to the monotone repair below. Solid
+          // is {phi < 0}, so raising it OPENS void. A full band width, so the
+          // hole is not marginal and cannot be closed by the offset bisection
+          // alone.
+          const double sstep = (2.0 * eta) / pmax;
+          for (std::size_t i2 = 0; i2 < L.count(); ++i2) alpha[i2] += sstep * dm[i2];
+          plsm_sync();
+          // The offset re-solve is mandatory and is the same fixed-point
+          // concern the monotone repair documents: opening void removes
+          // material, so the bisection pushes the surface back out.
+          const double offn = solve_offset(target_volume);
+          for (double& c : alpha) c += offn;
+          plsm_sync();
+          build_fields(0.0);
+          renuc_events += 1;
+          renuc_voxels += static_cast<long long>(take);
+        }
+      }
+    }
+
     // ★ MEASUREMENT IS UNGATED; ONLY ENFORCEMENT IS BEHIND `--monotone`.
     //
     // These were one block, gated together, and that made the CONTROL ARM
@@ -3780,7 +3929,8 @@ int main(int argc, char** argv) {
         << ',' << mono_components << ',' << mono_chi << ',' << mono_cavities
         << ',' << mono_tunnels << ',' << mono_violations << ',' << mono_reverts
         << ',' << mono_repaired_voxels << ',' << mono_new_components << ','
-        << mono_split_delta << ',' << it_wall << '\n';
+        << mono_split_delta << ',' << renuc_events << ',' << renuc_voxels
+        << ',' << it_wall << '\n';
     csv.flush();
 
     std::printf("it %3d  c = %.10g  vf = %.6f (occ %.1f)  offset %+.4f mm  "

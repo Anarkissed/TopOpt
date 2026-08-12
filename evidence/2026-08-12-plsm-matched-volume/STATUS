@@ -5,3 +5,19 @@
 18:34:21 START V2_gyr20
 18:54:55 OK V2_gyr20 60 iterations, printed_voxels=88423 (target ~88424)
 18:54:55 QUEUE_DONE
+19:23:26 START V3_stress
+20:00:42 OK V3_stress 60 iterations, printed_voxels=88423 (target ~88424)
+20:00:42 STRESS_DONE
+20:08:25 START W1_p16
+20:46:52 OK W1_p16 60 it, printed=88423 (target 88424), b0 distinct=43
+20:46:52 START W2_p24
+21:22:59 OK W2_p24 60 it, printed=88424 (target 88424), b0 distinct=37
+21:22:59 START W3_p32
+22:04:53 OK W3_p32 60 it, printed=88424 (target 88424), b0 distinct=23
+22:04:53 START W4_renuc
+22:42:09 OK W4_renuc 60 it, printed=88424 (target 88424), b0 distinct=40
+22:42:09 START W5_p24renuc
+23:18:21 OK W5_p24renuc 60 it, printed=88424 (target 88424), b0 distinct=36
+23:18:21 START W6_rods12
+23:41:53 OK W6_rods12 60 it, printed=88423 (target 88424), b0 distinct=16
+23:41:53 SEEDS_DONE
