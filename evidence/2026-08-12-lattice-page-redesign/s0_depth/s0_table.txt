@@ -1,6 +1,6 @@
 §0 — THE THREE ARMS, on the maintainer's own job
 task 2026-08-12-lattice-page-redesign · M2_verticalStand.step · res 128
-binary: s0_depth/topopt-cli.snapshot
+binary fingerprint: c618a90a3a72
 
 THE BARRIER — what the protection holds against TO
 arm                                            asked   reaches  layers   voxels held

@@ -396,7 +396,7 @@ MATERIAL (the anchor-to-load walk, the pre-flight).
 |---|---|
 | **R1** demonstrably usable on his job | **MET.** Arm C on his own job at rung 0.68: **16,009 latticed voxels (+22.8% on his 13,034), 13.0% of the part (his 12%), 490.6 g (his 507 g; solid 543.7 g)**, zero solid fallback, margin 2949 vs 1.5 required. Arm A reproduces his failure to 0.08% first. `s0_table.txt`. |
 | **R2** protection depth == lattice depth, asserted | **MET.** One store, one wire, and a core REFUSAL when they differ. `test_lattice_depth_tie`, `LatticeBarrierModelTests`. |
-| **R3** no wall of text | **MET.** Longest string added: the disclaimer, "A sample part. Your settings, not your result." — **7 words**. Asserted by `testNoWallOfTextAnywhereInTheNewUI` over every user-facing string the new UI can render. |
+| **R3** no wall of text | **MET.** Longest string added: the disclaimer, "A sample part. Your settings, not your result." — **8 words**. Asserted by `testNoWallOfTextAnywhereInTheNewUI` over every user-facing string the new UI can render. |
 | **R4** preview latency per interaction | **MET.** Table above; artifact `r4_preview_latency.txt` (RELEASE, quiet machine). The suite asserts the TESSELLATION CAP, not a wall clock: the timing assertion failed at 1033 ms while three 128³ ladders were saturating ten cores, and a bar that flips with the neighbours is not a bar. The cap is what makes it sub-second, so the cap is what is pinned; a 5 s ceiling still catches an order-of-magnitude regression. |
 | **R5** failing test first | **MET** for L5 (`l5/failing_first_compile.txt`). For the load/anchor check: it was NOT a defect — see §1(f) — so it ships as a regression guard with a positive control, and I say so rather than manufacture a failure. |
 | **R6** no verdict moves | **MET.** `design.bin`, all four variant STLs and every physics column of `iterations.csv` byte-identical base vs branch. `loadcase.json` gains only new keys; `run_info.json` differs only in `preflight_ms`, a wall clock. `r6/byte_identity.txt`. |
@@ -479,5 +479,5 @@ density and the stress field wipes down the part and the camera dives into the
 dense part so you can see the lattice following the load. Everything you have
 chosen sits in a panel on the left you can change at any time — the walkthrough
 is the order things are explained in, not a cage. There is no paragraph anywhere:
-the longest sentence on the page is seven words, and it is the note saying that
+the longest sentence on the page is eight words, and it is the note saying that
 the thing you are looking at is a sample, not your part.
