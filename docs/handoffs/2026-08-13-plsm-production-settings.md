@@ -14,7 +14,59 @@ brief gives: if the Helmholtz filter at r = 2 or r = 3 clears at both rungs it
 beats the penalty on surface and the question changes. Nothing below depends on
 that result.
 
-*(§0 is written last, when every number in it exists. The method is §1-§6.)*
+## 0. THE ANSWERS, IN ORDER — one line each
+
+**1. What eta = 1 costs and buys at the shipped rung.** ★ On the production path
+it buys **−7.5% of the internal surface** (31,528 → 29,170 triangles) and costs
+**+8.0% of carved roughness** (7.6090 → 8.2173) at a margin that is a wash
+(3297.3 → 3255.5, −1.3%) — so the triangle-count direction Stage A measured is
+confirmed and **its carved direction is REVERSED**, and both were "eta = 1 at the
+shipped volume". §4b(d).
+
+**2. Whether the finite-difference check passed on the new sensitivity.** ★ **On
+the volume, yes, first time: −0.085% and +0.479%, flat across three decades of
+step size.** ★★ **On the compliance, NO — and it found a SECOND wrong gradient**:
+the CONTINUUM weight every level-set arm since PR 324 has used reads **+56.0% and
++45.0%**, flat to five digits, and the DISCRETE weight that replaced it reads
+**−0.31% and +0.97%** on the same solves. §2(g).
+
+**3. What the stopping rule would have chosen on each Stage A arm against what it
+returned.** ★ It recovers **+19.5%** on `L0_none`, **+23.5%** on `L1_perim1` and
+**+24.1%** on PR 327's control, and is **±0.0%** on the four arms whose curves are
+flat — it may not cost anything where there is nothing to gain. §3(e). ★ And run
+for real on the production path it is worth **+47.0%** at the light rung
+(1728.5 → 2541.4) while using **200 iterations against the 60-cap's 240**. §4b(e).
+
+**4. The iteration count to convergence before and after the volume-fraction
+fix.** ★ **Before: it does not converge, it runs out** — all four rungs of both
+Heaviside arms stopped on `iteration-ceiling`, 240 iterations, the compliance
+plateau never firing once. **After: the margin-plateau rule stops every rung at
+40–60**, for 200 iterations total. ★ **But no rung reached the COMPLIANCE plateau
+even with 120 available, so PR 327's "57 and 61" is NOT confirmed here** and is
+not claimed. §4b(e).
+
+---
+
+### and the three results nobody asked for
+
+★★ **THE VOLUME CONSTRAINT NOW MEANS WHAT IT SAYS.** The fraction lands on SIMP's
+printed fraction to **0.04%** at every rung where the Heaviside arms miss by up to
+**4.5%** — so every prior margin comparison at the light rung in this line of work
+was confounded by mass, invisibly, because `achieved_vf` reported the smoothed sum
+and that was on target the whole time. §4b(a).
+
+★★ **THE SURFACE PREMISE IS GONE.** "3× the internal surface" became "+20.3% at
+matched volume" and is now **+2.0% at the shipped rung and −3.8% at the light
+one** — a WIN over SIMP on both surface columns at the light rung (carved −18.8%)
+at a volume matched to 0.02%, **with no perimeter penalty**. §4b(c).
+
+★ **THE STOPPING RULE IS CHEAPER THAN THE CAP IT REPLACES**, which was not the
+expectation: 200 iterations plus 20 certifications against 240 iterations.
+§4b(e).
+
+---
+
+*(The method is §1–§6; §4b is the campaign. The plain-language section is §8.)*
 
 ## 1. ITEM 1 — `eta_voxels` 2.0 → 1.0
 
@@ -778,3 +830,94 @@ and the reason is written at the site. This is the same defect class as
 `tests-on-value-types-miss-call-sites` and
 `app-strut-law-differs-from-core` — one value, two homes, and the wrong home
 wins.
+
+## 7. THE BARS
+
+| bar | how it was met |
+|---|---|
+| **R1** byte-identical where nothing should change | `run_r1_byte_identity.sh` — one folder, two binaries, the BEFORE side a checkout of the merge-base. ★ The inherited script would have measured NOTHING (it stashes, and this branch's work is committed, so on a clean tree it saves nothing and never goes back); it now refuses a dirty tree and refuses `HEAD == merge-base` rather than passing vacuously. `run_info.json` is deliberately outside the byte comparison — this task ADDS keys to it — and the script diffs its KEYS instead, where `removed: none` is the bar. |
+| **R2** the new sensitivity, finite-differenced | §2(g). Both functionals, five step sizes, on the SHIPPED header. It found the compliance weight wrong by 45–56%. |
+| **R3** every claim at both rungs | §4b throughout. Nominal 0.68 → printed 0.7973, nominal 0.26 → printed 0.5283, SIMP's own margins 3254.36 and 3014.12 read out of production's run of record by `tables.py`, never retyped. |
+| **R4** margin as a curve with its peak | §4b(e) prints the probe curve the rule actually watched, per rung. Mass, enclosed volume and CAD error in mm sit beside every roughness number in §4b(c). |
+| **R5** SIMP rows from the same probe invocation | One `external_field_surface_probe` call for the whole of §4b(c). ★ And a positive control for it: SIMP's own rung 0.68, dumped and handed back in as an arm, reproduces its internal row to four decimals. |
+| **R6** sealed void by the manufacturing definition | §4b(g), through the SHIPPED `plsm_void_topology` for SIMP and PLSM alike, cross-checked against an independent implementation. The caveat is carried: 0.00–0.05% at the light rung against 4.60–8.61% at the shipped one. |
+| **R7** no assertion weakened or deleted | `assertion_census.sh`, a MESSAGE census: 3,344 test messages before and after, 121 ctests before and after, **0 removed**, 3 production refusals ADDED. |
+| **R8** root cause with file and line, no placeholders | §2(g) names `core/src/simp/plsm.cpp:104`; §6 names `core/include/topopt/job.hpp`. No scratch at the repository root; every large field lives outside the repo under `$SCRATCH`. |
+| **R9** separate commit for any review response | Nothing to respond to yet; the branch's history is one commit per finding. |
+
+## 8. ★ IN PLAIN LANGUAGE
+
+**What this task was asked to do.** Take three settings that earlier experiments
+had already settled, put them into the real optimiser, and prove they work on the
+real part rather than in a test harness.
+
+**What the three settings are.**
+
+1. *A width knob (`eta`) halved.* The optimiser used to blur the edge of the part
+   over four voxels so it could do calculus on it. Halving that blur was measured
+   to give a cleaner surface.
+2. *How the optimiser measures "how much material is in this cell".* It used to
+   ask one question at the centre of the cell — "is the middle of this box inside
+   the part?" — and get a yes/no smeared into a maybe. It now measures the actual
+   **fraction** of the box that is inside, by sampling 64 points in it.
+3. *When to stop.* It used to run a fixed 60 rounds. Sometimes that was too few
+   and sometimes the answer got **worse** if you kept going.
+
+**What actually happened, in order.**
+
+★ **Before spending six hours of computer time, I checked the maths.** There is a
+standard way to test whether an optimiser's "which way is downhill" calculation is
+right: nudge the design a tiny bit, see how much the answer changes, and compare
+that with what the calculation predicted. The new cell-fraction calculation passed
+— it was right to within a tenth of a percent.
+
+★★ **But the same test found something else, which nobody was looking for.** The
+"downhill" calculation has two parts: *where* the edge moves, and *what that
+costs*. An earlier task had found and fixed a 23% error in the first part. Nobody
+had ever checked the second part. **It was wrong by 45–56%** — and it had been
+wrong in every experiment in this line of work for months. The tell is that the
+error did not change when I made the nudge ten times smaller; a measurement error
+would have moved, a *maths* error does not.
+
+Had I run the experiments first, all six hours of them would have been on the
+broken calculation and would have had to be thrown away.
+
+★★ **Then the biggest surprise, from the cell-fraction change.** The optimiser is
+told "make the part 26% as heavy". It was reporting that it had hit that target
+exactly — and it had, *by its own smeared measure*. But the part it actually
+produced was **4.5% lighter than asked**. Every previous comparison against the
+old optimiser at that setting was therefore comparing a lighter part with a
+heavier one and calling the difference a quality difference. **With the new
+measurement the part comes out within 0.04% of the target**, and the comparison
+finally means something.
+
+★★ **And then the surface result this whole line of work has been chasing.** The
+new optimiser was believed to produce three times as much internal surface as the
+old one — later revised to 20% more. Measured properly, at the same weight: **2%
+more at the heavy setting, and 4% LESS at the light setting**, where it also comes
+out visibly smoother. That is the first time the new method has beaten the old one
+on surface at all.
+
+★★ **The stopping rule turned out to be free.** The worry was that checking "is
+this design actually strong enough?" every ten rounds would be expensive, because
+that check is roughly as costly as a round. It stopped the run so much earlier
+that it used **less** computer time than the fixed 60 rounds it replaced — and the
+design it returned was **47% stronger** at the light setting, because the strength
+peaks around round 20 and then falls away, and the old rule shipped whatever was
+there at round 60.
+
+**What is honestly still wrong.** At the lightest setting the new method is still
+**16% weaker than the old one** at the same weight. That is not a measurement
+artefact and it is not fixed here — it is now simply *known*, cleanly, for the
+first time.
+
+**What was deliberately left out.** A fourth mechanism (a "perimeter penalty")
+was excluded because a different experiment currently running may beat it, and
+adding it now would make that experiment unreadable.
+
+**And four bugs found by needing a number rather than by looking for one:** the
+wrong cost calculation above; a topology formula that reported a phantom hole for
+every sealed cavity; a settings file that would have silently ignored two of the
+three changes this task shipped; and the fact that the optimiser had never
+recorded where its time went — every timing column in its log had been zero since
+the feature shipped.
