@@ -643,14 +643,22 @@ basis is built once and `N_t` is a property of that build.
 | `core = 16` | — | **ABANDONED after 35 min without finishing solve 1** |
 | `core = 32` | — | not attempted |
 
-**This is not a measurement of what a 16³ tiling costs.** It is that cost
-convolved with a ~10× starvation factor, and the two cannot be separated after
-the fact. What it does establish, and what the next attempt needs to know, is a
-real hazard: **a coarser tiling makes the one-off LOBPCG build MORE expensive
-even as it makes the per-solve refresh cheaper**, because the local eigenproblems
-grow with the cube of the core size (8³ ≈ 1.7k local DOFs, 16³ ≈ 14k). The prior
-sweep that found 8³ → 16³ took `N_t` 313 → 47 ran at `40×16×41`, where the whole
-build was 12.4 s. It does not transfer to 128³ for free.
+**The first attempt ran under a ~10× starvation factor, so it could not be read
+as a cost.** It was therefore RETRIED once the host quietened (load ~14 rather
+than ~108) — and `core = 16` still had not finished a single solve, while
+`core = 8` completes its whole first solve in about 40 seconds. **So this is not
+purely a contention artefact.** It is a real hazard, and it is the thing the next
+attempt most needs to know: **a coarser tiling makes the one-off LOBPCG build
+dramatically MORE expensive even as it makes the per-solve refresh cheaper**,
+because the local eigenproblems grow with the cube of the core size (8³ ≈ 1.7k
+local DOFs, 16³ ≈ 14k). The prior sweep that found 8³ → 16³ took `N_t` 313 → 47
+ran at `40×16×41`, where the *whole* build was 12.4 s. **It does not transfer to
+128³ for free**, and any plan that assumes a coarser tiling is a free win needs
+to price that build first.
+
+What is still unmeasured, and it is the part that decides §1, is `N_t` itself —
+which the build produces at its very end. The retry is the way to get it; it just
+needs to be allowed to finish.
 
 **The exact experiment, on a quiet machine, is one command:**
 

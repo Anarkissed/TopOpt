@@ -10,8 +10,13 @@ property of that build.
 | --- | --- |
 | `core = 8` (SHIPPED) | `N_t = 1674`, basis 40.26 MB — from his run and reproduced by every arm here |
 | `core = 4` | ABANDONED after 25 min. ~7,300 subdomains on his grid; and it is the WRONG DIRECTION anyway — smaller cores mean MORE subdomains and a LARGER `N_t` |
-| `core = 16` | ABANDONED after 35 min without completing solve 1 |
+| `core = 16` | ABANDONED after 35 min without completing solve 1 — and RETRIED on a quiet host (load ~14 vs ~108), where it still had not finished a solve |
 | `core = 32` | not attempted (16 did not finish) |
+
+★ **THE RETRY IS THE INFORMATIVE PART.** The first attempt could be dismissed as
+contention. The second could not: at load ~14, with `core = 8` completing its
+entire first solve in about 40 seconds, `core = 16` still did not produce one.
+The tiling's BUILD cost is real and it is steep.
 
 **Why, and what cannot be concluded from it.** The host was running four other
 agents' TopOpt jobs for the whole window — `levelset_probe` and three
