@@ -1,0 +1,44 @@
+# THE ANALYTIC DESIGN: phi(x) = sum_i alpha_i psi(|x - x_i|_R).
+# alpha is /Users/nadim/plsm_scratch/B_heaviside/variant_038_alpha.f64, 85680 float64 in x-fastest knot order.
+# Rebuild with topopt::plsm_make_lattice(nx, ny, nz, knots_vox..., support)
+# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, threads);
+# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).
+basis gaussian
+knots_vox 2 2 2
+support_vox 4 4 4
+counts 68 20 63
+pad 2 2 2
+n_coeff 85680
+n_voxels 468224
+compression 5.4647992530345473
+eta_voxels 2
+nx 128
+ny 31
+nz 118
+spacing 1.7052793026343613
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+requested_vf 0.38
+achieved_vf 0.38
+frozen_floor_occupancy 0.73753953951963824
+ersatz heaviside
+sens_weight continuum
+frac_samples 0
+frac_cut_cells 0
+frac_sample_wall_s 0
+frac_sens_wall_s 0
+stop_reason iteration-ceiling
+margin_peak_iteration 0
+margin_peak 0
+margin_probe_wall_s 0
+# margin_probe: iteration margin load_path_ok — the CURVE the rule watched. R4: never a point.
+void_components 15
+void_chi -4
+void_enclosed_solid 0
+void_sealed_pockets 12
+void_tunnels 19
+void_sealed_voxels 156
+void_sealed_volume_mm3 773.59055954929397
+void_voxels 45917
+# NOT CERTIFIED. The certificate in report.json belongs to the voxel field this was optimised on, at this resolution, and does NOT carry over to a re-evaluation at another one.
