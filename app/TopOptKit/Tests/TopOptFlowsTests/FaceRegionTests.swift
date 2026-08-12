@@ -348,6 +348,70 @@ final class FaceRegionTests: XCTestCase {
         XCTAssertTrue(text.contains("normal"))
     }
 
+    // MARK: - the wire (R1 at the app seam)
+
+    private func jobDict(_ r: RunRequest) throws -> [String: Any] {
+        let cfg = RemoteRunnerConfig(host: "127.0.0.1", port: 8757,
+                                     expectedFingerprint: "test")
+        let run = RemoteRun(config: cfg, request: r,
+                            progress: { _, _, _ in true }, onVariant: { _ in })
+        return try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try run.buildJobJSON()) as? [String: Any])
+    }
+
+    private func request(regions: [FaceRegion], groupRegions: [RegionID]) -> RunRequest {
+        RunRequest(modelPath: "/tmp/part.step", material: "PLA", materialsPath: "",
+                   rulesPath: "", resolution: 64, projectName: "regions",
+                   anchorFaceIDs: [3],
+                   loadGroups: [TopOptKit.LoadGroupSpec(faceIDs: [], force: SIMD3(0, 0, -60),
+                                                       regionIDs: groupRegions)],
+                   faceRegions: regions)
+    }
+
+    /// ★ NO REGIONS ⇒ NO REGION KEYS. A project that has not used the layer
+    /// emits the job it emitted before the layer existed (bar R1).
+    func testAJobWithNoRegionsCarriesNoRegionKeys() throws {
+        let r = RunRequest(modelPath: "/tmp/part.step", material: "PLA",
+                           materialsPath: "", rulesPath: "", resolution: 64,
+                           projectName: "plain", anchorFaceIDs: [3],
+                           loadGroups: [TopOptKit.LoadGroupSpec(faceIDs: [11],
+                                                                force: SIMD3(0, 0, -60))])
+        let loads = try XCTUnwrap(try jobDict(r)["loads"] as? [String: Any])
+        XCTAssertNil(loads["face_regions"])
+        XCTAssertNil(loads["anchor_region_ids"])
+        let g = try XCTUnwrap((loads["groups"] as? [[String: Any]])?.first)
+        XCTAssertNil(g["region_ids"])
+        XCTAssertEqual(g["face_ids"] as? [Int], [11])
+    }
+
+    /// And with a region: the DEFINITION goes on the wire — the filter, the
+    /// author-time match count, and the cut geometry — never a resolved list.
+    func testAJobWithARegionCarriesItsDefinition() throws {
+        var model = FaceRegionModel()
+        let id = model.union(faces: [], named: "blends",
+                             filter: .blend(maxAreaMM2: 42), matchedAtAuthor: 24)
+        model.splitManual(id, point: SIMD3(1, 2, 3), normal: SIMD3(0, 1, 0))
+        let loads = try XCTUnwrap(
+            try jobDict(request(regions: model.regions, groupRegions: [id]))["loads"]
+                as? [String: Any])
+        let regions = try XCTUnwrap(loads["face_regions"] as? [[String: Any]])
+        XCTAssertEqual(regions.count, 3, "the union and its two halves")
+        let root = try XCTUnwrap(regions.first { ($0["id"] as? Int) == id })
+        XCTAssertEqual(root["filter_matched_at_author"] as? Int, 24)
+        let f = try XCTUnwrap(root["filter"] as? [String: Any])
+        XCTAssertEqual(f["max_area_mm2"] as? Double, 42)
+        XCTAssertEqual(f["min_larger_neighbours"] as? Int, 2)
+        XCTAssertNil(root["add"], "a filter-defined union ships NO id list")
+        let child = try XCTUnwrap(regions.first { ($0["parent_id"] as? Int) == id })
+        let cuts = try XCTUnwrap(child["cuts"] as? [[String: Any]])
+        XCTAssertEqual(cuts.count, 1)
+        XCTAssertEqual(cuts[0]["normal"] as? [Double], [0, 1, 0],
+                       "a split is stored as GEOMETRY, not as 'region N, half A'")
+        let g = try XCTUnwrap((loads["groups"] as? [[String: Any]])?.first)
+        XCTAssertEqual(g["region_ids"] as? [Int], [id])
+        XCTAssertNil(g["face_ids"], "a region-only group ships no empty face array")
+    }
+
     func testAProjectSavedBeforeRegionsStillDecodes() throws {
         // A SelectionGroup written before `regionIDs` existed.
         let legacy = """
