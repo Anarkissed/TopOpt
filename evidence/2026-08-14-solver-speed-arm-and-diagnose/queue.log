@@ -1,0 +1,30 @@
+### N_t TRIAGE  Wed Aug 12 06:16:51 EDT 2026
+core=4  N_t= 0  MB= 0  implied_refresh= 0
+core=16  N_t= 0  MB= 0  implied_refresh= 0
+### PROBES (ITERS=1)  Wed Aug 12 06:26:51 EDT 2026
+evidence/2026-08-14-solver-speed-arm-and-diagnose/run_probes.sh: line 76: 80558 Terminated: 15          ./build/solver_arm_sweep "$WORK/job/$job" "$WORK/$name" --arm "$spec" --threads "$THREADS" --iters "$ITERS" > "$WORK/$name.log" 2>&1
+--- ctl ---
+  rung 0 it 1  cg=927  hier=1  mg_cycles=300  used_mg=0
+--- alg1 ---
+  rung 0 it 1  cg=927  hier=1  mg_cycles=300  used_mg=0
+  rung 1 it 1  cg=1223  hier=0  mg_cycles=0  used_mg=0
+  rung 2 it 1  cg=1343  hier=0  mg_cycles=0  used_mg=0
+  rung 3 it 1  cg=1763  hier=0  mg_cycles=0  used_mg=0
+evidence/2026-08-14-solver-speed-arm-and-diagnose/run_probes.sh: line 76: 83631 Terminated: 15          ./build/solver_arm_sweep "$WORK/job/$job" "$WORK/$name" --arm "$spec" --threads "$THREADS" --iters "$ITERS" > "$WORK/$name.log" 2>&1
+--- eta05 ---
+  (no iterations.csv)
+### ARMS after alg1  Wed Aug 12 06:38:32 EDT 2026
+ARM_RUNG arm=base vf_requested=0.680000 margin=2372.88667 accepted=1
+ARM_RUNG arm=base vf_requested=0.520000 margin=793.600505 accepted=1
+ARM_RUNG arm=base vf_requested=0.380000 margin=355.269912 accepted=1
+ARM_RUNG arm=base vf_requested=0.260000 margin=232.153157 accepted=1
+ARM_SUMMARY arm=base total_cg=14465 design_iters=8 wall_s=683.0 hier_attempts=2 rearm_attempts=0 rearm_carries=0 geneo_armed=1 geneo_declined=15 geneo_dim=1674 geneo_builds=1 alg1=0
+ARM_RUNG arm=rearm=1 vf_requested=0.680000 margin=2372.88667 accepted=1
+ARM_RUNG arm=rearm=1 vf_requested=0.520000 margin=793.600505 accepted=1
+ARM_RUNG arm=rearm=1 vf_requested=0.380000 margin=355.269912 accepted=1
+ARM_RUNG arm=rearm=1 vf_requested=0.260000 margin=232.153157 accepted=1
+ARM_SUMMARY arm=rearm=1 total_cg=14465 design_iters=8 wall_s=911.3 hier_attempts=8 rearm_attempts=13 rearm_carries=0 geneo_armed=1 geneo_declined=15 geneo_dim=1674 geneo_builds=1 alg1=0
+### ARMS DONE Wed Aug 12 07:05:06 EDT 2026
+### N_t TRIAGE RETRY (quieter host)  Wed Aug 12 07:05:26 EDT 2026
+evidence/2026-08-14-solver-speed-arm-and-diagnose/run_nt_triage.sh: line 37: 92533 Terminated: 15          ./build/solver_arm_sweep "$HERE/arms/job/job.json" "$WORK/nt$c" --arm "core=$c" --threads "$THREADS" --iters 1 > "$OUT/core$c.log" 2>&1
+core=16  N_t=0  basis_MB=0.00  refresh(2*N_t)=0  implied_threshold=1354  builds=0  armed=0  declined=0

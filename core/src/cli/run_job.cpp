@@ -8450,6 +8450,29 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     if (options.plsm.mode == PlsmMode::Parametric)
       options.plsm.threads = obs.matfree_threads;
   }
+  // ★ AND THE SOLVER POSTURE OVERRIDES, HERE FOR THE SAME REASON AND NOT ONE
+  // LINE EARLIER (task solver-speed-arm-and-diagnose). See RunObservability in
+  // job.hpp: `configure_production_options` re-asserts both of these globals at
+  // the start of the run — deliberately, so a thread that ran a harness earlier
+  // cannot carry an armed solver into a production run — which means the ONLY
+  // correct place to override them is after it and before the first solve.
+  // -1 is the default on both and applies nothing, so the CLI's runs and every
+  // existing caller are byte-identical.
+  if (obs.mg_algebraic_level1 >= 0)
+    fea_set_mg_algebraic_level1(obs.mg_algebraic_level1 != 0);
+  if (obs.matfree_mixed_precision >= 0)
+    fea_set_matfree_mixed_precision(obs.matfree_mixed_precision != 0);
+  // The latch re-arm is NOT re-asserted by configure_production_options (it has
+  // no production writer at all), but it IS zeroed by the run-start latch reset
+  // in minimize_plastic, so it is applied here alongside the other two rather
+  // than relying on a caller having set it at the right moment.
+  if (obs.mg_rearm_period > 0)
+    fea_matfree_set_mg_rearm_period(obs.mg_rearm_period);
+  // The run_info written up front recorded the PRE-override posture; re-read it
+  // now so the artifact says what the run actually did. Without this an armed
+  // arm reports `mg_algebraic_level1: false` and reads as a null result.
+  run_info.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();
+  run_info.mixed_precision = fea_matfree_mixed_precision_enabled();
   result.pipeline =
       minimize_plastic(grid, material, job.material, bcs, rules, options);
 

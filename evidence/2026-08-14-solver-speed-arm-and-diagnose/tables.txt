@@ -1,0 +1,135 @@
+
+==============================================================================
+§1(a)  HIS RUN'S GenEO DECISION LOG, IN FULL  (transitions only)
+==============================================================================
+armed=12  declined=156  builds=2  refreshes=10
+N_t=1684  basis=40.61 MB  refresh_cost/col=2  deflated_iter_cost=2  trigger=500
+log holds 18 rows for 168 solves — TRANSITIONS ONLY (dropped=0)
+
+ solve          action   burn  thresh  burn-thr  iters   tail    N_t
+     1         REBUILD    500     500         0    927    427   1674
+     2         DECLINE    970    4702     -3732    970      0   1674
+   125  REFRESH+ENGAGE   4702    4702         0   4713     11   1674
+   126         DECLINE   3986    4702      -716   3986      0   1674
+   130  REFRESH+ENGAGE   4702    4702         0   4891    189   1674
+   131         DECLINE   4567    4702      -135   4567      0   1674
+   132  REFRESH+ENGAGE   4702    4702         0   4938    236   1674
+   135         DECLINE   4465    4702      -237   4465      0   1674
+   136  REFRESH+ENGAGE   4702    4702         0   5006    304   1674
+   137         DECLINE   4370    4702      -332   4370      0   1674
+   143  REFRESH+ENGAGE   4702    4702         0   4852    150   1674
+   144         DECLINE   4392    4702      -310   4392      0   1674
+   145  REFRESH+ENGAGE   4702    4702         0   4776     74   1674
+   146         DECLINE   4176    4702      -526   4176      0   1674
+   148  REFRESH+ENGAGE   4702    4702         0   4772     70   1674
+   149         DECLINE   4343    4702      -359   4343      0   1674
+   167  REFRESH+ENGAGE   4702    4702         0   5591    889   1674
+   168         REBUILD   5202    5202         0   5545    343   1684
+
+THE THRESHOLD, DERIVED FROM THE RUN'S OWN NUMBERS (geneo.cpp:897-899, the cost model):
+  refresh   kGeneoRefreshCostPerColumn * N_t = 2 x 1674 = 3348   <- 71% of the threshold
+  plain leg engaged_burn                     =     500
+  defl. leg kGeneoDeflatedIterCost * tail    = 2 x 427 = 854
+  ------------------------------------------------------
+  threshold                                  =    4702   (the run reports 4702)
+
+DECLINES: 8 logged, (burn - threshold) = [-3732, -716, -526, -359, -332, -310, -237, -135]
+  worst miss -3732  best miss -135  median -346
+  as a FRACTION of the threshold: ['-79.4%', '-15.2%', '-11.2%', '-7.6%', '-7.1%', '-6.6%', '-5.0%', '-2.9%']
+DEFLATED TAILS (iterations after engaging): [11, 70, 74, 150, 189, 236, 304, 343, 427, 889]
+  median 212  max 889
+  -> a deflated solve finishes in 212 iterations where a plain one needs thousands.
+
+==============================================================================
+§2(a)  WHEN DID MULTIGRID LATCH — from the per-solve record
+==============================================================================
+HIS RUN (evidence/2026-08-10-plsm-production/s1_production_run):
+  design iterations 160   TOTAL CG 438348
+  hierarchy ATTEMPTED on 3 solves; CARRIED on 0
+  V-cycles per attempt: min 300 max 300 (budget kMgIterBudget = 300; ==300 means it never contracted)
+  first solve with NO hierarchy: rung 0 iter 4  <- the latch
+    rung 0: n= 40 total_cg=   46814 mean=  1170.3 min=927 max=1591
+    rung 1: n= 40 total_cg=   98494 mean=  2462.3 min=1616 max=3358
+    rung 2: n= 40 total_cg=  118452 mean=  2961.3 min=1955 max=4638
+    rung 3: n= 40 total_cg=  174588 mean=  4364.7 min=3349 max=5091
+
+==============================================================================
+§1(a)  THE FULL (burn - threshold) DISTRIBUTION, per solve
+==============================================================================
+HIS RUN: no solve wrote a nonzero geneo_threshold (no basis was ever held, or the columns predate this binary)
+base: 7 solves with a basis held
+  (burn - threshold): min -3732 median -2580 max -2251
+  declined WITHIN 10% of the threshold: 0 of 7
+rearm1: 7 solves with a basis held
+  (burn - threshold): min -3732 median -2580 max -2251
+  declined WITHIN 10% of the threshold: 0 of 7
+
+==============================================================================
+§4(a) / §3  THE MECHANISM PROBES — the solves multigrid is ATTEMPTED on
+==============================================================================
+kMgLatchThreshold = 3: the latch is decided by the first three ATTEMPTS,
+and his three were identical — 300 cycles each, the whole budget, no
+contraction. So a posture that does not change the FIRST attempt cannot
+change the run. At ITERS=1 the ladder yields one attempt (rung 0 iter 1);
+the other two stagnations that close the latch are rung-boundary
+certification solves, which iterations.csv carries no row for.
+mg_cycles 300 = the full budget = the V-cycle never contracted.
+
+   probe  solve  cg_iters  hier_built  mg_cycles  used_mg
+     ctl      1       927           1        300        0
+    alg1      1       927           1        300        0
+   eta05  (not run)
+   eta40  (not run)
+
+mg_algebraic_level1 report:
+  mg_algebraic_level1 = True
+  mg_algebraic_level1_refused = False
+  mg_algebraic_refuse_reason = None
+  mg_algebraic_levels = 3
+  mg_algebraic_aggregates = 5199
+  mg_algebraic_coarse_dim = 31186
+  mg_algebraic_added_mb = 112.3802032
+  mg_mode = stagnated-latched
+
+==============================================================================
+R1  THE ARMS — TOTAL CG ITERATIONS IS THE FIGURE OF MERIT
+==============================================================================
+       arm   total_cg   vs base     matvecs   vs base  iters   wall_s            mg_mode  mg_carried  geneo_arm  geneo_dec    N_t
+      base      14465    1.000x       18674    1.000x      8    683.0  stagnated-latched           0          1         15   1674
+    rearm1      14465    1.000x       25895    1.387x      8    911.3  stagnated-latched           0          1         15   1674
+
+==============================================================================
+R3  CERTIFIED MARGIN PER RUNG, PER ARM — no verdict may move
+==============================================================================
+  ARM_RUNG arm=base vf_requested=0.680000 margin=2372.88667 accepted=1
+  ARM_RUNG arm=base vf_requested=0.520000 margin=793.600505 accepted=1
+  ARM_RUNG arm=base vf_requested=0.380000 margin=355.269912 accepted=1
+  ARM_RUNG arm=base vf_requested=0.260000 margin=232.153157 accepted=1
+  ARM_RUNG arm=rearm=1 vf_requested=0.680000 margin=2372.88667 accepted=1
+  ARM_RUNG arm=rearm=1 vf_requested=0.520000 margin=793.600505 accepted=1
+  ARM_RUNG arm=rearm=1 vf_requested=0.380000 margin=355.269912 accepted=1
+  ARM_RUNG arm=rearm=1 vf_requested=0.260000 margin=232.153157 accepted=1
+
+==============================================================================
+R3  THE TRAJECTORY CURVE AND ITS SETTLING ITERATION, per arm per rung
+==============================================================================
+★ WHAT THIS IS AND IS NOT. R3 asks for the certified MARGIN as a curve.
+A per-iteration margin curve is not affordable here and the reason is
+measured, not asserted: PR 326 timed certifying an UNCONVERGED design at
+26x the cost of certifying a converged one, so a margin curve over a
+4-rung ladder would cost more than every arm in this table put together
+and would put the instrument inside the timing the arms report. What is
+printed instead is (a) the per-iteration COMPLIANCE curve, which is free
+— it is already in iterations.csv — with the iteration at which it
+settles to within 0.1%, and (b) the CERTIFIED margin at every rung, which
+is the number the accept gate actually reads. The gap between them is
+real and is named in the handoff.
+
+  arm     base rung 0: compliance 0.00526666 -> 0.00282944 over 2 iters, settles (0.1%) at iteration 2
+  arm     base rung 1: compliance 0.00739435 -> 0.00593092 over 2 iters, settles (0.1%) at iteration 2
+  arm     base rung 2: compliance 0.00997123 -> 0.00605599 over 2 iters, settles (0.1%) at iteration 2
+  arm     base rung 3: compliance 0.0111459 -> 0.011374 over 2 iters, settles (0.1%) at iteration 2
+  arm   rearm1 rung 0: compliance 0.00526666 -> 0.00282944 over 2 iters, settles (0.1%) at iteration 2
+  arm   rearm1 rung 1: compliance 0.00739435 -> 0.00593092 over 2 iters, settles (0.1%) at iteration 2
+  arm   rearm1 rung 2: compliance 0.00997123 -> 0.00605599 over 2 iters, settles (0.1%) at iteration 2
+  arm   rearm1 rung 3: compliance 0.0111459 -> 0.011374 over 2 iters, settles (0.1%) at iteration 2

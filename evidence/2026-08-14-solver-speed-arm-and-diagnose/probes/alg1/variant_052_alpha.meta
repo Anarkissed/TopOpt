@@ -1,0 +1,25 @@
+# THE ANALYTIC DESIGN: phi(x) = sum_i alpha_i psi(|x - x_i|_R).
+# alpha is /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/solver-speed-accelerators-diagnose-436a6d/evidence/2026-08-14-solver-speed-arm-and-diagnose/probes/alg1/variant_052_alpha.f64, 85680 float64 in x-fastest knot order.
+# Rebuild with topopt::plsm_make_lattice(nx, ny, nz, knots_vox..., support)
+# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, threads);
+# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).
+basis gaussian
+knots_vox 2 2 2
+support_vox 4 4 4
+counts 68 20 63
+pad 2 2 2
+n_coeff 85680
+n_voxels 468224
+compression 5.4647992530345473
+eta_voxels 2
+nx 128
+ny 31
+nz 118
+spacing 1.7052793026343613
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+requested_vf 0.52000000000000002
+achieved_vf 0.52000000000000024
+frozen_floor_occupancy 0.73753953951963824
+# NOT CERTIFIED. The certificate in report.json belongs to the voxel field this was optimised on, at this resolution, and does NOT carry over to a re-evaluation at another one.

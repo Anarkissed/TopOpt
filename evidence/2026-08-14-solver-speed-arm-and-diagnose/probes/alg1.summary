@@ -1,0 +1,5 @@
+ARM_RUNG arm=alg1 vf_requested=0.680000 margin=1324.4491 accepted=1
+ARM_RUNG arm=alg1 vf_requested=0.520000 margin=815.613001 accepted=1
+ARM_RUNG arm=alg1 vf_requested=0.380000 margin=275.124786 accepted=1
+ARM_RUNG arm=alg1 vf_requested=0.260000 margin=150.283045 accepted=1
+ARM_SUMMARY arm=alg1 total_cg=5256 design_iters=4 wall_s=508.0 hier_attempts=1 rearm_attempts=0 rearm_carries=0 geneo_armed=1 geneo_declined=11 geneo_dim=1674 geneo_builds=1 alg1=1

@@ -112,6 +112,37 @@ int main() {
           "shipped smoother is SCALAR damped Jacobi, not point-block");
   }
 
+  // ------------------------------------------------------------------
+  // 1b. THE SAME TRIPWIRE FOR THE LATCH RE-ARM PERIOD (task
+  //     solver-speed-arm-and-diagnose). The re-arm is a MEASUREMENT surface,
+  //     added so the maintainer's own part could be run with multigrid attempted
+  //     on every solve — the one thing handoff 2026-07-27-mg-stagnation-phase0
+  //     §7 said it could not do. It is not a policy change, and the shipped
+  //     policy is "once latched, never attempt again". Period 0 is what makes
+  //     that true, so period 0 is asserted here rather than trusted: a future
+  //     edit that arms a re-arm in production has to delete this check to do it.
+  {
+    check(topopt::fea_matfree_mg_rearm_period() == 0,
+          "shipped latch re-arm period is 0 — the latch is permanent for a run");
+    check(topopt::fea_matfree_mg_rearm_attempts() == 0,
+          "no re-arm was attempted before any measurement asked for one");
+    check(topopt::fea_matfree_mg_rearm_carries() == 0,
+          "no re-armed retry carried before any measurement asked for one");
+    // And the setter round-trips, so a probe that sets it is not measuring
+    // noise, and a reset of the LATCH does not silently clear the POSTURE.
+    topopt::fea_matfree_set_mg_rearm_period(4);
+    check(topopt::fea_matfree_mg_rearm_period() == 4,
+          "the re-arm period setter bites");
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    check(topopt::fea_matfree_mg_rearm_period() == 4,
+          "the run-start latch reset preserves the re-arm PERIOD");
+    check(topopt::fea_matfree_mg_rearm_attempts() == 0,
+          "the run-start latch reset zeroes the re-arm counters");
+    topopt::fea_matfree_set_mg_rearm_period(0);
+    check(topopt::fea_matfree_mg_rearm_period() == 0,
+          "the re-arm period is restored to the shipped 0");
+  }
+
   std::vector<DirichletBC> bcs;
   std::vector<NodalLoad> loads;
   const VoxelGrid g = make_block(bcs, loads);

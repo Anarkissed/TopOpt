@@ -149,6 +149,36 @@ constexpr int kMgLatchThreshold = 3;  // consecutive stagnations -> latch MG off
 thread_local int g_mg_consecutive_stagnations = 0;
 thread_local bool g_mg_latched = false;
 
+// --- MEASUREMENT-ONLY latch RE-ARM period (task solver-speed-arm-and-diagnose)
+// The one thing handoff 2026-07-27-mg-stagnation-phase0 §7 named as missing to
+// close its own B4: "a latch-disabled measurement build (opt-in flag; no
+// production behavior change) so MG is attempted on every solve of every rung
+// and the developed-rung verdict is OBSERVED rather than inferred". Phase 0
+// could only bracket the maintainer's part with synthetic fixtures; the part
+// itself is the fixture, and this is the flag that lets it be run.
+//
+// 0 = SHIPPED, and it is the default: the latch is permanent for the run, so
+// production is byte-identical (the re-arm block below is unreachable at 0 and
+// touches no state). n > 0 = after n consecutive LATCHED solves, clear the
+// latch and let ONE solve attempt a hierarchy again. n = 1 is the
+// "latch-disabled" build §7 asks for: every solve attempts MG.
+//
+// A re-armed attempt that stagnates re-latches IMMEDIATELY rather than paying
+// kMgLatchThreshold stagnations again: g_mg_consecutive_stagnations is left at
+// kMgLatchThreshold - 1, so the single stagnation the retry produces trips the
+// latch on its own. That bounds the probe's tax at one wasted build + one
+// wasted cycle budget per period instead of three, which is what makes a
+// period-1 arm affordable on a real 128^3 job at all. A retry that CONVERGES
+// clears the counter through the existing `solved` branch and multigrid simply
+// carries from there — which is the outcome the measurement exists to detect.
+thread_local int g_mg_rearm_period = 0;
+thread_local int g_mg_latched_solves = 0;
+// Cumulative-since-reset re-arm accounting, so the probe can price its own tax
+// rather than have it inferred: how many retries were granted and how many of
+// those retries CARRIED. Both are 0 in production by construction.
+thread_local long long g_mg_rearm_attempts = 0;
+thread_local long long g_mg_rearm_carries = 0;
+
 // --- Parity padding of the MG index space (task: multigrid-odd-axis-cliff;
 // scope widened by task multigrid-deep-block-pad) ---
 // 0 = OFF (legacy: any grid the coarsening rule rejects — odd fine axis OR
@@ -2111,6 +2141,19 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // hierarchy (the build is the expensive part) — go straight to Jacobi. The
     // latch is reset per run by the driver; a converging solve clears it below.
     MfHierarchy H;
+    // MEASUREMENT-ONLY re-arm (see g_mg_rearm_period). Unreachable when the
+    // period is 0, which is the production default, so the shipped path below
+    // reads exactly as it did: try_mg = !g_mg_latched.
+    bool rearmed_this_solve = false;
+    if (g_mg_latched && g_mg_rearm_period > 0 &&
+        ++g_mg_latched_solves >= g_mg_rearm_period) {
+      g_mg_latched = false;
+      g_mg_latched_solves = 0;
+      // One stagnation re-latches; see the comment at the declaration.
+      g_mg_consecutive_stagnations = kMgLatchThreshold - 1;
+      rearmed_this_solve = true;
+      ++g_mg_rearm_attempts;
+    }
     const bool try_mg = !g_mg_latched;
     const double t_h0 = fea_detail::mf_steady_ms();
     const bool have_h = try_mg && build_mf_hierarchy(m, nnx, nny, nnz, H);
@@ -2207,6 +2250,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     if (have_h) {
       if (solved) {
         g_mg_consecutive_stagnations = 0;
+        // Measurement accounting only (0 in production): a re-armed retry that
+        // CARRIED is the single observation the re-arm question turns on.
+        if (rearmed_this_solve) ++g_mg_rearm_carries;
       } else if (++g_mg_consecutive_stagnations >= kMgLatchThreshold) {
         g_mg_latched = true;
       }
@@ -2380,9 +2426,32 @@ void mg_reset_algebraic_level1_stats() { g_mg_alg_stats = AlgCoarsenStats{}; }
 void fea_matfree_reset_mg_stagnation_latch() {
   g_mg_consecutive_stagnations = 0;
   g_mg_latched = false;
+  g_mg_latched_solves = 0;
+  g_mg_rearm_attempts = 0;
+  g_mg_rearm_carries = 0;
 }
 
 bool fea_matfree_mg_stagnation_latched() { return g_mg_latched; }
+
+// The MEASUREMENT-ONLY latch re-arm period (task
+// solver-speed-arm-and-diagnose; closes handoff
+// 2026-07-27-mg-stagnation-phase0 §7's named gap). Production never calls this
+// setter — 0 is the default and no production caller exists — so the shipped
+// latch policy is unchanged and every production artifact is byte-identical.
+// The period deliberately SURVIVES fea_matfree_reset_mg_stagnation_latch()
+// (which the driver calls at run start and which clears the latch state and the
+// re-arm counters), for the same reason the GenEO probe config survives
+// fea_reset_geneo_basis: a harness sets the posture around a run and must not
+// have it erased by the run's own start. See the declaration for the semantics
+// of a re-armed attempt.
+void fea_matfree_set_mg_rearm_period(int period) {
+  g_mg_rearm_period = period > 0 ? period : 0;
+  g_mg_latched_solves = 0;
+}
+
+int fea_matfree_mg_rearm_period() { return g_mg_rearm_period; }
+long long fea_matfree_mg_rearm_attempts() { return g_mg_rearm_attempts; }
+long long fea_matfree_mg_rearm_carries() { return g_mg_rearm_carries; }
 
 // Parity-pad mode (task: multigrid-odd-axis-cliff). Production never calls the
 // setter (AUTO is the default); tests use OFF to exercise the legacy rejection
