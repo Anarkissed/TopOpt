@@ -379,6 +379,11 @@ including the layer-1 checks that would have caught a contamination.
   only. A region-only load group certifies and runs normally but gets no
   load-path verdict. One call to fix; listed in `r4_consumers.md`.
 * **Clearances and lattice regions** still read layer 1 only (§6).
+* **The manual cut goes through the region's CENTRE, not through a tapped
+  point.** §4(a) asks for a plane through the tap point; the mechanism takes any
+  point (`splitManual(point:normal:)`, and the persisted cut is a point + a
+  normal), so what is missing is only the UI's point-picking. The rotate button,
+  the snap candidates and the two-child result all work as specified.
 * The app's per-cell preview is an **area sample**, not the run's voxel grid: it
   subdivides each member triangle finely enough that one sample covers about one
   voxel, and the run prices the real thing again and refuses on the same floor.

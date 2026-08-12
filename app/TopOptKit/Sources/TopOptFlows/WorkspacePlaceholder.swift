@@ -81,6 +81,9 @@ public struct WorkspacePlaceholder: View {
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
     @State private var regionsOpen = false
+    /// The region a viewer tap corrects, or nil. Hoisted out of the sheet so the
+    /// workspace's tap router can see it — the sheet SELECTS, the viewer EDITS.
+    @State private var regionTapTarget: RegionID?
     /// The request that was last optimized — Optimize greys out until the inputs
     /// (load case / material / quality) change from it (or a run is in flight).
     @State private var lastRunRequest: RunRequest?
@@ -1016,6 +1019,21 @@ public struct WorkspacePlaceholder: View {
                 }
                 force.sync(groups: selection.groups)
             }
+            return
+        }
+        // ★ THE REGION SHEET OWNS THE TAP WHILE A REGION IS SELECTED (task
+        // 2026-08-14-face-regions §2c). A heuristic that cannot be corrected by
+        // hand is worse than no heuristic, so a tap here ADDS the face to the
+        // region — or DROPS it if the region already holds it — writing the
+        // explicit add/remove list the persistence re-applies on every import.
+        if regionsOpen, let rid = regionTapTarget,
+           let region = project.faceRegions.region(rid) {
+            if FaceRegionGeometry.members(of: region, in: mesh).contains(faceID) {
+                project.faceRegions.removeFace(faceID, from: rid)
+            } else {
+                project.faceRegions.addFace(faceID, to: rid)
+            }
+            project.refreshFaceRegionDrift()
             return
         }
         let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
@@ -3971,6 +3989,7 @@ public struct WorkspacePlaceholder: View {
                                        set: { project.faceRegions = $0 }),
                         selection: Binding(get: { project.selection },
                                            set: { project.selection = $0 }),
+                        selectedRegion: $regionTapTarget,
                         mesh: viewerMesh,
                         resolution: project.quality.resolution,
                         onChange: { project.refreshFaceRegionDrift() },

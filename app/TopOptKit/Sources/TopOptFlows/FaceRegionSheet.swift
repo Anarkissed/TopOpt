@@ -21,6 +21,9 @@ import TopOptDesign
 public struct FaceRegionSheet: View {
     @Binding var model: FaceRegionModel
     @Binding var selection: SelectionModel
+    /// The region a viewer tap corrects. Owned by the workspace so its tap
+    /// router can see it — the sheet SELECTS, the viewer EDITS (§2c).
+    @Binding var selected: RegionID?
     let mesh: ViewerMesh?
     let resolution: Int
     /// Called after any edit so the workspace can re-render highlights and
@@ -29,14 +32,15 @@ public struct FaceRegionSheet: View {
     let onClose: () -> Void
 
     @State private var sheet = FaceRegionSheetModel()
-    @State private var selected: RegionID?
     @State private var rotateStep = 0
 
     public init(model: Binding<FaceRegionModel>, selection: Binding<SelectionModel>,
+                selectedRegion: Binding<RegionID?>,
                 mesh: ViewerMesh?, resolution: Int,
                 onChange: @escaping () -> Void, onClose: @escaping () -> Void) {
         self._model = model
         self._selection = selection
+        self._selected = selectedRegion
         self.mesh = mesh
         self.resolution = resolution
         self.onChange = onChange

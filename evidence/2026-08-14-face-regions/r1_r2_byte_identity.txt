@@ -1,3 +1,9 @@
 === R1 — no regions: BASE cli vs BRANCH cli ===
 base   /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/basebuild/topopt-cli
 branch /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/face-regions-union-split-grid-c52969/build/topopt-cli
+-- the DESIGN set, raw (design.bin, fields.bin, report.json, meshes, alpha) --
+   identical, byte for byte (      15 files)
+-- the receipts, with the timestamps/fingerprint stripped --
+R1 PASS — every artifact identical (      18 files)
+
+=== R2 — face_ids vs an equivalent identity REGION, same (branch) cli ===
