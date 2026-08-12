@@ -29,6 +29,7 @@ else here exists to test what to *do* about them.
 | `run_arms.sh` / `arms/` | the full-ladder arms — the R1 table |
 | `run_nt_triage.sh` / `nt_triage/` | §1(b) — the GenEO basis dimension `N_t` at each subdomain tiling, one solve per point. **`nt_triage/RESULT.md` is where this task's one BLOCKED measurement is reported as blocked** |
 | `probes/NOTE_ctl.md`, `probes/NOTE_eta.md` | what was stopped early, why, and the command that finishes it |
+| `ctest.txt` | the suite: **119/119 passed**, with the denominator stated — two lib3mf-gated tests are registered but not configured in this build, so CI's denominator is 121 |
 | `host_load.txt` | the host was SHARED throughout; this is why no wall figure is cited as evidence |
 | `queue.log` | the measurement queue's own transcript, in order, with timestamps |
 

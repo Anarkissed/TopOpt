@@ -589,7 +589,15 @@ now positively established rather than inherited: the code path it speeds is
 
 `materials.json`, `rules.json`, `ARCHITECTURE.md` and `DECISIONS.md` were not
 touched. The gate is untouched. `geneo.cpp` was not edited at all — §1 is a
-reading of it, not a change to it.
+reading of it, not a change to it. The `core/` diff is **541 insertions and zero
+deletions**.
+
+**Suite: 119/119 passed** (`evidence/…/ctest.txt`), and the denominator is stated
+there rather than left for CI: two lib3mf-gated tests (`export_3mf`,
+`threemf_import`) are registered in `core/CMakeLists.txt` and not configured in
+this build, so **CI's denominator is 121 and this pass does not cover those
+two**. Nothing in the diff touches 3MF, but that is a claim and CI is where it is
+checked.
 
 ---
 
