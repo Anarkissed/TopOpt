@@ -576,6 +576,17 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       params.lattice_region->size() != grid.voxel_count())
     throw std::invalid_argument(
         "simp_compliance: lattice_region size != voxel_count");
+  // Task 2026-08-13-lattice-as-a-material: the relative-density override. Null on
+  // every path that has not opted in, so `LR == nullptr` below is the whole
+  // pre-existing world.
+  const std::vector<double>* const LR = params.lattice_relative_density;
+  if (LR != nullptr && LM == nullptr)
+    throw std::invalid_argument(
+        "simp_compliance: lattice_relative_density is set but lattice_material "
+        "is null — there is no material law for it to be a density of");
+  if (LR != nullptr && LR->size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "simp_compliance: lattice_relative_density size != voxel_count");
 
   // Split this call into LINEAR SOLVE and SENSITIVITY SWEEP (task 2026-08-02-
   // iteration-phase-timing). The per-voxel modulus fill below is charged to the
@@ -610,7 +621,14 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
         // cells-per-member floor.
         if (LM != nullptr &&
             (params.lattice_region == nullptr || (*params.lattice_region)[e])) {
-          const CubicTensor C = LM->value(rho);
+          // The relative density the tensor is evaluated at. Normally the design
+          // density; a declared frozen region overrides it per voxel (see
+          // SimpParams::lattice_relative_density), because there the design
+          // density is the ENVELOPE occupancy (1.0) and the lattice's own
+          // relative density is a separate number.
+          const double lat_rho =
+              (LR != nullptr && (*LR)[e] >= 0.0) ? (*LR)[e] : rho;
+          const CubicTensor C = LM->value(lat_rho);
           lat_mask[e] = 1;
           lat_c11[e] = C.C11;
           lat_c12[e] = C.C12;
@@ -754,9 +772,21 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
             qB += ur * kb;
             qC += ur * kc;
           }
+          // THE SAME relative density the tensor was BUILT at, by the same rule —
+          // written once here and once in the fill loop above rather than cached,
+          // because a cached triplet and a re-derived derivative that disagreed
+          // about which rho they belong to is exactly the defect that would not
+          // show up in the compliance and would silently poison the gradient.
+          const double lat_rho =
+              (LR != nullptr && (*LR)[e] >= 0.0) ? (*LR)[e] : rho;
           double Cv[3], Cd[3];
-          LM->eval(rho, Cv, Cd);
+          LM->eval(lat_rho, Cv, Cd);
           compliance += Cv[0] * qA + Cv[1] * qB + Cv[2] * qC;
+          // dc/d(lat_rho). On the multiscale path lat_rho IS the design density
+          // and this is dc/d(design density), unchanged. On an overridden voxel it
+          // is the derivative with respect to the LATTICE relative density — what
+          // Mode 2 chains through d rho / d beta, and what no density updater ever
+          // reads because an overridden voxel is frozen.
           out.dcompliance[e] = -(Cd[0] * qA + Cd[1] * qB + Cd[2] * qC);
           continue;
         }
@@ -3155,6 +3185,30 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   for (MaskValue m : eff)
     if (m == MaskValue::Active) n_active += 1.0;
 
+  // ★ THE TARGET FRACTION THE BUDGET IS ACTUALLY RUN AT (task 2026-08-13-lattice-
+  // as-a-material). `freed_mass_return * freed_mass_voxels` is 0.0 on every run
+  // that has not declared a lattice density field over its frozen region — and
+  // adding 0.0 to a positive double is exact — so `vf_target` IS
+  // `options.volume_fraction`, bit-for-bit, on every existing path. See
+  // SimpOptions::freed_mass_return for what the two ends of the knob mean.
+  //
+  // Clamped at 1.0: the Active set cannot hold more than its own envelope, and a
+  // frozen region big enough to overflow it would otherwise ask the OC bisection
+  // for a target it can never reach and saturate every rung to the same all-solid
+  // design (the same failure the Empty-counting budget caused, above).
+  if (!(options.freed_mass_return >= 0.0 && options.freed_mass_return <= 1.0))
+    throw std::invalid_argument(
+        "simp_optimize: freed_mass_return must be in [0, 1]");
+  if (!(options.freed_mass_voxels >= 0.0))
+    throw std::invalid_argument(
+        "simp_optimize: freed_mass_voxels must be >= 0");
+  const double vf_target =
+      n_active > 0.0
+          ? std::min(1.0, options.volume_fraction +
+                              options.freed_mass_return *
+                                  options.freed_mass_voxels / n_active)
+          : options.volume_fraction;
+
   // Achieved Active-voxel physical volume fraction of a filtered field (the
   // filter is 0 on frozen/empty, so the whole-field sum is the Active sum).
   auto active_volfrac = [&](const std::vector<double>& xphys_active) {
@@ -3169,7 +3223,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   std::vector<double> x(grid.voxel_count(), 0.0);
   if (options.initial_design.empty()) {
     for (std::size_t e = 0; e < x.size(); ++e) {
-      if (eff[e] == MaskValue::Active) x[e] = options.volume_fraction;
+      if (eff[e] == MaskValue::Active) x[e] = vf_target;
       else if (eff[e] == MaskValue::FrozenSolid) x[e] = 1.0;
       // FrozenVoid / Empty stay 0
     }
@@ -3181,7 +3235,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     for (std::size_t e = 0; e < x.size(); ++e)
       if (eff[e] == MaskValue::Active) is_design[e] = 1;
     x = warm_start_design(options.initial_design, filter, is_design,
-                          options.volume_fraction, params.density_min);
+                          vf_target, params.density_min);
     // Reapply the pins the uniform start carries: FrozenSolid -> 1, every
     // non-Active voxel -> 0 (the Active-only filter already yields 0 off the
     // Active set, but pin explicitly so FrozenSolid is full material).
@@ -3308,7 +3362,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // exactly where the Heaviside projection stands and does its job.
       if (options.semdot) {
         SemdotField sf = semdot_volume_fractions(grid, xphys, eff,
-                                                 options.volume_fraction * n_active,
+                                                 vf_target * n_active,
                                                  options.semdot_grid_points);
         xphys = std::move(sf.volume_fraction);
       }
@@ -3392,7 +3446,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         sp.mark();
         x_new = mma_update_masked_projected(
             mma_state, ++mma_iter, grid, filter, eff, x, xtilde, c.dcompliance,
-            cur_beta, eta, options.volume_fraction, cur_move,
+            cur_beta, eta, vf_target, cur_move,
             params.density_min);
         sp.charge(sp.update);
       } else if (st.project) {
@@ -3404,7 +3458,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         sp.mark();
         x_new = oc_update_masked_projected(grid, filter, eff, x, xtilde,
                                            c.dcompliance, st.beta, eta,
-                                           options.volume_fraction, st.move,
+                                           vf_target, st.move,
                                            params.density_min);
         sp.charge(sp.update);
       } else if (options.updater == SimpUpdater::MMA) {
@@ -3412,13 +3466,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         // subproblem as the plain overload, restricted to Active voxels.
         sp.mark();
         x_new = mma_update_masked(mma_state, ++mma_iter, grid, filter, eff, x,
-                                  c.dcompliance, options.volume_fraction,
+                                  c.dcompliance, vf_target,
                                   st.move, params.density_min);
         sp.charge(sp.update);
       } else {
         sp.mark();
         x_new = oc_update_masked(grid, filter, eff, x, c.dcompliance,
-                                 options.volume_fraction, st.move,
+                                 vf_target, st.move,
                                  params.density_min);
         sp.charge(sp.update);
       }
@@ -3446,7 +3500,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (options.semdot) {
         apply_mask_pins(eff, xafter);
         SemdotField sf = semdot_volume_fractions(
-            grid, xafter, eff, options.volume_fraction * n_active,
+            grid, xafter, eff, vf_target * n_active,
             options.semdot_grid_points);
         semdot_vf_now = n_active > 0.0 ? sf.achieved_volume / n_active : 0.0;
         xafter = std::move(sf.volume_fraction);
@@ -3653,7 +3707,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   double semdot_final_vf = 0.0;
   if (options.semdot) {
     SemdotField sf = semdot_volume_fractions(grid, result.physical_density, eff,
-                                             options.volume_fraction * n_active,
+                                             vf_target * n_active,
                                              options.semdot_grid_points);
     semdot_final_vf = n_active > 0.0 ? sf.achieved_volume / n_active : 0.0;
     result.semdot = true;

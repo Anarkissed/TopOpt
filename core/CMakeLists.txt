@@ -103,6 +103,12 @@ add_library(topopt
   # solver — so it belongs in the always-built base library beside warm_start.cpp
   # and is available to the dependency-free slices that read a design field.
   src/simp/semdot.cpp
+  # THE LATTICE DENSITY FIELD over a frozen region (task 2026-08-13-lattice-as-a-
+  # material). Grid arithmetic over topopt/voxel.hpp, the measured lattice library
+  # and the header-only RBF basis — no Eigen and no solver — so it belongs in the
+  # always-built base library beside semdot.cpp, and the dependency-free slices
+  # that read a design field can read the region's density with it.
+  src/simp/lattice_density_field.cpp
   src/simp/grading.cpp
   src/simp/cell_plan.cpp
   src/simp/observability.cpp
@@ -1674,6 +1680,19 @@ if(OpenCASCADE_FOUND)
   add_executable(levelset_probe EXCLUDE_FROM_ALL
     tests/harness/levelset_probe.cpp)
   target_link_libraries(levelset_probe PRIVATE topopt)
+
+  # M0-M5 (task 2026-08-13-lattice-as-a-material): the instrument for a FROZEN
+  # REGION AS A MATERIAL. Decomposes his frozen set into regions, measures the
+  # strain energy of each from a solve being run anyway, and runs the MODE 1
+  # assignment table through `analyze_fixed_design` — the shipped certification,
+  # in the shipped isolated posture — over the committed reference bakeoff's
+  # converged rungs. Writes no FEA of its own.
+  #   cmake --build build --target lattice_material_probe
+  #   ./build/lattice_material_probe <part.step> <materials.json> <ref/design.bin> \
+  #       <out> --stage law|regions|r1|assign|loop|cost
+  add_executable(lattice_material_probe EXCLUDE_FROM_ALL
+    tests/harness/lattice_material_probe.cpp)
+  target_link_libraries(lattice_material_probe PRIVATE topopt)
 
   # ARM 1 (task 2026-08-10-parametric-level-set): THE GATE. Fits an ANALYTIC
   # phi(x) = sum_i alpha_i psi_i(x) to a design we already have, and extracts the

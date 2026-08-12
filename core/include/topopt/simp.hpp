@@ -63,6 +63,30 @@ struct SimpParams {
   // and the pointers copy with it; nothing here takes ownership.
   const LatticeMaterialModel* lattice_material = nullptr;
   const std::vector<char>* lattice_region = nullptr;
+
+  // ── ★ WHERE THE LATTICE'S RELATIVE DENSITY COMES FROM (task 2026-08-13-
+  // lattice-as-a-material). Null is the entire multiscale world above,
+  // byte-for-byte: the tensor is evaluated at the voxel's own DESIGN density.
+  //
+  // A FROZEN region declared as lattice is the case this exists for. Its design
+  // density stays 1.0 — the cell fills the voxel's envelope, and the pore space
+  // is a property of the MATERIAL, not of the occupancy, so every downstream
+  // instrument that reads one density per voxel still reads 1.0 and still gets
+  // the answer it got before (bar R6). Its RELATIVE density is a different
+  // number and it travels here.
+  //
+  // Grid-indexed, size grid.voxel_count(). At a voxel selected by
+  // `lattice_region`:
+  //     entry <  0  -> evaluate C at the DESIGN density (the multiscale case)
+  //     entry >= 0  -> evaluate C at THIS number instead
+  // Entries at voxels the region does not select are never read.
+  //
+  // The SENSITIVITY `SimpCompliance::dcompliance` at an overridden voxel is
+  // dc/d(that relative density) — the derivative Mode 2's chain rule needs. It is
+  // NOT dc/d(design density), which is zero there because the design density does
+  // not enter the tensor. A frozen voxel's design density never moves, so no
+  // updater reads it; a Mode 2 beta step reads exactly this.
+  const std::vector<double>* lattice_relative_density = nullptr;
 };
 
 // SIMP Young's modulus for a design density: E(rho) = clamp(rho, rho_min, 1)^p
@@ -953,6 +977,39 @@ struct SimpIterationObservation {
 
 struct SimpOptions {
   double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
+
+  // ── ★ THE FROZEN REGION'S MASS IS INSIDE THE BUDGET (task 2026-08-13-lattice-
+  // as-a-material). Zero — the default — is the entire existing world: the Active
+  // target is `volume_fraction * n_active` exactly, adding 0.0 to a positive
+  // double changes not one bit, and every existing run is byte-for-byte.
+  //
+  // A frozen region declared as lattice at relative density f stops costing its
+  // envelope and starts costing f x its envelope. `freed_mass_voxels` is the
+  // mass-equivalent voxel count that frees, summed over the region:
+  // sum (1 - rho_e). It is the fourth row of the defect table — the region's mass
+  // was OUTSIDE the volume budget and it has to be INSIDE it — and this is where
+  // it enters.
+  //
+  // `freed_mass_return` in [0, 1] says how much of it the optimiser gets back:
+  //
+  //   0.0  BANK IT. The Active target is unchanged, so the run prints strictly
+  //        less material than the same rung did with the region solid. This is
+  //        the assignment table's posture (§4a) — it measures what latticing
+  //        COSTS in margin with nothing given back.
+  //   1.0  MASS-NEUTRAL. The Active target rises by exactly the freed mass, so
+  //        the run's total printed mass-equivalent equals what the SAME rung
+  //        printed with the region solid, and the optimiser re-places the freed
+  //        material where it wants it. This is the posture §3's buttressing
+  //        measurement demands: 94% of what it places lands within 5 mm of the
+  //        wall, so removing the wall's stiffness without letting it compensate
+  //        measures a handicap, not the mechanism.
+  //
+  // Between them is the frontier the §4c loop walks, and the NET saving is read
+  // off it. THE RUNG'S MEANING IS NOT REDEFINED: at f = 1 (nothing latticed)
+  // freed_mass_voxels is 0 and every posture is the shipped one.
+  double freed_mass_voxels = 0.0;
+  double freed_mass_return = 0.0;
+
   double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
   double move = 0.2;             // OC/MMA move limit
   // --- Adaptive move limit (handoff 2026-07-26-adaptive-move) --------------

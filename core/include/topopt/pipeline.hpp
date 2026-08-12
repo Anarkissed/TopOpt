@@ -13,6 +13,7 @@
 #include "topopt/plsm.hpp"               // PlsmOptions / PlsmMode (default Off)
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport
 #include "topopt/fea.hpp"        // DirichletBC
+#include "topopt/lattice_density_field.hpp"  // LatticeRegionSpec, LatticeBetaKnots
 #include "topopt/materials.hpp"  // Material
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/report.hpp"     // JobReport, VariantReport
@@ -529,6 +530,79 @@ struct MinimizePlasticOptions {
   // multiscale_lattice is armed and to 0.5 otherwise; it is not a free knob.
   // Must be in (0, 1).
   double printed_iso = 0.5;
+
+  // --- ★ LATTICE AS A MATERIAL over the FROZEN region -------------------------
+  //     (task 2026-08-13-lattice-as-a-material; see lattice_density_field.hpp
+  //      for the mechanism and for why the fixed density and the graded field
+  //      are ONE thing.)
+  //
+  // A frozen region — a face protection, an anchor pad, a BC skin — is full solid
+  // to the optimiser today in all four of the ways that matter: its FEA
+  // stiffness, its mass, its place in the volume budget (outside it), and its
+  // sensitivity (zero, which is correct). This block makes the first three read
+  // the LATTICE the region will actually be printed as, and leaves the fourth
+  // alone. On the maintainer's part that region is 45.5% of the printed mass.
+  //
+  // false (the DEFAULT) is THE ONE RULE: no field is resolved, no region id is
+  // read, `SimpParams::lattice_relative_density` stays null, the Active budget is
+  // `vf * n_active` bit-for-bit, and every existing run is byte-for-byte what it
+  // was. It is also inert when armed with every region SOLID or at density 1.0 —
+  // a lattice at relative density 1.0 IS solid, and bar R1 verifies that by
+  // checksum rather than by construction.
+  bool frozen_lattice = false;
+
+  // The topology the material curve is fitted from. Must pass
+  // `lattice_material_model_trustworthy` — only OCTET does today, and
+  // minimize_plastic REFUSES anything else rather than steer a gate on an
+  // interpolated stretch. When `multiscale_lattice` is ALSO armed the two
+  // topologies must agree: one run optimises against one material curve.
+  LatticeTopology frozen_lattice_topology = LatticeTopology::Octet;
+
+  // WHICH FROZEN VOXEL BELONGS TO WHICH DECLARED REGION. Solved-grid indexed
+  // (minimize_plastic_solved_grid), size 0 or voxel_count(); 0 means "no declared
+  // region". Only voxels the effective mask holds FrozenSolid are ever read — a
+  // density field over a voxel the optimiser can move is a different feature and
+  // must not appear by accident.
+  std::vector<int> frozen_lattice_region_id;
+  // The declaration, one entry per region id. A region absent from here, or in
+  // mode Solid, keeps its voxels fully dense.
+  std::vector<LatticeRegionSpec> frozen_lattice_regions;
+
+  // MODE 2's coefficients, and the knot lattice they live on. Empty `beta` means
+  // MODE 1 ONLY, which is what ships first (bar R2). A region in mode Optimised
+  // with no beta field is a REFUSAL, not a fallback to a default density.
+  std::vector<double> frozen_lattice_beta;
+  LatticeBetaKnots frozen_lattice_beta_knots;   // all zero = derive from the grid
+  double frozen_lattice_beta_support = 2.0;
+  double frozen_lattice_beta_steepness = 1.0;
+  std::string frozen_lattice_beta_basis = "gaussian";  // or "wendland"
+
+  // The lattice CELL the cells-per-member validity is judged at, and the nozzle
+  // the printability floor is judged at. A non-positive cell disables the
+  // per-region validity measurement — and with `frozen_lattice_refuse_below_floor`
+  // armed that is a REFUSAL of the whole feature, not a silent pass, because a
+  // law used outside its validity range with nothing measuring the range is the
+  // failure mode §1(d) exists to prevent.
+  double frozen_lattice_cell_mm = 0.0;
+  double frozen_lattice_min_extrudable_width_mm = 0.45;
+
+  // Refuse any region whose median cells-per-member is below
+  // `lattice_cells_per_member_min` (5 for octet). true is the shipped posture and
+  // the pre-registered bound B4. Settable to false ONLY to MEASURE what a refused
+  // region would have done — a run with it false is not certifiable and says so.
+  bool frozen_lattice_refuse_below_floor = true;
+
+  // Fold the measured de-homogenised STRUT bound into the acceptance gate over
+  // the latticed region (analyze.hpp `gate_on_strut_strength`). true is the
+  // shipped posture for this feature: without it the latticed region's strength
+  // is not gated at all, which is failure mode M5 moved one stage later.
+  bool frozen_lattice_gate_on_strut_strength = true;
+
+  // How much of the mass the field frees goes back to the optimiser. See
+  // SimpOptions::freed_mass_return — 0.0 banks it (the assignment table's
+  // posture), 1.0 is mass-neutral (the posture §3's buttressing coupling
+  // demands). The §4c loop walks between them.
+  double frozen_lattice_freed_mass_return = 0.0;
 
   // --- GATE DIAGNOSIS (handoff 2026-08-02-gate-diagnosis-recommendations) ------
   // Arm the per-rung explanation of the acceptance verdict: which term BINDS, its
@@ -1186,7 +1260,63 @@ inline long long grid_nodal_dofs(const VoxelGrid& g) {
 }
 
 // The result of a minimize_plastic run.
+// ★ WHAT THE LATTICE DENSITY FIELD ACTUALLY DID, ONCE PER RUN (task
+// 2026-08-13-lattice-as-a-material). Resolved once before the ladder — every rung
+// of one run optimises against the same material curve over the same region — so
+// it hangs off the RESULT and not off each variant. Default-constructed
+// (`armed == false`) on every run that did not arm `frozen_lattice`.
+//
+// ★ EVERY NUMBER HERE IS PER REGION, NEVER IN AGGREGATE (bar R5). An aggregate
+// cells-per-member is exactly the shape of report that lets one region below the
+// homogenisation floor hide behind four above it.
+struct FrozenLatticeReport {
+  bool armed = false;
+  std::string topology;
+  double cell_mm = 0.0;
+  double min_extrudable_width_mm = 0.0;
+  bool refuse_below_floor = true;
+  bool gate_on_strut_strength = false;
+  double freed_mass_return = 0.0;
+
+  // The frozen set as the LOOP holds it (effective_design_mask), and what of it
+  // the field latticed.
+  std::size_t frozen_solid_voxels = 0;
+  std::size_t latticed_voxels = 0;
+  // Mass-equivalent voxels freed: sum over latticed voxels of (1 - rho). Multiply
+  // by grid.voxel_volume() * material density to get grams — the GROSS prize, and
+  // it is never the number that decides the feature.
+  double freed_mass_voxels = 0.0;
+
+  struct Region {
+    int id = 0;
+    std::string name;
+    std::string mode;             // lattice_region_mode_name
+    double declared_density = 0.0;
+    std::size_t voxels = 0;       // frozen voxels the region owns
+    std::size_t latticed = 0;     // ... the field actually latticed
+    double mean_rho = 0.0;
+    double freed_mass_voxels = 0.0;
+    // The validity of the rho->stiffness law over THIS region, measured on the
+    // FULLY SOLID part (an upper bound on any rung's cells-per-member).
+    double member_width_median_mm = 0.0;
+    double cells_per_member_median = 0.0;
+    double cells_per_member_p10 = 0.0;
+    double floor_certifiable = 0.0;
+    double floor_buildable = 0.0;
+    double fraction_above_floor = 0.0;
+    bool in_validity_range = false;
+    bool buildable_not_certifiable = false;
+    bool refused = false;
+    std::string refusal;  // quotable, empty when in range
+  };
+  std::vector<Region> regions;
+};
+
 struct MinimizePlasticResult {
+  // ★ The lattice density field's own receipt (task 2026-08-13-lattice-as-a-
+  // material). `armed == false` on every run that did not declare one.
+  FrozenLatticeReport frozen_lattice;
+
   // Every rung the driver actually ran, in ladder order: accepted rungs (each
   // margin >= margin_stop) — optionally interleaved with rungs that do NOT stop
   // the walk, namely INFEASIBLE ones (handoff 131), DISCONNECTED ones (handoff
