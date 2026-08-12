@@ -3,3 +3,41 @@
 [loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
 [loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
 [loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+alpha: seeded from holes and fitted (85680 coefficients)
+
+== the design ==
+  grid            128 x 31 x 118   spacing 1.705279 mm
+  active cells    70688 of 468224
+  ersatz          MOLLIFIED volume fraction
+  k               4  (64 samples per cell)
+  eps_mult        1   bandwidth norm  L2
+  projection      sample SCATTER
+  V(alpha)        61621.582564 active-cell voxels  (rung target 48067.840000)
+  cut cells       14809   full 52355   empty 3524
+
+== dV/dalpha — the VOLUME, central difference, swept ==
+probe                        0.001        0.01         0.1         0.3           1
+random dir 0               -0.085%     -0.085%     -0.085%     -0.085%     -0.096%      analytic 1.05247
+random dir 1                0.479%      0.479%      0.479%      0.479%      0.489%      analytic -0.910122
+coefficient 20136           0.564%      0.572%      0.663%      1.626%      6.681%      analytic -7.32397
+coefficient 11982           0.569%      0.578%      0.671%      1.636%      6.688%      analytic -7.32296
+coefficient 14696           0.563%      0.572%      0.665%      1.630%      6.683%      analytic -7.32128
+
+== dC/dalpha — the COMPLIANCE, two state solves per point ==
+   'continuum' is the shipped weight (the strain-energy density e_v).
+   'discrete'  is dC/drho_v * (1 - rho_min) — the derivative of the
+               ACTUAL stiffness law, which differs from the continuum
+               form by p (1-rho_min) rho^(p-1) and coincides at p = 1.
+probe                       step     continuum      discrete
+random dir 0                0.01       56.017%       -0.313%
+random dir 0                 0.1       56.014%       -0.314%
+random dir 1                0.01       45.050%        0.967%
+random dir 1                 0.1       45.049%        0.967%
+coefficient 20136           0.01        6.288%       -1.534%
+coefficient 20136            0.1        5.998%       -1.802%
+coefficient 11982           0.01        7.327%       -1.529%
+coefficient 11982            0.1        7.012%       -1.818%
+coefficient 14696           0.01        7.123%       -1.497%
+coefficient 14696            0.1        6.833%       -1.764%
+
+wrote evidence/2026-08-13-plsm-production-settings/fd/frac/frac_fd.csv

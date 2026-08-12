@@ -809,6 +809,7 @@ std::string run_info_json(const RunInfo& info) {
   // Task 2026-08-13-plsm-production-settings — the ersatz, the stopping rule
   // and the topology counters. Empty/zero on every run that did not arm PLSM.
   str("plsm_ersatz", info.plsm_ersatz);
+  str("plsm_sens_weight", info.plsm_sens_weight);
   num("plsm_frac_samples", fmt_i(info.plsm_frac_samples));
   num("plsm_frac_eps_mult", fmt(info.plsm_frac_eps_mult));
   num("plsm_frac_mollified", bool_json(info.plsm_frac_mollified));
@@ -826,7 +827,8 @@ std::string run_info_json(const RunInfo& info) {
   num("plsm_margin_probe_wall_s", fmt(info.plsm_margin_probe_wall_s));
   num("plsm_void_components", fmt_ll(info.plsm_void_components));
   num("plsm_void_chi", fmt_ll(info.plsm_void_chi));
-  num("plsm_void_cavities", fmt_ll(info.plsm_void_cavities));
+  num("plsm_void_enclosed_solid", fmt_ll(info.plsm_void_enclosed_solid));
+  num("plsm_void_sealed_pockets", fmt_ll(info.plsm_void_sealed_pockets));
   num("plsm_void_tunnels", fmt_ll(info.plsm_void_tunnels));
   num("plsm_void_sealed_voxels", fmt_ll(info.plsm_void_sealed_voxels));
   num("plsm_void_sealed_volume_mm3", fmt(info.plsm_void_sealed_volume_mm3));

@@ -35,17 +35,19 @@
 //
 //     chi = #vertices - #edges + #faces - #cubes
 //
-// and chi = b0 - b1 + b2 (components - tunnels + cavities). With b0 counted
-// directly and b2 counted as the void pockets with no path out, b1 — THE TUNNEL
-// COUNT — falls out as b0 + b2 - chi.
+// and chi = b0 - b1 + b2, where b2 is the number of SOLID ISLANDS the void
+// completely encloses. With b0 and b2 counted directly, b1 — THE TUNNEL COUNT —
+// falls out as b0 + b2 - chi.
 //
-// ── ★ THE ESCAPE RULE IS THE MANUFACTURING ONE, NOT A SECOND OPINION ────────
+// ── ★ THE DRAINABILITY VERDICT IS THE MANUFACTURING ONE, NOT A SECOND OPINION
 //
-// `b2` needs a definition of "enclosed", and this repository already has one:
+// "Can this pocket be emptied" is a DIFFERENT question from b2 (see the struct),
+// and this repository already has an answer to it:
 // `lattice_void.hpp`'s enclosed-void rule, which is the standard additive-
-// manufacturing constraint. Its two commitments are adopted here verbatim rather
-// than re-derived, so a cavity this header counts and a cavity the lattice pass
-// REFUSES on are the same object:
+// `lattice_void.hpp`'s enclosed-void rule, the standard additive-manufacturing
+// constraint. Its two commitments are adopted here verbatim rather than
+// re-derived, so a sealed pocket this header counts and a cavity the lattice
+// pass REFUSES on are the same object:
 //
 //   * ★ THE VOID WALK IS 6-CONNECTED, because the SOLID walk (`walk_load_path`)
 //     is 26-connected and in 3D digital topology the complementary sets must
@@ -77,17 +79,36 @@
 
 namespace topopt {
 
+// ★★ TWO DIFFERENT QUESTIONS, AND THE HEADER THIS CAME FROM ANSWERED THEM WITH
+// ONE NUMBER. `b2` is a BETTI NUMBER of the void — how many solid islands the
+// void completely surrounds — and it is what closes `chi = b0 - b1 + b2` so that
+// the TUNNEL count falls out. `sealed_pockets` is a DRAINABILITY verdict — how
+// many void components have no route to the outside — and it is what R6 and the
+// lattice pass mean by "enclosed void". They are not the same quantity and they
+// are not even the same kind of quantity.
+//
+// ★ THE SANDBOX VERSION SUBSTITUTED THE SECOND FOR THE FIRST, and the unit test
+// in `test_plsm.cpp` is what caught it: a single 3x3x3 pocket in a solid block
+// has chi = 1 (it is contractible), b0 = 1, b1 = 0 and b2 = 0 — but ONE sealed
+// pocket. Putting the sealed count into the identity reported `chi = 2` and
+// `tunnels = 1` for a convex hole. Every tunnel count taken that way is
+// off by the number of undrainable pockets.
 struct PlsmVoidTopology {
   // b0 of the void INSIDE THE PART (not-printed, non-Empty), 6-connected.
   long long components = 0;
-  // Euler characteristic of that void's cubical complex.
+  // Euler characteristic of that void's cubical complex, computed exactly.
   long long chi = 0;
-  // b2 — pockets with no 6-connected route out through the not-printed set.
-  long long cavities = 0;
-  // b1 = b0 + b2 - chi. ★ If this rises while `components` does not, a hole was
-  // tunnelled rather than nucleated, and that is a finding rather than a bug.
+  // ★ b2 — SOLID ISLANDS the void completely encloses (printed components that
+  // reach neither the grid boundary nor the space outside the part). 26-connected,
+  // because the void is 6-connected and the complementary sets must take
+  // complementary adjacencies.
+  long long enclosed_solid = 0;
+  // ★ b1 = b0 + b2 - chi. THE TUNNEL COUNT. If this rises while `components`
+  // does not, a hole was TUNNELLED rather than nucleated — a topology change a
+  // component count alone would call no change at all.
   long long tunnels = 0;
-  // The trapped material, for the rows R6 asks for.
+  // ── the DRAINABILITY verdict, by the manufacturing definition (R6) ────────
+  long long sealed_pockets = 0;   // void components with no route to the outside
   long long sealed_voxels = 0;
   double sealed_volume_mm3 = 0.0;
   // The denominator, so a count is never read without the set it counts over.
@@ -186,24 +207,82 @@ inline PlsmVoidTopology plsm_void_topology(int nx, int ny, int nz, double h,
                            static_cast<int>(v)))] = 1;
       }
 
-  // ── b0 and b2 together, one pass over the void's roots ────────────────────
+  // ── b0, and the DRAINABILITY verdict, one pass over the void's roots ──────
   std::vector<int> seen(n, 0);
   for (std::size_t v = 0; v < n; ++v) {
     if (!isvoid[v]) continue;
     const int r = dv.find(static_cast<int>(v));
+    const bool open =
+        reaches[static_cast<std::size_t>(de.find(static_cast<int>(v)))] != 0;
     if (!seen[static_cast<std::size_t>(r)]) {
       seen[static_cast<std::size_t>(r)] = 1;
       ++t.components;
       // A void component lies entirely inside ONE escape component (it is a
       // subset of the escape set and the adjacency is the same), so the root's
       // escape verdict is the whole component's.
-      if (!reaches[static_cast<std::size_t>(de.find(static_cast<int>(v)))])
-        ++t.cavities;
+      if (!open) ++t.sealed_pockets;
     }
-    if (!reaches[static_cast<std::size_t>(de.find(static_cast<int>(v)))])
-      ++t.sealed_voxels;
+    if (!open) ++t.sealed_voxels;
   }
   t.sealed_volume_mm3 = static_cast<double>(t.sealed_voxels) * h * h * h;
+
+  // ── ★ b2 — THE SOLID ISLANDS THE VOID ENCLOSES ───────────────────────────
+  //
+  // A bounded component of the void's complement. The complement is the PRINTED
+  // set plus everything outside the part, so the UNBOUNDED one is whatever
+  // reaches the grid boundary or touches an out-of-part voxel; every other
+  // printed component is an island the void surrounds. 26-CONNECTED, because the
+  // void is 6-connected and the two sets must take complementary adjacencies or
+  // a checkerboard is simultaneously connected and not.
+  {
+    PlsmDisjointSet ds(n);
+    auto printed = [&](int i, int j, int k) {
+      if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) return false;
+      const std::size_t w = at(i, j, k);
+      return in_part[w] && occ[w] > iso;
+    };
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          if (!printed(i, j, k)) continue;
+          const std::size_t v = at(i, j, k);
+          for (int dk = -1; dk <= 0; ++dk)
+            for (int dj = -1; dj <= 1; ++dj)
+              for (int di = -1; di <= 1; ++di) {
+                if (dk == 0 && (dj > 0 || (dj == 0 && di >= 0))) continue;
+                if (printed(i + di, j + dj, k + dk))
+                  ds.join(static_cast<int>(v),
+                          static_cast<int>(at(i + di, j + dj, k + dk)));
+              }
+        }
+    std::vector<char> unbounded(n, 0);
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          if (!printed(i, j, k)) continue;
+          bool out = (i == 0 || j == 0 || k == 0 || i == nx - 1 ||
+                      j == ny - 1 || k == nz - 1);
+          if (!out) {
+            const int nb[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0},
+                                  {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
+            for (const auto& o : nb)
+              if (!in_part[at(i + o[0], j + o[1], k + o[2])]) { out = true; break; }
+          }
+          if (out)
+            unbounded[static_cast<std::size_t>(
+                ds.find(static_cast<int>(at(i, j, k))))] = 1;
+        }
+    std::vector<char> counted(n, 0);
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          if (!printed(i, j, k)) continue;
+          const int r = ds.find(static_cast<int>(at(i, j, k)));
+          if (counted[static_cast<std::size_t>(r)]) continue;
+          counted[static_cast<std::size_t>(r)] = 1;
+          if (!unbounded[static_cast<std::size_t>(r)]) ++t.enclosed_solid;
+        }
+  }
 
   // ── ★ THE EULER CHARACTERISTIC, EXACTLY, over the cubical complex ─────────
   //
@@ -254,7 +333,10 @@ inline PlsmVoidTopology plsm_void_topology(int nx, int ny, int nz, double h,
         if (i < nx && j < ny && k < nz && vox(i, j, k)) ++nc;
       }
   t.chi = nv - ne + nf - nc;
-  t.tunnels = t.components + t.cavities - t.chi;
+  // ★ b1 = b0 + b2 - chi, with b2 the ENCLOSED SOLID count and NOT the sealed
+  // pocket count. Substituting the second is the defect described at the top of
+  // this file, and `test_plsm.cpp` pins the difference on a convex pocket.
+  t.tunnels = t.components + t.enclosed_solid - t.chi;
   return t;
 }
 

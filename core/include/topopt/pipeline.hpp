@@ -993,6 +993,7 @@ struct MinimizePlasticVariant {
   // different objects, and reading the second as the first is what made
   // "max_iterations = 60" look like a converged setting for three tasks.
   PlsmErsatz plsm_ersatz = PlsmErsatz::VolumeFraction;
+  PlsmSensWeight plsm_sens_weight = PlsmSensWeight::Discrete;
   int plsm_frac_samples = 0;
   std::size_t plsm_frac_cut_cells = 0;
   double plsm_frac_sample_wall_s = 0.0;

@@ -62,6 +62,30 @@ enum class PlsmMode { Off, Parametric };
 // no longer the default and no shipped job selects it.
 enum class PlsmErsatz { Heaviside, VolumeFraction };
 
+// ── ★★ THE COMPLIANCE SENSITIVITY'S WEIGHT ──────────────────────────────────
+//
+// The MEASURE says where the boundary moves; the WEIGHT says what that costs.
+// They are separate choices and until 2026-08-13 only the measure had ever been
+// verified.
+//
+// `Continuum` is the classical shape derivative's: the strain-energy density
+// `q E0`, correct when material appears across the interface as a 0 -> 1 jump —
+// which is the continuum picture and also the DISCRETE one when the stiffness
+// law is LINEAR. GridapTopOpt's is (E = rho E0, p = 1). It is what PR 324/325/
+// 326/327 and the shipped `--plsm` mode all ran.
+//
+// ★★ `Discrete` is the derivative of the stiffness law PRODUCTION ACTUALLY RUNS,
+// which is SIMP at p = 3. R2 finite-differenced both against the same solves on
+// the same design: the continuum weight reads +56.0% and +45.0% on two random
+// directions, FLAT to five digits across a factor of ten in step size; the
+// discrete weight reads −0.31% and +0.97%. Flatness is what makes it a gradient
+// error and not noise. `Discrete` is therefore the default.
+//
+// ★ SINGLE COEFFICIENTS DO NOT SEPARATE THEM (6-7% against 1.5-1.8%), which is
+// the same trap the sub-cell-psi ablation fell into: only a general direction,
+// where many knots combine across the band, shows it.
+enum class PlsmSensWeight { Continuum, Discrete };
+
 // What a margin probe found on a candidate design. Returned by the driver's
 // certification callback (`PlsmOptions::margin_probe`) so the optimiser can
 // track the CERTIFIED margin without learning what a material, a build
@@ -148,6 +172,11 @@ struct PlsmOptions {
   // without it). They exist so both are PRICED rather than assumed.
   bool frac_sens_exact = true;
   bool frac_eps_l1 = false;
+
+  // ★★ THE COMPLIANCE WEIGHT. `Discrete` is the default and R2 is why (see
+  // PlsmSensWeight). `Continuum` reproduces PR 324-327's gradient exactly and
+  // exists so the control arm can be the control.
+  PlsmSensWeight sens_weight = PlsmSensWeight::Discrete;
 
   // The ersatz band half-width, VOXELS, for `PlsmErsatz::Heaviside`.
   //
@@ -348,6 +377,7 @@ struct PlsmRunResult {
   //     plsm_frac.hpp answers that objection at length.
   double eta_voxels = 1.0;
   PlsmErsatz ersatz = PlsmErsatz::VolumeFraction;
+  PlsmSensWeight sens_weight = PlsmSensWeight::Discrete;
   int frac_samples = 0;
   double spacing_mm = 0.0;
 

@@ -283,6 +283,9 @@ RunInfo build_run_info(const JobDescription& job,
         options.plsm.ersatz == PlsmErsatz::VolumeFraction
             ? options.plsm.frac_samples
             : 0;
+    info.plsm_sens_weight =
+        options.plsm.sens_weight == PlsmSensWeight::Discrete ? "discrete"
+                                                             : "continuum";
     info.plsm_frac_eps_mult = options.plsm.frac_eps_mult;
     info.plsm_frac_mollified = options.plsm.frac_mollified;
     info.plsm_frac_sens_exact = options.plsm.frac_sens_exact;
@@ -359,8 +362,10 @@ std::optional<BuildFrameRotation> variant_bake_rotation(
 //
 // WHAT READS IT: `topopt::plsm_evaluate(lattice, basis, alpha, nx, ny, nz,
 // factor, threads)` reconstructs phi on any lattice from `<stem>_alpha.f64` plus
-// the `<stem>_alpha.meta` beside it, and the ersatz is `plsm_heaviside(-phi,
-// eta_voxels * spacing)`. `external_field_surface_probe` reads the resulting
+// the `<stem>_alpha.meta` beside it. ★ THE ERSATZ RECIPE IS THE ONE THE `ersatz`
+// KEY NAMES AND NOT A FIXED FORMULA — under `fraction` (the production default
+// since 2026-08-13) there is no eta in the density at all, and the .meta writes
+// the sub-cell recipe instead. `external_field_surface_probe` reads the resulting
 // occupancy field directly. Nothing in the shipped pipeline consumes it yet, and
 // that is stated rather than implied: it is an OUTPUT, not an input, until a
 // consumer exists.
@@ -396,7 +401,20 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
        "support)\n"
     << "# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, "
        "threads);\n"
-    << "# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).\n"
+    // ★ THE RECIPE FOLLOWS THE ERSATZ THE DESIGN WAS OPTIMISED UNDER, because a
+    // reader who rebuilds `rho` from `alpha` with the wrong one gets a different
+    // object. Under `fraction` there is no eta in the density at all, and a line
+    // that said there was would be a lie in the file that exists to be trusted.
+    << (variant.plsm_ersatz == PlsmErsatz::VolumeFraction
+            ? "# the ersatz is the VOLUME FRACTION of each cell inside {phi < 0}:\n"
+              "#   sample frac_samples^3 points per cell at\n"
+              "#     x = i + (p + 0.5)/k - 0.5   (the SAME lattice plsm_evaluate\n"
+              "#     uses at factor = k, so the two nest exactly)\n"
+              "#   and take the fraction with phi < 0 — mollified by the\n"
+              "#   quadrature band when frac_mollified (see plsm_frac.hpp).\n"
+              "#   FROZEN cells are STAMPED 1 / 0 by the mask, not sampled.\n"
+              "#   eta_voxels below does NOT enter this density.\n"
+            : "# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).\n")
     << "basis " << (variant.plsm_basis_kind == PlsmBasisKind::Gaussian
                         ? "gaussian" : "wendland") << "\n"
     // ★ THREE NUMBERS, PER AXIS. A reader that collapses these to one has
@@ -438,6 +456,10 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
     << (variant.plsm_ersatz == PlsmErsatz::VolumeFraction ? "fraction"
                                                           : "heaviside")
     << "\n"
+    << "sens_weight "
+    << (variant.plsm_sens_weight == PlsmSensWeight::Discrete ? "discrete"
+                                                             : "continuum")
+    << "\n"
     << "frac_samples " << variant.plsm_frac_samples << "\n"
     << "frac_cut_cells " << variant.plsm_frac_cut_cells << "\n"
     << "frac_sample_wall_s " << variant.plsm_frac_sample_wall_s << "\n"
@@ -463,7 +485,8 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
   // ── ★ THE TOPOLOGY COUNTERS, ON EVERY RUN (the constraint does NOT ship) ──
   m << "void_components " << variant.plsm_topology.components << "\n"
     << "void_chi " << variant.plsm_topology.chi << "\n"
-    << "void_cavities " << variant.plsm_topology.cavities << "\n"
+    << "void_enclosed_solid " << variant.plsm_topology.enclosed_solid << "\n"
+    << "void_sealed_pockets " << variant.plsm_topology.sealed_pockets << "\n"
     << "void_tunnels " << variant.plsm_topology.tunnels << "\n"
     << "void_sealed_voxels " << variant.plsm_topology.sealed_voxels << "\n"
     << "void_sealed_volume_mm3 " << variant.plsm_topology.sealed_volume_mm3
@@ -6649,6 +6672,9 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     options.plsm.ersatz = job.plsm_ersatz == "heaviside"
                               ? PlsmErsatz::Heaviside
                               : PlsmErsatz::VolumeFraction;
+    options.plsm.sens_weight = job.plsm_sens_weight == "continuum"
+                                  ? PlsmSensWeight::Continuum
+                                  : PlsmSensWeight::Discrete;
     options.plsm.frac_samples = job.plsm_frac_samples;
     options.plsm.frac_eps_mult = job.plsm_frac_eps_mult;
     options.plsm.frac_mollified = job.plsm_frac_mollified;
@@ -8633,7 +8659,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.plsm_frac_sens_wall_s = v0.plsm_frac_sens_wall_s;
       run_info.plsm_void_components = v0.plsm_topology.components;
       run_info.plsm_void_chi = v0.plsm_topology.chi;
-      run_info.plsm_void_cavities = v0.plsm_topology.cavities;
+      run_info.plsm_void_enclosed_solid = v0.plsm_topology.enclosed_solid;
+      run_info.plsm_void_sealed_pockets = v0.plsm_topology.sealed_pockets;
       run_info.plsm_void_tunnels = v0.plsm_topology.tunnels;
       run_info.plsm_void_sealed_voxels = v0.plsm_topology.sealed_voxels;
       run_info.plsm_void_sealed_volume_mm3 = v0.plsm_topology.sealed_volume_mm3;

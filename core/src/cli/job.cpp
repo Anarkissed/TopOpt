@@ -878,7 +878,7 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(*pl,
                         {"enabled", "basis", "knots", "support", "eta_voxels",
                          "max_iterations", "seed", "refit_every", "move",
-                         "cg_tolerance_loose", "warm_start", "ersatz",
+                         "cg_tolerance_loose", "warm_start", "ersatz", "sens_weight",
                          "frac_samples", "frac_eps_mult", "frac_mollified",
                          "frac_sens_exact", "frac_eps_l1",
                          "margin_probe_every", "margin_plateau_probes",
@@ -956,6 +956,17 @@ JobDescription parse_job(const std::string& json_text) {
             "\"plsm.ersatz\" must be \"fraction\" (the exact cell volume "
             "fraction inside {phi < 0}, the production default) or "
             "\"heaviside\" (the centre-sampled smoothed step it replaces)");
+    }
+    if (const JsonValue* v = find_key(*pl, "sens_weight")) {
+      job.plsm_sens_weight = require_nonempty_string(*v, "plsm.sens_weight");
+      if (job.plsm_sens_weight != "discrete" &&
+          job.plsm_sens_weight != "continuum")
+        schema_fail(
+            "\"plsm.sens_weight\" must be \"discrete\" (the derivative of the "
+            "stiffness law production actually runs, the default) or "
+            "\"continuum\" (the classical shape derivative's strain-energy "
+            "density, which is correct only for a LINEAR law and which R2 "
+            "measured 45-56% off on this path)");
     }
     if (const JsonValue* v = find_key(*pl, "frac_samples")) {
       const double x = require_number(*v, "plsm.frac_samples");

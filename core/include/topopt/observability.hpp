@@ -597,6 +597,8 @@ struct RunInfo {
   // different objects and a receipt that did not say which would make every
   // number beside it unreadable.
   std::string plsm_ersatz;
+  // "discrete" | "continuum" — WHICH compliance weight the trajectory used.
+  std::string plsm_sens_weight;
   int plsm_frac_samples = 0;
   double plsm_frac_eps_mult = 0.0;
   bool plsm_frac_mollified = false;
@@ -618,7 +620,8 @@ struct RunInfo {
   // ship; these do, because they made every other finding legible.
   long long plsm_void_components = 0;
   long long plsm_void_chi = 0;
-  long long plsm_void_cavities = 0;
+  long long plsm_void_enclosed_solid = 0;
+  long long plsm_void_sealed_pockets = 0;
   long long plsm_void_tunnels = 0;
   long long plsm_void_sealed_voxels = 0;
   double plsm_void_sealed_volume_mm3 = 0.0;

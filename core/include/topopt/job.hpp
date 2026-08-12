@@ -750,6 +750,8 @@ struct JobDescription {
   // "fraction" | "heaviside". The second is PR 324/325/326's centre-sampled
   // smoothed Heaviside, kept reachable so the change is an A/B on this path.
   std::string plsm_ersatz = "fraction";
+  // "discrete" | "continuum" — WHICH compliance weight. See PlsmSensWeight.
+  std::string plsm_sens_weight = "discrete";
   int plsm_frac_samples = PlsmOptions{}.frac_samples;
   double plsm_frac_eps_mult = PlsmOptions{}.frac_eps_mult;
   bool plsm_frac_mollified = PlsmOptions{}.frac_mollified;

@@ -1334,6 +1334,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       variant.plsm_eta_voxels = pr.eta_voxels;
       variant.plsm_frozen_floor_occupancy = pr.frozen_floor_occupancy;
       variant.plsm_ersatz = pr.ersatz;
+      variant.plsm_sens_weight = pr.sens_weight;
       variant.plsm_frac_samples = pr.frac_samples;
       variant.plsm_frac_cut_cells = pr.frac_cut_cells;
       variant.plsm_frac_sample_wall_s = pr.frac_sample_wall_s;

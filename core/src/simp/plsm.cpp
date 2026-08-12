@@ -65,15 +65,54 @@ double steady_s() {
       .count();
 }
 
-// The strain-energy density, recovered from the sensitivity core already
-// computed. dc/drho = -p rho^(p-1) E0 q with q = u^T K_unit u, so
-// q E(rho) / rho^p = q E0 is exactly -dc / (p rho^(p-1) E0) * E0 ... the form
-// below is PR 324's, verbatim: it returns q E0, the quantity the shape
-// derivative integrates. The 0.1 floor is the probe's and guards the rho_min
-// voxels, where rho^(p-1) underflows the division.
+// ── ★★ THE TWO COMPLIANCE WEIGHTS, AND WHY THE DEFAULT CHANGED ─────────────
+//
+// The measure (`delta`) says WHERE the boundary moves; the weight says WHAT THAT
+// COSTS. They are separate choices and only one of them was ever verified.
+//
+// `energy_from` is the CONTINUUM one: the strain-energy density `q E0` that the
+// classical shape derivative integrates, recovered from core's `dcompliance`.
+// It is correct when material appears across the interface as a 0 -> 1 JUMP —
+// which is the continuum picture, and which is also the DISCRETE picture when
+// the stiffness law is linear. GridapTopOpt's is: E(rho) = rho E0, p = 1.
+//
+// ★★ PRODUCTION'S IS NOT. The trajectory runs SIMP at penalty p = 3, so the
+// derivative of the ersatz compliance the solver actually minimises is
+//
+//     dC/dalpha_i = SUM_v (dC/drho_v) (1 - rho_min) d f_v/d alpha_i
+//
+// and the continuum weight differs from it by a per-voxel factor
+// `p (1 - rho_min) rho_v^(p-1)` — about 0.75 at rho = 0.5, and VARYING across
+// the band, so it is not even a constant rescaling a step size could absorb.
+//
+// ★★ R2 MEASURED IT AND IT IS LARGE: on this part the continuum weight
+// finite-differences at +56.0% and +45.0% on two random directions, FLAT to five
+// digits across a factor of ten in step size, while the discrete weight reads
+// −0.31% and +0.97% on the same directions and the same solves. Flatness is what
+// makes it a gradient error rather than noise — the criterion PR 327 established
+// for the `|grad phi|` defect, applied to the other half of the same expression.
+//
+// ★ AND SINGLE COEFFICIENTS DO NOT SHOW IT: the continuum weight reads 6-7%
+// there against the discrete form's 1.5-1.8%. This is the same trap PR 327's
+// sub-cell-psi ablation fell into — a single-coefficient check would have passed
+// it. Only a general direction, where many knots combine over the band, separates
+// the two.
+//
+// So `PlsmSensWeight::Discrete` is the default and `Continuum` is kept reachable,
+// because it is what PR 324/325/326/327 and the shipped `--plsm` mode all ran and
+// the control arm has to be able to reproduce it exactly.
 double energy_from(double dc, double rho, double p, double e0) {
   const double r = std::max(rho, 0.1);
   return -dc / (p * std::pow(r, p - 1.0) * e0);
+}
+
+// The DISCRETE weight: the derivative of the ACTUAL stiffness law. `dc` is
+// `dC/drho_v` as core computes it, and `rho = rho_min + (1 - rho_min) * f_v`, so
+// `drho/df = 1 - rho_min`. The sign is flipped for the same reason
+// `energy_from`'s is — the scatter's convention is that a POSITIVE weight is
+// material coming IN.
+double discrete_weight_from(double dc, double rho_min) {
+  return -dc * (1.0 - rho_min);
 }
 
 PlsmBasisKind parse_basis(const std::string& s) {
@@ -243,6 +282,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   out.basis_kind = basis;
   out.eta_voxels = plsm.eta_voxels;
   out.ersatz = plsm.ersatz;
+  out.sens_weight = plsm.sens_weight;
   out.frac_samples = frac ? fk : 0;
   out.spacing_mm = h;
   const PlsmKnotLattice& L = out.lattice;
@@ -476,11 +516,29 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // CURVED — PR 327 §7 measured 365.8 voxels, 1.08% of extra stiffness, biased
   // toward branched designs and invisible to a volume constraint that summed the
   // same smeared field. Summing `f_v` IS summing the volume.
+  // ★ THE FRACTION'S BRANCH IS A DETERMINISTIC PARALLEL REDUCTION, AND BOTH
+  // WORDS ARE LOAD-BEARING. The bisection below evaluates this 100 times per
+  // iteration, and on his part each evaluation is 70,688 cells x 64 samples =
+  // 4.5 million mollified steps — serially that is over a second per iteration,
+  // several times the sampling it is meant to ride along with. Fixed chunks with
+  // the partials summed IN CHUNK ORDER make it reproducible run to run: a
+  // reduction whose combination order followed thread completion would move the
+  // seventh digit of the volume between two runs of the same job, and the
+  // constraint is compared against a target to that precision.
+  std::vector<double> vol_partial(
+      static_cast<std::size_t>(std::max(1, threads)), 0.0);
   auto active_volume_at = [&](double offset) {
     double s = 0.0;
     if (frac) {
-      for (std::size_t sl = 0; sl < fcache.ncell; ++sl)
-        s += frac_at(static_cast<std::size_t>(fcache.cell[sl]), offset);
+      std::fill(vol_partial.begin(), vol_partial.end(), 0.0);
+      // `plsm_frac_parallel` hands the body its THREAD INDEX and chunks the
+      // range CONTIGUOUSLY, so partial `q` always covers the same cells in the
+      // same order however the threads are scheduled.
+      plsm_frac_parallel(fcache.ncell, threads, [&](std::size_t sl, int tid) {
+        vol_partial[static_cast<std::size_t>(tid)] +=
+            frac_at(static_cast<std::size_t>(fcache.cell[sl]), offset);
+      });
+      for (double p : vol_partial) s += p;
       return s;
     }
     for (std::size_t v = 0; v < n; ++v) {
@@ -700,8 +758,15 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
             delta[v] =
                 dh > 0.0 ? dh * plsm_grad_mag(nx, ny, nz, phi, i, j, k, h) : 0.0;
           }
-          raw_vel[v] = energy_from(sc.dcompliance[v], rho[v], params.penalty,
-                                   params.youngs_modulus);
+          // ★ THE WEIGHT. See the two functions at the top of this file: the
+          // continuum strain-energy density is right for a LINEAR stiffness law
+          // and production's trajectory is SIMP at p = 3. R2 measured the
+          // difference at 45-56% on a general direction, flat across step size.
+          raw_vel[v] =
+              plsm.sens_weight == PlsmSensWeight::Continuum
+                  ? energy_from(sc.dcompliance[v], rho[v], params.penalty,
+                                params.youngs_modulus)
+                  : discrete_weight_from(sc.dcompliance[v], rho_min);
         }
 
     // ★ THERE IS NO EXPLICIT VOLUME MULTIPLIER HERE, AND PR 324's DESCENT ARM IS
