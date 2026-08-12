@@ -145,3 +145,10 @@ VARIANT vf=0.520000 achieved=0.520000 printed=0.701435 margin=3305.23 accepted=1
 [lattice] vf=0.52 frozen material: printed=45611 latticed=14524 solid=31087 in_include=14524 in_exclude=0/1680 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
 LATTICE vf=0.520000 topology=octet cell_mm=1.4 graded=1 rho_min=0.410488 rho_max=0.89988 cells=15340 tris=14127256 lattice_margin=2773.14 lattice_accepted=1 report=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_052_lattice.report.json mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_auto/variant_052_lattice.stl
 PROGRESS rung=2 rungs=4 iter=1
+PROGRESS rung=2 rungs=4 iter=2
+PROGRESS rung=2 rungs=4 iter=3
+PROGRESS rung=2 rungs=4 iter=4
+PROGRESS rung=2 rungs=4 iter=5
+PROGRESS rung=2 rungs=4 iter=6
+PROGRESS rung=2 rungs=4 iter=7
+PROGRESS rung=2 rungs=4 iter=8

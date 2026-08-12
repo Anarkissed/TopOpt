@@ -2,8 +2,8 @@ R3 — THE PATH, WALKED END TO END ON HIS OWN VARIANT
 
 HIS VARIANT: rung 068 — 143862 vertices / 287720 triangles
 HE SETS HIS VIEW: distance 181.5483, target (84.785, -28.061, 110.690)
-  stroke 1 -> rung 1, 20403 vertices moved, max 0.2681 mm, preview 515 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
-  stroke 2 -> rung 2, 20403 vertices moved, max 0.3715 mm, preview 552 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
-  stroke 3 -> rung 3, 20403 vertices moved, max 0.4221 mm, preview 415 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 1 -> rung 1, 20403 vertices moved, max 0.2681 mm, preview 421 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 2 -> rung 2, 20403 vertices moved, max 0.3715 mm, preview 434 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 3 -> rung 3, 20403 vertices moved, max 0.4221 mm, preview 426 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
   toggled back to Original — camera UNCHANGED
   renderer holds the page's geometry; settle ran ONCE for the whole session

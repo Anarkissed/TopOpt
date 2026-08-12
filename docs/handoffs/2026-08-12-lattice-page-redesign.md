@@ -448,7 +448,7 @@ MATERIAL (the anchor-to-load walk, the pre-flight).
 
 | bar | status |
 |---|---|
-| **R1** demonstrably usable on his job | **MET.** Arm C on his own job at rung 0.68: **16,009 latticed voxels (+22.8% on his 13,034), 13.0% of the part (his 12%), 490.6 g (his 507 g; solid 543.7 g)**, zero solid fallback, margin 2949 vs 1.5 required. Arm A reproduces his failure to 0.08% first. `s0_table.txt`. |
+| **R1** demonstrably usable on his job | **MET, at two rungs.** 0.68: **16,009 latticed voxels (+22.8% on his 13,034), 13.0% of the part (his 12%), 490.6 g (his 507 g; solid 543.7 g)**. 0.52: **15,340 latticed, 14.2%, 424.3 g — −22.0% on solid**, where arms A and B are REFUSED outright. Zero solid fallback in both. Arm A reproduces his failure to 0.08% first. `s0_table.txt`. |
 | **R2** protection depth == lattice depth, asserted | **MET.** One store, one wire, and a core REFUSAL when they differ. `test_lattice_depth_tie`, `LatticeBarrierModelTests`. |
 | **R3** no wall of text | **MET.** Longest string added: the disclaimer, "A sample part. Your settings, not your result." — **8 words**. Asserted by `testNoWallOfTextAnywhereInTheNewUI` over every user-facing string the new UI can render. |
 | **R4** preview latency per interaction | **MET.** Table above; artifact `r4_preview_latency.txt` (RELEASE, quiet machine). The suite asserts the TESSELLATION CAP, not a wall clock: the timing assertion failed at 1033 ms while three 128³ ladders were saturating ten cores, and a bar that flips with the neighbours is not a bar. The cap is what makes it sub-second, so the cap is what is pinned; a 5 s ceiling still catches an order-of-magnitude regression. |
@@ -457,6 +457,8 @@ MATERIAL (the anchor-to-load walk, the pre-flight).
 | **R7** never weaken an assertion | **MET.** Census: every kind unchanged or up, nothing deleted. `r7/assertion_census.txt`. |
 | **R8** no unfilled placeholders, no scratch at root | **MET.** |
 | **R9** separate commit for review response | pending review. |
+
+**The suites.** App: **1432 executed, 21 skipped, 0 failures** (`app_tests.txt`) — the same `swift test --package-path app/TopOptKit` the `app-macos` CI job runs. Core: **119/119 local** (`ctest.txt`), which is *not* a CI pass — this machine has no lib3mf, so it registers fewer tests than CI does. Report it as 119/<CI's total>.
 
 ---
 
