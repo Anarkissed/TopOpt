@@ -122,6 +122,21 @@ produces no lattice whatsoever, which is the state he has been living with.
 `member_too_thin_for_cell`), which is the same lesson again: the depth alone
 does not make a latticeable part.
 
+**AND THE CLEANEST PAIR IN THE WHOLE MEASUREMENT IS AT RUNG 0.52.** Arms B and C
+have the identical design there, so they present the lattice pass with the identical
+15,340 candidate voxels:
+
+| rung 0.52 | latticed | of candidates | fell back | mass |
+|---|---|---|---|---|
+| **B — depths matched, whole-part cell** | **0** | 15,340 | 15,340 | *no lattice emitted* |
+| **C — same design, per-region cell** | **15,340** | 15,340 | **0** | **424.3 g** |
+
+Core REFUSED arm B outright — "the grading law could lattice NONE of this
+variant's 15340 candidate voxels… refusing rather than writing a file with zero
+struts in it and calling it a lattice". Arm C latticed every one of them, 14.2%
+of the part, at 424.3 g against a 543.7 g solid — **−119.4 g, −22.0%**. Same
+part, same faces, same design, same voxels. One number changed: the cell.
+
 **Arm C is R1.** Auto takes core's own prescription — the per-region cell, 1.4 mm
 — and the same 16,009 voxels lattice **completely**: zero solid fallback, 43,816
 clipped struts, 14,959,524 triangles, margin 2949 against a required 1.5,

@@ -102,10 +102,26 @@ def main():
         if not rows:
             print(f"{label[:30]:<32}{'(still running — no rung yet)':>62}")
             continue
+        # ★ A RUNG CORE REFUSED HAS NO RECEIPT, and omitting it would read as
+        # "not run yet" rather than "emitted nothing" — the difference that
+        # matters most in this table. Refusals are read from the log and shown.
+        refused = {}
+        for m in re.finditer(
+                r"vf=([\d.]+) NO LATTICE EMITTED — the grading law could lattice "
+                r"NONE of this variant's (\d+) candidate voxels", log_text(arm)):
+            refused[f"{float(m.group(1)):.2f}"] = int(m.group(2))
+        by_rung = {}
         for name, r in rows:
-            any_rows = True
             m = re.search(r"_(\d+)_lattice", name)
-            rung = f"{int(m.group(1)) / 100:.2f}" if m else "?"
+            by_rung[f"{int(m.group(1)) / 100:.2f}" if m else "?"] = r
+        for rung in sorted(set(by_rung) | set(refused)):
+            any_rows = True
+            if rung in refused:
+                n = refused[rung]
+                print(f"{label[:30]:<32}{rung:>6}{0:>10}{n:>12,}{n:>16,}"
+                      f"{'REFUSED':>9}{'—':>9}")
+                continue
+            r = by_rung[rung]
             g = r.get("grading") or {}
             print(f"{label[:30]:<32}{rung:>6}"
                   f"{fmt(r.get('lattice_voxels')):>10}"

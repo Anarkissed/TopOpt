@@ -16,8 +16,11 @@ THE ANCHOR PAD, counted apart (§1f) — NOT a face protection
 
 THE LATTICE — per rung, from that rung's own receipt
 arm                               rung  latticed  region vox  solid fallback   mass g  cell mm
+A  his run (5 mm protect / 7 m    0.52         0      11,622          11,622  REFUSED        —
 A  his run (5 mm protect / 7 m    0.68       370      12,817          12,447    536.9    4.603
+B  depths matched (7 mm / 7 mm    0.52         0      15,340          15,340  REFUSED        —
 B  depths matched (7 mm / 7 mm    0.68       190      16,009          15,819    546.2    4.603
+C  matched + Auto per-region c    0.52    15,340      15,340               0    424.3      1.4
 C  matched + Auto per-region c    0.68    16,009      16,009               0    490.6      1.4
 
 INCLUDE REGIONS OVER VOID — 'a lattice cannot conjure material there'

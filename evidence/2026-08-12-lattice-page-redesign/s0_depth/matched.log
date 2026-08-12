@@ -122,3 +122,36 @@ PROGRESS rung=1 rungs=4 iter=36
 PROGRESS rung=1 rungs=4 iter=37
 PROGRESS rung=1 rungs=4 iter=38
 PROGRESS rung=1 rungs=4 iter=39
+PROGRESS rung=1 rungs=4 iter=40
+PROGRESS rung=1 rungs=4 iter=41
+PROGRESS rung=1 rungs=4 iter=42
+PROGRESS rung=1 rungs=4 iter=43
+PROGRESS rung=1 rungs=4 iter=44
+PROGRESS rung=1 rungs=4 iter=45
+PROGRESS rung=1 rungs=4 iter=46
+PROGRESS rung=1 rungs=4 iter=47
+PROGRESS rung=1 rungs=4 iter=48
+PROGRESS rung=1 rungs=4 iter=49
+PROGRESS rung=1 rungs=4 iter=50
+PROGRESS rung=1 rungs=4 iter=51
+PROGRESS rung=1 rungs=4 iter=52
+PROGRESS rung=1 rungs=4 iter=53
+PROGRESS rung=1 rungs=4 iter=54
+PROGRESS rung=1 rungs=4 iter=55
+PROGRESS rung=1 rungs=4 iter=56
+PROGRESS rung=1 rungs=4 iter=57
+PROGRESS rung=1 rungs=4 iter=58
+PROGRESS rung=1 rungs=4 iter=59
+PROGRESS rung=1 rungs=4 iter=60
+VARIANT vf=0.520000 achieved=0.520000 printed=0.701435 margin=3305.23 accepted=1 mesh=evidence/2026-08-12-lattice-page-redesign/s0_depth/out_matched/variant_052.stl
+[lattice] vf=0.52 NO LATTICE EMITTED — the grading law could lattice NONE of this variant's 15340 candidate voxels, so there is no lattice to emit — refusing rather than writing a file with zero struts in it and calling it a lattice. Reasons: member_too_thin_for_cell=15340, strut_unprintable_at_every_cell=0, irrecoverable_by_any_cell_size=15340. The widest member the law rejected is 17.05279303 mm; at this cell size a member must be at least 5.474809359 mm across to hold 5 cells. A smaller cell needs a finer declared extrusion width (min_extrudable_width_mm 0.42 mm sets the printability floor at 4.602619932 mm) — run the pre-flight forecast for the evaluated remedies.
+PROGRESS rung=2 rungs=4 iter=1
+PROGRESS rung=2 rungs=4 iter=2
+PROGRESS rung=2 rungs=4 iter=3
+PROGRESS rung=2 rungs=4 iter=4
+PROGRESS rung=2 rungs=4 iter=5
+PROGRESS rung=2 rungs=4 iter=6
+PROGRESS rung=2 rungs=4 iter=7
+PROGRESS rung=2 rungs=4 iter=8
+PROGRESS rung=2 rungs=4 iter=9
+PROGRESS rung=2 rungs=4 iter=10
