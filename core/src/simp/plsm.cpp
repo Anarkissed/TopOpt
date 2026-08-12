@@ -607,6 +607,12 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   for (int it = 1; it <= plsm.max_iterations; ++it) {
     if (options.cancel && *options.cancel) { cancelled = true; break; }
     const double t_it0 = steady_s();
+    // Baselines for this design iteration's WORK COUNTERS, read here so the
+    // delta at the observe hook spans exactly one iteration. Both are global
+    // monotone counters; taking a delta is the only correct way to attribute
+    // them, and the SIMP loop does the same (simp.cpp, `s.solves0`/`s.matvecs0`).
+    const long long solves0 = simp_compliance_call_count();
+    const long long matvecs0 = fea_matvec_count();
 
     // ★ THE OFFSET IS ADDED TO EVERY COEFFICIENT, NOT TO PHI. That keeps phi
     // inside the span of the basis — the whole representation claim would be void
@@ -908,37 +914,71 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       ob.cg_mg_cycles_attempted = sc.cg.mg_cycles_attempted;
       ob.cg_recycle_dim = sc.cg.recycle_dim;
       ob.cg_recycle_setup_matvecs = sc.cg.recycle_setup_matvecs;
-      // ── ★★ THE TIMING BLOCK, WHICH THIS PATH LEFT BLANK FROM PR 325 UNTIL
+      // ★ THE GENEO DECISION, WHICH THIS SITE USED TO DROP (task
+      // solver-speed-arm-and-diagnose). `iterations.csv` has carried
+      // geneo_dim/action/burn/threshold since the engagement gate shipped, and
+      // the SIMP loop fills them (simp.cpp, the two `obs.cg_geneo_*` blocks) —
+      // but this loop did not, so on the PLSM path, which is the path the CLI
+      // now runs EXCLUSIVELY (main.cpp: `run` has no SIMP route), every row of
+      // every production run reported `geneo_action 0, geneo_threshold 0`. The
+      // per-solve gate decision was therefore unreadable on the only path that
+      // ships, and the arm/decline diagnosis had to fall back on
+      // `run_info.geneo_decisions`, which by design records TRANSITIONS ONLY
+      // (geneo.hpp) and so cannot give a distribution.
+      //
+      // This is the THIRD occurrence of exactly this drift; geneo.hpp's
+      // `geneo_fill_cg_info` comment documents the second ("the multigrid site
+      // kept reporting geneo_trigger_burn while silently dropping
+      // geneo_threshold, so a real production run wrote geneo_threshold = 0 on
+      // every row while the unit test — which uses the other entry point — read
+      // it correctly"). Read-only observability: `sc.cg` is already filled by
+      // the solve, and copying four ints out of it cannot move a design byte.
+      ob.cg_geneo_dim = sc.cg.geneo_dim;
+      ob.cg_geneo_action = sc.cg.geneo_action;
+      ob.cg_geneo_burn = sc.cg.geneo_trigger_burn;
+      ob.cg_geneo_threshold = sc.cg.geneo_threshold;
+      // ★ AND THE HONEST WORK UNIT, for the same reason and in the same breath.
+      // `matvecs` exists because the CG iteration count is NOT cost when an
+      // accelerator is armed: a coarse-operator refresh is N_t operator applies
+      // and moves no iteration counter at all (simp.hpp, IterationPhaseTimes:
+      // "the apply count is the honest work unit when the CG iteration count is
+      // not"). Without it a GenEO arm that engages reports FEWER CG iterations
+      // while doing MORE work, and the table would read as a win. The two
+      // GenEO timing splits come with it because they are what price the
+      // refresh against the deflation in wall terms.
+      ob.phases.fea_solves = simp_compliance_call_count() - solves0;
+      ob.phases.matvecs = fea_matvec_count() - matvecs0;
+      ob.phases.solver_geneo_setup_ms = sc.cg.t_geneo_setup_ms;
+      ob.phases.solver_geneo_apply_ms = sc.cg.t_geneo_apply_ms;
+      // ── ★★ AND THE WALL ITSELF, WHICH THIS PATH LEFT BLANK FROM PR 325 UNTIL
       //    2026-08-13 ─────────────────────────────────────────────────────────
       //
-      // `iterations.csv` has `total_ms`, `solve_ms`, `fea_ms`, `sens_ms` and
-      // `analysis_ms`; the SIMP path fills them (94,613.450 on his rung 0.68's
-      // first iteration) and THIS PATH WROTE 0.000 IN ALL OF THEM ON EVERY ROW
-      // OF EVERY RUN. The block above was filled and this one was not, so a
-      // parametric run's record carried its compliance and its CG counters and
-      // nothing at all about where its time went.
+      // ★ THE FOUR LINES ABOVE AND THE FOUR BELOW WERE ADDED BY TWO DIFFERENT
+      // TASKS, AND THE MERGE IS WHERE THEIR REASONING HAD TO BE RECONCILED. The
+      // work-counter block arrived with the sentence "the rest of
+      // IterationPhaseTimes is left at its defaults: the PLSM loop has no
+      // filter, no projection and no OC/MMA density update, so filling those
+      // columns would be inventing phases that did not run." ★ THAT IS RIGHT
+      // ABOUT `filter_ms`, `project_ms` AND `update_ms` AND WRONG ABOUT
+      // `total_ms`. The iteration's own wall is not a phase that did not run —
+      // it is the phase that ran, unrecorded. `iterations.csv` carried 0.000 in
+      // `total_ms`, `solve_ms` and `fea_ms` on every row of every parametric run
+      // while the SIMP path filled them (94,613.450 on his rung 0.68's first
+      // iteration), which reads as "measured, and it was zero" rather than
+      // "never measured".
       //
-      // ★ IT WAS FOUND BY NEEDING THE NUMBER, NOT BY READING THE CODE: the
-      // task's own cost table divided by `total_ms` and got a zero. That is the
-      // shape of gap this file's own comment warns about six lines up — "a run
-      // that reports nothing is not a production path" — and the loop had got
-      // the ROWS right and left the COLUMNS blank, which reads as "measured, and
-      // it was zero" rather than "never measured".
+      // ★ FOUND BY NEEDING THE NUMBER, NOT BY READING THE CODE: this task's own
+      // cost table divided by `total_ms` and got a zero.
       //
-      // ★ ONLY THE TERMS THIS LOOP ACTUALLY HAS ARE FILLED. There is no density
-      // filter and no projection on this path, so `filter_ms` and `project_ms`
-      // stay 0 — that is a true statement about the trajectory, not a gap. The
-      // sub-cell sampling and the sensitivity scatter have no SIMP analogue and
-      // are reported on the receipt (`frac_sample_wall_s`, `frac_sens_wall_s`)
-      // rather than folded into a column that would then mean two things.
-      // ★ `residual_ms` IS FILLED HONESTLY AND IS THE POINT OF THE PARTITION.
-      // `IterationPhaseTimes`' own contract is that the named phases are
-      // subtracted from the iteration's wall and whatever is left is REPORTED,
-      // so time going somewhere unnamed is visible in the CSV instead of
-      // inferred. On this path the unnamed part is the offset bisection, the
-      // sub-cell sampling, the MMA step and the re-fit — real work with no SIMP
-      // analogue — and it belongs in the residual rather than in a column that
-      // would then mean two different things on two paths.
+      // ★ `residual_ms` IS THE POINT OF THE PARTITION AND IS FILLED HONESTLY.
+      // The named phases are subtracted from the iteration's wall and whatever
+      // is left is REPORTED, so time going somewhere unnamed is visible in the
+      // CSV instead of inferred. Here the unnamed part is the offset bisection,
+      // the sub-cell sampling, the MMA step and the re-fit — real work with no
+      // SIMP analogue. The two GenEO splits above are a SUB-split of `solve_ms`
+      // and not extra terms (simp.hpp), so subtracting `solve_ms` alone does not
+      // double-count them. `filter_ms` and `project_ms` stay 0 because this path
+      // genuinely has neither, which is a true statement rather than a gap.
       ob.phases.total_ms = (steady_s() - t_it0) * 1000.0;
       ob.phases.solve_ms = sc.t_solve_ms;
       ob.phases.fea_ms = sc.t_solve_ms;

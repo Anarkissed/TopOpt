@@ -1,0 +1,21 @@
+ctest — 100% of what this build configures, and the denominator is stated
+=======================================================================
+
+  119/119 PASSED   (total 2725 s)
+
+★ THE DENOMINATOR IS 119, NOT THE 121 REGISTERED, and that gap is named
+  rather than left for CI to find. Two tests are registered in
+  core/CMakeLists.txt and NOT configured in this build:
+
+      export_3mf
+      threemf_import
+
+  Both are lib3mf-gated. CI builds with lib3mf, so CI's denominator is 121
+  and this local pass does not cover those two. Nothing in this task's diff
+  touches 3MF import or export — the changed files are multigrid.cpp,
+  plsm.cpp, run_job.cpp, fea.hpp, job.hpp and two test/harness files — but
+  'my diff should not affect them' is a claim, not a result, and CI is
+  where it gets checked.
+
+See the memory note local-ctest-denominator-is-not-cis for why this is
+written down every time.
