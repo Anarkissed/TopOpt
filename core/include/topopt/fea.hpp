@@ -1090,6 +1090,31 @@ long long fea_geneo_decisions_dropped();
 void fea_matfree_reset_mg_stagnation_latch();
 bool fea_matfree_mg_stagnation_latched();
 
+// MEASUREMENT-ONLY latch RE-ARM (task solver-speed-arm-and-diagnose). Handoff
+// 2026-07-27-mg-stagnation-phase0 refuted the rung-boundary re-arm on synthetic
+// fixtures and then named, in its own §7, the one thing it could not do: run
+// the MAINTAINER'S part with the latch disabled, so the developed-rung verdict
+// is OBSERVED rather than inferred. This is that flag.
+//
+//   0 (THE DEFAULT, and what production runs) — the shipped policy: once
+//     latched, the run never attempts a hierarchy again. No production caller
+//     sets anything else, so every production artifact is byte-identical.
+//   n > 0 — after n consecutive LATCHED solves, clear the latch and let ONE
+//     solve attempt a hierarchy again. n = 1 attempts MG on every solve. A
+//     retry that stagnates re-latches immediately (it does not pay the
+//     kMgLatchThreshold count again), so the probe's tax is one wasted
+//     hierarchy build plus one wasted cycle budget per period.
+//
+// The period survives fea_matfree_reset_mg_stagnation_latch() (which the driver
+// calls at run start and which zeroes the latch state and both counters below),
+// so a harness can set the posture before the run and have it hold.
+// `_attempts` counts retries granted, `_carries` how many of those CONVERGED —
+// the single number the re-arm question turns on. Both are 0 in production.
+void fea_matfree_set_mg_rearm_period(int period);
+int fea_matfree_mg_rearm_period();
+long long fea_matfree_mg_rearm_attempts();
+long long fea_matfree_mg_rearm_carries();
+
 // PARITY PADDING of the multigrid index space (task: multigrid-odd-axis-cliff;
 // scope widened by task multigrid-deep-block-pad). A grid the coarsening rule
 // rejects — a single odd fine axis (e.g. the real 128x31x118 run) or an

@@ -1,0 +1,11 @@
+Wed Aug 12 05:30:25 EDT 2026
+ 5:30  up 33 days, 12:07, 2 users, load averages: 23.08 19.46 14.82
+--- concurrent topopt processes ---
+61341 134.9%cpu /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/solver-speed-accelerators-diagnose-436a6d/build/topopt-cli run job_fast5.json --out
+61626 96.1%cpu ./build/topopt-cli run /tmp/plsmsmoke/job.json --out
+61948 1.8%cpu /bin/zsh -c source /Users/nadim/.claude/shell-snapshots/snapshot-zsh-1786526451679-lhm4nj.sh
+43005 0.0%cpu /Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python /Applications/TopOpt Worker.app/Contents/Resources/topopt_worker.py --cli
+61954 0.0%cpu /bin/zsh -c source /Users/nadim/.claude/shell-snapshots/snapshot-zsh-1786526451679-lhm4nj.sh
+61621 0.0%cpu /bin/zsh -c source /Users/nadim/.claude/shell-snapshots/snapshot-zsh-1786525013928-euqg5z.sh
+61340 0.0%cpu /bin/zsh -c source /Users/nadim/.claude/shell-snapshots/snapshot-zsh-1786526451679-lhm4nj.sh
+61338 0.0%cpu /bin/zsh -c source /Users/nadim/.claude/shell-snapshots/snapshot-zsh-1786526451679-lhm4nj.sh

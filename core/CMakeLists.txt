@@ -1675,6 +1675,24 @@ if(OpenCASCADE_FOUND)
     tests/harness/levelset_probe.cpp)
   target_link_libraries(levelset_probe PRIVATE topopt)
 
+  # Task solver-speed-arm-and-diagnose: the two built accelerators (GenEO's
+  # two-level deflation and the geometric V-cycle) are armed and not running, and
+  # every prior measurement of either was taken on a PROXY whose own text named
+  # the gap — geneo-standing-probe priced the refresh at an operating point the
+  # shipped job has since left, and mg-stagnation-phase0 §7 said outright that the
+  # developed-rung verdict "requires the maintainer's actual part". run_job.cpp is
+  # compiled into libtopopt, so this harness drives HIS captured job through the
+  # PRODUCTION driver while varying only switches production already has and does
+  # not write (fea_set_mg_algebraic_level1, the measurement-only latch re-arm, the
+  # GenEO probe surface whose defaults ARE the shipped tripwire constants). No
+  # production default moves; the `base` arm applies nothing and is the control.
+  # EXCLUDE_FROM_ALL like every other harness here, so CI never builds it.
+  #   cmake --build build --target solver_arm_sweep
+  #   ./build/solver_arm_sweep <job.json> <out_dir> --arm base --threads 6
+  add_executable(solver_arm_sweep EXCLUDE_FROM_ALL
+    tests/harness/solver_arm_sweep.cpp)
+  target_link_libraries(solver_arm_sweep PRIVATE topopt)
+
   # ARM 1 (task 2026-08-10-parametric-level-set): THE GATE. Fits an ANALYTIC
   # phi(x) = sum_i alpha_i psi_i(x) to a design we already have, and extracts the
   # surface FROM THE FUNCTION on a refined lattice rather than from a resample of
