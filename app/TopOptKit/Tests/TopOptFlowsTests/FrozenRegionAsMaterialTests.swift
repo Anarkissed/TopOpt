@@ -1,0 +1,201 @@
+// FrozenRegionAsMaterialTests.swift — task 2026-08-13-lattice-as-a-material, §7.
+//
+// §7b — the face card already stated what the barrier HANDS the lattice in grams
+//       (PR 328 §0b). It stopped one multiplication short of the number the
+//       feature exists for: what that material WEIGHS as a lattice, and the
+//       difference.
+// §7a — a declared region needs a DENSITY control, and it must default to AUTO,
+//       which ★ can never produce a refusal.
+// §7c — a region using the rho -> stiffness law outside its validity range must
+//       show as such, and the card's own verdict is where.
+//
+// ★ THE LAST TEST HERE IS THE ONE THIS FILE IS PAID FOR. "tests on value types
+// miss call sites" has shipped FIVE times in this repository: a derivation is
+// unit-tested, the view never calls it, the control is dead on the device and
+// the suite is green. So the last test reads WorkspacePlaceholder.swift and
+// asserts the card row renders the two new numbers and the control writes the
+// settings key the job carries.
+
+import XCTest
+import TopOptKit
+@testable import TopOptFlows
+
+@MainActor
+final class FrozenRegionAsMaterialTests: XCTestCase {
+
+    private static let repoRoot: URL = {
+        var u = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { u.deleteLastPathComponent() }
+        return u
+    }()
+
+    /// Core's own numbers, through the bridge — never an app-side literal.
+    /// `app-octet-strut-law-differs-from-core` measured what a copy costs: 1.4x.
+    private let topology = LatticeType.octet
+    private var bounds: TopOptKit.LatticeCellBounds {
+        TopOptKit.latticeCellBounds(topology: topology.id, minExtrudableWidthMM: 0.45)
+    }
+    private var limits: TopOptKit.LatticeLimits {
+        TopOptKit.latticeLimits(topology: topology.id)
+    }
+
+    /// A slab thick enough that the two bounds do not cross, so the card is
+    /// `certified` and the mass arithmetic is what is under test.
+    private func card(depthMM: Double = 30, heldVoxels: Int = 10_000,
+                      declared: Double? = nil) -> LatticeFaceCard {
+        LatticeFaceCardDerivation.card(
+            faceID: 16, depthMM: depthMM, heldVoxels: heldVoxels,
+            spacingMM: 1.705279303, densityGCM3: 1.24, topology: topology,
+            bounds: bounds, limits: limits, declaredDensity: declared,
+            minExtrudableWidthMM: 0.45)
+    }
+
+    // ── §7b: what it will weigh, and the difference ──────────────────────────
+
+    func testTheCardStatesWhatTheMaterialWeighsAsALatticeAndTheDifference() {
+        let c = card()
+        XCTAssertGreaterThan(c.heldMassG, 0)
+        XCTAssertGreaterThan(c.relativeDensity, 0)
+        // The arithmetic is core's own mass accounting: a latticed voxel counts
+        // its relative density, a solid one counts 1.
+        XCTAssertEqual(c.latticedMassG, c.heldMassG * c.relativeDensity,
+                       accuracy: 1e-9)
+        XCTAssertEqual(c.savedMassG, c.heldMassG - c.latticedMassG, accuracy: 1e-9)
+        XCTAssertGreaterThan(c.savedMassG, 0, "a lattice below solid must save mass")
+        XCTAssertTrue(c.savedText.hasPrefix("−"),
+                      "the saving is mass LEAVING the part: \(c.savedText)")
+    }
+
+    /// A card with nothing to lattice must show a dash, not "0.0 g saved" —
+    /// they read very differently to someone deciding whether to drag further.
+    func testNoMaterialShowsADashRatherThanZeroGrams() {
+        let c = card(heldVoxels: 0)
+        XCTAssertEqual(c.verdict, .noMaterial)
+        XCTAssertEqual(c.latticedText, "—")
+        XCTAssertEqual(c.savedText, "—")
+    }
+
+    // ── §7a: the control, and AUTO ───────────────────────────────────────────
+
+    func testAutoIsTheDefaultAndIsAbsence() throws {
+        let s = LatticeSettings()
+        XCTAssertTrue(s.frozenRegionDensity.isEmpty,
+                      "Auto is the default on every control (lattice-page §4)")
+        let round = try JSONDecoder().decode(
+            LatticeSettings.self, from: try JSONEncoder().encode(s))
+        XCTAssertEqual(round.frozenRegionDensity, s.frozenRegionDensity)
+    }
+
+    func testAnOlderSnapshotWithoutTheKeyDecodesToAuto() throws {
+        let json = Data("""
+        {"enabled":true,"topologyID":"octet","cellMM":2,
+         "minRelativeDensity":0,"maxRelativeDensity":1,
+         "includePrimitives":[],"boundary":"fullSkin","densityMode":"uniform",
+         "paintedIncludeFaces":[],"paintDepthMM":4,"groupRoles":{}}
+        """.utf8)
+        let s = try JSONDecoder().decode(LatticeSettings.self, from: json)
+        XCTAssertTrue(s.frozenRegionDensity.isEmpty)
+    }
+
+    func testADeclaredDensityRoundTripsAndMovesTheCard() throws {
+        let id = UUID()
+        var s = LatticeSettings()
+        s.frozenRegionDensity[id] = 0.45
+        let round = try JSONDecoder().decode(
+            LatticeSettings.self, from: try JSONEncoder().encode(s))
+        XCTAssertEqual(round.frozenRegionDensity[id], 0.45)
+
+        let auto = card()
+        let declared = card(declared: 0.45)
+        XCTAssertEqual(declared.relativeDensity, 0.45, accuracy: 1e-9)
+        XCTAssertGreaterThan(declared.latticedMassG, auto.latticedMassG,
+                             "a denser declaration must weigh more")
+        XCTAssertLessThan(declared.savedMassG, auto.savedMassG)
+    }
+
+    /// ★ AUTO CAN NEVER REFUSE. Swept across depths from far under core's
+    /// printability floor to far over it, Auto must never produce a verdict the
+    /// user cannot proceed from — `outOfRegime` still BUILDS and says so; what it
+    /// must never be is an error the default state puts the page into.
+    func testAutoNeverRefusesAtAnyDepth() {
+        for d in stride(from: 0.5, through: 60.0, by: 0.5) {
+            let c = card(depthMM: d)
+            XCTAssertNotEqual(c.verdict, .noMaterial,
+                              "Auto produced 'no material' with material present at depth \(d)")
+            XCTAssertGreaterThan(c.relativeDensity, 0,
+                                 "Auto must always pick a density (depth \(d))")
+            XCTAssertGreaterThan(c.cellMM, 0,
+                                 "Auto must always pick a cell (depth \(d))")
+        }
+    }
+
+    /// SOLID is 1.0 and it emits NO lattice — core's own `kLatticeSolidAt` rule,
+    /// which is what lets bar R1 be exact rather than merely tight.
+    func testDeclaringSolidEmitsNoLatticeAndSavesNothing() {
+        let c = card(declared: 1.0)
+        XCTAssertEqual(c.verdict, .noMaterial)
+        XCTAssertEqual(c.relativeDensity, 0)
+        XCTAssertEqual(c.savedMassG, 0, accuracy: 1e-12)
+        XCTAssertGreaterThan(c.heldMassG, 0, "the material is still there — it is solid")
+    }
+
+    // ── §7c: outside the law's validity range, and it SHOWS ──────────────────
+
+    /// A slab too thin for the two bounds to both hold is out of regime: the
+    /// stiffness law is being used outside its validity range and the card says
+    /// so rather than stamping the part certified.
+    func testATooThinSlabIsOutOfRegimeAndTheVerdictSaysSo() {
+        let thin = card(depthMM: 2.0)
+        XCTAssertEqual(thin.verdict, .outOfRegime,
+                       "2 mm cannot hold \(bounds.cellsPerMemberFloor) cells at "
+                     + "core's \(bounds.printabilityFloorMM) mm printability floor")
+        XCTAssertEqual(thin.verdict.label, "Out of regime")
+        let thick = card(depthMM: 40)
+        XCTAssertEqual(thick.verdict, .certified)
+    }
+
+    /// A DECLARED density whose strut is thinner than one bead is refused, NOT
+    /// silently raised — raising it would print a heavier lattice than the user
+    /// asked for and report the lighter one.
+    func testADeclaredDensityThatCannotPrintIsRefusedNotClamped() {
+        // The band floor at a cell this coarse prints; force a thin one by
+        // declaring right at the band's bottom on a slab whose Auto cell is fine.
+        let c = LatticeFaceCardDerivation.card(
+            faceID: 16, depthMM: 8, heldVoxels: 1000, spacingMM: 1.0,
+            densityGCM3: 1.24, topology: topology, bounds: bounds, limits: limits,
+            declaredDensity: limits.rhoMin, minExtrudableWidthMM: 5.0)
+        XCTAssertEqual(c.verdict, .outOfRegime)
+        XCTAssertEqual(c.relativeDensity, limits.rhoMin, accuracy: 1e-9,
+                       "the declaration is reported as made, never quietly raised")
+    }
+
+    /// One out-of-regime region must not stamp the whole part, and the part
+    /// verdict must be stated ALONGSIDE the counts.
+    func testOneOutOfRegimeRegionDoesNotSilentlyStampThePart() {
+        let s = LatticeFaceCardDerivation.partSummary([card(depthMM: 40),
+                                                       card(depthMM: 2)])
+        XCTAssertEqual(s.verdict, .outOfRegime)
+        XCTAssertEqual(s.certified, 1)
+        XCTAssertEqual(s.outOfRegime, 1)
+    }
+
+    // ── ★ THE CALL SITE ──────────────────────────────────────────────────────
+
+    func testTheCardRowRendersTheNewNumbersAndTheControlIsWired() throws {
+        let src = try String(contentsOf: Self.repoRoot.appendingPathComponent(
+            "app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift"),
+            encoding: .utf8)
+        XCTAssertTrue(src.contains("metricChip(c.latticedText, \"as lattice\")"),
+                      "the card row must show what the material weighs as a lattice")
+        XCTAssertTrue(src.contains("metricChip(c.savedText, \"saved\")"),
+                      "the card row must show the difference — the whole point")
+        XCTAssertTrue(src.contains("latticeDensityControl(g)"),
+                      "the per-region density control must be rendered")
+        XCTAssertTrue(src.contains("project.lattice.frozenRegionDensity.removeValue"),
+                      "Auto must be selectable, and Auto is ABSENCE — a stored "
+                    + "default would make the app the author of core's number")
+        XCTAssertTrue(src.contains("declaredDensity: declaredCopy[fid]"),
+                      "the declaration must reach the card derivation, or the "
+                    + "control is decoration")
+    }
+}

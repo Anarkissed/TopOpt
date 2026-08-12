@@ -1,0 +1,68 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+== lattice_material_probe — a frozen region as a MATERIAL ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+stage       law   rung 0.68   cell 2 mm   nozzle 0.45 mm   threads 3
+
+-- M0(a) THE FIT: what the optimiser actually sees --
+   topology            octet
+   measured rows       19   (lattice_resolved_rows — CORE, never a transcript)
+   certifiable band    [0.050470, 0.899880]
+   trustworthy to STEER a loop on   YES
+   fit order           4 terms, origin-anchored C(0) = 0
+   solid triplet at rho=1  C11 5185.7585  C12 2554.1796  C44 1315.7895
+   isotropic solid         C11 5185.7585  C12 2554.1796  C44 1315.7895
+   |curve(1) - isotropic|  0.000e+00  0.000e+00  0.000e+00   (relative)
+
+-- M0(b) THE ASYMPTOTIC LAW THE OPTIMISER MUST NEVER SEE --
+   Gibson-Ashby E*/Es = C rho^m is fitted here to the MEASURED rows' own
+   effective Young's modulus so the comparison is like for like, then the
+   two are differenced ROW BY ROW. `lattice-phase0` M2 measured this gap at
+   23-52% with an exponent near 2.0, OVER-PREDICTING stiffness.
+
+   fitted Gibson-Ashby   E*/Es = 0.794431 rho^1.6783   (over 19 measured rows)
+        rho  measured E*/Es       G-A E*/Es   G-A error
+     0.0505    7.117433e-03    5.288281e-03     -25.70%
+     0.0635    9.336631e-03    7.785488e-03     -16.61%
+     0.0811    1.257748e-02    1.172034e-02      -6.81%
+     0.0988    1.608173e-02    1.633321e-02      +1.56%
+     0.1191    2.046220e-02    2.233605e-02      +9.16%
+     0.1476    2.746546e-02    3.204086e-02     +16.66%
+     0.2041    4.451538e-02    5.519326e-02     +23.99%
+     0.2530    6.334655e-02    7.910565e-02     +24.88%
+     0.2973    8.183293e-02    1.037353e-01     +26.76%
+     0.3979    1.397772e-01    1.691494e-01     +21.01%
+     0.5064    2.311359e-01    2.536040e-01      +9.72%
+     0.5909    3.213000e-01    3.285624e-01      +2.26%
+     0.6151    3.491588e-01    3.514190e-01      +0.65%
+     0.6550    3.986349e-01    3.905444e-01      -2.03%
+     0.6987    4.658545e-01    4.352461e-01      -6.57%
+     0.7521    5.448544e-01    4.924993e-01      -9.61%
+     0.7975    6.187137e-01    5.434445e-01     -12.17%
+     0.8512    7.216072e-01    6.062143e-01     -15.99%
+     0.8999    8.137535e-01    6.655228e-01     -18.22%
+   WORST +26.76% at rho 0.2973. This is the error the fitted curve does NOT
+   inherit, because it interpolates the rows instead of an exponent.
+
+-- M0(c) THE VALIDITY RANGE, IN CELLS PER MEMBER --
+   certifiable floor N*      5.0000  (lattice_cells_per_member_min)
+   percolation floor         1.0000  (lattice_percolation_cells_per_member_min)
+   printability floor cell   4.931378 mm at a 0.45 mm nozzle
+   member   3.0 mm  feasible NO   min certifiable member  5.8659 mm  cells at cell 2 mm:  1.50
+   member   5.0 mm  feasible NO   min certifiable member  5.8659 mm  cells at cell 2 mm:  2.50
+   member   8.0 mm  feasible yes  min certifiable member  5.8659 mm  cells at cell 2 mm:  4.00
+   member  10.0 mm  feasible yes  min certifiable member  5.8659 mm  cells at cell 2 mm:  5.00
+   member  12.0 mm  feasible yes  min certifiable member  5.8659 mm  cells at cell 2 mm:  6.00
+   member  15.0 mm  feasible yes  min certifiable member  5.8659 mm  cells at cell 2 mm:  7.50
+   member  20.0 mm  feasible yes  min certifiable member  5.8659 mm  cells at cell 2 mm: 10.00
+   member  25.0 mm  feasible yes  min certifiable member  5.8659 mm  cells at cell 2 mm: 12.50
+
+   OUTSIDE THE RANGE the law is not softened and not extrapolated: the
+   region is REFUSED (bar B4). `lattice_derive_cell_for_member` gives the
+   number a user acts on — the thinnest member that could clear the floor at
+   this nozzle at ANY (cell, density) pair in the band.

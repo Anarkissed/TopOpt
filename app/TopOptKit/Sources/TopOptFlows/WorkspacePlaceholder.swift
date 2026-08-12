@@ -4405,10 +4405,45 @@ public struct WorkspacePlaceholder: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(DS.Color.textTertiary.color)
             }
+            // ★ §7a — THE DENSITY CONTROL, AND IT DEFAULTS TO AUTO. Every control
+            // on this page defaults to Auto and ★ AUTO MUST NEVER PRODUCE A
+            // REFUSAL: Auto picks inside core's certifiable band, so there is
+            // always an admissible answer. A typed number is MODE 1 — a declared
+            // constant density, which is the constant case of the same graded
+            // field — and "Solid" is 1.0, which emits no lattice at all.
+            latticeDensityControl(g)
             Spacer(minLength: 0)
             if let c = card { latticeFaceCardChips(c) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private func latticeDensityControl(_ g: SelectionGroup) -> some View {
+        let f = project.lattice.frozenRegionDensity[g.id]
+        Menu {
+            Button("Auto") {
+                project.lattice.frozenRegionDensity.removeValue(forKey: g.id)
+                refreshLatticeFaceCards()
+            }
+            ForEach([0.30, 0.45, 0.60, 0.75], id: \.self) { v in
+                Button(String(format: "%.0f%%", v * 100)) {
+                    project.lattice.frozenRegionDensity[g.id] = v
+                    refreshLatticeFaceCards()
+                }
+            }
+            Button("Solid") {
+                project.lattice.frozenRegionDensity[g.id] = 1.0
+                refreshLatticeFaceCards()
+            }
+        } label: {
+            Text(f == nil ? "Auto"
+                 : (f! >= 1.0 ? "Solid" : String(format: "%.0f%%", f! * 100)))
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Self.clearanceTint)
+                .padding(.vertical, 3).padding(.horizontal, DS.Space.xs)
+                .background(Capsule().fill(Self.clearanceTint.opacity(0.16)))
+        }
+        .accessibilityIdentifier("lattice-density-\(g.id.uuidString)")
     }
 
     /// The per-region verdict core computes and the app used to discard (§5a):
@@ -4419,6 +4454,12 @@ public struct WorkspacePlaceholder: View {
             : (c.verdict == .outOfRegime ? DS.Color.warning : DS.Color.textQuaternary)
         return HStack(spacing: DS.Space.xs) {
             metricChip(c.heldText, "hands over")
+            // ★ WHAT IT WILL WEIGH, AND THE DIFFERENCE (task 2026-08-13-lattice-
+            // as-a-material §7b). "hands over" alone is half a sentence: the
+            // reason to hand material to a lattice is what comes back lighter,
+            // and that number was one multiplication away and not on screen.
+            metricChip(c.latticedText, "as lattice")
+            metricChip(c.savedText, "saved")
             metricChip(c.cellText, "cell")
             metricChip(c.densityText, "density")
             metricChip(c.strutText, "strut")
@@ -4460,6 +4501,13 @@ public struct WorkspacePlaceholder: View {
         let widthMM = project.printParams.strutLineWidthMM
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
+        // §7a — the user's per-region density, or nil for AUTO. Captured with the
+        // rest of the inputs so the detached task reads a value, not the model.
+        var declared: [Int: Double] = [:]
+        for (fid, gid) in groupForFace {
+            if let d = project.lattice.frozenRegionDensity[gid] { declared[fid] = d }
+        }
+        let declaredCopy = declared
         Task.detached(priority: .userInitiated) {
             let bounds = TopOptKit.latticeCellBounds(topology: topology.id,
                                                      minExtrudableWidthMM: widthMM)
@@ -4474,7 +4522,9 @@ public struct WorkspacePlaceholder: View {
                     faceID: fid, depthMM: depthsCopy[i],
                     heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topology: topology,
-                    bounds: bounds, limits: limits)
+                    bounds: bounds, limits: limits,
+                    declaredDensity: declaredCopy[fid],
+                    minExtrudableWidthMM: widthMM)
             }
             await MainActor.run {
                 guard token == latticeCardsToken else { return }   // a newer drag won

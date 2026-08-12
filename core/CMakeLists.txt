@@ -1687,12 +1687,15 @@ if(OpenCASCADE_FOUND)
   # assignment table through `analyze_fixed_design` — the shipped certification,
   # in the shipped isolated posture — over the committed reference bakeoff's
   # converged rungs. Writes no FEA of its own.
-  #   cmake --build build --target lattice_material_probe
-  #   ./build/lattice_material_probe <part.step> <materials.json> <ref/design.bin> \
+  # ★ NOT `lattice_material_probe` — that name is TAKEN, by the multiscale-
+  # lattice-feasibility probe that measures the C(rho) fit's own bars. This one
+  # is about a FROZEN REGION, which is a different subject on the same library.
+  #   cmake --build build --target frozen_lattice_probe
+  #   ./build/frozen_lattice_probe <part.step> <materials.json> <ref/design.bin> \
   #       <out> --stage law|regions|r1|assign|loop|cost
-  add_executable(lattice_material_probe EXCLUDE_FROM_ALL
-    tests/harness/lattice_material_probe.cpp)
-  target_link_libraries(lattice_material_probe PRIVATE topopt)
+  add_executable(frozen_lattice_probe EXCLUDE_FROM_ALL
+    tests/harness/frozen_lattice_probe.cpp)
+  target_link_libraries(frozen_lattice_probe PRIVATE topopt)
 
   # ARM 1 (task 2026-08-10-parametric-level-set): THE GATE. Fits an ANALYTIC
   # phi(x) = sum_i alpha_i psi_i(x) to a design we already have, and extracts the

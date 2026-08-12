@@ -410,6 +410,30 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// out while he decides what to do about it.
     public var requireVoidReachesExterior: Bool
 
+    /// ★ THE PER-REGION LATTICE DENSITY (task 2026-08-13-lattice-as-a-material,
+    /// §7a), keyed by `SelectionGroup.id` exactly as `groupRoles` is — an
+    /// attribute over the ONE `SelectionModel`, never a second group store.
+    ///
+    /// A DECLARED region carrying a fixed relative density is MODE 1; the
+    /// optimiser choosing a graded density field over the region is MODE 2. They
+    /// are one mechanism — a fixed density IS a constant density field — so this
+    /// is one control with two settings and not two features:
+    ///
+    ///   ABSENT (the default)  AUTO. The optimiser picks the density, graded, and
+    ///                         it is bounded by core's own certifiable band, so
+    ///                         ★ AUTO CAN NEVER PRODUCE A REFUSAL — there is
+    ///                         always an admissible density in the band for it to
+    ///                         choose. That is the lattice-page redesign §4 rule,
+    ///                         and it is the reason Auto is the default here.
+    ///   PRESENT               the user's fixed relative density f. 1.0 means
+    ///                         SOLID and emits no lattice at all, byte-identically
+    ///                         to not declaring the region (core's own C0 rule,
+    ///                         `kLatticeSolidAt`).
+    ///
+    /// Empty by default ⇒ absent from every older snapshot ⇒ those projects decode
+    /// unchanged (bar R1).
+    public var frozenRegionDensity: [UUID: Double]
+
     /// The FIRST include primitive — the legacy single-region accessor the existing
     /// gizmo plumbing (`placeLatticeRegion` / `moveLatticeRegion` / proxy scoping)
     /// reads and writes. One source of truth: this is a view over
@@ -459,7 +483,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 // Defaults ON, like core. Every other flag here defaults OFF
                 // because it adds behaviour; this one defaults ON because the
                 // maintainer armed the rule.
-                requireVoidReachesExterior: Bool = true) {
+                requireVoidReachesExterior: Bool = true,
+                frozenRegionDensity: [UUID: Double] = [:]) {
+        self.frozenRegionDensity = frozenRegionDensity
         self.retainSubfloorInUnloadedRegions = retainSubfloorInUnloadedRegions
         self.subfloorStressFraction = subfloorStressFraction
         self.subfloorPerRegion = subfloorPerRegion
@@ -501,6 +527,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // the enclosed-void rule's OFF control
         // (task 2026-08-06-arm-projection-and-void-check)
         case requireVoidReachesExterior
+        // the per-region lattice density (task 2026-08-13-lattice-as-a-material)
+        case frozenRegionDensity
     }
 
     public init(from decoder: Decoder) throws {
@@ -535,6 +563,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Absent from every pre-task snapshot ⇒ empty ⇒ every group falls back to
         // `paintDepthMM`, which is exactly the depth those projects emitted.
         groupDepthMM = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDepthMM) ?? [:]
+        // Absent from every snapshot older than this task, and the default is
+        // AUTO for every region, so an old project decodes to exactly what it
+        // always meant (bar R1).
+        frozenRegionDensity =
+            try c.decodeIfPresent([UUID: Double].self, forKey: .frozenRegionDensity) ?? [:]
         // Absent from every snapshot written before this task ⇒ off / core's own
         // number ⇒ those projects keep emitting exactly the job they emitted.
         retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
@@ -569,6 +602,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
+        try c.encode(frozenRegionDensity, forKey: .frozenRegionDensity)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
