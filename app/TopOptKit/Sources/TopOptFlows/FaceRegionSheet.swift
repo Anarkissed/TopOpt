@@ -230,9 +230,16 @@ public struct FaceRegionSheet: View {
     private func splitSection(_ region: FaceRegion) -> some View {
         Divider().overlay(DS.Color.strokeSubtle.color)
         VStack(alignment: .leading, spacing: DS.Space.m) {
+            // ★ THE LABELS FOLLOW THE FRAME. On a shared axis the two families
+            // are sectors AROUND it and slabs ALONG it; on the PCA fallback they
+            // are cuts across the long axis and across the short one. Calling
+            // both "Around/Along" would describe a rotation the split does not
+            // make.
             HStack {
-                stepper("Around", $sheet.gridN)
-                stepper("Along", $sheet.gridM)
+                let cyl = mesh.flatMap { sheet.gridPreview(of: region, in: $0) }
+                    .map { !$0.pcaFallback } ?? false
+                stepper(cyl ? "Around" : "Long axis", $sheet.gridN)
+                stepper(cyl ? "Along" : "Short axis", $sheet.gridM)
             }
             if let mesh, let preview = sheet.gridPreview(of: region, in: mesh) {
                 if preview.pcaFallback {
