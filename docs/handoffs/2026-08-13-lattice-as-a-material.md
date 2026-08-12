@@ -4,7 +4,7 @@ Evidence: `evidence/2026-08-13-lattice-as-a-material/`. The pre-registration
 (`r0_preregistration.md`) was **committed before the first arm ran** — commit
 `00eff24`, whose tree contains that file and nothing else under that directory.
 
-★ **THIS HANDOFF REPORTS AN INCOMPLETE MEASUREMENT CAMPAIGN AND SAYS SO IN §0.**
+★ **THE ASSIGNMENT TABLES ARE COMPLETE AT BOTH RUNGS; THE LOOP IS NOT RUN.**
 The mechanism is built and receipted, the law's validity range is measured, his
 frozen set is decomposed and priced, and **the assignment table is COMPLETE at
 BOTH rungs** — 8 cells at 0.68 and 6 at 0.26, failures included. ★ The light rung
@@ -14,8 +14,8 @@ settle the pre-registered mass bound **against** the feature for this part at th
 cell (§0.4), without the loop needing to run. ★ **Under the certificate's own per-voxel regime guard,
 NONE of the assignments measured is certifiable** (§0.3b), and the pre-registered
 margin bound is missed at every cell for a reason that is a defect in the bound
-(§0.3e). What did not run, and the measured cost that stopped it, are
-in §0.6 and §7. **Nothing below is estimated, and no gross saving is presented
+(§0.3e). What did not run — the loop (bar R4) and Mode 2's in-loop
+coupling — and the measured cost behind that, are in §0.6 and §7. **Nothing below is estimated, and no gross saving is presented
 as a saving.**
 
 ---
@@ -516,7 +516,7 @@ has shipped five times here.
 | **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
 | **R3** every arm at two rungs | ★ **HELD, and it paid for itself** — both tables complete (8/8 and 6/6), and the light rung REFUSED the region holding 73% of the prize while the shipped rung admitted it (§0.3b) |
-| **R4** NET, and margin as a curve | no optimised arm ran, so there is no curve and no NET number; **no gross number is presented as a saving anywhere**, and the app's own wording says so |
+| **R4** NET, and margin as a curve | **MISSED** — no optimised arm ran, so there is no curve and no NET number. **No gross number is presented as a saving anywhere**, the app's own wording says so, and §0.4 settles the mass bound from the certified tables instead |
 | **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
 | **R7** assertion census | **held** — §6 |
@@ -588,19 +588,30 @@ the floor is being enforced). **Nothing was removed.** The full run is in
 Stated plainly and separately, because scaling this task down is the
 maintainer's call and not mine.
 
-### 7.1 The measurement campaign (§2, §4 of the brief; bars R3, R4)
+### 7.1 ★ THE LOOP (§4c of the brief; bar R4) — the one measurement still owed
 
-M1 (regions and their strain energy), M2 (the assignment table at two rungs) and
-M3 (the loop) did not complete. The instrument is built, committed and runs;
-`evidence/…/queue.sh` is the queue in pre-registered order and is what to run.
+**M0, M1 and M2 all completed**, both rungs, every cell including the failures
+(§0.1–§0.3b). What did NOT run is **M3, the loop**: assign → re-optimise the
+remainder at the rung the freed mass allows → certify → step the densest region
+up one level → repeat.
 
-The cost, measured: one cold certification of his part is **tens of minutes** of
-plain CG at 1.47M DOFs (§0.6). The brief's ~20 certified runs is therefore a
-multi-hour campaign, and the brief's own §4(b) doubles it by requiring two rungs.
-`queue.sh` takes `M2_REGIONS` and `M2_DENSITIES` so the cap is on the command
-line and in the record rather than in a default, and the probe **prints the
-regions it skipped** — a table that silently omitted them would read as though
-they had been measured.
+So there is no NET number and no margin CURVE with a settling iteration, which is
+what bar R4 asks for. ★ **It is not, however, the thing standing between this and
+a decision**: §0.4 settles B3 against the feature from the two completed tables
+alone, because the only region surviving the ladder saves at most 8.68% GROSS at
+its worst-margin density and NET is strictly smaller. The loop would quantify how
+much smaller. Run it with `freed_mass_return` swept from 0.0 to 1.0 —
+`evidence/…/queue.sh` is the queue, in the pre-registered order.
+
+The cost, measured rather than assumed: **491–882 s per certified cell**, mean
+~610 s at the shipped rung and ~820 s at the light one, on 1.47M DOFs of plain CG
+(§0.6). The 14 cells reported here were ~4 hours of solve. A loop pass adds a
+full re-optimisation (60+ iterations) on top of a certification, per point.
+
+`queue.sh` takes `M2_REGIONS` and `M2_DENSITIES` from the environment so any cap
+is on the command line and in the record rather than hidden in a default, and the
+probe **prints the regions it skipped** — a table that silently omitted them would
+read as though they had been measured.
 
 ### 7.2 Mode 2's in-loop coupling (§3c)
 
