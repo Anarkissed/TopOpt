@@ -605,12 +605,23 @@ Two consequences, applied rather than merely noted:
    §Machine applied to the same condition, and §3 of the former demonstrated it
    directly: two runs of the identical posture, identical 394 iterations, **17.6 %
    apart in wall.**
-2. **The arms are shorter than planned, identically across arms.** Every arm caps
-   PLSM at the same small number of design iterations per rung instead of the
-   shipped 60. That is a reduction in COVERAGE, not in the comparison. It also
-   biases the table **against** GenEO: the solves are ~1,400 CG where his are
-   ~4,400, so the threshold the gate must clear is unchanged while the plain
-   solve it races got shorter. A GenEO win measured here would be conservative.
+2. **The arms are shorter than planned, identically across arms.** The arms cap
+   PLSM at **2** design iterations per rung and the probes at **1**, against the
+   shipped 60 — applied to the control as well as to every armed posture, so it
+   is a reduction in COVERAGE and not in the comparison. Two things follow, and
+   both cut in the safe direction:
+
+   * It biases the table **against** GenEO. The solves here run ~1,400 CG where
+     his run ~4,400, so the threshold the gate must clear is unchanged while the
+     plain solve it is racing got shorter. A GenEO win measured here would be a
+     conservative one.
+   * It does **not** weaken §2 or §4(a) at all, because the multigrid question is
+     decided in the first three solves of the run by construction
+     (`kMgLatchThreshold = 3`) and those solves are identical at any cap — 927 /
+     970, verified against his own run and against the production CLI (§R2).
+
+   What it genuinely does cost is R3's settling curve, and §6d says so rather
+   than presenting a two-point curve as one.
 
 ### 6b. ★ §1(b) — THE BASIS SWEEP DID NOT COMPLETE. BLOCKED, and reported as blocked.
 
