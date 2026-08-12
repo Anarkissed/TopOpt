@@ -221,11 +221,22 @@ print()
 print("=" * 100)
 print("TABLE 5 — ITEM 2(e), WHAT THE FRACTION COSTS ON THE PRODUCTION PATH")
 print("=" * 100)
-# ★ THE DENOMINATOR IS THE RUNG'S OWN ITERATION WALL, SUMMED FROM
-# `iterations.csv`'s `total_ms`, and NOT a run-level figure — `run_info.json`
-# does not carry one, and PR 327 quoted this as a share OF AN ITERATION (1.92%).
-# Taking it against a whole run would have made the number look smaller for the
-# arm that ran longer, which is the opposite of a cost.
+# ★★ THE DENOMINATOR IS THE RUNG'S WALL FROM `wall_ms` DELTAS, AND THE REASON IS
+# A DEFECT THIS TASK FOUND RATHER THAN A PREFERENCE. `iterations.csv` has a
+# `total_ms` column, the SIMP path fills it (94,613.450 on his rung 0.68's first
+# iteration), and ★ THE PLSM PATH WRITES 0.000 THERE ON EVERY ROW OF EVERY RUN
+# SINCE PR 325 — along with solve_ms, fea_ms, sens_ms and analysis_ms. Its
+# `observe` block fills the compliance and the CG counters and leaves the whole
+# timing block at its default. Using it would have divided by zero.
+#
+# `wall_ms` is an ABSOLUTE timestamp per iteration and is filled, so consecutive
+# differences give the per-iteration wall. The first iteration of a rung has no
+# predecessor inside that rung and is skipped, so the denominator is the wall of
+# iterations 2..n and the numerator is scaled to match.
+#
+# ★ AND IT IS A SHARE OF AN ITERATION, NOT OF A RUN, because that is what PR 327
+# quoted (1.92%). Against a whole run the number would shrink for the arm that
+# ran longer, which is the opposite of a cost.
 hdr = ("arm", "rung", "iters", "sampling s", "sensitivity s", "rung wall s",
        "share %", "cut cells")
 print(f"{hdr[0]:<14}{hdr[1]:<7}{hdr[2]:>7}{hdr[3]:>12}{hdr[4]:>15}"
@@ -243,10 +254,15 @@ for arm in ARMS:
         if not meta:
             continue
         rows_r = [r for r in iters if r.get("rung") == RUNG_INDEX[rung]]
-        wall = sum(fnum(r.get("total_ms"), 0.0) for r in rows_r) / 1000.0
+        ts = [fnum(r.get("wall_ms"), 0.0) for r in rows_r]
+        wall = (ts[-1] - ts[0]) / 1000.0 if len(ts) >= 2 else 0.0
+        n_span = max(1, len(ts) - 1)   # iterations the span actually covers
         smp = fnum(one(meta, "frac_sample_wall_s"), 0.0)
         sen = fnum(one(meta, "frac_sens_wall_s"), 0.0)
-        share = (smp + sen) / wall * 100.0 if wall > 0 else float("nan")
+        # The numerator is the WHOLE rung's sampling+sensitivity; scale it to the
+        # same n the denominator covers so the ratio is per-iteration.
+        scaled = (smp + sen) * n_span / max(1, len(ts))
+        share = scaled / wall * 100.0 if wall > 0 else float("nan")
         print(f"{arm:<14}{rung:<7}{len(rows_r):>7}{smp:>12.2f}{sen:>15.2f}"
               f"{wall:>13.1f}{share:>8.2f}%"
               f"{one(meta,'frac_cut_cells','0'):>11}")
@@ -256,3 +272,9 @@ print("  cells); `sensitivity` is the quadrature band plus the sample scatter.")
 print("  Both are ZERO on the Heaviside arms by construction — that is the")
 print("  positive control for the column, not a missing measurement.")
 print("★ PR 327 measured 1.92% of an iteration on the probe path at k = 4.")
+print("★★ AND THE WALL CLOCKS CARRY A CAVEAT THE ITERATION COUNTS DO NOT: this")
+print("   host was SHARED with other worktrees' jobs for part of the campaign")
+print("   (levelset_probe, solver_arm_sweep and a ctest binary were measured")
+print("   running concurrently). The DESIGNS are deterministic and unaffected;")
+print("   the wall clocks are not comparable at better than about 10%, which is")
+print("   the same caveat PR 327 section 3(a) states for the same reason.")
