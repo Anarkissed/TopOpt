@@ -137,6 +137,25 @@ struts in it and calling it a lattice". Arm C latticed every one of them, 14.2%
 of the part, at 424.3 g against a 543.7 g solid — **−119.4 g, −22.0%**. Same
 part, same faces, same design, same voxels. One number changed: the cell.
 
+**THREE OF THE FOUR RUNGS RAN before the maintainer took the machine back to
+attempt the run himself.** Every one tells the same story:
+
+| rung | A — his run | B — depths matched | C — matched + Auto |
+|---|---|---|---|
+| 0.38 | REFUSED (0 of 11,049) | REFUSED (0 of 15,164) | **15,164 of 15,164 · 365.1 g** |
+| 0.52 | REFUSED (0 of 11,622) | REFUSED (0 of 15,340) | **15,340 of 15,340 · 424.3 g** |
+| 0.68 | 370 of 12,817 · 536.9 g | 190 of 16,009 · 546.2 g | **16,009 of 16,009 · 490.6 g** |
+
+Arm C latticed **every candidate voxel at every rung it reached**, with zero solid
+fallback, all accepted. Arms A and B emitted nothing at all at two rungs out of
+three.
+
+★ **THE RUNG THAT WAS NOT REACHED IS 0.26, AND IT IS THE ONE TO WATCH.** It is
+the lightest rung, so its members are the thinnest, and thin members are exactly
+what `member_too_thin_for_cell` rejects. If "press Auto and it works" has a
+limit on this part, 0.26 is where it appears. Nothing here claims it: R1 is
+stated at the rungs that ran, and 0.26 is unmeasured.
+
 **Arm C is R1.** Auto takes core's own prescription — the per-region cell, 1.4 mm
 — and the same 16,009 voxels lattice **completely**: zero solid fallback, 43,816
 clipped struts, 14,959,524 triangles, margin 2949 against a required 1.5,
@@ -448,7 +467,7 @@ MATERIAL (the anchor-to-load walk, the pre-flight).
 
 | bar | status |
 |---|---|
-| **R1** demonstrably usable on his job | **MET, at two rungs.** 0.68: **16,009 latticed voxels (+22.8% on his 13,034), 13.0% of the part (his 12%), 490.6 g (his 507 g; solid 543.7 g)**. 0.52: **15,340 latticed, 14.2%, 424.3 g — −22.0% on solid**, where arms A and B are REFUSED outright. Zero solid fallback in both. Arm A reproduces his failure to 0.08% first. `s0_table.txt`. |
+| **R1** demonstrably usable on his job | **MET, at the three rungs that ran (0.38 / 0.52 / 0.68); 0.26 unmeasured.** 0.68: **16,009 latticed voxels (+22.8% on his 13,034), 13.0% of the part (his 12%), 490.6 g (his 507 g; solid 543.7 g)**. 0.52: **15,340 latticed, 14.2%, 424.3 g — −22.0% on solid**; 0.38: **15,164 latticed, 365.1 g**. Arms A and B are REFUSED outright at both. Zero solid fallback in both. Arm A reproduces his failure to 0.08% first. `s0_table.txt`. |
 | **R2** protection depth == lattice depth, asserted | **MET.** One store, one wire, and a core REFUSAL when they differ. `test_lattice_depth_tie`, `LatticeBarrierModelTests`. |
 | **R3** no wall of text | **MET.** Longest string added: the disclaimer, "A sample part. Your settings, not your result." — **8 words**. Asserted by `testNoWallOfTextAnywhereInTheNewUI` over every user-facing string the new UI can render. |
 | **R4** preview latency per interaction | **MET.** Table above; artifact `r4_preview_latency.txt` (RELEASE, quiet machine). The suite asserts the TESSELLATION CAP, not a wall clock: the timing assertion failed at 1033 ms while three 128³ ladders were saturating ten cores, and a bar that flips with the neighbours is not a bar. The cap is what makes it sub-second, so the cap is what is pinned; a 5 s ceiling still catches an order-of-magnitude regression. |
