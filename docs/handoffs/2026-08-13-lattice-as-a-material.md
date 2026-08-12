@@ -6,9 +6,9 @@ Evidence: `evidence/2026-08-13-lattice-as-a-material/`. The pre-registration
 
 ★ **THIS HANDOFF REPORTS AN INCOMPLETE MEASUREMENT CAMPAIGN AND SAYS SO IN §0.**
 The mechanism is built and receipted, the law's validity range is measured, his
-frozen set is decomposed and priced, and the assignment table is STARTED — six
-of its sixteen cells at one of its two rungs, and the five findings that fall
-out of them are in §0.3. ★ **Under the certificate's own per-voxel regime guard,
+frozen set is decomposed and priced, and the assignment table is COMPLETE at the
+shipped rung — all 8 cells, failures included — with five findings in §0.3. The
+LIGHT rung did not run. ★ **Under the certificate's own per-voxel regime guard,
 NONE of the assignments measured is certifiable** (§0.3b), and the pre-registered
 margin bound is missed at every cell for a reason that is a defect in the bound
 (§0.3e). What did not run, and the measured cost that stopped it, are
@@ -85,76 +85,83 @@ are what a reader needs. On the next pass the bound should key on the FRACTION
 below the floor, not the median — that is a change to make deliberately and in
 advance, not now.
 
-### 0.3 ★ The assignment table at the shipped rung — the rows in the record
+### 0.3 ★ The assignment table at the shipped rung — COMPLETE, all 8 cells
 
 `evidence/…/m2/r0.68/m2_assignment.csv`, rung 0.68, cell 2 mm, nozzle 0.45 mm,
-one certified analysis per cell through the shipped gate.
-Baseline (every region SOLID): **margin_effective 673.856, mass 543.724 g, ACCEPTED.**
+one certified analysis per cell through the shipped gate, **every cell reported
+including the failures**. Baseline (every region SOLID): **margin_effective
+673.856, mass 543.724 g, ACCEPTED**, 592.8 s.
 
-| region | f | mass | Δmass | **margin_eff** | Δ% | **solid-only** | Δ% | **strut** | regime | drain |
-|---|---|---|---|---|---|---|---|---|---|---|
-| load-pad-1 | 0.20 | — | — | — | — | — | — | — | — | ★ **REFUSED — the strut does not print at this cell and nozzle** |
-| load-pad-1 | 0.30 | 417.822 g | **−125.902** | 134.773 | −80.0% | 326.740 | −51.5% | 134.773 | ★ OUT | ok |
-| load-pad-1 | 0.45 | 444.801 g | −98.923 | 150.978 | −77.6% | 383.930 | −43.0% | 150.978 | ★ OUT | ok |
-| load-pad-1 | 0.60 | 471.780 g | −71.944 | **213.935** | −68.3% | 453.097 | −32.8% | 213.935 | ★ OUT | ok |
-| anchor-2 | 0.20 | — | — | — | — | — | — | — | — | ★ **REFUSED — printability** |
-| anchor-2 | 0.30 | 496.523 g | −47.201 | 173.117 | −74.3% | **665.609** | ★ **−1.2%** | 173.117 | ★ OUT | ok |
+| region | f | mass | Δmass | **margin_eff** | Δ% | **solid-only** | Δ% | **strut** | regime | drain | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| load-pad-1 | 0.20 | — | — | — | — | — | — | — | — | — | ★ **REFUSED — the strut does not print at this cell and nozzle** |
+| load-pad-1 | 0.30 | 417.822 | ★ **−125.902** | 134.773 | −80.00% | 326.740 | −51.5% | 134.773 | ★ OUT | ok | accepted |
+| load-pad-1 | 0.45 | 444.801 | −98.923 | 150.978 | −77.59% | 383.930 | −43.0% | 150.978 | ★ OUT | ok | accepted |
+| load-pad-1 | 0.60 | 471.780 | −71.944 | 213.935 | −68.25% | 453.097 | −32.8% | 213.935 | ★ OUT | ok | accepted |
+| anchor-2 | 0.20 | — | — | — | — | — | — | — | — | — | ★ **REFUSED — printability** |
+| anchor-2 | 0.30 | 496.523 | −47.201 | 173.117 | −74.31% | 665.609 | ★ −1.2% | 173.117 | ★ OUT | ok | accepted |
+| anchor-2 | 0.45 | 506.637 | −37.087 | 232.855 | −65.44% | 670.349 | ★ −0.5% | 232.855 | ★ OUT | ok | accepted |
+| anchor-2 | 0.60 | 516.752 | −26.972 | ★ **361.292** | −46.38% | 672.327 | ★ −0.2% | 361.292 | ★ OUT | ok | accepted |
 
 Every certified cell is ACCEPTED by the shipped gate (`margin_stop` = 1.5) and
-every one is DRAINABLE. Four findings, and the last one is the one that changes
-how this feature should be used.
+every one is DRAINABLE. Per-cell certification: 491–756 s, mean ≈ 610 s.
 
 ★ **(a) THE STRUT TERM BINDS IN EVERY ROW, AND IT IS WORTH UP TO 3.8x.**
 `margin_effective` equals `lattice_strut.margin_worst_case` **exactly, in all
-four**. Without §1(c)'s `gate_on_strut_strength` these cells would report the
-solid-only column — 2.4x, 2.5x, 2.1x and **3.8x** higher. That is failure mode M5
-precisely: a latticed region passing by not being looked at. `margin_effective_solid_only`
-keeps the number the gate would have used, so the term's cost is never invisible.
+six**. Without §1(c)'s `gate_on_strut_strength` these cells would report the
+solid-only column — 2.4x, 2.5x, 2.1x, 3.8x, 2.9x and 1.9x higher. That is failure
+mode M5 precisely: a latticed region passing by not being looked at.
+`margin_effective_solid_only` keeps the number the gate would have used, so the
+term's cost is never invisible.
 
-★ **(b) THE CERTIFICATE SAYS OUT OF REGIME ON *BOTH* REGIONS**, including
-`anchor-2` — whose median is **13.64** cells per member with **97.8%** of its
-voxels clearing the 5-cell floor. `lattice_region_validity` keys on the region's
-MEDIAN and admits both; `analyze_fixed_design` keys on the **thinnest latticed
-member** and flags both. ★ **Two instruments in this task disagree on every
-region measured, and the per-voxel one is the conservative one.** Bar B4 as
-pre-registered (on the median) is the weaker test; it is left as written because
-it was pre-registered, and the next pre-registration should key on the thinnest
-member or the fraction below the floor. Under the certificate's own guard, **no
-assignment in this table is certifiable**, and that is the honest reading of it.
+★ **(b) THE CERTIFICATE SAYS OUT OF REGIME ON EVERY CELL**, including all three
+`anchor-2` cells — a region whose median is **13.64** cells per member with
+**97.8%** of its voxels clearing the 5-cell floor. `lattice_region_validity` keys
+on the region's MEDIAN and admits both regions; `analyze_fixed_design` keys on
+the **thinnest latticed member** and flags every assignment. ★ **Two instruments
+in this task disagree on every cell measured, and the per-voxel one is the
+conservative one.** Bar B4 as pre-registered (on the median) is the weaker test;
+it is left as written because it was pre-registered, and the next pre-registration
+must key on the thinnest member. ★ **Under the certificate's own guard, NO
+assignment in this table is certifiable** — that is the honest reading, and it is
+the finding that should govern what happens next.
 
-★ **(c) LATTICING THE ANCHOR DOES ALMOST NO DAMAGE TO THE REST OF THE PART.**
-`anchor-2` at 0.30 moves the SOLID region's margin by **−1.2%** (665.609 against
-673.856) while its own strut bound lands at 173.117. So the −74.3% is not the
-structure being weakened — it is the newly-latticed material's own strut
-strength becoming the binding term. The two columns separate exactly the two
-questions, which is why both are on the receipt.
+★ **(c) LATTICING THE ANCHOR IS STRUCTURALLY ALMOST FREE.** Its solid-only margin
+moves **−1.2% / −0.5% / −0.2%** across the three densities — i.e. essentially not
+at all. The whole of its −74%/−65%/−46% is **the newly-latticed material's own
+strut strength becoming the binding term**, not the structure weakening. The two
+receipt columns separate exactly those two questions, which is why both exist.
 
-★ **(d) THE QUIETER REGION IS THE WORSE TRADE, AND THAT INVERTS THE INTUITION.**
-`load-pad-1` at 0.60 saves **71.9 g** and leaves margin **213.9**. `anchor-2` at
-0.30 saves **47.2 g** and leaves margin **173.1**. The load pad — the region
-holding the part's PEAK von Mises — dominates the anchor on *both* axes. The
-reason is (c): the choice is governed by the strut bound over the lattice itself,
-not by how much the surrounding structure is disturbed, so a LIGHT lattice in a
-quiet place is worse than a DENSE lattice in a loud one. **Assign density by the
-strut bound, not by how quiet the region looks.**
+★ **(d) A LIGHT LATTICE IN THE QUIET REGION IS DOMINATED BY A DENSE ONE IN THE
+LOUD REGION.** `load-pad-1` at 0.60 saves **71.9 g** at margin **213.9**;
+`anchor-2` at 0.30 saves **47.2 g** at margin **173.1** — strictly worse on
+*both* axes, from the region carrying half the peak stress rather than all of it.
+The Pareto set over the six certified cells is `load-pad-1` at 0.30/0.45/0.60 and
+`anchor-2` at 0.45/0.60; `anchor-2` at 0.30 is the only dominated cell. ★ The
+governing quantity is the STRUT bound over the lattice itself, not how much the
+surrounding structure is disturbed — so **assign density by the strut bound, not
+by how quiet the region looks.**
 
-★ **(e) THE MARGIN BOUND B2 IS MISSED AT EVERY CELL, AND THE BOUND IS WHAT IS
-WRONG.** The best certified cell here is `load-pad-1` at 0.60, at −68.3% against
-a pre-registered −5.0%. Per §5(b) this is REPORTED and the bound is NOT retuned.
-But the reason is worth stating: ★ **B2 was written as a RELATIVE bound on a part
-whose absolute margin is ~450x the gate it must clear.** Every cell above is
-accepted with 90–140x headroom. A relative margin bound on such a part refuses
-assignments the shipped gate accepts comfortably; the next pre-registration
+★ **(e) B2 IS MISSED AT EVERY CELL INCLUDING THE BEST, AND THE BOUND IS WHAT IS
+WRONG.** The best cell in the table is `anchor-2` at 0.60: **−46.38%** against a
+pre-registered **−5.0%**. Per §5(b) this is REPORTED and NOT retuned. The reason
+matters: ★ **B2 was written as a RELATIVE bound on a part whose absolute margin is
+~450x the gate it must clear.** Every certified cell above passes the shipped
+gate with 90–240x headroom. A relative margin bound on such a part refuses
+assignments the shipped gate accepts comfortably. The next pre-registration
 should bound the margin against `margin_stop`, not against the baseline.
 
-★ **NOT COMPLETE.** `anchor-2` at 0.45 and 0.60 had not certified when the
-session ended, and rung 0.26 (bar R3, §4b) did not run at all. The table is
-therefore 6 of 16 cells at 1 of 2 rungs; `queue.sh` runs the rest.
+★ **WHAT IS STILL MISSING FROM THE TABLE: THE LIGHT RUNG.** Bar R3 and §4(b)
+require both rungs, and 0.26 did not run. That is not a formality — Proposal 1 §3
+measured the margin spread at 1.1% across ten arms at a heavy rung, which is
+exactly why a light rung is required, and every verdict above is a heavy-rung
+verdict.
 
 ### 0.4 ★ The NET mass saving — **NOT MEASURED.**
 
 The largest gross in the table is **−125.902 g (−23.2%)**, at the cell with the
-worst margin, with the freed mass BANKED
+worst margin; the best-margin cell's gross is **−26.972 g (−5.0%)**. Both are with
+the freed mass BANKED
 (`freed_mass_return = 0.0`, the assignment table's posture). ★ **That is not the
 saving and must not be read as one.** §0.2 measured that 100% of the frozen mass
 is load-bearing and that this very region holds the part's peak von Mises, so the
@@ -462,7 +469,7 @@ has shipped five times here.
 |---|---|
 | **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
-| **R3** every arm at two rungs | **MISSED** — rung 0.68 only, 6 of 16 cells; rung 0.26 did not run. §7.1 |
+| **R3** every arm at two rungs | **MISSED** — rung 0.68 complete (8/8 cells), rung 0.26 did not run. §7.1 |
 | **R4** NET, and margin as a curve | no optimised arm ran, so there is no curve and no NET number; **no gross number is presented as a saving anywhere**, and the app's own wording says so |
 | **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
