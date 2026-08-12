@@ -118,6 +118,71 @@ trapped voxels (1979 against 1603).
 
 ---
 
+## arm D — item 2 (fraction k=4, eta 1, **discrete weight**, cap 60)
+
+Finished 11:46, about **1 h 48 min**.
+
+### ★★ THE PREDICTION WRITTEN BEFORE THIS ARM RAN IS CONFIRMED, AND BY MORE THAN IT CLAIMED
+
+| rung | B (eta 2) | C (eta 1) | **D (fraction)** | SIMP | D's error vs SIMP |
+|---|---|---|---|---|---|
+| 0.68 | 0.7900 | 0.7928 | **0.7969** | 0.7973 | **0.05%** |
+| 0.52 | 0.6802 | 0.6889 | **0.6947** | 0.6941 | **0.09%** |
+| 0.38 | 0.5860 | 0.5977 | **0.6049** | 0.6048 | **0.02%** |
+| 0.26 | 0.5047 | 0.5199 | **0.5281** | 0.5283 | **0.04%** |
+
+★★ **THE FRACTION LANDS ON SIMP'S PRINTED FRACTION TO WITHIN 0.0006 AT EVERY
+RUNG.** The Heaviside arms miss by up to **4.5%** (0.5047 against 0.5283); the
+fraction misses by **0.04%** — a hundredfold improvement, and it is not a tuning
+result, it is what "summing `f_v` IS summing the volume" means.
+
+★★ **SO EVERY PRIOR MARGIN COMPARISON AT THE LIGHT RUNG IN THIS LINE OF WORK WAS
+CONFOUNDED BY MASS.** A "rung 0.26" parametric run printed 0.5047 where SIMP
+printed 0.5283 — it was 4.5% lighter, and 4.5% of material at the light rung is
+worth a great deal of margin. The ladder's rungs did not mean what they said, and
+nothing in the receipt made that visible because `achieved_vf` reported the
+SMOOTHED SUM, which was on target the whole time.
+
+### the margins, now that the volumes are comparable
+
+| rung | D | SIMP | Δ |
+|---|---|---|---|
+| 0.68 | 3263.5 | 3254.4 | **+0.3%** |
+| 0.52 | 3391.9 | 3389.4 | **+0.1%** |
+| 0.38 | 3296.6 | 3290.9 | **+0.2%** |
+| 0.26 | 1728.5 | 3014.1 | ★ **−42.7%** |
+
+★ **At the three heavier rungs the fraction arm REPRODUCES SIMP's margin at
+SIMP's mass, to a few tenths of a percent.** That is the first time in this line
+of work that a parametric arm has been at the same volume as SIMP and can be read
+against it directly.
+
+★ **The light rung is still the method's weak point**, but the number improves
+across the arms — **−74.2% → −46.3% → −42.7%** — and only D's is a like-for-like
+comparison at all. What remains there is not a mass artefact.
+
+### convergence
+
+All four rungs on `iteration-ceiling` again, so the cap of 60 was reached in
+every arm. But the last-10 compliance spread at rung 0.68 tells a finer story:
+
+| arm | rung 0.68 | rung 0.26 |
+|---|---|---|
+| B (eta 2) | 0.403% | 19.149% |
+| C (eta 1) | 0.561% | 21.498% |
+| **D (fraction)** | **0.338%** | **11.137%** |
+
+The plateau rule fires below 0.1%, so none of them is close at the shipped rung —
+and at the LIGHT rung the fraction arm is at **11.1% against the Heaviside arms'
+19–21%**, roughly half the churn. ★ PR 327 measured its fraction arms stopping at
+57 and 61 iterations; here at a cap of 60 none did. That is not a contradiction —
+PR 327's arms ran at the probe's volume convention with 120 iterations available,
+and the plateau needs ten flat iterations to fire at all — but it does mean **the
+convergence claim has to rest on arm A**, which is the only arm with the headroom
+to show it.
+
+---
+
 ## the host
 
 ★ **NOT MINE.** Other worktrees ran `levelset_probe`, `solver_arm_sweep`,
