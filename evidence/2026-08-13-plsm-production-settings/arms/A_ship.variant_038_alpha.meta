@@ -1,0 +1,56 @@
+# THE ANALYTIC DESIGN: phi(x) = sum_i alpha_i psi(|x - x_i|_R).
+# alpha is /Users/nadim/plsm_scratch/A_ship/variant_038_alpha.f64, 85680 float64 in x-fastest knot order.
+# Rebuild with topopt::plsm_make_lattice(nx, ny, nz, knots_vox..., support)
+# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, threads);
+# the ersatz is the VOLUME FRACTION of each cell inside {phi < 0}:
+#   sample frac_samples^3 points per cell at
+#     x = i + (p + 0.5)/k - 0.5   (the SAME lattice plsm_evaluate
+#     uses at factor = k, so the two nest exactly)
+#   and take the fraction with phi < 0 — mollified by the
+#   quadrature band when frac_mollified (see plsm_frac.hpp).
+#   FROZEN cells are STAMPED 1 / 0 by the mask, not sampled.
+#   eta_voxels below does NOT enter this density.
+basis gaussian
+knots_vox 2 2 2
+support_vox 4 4 4
+counts 68 20 63
+pad 2 2 2
+n_coeff 85680
+n_voxels 468224
+compression 5.4647992530345473
+eta_voxels 1
+nx 128
+ny 31
+nz 118
+spacing 1.7052793026343613
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+requested_vf 0.38
+achieved_vf 0.37999999378338062
+frozen_floor_occupancy 0.90915494309189537
+ersatz fraction
+sens_weight discrete
+frac_samples 4
+frac_cut_cells 6147
+frac_sample_wall_s 15.344344998709857
+frac_sens_wall_s 1.4916152060031891
+stop_reason margin-plateau
+margin_peak_iteration 20
+margin_peak 3297.0306919229065
+margin_probe_wall_s 220.077433541
+# margin_probe: iteration margin load_path_ok — the CURVE the rule watched. R4: never a point.
+margin_probe 10 2429.9570078804936 1
+margin_probe 20 3297.0306919229065 1
+margin_probe 30 3304.7392086177597 1
+margin_probe 40 3253.7988137980401 1
+margin_probe 50 2483.2377300391959 1
+void_components 3
+void_chi -6
+void_enclosed_solid 0
+void_sealed_pockets 0
+void_tunnels 9
+void_sealed_voxels 0
+void_sealed_volume_mm3 0
+void_voxels 43852
+# NOT CERTIFIED. The certificate in report.json belongs to the voxel field this was optimised on, at this resolution, and does NOT carry over to a re-evaluation at another one.

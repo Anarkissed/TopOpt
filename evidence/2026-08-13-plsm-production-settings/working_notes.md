@@ -183,6 +183,74 @@ to show it.
 
 ---
 
+## ★★ arm A — the shipped posture (fraction, eta 1, discrete, cap 120, probe every 10)
+
+Finished 13:25, about **1 h 39 min**. ★ **200 iterations, not 480** — the
+margin-plateau rule fired on **every one of the four rungs**.
+
+| rung | A printed / margin | SIMP | Δ vs SIMP | D (cap 60, no rule) | ★ Δ vs D |
+|---|---|---|---|---|---|
+| 0.68 | 0.7963 / **3271.5** | 3254.4 | **+0.5%** | 3263.5 | +0.2% |
+| 0.52 | 0.6940 / **3395.8** | 3389.4 | **+0.2%** | 3391.9 | +0.1% |
+| 0.38 | 0.6046 / **3297.0** | 3290.9 | **+0.2%** | 3296.6 | +0.0% |
+| 0.26 | 0.5282 / **2541.4** | 3014.1 | −15.7% | 1728.5 | ★★ **+47.0%** |
+
+### ★★★ THE LIGHT RUNG IS THE ITEM, MEASURED
+
+`D_fraction` and `A_ship` differ in **two settings only** — the iteration cap and
+the margin probe — and they land on the **same printed fraction** (0.5281 against
+0.5282). Everything else about them is identical. The margin difference is
+therefore entirely *which iterate ships*:
+
+> ★★ **1728.5 → 2541.4, +47.0%, from the stopping rule alone.**
+
+The brief predicted 16–19% from the Stage A and PR 327 curves. On the production
+path at the light rung it is **47%**, and the reason is visible in the probe
+curve the rule recorded:
+
+    rung 0.26   it10 1367.7   it20 ★2541.4   it30 1784.3   it40 1771.3   it50 1458.0
+
+★ **The margin peaks at iteration 20 and falls 43% by iteration 50.** The old
+posture ran to 60 and shipped the best-COMPLIANCE iterate; this one certified on a
+cadence, saw the peak, and returned it.
+
+### ★ THE RULE IS CHEAPER THAN THE CAP IT REPLACES
+
+| arm | iterations | optimise wall | probes |
+|---|---|---|---|
+| B / C / D (cap 60) | 240 | 136.0 / 107.1 / 103.3 min | — |
+| ★ **A (rule, cap 120)** | **200** | **95.0 min** | 20, costing **721.7 s total** |
+
+★★ **200 iterations against 240, plus 20 certifications at 36 s each.** Even
+counting every probe as a whole extra iteration that is ~220 iteration-equivalents
+against 240 — **the margin-plateau rule uses LESS machine time than the
+60-iteration cap it replaces, and returns a better design.** That was not the
+expectation; the cadence was budgeted as a cost to be justified.
+
+### ★ AND THE TOLERANCE EARNED ITS PLACE TWICE
+
+    rung 0.38   it20 ★3297.03   it30 3304.74   it40 3253.80   it50 2483.24
+    rung 0.52   it10 ★3395.80   it20 3395.48   it30 3392.94   it40 3393.23
+
+On rung 0.38 iteration 30 reads **HIGHER** than the retained peak — by 0.23%,
+inside the 0.5% band and inside the 0.15% reproduction floor twenty consecutive
+certified iterates were measured to span. It is not counted as an improvement, so
+iteration 20's design ships. On rung 0.52 the whole tail spans 0.1% and the rule
+returns **iteration 10** — +0.2% over SIMP in ten iterations.
+
+★ Without the band, both rungs would have re-selected the shipped design on noise.
+
+### convergence, and PR 327's 57/61
+
+Every rung stopped on `margin-plateau`, so **no rung reached the compliance
+plateau even with 120 available**. PR 327's fraction arms stopped at 57 and 61 on
+the shipped COMPLIANCE rule at the probe's volume convention; here the margin rule
+fires first, at 40–60. The two are not in conflict — they are different rules —
+but it means **this task cannot confirm PR 327's compliance-convergence claim on
+the production path**, and does not.
+
+---
+
 ## the host
 
 ★ **NOT MINE.** Other worktrees ran `levelset_probe`, `solver_arm_sweep`,
