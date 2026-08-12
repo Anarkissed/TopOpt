@@ -152,7 +152,12 @@ assignments the shipped gate accepts comfortably. The next pre-registration
 should bound the margin against `margin_stop`, not against the baseline.
 
 ★ **WHAT IS STILL MISSING FROM THE TABLE: THE LIGHT RUNG.** Bar R3 and §4(b)
-require both rungs, and 0.26 did not run. That is not a formality — Proposal 1 §3
+require both rungs. Rung **0.26** was started —
+`evidence/…/m2/r0.26/m2_assignment.csv` and `m2/assign_r0.26.txt`, same six
+certified cells — and did not finish inside the session. ★ **If those files exist
+and are short, they are PARTIAL**: the CSV is flushed per row and the run appends
+`EXIT=` to the log when it completes, so a log without that line is a run that was
+cut off, not a run that found nothing. Re-run it with `queue.sh`. That is not a formality — Proposal 1 §3
 measured the margin spread at 1.1% across ten arms at a heavy rung, which is
 exactly why a light rung is required, and every verdict above is a heavy-rung
 verdict.
