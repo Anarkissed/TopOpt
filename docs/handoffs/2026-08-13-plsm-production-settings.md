@@ -536,6 +536,215 @@ one-off and must never become the shipped number.
 / 5127.5 mm³ against nothing at all). Trapped powder is a HIGH-DENSITY problem,
 so a light rung passing the enclosed-void check says nothing about a heavy one.
 
+## 4b. ★★ THE ARMS — FOUR ARMS, ONE VARIABLE EACH, BOTH RUNGS OUT OF EVERY RUN
+
+Every arm is `topopt-cli run` on his captured job. Consecutive arms differ in one
+thing; B, C and D are all capped at 60 iterations so the budget is not a second
+variable, and only D → A changes it — which IS item 3.
+
+| arm | ersatz | eta | weight | cap | probe |
+|---|---|---|---|---|---|
+| `B_heaviside` | `H_eta` at the cell centre | 2 | continuum | 60 | off |
+| `C_eta1` | `H_eta` at the cell centre | **1** | continuum | 60 | off |
+| `D_fraction` | **the volume fraction, k = 4** | 1 | **discrete** | 60 | off |
+| `A_ship` | the volume fraction, k = 4 | 1 | discrete | **120** | **every 10** |
+
+`B_heaviside` is the PREVIOUS production posture exactly — the ersatz, the band
+width, the compliance weight and the cap that shipped before this task.
+
+### (a) ★★ THE VOLUME CONSTRAINT NOW MEANS WHAT IT SAYS, AND THIS IS THE BIGGEST RESULT
+
+Printed fraction against SIMP's own, per rung:
+
+| rung | B (eta 2) | C (eta 1) | **D (fraction)** | SIMP | D's error |
+|---|---|---|---|---|---|
+| 0.68 | 0.7900 | 0.7928 | **0.7969** | 0.7973 | **0.05%** |
+| 0.52 | 0.6802 | 0.6889 | **0.6947** | 0.6941 | 0.09% |
+| 0.38 | 0.5860 | 0.5977 | **0.6049** | 0.6048 | 0.02% |
+| 0.26 | 0.5047 | 0.5199 | **0.5281** | 0.5283 | **0.04%** |
+
+★★ **THE HEAVISIDE ARMS MISS BY UP TO 4.5%; THE FRACTION MISSES BY 0.04%.** It is
+not a tuning result — it is what "summing `f_v` IS summing the volume" means.
+
+★★ **SO EVERY PRIOR MARGIN COMPARISON AT THE LIGHT RUNG IN THIS LINE OF WORK WAS
+CONFOUNDED BY MASS.** A "rung 0.26" parametric run printed 0.5047 where SIMP
+printed 0.5283 — **4.5% lighter**, which at the light rung is worth a great deal
+of margin — and nothing in the receipt showed it, because `achieved_vf` reported
+the SMOOTHED SUM and that was on target the whole time. This is the same defect
+Stage A's `--volume-count` found in the probe (8.9% drift), arriving on the
+production path and fixed by construction rather than by a flag.
+
+### (b) the certificates, at both rungs, at last comparable
+
+| rung 0.68 → printed 0.7973 | printed | margin | vs SIMP | mass g |
+|---|---|---|---|---|
+| **SIMP** | 0.7973 | **3254.4** | — | 543.7 |
+| B (eta 2) | 0.7900 | 3297.3 | — | 538.8 |
+| C (eta 1) | 0.7928 | 3255.5 | — | 540.7 |
+| D (fraction) | 0.7969 | 3263.5 | **+0.3%** | 543.4 |
+| ★ **A (shipped)** | **0.7963** | **3271.5** | ★ **+0.5%** | **543.0** |
+
+| rung 0.26 → printed 0.5283 | printed | margin | vs SIMP | mass g |
+|---|---|---|---|---|
+| **SIMP** | 0.5283 | **3014.1** | — | 360.3 |
+| B (eta 2) | 0.5047 | 777.5 | — | 344.2 |
+| C (eta 1) | 0.5199 | 1619.2 | — | 354.5 |
+| D (fraction) | 0.5281 | 1728.5 | −42.7% | 360.1 |
+| ★ **A (shipped)** | **0.5282** | **2541.4** | **−15.7%** | **360.2** |
+
+★ **At the shipped rung the posture that ships is +0.5% over SIMP at 0.1% less
+mass.** At the light rung it is still **−15.7% BELOW SIMP** — improved from
+−74.2% across the arms, and only D's and A's rows are like-for-like at all. ★ What
+remains at the light rung is NOT a mass artefact and is not claimed to be fixed:
+**the parametric method is genuinely weaker than SIMP at low volume fraction on
+this part**, and that is now measured cleanly rather than confounded.
+
+### (c) ★★ THE SURFACE — ONE PROBE INVOCATION, SIMP IN THE SAME RUN (R5)
+
+| rung 0.68 | n_cut | vs SIMP | carved | CAD mm | mid % | min-feat | volume mm³ |
+|---|---|---|---|---|---|---|---|
+| **SIMP** | **26,191** | — | **7.5521** | **0.4293** | 85.28% | 5,464 | 440,551 |
+| B (eta 2) | 31,528 | +20.4% | 7.6090 | 0.4741 | 60.33% | 3,894 | 436,387 |
+| C (eta 1) | 29,170 | +11.4% | 8.2173 | 0.4501 | 67.26% | 4,776 | 442,002 |
+| ★ **D (fraction)** | **26,719** | ★ **+2.0%** | ★ **6.9646** | **0.4341** | 82.28% | 5,096 | 444,064 |
+| **A (shipped)** | 27,806 | **+6.2%** | **7.4214** | **0.4301** | 82.15% | 5,483 | 443,366 |
+
+| rung 0.26 | n_cut | vs SIMP | carved | CAD mm | mid % | min-feat | volume mm³ |
+|---|---|---|---|---|---|---|---|
+| **SIMP** | **74,646** | — | **10.2657** | **0.4375** | 99.99% | 5,523 | 288,713 |
+| B (eta 2) | 77,883 | +4.3% | 8.4065 | 0.4978 | 38.25% | 3,128 | 268,159 |
+| C (eta 1) | 75,647 | +1.3% | 9.4222 | 0.4451 | 45.18% | 4,285 | 282,003 |
+| D (fraction) | 73,337 | −1.8% | 8.2827 | 0.4413 | 77.45% | 5,292 | 288,644 |
+| ★★ **A (shipped)** | **71,826** | ★★ **−3.8%** | ★★ **8.3380** | 0.4506 | 77.81% | 5,246 | **288,651** |
+
+★★ **THE PREMISE THIS TRACK STARTED FROM IS GONE.** "3× the internal surface"
+became "+20.3% at matched volume" became, here, **+2.0% at the shipped rung and
+−3.8% at the light one** — and the light-rung row is a WIN over SIMP on both
+surface columns (carved 8.3380 against 10.2657, **−18.8%**) at a volume matched
+to 0.02%.
+
+★ **AND IT IS THE FIRST SURFACE WIN OVER SIMP THIS LINE OF WORK HAS PRODUCED
+WITHOUT THE PERIMETER PENALTY.** The brief notes C = 1 buying −7.4% n_cut at the
+light rung as "the first surface result any arm has produced that beats SIMP";
+the shipped posture gets −3.8% with no penalty term at all, and Stage B can now
+be read against that rather than against a +20% baseline.
+
+★ **B's and C's surface rows at the light rung may NOT be read against SIMP.**
+They print 268,159 and 282,003 mm³ against SIMP's 288,713 — 7.1% and 2.3% less
+material — so their triangle counts are cheaper for a reason that has nothing to
+do with smoothness. Only D and A are volume-matched. **That is (a) again, in the
+column where it is easiest to be fooled by it.**
+
+### (d) ★ ITEM 1, ON THE PRODUCTION PATH, AND IT IS NOT WHAT STAGE A MEASURED
+
+`B_heaviside` → `C_eta1` is eta alone:
+
+| | n_cut 0.68 | carved 0.68 | CAD 0.68 | margin 0.68 | margin 0.26 |
+|---|---|---|---|---|---|
+| eta = 2 | 31,528 | 7.6090 | 0.4741 | 3297.3 | 777.5 |
+| eta = 1 | 29,170 (**−7.5%**) | 8.2173 (**+8.0%**) | 0.4501 | 3255.5 (−1.3%) | 1619.2 (★ **+108%**) |
+
+★ **THE DIRECTION ON TRIANGLE COUNT HOLDS AND THE CARVED COLUMN REVERSES.**
+Stage A measured −3.6% n_cut and −21.7% CARVED at the shipped volume on the probe
+path; on the production path it is **−7.5% n_cut and +8.0% carved — carved gets
+WORSE.** Both are "eta = 1 at the shipped volume", and they disagree on a column.
+The n_cut direction is confirmed twice; **the carved direction is not, and is
+reported as unresolved rather than averaged.**
+
+★★ **AND THE MARGIN CLAIM DOES NOT SURVIVE THE SECOND RUNG.** Stage A found the
+margins "identical to three digits" and concluded eta is a surface knob and not a
+margin knob. At the shipped rung that reproduces (−1.3%). At the LIGHT rung eta = 1
+**more than doubles the margin, 777.5 → 1619.2**. The conclusion was right where
+it was measured and wrong as a general statement — which is exactly what R3's
+two-rung rule exists to catch.
+
+★ **But part of that +108% is bought, not free**, and the mechanism is (a): eta = 1
+prints 3.0% MORE material at that rung, because a narrower band drifts less
+between the smoothed sum the constraint targets and the printed set it is meant
+to mean. Under the fraction the two coincide and the question stops existing.
+
+### (e) ★★ ITEM 3, ON THE PRODUCTION PATH — AND IT IS CHEAPER THAN THE CAP IT REPLACES
+
+`D_fraction` and `A_ship` differ in TWO settings — the cap and the probe — and
+land on the SAME printed fraction (0.5281 against 0.5282). The margin difference
+is therefore entirely WHICH ITERATE SHIPS.
+
+    rung 0.26   it10 1367.7   it20 ★2541.4   it30 1784.3   it40 1771.3   it50 1458.0
+    rung 0.68   it10 3243.5   it20 3242.4   it30 ★3271.5   it40 3259.3   it50 3238.1   it60 3262.4
+
+★★ **THE LIGHT RUNG'S MARGIN PEAKS AT ITERATION 20 AND FALLS 43% BY ITERATION 50,
+AND STOPPING AT THE PEAK IS WORTH +47.0% (1728.5 → 2541.4).** The brief predicted
+16–19% from the Stage A and PR 327 curves; on the production path at the light
+rung it is **47%**.
+
+| | iterations | optimise wall | probes |
+|---|---|---|---|
+| B / C / D (cap 60) | 240 | 136.0 / 107.1 / 103.3 min | — |
+| ★ **A (the rule, cap 120)** | **200** | **95.0 min** | 20, costing **721.7 s** |
+
+★★ **200 ITERATIONS AGAINST 240, PLUS 20 CERTIFICATIONS AT 36 s EACH.** Counting
+every probe as a whole extra iteration that is ~220 iteration-equivalents against
+240: **the margin-plateau rule uses LESS machine time than the 60-iteration cap it
+replaces, and returns a better design.** The cadence was budgeted in §3(c) as a
+cost needing justification. It pays for itself.
+
+★ **AND THE 0.5% BAND EARNED ITS PLACE TWICE.** On rung 0.38 iteration 30 reads
+HIGHER than the retained peak — by 0.23%, inside the band and inside the 0.15%
+reproduction floor — so iteration 20's design ships. On rung 0.52 the whole tail
+spans 0.1% and the rule returns **iteration 10**, +0.2% over SIMP in ten
+iterations. Without the band both rungs would have re-selected the shipped design
+on noise.
+
+★ **What this task does NOT establish.** Every rung stopped on `margin-plateau`,
+so **no rung reached the COMPLIANCE plateau even with 120 available**. PR 327's
+"57 and 61 iterations" was on the shipped compliance rule at the probe's volume
+convention. The two rules are different rules; this campaign cannot confirm that
+claim on the production path and does not.
+
+### (f) ★ ITEM 2(e) — THE COST, CONFIRMED ON THE PRODUCTION PATH
+
+| arm | rung | sampling | sensitivity | rung wall | share | cut cells |
+|---|---|---|---|---|---|---|
+| D | 0.68 | 17.58 s | 1.24 s | 941.0 s | ★ **1.97%** | 4,009 |
+| D | 0.26 | 18.39 s | 1.73 s | 2096.7 s | 0.94% | 5,574 |
+| A | 0.68 | 17.90 s | 1.39 s | 1087.6 s | 1.74% | 4,042 |
+| A | 0.26 | 15.19 s | 1.45 s | 1756.7 s | 0.93% | 5,579 |
+
+★ **1.97% at the shipped rung against PR 327's 1.92% on the probe path** — the
+same number, on a different code path, at a different volume convention. It is
+**half that at the light rung** because the state solve is dearer there and the
+sampling is not.
+
+★ **The Heaviside arms read 0.00 in both columns.** That is the column's positive
+control, not a missing measurement.
+
+### (g) ★ ITEM 4's COUNTERS, ON THE ARMS
+
+| arm | rung | b0 | chi | b2 | b1 tunnels | sealed pk | sealed vox | sealed % |
+|---|---|---|---|---|---|---|---|---|
+| B | 0.68 | 34 | 25 | 0 | 9 | 22 | 1,602 | 6.88% |
+| C | 0.68 | 24 | 16 | 0 | 8 | 9 | 1,979 | 8.61% |
+| ★ **D** | 0.68 | **16** | 15 | 0 | **1** | 8 | 1,864 | 8.27% |
+| **A** | 0.68 | **17** | 15 | 0 | **2** | 7 | 1,740 | 7.70% |
+| **SIMP** | 0.68 | **16** | 16 | 0 | **0** | 10 | 1,034 | 4.60% |
+| B | 0.26 | 20 | −7 | 0 | 27 | 18 | 30 | 0.05% |
+| D | 0.26 | 4 | −8 | 0 | 12 | 0 | 0 | 0.00% |
+| A | 0.26 | 4 | −7 | 0 | 11 | 0 | 0 | 0.00% |
+| SIMP | 0.26 | 2 | −7 | 0 | 9 | 0 | 0 | 0.00% |
+
+★ **The fraction HALVES the void component count and lands on SIMP's** — 16 and
+17 against B's 34 and C's 24, with SIMP at 16 — and takes the tunnel count from 9
+to 1. The counters shipped as a diagnostic and their first real use is to say
+that the ersatz change did something structural, not only dimensional.
+
+★ **R6, and the caveat the brief asked to be carried: sealed void is 0.00–0.05%
+at the light rung against 4.60–8.61% at the shipped one, on EVERY arm including
+SIMP.** Trapped powder is a HIGH-DENSITY problem, so a light rung passing the
+enclosed-void check says nothing about a heavy one. ★ The parametric arms still
+carry **1.7–2.0× SIMP's trapped VOLUME** at the shipped rung even where their
+pocket COUNT is lower, which is `plsm-nucleates-sealed-cavities` surviving the
+ersatz change.
+
 ## 5. WHAT IS NOT IN THIS TASK
 
 * ★ **THE PERIMETER PENALTY (C).** Waits for Stage B. When it lands the decision

@@ -908,6 +908,41 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       ob.cg_mg_cycles_attempted = sc.cg.mg_cycles_attempted;
       ob.cg_recycle_dim = sc.cg.recycle_dim;
       ob.cg_recycle_setup_matvecs = sc.cg.recycle_setup_matvecs;
+      // ── ★★ THE TIMING BLOCK, WHICH THIS PATH LEFT BLANK FROM PR 325 UNTIL
+      //    2026-08-13 ─────────────────────────────────────────────────────────
+      //
+      // `iterations.csv` has `total_ms`, `solve_ms`, `fea_ms`, `sens_ms` and
+      // `analysis_ms`; the SIMP path fills them (94,613.450 on his rung 0.68's
+      // first iteration) and THIS PATH WROTE 0.000 IN ALL OF THEM ON EVERY ROW
+      // OF EVERY RUN. The block above was filled and this one was not, so a
+      // parametric run's record carried its compliance and its CG counters and
+      // nothing at all about where its time went.
+      //
+      // ★ IT WAS FOUND BY NEEDING THE NUMBER, NOT BY READING THE CODE: the
+      // task's own cost table divided by `total_ms` and got a zero. That is the
+      // shape of gap this file's own comment warns about six lines up — "a run
+      // that reports nothing is not a production path" — and the loop had got
+      // the ROWS right and left the COLUMNS blank, which reads as "measured, and
+      // it was zero" rather than "never measured".
+      //
+      // ★ ONLY THE TERMS THIS LOOP ACTUALLY HAS ARE FILLED. There is no density
+      // filter and no projection on this path, so `filter_ms` and `project_ms`
+      // stay 0 — that is a true statement about the trajectory, not a gap. The
+      // sub-cell sampling and the sensitivity scatter have no SIMP analogue and
+      // are reported on the receipt (`frac_sample_wall_s`, `frac_sens_wall_s`)
+      // rather than folded into a column that would then mean two things.
+      // ★ `residual_ms` IS FILLED HONESTLY AND IS THE POINT OF THE PARTITION.
+      // `IterationPhaseTimes`' own contract is that the named phases are
+      // subtracted from the iteration's wall and whatever is left is REPORTED,
+      // so time going somewhere unnamed is visible in the CSV instead of
+      // inferred. On this path the unnamed part is the offset bisection, the
+      // sub-cell sampling, the MMA step and the re-fit — real work with no SIMP
+      // analogue — and it belongs in the residual rather than in a column that
+      // would then mean two different things on two paths.
+      ob.phases.total_ms = (steady_s() - t_it0) * 1000.0;
+      ob.phases.solve_ms = sc.t_solve_ms;
+      ob.phases.fea_ms = sc.t_solve_ms;
+      ob.phases.residual_ms = ob.phases.total_ms - ob.phases.solve_ms;
       options.observe(ob);
     }
     // `SimpOptimizeResult::history` is part of the contract — "history has
