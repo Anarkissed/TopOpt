@@ -16,3 +16,11 @@ PROGRESS rung=2 rungs=4 iter=1
 PROGRESS rung=2 rungs=4 iter=2
 VARIANT vf=0.380000 achieved=0.380000 printed=0.595181 margin=355.27 accepted=1 mesh=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/solver-speed-accelerators-diagnose-436a6d/evidence/2026-08-14-solver-speed-arm-and-diagnose/arms/base/variant_038.stl
 PROGRESS rung=3 rungs=4 iter=1
+PROGRESS rung=3 rungs=4 iter=2
+VARIANT vf=0.260000 achieved=0.260000 printed=0.497529 margin=232.153 accepted=1 mesh=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/solver-speed-accelerators-diagnose-436a6d/evidence/2026-08-14-solver-speed-arm-and-diagnose/arms/base/variant_026.stl
+WARNING: multigrid solver "MultigridCG_Matfree" fell back to Jacobi-CG on the 128x31x118 solved grid (the hierarchy could not be built, OR the V-cycle stagnated on a high-contrast field) — expect a large slowdown. Linear solves ran Jacobi-CG; run_info.json records cg_multigrid=false. See iterations.csv for the per-solve record.
+ARM_RUNG arm=base vf_requested=0.680000 margin=2372.88667 accepted=1
+ARM_RUNG arm=base vf_requested=0.520000 margin=793.600505 accepted=1
+ARM_RUNG arm=base vf_requested=0.380000 margin=355.269912 accepted=1
+ARM_RUNG arm=base vf_requested=0.260000 margin=232.153157 accepted=1
+ARM_SUMMARY arm=base total_cg=14465 design_iters=8 wall_s=683.0 hier_attempts=2 rearm_attempts=0 rearm_carries=0 geneo_armed=1 geneo_declined=15 geneo_dim=1674 geneo_builds=1 alg1=0

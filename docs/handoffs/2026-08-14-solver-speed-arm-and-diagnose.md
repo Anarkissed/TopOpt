@@ -646,6 +646,107 @@ not, GenEO is finished as a rescue on this problem and §4(a)'s algebraic coarse
 space is the answer instead. **Neither branch is established here, and this
 handoff does not pretend otherwise.**
 
+### 6c. ★ §4(a) MEASURED — the algebraic coarse space BUILDS at his scale, and the V-cycle still does not contract
+
+This is the cleanest result in the task and it is a **NO-GO**.
+
+| | control (`base`) | `alg1` |
+| --- | --- | --- |
+| `mg_algebraic_level1` | false | **true** — armed, and the artifact says so |
+| `mg_algebraic_level1_refused` | — | **false** — NOT declined by the memory cap |
+| aggregates / coarse dim / levels | — | **5,199 / 31,186 / 3** |
+| `mg_algebraic_added_mb` | 0 | **112.38** — against a 2,048 MB cap |
+| rung 0 iter 1: `cg_iters` | 927 | **927** |
+| rung 0 iter 1: `hier_built` / `mg_cycles_attempted` | 1 / **300** | 1 / **300** |
+| `cg_multigrid` (did the V-cycle ever carry?) | 0 | **0** |
+| `mg_mode` | `stagnated-latched` | **`stagnated-latched`** |
+| rungs 1-3 `cg_iters` | 1223 / 1343 / 1763 | **1223 / 1343 / 1763** |
+
+**Read the first four rows and the last five together.** The half of §4(a)'s
+prediction about *reachability* is confirmed and then some: the algebraic path is
+armed, it builds a real three-level hierarchy with 5,199 aggregates, and it is
+**not refused** — the memory objection that withholds it in production genuinely
+does not bind at his scale, by a factor of eighteen rather than the four I
+predicted. **The half about *acceleration* is refuted.** The V-cycle burns the
+identical 300-cycle budget on the identical solve, the latch closes at the
+identical place, and every CG count down all four rungs is identical to the
+control.
+
+**A correction to my own prediction, because the arithmetic was wrong even though
+the conclusion was right.** §4(a) predicted "~520 MB" from 355 bytes/DOF x
+1,473,696 DOF. The measurement is 112.38 MB. The error is the denominator:
+`solved_grid_dofs` counts the **full padded nodal space**, while the algebraic
+path — and the bytes/DOF table it was fitted on — count **KEPT** DOFs, and his
+thin part keeps only about a quarter of them. Back the kept count out of the
+measurement and it lands at ~346k DOF and **~67 fine DOFs per aggregate, inside
+the 65-78 band** that fit held across a 108x DOF range. So the aggregation is
+behaving *normally* here. It is not over-coarsening, it is not collapsing, and
+there is no tuning story hiding in it. **It simply does not help on this
+geometry.**
+
+**What that closes.** Combined with §2, geometric and algebraic coarse spaces have
+now both been observed to fail on his part, on his grid, through the production
+driver. `2026-08-02-multigrid-component-sweep` had already closed the smoother,
+the depth, the cycle shape and omega (25 configurations, 0 convergences). **There
+is no remaining multigrid lever for this job that anyone has proposed and not
+tested**, and mixed precision (§4d) stays a no-op because the V-cycle it
+accelerates still never carries.
+
+★ **And it moves the count that `2026-07-27-mg-stagnation-phase0` §6 asked for.**
+That handoff's AMG reopen condition is "n >= 3 distinct real parts where geometric
+MG is observed to attempt and stagnate with the latch disabled or re-armed". This
+task contributes the first clean point for the maintainer's part — and it also
+supplies something that handoff did not ask for and would have wanted: on that
+same part, **the algebraic replacement it was holding AMG in reserve for was
+tried, and it did not carry either.**
+
+---
+
+### 6d. R1 — the arms table, with the honest work unit beside the iteration count
+
+Every arm is his job through `run_job`, capped at **2 PLSM design iterations per
+rung** (4 rungs, 8 design solves) — identically, `base` included.
+
+| arm | TOTAL CG | vs base | matvecs | vs base | wall s *(indicative)* | `mg_mode` | MG carried | GenEO armed / declined | `N_t` |
+|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+| `base` | **14,465** | 1.000x | **18,674** | 1.000x | 683.0 | `stagnated-latched` | 0 | 1 / 15 | 1674 |
+
+★ **`matvecs` sits beside `total_cg` and is not decoration.** 18,674 against
+14,465 is a **4,209-apply gap the CG counter cannot see**, and almost all of it is
+GenEO's one basis build. An arm that engaged GenEO would report FEWER CG
+iterations while doing MORE work; reporting the iteration count alone would let
+that read as a win. This is the column `plsm.cpp` was not filling (§5), which is
+why no previous production run has it.
+
+★ **And `rearm_attempts = 0 / rearm_carries = 0` on `base` is the control that
+matters for §5's new switch**: with the period at its shipped 0, the re-arm block
+is unreachable and its counters never move. The measurement surface is inert
+until it is asked for.
+
+**R3 — the certified margin, every rung, and no verdict moved:**
+
+| rung | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---:|---:|---:|---:|
+| `base` margin | 2372.887 | 793.601 | 355.270 | 232.153 |
+| verdict | ACCEPT | ACCEPT | ACCEPT | ACCEPT |
+
+★ **What R3 asked for and what this is, stated plainly.** R3 asks for the margin
+as a CURVE with its settling iteration. **That is not what is above, and the
+2-iteration cap is why**: a two-point curve has no settling iteration, and a
+per-iteration margin curve was unaffordable for a reason that is measured rather
+than asserted — PR 326 timed certifying an *unconverged* design at **26x the cost**
+of certifying a converged one, so a margin curve down a 4-rung ladder would cost
+more than every arm in this table combined and would put the instrument inside
+the timing the table reports. What is here instead is the margin **at every rung
+of every arm**, which is the number the accept gate actually reads, plus the
+per-iteration compliance curve in `tables.py` (free — it is already in
+`iterations.csv`). **The settling behaviour R3 wants is a property of a
+60-iteration run and it is not measured here.** PR 326 and PR 327 measured it
+directly (margin still climbing at 60; one arm peaking at 80 then falling 19.4 %
+by 120) and those remain the references.
+
+---
+
 ## 7. NOT IN THIS TASK — and the one line worth carrying forward
 
 **Resolution continuation is the strongest remaining lever, and the exact volume
@@ -697,7 +798,14 @@ margin of 7 %.** It is losing a coin flip it is calling correctly.
 The fix is not to change the rule. It is to make the summary smaller, because the
 rebuild cost is directly proportional to its size — and the one setting that
 changes its size is how the part is chopped up into pieces. Bigger pieces, fewer
-summary entries, cheaper rebuild. That is the experiment §6 runs.
+summary entries, cheaper rebuild.
+
+**That experiment did not run, and that is the one thing this task owes and did
+not deliver.** The machine it had to run on was shared with four other jobs all
+day, and building the summary at a coarser chop takes long enough that no single
+attempt finished. It is one command on a quiet machine, it takes minutes, and
+until someone runs it the honest position is that we know exactly why GenEO
+declines and do not yet know whether the obvious fix works.
 
 **The second one, multigrid, failed for a reason nobody expected, and it failed
 early.** Multigrid solves a problem by repeatedly stepping back to a blurrier
@@ -706,32 +814,48 @@ it is switched off for good. On his job it failed all three and was off for the
 remaining 157 solves.
 
 The obvious suspicion is that it was judged at a bad moment — right at the start,
-when the design is a formless grey haze. **The measurement says the opposite, and
-it is worth stating clearly: at that first solve the design is completely
-uniform.** There is no contrast for multigrid to choke on — the stiffness varies
-by a factor of about 3 across the whole part, which is nothing. It still failed.
+before the design has taken shape. **The measurement says the opposite.** Earlier
+work reproduced the same failure on a completely uniform field, and separately
+showed that extreme stiffness contrast on its own is nearly free. So neither the
+design nor its contrast is the culprit.
 
-So the cause is not the design at all. It is **the shape of the part**: a thin
-stand occupying under a quarter of the box it sits in. Blur that and the thin
-parts disappear, and a blurry version with no structure in it cannot help solve
-the sharp one. And the design only gets thinner as the optimiser removes material
-— his own run shows solves getting **3.7× more expensive** from the first rung to
-the last. **The moment it was judged was the moment it had its best chance.**
-Switching it off was right, and re-arming it later — which the task asks about and
-which July's work predicted would fail — is tested here directly on his part
-rather than on a stand-in.
+*(A correction to the brief while we are here: it argues the new optimiser made
+the material contrast a thousand times gentler. It did not. The number it quotes
+is a density; the solver sees a stiffness, and stiffness goes as density cubed.
+The contrast is a billion to one, exactly as before.)*
 
-**And there is a third accelerator that nobody asked about, which is the one to
-actually use.** It replaces the "blur the grid" step with one that groups voxels
-by how they are actually connected instead of by where they sit. Someone built it
-in August, measured it on this exact kind of problem, and found it cut the total
-work across a whole run by **five and a half times** while leaving every
-engineering verdict unchanged — and, tellingly, it made the first accelerator's
-whole dilemma vanish, because the solves stopped being hard enough to need
-rescuing. It was left switched off for two honest reasons: it is a *loss* on
-well-behaved parts, so it needs a rule for when to use it; and its memory use was
-projected to blow the budget on a big enough job. **His job is four times under
-that budget.** The rule is the real work, and it is not written.
+The cause is **the shape of the part**: a thin stand occupying under a quarter of
+the box it sits in. Blur that and the thin bits disappear, and a blurry version
+with no structure in it cannot help solve the sharp one. That is measurable and
+was measured: the blurred version captures **1.6 %** of the answer's energy, where
+a well-behaved part gives **99.3 %**. And it only gets worse as the optimiser
+removes material — his own run shows solves getting **3.7× more expensive** from
+the first rung to the last. **The moment it was judged was the moment it had its
+best chance.** Switching it off was right.
+
+**And there is a third accelerator that nobody asked about. It looked like the
+answer. It is not.** Instead of blurring the grid, it groups voxels by how they
+are actually connected. Someone built it in August, measured it on this kind of
+problem, and found it cut the total work across a whole run by **five and a half
+times** while leaving every engineering verdict unchanged — and it made the first
+accelerator's whole dilemma vanish, because the solves stopped being hard enough
+to need rescuing. It was left switched off partly because its memory use was
+projected to blow the budget on a big enough job, **and his job is eighteen times
+under that budget**, so there was every reason to expect it to work.
+
+**It was switched on and run on his job, and it did not help at all.** It built
+what it was supposed to build. Then the solver burned through its entire budget
+exactly as before, gave up at exactly the same place, and every single count down
+all four rungs came out identical to leaving it off. The numbers it was measured
+at came from a problem twenty times smaller; they do not carry.
+
+That is the most useful thing in this handoff, because it closes a door rather
+than opening one. Blurring the grid does not work here. Grouping by connectivity
+does not work here either. Every knob on the blurring itself — how much smoothing,
+how many levels, what shape of cycle — was swept last week: twenty-five
+combinations, none of them converged. **There is nothing left in that direction
+that anyone has suggested and not tried**, and that is worth knowing before
+another week goes into it.
 
 **And one thing that turns out to be a non-question.** The task asks whether last
 week's change to how the boundary is represented made the solver's job harder.

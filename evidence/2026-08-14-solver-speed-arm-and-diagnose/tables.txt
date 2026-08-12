@@ -57,7 +57,10 @@ HIS RUN (evidence/2026-08-10-plsm-production/s1_production_run):
 §1(a)  THE FULL (burn - threshold) DISTRIBUTION, per solve
 ==============================================================================
 HIS RUN: no solve wrote a nonzero geneo_threshold (no basis was ever held, or the columns predate this binary)
-base: no geneo_threshold column
+base: 7 solves with a basis held
+  (burn - threshold): min -3732 median -2580 max -2251
+  declined WITHIN 10% of the threshold: 0 of 7
+rearm1: no geneo_threshold column
 
 ==============================================================================
 §4(a) / §3  THE MECHANISM PROBES — the solves multigrid is ATTEMPTED on
@@ -90,11 +93,16 @@ mg_algebraic_level1 report:
 R1  THE ARMS — TOTAL CG ITERATIONS IS THE FIGURE OF MERIT
 ==============================================================================
        arm   total_cg   vs base     matvecs   vs base  iters   wall_s            mg_mode  mg_carried  geneo_arm  geneo_dec    N_t
-      base          0         -           0         -      0                        None           0          0          0      0
+      base      14465    1.000x       18674    1.000x      8    683.0  stagnated-latched           0          1         15   1674
+    rearm1          0    0.000x           0    0.000x      0                        None           0          0          0      0
 
 ==============================================================================
 R3  CERTIFIED MARGIN PER RUNG, PER ARM — no verdict may move
 ==============================================================================
+  ARM_RUNG arm=base vf_requested=0.680000 margin=2372.88667 accepted=1
+  ARM_RUNG arm=base vf_requested=0.520000 margin=793.600505 accepted=1
+  ARM_RUNG arm=base vf_requested=0.380000 margin=355.269912 accepted=1
+  ARM_RUNG arm=base vf_requested=0.260000 margin=232.153157 accepted=1
 
 ==============================================================================
 R3  THE TRAJECTORY CURVE AND ITS SETTLING ITERATION, per arm per rung
@@ -111,3 +119,7 @@ settles to within 0.1%, and (b) the CERTIFIED margin at every rung, which
 is the number the accept gate actually reads. The gap between them is
 real and is named in the handoff.
 
+  arm     base rung 0: compliance 0.00526666 -> 0.00282944 over 2 iters, settles (0.1%) at iteration 2
+  arm     base rung 1: compliance 0.00739435 -> 0.00593092 over 2 iters, settles (0.1%) at iteration 2
+  arm     base rung 2: compliance 0.00997123 -> 0.00605599 over 2 iters, settles (0.1%) at iteration 2
+  arm     base rung 3: compliance 0.0111459 -> 0.011374 over 2 iters, settles (0.1%) at iteration 2

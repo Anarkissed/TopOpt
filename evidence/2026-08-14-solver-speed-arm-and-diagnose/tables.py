@@ -158,6 +158,15 @@ def arms():
             print(f"{n:>10}  (no iterations.csv — run incomplete)")
             continue
         r = rows(csvp)
+        # ★ A HEADER-ONLY CSV IS NOT A ZERO. An arm that has not produced a
+        # single solve must not print `total_cg 0  0.000x` — that reads as a
+        # measured result of zero rather than as "this did not run", which is
+        # precisely the failure this project files under "a green run that
+        # measures nothing".
+        if not r:
+            print(f"{n:>10}  (iterations.csv has no rows — the run produced no "
+                  f"solve; NOT a measurement of zero)")
+            continue
         total = sum(int(x["cg_iters"]) for x in r)
         mv = sum(int(x.get("matvecs", 0) or 0) for x in r)
         carried = sum(1 for x in r if x["cg_multigrid"] == "1")
