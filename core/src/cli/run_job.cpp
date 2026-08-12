@@ -4137,9 +4137,11 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // not carried. The round-trip test (core/tests/unit/test_job_loadcase_copy.cpp)
   // then locks the VALUES; this locks the COVERAGE, which is the half that was
   // missing.
-  const auto& [j_present, j_anchors, j_anchor_face_ids, j_groups, j_clearances,
+  const auto& [j_present, j_anchors, j_anchor_face_ids, j_face_regions,
+               j_anchor_region_ids, j_groups, j_clearances,
                j_face_protection_face_ids, j_face_protection_depth_mm,
-               j_face_protection_depths_mm,
+               j_face_protection_depths_mm, j_face_protection_region_ids,
+               j_face_protection_region_depths_mm,
                j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
@@ -4149,6 +4151,12 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   (void)j_present;
 
   ProductionLoadCase lc;
+  // ★ THE REGION LAYER travels verbatim (task 2026-08-14-face-regions §1): the
+  // specs are RESOLVED once inside build_production_loadcase, against the model
+  // it voxelizes, so the job never carries a resolved member list that could
+  // disagree with the import.
+  lc.face_regions = j_face_regions;
+  lc.anchor_region_ids = j_anchor_region_ids;
   // Anchors: raw B-rep ids (from the app) and/or geometric selectors compose.
   lc.anchor_face_ids = j_anchor_face_ids;
   for (const int id : resolve_selectors(model, j_anchors, "anchors"))
@@ -4158,6 +4166,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
     lg.face_ids = g.face_ids;
     for (const int id : resolve_selectors(model, g.faces, "loads group faces"))
       lg.face_ids.push_back(id);
+    lg.region_ids = g.region_ids;
     lg.force = g.force;
     lc.load_groups.push_back(std::move(lg));
   }
@@ -4214,6 +4223,10 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // COPIED: the PER-FACE depths (task 2026-08-12 §0a). Empty => every protection
   // uses the global depth, byte-identical to before the task.
   lc.face_protection_depths_mm = j_face_protection_depths_mm;
+  // COPIED: protections declared on a REGION, and their per-region depths (task
+  // 2026-08-14-face-regions). Empty => byte-identical to before the task.
+  lc.face_protection_region_ids = j_face_protection_region_ids;
+  lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;

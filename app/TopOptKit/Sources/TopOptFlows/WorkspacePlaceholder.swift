@@ -78,6 +78,9 @@ public struct WorkspacePlaceholder: View {
     @State private var nameDraft = ""
     /// Collapse the (bottom-left) Selections panel by tapping its header.
     @State private var selectionsCollapsed = false
+    /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
+    /// Selections header; it is where a union, a filter and a split are made.
+    @State private var regionsOpen = false
     /// The request that was last optimized — Optimize greys out until the inputs
     /// (load case / material / quality) change from it (or a run is in flight).
     @State private var lastRunRequest: RunRequest?
@@ -555,6 +558,9 @@ public struct WorkspacePlaceholder: View {
                 // is no longer placed separately here.
                 if force.gravityIsSet { bottomRightControls }
                 if viewerMesh != nil { selectionsPanel }
+                // ★ The Regions surface, beside the Selections panel it edits
+                // (task 2026-08-14-face-regions).
+                if viewerMesh != nil, regionsOpen { regionsPanelOverlay }
                 if viewerMesh != nil { latticePreviewOverlay }
                 // Round-2 T1: the big Lattice entry button — top right, LEFT of the
                 // position gizmo, Optimize's stature, and it SAYS what is missing.
@@ -3957,6 +3963,23 @@ public struct WorkspacePlaceholder: View {
             }
     }
 
+    /// ★ THE REGIONS SURFACE (task 2026-08-14-face-regions). Bound straight to
+    /// the project's own region model and selection, so a union made here is the
+    /// union the run emits — no second store, no copy to keep in sync.
+    private var regionsPanelOverlay: some View {
+        FaceRegionSheet(model: Binding(get: { project.faceRegions },
+                                       set: { project.faceRegions = $0 }),
+                        selection: Binding(get: { project.selection },
+                                           set: { project.selection = $0 }),
+                        mesh: viewerMesh,
+                        resolution: project.quality.resolution,
+                        onChange: { project.refreshFaceRegionDrift() },
+                        onClose: { regionsOpen = false })
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.leading, 320)
+            .padding(.bottom, 96)
+    }
+
     // MARK: left Selections panel (design) with the kg/lbs toggle
 
     private var selectionsPanel: some View {
@@ -3979,6 +4002,16 @@ public struct WorkspacePlaceholder: View {
                 .buttonStyle(.plain)
                 Spacer()
                 if !selectionsCollapsed {
+                    // ★ REGIONS (task 2026-08-14-face-regions). Combine faces
+                    // into one selection, and split one into pieces.
+                    Button { regionsOpen.toggle() } label: {
+                        Image(systemName: "square.on.square.dashed")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle((regionsOpen ? DS.Color.accent
+                                              : DS.Color.textTertiary).color)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Regions")
                     keepClearQuickAction
                     unitToggle
                 }

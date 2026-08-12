@@ -1,0 +1,58 @@
+=== 1. THE PART ===
+part            evidence/2026-08-12-lattice-page-redesign/M2_verticalStand.step
+resolution      128   spacing 1.70528 mm   voxel face 2.90798 mm^2
+faces           78  (78 with area)
+area  min/med/max  0.0008068 / 167.8 / 1.71e+04 mm^2
+voxels min/med/max 0 / 58 / 5880   (area / voxel face)
+RANGE           21195190x
+
+=== 2. THE FILLET/CHAMFER FILTER ===
+threshold        41.95 mm^2  (0.25 x median)
+blend  (small + 2 larger)   24 faces
+size   (small only)         27 faces
+kind == other               30 faces   <- the NAIVE reading
+kind == cylinder            12 faces
+`other` MISSES              13 of the blend matches
+`other` OVER-CATCHES        19 faces the blend filter rejects
+blend matches: 5 6 7 8 9 10 11 12 13 14 27 28 35 42 43 44 46 47 53 59 60 63 64 75 
+
+=== 3. THE TAP COUNT (his captured load group) ===
+declared faces   22  (22 resolve on this import)
+TODAY            22 taps (one per face)
+adjacency groups 1  (his faces that touch each other at all)
+expand-coplanar  22 taps (one per connected coplanar cluster)
+expand-same-kind 9 taps (one per connected same-class cluster)
+filter + Combine 2 taps (pick a preset, press Combine)
+
+expand-coplanar on the five largest faces (1 tap each):
+  face 15  (1.71e+04 mm^2)  1 tap -> 1 faces
+  face 2   (1.238e+04 mm^2)  1 tap -> 1 faces
+  face 16  (1.181e+04 mm^2)  1 tap -> 1 faces
+  face 18  (9890 mm^2)  1 tap -> 1 faces
+  face 23  (9633 mm^2)  1 tap -> 1 faces
+
+=== 4. LAYER 1, BEFORE AND AFTER A UNION + A 10x5 GRID SPLIT ===
+union            region 100, 24 member faces, 214.4 mm^2
+grid parent      face 15, 6081 voxels, frame PCA (no shared axis)
+10x5 split       50 cells, voxels 6081 of 6081 (PARTITIONS)
+smallest cell    0 voxels  floor 16  -> REFUSED
+refusal          smallest cell (1x1) holds 0 voxels, under the floor of 16. This region holds 6081 voxels, so at most 380 cells can clear it.
+
+  LAYER 1 CHECKS
+  triangle_face unchanged (every voxel keeps its CAD face)   OK
+  face_count unchanged                                       OK
+  the analytic surface table is the same size                OK
+  every analytic surface identical, bit for bit              OK
+  CAD attribution per vertex identical                       OK
+  CAD-ATTRIBUTED VERTEX COUNT identical                      OK
+  projection move (max/rms/count) identical to the digit     OK
+  CAD ERROR — worst face flatness identical to the digit   OK
+  CAD ERROR — worst bore out-of-roundness identical        OK
+  the projected mesh has the same vertex count               OK
+
+  attributed vertices  694 of 1555  (share 0.446302251)
+  projection max/rms   1.8044863983e-09 / 4.03884169377e-10 mm
+  CAD ERROR  flatness  1.2124389394e-15 mm (worst face, 17 measured)
+  CAD ERROR  roundness 3.59712259979e-14 mm (worst bore, 4 measured)
+
+ALL LAYER-1 CHECKS PASSED (0 failed checks)

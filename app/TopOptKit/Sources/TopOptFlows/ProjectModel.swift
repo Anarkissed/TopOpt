@@ -51,6 +51,18 @@ public final class ProjectModel: ObservableObject {
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
 
+    /// ★ THE REGION LAYER (task 2026-08-14-face-regions §1) — the unions and the
+    /// split cells over this part's faces. Default EMPTY: with no region edits the
+    /// project emits exactly the job it emitted before this layer existed (bar R1).
+    /// Persisted on the project as the DEFINITION (filter + add/remove + cut
+    /// geometry), so a re-import re-evaluates it and reports what changed.
+    @Published public var faceRegions = FaceRegionModel()
+
+    /// The regions whose filter matches a different number of faces than it did
+    /// when it was authored — computed on the import that follows a restore, and
+    /// surfaced rather than absorbed (§3c). Empty when nothing drifted.
+    @Published public private(set) var faceRegionDrift: [FaceRegionModel.Drift] = []
+
     /// Paint-mode overlay (handoff 2026-07-25): the triangle→painted-face map for the imported
     /// part, the escape when tap-selection over-selects. Nil for a project with no paintable mesh.
     /// `@Published` value type: a brush stroke mutates it in place (via `paintStroke`), which
@@ -269,9 +281,35 @@ public final class ProjectModel: ObservableObject {
         // projection ARMED, which is what the new core default means; decoding it to
         // false would quietly opt every existing project out of the change.
         self.projectCADFaces = snapshot.projectCADFaces ?? true
+        self.faceRegions = snapshot.faceRegions ?? FaceRegionModel()
+        // ★ RE-EVALUATE THE PERSISTED REGIONS AGAINST THIS IMPORT, and report what
+        // moved (§3c / bar R6). A union is stored as a filter plus a hand
+        // add/remove list precisely so it CAN be re-evaluated; the one thing that
+        // must never happen is absorbing a change silently.
+        refreshFaceRegionDrift()
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
+    }
+
+    /// Re-evaluate every persisted region's filter against the CURRENT import and
+    /// record which ones now match a different number of faces than they did when
+    /// they were authored. Called on restore and after a re-import.
+    ///
+    /// ★ REPORTED, NEVER ABSORBED. A CAD edit renumbers B-rep faces; a union whose
+    /// filter used to catch seven blend faces and now catches five is a fact the
+    /// user has to see before they run. The core reports the same number on its own
+    /// side (`[loadcase] region ... drift=`), so a remote run says it too.
+    public func refreshFaceRegionDrift() {
+        guard let mesh = viewerMesh, !faceRegions.isEmpty else {
+            faceRegionDrift = []
+            return
+        }
+        var now: [RegionID: Int] = [:]
+        for r in faceRegions.regions where r.filter.any {
+            now[r.id] = FaceRegionGeometry.match(r.filter, in: mesh).count
+        }
+        faceRegionDrift = faceRegions.drift(matchedNow: now)
     }
 
     /// The Q2 message: which restored groups reference face ids the re-imported
@@ -455,19 +493,27 @@ public final class ProjectModel: ObservableObject {
     /// STL project (no face selection) — the run then falls back to self-weight.
     public func loadCase() -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
                                buildDirection: SIMD3<Double>,
-                               plateDirection: SIMD3<Double>) {
+                               plateDirection: SIMD3<Double>,
+                               anchorRegionIDs: [RegionID]) {
         var anchors: [Int] = []
+        var anchorRegions: [RegionID] = []
         var loads: [TopOptKit.LoadGroupSpec] = []
         for g in selection.groups {
             let kind = force.kind(for: g.id)
             if kind.isAnchor {
                 // Painted faces carry a live overlay id; the run sees the dense re-import id.
                 anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
+                // ★ A region rides ALONGSIDE the faces (task 2026-08-14-face-regions
+                // §3e). Region ids are NOT face ids and are never remapped through
+                // `resolvedRunFaceID` — a region is resolved core-side against the
+                // run's own import, which is the whole reason it survives one.
+                anchorRegions.append(contentsOf: g.regionIDs)
             } else if kind.isLoad {
                 let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
                 if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
-                                       force: SIMD3<Double>(f)))
+                                       force: SIMD3<Double>(f),
+                                       regionIDs: g.regionIDs))
                 }
             }
         }
@@ -481,7 +527,7 @@ public final class ProjectModel: ObservableObject {
         // job is byte-identical to what this project produced before. Non-zero
         // only when the user actually answered the second question.
         let plate = buildOrientation.plateUp.map { simd_normalize($0) } ?? SIMD3<Float>(0, 0, 0)
-        return (anchors, loads, SIMD3<Double>(up), SIMD3<Double>(plate))
+        return (anchors, loads, SIMD3<Double>(up), SIMD3<Double>(plate), anchorRegions)
     }
 
     /// The run's "Keep clear" clearances (handoff 100), derived from the selection +
@@ -554,13 +600,17 @@ public final class ProjectModel: ObservableObject {
     /// carries — so the barrier is exactly as deep as the lattice it feeds. For a
     /// protect-only group it is the project's global depth, unchanged.
     public func faceProtectionSpecs()
-        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double]) {
+        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
+            regionIDs: [RegionID], regionDepthsMM: [Double]) {
         guard viewerMesh != nil else {
-            return ([], force.faceProtectDepthMM, [])
+            return ([], force.faceProtectDepthMM, [], [], [])
         }
         var ids: [Int] = []
         var depths: [Double] = []
+        var regionIDs: [RegionID] = []
+        var regionDepths: [Double] = []
         var seen = Set<FaceID>()
+        var seenRegions = Set<RegionID>()
         for g in selection.groups where force.isProtected(g.id) {
             // A protected group that is ALSO a lattice region is one slab; a
             // protect-only group keeps the project's global depth.
@@ -575,8 +625,17 @@ public final class ProjectModel: ObservableObject {
                 ids.append(Int(resolvedRunFaceID(f)))
                 depths.append(d)
             }
+            // ★ EACH REGION CARRIES ITS OWN DEPTH — which is what makes a grid
+            // split a hand-authored grading mechanism (§6): ten sectors around a
+            // curved feature, each protected to a different depth, with the
+            // optimiser deciding none of it.
+            for r in g.regionIDs where !seenRegions.contains(r) {
+                seenRegions.insert(r)
+                regionIDs.append(r)
+                regionDepths.append(d)
+            }
         }
-        return (ids, force.faceProtectDepthMM, depths)
+        return (ids, force.faceProtectDepthMM, depths, regionIDs, regionDepths)
     }
 
     /// The lattice region depth for `group`, in mm — the ONE number, read through
@@ -1339,7 +1398,8 @@ public final class ProjectModel: ObservableObject {
                                // omitted-when-default rule would make the OFF
                                // state the only one that survives a reopen only
                                // by accident of which value it happened to be.
-                               projectCADFaces: projectCADFaces)
+                               projectCADFaces: projectCADFaces,
+                               faceRegions: faceRegions.isEmpty ? nil : faceRegions)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

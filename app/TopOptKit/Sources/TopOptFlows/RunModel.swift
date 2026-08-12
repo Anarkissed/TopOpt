@@ -116,6 +116,20 @@ public struct RunRequest: Equatable, Sendable {
     /// Empty ⇒ every protection uses the global depth (the pre-task request,
     /// byte-identical). Part of the request identity.
     public let faceProtectionDepthsMM: [Double]
+    /// ★ THE REGION LAYER (task 2026-08-14-face-regions §1) — the unions and the
+    /// split cells the user authored, declared ONCE and referred to by id from
+    /// the groups / anchors / protections below. Empty ⇒ no region edits ⇒ the
+    /// emitted job is byte-identical to the one this project emitted before the
+    /// region layer existed (bar R1). Part of the request identity: a union or a
+    /// split changes what is selected, so it must re-enable Optimize.
+    public let faceRegions: [FaceRegion]
+    /// Regions tagged FIXTURE, alongside `anchorFaceIDs`.
+    public let anchorRegionIDs: [RegionID]
+    /// Regions whose own material the optimizer may not touch, and their
+    /// per-region depths (mm; <= 0 ⇒ the global depth). Fifty sectors of a grid
+    /// split each carrying their own depth is exactly this pair of lists.
+    public let faceProtectionRegionIDs: [RegionID]
+    public let faceProtectionRegionDepthsMM: [Double]
     /// The lattice block (handoff 2026-07-29-lattice-mode-ui), or nil for a non-lattice
     /// run (byte-identical to today, BAR U1). Present only when lattice mode is on AND the
     /// settings are runnable-as-certified (a core-certifiable topology within the core band
@@ -170,6 +184,10 @@ public struct RunRequest: Equatable, Sendable {
                 clearances: [TopOptKit.ClearanceSpec] = [],
                 faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
                 faceProtectionDepthsMM: [Double] = [],
+                faceRegions: [FaceRegion] = [],
+                anchorRegionIDs: [RegionID] = [],
+                faceProtectionRegionIDs: [RegionID] = [],
+                faceProtectionRegionDepthsMM: [Double] = [],
                 projectID: UUID? = nil, sourceFormat: String = "",
                 lattice: LatticeSpec? = nil,
                 // Defaults to core's own default. A caller that says nothing gets
@@ -198,6 +216,10 @@ public struct RunRequest: Equatable, Sendable {
         self.faceProtections = faceProtections
         self.faceProtectionDepthMM = faceProtectionDepthMM
         self.faceProtectionDepthsMM = faceProtectionDepthsMM
+        self.faceRegions = faceRegions
+        self.anchorRegionIDs = anchorRegionIDs
+        self.faceProtectionRegionIDs = faceProtectionRegionIDs
+        self.faceProtectionRegionDepthsMM = faceProtectionRegionDepthsMM
         self.projectID = projectID
         self.lattice = lattice
         self.projectCADFaces = projectCADFaces
@@ -1062,6 +1084,7 @@ public final class RunModel: ObservableObject {
         // anchors, no load groups) still takes the self-weight ladder (§5) — the only
         // option for a bare STL with no face selection.
         let hasLoadCase = !request.anchorFaceIDs.isEmpty || !request.loadGroups.isEmpty
+            || !request.faceRegions.isEmpty
         if request.isStepModel || hasLoadCase {
             return try TopOptKit.minimizePlasticLoadCase(
                 stepPath: request.modelPath, material: request.material,
@@ -1080,6 +1103,14 @@ public final class RunModel: ObservableObject {
                 faceProtections: request.faceProtections,
                 faceProtectionDepthMM: request.faceProtectionDepthMM,
                 faceProtectionDepthsMM: request.faceProtectionDepthsMM,
+                // ★ THE REGION LAYER reaches the ON-DEVICE run (task
+                // 2026-08-14-face-regions). The LAN job.json and this call now
+                // carry the same regions; JobJSONEquivalenceTests asserts they
+                // agree, the way it already does for the wall widths.
+                faceRegions: request.faceRegions.map(TopOptKit.FaceRegionSpec.init(region:)),
+                anchorRegionIDs: request.anchorRegionIDs,
+                faceProtectionRegionIDs: request.faceProtectionRegionIDs,
+                faceProtectionRegionDepthsMM: request.faceProtectionRegionDepthsMM,
                 progress: progress, onVariant: onVariant)
         }
         return try TopOptKit.minimizePlastic(

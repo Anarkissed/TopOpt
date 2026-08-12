@@ -1,0 +1,36 @@
+=== R7 — COPY BUDGET ===
+Every string this branch puts ON SCREEN, longest first. The budget is ~25
+words; the longest is 11.
+
+  11 words  FaceRegionSheet.swift:135  “Tap a face on the model to add or drop it.”
+  10 words  FaceRegionSheet.swift:240  “No shared axis — cuts follow the shape's long axis.”
+   9 words  FaceRegionSheet.swift:94  “N: N → N faces since you made it”
+   6 words  FaceRegion.swift:400  “Smallest piece: N voxels, floor N. ”
+   6 words  FaceRegionSheet.swift:245  “N pieces · smallest N vox”
+   5 words  FaceRegion.swift:401  “N voxels fits N pieces.”
+   5 words  FaceRegionSheet.swift:211  “N parts · N vox”
+   5 words  FaceRegion.swift:272  “N \(k == 0 ? ”
+   4 words  FaceRegionSheet.swift:212  “Nf · N vox”
+   4 words  FaceRegionSheetModel.swift:27  “Bores of one size”
+   3 words  FaceRegionSheet.swift:179  “No regions yet.”
+   3 words  FaceRegionSheetModel.swift:26  “Fillets & chamfers”
+
+  38 on-screen strings added; LONGEST = 11 words.
+
+The longest CLI DIAGNOSTIC is the sliver refusal, which runs ~70 words. It is a
+terminal/log message, not UI copy, and it is deliberately long for the same
+reason every other refusal in loadcase.cpp is: it names the number, the floor,
+the budget, and the two ways out. The UI shows the SHORT form of the same
+verdict ("Smallest piece: N voxels, floor 16." + "N voxels fits N pieces.").
+
+=== R8 — ASSERTION CENSUS ===
+Counted by MESSAGE, not by name: every distinct assertion/refusal text in
+core and the app tests, base vs branch. A deletion shows up as a message
+that exists on base and not on the branch.
+
+  CHECK\                   base  4059   branch  4059   +0
+  XCTAssert\w*\            base  5104   branch  5104   +0
+  schema_fail\             base   133   branch   133   +0
+  throw std::\w+\          base   426   branch   426   +0
+
+  No category fell. Nothing was weakened or deleted.

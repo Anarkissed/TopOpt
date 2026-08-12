@@ -76,6 +76,11 @@ add_library(topopt
   src/io/segment.cpp
   src/io/part.cpp
   src/io/face_tag.cpp
+  # THE REGION LAYER (task 2026-08-14-face-regions §1): the second layer of
+  # identity, over the face partition and never writing it. OCCT-free for the
+  # same reason face_tag.cpp is — a region must resolve wherever a mesh is,
+  # including the dependency-free iOS slices.
+  src/io/face_region.cpp
   src/io/face_overrides.cpp
   src/io/fields.cpp
   src/io/design_store.cpp
@@ -572,6 +577,15 @@ add_test(NAME smooth COMMAND test_smooth)
 add_executable(test_cad_project tests/unit/test_cad_project.cpp)
 target_link_libraries(test_cad_project PRIVATE topopt)
 add_test(NAME cad_project COMMAND test_cad_project)
+
+# THE REGION LAYER (task 2026-08-14-face-regions §1). Hand-built StepModel, so
+# no OCCT and no Eigen — it gates every CI config, which is what a layer this
+# load-bearing needs. Its headline assertion is that a one-member zero-cut
+# region tags EXACTLY the voxels tag_step_face tags: regions are the same
+# selection rule under a second name, which is why day one is byte-identical.
+add_executable(test_face_region tests/unit/test_face_region.cpp)
+target_link_libraries(test_face_region PRIVATE topopt)
+add_test(NAME face_region COMMAND test_face_region)
 
 # BOTH DEFAULTS ARE ARMED (task 2026-08-06-arm-projection-and-void-check).
 # `output.project_cad_faces` and `lattice.require_lattice_void_reaches_exterior`
@@ -1573,6 +1587,17 @@ if(OpenCASCADE_FOUND)
   add_executable(cad_project_probe EXCLUDE_FROM_ALL
     tests/harness/cad_project_probe.cpp)
   target_link_libraries(cad_project_probe PRIVATE topopt)
+
+  # THE REGION LAYER, ON A REAL PART (task 2026-08-14-face-regions, R2/R3).
+  # Reports what the blend heuristic matched, the tap count before and after,
+  # and — the bar that matters — whether resolving a union and a 10x5 grid split
+  # moved `triangle_face`, the analytic surface table, the CAD attribution or the
+  # measured CAD error. Needs OCCT to import a STEP part.
+  #   cmake --build build --target face_region_probe
+  #   ./build/face_region_probe <part.step> <resolution>
+  add_executable(face_region_probe EXCLUDE_FROM_ALL
+    tests/harness/face_region_probe.cpp)
+  target_link_libraries(face_region_probe PRIVATE topopt)
 
   # S2 (task 2026-08-08-smoothing-that-works-and-is-usable): the bake-off PR 306
   # stopped short of — Taubin against mean-curvature flow on the OPTIMIZER-CUT

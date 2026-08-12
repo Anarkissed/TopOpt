@@ -435,9 +435,76 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
   topopt::ProductionLoadCase lc;
   lc.anchor_face_ids.assign(load_case.anchor_face_ids.begin(),
                             load_case.anchor_face_ids.end());
+  // ── THE REGION LAYER, UNFLATTENED (task 2026-08-14-face-regions §1) ────────
+  // The on-device run reads the SAME ProductionLoadCase::face_regions the LAN
+  // job.json produces, so a union or a split behaves identically wherever the
+  // user taps Optimize. Empty arrays => no regions => byte-identical.
+  {
+    const std::size_t n = load_case.region_ids.size();
+    std::size_t add_off = 0, rem_off = 0, cut_off = 0;
+    auto at_i = [](const std::vector<int32_t>& v, std::size_t i, int fallback) {
+      return i < v.size() ? v[i] : fallback;
+    };
+    auto at_d = [](const std::vector<double>& v, std::size_t i, double fallback) {
+      return i < v.size() ? v[i] : fallback;
+    };
+    for (std::size_t r = 0; r < n; ++r) {
+      topopt::FaceRegionSpec spec;
+      spec.id = load_case.region_ids[r];
+      spec.parent_id = at_i(load_case.region_parent_ids, r, -1);
+      spec.filter_matched_at_author =
+          at_i(load_case.region_filter_matched_at_author, r, -1);
+      spec.filter.max_area_mm2 = at_d(load_case.region_filter_max_area_mm2, r, 0.0);
+      spec.filter.min_area_mm2 = at_d(load_case.region_filter_min_area_mm2, r, 0.0);
+      spec.filter.min_larger_neighbours =
+          at_i(load_case.region_filter_min_larger_neighbours, r, 0);
+      spec.filter.larger_ratio = at_d(load_case.region_filter_larger_ratio, r, 2.0);
+      switch (at_i(load_case.region_filter_kind, r, -1)) {
+        case 0: spec.filter.kind = "plane"; break;
+        case 1: spec.filter.kind = "cylinder"; break;
+        case 2: spec.filter.kind = "other"; break;
+        default: break;  // -1 = unset
+      }
+      spec.filter.cylinder_radius_mm =
+          at_d(load_case.region_filter_cyl_radius_mm, r, 0.0);
+      spec.filter.cylinder_radius_tol_mm =
+          at_d(load_case.region_filter_cyl_tol_mm, r, 0.05);
+      const std::size_t na =
+          static_cast<std::size_t>(std::max(0, at_i(load_case.region_add_sizes, r, 0)));
+      for (std::size_t k = 0; k < na && add_off + k < load_case.region_add_faces.size(); ++k)
+        spec.add.push_back(load_case.region_add_faces[add_off + k]);
+      add_off += na;
+      const std::size_t nr = static_cast<std::size_t>(
+          std::max(0, at_i(load_case.region_remove_sizes, r, 0)));
+      for (std::size_t k = 0; k < nr && rem_off + k < load_case.region_remove_faces.size(); ++k)
+        spec.remove.push_back(load_case.region_remove_faces[rem_off + k]);
+      rem_off += nr;
+      const std::size_t nc =
+          static_cast<std::size_t>(std::max(0, at_i(load_case.region_cut_sizes, r, 0)));
+      for (std::size_t k = 0; k < nc; ++k) {
+        const std::size_t b = 3 * (cut_off + k);
+        if (b + 2 >= load_case.region_cut_normal_xyz.size()) break;
+        topopt::RegionCut cut;
+        cut.point = topopt::Vec3{load_case.region_cut_point_xyz[b],
+                                 load_case.region_cut_point_xyz[b + 1],
+                                 load_case.region_cut_point_xyz[b + 2]};
+        cut.normal = topopt::Vec3{load_case.region_cut_normal_xyz[b],
+                                  load_case.region_cut_normal_xyz[b + 1],
+                                  load_case.region_cut_normal_xyz[b + 2]};
+        cut.strict = cut_off + k < load_case.region_cut_strict.size() &&
+                     load_case.region_cut_strict[cut_off + k] != 0;
+        spec.cuts.push_back(cut);
+      }
+      cut_off += nc;
+      lc.face_regions.push_back(std::move(spec));
+    }
+  }
+  lc.anchor_region_ids.assign(load_case.anchor_region_ids.begin(),
+                              load_case.anchor_region_ids.end());
   {
     const std::size_t group_count = load_case.load_group_sizes.size();
     std::size_t face_off = 0;
+    std::size_t region_off = 0;
     for (std::size_t g = 0; g < group_count; ++g) {
       topopt::ProductionLoadCase::LoadGroup lg;
       lg.force = topopt::Vec3{
@@ -448,6 +515,13 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
       for (std::size_t f = 0; f < n && face_off + f < load_case.load_face_ids.size(); ++f)
         lg.face_ids.push_back(load_case.load_face_ids[face_off + f]);
       face_off += n;
+      const std::size_t rn =
+          g < load_case.load_group_region_sizes.size()
+              ? static_cast<std::size_t>(std::max(0, load_case.load_group_region_sizes[g]))
+              : 0;
+      for (std::size_t k = 0; k < rn && region_off + k < load_case.load_region_ids.size(); ++k)
+        lg.region_ids.push_back(load_case.load_region_ids[region_off + k]);
+      region_off += rn;
       lc.load_groups.push_back(std::move(lg));
     }
   }
@@ -545,6 +619,13 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
     lc.face_protection_depth_mm = load_case.face_protection_depth_mm;
   lc.face_protection_depths_mm.assign(load_case.face_protection_depths_mm.begin(),
                                       load_case.face_protection_depths_mm.end());
+  // Protections declared on a REGION, and their per-region depths (task
+  // 2026-08-14-face-regions). Empty => byte-identical.
+  lc.face_protection_region_ids.assign(load_case.face_protection_region_ids.begin(),
+                                       load_case.face_protection_region_ids.end());
+  lc.face_protection_region_depths_mm.assign(
+      load_case.face_protection_region_depths_mm.begin(),
+      load_case.face_protection_region_depths_mm.end());
   return lc;
 }
 

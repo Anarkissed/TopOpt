@@ -307,6 +307,14 @@ public final class AppModel: ObservableObject {
                           faceProtections: protections.faceIDs,
                           faceProtectionDepthMM: protections.depthMM,
                           faceProtectionDepthsMM: protections.depthsMM,
+                          // ★ THE REGION LAYER (task 2026-08-14-face-regions §1).
+                          // Emitted only when the user authored one, so an
+                          // untouched project ships the identical request — and
+                          // hence the identical job.json — it always did (R1).
+                          faceRegions: project.faceRegions.regions,
+                          anchorRegionIDs: lc.anchorRegionIDs,
+                          faceProtectionRegionIDs: protections.regionIDs,
+                          faceProtectionRegionDepthsMM: protections.regionDepthsMM,
                           projectID: project.id,
                           sourceFormat: file.sourceFormat,
                           lattice: latticeSpec,
