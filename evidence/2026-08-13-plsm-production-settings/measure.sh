@@ -82,7 +82,13 @@ for R in $RUNGS; do
   [ -f "$SCRATCH/simp_dump/rung_$R.f64" ] && set -- "$@" "$SCRATCH/simp_dump/rung_$R"
 done
 ./build/plsm_topology_probe "$STEP" "$@" > "$HERE/m2_topology.txt" 2>&1
-grep '^CSV,' "$HERE/m2_topology.txt" | sed 's/^CSV,//' > "$HERE/m2_topology.csv" || true
+# ★ THE HEADER COMES FROM THE PROBE TOO, not from this script. An earlier cut
+# grepped only the `CSV,` rows and left the CSV headerless, so `DictReader` took
+# the first DATA row as the header and Table 4 printed nine blank lines — a table
+# that renders but says nothing, which is worse than one that fails.
+{ grep -E '^field,' "$HERE/m2_topology.txt" | head -1
+  grep -E '^CSV,' "$HERE/m2_topology.txt" | sed 's/^CSV,//'
+} > "$HERE/m2_topology.csv" || true
 echo "(2) done -> m2_topology.csv"
 
 # ── (3) the certificates, the masses and the stop reasons, out of each arm's own

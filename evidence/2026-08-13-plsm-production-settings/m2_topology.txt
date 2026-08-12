@@ -1,0 +1,30 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+== void topology, by the MANUFACTURING escape rule (6-connected void, exterior = the grid's boundary planes) ==
+grid 128 x 31 x 118   spacing 1.705279 mm   in-part voxels 110904 of 468224
+
+field                                          b0      chi  b2solid    b1tun  sealed_pk  sealed_vox  sealed%    sealed_mm3
+field,b0_components,chi,b2_enclosed_solid,b1_tunnels,sealed_pockets,void_voxels,sealed_voxels,sealed_volume_mm3
+/Users/nadim/plsm_scratch/B_heaviside/dump/rung_0.68       34       25        0        9         22        1602    6.88%      7944.180
+CSV,/Users/nadim/plsm_scratch/B_heaviside/dump/rung_0.68,34,25,0,9,22,23288,1602,7944.179977
+/Users/nadim/plsm_scratch/B_heaviside/dump/rung_0.26       20       -7        0       27         18          30    0.05%       148.767
+CSV,/Users/nadim/plsm_scratch/B_heaviside/dump/rung_0.26,20,-7,0,27,18,54927,30,148.767415
+/Users/nadim/plsm_scratch/C_eta1/dump/rung_0.68       24       16        0        8          9        1979    8.61%      9813.690
+CSV,/Users/nadim/plsm_scratch/C_eta1/dump/rung_0.68,24,16,0,8,9,22978,1979,9813.690496
+/Users/nadim/plsm_scratch/C_eta1/dump/rung_0.26        7       -8        0       15          3           3    0.01%        14.877
+CSV,/Users/nadim/plsm_scratch/C_eta1/dump/rung_0.26,7,-8,0,15,3,53248,3,14.876742
+/Users/nadim/plsm_scratch/D_fraction/dump/rung_0.68       16       15        0        1          8        1864    8.27%      9243.415
+CSV,/Users/nadim/plsm_scratch/D_fraction/dump/rung_0.68,16,15,0,1,8,22529,1864,9243.415404
+/Users/nadim/plsm_scratch/D_fraction/dump/rung_0.26        4       -8        0       12          0           0    0.00%         0.000
+CSV,/Users/nadim/plsm_scratch/D_fraction/dump/rung_0.26,4,-8,0,12,0,52334,0,0.000000
+/Users/nadim/plsm_scratch/A_ship/dump/rung_0.68       17       15        0        2          7        1740    7.70%      8628.510
+CSV,/Users/nadim/plsm_scratch/A_ship/dump/rung_0.68,17,15,0,2,7,22590,1740,8628.510087
+/Users/nadim/plsm_scratch/A_ship/dump/rung_0.26        4       -7        0       11          0           0    0.00%         0.000
+CSV,/Users/nadim/plsm_scratch/A_ship/dump/rung_0.26,4,-7,0,11,0,52320,0,0.000000
+/Users/nadim/plsm_scratch/simp_dump/rung_0.68       16       16        0        0         10        1034    4.60%      5127.517
+CSV,/Users/nadim/plsm_scratch/simp_dump/rung_0.68,16,16,0,0,10,22480,1034,5127.516914
+/Users/nadim/plsm_scratch/simp_dump/rung_0.26        2       -7        0        9          0           0    0.00%         0.000
+CSV,/Users/nadim/plsm_scratch/simp_dump/rung_0.26,2,-7,0,9,0,52309,0,0.000000

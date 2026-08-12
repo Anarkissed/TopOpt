@@ -210,7 +210,15 @@ else:
     for r in rows:
         vv = fnum(r.get("void_voxels"), 0) or 1
         sv = fnum(r.get("sealed_voxels"), 0)
-        print(f"{os.path.basename(r.get('field','')):<40}"
+        # ★ THE ARM NAME IS THE DIRECTORY, NOT THE BASENAME. Every field is
+        # called `rung_0.68`; printing the basename alone gave ten identically
+        # labelled rows, which is a table nobody can read.
+        parts = r.get("field", "").split("/")
+        arm = parts[-3] if len(parts) >= 3 else "?"
+        if arm == "plsm_scratch" or parts[-2] == "simp_dump":
+            arm = "SIMP"          # the reference dump lives one level shallower
+        label = arm + " " + parts[-1]
+        print(f"{label:<40}"
               f"{r.get('b0_components',''):>9}{r.get('chi',''):>9}"
               f"{r.get('b2_enclosed_solid',''):>9}{r.get('b1_tunnels',''):>11}"
               f"{r.get('sealed_pockets',''):>10}"
