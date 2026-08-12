@@ -78,17 +78,37 @@ int main(int argc, char** argv) {
   for (std::size_t v = 0; v < n; ++v)
     in_part[v] = grid.tags[v] != VoxelTag::Empty ? 1 : 0;
 
+  // ★ `--dump-in-part FILE` writes the in-part mask as raw uint8, so the
+  // one-off cross-check in the evidence directory can recompute these counters
+  // with completely different code on the SAME grid. A second implementation is
+  // only a check if it is handed the same inputs.
+  for (int i = 2; i + 1 < argc; ++i)
+    if (std::string(argv[i]) == "--dump-in-part") {
+      std::ofstream d(argv[i + 1], std::ios::binary);
+      d.write(in_part.data(), static_cast<std::streamsize>(in_part.size()));
+      std::printf("wrote in-part mask (%zu bytes) to %s\n", in_part.size(),
+                  argv[i + 1]);
+    }
+
   std::printf(
       "== void topology, by the MANUFACTURING escape rule "
       "(6-connected void, exterior = the grid's boundary planes) ==\n"
       "grid %d x %d x %d   spacing %.6f mm   in-part voxels %zu of %zu\n\n",
       grid.nx, grid.ny, grid.nz, grid.spacing,
       static_cast<std::size_t>(grid.solid_count()), n);
-  std::printf("%-40s%10s%10s%10s%10s%12s%14s\n", "field", "b0","chi","b2solid","b1tun","sealed_pk","sealed_vox","sealed_mm3");
+  // ★ `b2` AND `sealed_pk` ARE DIFFERENT COLUMNS ON PURPOSE. b2 is the Betti
+  // number the Euler identity needs — the SOLID ISLANDS the void encloses —
+  // and `sealed_pk` is the DRAINABILITY verdict. Printing one under the other's
+  // name is the defect `plsm_topology.hpp`'s header describes.
+  std::printf("%-40s%9s%9s%9s%9s%11s%12s%9s%14s\n", "field", "b0", "chi",
+              "b2solid", "b1tun", "sealed_pk", "sealed_vox", "sealed%",
+              "sealed_mm3");
 
-  std::printf("field,b0_components,chi,b2_enclosed_solid,b1_tunnels,sealed_pockets,void_voxels,sealed_voxels,sealed_volume_mm3\n");
+  std::printf("field,b0_components,chi,b2_enclosed_solid,b1_tunnels,"
+              "sealed_pockets,void_voxels,sealed_voxels,sealed_volume_mm3\n");
   for (int i = 2; i < argc; ++i) {
     const std::string stem = argv[i];
+    if (stem == "--dump-in-part") { ++i; continue; }
     std::ifstream f(stem + ".f64", std::ios::binary);
     if (!f) {
       std::printf("FATAL: cannot open %s.f64\n", stem.c_str());
@@ -107,9 +127,15 @@ int main(int argc, char** argv) {
     const PlsmVoidTopology t =
         plsm_void_topology(grid.nx, grid.ny, grid.nz, grid.spacing, occ, 0.5,
                            in_part);
-    std::printf("%-40s%10lld%10lld%10lld%10lld%10lld%12lld%14.3f\n", stem.c_str(),
-                t.components, t.chi, t.enclosed_solid, t.tunnels, t.sealed_pockets,
-                t.sealed_voxels, t.sealed_volume_mm3);
+    const double sealed_pct =
+        t.void_voxels > 0
+            ? 100.0 * static_cast<double>(t.sealed_voxels) /
+                  static_cast<double>(t.void_voxels)
+            : 0.0;
+    std::printf("%-40s%9lld%9lld%9lld%9lld%11lld%12lld%8.2f%%%14.3f\n",
+                stem.c_str(), t.components, t.chi, t.enclosed_solid, t.tunnels,
+                t.sealed_pockets, t.sealed_voxels, sealed_pct,
+                t.sealed_volume_mm3);
     std::printf("CSV,%s,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%.6f\n", stem.c_str(),
                 t.components, t.chi, t.enclosed_solid, t.tunnels, t.sealed_pockets,
                 t.void_voxels,

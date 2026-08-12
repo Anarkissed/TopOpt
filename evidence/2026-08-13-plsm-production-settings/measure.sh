@@ -36,7 +36,16 @@ ARMS="${ARMS:-B_heaviside C_eta1 D_fraction A_ship}"
 RUNGS="${RUNGS:-0.68 0.26}"
 
 cmake --build build -j6 --target external_field_surface_probe \
-    plsm_topology_probe > /dev/null
+    plsm_topology_probe design_rung_dump > /dev/null
+
+# ★ SIMP'S OWN RUNGS AS FIELDS, so R6's table has a baseline row. The reference
+# design.bin is production's SIMP run of record; `design_rung_dump` is INVOKED
+# rather than its format retyped.
+if [ ! -f "$SCRATCH/simp_dump/rung_0.68.f64" ]; then
+  mkdir -p "$SCRATCH/simp_dump"
+  ./build/design_rung_dump "$REF" "$SCRATCH/simp_dump" \
+      > "$HERE/simp_dump.txt" 2>&1
+fi
 
 # ── (1) ★ THE SURFACE TABLE. ONE INVOCATION, BOTH RUNGS, EVERY ARM, AND SIMP'S
 # OWN RUNGS OUT OF THE REFERENCE design.bin IN THE SAME RUN AT THE SAME
