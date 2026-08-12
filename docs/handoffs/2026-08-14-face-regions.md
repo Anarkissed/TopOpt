@@ -449,14 +449,26 @@ commit, and it refuses outright if any piece would come out smaller than the
 smallest face your CAD gave you in the first place. Fifty pieces from one tap is
 a lot of rows, so they fold up under one.
 
-Three honest things. **First**, one of the ideas in the brief doesn't work on
-your files: "tap one face, grab the flat ones next to it" does nothing on a STEP
-part, because a CAD kernel already merges flat surface into one face. The filter
-is what gets you from 22 taps to 2. **Second**, we found a bug in our own work by
-measuring rather than by reading it: the first version quietly froze a list of
-face numbers inside the union, and when we simulated you editing the CAD, a
-24-face selection came back as 32. It now stores the *rule*, re-runs it on every
-import, and tells you when the answer changed. **Third**, splitting a region lets
-you hand-set how deep each sector is *protected*, but not yet how each sector is
-*latticed* — the lattice still wants a shape, not a set of voxels. The three
-changes that would finish it are written down.
+Four honest things.
+
+**One of the ideas in the brief doesn't work on your files.** "Tap one face, grab
+the flat ones next to it" does nothing on a STEP part, because a CAD kernel
+already merges flat surface into one face. The filter is what gets you from 22
+taps to 2.
+
+**We found two bugs in our own work by measuring rather than by reading.** The
+first version quietly froze a list of face numbers inside the union, and when we
+simulated you editing the CAD, a 24-face selection came back as 32; it now stores
+the *rule*, re-runs it on every import, and tells you when the answer changed.
+And the run's receipt was silently leaving the new region information out —
+found by opening the file the run produced, not by rereading the code that
+writes it.
+
+**Splitting a region lets you hand-set how deep each sector is *protected*, but
+not yet how each sector is *latticed*.** The lattice still wants a shape, not a
+set of voxels. The three changes that would finish it are written down.
+
+**The manual cut goes through the middle of the region, not through where you
+tap.** Everything else about it — the rotate button, the snapping, the two
+halves — works; only picking the point on the model is missing, and the machinery
+underneath already takes any point.
