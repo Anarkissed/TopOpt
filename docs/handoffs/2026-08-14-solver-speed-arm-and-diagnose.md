@@ -725,11 +725,11 @@ tried, and it did not carry either.**
 Every arm is his job through `run_job`, capped at **2 PLSM design iterations per
 rung** (4 rungs, 8 design solves) — identically, `base` included.
 
-| arm | TOTAL CG | vs base | matvecs | vs base | `mg_mode` | MG carried | GenEO armed / declined | `N_t` |
-|---|---:|---:|---:|---:|---|---:|---:|---:|
-| `base` | **14,465** | 1.000x | **18,674** | 1.000x | `stagnated-latched` | 0 / 8 attempts 2 | 1 / 15 | 1674 |
-| `rearm=1` | **14,465** | **1.000x** | **25,895** | **1.386x** | `stagnated-latched` | **0 / 8 attempts 8** | 1 / 15 | 1674 |
-| `alg1` *(probe, 1 iter/rung)* | 5,256 | — | — | — | `stagnated-latched` | 0 | 1 / 11 | 1674 |
+| arm | TOTAL CG | vs base | matvecs | vs base | `mg_mode` | MG attempts | of which CARRIED | GenEO armed / declined | `N_t` |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| `base` | **14,465** | 1.000x | **18,674** | 1.000x | `stagnated-latched` | 2 | **0** | 1 / 15 | 1674 |
+| `rearm=1` | **14,465** | **1.000x** | **25,895** | **1.386x** | `stagnated-latched` | **8** | **0** | 1 / 15 | 1674 |
+| `alg1` *(probe, 1 iter/rung)* | 5,256 | — | — | — | `stagnated-latched` | 1 | **0** | 1 / 11 | 1674 |
 
 *(`base` wall 683.0 s; the `rearm` arm's wall is several times that and is not
 quoted — §6a, the host was shared. The `alg1` row is a 1-iteration probe and its
@@ -796,6 +796,29 @@ and attempted on all of them.
 hierarchy, every retry burned the entire 300-cycle budget, and not one of them
 carried** — `cg_multigrid` is 0 on every row of both arms.
 
+The arm's own counters say it in one line:
+
+```
+  rearm_attempts = 13     rearm_carries = 0     hier_attempts = 8
+```
+
+**Thirteen retries granted — the eight design solves plus five rung-boundary
+certification solves — and zero of them carried.** `rearm_carries` is the single
+number the re-arm question turns on, and it is zero.
+
+★ **AND THE DESIGN DID NOT MOVE (R3).** Every certified margin is identical to
+the control **to every printed digit**:
+
+| rung | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---:|---:|---:|---:|
+| `base` | 2372.88667 | 793.600505 | 355.269912 | 232.153157 |
+| `rearm=1` | 2372.88667 | 793.600505 | 355.269912 | 232.153157 |
+| verdict | ACCEPT → ACCEPT | ACCEPT → ACCEPT | ACCEPT → ACCEPT | ACCEPT → ACCEPT |
+
+That is what a solver-only change is supposed to look like, and it is the
+positive half of this arm: the re-arm machinery is **exact** — it changes which
+preconditioner is attempted and nothing else. It is simply not worth attempting.
+
 ★ **THE CG COLUMN IS BIT-IDENTICAL AND THE MATVEC COLUMN IS NOT — that is the
 whole point, and it is why §5's instrument fix was worth making.** The re-arm
 costs **~1,203 operator applies per solve** — one wasted hierarchy build plus 300
@@ -804,7 +827,9 @@ actually solves the system is unchanged. **Total CG is 14,465 either way — R1'
 unit reports the re-arm as exactly free.** It is not free: it is **+7,221
 operator applies, +38.7 %, for zero benefit**, and no production
 `iterations.csv` written before this task could have shown that, because the
-`matvecs` column was 0 on every row (§5).
+`matvecs` column was 0 on every row (§5). Wall agrees in direction — **683.0 s
+→ 911.3 s, +33.4 %** — and is quoted here only because it corroborates a
+deterministic count rather than standing in for one (§6a).
 
 ★ **AND IT MEETS PHASE 0'S OWN REOPEN CONDITION.** That handoff asked for
 `used_mg=0` with `hier_built=1` on a **`vf ≤ 0.4`, structure-formed field**, with
