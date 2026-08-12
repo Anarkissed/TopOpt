@@ -1,0 +1,8 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+[preflight] load path CONNECTED: 5165 load voxels, 3348 anchor voxels, 110904 of 468224 voxels allowed to hold material; narrowest separating cross-section 3840 voxels (1.117e+04 mm^2) at 11/12 steps from the anchor; 4.65 ms
+NOTE: solve grid 128x31x118 has odd axis(es) [y=31] - geometric multigrid pads its INDEX SPACE to 128x32x120 (up to 4 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=4 iter=1

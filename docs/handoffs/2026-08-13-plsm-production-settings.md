@@ -204,6 +204,80 @@ fixed in voxels and converges to nothing. And the value function is the exact
 ANTIDERIVATIVE of the mollifier the sensitivity uses, so `dS/dt = -delta_q(t)`
 identically — the value and the gradient are two facts about one function.
 
+### (g) ★★ R2 — THE FINITE DIFFERENCE, AND THE SECOND WRONG GRADIENT IT FOUND
+
+`core/tests/harness/plsm_frac_fd_probe.cpp` differences the **shipped header** —
+`plsm_frac_build`, `plsm_frac_of_soft`, `plsm_frac_band`, `plsm_frac_scatter`, in
+the order and with the arguments `plsm_optimize` uses them in. A probe that
+reimplemented the gradient would verify the probe.
+
+**The volume, `V(alpha) = SUM_{v ACTIVE} f_v`, swept over five step sizes:**
+
+| probe | 0.001 | 0.01 | 0.1 | 0.3 | 1.0 |
+|---|---|---|---|---|---|
+| random dir 0 | **−0.085%** | **−0.085%** | **−0.085%** | **−0.085%** | −0.096% |
+| random dir 1 | **+0.479%** | **+0.479%** | **+0.479%** | **+0.479%** | +0.489% |
+| coefficient 20136 | +0.564% | +0.572% | +0.663% | +1.626% | +6.681% |
+| coefficient 11982 | +0.569% | +0.578% | +0.671% | +1.636% | +6.688% |
+| coefficient 14696 | +0.563% | +0.572% | +0.665% | +1.630% | +6.683% |
+
+★ **THE VOLUME SENSITIVITY IS VERIFIED TO BETTER THAN HALF A PERCENT, FLAT ACROSS
+THREE DECADES.** PR 327's HARD variant read +182% at step 0.001 and −45.7% at
+0.01 on the same functional; the mollified value removes that staircase
+completely, which is the whole reason it is the default. The single-coefficient
+rows climb at the large steps because the FUNCTION curves there, not because the
+gradient does — that is truncation, and it moves with the step exactly as
+truncation should.
+
+**★★ AND THE COMPLIANCE, WHERE THE ANSWER WAS NOT THE EXPECTED ONE.** Two state
+solves per point, at the tight tolerance, both weights differenced against the
+SAME solves:
+
+| probe | step | **continuum** (the shipped weight) | **discrete** (the derivative of the actual law) |
+|---|---|---|---|
+| random dir 0 | 0.01 | ★ **+56.017%** | **−0.313%** |
+| random dir 0 | 0.1 | ★ **+56.014%** | **−0.314%** |
+| random dir 1 | 0.01 | ★ **+45.050%** | **+0.967%** |
+| random dir 1 | 0.1 | ★ **+45.049%** | **+0.967%** |
+| coefficient 20136 | 0.01 | +6.288% | −1.534% |
+| coefficient 20136 | 0.1 | +5.998% | −1.802% |
+| coefficient 11982 | 0.01 | +7.327% | −1.529% |
+| coefficient 14696 | 0.01 | +7.123% | −1.497% |
+
+★★ **THE COMPLIANCE GRADIENT PR 324, 325, 326, 327 AND THE SHIPPED `--plsm` MODE
+ALL USE IS OFF BY 45–56% ON A GENERAL DIRECTION, AND IT IS FLAT TO FIVE DIGITS
+ACROSS A FACTOR OF TEN IN STEP SIZE.** 56.017 against 56.014. By exactly the
+criterion PR 327 established for the `|grad phi|` defect, that is a gradient
+error and not noise.
+
+★ **THE ROOT CAUSE, WITH FILE AND LINE.** `core/src/simp/plsm.cpp:104`
+(`energy_from`) returns the strain-energy density `q E0` — the energy released
+when material appears across the interface as a 0 → 1 **jump**. That is the
+continuum shape derivative, and it is also the discrete one **when the stiffness
+law is linear**. GridapTopOpt's is: `E(rho) = rho E0`, penalty 1. ★ **This
+trajectory runs SIMP at penalty 3**, so the derivative of the ersatz compliance
+the solver actually minimises is
+
+    dC/dalpha_i = SUM_v (dC/drho_v)(1 - rho_min) d f_v/d alpha_i
+
+and the two differ by a per-voxel factor `p (1 - rho_min) rho_v^(p-1)` — about
+0.75 at `rho = 0.5` and **varying across the band**, so it is not even a constant
+rescaling that a move limit could absorb.
+
+★ **PR 327 CORRECTED THE MEASURE AND LEFT THE WEIGHT.** `delta` says WHERE the
+boundary moves; the weight says WHAT THAT COSTS. They are separate factors of one
+product and only the first had ever been differenced. Correcting one and not the
+other is why this had to be re-checked rather than inherited.
+
+★ **AND A SINGLE-COEFFICIENT CHECK WOULD HAVE PASSED IT** — 6–7% against the
+discrete form's 1.5–1.8%. That is the same trap PR 327's own sub-cell-psi
+ablation fell into, arriving a second time: only a general direction, where many
+knots combine across the band, separates the two.
+
+`PlsmSensWeight::Discrete` is the default. `Continuum` is reachable, documented
+with this table at the site, and is what `B_heaviside` and `C_eta1` run so the
+control arms are the controls.
+
 ## 3. ITEM 3 — the stopping rule
 
 ### (a) `max_iterations = 60` was wrong in BOTH directions
