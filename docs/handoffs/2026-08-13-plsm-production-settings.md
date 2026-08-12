@@ -9,19 +9,23 @@ production file between them**. Everything below is `core/src`, `core/include`
 and the job schema, and every arm runs through `topopt-cli run` on his captured
 job — not through `levelset_probe`.
 
-★ **THE PERIMETER PENALTY IS NOT HERE.** It waits for Stage B, for the reason the
-brief gives: if the Helmholtz filter at r = 2 or r = 3 clears at both rungs it
-beats the penalty on surface and the question changes. Nothing below depends on
-that result.
+★★ **THE PERIMETER PENALTY IS NOT HERE, AND IT IS NOT COMING.** It was held for
+Stage B; Stage B is in and **superseded it** — the robust erode/dilate triple
+dominates it on both surface columns at identical margin, and the filters the
+reviewer thought might beat both **collapse** at the light rung (margins 510 and
+308 against SIMP's 3014). §5 closes the placeholder rather than holding it.
 
 ## 0. THE ANSWERS, IN ORDER — one line each
 
-**1. What eta = 1 costs and buys at the shipped rung.** ★ On the production path
-it buys **−7.5% of the internal surface** (31,528 → 29,170 triangles) and costs
+**1. What eta = 1 costs and buys at the shipped rung.** ★ On the `Heaviside`
+path it buys **−7.5% of the internal surface** (31,528 → 29,170) and costs
 **+8.0% of carved roughness** (7.6090 → 8.2173) at a margin that is a wash
-(3297.3 → 3255.5, −1.3%) — so the triangle-count direction Stage A measured is
-confirmed and **its carved direction is REVERSED**, and both were "eta = 1 at the
-shipped volume". §4b(d).
+(−1.3%) — Stage A's triangle direction confirmed, **its carved direction
+REVERSED**. ★★ **But on the path that SHIPS it buys and costs NOTHING: all three
+design-affecting readers of `eta_voxels` sit behind `if (!frac)`, so after §2 the
+knob cannot move a design at all.** Its one surviving consumer was reporting a
+guarantee it no longer measured, and the enumeration the amendment asked for is
+what caught that. §1(c), §1(d), §4b(d).
 
 **2. Whether the finite-difference check passed on the new sensitivity.** ★ **On
 the volume, yes, first time: −0.085% and +0.479%, flat across three decades of
@@ -68,9 +72,19 @@ expectation: 200 iterations plus 20 certifications against 240 iterations.
 
 *(The method is §1–§6; §4b is the campaign. The plain-language section is §8.)*
 
-## 1. ITEM 1 — `eta_voxels` 2.0 → 1.0
+## 1. ITEM 1 — `eta_voxels`, AND WHY IT IS NOT SIMPLY SET TO 1
 
-One line in `core/include/topopt/plsm.hpp`, and one more in
+★★ **THE AMENDMENT CHANGED THIS ITEM AND THE CHANGE IS RIGHT.** The instruction is
+no longer "set eta = 1": it is **ship §2 first, then enumerate every remaining
+reader of `eta_voxels` with file and line, and only then decide between tuning it
+and deleting it** — because a live knob with no consumer is how the next person
+plans against a number that does nothing.
+
+★ **§2 HAS SHIPPED** (the amendment was written before it did), so the
+enumeration is answerable and is §1(c). `eta_voxels` **stays at 1.0**, and the
+reason is narrower than "it is the better value".
+
+The value itself is one line in `core/include/topopt/plsm.hpp`, and one more in
 `core/include/topopt/job.hpp` — see §6 for why the second one is the interesting
 half.
 
@@ -120,6 +134,70 @@ and not only to the band the shape derivative sees.
 
 ★ **Under the volume fraction it stops existing**: a frozen cell is STAMPED to
 1.0 and the guarantee is exact rather than a band-width argument. §2(c).
+
+### (c) ★★ EVERY REMAINING READER OF `eta_voxels`, WITH FILE AND LINE
+
+Merged tree, after §2 shipped. `grep` over `core/src`, `core/include` and the app
+bridge; the app reads none.
+
+**Affects the DESIGN — and ONLY on the non-default `Heaviside` path:**
+
+| file:line | what |
+|---|---|
+| `core/src/simp/plsm.cpp:497` | `build_fields` — `plsm_heaviside(-phi_eff, eta)`. ★ inside `else if (!frac)`; **dead under the shipped default.** |
+| `core/src/simp/plsm.cpp:547` | `active_volume_at` — the volume constraint. ★ `!frac` branch; **dead under the default.** |
+| `core/src/simp/plsm.cpp:763` | the shape derivative's `plsm_dheaviside(phi, eta)`. ★ `!frac` branch; **dead under the default.** |
+
+**Affects a REFUSAL — and this one runs on BOTH paths:**
+
+| file:line | what |
+|---|---|
+| `core/src/simp/plsm.cpp:298` → `:307` | `plsm_frozen_floor_occupancy` and the load-path throw. |
+
+**Validation, no design effect:** `plsm.cpp:234`.
+**Pure plumbing and receipt, no design effect:** `job.cpp:879,916–919`;
+`run_job.cpp:269,416–417,434,6665`; `minimize_plastic.cpp:1334`;
+`observability.cpp:801`; `pipeline.hpp:982`; `observability.hpp:587`;
+`job.hpp:742`; `plsm.hpp:195,378`.
+
+★★ **SO: UNDER THE SHIPPED DEFAULT, `eta_voxels` HAS NO CONSUMER THAT CAN CHANGE
+A DESIGN.** All three design-affecting readers sit behind `if (!frac)`.
+
+★★ **AND THE ONE SURVIVING CONSUMER WAS MEASURING THE WRONG THING — THE
+ENUMERATION IS WHAT CAUGHT IT.** Under the fraction a FrozenSolid cell is STAMPED
+to 1.0 by `build_fields`; it is never sampled and `H_eta` is never evaluated on
+it. `plsm_frozen_floor_occupancy` was nevertheless still reporting
+`H_eta(h/2) = 0.909155` — a property of a density the run does not use — while
+the actual floor was **1.0**. The assertion passed for a reason unrelated to what
+shipped and the receipt published the wrong number. ★ **Fixed**: each path now
+reports its own floor (the stamp under the fraction, `H_eta` under the
+Heaviside), and **the assertion itself is untouched and still fires on both** —
+R7 does not permit deleting a check because one path stopped needing it.
+
+### (d) ★ SO WHY NOT DELETE IT — the amendment's own (c), answered
+
+★ **The amendment's two branches are "something reads it → set 1.0 and say what"
+and "nothing reads it → propose deleting". The truth is a third thing and it is
+worth stating precisely: NOTHING ON THE SHIPPED PATH READS IT, BUT
+`PlsmErsatz::Heaviside` IS STILL REACHABLE AND CANNOT RUN WITHOUT IT.**
+
+Deleting `eta_voxels` therefore means deleting `PlsmErsatz::Heaviside` with it,
+and that would cost three things this task used and a successor will want:
+
+1. ★ **the control arm.** `B_heaviside` IS the previous production posture; it is
+   how §4b can say what changed rather than only what is.
+2. **the A/B for the next ersatz.** Anything that replaces the fraction will want
+   the same one-flag comparison the fraction got.
+3. **PR 324–327's reproducibility.** Four tasks' arms are `H_eta` arms; with the
+   enum gone, none of them can be re-run on the production path.
+
+★ **RECOMMENDATION, NOT DONE HERE.** When the fraction has shipped a release and
+nobody needs the control, delete `PlsmErsatz`, `PlsmSensWeight::Continuum`,
+`eta_voxels` and `plsm_frozen_floor_occupancy`'s eta branch **together, in one
+commit** — they are one feature, and removing the knob while leaving the path
+would produce exactly the orphan the amendment is warning about. ★ Until then
+`eta_voxels = 1.0` is correct **for the only path that reads it**, and the
+handoff should not claim it does anything on the path that ships.
 
 ## 2. ITEM 2 — the exact volume fraction, which is a correctness fix
 
@@ -799,10 +877,28 @@ ersatz change.
 
 ## 5. WHAT IS NOT IN THIS TASK
 
-* ★ **THE PERIMETER PENALTY (C).** Waits for Stage B. When it lands the decision
-  is the maintainer's and it is a trade, not a defect: at the light rung C = 1
-  buys **−7.4% n_cut against SIMP** — the first surface result any arm has
-  produced that beats SIMP — and costs **8.3 points of margin**.
+* ★★ **THE PERIMETER PENALTY (C) — THE PLACEHOLDER IS CLOSED, NOT PENDING.**
+  Stage B is in and **superseded it**: the ROBUST ERODE/DILATE TRIPLE dominates it
+  on both columns at identical margin (shipped rung, n_cut 27,511 against 27,887
+  and carved **7.5190 against 9.1155**), and the robust arm's carved roughness
+  **beats SIMP outright** — 7.5190 against 7.5521. **Do not hold a slot for the
+  penalty; it is not shipping in this task or a successor.**
+* ★ **AND THE ROBUST TRIPLE IS BLOCKED, NOT NEXT.** It leaves **14.85% sealed void
+  (16,553 mm³)** against a production lattice step that has already REFUSED a PLSM
+  design over **337 mm³** — 49× less. A post-hoc gate means running 88 minutes to
+  be refused, so drainability has to become a constraint INSIDE the loop, and the
+  `in_region` predicate defect has to be fixed first or that constraint measures
+  the wrong thing. ★ **That is a separate task and NOTHING HERE WAITS ON IT.**
+* ★ **The filters are refuted in the opposite direction to the hypothesis.** The
+  reviewer's question was whether the Helmholtz filter at r = 2 or r = 3 might
+  clear both rungs and beat the penalty. At the light rung they **collapse** —
+  margins 510 and 308 against SIMP's 3014.12, −83.1% and −89.8%. This task's §1
+  was written to wait on that answer; the answer is no, and §1 no longer waits.
+* ★★ **AND THE NUMBER THAT SHOULD GOVERN WHAT COMES NEXT: NOTHING CLEARS SIMP AT
+  THE LIGHT RUNG, INCLUDING DOING NOTHING.** Stage B's unmodified control is
+  −27.6%; this task's shipped posture is **−15.7%**, the best of either campaign,
+  and still short. That is a property of the parametric method rather than of any
+  mechanism, and it is the largest open number on this branch.
 * `hole_period_voxels` — withdrawn by the matched-volume measurement, which
   showed a seed mechanism REVERSING SIGN across the volume change (the gyroid's
   −12.0% became +5.3% worse than nothing). Seed conclusions do not transfer
@@ -830,6 +926,46 @@ and the reason is written at the site. This is the same defect class as
 `tests-on-value-types-miss-call-sites` and
 `app-strut-law-differs-from-core` — one value, two homes, and the wrong home
 wins.
+
+## 6b. ★ R10 — THE SOLVER POSTURE, BEFORE AND AFTER §2, ON THE SAME JOB
+
+The amendment's hypothesis: the exact fraction narrows the boundary from roughly
+four voxels to one cell, **which is harder for a coarsening operator, not
+easier**, so §2 might change what PR 329 measured about the latch.
+
+Read from the four arms' own `run_info.json` — same job, same four rungs, the two
+Heaviside arms being "before" and the two fraction arms "after":
+
+| | B heav | C eta1 | **D frac** | **A ship** |
+|---|---|---|---|---|
+| `cg_multigrid` | False | False | **False** | **False** |
+| `mg_levels` | 0 | 0 | **0** | **0** |
+| `mg_mode` | stagnated-latched | stagnated-latched | **stagnated-latched** | **stagnated-latched** |
+| `mg_algebraic_level1` | False | False | False | False |
+| `geneo_twolevel` | True | True | True | True |
+| `geneo_basis_dim` | 1685 | 1685 | 1685 | 1686 |
+| `geneo_basis_builds` | 2 | 2 | 2 | 1 |
+| `geneo_armed_solves` | 15 | 4 | 8 | 14 |
+| `geneo_declined_solves` | 233 | 244 | 240 | 214 |
+| `krylov_recycle_dim` | 16 | 16 | 16 | 16 |
+| `solved_grid_dofs` | 1,473,696 | 1,473,696 | 1,473,696 | 1,473,696 |
+
+★★ **THE ANSWER IS NO CHANGE, AND IT IS A CLEAN NEGATIVE.** `mg_mode` is
+`stagnated-latched` and `cg_multigrid` false on all four arms. The exact fraction
+neither helps nor hurts the coarse space — **because the geometric hierarchy
+already fails on this part before boundary width is what matters**, which is
+exactly what PR 329 concluded from the other side.
+
+★ **The GenEO counts move but not with the ersatz.** `armed_solves` reads
+15 / 4 / 8 / 14 — the FEWEST is `C_eta1`, a HEAVISIDE arm, and the most is a
+Heaviside and a fraction arm respectively. The variation tracks how many solves
+each arm ran and how its design conditioned, not which density it used.
+`geneo_basis_dim` is 1685 on three arms and 1686 on the fourth.
+
+★ **What this does NOT say.** It is one part at one resolution, and `mg_mode` was
+already latched before §2 — so this rules out the fraction making coarsening
+WORSE on a part where coarsening already fails. It cannot say what the fraction
+would do to a part where the hierarchy builds.
 
 ## 7. THE BARS
 

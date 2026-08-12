@@ -295,14 +295,32 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   out.frozen_solid_voxels = fb.n_solid;
   out.frozen_void_voxels = fb.n_void;
   out.active_voxels = fb.n_active;
-  out.frozen_floor_occupancy = plsm_frozen_floor_occupancy(fb, plsm.eta_voxels);
+  // ── ★★ THE FLOOR OCCUPANCY IS WHAT THE RUN ACTUALLY GIVES THE FROZEN SET,
+  //    AND UNDER THE FRACTION THAT IS NOT AN `H_eta` ────────────────────────
+  //
+  // ★ THIS LINE WAS VESTIGIAL FOR ONE COMMIT AND THE ENUMERATION CAUGHT IT.
+  // Under `VolumeFraction` a FrozenSolid cell is STAMPED to 1.0 by
+  // `build_fields` — it is never sampled and `H_eta` is never evaluated on it —
+  // so reporting `H_eta(h/2)` here described a density the run does not use.
+  // The number came out 0.909155 while the actual occupancy was 1.0, the
+  // assertion below passed for a reason unrelated to what shipped, and the
+  // receipt published the wrong one. A guarantee that is measured on the wrong
+  // quantity is the shape of defect this whole task keeps finding.
+  //
+  // ★ THE ASSERTION ITSELF IS UNCHANGED AND STILL FIRES ON BOTH PATHS (R7 does
+  // not permit deleting a check because one path stopped needing it). What
+  // changes is that each path now reports ITS OWN floor: the stamped 1.0 under
+  // the fraction, `H_eta` of the shallowest frozen voxel under the Heaviside.
+  out.frozen_floor_occupancy =
+      frac ? 1.0 : plsm_frozen_floor_occupancy(fb, plsm.eta_voxels);
   // ★ THE ASSERTION PR 324 §5 PAID FOR. Every fit it ran was REJECTED on the LOAD
   // PATH, not on the margin, because an analytic phi leaked 40 frozen voxels of
   // 40,216 below the iso and `load_path_connected` then found no route from the
   // anchor to the load. Under the smooth boolean that cannot happen — phi_eff is
   // a `min` with a field that is <= -h/2 on the whole frozen set — and this is
   // where that stops being an argument and becomes a check the run cannot pass
-  // without. It is a property of (eta, the mask), so it is decidable here, once,
+  // without. It is a property of (eta, the mask) on the Heaviside path and of
+  // the STAMP on the fraction path, so either way it is decidable here, once,
   // before any wall clock is spent.
   if (fb.n_solid > 0 && !(out.frozen_floor_occupancy > 0.5))
     throw std::invalid_argument(
