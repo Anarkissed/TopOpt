@@ -1921,7 +1921,9 @@ OptimizeResult run_minimize_plastic_loadcase(
     // RemoteRunner.buildJobJSON. ALL THREE MOVE TOGETHER.
     setup.options.plsm.mode = topopt::PlsmMode::Parametric;
     for (const auto& pr : setup.face_protection_reports)
-      bridge_log("loadcase: face-protection face=" + std::to_string(pr.face_id) +
+      bridge_log("loadcase: face-protection " +
+                 (pr.region_id >= 0 ? "region=" + std::to_string(pr.region_id)
+                                    : "face=" + std::to_string(pr.face_id)) +
                  " voxels_frozen=" + std::to_string(pr.voxels_frozen) +
                  " depth=" + std::to_string(pr.depth_voxels) +
                  (pr.thinner_than_depth ? " thinner-than-depth" : ""));
@@ -2020,6 +2022,7 @@ OptimizeResult run_minimize_plastic_loadcase(
     // face's own solid was thinner than the requested depth).
     for (const auto& pr : setup.face_protection_reports) {
       result.protection_face_ids.push_back(pr.face_id);
+      result.protection_region_ids.push_back(pr.region_id);
       result.protection_voxels_frozen.push_back(
           static_cast<int32_t>(pr.voxels_frozen));
       result.protection_depth_voxels.push_back(

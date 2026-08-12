@@ -436,6 +436,11 @@ struct OptimizeResult {
   //                                depth (froze what exists — no silent over-claim)
   // Empty when no protection was declared.
   std::vector<int32_t> protection_face_ids;
+  // ★ Parallel to the above: the REGION this protection was declared on, or -1
+  // when it was declared on a face (task 2026-08-14-face-regions). A region is
+  // not a face, and reporting a region protection as `face_id: -1` would be a
+  // receipt claiming a face that does not exist.
+  std::vector<int32_t> protection_region_ids;
   std::vector<int32_t> protection_voxels_frozen;
   std::vector<int32_t> protection_depth_voxels;
   std::vector<uint8_t> protection_thinner;

@@ -4335,7 +4335,18 @@ std::string loadcase_receipt_json(const JobDescription& job,
     for (std::size_t i = 0; i < setup->face_protection_reports.size(); ++i) {
       const ProductionRunSetup::FaceProtectionReport& f =
           setup->face_protection_reports[i];
+      // ★ A REGION PROTECTION REPORTS ITS REGION, not `face_id: -1` (task
+      // 2026-08-14-face-regions). A receipt that names a face which does not
+      // exist is worse than one that says nothing.
+      // ★ THE KEY IS EMITTED ONLY WHEN THERE IS A REGION. A receipt that names
+      // `face_id: -1` for a region protection claims a face that does not
+      // exist; a receipt that gains a `"region_id": -1` on every pre-region run
+      // is no longer byte-identical to the one it produced yesterday (bar R1).
+      // Both are avoided by writing the key only when it says something.
       s += "    {\"face_id\": " + std::to_string(f.face_id) +
+           (f.region_id >= 0
+                ? ", \"region_id\": " + std::to_string(f.region_id)
+                : std::string()) +
            ", \"voxels_frozen\": " + std::to_string(f.voxels_frozen) +
            ", \"depth_voxels\": " + std::to_string(f.depth_voxels) +
            ", \"depth_requested_mm\": " + json_num(f.depth_requested_mm) +

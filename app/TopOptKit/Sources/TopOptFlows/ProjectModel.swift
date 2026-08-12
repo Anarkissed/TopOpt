@@ -1367,6 +1367,17 @@ public final class ProjectModel: ObservableObject {
         var acc = SIMD3<Float>.zero
         var found = false
         for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; found = true } }
+        // ★ A REGION CONTRIBUTES ITS MEMBERS' NORMALS (task 2026-08-14-face-regions).
+        // Without this a group holding ONLY a region would fall back to the +Z
+        // default and a "normal to the face" load would point the wrong way —
+        // silently, since nothing downstream can tell a defaulted normal from a
+        // measured one.
+        for r in g.regionIDs {
+            guard let region = faceRegions.region(r) else { continue }
+            for f in FaceRegionGeometry.members(of: region, in: mesh) {
+                if let nrm = mesh.faceNormal(f) { acc += nrm; found = true }
+            }
+        }
         guard found else { return nil }
         let len = simd_length(acc)
         return len > 1e-6 ? acc / len : nil

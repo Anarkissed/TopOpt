@@ -277,7 +277,8 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     /// exactly one group — the same invariant `pickFaces` keeps for faces — so
     /// this steals from any other holder.
     public mutating func addRegions(_ ids: [RegionID], to group: UUID) {
-        guard !ids.isEmpty, let idx = regions_index(group) else { return }
+        guard !ids.isEmpty, let idx = groups.firstIndex(where: { $0.id == group })
+        else { return }
         for i in groups.indices where groups[i].id != group {
             groups[i].removeRegions(ids)
         }
@@ -299,10 +300,6 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     /// The group that owns `region`, if any.
     public func group(forRegion region: RegionID) -> SelectionGroup? {
         groups.first { $0.regionIDs.contains(region) }
-    }
-
-    private func regions_index(_ id: UUID) -> Int? {
-        groups.firstIndex(where: { $0.id == id })
     }
 
     /// Remove a group entirely. If it was the active group, the active selection

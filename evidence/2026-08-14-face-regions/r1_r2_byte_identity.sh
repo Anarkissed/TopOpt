@@ -64,13 +64,60 @@ cat > "$OUT/job_regions.json" <<'JSON'
 }
 JSON
 
-run() {  # run <cli> <job> <subdir>
-  local cli="$1" job="$2" sub="$3"
-  rm -rf "$OUT/$sub"
-  ( cd "$OUT" && "$cli" run "$job" --out "$sub" > "$sub.log" 2>&1 ) || {
-    echo "RUN FAILED ($sub) — tail of log:"; tail -20 "$OUT/$sub.log"; exit 1; }
-  ( cd "$OUT/$sub" && find . -type f ! -name '*.log' | sort \
-      | xargs shasum -a 256 ) > "$OUT/$sub.sha256"
+# EVERY ARM WRITES TO A DIRECTORY CALLED `run`, inside its own parent. The
+# `_alpha.meta` sidecar quotes its own output path in a comment line, so two arms
+# writing to differently-named directories differ in a byte that has nothing to
+# do with the design. Same name, different parent: the paths differ, the bytes
+# do not.
+run() {  # run <cli> <job> <arm>
+  local cli="$1" job="$2" arm="$3"
+  rm -rf "${OUT:?}/$arm"
+  mkdir -p "$OUT/$arm"
+  cp "$OUT/l-bracket.step" "$OUT/$job" "$OUT/$arm/"
+  ( cd "$OUT/$arm" && "$cli" run "$job" --out run > "$arm.log" 2>&1 ) || {
+    echo "RUN FAILED ($arm) — tail of log:"; tail -20 "$OUT/$arm/$arm.log"; exit 1; }
+  ( cd "$OUT/$arm/run" && find . -type f ! -name '*.log' | sort \
+      | xargs shasum -a 256 ) > "$OUT/$arm.sha256"
+
+  # ── THE THREE FIELDS A RUN CANNOT REPRODUCE, NAMED ─────────────────────────
+  # A receipt cannot hold a wall clock. Three values in these artifacts are
+  # properties of WHEN and WHERE the binary ran, not of what it computed:
+  #   * run_info.json  created_wall_ms   — a timestamp
+  #   * run_info.json  fingerprint       — the build's git sha (the base cli is
+  #                                        built from a tarball and reports "dev")
+  #   * run_info.json  preflight_ms and every *_ms timing
+  #   * iterations.csv column 3          — a per-iteration wall-clock stamp
+  # They are STRIPPED here, and only here, and this comment is the whole list.
+  # Everything else — design.bin, fields.bin, report.json, every variant STL and
+  # every alpha field — is compared raw.
+  python3 - "$OUT/$arm/run" > "$OUT/$arm.norm.sha256" <<'PY'
+import hashlib, json, os, re, sys
+root = sys.argv[1]
+DROP = re.compile(r'(_ms$|^created_wall_ms$|^fingerprint$|_seconds$)')
+def strip(o):
+    if isinstance(o, dict):
+        return {k: strip(v) for k, v in o.items() if not DROP.search(k)}
+    if isinstance(o, list):
+        return [strip(v) for v in o]
+    return o
+for f in sorted(os.listdir(root)):
+    p = os.path.join(root, f)
+    if not os.path.isfile(p) or f.endswith('.log'):
+        continue
+    if f == 'run_info.json':
+        b = json.dumps(strip(json.load(open(p))), sort_keys=True).encode()
+    elif f == 'iterations.csv':
+        rows = []
+        for i, line in enumerate(open(p)):
+            c = line.rstrip('\n').split(',')
+            if i > 0 and len(c) > 2:
+                c[2] = 'T'          # the wall-clock stamp
+            rows.append(','.join(c))
+        b = '\n'.join(rows).encode()
+    else:
+        b = open(p, 'rb').read()
+    print(hashlib.sha256(b).hexdigest(), ' ./' + f)
+PY
 }
 
 echo "=== R1 — no regions: BASE cli vs BRANCH cli ==="
@@ -78,8 +125,11 @@ echo "base   $BASE_CLI"
 echo "branch $BRANCH_CLI"
 run "$BASE_CLI"   job_faces.json base_faces
 run "$BRANCH_CLI" job_faces.json branch_faces
-if diff -u "$OUT/base_faces.sha256" "$OUT/branch_faces.sha256"; then
-  echo "R1 PASS — every artifact byte-identical ($(wc -l < "$OUT/base_faces.sha256") files)"
+echo "-- raw comparison (a difference here is either the design or a clock) --"
+diff -u "$OUT/base_faces.sha256" "$OUT/branch_faces.sha256" || true
+echo "-- with the timestamps/fingerprint stripped --"
+if diff -u "$OUT/base_faces.norm.sha256" "$OUT/branch_faces.norm.sha256"; then
+  echo "R1 PASS — every artifact identical ($(wc -l < "$OUT/base_faces.norm.sha256") files)"
 else
   echo "R1 FAIL"; exit 1
 fi
@@ -87,8 +137,7 @@ fi
 echo
 echo "=== R2 — face_ids vs an equivalent identity REGION, same (branch) cli ==="
 run "$BRANCH_CLI" job_regions.json branch_regions
-# The two sha256 listings name the same files; compare the hash column only.
-if diff -u "$OUT/branch_faces.sha256" "$OUT/branch_regions.sha256"; then
+if diff -u "$OUT/branch_faces.norm.sha256" "$OUT/branch_regions.norm.sha256"; then
   echo "R2 PASS — a region tags exactly what its face tags, to the byte"
 else
   echo "R2 FAIL"; exit 1
@@ -118,9 +167,11 @@ cat > "$OUT/job_sliver.json" <<'JSON'
 }
 JSON
 rm -rf "$OUT/sliver"
-if ( cd "$OUT" && "$BRANCH_CLI" run job_sliver.json --out sliver > sliver.log 2>&1 ); then
+mkdir -p "$OUT/sliver"
+cp "$OUT/l-bracket.step" "$OUT/job_sliver.json" "$OUT/sliver/"
+if ( cd "$OUT/sliver" && "$BRANCH_CLI" run job_sliver.json --out run > sliver.log 2>&1 ); then
   echo "R5 FAIL — a sub-region under the floor was ACCEPTED"; exit 1
 else
   echo "R5 PASS — refused. The message:"
-  grep -i "under the floor" "$OUT/sliver.log" || tail -5 "$OUT/sliver.log"
+  grep -i "under the floor" "$OUT/sliver/sliver.log" || tail -5 "$OUT/sliver/sliver.log"
 fi
