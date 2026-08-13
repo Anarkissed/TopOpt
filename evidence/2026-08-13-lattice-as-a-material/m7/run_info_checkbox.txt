@@ -25,3 +25,23 @@ achieved_solid_fraction      0.2698170732           0.3323170732
 * `lattice_budget_convention` is "none" in both because this fixture declares
   no lattice region — the question did not arise, and the record says so
   rather than asserting a convention nothing exercised.
+
+── A THIRD RUN: NO LOADCASE, SO NO CHECKBOX ────────────────────────────────
+
+The M6.2 demo job (l-bracket.step, self-weight, no `loads` block) run on the same
+build:
+
+  mode                         minimize_plastic
+  load_source                  self_weight
+  ladder_direction             null          <-- asserts NOTHING
+  lattice_budget_convention    none
+  achieved_solid_fraction      0.1874123422
+
+* A self-weight job carries no load case and therefore no checkbox, so
+  `ladder_direction` is JSON null rather than the "reduce" a default would have
+  written. An unknown input is a refusal to answer, never a default — the same
+  rule that fixed the printability floor earlier in this task.
+
+* `achieved_solid_fraction` is still MEASURED (18.7%), because that outcome is
+  known whether or not a checkbox was ever offered. The two fields are null for
+  different reasons and neither borrows the other's excuse.
