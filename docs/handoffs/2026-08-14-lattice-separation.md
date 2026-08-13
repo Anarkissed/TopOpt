@@ -89,8 +89,11 @@ is one line and the alternative was shipping a "cinematic" that cuts.
 the same models**. That is not a description — it is how "seeing the same style
 of page as before" is made structurally true rather than approximately true. The
 Selections library, the button sizes, the bottom bar and the gizmo corner are
-literally the same code; backlog L3's "the buttons feel different" cannot recur,
-because there is no second set of buttons.
+literally the same code, so backlog L3's "the buttons feel different" cannot
+recur BETWEEN THESE TWO — there is no second set of them to drift. (The ladder
+page and the smoothing page are still their own views; §6's shared modal
+placement is what keeps those in line, and it is a weaker guarantee than this
+one.)
 
 What differs is `WorkspaceStageVisibility.of(stage)` — five columns, read at
 every visibility site. A site reads the TABLE, never the stage, so a new
@@ -267,10 +270,10 @@ them and nothing here is designed around them.
 | **R6** the sample is visible on entry | **MET.** 0 lit pixels → 61,794, through the shipping shader. `r6_sample_before_reveal0.png` / `r6_sample_after.png`. |
 | **R7** no wall of text | **MET. Longest string added: 3 words** — "Holds no material" and the out-of-regime headline "0.8 cells across". Asserted at ≤ 3 over every string this task adds. Stated honestly: the longest string the lattice stage can render is still `LatticeFaceRoleGate.Block.undeclared.reason` — "Give this face a role first", 6 words — which PR 328 wrote and this task did not touch. |
 | **R8** no verdict moves | **MET, structurally: `core/` is untouched.** `git diff --stat 9e96beb -- core/` is empty; every change is under `app/`. Core ctest reported below. |
-| **R9** never weaken an assertion | **MET.** `r9_assertion_census.txt` — every kind unchanged or up, nothing deleted. Two source-reading tests were UPDATED where a symbol was renamed, and both were STRENGTHENED in the same edit (the page-hiding census gained the two new overlays; the design-box census gained the lattice-stage term). |
+| **R9** never weaken an assertion | **MET.** `r9_assertion_census.txt` — every kind unchanged or up, nothing deleted. Two source-reading tests were UPDATED where a symbol was renamed, and both were STRENGTHENED in the same edit: the "no workspace chrome while a page is up" census renamed `latticeEntryButtonOverlay` → `stageNavigationButtonOverlay` **and gained the two overlays this task added**, and the design-box census kept its D5a assertions and **gained the lattice-stage term**. |
 | **R10** no unfilled placeholders, no scratch at root | **MET.** |
 
-**The suites.** App: **1456 executed, 22 skipped, 3 failures** — all three are
+**The suites.** App: **1459 executed, 22 skipped, 3 failures** — all three are
 `AppModelTests.test*ThreeMF*`, and they fail because THIS MACHINE's core slice
 has no lib3mf ("3MF import requires lib3mf, which is not available in this
 build"). They failed identically on this branch's first run before any source
@@ -278,7 +281,7 @@ edit. I provisioned lib3mf to close the gap and the test bundle then failed to
 LINK with undefined `_lib3mf_*` — the known worktree trap — so I reverted to the
 3MF-free slice, which is three visible refusals instead of a bundle that will not
 build. **CI provisions lib3mf and runs the same `swift test`, so report this as
-1453/1456 local against CI's own denominator.**
+1456/1459 local against CI's own denominator.**
 
 ---
 
