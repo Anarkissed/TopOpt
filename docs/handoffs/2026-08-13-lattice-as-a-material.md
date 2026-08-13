@@ -41,8 +41,7 @@ misled:
    Release. Superseded by §0.6, and it is the one that cost the most: four
    scope decisions rested on it.
 
-★ **WHAT IS STILL NOT DONE**: the margin as a per-iteration CURVE with a settling
-iteration (bar R4's other half), and Mode 2's wiring into the LADDER — which is
+★ **WHAT IS STILL NOT DONE**: Mode 2's wiring into the LADDER — which is
 gated on a budget-convention decision that is yours, not mine (§0.5). §3(e)'s cost
 confirmation IS done (§0.4c, **0.0750%**) and **Mode 2 itself is built, optimises,
 and its gradient is verified end to end** (§0.5).
@@ -346,6 +345,54 @@ its Jacobian — is under a thousandth of one state solve on his part. Mode 1's
 constant field is **0.8 ms** against 72 seconds. The brief's premise holds with
 three orders of magnitude to spare, so cost is not a reason to prefer Mode 1 over
 Mode 2, and it never was.
+
+### 0.4d ★★ R4's OTHER HALF: **the margin settles at iteration 12 of 127**
+
+`evidence/…/m4/curve_r0.68.txt`, `m4/r0.68/r4_margin_curve.csv`. Rung 0.68, the
+frozen-lattice posture, `freed_mass_return = 0`. Every iteration's analysis
+density captured through the driver and certified **offline**, then B6's
+pre-registered rule applied verbatim — first i with |m_j − m_i| ≤ 0.5% of m_i for
+all j in [i, i+20]. No window and no tolerance was retuned (§5).
+
+| | |
+|---|---|
+| iterations | **127** |
+| ★ settling iteration (B6) | **12** |
+| margin there → final | 98.553031 → **99.735559** (**+1.200%**) |
+| iterations after settling | **115 of 127 — 90.6% of the run** |
+| certification cost | 127 × **32.4 s** |
+
+> ★ **90.6% of the run buys 1.200% of margin.**
+
+**And the margin is NOT monotone.** It rises on only **63 of 126** steps, and
+after settling it wobbles across a **2.264%** band (97.5272 … 99.7356) — wider
+than the total gain from settling to the end. So "the margin improved by running
+longer" and "the margin is noise around a plateau" are the same data, and a
+stopping rule reading a single iteration's margin is reading that noise. This is
+the same shape `levelset-margin-saturates-before-compliance` found on a different
+optimiser, which is mild evidence it is the certification's behaviour rather than
+one optimiser's.
+
+★ It does NOT peak-then-fall here: the maximum IS the final iteration. That
+distinguishes it from the level-set finding, and is why the curve is reported
+rather than summarised into "it saturates".
+
+★ **Two defects in the measurement, both caught by the stage's own posture check**
+— which certifies the final captured design and compares it against the margin
+the RUN reported for that same design, refusing to present the curve if they
+disagree by more than 1%. It fired at **239.66%** on the first run:
+
+1. **The strut gate.** `minimize_plastic` arms `gate_on_strut_strength` whenever
+   the run latticed anything; the stage was certifying without it. That compares
+   two different certificates and reports the difference as a posture difference.
+2. **The driver optimises more than once per rung.** Draft-quality escalation
+   re-runs `simp_optimize`, so the hook saw both passes — 12 densities against a
+   5-iteration cap. Concatenating them would put a discontinuity in the middle of
+   a "trajectory". The curve is the last `run_iters` captures, and the trim is
+   printed.
+
+After both, the check reads **0.2980%** apart, so the curve IS the run's own
+margin trajectory rather than a re-certification of something adjacent to it.
 
 ### 0.5 ★★ MODE 2 IS NOW BUILT AND IT OPTIMISES — β joins the MMA design vector
 

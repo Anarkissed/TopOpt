@@ -1,0 +1,158 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+== frozen_lattice_probe — a frozen region as a MATERIAL ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+stage       curve   rung 0.68   cell 2 mm   nozzle 0.45 mm   threads 6
+
+baseline    rung 0.68 from evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.679951)
+
+regions     14, keyed on provenance
+            11380 voxels claimed by more than one declaration (protection wins)
+-- R4(b) THE MARGIN AS A CURVE, rung 0.68, cap 120 iterations --
+   capturing every iteration's analysis density, then certifying each one OFFLINE
+
+   the run: 129 densities captured, 1651.4 s; the run REPORTS 127 iterations
+   ★ 2 captures DROPPED from the front: the driver ran more than one pass on this rung (draft escalation), and the curve is the pass that produced the certified design.
+   posture: rebuilt (29662 latticed voxels)
+   posture check: final design certifies 99.735559 here, the RUN reported 99.439251 (0.2980% apart)
+
+   iter   margin        d vs prev
+      1    93.901524    
+      2    95.720182    
+      3    96.625990    
+      4    97.099867    within 0.5%
+      5    97.413067    within 0.5%
+      6    97.675320    within 0.5%
+      7    97.886852    within 0.5%
+      8    98.057933    within 0.5%
+      9    98.209730    within 0.5%
+     10    98.351660    within 0.5%
+     11    98.475013    within 0.5%
+     12    98.553031    within 0.5%
+     13    98.606661    within 0.5%
+     14    98.664982    within 0.5%
+     15    98.716481    within 0.5%
+     16    98.767594    within 0.5%
+     17    98.831603    within 0.5%
+     18    98.856176    within 0.5%
+     19    98.906054    within 0.5%
+     20    98.900483    within 0.5%
+     21    98.931002    within 0.5%
+     22    98.941226    within 0.5%
+     23    98.956569    within 0.5%
+     24    98.973626    within 0.5%
+     25    98.983349    within 0.5%
+     26    98.989815    within 0.5%
+     27    98.985586    within 0.5%
+     28    98.985870    within 0.5%
+     29    98.986104    within 0.5%
+     30    98.992949    within 0.5%
+     31    98.995127    within 0.5%
+     32    98.994851    within 0.5%
+     33    98.994851    within 0.5%
+     34    98.686504    within 0.5%
+     35    98.803192    within 0.5%
+     36    98.886978    within 0.5%
+     37    98.933033    within 0.5%
+     38    98.966921    within 0.5%
+     39    98.988516    within 0.5%
+     40    98.995173    within 0.5%
+     41    98.994876    within 0.5%
+     42    98.994831    within 0.5%
+     43    98.994103    within 0.5%
+     44    98.996109    within 0.5%
+     45    99.000693    within 0.5%
+     46    99.000525    within 0.5%
+     47    99.002788    within 0.5%
+     48    99.000263    within 0.5%
+     49    98.991715    within 0.5%
+     50    98.980822    within 0.5%
+     51    98.971027    within 0.5%
+     52    98.966050    within 0.5%
+     53    98.966478    within 0.5%
+     54    98.967564    within 0.5%
+     55    98.970852    within 0.5%
+     56    98.975192    within 0.5%
+     57    98.979495    within 0.5%
+     58    98.983265    within 0.5%
+     59    98.986746    within 0.5%
+     60    98.991446    within 0.5%
+     61    98.996108    within 0.5%
+     62    98.997933    within 0.5%
+     63    98.998977    within 0.5%
+     64    98.999578    within 0.5%
+     65    98.999733    within 0.5%
+     66    98.998262    within 0.5%
+     67    98.997764    within 0.5%
+     68    98.996602    within 0.5%
+     69    98.994360    within 0.5%
+     70    98.991667    within 0.5%
+     71    98.989351    within 0.5%
+     72    98.966412    within 0.5%
+     73    98.963966    within 0.5%
+     74    98.960997    within 0.5%
+     75    98.957667    within 0.5%
+     76    98.954300    within 0.5%
+     77    98.951255    within 0.5%
+     78    98.948127    within 0.5%
+     79    98.944565    within 0.5%
+     80    98.940946    within 0.5%
+     81    98.937313    within 0.5%
+     82    98.932841    within 0.5%
+     83    98.857817    within 0.5%
+     84    98.865557    within 0.5%
+     85    98.860891    within 0.5%
+     86    98.855905    within 0.5%
+     87    98.850381    within 0.5%
+     88    98.844101    within 0.5%
+     89    98.837632    within 0.5%
+     90    98.833268    within 0.5%
+     91    98.828427    within 0.5%
+     92    98.824492    within 0.5%
+     93    98.817858    within 0.5%
+     94    98.600333    within 0.5%
+     95    98.598549    within 0.5%
+     96    98.574260    within 0.5%
+     97    98.556462    within 0.5%
+     98    98.546355    within 0.5%
+     99    98.547373    within 0.5%
+    100    98.543578    within 0.5%
+    101    98.538776    within 0.5%
+    102    98.538551    within 0.5%
+    103    98.539646    within 0.5%
+    104    98.540010    within 0.5%
+    105    98.179593    within 0.5%
+    106    98.454836    within 0.5%
+    107    98.209565    within 0.5%
+    108    98.350337    within 0.5%
+    109    98.307377    within 0.5%
+    110    98.316053    within 0.5%
+    111    98.317443    within 0.5%
+    112    98.310833    within 0.5%
+    113    98.309468    within 0.5%
+    114    98.308425    within 0.5%
+    115    98.307288    within 0.5%
+    116    98.434428    within 0.5%
+    117    98.415699    within 0.5%
+    118    98.111261    within 0.5%
+    119    97.876386    within 0.5%
+    120    98.178201    within 0.5%
+    121    98.077714    within 0.5%
+    122    98.276124    within 0.5%
+    123    98.051557    within 0.5%
+    124    98.267935    within 0.5%
+    125    97.969874    within 0.5%
+    126    97.527205    within 0.5%
+    127    99.735559    
+
+   127 certifications, 4113.0 s (32.4 s each)
+
+★ SETTLING ITERATION (B6: first i with |m_j - m_i| <= 0.5% of m_i for all j in [i, i+20])
+   ★ i = 12 of 127   margin there 98.553031, final 99.735559 (1.200% apart)
+   wrote evidence/2026-08-13-lattice-as-a-material/m4/r0.68/r4_margin_curve.csv
