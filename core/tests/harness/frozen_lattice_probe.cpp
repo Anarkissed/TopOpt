@@ -95,22 +95,35 @@ struct Args {
   // is minutes of matrix-free CG, so a 5x4x2 table is hours. Empty = every region.
   // A run that names a subset PRINTS the ones it skipped (`no silent caps`).
   std::vector<int> only_regions;
+  // ★ "provenance" (the default) keys regions on WHICH DECLARATION froze each
+  // voxel; "connectivity" is the first cut's flood fill, kept as a control so the
+  // fusion it causes can be seen rather than taken on trust.
+  std::string regions_mode = "provenance";
 };
 
 // ── THE REGION DECOMPOSITION ────────────────────────────────────────────────
 //
-// ★ REGIONS ARE MEASURED FROM THE MASK, NOT DECLARED BESIDE IT. The frozen set is
-// split into 26-CONNECTED COMPONENTS of `effective_design_mask`'s FrozenSolid
-// voxels, and each component is then LABELLED by what it contains: Fixture voxels
-// make it an anchor region, Load voxels a load region, neither a protection
-// region. 26 and not 6 because the load path's own walk over the solid set is
-// 26-connected (voxel.hpp, walk_load_path) — two elements meeting at a corner
-// share that node and really do pass force through it, so a component that walk
-// treats as one piece must be one region here too.
+// ★★ REGIONS ARE KEYED ON PROVENANCE — WHICH DECLARED THING FROZE EACH VOXEL —
+// AND NOT ON CONNECTIVITY. THIS IS A CORRECTION; THE FIRST CUT GOT IT WRONG.
 //
-// This is deliberately NOT read back from ProductionRunSetup's per-face reports:
-// those carry COUNTS, not per-voxel provenance, and a region a user can point at
-// on screen is a connected piece of material, not a face id.
+// The first cut split the frozen set into 26-connected components. On his part
+// that FUSED face 16's protection collar with the structural pads under the 22
+// LOAD faces, because they touch — and the load pads sit directly under the
+// applied force. The merged blob then reported 100% of the part's peak von Mises
+// and the write-up said "the declared wall carries the peak stress". It does not;
+// that was the pads' stress wearing the wall's name.
+//
+// `mask_step_face` (step.hpp) is the SAME primitive `build_production_loadcase`
+// uses to create those voxels, so replaying it per declared face recovers exactly
+// which declaration owns which voxel. A region is then the thing the USER
+// DECLARED, which is also what the app keys on (`SelectionGroup.id`) and what a
+// user can point at on screen.
+//
+// ★ PRECEDENCE, and it mirrors the run's own. A voxel claimed by more than one
+// declaration is attributed to the FACE PROTECTION, because that is the one the
+// user drew explicitly; the anchor/load pads are derived. Overlap is REPORTED
+// rather than silently resolved — on his part it is ~2,986 voxels, and a region
+// table that hid it would not add up to the frozen set.
 struct Region {
   int id = 0;
   std::string name;
@@ -126,6 +139,27 @@ struct Region {
   bool quiet = false;
 };
 
+// Replay ONE declaration's own `mask_step_face` and return the voxels it owns,
+// intersected with the frozen set the loop actually holds.
+std::vector<char> face_provenance(const VoxelGrid& g, const StepModel& model,
+                                  int face_id, int depth_voxels,
+                                  const DesignMask& eff) {
+  DesignMask scratch(g.voxel_count(), MaskValue::Active);
+  mask_step_face(g, model, face_id, MaskValue::FrozenSolid, depth_voxels,
+                 scratch);
+  std::vector<char> own(g.voxel_count(), 0);
+  for (std::size_t e = 0; e < own.size(); ++e)
+    own[e] = (scratch[e] == MaskValue::FrozenSolid &&
+              eff[e] == MaskValue::FrozenSolid)
+                 ? 1
+                 : 0;
+  return own;
+}
+
+// ★ THE CONNECTIVITY DECOMPOSITION, KEPT AS A CONTROL AND NOT AS THE ANSWER.
+// It is what the first cut used; `--regions connectivity` still selects it so
+// the two can be put side by side and the fusion this file's header describes can
+// be SEEN rather than taken on trust.
 std::vector<Region> decompose_frozen(const VoxelGrid& g, const DesignMask& eff) {
   const std::size_t n = g.voxel_count();
   std::vector<int> comp(n, 0);
@@ -182,6 +216,61 @@ std::vector<Region> decompose_frozen(const VoxelGrid& g, const DesignMask& eff) 
                                        : "protection";
     out[q].name += "-" + std::to_string(out[q].id);
   }
+  return out;
+}
+
+// ★ THE DECOMPOSITION THAT SHIPS: one region per DECLARED face, in declaration
+// order, protection faces first so they win the overlap. Anything frozen that no
+// declaration claims (the implicit Load/Fixture BC skin the loop pins on its own)
+// becomes one final region named for what it is, rather than being dropped —
+// dropping it would make the region masses not add up to the frozen set.
+std::vector<Region> decompose_by_provenance(
+    const VoxelGrid& g, const DesignMask& eff, const StepModel& model,
+    const std::vector<int>& protection_faces, int protection_depth_voxels,
+    const std::vector<int>& anchor_faces, const std::vector<int>& load_faces,
+    int pad_depth_voxels, std::size_t* overlap_out) {
+  std::vector<Region> out;
+  std::vector<char> claimed(g.voxel_count(), 0);
+  std::size_t overlap = 0;
+
+  auto add = [&](const std::string& name, const std::vector<char>& own,
+                 bool has_fixture, bool has_load) {
+    Region r;
+    r.name = name;
+    r.has_fixture = has_fixture;
+    r.has_load = has_load;
+    for (std::size_t e = 0; e < own.size(); ++e) {
+      if (!own[e]) continue;
+      if (claimed[e]) { ++overlap; continue; }
+      claimed[e] = 1;
+      r.voxels.push_back(e);
+    }
+    if (!r.voxels.empty()) out.push_back(std::move(r));
+  };
+
+  // PROTECTIONS FIRST — the declaration the user drew explicitly wins.
+  for (int f : protection_faces)
+    add("protect-" + std::to_string(f),
+        face_provenance(g, model, f, protection_depth_voxels, eff), false, false);
+  for (int f : anchor_faces)
+    add("anchor-" + std::to_string(f),
+        face_provenance(g, model, f, pad_depth_voxels, eff), true, false);
+  for (int f : load_faces)
+    add("load-" + std::to_string(f),
+        face_provenance(g, model, f, pad_depth_voxels, eff), false, true);
+
+  // Whatever the loop froze that no declaration owns.
+  std::vector<char> rest(g.voxel_count(), 0);
+  std::size_t n_rest = 0;
+  for (std::size_t e = 0; e < rest.size(); ++e)
+    if (eff[e] == MaskValue::FrozenSolid && !claimed[e]) { rest[e] = 1; ++n_rest; }
+  if (n_rest > 0) add("bc-skin-undeclared", rest, false, false);
+
+  std::sort(out.begin(), out.end(), [](const Region& a, const Region& b) {
+    return a.voxels.size() > b.voxels.size();
+  });
+  for (std::size_t q = 0; q < out.size(); ++q) out[q].id = static_cast<int>(q + 1);
+  if (overlap_out != nullptr) *overlap_out = overlap;
   return out;
 }
 
@@ -242,6 +331,7 @@ int main(int argc, char** argv) {
     else if (s == "--iters") nexti(a.iters);
     else if (s == "--freed-mass-return") next(a.freed_mass_return);
     else if (s == "--allow-below-floor") a.allow_below_floor = true;
+    else if (s == "--regions" && i + 1 < argc) a.regions_mode = argv[++i];
     else if (s == "--only-regions" && i + 1 < argc) {
       std::string v = argv[++i];
       std::size_t p = 0;
@@ -481,7 +571,29 @@ int main(int argc, char** argv) {
               pick->requested_volume_fraction, a.ref_design.c_str(),
               pick->achieved_volume_fraction);
 
-  const std::vector<Region> regions0 = decompose_frozen(grid, eff);
+  std::size_t region_overlap = 0;
+  std::vector<Region> regions0;
+  if (a.regions_mode == "connectivity") {
+    regions0 = decompose_frozen(grid, eff);
+  } else if (a.regions_mode == "provenance") {
+    regions0 = decompose_by_provenance(
+        grid, eff, model, lc.face_protection_face_ids,
+        std::max(1, static_cast<int>(std::lround(lc.face_protection_depth_mm /
+                                                 grid.spacing))),
+        lc.anchor_face_ids, lg.face_ids, kProductionAnchorPadDepthVoxels,
+        &region_overlap);
+  } else {
+    std::printf("FATAL: --regions must be provenance or connectivity, got %s\n",
+                a.regions_mode.c_str());
+    return 2;
+  }
+  std::printf("regions     %zu, keyed on %s%s\n", regions0.size(),
+              a.regions_mode.c_str(),
+              a.regions_mode == "provenance" && region_overlap > 0
+                  ? "" : "");
+  if (a.regions_mode == "provenance")
+    std::printf("            %zu voxels claimed by more than one declaration "
+                "(protection wins)\n", region_overlap);
   const std::vector<int> rid = region_id_field(grid, regions0);
 
   // ── ★ THE CERTIFICATION POSTURE, AND WHY IT IS THE ISOLATED ONE ──────────
