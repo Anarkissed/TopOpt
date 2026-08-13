@@ -131,6 +131,12 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", c.depthMM),
                              modifiable: true),
             LatticeDrawerRow(label: "Hands over", value: c.heldText),
+            // ★ WHAT IT WILL WEIGH, AND THE DIFFERENCE (task 2026-08-13-lattice-
+            // as-a-material §7b). "Hands over" alone is half a sentence: the
+            // reason to hand material to a lattice is what comes back lighter,
+            // and that number was one multiplication away and not on screen.
+            LatticeDrawerRow(label: "As lattice", value: c.latticedText),
+            LatticeDrawerRow(label: "Saved", value: c.savedText),
             LatticeDrawerRow(label: "Cell", value: c.cellText),
             LatticeDrawerRow(label: "Density", value: c.densityText),
             LatticeDrawerRow(label: "Strut", value: c.strutText),

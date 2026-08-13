@@ -509,6 +509,15 @@ final class LatticeSeparationTests: XCTestCase {
     // ─────────────────────────────────────────────────────────────────────
     // MARK: §4 — the drawer
 
+    /// ★ A CARD MUST SAY WHICH PRINT PROFILE IT MEANS (task
+    /// 2026-08-13-lattice-as-a-material §1b). `minExtrudableWidthMM` has no
+    /// default in production — an unknown width is `outOfRegime`, never a silent
+    /// pass — so a fixture has to state one. These are AUTO cards whose cell sits
+    /// at or above the floor in `bounds`, so they are printable by construction
+    /// at this width and the verdict below stays governed by the bounds this test
+    /// is actually exercising. Same constant, same reason, as LatticeWizardTests.
+    private let profileWidthMM = 0.45
+
     private func card(verdict: LatticeFaceCard.Verdict) -> LatticeFaceCard {
         let bounds = TopOptKit.LatticeCellBounds(
             printabilityFloorMM: verdict == .outOfRegime ? 4.93 : 1.2,
@@ -519,7 +528,8 @@ final class LatticeSeparationTests: XCTestCase {
             faceID: 16, depthMM: verdict == .outOfRegime ? 4.0 : 40.0,
             heldVoxels: verdict == .noMaterial ? 0 : 12_000,
             spacingMM: 1.70527, densityGCM3: 1.24, topology: .octet,
-            bounds: bounds, limits: limits)
+            bounds: bounds, limits: limits,
+            minExtrudableWidthMM: profileWidthMM)
     }
 
     /// ★ §4c — the flag is the HEADLINE, not a sideways orange strip. His own

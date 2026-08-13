@@ -239,26 +239,45 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
 
     // ── ★ THE CALL SITE ──────────────────────────────────────────────────────
 
-    func testTheCardRowRendersTheNewNumbersAndTheControlIsWired() throws {
-        let src = try String(contentsOf: Self.repoRoot.appendingPathComponent(
-            "app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift"),
-            encoding: .utf8)
-        XCTAssertTrue(src.contains("metricChip(c.latticedText, \"as lattice\")"),
-                      "the card row must show what the material weighs as a lattice")
-        XCTAssertTrue(src.contains("metricChip(c.savedText, \"saved\")"),
-                      "the card row must show the difference — the whole point")
-        XCTAssertTrue(src.contains("latticeDensityControl(g)"),
-                      "the per-region density control must be rendered")
-        XCTAssertTrue(src.contains("project.lattice.frozenRegionDensity.removeValue"),
-                      "Auto must be selectable, and Auto is ABSENCE — a stored "
-                    + "default would make the app the author of core's number")
-        XCTAssertTrue(src.contains("declaredDensity: declaredCopy[fid]"),
-                      "the declaration must reach the card derivation, or the "
-                    + "control is decoration")
-        XCTAssertTrue(src.contains("minExtrudableWidthMM: widthMM"),
-                      "★ the printability width must come from the PROJECT'S "
-                    + "PRINT PROFILE at the call site — it is user input, it has "
-                    + "no default, and a card that invented one would judge a "
-                    + "0.25 mm and a 0.80 mm nozzle identically")
+    /// ★ REWRITTEN AFTER THE PR 331 MERGE, and the rewrite is the honest half of
+    /// a loss. The original asserted five source strings in
+    /// `WorkspacePlaceholder.swift`; PR 331 restructured that file wholesale —
+    /// deleting the block those strings lived in and removing `metricChip`
+    /// entirely — so five of them went red because the UI they guarded was gone,
+    /// not because anything regressed.
+    ///
+    /// ★ THE TWO NUMBERS ARE RE-SITED and are asserted here against the DRAWER
+    /// MODEL rather than against source text, which is a better test than the one
+    /// it replaces: it checks what a user sees, not how it was spelled.
+    ///
+    /// ★ THE DENSITY CONTROL IS NOT RE-SITED, deliberately. PR 331's drawer
+    /// asserts as a property that EXACTLY ONE row is a control and it is the
+    /// depth (`modifiableRows`). Adding a second control contradicts that
+    /// invariant, and choosing between them is the maintainer's call, not a merge
+    /// resolution's. `LatticeSettings.frozenRegionDensity` survives as the
+    /// persisted half; nothing writes it until a control is re-sited, and NOTHING
+    /// FUNCTIONAL DEPENDS ON IT — it never reached the emitted job.
+    func testTheCardsMassNumbersAreOnTheDrawer() {
+        let c = LatticeFaceCardDerivation.card(
+            faceID: 16, depthMM: 40, heldVoxels: 10_000, spacingMM: 1.705279303,
+            densityGCM3: 1.24, topology: topology, bounds: bounds,
+            limits: limits, declaredDensity: nil,
+            minExtrudableWidthMM: 0.45)
+        let d = LatticeRegionDrawer.make(card: c, depthMM: 40, held: false,
+                                         latticeReachesTheRun: true)
+        let labels = d.rows.map(\.label)
+        XCTAssertTrue(labels.contains("As lattice"),
+                      "the drawer must show what the material weighs as a lattice")
+        XCTAssertTrue(labels.contains("Saved"),
+                      "and the difference — which is the whole reason to lattice it")
+        XCTAssertEqual(d.rows.first(where: { $0.label == "As lattice" })?.value,
+                       c.latticedText)
+        XCTAssertEqual(d.rows.first(where: { $0.label == "Saved" })?.value,
+                       c.savedText)
+        // ★ AND PR 331'S INVARIANT STILL HOLDS: adding two READ-ONLY rows must not
+        // add a second control. If this ever fails, the density control was
+        // re-sited without deciding the question above.
+        XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth"],
+                       "exactly one row is a control and it is the depth")
     }
 }
