@@ -28,3 +28,26 @@ handoff, which marks every answer MEASURED or NOT.
   feature, different depths per sector, per-sector latticed voxels and derived
   cell/density/strut against the last real run's 13,034 / 12% / 507 g.
 * **R6** the cost of the mask-backed predicate against the geometric one.
+
+## ★ THE MONITORING DEFECTS, RECORDED
+
+Six flaws in this run's own safety net, every one found by a layer firing (or
+conspicuously not firing) rather than by inspection:
+
+| # | flaw | consequence |
+|---|---|---|
+| 1 | `pgrep -c` does not exist on macOS | heartbeat reported blanks |
+| 2 | stall measured the STATUS FILE, static for hours during a long step | false alarms, and learned indifference to them |
+| 3 | Monitors given 1-hour timeouts on multi-hour runs | coverage expiring before the thing it watched |
+| 4 | watchdog stood down on the FIRST completion marker | the critical re-run left unguarded |
+| 5 | heartbeat v1 did the same | same |
+| 6 | heartbeat v2 did the same again, one marker later | same |
+
+★ 4, 5 and 6 are ONE defect implemented three times. The rule was stated after
+the fourth and still implemented per-marker twice more. The structural fix is to
+key on PROCESS LIVENESS — "any driver alive" — which survives adding another
+driver without remembering to re-arm anything.
+
+THE RULE, in the form that would have prevented all six:
+  a monitoring layer must key on the WORK STILL RUNNING, OUTLIVE it, and measure
+  the WORK rather than the PAPERWORK.
