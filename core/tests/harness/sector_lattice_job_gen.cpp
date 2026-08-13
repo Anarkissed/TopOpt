@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
   s += "  \"grading\": {\"cell_mode\": \"fit\", \"topology\": \"octet\", "
        "\"min_extrudable_width_mm\": 0.42},\n";
   s += "  \"lattice\": {\"topology\": \"octet\", \"emit_stl\": true, "
-       "\"emit_3mf\": false, \"skin\": \"rim\", "
+       "\"emit_3mf\": false, \"skin\": \"none\", "
        "\"min_extrudable_width_mm\": 0.42,\n    \"regions\": [\n";
   for (int i = 0; i < sectors; ++i) {
     s += "      {\"role\": \"include\", \"kind\": \"region\", \"region_id\": " +

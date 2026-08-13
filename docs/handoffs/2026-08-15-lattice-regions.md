@@ -7,10 +7,10 @@ face-region layer; every baseline below is that commit.
 > **"A grid split grades what is FROZEN, not what is LATTICED."**
 > — my own §6, PR 331.
 
-**★ THE HONEST HEADLINE FIRST: the mechanism is built and unit-tested; the two
-bars that need production runs are NOT MEASURED.** §0 marks each answer
-MEASURED or NOT. Nothing below is inferred from code reading and presented as a
-result.
+**★ Every §0 answer is marked MEASURED or NOT.** Nothing here is inferred from
+code reading and presented as a result. R1, R2, R3, R5, R6 and R7 are measured;
+R4 — the demonstration on his part — is the one still being run, and until it
+lands this is a mechanism rather than a demonstrated feature.
 
 ---
 
@@ -36,9 +36,20 @@ call the same `region_member_voxels` + `cut_voxels`. Asserted voxel-for-voxel at
 four depths (1.0, 2.6, 3.0, 4.4 mm) against `mask_step_region`, which is what the
 protection actually walks.
 
-**What does the mask-backed predicate cost against the geometric one? ★ NOT
-MEASURED (bar R6).** The prediction in §3(a) — an array index may beat the
-arithmetic — is untested and is not reported as a result.
+**What does the mask-backed predicate cost against the geometric one? MEASURED —
+and §3(a)'s prediction is WRONG at one of the three sites.** On his part at 128:
+
+| site | analytic | mask | |
+|---|---|---|---|
+| point membership (fit-cell field, multiscale sweep) | 0.68 ms | 0.67 ms | indistinguishable |
+| cell activation (`cell_may_overlap`) | 0.01 ms | **0.41 ms** | **42x SLOWER** |
+
+§3(a) guessed "it may be faster, not slower". On the per-point sweeps it is a
+wash. On cell activation it is decisively slower, because the exact box test
+walks up to 512 voxels per cell where the analytic test is a few operations —
+the price of `overlaps_box` being EXACT where the Lipschitz bound is merely
+conservative. It is affordable (0.41 ms for every cell on the whole part), but
+the guess did not hold. `r6_predicate_cost.txt`.
 
 **Can density differ per sector, or is that a further change? IT ALREADY DOES,
 DERIVED — and a directly-authored per-sector density IS a further change.**
@@ -143,14 +154,43 @@ a measurement and I am not reporting it as one.** It needs the §4 run.
 
 ---
 
-## §3 — COST — NOT MEASURED
+## §3 — COST — MEASURED
 
-Both halves of §3 are open. §3(b) can be stated from the type: a mask is
-`1 byte × voxel_count`, so **457 KB per region on his 468,224-voxel grid, 4.6 MB
-for ten** — carried once and shared by `shared_ptr` through every copy of the
-`ClearanceGeometry` (which is why it is a `shared_ptr` and not a `vector`). §3(a),
-the per-call cost against the geometric predicate at the three sites, is
-unmeasured.
+**§3(a).** See §0: a wash on the per-point sweeps, **42x slower** on cell
+activation, 0.41 ms absolute for every cell on the part. The prediction that a
+mask "may be faster" held in two of three places and failed in the third, and
+the reason is structural rather than incidental — the mask's cell test is EXACT
+where the analytic one is a bound, and exactness costs a box walk.
+
+**§3(b).** A mask is 1 byte per voxel: **457 KB per region on his 468,224-voxel
+grid, 4.5 MB for ten.** Carried once and shared by `shared_ptr` through every
+copy of the `ClearanceGeometry` — which is why it is a `shared_ptr` and not a
+`vector`, since these objects are copied into `LatticeBoundary`, into every
+per-variant pipeline and into the forecast.
+
+## §3(c) — TWO LIMITS THE RUNS FOUND, NEITHER ANTICIPATED
+
+**A region-backed lattice region cannot use the `rim` / `skin` finish.** Core
+refuses cleanly and explains itself:
+
+> The rim/skin finish rides pairs of ANALYTIC boundary faces, and at least one of
+> each pair must be a PLANE. This run's lattice boundary is built from the voxel
+> silhouette plus clearances and lattice roles, none of which contribute a plane.
+
+That is the type mismatch surfacing where nobody looked for it. An analytic
+`face` lattice region contributes a plane the rim can ride — which is why his own
+job runs with `"skin": "rim"`. A voxel set has no plane, so a sector-latticed
+region **exports undressed** (`"skin": "none"`) today. The refusal is a refusal,
+not a silent undressed export, which is the right behaviour; the gap is real.
+
+**The pre-flight cannot forecast a region-backed include.** It runs BEFORE the
+import and before the grid exists, so there is no mask and no derivable extent.
+★ This was found by the first §4 run CRASHING: the pre-flight called the analytic
+extent reader (`run_job.cpp:7139`) on a kind that has no half-extents, read 0,
+and `lattice_derive_cell_for_member` threw "member_width_mm must be > 0". Such
+regions are now skipped and counted there, and the run's own per-region verdicts
+carry the real numbers. Closing it means voxelizing inside the pre-flight — a
+decision, not a typo.
 
 ---
 
