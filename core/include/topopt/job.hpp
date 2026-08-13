@@ -435,6 +435,12 @@ struct JobLoadGroup {
   // selection produces and the LAN worker forwards). Exactly one form per group.
   std::vector<JobFaceSelector> faces;  // every match tagged LOAD
   std::vector<int> face_ids;           // raw B-rep face ids, tagged LOAD
+  // ★ REGION ids (task 2026-08-14-face-regions §3e). A group may ALSO name
+  // regions declared in `loads.face_regions` — a union of blend faces, or one
+  // sector of a grid split. Regions and face ids compose: the group is the
+  // union of both, tagged in that order (face ids first, exactly as before, so
+  // a group that names no regions is byte-identical).
+  std::vector<int> region_ids;
   Vec3 force{0.0, 0.0, 0.0};           // fx, fy, fz in N
 };
 
@@ -545,6 +551,17 @@ struct JobLoadCase {
   bool present = false;                     // "loads" block was given
   std::vector<JobFaceSelector> anchors;     // geometric selectors -> FIXTURE
   std::vector<int> anchor_face_ids;         // OR raw B-rep face ids -> FIXTURE
+  // ★ THE REGION LAYER (task 2026-08-14-face-regions §1). Declared ONCE here and
+  // referred to by id from groups / anchors / protections, so a union that feeds
+  // three consumers is written once and cannot drift between them. Empty (the
+  // default) => no regions => byte-identical to every job written before this.
+  //
+  // ★ NOTHING HERE TOUCHES THE FACE PARTITION. A region is (member face ids) ∩
+  // (half-spaces); `StepModel::triangle_face` and `StepModel::faces` are read,
+  // never written, so CAD-face projection and every analytic-surface lookup are
+  // exactly as they were. See face_region.hpp.
+  std::vector<FaceRegionSpec> face_regions;
+  std::vector<int> anchor_region_ids;       // regions -> FIXTURE
   std::vector<JobLoadGroup> groups;         // distributed tractions
   std::vector<JobClearance> clearances;     // "Keep clear" keep-out regions
   // Handoff 124 — Face protections (preserve-skin). Raw B-rep face ids whose OWN
@@ -561,6 +578,12 @@ struct JobLoadCase {
   //     "face_protections": [ {"face_id": 16, "depth_mm": 7} ]
   // alongside the legacy integer form, which is still accepted unchanged.
   std::vector<double> face_protection_depths_mm;
+  // ★ PROTECTIONS BY REGION. Parallel vectors: one region id and one depth (mm,
+  // <= 0 => the global depth) per protected region. A grid split's fifty sectors
+  // each carrying their OWN depth is exactly this list — which is what makes a
+  // grid split a hand-authored grading mechanism (§6). Empty => byte-identical.
+  std::vector<int> face_protection_region_ids;
+  std::vector<double> face_protection_region_depths_mm;
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
   bool minimize_plastic = true;             // true = reduction ladder + pad

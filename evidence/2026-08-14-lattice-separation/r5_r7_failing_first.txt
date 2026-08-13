@@ -1,0 +1,28 @@
+R5 / §7 — WRITTEN TO FAIL FIRST
+
+LatticeSeparationTests.swift compiled against the PRE-TASK wizard (a git
+checkout of LatticeWizardModel.swift and LatticeSetupWizard.swift; every
+other file is the branch's). The API had no way to EXPRESS what R5 asks
+for, so the failure is a COMPILE failure — the same shape as PR 328's L5,
+and for the same reason: a wizard and a side modal that are two views of
+one state machine cannot be written against a model with no stage table,
+no settings table and no reveal.
+
+$ swift build --package-path app/TopOptKit --build-tests
+
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:331:33: error: cannot find 'LatticeWizardSetting' in scope
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:338:11: error: value of type 'LatticeWizardModel' has no member 'touched'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:343:11: error: value of type 'LatticeWizardModel' has no member 'advance'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:345:11: error: value of type 'LatticeWizardModel' has no member 'advance'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:346:34: error: type 'LatticeWizardStage' has no member 'finish'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:347:26: error: value of type 'LatticeWizardModel' has no member 'hasNext'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:354:23: error: cannot find type 'LatticeWizardSetting' in scope
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:356:34: error: value of type 'LatticeWizardStage' has no member 'settings'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:358:28: error: value of type 'LatticeWizardStage' has no member 'settings'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:364:36: error: cannot find 'LatticeWizardSetting' in scope
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:373:21: error: type 'LatticeWizardStage' has no member 'finish'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:374:34: error: type 'LatticeWizardStage' has no member 'finish'
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:386:17: error: cannot find 'LatticeWizardReveal' in scope
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:394:24: error: cannot find 'LatticeWizardReveal' in scope
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:398:17: error: cannot find 'LatticeWizardReveal' in scope
+app/TopOptKit/Tests/TopOptFlowsTests/LatticeSeparationTests.swift:481:18: error: cannot find 'LatticeWizardSetting' in scope

@@ -362,7 +362,13 @@ final class SmoothingPageRound2Tests: XCTestCase {
             "bottomBar",                  // hint + compute + print params + Optimize
             "bottomRightControls",        // Paint, Fast·64³, Minimize plastic, Design Box
             "selectionsPanel",            // the Selections list with Group A/B
-            "latticeEntryButtonOverlay",  // the Lattice chip
+            // Renamed by task 2026-08-14-lattice-separation §1b: the entry button
+            // became the STAGE NAVIGATION button (TO ⇄ lattice). Same placement,
+            // same rule — and the two affordances the separation ADDED are on the
+            // list too, so a page cannot be half-hidden by a new one.
+            "stageNavigationButtonOverlay",
+            "latticeSettingsButtonOverlay",
+            "latticeDepthHandlesOverlay",
             "latticePreviewOverlay",
             "loadOverlays",
             "seeResultsChip",

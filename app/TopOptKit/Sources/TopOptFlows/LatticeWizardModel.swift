@@ -27,15 +27,68 @@ import Foundation
 import simd
 
 /// Which stage the page is showing.
+///
+/// ★ THE ORDER IS §5d's, UNCHANGED FROM PR 328's BUILD: one cell alone → the cell
+/// flies into the sample and tiles it → density and boundary finish, with the
+/// stress-field wipe on Auto. PR 328 had the first two; `finish` is the third,
+/// which existed as a set of controls with no stage of its own.
 public enum LatticeWizardStage: Int, Equatable, Sendable, CaseIterable {
     /// One cell, large, centred, rotatable.
     case cell = 0
     /// The cell has tiled the sample part.
     case lattice = 1
+    /// Density and boundary finish, on the tiled part.
+    case finish = 2
 
-    /// ★ Three words at most (R3).
+    /// ★ Three words at most (R7).
     public var title: String {
-        self == .cell ? "One cell" : "In the part"
+        switch self {
+        case .cell: return "One cell"
+        case .lattice: return "In the part"
+        case .finish: return "Finish"
+        }
+    }
+
+    /// The settings this stage is ABOUT — derived by filtering
+    /// `LatticeWizardSetting`, so the wizard's stage list and the side modal's
+    /// sub-titles are ONE table read two ways and can never disagree (§5c).
+    public var settings: [LatticeWizardSetting] {
+        LatticeWizardSetting.allCases.filter { $0.stage == self }
+    }
+
+    public var next: LatticeWizardStage? {
+        LatticeWizardStage(rawValue: rawValue + 1)
+    }
+}
+
+/// ★ ONE SETTING. The wizard asks for it centre stage; the side modal offers it
+/// under its stage's sub-title (§5c). The `stage` property is the whole coupling:
+/// changing a setting in the modal moves the wizard to `stage`, and the wizard at
+/// `stage` asks for exactly the settings that map back to it.
+public enum LatticeWizardSetting: String, Equatable, Sendable, CaseIterable {
+    case type, size, thickness
+    case cellSize
+    case density, finish
+
+    /// ★ Two words at most (R7).
+    public var title: String {
+        switch self {
+        case .type: return "Type"
+        case .size: return "Size"
+        case .thickness: return "Thickness"
+        case .cellSize: return "Cell size"
+        case .density: return "Density"
+        case .finish: return "Finish"
+        }
+    }
+
+    /// The stage whose VISUAL OUTPUT shows this setting doing something.
+    public var stage: LatticeWizardStage {
+        switch self {
+        case .type, .size, .thickness: return .cell
+        case .cellSize: return .lattice
+        case .density, .finish: return .finish
+        }
     }
 }
 
@@ -141,10 +194,42 @@ public struct LatticeWizardModel: Equatable, Sendable {
 
     public mutating func finishedPlaying() { playing = nil }
 
+    /// ★ THE NEXT BUTTON (§5a). One decision at a time, in the middle of the
+    /// screen; Next advances to the stage after this one and plays its entry
+    /// cinematic. Nil at the end — the view shows Save & Exit there instead.
+    public mutating func advance() {
+        guard let n = stage.next else { return }
+        move(to: n)
+    }
+
+    public var hasNext: Bool { stage.next != nil }
+
+    /// ★ THE COUPLING, IN ONE FUNCTION (§5c). A setting changed in the side modal
+    /// moves the wizard to that setting's stage so the change is SEEN, and moving
+    /// to a stage plays that stage's cinematic. The modal and the wizard are two
+    /// views of one state machine, which is bar R5.
+    public mutating func touched(_ setting: LatticeWizardSetting) {
+        move(to: setting.stage)
+    }
+
+    /// Enter a stage and play what that stage is for. Re-entering the stage the
+    /// page is already on does NOT replay — a size scrub would otherwise restart
+    /// the morph on every frame of the drag.
+    public mutating func move(to s: LatticeWizardStage) {
+        guard s != stage else { return }
+        stage = s
+        switch s {
+        case .cell: playing = nil; playToken += 1
+        case .lattice: play(.tile)
+        case .finish: play(densityMode == .auto ? .stressWipeAndDive : .boundarySwap)
+        }
+    }
+
     /// Setting the TYPE morphs the cell (§2 Stage A). Never a swap.
     public mutating func setTopology(_ id: String) {
         guard id != topologyID else { return }
         topologyID = id
+        stage = .cell            // §5c: the type's visual output is the lone cell
         play(.morph)
     }
 
@@ -164,10 +249,11 @@ public struct LatticeWizardModel: Equatable, Sendable {
     }
 
     /// Auto DENSITY plays the stress explanation; uniform does not (there is
-    /// nothing to explain about a flat field).
+    /// nothing to explain about a flat field). §5c: it also moves the wizard to
+    /// the stage whose visual output is the density.
     public mutating func setDensityMode(_ m: LatticeDensityMode) {
         densityMode = m
-        if stage != .lattice { stage = .lattice }
+        stage = LatticeWizardSetting.density.stage
         play(m == .auto ? .stressWipeAndDive : .tile)
     }
 
@@ -175,16 +261,16 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public mutating func setCellSizeMode(_ m: LatticeCellSizeMode) {
         cellSizeMode = m
         if m == .auto {
-            stage = .lattice
+            stage = LatticeWizardSetting.cellSize.stage
             play(.jumpToSample)
         }
     }
 
-    /// The four boundary finishes are SHOWN on the part, switchable (§2 C).
+    /// The boundary finishes are SHOWN on the part, switchable (§2 C).
     public mutating func setBoundary(_ b: LatticeBoundaryTreatment) {
         guard b != boundary else { return }
         boundary = b
-        if stage != .lattice { stage = .lattice }
+        stage = LatticeWizardSetting.finish.stage
         play(.boundarySwap)
     }
 
@@ -219,5 +305,60 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var stageTriangleCount: Int {
         LatticeSamplePatch.triangleCount(lattice: lattice,
                                          cells: stage == .cell ? 1 : cellsAcross)
+    }
+}
+
+/// ★ §7 — WHY THE SAMPLE WAS INVISIBLE, AS A TYPE THAT CANNOT DO IT AGAIN.
+///
+/// THE DEFECT, with the two lines that caused it. `LatticeSetupWizard` passed the
+/// renderer
+///
+///     reveal: Float(model.densityMode == .auto ? wipe : 1)     (line 75)
+///     @State private var wipe: Double = 0                      (line 42)
+///
+/// and `MetalMeshView`'s fragment shader discards every fragment above the reveal
+/// height:
+///
+///     if (t > reveal.x) discard_fragment();                    (line 126)
+///
+/// §4b of the previous task had already made `densityMode` default to `.auto` on a
+/// new project, so the page opened with `reveal = 0` and the shader threw away
+/// every pixel of a mesh that had been built, uploaded and counted. That is the
+/// maintainer's report exactly: an empty viewport with "1 ms · 544 tris" beside it.
+/// Nothing was wrong with the camera, the scale or the frustum — the geometry was
+/// on screen and each of its fragments was individually discarded.
+///
+/// THE SHAPE OF THE FIX. The wipe is a CINEMATIC — a thing that runs and finishes —
+/// not a property of a setting. So it is modelled as one: the reveal is 1 unless a
+/// wipe is actually running, and `begin`/`end` bracket it. A density mode can no
+/// longer hold the page blank, because the density mode is not an input here.
+public struct LatticeWizardReveal: Equatable, Sendable {
+
+    /// How far the wipe has come, 0…1. Meaningless unless `wiping`.
+    public private(set) var fraction: Double = 0
+    /// Whether a wipe is running RIGHT NOW.
+    public private(set) var wiping: Bool = false
+
+    public init() {}
+
+    /// ★ WHAT THE RENDERER GETS. 1 — everything drawn — unless a wipe is running.
+    public var value: Double { wiping ? fraction : 1 }
+
+    public mutating func begin() {
+        wiping = true
+        fraction = 0
+    }
+
+    public mutating func step(to f: Double) {
+        guard wiping else { return }
+        fraction = Swift.min(1, Swift.max(0, f))
+    }
+
+    /// The wipe landed (or was interrupted by a stage change): the part is whole
+    /// again. Every exit from a wipe goes through here, so there is no path that
+    /// leaves the page holding a partial reveal.
+    public mutating func end() {
+        wiping = false
+        fraction = 1
     }
 }

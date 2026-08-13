@@ -4221,9 +4221,11 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // not carried. The round-trip test (core/tests/unit/test_job_loadcase_copy.cpp)
   // then locks the VALUES; this locks the COVERAGE, which is the half that was
   // missing.
-  const auto& [j_present, j_anchors, j_anchor_face_ids, j_groups, j_clearances,
+  const auto& [j_present, j_anchors, j_anchor_face_ids, j_face_regions,
+               j_anchor_region_ids, j_groups, j_clearances,
                j_face_protection_face_ids, j_face_protection_depth_mm,
-               j_face_protection_depths_mm,
+               j_face_protection_depths_mm, j_face_protection_region_ids,
+               j_face_protection_region_depths_mm,
                j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
@@ -4233,6 +4235,12 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   (void)j_present;
 
   ProductionLoadCase lc;
+  // ★ THE REGION LAYER travels verbatim (task 2026-08-14-face-regions §1): the
+  // specs are RESOLVED once inside build_production_loadcase, against the model
+  // it voxelizes, so the job never carries a resolved member list that could
+  // disagree with the import.
+  lc.face_regions = j_face_regions;
+  lc.anchor_region_ids = j_anchor_region_ids;
   // Anchors: raw B-rep ids (from the app) and/or geometric selectors compose.
   lc.anchor_face_ids = j_anchor_face_ids;
   for (const int id : resolve_selectors(model, j_anchors, "anchors"))
@@ -4242,6 +4250,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
     lg.face_ids = g.face_ids;
     for (const int id : resolve_selectors(model, g.faces, "loads group faces"))
       lg.face_ids.push_back(id);
+    lg.region_ids = g.region_ids;
     lg.force = g.force;
     lc.load_groups.push_back(std::move(lg));
   }
@@ -4298,6 +4307,10 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // COPIED: the PER-FACE depths (task 2026-08-12 §0a). Empty => every protection
   // uses the global depth, byte-identical to before the task.
   lc.face_protection_depths_mm = j_face_protection_depths_mm;
+  // COPIED: protections declared on a REGION, and their per-region depths (task
+  // 2026-08-14-face-regions). Empty => byte-identical to before the task.
+  lc.face_protection_region_ids = j_face_protection_region_ids;
+  lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
@@ -4379,7 +4392,16 @@ std::string loadcase_receipt_json(const JobDescription& job,
       s += "    {\"index\": " + std::to_string(g.index) + ", \"face_ids\": [";
       for (std::size_t f = 0; f < g.face_ids.size(); ++f)
         s += (f ? ", " : "") + std::to_string(g.face_ids[f]);
-      s += "], \"force_mag_n\": " + json_num(g.force_mag) +
+      s += "]";
+      // ★ AND THE REGIONS IT DECLARED (task 2026-08-14-face-regions). Written
+      // only when there are some, so a pre-region run's receipt is unchanged.
+      if (!g.region_ids.empty()) {
+        s += ", \"region_ids\": [";
+        for (std::size_t r = 0; r < g.region_ids.size(); ++r)
+          s += (r ? ", " : "") + std::to_string(g.region_ids[r]);
+        s += "]";
+      }
+      s += ", \"force_mag_n\": " + json_num(g.force_mag) +
            ", \"voxels_tagged\": " + std::to_string(g.voxels_tagged) +
            ", \"status\": \"" +
            (g.status == LoadGroupReport::Status::Ok
@@ -4406,7 +4428,18 @@ std::string loadcase_receipt_json(const JobDescription& job,
     for (std::size_t i = 0; i < setup->face_protection_reports.size(); ++i) {
       const ProductionRunSetup::FaceProtectionReport& f =
           setup->face_protection_reports[i];
+      // ★ A REGION PROTECTION REPORTS ITS REGION, not `face_id: -1` (task
+      // 2026-08-14-face-regions). A receipt that names a face which does not
+      // exist is worse than one that says nothing.
+      // ★ THE KEY IS EMITTED ONLY WHEN THERE IS A REGION. A receipt that names
+      // `face_id: -1` for a region protection claims a face that does not
+      // exist; a receipt that gains a `"region_id": -1` on every pre-region run
+      // is no longer byte-identical to the one it produced yesterday (bar R1).
+      // Both are avoided by writing the key only when it says something.
       s += "    {\"face_id\": " + std::to_string(f.face_id) +
+           (f.region_id >= 0
+                ? ", \"region_id\": " + std::to_string(f.region_id)
+                : std::string()) +
            ", \"voxels_frozen\": " + std::to_string(f.voxels_frozen) +
            ", \"depth_voxels\": " + std::to_string(f.depth_voxels) +
            ", \"depth_requested_mm\": " + json_num(f.depth_requested_mm) +
@@ -4416,6 +4449,33 @@ std::string loadcase_receipt_json(const JobDescription& job,
       s += (i + 1 < setup->face_protection_reports.size()) ? ",\n" : "\n";
     }
     s += "  ],\n";
+    // ★ WHAT EACH DECLARED REGION RESOLVED TO ON THIS IMPORT (task
+    // 2026-08-14-face-regions §3c). A union is persisted as a FILTER plus a hand
+    // add/remove list and re-evaluated on every import, so the receipt has to
+    // carry what it found — and `filter_drift`, which is the only place a CAD
+    // edit that renumbered faces becomes visible after the fact.
+    //
+    // The block is written ONLY when regions were declared, so a pre-region run
+    // produces the run_info.json it always produced (bar R1).
+    if (!setup->face_region_reports.empty()) {
+      s += "  \"face_regions\": [\n";
+      for (std::size_t i = 0; i < setup->face_region_reports.size(); ++i) {
+        const ProductionRunSetup::FaceRegionReport& r =
+            setup->face_region_reports[i];
+        s += "    {\"id\": " + std::to_string(r.id) +
+             ", \"name\": " + json_str(r.name) +
+             ", \"parent_id\": " + std::to_string(r.parent_id) +
+             ", \"member_faces\": " + std::to_string(r.member_faces) +
+             ", \"cuts\": " + std::to_string(r.cuts) +
+             ", \"area_mm2\": " + json_num(r.area_mm2) +
+             ", \"filter_matched\": " + std::to_string(r.filter_matched) +
+             (r.filter_drift_known
+                  ? ", \"filter_drift\": " + std::to_string(r.filter_drift)
+                  : std::string()) + "}";
+        s += (i + 1 < setup->face_region_reports.size()) ? ",\n" : "\n";
+      }
+      s += "  ],\n";
+    }
     // ★ THE ANCHOR/LOAD STRUCTURAL PAD, ON ITS OWN LINE (task 2026-08-12 §1f).
     // It freezes with the same FrozenSolid value at the same depth 3 as a
     // protection, and reading the two together is how "I protected one wall"
@@ -6535,6 +6595,18 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
       // it was right, and I still missed it. `s0_table.py` reading a 0 is what
       // caught it.)
       echo.anchor_pad_report = setup.anchor_pad_report;
+      // ★ AND IT BIT AGAIN (task 2026-08-14-face-regions). This branch added
+      // `face_region_reports`, emitted the block that writes them, watched
+      // loadcase.json come out WITHOUT it, and found the missing line here —
+      // three warnings deep in comments that all said "every new setup field
+      // has to be added here too". A hand-copied list cannot notice a field it
+      // was never told about. THE FIX IS THE ONE `production_loadcase_from_job`
+      // ALREADY USES: decompose by structured binding so the language forces
+      // every member to be named. It is not done here because the echo copies a
+      // deliberate SUBSET (setup.options has been moved from by this point), so
+      // the binding needs a `(void)` line per skipped field — worth doing, and
+      // out of scope for this branch's diff.
+      echo.face_region_reports = setup.face_region_reports;
       // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
       // onto the echo too, or the receipt would silently report a growth run as a
       // reduction one (the echo is a hand-copied subset, so every new setup field

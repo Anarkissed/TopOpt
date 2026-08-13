@@ -436,6 +436,11 @@ struct OptimizeResult {
   //                                depth (froze what exists — no silent over-claim)
   // Empty when no protection was declared.
   std::vector<int32_t> protection_face_ids;
+  // ★ Parallel to the above: the REGION this protection was declared on, or -1
+  // when it was declared on a face (task 2026-08-14-face-regions). A region is
+  // not a face, and reporting a region protection as `face_id: -1` would be a
+  // receipt claiming a face that does not exist.
+  std::vector<int32_t> protection_region_ids;
   std::vector<int32_t> protection_voxels_frozen;
   std::vector<int32_t> protection_depth_voxels;
   std::vector<uint8_t> protection_thinner;
@@ -635,6 +640,57 @@ struct BridgeLoadCase {
   std::vector<int32_t> load_face_ids;
   std::vector<int32_t> load_group_sizes;
   std::vector<double> load_forces;  // 3 per group (fx, fy, fz)
+
+  // ── THE REGION LAYER (task 2026-08-14-face-regions §1) ────────────────────
+  //
+  // ★ The ON-DEVICE run must see the same selections the LAN job.json carries,
+  // or a user who unions and splits and then taps Optimize gets a run that
+  // quietly ignores every one of them — a green run that measures nothing.
+  //
+  // Flat parallel arrays, the same idiom the clearances use, so the POD stays
+  // trivially copyable across the language boundary. R regions:
+  //
+  //   region_ids[R], region_parent_ids[R]
+  //   region_add_sizes[R]      -> region_add_faces[sum]
+  //   region_remove_sizes[R]   -> region_remove_faces[sum]
+  //   region_cut_sizes[R]      -> region_cut_point_xyz[3*sum],
+  //                               region_cut_normal_xyz[3*sum],
+  //                               region_cut_strict[sum]
+  //   region_filter_*[R]       (a value <= 0 / -1 means UNSET)
+  //
+  // Region NAMES do not cross: they are UI copy, and the core log names a region
+  // by its id. Empty arrays => no regions => byte-identical POD to before.
+  std::vector<int32_t> region_ids;
+  std::vector<int32_t> region_parent_ids;
+  std::vector<int32_t> region_add_sizes;
+  std::vector<int32_t> region_add_faces;
+  std::vector<int32_t> region_remove_sizes;
+  std::vector<int32_t> region_remove_faces;
+  std::vector<int32_t> region_cut_sizes;
+  std::vector<double> region_cut_point_xyz;
+  std::vector<double> region_cut_normal_xyz;
+  std::vector<uint8_t> region_cut_strict;
+  std::vector<double> region_filter_max_area_mm2;
+  std::vector<double> region_filter_min_area_mm2;
+  std::vector<int32_t> region_filter_min_larger_neighbours;
+  std::vector<double> region_filter_larger_ratio;
+  std::vector<int32_t> region_filter_kind;  // -1 unset, 0 plane, 1 cylinder, 2 other
+  std::vector<double> region_filter_cyl_radius_mm;
+  std::vector<double> region_filter_cyl_tol_mm;
+  std::vector<int32_t> region_filter_matched_at_author;  // -1 = not recorded
+
+  // Regions tagged FIXTURE, and per load group the regions it also covers
+  // (parallel to `load_group_sizes`: one count per group, flattened into
+  // `load_region_ids`). An EMPTY `load_group_region_sizes` means "no group names
+  // a region", which is the pre-region wire.
+  std::vector<int32_t> anchor_region_ids;
+  std::vector<int32_t> load_region_ids;
+  std::vector<int32_t> load_group_region_sizes;
+
+  // Protections declared on a region, and their per-region depths (mm; <= 0 =>
+  // the global `face_protection_depth_mm`).
+  std::vector<int32_t> face_protection_region_ids;
+  std::vector<double> face_protection_region_depths_mm;
   bool minimize_plastic = true;
   double build_dir_x = 0.0;
   double build_dir_y = 0.0;

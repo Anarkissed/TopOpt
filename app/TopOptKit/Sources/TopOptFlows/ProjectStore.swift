@@ -68,6 +68,21 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// not merely the convenient one.
     public var projectCADFaces: Bool?
 
+    /// ★ THE REGION LAYER (task 2026-08-14-face-regions §3c) — the unions and the
+    /// split cells the user authored.
+    ///
+    /// What is stored is the DEFINITION, never the result: each region carries its
+    /// filter, an explicit add/remove list, and its split half-spaces as
+    /// model-space geometry. A re-import re-evaluates the filter and REPORTS the
+    /// difference (`FaceRegionModel.drift`) rather than absorbing it, which is
+    /// what makes a union survive a CAD edit that renumbers B-rep faces instead of
+    /// silently pointing at whatever inherited the number.
+    ///
+    /// OPTIONAL, for the same back-compat reason as every field above: a snapshot
+    /// written before this existed must decode, and nil is the empty model — no
+    /// regions, so the project emits exactly the job it always did (bar R1).
+    public var faceRegions: FaceRegionModel?
+
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
                 originalFileName: String, savedAt: Date,
@@ -75,7 +90,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
                 minimizePlastic: Bool? = nil, quality: RunQuality? = nil,
                 optimized: Bool? = nil, printParams: PrintParams? = nil,
                 designBox: DesignBoxModel? = nil, lattice: LatticeSettings? = nil,
-                projectCADFaces: Bool? = nil) {
+                projectCADFaces: Bool? = nil, faceRegions: FaceRegionModel? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -93,6 +108,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.designBox = designBox
         self.lattice = lattice
         self.projectCADFaces = projectCADFaces
+        self.faceRegions = faceRegions
     }
 }
 

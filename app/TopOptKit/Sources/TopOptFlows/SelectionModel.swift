@@ -45,12 +45,56 @@ public struct SelectionGroup: Identifiable, Equatable, Sendable, Codable {
     public var colorIndex: Int
     /// The face ids in this group, in selection order, deduplicated (design `faces`).
     public private(set) var faces: [FaceID]
+    /// ★ THE REGIONS in this group (task 2026-08-14-face-regions §1). A union of
+    /// 23 blend faces is ONE entry here instead of 23 in `faces` — which is the
+    /// whole point of the layer. A group carries both: a region and a plain face
+    /// are both selections, and the run tags them the same way.
+    ///
+    /// DECODED WITH `decodeIfPresent` (see `init(from:)`): a project saved before
+    /// this field existed must still open, and it opens with no regions, which is
+    /// exactly the group it was.
+    public private(set) var regionIDs: [RegionID]
 
-    public init(id: UUID = UUID(), name: String, colorIndex: Int, faces: [FaceID] = []) {
+    public init(id: UUID = UUID(), name: String, colorIndex: Int, faces: [FaceID] = [],
+                regionIDs: [RegionID] = []) {
         self.id = id
         self.name = name
         self.colorIndex = colorIndex
         self.faces = faces
+        self.regionIDs = regionIDs
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, colorIndex, faces, regionIDs }
+
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        colorIndex = try c.decode(Int.self, forKey: .colorIndex)
+        faces = try c.decode([FaceID].self, forKey: .faces)
+        regionIDs = try c.decodeIfPresent([RegionID].self, forKey: .regionIDs) ?? []
+    }
+
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(colorIndex, forKey: .colorIndex)
+        try c.encode(faces, forKey: .faces)
+        // Written only when non-empty, so a project with no regions produces the
+        // exact project.json it produced before this field existed.
+        if !regionIDs.isEmpty { try c.encode(regionIDs, forKey: .regionIDs) }
+    }
+
+    /// Add / remove regions. A region belongs to exactly one group, the same
+    /// invariant `faces` keeps.
+    mutating func addRegions(_ ids: [RegionID]) {
+        for r in ids where !regionIDs.contains(r) { regionIDs.append(r) }
+    }
+
+    mutating func removeRegions(_ ids: [RegionID]) {
+        let drop = Set(ids)
+        regionIDs.removeAll { drop.contains($0) }
     }
 
     /// The group's colour, from the design palette (`this.COLORS`), by `colorIndex`.
@@ -62,8 +106,23 @@ public struct SelectionGroup: Identifiable, Equatable, Sendable, Codable {
     /// Number of faces (design `g.faces.length`) — the face-count chip value.
     public var faceCount: Int { faces.count }
 
+    /// ROWS in this group: plain faces plus regions. A union collapses 23 faces
+    /// into one row, so this is the number the chip should show — the count of
+    /// things the user selected, not the count of things the CAD happened to
+    /// have. `faceCount` stays as it was for every existing caller.
+    public var selectionCount: Int { faces.count + regionIDs.count }
+
     /// The design's "N face" / "N faces" chip label.
     public var faceLabel: String { faceCount == 1 ? "1 face" : "\(faceCount) faces" }
+
+    /// The chip label once regions are in play: "1 region · 3 faces", or the
+    /// plain face label when the group holds no region (byte-identical copy for
+    /// every project that has not used the layer).
+    public var selectionLabel: String {
+        guard !regionIDs.isEmpty else { return faceLabel }
+        let r = regionIDs.count == 1 ? "1 region" : "\(regionIDs.count) regions"
+        return faces.isEmpty ? r : "\(r) · \(faceLabel)"
+    }
 
     /// Add face ids, preserving order and dropping duplicates (design
     /// `[...new Set([...faces, ...keys])]`).
@@ -212,6 +271,35 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     public mutating func clearActive() {
         activeGroupID = nil
         groups.removeAll { $0.faces.isEmpty }
+    }
+
+    /// Put regions into a group (the union commit path). A region belongs to
+    /// exactly one group — the same invariant `pickFaces` keeps for faces — so
+    /// this steals from any other holder.
+    public mutating func addRegions(_ ids: [RegionID], to group: UUID) {
+        guard !ids.isEmpty, let idx = groups.firstIndex(where: { $0.id == group })
+        else { return }
+        for i in groups.indices where groups[i].id != group {
+            groups[i].removeRegions(ids)
+        }
+        groups[idx].addRegions(ids)
+        groups.removeAll {
+            $0.faces.isEmpty && $0.regionIDs.isEmpty && $0.id != group
+                && $0.id != activeGroupID
+        }
+    }
+
+    /// Drop regions from every group (a dissolve, or a re-import that lost them).
+    public mutating func removeRegions(_ ids: [RegionID]) {
+        for i in groups.indices { groups[i].removeRegions(ids) }
+        groups.removeAll {
+            $0.faces.isEmpty && $0.regionIDs.isEmpty && $0.id != activeGroupID
+        }
+    }
+
+    /// The group that owns `region`, if any.
+    public func group(forRegion region: RegionID) -> SelectionGroup? {
+        groups.first { $0.regionIDs.contains(region) }
     }
 
     /// Remove a group entirely. If it was the active group, the active selection

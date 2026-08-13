@@ -379,6 +379,21 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// `LatticeSlabDepth`, never directly at a call site.
     public var groupDepthMM: [UUID: Double]
 
+    /// ★ THE PER-PRIMITIVE LATTICE / NO-LATTICE OVERRIDE (task
+    /// 2026-08-14-lattice-separation §3c). Keyed by `LatticeSelectableRef.key`.
+    /// A primitive with no entry follows its group's `groupRoles` declaration, so
+    /// every snapshot written before this task resolves to exactly the roles it
+    /// had. Read only through `LatticeSelectableRoles`, never directly.
+    public var selectableRoles: [String: LatticeSelectableRole]
+
+    /// ★ THE PER-PRIMITIVE DEPTH — the same override shape as the role, for the
+    /// number the 3D depth plane drags (§3d). Absent ⇒ `groupDepthMM` ⇒
+    /// `paintDepthMM`, so nothing about an untouched project moves. It is STILL
+    /// the protection depth as well: `ProjectModel.faceProtectionSpecs()` and
+    /// `latticeJobRegions()` both resolve through `LatticeSlabDepth`, per face
+    /// (bar R4).
+    public var selectableDepthMM: [String: Double]
+
     // ── SUB-FLOOR RETENTION, the user's raw choices (task
     // 2026-08-05-lattice-retention-app-control). All OFF / absent by default, so
     // an untouched project emits exactly today's job (bar R1), and absent from
@@ -452,6 +467,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
                 groupDepthMM: [UUID: Double] = [:],
+                selectableRoles: [String: LatticeSelectableRole] = [:],
+                selectableDepthMM: [String: Double] = [:],
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
@@ -480,6 +497,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.paintDepthMM = paintDepthMM
         self.groupRoles = groupRoles
         self.groupDepthMM = groupDepthMM
+        self.selectableRoles = selectableRoles
+        self.selectableDepthMM = selectableDepthMM
         if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
     }
 
@@ -494,6 +513,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
         case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
+        // The per-SELECTABLE role + depth (task 2026-08-14-lattice-separation
+        // §3c/§3d). Named `primitive*` before PR 331 landed and made the unit
+        // bigger than a primitive; the legacy keys below decode so a snapshot
+        // written against the earlier name still opens with its choices intact.
+        case selectableRoles, selectableDepthMM
+        case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction
@@ -535,6 +560,18 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Absent from every pre-task snapshot ⇒ empty ⇒ every group falls back to
         // `paintDepthMM`, which is exactly the depth those projects emitted.
         groupDepthMM = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDepthMM) ?? [:]
+        // Absent from every snapshot written before the separation task ⇒ empty ⇒
+        // every selectable follows its group, which is the ONLY answer those
+        // projects ever had (§3c). The `primitive*` fallback reads a snapshot
+        // written under the pre-PR-331 name so those choices are not lost either.
+        selectableRoles = try c.decodeIfPresent([String: LatticeSelectableRole].self,
+                                                forKey: .selectableRoles)
+            ?? c.decodeIfPresent([String: LatticeSelectableRole].self,
+                                 forKey: .primitiveRoles) ?? [:]
+        selectableDepthMM = try c.decodeIfPresent([String: Double].self,
+                                                  forKey: .selectableDepthMM)
+            ?? c.decodeIfPresent([String: Double].self,
+                                 forKey: .primitiveDepthMM) ?? [:]
         // Absent from every snapshot written before this task ⇒ off / core's own
         // number ⇒ those projects keep emitting exactly the job they emitted.
         retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
@@ -569,6 +606,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
+        try c.encode(selectableRoles, forKey: .selectableRoles)
+        try c.encode(selectableDepthMM, forKey: .selectableDepthMM)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,

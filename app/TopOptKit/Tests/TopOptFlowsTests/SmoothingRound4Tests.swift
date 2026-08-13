@@ -557,10 +557,17 @@ final class SmoothingRound4Tests: XCTestCase {
     /// the CONDITION never did.
     func testTheDesignBoxIsNotDrawnOnTheSmoothingPage() throws {
         let ws = try codeOnly(sourceURL("WorkspacePlaceholder.swift"))
-        XCTAssertTrue(ws.contains("designBox: (showDesignGizmo && !showSmoothingPage)"),
+        // Task 2026-08-14-lattice-separation §2b added a SECOND term to each
+        // condition — the design box is also hidden on the lattice STAGE. The D5a
+        // guarantee is unchanged and is still asserted here; what moved is that
+        // the expression no longer closes on `!showSmoothingPage`.
+        XCTAssertTrue(ws.contains("designBox: (showDesignGizmo && !showSmoothingPage"),
                       "D5a: not on this page")
-        XCTAssertTrue(ws.contains("keepOutBoxes: (showDesignGizmo && !showSmoothingPage)"),
+        XCTAssertTrue(ws.contains("keepOutBoxes: (showDesignGizmo && !showSmoothingPage"),
                       "D5a: nor its keep-out boxes")
+        XCTAssertTrue(ws.contains("&& visible.designBox)")
+                      && ws.contains("&& visible.keepOuts)"),
+                      "§2b: and neither is drawn on the lattice stage")
         // AND THE OTHER PAGES ARE UNTOUCHED. The lattice page mounts the same
         // view; gating on `fullScreenPageUp` would have changed it too, which is
         // not what was asked for.

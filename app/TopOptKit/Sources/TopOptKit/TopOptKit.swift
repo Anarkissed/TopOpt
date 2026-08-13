@@ -1407,11 +1407,78 @@ public enum TopOptKit {
     /// A user load group for `minimizePlasticLoadCase`: the B-rep faces it covers
     /// and the total force (newtons) applied over them (the M7.6 UI's direction ×
     /// weight). The force is spread as a distributed traction over the faces.
+    /// ★ ONE REGION, as the bridge wants it (task 2026-08-14-face-regions §1).
+    /// TopOptKit sits BELOW TopOptFlows, so this is a plain transport record the
+    /// flows layer fills from its own `FaceRegion` — not a second model. The
+    /// filter fields use the same "<= 0 / -1 means unset" convention the bridge
+    /// POD does, so there is one convention end to end.
+    public struct FaceRegionSpec: Equatable, Sendable {
+        public let id: Int
+        public let parentID: Int
+        public let addFaces: [Int]
+        public let removeFaces: [Int]
+        /// (point, normal, strict) per half-space.
+        public let cuts: [(point: SIMD3<Double>, normal: SIMD3<Double>, strict: Bool)]
+        public let maxAreaMM2: Double
+        public let minAreaMM2: Double
+        public let minLargerNeighbours: Int
+        public let largerRatio: Double
+        /// -1 unset, 0 plane, 1 cylinder, 2 other.
+        public let kindCode: Int
+        public let cylinderRadiusMM: Double
+        public let cylinderRadiusTolMM: Double
+        public let filterMatchedAtAuthor: Int
+
+        public init(id: Int, parentID: Int = -1, addFaces: [Int] = [],
+                    removeFaces: [Int] = [],
+                    cuts: [(point: SIMD3<Double>, normal: SIMD3<Double>, strict: Bool)] = [],
+                    maxAreaMM2: Double = 0, minAreaMM2: Double = 0,
+                    minLargerNeighbours: Int = 0, largerRatio: Double = 2,
+                    kindCode: Int = -1, cylinderRadiusMM: Double = 0,
+                    cylinderRadiusTolMM: Double = 0.05,
+                    filterMatchedAtAuthor: Int = -1) {
+            self.id = id
+            self.parentID = parentID
+            self.addFaces = addFaces
+            self.removeFaces = removeFaces
+            self.cuts = cuts
+            self.maxAreaMM2 = maxAreaMM2
+            self.minAreaMM2 = minAreaMM2
+            self.minLargerNeighbours = minLargerNeighbours
+            self.largerRatio = largerRatio
+            self.kindCode = kindCode
+            self.cylinderRadiusMM = cylinderRadiusMM
+            self.cylinderRadiusTolMM = cylinderRadiusTolMM
+            self.filterMatchedAtAuthor = filterMatchedAtAuthor
+        }
+
+        public static func == (a: FaceRegionSpec, b: FaceRegionSpec) -> Bool {
+            a.id == b.id && a.parentID == b.parentID && a.addFaces == b.addFaces
+                && a.removeFaces == b.removeFaces
+                && a.cuts.count == b.cuts.count
+                && zip(a.cuts, b.cuts).allSatisfy {
+                    $0.point == $1.point && $0.normal == $1.normal && $0.strict == $1.strict
+                }
+                && a.maxAreaMM2 == b.maxAreaMM2 && a.minAreaMM2 == b.minAreaMM2
+                && a.minLargerNeighbours == b.minLargerNeighbours
+                && a.largerRatio == b.largerRatio && a.kindCode == b.kindCode
+                && a.cylinderRadiusMM == b.cylinderRadiusMM
+                && a.cylinderRadiusTolMM == b.cylinderRadiusTolMM
+                && a.filterMatchedAtAuthor == b.filterMatchedAtAuthor
+        }
+    }
+
     public struct LoadGroupSpec: Equatable, Sendable {
         public let faceIDs: [Int]
+        /// ★ REGION ids the group ALSO covers (task 2026-08-14-face-regions §3e).
+        /// A union of 23 blend faces is ONE entry here instead of 23 in
+        /// `faceIDs` — which is the whole point. Empty ⇒ the group emits exactly
+        /// what it emitted before the region layer existed.
+        public let regionIDs: [Int]
         public let force: SIMD3<Double>
-        public init(faceIDs: [Int], force: SIMD3<Double>) {
+        public init(faceIDs: [Int], force: SIMD3<Double>, regionIDs: [Int] = []) {
             self.faceIDs = faceIDs
+            self.regionIDs = regionIDs
             self.force = force
         }
     }
@@ -1566,14 +1633,55 @@ public enum TopOptKit {
         clearances: [ClearanceSpec] = [],
         faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
         faceProtectionDepthsMM: [Double] = [],
+        faceRegions: [FaceRegionSpec] = [],
+        anchorRegionIDs: [Int] = [],
+        faceProtectionRegionIDs: [Int] = [],
+        faceProtectionRegionDepthsMM: [Double] = [],
         progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
         onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
         var lc = topoptbridge.BridgeLoadCase()
         for f in anchorFaceIDs { lc.anchor_face_ids.push_back(Int32(f)) }
+        // ★ THE REGION LAYER reaches the ON-DEVICE run too (task
+        // 2026-08-14-face-regions). Without this a user who unions and splits and
+        // then taps Optimize locally would get a run that ignored every one of
+        // them — the "green run that measures nothing" shape. Empty => the POD is
+        // byte-identical to before.
+        for r in faceRegions {
+            lc.region_ids.push_back(Int32(r.id))
+            lc.region_parent_ids.push_back(Int32(r.parentID))
+            lc.region_add_sizes.push_back(Int32(r.addFaces.count))
+            for f in r.addFaces { lc.region_add_faces.push_back(Int32(f)) }
+            lc.region_remove_sizes.push_back(Int32(r.removeFaces.count))
+            for f in r.removeFaces { lc.region_remove_faces.push_back(Int32(f)) }
+            lc.region_cut_sizes.push_back(Int32(r.cuts.count))
+            for c in r.cuts {
+                for v in [c.point.x, c.point.y, c.point.z] { lc.region_cut_point_xyz.push_back(v) }
+                for v in [c.normal.x, c.normal.y, c.normal.z] { lc.region_cut_normal_xyz.push_back(v) }
+                lc.region_cut_strict.push_back(c.strict ? 1 : 0)
+            }
+            lc.region_filter_max_area_mm2.push_back(r.maxAreaMM2)
+            lc.region_filter_min_area_mm2.push_back(r.minAreaMM2)
+            lc.region_filter_min_larger_neighbours.push_back(Int32(r.minLargerNeighbours))
+            lc.region_filter_larger_ratio.push_back(r.largerRatio)
+            lc.region_filter_kind.push_back(Int32(r.kindCode))
+            lc.region_filter_cyl_radius_mm.push_back(r.cylinderRadiusMM)
+            lc.region_filter_cyl_tol_mm.push_back(r.cylinderRadiusTolMM)
+            lc.region_filter_matched_at_author.push_back(Int32(r.filterMatchedAtAuthor))
+        }
+        for r in anchorRegionIDs { lc.anchor_region_ids.push_back(Int32(r)) }
+        for r in faceProtectionRegionIDs { lc.face_protection_region_ids.push_back(Int32(r)) }
+        for d in faceProtectionRegionDepthsMM { lc.face_protection_region_depths_mm.push_back(d) }
+        // `load_group_region_sizes` is emitted ONLY when some group names a
+        // region, so a pre-region load case ships the exact arrays it always did.
+        let anyGroupRegions = loadGroups.contains { !$0.regionIDs.isEmpty }
         for g in loadGroups {
             for f in g.faceIDs { lc.load_face_ids.push_back(Int32(f)) }
             lc.load_group_sizes.push_back(Int32(g.faceIDs.count))
+            if anyGroupRegions {
+                for r in g.regionIDs { lc.load_region_ids.push_back(Int32(r)) }
+                lc.load_group_region_sizes.push_back(Int32(g.regionIDs.count))
+            }
             lc.load_forces.push_back(g.force.x)
             lc.load_forces.push_back(g.force.y)
             lc.load_forces.push_back(g.force.z)

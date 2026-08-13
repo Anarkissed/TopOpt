@@ -834,6 +834,55 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         if !request.anchorFaceIDs.isEmpty {
             loads["anchor_face_ids"] = request.anchorFaceIDs
         }
+        // ── THE REGION LAYER (task 2026-08-14-face-regions §1) ────────────────
+        //
+        // Declared ONCE, referred to by id below, and emitted ONLY when the user
+        // authored a union or a split. ★ NO REGIONS ⇒ NO KEY ⇒ the job is
+        // byte-identical to the one this project shipped yesterday (bar R1).
+        //
+        // ★ WHAT GOES ON THE WIRE IS THE DEFINITION, NOT THE RESULT (§3c): the
+        // filter, plus the explicit add/remove list, plus the split half-spaces
+        // as model-space geometry. The worker re-evaluates the filter against ITS
+        // import and reports the difference against `filter_matched_at_author`,
+        // so a CAD edit that renumbers faces is surfaced instead of absorbed.
+        if !request.faceRegions.isEmpty {
+            loads["face_regions"] = request.faceRegions.map { r -> [String: Any] in
+                var e: [String: Any] = ["id": r.id]
+                if !r.name.isEmpty { e["name"] = r.name }
+                if r.parentID >= 0 { e["parent_id"] = r.parentID }
+                if !r.add.isEmpty { e["add"] = r.add.map(Int.init) }
+                if !r.remove.isEmpty { e["remove"] = r.remove.map(Int.init) }
+                if r.filterMatchedAtAuthor >= 0 {
+                    e["filter_matched_at_author"] = r.filterMatchedAtAuthor
+                }
+                if r.filter.any {
+                    var f: [String: Any] = [:]
+                    if r.filter.maxAreaMM2 > 0 { f["max_area_mm2"] = r.filter.maxAreaMM2 }
+                    if r.filter.minAreaMM2 > 0 { f["min_area_mm2"] = r.filter.minAreaMM2 }
+                    if r.filter.minLargerNeighbours > 0 {
+                        f["min_larger_neighbours"] = r.filter.minLargerNeighbours
+                        f["larger_ratio"] = r.filter.largerRatio
+                    }
+                    if !r.filter.kind.isEmpty { f["kind"] = r.filter.kind }
+                    if r.filter.cylinderRadiusMM > 0 {
+                        f["cylinder_radius_mm"] = r.filter.cylinderRadiusMM
+                        f["cylinder_radius_tol_mm"] = r.filter.cylinderRadiusTolMM
+                    }
+                    e["filter"] = f
+                }
+                if !r.cuts.isEmpty {
+                    e["cuts"] = r.cuts.map { c -> [String: Any] in
+                        ["point": [c.point.x, c.point.y, c.point.z],
+                         "normal": [c.normal.x, c.normal.y, c.normal.z],
+                         "strict": c.strict]
+                    }
+                }
+                return e
+            }
+        }
+        if !request.anchorRegionIDs.isEmpty {
+            loads["anchor_region_ids"] = request.anchorRegionIDs
+        }
         // THE BUILD-PLATE NORMAL, at the job ROOT and not inside `loads` (handoff
         // 2026-08-01-build-direction-separation): `loads.build_dir` above answers
         // "which way is down in service" (the core negates it into gravity), and
@@ -880,8 +929,14 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         job["bake_build_orientation"] = "off"
         if !request.loadGroups.isEmpty {
             loads["groups"] = request.loadGroups.map { g -> [String: Any] in
-                ["face_ids": g.faceIDs,
-                 "force": [g.force.x, g.force.y, g.force.z]]
+                var e: [String: Any] = ["force": [g.force.x, g.force.y, g.force.z]]
+                // Emit "face_ids" only when there ARE face ids: a group that is
+                // now ONE region must not ship an empty array where a 23-element
+                // one used to be — and a group with no regions must ship exactly
+                // what it always did.
+                if !g.faceIDs.isEmpty { e["face_ids"] = g.faceIDs }
+                if !g.regionIDs.isEmpty { e["region_ids"] = g.regionIDs }
+                return e
             }
         }
         if request.infillPercent >= 0 {
@@ -954,6 +1009,30 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 if request.faceProtectionDepthMM > 0 {
                     loads["face_protection_depth_mm"] = request.faceProtectionDepthMM
                 }
+            }
+        }
+        // ★ PROTECTIONS DECLARED ON A REGION. The object form is the only one
+        // that can carry a region id, so a job with any region protection uses
+        // it throughout — the schema refuses a mix of bare ids and objects, and
+        // the two must agree on ONE form. Face protections already in the bare
+        // form above are promoted here rather than left to clash.
+        if !request.faceProtectionRegionIDs.isEmpty {
+            var entries: [[String: Any]] = []
+            let faceDepths = request.faceProtectionDepthsMM
+            for (k, f) in request.faceProtections.enumerated() {
+                var e: [String: Any] = ["face_id": f]
+                if k < faceDepths.count, faceDepths[k] > 0 { e["depth_mm"] = faceDepths[k] }
+                entries.append(e)
+            }
+            let regionDepths = request.faceProtectionRegionDepthsMM
+            for (k, r) in request.faceProtectionRegionIDs.enumerated() {
+                var e: [String: Any] = ["region_id": r]
+                if k < regionDepths.count, regionDepths[k] > 0 { e["depth_mm"] = regionDepths[k] }
+                entries.append(e)
+            }
+            loads["face_protections"] = entries
+            if request.faceProtectionDepthMM > 0 {
+                loads["face_protection_depth_mm"] = request.faceProtectionDepthMM
             }
         }
         job["loads"] = loads
