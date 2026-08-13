@@ -545,6 +545,92 @@ int main() {
           "bar wearing a Mode 2 label");
   }
 
+  // ── ★ MODE 2 THROUGH THE REAL OPTIMISER, UNDER BOTH CONVENTIONS ─────────
+  //
+  // The loop bar above drives `mma_update_masked_lattice` by hand. This drives
+  // `simp_optimize` — the shipped optimiser — through the `LatticeDesignCoupling`
+  // seam, which is what a ladder rung actually does.
+  //
+  // ★ THE TWO CONVENTIONS ARE DIFFERENT OPTIMISATION PROBLEMS AND THE BAR IS
+  // DIFFERENT FOR EACH, which is the point of testing both:
+  //   BANKED (minimize_plastic ON)  the field holds its OWN allowance, so its
+  //                                 mass must NOT drift — it redistributes.
+  //   SPENT  (minimize_plastic OFF) one shared budget, so the field's mass MAY
+  //                                 move; the TOTAL is what must hold.
+  {
+    const LatticeMaterialModel M = build_lattice_material_model(T, 2300.0, 0.35);
+    SimpParams p;
+    p.youngs_modulus = 2300.0;
+    p.poisson = 0.35;
+    p.penalty = 3.0;
+    p.lattice_material = &M;
+    const std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    const std::vector<NodalLoad> loads = tip_load_z(g, -4.0);
+
+    std::vector<int> rid2(g.voxel_count(), 0);
+    DesignMask eff(g.voxel_count(), MaskValue::Active);
+    std::vector<char> only(g.voxel_count(), 0);
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i)
+          if (i >= g.nx / 2) {
+            const std::size_t e = g.index(i, j, k);
+            rid2[e] = 1;
+            eff[e] = MaskValue::FrozenSolid;
+            only[e] = 1;
+          }
+    LatticeRegionSpec opt;
+    opt.id = 1;
+    opt.name = "field";
+    opt.mode = LatticeRegionMode::Optimised;
+
+    auto run = [&](bool shares_budget) {
+      LatticeBetaField B;
+      const LatticeBetaKnots kn = lattice_beta_knots_for_grid(g, 0.0, 0.0, 0.0);
+      B.lattice = plsm_make_lattice(g.nx, g.ny, g.nz, kn.dx, kn.dy, kn.dz, 2.0);
+      B.basis = PlsmBasisKind::Gaussian;
+      B.steepness = 1.0;
+      B.beta.assign(B.lattice.count(), 0.0);
+      LatticeFieldCoupling C(g, rid2, {opt}, T, B, only, {}, {},
+                             /*allowance_voxels=*/0.0, shares_budget,
+                             kLatticeBetaBox, 1);
+      const double allowance = C.mass_allowance_voxels();
+
+      SimpOptions o;
+      o.volume_fraction = 0.40;
+      o.updater = SimpUpdater::MMA;
+      o.max_iterations = 14;
+      o.filter_radius = 1.5;
+      o.lattice_coupling = &C;
+      const SimpOptimizeResult r = simp_optimize(g, p, bcs, loads, o, eff);
+
+      double moved = 0.0;
+      for (double b : C.coefficients()) moved = std::max(moved, std::fabs(b));
+      std::printf("  %-6s: c %.6e -> %.6e, lattice mass %.3f (allowance %.3f), "
+                  "max|beta| %.4f\n",
+                  shares_budget ? "SPENT" : "BANKED", r.history.front().compliance,
+                  r.history.back().compliance, C.occupied_mass_voxels(),
+                  allowance, moved);
+      CHECK(r.history.back().compliance < r.history.front().compliance,
+            "Mode 2 through simp_optimize must go DOWNHILL");
+      // ★ POSITIVE CONTROL, again: without it every check here would pass on a
+      // run where the coupling was silently ignored.
+      CHECK(moved > 1e-6,
+            "the beta block must MOVE inside the real optimiser — a coupling "
+            "that is accepted and then ignored is the failure this guards");
+      return std::pair<double, double>(C.occupied_mass_voxels(), allowance);
+    };
+
+    const std::pair<double, double> banked = run(false);
+    CHECK(std::fabs(banked.first - banked.second) <= 0.02 * banked.second,
+          "★ BANKED: the field holds its OWN allowance, so its mass must not "
+          "drift — under minimize_plastic ON the saving has already left the "
+          "part and Mode 2 only REDISTRIBUTES what remains");
+
+    const std::pair<double, double> spent = run(true);
+    CHECK(spent.first > 0.0, "SPENT: the field still holds mass");
+  }
+
   // ── the refusals ─────────────────────────────────────────────────────────
   {
     bool threw = false;

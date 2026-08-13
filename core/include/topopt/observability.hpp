@@ -996,6 +996,39 @@ struct RunInfo {
   double applied_build_dir_x = 0.0;
   double applied_build_dir_y = 0.0;
   double applied_build_dir_z = 0.0;
+
+  // ── ★ WHICH LADDER RAN, AND WHAT IT DID WITH A LATTICE'S FREED MASS
+  // (task 2026-08-13-lattice-as-a-material §0.5, the maintainer's ruling).
+  //
+  // ★ `mode` ABOVE DOES NOT ANSWER THIS AND NEVER DID. It is `job.mode` — the
+  // job KIND, "minimize_plastic" vs "analyze" — so it reads "minimize_plastic"
+  // on every optimisation run whether or not the user ticked the box. The two
+  // are different axes wearing the same words, which is why every run this
+  // project has produced looks identical here. `ladder_direction` is the
+  // CHECKBOX: `loads.minimize_plastic` ON walks the REDUCTION ladder, OFF walks
+  // the GROWTH ladder (cli/loadcase.cpp: `growth = !lc.minimize_plastic`).
+  //
+  // `lattice_budget_convention` is what that choice means for a lattice, and it
+  // is READ FROM THE MODE rather than from any option of its own — one
+  // user-facing control, one meaning:
+  //   "banked" (reduce) the budget covers only what the OPTIMISER controls, so
+  //             the lattice's saving leaves the part and it gets LIGHTER;
+  //   "spent"  (grow)   the budget covers EVERYTHING including the lattice, so
+  //             the freed mass is re-placed inside the same total and the
+  //             lattice buys STRUCTURE;
+  //   "none"            no lattice region emitted — the question did not arise.
+  //
+  // ★ `achieved_solid_fraction` is the achieved mass over the mass the SAME part
+  // would have SOLID. Without it a latticed ladder cannot be compared with an
+  // unlatticed one at all: the rung is a fraction of the ACTIVE envelope, and a
+  // frozen region that stopped costing its envelope moves what that fraction
+  // means. Comparing his own runs is exactly what the last convention defect
+  // destroyed. `observed` false emits JSON null rather than a 0.0 that reads
+  // like a measured weightless part.
+  std::string ladder_direction;           // "reduce" | "grow" | "" (unknown)
+  std::string lattice_budget_convention;  // "banked" | "spent" | "none"
+  double achieved_solid_fraction = 0.0;
+  bool achieved_solid_fraction_observed = false;
 };
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's

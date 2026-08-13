@@ -96,6 +96,7 @@
 #include <vector>
 
 #include "topopt/lattice.hpp"
+#include "topopt/simp.hpp"
 #include "topopt/lattice_material.hpp"
 #include "topopt/plsm_basis.hpp"
 #include "topopt/voxel.hpp"
@@ -106,6 +107,13 @@ namespace topopt {
 // latticed voxel emitted. Exactly 1.0 — not an epsilon band — so the C0 bar is a
 // statement about the number the caller passed and not about a tolerance.
 inline constexpr double kLatticeSolidAt = 1.0;
+
+// ★ THE BETA COEFFICIENT BOX. Not a user knob and deliberately not one: the map
+// t -> rho is a sigmoid of t/steepness, so |t| beyond ~8 steepnesses is already
+// pinned to an end of the admissible band and a wider box only buys asymptote
+// arithmetic on a variable that cannot move the density. It bounds the SOLVER,
+// not the design.
+inline constexpr double kLatticeBetaBox = 8.0;
 
 // ── the declaration ─────────────────────────────────────────────────────────
 
@@ -406,6 +414,66 @@ PlsmCsr lattice_beta_jacobian(const VoxelGrid& grid,
 // Throws std::invalid_argument if `dF_drho` is not J.rows long.
 std::vector<double> lattice_beta_chain(const PlsmCsr& jacobian,
                                        const std::vector<double>& dF_drho);
+
+// ★ MODE 2's coupling, concrete (task 2026-08-13 §3). Holds the beta field, the
+// resolved per-voxel density and the Jacobian for the CURRENT coefficients, and
+// re-derives all three whenever the optimiser moves beta.
+//
+// ★ THE JACOBIAN IS REBUILT ON EVERY STEP, deliberately. d rho/d beta depends on
+// beta (through the map's slope), so a Jacobian cached from the seed would be
+// the gradient of a field the solve never used — the same class of error as
+// pointing the density override after the solve instead of before. It costs
+// 39.7 ms against a 72-second state solve (evidence/…/m5/cost.txt), which is
+// why "recompute it" is affordable enough not to need arguing about.
+class LatticeFieldCoupling final : public LatticeDesignCoupling {
+ public:
+  // `allowance_voxels` is the block's own mass budget in voxel-equivalents; it
+  // is read only when `shares_budget` is false (the BANKED convention). Pass the
+  // seed field's occupied mass to hold the region at the mass Mode 1 would have
+  // printed. `beta_box` bounds every coefficient symmetrically.
+  LatticeFieldCoupling(const VoxelGrid& grid, std::vector<int> region_id,
+                       std::vector<LatticeRegionSpec> regions,
+                       LatticeTopology topo, LatticeBetaField beta,
+                       std::vector<char> only_where, std::vector<int> refused,
+                       std::vector<LatticeRegionValidity> validity,
+                       double allowance_voxels, bool shares_budget,
+                       double beta_box, int threads);
+
+  const std::vector<double>& relative_density() const override { return lr_; }
+  double occupied_mass_voxels() const override { return occupied_; }
+  const std::vector<double>& coefficients() const override { return beta_.beta; }
+  void set_coefficients(const std::vector<double>& b) override;
+  double coefficient_min() const override { return -box_; }
+  double coefficient_max() const override { return box_; }
+  std::vector<double> chain(const std::vector<double>& dF_drho) const override;
+  double mass_allowance_voxels() const override { return allowance_; }
+  bool shares_budget() const override { return shares_; }
+
+  // The resolved field at the CURRENT coefficients — what the certification's
+  // LatticePosture is built from once the run ends.
+  const ResolvedLatticeDensityField& resolved() const { return field_; }
+
+ private:
+  void refresh();
+
+  const VoxelGrid& grid_;
+  std::vector<int> region_id_;
+  std::vector<LatticeRegionSpec> regions_;
+  LatticeTopology topo_;
+  LatticeBetaField beta_;
+  std::vector<char> only_where_;
+  std::vector<int> refused_;
+  std::vector<LatticeRegionValidity> validity_;
+  double allowance_ = 0.0;
+  bool shares_ = false;
+  double box_ = 8.0;
+  int threads_ = 1;
+
+  ResolvedLatticeDensityField field_;
+  std::vector<double> lr_;   // grid-indexed override, < 0 = not latticed
+  PlsmCsr jac_;
+  double occupied_ = 0.0;
+};
 
 }  // namespace topopt
 

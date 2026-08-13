@@ -504,6 +504,25 @@ std::string run_info_json(const RunInfo& info) {
   str("cli_version", info.cli_version);
   str("fingerprint", info.fingerprint);
   str("mode", info.mode);
+  // ★ THE CHECKBOX, WHICH `mode` ABOVE HAS NEVER CARRIED. `mode` is the job KIND
+  // ("minimize_plastic" vs "analyze") and reads the same on every optimisation
+  // run whichever way the box is ticked; `ladder_direction` is what the user
+  // actually chose. Emitted right here so the two are read together and the
+  // collision cannot mislead a third time.
+  num("ladder_direction", info.ladder_direction.empty()
+                              ? std::string("null")
+                              : std::string("\"") +
+                                    json_escape(info.ladder_direction) + "\"");
+  num("lattice_budget_convention",
+      info.lattice_budget_convention.empty()
+          ? std::string("null")
+          : std::string("\"") + json_escape(info.lattice_budget_convention) +
+                "\"");
+  // Achieved mass over the SAME part solid. null until observed — a 0.0 here
+  // would read like a measured weightless part.
+  num("achieved_solid_fraction", info.achieved_solid_fraction_observed
+                                     ? fmt(info.achieved_solid_fraction)
+                                     : std::string("null"));
   str("material", info.material);
   // True source format the user supplied (handoff 2026-07-26-3mf-optimize-path):
   // "3mf" even when the model file is an STL working copy the app normalised it to.

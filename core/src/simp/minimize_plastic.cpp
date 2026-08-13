@@ -687,6 +687,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   FrozenLatticeReport fl_report;             // copied onto `result` once it exists
   std::vector<char> fl_mask;                 // grid-indexed, 1 = latticed frozen
   std::vector<double> fl_rho;                // its relative density there
+  // ★ MODE 2's coupling, held across the WHOLE ladder so beta carries from rung
+  // to rung exactly as the density warm start does — restarting it each rung
+  // would throw away the field the previous rung paid for.
+  std::unique_ptr<LatticeFieldCoupling> fl_coupling;
   std::vector<double> lat_rho_override;      // owns SimpParams::lattice_relative_density
   std::unique_ptr<LatticeMaterialModel> fl_model;
   std::vector<LatticeRegionValidity> fl_validity;
@@ -858,6 +862,39 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     fl_rho = fl_field.rho;
     fl_latticed_voxels = fl_field.latticed_voxels;
     fl_freed_mass_voxels = fl_field.freed_mass_voxels;
+
+    // ★ MODE 2 (task 2026-08-13 §3, and the maintainer's §0.5 ruling). Built
+    // ONLY when a surviving region is actually Optimised: a run whose regions
+    // are all Declared is Mode 1 and must take no new branch at all.
+    //
+    // ★ THE CONVENTION IS `growth_ladder`, WHICH IS THE `minimize_plastic`
+    // CHECKBOX — cli/loadcase.cpp sets `growth = !lc.minimize_plastic`. It is
+    // read here rather than given an option of its own, because that checkbox
+    // ALREADY is the question "am I chasing lightness or performance?" and a
+    // second control deciding the same thing is exactly the duplication that
+    // produced the probe/ladder volume mismatch.
+    //
+    //   minimize_plastic ON  -> reduction ladder -> shares_budget FALSE -> BANKED
+    //   minimize_plastic OFF -> growth ladder    -> shares_budget TRUE  -> SPENT
+    //
+    // The allowance is the SEED field's own occupied mass (passed as 0.0, which
+    // the coupling resolves to exactly that): under BANKED the region holds the
+    // mass Mode 1 would have printed and Mode 2 only redistributes it.
+    if (have_beta && !fl_field.empty()) {
+      bool any_optimised = false;
+      for (const LatticeRegionSpec& s2 : fl_specs)
+        if (s2.mode == LatticeRegionMode::Optimised &&
+            std::find(fl_refused.begin(), fl_refused.end(), s2.id) ==
+                fl_refused.end())
+          any_optimised = true;
+      if (any_optimised)
+        fl_coupling = std::make_unique<LatticeFieldCoupling>(
+            G, options.frozen_lattice_region_id, fl_specs,
+            options.frozen_lattice_topology, beta_field, frozen_solid,
+            fl_refused, fl_validity, /*allowance_voxels=*/0.0,
+            /*shares_budget=*/growth_ladder, kLatticeBetaBox,
+            fea_matfree_thread_count());
+    }
 
     // ★ C0 (bar R1): a field that lattices NOTHING — every region solid, or every
     // declared density 1.0, or every region refused — arms not one branch below.
@@ -1378,6 +1415,19 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     opt.freed_mass_voxels = fl_freed_mass_voxels;
     opt.freed_mass_return =
         fl_freed_mass_voxels > 0.0 ? options.frozen_lattice_freed_mass_return : 0.0;
+    // ★ MODE 2. Null on every Mode 1 run, so the loop takes no new branch there.
+    //
+    // ★ AND UNDER MODE 2 THE FREED-MASS KNOB IS SUPPRESSED, not merely ignored.
+    // `freed_mass_return` splits a CONSTANT saving between the two blocks; under
+    // Mode 2 that split is what MMA solves, and the lattice's mass is on the
+    // constraint's left-hand side instead of folded into the target. Leaving the
+    // knob live would fold the same mass in twice — the double-count this whole
+    // convention exists to avoid — and it would do so silently.
+    opt.lattice_coupling = fl_coupling.get();
+    if (fl_coupling) {
+      opt.freed_mass_return = 0.0;
+      opt.freed_mass_voxels = 0.0;
+    }
     // Handoff 123 — when the conditional gate fires, this rung runs in TWO
     // phases (grayscale MMA, then β-projection seeded from it) as two
     // simp_optimize calls. The projection phase's own iteration counter restarts

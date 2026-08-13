@@ -527,4 +527,69 @@ std::vector<double> lattice_beta_chain(const PlsmCsr& jacobian,
   return g;
 }
 
+LatticeFieldCoupling::LatticeFieldCoupling(
+    const VoxelGrid& grid, std::vector<int> region_id,
+    std::vector<LatticeRegionSpec> regions, LatticeTopology topo,
+    LatticeBetaField beta, std::vector<char> only_where,
+    std::vector<int> refused, std::vector<LatticeRegionValidity> validity,
+    double allowance_voxels, bool shares_budget, double beta_box, int threads)
+    : grid_(grid),
+      region_id_(std::move(region_id)),
+      regions_(std::move(regions)),
+      topo_(topo),
+      beta_(std::move(beta)),
+      only_where_(std::move(only_where)),
+      refused_(std::move(refused)),
+      validity_(std::move(validity)),
+      allowance_(allowance_voxels),
+      shares_(shares_budget),
+      box_(beta_box),
+      threads_(threads) {
+  if (!(box_ > 0.0))
+    throw std::invalid_argument(
+        "LatticeFieldCoupling: beta_box must be > 0");
+  refresh();
+  // ★ The allowance defaults to WHAT THE SEED OCCUPIES when the caller passes a
+  // non-positive one. Under BANKED that holds the region at the mass Mode 1
+  // would have printed, which is the whole meaning of "banked": the saving is
+  // already taken, and Mode 2 only redistributes what is left.
+  if (!(allowance_ > 0.0)) allowance_ = occupied_;
+}
+
+void LatticeFieldCoupling::refresh() {
+  // ★ The SAME validity the run resolved its seed field with — a fitted region's
+  // cell and density floor come from it, so resolving without it here would move
+  // the field the optimiser is stepping to a different cell than the one the run
+  // certified against.
+  field_ = resolve_lattice_density_field(
+      grid_, region_id_, regions_, topo_, &beta_, &only_where_, refused_,
+      validity_.empty() ? nullptr : &validity_);
+  const std::size_t n = grid_.voxel_count();
+  lr_.assign(n, -1.0);
+  occupied_ = 0.0;
+  if (!field_.empty())
+    for (std::size_t e = 0; e < n; ++e)
+      if (field_.mask[e]) {
+        lr_[e] = field_.rho[e];
+        occupied_ += field_.rho[e];
+      }
+  // Rebuilt at THIS beta — see the header. A cached Jacobian would be the
+  // gradient of a field the solve never used.
+  jac_ = lattice_beta_jacobian(grid_, region_id_, regions_, topo_, beta_,
+                               &only_where_, refused_, threads_);
+}
+
+void LatticeFieldCoupling::set_coefficients(const std::vector<double>& b) {
+  if (b.size() != beta_.beta.size())
+    throw std::invalid_argument(
+        "LatticeFieldCoupling::set_coefficients: size != coefficient count");
+  beta_.beta = b;
+  refresh();
+}
+
+std::vector<double> LatticeFieldCoupling::chain(
+    const std::vector<double>& dF_drho) const {
+  return lattice_beta_chain(jac_, dF_drho);
+}
+
 }  // namespace topopt

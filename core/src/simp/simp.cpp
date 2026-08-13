@@ -85,6 +85,22 @@ void validate_updater_options(const SimpOptions& o) {
     throw std::invalid_argument(
         "simp_optimize: MMA updater does not support a Heaviside projection "
         "schedule; use OC or clear options.projection");
+  // ★ MODE 2 (task 2026-08-13 §3). The coupling is read in exactly one place —
+  // the masked overload's plain-MMA branch — so every other combination would
+  // accept the option and then IGNORE it. A silently ignored design variable is
+  // worse than a refusal: the run looks like Mode 2 and optimises Mode 1, and
+  // nothing in the record says which happened.
+  if (o.lattice_coupling != nullptr) {
+    if (o.updater != SimpUpdater::MMA)
+      throw std::invalid_argument(
+          "simp_optimize: lattice_coupling (Mode 2) requires the MMA updater — "
+          "OC has no second design block");
+    if (!o.projection.empty() || o.mma_projection)
+      throw std::invalid_argument(
+          "simp_optimize: lattice_coupling (Mode 2) and a Heaviside projection "
+          "are mutually exclusive; the projected subproblem does not carry the "
+          "beta block");
+  }
 }
 
 // Validate the MMA Heaviside-projection opt-in (handoff 114). This is the
@@ -3078,6 +3094,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // MMA updater state (ROADMAP M7.mma.4). Unused when updater == OC; the masked
   // loop owns a single continuous MMA iteration count across all stages, exactly
   // like the unconstrained overload.
+  // ★ MODE 2's beta block carries its OWN asymptotes under BANKED, where the two
+  // blocks are separate subproblems. Unused (and unallocated) when no coupling.
+  MmaJointState beta_state;
   MmaState mma_state;
   int mma_iter = 0;
 
@@ -3205,8 +3224,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // drives the TRAJECTORY solve, the certified solve below never does.
       // SEMDOT then forces p = 1 on top (semdot_law): the thresholding is the
       // penalization, and continuation is refused under it anyway.
-      const SimpParams traj_params = semdot_law(
+      SimpParams traj_params = semdot_law(
           penalty_for_iteration(params, options, result.iterations + 1), options);
+      // ★ MODE 2: the field is resolved at THIS iteration's coefficients and the
+      // override is pointed at it BEFORE the solve, so the tensor the solve sees
+      // and the dc/drho it returns belong to the same beta. Pointing it after
+      // would give the gradient of a field the solve never used.
+      if (options.lattice_coupling != nullptr)
+        traj_params.lattice_relative_density =
+            &options.lattice_coupling->relative_density();
       // ACTIVE DOMAIN: trajectory-only, on the ANALYSIS grid (the design box) —
       // the grid the dilution lives on and the one this feature exists for.
       double af = 1.0;
@@ -3291,6 +3317,36 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                            vf_target, st.move,
                                            params.density_min);
         sp.charge(sp.update);
+      } else if (options.updater == SimpUpdater::MMA &&
+                 options.lattice_coupling != nullptr &&
+                 options.lattice_coupling->shares_budget()) {
+        // ★ MODE 2, SPENT (minimize_plastic OFF / the GROWTH ladder). ONE budget
+        // covers both blocks, so they must be updated TOGETHER: MMA's dual
+        // multiplier prices the whole thing, and whichever block buys stiffness
+        // more cheaply per unit mass gets the mass. Updating them separately
+        // would let each spend the same budget.
+        sp.mark();
+        LatticeDesignCoupling& L = *options.lattice_coupling;
+        std::vector<double> ones_lat(grid.voxel_count(), 0.0);
+        const std::vector<double>& lr = L.relative_density();
+        for (std::size_t e = 0; e < ones_lat.size(); ++e)
+          if (lr[e] >= 0.0) ones_lat[e] = 1.0;
+        // The total: the Active target PLUS what the field is allowed. Under
+        // SPENT the split between them is what MMA solves, which is exactly why
+        // `freed_mass_return` has no meaning here — see the handoff §0.5.
+        const double total_target =
+            vf_target * n_active + L.mass_allowance_voxels();
+        const std::vector<double> joint = mma_update_masked_lattice(
+            mma_state, ++mma_iter, grid, filter, eff, x, L.coefficients(),
+            c.dcompliance, L.chain(c.dcompliance), L.chain(ones_lat),
+            L.occupied_mass_voxels(), total_target, L.coefficient_min(),
+            L.coefficient_max(), st.move, params.density_min);
+        x_new.assign(joint.begin(),
+                     joint.begin() + static_cast<std::ptrdiff_t>(grid.voxel_count()));
+        L.set_coefficients(std::vector<double>(
+            joint.begin() + static_cast<std::ptrdiff_t>(grid.voxel_count()),
+            joint.end()));
+        sp.charge(sp.update);
       } else if (options.updater == SimpUpdater::MMA) {
         // Passive-region MMA (M7.mma.4): the same single-volume-constraint MMA
         // subproblem as the plain overload, restricted to Active voxels.
@@ -3299,6 +3355,39 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                   c.dcompliance, vf_target,
                                   st.move, params.density_min);
         sp.charge(sp.update);
+        // ★ MODE 2, BANKED (minimize_plastic ON / the REDUCTION ladder). The two
+        // blocks are priced SEPARATELY, so their KKT systems DECOUPLE and each
+        // is an independent 1-D dual. The Active update above is therefore the
+        // shipped call, unchanged and byte-identical; only this second, smaller
+        // subproblem is new. The field redistributes its OWN allowance — denser
+        // where it carries, lighter where it does not — at the same part mass
+        // Mode 1 would have printed.
+        if (options.lattice_coupling != nullptr) {
+          sp.mark();
+          LatticeDesignCoupling& L = *options.lattice_coupling;
+          std::vector<double> ones_lat(grid.voxel_count(), 0.0);
+          const std::vector<double>& lr = L.relative_density();
+          for (std::size_t e = 0; e < ones_lat.size(); ++e)
+            if (lr[e] >= 0.0) ones_lat[e] = 1.0;
+          const std::vector<double> b = L.coefficients();
+          const std::size_t nb = b.size();
+          std::vector<std::size_t> bdof(nb);
+          for (std::size_t j = 0; j < nb; ++j) bdof[j] = j;
+          std::vector<double> bmin(nb, L.coefficient_min()),
+              bmax(nb, L.coefficient_max());
+          std::vector<double> dobj = L.chain(c.dcompliance);
+          const std::vector<double> dmass = L.chain(ones_lat);
+          double sc = 0.0;
+          for (double v : dobj) sc = std::max(sc, std::fabs(v));
+          if (sc > 0.0)
+            for (double& v : dobj) v /= sc;
+          const double g0 =
+              L.occupied_mass_voxels() - L.mass_allowance_voxels();
+          L.set_coefficients(mma_update_joint(beta_state, mma_iter, b, bdof,
+                                              dobj, dmass, bmin, bmax, g0,
+                                              st.move));
+          sp.charge(sp.update);
+        }
       } else {
         sp.mark();
         x_new = oc_update_masked(grid, filter, eff, x, c.dcompliance,
