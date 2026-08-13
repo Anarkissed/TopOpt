@@ -75,19 +75,27 @@ Production's 337 mm³ refusal was a pocket *with* lattice (7 of 215 cells), so t
 is false unless the job asks"* — but `job.hpp:289` declares it **`= true`**. The
 comment is wrong; the check is armed by default.
 
-### ★★ AND THE PERIMETER PENALTY IS NOT SUPERSEDED WHERE DRAINABILITY BINDS
+### ★★ AND FOR LATTICED PARTS THE PERIMETER PENALTY IS THE ONLY ONE THAT SHIPS
 
-The corrected table supports a split recommendation, not a flat replacement:
+★ **MEASURED 2026-08-13, one `lattice-variant` run per arm on his recipe.** The
+11,158 / 5,946 figures above are ALL sealed void in the part — an upper bound.
+The quantity that actually refuses is the subset inside the lattice:
 
-| | carved | sealed void |
-|---|---|---|
-| ★ robust triple | **7.5190** (beats SIMP) | **10.01%** (worst) |
-| ★ perimeter C=1 | 9.1155 | **5.33%** (roughly half) |
+| | carved | all sealed void | ★ **latticed** sealed void | lattice verdict |
+|---|---|---|---|---|
+| robust triple | **7.5190** (beats SIMP) | 11,158 mm³ | **1,021.5 mm³** | ★ **REFUSED** |
+| perimeter C=1 | 9.1155 | 5,946 mm³ | ★ **0 mm³** | ★ **ACCEPTED, exported** |
 
-★ **Robust is the right answer where surface binds; the perimeter penalty is the
-right answer where drainability binds — which is latticed parts.** They are
-answers to different questions, and the C sweep is retained as the reference for
-what a global interface tax costs.
+★ **The bound overstated the robust blocker by 11×** — 3.0× the 337 mm³ refusal,
+not 33×. ★★ **But the ordering did not merely persist, it became CATEGORICAL: one
+refuses and one ships.**
+
+**So the recommendation splits on the job type, and both halves are measured:**
+
+- ★ **TO-only → the ROBUST TRIPLE.** Nothing reads sealed void when there is no
+  lattice, so it ships today with the better surface.
+- ★ **TO+lattice → the PERIMETER PENALTY.** Not a consolation: on this recipe it
+  is **the only mechanism of the two that produces a part at all.**
 
 ### ★★ AND THE FINDING WITH NO OWNER
 
