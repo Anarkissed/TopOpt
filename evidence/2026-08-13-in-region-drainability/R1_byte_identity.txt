@@ -1,0 +1,7 @@
+R1 — DESIGN BYTE-IDENTITY ACROSS THE ADDED COLUMNS
+X_robust_recheck (new binary) vs BS_robust (old binary), identical flags.
+  it0020  ea2170293da43f0a9c81...  IDENTICAL
+  it0060  9d100776a115b65a3f0e...  IDENTICAL
+  it0120  2f804e4a94cca3a62a95...  IDENTICAL
+The added measurement writes to the CSV and never touches alpha, phi or occ.
+Proven by checksum, not by argument.
