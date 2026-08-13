@@ -1,0 +1,51 @@
+=== R4 — THE VALID DEMONSTRATION: A GRADED LATTICE, ON HIS PART ===
+M2_verticalStand.step @ 128. Face 15 (the part's largest, 1.71e4 mm^2, 6081
+voxels one layer deep, PCA frame) split 1x2. Each sector is a region-backed
+LATTICE region AND a protection at the SAME declared depth.
+
+ sector  declared  extent_mm   cell_mm      rho  strut_mm   c/mem  regime    cand    latt
+      0    3.0 mm     6.8211    1.3642   0.4283    0.4200    5.00      ok    7922    7922
+      1    7.5 mm    13.6422    2.7284   0.1386    0.4200    5.00      ok    9206    9206
+
+★★ distinct_cells = 2. THE DEPTHS GRADE THE LATTICE.
+
+  extent   6.8211 -> 13.6422   exactly 2x, tracking the declared 2.5x depth
+                               through the voxel-layer rounding (2 vs 4 layers)
+  cell     1.3642 -> 2.7284    exactly 2x
+  density  0.4283 -> 0.1386    ★ 3.09x APART — the sectors are genuinely
+                               different lattices, not one lattice twice
+  c/mem    5.00 both           exactly AT the certification floor
+  regime   ok BOTH             both sectors CERTIFY
+
+  The variant's own cell_levels confirm two distinct cells were emitted:
+     level 0  cell 1.3642  14664 voxels
+     level 1  cell 2.7284   2464 voxels
+  and its strut range widens to [0.420, 1.047] mm — one lattice could not do that.
+
+★ CONTRAST WITH THE INVALID DEMO (r4_root_cause.txt): four sectors of a
+  ~6-voxel-tall bore, all four at extent 3.4106, one cell, all OUT of regime.
+  Same code, same binary family — the difference is entirely that the earlier
+  experiment made the split height the binding dimension so the declared depth
+  could not matter.
+
+DRAINABILITY, §2(d), on this run:
+  sealed                          False
+  sealed_cells                        0
+  sealed_voxels                       0
+  latticed_cells                  24168
+  sealed_pockets_without_lattice     38   (pockets with no lattice in them)
+  ★ NOTE: `latticed_voxels_reached` (68512) is a VOXEL count and `latticed_cells`
+    (24168) a CELL count — they are different quantities. An earlier run happened
+    to show them equal and that was coincidence, not a property. What matters is
+    sealed == False with zero sealed cells and zero sealed voxels.
+
+PART LEVEL, against the last real run (13,034 latticed voxels / 12% / 507 g):
+  latticed_cells   59888        include_regions 2      triangles 58,225,836
+  Not comparable rung-for-rung: that run latticed eight analytic regions of the
+  whole part; this one latticed two sectors of one face at deliberately
+  different depths. Stated so the numbers are not read as a regression.
+
+CAVEAT, NAMED: this run's binary predates `refuse_infeasible_region_lattice`
+(§2c), added while the run was in flight. That guard fires only on an INFEASIBLE
+region include; both sectors here are feasible (`ok`), so it cannot have changed
+this result.

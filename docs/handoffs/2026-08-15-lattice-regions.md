@@ -21,39 +21,27 @@ unit level (34 checks), not yet on his part.** `"kind": "region"` with a
 `region_id` and a depth resolves the sector's voxel set and drives the same
 membership every analytic lattice region drives.
 
-**Latticed voxels per sector on his part: MEASURED, and the answer is SPLIT.**
-Four sectors of face 4 (cylindrical, 1741 mm²) at 3.0 / 4.5 / 6.0 / 7.5 mm:
+**Latticed voxels per sector on his part: MEASURED — and it is a GRADED
+LATTICE.** Face 15 (the part's largest) split 1×2, sectors at 3.0 and 7.5 mm:
 
-| sector | declared | layers | extent_mm | cell_mm | rho | strut | c/mem | regime | candidate | latticed |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 0 | 3.0 | 2 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **308** | 308 |
-| 1 | 4.5 | 3 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **372** | 372 |
-| 2 | 6.0 | 4 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **522** | 522 |
-| 3 | 7.5 | 4 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **781** | 781 |
+| sector | declared | extent_mm | cell_mm | rho | strut_mm | c/mem | regime | latticed |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 3.0 | 6.8211 | **1.3642** | **0.4283** | 0.4200 | 5.00 | ok | 7922 |
+| 1 | 7.5 | 13.6422 | **2.7284** | **0.1386** | 0.4200 | 5.00 | ok | 9206 |
 
-★ **The PLUMBING is demonstrated: four region-backed lattice regions resolved
-from voxel masks on his own part, each with its own verdict row, candidate
-voxels rising monotonically 308 → 781 with declared depth, every one latticed
-(0 solid fallback), and the void-escape network reaching all of them.**
+★★ `distinct_cells = 2`. Cell 2× apart, **density 3.09× apart**, both exactly at
+the 5.00 cells-per-member certification floor, and **both CERTIFY**. The
+variant's own `cell_levels` shows two cells emitted (14,664 voxels at 1.3642 mm,
+2,464 at 2.7284 mm) and the strut range widens to [0.420, 1.047] mm — which one
+lattice cannot produce. `r4_sectors_large.txt`.
 
-★★ **BUT THIS DEMONSTRATION CANNOT ANSWER THE GRADING QUESTION, AND THAT IS MY
-ERROR, NOT A DEFECT.** `extent_mm` is 3.4106 in all four — exactly 2× the
-1.70528 mm spacing — so one cell, one density, one strut. I read that as a code
-defect and "fixed" it twice before printing the distribution
-(`r4_extent_distribution.txt`), which showed **min == p25 == median == max** on
-these sectors: a POINT. Nothing was broken.
-
-The bounding boxes said why: **the bore's axial extent is ~6 voxels and I split
-it FOUR ways**, so each sector is 1–2 voxels tall while spanning ~100 × ~55
-around and through the wall. The thinnest dimension really is the slice height,
-and the declared depth grows the other two. A six-voxel feature cut four ways
-cannot show depth-driven grading — no implementation could.
-
-On a region where depth DOES bind (one large face split in two, 3.0 vs 7.5 mm)
-the same probe gives **min 3.411 for both** and **median 6.821 vs 13.642** — the
-minimum is boundary-dominated, the median tracks the depth exactly. That is why
-the median stands. The valid end-to-end demonstration is `r4_sectors_large.txt`;
-until it lands, **depth-driven grading is NOT demonstrated on his part.**
+★ **AN EARLIER DEMONSTRATION SAID THE OPPOSITE, AND IT WAS MY EXPERIMENT THAT WAS
+WRONG.** Four sectors of a bore, all at extent 3.4106, one cell, all out of
+regime — because the bore's axial extent is ~6 voxels and I split it FOUR ways,
+making the slice height binding so the declared depth could never matter. I read
+that flat table as a code defect and changed the extent statistic twice before
+printing the distribution, which showed `min == p25 == median == max`: a POINT,
+which no statistic could separate. `r4_root_cause.txt`, `r4_extent_distribution.txt`.
 
 **Does the depth drive both protection and lattice? YES — MEASURED, and it is
 structural rather than agreed.** `region_depth_layers` is now the ONE mm→voxel-
@@ -78,7 +66,8 @@ conservative. It is affordable (0.41 ms for every cell on the whole part), but
 the guess did not hold. `r6_predicate_cost.txt`.
 
 **Can density differ per sector, or is that a further change? IT ALREADY DOES,
-DERIVED — and a directly-authored per-sector density IS a further change.**
+AND IT IS NOW MEASURED: 0.4283 vs 0.1386 on his part, 3.09× apart.** A
+directly-authored per-sector density IS still a further change.
 Each region gets its own `FitRegionCell`: extent → `cell = max(extent/N*, finest
 printable)` → `relative_density = lattice_min_density_for_strut(topo, cell, w)` →
 strut. So two sectors at different depths get different extents and therefore
