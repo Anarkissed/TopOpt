@@ -1,24 +1,21 @@
-CORE ctest — task 2026-08-14-lattice-separation
+CORE ctest — task 2026-08-14-lattice-separation, on the REBASED tree
 
-core/ is UNTOUCHED on this branch (git diff --stat 9e96beb -- core/ is empty),
-so this is a regression check, not a change under test.
+Base 726160c (PR 331 face-regions). This branch does not touch core/ —
+`git diff --stat 726160c -- core/` is empty — but the BASE moved onto a branch
+that does, so the suite is re-run here rather than the pre-rebase 119/119 being
+quoted for a tree that no longer exists. The extra test is PR 331's face_region.
 
 NOT a CI pass: this machine has no lib3mf, so `export_3mf` and `threemf_import`
-do not REGISTER and the denominator is 119 where CI's is higher. Report it as
-119/<CI's total>.
+do not REGISTER. 120 is 120 of CI's 122. Report N/122, never N/N.
 
-The host was NOT quiet — load average 16.2, another worktree running its own
-topopt-cli ladder — so the DURATIONS below describe the host, not the code.
+The host was NOT quiet — another worktree was running its own topopt-cli
+ladder — so the DURATIONS describe the host, not the code.
 
-112/119 Test #118: selfweight_clearance_void ........   Passed    7.99 sec
-113/119 Test #119: mesh_job .........................   Passed    9.44 sec
-114/119 Test #108: face_protection_parity ...........   Passed  131.98 sec
-115/119 Test  #86: coarsen_rule .....................   Passed  237.74 sec
-116/119 Test #115: lattice_variant ..................   Passed  182.53 sec
-117/119 Test #105: design_stream ....................   Passed  375.94 sec
-118/119 Test #114: protect_freeze_vs_solidity .......   Passed  444.46 sec
-119/119 Test #104: cli_demo .........................   Passed  2078.64 sec
+117/120 Test #116: lattice_variant ..................   Passed  155.33 sec
+118/120 Test #106: design_stream ....................   Passed  295.01 sec
+119/120 Test #115: protect_freeze_vs_solidity .......   Passed  382.38 sec
+120/120 Test #105: cli_demo .........................   Passed  1283.44 sec
 
-100% tests passed out of 119
+100% tests passed out of 120
 
-Total Test time (real) = 2317.45 sec
+Total Test time (real) = 1579.54 sec
