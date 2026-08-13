@@ -42,8 +42,8 @@ misled:
    scope decisions rested on it.
 
 ★ **WHAT IS STILL NOT DONE**: the margin as a per-iteration CURVE with a settling
-iteration (bar R4's other half), Mode 2's β-in-MMA coupling, and §3(e)'s cost
-confirmation. §7 has each with what it would take.
+iteration (bar R4's other half) and Mode 2's β-in-MMA coupling. §7 has each with
+what it would take. §3(e)'s cost confirmation IS done — §0.4c, **0.0750%**.
 
 ★ **Nothing below is estimated, and no gross figure is presented as a saving.**
 
@@ -314,6 +314,36 @@ spend is 78% of a margin that was 450x what the gate asks.** Whether that trade
 is worth taking is a judgement about how much of that headroom is real, which is
 a question about `z_knockdown` and the strut law's own caveats (§1.4) and not one
 this task can settle.
+
+### 0.4c ★ §3(e) CONFIRMED, not assumed: the machinery is **0.0750%** of one state solve
+
+`evidence/…/m5/cost.txt`. The brief asked for this to be confirmed rather than
+taken on PR 324's word, and it is — by timing the machinery **directly** rather
+than differencing two runs.
+
+★ **The obvious experiment would have been wrong.** Timing a frozen-lattice run
+against a solid one and calling the difference "the machinery" conflates the
+field resolution (which IS the machinery) with the fact that a latticed voxel
+makes the operator a composite cubic element, so the CG does different work. A
+raw wall delta charges the machinery for the solver's extra iterations. So each
+piece is timed on its own, 50 repetitions, against one state solve on the same
+grid at the trajectory tolerance:
+
+| | ms |
+|---|---|
+| MODE 1 — resolve the constant field | **0.7959** |
+| MODE 2 — resolve t = Σ β ψ (864 coefficients) | 14.6131 |
+| MODE 2 — dρ/dβ, the analytic Jacobian | 39.7001 |
+| ★ **MODE 2 machinery, per iteration** | **54.3132** |
+| ONE STATE SOLVE (1057 CG iterations) | **72,389.6** |
+
+> ★ **machinery / state solve = 0.0750%**
+
+**CONFIRMED.** Even Mode 2 — the doubled coefficient block, its resolution AND
+its Jacobian — is under a thousandth of one state solve on his part. Mode 1's
+constant field is **0.8 ms** against 72 seconds. The brief's premise holds with
+three orders of magnitude to spare, so cost is not a reason to prefer Mode 1 over
+Mode 2, and it never was.
 
 ### 0.5 ★ Whether Mode 2 beat Mode 1 — **NOT MEASURED, and Mode 2's in-loop coupling is NOT BUILT.**
 

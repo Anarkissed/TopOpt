@@ -24,9 +24,7 @@
 //       (a certification measured 590.6 s; in Release it is 28.0 s), so the
 //       reason it is missing is not the reason originally given — it is simply
 //       unbuilt, and at 28 s a certification it is minutes of compute.
-//   M5  the COST confirmation the brief asks for in §3(e): PR 324 measured 99.5%
-//       of an iteration as the state solve, and doubling the coefficient block
-//       is claimed to land on that side of the ledger. NOT CONFIRMED HERE.
+//   (M5 is implemented — see `--stage cost`.)
 //
 // ★ THE PROBLEM IS NOT RE-DERIVED. `build_production_loadcase` builds it from the
 // same transcription `levelset_probe` and `portable_problem_export` use, and the
@@ -318,7 +316,7 @@ int main(int argc, char** argv) {
   if (argc < 5) {
     std::printf(
         "usage: frozen_lattice_probe <part.step> <materials.json> "
-        "<ref_design.bin> <out_dir> [--stage law|regions|r1|assign|loop]\n"
+        "<ref_design.bin> <out_dir> [--stage law|regions|r1|assign|loop|cost]\n"
         "       (M3 'loop' and M5 'cost' are NOT implemented — see the file "
         "header)\n"
         "       [--rung R] [--cell MM] [--threads N] [--iters N]\n"
@@ -1211,6 +1209,128 @@ int main(int argc, char** argv) {
                 "     re-optimised, so the optimiser has already put back "
                 "whatever it wanted.\n");
     std::printf("   wrote %s/m3_loop.csv\n", a.out.c_str());
+    fea_set_matfree_threads(prev_threads);
+    return 0;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // M5 — ★ §3(e): DOES THE MACHINERY COST ANYTHING AGAINST THE STATE SOLVE?
+  // ─────────────────────────────────────────────────────────────────────────
+  //
+  // The brief: PR 324 found 99.5% of an iteration is the state solve, with the
+  // whole parametric machinery — MMA over 85,680 variables — costing 0.114 s, so
+  // doubling the coefficient block lands on that side of the ledger.
+  // ★ CONFIRM IT RATHER THAN ASSUMING IT.
+  //
+  // ★ AND THE OBVIOUS EXPERIMENT IS THE WRONG ONE. Timing a frozen-lattice run
+  // against a solid one and calling the difference "the machinery" conflates two
+  // things: the field resolution and the pins (which IS the machinery) with the
+  // fact that a latticed voxel makes the OPERATOR a composite cubic element, so
+  // the linear system genuinely changes and the CG does different work. A raw
+  // wall delta charges the machinery for the solver's extra iterations.
+  //
+  // So the machinery is timed DIRECTLY — the field resolution and the Jacobian,
+  // which is everything Mode 1 and Mode 2 add per iteration — against ONE state
+  // solve on the same grid. No confound, and the ratio is the answer.
+  //
+  // ★ WALL CLOCK IS A CLAIM ABOUT A CONFIGURATION. Run this in Release; a cost
+  // measured on an unoptimised build is meaningless, and this task learned that
+  // the expensive way (handoff §0.6).
+  if (a.stage == "cost") {
+    std::vector<LatticeRegionSpec> specs;
+    for (const Region& r : regions0) {
+      LatticeRegionSpec sp;
+      sp.id = r.id;
+      sp.name = r.name;
+      sp.mode = LatticeRegionMode::Declared;
+      sp.declared_density = 0.30;
+      specs.push_back(sp);
+    }
+    std::vector<char> frozen_solid(n, 0);
+    for (std::size_t e = 0; e < n; ++e)
+      frozen_solid[e] = eff[e] == MaskValue::FrozenSolid ? 1 : 0;
+
+    // MODE 1: the constant field, resolved.
+    const int reps = 50;
+    double t0 = now_s();
+    for (int i = 0; i < reps; ++i) {
+      const ResolvedLatticeDensityField f = resolve_lattice_density_field(
+          grid, rid, specs, topo, nullptr, &frozen_solid, {});
+      if (f.latticed_voxels == 0 && i == 0)
+        std::printf("   (note: the field latticed nothing — timing an empty "
+                    "resolve)\n");
+    }
+    const double ms_mode1 = 1000.0 * (now_s() - t0) / reps;
+
+    // MODE 2: the beta field plus its analytic Jacobian — the "doubled
+    // coefficient block" the brief asks about, at the production knot rule.
+    LatticeBetaField B;
+    const LatticeBetaKnots k = lattice_beta_knots_for_grid(grid, 0.0, 0.0, 0.0);
+    B.lattice = plsm_make_lattice(grid.nx, grid.ny, grid.nz, k.dx, k.dy, k.dz, 2.0);
+    B.basis = PlsmBasisKind::Gaussian;
+    B.beta.assign(B.lattice.count(), 0.0);
+    std::vector<LatticeRegionSpec> ospecs = specs;
+    for (LatticeRegionSpec& sp : ospecs) sp.mode = LatticeRegionMode::Optimised;
+    t0 = now_s();
+    for (int i = 0; i < reps; ++i) {
+      const ResolvedLatticeDensityField f = resolve_lattice_density_field(
+          grid, rid, ospecs, topo, &B, &frozen_solid, {});
+      (void)f;
+    }
+    const double ms_mode2 = 1000.0 * (now_s() - t0) / reps;
+    t0 = now_s();
+    for (int i = 0; i < reps; ++i) {
+      const PlsmCsr J = lattice_beta_jacobian(grid, rid, ospecs, topo, B,
+                                              &frozen_solid, {}, a.threads);
+      (void)J;
+    }
+    const double ms_jac = 1000.0 * (now_s() - t0) / reps;
+
+    // ONE STATE SOLVE on the same grid, at the TRAJECTORY tolerance the loop
+    // uses — not the certification tolerance, because the comparison the brief
+    // makes is against the solve an ITERATION performs.
+    t0 = now_s();
+    const SimpCompliance sc = simp_compliance(grid, params, rho0, bcs, loads,
+                                              1e-4, options.simp.cg_max_iterations,
+                                              nullptr, nullptr,
+                                              options.simp.solver, nullptr);
+    const double ms_solve = 1000.0 * (now_s() - t0);
+
+    const double machinery = ms_mode2 + ms_jac;
+    std::printf("-- M5 §3(e): the machinery, timed DIRECTLY against one state "
+                "solve --\n\n");
+    std::printf("   grid %d x %d x %d, %zu beta coefficients, %d threads, "
+                "%d reps\n\n", grid.nx, grid.ny, grid.nz, B.lattice.count(),
+                a.threads, reps);
+    std::printf("   %-42s %12.4f ms\n", "MODE 1  resolve the constant field",
+                ms_mode1);
+    std::printf("   %-42s %12.4f ms\n", "MODE 2  resolve t = sum beta psi",
+                ms_mode2);
+    std::printf("   %-42s %12.4f ms\n", "MODE 2  d rho / d beta (the Jacobian)",
+                ms_jac);
+    std::printf("   %-42s %12.4f ms\n", "★ MODE 2 machinery per iteration",
+                machinery);
+    std::printf("   %-42s %12.1f ms   (cg %d)\n", "ONE STATE SOLVE (trajectory tol)",
+                ms_solve, sc.cg.iterations);
+    if (ms_solve > 0.0) {
+      std::printf("\n   ★ machinery / state solve = %.4f%%   (the brief's claim: "
+                  "the solve is 99.5%%\n"
+                  "     of an iteration, so the coefficient block lands on the "
+                  "free side)\n",
+                  100.0 * machinery / ms_solve);
+      std::printf("   ★ VERDICT: %s\n",
+                  100.0 * machinery / ms_solve < 1.0
+                      ? "CONFIRMED — the machinery is under 1% of one state solve."
+                      : "NOT CONFIRMED — the machinery is NOT negligible here; "
+                        "the number above is what it costs.");
+    }
+    std::ofstream csv(a.out + "/m5_cost.csv");
+    csv.precision(10);
+    csv << "quantity,ms\n";
+    csv << "mode1_resolve," << ms_mode1 << "\nmode2_resolve," << ms_mode2
+        << "\nmode2_jacobian," << ms_jac << "\nmode2_machinery," << machinery
+        << "\nstate_solve," << ms_solve << "\n";
+    std::printf("   wrote %s/m5_cost.csv\n", a.out.c_str());
     fea_set_matfree_threads(prev_threads);
     return 0;
   }
