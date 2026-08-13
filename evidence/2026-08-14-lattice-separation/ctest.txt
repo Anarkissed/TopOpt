@@ -1,0 +1,24 @@
+CORE ctest — task 2026-08-14-lattice-separation
+
+core/ is UNTOUCHED on this branch (git diff --stat 9e96beb -- core/ is empty),
+so this is a regression check, not a change under test.
+
+NOT a CI pass: this machine has no lib3mf, so `export_3mf` and `threemf_import`
+do not REGISTER and the denominator is 119 where CI's is higher. Report it as
+119/<CI's total>.
+
+The host was NOT quiet — load average 16.2, another worktree running its own
+topopt-cli ladder — so the DURATIONS below describe the host, not the code.
+
+112/119 Test #118: selfweight_clearance_void ........   Passed    7.99 sec
+113/119 Test #119: mesh_job .........................   Passed    9.44 sec
+114/119 Test #108: face_protection_parity ...........   Passed  131.98 sec
+115/119 Test  #86: coarsen_rule .....................   Passed  237.74 sec
+116/119 Test #115: lattice_variant ..................   Passed  182.53 sec
+117/119 Test #105: design_stream ....................   Passed  375.94 sec
+118/119 Test #114: protect_freeze_vs_solidity .......   Passed  444.46 sec
+119/119 Test #104: cli_demo .........................   Passed  2078.64 sec
+
+100% tests passed out of 119
+
+Total Test time (real) = 2317.45 sec

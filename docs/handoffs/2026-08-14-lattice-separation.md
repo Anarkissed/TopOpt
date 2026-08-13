@@ -269,11 +269,12 @@ them and nothing here is designed around them.
 | **R5** wizard and modal one state, failing test first | **MET.** `r5_r7_failing_first.txt` — the tests do not COMPILE against the pre-task model, the same shape as PR 328's L5: the API had no way to express the case. |
 | **R6** the sample is visible on entry | **MET.** 0 lit pixels → 61,794, through the shipping shader. `r6_sample_before_reveal0.png` / `r6_sample_after.png`. |
 | **R7** no wall of text | **MET. Longest string added: 3 words** — "Holds no material" and the out-of-regime headline "0.8 cells across". Asserted at ≤ 3 over every string this task adds. Stated honestly: the longest string the lattice stage can render is still `LatticeFaceRoleGate.Block.undeclared.reason` — "Give this face a role first", 6 words — which PR 328 wrote and this task did not touch. |
-| **R8** no verdict moves | **MET, structurally: `core/` is untouched.** `git diff --stat 9e96beb -- core/` is empty; every change is under `app/`. Core ctest reported below. |
+| **R8** no verdict moves | **MET, structurally: `core/` is untouched.** `git diff --stat 9e96beb -- core/` is empty; every change is under `app/`. Core **119/119** (`ctest.txt`) — a regression check, not a change under test, and NOT a CI pass: this machine has no lib3mf so `export_3mf` and `threemf_import` do not REGISTER. Report it as 119/<CI's total>. |
 | **R9** never weaken an assertion | **MET.** `r9_assertion_census.txt` — every kind unchanged or up, nothing deleted. Two source-reading tests were UPDATED where a symbol was renamed, and both were STRENGTHENED in the same edit: the "no workspace chrome while a page is up" census renamed `latticeEntryButtonOverlay` → `stageNavigationButtonOverlay` **and gained the two overlays this task added**, and the design-box census kept its D5a assertions and **gained the lattice-stage term**. |
 | **R10** no unfilled placeholders, no scratch at root | **MET.** |
 
-**The suites.** App: **1459 executed, 22 skipped, 3 failures** — all three are
+**The suites.** Core: **119/119** local (`ctest.txt`), on an untouched `core/`.
+App: **1459 executed, 22 skipped, 3 failures** — all three are
 `AppModelTests.test*ThreeMF*`, and they fail because THIS MACHINE's core slice
 has no lib3mf ("3MF import requires lib3mf, which is not available in this
 build"). They failed identically on this branch's first run before any source
