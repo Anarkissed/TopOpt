@@ -2675,4 +2675,1029 @@ Test Case '-[TopOptFlowsTests.RunModelTests testDismissingAStallCancelsTheBackgr
 Test Case '-[TopOptFlowsTests.RunModelTests testETAcountsDownAsARungProgresses]' started.
 Test Case '-[TopOptFlowsTests.RunModelTests testETAcountsDownAsARungProgresses]' passed (0.007 seconds).
 Test Case '-[TopOptFlowsTests.RunModelTests testETAisNilDuringWarmup]' started.
-Test Case '-[TopOptFlowsTests.RunModelTests testETAisNilDuringWarmup]' p
+Test Case '-[TopOptFlowsTests.RunModelTests testETAisNilDuringWarmup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testETAisUpperBoundBeforeFirstRungCompletes]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testETAisUpperBoundBeforeFirstRungCompletes]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testETAplateauEarlyIsBoundedByTheUpperEstimate]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testETAplateauEarlyIsBoundedByTheUpperEstimate]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testETAsurvivesAReconnectGap]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testETAsurvivesAReconnectGap]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testETAswitchesToApproximateAfterARungCompletes]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testETAswitchesToApproximateAfterARungCompletes]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testETAtracksASlowerRung]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testETAtracksASlowerRung]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testFailureMessages]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testFailureMessages]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testForegroundRemoteCompletionNotifies]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testForegroundRemoteCompletionNotifies]' passed (0.261 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testForegroundRunDoesNotNotify]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testForegroundRunDoesNotNotify]' passed (0.014 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testFractionMonotoneWithinAndAcrossRungs]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testFractionMonotoneWithinAndAcrossRungs]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testFractionNeverReachesOne]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testFractionNeverReachesOne]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testFractionZeroBeforeFirstIteration]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testFractionZeroBeforeFirstIteration]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testGateDiagnosisDecodesTheCoreDocument]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testGateDiagnosisDecodesTheCoreDocument]' passed (0.022 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testKeepWaitingReArmsTheGuardAndResumes]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testKeepWaitingReArmsTheGuardAndResumes]' passed (0.007 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testLateReturnFromAStalledRunIsDroppedForTheNewRun]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testLateReturnFromAStalledRunIsDroppedForTheNewRun]' passed (0.006 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testLocalRunArmsTheLocalWatchdog]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testLocalRunArmsTheLocalWatchdog]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testMinFeatureViolationsDoNotBlockAcceptance]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testMinFeatureViolationsDoNotBlockAcceptance]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testMinimizedFailureIsRestoredSoTheSheetShows]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testMinimizedFailureIsRestoredSoTheSheetShows]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testMotivatingRunDialogNamesBothMarginsAndTheRealFix]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testMotivatingRunDialogNamesBothMarginsAndTheRealFix]' passed (0.032 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testNoSettingFixesThisIsStatedPlainly]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testNoSettingFixesThisIsStatedPlainly]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testProductionMultigridPathTerminatesAndReportsProgress]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testProductionMultigridPathTerminatesAndReportsProgress]' passed (129.873 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testProgressClampsDegenerateInputs]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testProgressClampsDegenerateInputs]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testProgressPublishedFromCallback]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testProgressPublishedFromCallback]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRealMinimizePlasticRunReachesTerminalPhase]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRealMinimizePlasticRunReachesTerminalPhase]' passed (5.581 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateCountsDownWithinARung]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateCountsDownWithinARung]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateNilUntilFirstRungCompletes]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateNilUntilFirstRungCompletes]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateNonNegativeWhenCurrentRungRunsLong]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateNonNegativeWhenCurrentRungRunsLong]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateProjectsFromCompletedRungs]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRemainingEstimateProjectsFromCompletedRungs]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRemoteRunDoesNotArmTheLocalWatchdog]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRemoteRunDoesNotArmTheLocalWatchdog]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRestoreReopensAMinimizedRun]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRestoreReopensAMinimizedRun]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRungFractionIsDiscreteAndFlatWithinARung]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRungFractionIsDiscreteAndFlatWithinARung]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRunInBackgroundMinimizesAndNotifiesOnCompletion]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRunInBackgroundMinimizesAndNotifiesOnCompletion]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testRunRequestIsStepModel]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testRunRequestIsStepModel]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testSetupStallBecomesAFailureSheet]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testSetupStallBecomesAFailureSheet]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testSetupStallWithDesignBoxNamesTheBox]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testSetupStallWithDesignBoxNamesTheBox]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testSeveredLoadPathIsNotReportedAsAMarginNumber]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testSeveredLoadPathIsNotReportedAsAMarginNumber]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testSolverThrowIsAFailureSheetWithDiagnostic]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testSolverThrowIsAFailureSheetWithDiagnostic]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testStageLabelSingleVsMultiRung]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testStageLabelSingleVsMultiRung]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testStartIsNoOpWhileRunning]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testStartIsNoOpWhileRunning]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testStartSetsStartedAtAndResetClearsIt]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testStartSetsStartedAtAndResetClearsIt]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testStreamedAcceptedVariantSurvivesLeavingAnInFlightRun]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testStreamedAcceptedVariantSurvivesLeavingAnInFlightRun]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testStreamedVariantsAppearBeforeFinish]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testStreamedVariantsAppearBeforeFinish]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testSuccessStoresOutcomeAndClearsProgress]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testSuccessStoresOutcomeAndClearsProgress]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RunModelTests testWatchdogDisarmsOnFirstProgress]' started.
+Test Case '-[TopOptFlowsTests.RunModelTests testWatchdogDisarmsOnFirstProgress]' passed (0.000 seconds).
+Test Suite 'RunModelTests' passed at 2026-08-12 22:44:06.102.
+	 Executed 51 tests, with 0 failures (0 unexpected) in 136.040 (136.063) seconds
+Test Suite 'SelectionModelTests' started at 2026-08-12 22:44:06.102.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testAddGroupAutoNamesAndColours]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testAddGroupAutoNamesAndColours]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testClearActiveDeselectsAndDropsEmptyGroups]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testClearActiveDeselectsAndDropsEmptyGroups]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testColourAndGroupForFace]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testColourAndGroupForFace]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testColoursCycleThroughPalette]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testColoursCycleThroughPalette]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testDeselectSubset]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testDeselectSubset]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testEmptyInitially]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testEmptyInitially]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testFaceToGroupMap]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testFaceToGroupMap]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testNamesWrapAfterZ]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testNamesWrapAfterZ]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testPickAddsAndDedups]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testPickAddsAndDedups]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testPickEmptyIsNoOp]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testPickEmptyIsNoOp]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testPickWithNoActiveCreatesGroup]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testPickWithNoActiveCreatesGroup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testRemoveActiveClearsActive]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testRemoveActiveClearsActive]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testRemoveNonActiveKeepsActive]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testRemoveNonActiveKeepsActive]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testRename]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testRename]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testSetActive]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testSetActive]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testStealEmptyingOtherGroupRemovesIt]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testStealEmptyingOtherGroupRemovesIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testStealMovesFaceBetweenGroups]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testStealMovesFaceBetweenGroups]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionModelTests testTapAgainDeselects]' started.
+Test Case '-[TopOptFlowsTests.SelectionModelTests testTapAgainDeselects]' passed (0.000 seconds).
+Test Suite 'SelectionModelTests' passed at 2026-08-12 22:44:06.107.
+	 Executed 18 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+Test Suite 'SelectionTaggingTests' started at 2026-08-12 22:44:06.107.
+Test Case '-[TopOptFlowsTests.SelectionTaggingTests testEmptyGroupMakesNoCalls]' started.
+Test Case '-[TopOptFlowsTests.SelectionTaggingTests testEmptyGroupMakesNoCalls]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionTaggingTests testFixtureAndLoadTagWithRightFaceIDs]' started.
+Test Case '-[TopOptFlowsTests.SelectionTaggingTests testFixtureAndLoadTagWithRightFaceIDs]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SelectionTaggingTests testFrozenGroupMasksInsteadOfThrowing]' started.
+Test Case '-[TopOptFlowsTests.SelectionTaggingTests testFrozenGroupMasksInsteadOfThrowing]' passed (0.000 seconds).
+Test Suite 'SelectionTaggingTests' passed at 2026-08-12 22:44:06.108.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'SmoothingModelTests' started at 2026-08-12 22:44:06.108.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testCertifiedExposesOnlySmoothedNumbers]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testCertifiedExposesOnlySmoothedNumbers]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testDriftLineFlagsExceedingTheBound]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testDriftLineFlagsExceedingTheBound]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testDriftLineUnderBoundIsPlain]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testDriftLineUnderBoundIsPlain]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testHardFailureSurfacesMessageAndNoNumbers]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testHardFailureSurfacesMessageAndNoNumbers]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testIdleExposesNoNumbers]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testIdleExposesNoNumbers]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testNonConvergentBecomesCouldNotCertifyWithNoNumbers]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testNonConvergentBecomesCouldNotCertifyWithNoNumbers]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testPillTextIsStable]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testPillTextIsStable]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testQuantizationInfoDisclosesTheVoxelGap]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testQuantizationInfoDisclosesTheVoxelGap]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testResetClearsTheReceipt]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testResetClearsTheReceipt]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testStrengthZeroDisablesApply]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testStrengthZeroDisablesApply]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testWeakenedBelowGateReportsRejectedNotAccepted]' started.
+Test Case '-[TopOptFlowsTests.SmoothingModelTests testWeakenedBelowGateReportsRejectedNotAccepted]' passed (0.001 seconds).
+Test Suite 'SmoothingModelTests' passed at 2026-08-12 22:44:06.123.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.014 (0.016) seconds
+Test Suite 'SmoothingPageEvidenceGen' started at 2026-08-12 22:44:06.123.
+Test Case '-[TopOptFlowsTests.SmoothingPageEvidenceGen testWriteScreenshots]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPageEvidenceGen.swift:129: -[TopOptFlowsTests.SmoothingPageEvidenceGen testWriteScreenshots] : Test skipped - set TOPOPT_SMOOTHING_PAGE_EVIDENCE=1
+Test Case '-[TopOptFlowsTests.SmoothingPageEvidenceGen testWriteScreenshots]' skipped (0.001 seconds).
+Test Suite 'SmoothingPageEvidenceGen' passed at 2026-08-12 22:44:06.125.
+	 Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'SmoothingPageRound2Tests' started at 2026-08-12 22:44:06.125.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testAnUnreadableVariantMeshIsItsOwnNamedRefusal]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testAnUnreadableVariantMeshIsItsOwnNamedRefusal]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testAnUnresolvedMaskIsStillItsOwnState]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testAnUnresolvedMaskIsStillItsOwnState]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testAnUnstatedPathDoesNotFailTheCheck]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testAnUnstatedPathDoesNotFailTheCheck]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testATriangleWithNoMovableCornerIsRefusedOnThePageMesh]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testATriangleWithNoMovableCornerIsRefusedOnThePageMesh]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testBrushToolsAreAValueWithTheRulesTheGestureObeys]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testBrushToolsAreAValueWithTheRulesTheGestureObeys]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testEveryBrushToolIsOnThePagePanelAndUsesTheSharedTokens]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testEveryBrushToolIsOnThePagePanelAndUsesTheSharedTokens]' passed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testFrozenVerticesTakeExactlyZeroWeightAtEveryStrength]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testFrozenVerticesTakeExactlyZeroWeightAtEveryStrength]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testMatchingCountsFromADifferentFileStillRefuse]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testMatchingCountsFromADifferentFileStillRefuse]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testMismatchedMeshesStillRefuseToPaint]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testMismatchedMeshesStillRefuseToPaint]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testNoPageChromeLandsUnderThePositionGizmo]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testNoPageChromeLandsUnderThePositionGizmo]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheBridgeAlsoRefusesAWeightVectorOfTheWrongLength]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheBridgeAlsoRefusesAWeightVectorOfTheWrongLength]' passed (0.006 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheBrushIsBuiltByThePageMeshAndCarriesItsPath]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheBrushIsBuiltByThePageMeshAndCarriesItsPath]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheFreezeMaskRequestCanOnlyNameThePageMeshOwnFile]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheFreezeMaskRequestCanOnlyNameThePageMeshOwnFile]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheLatticePagesSimulationButtonIsInTheBottomRightCluster]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheLatticePagesSimulationButtonIsInTheBottomRightCluster]' passed (0.009 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheNormalPathNoLongerTripsTheGuard]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheNormalPathNoLongerTripsTheGuard]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testThePageMeshIsBuiltByImportingItsOwnFile]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testThePageMeshIsBuiltByImportingItsOwnFile]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheSmoothingPageNeverUsesTheRunsOwnBufferAfterTheExport]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheSmoothingPageNeverUsesTheRunsOwnBufferAfterTheExport]' passed (0.019 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheSmoothingPageOwnsItsBrushGestureRatherThanBorrowingIt]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheSmoothingPageOwnsItsBrushGestureRatherThanBorrowingIt]' passed (0.028 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheSmoothingPageShowsProtectedRegionsWithoutOfferingToEditThem]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheSmoothingPageShowsProtectedRegionsWithoutOfferingToEditThem]' passed (0.050 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheTwoFullScreenPagesAreMutuallyExclusive]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testTheTwoFullScreenPagesAreMutuallyExclusive]' passed (0.021 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testWhileAPageIsUpTheWorkspaceDrawsNoChromeOfItsOwn]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageRound2Tests testWhileAPageIsUpTheWorkspaceDrawsNoChromeOfItsOwn]' passed (0.070 seconds).
+Test Suite 'SmoothingPageRound2Tests' passed at 2026-08-12 22:44:06.345.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.218 (0.220) seconds
+Test Suite 'SmoothingPageTests' started at 2026-08-12 22:44:06.345.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAHardFailureIsAlsoAStateAndNeverACrash]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAHardFailureIsAlsoAStateAndNeverACrash]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testALatticedRunIsNotOfferedSmoothing]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testALatticedRunIsNotOfferedSmoothing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAllThreePagesReadTheSharedChromeTokens]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAllThreePagesReadTheSharedChromeTokens]' passed (0.071 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testANonConvergentRecertificationKeepsNothingAndBlocksTheLattice]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testANonConvergentRecertificationKeepsNothingAndBlocksTheLattice]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testANonConvergentSmoothingIsNeverKeepable]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testANonConvergentSmoothingIsNeverKeepable]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAnUncertifiableBaselineIsNamedAsItsOwnFailure]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAnUncertifiableBaselineIsNamedAsItsOwnFailure]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testARunThatKeptNoJobIsRefusedRatherThanFallingBack]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testARunThatKeptNoJobIsRefusedRatherThanFallingBack]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testASelfWeightRunIsRefusedWithItsOwnReason]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testASelfWeightRunIsRefusedWithItsOwnReason]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testASmoothedVariantGoesToTheLatticePageOnItsSmoothedGeometry]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testASmoothedVariantGoesToTheLatticePageOnItsSmoothedGeometry]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAVerdictDropIsNamedAsSuch]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testAVerdictDropIsNamedAsSuch]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBothColumnsComeFromTheCertificationEngine]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBothColumnsComeFromTheCertificationEngine]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBrushIsInertUntilCoreHasAnsweredWhatIsFrozen]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBrushIsInertUntilCoreHasAnsweredWhatIsFrozen]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBrushRefusesATriangleWhoseEveryVertexIsFrozen]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBrushRefusesATriangleWhoseEveryVertexIsFrozen]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBrushStrokesAreExactlyInvertible]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testBrushStrokesAreExactlyInvertible]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testChromeGeometryIsOneSharedConstantSet]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testChromeGeometryIsOneSharedConstantSet]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testDiscardReturnsTheOriginalVariantBitIdentically]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testDiscardReturnsTheOriginalVariantBitIdentically]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testEveryDisabledActionStatesItsReason]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testEveryDisabledActionStatesItsReason]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testFrozenVerticesAreTintedBeforeAnythingIsPainted]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testFrozenVerticesAreTintedBeforeAnythingIsPainted]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testFrozenVerticesNeverReceiveAWeightEvenWhenPaintedOver]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testFrozenVerticesNeverReceiveAWeightEvenWhenPaintedOver]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testLoadCaseIsReadFromTheRetainedJobDocument]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testLoadCaseIsReadFromTheRetainedJobDocument]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testMinFeatureIsReportedBothWays]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testMinFeatureIsReportedBothWays]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testNonConvergenceIsLegibleAndTheOldReceiptIsMarkedStale]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testNonConvergenceIsLegibleAndTheOldReceiptIsMarkedStale]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testNothingSmoothedMeansTheStageShowsTheOriginal]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testNothingSmoothedMeansTheStageShowsTheOriginal]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testPaintedAreasTintByTheirPassCountAndFrozenStillWins]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testPaintedAreasTintByTheirPassCountAndFrozenStillWins]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testSendToLatticeIsGatedOnACertifiedSmoothing]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testSendToLatticeIsGatedOnACertifiedSmoothing]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testStrengthIsPerRegionAndTheStrongestRegionWins]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testStrengthIsPerRegionAndTheStrongestRegionWins]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testStrengthIsReversibleWithoutRepainting]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testStrengthIsReversibleWithoutRepainting]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testSubstitutingTheProjectsCurrentStateWouldFail]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testSubstitutingTheProjectsCurrentStateWouldFail]' passed (0.055 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheBrushIsInvisibleUntilTheFreezeMaskIsKnown]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheBrushIsInvisibleUntilTheFreezeMaskIsKnown]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheReceiptShowsEveryRowTheTaskNames]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheReceiptShowsEveryRowTheTaskNames]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheReceiptStatesTheAnalyzedVsPrintedGap]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheReceiptStatesTheAnalyzedVsPrintedGap]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheSmoothingPageHasNoSecondSelectionSystem]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPageTests testTheSmoothingPageHasNoSecondSelectionSystem]' passed (0.027 seconds).
+Test Suite 'SmoothingPageTests' passed at 2026-08-12 22:44:06.533.
+	 Executed 32 tests, with 0 failures (0 unexpected) in 0.185 (0.188) seconds
+Test Suite 'SmoothingPreviewGateTests' started at 2026-08-12 22:44:06.533.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testALaterStrokeStillReachesTheStageAfterACertification]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPreviewGateTests.swift:185: -[TopOptFlowsTests.SmoothingPreviewGateTests testALaterStrokeStillReachesTheStageAfterACertification] : Test skipped - G2 CONFIRMED FAILING — see s3_reproduction_failing.txt. Deferred behind S1's NO-GO: fix is WorkspacePlaceholder.swift:1019, which must compare WHICH brush the certified mesh describes, not merely that one exists.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testALaterStrokeStillReachesTheStageAfterACertification]' skipped (0.004 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheModelPrefersAFreshPreviewOverAStaleCertifiedMesh]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingPreviewGateTests.swift:217: -[TopOptFlowsTests.SmoothingPreviewGateTests testTheModelPrefersAFreshPreviewOverAStaleCertifiedMesh] : Test skipped - G3 CONFIRMED FAILING — see s3_reproduction_failing.txt. Deferred behind S1's NO-GO: fix is SmoothingPageModel.swift:847, whose certified-outcome branch must yield to a preview of a LATER brush.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheModelPrefersAFreshPreviewOverAStaleCertifiedMesh]' skipped (0.003 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheSmoothedTabIsReachableAsSoonAsAPreviewExists]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewGateTests testTheSmoothedTabIsReachableAsSoonAsAPreviewExists]' passed (0.001 seconds).
+Test Suite 'SmoothingPreviewGateTests' passed at 2026-08-12 22:44:06.542.
+	 Executed 3 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.008 (0.009) seconds
+Test Suite 'SmoothingPreviewNoDiskTests' started at 2026-08-12 22:44:06.542.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testAnOutOfRangeTriangleIsRefused]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testAnOutOfRangeTriangleIsRefused]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testAStrokePreviewsWithTheVariantFileDeleted]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testAStrokePreviewsWithTheVariantFileDeleted]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testTheInMemoryRouteMatchesTheFileRouteExactly]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testTheInMemoryRouteMatchesTheFileRouteExactly]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testTheRouteThePageUsedToTakeDoesReadTheFile]' started.
+Test Case '-[TopOptFlowsTests.SmoothingPreviewNoDiskTests testTheRouteThePageUsedToTakeDoesReadTheFile]' passed (0.004 seconds).
+Test Suite 'SmoothingPreviewNoDiskTests' passed at 2026-08-12 22:44:06.558.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.016 (0.017) seconds
+Test Suite 'SmoothingRound3Tests' started at 2026-08-12 22:44:06.558.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testAFullyFrozenTriangleIsStillRefused]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testAFullyFrozenTriangleIsStillRefused]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testAMismatchedMaskStillRefusesThroughTheNewBrush]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testAMismatchedMaskStillRefusesThroughTheNewBrush]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testBrushingAgainDeepensTheSmoothing]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testBrushingAgainDeepensTheSmoothing]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testDiscardAndLatticeSitAboveRecertifyAndKeepIsGone]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testDiscardAndLatticeSitAboveRecertifyAndKeepIsGone]' passed (0.007 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testEraseClearsTheAreaOutright]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testEraseClearsTheAreaOutright]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testEveryStrokeIsTheSameHue]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testEveryStrokeIsTheSameHue]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testExactlyOneNoteIsEverOnScreen]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testExactlyOneNoteIsEverOnScreen]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testFrozenVerticesStayFrozenThroughTheNewBrush]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testFrozenVerticesStayFrozenThroughTheNewBrush]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testFrozenVerticesStayTintedAtEveryRung]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testFrozenVerticesStayTintedAtEveryRung]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testOneStrokeDeepensByOneRungHoweverManySamplesItEmits]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testOneStrokeDeepensByOneRungHoweverManySamplesItEmits]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testPencilOnlyGivesTheFingerBackToTheCamera]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testPencilOnlyGivesTheFingerBackToTheCamera]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testRecertifyingIsWhatKeeps]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testRecertifyingIsWhatKeeps]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheEntryNoticeIsOneSentenceAndDismissible]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheEntryNoticeIsOneSentenceAndDismissible]' passed (0.007 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheFootprintIsDrawnAtTheRadiusTheHitTestUses]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheFootprintIsDrawnAtTheRadiusTheHitTestUses]' passed (0.019 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheGestureLayerRoutesByContactKind]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheGestureLayerRoutesByContactKind]' passed (0.054 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheNoteAutoDismisses]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheNoteAutoDismisses]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheNoteNeverLandsBehindAnyOtherChrome]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheNoteNeverLandsBehindAnyOtherChrome]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheNoteRuleIsSharedWithTheLatticePage]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheNoteRuleIsSharedWithTheLatticePage]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testThePageHasNoRegionUIAtAll]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testThePageHasNoRegionUIAtAll]' passed (0.011 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testThePanelContainsOnlyBrushControls]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testThePanelContainsOnlyBrushControls]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testThePortraitPanelClearsTheActionCluster]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testThePortraitPanelClearsTheActionCluster]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheReceiptDrawerOverlapsNothing]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheReceiptDrawerOverlapsNothing]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheReceiptIsADrawerAboveRecertifyAndIsClosedAtRest]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheReceiptIsADrawerAboveRecertifyAndIsClosedAtRest]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheSpacingTokenIsStillTheSharedOne]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheSpacingTokenIsStillTheSharedOne]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheStandingProseBlocksAreGone]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheStandingProseBlocksAreGone]' passed (0.011 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheStandingTextWasCut]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheStandingTextWasCut]' passed (0.026 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheTintStrengthensWithEachStroke]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound3Tests testTheTintStrengthensWithEachStroke]' passed (0.000 seconds).
+Test Suite 'SmoothingRound3Tests' passed at 2026-08-12 22:44:06.721.
+	 Executed 27 tests, with 0 failures (0 unexpected) in 0.160 (0.163) seconds
+Test Suite 'SmoothingRound4EvidenceGen' started at 2026-08-12 22:44:06.721.
+Test Case '-[TopOptFlowsTests.SmoothingRound4EvidenceGen testWriteMeasuredLayoutAndFrames]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/SmoothingRound4EvidenceGen.swift:53: -[TopOptFlowsTests.SmoothingRound4EvidenceGen testWriteMeasuredLayoutAndFrames] : Test skipped - set TOPOPT_SMOOTHING_ROUND4_EVIDENCE=1
+Test Case '-[TopOptFlowsTests.SmoothingRound4EvidenceGen testWriteMeasuredLayoutAndFrames]' skipped (0.005 seconds).
+Test Suite 'SmoothingRound4EvidenceGen' passed at 2026-08-12 22:44:06.726.
+	 Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.005 (0.005) seconds
+Test Suite 'SmoothingRound4Tests' started at 2026-08-12 22:44:06.726.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAFingerDragPaintsWhilePencilOnlyIsOff]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAFingerDragPaintsWhilePencilOnlyIsOff]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAOneFingerDragCanAlwaysOrbit]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAOneFingerDragCanAlwaysOrbit]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragDrivesTheCameraWhenTheBrushIsOff]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragDrivesTheCameraWhenTheBrushIsOff]' passed (0.011 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragPaintsWhilePencilOnlyIsOn]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAPencilDragPaintsWhilePencilOnlyIsOn]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAStaleQueuedNoteIsDroppedRatherThanShownLate]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testAStaleQueuedNoteIsDroppedRatherThanShownLate]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testChangedTintsAreReuploaded]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testChangedTintsAreReuploaded]' passed (0.013 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testDiscardEmptiesTheNoteQueue]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testDiscardEmptiesTheNoteQueue]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testEverySiteThatRoutesADragAsksTheOneGate]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testEverySiteThatRoutesADragAsksTheOneGate]' passed (0.063 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testFrozenCornersStayLockedInTheViewerArrayHoweverManyPasses]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testFrozenCornersStayLockedInTheViewerArrayHoweverManyPasses]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testNotesQueueRatherThanStackOrOverwrite]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testNotesQueueRatherThanStackOrOverwrite]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testNoTwoPiecesOfChromeOverlap]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testNoTwoPiecesOfChromeOverlap]' passed (0.388 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testOrbitIsOfferedOnlyWhilePencilOnlyIsOff]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testOrbitIsOfferedOnlyWhilePencilOnlyIsOff]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testOrbitModeNeverMarksTheSurface]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testOrbitModeNeverMarksTheSurface]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheActionColumnIsOrderedByWidth]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheActionColumnIsOrderedByWidth]' passed (0.077 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheActionOrderIsTheSameInEveryState]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheActionOrderIsTheSameInEveryState]' passed (0.064 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheCloseButtonDismissesTheFailureBannerToo]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheCloseButtonDismissesTheFailureBannerToo]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheDesignBoxIsNotDrawnOnTheSmoothingPage]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheDesignBoxIsNotDrawnOnTheSmoothingPage]' passed (0.026 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheGateRoutesEveryOtherDragToTheCamera]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheGateRoutesEveryOtherDragToTheCamera]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheNoteIsTopCentreInBothOrientations]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheNoteIsTopCentreInBothOrientations]' passed (0.031 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testThePanelHugsItsContentAndClearsTheIdentityRows]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testThePanelHugsItsContentAndClearsTheIdentityRows]' passed (0.031 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testThePanelRendersTheConditionalModeSet]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testThePanelRendersTheConditionalModeSet]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testThePortraitPanelClearsTheActionColumn]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testThePortraitPanelClearsTheActionColumn]' passed (0.019 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheRefusedFingerIsExplainedOnceAtTheMomentItHappens]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheRefusedFingerIsExplainedOnceAtTheMomentItHappens]' passed (0.015 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheSmoothedSideSentenceIsANoteAndNotStandingProse]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheSmoothedSideSentenceIsANoteAndNotStandingProse]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheStrokeTintIsOrangeAndAddsTenPercentPerPass]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheStrokeTintIsOrangeAndAddsTenPercentPerPass]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheTintIsTheLengthTheRendererWillAccept]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheTintIsTheLengthTheRendererWillAccept]' passed (0.030 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheTintNeedsNoSolveNoPreviewAndNoCertification]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheTintNeedsNoSolveNoPreviewAndNoCertification]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheWholePathWorksForBothInputModes]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheWholePathWorksForBothInputModes]' passed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheWorkingStatusCarriesNoCloseButton]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRound4Tests testTheWorkingStatusCarriesNoCloseButton]' passed (0.004 seconds).
+Test Suite 'SmoothingRound4Tests' passed at 2026-08-12 22:44:07.529.
+	 Executed 29 tests, with 0 failures (0 unexpected) in 0.799 (0.803) seconds
+Test Suite 'SmoothingRungStalenessTests' started at 2026-08-12 22:44:07.529.
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testASmoothingOfOneRungIsNotCurrentForAnother]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testASmoothingOfOneRungIsNotCurrentForAnother]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testNothingKeptAndNothingSelectedSayNothing]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testNothingKeptAndNothingSelectedSayNothing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testTheModelRecordsWhichRungItSmoothedAndStalesAgainstALaterOne]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testTheModelRecordsWhichRungItSmoothedAndStalesAgainstALaterOne]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testTheSameRungOfADIFFERENTRunIsStale]' started.
+Test Case '-[TopOptFlowsTests.SmoothingRungStalenessTests testTheSameRungOfADIFFERENTRunIsStale]' passed (0.000 seconds).
+Test Suite 'SmoothingRungStalenessTests' passed at 2026-08-12 22:44:07.530.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'SmoothingStrokeCameraTests' started at 2026-08-12 22:44:07.530.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartDoesSettleAgain]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartDoesSettleAgain]' passed (0.143 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartStillReframesTheCamera]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testANewPartStillReframesTheCamera]' passed (0.139 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotMoveTheCamera]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotMoveTheCamera]' passed (0.132 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotRestartTheSettleAnimation]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testAStrokeDoesNotRestartTheSettleAnimation]' passed (0.129 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testFiveConsecutiveStrokesLeaveTheCameraWhereItWas]' passed (0.382 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheSignatureSeparatesAMovedSurfaceFromADifferentOne]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheSignatureSeparatesAMovedSurfaceFromADifferentOne]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheTopologyHashIgnoresThePositions]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTheTopologyHashIgnoresThePositions]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTogglingBackToTheOriginalDoesNotMoveTheCamera]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeCameraTests testTogglingBackToTheOriginalDoesNotMoveTheCamera]' passed (0.182 seconds).
+Test Suite 'SmoothingStrokeCameraTests' passed at 2026-08-12 22:44:08.639.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 1.108 (1.109) seconds
+Test Suite 'SmoothingStrokeLatencyEvidence' started at 2026-08-12 22:44:08.639.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeLatencyEvidence testStrokeLatencyOnHisVariant]' started.
+Test Case '-[TopOptFlowsTests.SmoothingStrokeLatencyEvidence testStrokeLatencyOnHisVariant]' passed (22.372 seconds).
+Test Suite 'SmoothingStrokeLatencyEvidence' passed at 2026-08-12 22:44:31.011.
+	 Executed 1 test, with 0 failures (0 unexpected) in 22.372 (22.372) seconds
+Test Suite 'SmoothingUsablePathTests' started at 2026-08-12 22:44:31.011.
+Test Case '-[TopOptFlowsTests.SmoothingUsablePathTests testTheWholePathOnHisOwnVariant]' started.
+Test Case '-[TopOptFlowsTests.SmoothingUsablePathTests testTheWholePathOnHisOwnVariant]' passed (30.017 seconds).
+Test Suite 'SmoothingUsablePathTests' passed at 2026-08-12 22:45:01.028.
+	 Executed 1 test, with 0 failures (0 unexpected) in 30.017 (30.018) seconds
+Test Suite 'SmoothingViewerTests' started at 2026-08-12 22:45:01.029.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testAVolumePreservingSmoothingHonestlyReportsNoMassChange]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testAVolumePreservingSmoothingHonestlyReportsNoMassChange]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testBothMassRowsPrintAtTheSameStatedResolution]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testBothMassRowsPrintAtTheSameStatedResolution]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testDiscardReturnsTheOriginalMeshToTheViewer]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testDiscardReturnsTheOriginalMeshToTheViewer]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testReportedMeshMassChangesWithTheSmoothedShape]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testReportedMeshMassChangesWithTheSmoothedShape]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheContentSignatureSeparatesThem]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheContentSignatureSeparatesThem]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheOriginalViewStillShowsTheOriginal]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheOriginalViewStillShowsTheOriginal]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheRendererGatesOnTheContentSignature]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheRendererGatesOnTheContentSignature]' passed (0.016 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheShippedSignatureCannotSeeALocalSmoothing]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheShippedSignatureCannotSeeALocalSmoothing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSignatureCoversTheIndexBufferAsWell]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSignatureCoversTheIndexBufferAsWell]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSignatureDoesNotUseAProcessSeededHasher]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSignatureDoesNotUseAProcessSeededHasher]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSignatureIsDeterministic]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSignatureIsDeterministic]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSmoothedViewMeshDiffersFromOriginalAfterRecertify]' started.
+Test Case '-[TopOptFlowsTests.SmoothingViewerTests testTheSmoothedViewMeshDiffersFromOriginalAfterRecertify]' passed (0.002 seconds).
+Test Suite 'SmoothingViewerTests' passed at 2026-08-12 22:45:01.064.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.029 (0.035) seconds
+Test Suite 'StageBackdropTests' started at 2026-08-12 22:45:01.064.
+Test Case '-[TopOptFlowsTests.StageBackdropTests testStageBackdropIsGated]' started.
+Test Case '-[TopOptFlowsTests.StageBackdropTests testStageBackdropIsGated]' passed (0.006 seconds).
+Test Case '-[TopOptFlowsTests.StageBackdropTests testStagePipelineBuilds]' started.
+Test Case '-[TopOptFlowsTests.StageBackdropTests testStagePipelineBuilds]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.StageBackdropTests testStageShaderCompiles]' started.
+Test Case '-[TopOptFlowsTests.StageBackdropTests testStageShaderCompiles]' passed (0.001 seconds).
+Test Suite 'StageBackdropTests' passed at 2026-08-12 22:45:01.075.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+Test Suite 'StreamedVariantVisibilityTests' started at 2026-08-12 22:45:01.075.
+Test Case '-[TopOptFlowsTests.StreamedVariantVisibilityTests testETAResolvesToANumberOnceARungHasCompleted]' started.
+Test Case '-[TopOptFlowsTests.StreamedVariantVisibilityTests testETAResolvesToANumberOnceARungHasCompleted]' passed (0.969 seconds).
+Test Case '-[TopOptFlowsTests.StreamedVariantVisibilityTests testSecondStreamedVariantAppearsWithoutLeavingTheProject]' started.
+Test Case '-[TopOptFlowsTests.StreamedVariantVisibilityTests testSecondStreamedVariantAppearsWithoutLeavingTheProject]' passed (0.893 seconds).
+Test Case '-[TopOptFlowsTests.StreamedVariantVisibilityTests testStreamedVariantsStillSurviveLeavingAnInFlightRun]' started.
+Test Case '-[TopOptFlowsTests.StreamedVariantVisibilityTests testStreamedVariantsStillSurviveLeavingAnInFlightRun]' passed (0.001 seconds).
+Test Suite 'StreamedVariantVisibilityTests' passed at 2026-08-12 22:45:02.939.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 1.863 (1.864) seconds
+Test Suite 'StrutLineWidthTests' started at 2026-08-12 22:45:02.939.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testAnExplicitStrutWidthSurvivesTheInitialiserAndAClamp]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testAnExplicitStrutWidthSurvivesTheInitialiserAndAClamp]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testDefaultStrutWidthIsTheWiderBeadByRule]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testDefaultStrutWidthIsTheWiderBeadByRule]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testEditingAWallBeadDoesNotMoveAStoredStrutWidth]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testEditingAWallBeadDoesNotMoveAStoredStrutWidth]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testMigrationUsesTheProjectsOwnBeadsNotTheShippedOnes]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testMigrationUsesTheProjectsOwnBeadsNotTheShippedOnes]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testNoLatticeLineWidthSiteReadsAWallBead]' passed (0.123 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testPreLineWidthProjectStillDecodes]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testPreLineWidthProjectStillDecodes]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testProjectSavedBeforeTheFieldResolvesByTheRule]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testProjectSavedBeforeTheFieldResolvesByTheRule]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testRunRequestSendsTheStrutWidthAndKeepsTheWallBeads]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testRunRequestSendsTheStrutWidthAndKeepsTheWallBeads]' passed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testStrutWidthChangesTheLatticeSpecItProduces]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testStrutWidthChangesTheLatticeSpecItProduces]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testStrutWidthFollowsTheMachineNotAConstant]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testStrutWidthFollowsTheMachineNotAConstant]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testStrutWidthRoundTripsAndOverridesTheRuleOnceStated]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testStrutWidthRoundTripsAndOverridesTheRuleOnceStated]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testWallLoopConsumersStillCarryTheWallBead]' started.
+Test Case '-[TopOptFlowsTests.StrutLineWidthTests testWallLoopConsumersStillCarryTheWallBead]' passed (0.009 seconds).
+Test Suite 'StrutLineWidthTests' passed at 2026-08-12 22:45:03.085.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.145 (0.146) seconds
+Test Suite 'TapOverselectCaptureTests' started at 2026-08-12 22:45:03.085.
+Test Case '-[TopOptFlowsTests.TapOverselectCaptureTests testCaptureShelfBracketTapBeforeAfter]' started.
+Test Case '-[TopOptFlowsTests.TapOverselectCaptureTests testCaptureShelfBracketTapBeforeAfter]' passed (0.245 seconds).
+Test Suite 'TapOverselectCaptureTests' passed at 2026-08-12 22:45:03.330.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.245 (0.245) seconds
+Test Suite 'TopOptDesignTests' started at 2026-08-12 22:45:03.330.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testAccentOptionsMatchDesignAppearanceSet]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testAccentOptionsMatchDesignAppearanceSet]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testBlurRadii]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testBlurRadii]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testCorePalette]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testCorePalette]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testGlassSurfaces]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testGlassSurfaces]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testGroupPaletteMatchesDesignCOLORS]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testGroupPaletteMatchesDesignCOLORS]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testLiquidGlassIntensityClamps]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testLiquidGlassIntensityClamps]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testLiquidGlassTintTokens]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testLiquidGlassTintTokens]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testOpacityKeepsChannelsChangesAlpha]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testOpacityKeepsChannelsChangesAlpha]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testProgressBarClampsValue]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testProgressBarClampsValue]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testRadii]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testRadii]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testRGBAHexDecodesToChannels]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testRGBAHexDecodesToChannels]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testShadowTokens]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testShadowTokens]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testSpacingScale]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testSpacingScale]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testStrokesAndFills]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testStrokesAndFills]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testTextRampOpacities]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testTextRampOpacities]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testToastDwell]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testToastDwell]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testTypeSizes]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testTypeSizes]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testTypeWeightsAndTracking]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testTypeWeightsAndTracking]' passed (0.000 seconds).
+Test Case '-[TopOptDesignTests.TopOptDesignTests testViewsInstantiate]' started.
+Test Case '-[TopOptDesignTests.TopOptDesignTests testViewsInstantiate]' passed (0.000 seconds).
+Test Suite 'TopOptDesignTests' passed at 2026-08-12 22:45:03.334.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'TopOptKitTests' started at 2026-08-12 22:45:03.334.
+Test Case '-[TopOptKitTests.TopOptKitTests testAmbiguousJunctionIsRefusedWithTheRealReason]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testAmbiguousJunctionIsRefusedWithTheRealReason]' passed (0.003 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testBridgeSmoke]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testBridgeSmoke]' passed (0.001 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testCoreVersionNonEmpty]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testCoreVersionNonEmpty]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testDuplicateFacetMeshRepairsAndImports]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testDuplicateFacetMeshRepairsAndImports]' passed (0.002 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testExportSTLRoundTrip]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testExportSTLRoundTrip]' passed (0.002 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testImportBrokenSTLIsRefusedWithADiagnosis]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testImportBrokenSTLIsRefusedWithADiagnosis]' passed (0.001 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testImportCubeSTL]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testImportCubeSTL]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testImportMissingFileThrows]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testImportMissingFileThrows]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testImportStepFaces]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testImportStepFaces]' passed (0.016 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testInspectCleanSTLIsAcceptable]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testInspectCleanSTLIsAcceptable]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testLoadMaterials]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testLoadMaterials]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testLoadMaterialsMissingFileThrows]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testLoadMaterialsMissingFileThrows]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMaskStepFace]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testMaskStepFace]' passed (0.366 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMaskStepFaceBadDepthThrows]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testMaskStepFaceBadDepthThrows]' passed (0.007 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMaskStepFaceOutOfRangeThrows]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testMaskStepFaceOutOfRangeThrows]' passed (0.008 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticCancel]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticCancel]' passed (0.017 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticLoadCaseDesignBoxExpandsTheGrid]' started.
+[loadcase] load-group 0: faces=1 |F|=5N voxels_tagged=70 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=105 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=5N voxels_tagged=70 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=105 (structural pad, NOT a face protection)
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticLoadCaseDesignBoxExpandsTheGrid]' passed (36.085 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticLoadCaseUsesDeclaredForces]' started.
+[loadcase] load-group 0: faces=1 |F|=5N voxels_tagged=44 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=GROWTH rungs=[1.55,1.25,1.10] anchor_pad=1 — add as little plastic as possible to reach the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=272 (structural pad, NOT a face protection)
+[loadcase] growth design box AUTO-DERIVED (none drawn): min=(-35,-25,-5) max=(35,25,65) mm spacing=5
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticLoadCaseUsesDeclaredForces]' passed (54.035 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticResultsFields]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticResultsFields]' passed (1.773 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticUnknownMaterialThrows]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticUnknownMaterialThrows]' passed (0.001 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticWithProgress]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testMinimizePlasticWithProgress]' passed (1.798 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testPseudoFaceIDsAreDeterministicAcrossReimports]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testPseudoFaceIDsAreDeterministicAcrossReimports]' passed (0.001 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testRescalePartAppliesAUnitChoice]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testRescalePartAppliesAUnitChoice]' passed (0.001 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testSmallHoleMeshRepairsAndImports]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testSmallHoleMeshRepairsAndImports]' passed (0.002 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testStepImportProducesMeshOnThisPlatform]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testStepImportProducesMeshOnThisPlatform]' passed (0.010 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testTagStepFace]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testTagStepFace]' passed (0.119 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testTagStepFaceOutOfRangeThrows]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testTagStepFaceOutOfRangeThrows]' passed (0.010 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testVoxelizeBadResolutionThrows]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testVoxelizeBadResolutionThrows]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testVoxelizeCube]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testVoxelizeCube]' passed (0.000 seconds).
+Test Case '-[TopOptKitTests.TopOptKitTests testWallSizedHoleIsRefusedAfterSafeCapping]' started.
+Test Case '-[TopOptKitTests.TopOptKitTests testWallSizedHoleIsRefusedAfterSafeCapping]' passed (0.001 seconds).
+Test Suite 'TopOptKitTests' passed at 2026-08-12 22:46:37.601.
+	 Executed 30 tests, with 0 failures (0 unexpected) in 94.263 (94.267) seconds
+Test Suite 'TransformGizmoTests' started at 2026-08-12 22:46:37.601.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testArrowheadsPickTheirAxis]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testArrowheadsPickTheirAxis]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testAxisAndPlaneMapsMatchPrimitiveGizmo]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testAxisAndPlaneMapsMatchPrimitiveGizmo]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testDegenerateSizeMisses]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testDegenerateSizeMisses]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testEmptyMarginMisses]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testEmptyMarginMisses]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testHubCentreIsFreeMove]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testHubCentreIsFreeMove]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testPlaneSquarePicksItsPlane]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testPlaneSquarePicksItsPlane]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testRibbonPicksRotate]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testRibbonPicksRotate]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testShaderIsGeneratedFromTheSingleConstantSource]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testShaderIsGeneratedFromTheSingleConstantSource]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testShaftPicksItsAxis]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testShaftPicksItsAxis]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testTouchTargetsAreFingerSized]' started.
+Test Case '-[TopOptFlowsTests.TransformGizmoTests testTouchTargetsAreFingerSized]' passed (0.000 seconds).
+Test Suite 'TransformGizmoTests' passed at 2026-08-12 22:46:37.604.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'UndoHistoryTests' started at 2026-08-12 22:46:37.604.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testCanUndoNowEnablesImmediatelyOnEditBeforeDebounce]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testCanUndoNowEnablesImmediatelyOnEditBeforeDebounce]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testCommitRecordsOnlyRealChanges]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testCommitRecordsOnlyRealChanges]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testDebouncedAutoCommitRecordsSettledEdit]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testDebouncedAutoCommitRecordsSettledEdit]' passed (0.607 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testDepthBoundDropsOldest]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testDepthBoundDropsOldest]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testNewCommitClearsRedo]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testNewCommitClearsRedo]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testPerformUndoRedoRestoresSelection]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testPerformUndoRedoRestoresSelection]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testPerformUndoRestoresDesignBoxAndForce]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testPerformUndoRestoresDesignBoxAndForce]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testResetSeedsBaselineWithNoHistory]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testResetSeedsBaselineWithNoHistory]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testUndoBaselineIsRestoredStateNotEmpty]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testUndoBaselineIsRestoredStateNotEmpty]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testUndoRedoRoundTrip]' started.
+Test Case '-[TopOptFlowsTests.UndoHistoryTests testUndoRedoRoundTrip]' passed (0.000 seconds).
+Test Suite 'UndoHistoryTests' passed at 2026-08-12 22:46:38.218.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.613 (0.614) seconds
+Test Suite 'VariantEntryGatingTests' started at 2026-08-12 22:46:38.218.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testADesignBoxRunIsLatticeableBecauseCoreCanDoIt]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testADesignBoxRunIsLatticeableBecauseCoreCanDoIt]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAGradedLatticeRunWithADesignBoxIsRefusedAtTheBUTTON]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAGradedLatticeRunWithADesignBoxIsRefusedAtTheBUTTON]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAHealthyWorkerRunEnablesBothEntries]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAHealthyWorkerRunEnablesBothEntries]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAllBlockingReasonsAreReportedNotJustTheFirst]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAllBlockingReasonsAreReportedNotJustTheFirst]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAStreamedVariantIsFullyUsableWhileTheLadderIsStillRunning]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testAStreamedVariantIsFullyUsableWhileTheLadderIsStillRunning]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testBothPageOpenersRefuseABlockedVariantBeforeOpeningAnything]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testBothPageOpenersRefuseABlockedVariantBeforeOpeningAnything]' passed (0.007 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testChoosingRimOnlyWarnsAndIsNotTheDefault]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testChoosingRimOnlyWarnsAndIsNotTheDefault]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testEveryBlockingPreconditionDisablesLatticeWithItsOwnReason]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testEveryBlockingPreconditionDisablesLatticeWithItsOwnReason]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testEveryBlockingPreconditionDisablesSmoothingWithItsOwnReason]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testEveryBlockingPreconditionDisablesSmoothingWithItsOwnReason]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testEveryUnavailabilityReasonIsDistinctAndSpecific]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testEveryUnavailabilityReasonIsDistinctAndSpecific]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testHalfARetentionPairIsRefused]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testHalfARetentionPairIsRefused]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testRimOnlyProducesNothingBecauseCoreAddsNoPlaneFaceOnAnyProductionPath]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testRimOnlyProducesNothingBecauseCoreAddsNoPlaneFaceOnAnyProductionPath]' passed (0.147 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheAppBlockTracksTheCoreRefusalInBothDirections]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheAppBlockTracksTheCoreRefusalInBothDirections]' passed (0.027 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheDesignBoxFactIsReadFromTheJobsOwnKey]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheDesignBoxFactIsReadFromTheJobsOwnKey]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheGateIsDeterministic]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheGateIsDeterministic]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheLatticeActionQueuesWhileTheWorkerIsBusyAndSaysSo]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheLatticeActionQueuesWhileTheWorkerIsBusyAndSaysSo]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheMachineIsStampedOnTheOutcomeAndSurfacedOnRunAndVariant]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheMachineIsStampedOnTheOutcomeAndSurfacedOnRunAndVariant]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheMachineSurvivesTheResultsRoundTrip]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheMachineSurvivesTheResultsRoundTrip]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheOnDeviceRefusalAndTheMachineAgree]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheOnDeviceRefusalAndTheMachineAgree]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheResultsEntryControlsAreGated]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheResultsEntryControlsAreGated]' passed (0.010 seconds).
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheSolvingMachineIsResolvedFromTheRunsOwnRecord]' started.
+Test Case '-[TopOptFlowsTests.VariantEntryGatingTests testTheSolvingMachineIsResolvedFromTheRunsOwnRecord]' passed (0.000 seconds).
+Test Suite 'VariantEntryGatingTests' passed at 2026-08-12 22:46:38.418.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.199 (0.201) seconds
+Test Suite 'VariantIdentityTravelsTests' started at 2026-08-12 22:46:38.418.
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testAContainerWithoutThisRungRefusesRatherThanFallingBackToTheRung]' started.
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testAContainerWithoutThisRungRefusesRatherThanFallingBackToTheRung]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testAGrowthVariantCarriesItsOwnAchievedFraction]' started.
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testAGrowthVariantCarriesItsOwnAchievedFraction]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testAReductionVariantCarriesItsOwnAchievedFraction]' started.
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testAReductionVariantCarriesItsOwnAchievedFraction]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testTheEmittedJobIsWrittenForCoreToParse]' started.
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testTheEmittedJobIsWrittenForCoreToParse]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testTheLadderRungNeverTravelsAsAVolumeFraction]' started.
+Test Case '-[TopOptFlowsTests.VariantIdentityTravelsTests testTheLadderRungNeverTravelsAsAVolumeFraction]' passed (0.000 seconds).
+Test Suite 'VariantIdentityTravelsTests' passed at 2026-08-12 22:46:38.420.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'VariantRetentionTests' started at 2026-08-12 22:46:38.420.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testANewRunNamesWhatItWillReplaceBeforeReplacingIt]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testANewRunNamesWhatItWillReplaceBeforeReplacingIt]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testAnOnDeviceRunDoesNotInheritThePreviousRunsRetentionPair]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testAnOnDeviceRunDoesNotInheritThePreviousRunsRetentionPair]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testARefusedRunDoesNotDestroyTheCompletedRunsVariants]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testARefusedRunDoesNotDestroyTheCompletedRunsVariants]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testASaveWhileTheRunHasNoOutcomeDoesNotOrphanThePersistedResults]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testASaveWhileTheRunHasNoOutcomeDoesNotOrphanThePersistedResults]' passed (0.031 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testAStalledRunReturnsThePreviousResultsOnlyWhenAbandoned]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testAStalledRunReturnsThePreviousResultsOnlyWhenAbandoned]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testASuccessfulRunReplacesThePreviousResults]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testASuccessfulRunReplacesThePreviousResults]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testCancellingANewRunDoesNotDestroyThePreviousOne]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testCancellingANewRunDoesNotDestroyThePreviousOne]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testEveryVariantSurvivesEveryKindOfSetupEdit]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testEveryVariantSurvivesEveryKindOfSetupEdit]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testStreamedVariantsDoNotSpliceOntoThePreviousRun]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testStreamedVariantsDoNotSpliceOntoThePreviousRun]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheDesignBoxVerdictComesFromTheRetainedJobNotTheLiveSetup]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheDesignBoxVerdictComesFromTheRetainedJobNotTheLiveSetup]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheGateCannotReachLiveProjectState]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheGateCannotReachLiveProjectState]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheInFlightRunsReportedPairIsAdoptedOnlyOnSuccess]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheInFlightRunsReportedPairIsAdoptedOnlyOnSuccess]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheOptimizeButtonRoutesThroughTheConfirmation]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheOptimizeButtonRoutesThroughTheConfirmation]' passed (0.012 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheRetainedJobComesBackWithTheRestoredVariants]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheRetainedJobComesBackWithTheRestoredVariants]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheWorkspaceBuildsTheFactsFromTheRunNotTheProject]' started.
+Test Case '-[TopOptFlowsTests.VariantRetentionTests testTheWorkspaceBuildsTheFactsFromTheRunNotTheProject]' passed (0.004 seconds).
+Test Suite 'VariantRetentionTests' passed at 2026-08-12 22:46:38.477.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.056 (0.057) seconds
+Test Suite 'ViewerProfileTests' started at 2026-08-12 22:46:38.477.
+Test Case '-[TopOptFlowsTests.ViewerProfileTests testFrameDrawCallCensus]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/ViewerProfileTests.swift:151: -[TopOptFlowsTests.ViewerProfileTests testFrameDrawCallCensus] : Test skipped - set TOPOPT_VIEWER_PROFILE_DIR to profile
+Test Case '-[TopOptFlowsTests.ViewerProfileTests testFrameDrawCallCensus]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ViewerProfileTests testProfileRealBracketVariants]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/ViewerProfileTests.swift:151: -[TopOptFlowsTests.ViewerProfileTests testProfileRealBracketVariants] : Test skipped - set TOPOPT_VIEWER_PROFILE_DIR to a topopt-cli --out directory to profile
+Test Case '-[TopOptFlowsTests.ViewerProfileTests testProfileRealBracketVariants]' skipped (0.000 seconds).
+Test Suite 'ViewerProfileTests' passed at 2026-08-12 22:46:38.478.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'ViewerRebuildProfileTests' started at 2026-08-12 22:46:38.478.
+Test Case '-[TopOptFlowsTests.ViewerRebuildProfileTests testCachedMeshIsGeometricallyIdentical]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/ViewerRebuildProfileTests.swift:98: -[TopOptFlowsTests.ViewerRebuildProfileTests testCachedMeshIsGeometricallyIdentical] : Test skipped - set TOPOPT_VIEWER_PROFILE_DIR to profile
+Test Case '-[TopOptFlowsTests.ViewerRebuildProfileTests testCachedMeshIsGeometricallyIdentical]' skipped (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerRebuildProfileTests testSelectedMeshPerBodyEvalCost]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/app/TopOptKit/Tests/TopOptFlowsTests/ViewerRebuildProfileTests.swift:98: -[TopOptFlowsTests.ViewerRebuildProfileTests testSelectedMeshPerBodyEvalCost] : Test skipped - set TOPOPT_VIEWER_PROFILE_DIR to a topopt-cli --out directory to profile
+Test Case '-[TopOptFlowsTests.ViewerRebuildProfileTests testSelectedMeshPerBodyEvalCost]' skipped (0.000 seconds).
+Test Suite 'ViewerRebuildProfileTests' passed at 2026-08-12 22:46:38.478.
+	 Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'ViewerTests' started at 2026-08-12 22:46:38.478.
+Test Case '-[TopOptFlowsTests.ViewerTests testAppModelClearsGeometryOnReject]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testAppModelClearsGeometryOnReject]' passed (0.178 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testAppModelRetainsImportedGeometry]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testAppModelRetainsImportedGeometry]' passed (0.023 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testBoundsOfEmptyIsEmpty]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testBoundsOfEmptyIsEmpty]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testBoundsOfUnitCube]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testBoundsOfUnitCube]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testCubeNormalsPointOutwardAndAreUnit]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testCubeNormalsPointOutwardAndAreUnit]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testCubeYieldsSixDistinctFaceNormals]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testCubeYieldsSixDistinctFaceNormals]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testElevationClampsAtPoles]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testElevationClampsAtPoles]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testEyeIsDistanceFromTarget]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testEyeIsDistanceFromTarget]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testFaceNormalOfSingleTriangleIsGeometric]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testFaceNormalOfSingleTriangleIsGeometric]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testFlatBufferHasThreeVerticesPerTriangle]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testFlatBufferHasThreeVerticesPerTriangle]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testFlatNormalsAreConstantPerTriangleAndEqualFaceNormal]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testFlatNormalsAreConstantPerTriangleAndEqualFaceNormal]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testFrameCentersAndFits]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testFrameCentersAndFits]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testFrameEmptyMeshStaysUsable]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testFrameEmptyMeshStaysUsable]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testInitClampsElevation]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testInitClampsElevation]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testNormalMatrixColumnsAreOrthonormal]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testNormalMatrixColumnsAreOrthonormal]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testNormalsIgnoreOutOfRangeIndices]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testNormalsIgnoreOutOfRangeIndices]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testOrbitTurnsAzimuthBySensitivity]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testOrbitTurnsAzimuthBySensitivity]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testPanIgnoresDegenerateViewport]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testPanIgnoresDegenerateViewport]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testPanMovesTargetInTheViewPlane]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testPanMovesTargetInTheViewPlane]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testPanSignsFollowTheCameraBasis]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testPanSignsFollowTheCameraBasis]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testPanThenOrbitOrbitsAboutTheNewTarget]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testPanThenOrbitOrbitsAboutTheNewTarget]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testRendererFlexDisplacesGeometry]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testRendererFlexDisplacesGeometry]' passed (0.029 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testRendererRasterizesMeshToPixels]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testRendererRasterizesMeshToPixels]' passed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testResetPanReturnsToFramedCentre]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testResetPanReturnsToFramedCentre]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testSingleTriangleNormal]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testSingleTriangleNormal]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testSmoothFlatBufferMatchesFlatPositionsButUsesSmoothNormals]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testSmoothFlatBufferMatchesFlatPositionsButUsesSmoothNormals]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testSmoothShadedViewerMeshLeavesGeometryUnchanged]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testSmoothShadedViewerMeshLeavesGeometryUnchanged]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testTargetProjectsToClipCenter]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testTargetProjectsToClipCenter]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testViewerMeshEmpty]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testViewerMeshEmpty]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testViewerMeshShape]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testViewerMeshShape]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testViewMatrixMapsEyeAndTarget]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testViewMatrixMapsEyeAndTarget]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testZoomClampsToLimits]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testZoomClampsToLimits]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerTests testZoomIgnoresNonPositiveFactor]' started.
+Test Case '-[TopOptFlowsTests.ViewerTests testZoomIgnoresNonPositiveFactor]' passed (0.000 seconds).
+Test Suite 'ViewerTests' passed at 2026-08-12 22:46:38.721.
+	 Executed 33 tests, with 0 failures (0 unexpected) in 0.241 (0.243) seconds
+Test Suite 'ViewerVisibilityRegressionTests' started at 2026-08-12 22:46:38.721.
+Test Case '-[TopOptFlowsTests.ViewerVisibilityRegressionTests testBodyRendersOpaqueByDefault]' started.
+Test Case '-[TopOptFlowsTests.ViewerVisibilityRegressionTests testBodyRendersOpaqueByDefault]' passed (0.026 seconds).
+Test Case '-[TopOptFlowsTests.ViewerVisibilityRegressionTests testResultsViewStartsFullyFormedAndOpaque]' started.
+Test Case '-[TopOptFlowsTests.ViewerVisibilityRegressionTests testResultsViewStartsFullyFormedAndOpaque]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewerVisibilityRegressionTests testStepImportHandsNonEmptyMeshToViewer]' started.
+Test Case '-[TopOptFlowsTests.ViewerVisibilityRegressionTests testStepImportHandsNonEmptyMeshToViewer]' passed (0.015 seconds).
+Test Suite 'ViewerVisibilityRegressionTests' passed at 2026-08-12 22:46:38.763.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.041 (0.042) seconds
+Test Suite 'ViewportKeepOutTests' started at 2026-08-12 22:46:38.763.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testBestCandidatePrefersHomeThenLeastOverlap]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testBestCandidatePrefersHomeThenLeastOverlap]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testBusyProjectBeforeAfterCaptureHasNoOverlap]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testBusyProjectBeforeAfterCaptureHasNoOverlap]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceKnobsSlideOffGizmoAndDontStack]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceKnobsSlideOffGizmoAndDontStack]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingCentreFallback]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingCentreFallback]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingKeepsBoundaryOutsideRing]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingKeepsBoundaryOutsideRing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingPillSeatsBeyondKnob]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingPillSeatsBeyondKnob]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingPushesInsidePointOutToRing]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testClearanceRingPushesInsidePointOutToRing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testDensePileResolvesToZeroOverlap]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testDensePileResolvesToZeroOverlap]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testDeterministicIndependentOfInputOrder]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testDeterministicIndependentOfInputOrder]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testDeterministicSameInputSameOutput]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testDeterministicSameInputSameOutput]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testHigherPriorityStaysCloserToAnchorThanLower]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testHigherPriorityStaysCloserToAnchorThanLower]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testLeaderLineKicksInPastThreshold]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testLeaderLineKicksInPastThreshold]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testLocusKnobSlidesToClearCandidate]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testLocusKnobSlidesToClearCandidate]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testMaxShiftCapsDisplacementAndKeepsVisible]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testMaxShiftCapsDisplacementAndKeepsVisible]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testMinimumTouchIsEnforced]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testMinimumTouchIsEnforced]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testNoRoomHidesLowestPriorityNeverStacks]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testNoRoomHidesLowestPriorityNeverStacks]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testRawProjectedAnchorsOverlapButPassSeparatesThem]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testRawProjectedAnchorsOverlapButPassSeparatesThem]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testResolvesOnTouchBoundsNotDrawnBounds]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testResolvesOnTouchBoundsNotDrawnBounds]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testRigidGizmoNeverMovesAndDisplacesOthers]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testRigidGizmoNeverMovesAndDisplacesOthers]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testSlowOrbitIsStableAndWritesCapture]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testSlowOrbitIsStableAndWritesCapture]' passed (0.015 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testStabilizerConvergesMonotoneNoOvershoot]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testStabilizerConvergesMonotoneNoOvershoot]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testStabilizerDeadBandHoldsStill]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testStabilizerDeadBandHoldsStill]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testUncappedElementStillSeparatesFully]' started.
+Test Case '-[TopOptFlowsTests.ViewportKeepOutTests testUncappedElementStillSeparatesFully]' passed (0.000 seconds).
+Test Suite 'ViewportKeepOutTests' passed at 2026-08-12 22:46:38.784.
+	 Executed 23 tests, with 0 failures (0 unexpected) in 0.019 (0.021) seconds
+Test Suite 'WorkspaceInteractionTests' started at 2026-08-12 22:46:38.784.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testMultiFaceLoopNeverPullsFacesFromASetGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testMultiFaceLoopNeverPullsFacesFromASetGroup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testSelectedCommittedGroupGrowsOnTap]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testSelectedCommittedGroupGrowsOnTap]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAFaceInTheActiveGroupDeselectsIt]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAFaceInTheActiveGroupDeselectsIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAnotherGroupsFaceReselectsItWithoutStealing]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAnotherGroupsFaceReselectsItWithoutStealing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapDeselectDoesNotTouchInactiveGroups]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapDeselectDoesNotTouchInactiveGroups]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceAfterCommitStartsAFreshGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceAfterCommitStartsAFreshGroup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceGrowsAPendingSelection]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceGrowsAPendingSelection]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceWithNothingActiveStartsAGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceWithNothingActiveStartsAGroup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapTheOnlyFaceInTheActiveGroupDropsTheGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapTheOnlyFaceInTheActiveGroupDropsTheGroup]' passed (0.000 seconds).
+Test Suite 'WorkspaceInteractionTests' passed at 2026-08-12 22:46:38.786.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'TopOptKitPackageTests.xctest' failed at 2026-08-12 22:46:38.786.
+	 Executed 1497 tests, with 22 tests skipped and 8 failures (0 unexpected) in 376.034 (376.257) seconds
+Test Suite 'All tests' failed at 2026-08-12 22:46:38.786.
+	 Executed 1497 tests, with 22 tests skipped and 8 failures (0 unexpected) in 376.034 (376.258) seconds
+e-separation-wizard-ced44e/evidence/2026-07-25-numeric-input/04_integer_pad.png
+NUMERIC-INPUT-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-07-25-numeric-input/02_pad_anchored_beside_chip.png
+NUMERIC-INPUT-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-07-25-numeric-input/03_replace_on_first_key.png
+NUMERIC-INPUT-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-07-25-numeric-input/01_number_pad.png
+PLANE-EXTENTS-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-07-26-plane-extents/02_before_after.png
+PLANE-EXTENTS-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-07-26-plane-extents/01_plane_row_length_width_depth.png
+Q3 EVIDENCE: |F|=58.839900970458984 N, load voxels=1024, anchor voxels=1024, maxStress=1.3260046998687578 MPa, maxDisp=0.0021794815385106484 mm, accepted=true
+Q4 EVIDENCE: analyze: the declared load case produced NO external load — every declared load group contributed nothing at resolution 32: group 0 (face 0, |F|=0 N): zero force — set a non-zero force on this load — nothing to certify under
+ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/docs/handoffs/assets/round6_3_gizmo_rotation.png
+ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/docs/handoffs/assets/round6_2_panel_no_wrap.png
+ROUND6-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/docs/handoffs/assets/round6_1_chips_off_handles.png
+GATE-DIAGNOSIS-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-08-02-gate-diagnosis-recommendations/wallmount_dialog_before_after.txt
+STROKE LATENCY ON HIS OWN VARIANT — rung 068
+
+BUILD: DEBUG — NOT the configuration the app ships. Re-run with
+       `swift test -c release --filter SmoothingStrokeLatencyEvidence`
+       for the numbers he actually feels.
+
+mesh   variant_068.stl: 14386084 bytes, 143862 vertices / 287720 triangles
+brush  every vertex at weight 1.0, strength 0.49 (Taubin pairs as resolved by taubin_params_for_strength)
+repeats per row: 5; every figure is ms PER STROKE
+
+stage                                  repeats    ms/stroke
+------------------------------------------------------------
+A  preview via PATH   — STL re-import        5     809.3
+A  preview via PATH   — smoothing            5      75.0
+A  preview via PATH   — TOTAL                5    1036.7
+B  preview via MEMORY — STL re-import        5       0.0
+B  preview via MEMORY — smoothing            5      77.5
+B  preview via MEMORY — TOTAL                5     406.6
+   ViewerMesh build (app side, both)         5    2497.5
+------------------------------------------------------------
+stroke release -> updated preview, BEFORE:   3534.2 ms
+stroke release -> updated preview, AFTER :   2904.1 ms
+removed: 630.2 ms per stroke (17.8% of the before figure)
+
+
+S1d — WHAT ELSE A PASS REBUILDS (not on the critical path above, but
+      paid on EVERY SwiftUI body evaluation, of which a stroke causes
+      several):
+   smoothBrush.viewerTints()  863160 entries      245.1 ms
+   the coordinator's array compare against the uploaded copy     62.3 ms
+
+The import share of the SHIPPED preview call: 91.5%
+moved vertices 143862 / 143862; max displacement 0.4449 mm
+HIS VARIANT: rung 068 — 143862 vertices / 287720 triangles
+HE SETS HIS VIEW: distance 181.5483, target (84.785, -28.061, 110.690)
+  stroke 1 -> rung 1, 20403 vertices moved, max 0.2681 mm, preview 520 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 2 -> rung 2, 20403 vertices moved, max 0.3715 mm, preview 467 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  stroke 3 -> rung 3, 20403 vertices moved, max 0.4221 mm, preview 449 ms (import 0 ms), camera UNCHANGED, Smoothed reachable with receipt=nil
+  toggled back to Original — camera UNCHANGED
+  renderer holds the page's geometry; settle ran ONCE for the whole session
+TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/docs/handoffs/assets/tap_overselect_before.png
+TAP-OVERSELECT-CAPTURE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/docs/handoffs/assets/tap_overselect_after.png
+STEP-IMPORT-PROOF l-bracket.step triangleCount=236 vertexCount=116 faceCount=10 watertight=true
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

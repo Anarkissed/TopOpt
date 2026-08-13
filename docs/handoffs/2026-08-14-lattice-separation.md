@@ -379,7 +379,7 @@ behaviour PR 331 refuted (22 → 22 on his part).
 | **R5** wizard and modal one state, failing test first | **MET.** `r5_r7_failing_first.txt` — the tests do not COMPILE against the pre-task model, the same shape as PR 328's L5: the API had no way to express the case. |
 | **R6** the sample is visible on entry | **MET.** 0 lit pixels → 61,794, through the shipping shader. `r6_sample_before_reveal0.png` / `r6_sample_after.png`. |
 | **R7** no wall of text | **MET. Longest string added: 3 words** — "Holds no material" and the out-of-regime headline "0.8 cells across". Asserted at ≤ 3 over every string this task adds. Stated honestly: the longest string the lattice stage can render is still `LatticeFaceRoleGate.Block.undeclared.reason` — "Give this face a role first", 6 words — which PR 328 wrote and this task did not touch. |
-| **R8** no verdict moves | **MET, structurally: `core/` is untouched.** `git diff --stat 9e96beb -- core/` is empty; every change is under `app/`. Core **119/119** (`ctest.txt`) — a regression check, not a change under test, and NOT a CI pass: this machine has no lib3mf so `export_3mf` and `threemf_import` do not REGISTER. Report it as 119/<CI's total>. |
+| **R8** no verdict moves | **MET, structurally: this branch does not touch `core/`.** `git diff --stat 726160c -- core/` is empty; every change is under `app/`. ★ The BASE moved, though — PR 331 changed core — so the suite was RE-RUN on the rebased tree rather than the pre-rebase number being quoted (`ctest.txt`). NOT a CI pass either way: this machine has no lib3mf, so `export_3mf` and `threemf_import` do not REGISTER. Report N/122, never N/N. |
 | **R9** never weaken an assertion | **MET.** `r9_assertion_census.txt` — every kind unchanged or up, nothing deleted. Two source-reading tests were UPDATED where a symbol was renamed, and both were STRENGTHENED in the same edit: the "no workspace chrome while a page is up" census renamed `latticeEntryButtonOverlay` → `stageNavigationButtonOverlay` **and gained the two overlays this task added**, and the design-box census kept its D5a assertions and **gained the lattice-stage term**. |
 | **R10** no unfilled placeholders, no scratch at root | **MET.** |
 | **R11** rebased on PR 331, base stated | **MET.** Base `726160c`; six commits rebased, one conflict, resolved by keeping BOTH surfaces. The rebase also surfaced a stale-vendor hang — see §8. |
@@ -387,8 +387,8 @@ behaviour PR 331 refuted (22 → 22 on his part).
 | **R13** a region and a face behave identically | **MET**, with the one difference ASSERTED rather than glossed: same refs list, same role chips, same three states, same depth resolution, same drawer builder — and `latticeReachesTheRun == false` on a region, shown as "Frozen, not latticed". |
 | **R14** PR 331's guards still fire | **MET.** `checkSliver` still refuses with its number; the small-face policy still DIMS rather than hides, in the new row list. |
 
-**The suites.** Core: **119/119** local (`ctest.txt`), on an untouched `core/`.
-App: **1459 executed, 22 skipped, 3 failures** — all three are
+**The suites.** Core: see `ctest.txt` — `core/` is untouched BY THIS BRANCH, but the base moved to PR 331, which DID change core, so the suite was re-run on the rebased tree rather than quoting the pre-rebase number.
+App: **1497 executed, 22 skipped, 3 failures** (on the REBASED tree — PR 331's 26 region tests and this task's 39 are both in that number) — all three are
 `AppModelTests.test*ThreeMF*`, and they fail because THIS MACHINE's core slice
 has no lib3mf ("3MF import requires lib3mf, which is not available in this
 build"). They failed identically on this branch's first run before any source
@@ -396,7 +396,7 @@ edit. I provisioned lib3mf to close the gap and the test bundle then failed to
 LINK with undefined `_lib3mf_*` — the known worktree trap — so I reverted to the
 3MF-free slice, which is three visible refusals instead of a bundle that will not
 build. **CI provisions lib3mf and runs the same `swift test`, so report this as
-1456/1459 local against CI's own denominator.**
+1494/1497 local against CI's own denominator.**
 
 ---
 
