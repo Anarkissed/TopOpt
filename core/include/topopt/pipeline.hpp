@@ -1327,6 +1327,20 @@ struct FrozenLatticeReport {
     bool in_validity_range = false;
     bool buildable_not_certifiable = false;
     bool refused = false;
+    // ★ WHERE THIS REGION'S CELL CAME FROM, and what it cost. `cell_mode` is
+    // "fixed" (the run's one cell) or "fit" (derived from this region's own
+    // thickness, so the homogenisation floor is cleared by construction).
+    // `fit_cell_mm` / `fit_min_density` are what a FIT would give, reported for
+    // EVERY region so a refusal under a fixed cell can name the cell that would
+    // have worked.
+    std::string cell_mode;
+    double cell_used_mm = 0.0;
+    bool fit_feasible = false;
+    double fit_cell_mm = 0.0;
+    double fit_min_density = 0.0;
+    // ★ The declared density had to be RAISED to print at the cell in force.
+    // Reported, never silent: the user asked for one mass and got another.
+    bool density_raised_to_print = false;
     std::string refusal;  // quotable, empty when in range
   };
   std::vector<Region> regions;

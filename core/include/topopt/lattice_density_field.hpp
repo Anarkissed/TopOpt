@@ -115,6 +115,35 @@ enum class LatticeRegionMode {
   Optimised,  // MODE 2: t(x) = sum_j beta_j psi_j(x), beta a design variable
 };
 
+// ── ★ WHERE THE REGION'S CELL COMES FROM ────────────────────────────────────
+//
+// ★ THIS IS THE DIFFERENCE BETWEEN A FEATURE THAT REFUSES AND ONE THAT WORKS.
+//
+// The cells-per-member floor is not a property of the region — it is a property
+// of the region AND the cell. A 6.8 mm wall cannot hold 5 cells at a 2 mm cell
+// and holds them comfortably at a 1.3 mm one. An earlier cut of this task took
+// ONE cell for the whole run and REFUSED every region that could not hold it,
+// which threw away regions that were perfectly latticeable at a cell derived
+// from their own thickness.
+//
+// `lattice_derive_cell_for_member` (lattice.hpp) has answered this since PR 302:
+// given a member width and the user's nozzle it returns the admissible (cell,
+// density) window, both ends. The COARSEST end — exactly N* cells across, at the
+// lightest density whose strut still prints there — is the minimum-mass
+// CERTIFIED lattice for that member, and it clears the homogenisation floor BY
+// CONSTRUCTION rather than by luck.
+enum class LatticeRegionCellMode {
+  // Use the run's single `frozen_lattice_cell_mm`. The region is REFUSED if it
+  // cannot hold N* cells at that cell. Honest, and usually the wrong question.
+  Fixed,
+  // ★ DERIVE the cell from THIS REGION'S OWN measured thickness, so it clears
+  // the floor by construction. The density floor comes with it: the lightest
+  // that still prints at the derived cell, at the user's own stated width.
+  Fit,
+};
+
+const char* lattice_region_cell_mode_name(LatticeRegionCellMode m);
+
 const char* lattice_region_mode_name(LatticeRegionMode m);
 
 // One declared region of the frozen set. `voxels` is not stored here — the
@@ -134,6 +163,11 @@ struct LatticeRegionSpec {
   // `resolve_lattice_density_field` intersects with the band.
   double optimised_rho_min = 0.0;
   double optimised_rho_max = 0.0;
+
+  // Where this region's cell comes from. `Fixed` (the default) is the run's one
+  // cell and is the conservative reading; `Fit` derives it from the region's own
+  // thickness so the homogenisation floor is cleared by construction.
+  LatticeRegionCellMode cell_mode = LatticeRegionCellMode::Fixed;
 };
 
 // ── the beta field (MODE 2) ─────────────────────────────────────────────────
@@ -214,6 +248,23 @@ struct LatticeRegionValidity {
   // density) pair in the band — the number a user acts on when refused.
   double min_member_width_certifiable_mm = 0.0;
 
+  // ── ★ THE FITTED CELL: what this region could hold if the cell were derived
+  // from ITS OWN thickness rather than taken from the run (see
+  // LatticeRegionCellMode). Populated whether or not the region asked for it, so
+  // a REFUSAL under a fixed cell can name the cell that would have worked
+  // instead of just saying no.
+  //
+  // `fit_cell_mm` is the COARSEST admissible cell — exactly N* cells across the
+  // member — and `fit_min_density` is the lightest density whose strut still
+  // prints there at the user's own stated width. Together they are the
+  // MINIMUM-MASS CERTIFIED lattice for this member. Both 0 when no (cell,
+  // density) pair in the band fits the member at this nozzle, which is the one
+  // case a finer cell cannot rescue.
+  bool fit_feasible = false;
+  double fit_cell_mm = 0.0;
+  double fit_min_density = 0.0;
+  double fit_strut_diameter_mm = 0.0;
+
   // ★ THE SECOND, INDEPENDENT BAR: PRINTABILITY. Homogenisation asks whether the
   // member is thick enough for the law; this asks whether the STRUT comes out of
   // the nozzle at all. They bind from opposite directions — a coarser cell helps
@@ -257,6 +308,15 @@ struct ResolvedLatticeDensityField {
   // certification path needs no second contract.
   std::vector<char> mask;
   std::vector<double> rho;
+  // ★ THE PER-VOXEL CELL (mm), for a region whose cell was FITTED to its own
+  // thickness. Empty when every emitting region used the run's single cell —
+  // then the caller passes its scalar and nothing downstream changes. When
+  // non-empty it is exactly `LatticePosture::cell_size_field`, the SWEPT posture
+  // that has existed since 2026-08-01-lattice-cell-size-sweep, so the
+  // certification's cells-per-member guard asks each voxel about ITS OWN cell
+  // instead of one number for the whole part — which is the honest question for a
+  // part whose regions were fitted separately.
+  std::vector<double> cell_mm;
 
   std::size_t latticed_voxels = 0;
   // Mass-equivalent voxels the field FREES: sum over latticed voxels of (1 - rho).
@@ -270,6 +330,11 @@ struct ResolvedLatticeDensityField {
 
   // Regions refused because they are outside the law's validity range, by id.
   std::vector<int> refused_region_ids;
+  // Per region, in `regions` order: the cell actually used, and whether the
+  // declared density had to be RAISED to print at it. A raise is reported, never
+  // silent — the user asked for a mass and got a different one.
+  std::vector<double> region_cell_mm;
+  std::vector<char> region_density_raised;
 
   bool empty() const { return latticed_voxels == 0; }
 };
@@ -292,11 +357,20 @@ struct ResolvedLatticeDensityField {
 // Throws std::invalid_argument on a size mismatch, a duplicate region id, a
 // non-finite declared density, or a beta field whose coefficient count disagrees
 // with its lattice.
+// `validity` (optional, parallel to `regions`) carries the FITTED cell and its
+// density floor from `lattice_region_validity`. It is REQUIRED for any region in
+// cell mode Fit — a fitted region with nothing to fit to is a declaration error,
+// not a fallback to the run's cell — and ignored for the rest. When supplied, a
+// Declared density below the fitted cell's printable floor is RAISED to it and
+// the raise is reported (`region_density_raised`), because a fitted cell changes
+// which densities print and silently emitting an unprintable strut is the one
+// outcome a mass feature must not have.
 ResolvedLatticeDensityField resolve_lattice_density_field(
     const VoxelGrid& grid, const std::vector<int>& region_id,
     const std::vector<LatticeRegionSpec>& regions, LatticeTopology topo,
     const LatticeBetaField* beta, const std::vector<char>* only_where,
-    const std::vector<int>& refused);
+    const std::vector<int>& refused,
+    const std::vector<LatticeRegionValidity>* validity = nullptr);
 
 // d rho_e / d beta_j for every latticed voxel of an Optimised region, as a sparse
 // matrix in the same CSR shape `plsm_build_A` produces (rows = voxels of the grid,

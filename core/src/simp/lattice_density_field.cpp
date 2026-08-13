@@ -21,6 +21,15 @@ const char* lattice_region_mode_name(LatticeRegionMode m) {
   throw std::logic_error("lattice_region_mode_name: unnamed LatticeRegionMode");
 }
 
+const char* lattice_region_cell_mode_name(LatticeRegionCellMode m) {
+  switch (m) {
+    case LatticeRegionCellMode::Fixed: return "fixed";
+    case LatticeRegionCellMode::Fit: return "fit";
+  }
+  throw std::logic_error(
+      "lattice_region_cell_mode_name: unnamed LatticeRegionCellMode");
+}
+
 double lattice_density_heaviside(double t, double steepness) {
   if (!(steepness > 0.0))
     throw std::invalid_argument(
@@ -183,14 +192,26 @@ std::vector<LatticeRegionValidity> lattice_region_validity(
     v.fraction_above_floor =
         static_cast<double>(above) / static_cast<double>(w.size());
 
-    // The thinnest member that clears the CERTIFIABLE floor at this nozzle, at
-    // any (cell, density) pair in the band. `lattice_derive_cell_for_member`
-    // refuses a non-positive width, and a region whose median width is 0 is a
-    // region of unprinted voxels — reported, not passed on.
+    // ★ THE FITTED CELL, and the thinnest member that clears the CERTIFIABLE
+    // floor at this nozzle. `lattice_derive_cell_for_member` answers both from
+    // the region's OWN width: the coarsest admissible cell is exactly N* cells
+    // across, and the lightest density whose strut still prints there is the
+    // minimum-mass certified lattice for that member.
+    //
+    // Computed for EVERY region, whatever cell mode it asked for, so a refusal
+    // under a fixed cell can name the cell that WOULD have worked rather than
+    // just saying no. It refuses a non-positive width, and a region whose median
+    // width is 0 is a region of unprinted voxels — reported, not passed on.
     if (v.member_width_median_mm > 0.0) {
       const LatticeCellDerivation d = lattice_derive_cell_for_member(
           topo, v.member_width_median_mm, min_extrudable_width_mm);
       v.min_member_width_certifiable_mm = d.min_member_width_certifiable_mm;
+      v.fit_feasible = d.feasible;
+      if (d.feasible) {
+        v.fit_cell_mm = d.lightest_cell_size_mm;
+        v.fit_min_density = d.lightest_relative_density;
+        v.fit_strut_diameter_mm = d.lightest_strut_diameter_mm;
+      }
     }
 
     v.in_validity_range = v.cells_per_member_median >= floor_cert;
@@ -198,20 +219,40 @@ std::vector<LatticeRegionValidity> lattice_region_validity(
         !v.in_validity_range && v.cells_per_member_median >= floor_build;
     if (!v.in_validity_range) {
       char buf[512];
-      std::snprintf(
-          buf, sizeof buf,
-          "region %d spans %.3f mm at the median, which is %.2f cells per member "
-          "at a %.3f mm cell — below the %.1f-cell homogenisation floor the "
-          "certificate needs%s. The rho->stiffness law is OUT OF ITS VALIDITY "
-          "RANGE here: no density in the band is certifiable for this member "
-          "until it is at least %.4f mm across (or the cell gets finer).",
-          v.id, v.member_width_median_mm, v.cells_per_member_median, cell_mm,
-          floor_cert,
-          v.buildable_not_certifiable
-              ? " (it clears the percolation floor, so it is BUILDABLE AND "
-                "UNCERTIFIABLE, not un-latticeable)"
-              : "",
-          v.min_member_width_certifiable_mm);
+      // ★ A REFUSAL MUST CARRY THE NUMBER THAT FIXES IT. When the region WOULD
+      // work at a cell derived from its own thickness, say so and give that
+      // cell — "too thin for a 2 mm cell" and "cannot be latticed" are very
+      // different statements and only one of them is usually true.
+      if (v.fit_feasible) {
+        std::snprintf(
+            buf, sizeof buf,
+            "region %d spans %.3f mm at the median, which is %.2f cells per "
+            "member at the run's %.3f mm cell — below the %.1f-cell "
+            "homogenisation floor the certificate needs. ★ IT FITS AT ITS OWN "
+            "CELL: at %.4f mm this member holds exactly %.1f cells, and the "
+            "lightest density that still prints there at a %.3f mm strut width "
+            "is %.4f (strut %.4f mm). Set this region's cell mode to FIT, or "
+            "lower the run's cell to %.4f mm.",
+            v.id, v.member_width_median_mm, v.cells_per_member_median, cell_mm,
+            floor_cert, v.fit_cell_mm, floor_cert, min_extrudable_width_mm,
+            v.fit_min_density, v.fit_strut_diameter_mm, v.fit_cell_mm);
+      } else {
+        std::snprintf(
+            buf, sizeof buf,
+            "region %d spans %.3f mm at the median, which is %.2f cells per "
+            "member at a %.3f mm cell — below the %.1f-cell homogenisation floor "
+            "the certificate needs%s. ★ AND NO FINER CELL RESCUES IT: at a %.3f "
+            "mm strut width no (cell, density) pair in the band fits a member "
+            "this thin. It must be at least %.4f mm across, or the strut width "
+            "must come down.",
+            v.id, v.member_width_median_mm, v.cells_per_member_median, cell_mm,
+            floor_cert,
+            v.buildable_not_certifiable
+                ? " (it clears the percolation floor, so it is BUILDABLE AND "
+                  "UNCERTIFIABLE, not un-latticeable)"
+                : "",
+            min_extrudable_width_mm, v.min_member_width_certifiable_mm);
+      }
       v.refusal = buf;
     }
   }
@@ -222,7 +263,8 @@ ResolvedLatticeDensityField resolve_lattice_density_field(
     const VoxelGrid& grid, const std::vector<int>& region_id,
     const std::vector<LatticeRegionSpec>& regions, LatticeTopology topo,
     const LatticeBetaField* beta, const std::vector<char>* only_where,
-    const std::vector<int>& refused) {
+    const std::vector<int>& refused,
+    const std::vector<LatticeRegionValidity>* validity) {
   const std::size_t n = grid.voxel_count();
   if (region_id.size() != n)
     throw std::invalid_argument(
@@ -242,7 +284,27 @@ ResolvedLatticeDensityField resolve_lattice_density_field(
   out.region_latticed_voxels.assign(regions.size(), 0);
   out.region_freed_mass_voxels.assign(regions.size(), 0.0);
   out.region_mean_rho.assign(regions.size(), 0.0);
+  out.region_cell_mm.assign(regions.size(), 0.0);
+  out.region_density_raised.assign(regions.size(), 0);
   out.refused_region_ids = refused;
+
+  if (validity != nullptr && validity->size() != regions.size())
+    throw std::invalid_argument(
+        "resolve_lattice_density_field: validity size != regions size — it is "
+        "parallel to `regions` or it is absent");
+
+  // ★ A FITTED REGION NEEDS SOMETHING TO FIT TO. Falling back to the run's cell
+  // would silently give it the very cell it was declared Fit to escape.
+  for (const LatticeRegionSpec& r : regions) {
+    if (r.cell_mode != LatticeRegionCellMode::Fit) continue;
+    if (std::find(refused.begin(), refused.end(), r.id) != refused.end()) continue;
+    if (r.mode == LatticeRegionMode::Solid) continue;
+    if (validity == nullptr)
+      throw std::invalid_argument(
+          "resolve_lattice_density_field: region " + std::to_string(r.id) +
+          " is in cell mode FIT but no validity was supplied to fit against "
+          "(run lattice_region_validity first and pass it)");
+  }
 
   // Nothing to emit at all? Leave `mask` / `rho` EMPTY rather than allocating two
   // grid-sized zero vectors, so a caller can test `empty()` and take the
@@ -285,6 +347,17 @@ ResolvedLatticeDensityField resolve_lattice_density_field(
         double lo = 0.0, hi = 0.0;
         region_band(r, topo, &lo, &hi);
 
+        // ★ THE CELL THIS REGION IS ACTUALLY BUILT AT, and the density floor
+        // that comes with it. A FITTED region takes the coarsest cell its own
+        // thickness can homogenise; everything else takes the run's.
+        double cell_here = 0.0, printable_floor = 0.0;
+        if (r.cell_mode == LatticeRegionCellMode::Fit) {
+          const LatticeRegionValidity& vv = (*validity)[it->second];
+          if (!vv.fit_feasible) continue;  // refused upstream; emit nothing
+          cell_here = vv.fit_cell_mm;
+          printable_floor = vv.fit_min_density;
+        }
+
         double rho;
         if (r.mode == LatticeRegionMode::Declared) {
           if (!std::isfinite(r.declared_density))
@@ -295,7 +368,19 @@ ResolvedLatticeDensityField resolve_lattice_density_field(
           // would silently turn "leave this solid" into "lattice it at 0.90".
           if (r.declared_density >= kLatticeSolidAt) continue;
           rho = std::min(hi, std::max(lo, r.declared_density));
+          // ★ RAISED TO PRINT, AND REPORTED. A fitted cell changes which
+          // densities come out of the nozzle; emitting a strut thinner than one
+          // bead because the user typed a lighter number is the one outcome a
+          // mass feature must not have. The raise is recorded per region so the
+          // receipt can say the user asked for one mass and got another.
+          if (printable_floor > 0.0 && rho < printable_floor) {
+            rho = std::min(hi, printable_floor);
+            out.region_density_raised[it->second] = 1;
+          }
         } else {
+          // MODE 2's band takes the fitted cell's printable floor as its LOWER
+          // bound, so the optimiser cannot choose a density that does not print.
+          if (printable_floor > 0.0) lo = std::max(lo, std::min(hi, printable_floor));
           idx.clear();
           w.clear();
           plsm_support_of(beta->lattice, beta->basis, static_cast<double>(i),
@@ -308,6 +393,11 @@ ResolvedLatticeDensityField resolve_lattice_density_field(
 
         out.mask[e] = 1;
         out.rho[e] = rho;
+        if (cell_here > 0.0) {
+          if (out.cell_mm.empty()) out.cell_mm.assign(n, 0.0);
+          out.cell_mm[e] = cell_here;
+          out.region_cell_mm[it->second] = cell_here;
+        }
         ++out.latticed_voxels;
         out.freed_mass_voxels += 1.0 - rho;
         ++out.region_latticed_voxels[it->second];
@@ -326,6 +416,7 @@ ResolvedLatticeDensityField resolve_lattice_density_field(
     // EMPTY field so the caller's byte-identical test still fires.
     out.mask.clear();
     out.rho.clear();
+    out.cell_mm.clear();
   }
   return out;
 }

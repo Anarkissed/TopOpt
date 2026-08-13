@@ -384,6 +384,20 @@ add_test(NAME multiscale_material COMMAND test_multiscale_material)
 # solve; the two floors (homogenisation and printability) that bind in OPPOSITE
 # directions and are never merged into one verdict; the beta field's analytic
 # Jacobian against a central difference; and every refusal.
+# ★ BAR R1 as a GUARD, not a measurement: Lattice(f = 1.0) must be BYTE-IDENTICAL
+# to Solid, checked over a WHOLE minimize_plastic run — pins, material law,
+# volume budget, ladder, certification, receipt — on a synthetic wall that runs in
+# seconds. "Byte-identical" is scale-independent, so his 468k-voxel part learns
+# the same bit for hours of solve; this learns it on every CI build forever.
+# Carries its own POSITIVE CONTROL (the same arming at f = 0.30 must move the
+# design and the mass), so it cannot pass by the feature doing nothing.
+add_executable(test_frozen_lattice_c0 tests/validation/test_frozen_lattice_c0.cpp)
+target_link_libraries(test_frozen_lattice_c0 PRIVATE topopt)
+target_compile_definitions(test_frozen_lattice_c0 PRIVATE
+  MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+  SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+add_test(NAME frozen_lattice_c0 COMMAND test_frozen_lattice_c0)
+
 add_executable(test_lattice_density_field tests/unit/test_lattice_density_field.cpp)
 target_link_libraries(test_lattice_density_field PRIVATE topopt)
 target_compile_definitions(test_lattice_density_field PRIVATE

@@ -761,8 +761,28 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           G, options.frozen_lattice_region_id, options.frozen_lattice_regions,
           width, options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
           options.frozen_lattice_min_extrudable_width_mm);
-      for (const LatticeRegionValidity& v : fl_validity)
-        if (!v.in_validity_range) fl_refused.push_back(v.id);
+      // ★ REFUSE ONLY WHAT NO CELL CAN RESCUE. The cells-per-member floor is a
+      // property of the region AND the cell, not of the region alone: a 6.8 mm
+      // wall misses 5 cells at a 2 mm cell and clears them at a 1.3 mm one. An
+      // earlier cut of this task refused on the RUN'S cell and threw away every
+      // region that was perfectly latticeable at a cell derived from its own
+      // thickness — which on his part was the region holding 73% of the prize.
+      //
+      // So a region in cell mode FIT is refused only when
+      // `lattice_derive_cell_for_member` says NO (cell, density) pair in the band
+      // fits its member at the user's own stated strut width. That is the one
+      // case a finer cell cannot fix, and its remedy is a thicker member or a
+      // finer nozzle — which the refusal names.
+      for (std::size_t q = 0; q < fl_validity.size(); ++q) {
+        const LatticeRegionValidity& v = fl_validity[q];
+        const bool fits =
+            q < options.frozen_lattice_regions.size() &&
+                    options.frozen_lattice_regions[q].cell_mode ==
+                        LatticeRegionCellMode::Fit
+                ? v.fit_feasible
+                : v.in_validity_range;
+        if (!fits) fl_refused.push_back(v.id);
+      }
     }
     // ★ THE SECOND BAR, AND IT BINDS FROM THE OTHER DIRECTION: PRINTABILITY. A
     // density whose strut is thinner than one bead does not come out of the
@@ -778,6 +798,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
           options.frozen_lattice_min_extrudable_width_mm);
       for (LatticeRegionSpec& s : fl_specs) {
+        // ★ A FITTED REGION IS NOT JUDGED AT THE RUN'S CELL. Its density floor
+        // is the fitted cell's own, and `resolve_lattice_density_field` RAISES a
+        // lighter declaration to it and reports the raise. Refusing here would
+        // refuse it for failing a test about a cell it is not built at.
+        if (s.cell_mode == LatticeRegionCellMode::Fit) continue;
         if (s.mode == LatticeRegionMode::Declared &&
             s.declared_density < kLatticeSolidAt &&
             !lattice_density_printable(
@@ -827,7 +852,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     fl_field = resolve_lattice_density_field(
         G, options.frozen_lattice_region_id, fl_specs,
         options.frozen_lattice_topology, have_beta ? &beta_field : nullptr,
-        &frozen_solid, fl_refused);
+        &frozen_solid, fl_refused,
+        fl_validity.empty() ? nullptr : &fl_validity);
     fl_mask = fl_field.mask;
     fl_rho = fl_field.rho;
     fl_latticed_voxels = fl_field.latticed_voxels;
@@ -909,6 +935,21 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         r.in_validity_range = v.in_validity_range;
         r.buildable_not_certifiable = v.buildable_not_certifiable;
         r.refusal = v.refusal;
+        break;
+      }
+      r.cell_mode = lattice_region_cell_mode_name(spec.cell_mode);
+      r.cell_used_mm = q < fl_field.region_cell_mm.size() &&
+                               fl_field.region_cell_mm[q] > 0.0
+                           ? fl_field.region_cell_mm[q]
+                           : options.frozen_lattice_cell_mm;
+      r.density_raised_to_print =
+          q < fl_field.region_density_raised.size() &&
+          fl_field.region_density_raised[q] != 0;
+      for (const LatticeRegionValidity& v : fl_validity) {
+        if (v.id != spec.id) continue;
+        r.fit_feasible = v.fit_feasible;
+        r.fit_cell_mm = v.fit_cell_mm;
+        r.fit_min_density = v.fit_min_density;
         break;
       }
       r.refused =
@@ -2075,6 +2116,22 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         if (!fl_mask[e]) continue;
         ms_posture->mask[e] = 1;
         ms_posture->relative_density[e] = fl_rho[e];
+      }
+      // ★ AND THE FITTED CELL GOES WITH IT. `analyze_fixed_design`'s
+      // cells-per-member regime guard asks "how many cells across this member?",
+      // and on a run whose regions were each fitted to their own thickness there
+      // is no single right answer to ask it with. `LatticePosture::cell_size_field`
+      // is exactly the SWEPT posture that question needs (handoff
+      // 2026-08-01-lattice-cell-size-sweep) — each voxel judged at ITS OWN cell.
+      // Without this the certificate would judge a 1.3 mm-cell region against the
+      // run's 2 mm and report it out of regime when it is not.
+      if (!fl_field.cell_mm.empty()) {
+        if (ms_posture->cell_size_field.size() != G.voxel_count())
+          ms_posture->cell_size_field.assign(G.voxel_count(),
+                                             ms_posture->cell_size_mm);
+        for (std::size_t e = 0; e < fl_mask.size(); ++e)
+          if (fl_mask[e] && fl_field.cell_mm[e] > 0.0)
+            ms_posture->cell_size_field[e] = fl_field.cell_mm[e];
       }
     }
 

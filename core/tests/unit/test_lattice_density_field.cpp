@@ -153,13 +153,41 @@ int main() {
     CHECK(mid[0].buildable_not_certifiable,
           "and above the percolation floor — BUILDABLE AND UNCERTIFIABLE is a "
           "third verdict, not a rounding of the other two");
-    CHECK(!mid[0].refusal.empty() &&
-              mid[0].refusal.find("VALIDITY RANGE") != std::string::npos &&
-              mid[0].refusal.find("BUILDABLE AND UNCERTIFIABLE") != std::string::npos,
-          "the refusal must name what is wrong in words a receipt can quote");
+    // ★ 5 mm is below the thinnest member ANY cell can certify at this nozzle
+    // (5.8659 mm), so no finer cell rescues it and the refusal must SAY so —
+    // the remedy is a thicker member or a finer nozzle, not a cell change.
+    CHECK(!mid[0].fit_feasible,
+          "a 5 mm member cannot be fitted at a 0.45 mm strut width");
+    CHECK(mid[0].refusal.find("NO FINER CELL RESCUES IT") != std::string::npos,
+          "the refusal must say that the cell is not the lever here");
     CHECK(mid[0].min_member_width_certifiable_mm > 5.0,
           "and it must carry the number a user acts on: the thinnest member that "
           "COULD clear the floor at this nozzle");
+
+    // ★★ AND THE CASE THE WHOLE FEATURE TURNS ON: a member that MISSES the floor
+    // at the run's cell and CLEARS it at its own. 8 mm at a 2 mm cell is 4 cells
+    // — under the floor — but 8 mm is above the 5.8659 mm minimum, so a fitted
+    // cell of 8/5 = 1.6 mm holds exactly 5 cells. An earlier cut of this task
+    // refused this region outright; on his part that was the region holding 73%
+    // of the prize.
+    std::vector<double> fitme(g.voxel_count(), 8.0);
+    const std::vector<LatticeRegionValidity> fit = lattice_region_validity(
+        g, rid, {declared(1, 0.30)}, fitme, T, 2.0, 0.45);
+    CHECK(!fit[0].in_validity_range,
+          "8 mm at the RUN'S 2 mm cell is 4 cells — under the floor");
+    CHECK(fit[0].fit_feasible,
+          "★ but it FITS at a cell derived from its own thickness");
+    CHECK(std::fabs(fit[0].fit_cell_mm - 8.0 / 5.0) < 1e-9,
+          "the fitted cell is exactly N* cells across the member");
+    CHECK(fit[0].fit_min_density > 0.0 &&
+              lattice_density_printable(T, fit[0].fit_min_density,
+                                        fit[0].fit_cell_mm, 0.45),
+          "and the density that comes with it PRINTS at that cell — the fit "
+          "answers both bounds at once or it answers neither");
+    CHECK(fit[0].refusal.find("IT FITS AT ITS OWN CELL") != std::string::npos,
+          "★ and the refusal under the fixed cell must NAME the cell that works "
+          "— \"too thin for a 2 mm cell\" and \"cannot be latticed\" are very "
+          "different statements and only one of them is true here");
 
     // 1 mm at a 2 mm cell is 0.5 cells: under BOTH floors.
     std::vector<double> hair(g.voxel_count(), 1.0);
