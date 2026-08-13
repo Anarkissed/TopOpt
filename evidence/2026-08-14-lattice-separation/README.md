@@ -1,7 +1,8 @@
 # evidence — 2026-08-14-lattice-separation
 
 Handoff: `docs/handoffs/2026-08-14-lattice-separation.md`
-Branch base: `9e96beb`
+Branch base: **`726160c`** (PR 331 `face-regions`) — REBASED onto it when the
+interrupt withdrew §8. Original base `9e96beb`.
 
 | file | what it is |
 |---|---|
@@ -10,11 +11,11 @@ Branch base: `9e96beb`
 | `r6_sample_after.png` | The same mesh at `LatticeWizardReveal().value` = 1. **61,794 lit pixels.** |
 | `r9_assertion_census.txt` | R9 — assertion-message census by KIND, base vs branch. Every count unchanged or up. |
 | `app_tests.txt` | The `swift test --package-path app/TopOptKit` the `app-macos` CI job runs. |
-| `ctest.txt` | Core's suite. `core/` is UNTOUCHED on this branch (`git diff --stat 9e96beb -- core/` is empty), so this is a regression check, not a change under test. |
+| `ctest.txt` | Core's suite, **120/120** on the REBASED tree. `core/` is untouched by this branch (`git diff --stat 726160c -- core/` is empty) — but the base moved onto one that does touch it, so the suite is re-run rather than the pre-rebase 119/119 being quoted for a tree that no longer exists. |
 
 ## Two things to read with care
 
-**The three app failures are this machine, not this branch.** All three are
+**The three app failures are this machine, not this branch.** (1497 executed on the rebased tree — PR 331's 26 region tests and this task's 39 are both in it.) All three are
 `AppModelTests.test*ThreeMF*` and they fail with core's own message: "3MF import
 requires lib3mf, which is not available in this build". They failed identically
 on this branch before any source edit. Provisioning lib3mf here makes the test
