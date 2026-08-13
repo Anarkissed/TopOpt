@@ -694,12 +694,25 @@ grep: test assertion messages, registered ctest names, production refusal
 messages, the comparison-operator histogram inside `CHECK()`, and the harness's
 own refusals as one bag.
 
-**Production refusals went UP** — this task adds refusals (an untrustworthy
+Run against `main` **after merging it twice** — it moved under this task both
+times (PR 328's lattice-page redesign, then PR 329's solver-speed work), which is
+the trap `main-moves-under-long-tasks` records. A census against a stale base
+reports the OTHER branch's additions as this one's removals; the first run here
+did exactly that, flagging eight latch-re-arm assertions that were simply not in
+this tree yet.
+
+Against the merged tree: **nothing removed in any of the five sections.**
+Registered ctests **121 → 123** (`frozen_lattice_c0`, `lattice_density_field`),
+production refusals **418 → 445**, and no comparison operator inside `CHECK()`
+weakened.
+
+Production refusals went UP because this task adds them: an untrustworthy
 topology, a mismatched region-id size, a region in Optimised mode with no β
-field, a narrowing that empties the band, a `freed_mass_return` outside [0,1], a
-`lattice_relative_density` with no material law, and a lattice cell of zero when
-the floor is being enforced). **Nothing was removed.** The full run is in
-`evidence/…/r7_assertion_census.txt`.
+field, a fitted region with no validity to fit against, a narrowing that empties
+the band, a `freed_mass_return` outside [0,1], a `lattice_relative_density` with
+no material law, a lattice cell of zero when the floor is enforced, and — the one
+this task learned late — **an unset minimum extrudable strut width** (§1.2b).
+The full run is in `evidence/…/r7_assertion_census.txt`.
 
 ---
 
