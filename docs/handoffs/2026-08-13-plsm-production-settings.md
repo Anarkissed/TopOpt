@@ -971,7 +971,7 @@ would do to a part where the hierarchy builds.
 
 | bar | how it was met |
 |---|---|
-| **R1** byte-identical where nothing should change | `run_r1_byte_identity.sh` — one folder, two binaries, the BEFORE side a checkout of the merge-base. ★ The inherited script would have measured NOTHING (it stashes, and this branch's work is committed, so on a clean tree it saves nothing and never goes back); it now refuses a dirty tree and refuses `HEAD == merge-base` rather than passing vacuously. `run_info.json` is deliberately outside the byte comparison — this task ADDS keys to it — and the script diffs its KEYS instead, where `removed: none` is the bar. |
+| **R1** byte-identical where nothing should change | ★ **MET — see §7b.** design.bin, report.json and all four meshes BYTE-IDENTICAL; iterations.csv identical across 240 iterations and 44 columns; `run_info.json` 24 keys added, **0 removed, 0 shared values changed**. ★★ And it took THREE attempts to make the check mean anything — §7b is the retraction. |
 | **R2** the new sensitivity, finite-differenced | §2(g). Both functionals, five step sizes, on the SHIPPED header. It found the compliance weight wrong by 45–56%. |
 | **R3** every claim at both rungs | §4b throughout. Nominal 0.68 → printed 0.7973, nominal 0.26 → printed 0.5283, SIMP's own margins 3254.36 and 3014.12 read out of production's run of record by `tables.py`, never retyped. |
 | **R4** margin as a curve with its peak | §4b(e) prints the probe curve the rule actually watched, per rung. Mass, enclosed volume and CAD error in mm sit beside every roughness number in §4b(c). |
@@ -980,6 +980,71 @@ would do to a part where the hierarchy builds.
 | **R7** no assertion weakened or deleted | `assertion_census.sh`, a MESSAGE census: 3,344 test messages before and after, 121 ctests before and after, **0 removed**, 3 production refusals ADDED. |
 | **R8** root cause with file and line, no placeholders | §2(g) names `core/src/simp/plsm.cpp:104`; §6 names `core/include/topopt/job.hpp`. No scratch at the repository root; every large field lives outside the repo under `$SCRATCH`. |
 | **R9** separate commit for any review response | Nothing to respond to yet; the branch's history is one commit per finding. |
+
+## 7b. ★★ R1 — AND THE TWO WAYS IT PASSED WITHOUT MEASURING ANYTHING FIRST
+
+### the verdict that counts
+
+    BEFORE  9e96beb (the merge-base with main), checked out in place
+    AFTER   this branch, with the OLD defaults PINNED in the plsm block
+    binaries b13a13b9... vs 6b2692e7...   (checked DISTINCT by the script)
+
+| artefact | result |
+|---|---|
+| `design.bin` — every evaluated rung's density field | ★ **BYTE-IDENTICAL** (14,983,608 bytes) |
+| `report.json` — every margin, mass and verdict | ★ **BYTE-IDENTICAL** |
+| `variant_026 / 038 / 052 / 068 .stl` | ★ **BYTE-IDENTICAL** |
+| `iterations.csv`, computed columns | **IDENTICAL** across 240 iterations, 44 columns |
+| `run_info.json` | 24 keys added, **0 removed, 0 shared values changed** |
+
+★★ **WHAT THIS ESTABLISHES: EVERY DIFFERENCE THIS TASK PRODUCES COMES FROM A
+DEFAULT, NOT FROM AN UNINTENDED CHANGE TO THE MACHINERY.** The new binary,
+configured as the old one, reproduces the old one exactly — 240 iterations, every
+design byte, every mesh, every certificate. The new paths are genuinely opt-in.
+
+★ **The AFTER run's 240 iterations are themselves the proof the pinning took.**
+This task's defaults produce **200** (60/40/50/50, the margin-plateau rule
+firing). Had the plsm block been ignored, AFTER would have shown 200 and
+`stop_reason: margin-plateau`.
+
+★ **The excluded columns are excluded honestly.** `total_ms`, `solve_ms` and
+`fea_ms` DO differ between the two sides — this task fixed the PLSM path's blank
+timing block (§4b, and they read 0.000 on the BEFORE side by construction). They
+are wall clocks, the comparison excludes wall clocks on both sides for the reason
+it always did, and that is stated rather than left for a reader to notice.
+
+### ★★ AND IT PASSED VACUOUSLY TWICE BEFORE IT PASSED HONESTLY
+
+**Attempt 1 reported BYTE-IDENTICAL on every artefact and had compared one binary
+with itself.** Two independent causes, both now guarded in the script:
+
+1. ★ **`cmake --build build --target topopt-cli` IS A SILENT NO-OP.** The CMake
+   target is `topopt_cli`; `topopt-cli` is the OUTPUT FILE in the build
+   directory, so make finds no rule, sees the file, calls it up to date and exits
+   **0**. Neither side was ever rebuilt. The tell was `build/topopt-cli`'s mtime
+   never moving across a 3.5-hour run. ★ **This is a documented trap in this
+   repository and it still landed, because the command arrived INSIDE an
+   inherited script rather than being typed.**
+2. ★ **The CLI has no SIMP route.** `core/src/cli/main.cpp` (~line 429) sets
+   `job.has_plsm = true; job.plsm_enabled = true` unconditionally on `run` and
+   REFUSES `plsm.enabled: false`. The script's original premise — "the job
+   carries no plsm block, therefore `PlsmMode::Off` holds" — has been false since
+   PR 329. **Both sides ran the parametric path**, which is also how (1) was
+   caught: both `run_info.json` files said `ersatz: fraction`, and the base
+   commit has no such thing.
+
+★ **The guard that makes a repeat impossible**: the script hashes the binary on
+each side and REFUSES if they match. A pass now requires a real rebuild.
+
+★ **Attempt 2 aborted in 45 seconds** — the pinned job was written to `$SCRATCH`
+without the STEP beside it, and a job names its model relative to its own
+directory. `set -e` stopped the run and produced nothing. **A script that fails
+loudly on a real problem is the evidence the guards are live.**
+
+★ **SIMP's own byte-identity is NOT this script's to prove**, and `main.cpp` says
+why: `run_job` and `minimize_plastic` keep `PlsmMode::Off`, and *"22 test files
+call them IN-PROCESS with values pinned from SIMP designs ... those tests are the
+evidence that the SIMP code is unmoved."* That evidence is the ctest suite.
 
 ## 8. ★ IN PLAIN LANGUAGE
 

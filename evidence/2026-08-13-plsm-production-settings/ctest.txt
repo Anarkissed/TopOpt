@@ -1,0 +1,30 @@
+Test project /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/plsm-production-settings-ship-7e17ab/build
+        Start   1: materials_loader
+  1/119 Test   #1: materials_loader .................   Passed    0.45 sec
+        Start   2: stl_import
+  2/119 Test   #2: stl_import .......................   Passed    0.25 sec
+        Start   3: lattice_gen
+  3/119 Test   #3: lattice_gen ......................   Passed    0.96 sec
+        Start   4: lattice_boundary
+  4/119 Test   #4: lattice_boundary .................   Passed    0.37 sec
+        Start   5: lattice_clip_shell
+  5/119 Test   #5: lattice_clip_shell ...............   Passed    9.70 sec
+        Start   6: mesh_winding
+  6/119 Test   #6: mesh_winding .....................   Passed    0.25 sec
+        Start   7: lattice_void
+  7/119 Test   #7: lattice_void .....................   Passed    0.24 sec
+        Start   8: lattice_skin_freeform
+  8/119 Test   #8: lattice_skin_freeform ............   Passed   27.68 sec
+        Start   9: grading
+  9/119 Test   #9: grading ..........................   Passed    2.43 sec
+        Start  10: lattice_material_model
+ 10/119 Test  #10: lattice_material_model ...........   Passed    0.32 sec
+        Start  11: multiscale_material
+ 11/119 Test  #11: multiscale_material ..............   Passed    0.30 sec
+        Start  12: lattice_dehomog
+ 12/119 Test  #12: lattice_dehomog ..................   Passed    1.05 sec
+        Start  13: surface_stiffness_model
+ 13/119 Test  #13: surface_stiffness_model ..........   Passed    0.25 sec
+        Start  14: mesh_segmentation
+ 14/119 Test  #14: mesh_segmentation ................   Passed    0.23 sec
+        Start  15: face_overrides
