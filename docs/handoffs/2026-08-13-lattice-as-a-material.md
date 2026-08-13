@@ -966,6 +966,19 @@ part of the evidence.**
 The only genuine non-failures in the overnight log are **my own `pkill`** while
 re-ordering queues (`Terminated: 15`).
 
+Final state, `swift test`'s OWN exit code (not a pipeline's — `… | tail` returns
+`tail`'s status and can never fail): **`SWIFT_TEST_EXIT=0`, 1445 tests, 21
+skipped, 0 failures**, against a core rebuilt with `app/scripts/build_core.sh`
+after today's MMA change.
+
+★ **AND `swift test` REWRITES OTHER TASKS' EVIDENCE FILES.** It regenerated
+`2026-08-08-smoothing…/r3_usable_path.txt`, `…/s1c_stroke_latency.txt` and
+`2026-08-12-lattice-page-redesign/r4_preview_latency.txt` with fresh timings —
+taken on a machine that was running a 127-certification campaign at the time.
+Committing those would have silently replaced another handoff's measured numbers
+with contended ones from an unrelated branch. They are reverted; **check
+`git status` after running the app suite.**
+
 The byte-identity argument for every pre-existing path is a construction, not a
 test result, and is stated so it can be checked by reading: every new option
 defaults to the value that takes no new branch, `vf_target` reduces to
