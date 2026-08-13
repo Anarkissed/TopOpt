@@ -806,6 +806,35 @@ struct RunObservability {
   // It is here because a run that pins every performance core makes the machine
   // unusable for the hours it takes, and "wait until tonight" is not a setting.
   int matfree_threads = 0;
+
+  // ★ MEASUREMENT-ONLY SOLVER POSTURE OVERRIDES (task
+  // solver-speed-arm-and-diagnose), on this channel for EXACTLY the reason
+  // `matfree_threads` is on it: `configure_production_options` sets both of the
+  // globals below to their shipped values at the start of the run
+  // (production.cpp, `fea_set_mg_algebraic_level1(kProductionMgAlgebraicLevel1)`
+  // and the mixed-precision line beside it), so a harness that set them BEFORE
+  // calling run_job would be silently overwritten and would measure the shipped
+  // posture while believing it had armed something. That failure mode is the
+  // whole reason this repository writes "a green run that measures nothing" in
+  // its own notes, and it is not hypothetical here: it happened once during this
+  // task and was caught by `mg_algebraic_level1: false` in an armed arm's
+  // run_info.json.
+  //
+  //   -1 (THE DEFAULT) — leave the production rule alone. Nothing is applied,
+  //      and every production artifact is byte-identical: the CLI never sets
+  //      these, so `run_job` behaves exactly as it did.
+  //    0 / 1 — force the posture OFF / ON, applied at the same point the thread
+  //      override is, i.e. after configure_production_options and before the
+  //      first solve.
+  //
+  // Both are EXACT accelerators by construction — they change coarse SPACES and
+  // arithmetic precision inside an SPD preconditioner, never the outer FP64
+  // residual test that defines convergence — so they move iteration counts and
+  // in-basin rounding, never a gate's verdict logic. `mg_rearm_period` is the
+  // latch re-arm (fea.hpp); 0 is the shipped "never re-arm".
+  int mg_algebraic_level1 = -1;
+  int matfree_mixed_precision = -1;
+  int mg_rearm_period = 0;
 };
 
 // The outcome of run_job, exposing enough for callers (the CLI main and the

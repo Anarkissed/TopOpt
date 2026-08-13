@@ -1,0 +1,5 @@
+ARM_RUNG arm=base vf_requested=0.680000 margin=2372.88667 accepted=1
+ARM_RUNG arm=base vf_requested=0.520000 margin=793.600505 accepted=1
+ARM_RUNG arm=base vf_requested=0.380000 margin=355.269912 accepted=1
+ARM_RUNG arm=base vf_requested=0.260000 margin=232.153157 accepted=1
+ARM_SUMMARY arm=base total_cg=14465 design_iters=8 wall_s=683.0 hier_attempts=2 rearm_attempts=0 rearm_carries=0 geneo_armed=1 geneo_declined=15 geneo_dim=1674 geneo_builds=1 alg1=0
