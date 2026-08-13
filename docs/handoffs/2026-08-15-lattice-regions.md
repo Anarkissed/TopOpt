@@ -184,13 +184,23 @@ regions this task adds — the "green run that measures nothing" shape.
 
 **(b) The depth is one number — BUILT and ASSERTED.** See §0.
 
-**(c) The sliver guard on the lattice side — PARTIAL.** The resolver refuses a
-region-backed lattice region whose mask selects **no** solid voxels, naming the
-region, the depth, the grid spacing and the three ways out. What is NOT yet
-wired is the §5(a)-shaped refusal for a sector that resolves to voxels but is too
-thin to CERTIFY a lattice; today that surfaces as `out_of_regime` on the per-
-region verdict, which is a verdict rather than a refusal. Reusing
-`check_sliver`'s message shape there is a small change and is not done.
+**(c) The sliver guard on the lattice side — DONE, with one boundary I did not
+move.** Two refusals now, both in §5(a)'s shape (name the number AND the
+arithmetic):
+
+* the resolver refuses a region-backed lattice region whose mask selects **no**
+  solid voxels, naming the region, the depth, the grid spacing and the ways out;
+* `refuse_infeasible_region_lattice` refuses one that cannot carry a lattice at
+  ANY legal cell, naming its measured body width against the buildable and
+  certifiable minimums at the declared extrusion width.
+
+★ **It refuses on `!feasible`, NOT on `out_of_regime`, and that is deliberate.**
+This file already decided, in writing, that a region which "clears percolation
+but not accuracy is buildable and uncertifiable, which is a verdict, not a
+refusal" — the pre-flight's case C. Refusing there would overturn that decision
+for every analytic job as well. Infeasible is different in kind: no printable AND
+percolating pair exists at any cell, so there is nothing to build. The refusal is
+scoped to `kind == "region"`, so no existing job's behaviour moves.
 
 **(d) Drainability per sector — NOT ANALYSED.** `lattice_void_escape` runs on the
 part's void network and is indifferent to which region latticed a voxel, so there
