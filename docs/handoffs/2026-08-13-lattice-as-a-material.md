@@ -70,56 +70,77 @@ its Gibson-Ashby gap, the drainability result, and — from the tables — that 
 STRUT bound binds in every certified cell and that latticing the anchor moves the
 solid region's margin by −0.003%.
 
-### 0.2 ★ How much of the 247.3 g sits in QUIET regions: **NONE OF IT.**
+### 0.2 ★★ The frozen set, keyed on PROVENANCE — 14 declared regions, not 2
 
-`evidence/…/m1/regions_r0.68.txt`. Measured on his converged rung 0.68 with one
-certification solve, against **core's own** quiet predicate
-(`lattice_subfloor_retention_stress_fraction` = 0.20 — the same one
-`grade_lattice` arms sub-floor retention on, so the probe and the shipped grading
-law cannot disagree about which regions are quiet).
+`evidence/…/m1/regions_provenance_r0.68.txt`. Regions keyed on WHICH DECLARATION
+froze each voxel (`mask_step_face`, replayed per declared face) rather than on
+connectivity. **11,380 voxels are claimed by more than one declaration**; the face
+protection wins them, and the overlap is reported rather than resolved silently.
 
-| region | voxels | mass | strain energy | share | peak vM | vM / part peak | verdict |
-|---|---|---|---|---|---|---|---|
-| **load-pad-1** | 29,250 | **179.860 g** | 5.450e-04 | **45.42%** | 0.0169 | ★ **100.00%** | LOAD-BEARING |
-| **anchor-2** | 10,966 | **67.431 g** | 3.003e-05 | 2.50% | 0.0087 | **51.60%** | LOAD-BEARING |
-
-> frozen mass **247.290 g** of 543.724 g printed (**45.48%**) — the brief's 247.3 g,
-> reproduced independently
-> **QUIET 0.000 g (0.00%) · LOAD-BEARING 247.290 g (100.00%)**
-
-★ **This is the opposite of the outcome §2 hoped for, and it matters.** The brief
-said: *if most of the prize is in quiet regions, most of the risk in this task
-evaporates.* None of it is. The larger region **contains the part's peak von
-Mises** and carries **45% of the printed part's entire strain energy**; the
-smaller sits at half the part peak. So the accuracy problem does **not** dissolve,
-the 5-cell floor is aimed exactly where it needs to be, and §3's buttressing
-coupling is fully in play. The mass-neutral posture (`freed_mass_return = 1.0`)
-is therefore not a variant to try — it is the one the measurement demands.
-
-★ **And his declared face protection is not a separately addressable region.**
-The frozen set is **TWO** 26-connected components, not the ~5 the brief
-anticipated. Face 16's protection collar (10,554 voxels) is 26-connected to the
-load-face structural pad, so `load-pad-1` is both of them as one piece of
-material: 29,250 + 10,966 = 40,216, exactly the FrozenSolid count. A user who
-wants to lattice "just the protected face" cannot — it is one member with the
-load pad, and any density assigned to it is assigned to both.
-
-### 0.2b ★ The law's validity, per region (bar R5) — and the median hides the tail
-
-| region | median member | cells/member | **p10 cells** | **% of voxels clearing N\*** | verdict |
+| region | voxels | mass | energy share | peak vM / PART peak | verdict |
 |---|---|---|---|---|---|
-| load-pad-1 | 10.2317 mm | **5.12** | **1.71** | ★ **60.2%** | IN RANGE |
-| anchor-2 | 27.2845 mm | 13.64 | 5.12 | 97.8% | IN RANGE |
+| anchor-18 | 10,966 | 67.431 g | 2.50% | 51.60% | LOAD-BEARING |
+| ★ **protect-16** | 10,554 | **64.897 g** | **6.31%** | ★ **84.09%** | LOAD-BEARING |
+| load-20 | 4,802 | 29.528 g | 1.73% | 60.62% | LOAD-BEARING |
+| load-1 | 3,439 | 21.147 g | 6.45% | **100.00%** | LOAD-BEARING |
+| load-24 | 2,778 | 17.082 g | 11.40% | 96.76% | LOAD-BEARING |
+| load-25 | 2,609 | 16.043 g | 9.60% | 94.89% | LOAD-BEARING |
+| *(7 more load faces)* | 5,068 | 31.163 g | 9.91% | 30–72% | LOAD-BEARING |
+| load-49 | 130 | 0.799 g | 0.02% | **16.15%** | ★ QUIET |
 
-Both clear the 5-cell floor **at the median**, so bar B4 as pre-registered passes
-— and `load-pad-1` clears it by **2.4%**, with **39.8% of its voxels below the
-floor** and a tenth percentile of 1.71 cells, a third of what the certificate
-needs. ★ **The bound was pre-registered on the median and the median is the wrong
-statistic here**; it is reported as passing because that is what was written down
-before the run, and the p10 and the fraction are reported beside it because they
-are what a reader needs. On the next pass the bound should key on the FRACTION
-below the floor, not the median — that is a change to make deliberately and in
-advance, not now.
+> frozen mass **247.290 g** of 543.724 g printed (**45.48%**)
+> **QUIET 0.799 g (0.32%) · LOAD-BEARING 246.491 g (99.68%)**
+
+★ **THE PEAK VON MISES IS NOT WHERE THE FUSED MEASUREMENT PUT IT.** Under
+connectivity the whole 29,250-voxel blob reported 100% of part peak; the peak
+actually sits in **load-1**, a 3,439-voxel pad directly under the applied force.
+The declared protection face is a separate region and reads 84.09%.
+
+★ **AND ON THE STANDING HYPOTHESIS THAT THE PROTECTED WALL IS UNLOADED: THIS
+MEASUREMENT DOES NOT SUPPORT IT.** `protect-16` reads **84.09% of part peak**,
+which core's own ceiling (0.20) calls load-bearing by a wide margin. Two honest
+caveats on that number, because they cut in the hypothesis's favour:
+
+* the predicate is a **PEAK**, so one hot voxel where the collar meets a load
+  path governs the whole region. By ENERGY the collar is **6.31%** of the printed
+  part's strain energy while being **26%** of the frozen set by volume — i.e.
+  markedly quieter per unit volume than the load pads, just not ~0;
+* it is one load case at one rung. A different service case could move it.
+
+The QUIET column is not empty but it is nearly so: **0.799 g of 247.290 g**.
+
+### 0.2b ★★ AND THE DECISIVE FACT ABOUT THE COLLAR IS GEOMETRIC, NOT STRUCTURAL
+
+| region | median member | cells/member @ 2 mm | fits at its own cell? |
+|---|---|---|---|
+| ★ **protect-16** | ★ **3.4106 mm** | 1.71 | ★ **NO — and no finer cell rescues it** |
+| load-24, load-32 | 6.8211 mm | 3.41 | **YES** — at 1.3642 mm, ρ ≥ 0.4782 |
+| anchor-18 | 27.2845 mm | 13.64 | yes (already in range) |
+| the other 10 | 10.2–30.7 mm | 5.12–15.35 | yes (already in range) |
+
+★ **The declared protection collar is 3.41 mm thick, and the thinnest member that
+can hold a CERTIFIABLE octet lattice at a 0.45 mm strut width is 5.8659 mm.** So
+the stress question never arises for it: there is no (cell, density) pair in the
+band that both prints and homogenises across 3.41 mm, at any cell. The software
+now says exactly that, with the two numbers that would change it:
+
+> *region 2 spans 3.411 mm at the median … it clears the percolation floor, so it
+> is BUILDABLE AND UNCERTIFIABLE, not un-latticeable. ★ AND NO FINER CELL RESCUES
+> IT: at a 0.450 mm strut width no (cell, density) pair in the band fits a member
+> this thin. It must be at least 5.8659 mm across, or the strut width must come
+> down.*
+
+★ **Whereas two load-face pads at 6.82 mm ARE rescued by the fit** — refused at
+the run's 2 mm cell, certifiable at their own 1.3642 mm cell with ρ ≥ 0.4782. That
+is the mechanism §2.5 added, doing its job on his part.
+
+★ **So the honest reading is a THIRD one, not either of the first two.** It is not
+"the frozen set carries the peak stress" (that was the fusion artefact) and it is
+not "the light rung refuses the prize" (that was my fixed cell). It is: **the
+biggest single frozen region a user explicitly declared is too THIN to certify a
+lattice on this printer** — 3.41 mm against a 5.87 mm floor — and the remedy is a
+thicker collar or a finer nozzle, both of which are the user's to choose and
+neither of which the software can invent.
 
 ### 0.3 ★ The assignment table at the shipped rung — COMPLETE, all 8 cells
 
@@ -831,8 +852,24 @@ densities you would actually pick and under-predicts by 26% at the light end. Th
 optimiser never sees that formula here — it uses the 19 real measurements — but
 it is worth writing down, because that formula is what most tools use.
 
-**Three: I measured this part and got two things wrong, and both were my
-software rather than the part.**
+**Three: the real answer for his part is about THICKNESS, not about stress — and
+I got there by way of two mistakes that were my software rather than the part.**
+
+The wall he protects is about **3.4 mm** thick. For a lattice's stiffness to be
+predictable you need at least five cells across the thing you're latticing, and
+for the struts to come out of the nozzle the cells can't be too small. Those two
+demands pull in opposite directions, and on his 0.45 mm nozzle they leave a hard
+floor: **nothing thinner than 5.9 mm can hold a certifiable lattice, at any cell
+size**. His wall is well under that. So the question "is it carrying load?" never
+really arises for it — there is no lattice to put there in the first place. The
+remedy is a thicker collar or a finer nozzle, and the software now says so with
+both numbers instead of just refusing.
+
+Two of his load-bearing pads, at 6.8 mm, are a different story: they were refused
+at the run's cell and are perfectly certifiable at their own. That is the fix
+below, working.
+
+Now the two mistakes, because they are why it took three attempts to see that.
 
 The first was how I grouped the regions. I found them by "what's touching what",
 and it turns out the protected wall is touching the pads that sit directly under
