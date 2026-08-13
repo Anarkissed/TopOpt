@@ -40,6 +40,10 @@ int main(int argc, char** argv) {
   // the one that divides a real feature evenly.
   const int n_ang = std::atoi(argv[3]);
   const int m_ax = std::atoi(argv[4]);
+  // -2 = the largest face of ANY kind. The bore demonstration was invalid: its
+  // axial extent is ~6 voxels, so splitting it four ways made the SLICE HEIGHT
+  // the thinnest dimension and the declared depth could never bind.
+  const int want_face = argc > 6 ? std::atoi(argv[6]) : -1;
   const int sectors = n_ang * m_ax;
   StepModel model = import_part_file_resolved(part);
   const VoxelGrid grid = voxelize(model.mesh, res);
@@ -49,10 +53,18 @@ int main(int argc, char** argv) {
   // and what makes the split cylindrical (sectors about the bore's own axis)
   // rather than a PCA fallback.
   int feature = -1;
-  for (int f = 0; f < model.face_count; ++f) {
-    if (model.faces[(std::size_t)f].kind != StepSurfaceKind::Cylinder) continue;
-    if (feature < 0 || areas[(std::size_t)f] > areas[(std::size_t)feature])
-      feature = f;
+  if (want_face == -2) {
+    feature = 0;
+    for (int f = 1; f < model.face_count; ++f)
+      if (areas[(std::size_t)f] > areas[(std::size_t)feature]) feature = f;
+  } else if (want_face >= 0) {
+    feature = want_face;
+  } else {
+    for (int f = 0; f < model.face_count; ++f) {
+      if (model.faces[(std::size_t)f].kind != StepSurfaceKind::Cylinder) continue;
+      if (feature < 0 || areas[(std::size_t)f] > areas[(std::size_t)feature])
+        feature = f;
+    }
   }
   if (feature < 0) { std::fprintf(stderr, "no cylindrical face\n"); return 1; }
 
@@ -85,7 +97,8 @@ int main(int argc, char** argv) {
 
   // ★ THE DEPTHS DIFFER PER SECTOR — that is the whole demonstration.
   std::vector<double> depths;
-  for (int i = 0; i < sectors; ++i) depths.push_back(3.0 + 1.5 * i);
+  for (int i = 0; i < sectors; ++i)
+    depths.push_back(sectors == 2 ? (i == 0 ? 3.0 : 7.5) : 3.0 + 1.5 * i);
 
   std::string s = "{\n";
   s += "  \"material\": \"PLA\",\n  \"mode\": \"minimize_plastic\",\n";

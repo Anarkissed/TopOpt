@@ -327,42 +327,42 @@ std::vector<std::size_t> grid_split_voxel_counts(
     const VoxelGrid& grid, const std::vector<int>& member_voxels,
     const std::vector<GridSplitCell>& cells);
 
-// ★★ NOT THE MINIMUM — THE MEDIAN. A CORRECTION THE §4 RUN FORCED
-// (task 2026-08-15-lattice-regions §0).
+// ★★ THE MEDIAN — AND THE ARC IS WORTH MORE THAN THE ANSWER
+// (task 2026-08-15-lattice-regions).
 //
-// The first version took the MINIMUM of tau, arguing a percentile "would let the
-// cell be sized by material the thinnest part cannot hold". The argument is
-// sound; the implementation was still useless, because THE MINIMUM IS A CONSTANT
-// BY CONSTRUCTION: the largest ball that fits inside a set and contains a voxel
-// ON THAT SET'S BOUNDARY is ~1-2 voxels however thick the set is elsewhere. Every
-// region therefore measured ~2 voxels.
+// This changed three times. The record matters because the wrong turns were
+// caused by measuring one degenerate case and generalising from it.
 //
-// Measured, not reasoned. Four sectors of one bore on M2_verticalStand at 128,
-// declared 3.0 / 4.5 / 6.0 / 7.5 mm = 2 / 3 / 4 / 4 voxel layers:
+//   1. MINIMUM. Four bore sectors declared 3.0/4.5/6.0/7.5 mm all returned
+//      3.4106 mm, so the minimum looked boundary-dominated and degenerate.
+//   2. MEDIAN. Same four sectors, same 3.4106 mm. So that diagnosis looked
+//      wrong too, and it was reverted to the minimum.
+//   3. `region_extent_probe` printed the DISTRIBUTION instead of one number,
+//      on two different regions, and settled it:
 //
-//     sector   declared   candidate voxels   extent_mm   cell_mm
-//        0       3.0 mm         308           3.4106     1.0950
-//        1       4.5 mm         372           3.4106     1.0950
-//        2       6.0 mm         522           3.4106     1.0950
-//        3       7.5 mm         781           3.4106     1.0950
+//   the four BORE sectors (split height binding, ~2 voxels tall):
+//        min == p25 == median == max == 3.411 for every sector
+//        -> the distribution is a POINT; NO statistic can separate them, and
+//           the region really IS that thin. Nothing was broken here.
 //
-// 3.4106 mm is EXACTLY 2 x the 1.70528 mm spacing, in all four. The depth reached
-// the SELECTION (308 -> 781 voxels, monotone) and did not reach the GRADING at
-// all: one cell, one density, one strut, `distinct_cells: 1`.
+//   ONE LARGE FACE split in two, depths 3.0 and 7.5 mm (depth binding):
+//        sector 0  bbox 126x2x56    min 3.411   median  6.821
+//        sector 1  bbox 117x4x104   min 3.411   median 13.642
+//        -> the MINIMUM is 3.411 for BOTH, though one body is twice as thick.
+//           The MEDIAN tracks the declared depth exactly, 2x for 2x.
 //
-// The MEDIAN measures the body rather than the boundary, and the body is what
-// "how many cells lie across this" asks about — the same quantity
-// min(depth, 2*half_u, 2*half_w) reports for an analytic slab, which is a
-// DIMENSION of the slab and not a minimum over its points. It still adapts to a
-// genuinely thin region, which a declared depth alone would not.
-// ★ IT MEASURES ON THE MASK'S OWN GRID, NOT THE CALLER'S, and that is a defect
-// this branch shipped for about ten minutes. The first version took the caller's
-// grid and indexed `mask.inside[i]` by the same i — which is correct only while
-// the two grids are the same lattice. On the DESIGN-BOX path `solved_grid` is an
-// EXPANDED grid with different dimensions, so the region would have been read as
-// an arbitrary reindexed scatter of voxels, silently, and the derived cell would
-// have been sized from a shape nobody declared. The mask carries the grid it was
-// built on precisely so this cannot happen; the parameter is gone.
+// So the minimum IS boundary-dominated — a voxel on a set's boundary has a ~1-2
+// voxel inscribed ball however thick the body is — and the median measures the
+// body. Step 1's diagnosis was right; step 2 tested it on the one region where
+// nothing could have worked, and step 2's revert generalised from that.
+//
+// ★ THE LESSON, RECORDED BECAUSE IT COST THREE CHANGES: when a measurement comes
+// back flat, print the DISTRIBUTION before changing the statistic. The probe
+// that settled this runs in seconds and existed after the second wrong fix.
+//
+// The median is also what the fit law needs: it asks how many cells lie ACROSS
+// the latticed body, and the body's thickness — not its thinnest boundary voxel
+// — is that quantity.
 double region_thinnest_extent_mm(const ClearanceVoxelMask& mask);
 
 // ★ THE ONE mm → VOXEL-LAYER CONVERSION (task 2026-08-15-lattice-regions §2b,

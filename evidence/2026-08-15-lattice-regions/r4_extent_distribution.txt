@@ -1,0 +1,20 @@
+=== region_extent_probe — the distribution, on two regions ===
+
+--- the four BORE sectors (split height binding, ~2 voxels tall) ---
+part face 4 (1741 mm^2, CYLINDRICAL)  spacing 1.70528 mm  split 1x4
+sector  declared  layers  mask bbox (voxels, i x j x k) tau: min p25 med p75 p90 max (mm)
+0       3.0       2       100x2x53 (308 vox)         3.411 3.411 3.411 3.411 3.411 3.411
+1       4.5       3       102x1x55 (372 vox)         3.411 3.411 3.411 3.411 3.411 3.411
+2       6.0       4       104x1x57 (522 vox)         3.411 3.411 3.411 3.411 3.411 3.411
+3       7.5       4       104x2x57 (781 vox)         3.411 3.411 3.411 3.411 3.411 3.411
+
+--- ONE LARGE FACE split in two (depth binding) ---
+part face 15 (1.71e+04 mm^2, PCA)  spacing 1.70528 mm  split 1x2
+sector  declared  layers  mask bbox (voxels, i x j x k) tau: min p25 med p75 p90 max (mm)
+0       3.0       2       126x2x56 (7922 vox)        3.411 6.821 6.821 6.821 6.821 6.821
+1       7.5       4       117x4x104 (9206 vox)       3.411 13.642 13.642 13.642 13.642 13.642
+
+★ min is 3.411 in BOTH cases and for BOTH depths — boundary-dominated.
+★ median is a POINT on the bore sectors (nothing could separate them) and
+  tracks the declared depth exactly on the large face: 6.821 -> 13.642,
+  a 2x ratio for 2 vs 4 layers.

@@ -1616,6 +1616,10 @@ if(OpenCASCADE_FOUND)
   # THE §4 DEMONSTRATION JOB (task 2026-08-15-lattice-regions, bar R4): a curved
   # feature on his part, grid-split into sectors at different lattice depths,
   # with the cut planes taken from core's own grid_split_cells.
+  add_executable(region_extent_probe EXCLUDE_FROM_ALL
+    tests/harness/region_extent_probe.cpp)
+  target_link_libraries(region_extent_probe PRIVATE topopt)
+
   add_executable(sector_lattice_job_gen EXCLUDE_FROM_ALL
     tests/harness/sector_lattice_job_gen.cpp)
   target_link_libraries(sector_lattice_job_gen PRIVATE topopt)

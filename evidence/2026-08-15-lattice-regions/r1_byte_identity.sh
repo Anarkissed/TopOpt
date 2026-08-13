@@ -5,6 +5,12 @@
 #       byte-identical artifacts on a topopt-cli built from BASE and one built
 #       from this BRANCH. Not "the code path looks unchanged" — the bytes.
 #
+#   ★ BOTH JOBS CARRY THE SAME LATTICE BLOCK. The first adaptation added it to
+#   the R1 job only, so the faces arm emitted variant_*_lattice.{stl,report.json}
+#   the regions arm did not, and the resulting "R2 FAIL" was the script's fault,
+#   not the code's. A comparison is only a comparison when both sides describe
+#   the same physics.
+#
 #   ADAPTED for task 2026-08-15-lattice-regions R1: the baseline is PR 331's
 #   head (726160c), and the R1 job carries a LATTICE — the subsystem this task
 #   changed — expressed the way it always was, with no region-backed region.
@@ -73,6 +79,9 @@ cat > "$OUT/job_regions.json" <<'JSON'
     "face_protections": [5],
     "face_protection_depth_mm": 3.0
   },
+  "grading": {"cell_mode": "fit", "topology": "octet", "min_extrudable_width_mm": 0.42},
+  "lattice": {"topology": "octet", "emit_stl": true, "emit_3mf": false, "skin": "none", "min_extrudable_width_mm": 0.42,
+    "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0,0,0], "normal": [0,0,1], "half_u_mm": 30, "half_w_mm": 30, "depth_mm": 6}}]},
   "output": {"report": "report.json", "mesh_format": "stl", "mesh_prefix": "variant"}
 }
 JSON
