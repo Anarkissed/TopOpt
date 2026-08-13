@@ -167,10 +167,13 @@ unmeasured.
 | **R7** no assertion weakened | **MET** — `r7_assertion_census.txt`, no category fell |
 | **R8** root cause with file and line; no placeholders; no root scratch | **MET** |
 
-Local suites: `test_lattice_region_mask` 34/34 and `test_face_region` 68/68; the
-lattice/job/clearance subset of `ctest` passed 14/14 before the last commit. **The
-full suite has not been re-run since**, and core registers 120 tests locally
-against CI's 122 (no lib3mf here) — report N/122.
+Local suites: `test_lattice_region_mask` 34/34 and `test_face_region` 68/68.
+After the R3 fix, the lattice/job/clearance `ctest` subset passed **8/8** (1571 s)
+— `cli_demo`, `lattice_variant`, `lattice_hookup`, `mesh_job` and the region
+tests, i.e. the paths the resolver's new `(model, grid)` parameters and the mask
+branch actually run through. **The FULL suite has not been re-run on this
+branch**, and core registers 120 tests locally against CI's 122 (no lib3mf here)
+— report N/122, never N/N.
 
 ---
 

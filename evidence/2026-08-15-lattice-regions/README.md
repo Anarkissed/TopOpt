@@ -6,6 +6,7 @@ handoff, which marks every answer MEASURED or NOT.
 
 | file | what it is |
 |---|---|
+| `subset_ctest.txt` | The lattice/job/clearance `ctest` subset after the R3 fix: **8/8 passed** (1571 s), including `cli_demo`, `lattice_variant` and `lattice_hookup` — the paths the resolver's new `(model, grid)` parameters and the mask branch run through. The FULL suite has not been re-run. |
 | `r7_assertion_census.txt` | **R7** — assertion census against `726160c` (PR 331's head, this task's baseline). No category fell. |
 
 ## What is asserted, and where
