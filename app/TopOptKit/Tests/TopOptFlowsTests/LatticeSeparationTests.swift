@@ -199,8 +199,8 @@ final class LatticeSeparationTests: XCTestCase {
     /// DIFFERENT regions — not one answer applied twice.
     func testTwoPrimitivesInOneGroupWithDifferentSettingsProduceTwoRegions() {
         let (p, gid) = oneGroupTwoWalls()
-        let a = LatticePrimitiveRef.face(group: gid, face: 16)
-        let b = LatticePrimitiveRef.face(group: gid, face: 17)
+        let a = LatticeSelectableRef.face(group: gid, face: 16)
+        let b = LatticeSelectableRef.face(group: gid, face: 17)
 
         // Before: the group decides, so both faces get the same role.
         let before = p.latticeJobRegions().regions.filter { $0.kind == .face }
@@ -210,8 +210,8 @@ final class LatticeSeparationTests: XCTestCase {
                        + "has not been given its own answer")
 
         // The user says "lattice here" on one wall and "no lattice" on the other.
-        p.lattice.primitiveRoles[a.key] = .include
-        p.lattice.primitiveRoles[b.key] = .exclude
+        p.lattice.selectableRoles[a.key] = .include
+        p.lattice.selectableRoles[b.key] = .exclude
 
         let after = p.latticeJobRegions().regions.filter { $0.kind == .face }
         XCTAssertEqual(after.count, 2, "R3: still two regions")
@@ -233,16 +233,16 @@ final class LatticeSeparationTests: XCTestCase {
         p.force.setProtected(gid, true)          // …that is still eligible
         XCTAssertNil(p.latticeEligibleRoles()[gid])
 
-        let a = LatticePrimitiveRef.face(group: gid, face: 16)
-        let b = LatticePrimitiveRef.face(group: gid, face: 17)
-        LatticePrimitiveRoles.declare(.include, for: a,
-                                      siblings: p.latticePrimitiveRefs(p.selection.groups[0]),
+        let a = LatticeSelectableRef.face(group: gid, face: 16)
+        let b = LatticeSelectableRef.face(group: gid, face: 17)
+        LatticeSelectableRoles.declare(.include, for: a,
+                                      siblings: p.latticeSelectableRefs(p.selection.groups[0]),
                                       groupRole: p.latticeEligibleRoles()[gid],
-                                      in: &p.lattice.primitiveRoles)
+                                      in: &p.lattice.selectableRoles)
         p.lattice.groupRoles[gid] = .include     // what the tap also does
 
-        XCTAssertEqual(p.lattice.primitiveRoles[a.key], .include)
-        XCTAssertEqual(p.lattice.primitiveRoles[b.key], .off,
+        XCTAssertEqual(p.lattice.selectableRoles[a.key], .include)
+        XCTAssertEqual(p.lattice.selectableRoles[b.key], .off,
                        "§3c: the sibling was PINNED to what it already was — "
                        + "nothing, not carried along by the new declaration")
         let faces = p.latticeJobRegions().regions.filter { $0.kind == .face }
@@ -251,13 +251,13 @@ final class LatticeSeparationTests: XCTestCase {
     }
 
     func testOffIsNeverAWireRole() {
-        XCTAssertNil(LatticePrimitiveRole.off.regionRole)
-        XCTAssertEqual(LatticePrimitiveRole.include.regionRole, .include)
-        XCTAssertEqual(LatticePrimitiveRole.exclude.regionRole, .exclude)
+        XCTAssertNil(LatticeSelectableRole.off.regionRole)
+        XCTAssertEqual(LatticeSelectableRole.include.regionRole, .include)
+        XCTAssertEqual(LatticeSelectableRole.exclude.regionRole, .exclude)
         // …and it overrides the group, rather than falling through to it.
         let gid = UUID()
-        let ref = LatticePrimitiveRef.face(group: gid, face: 16)
-        XCTAssertNil(LatticePrimitiveRoles.role(for: ref, groupRole: .include,
+        let ref = LatticeSelectableRef.face(group: gid, face: 16)
+        XCTAssertNil(LatticeSelectableRoles.role(for: ref, groupRole: .include,
                                                 overrides: [ref.key: .off]),
                      "§3c: OFF means not a region, even inside a latticed group")
     }
@@ -268,10 +268,10 @@ final class LatticeSeparationTests: XCTestCase {
         XCTAssertEqual(p.latticeCoverage(g), .all,
                        "§3c: both walls follow the group's include declaration")
 
-        p.lattice.primitiveRoles[LatticePrimitiveRef.face(group: gid, face: 17).key] = .exclude
+        p.lattice.selectableRoles[LatticeSelectableRef.face(group: gid, face: 17).key] = .exclude
         XCTAssertEqual(p.latticeCoverage(g), .some, "§3c: all / SOME / none")
 
-        p.lattice.primitiveRoles[LatticePrimitiveRef.face(group: gid, face: 16).key] = .exclude
+        p.lattice.selectableRoles[LatticeSelectableRef.face(group: gid, face: 16).key] = .exclude
         XCTAssertEqual(p.latticeCoverage(g), .none)
     }
 
@@ -279,7 +279,7 @@ final class LatticeSeparationTests: XCTestCase {
     /// a group that declares nothing emits nothing, whatever its primitives say.
     func testAPerPrimitiveOverrideIsNotAWayPastTheRoleGate() {
         let (p, gid) = oneGroupTwoWalls()
-        p.lattice.primitiveRoles[LatticePrimitiveRef.face(group: gid, face: 16).key] = .include
+        p.lattice.selectableRoles[LatticeSelectableRef.face(group: gid, face: 16).key] = .include
         p.force.setProtected(gid, false)      // the group now declares nothing
         XCTAssertNil(p.latticeEligibleRoles()[gid])
         XCTAssertTrue(p.latticeJobRegions().regions.isEmpty,
@@ -291,11 +291,11 @@ final class LatticeSeparationTests: XCTestCase {
     /// follows its group and the emission is exactly what it was.
     func testASnapshotWithoutOverridesEmitsExactlyWhatItDidBefore() throws {
         let (p, _) = oneGroupTwoWalls()
-        XCTAssertTrue(p.lattice.primitiveRoles.isEmpty)
+        XCTAssertTrue(p.lattice.selectableRoles.isEmpty)
         let data = try JSONEncoder().encode(p.lattice)
         let back = try JSONDecoder().decode(LatticeSettings.self, from: data)
-        XCTAssertTrue(back.primitiveRoles.isEmpty)
-        XCTAssertTrue(back.primitiveDepthMM.isEmpty)
+        XCTAssertTrue(back.selectableRoles.isEmpty)
+        XCTAssertTrue(back.selectableDepthMM.isEmpty)
         XCTAssertEqual(back.groupDepthMM, p.lattice.groupDepthMM)
     }
 
@@ -307,10 +307,10 @@ final class LatticeSeparationTests: XCTestCase {
     /// depths — and each face's protection must be its own face's depth.
     func testTheDepthDragAndTheProtectionDepthRemainOneNumberPerFace() {
         let (p, gid) = oneGroupTwoWalls()
-        let a = LatticePrimitiveRef.face(group: gid, face: 16)
-        let b = LatticePrimitiveRef.face(group: gid, face: 17)
-        p.lattice.primitiveDepthMM[a.key] = 9.0     // dragged deeper
-        p.lattice.primitiveDepthMM[b.key] = 3.0     // dragged shallower
+        let a = LatticeSelectableRef.face(group: gid, face: 16)
+        let b = LatticeSelectableRef.face(group: gid, face: 17)
+        p.lattice.selectableDepthMM[a.key] = 9.0     // dragged deeper
+        p.lattice.selectableDepthMM[b.key] = 3.0     // dragged shallower
 
         let specs = p.faceProtectionSpecs()
         let protections = zip(specs.faceIDs, specs.depthsMM).map {
@@ -372,7 +372,7 @@ final class LatticeSeparationTests: XCTestCase {
     /// so a viewport drag cannot reach a depth the card could not.
     func testTheDepthPlaneHandleWritesTheOneNumber() {
         let (p, gid) = oneGroupTwoWalls()
-        let ref = LatticePrimitiveRef.face(group: gid, face: 16)
+        let ref = LatticeSelectableRef.face(group: gid, face: 16)
         p.writeLatticeDepthMM(ref, mm: 9.25)
         XCTAssertEqual(p.latticeSlabDepthMM(ref, in: gid), 9.25, accuracy: 1e-12)
         XCTAssertEqual(p.latticeSlabDepthMM(.face(group: gid, face: 17), in: gid),
@@ -393,21 +393,21 @@ final class LatticeSeparationTests: XCTestCase {
 
     func testTheDepthFallsBackGroupThenProject() {
         let gid = UUID()
-        let ref = LatticePrimitiveRef.face(group: gid, face: 16)
+        let ref = LatticeSelectableRef.face(group: gid, face: 16)
         XCTAssertEqual(LatticeSlabDepth.depthMM(ref: ref, group: gid,
-                                                perPrimitive: [ref.key: 9],
+                                                perSelectable: [ref.key: 9],
                                                 perGroup: [gid: 7], fallbackMM: 4),
                        9, accuracy: 1e-12, "the primitive's own number wins")
         XCTAssertEqual(LatticeSlabDepth.depthMM(ref: ref, group: gid,
-                                                perPrimitive: [:],
+                                                perSelectable: [:],
                                                 perGroup: [gid: 7], fallbackMM: 4),
                        7, accuracy: 1e-12, "then the group's")
         XCTAssertEqual(LatticeSlabDepth.depthMM(ref: ref, group: gid,
-                                                perPrimitive: [:], perGroup: [:],
+                                                perSelectable: [:], perGroup: [:],
                                                 fallbackMM: 4),
                        4, accuracy: 1e-12, "then the project's")
         XCTAssertEqual(LatticeSlabDepth.depthMM(ref: ref, group: gid,
-                                                perPrimitive: [ref.key: 1e6],
+                                                perSelectable: [ref.key: 1e6],
                                                 perGroup: [:], fallbackMM: 4),
                        LatticeSlabDepth.maxMM, accuracy: 1e-12,
                        "and it is clamped like every other route to a depth")

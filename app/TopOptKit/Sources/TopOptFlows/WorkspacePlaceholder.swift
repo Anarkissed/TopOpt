@@ -152,9 +152,11 @@ public struct WorkspacePlaceholder: View {
     /// in what `WorkspaceStageVisibility` lets each of them draw. That is the only
     /// way "seeing the same style of page as before" can be structurally true.
     @State private var stage: WorkspaceStage = .topology
-    /// Which group's region drawer is open (§4a). Collapsed by default; one at a
-    /// time, like every other drawer in this workspace.
-    @State private var latticeDrawerGroup: UUID?
+    /// ★ THE ONE DISCLOSURE STATE IN THE SELECTIONS PANEL (bar R12). A region's
+    /// expansion is stored in PR 331's own `FaceRegion.collapsed`; a group's and a
+    /// face's live in this value. One type, one call, and the region case is
+    /// literally the same bit the Regions sheet reads.
+    @State private var latticeDisclosure = LatticeRowDisclosure()
     /// The depth plane whose 3D handle owns the current drag (§3d), and the depth
     /// it started from.
     @State private var draggingDepthPlane: String?
@@ -1107,7 +1109,7 @@ public struct WorkspacePlaceholder: View {
             let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
             if let gid = LatticeLibraryTap.route(faceID: faceID, loop: loop,
                                                  selection: &selection) {
-                latticeDrawerGroup = gid
+                latticeDisclosure.toggle(gid.uuidString)
             }
             force.sync(groups: selection.groups)
             refreshLatticeFaceCards()
@@ -2402,7 +2404,7 @@ public struct WorkspacePlaceholder: View {
         return Button {
             guard enabled else { return }
             stage = stage == .topology ? .lattice : .topology
-            latticeDrawerGroup = nil
+            latticeDisclosure.closeAll()
             if stage == .lattice { refreshLatticeFaceCards() }
         } label: {
             VStack(spacing: 2) {
@@ -4438,9 +4440,9 @@ public struct WorkspacePlaceholder: View {
               case .latticeSummary:
                   latticeSummaryRow(g)
               case .latticeDrawer:
-                  if latticeDrawerGroup == g.id { latticeGroupDrawer(g) }
+                  if latticeDisclosure.isExpanded(g.id.uuidString) { latticeGroupDrawer(g) }
               case .latticePrimitiveRows:
-                  if latticeDrawerGroup == g.id { latticePrimitiveRows(g) }
+                  if latticeDisclosure.isExpanded(g.id.uuidString) { latticePrimitiveRows(g) }
               }
           }
         }
@@ -4596,7 +4598,7 @@ public struct WorkspacePlaceholder: View {
     /// COLOUR. Tapping opens the drawer. Everything else is behind it.
     @ViewBuilder private func latticeSummaryRow(_ g: SelectionGroup) -> some View {
         let block = latticeRoleBlock(g)
-        let open = latticeDrawerGroup == g.id
+        let open = latticeDisclosure.isExpanded(g.id.uuidString)
         let coverage = project.latticeCoverage(g)
         let drawer = latticeDrawer(g)
         let tint = latticeVerdictTint(drawer.verdict)
@@ -4610,7 +4612,7 @@ public struct WorkspacePlaceholder: View {
                 Spacer(minLength: 0)
             } else {
                 Button {
-                    latticeDrawerGroup = open ? nil : g.id
+                    latticeDisclosure.toggle(g.id.uuidString)
                     if !open { refreshLatticeFaceCards() }
                 } label: {
                     HStack(spacing: DS.Space.s) {
@@ -4642,7 +4644,15 @@ public struct WorkspacePlaceholder: View {
     /// flag is its HEADLINE (it is the one line that predicts a wasted run); the
     /// depth is the only control; everything else is a FACT, presented as a fact.
     @ViewBuilder private func latticeGroupDrawer(_ g: SelectionGroup) -> some View {
-        let drawer = latticeDrawer(g)
+        latticeDrawerBody(latticeDrawer(g), depthDrag: latticeGroupDepthDrag(g),
+                          identifier: "lattice-drawer-\(g.id.uuidString)")
+    }
+
+    /// ★ THE ONE DRAWER LAYOUT. A group row and a selectable row render THIS —
+    /// so "a region and a face behave identically" (bar R13) is a property of
+    /// there being one view, not of two views being kept in step.
+    @ViewBuilder private func latticeDrawerBody<G: Gesture>(
+        _ drawer: LatticeRegionDrawer, depthDrag: G, identifier: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let head = drawer.headline {
                 let tint = latticeVerdictTint(head.verdict)
@@ -4675,8 +4685,8 @@ public struct WorkspacePlaceholder: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .padding(.vertical, 3).padding(.horizontal, DS.Space.sm)
                             .background(Capsule().fill(DS.Color.fillSelected.color))
-                            .gesture(latticeGroupDepthDrag(g))
-                            .accessibilityIdentifier("lattice-depth-\(g.id.uuidString)")
+                            .gesture(depthDrag)
+                            .accessibilityIdentifier("\(identifier)-depth")
                     } else {
                         Text(row.value)
                             .font(.system(size: 11, weight: .bold)).monospacedDigit()
@@ -4696,17 +4706,27 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
             .fill(DS.Color.fillSubtle.color))
-        .accessibilityIdentifier("lattice-drawer-\(g.id.uuidString)")
+        .accessibilityIdentifier(identifier)
     }
 
-    /// ★ §3c — ONE ROW PER PRIMITIVE, each with its own lattice / no-lattice.
-    /// "Otherwise, what the fuck are they doing?" — they decide now.
+    /// ★ §3c — ONE ROW PER SELECTABLE, each with its own lattice / no-lattice.
+    /// "Otherwise, what the fuck are they doing?" — they decide now, and since PR
+    /// 331 a REGION is one of them and behaves identically (bar R13).
     @ViewBuilder private func latticePrimitiveRows(_ g: SelectionGroup) -> some View {
         let block = latticeRoleBlock(g)
         if block == nil {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(project.latticePrimitiveRefs(g), id: \.key) { ref in
+                ForEach(project.latticeSelectableRefs(g), id: \.key) { ref in
                     latticePrimitiveRow(g, ref)
+                    // ★ §4 (the interrupt's §2b) — THE DRAWER OPENS BENEATH A
+                    // REGION ROW TOO, through the SAME disclosure the row's
+                    // chevron writes. For a region that bit is PR 331's
+                    // `collapsed`, so expanding the row reveals its numbers AND
+                    // its children at once — which is what §5(b) describes a
+                    // deliberate expand doing, and it is one mechanism, not two.
+                    if latticeDisclosure.isExpanded(ref, regions: project.faceRegions) {
+                        latticeSelectableDrawer(g, ref)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -4714,12 +4734,42 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func latticePrimitiveRow(_ g: SelectionGroup,
-                                     _ ref: LatticePrimitiveRef) -> some View {
-        let role = project.latticePrimitiveRole(ref, in: g.id)
+                                     _ ref: LatticeSelectableRef) -> some View {
+        let role = project.latticeSelectableRole(ref, in: g.id)
+        let dimmed = latticeRowIsBelowTheSmallFaceFloor(ref)
         return HStack(spacing: DS.Space.xs) {
+            // ★ R12 — THE ONE DISCLOSURE. For a REGION this chevron writes PR
+            // 331's own `FaceRegion.collapsed`, the same field the Regions sheet
+            // writes, so the two lists can never disagree about whether a split
+            // is open — and expanding reveals this row's numbers and its children
+            // together. For a face or a primitive it writes the same
+            // `LatticeRowDisclosure`. One type, one call, no second state.
+            Button {
+                latticeDisclosure.toggle(ref, regions: &project.faceRegions)
+            } label: {
+                Image(systemName: latticeDisclosure.isExpanded(
+                        ref, regions: project.faceRegions)
+                      ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("lattice-row-disclose-\(ref.key)")
             Text(latticePrimitiveName(ref))
                 .font(.system(size: 10, weight: .semibold)).monospacedDigit()
                 .foregroundStyle(DS.Color.textTertiary.color)
+            // ★ THE ONE HONEST DIFFERENCE (the interrupt's §3). The choice is
+            // CAPTURED, and the row says the run will freeze this region without
+            // latticing it — core's `lattice.regions` are geometry predicates and
+            // a region is a voxel set (PR 331 §6). Three words, not silence.
+            if !ref.latticeReachesTheRun, role != nil {
+                Text(Self.latticeRegionNotConsumed)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(DS.Color.warning.color)
+                    .padding(.vertical, 2).padding(.horizontal, 5)
+                    .background(Capsule().fill(DS.Color.warning.opacity(0.16).color))
+                    .accessibilityIdentifier("lattice-region-frozen-only")
+            }
             Spacer(minLength: 0)
             latticePrimitiveChip(g, ref, .include, label: "Lattice", on: role == .include)
             latticePrimitiveChip(g, ref, .exclude, label: "Solid", on: role == .exclude)
@@ -4732,21 +4782,51 @@ public struct WorkspacePlaceholder: View {
                 .gesture(latticePrimitiveDepthDrag(g, ref))
                 .accessibilityIdentifier("lattice-primitive-depth-\(ref.key)")
         }
+        // ★ R14 — PR 331's SMALL-FACE POLICY (§5c): rows below the sliver floor
+        // are DIMMED, not hidden. Hiding them would lose a selection his CAD does
+        // hand him (faces 41-47 are 16 voxels and he uses them). The rule follows
+        // the row into this list rather than stopping at the Regions sheet.
+        .opacity(dimmed ? 0.55 : 1)
     }
 
-    /// A primitive's short name on its row. Two words at most (R7).
-    private func latticePrimitiveName(_ ref: LatticePrimitiveRef) -> String {
+    /// ★ Three words (R7). The region's depth IS consumed — it is PR 331's
+    /// per-sector protection depth; what the run cannot consume yet is the
+    /// lattice half.
+    static let latticeRegionNotConsumed = "Frozen, not latticed"
+
+    /// PR 331 §5c's small-face policy, applied to this list: a selectable holding
+    /// fewer voxels than the sliver floor is dimmed. Faces and regions alike, from
+    /// PR 331's own estimate at the project's own resolution.
+    private func latticeRowIsBelowTheSmallFaceFloor(_ ref: LatticeSelectableRef) -> Bool {
+        guard let mesh = viewerMesh, let spacing = voxelSpacingMM else { return false }
+        let members: [FaceID]
+        switch ref {
+        case let .face(_, f): members = [f]
+        case .primitive: return false          // a hand-placed slab has no CAD area
+        case let .region(_, rid):
+            guard let region = project.faceRegions.region(rid) else { return false }
+            members = FaceRegionGeometry.members(of: region, in: mesh)
+        }
+        let voxels = FaceRegionGeometry.memberVoxelEstimate(
+            members: members, in: mesh, spacingMM: spacing)
+        return voxels < kRegionSliverFloorVoxels
+    }
+
+    /// A selectable's short name on its row. Two words at most (R7).
+    private func latticePrimitiveName(_ ref: LatticeSelectableRef) -> String {
         switch ref {
         case let .face(_, f): return "Face \(project.runFaceID(f))"
         case .primitive: return "Primitive"
+        case let .region(_, rid):
+            return project.faceRegions.region(rid)?.name ?? "Region \(rid)"
         }
     }
 
     /// ★ One primitive's own answer: Lattice / Solid / Off (§3c). Three, not two —
-    /// see `LatticePrimitiveRole`: without an explicit "not a region", declaring
+    /// see `LatticeSelectableRole`: without an explicit "not a region", declaring
     /// ONE face of a three-face group would silently declare the other two.
-    private func latticePrimitiveChip(_ g: SelectionGroup, _ ref: LatticePrimitiveRef,
-                                      _ role: LatticePrimitiveRole, label: String,
+    private func latticePrimitiveChip(_ g: SelectionGroup, _ ref: LatticeSelectableRef,
+                                      _ role: LatticeSelectableRole, label: String,
                                       on: Bool) -> some View {
         let tint: RGBA
         switch role {
@@ -4758,10 +4838,10 @@ public struct WorkspacePlaceholder: View {
             guard !on else { return }   // it already says this; a re-tap is a no-op
             // The declaring tap PINS this primitive's siblings to whatever they
             // resolved to a moment ago, so setting one face never moves another.
-            LatticePrimitiveRoles.declare(
-                role, for: ref, siblings: project.latticePrimitiveRefs(g),
+            LatticeSelectableRoles.declare(
+                role, for: ref, siblings: project.latticeSelectableRefs(g),
                 groupRole: project.latticeEligibleRoles()[g.id],
-                in: &project.lattice.primitiveRoles)
+                in: &project.lattice.selectableRoles)
             // The group must carry a role for the eligibility gate to let ANY of
             // its primitives through (§1a), and a primitive saying "lattice here"
             // is the declaration that turns the mode on. Both, from the one tap.
@@ -4809,7 +4889,7 @@ public struct WorkspacePlaceholder: View {
     /// Drag ONE primitive's own depth (§3d). The same number the 3D depth plane's
     /// handle writes, and the same number that face is protected to (R4).
     private func latticePrimitiveDepthDrag(_ g: SelectionGroup,
-                                           _ ref: LatticePrimitiveRef) -> some Gesture {
+                                           _ ref: LatticeSelectableRef) -> some Gesture {
         let seedDepth = project.latticeSlabDepthMM(ref, in: g.id)
         return DragGesture(minimumDistance: 1)
             .onChanged { v in
@@ -4831,6 +4911,23 @@ public struct WorkspacePlaceholder: View {
         LatticeRegionDrawer.make(card: latticeFaceCards[g.id],
                                  depthMM: project.latticeSlabDepthMM(g.id),
                                  held: force.isProtected(g.id))
+    }
+
+    /// ★ THE DRAWER BENEATH ONE SELECTABLE (the interrupt's §2b) — the SAME
+    /// builder and the same layout the group row uses, so a region row and a face
+    /// row are not "similar", they are the same drawer (bar R13). The one thing
+    /// that differs is stated by the builder, not by this view: a region's
+    /// lattice choice cannot reach the run yet.
+    @ViewBuilder private func latticeSelectableDrawer(_ g: SelectionGroup,
+                                                      _ ref: LatticeSelectableRef) -> some View {
+        let drawer = LatticeRegionDrawer.make(
+            card: latticeFaceCards[g.id],
+            depthMM: project.latticeSlabDepthMM(ref, in: g.id),
+            held: force.isProtected(g.id),
+            latticeReachesTheRun: ref.latticeReachesTheRun)
+        latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
+                          identifier: "lattice-drawer-\(ref.key)")
+            .padding(.leading, DS.Space.m)
     }
 
     private func latticeVerdictTint(_ v: LatticeFaceCard.Verdict) -> RGBA {

@@ -380,11 +380,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var groupDepthMM: [UUID: Double]
 
     /// ★ THE PER-PRIMITIVE LATTICE / NO-LATTICE OVERRIDE (task
-    /// 2026-08-14-lattice-separation §3c). Keyed by `LatticePrimitiveRef.key`.
+    /// 2026-08-14-lattice-separation §3c). Keyed by `LatticeSelectableRef.key`.
     /// A primitive with no entry follows its group's `groupRoles` declaration, so
     /// every snapshot written before this task resolves to exactly the roles it
-    /// had. Read only through `LatticePrimitiveRoles`, never directly.
-    public var primitiveRoles: [String: LatticePrimitiveRole]
+    /// had. Read only through `LatticeSelectableRoles`, never directly.
+    public var selectableRoles: [String: LatticeSelectableRole]
 
     /// ★ THE PER-PRIMITIVE DEPTH — the same override shape as the role, for the
     /// number the 3D depth plane drags (§3d). Absent ⇒ `groupDepthMM` ⇒
@@ -392,7 +392,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// the protection depth as well: `ProjectModel.faceProtectionSpecs()` and
     /// `latticeJobRegions()` both resolve through `LatticeSlabDepth`, per face
     /// (bar R4).
-    public var primitiveDepthMM: [String: Double]
+    public var selectableDepthMM: [String: Double]
 
     // ── SUB-FLOOR RETENTION, the user's raw choices (task
     // 2026-08-05-lattice-retention-app-control). All OFF / absent by default, so
@@ -467,8 +467,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
                 groupDepthMM: [UUID: Double] = [:],
-                primitiveRoles: [String: LatticePrimitiveRole] = [:],
-                primitiveDepthMM: [String: Double] = [:],
+                selectableRoles: [String: LatticeSelectableRole] = [:],
+                selectableDepthMM: [String: Double] = [:],
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
@@ -497,8 +497,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.paintDepthMM = paintDepthMM
         self.groupRoles = groupRoles
         self.groupDepthMM = groupDepthMM
-        self.primitiveRoles = primitiveRoles
-        self.primitiveDepthMM = primitiveDepthMM
+        self.selectableRoles = selectableRoles
+        self.selectableDepthMM = selectableDepthMM
         if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
     }
 
@@ -513,8 +513,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
         case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
-        // the per-PRIMITIVE role + depth (task 2026-08-14-lattice-separation §3c/§3d)
-        case primitiveRoles, primitiveDepthMM
+        // The per-SELECTABLE role + depth (task 2026-08-14-lattice-separation
+        // §3c/§3d). Named `primitive*` before PR 331 landed and made the unit
+        // bigger than a primitive; the legacy keys below decode so a snapshot
+        // written against the earlier name still opens with its choices intact.
+        case selectableRoles, selectableDepthMM
+        case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction
@@ -557,12 +561,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // `paintDepthMM`, which is exactly the depth those projects emitted.
         groupDepthMM = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDepthMM) ?? [:]
         // Absent from every snapshot written before the separation task ⇒ empty ⇒
-        // every primitive follows its group, which is the ONLY answer those
-        // projects ever had (§3c).
-        primitiveRoles = try c.decodeIfPresent([String: LatticePrimitiveRole].self,
-                                               forKey: .primitiveRoles) ?? [:]
-        primitiveDepthMM = try c.decodeIfPresent([String: Double].self,
-                                                 forKey: .primitiveDepthMM) ?? [:]
+        // every selectable follows its group, which is the ONLY answer those
+        // projects ever had (§3c). The `primitive*` fallback reads a snapshot
+        // written under the pre-PR-331 name so those choices are not lost either.
+        selectableRoles = try c.decodeIfPresent([String: LatticeSelectableRole].self,
+                                                forKey: .selectableRoles)
+            ?? c.decodeIfPresent([String: LatticeSelectableRole].self,
+                                 forKey: .primitiveRoles) ?? [:]
+        selectableDepthMM = try c.decodeIfPresent([String: Double].self,
+                                                  forKey: .selectableDepthMM)
+            ?? c.decodeIfPresent([String: Double].self,
+                                 forKey: .primitiveDepthMM) ?? [:]
         // Absent from every snapshot written before this task ⇒ off / core's own
         // number ⇒ those projects keep emitting exactly the job they emitted.
         retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
@@ -597,8 +606,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
-        try c.encode(primitiveRoles, forKey: .primitiveRoles)
-        try c.encode(primitiveDepthMM, forKey: .primitiveDepthMM)
+        try c.encode(selectableRoles, forKey: .selectableRoles)
+        try c.encode(selectableDepthMM, forKey: .selectableDepthMM)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,

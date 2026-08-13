@@ -1,7 +1,8 @@
 # 2026-08-14 — separating the TO from the lattice, and a wizard you can see
 
 Evidence: `evidence/2026-08-14-lattice-separation/`
-Branch base: `9e96beb` (the merge of PR 329)
+Branch base: **`726160c`** — PR 331 `face-regions`, REBASED onto (bar R11), not merged blind.
+Original base before the interrupt: `9e96beb` (the merge of PR 329)
 
 > **"It is VERY important we separate the TO and Lattices out so the user can
 > choose between JUST TO or TO+lattice and have complete control with where the
@@ -251,10 +252,119 @@ is unchanged.
 
 ---
 
-## §8 — NOT BUILT, ON INSTRUCTION
+## §8 — WITHDRAWN MID-TASK, AND WHAT IT COST
 
-Face splitting, grid splitting and union are deferred. Nothing here builds toward
-them and nothing here is designed around them.
+§8 said face splitting, grid splitting and union were deferred and must not be
+designed around. **PR 331 landed and that stopped being true**, in the very panel
+this task restructures. What follows is the rebase, section by section, against
+the bars the interrupt added.
+
+### R11 — rebased, and the rebase found a defect of its own
+
+`git rebase 726160c` over six commits, one conflict, in
+`WorkspacePlaceholder.swift`'s overlay stack: PR 331 added `regionsPanelOverlay`
+exactly where §1 removed `latticeEntryButtonOverlay`. Resolved by keeping BOTH —
+regions are a SELECTION facility, not a lattice one, so the Regions surface
+belongs to both stages while the lattice affordances belong to one.
+
+★ **AND THE REBASE BROKE THE SUITE IN A WAY THAT LOOKED LIKE A BAD TEST.** PR 331
+changed `core/src/cli/job.cpp`; I did not re-run `build_core.sh`, so the vendored
+`TopOptCore.xcframework` was built from the PRE-rebase core. It did not fail to
+link — **it hung**. `swift test --filter LatticeSeparation` ran 10+ minutes at
+100% CPU with no output, while every one of those tests passed in milliseconds
+run ALONE. `sample <pid>` named the frame:
+
+```
+LatticeSettings.runSpec(...)  default argument 6
+  LatticeRetentionCapability.fromCore   (LatticeSubfloorRetention.swift:91)
+    one-time initialization function for fromCore
+```
+
+`fromCore` is a lazy `static let` that asks the linked core whether its grading
+schema accepts four keys. Against a core whose parser had moved underneath it the
+probe never returned — and because it initialises ONCE, only the first test to
+reach it hangs, which is why single-test runs looked healthy. Rebuilding the
+xcframework fixed it: **39 tests, 0 failures, 0.216 s.**
+
+### §3(c) → PER SELECTABLE, not per primitive
+
+`LatticePrimitiveRef` is now `LatticeSelectableRef` with a third case,
+`.region(group:region:)`, and the stores are `selectableRoles` /
+`selectableDepthMM` (the old `primitive*` keys still DECODE, so a snapshot
+written yesterday keeps its choices). A region carries its own lattice /
+no-lattice, its own depth, its own drawer, and counts in the group's
+all/some/none exactly as a face does — `testARegionIsASelectableJustLikeAFace`,
+`testARegionCarriesItsOwnLatticeChoice`.
+
+### §3(d) → the depth handle works on a REGION, into PR 331's own store
+
+A region's dragged depth lands in `face_protection_region_ids` +
+`face_protection_region_depths_mm` — PR 331's arrays, filled through the same
+`LatticeSlabDepth` call a face goes through. No parallel store.
+`testARegionsDepthFillsPR331sPerRegionProtectionArrays` drags a region to 9 mm
+and the face beside it to 3 mm and requires both to come out.
+
+★ **AND THE PLANE IS REFUSED, NOT INVENTED, WHEN THE REGION HAS NO DIRECTION.**
+A face has a plane; a region is a voxel set. The plane is built from PR 331's own
+`FaceRegionGeometry.frame` plus the area-weighted mean of the members' outward
+normals — and when that mean is shorter than 0.75 (a union wrapping a bore, or a
+top face unioned with a side face) there IS no "into the part", so no 3D grab is
+offered. The region keeps its depth NUMBER and its row; what it loses is a handle
+that would have meant nothing. `testAWrappingRegionGetsNoDepthPlaneRatherThanAMeaninglessOne`.
+
+### R12 — ONE disclosure, and PR 331 owns the half it should
+
+`LatticeRowDisclosure` is the only expand/collapse concept in the Selections
+panel, and for a REGION it reads and writes **PR 331's own
+`FaceRegion.collapsed`** — the same bit, not a mirror — so the panel and the
+Regions sheet cannot disagree about whether a split is open. Expanding a region
+therefore reveals its drawer AND its children together, which is what §5(b)
+describes a deliberate expand doing; a collapsed grid parent is still ONE row in
+this list (`testAGridSplitStillAddsONERowToTheLatticeList`: 1 collapsed, 26
+expanded). A group and a face have no `FaceRegion` to store it on, so those live
+in the same type's own set — one mechanism, and only one of its two backing
+stores is ours.
+
+### R14 — PR 331's guards still fire
+
+The sliver guard (`FaceRegionModel.checkSliver`, floor 16 voxels — the size of the
+smallest face his own CAD hands him) still refuses with its number after the
+restructure, and the small-face policy still DIMS rather than hides: a
+sub-floor selectable is listed in the lattice row list and drawn at 0.55 opacity,
+because hiding it would lose a selection his CAD does hand him (faces 41-47).
+`testTheSliverGuardStillRefusesWithItsNumber`,
+`testASmallSelectableIsListedAndFlaggedNotHidden`.
+
+### ★ THE ONE THING THAT IS NOT IDENTICAL, AND HOW IT IS SHOWN
+
+The interrupt forbade making a region into a lattice region, and it is right that
+this is core's problem: `lattice.regions` are pure GEOMETRY that become
+`ClearanceGeometry` predicates evaluated pointwise (`run_job.cpp:621`, `:756`,
+`:856`), while a region is a voxel SET (PR 331 §6).
+
+**So the choice is captured and the row says it is not consumed.** I considered
+disabling the chips instead, and rejected it: the interrupt asks for the choice to
+be CAPTURED so it survives until core catches up, and a disabled control captures
+nothing. What makes capture honest is that it is not silent — the row carries
+**"Frozen, not latticed"** (three words) and the drawer LEADS with it, outranking
+even the out-of-regime verdict. The depth half is genuinely live: it is PR 331's
+per-sector protection depth and the run consumes it.
+
+`testARegionsLatticeChoiceIsCapturedAndTheRowSaysItIsNotConsumed` asserts the
+capture, the words, and that the row chip and the drawer headline are the same
+words. `testNoRegionIsEverEmittedAsALatticeRegion` asserts the other half — no
+region reaches `lattice.regions`, so nothing downstream can act on a choice core
+cannot read.
+
+**If that is still the wrong trade, the smaller alternative is one line:** make
+`latticeReachesTheRun` disable the two chips and keep the depth live. The flag is
+already the single point that decides it.
+
+### §4 of the interrupt — the coplanar correction
+
+Nothing to correct: `git diff 726160c -- app docs` in this branch contains no
+occurrence of "coplanar". This branch never promised the expand-to-coplanar
+behaviour PR 331 refuted (22 → 22 on his part).
 
 ---
 
@@ -272,6 +382,10 @@ them and nothing here is designed around them.
 | **R8** no verdict moves | **MET, structurally: `core/` is untouched.** `git diff --stat 9e96beb -- core/` is empty; every change is under `app/`. Core **119/119** (`ctest.txt`) — a regression check, not a change under test, and NOT a CI pass: this machine has no lib3mf so `export_3mf` and `threemf_import` do not REGISTER. Report it as 119/<CI's total>. |
 | **R9** never weaken an assertion | **MET.** `r9_assertion_census.txt` — every kind unchanged or up, nothing deleted. Two source-reading tests were UPDATED where a symbol was renamed, and both were STRENGTHENED in the same edit: the "no workspace chrome while a page is up" census renamed `latticeEntryButtonOverlay` → `stageNavigationButtonOverlay` **and gained the two overlays this task added**, and the design-box census kept its D5a assertions and **gained the lattice-stage term**. |
 | **R10** no unfilled placeholders, no scratch at root | **MET.** |
+| **R11** rebased on PR 331, base stated | **MET.** Base `726160c`; six commits rebased, one conflict, resolved by keeping BOTH surfaces. The rebase also surfaced a stale-vendor hang — see §8. |
+| **R12** one collapse mechanism in the panel | **MET.** `LatticeRowDisclosure`; a region's bit IS `FaceRegion.collapsed`. A collapsed grid parent is 1 row here, 26 expanded. |
+| **R13** a region and a face behave identically | **MET**, with the one difference ASSERTED rather than glossed: same refs list, same role chips, same three states, same depth resolution, same drawer builder — and `latticeReachesTheRun == false` on a region, shown as "Frozen, not latticed". |
+| **R14** PR 331's guards still fire | **MET.** `checkSliver` still refuses with its number; the small-face policy still DIMS rather than hides, in the new row list. |
 
 **The suites.** Core: **119/119** local (`ctest.txt`), on an untouched `core/`.
 App: **1459 executed, 22 skipped, 3 failures** — all three are
@@ -358,3 +472,34 @@ proved it by rendering the same cell through the same graphics code twice: zero
 lit pixels before, sixty-one thousand after. Both pictures are in the evidence
 folder. The camera also now frames the object when you arrive and every time the
 wizard moves on, so it is always in view at a sensible size.
+
+---
+
+**A late change, and what it means for you.** Part way through this work the
+face-regions branch landed — the one that lets you combine twenty-four little
+fillets into one thing and cut it into pieces. That put a new kind of row in the
+same list I was rebuilding, so the rule you gave me had to widen: it is not "each
+primitive gets its own lattice choice", it is *each selectable*. A region you made
+by combining faces now has its own Lattice / Solid / Off, its own depth, and its
+own drawer, exactly like a single face. Two of them in one group can disagree, and
+the job comes out with them disagreeing.
+
+One thing about regions is honestly not finished, and it is not something this
+branch could finish. The optimiser can freeze a region to a depth — that works
+today, and it is how you hand-set ten different depths around a curved feature.
+But it cannot yet *lattice* a region, because the lattice code wants a shape (a
+cylinder, a slab) and a region is a set of voxels. So the choice you make is
+remembered, and the row tells you plainly: **"Frozen, not latticed."** I would
+rather it said that than quietly do nothing. Finishing it is three changes in the
+core, they are written down in the face-regions handoff, and it is a separate job.
+
+There is also one place a region does not get a 3D handle: if you combine faces
+that point in different directions — say a wall and the top — there is no single
+"into the part" for a depth plane to run along, so you get the number without the
+handle rather than a handle that means nothing.
+
+And a note from the rebase, because it cost an hour and will cost the next person
+the same. Pulling in that branch changed the C++ core, and I did not rebuild the
+compiled copy the app links against. Nothing failed to build — the test run just
+sat there, spinning, forever, while every test passed fine on its own. The stale
+copy was answering a question about the job format and never coming back.

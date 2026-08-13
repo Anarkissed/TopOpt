@@ -113,9 +113,9 @@ public enum LatticeRegionEmission {
     /// user dragged THAT group's primitive to, which is also the depth its faces
     /// are protected to. `faceDepthMM` remains only as the fallback for a group
     /// the user has never dragged.
-    /// ★ `primitiveRoles` and `primitiveDepthMM` are the PER-PRIMITIVE overrides
+    /// ★ `selectableRoles` and `selectableDepthMM` are the PER-PRIMITIVE overrides
     /// (task 2026-08-14-lattice-separation §3c/§3d), keyed by
-    /// `LatticePrimitiveRef.key`. Empty ⇒ every primitive follows its group ⇒ the
+    /// `LatticeSelectableRef.key`. Empty ⇒ every primitive follows its group ⇒ the
     /// emission is byte-identical to the one before the separation, which is why
     /// they default to empty rather than being threaded through every call site.
     ///
@@ -129,8 +129,8 @@ public enum LatticeRegionEmission {
                                faceDepthMM: Double,
                                groupDepthMM: (UUID) -> Double = { _ in .nan },
                                runFaceID: @escaping (FaceID) -> Int = { Int($0) },
-                               primitiveRoles: [String: LatticePrimitiveRole] = [:],
-                               primitiveDepthMM: [String: Double] = [:],
+                               selectableRoles: [String: LatticeSelectableRole] = [:],
+                               selectableDepthMM: [String: Double] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -142,22 +142,22 @@ public enum LatticeRegionEmission {
             let gd = groupDepthMM(g.id)
             let groupDepth = gd.isFinite ? gd : faceDepthMM
             for (p, d) in primitives(g.id) {
-                let ref = LatticePrimitiveRef.primitive(p.id)
-                guard let role = LatticePrimitiveRoles.role(
-                    for: ref, groupRole: groupRole, overrides: primitiveRoles) else { continue }
+                let ref = LatticeSelectableRef.primitive(p.id)
+                guard let role = LatticeSelectableRoles.role(
+                    for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
                 // A manual primitive carries its own resolved depth already (the
                 // clearance-metric chain); the per-primitive override wins over it
                 // exactly as it does for a face.
                 if let s = spec(for: p, role: role,
-                                depthMM: primitiveDepthMM[ref.key] ?? d) {
+                                depthMM: selectableDepthMM[ref.key] ?? d) {
                     out.append(s)
                 }
             }
             for f in g.faces {
-                let ref = LatticePrimitiveRef.face(group: g.id, face: f)
-                guard let role = LatticePrimitiveRoles.role(
-                    for: ref, groupRole: groupRole, overrides: primitiveRoles) else { continue }
-                let depth = primitiveDepthMM[ref.key] ?? groupDepth
+                let ref = LatticeSelectableRef.face(group: g.id, face: f)
+                guard let role = LatticeSelectableRoles.role(
+                    for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
+                let depth = selectableDepthMM[ref.key] ?? groupDepth
                 if let r = resolve(f),
                    let s = spec(for: r, role: role, depthMM: depth,
                                 faceID: runFaceID(f)) {

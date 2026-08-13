@@ -85,8 +85,26 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
     /// is coarse enough to homogenize across this slab" — core's two-bound
     /// crossing. The headline states the crossing in the two numbers that produced
     /// it (the depth and the cell) because those are the two the user can move.
+    ///
+    /// ★ `latticeReachesTheRun == false` OUTRANKS IT (the interrupt's §3). For a
+    /// REGION the lattice half of the choice cannot reach the run at all — core's
+    /// `lattice.regions` are geometry predicates and a region is a voxel set
+    /// (PR 331 §6) — so no cell verdict is worth leading with. The depth still is:
+    /// it is PR 331's per-sector protection depth and the run consumes it.
     public static func make(card: LatticeFaceCard?, depthMM: Double,
-                            held: Bool) -> LatticeRegionDrawer {
+                            held: Bool,
+                            latticeReachesTheRun: Bool = true) -> LatticeRegionDrawer {
+        guard latticeReachesTheRun else {
+            return LatticeRegionDrawer(
+                headline: Headline(text: "Frozen, not latticed", verdict: .outOfRegime),
+                collapsedValue: card?.heldText ?? "—",
+                verdict: .outOfRegime,
+                rows: [LatticeDrawerRow(label: "Depth",
+                                        value: String(format: "%.1f mm", depthMM),
+                                        modifiable: true),
+                       LatticeDrawerRow(label: "Hands over", value: card?.heldText ?? "—")],
+                held: held)
+        }
         guard let c = card else {
             // No preview yet (no B-rep, or the voxelization has not landed). Say
             // so with the depth, which is known, and invent nothing else.

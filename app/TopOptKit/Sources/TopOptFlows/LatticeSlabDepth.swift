@@ -62,12 +62,12 @@ public enum LatticeSlabDepth {
     /// two faces of one group dragged to two different depths produce two
     /// protections at those two depths and two regions at the same two — there is
     /// still no way to express a third number.
-    public static func depthMM(ref: LatticePrimitiveRef,
+    public static func depthMM(ref: LatticeSelectableRef,
                                group: UUID,
-                               perPrimitive: [String: Double],
+                               perSelectable: [String: Double],
                                perGroup: [UUID: Double],
                                fallbackMM: Double) -> Double {
-        clamp(perPrimitive[ref.key] ?? perGroup[group] ?? fallbackMM)
+        clamp(perSelectable[ref.key] ?? perGroup[group] ?? fallbackMM)
     }
 
     /// One face's resolved slab: the face id the run will use, and the ONE depth.
