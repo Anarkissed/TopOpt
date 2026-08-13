@@ -51,6 +51,25 @@ public enum LatticeSlabDepth {
         Swift.min(maxMM, Swift.max(minMM, v))
     }
 
+    /// ★ THE DEPTH FOR ONE PRIMITIVE (task 2026-08-14-lattice-separation §3d).
+    ///
+    /// §3d asks for a draggable depth plane per FACE OR PRIMITIVE, so the depth
+    /// gains the same override shape the role did: the primitive's own number
+    /// when it has one, otherwise its group's, otherwise the project's default.
+    ///
+    /// ★ AND R4 STILL HOLDS BECAUSE OF THIS FUNCTION, NOT ALONGSIDE IT. The
+    /// protection spec and the region emission both resolve HERE, per face, so
+    /// two faces of one group dragged to two different depths produce two
+    /// protections at those two depths and two regions at the same two — there is
+    /// still no way to express a third number.
+    public static func depthMM(ref: LatticePrimitiveRef,
+                               group: UUID,
+                               perPrimitive: [String: Double],
+                               perGroup: [UUID: Double],
+                               fallbackMM: Double) -> Double {
+        clamp(perPrimitive[ref.key] ?? perGroup[group] ?? fallbackMM)
+    }
+
     /// One face's resolved slab: the face id the run will use, and the ONE depth.
     public struct Slab: Equatable, Sendable {
         public let faceID: Int

@@ -615,13 +615,19 @@ public final class ProjectModel: ObservableObject {
             // A protected group that is ALSO a lattice region is one slab; a
             // protect-only group keeps the project's global depth.
             let latticed = lattice.enabled && lattice.groupRoles[g.id] != nil
-            let d = latticed
-                ? LatticeSlabDepth.depthMM(group: g.id,
-                                           perGroup: lattice.groupDepthMM,
-                                           fallbackMM: lattice.paintDepthMM)
-                : force.faceProtectDepthMM
             for f in g.faces where !seen.contains(f) {
                 seen.insert(f)
+                // ★ PER FACE (task 2026-08-14 §3d). The depth plane is draggable
+                // per face now, so the protection is resolved per face through the
+                // SAME `LatticeSlabDepth` call the region emission makes — which is
+                // what keeps R4 true when two faces of one group hold two depths.
+                let d = latticed
+                    ? LatticeSlabDepth.depthMM(
+                        ref: .face(group: g.id, face: f), group: g.id,
+                        perPrimitive: lattice.primitiveDepthMM,
+                        perGroup: lattice.groupDepthMM,
+                        fallbackMM: lattice.paintDepthMM)
+                    : force.faceProtectDepthMM
                 ids.append(Int(resolvedRunFaceID(f)))
                 depths.append(d)
             }
@@ -643,6 +649,42 @@ public final class ProjectModel: ObservableObject {
     public func latticeSlabDepthMM(_ group: UUID) -> Double {
         LatticeSlabDepth.depthMM(group: group, perGroup: lattice.groupDepthMM,
                                  fallbackMM: lattice.paintDepthMM)
+    }
+
+    /// The depth for ONE primitive (task 2026-08-14 §3d) — its own dragged number,
+    /// else its group's, else the project default. This is what the 3D depth plane
+    /// drags and what the protection freezes: one call, both meanings.
+    public func latticeSlabDepthMM(_ ref: LatticePrimitiveRef, in group: UUID) -> Double {
+        LatticeSlabDepth.depthMM(ref: ref, group: group,
+                                 perPrimitive: lattice.primitiveDepthMM,
+                                 perGroup: lattice.groupDepthMM,
+                                 fallbackMM: lattice.paintDepthMM)
+    }
+
+    /// The role in force for ONE primitive (§3c) — its own override, else its
+    /// group's declaration. nil ⇒ not latticed at all.
+    public func latticePrimitiveRole(_ ref: LatticePrimitiveRef,
+                                     in group: UUID) -> LatticeGroupRole? {
+        LatticePrimitiveRoles.role(for: ref, groupRole: latticeEligibleRoles()[group],
+                                   overrides: lattice.primitiveRoles)
+    }
+
+    /// Everything inside a group that can be latticed on its own: its B-rep faces
+    /// then its manual primitives, in the selection's own order (§3c). ONE listing
+    /// rule, so the row the user taps and the region the run emits are the same
+    /// set — a per-primitive control over a list the emission does not walk would
+    /// be the "decorative primitive" defect again, one level down.
+    public func latticePrimitiveRefs(_ g: SelectionGroup) -> [LatticePrimitiveRef] {
+        g.faces.map { LatticePrimitiveRef.face(group: g.id, face: $0) }
+            + force.manualPrimitives(for: g.id).map { .primitive($0.id) }
+    }
+
+    /// ALL / SOME / NONE of a group's primitives are latticed — the summary the
+    /// group row shows now that it does not own the decision (§3c).
+    public func latticeCoverage(_ g: SelectionGroup) -> LatticeGroupCoverage {
+        LatticePrimitiveRoles.coverage(refs: latticePrimitiveRefs(g),
+                                       groupRole: latticeEligibleRoles()[g.id],
+                                       overrides: lattice.primitiveRoles)
     }
 
     /// Whether the anchored-bore AUTO clearance rule applies to a group (keep-clear
@@ -774,6 +816,107 @@ public final class ProjectModel: ObservableObject {
             }
         }
         return out
+    }
+
+    // MARK: - ★ THE LATTICE DEPTH PLANES (task 2026-08-14-lattice-separation §3d)
+
+    /// ★ A DRAGGABLE DEPTH PLANE PER FACE OR PRIMITIVE, expanding outward from the
+    /// face, dragged to set how far in the lattice may go.
+    ///
+    /// PR 328 built the slab's geometry and its number and put the DRAG on the
+    /// card's numeric field, and said so. This is the 3D handle it did not get to.
+    /// It is not new drag math: the plane is a `ClearanceVolume.slab` and the grab
+    /// is a `ClearanceHandle(role: .slabDepth)` — the same tested pair the
+    /// keep-clear face slabs have used since keep-clear Phase B. What is new is
+    /// where the dragged number LANDS: `LatticeSettings.primitiveDepthMM`, which is
+    /// also the protection depth (bar R4).
+    ///
+    /// ★ THE NORMAL IS FLIPPED, and that is the whole difference from a keep-out.
+    /// A clearance slab reaches OUT of the part (it is space that must stay empty);
+    /// a lattice slab reaches IN (it is material that must be held and lightened).
+    /// `LatticeRegionEmission.spec(for:role:depthMM:faceID:)` flips it for the same
+    /// reason, so the plane on screen is the region in the job.
+    public struct LatticeDepthPlane: Identifiable {
+        public let ref: LatticePrimitiveRef
+        public let groupID: UUID
+        /// The render/handle key: the run face id, or the manual sentinel.
+        public let faceKey: Int
+        public let role: LatticeGroupRole
+        public let depthMM: Double
+        public let volume: ClearanceVolume
+        public let handle: ClearanceHandle
+        public var id: String { ref.key }
+    }
+
+    /// Every lattice depth plane to draw and grab, in the selection's order.
+    /// Empty when lattice mode is off or nothing is declared — the TO page hides
+    /// these, and a page that has none draws none.
+    public func latticeDepthPlanes() -> [LatticeDepthPlane] {
+        guard lattice.enabled, let mesh = viewerMesh else { return [] }
+        let roles = latticeEligibleRoles()
+        var out: [LatticeDepthPlane] = []
+        for g in selection.groups {
+            guard let groupRole = roles[g.id] else { continue }
+            for f in g.faces {
+                let ref = LatticePrimitiveRef.face(group: g.id, face: f)
+                guard let role = LatticePrimitiveRoles.role(
+                        for: ref, groupRole: groupRole,
+                        overrides: lattice.primitiveRoles),
+                      let geo = mesh.faceGeometry(f), geo.isPlane,
+                      let outline = mesh.facePlaneOutline(
+                        f, planeNormal: SIMD3<Float>(geo.planeNormal),
+                        planeOrigin: SIMD3<Float>(geo.planeOrigin))
+                else { continue }
+                let depth = latticeSlabDepthMM(ref, in: g.id)
+                // INTO the part: the same flip the emission makes.
+                let inward = StepFaceGeometry(kind: .plane,
+                                              planeNormal: -geo.planeNormal,
+                                              planeOrigin: geo.planeOrigin)
+                let key = Int(resolvedRunFaceID(f))
+                let volume = ClearanceVolume.slab(faceID: key, geometry: inward,
+                                                  outline: outline, depthMM: depth)
+                guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
+                                                       axialSpan: nil).first
+                else { continue }
+                out.append(LatticeDepthPlane(ref: ref, groupID: g.id, faceKey: key,
+                                             role: role, depthMM: depth,
+                                             volume: volume, handle: h))
+            }
+            // A hand-placed FACE primitive is already a slab in its own frame, so
+            // its axis is the region direction and needs no flip. A BOLT primitive
+            // is a cylinder region — there is no depth to drag, so it gets no plane.
+            for mp in force.manualPrimitives(for: g.id) where mp.kind == .face {
+                let ref = LatticePrimitiveRef.primitive(mp.id)
+                guard let role = LatticePrimitiveRoles.role(
+                    for: ref, groupRole: groupRole,
+                    overrides: lattice.primitiveRoles) else { continue }
+                let n = SIMD3<Float>(mp.axis)
+                let (u, v) = planeBasis(normal: n)
+                let outline = PlaneOutline(center: SIMD3<Float>(mp.center),
+                                           uAxis: u, vAxis: v,
+                                           halfU: Float(mp.halfUMM),
+                                           halfV: Float(mp.halfWMM))
+                let key = Self.manualFaceKey(mp.id)
+                let depth = lattice.primitiveDepthMM[ref.key] ?? mp.resolvedDepthMM
+                let volume = ClearanceVolume.slab(faceID: key,
+                                                  geometry: mp.syntheticGeometry,
+                                                  outline: outline, depthMM: depth)
+                guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
+                                                       axialSpan: nil).first
+                else { continue }
+                out.append(LatticeDepthPlane(ref: ref, groupID: g.id, faceKey: key,
+                                             role: role, depthMM: depth,
+                                             volume: volume, handle: h))
+            }
+        }
+        return out
+    }
+
+    /// Write a dragged depth for one primitive — THE one number (§3d/R4). Clamped
+    /// through `LatticeSlabDepth` so a viewport drag cannot reach a depth the card
+    /// could not.
+    public func writeLatticeDepthMM(_ ref: LatticePrimitiveRef, mm: Double) {
+        lattice.primitiveDepthMM[ref.key] = LatticeSlabDepth.clamp(mm)
     }
 
     /// A stable NEGATIVE sentinel face key for a manual primitive, so it never
@@ -929,6 +1072,10 @@ public final class ProjectModel: ObservableObject {
                 self?.latticeSlabDepthMM(gid) ?? .nan
             },
             runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
+            // ★ §3c/§3d — the per-primitive role and depth overrides. Empty on
+            // every project that has not used them ⇒ the emission is unchanged.
+            primitiveRoles: lattice.primitiveRoles,
+            primitiveDepthMM: lattice.primitiveDepthMM,
             resolve: { [weak self] f in
                 guard let mesh = self?.viewerMesh, let geo = mesh.faceGeometry(f) else { return nil }
                 if geo.isCylinder {
