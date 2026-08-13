@@ -980,6 +980,43 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
   return out;
 }
 
+// ★ §2(c) — THE SLIVER GUARD, ON THE LATTICE SIDE (task 2026-08-15-lattice-
+// regions). PR 331's §5(a) refuses a grid split whose cells fall under the voxel
+// floor, naming the number AND the arithmetic ("at most 42 sub-regions can clear
+// the floor here"). The lattice side needs the same shape of refusal for the
+// same reason: a sector that cannot carry a lattice at ANY legal cell should say
+// so before the run, not leave a receipt to be read afterwards.
+//
+// ★ IT REFUSES ON `!feasible`, NOT ON `out_of_regime`, and that boundary is not
+// mine to move. This file already decided, deliberately and in writing, that a
+// region which "clears percolation but not accuracy is buildable and
+// uncertifiable, which is a verdict, not a refusal" (fill_fit_region_cell, the
+// pre-flight's case C). Refusing there would overturn an existing decision on
+// every analytic job too. Infeasible is different in kind: no printable AND
+// percolating pair exists at any cell, so there is nothing to build.
+//
+// Scoped to `kind == "region"`: an analytic include behaves exactly as it did.
+void refuse_infeasible_region_lattice(const JobDescription& job,
+                                      const std::vector<FitRegionCell>& cells,
+                                      double min_extrudable_width_mm) {
+  for (const FitRegionCell& f : cells) {
+    if (f.feasible) continue;
+    if (f.job_region_index >= job.lattice.regions.size()) continue;
+    const JobLatticeRegion& r = job.lattice.regions[f.job_region_index];
+    if (r.kind != "region") continue;   // the analytic kinds keep their verdict
+    throw JobError(
+        "lattice region " + std::to_string(r.region_id) +
+        " cannot carry a lattice at ANY legal cell: its body measures " +
+        json_num(f.extent_mm) + " mm across, and this topology needs at least " +
+        json_num(f.min_width_buildable_mm) +
+        " mm to build a strut at the declared " +
+        json_num(min_extrudable_width_mm) +
+        " mm extrusion width (and " + json_num(f.min_width_certifiable_mm) +
+        " mm to certify one). Declare a deeper region, run at a finer "
+        "resolution, or split the parent into fewer pieces.");
+  }
+}
+
 // The per-voxel desired cell the grading law's Fit mode consumes: the derived cell of
 // the include region owning each voxel, 0 elsewhere. Built from the SAME membership
 // test the certification mask uses (`point_in_clearance_region`, first match wins), so
@@ -3219,6 +3256,8 @@ LatticeVariantOutcome lattice_one_variant(
       fit_cells = fit_region_cells(job, gp.topology,
                                    job.grading.min_extrudable_width_mm,
                                    &lattice_roles);
+      refuse_infeasible_region_lattice(job, fit_cells,
+                                       job.grading.min_extrudable_width_mm);
       if (fit_cells.size() != lattice_roles.includes.size())
         throw JobError(
             "run_job: fit derivation and the resolved include regions disagree on "
