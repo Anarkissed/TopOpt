@@ -41,8 +41,10 @@ misled:
    Release. Superseded by §0.6, and it is the one that cost the most: four
    scope decisions rested on it.
 
-★ **WHAT IS STILL NOT DONE**: Mode 2's wiring into the LADDER — which is
-gated on a budget-convention decision that is yours, not mine (§0.5). §3(e)'s cost
+★ **WHAT IS STILL NOT DONE**: Mode 2 measured against Mode 1 **on his part** at
+matched volume. The mechanism is built, wired into the ladder under the ruled
+convention (§0.5a) and measured on a fixture; what it is WORTH on real geometry
+is one more arm of §7.1's loop. §3(e)'s cost
 confirmation IS done (§0.4c, **0.0750%**) and **Mode 2 itself is built, optimises,
 and its gradient is verified end to end** (§0.5).
 
@@ -315,6 +317,69 @@ spend is 78% of a margin that was 450x what the gate asks.** Whether that trade
 is worth taking is a judgement about how much of that headroom is real, which is
 a question about `z_knockdown` and the strut law's own caveats (§1.4) and not one
 this task can settle.
+
+### 0.5a ★★ THE BUDGET CONVENTION IS DECIDED, AND IT IS THE `minimize_plastic` CHECKBOX
+
+The maintainer's ruling. One user-facing control, one meaning, no new knob. Four
+answers, one line each, then what was built.
+
+**(1) ★ THE CHECKBOX DOES REACH THE WORKER — answer (i), the path is fine.**
+Traced end to end: the app sends the boolean at
+[`RemoteRunner.swift:830`](app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:830)
+(`loads["minimize_plastic"] = request.minimizePlastic`), core parses it at
+[`job.cpp:667`](core/src/cli/job.cpp:667), and it drives the ladder at
+[`loadcase.cpp:382`](core/src/cli/loadcase.cpp:382) — `const bool growth =
+!lc.minimize_plastic;`. **No bug.** Unticking it changes the run today.
+
+★ **But the reason it LOOKED unconditional is real and is now fixed.** The
+literal `"mode": "minimize_plastic"` at
+[`RemoteRunner.swift:667`](app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:667)
+is the job **KIND** — `"minimize_plastic"` vs `"analyze"`, validated at
+[`job.cpp:410`](core/src/cli/job.cpp:410) — and `run_info.mode` echoes exactly
+that ([`observability.cpp`](core/src/simp/observability.cpp), `str("mode",
+info.mode)`). **Two different axes wearing the same words**, which is why every
+run ever produced reads identically there and why the record could not answer
+"which ladder ran". It answers now — (3).
+
+**(2) ★ WHAT `OFF` OPTIMISES FOR, AGAINST THE CODE — it GROWS.**
+[`loadcase.cpp:369-372`](core/src/cli/loadcase.cpp:369): ON walks
+`[0.68, 0.52, 0.38, 0.26]` of the part's volume and recommends the **lightest**
+rung that clears the margin; OFF walks `[1.55, 1.25, 1.10]` — **above 1.0** — and
+recommends the **smallest ADDITION** that clears it.
+
+★ **So it is NOT "maximise stiffness at a fixed volume", and §1's wording needs
+one correction.** Under OFF the total is not the as-imported mass; it is the
+**rung's multiple of it**. The convention still maps exactly as ruled — the freed
+mass is spent inside the same total and the lattice buys structure — but "the
+part weighs what was asked" reads precisely as *"the part weighs the RUNG's
+target"*, which is above the imported part. Stated against the behaviour, not the
+name, because a convention written against a name is the same class of error as
+the volume-convention bug.
+
+★ **And the OFF branch is NOT under-exercised**: it has its own validation suite
+(`core/tests/validation/test_growth_ladder.cpp`) plus coverage in
+`test_preflight_divergence`, `test_loadcase_analyze`, `test_active_domain`,
+`test_selfweight_clearance_void` and `test_lattice_variant`.
+
+**(3) ★ THE CONVENTION AND THE SOLID FRACTION ARE NOW IN `run_info.json`.**
+Three new keys, filled in the ONE shared builder
+([`run_job.cpp` `build_run_info`](core/src/cli/run_job.cpp:176)) so all four
+write sites agree by construction:
+
+| key | |
+|---|---|
+| `ladder_direction` | `"reduce"` / `"grow"` — **the checkbox**, which `mode` never carried |
+| `lattice_budget_convention` | `"banked"` / `"spent"` / `"none"` |
+| `achieved_solid_fraction` | achieved mass ÷ the same part **solid**; `null` until observed |
+
+The last one is the one that makes his runs comparable again: a rung is a
+fraction of the ACTIVE envelope, so a frozen region that stopped costing its
+envelope **moves what the rung means**, and a latticed ladder cannot otherwise be
+compared with an unlatticed one.
+
+**(4) ★ B2 REMAINS MISSED AND REMAINS REPORTED.** Not revisited under the new
+convention. If it ever clears under SPENT that is a NEW measurement under a NEW
+convention and must be labelled as one — never as B2 passing.
 
 ### 0.4c ★ §3(e) CONFIRMED, not assumed: the machinery is **0.0750%** of one state solve
 
@@ -1063,7 +1128,51 @@ declaration rather than from connectivity.
 Until that is done, no per-region stress number measured on his part should be
 quoted for a declared face.
 
-### 7.2 Mode 2 — BUILT and measured; what remains is the LADDER wiring
+### 7.2 Mode 2 — BUILT, WIRED INTO THE LADDER, and measured
+
+**Done.** The convention question that gated it is answered (§0.5a) and the
+wiring followed it rather than inventing a knob.
+
+`SimpOptions::lattice_coupling` is an abstract seam (`LatticeDesignCoupling`) so
+`simp.cpp` stays free of lattice types — it knows only that there is a second
+block of variables with a box, a sensitivity chain and a mass.
+`LatticeFieldCoupling` implements it and `minimize_plastic` builds one **only**
+when a surviving region is actually `Optimised`, holding it across the whole
+ladder so β carries rung to rung as the density warm start does.
+
+Measured through `simp_optimize` itself, 14 iterations, both conventions:
+
+| | compliance | lattice mass | allowance |
+|---|---|---|---|
+| **BANKED** (ON) | 2.504e-02 → **1.387e-02** | **410.069** | 410.551 |
+| **SPENT** (OFF) | 2.504e-02 → **1.489e-02** | **382.564** | 410.551 |
+
+BANKED holds its allowance to **0.12%** — it redistributes and does not drift.
+SPENT hands **27.99** voxel-equivalents to the Active set. That difference IS the
+ruling, asserted rather than described.
+
+★ **The Jacobian is rebuilt every step**, deliberately: dρ/dβ depends on β through
+the map's slope, so a Jacobian cached from the seed would be the gradient of a
+field the solve never used — the same class of error as pointing the density
+override after the solve instead of before. It costs 39.7 ms against a 72-second
+state solve (§0.4c), so "recompute it" needs no argument.
+
+★ **`freed_mass_return` is SUPPRESSED under Mode 2, not ignored.** It splits a
+CONSTANT saving; under Mode 2 that split is what MMA solves, with the lattice
+mass on the constraint's left-hand side. Leaving it live would fold the same mass
+in twice — silently.
+
+★ **A coupling the loop would accept and then ignore is REFUSED**: OC has no
+second block, and the projected subproblem does not carry β. A silently ignored
+design variable is worse than a refusal — the run looks like Mode 2, optimises
+Mode 1, and nothing in the record says which.
+
+**What is still NOT measured:** Mode 2 against Mode 1 at matched volume **on his
+part**. Nothing here says Mode 2 beats Mode 1 on real geometry — only that both
+conventions descend and hold the mass their convention says they should, on a
+fixture. That is §7.1's loop with an extra arm.
+
+### 7.2b (superseded) the wiring, when it was still owed
 
 The subproblem is built, exercised and measured (§0.5, §3d). What is **not** done
 is calling it from `minimize_plastic`'s rungs, which needs two things this
@@ -1117,8 +1226,34 @@ is its density times solid, and — this is the part that matters — the weight
 gives up goes back into the budget, so the optimiser can spend it somewhere
 useful.
 
-Two things came out of it that are worth knowing even though the big measurement
-did not finish.
+★ **It is finished now, and the headline is that it works: 170.8 grams off a
+544-gram part, 31%.** What follows is what came out of it.
+
+★ **You get to choose what the saving is FOR, and you already do — it is the
+"minimize plastic" tick box you set when you import.** Leave it ticked and the
+lattice's saved weight *leaves the part*: it comes out lighter. Untick it and the
+saved weight is *spent* — the part comes out at the weight the run was aiming for
+and the lattice buys you strength instead. That was the one open decision on this
+task and it needed you, not me, because it is a question about what you want
+rather than about what the code can do. It has no new setting: the box you
+already tick is the whole answer.
+
+★ **Two things about that box are now written into every run's record.** It used
+to be impossible to tell from a finished run which way the box had been set —
+there was a field called "mode" that said `minimize_plastic` on *every* run,
+because it meant a different thing entirely ("this is an optimise job, not an
+analyse job"). Same words, different question. Every run also now records **how
+heavy the result is as a fraction of the same part solid** — without that number
+a latticed run and an ordinary one cannot honestly be compared, because latticing
+changes what the weight target itself means.
+
+★ **I checked whether that tick box actually reaches the machine that does the
+work, rather than assuming it.** It does — I followed it from the app, through
+the job file, to the line that picks which way the optimiser walks. No bug. Worth
+the two minutes: the answer being obvious is not the same as the answer being
+checked.
+
+Two more things are worth knowing.
 
 **One: the printer's nozzle, not the software, is what limits this.** For the
 lattice's stiffness to be *predictable* you need at least five lattice cells
@@ -1183,3 +1318,30 @@ the structure at all.
 **What's still open** is the last loop — give the freed weight back to the
 optimiser and see how much comes back as material — and re-measuring the part now
 that the two bugs above are fixed. `queue.sh` is the button for both.
+
+★ **And the last thing the machinery does is redistribute, not just thin out.**
+With the box ticked, the lattice region keeps exactly the weight it was going to
+keep — but the optimiser is now free to move that weight *around inside the
+region*: denser where the region is actually carrying something, thinner where it
+is not. Same weight, more strength, for free. With the box unticked it can go
+further and hand some of that weight to the rest of the part. Measured on a test
+piece: ticked, the region held its weight to within 0.12% and got stiffer;
+unticked, it gave up 7% of its weight to the structure around it.
+
+★ **One number I would act on.** I measured the safety margin at every one of 127
+iterations of a real run, which nobody had done before — previously only the
+final number was recorded. **The margin stops meaningfully improving at iteration
+12.** The remaining 115 iterations — 90% of the run — buy 1.2%. Worse, the margin
+does not climb smoothly: it jitters by more than 2%, which is *larger than the
+total improvement over those 115 iterations*. So a rule that watches the margin
+and decides "that got better, keep going" is watching noise. There is real time
+to be saved there.
+
+★ **Where I was wrong, since it shaped the work.** The app's test suite kept
+failing and I blamed a known intermittent graphics fault that this project has
+documented. It was not that. One test runs the real command-line tool, and the
+copy it reached for was five days stale — from before a change that added a new
+setting, which the old copy then rejected. A stale program makes that test go
+*red*, not *skip*, and red looks exactly like "you broke something". Rebuilding
+it made all 1445 tests pass with nothing else changed. A familiar explanation is
+a comfortable one and I leaned on it for four runs.
