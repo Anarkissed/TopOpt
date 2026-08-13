@@ -735,6 +735,24 @@ struct MinimizePlasticOptions {
   // optimization itself.
   int keyframe_count = 0;
 
+  // ★ DIAGNOSTIC ONLY (task 2026-08-13-lattice-as-a-material, bar R4): the
+  // ANALYSIS density at EVERY iteration, with the 1-based iteration number.
+  // Null by default and never set in production; with it null the driver takes
+  // no new branch and the run is unchanged.
+  //
+  // It exists because "the margin SETTLES at iteration i" is a claim about a
+  // TRAJECTORY, and every other hook here reports an endpoint. A probe cannot
+  // answer it by re-implementing the ladder — a probe that runs a different loop
+  // measures a different thing — so the driver hands out the trajectory instead.
+  //
+  // ★ DO NOT CERTIFY INSIDE THIS CALLBACK. `analyze_fixed_design` is not pure,
+  // so certifying mid-loop lets the measurement change the run it is measuring.
+  // Copy the density out (or write it to disk) and certify afterwards.
+  //
+  // Composes with `keyframe_count`: playback keeps its own cadence.
+  std::function<void(int iteration, const std::vector<double>& analysis_density)>
+      iteration_density;
+
   // User-defined design load (ARCHITECTURE §1 mode (a): "user-defined loads").
   // When NON-EMPTY, these nodal loads REPLACE self-weight as the design load —
   // the driver optimizes and analyses the part under this load case instead of

@@ -1573,6 +1573,36 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       };
     }
 
+    // ★ DIAGNOSTIC ONLY (task 2026-08-13-lattice-as-a-material, bar R4). A probe
+    // that wants the margin as a per-iteration CURVE needs the analysis density
+    // at EVERY iteration, which no production consumer wants. Null by default;
+    // nothing in production sets it, and with it null not one line below runs.
+    //
+    // ★ It COMPOSES with the playback keyframe rather than replacing it — an
+    // earlier draft assigned `opt.keyframe` directly and would have silently
+    // disabled playback for any caller that asked for both.
+    //
+    // ★ AND IT MUST NOT CERTIFY IN HERE. `analyze_fixed_design` is not pure
+    // (2026-08-11), so calling it mid-loop would let a diagnostic change the
+    // trajectory it is measuring. The hook HANDS OUT the density; certifying it
+    // is the caller's problem, offline.
+    if (options.iteration_density) {
+      const auto playback = opt.keyframe;
+      // ★ The playback hook keeps ITS OWN cadence. Forcing the stride to 1 for
+      // the diagnostic would otherwise hand playback every iteration instead of
+      // the ~keyframe_count it asked for — a diagnostic must not change what the
+      // other consumer receives.
+      const int playback_stride = std::max(1, opt.keyframe_stride);
+      int seen = 0;
+      opt.keyframe_stride = 1;
+      opt.keyframe = [&options, playback, playback_stride,
+                      seen](const std::vector<double>& d) mutable {
+        ++seen;
+        if (playback && (seen - 1) % playback_stride == 0) playback(d);
+        options.iteration_density(seen, d);
+      };
+    }
+
     // ── THE ONE BRANCH (task 2026-08-10-plsm-production) ────────────────────
     //
     // ★ PlsmMode::Off IS THE DEFAULT AND IS THE ENTIRE EXISTING WORLD. This `if`

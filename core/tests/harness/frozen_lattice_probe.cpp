@@ -25,6 +25,14 @@
 //       reason it is missing is not the reason originally given — it is simply
 //       unbuilt, and at 28 s a certification it is minutes of compute.
 //   (M5 is implemented — see `--stage cost`.)
+//   (R4's margin CURVE is implemented — see `--stage curve`.)
+//
+//   --stage curve    R4(b) the margin as a PER-ITERATION curve, and the settling
+//                        iteration under B6's pre-registered definition. Captures
+//                        every iteration's analysis density through the driver's
+//                        diagnostic hook, then certifies each one OFFLINE — never
+//                        inside the callback, because `analyze_fixed_design` is
+//                        not pure and would perturb the trajectory it measures.
 //
 // ★ THE PROBLEM IS NOT RE-DERIVED. `build_production_loadcase` builds it from the
 // same transcription `levelset_probe` and `portable_problem_export` use, and the
@@ -1236,6 +1244,169 @@ int main(int argc, char** argv) {
   // ★ WALL CLOCK IS A CLAIM ABOUT A CONFIGURATION. Run this in Release; a cost
   // measured on an unoptimised build is meaningless, and this task learned that
   // the expensive way (handoff §0.6).
+  // ─────────────────────────────────────────────────────────────────────────
+  // R4's OTHER HALF — THE MARGIN AS A PER-ITERATION CURVE, AND WHEN IT SETTLES
+  // ─────────────────────────────────────────────────────────────────────────
+  //
+  // ★ B6's definition, PRE-REGISTERED and used verbatim: the settling iteration
+  // is the first i such that for all j in [i, i+20], |m_j - m_i| <= 0.5% of m_i.
+  // It is not re-derived here and no window or tolerance is tuned to make a
+  // number look better (§5 of the brief).
+  //
+  // ★ THE DENSITIES ARE CERTIFIED AFTERWARDS, NEVER INSIDE THE HOOK.
+  // `analyze_fixed_design` is not pure, so certifying mid-loop would let the
+  // measurement perturb the trajectory it is measuring. The run captures, then
+  // the run ends, then the certifications happen.
+  if (a.stage == "curve") {
+    const std::string rules_path =
+        a.materials.substr(0, a.materials.find_last_of('/') + 1) +
+        "../settings/rules.json";
+    const SettingsRules rules = load_settings_rules_file(rules_path);
+
+    std::vector<LatticeRegionSpec> specs;
+    for (const Region& r : regions0) {
+      LatticeRegionSpec sp;
+      sp.id = r.id;
+      sp.name = r.name;
+      sp.mode = LatticeRegionMode::Declared;
+      sp.declared_density = a.densities.empty() ? 0.30 : a.densities.front();
+      sp.cell_mode = LatticeRegionCellMode::Fit;
+      specs.push_back(sp);
+    }
+
+    std::printf("-- R4(b) THE MARGIN AS A CURVE, rung %.2f, cap %d iterations --\n",
+                a.rung, a.iters);
+    std::printf("   capturing every iteration's analysis density, then "
+                "certifying each one OFFLINE\n\n");
+
+    std::vector<std::vector<double>> traj;
+    MinimizePlasticOptions o = options;
+    o.volume_fraction_ladder = {a.rung};
+    o.simp.max_iterations = a.iters;
+    o.frozen_lattice = true;
+    o.frozen_lattice_topology = topo;
+    o.frozen_lattice_region_id = rid;
+    o.frozen_lattice_cell_mm = a.cell_mm;
+    o.frozen_lattice_min_extrudable_width_mm = a.min_extrudable_width_mm;
+    o.frozen_lattice_regions = specs;
+    o.frozen_lattice_freed_mass_return = a.freed_mass_return;
+    o.iteration_density = [&traj](int, const std::vector<double>& d) {
+      traj.push_back(d);
+    };
+
+    const double t_run = now_s();
+    const MinimizePlasticResult mr =
+        minimize_plastic(grid, material, "PLA", bcs, rules, o);
+    const double run_wall = now_s() - t_run;
+    std::printf("   the run: %zu iterations captured, %.1f s\n", traj.size(),
+                run_wall);
+    if (traj.empty()) {
+      std::printf("   NOTHING CAPTURED — the hook never fired. Not a curve, and "
+                  "not a result.\n");
+      return 1;
+    }
+
+    // ★ THE POSTURE, REBUILT — AND THEN CHECKED AGAINST THE RUN'S OWN ANSWER.
+    // The driver does not hand its posture back, so this rebuilds it from the
+    // same inputs. That is legitimate only if it reproduces what the run used,
+    // so the final captured design is certified here and compared with the
+    // margin the RUN reported for that same design. A curve certified under a
+    // different posture than the run optimised against would be measuring two
+    // things at once, and would look perfectly reasonable doing it.
+    const std::vector<double> widthC = local_member_thickness_mm(grid, rho0, 0.5, 32);
+    const std::vector<LatticeRegionValidity> VC = lattice_region_validity(
+        grid, rid, specs, widthC, topo, a.cell_mm, a.min_extrudable_width_mm);
+    std::vector<char> onlyC(n, 0);
+    for (std::size_t e = 0; e < n; ++e)
+      onlyC[e] = eff[e] == MaskValue::FrozenSolid ? 1 : 0;
+    std::vector<int> refusedC;
+    for (std::size_t q = 0; q < specs.size(); ++q)
+      if (!VC[q].in_validity_range && !VC[q].fit_feasible)
+        refusedC.push_back(specs[q].id);
+    const ResolvedLatticeDensityField FC = resolve_lattice_density_field(
+        grid, rid, specs, topo, nullptr, &onlyC, refusedC, &VC);
+    LatticePosture held;
+    const LatticePosture* posture = nullptr;
+    if (!FC.empty()) {
+      held.topology = topo;
+      held.cell_size_mm = a.cell_mm;
+      held.mask = FC.mask;
+      held.relative_density = FC.rho;
+      held.cell_size_field = FC.cell_mm;
+      posture = &held;
+    }
+    std::printf("   posture: %s (%zu latticed voxels)\n", posture ? "rebuilt" : "none (solid)",
+                FC.latticed_voxels);
+
+    const double run_margin =
+        mr.evaluated.empty() ? 0.0 : mr.evaluated.back().report.margin_effective;
+    const FixedDesignAnalysis check = certify(traj.back(), posture, false);
+    const double rel = run_margin > 0.0
+                           ? 100.0 * std::fabs(check.margin_effective - run_margin) /
+                                 run_margin
+                           : 0.0;
+    std::printf("   posture check: final design certifies %.6f here, the RUN "
+                "reported %.6f (%.4f%% apart)\n",
+                check.margin_effective, run_margin, rel);
+    if (rel > 1.0)
+      std::printf("   ★ THE REBUILT POSTURE DOES NOT REPRODUCE THE RUN'S MARGIN. "
+                  "The curve below is NOT the run's margin trajectory — read it "
+                  "as a different measurement, or not at all.\n");
+    std::printf("\n");
+
+    std::printf("   iter   margin        d vs prev\n");
+    std::vector<double> m(traj.size(), 0.0);
+    const double t_cert = now_s();
+    for (std::size_t i = 0; i < traj.size(); ++i) {
+      const FixedDesignAnalysis an = certify(traj[i], posture, false);
+      m[i] = an.margin_effective;
+      std::printf("   %4zu   %- 12.6f  %s\n", i + 1, m[i],
+                  i == 0 ? "" :
+                  (std::fabs(m[i] - m[i - 1]) <= 0.005 * std::fabs(m[i - 1])
+                       ? "within 0.5%" : ""));
+      std::fflush(stdout);
+    }
+    std::printf("\n   %zu certifications, %.1f s (%.1f s each)\n", traj.size(),
+                now_s() - t_cert, (now_s() - t_cert) / (double)traj.size());
+
+    // ★ B6, verbatim.
+    const std::size_t W = 20;
+    std::size_t settle = 0;
+    bool settled = false;
+    for (std::size_t i = 0; i + W < m.size(); ++i) {
+      bool ok = true;
+      for (std::size_t j = i; j <= i + W && ok; ++j)
+        if (std::fabs(m[j] - m[i]) > 0.005 * std::fabs(m[i])) ok = false;
+      if (ok) { settle = i + 1; settled = true; break; }
+    }
+    std::printf("\n★ SETTLING ITERATION (B6: first i with |m_j - m_i| <= 0.5%% of "
+                "m_i for all j in [i, i+%zu])\n", W);
+    if (settled)
+      std::printf("   ★ i = %zu of %zu   margin there %.6f, final %.6f "
+                  "(%.3f%% apart)\n",
+                  settle, m.size(), m[settle - 1], m.back(),
+                  100.0 * (m.back() - m[settle - 1]) /
+                      std::max(1e-30, std::fabs(m[settle - 1])));
+    else
+      std::printf("   ★ NEVER SETTLES inside %zu iterations. The window needs "
+                  "%zu+1 iterations to close, so a run capped at %zu can only "
+                  "answer this for i <= %zu — this is a CAP, not a finding.\n",
+                  m.size(), W, m.size(),
+                  m.size() > W ? m.size() - W : 0);
+
+    if (!a.out.empty()) {
+      std::string csv = a.out + "/r4_margin_curve.csv";
+      if (FILE* f = std::fopen(csv.c_str(), "w")) {
+        std::fprintf(f, "iteration,margin\n");
+        for (std::size_t i = 0; i < m.size(); ++i)
+          std::fprintf(f, "%zu,%.10f\n", i + 1, m[i]);
+        std::fclose(f);
+        std::printf("   wrote %s\n", csv.c_str());
+      }
+    }
+    return 0;
+  }
+
   if (a.stage == "cost") {
     std::vector<LatticeRegionSpec> specs;
     for (const Region& r : regions0) {
