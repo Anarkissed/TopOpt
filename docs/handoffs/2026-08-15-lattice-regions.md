@@ -130,11 +130,30 @@ A face region declares none. `region_thinnest_extent_mm` runs
 behind the width-aware knockdown gate and the grading law's cells-per-member test
 — over a synthetic density that is 1 inside the region, and takes the MINIMUM.
 
-The minimum, not a percentile: the extent bounds how many cells lie ACROSS the
-body and the fit law takes `max(extent/N*, finest printable)`. A percentile would
-let the cell be sized by material the thinnest part of the region cannot hold —
-precisely the "1.52 cells across, under the 5.00-cell floor" failure fit mode
-exists to prevent.
+★ **THE MEDIAN, AND I GOT THIS WRONG FIRST.** The first version took the
+MINIMUM, argued from conservatism: a percentile "would let the cell be sized by
+material the thinnest part of the region cannot hold — precisely the 1.52
+cells-across failure fit mode exists to prevent."
+
+The argument is sound about conservatism and it produced a useless number,
+because **the minimum is a CONSTANT by construction**. The largest ball that fits
+inside a set and contains a voxel ON THAT SET'S BOUNDARY is one or two voxels
+however thick the set is elsewhere. Every region measured ~2 voxels. On his part
+all four sectors — declared 3.0 / 4.5 / 6.0 / 7.5 mm — returned `extent_mm`
+3.4106, exactly 2× the 1.70528 mm spacing, and therefore one cell, one density,
+one strut. Nothing but the run could have shown that; the unit tests were green
+throughout.
+
+The MEDIAN measures the body rather than the boundary, which is the quantity
+"how many cells lie across this" is actually asking about — and the same KIND of
+quantity `min(depth, 2·half_u, 2·half_w)` reports for an analytic slab, which is
+a DIMENSION of the slab, not a minimum over its points. It still adapts to a
+genuinely thin sector, which a declared depth alone would not.
+
+Pinned by `a_thicker_region_measures_thicker` in `test_lattice_region_mask.cpp`:
+the same face at 2 and 5 voxel layers measures 4.000 mm and 10.000 mm, a 2.5×
+ratio against a declared 2.5×. Under the minimum both return ~2 voxels and the
+test fails.
 
 ---
 
