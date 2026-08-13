@@ -1083,8 +1083,18 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.lattice_forecast_region_too_thin);
       le += ", \"forecast_required_member_mm\": " +
             fmt(info.lattice_forecast_required_mm);
+      // ★ NOT-FINITE SERIALIZES AS null, LIKE EVERY OTHER SENTINEL IN THIS FILE
+      // (task 2026-08-15-lattice-regions). `thinnest_mm` starts at +inf and is
+      // lowered by each include region the pre-flight can price. A job whose
+      // includes are ALL region-backed prices none of them there (the pre-flight
+      // runs before the import, so a region has no mask yet) and the value stays
+      // +inf — which `fmt` wrote as a bare `inf`, making run_info.json INVALID
+      // JSON. Every consumer that parses the receipt then fails, including the
+      // app. Found by the §4 run: the extractor could not read its own evidence.
       le += ", \"forecast_thinnest_region_mm\": " +
-            fmt(info.lattice_forecast_thinnest_region_mm);
+            (std::isfinite(info.lattice_forecast_thinnest_region_mm)
+                 ? fmt(info.lattice_forecast_thinnest_region_mm)
+                 : std::string("null"));
     }
     // Frozen material (task 2026-08-04-protect-freeze-vs-solidity) — an
     // INDEPENDENT gate from the roles block above: a run can have frozen

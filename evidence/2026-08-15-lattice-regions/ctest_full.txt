@@ -1,0 +1,11 @@
+=== FULL core ctest, task 2026-08-15-lattice-regions ===
+121/121 Test #106: cli_demo .........................   Passed  2047.49 sec
+
+100% tests passed out of 121
+
+Total Test time (real) = 2047.50 sec
+
+121 registered locally against CI's 123 — export_3mf and threemf_import do
+NOT register without lib3mf here, and CMake says so at configure time.
+121 = the 120 of PR 331 plus this task's lattice_region_mask.
+Report N/123, never N/N.

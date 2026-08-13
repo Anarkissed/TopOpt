@@ -856,16 +856,34 @@ double lattice_region_thinnest_extent_mm(const JobLatticeRegion& r) {
 // thinnest dimension of this volume" means, and by the same definition the
 // grading law compares a cell against. Reused, not re-derived, as §1c asks.
 //
-// ★ WHY THE MINIMUM AND NOT A PERCENTILE. `lattice_region_thinnest_extent_mm`
-// bounds how many cells can lie ACROSS the latticed body, and the fit law takes
-// cell = max(extent / N*, finest printable). A percentile would let the cell be
-// sized by material that the thinnest part of the region cannot hold, which is
-// precisely the "1.52 cells across, under the 5.00-cell floor" failure the fit
-// mode exists to prevent. The minimum is the conservative reading and the only
-// one that keeps the derived cell certifiable everywhere in the region.
+// ★★ NOT THE MINIMUM — THE MEDIAN. A CORRECTION THE §4 RUN FORCED
+// (task 2026-08-15-lattice-regions §0).
 //
-// A ONE-VOXEL-DEEP region measures one voxel thick, which is honest: at that
-// depth there is no room for a cell, and the fit law will say so.
+// The first version took the MINIMUM of tau, arguing a percentile "would let the
+// cell be sized by material the thinnest part cannot hold". The argument is
+// sound; the implementation was still useless, because THE MINIMUM IS A CONSTANT
+// BY CONSTRUCTION: the largest ball that fits inside a set and contains a voxel
+// ON THAT SET'S BOUNDARY is ~1-2 voxels however thick the set is elsewhere. Every
+// region therefore measured ~2 voxels.
+//
+// Measured, not reasoned. Four sectors of one bore on M2_verticalStand at 128,
+// declared 3.0 / 4.5 / 6.0 / 7.5 mm = 2 / 3 / 4 / 4 voxel layers:
+//
+//     sector   declared   candidate voxels   extent_mm   cell_mm
+//        0       3.0 mm         308           3.4106     1.0950
+//        1       4.5 mm         372           3.4106     1.0950
+//        2       6.0 mm         522           3.4106     1.0950
+//        3       7.5 mm         781           3.4106     1.0950
+//
+// 3.4106 mm is EXACTLY 2 x the 1.70528 mm spacing, in all four. The depth reached
+// the SELECTION (308 -> 781 voxels, monotone) and did not reach the GRADING at
+// all: one cell, one density, one strut, `distinct_cells: 1`.
+//
+// The MEDIAN measures the body rather than the boundary, and the body is what
+// "how many cells lie across this" asks about — the same quantity
+// min(depth, 2*half_u, 2*half_w) reports for an analytic slab, which is a
+// DIMENSION of the slab and not a minimum over its points. It still adapts to a
+// genuinely thin region, which a declared depth alone would not.
 // ★ IT MEASURES ON THE MASK'S OWN GRID, NOT THE CALLER'S, and that is a defect
 // this branch shipped for about ten minutes. The first version took the caller's
 // grid and indexed `mask.inside[i]` by the same i — which is correct only while
@@ -896,11 +914,14 @@ double region_thinnest_extent_mm(const ClearanceVoxelMask& mask) {
   const int cap = 64;
   const std::vector<double> tau =
       local_member_thickness_mm(grid, dens, 0.5, cap);
-  double thinnest = std::numeric_limits<double>::infinity();
+  std::vector<double> body;
+  body.reserve(mask.set_count());
   for (std::size_t i = 0; i < n; ++i)
-    if (mask.inside[i] && i < tau.size() && tau[i] > 0.0)
-      thinnest = std::min(thinnest, tau[i]);
-  return thinnest;
+    if (mask.inside[i] && i < tau.size() && tau[i] > 0.0) body.push_back(tau[i]);
+  if (body.empty()) return std::numeric_limits<double>::infinity();
+  const std::size_t mid = body.size() / 2;
+  std::nth_element(body.begin(), body.begin() + mid, body.end());
+  return body[mid];
 }
 
 // What FIT derived for ONE declared include region.

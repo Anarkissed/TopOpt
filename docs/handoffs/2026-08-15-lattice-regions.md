@@ -21,13 +21,25 @@ unit level (34 checks), not yet on his part.** `"kind": "region"` with a
 `region_id` and a depth resolves the sector's voxel set and drives the same
 membership every analytic lattice region drives.
 
-**Latticed voxels per sector on his part: ★ NOT MEASURED.** The demonstration
-§4 asks for — grid-split a curved feature on `M2_verticalStand.step`, give the
-sectors different depths, run it, report per-sector counts against the last real
-run's 13,034 / 12% / 507 g — has not been run. **Until it is, this feature is
-not demonstrated, and the bar R4 language applies to me: a test against a path
-he cannot reach is not evidence.** What exists is a unit assertion that two
-sectors of one face at depths 1 and 3 select different, disjoint voxel sets.
+**Latticed voxels per sector on his part: MEASURED, and the answer is SPLIT.**
+Four sectors of face 4 (cylindrical, 1741 mm²) at 3.0 / 4.5 / 6.0 / 7.5 mm:
+
+| sector | declared | layers | extent_mm | cell_mm | rho | strut | c/mem | regime | candidate | latticed |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 3.0 | 2 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **308** | 308 |
+| 1 | 4.5 | 3 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **372** | 372 |
+| 2 | 6.0 | 4 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **522** | 522 |
+| 3 | 7.5 | 4 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **781** | 781 |
+
+★ **The depth reaches the SELECTION and not the GRADING.** Four region-backed
+lattice regions resolved from voxel masks on his own part, each with its own
+verdict row, candidate voxels rising monotonically 308 → 781, every one latticed
+(0 solid fallback). But `extent_mm` is **3.4106 in all four — exactly 2× the
+1.70528 mm spacing** — so one cell, one density, one strut, `distinct_cells: 1`.
+
+**Per §4(b), that means the feature does not work yet**, whatever the unit tests
+say. See §1(c) for the root cause (my own choice of the MINIMUM, which is
+degenerate) and the median fix; the re-run is `r4_sectors_median.txt`.
 
 **Does the depth drive both protection and lattice? YES — MEASURED, and it is
 structural rather than agreed.** `region_depth_layers` is now the ONE mm→voxel-
