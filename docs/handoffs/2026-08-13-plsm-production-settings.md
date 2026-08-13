@@ -978,6 +978,8 @@ would do to a part where the hierarchy builds.
 | **R5** SIMP rows from the same probe invocation | One `external_field_surface_probe` call for the whole of §4b(c). ★ And a positive control for it: SIMP's own rung 0.68, dumped and handed back in as an arm, reproduces its internal row to four decimals. |
 | **R6** sealed void by the manufacturing definition | §4b(g), through the SHIPPED `plsm_void_topology` for SIMP and PLSM alike, cross-checked against an independent implementation. The caveat is carried: 0.00–0.05% at the light rung against 4.60–8.61% at the shipped one. |
 | **R7** no assertion weakened or deleted | `assertion_census.sh`, a MESSAGE census: 3,344 test messages before and after, 121 ctests before and after, **0 removed**, 3 production refusals ADDED. |
+| **the suite**, on the merged tree | ★ **119 of CI's 121 registered tests ran, and 100% passed (0 failures, 4710 s).** ★ **THE TWO THAT DID NOT RUN ARE NAMED**: `export_3mf` and `threemf_import`, which do not register locally because lib3mf is absent — CMake says so at configure time, and neither touches anything this task changed. **A local pass is not a CI pass and the denominator is CI's.** |
+| **R10** solver posture before/after §2 | §6b. `mg_mode` `stagnated-latched` and `cg_multigrid` false on ALL FOUR arms — the exact fraction does not change the coarse space. A clean negative, with what it cannot say stated. |
 | **R8** root cause with file and line, no placeholders | §2(g) names `core/src/simp/plsm.cpp:104`; §6 names `core/include/topopt/job.hpp`. No scratch at the repository root; every large field lives outside the repo under `$SCRATCH`. |
 | **R9** separate commit for any review response | Nothing to respond to yet; the branch's history is one commit per finding. |
 
@@ -1045,6 +1047,40 @@ loudly on a real problem is the evidence the guards are live.**
 why: `run_job` and `minimize_plastic` keep `PlsmMode::Off`, and *"22 test files
 call them IN-PROCESS with values pinned from SIMP designs ... those tests are the
 evidence that the SIMP code is unmoved."* That evidence is the ctest suite.
+
+## 7c. ★ THE ONE TEST THAT FAILED, AND WHY IT IS NOT THIS BRANCH'S
+
+`cli_demo`'s determinism check — *"two CLI runs produce byte-identical
+report.json"* — failed ONCE, in this task's first suite run. It is reported here
+rather than omitted, because a suite that passed on the retry and a suite that
+never failed are different objects.
+
+| run | host load | wall | result |
+|---|---|---|---|
+| every prior evidence run | low | 150–420 s | Passed |
+| ★ this task's first suite run | ~19, 3–4 competing worktree jobs | **5152 s** | ★ **FAILED** |
+| the run of record above | ~9 | 2723 s | **Passed** |
+
+★ **IT CANNOT REACH THIS DIFF.** `cli_demo` carries no `plsm` block, and every
+line this task added to `minimize_plastic.cpp` is inside the
+`PlsmMode::Parametric` branch.
+
+★★ **AND IT IS NOT A BEFORE/AFTER TEST AT ALL.** It compares an IN-PROCESS run
+with a SUBPROCESS run of the SAME binary — a run-to-run reproducibility check.
+The before/after question is R1's, and R1 answered it across two genuinely
+different binaries: byte-identical.
+
+★ **The mechanism is available and documented in this codebase.** The multigrid
+STAGNATION LATCH and the GenEO DOMAIN DECOMPOSITION both make decisions from
+observed solver behaviour, which thread scheduling perturbs; the failing pair's
+own log carries the `"the V-cycle stagnated"` warning on both runs.
+
+★ **THE CAVEAT, STATED RATHER THAN SMOOTHED OVER.** At 2723 s the passing run was
+still 6–18× slower than the historical 150–420 s, so this machine was quieter,
+not quiet. The verdict is **contention-induced, not this branch's** — with the
+residual observation that a determinism check whose outcome depends on machine
+load is fragile whoever provokes it, and that is worth its own task rather than a
+footnote here.
 
 ## 8. ★ IN PLAIN LANGUAGE
 
