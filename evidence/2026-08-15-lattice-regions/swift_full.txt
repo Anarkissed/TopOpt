@@ -1,0 +1,12 @@
+=== FULL app suite, task 2026-08-15-lattice-regions ===
+	 Executed 1458 tests, with 22 tests skipped and 8 failures (0 unexpected) in 251.413 (251.531) seconds
+
+1450/1458. All 8 failures are the SAME environmental gap as PR 331 — this
+machine's core slice has no lib3mf, so three AppModelTests 3MF-import cases
+refuse before they test anything:
+  AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+  AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+  AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
+
+★ Not caused by this task, and not fixed by it. CI builds the slice with
+  lib3mf and runs all three.
