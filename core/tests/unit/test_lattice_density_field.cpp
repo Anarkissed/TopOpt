@@ -16,6 +16,7 @@
 #include "topopt/lattice_material.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/simp.hpp"
+#include "simp/mma_joint.hpp"
 #include "topopt/voxel.hpp"
 
 #include <algorithm>
@@ -412,6 +413,136 @@ int main() {
     CHECK(all_zero && gd.size() == B.beta.size(),
           "a Declared region's beta gradient is EXACTLY zero — a fixed density "
           "is a constant density field");
+  }
+
+  // ── ★ MODE 2 ACTUALLY OPTIMISES: a loop, not just a gradient ─────────────
+  //
+  // The gradient bar above says the direction is right. This says the loop that
+  // follows it goes DOWNHILL and stays on budget — which is a different claim,
+  // and the one that decides whether Mode 2 is a feature or an assertion.
+  //
+  // Half the block is Active design space; the other half is FROZEN and carries
+  // the density field. One volume constraint prices both, so the optimiser is
+  // free to spend the budget on whichever buys stiffness more cheaply. That
+  // trade IS Mode 2.
+  {
+    LatticeBetaField B;
+    const LatticeBetaKnots kn = lattice_beta_knots_for_grid(g, 0.0, 0.0, 0.0);
+    B.lattice = plsm_make_lattice(g.nx, g.ny, g.nz, kn.dx, kn.dy, kn.dz, 2.0);
+    B.basis = PlsmBasisKind::Gaussian;
+    B.steepness = 1.0;
+    B.beta.assign(B.lattice.count(), 0.0);  // the band midpoint everywhere
+
+    // Region 1 = the frozen half (latticed); region 0 = nowhere.
+    std::vector<int> rid2(g.voxel_count(), 0);
+    DesignMask eff(g.voxel_count(), MaskValue::Active);
+    std::vector<char> only(g.voxel_count(), 0);
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i)
+          if (i >= g.nx / 2) {
+            const std::size_t e = g.index(i, j, k);
+            rid2[e] = 1;
+            eff[e] = MaskValue::FrozenSolid;
+            only[e] = 1;
+          }
+    LatticeRegionSpec opt;
+    opt.id = 1;
+    opt.name = "field";
+    opt.mode = LatticeRegionMode::Optimised;
+
+    const LatticeMaterialModel M = build_lattice_material_model(T, 2300.0, 0.35);
+    SimpParams p;
+    p.youngs_modulus = 2300.0;
+    p.poisson = 0.35;
+    p.penalty = 3.0;
+    p.lattice_material = &M;
+
+    const std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    const std::vector<NodalLoad> loads = tip_load_z(g, -4.0);
+    const DensityFilter filt = make_density_filter(g, 1.5, eff);
+
+    double n_active = 0.0;
+    for (MaskValue m : eff)
+      if (m == MaskValue::Active) n_active += 1.0;
+
+    // The budget: 40% of the Active envelope, plus whatever the seed field
+    // occupies. Stated here rather than derived, because the convention is a
+    // CHOICE (see the handoff §3d) and a buried one would be unauditable.
+    std::vector<double> x(g.voxel_count(), 0.0);
+    for (std::size_t e = 0; e < x.size(); ++e)
+      x[e] = (eff[e] == MaskValue::Active) ? 0.40 : 1.0;
+    const ResolvedLatticeDensityField seed =
+        resolve_lattice_density_field(g, rid2, {opt}, T, &B, &only, {});
+    double seed_mass = 0.0;
+    for (std::size_t e = 0; e < g.voxel_count(); ++e)
+      if (seed.mask[e]) seed_mass += seed.rho[e];
+    const double total_target = 0.40 * n_active + seed_mass;
+
+    MmaJointState st;
+    double c_first = 0.0, c_last = 0.0, mass_last = 0.0;
+    double beta_span = 0.0;
+    for (int it = 1; it <= 12; ++it) {
+      const ResolvedLatticeDensityField f =
+          resolve_lattice_density_field(g, rid2, {opt}, T, &B, &only, {});
+      std::vector<double> lr(g.voxel_count(), -1.0);
+      double lat_mass = 0.0;
+      for (std::size_t e = 0; e < g.voxel_count(); ++e)
+        if (f.mask[e]) {
+          lr[e] = f.rho[e];
+          lat_mass += f.rho[e];
+        }
+      SimpParams q = p;
+      q.lattice_relative_density = &lr;
+      const SimpCompliance c = simp_compliance(g, q, x, bcs, loads, 1e-11, 20000);
+      if (it == 1) c_first = c.compliance;
+      c_last = c.compliance;
+
+      const PlsmCsr J =
+          lattice_beta_jacobian(g, rid2, {opt}, T, B, &only, {}, 1);
+      std::vector<double> ones_lat(g.voxel_count(), 0.0);
+      for (std::size_t e = 0; e < g.voxel_count(); ++e)
+        if (f.mask[e]) ones_lat[e] = 1.0;
+      const std::vector<double> dobj_b = lattice_beta_chain(J, c.dcompliance);
+      const std::vector<double> dmass_b = lattice_beta_chain(J, ones_lat);
+
+      const std::vector<double> nx_ = mma_update_masked_lattice(
+          st, it, g, filt, eff, x, B.beta, c.dcompliance, dobj_b, dmass_b,
+          lat_mass, total_target, -8.0, 8.0, 0.2, p.density_min);
+      for (std::size_t e = 0; e < g.voxel_count(); ++e)
+        if (eff[e] == MaskValue::Active) x[e] = nx_[e];
+      for (std::size_t j = 0; j < B.beta.size(); ++j)
+        B.beta[j] = nx_[g.voxel_count() + j];
+
+      // Total mass-equivalent actually held, at the END of the step.
+      const std::vector<double> xph = filt.filter_density(x);
+      double v = 0.0;
+      for (double t : xph) v += t;
+      const ResolvedLatticeDensityField fe =
+          resolve_lattice_density_field(g, rid2, {opt}, T, &B, &only, {});
+      double lm = 0.0;
+      for (std::size_t e = 0; e < g.voxel_count(); ++e)
+        if (fe.mask[e]) lm += fe.rho[e];
+      mass_last = v + lm;
+    }
+    for (double bv : B.beta) beta_span = std::max(beta_span, std::fabs(bv));
+
+    std::printf("MODE 2 loop: c %.6e -> %.6e (%.2f%%), mass %.3f vs budget %.3f,"
+                " max|beta| %.4f\n",
+                c_first, c_last, 100.0 * (c_last - c_first) / c_first, mass_last,
+                total_target, beta_span);
+
+    CHECK(c_last < c_first,
+          "★ Mode 2 must go DOWNHILL — a joint update that raises the objective "
+          "is a wrong gradient or a wrong constraint, not a slow start");
+    CHECK(mass_last <= total_target * 1.02,
+          "and it must stay on the ONE budget that prices both blocks — a "
+          "lattice that pays for itself twice would look like free stiffness");
+    // ★ POSITIVE CONTROL. If beta never moved, the two checks above would pass
+    // on a pure density run and this whole block would be measuring nothing.
+    CHECK(beta_span > 1e-6,
+          "the beta block must actually MOVE — otherwise this bar is the Mode 1 "
+          "bar wearing a Mode 2 label");
   }
 
   // ── the refusals ─────────────────────────────────────────────────────────

@@ -401,6 +401,7 @@ add_test(NAME frozen_lattice_c0 COMMAND test_frozen_lattice_c0)
 
 add_executable(test_lattice_density_field tests/unit/test_lattice_density_field.cpp)
 target_link_libraries(test_lattice_density_field PRIVATE topopt)
+target_include_directories(test_lattice_density_field PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(test_lattice_density_field PRIVATE
   MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
 add_test(NAME lattice_density_field COMMAND test_lattice_density_field)
