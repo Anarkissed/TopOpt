@@ -31,15 +31,29 @@ Four sectors of face 4 (cylindrical, 1741 mm²) at 3.0 / 4.5 / 6.0 / 7.5 mm:
 | 2 | 6.0 | 4 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **522** | 522 |
 | 3 | 7.5 | 4 | 3.4106 | 1.0950 | 0.600 | 0.420 | 3.11 | OUT | **781** | 781 |
 
-★ **The depth reaches the SELECTION and not the GRADING.** Four region-backed
-lattice regions resolved from voxel masks on his own part, each with its own
-verdict row, candidate voxels rising monotonically 308 → 781, every one latticed
-(0 solid fallback). But `extent_mm` is **3.4106 in all four — exactly 2× the
-1.70528 mm spacing** — so one cell, one density, one strut, `distinct_cells: 1`.
+★ **The PLUMBING is demonstrated: four region-backed lattice regions resolved
+from voxel masks on his own part, each with its own verdict row, candidate
+voxels rising monotonically 308 → 781 with declared depth, every one latticed
+(0 solid fallback), and the void-escape network reaching all of them.**
 
-**Per §4(b), that means the feature does not work yet**, whatever the unit tests
-say. See §1(c) for the root cause (my own choice of the MINIMUM, which is
-degenerate) and the median fix; the re-run is `r4_sectors_median.txt`.
+★★ **BUT THIS DEMONSTRATION CANNOT ANSWER THE GRADING QUESTION, AND THAT IS MY
+ERROR, NOT A DEFECT.** `extent_mm` is 3.4106 in all four — exactly 2× the
+1.70528 mm spacing — so one cell, one density, one strut. I read that as a code
+defect and "fixed" it twice before printing the distribution
+(`r4_extent_distribution.txt`), which showed **min == p25 == median == max** on
+these sectors: a POINT. Nothing was broken.
+
+The bounding boxes said why: **the bore's axial extent is ~6 voxels and I split
+it FOUR ways**, so each sector is 1–2 voxels tall while spanning ~100 × ~55
+around and through the wall. The thinnest dimension really is the slice height,
+and the declared depth grows the other two. A six-voxel feature cut four ways
+cannot show depth-driven grading — no implementation could.
+
+On a region where depth DOES bind (one large face split in two, 3.0 vs 7.5 mm)
+the same probe gives **min 3.411 for both** and **median 6.821 vs 13.642** — the
+minimum is boundary-dominated, the median tracks the depth exactly. That is why
+the median stands. The valid end-to-end demonstration is `r4_sectors_large.txt`;
+until it lands, **depth-driven grading is NOT demonstrated on his part.**
 
 **Does the depth drive both protection and lattice? YES — MEASURED, and it is
 structural rather than agreed.** `region_depth_layers` is now the ONE mm→voxel-
