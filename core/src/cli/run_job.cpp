@@ -1087,8 +1087,16 @@ void fill_fit_region_voxels(RunInfo& gi, const VoxelGrid& grid,
 // variant outcome: the derivation is pure arithmetic on core's own constants and the
 // declared geometry, so recomputing it here cannot disagree with what the run used —
 // while a second copy carried down the call chain could go stale.
+// ★ `roles` IS NOT OPTIONAL FOR CORRECTNESS HERE, only for the analytic path
+// (task 2026-08-15-lattice-regions, bar R3). A region-backed include is dropped
+// from `fit_region_cells` without it, which makes this vector shorter than
+// `includes` — and `fill_fit_region_voxels` then returns EARLY on the size
+// mismatch, so the per-region breakdown silently vanishes for exactly the
+// regions this task added. That is the "green run that measures nothing" shape,
+// so every call site passes the roles it resolved.
 void fill_grading_fit(RunInfo& gi, const GradedField& gf,
-                      const JobDescription& job) {
+                      const JobDescription& job,
+                      const LatticeRoleRegions* roles = nullptr) {
   gi.grading_min_printable_cell_mm = gf.min_printable_cell_mm;
   gi.grading_density_raised_for_print_voxels =
       static_cast<long long>(gf.density_raised_for_print_voxels);
@@ -1101,7 +1109,7 @@ void fill_grading_fit(RunInfo& gi, const GradedField& gf,
   gi.grading_fit_regions.clear();
   for (const FitRegionCell& f :
        fit_region_cells(job, gf.posture.topology,
-                        job.grading.min_extrudable_width_mm)) {
+                        job.grading.min_extrudable_width_mm, roles)) {
     RunInfo::GradingFitRegion R;
     R.region_index = static_cast<int>(f.job_region_index);
     R.extent_mm = f.extent_mm;
@@ -5655,7 +5663,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gi.grading_any_strut_below_min = gf.any_strut_below_min;
     gi.grading_region_ungradeable = gf.region_ungradeable;
     fill_grading_cell_plan(gi, gf);
-    fill_grading_fit(gi, gf, job);
+    fill_grading_fit(gi, gf, job, &an_roles);
     if (gp.cell_mode == CellSizeMode::Fit)
       fill_fit_region_voxels(gi, design_grid, density, 0.5, an_roles.includes, gf);
     fill_grading_subfloor(gi, gf);
@@ -6424,7 +6432,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.grading_any_strut_below_min = R.gf.any_strut_below_min;
       gi.grading_region_ungradeable = R.gf.region_ungradeable;
       fill_grading_cell_plan(gi, R.gf);
-      fill_grading_fit(gi, R.gf, job);
+      fill_grading_fit(gi, R.gf, job, &lattice_roles);
       if (R.gf.cell_mode == CellSizeMode::Fit)
         fill_fit_region_voxels(gi, model_grid, sd.density,
                                run_printed_iso(options), lattice_roles.includes,
@@ -8249,7 +8257,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.g_below_min = gf.any_strut_below_min;
       lat_agg.g_ungradeable = gf.region_ungradeable;
       fill_grading_cell_plan(lat_agg.g_cell_ri, gf);
-      fill_grading_fit(lat_agg.g_cell_ri, gf, job);
+      fill_grading_fit(lat_agg.g_cell_ri, gf, job, &lattice_roles);
       if (gf.cell_mode == CellSizeMode::Fit)
         fill_fit_region_voxels(lat_agg.g_cell_ri, solved_grid,
                                v.optimization.physical_density,
