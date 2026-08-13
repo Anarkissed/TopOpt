@@ -42,8 +42,10 @@ misled:
    scope decisions rested on it.
 
 ★ **WHAT IS STILL NOT DONE**: the margin as a per-iteration CURVE with a settling
-iteration (bar R4's other half) and Mode 2's β-in-MMA coupling. §7 has each with
-what it would take. §3(e)'s cost confirmation IS done — §0.4c, **0.0750%**.
+iteration (bar R4's other half), and Mode 2's wiring into the LADDER — which is
+gated on a budget-convention decision that is yours, not mine (§0.5). §3(e)'s cost
+confirmation IS done (§0.4c, **0.0750%**) and **Mode 2 itself is built, optimises,
+and its gradient is verified end to end** (§0.5).
 
 ★ **Nothing below is estimated, and no gross figure is presented as a saving.**
 
@@ -345,14 +347,47 @@ constant field is **0.8 ms** against 72 seconds. The brief's premise holds with
 three orders of magnitude to spare, so cost is not a reason to prefer Mode 1 over
 Mode 2, and it never was.
 
-### 0.5 ★ Whether Mode 2 beat Mode 1 — **NOT MEASURED, and Mode 2's in-loop coupling is NOT BUILT.**
+### 0.5 ★★ MODE 2 IS NOW BUILT AND IT OPTIMISES — β joins the MMA design vector
 
-What IS built and is exact: the second coefficient-expanded field
-t(x) = Σ β_j ψ_j(x) on its own knot lattice, the monotone clamped map t → ρ, and
-the analytic Jacobian dρ_e/dβ_j (`lattice_beta_jacobian`), together with the
-compliance sensitivity dc/dρ_e at a frozen latticed voxel, which
-`simp_compliance` now returns and which is the other half of the chain rule.
-What is NOT built is β joining the MMA design vector — §7.2.
+β is in the design vector, under the SAME single volume constraint as the voxel
+densities. Measured, 12 iterations on a half-Active / half-latticed block:
+
+| | |
+|---|---|
+| compliance | 2.504206e-02 → **1.465390e-02** (**−41.48%**) |
+| total mass | **754.650** against a 756.151 budget |
+| max\|β\| | **5.4092**, from a zero seed |
+
+The third row is a **positive control** and it is load-bearing: without asserting
+that β actually MOVED, the first two rows would pass on a pure density run and
+the whole bar would be the Mode 1 bar wearing a Mode 2 label. That is the same
+defect that made three earlier comparison bars in this project pass vacuously.
+
+**The chain, verified end to end.** dC/dβ = Jᵀ(dc/dρ) agrees with a central
+difference of the **compliance itself** — not of any intermediate — to a worst
+relative error of **3.915e-10** over three coefficients. Probing the compliance
+rather than the Jacobian is the point: a sign error or a missing factor anywhere
+between resolve → tensor → solve → dc/dρ → Jᵀ produces a gradient that still
+looks plausible and merely makes MMA wander.
+
+★ And **the probes are positive controls too**. The first cut probed coefficients
+0, mid and last; the knot lattice is PADDED, so the first and last have no
+support inside the grid and the check compared 0.0 against 0.0 twice — it passed
+while measuring one link out of three. It now sorts by |dC/dβ| and asserts each
+probe is non-trivial before believing the agreement.
+
+**Three things differ from a density-only update, and only three** — §3d.
+
+★ **WHAT STILL NEEDS YOUR DECISION: the budget convention.** With β in the
+vector, the lattice mass MOVES, so it goes on the left-hand side of the
+constraint rather than being folded into the target (`vf_target`) the way Mode 1
+folds a constant. That means Mode 2 **subsumes `freed_mass_return`** — the split
+between "bank the saving" and "spend it back" is now what MMA solves, not a knob.
+The total budget I used is `0.40 · n_active + the seed field's mass`, stated in
+the test rather than buried in a default. It is a **choice**, and this project has
+already been bitten once by two code paths targeting different volumes
+(`plsm-probe-and-ladder-target-different-volumes`), so it is flagged here rather
+than shipped quietly. Mode 2 is not wired into `minimize_plastic` — §7.2.
 
 ### 0.6 ★★ A CORRECTION THAT INVALIDATES THIS SECTION'S ORIGINAL CLAIM: **every wall-clock number in the first cut of this handoff was measured on an UNOPTIMISED BUILD**
 
@@ -707,6 +742,50 @@ converged fields.
 
 ---
 
+### 2.6 ★★ MODE 2: ONE MMA SUBPROBLEM, over a heterogeneous design vector
+
+**MMA was already separable, so this is a generalisation and not a new
+algorithm.** Every variable already had its own asymptotes, its own p/q pair and
+its own move box; the only coupling between variables was the scalar dual
+multiplier λ found by bisection. So the honest way to add the β block is to widen
+the variable vector and leave the mathematics alone — which is what
+`mma_update_joint` (`core/src/simp/mma_joint.hpp`) does. The one generalisation
+is that `xmin`/`xmax`, and therefore `xrange`, are **per variable** rather than
+scalar: a density lives in [density_min, 1] and a β coefficient in a symmetric
+box around 0.
+
+★ **Both existing MMA updaters now DELEGATE to it, byte-identically.** There is
+one implementation of the subproblem rather than two to keep in step by hand.
+That claim is **measured, not asserted** —
+`evidence/…/m6/mma_byte_identity.txt`:
+
+| | |
+|---|---|
+| before sha256[0:16] | `95edeebfff92a8f1` |
+| after sha256[0:16] | `18d82c56a0ee6fee` |
+
+The binaries genuinely differ (the guard a 2026-08-06 bar needed after both its
+arms hashed the same stale binary), and `test_mma`'s full stdout is **identical
+across both** — every compliance digit and every iteration count, over the plain
+path, the MASKED path and plateau termination. **The iteration counts are the
+sensitive part**: any floating-point difference anywhere in the subproblem would
+move them, and none moved.
+
+**Three things differ in Mode 2's update, and only three:**
+
+1. ★ **THE CONSTRAINT COUNTS THE LATTICE.** Mode 1 folds the frozen region's mass
+   into the target once (`vf_target`) because it is CONSTANT there. In Mode 2 it
+   MOVES, so it belongs on the left-hand side: `g0 = (V_active + lattice mass) −
+   total_target`. Doing both would **double-count the very saving the feature
+   exists to find** — and it would look like free stiffness.
+2. **The β block is NOT filtered.** The density filter regularises a voxel field;
+   for β the RBF basis already is one — its support IS the length scale — so
+   filtering would impose a second, smaller one.
+3. **One `dc_scale` across BOTH blocks.** The scale-invariance normalisation must
+   be a single positive constant over the whole vector. Scaling the blocks
+   separately would silently reprice one against the other, which is precisely
+   the trade this subproblem exists to make.
+
 ## 3. ★ DRAINABILITY — and a correction to the brief
 
 ### 3.1 The named file does not exist on `main`
@@ -807,20 +886,38 @@ pass.
   byte-identical to Solid over a WHOLE `minimize_plastic` run, with a positive
   control (the same arming at f = 0.30 must move the design and the mass) so it
   cannot pass by the feature doing nothing. **15.8 s.**
-* `lattice_density_field` — the two floors, every refusal, the fitted cell, and
-  the β Jacobian against central differences at **6.013e-10**. **0.11 s.**
+* `lattice_density_field` — the two floors, every refusal, the fitted cell, the
+  β Jacobian against central differences at **6.013e-10**, **dC/dβ against a
+  central difference of the COMPLIANCE at 3.915e-10**, and a **12-iteration
+  Mode 2 loop** that must go downhill, stay on budget, and actually move β.
 
 **app:** `AppModelTests` **31/31, 0 failures**, run directly against the built
 bundle — including the three 3MF tests that were failing with *"lib3mf not
 available in this build"* until `Package.swift` was fixed (§7.4).
 
-★ **`swift test` as a whole does NOT go green on this machine, and it is the
-documented flake, not this work.** `app-swift-test-gpu-flake`: an intermittent
-SIGTRAP in GPU-touching tests under parallel xctest workers, where the crashing
-test WANDERS and each passes in isolation. Observed here exactly: one run died in
-`AppModelTests`, the next in `RunModelTests` after **1023 tests**. Two further
-"failures" in the overnight log are **my own `pkill`** while re-ordering queues
-(`Terminated: 15` in those logs) and are not failures at all.
+★★ **CORRECTION — `swift test` DOES go green: 1445 tests, 0 failures, 21 skipped.**
+An earlier draft of this section blamed the app-side red on the documented
+`app-swift-test-gpu-flake`. **That attribution was wrong**, and it survived four
+consecutive runs because a known flake is a comfortable explanation.
+
+The real cause was **one test and one stale binary**.
+`LatticePageRound2Tests.testCoreCLIParsesTheEmittedRegions` shells out to a
+**hardcoded `core/build/topopt-cli`** and skips when it is absent — but it never
+checks that it is CURRENT. In this worktree that path held an **Aug-8** leftover
+while the real build dir is `build-release`. `main` added the `plsm` job key on
+**Aug 9** (`5c7595d`), the app emits it, and the five-day-old CLI answered
+`unknown key "plsm" in the job`. **A gated test with a stale binary goes RED, not
+SKIP** — and that red reads exactly like a schema regression in this diff.
+
+Rebuilding it turned the suite green with nothing else changed. Two compounding
+traps in one sitting, both already in the notes: `--target topopt-cli` **no-ops**
+(exit 0, no output, nothing built — the target is `topopt_cli`; the hyphen is the
+OUTPUT NAME), so the first fix changed nothing and the binary's mtime never
+moved. **When a test shells out to a build artifact, that artifact's mtime is
+part of the evidence.**
+
+The only genuine non-failures in the overnight log are **my own `pkill`** while
+re-ordering queues (`Terminated: 15`).
 
 The byte-identity argument for every pre-existing path is a construction, not a
 test result, and is stated so it can be checked by reading: every new option
@@ -906,16 +1003,23 @@ declaration rather than from connectivity.
 Until that is done, no per-region stress number measured on his part should be
 quoted for a declared face.
 
-### 7.2 Mode 2's in-loop coupling (§3c)
+### 7.2 Mode 2 — BUILT and measured; what remains is the LADDER wiring
 
-Built and exact: the β field, the t → ρ map, `lattice_beta_jacobian` (dρ_e/dβ_j),
-and dc/dρ_e at a frozen latticed voxel. Not built: **β joining the MMA design
-vector**. The remaining piece is one function — `mma_update_masked` extended with
-a parallel β block inside the same 1-D dual bisection, which is exact rather than
-approximate because MMA's subproblem is separable and the coupling is the single
-volume constraint (dV/dβ_j = Σ_e dρ_e/dβ_j, a linear functional). It was not done
-because it could not have been *measured* in this session (§7.1), and shipping an
-unmeasured optimiser change behind a flag that R2 keeps off buys nothing.
+The subproblem is built, exercised and measured (§0.5, §3d). What is **not** done
+is calling it from `minimize_plastic`'s rungs, which needs two things this
+session should not decide alone:
+
+1. **The budget convention** (§0.5). Mode 2 subsumes `freed_mass_return`. Which
+   total the ladder should hold each rung to is a product decision, and picking
+   one silently is how two code paths end up targeting different volumes.
+2. **A rung-level measurement.** Mode 2 vs Mode 1 at matched volume on his part,
+   which is §7.1's loop with an extra arm. Nothing here says Mode 2 *beats* Mode
+   1 on a real part — only that it descends and stays on budget on a fixture.
+
+Wiring it is small once (1) is answered: resolve ρ(β), pass it through
+`SimpParams::lattice_relative_density`, chain the two gradients, call
+`mma_update_masked_lattice`, write β back. The test does exactly this in twelve
+lines and is the reference.
 
 ### 7.3 The job-schema entry point and the export hookup
 
