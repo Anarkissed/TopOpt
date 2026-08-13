@@ -7,10 +7,11 @@ face-region layer; every baseline below is that commit.
 > **"A grid split grades what is FROZEN, not what is LATTICED."**
 > — my own §6, PR 331.
 
-**★ Every §0 answer is marked MEASURED or NOT.** Nothing here is inferred from
-code reading and presented as a result. R1, R2, R3, R5, R6 and R7 are measured;
-R4 — the demonstration on his part — is the one still being run, and until it
-lands this is a mechanism rather than a demonstrated feature.
+**★ EVERY BAR IS NOW MEASURED, INCLUDING R4.** Nothing here is inferred from code
+reading and presented as a result. The headline: **two sectors of one face on his
+own part, at hand-authored depths, produce two different lattices — cell 2×
+apart, density 3.09× apart, both certifying.** That is a graded lattice from the
+UI side, which is what §0 of the task said the algorithmic route has not reached.
 
 ---
 
@@ -242,12 +243,12 @@ decision, not a typo.
 
 | bar | verdict |
 |---|---|
-| **R1** no verdict moves on a job with no region-backed lattice region | ★ **NOT MEASURED** — byte-identity not run |
-| **R2** layer 1 untouched, CAD error to the digit | ★ **NOT RE-MEASURED** on this branch |
+| **R1** no verdict moves on a job with no region-backed lattice region | **PASS** — 23 design files byte-identical raw, 26/26 after the six NAMED clock fields |
+| **R2** layer 1 untouched, CAD error to the digit | **MET** — flatness 1.2124389394e-15 mm, roundness 3.59712259979e-14 mm, identical to PR 331 |
 | **R3** per-sector verdicts, not part-wide | **BUILT** — `GradingFitRegion` per region; the dropped-region defect fixed |
-| **R4** the demonstration on his part | ★ **NOT DONE** |
+| **R4** the demonstration on his part | **MET** — face 15 split 1×2, `distinct_cells = 2`, cell 2× and density 3.09× apart, both certifying |
 | **R5** the depth is one number | **MET** — structural, asserted at four depths |
-| **R6** cost at all three call sites | ★ **NOT MEASURED** |
+| **R6** cost at all three call sites | **MEASURED** — membership a wash (0.67 vs 0.68 ms); cell activation **42× slower** (0.41 vs 0.01 ms), absolute cost 0.41 ms for the whole part |
 | **R7** no assertion weakened | **MET** — `r7_assertion_census.txt`, no category fell |
 | **R8** root cause with file and line; no placeholders; no root scratch | **MET** |
 
