@@ -1,0 +1,21 @@
+=== R1 — a job WITH a lattice and NO region-backed lattice region ===
+baseline: 726160c (PR 331 head)   branch: 56d888f
+
+-- the DESIGN set, raw: 23 files, IDENTICAL byte for byte --
+   (design.bin, fields.bin, report.json, every variant STL, every alpha field)
+
+-- every value that differs in run_info.json, exhaustive key-by-key walk --
+  /created_wall_ms                        1786604197602  ->  1786604377816
+  /fingerprint                            dev            ->  56d888f8393f
+  /preflight_ms                           0.2125411034   ->  0.2010827065
+  /lattice_export/gen_seconds             11.33724433    ->  13.44834846
+  /lattice_export/void_escape/wall_seconds 0.001578583   ->  0.001597292
+  /lattice_export/gen_fraction            0.06428657746  ->  0.06760686464
+
+  SIX VALUES, ALL WALL CLOCKS. gen_fraction is generation seconds over
+  total seconds — a ratio of two clocks, which is why it moves when the
+  two arms run under different machine load. It was added to the script's
+  NAMED strip list (not a widened pattern) after this run.
+
+-- with those six stripped, from the SAME artifacts (no re-run) --
+R1 PASS — all 26 artifacts identical

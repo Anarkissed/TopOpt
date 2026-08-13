@@ -1608,6 +1608,18 @@ if(OpenCASCADE_FOUND)
     tests/harness/face_region_probe.cpp)
   target_link_libraries(face_region_probe PRIVATE topopt)
 
+  # WHAT THE MASK-BACKED PREDICATE COSTS (task 2026-08-15-lattice-regions, R6).
+  add_executable(region_mask_cost_probe EXCLUDE_FROM_ALL
+    tests/harness/region_mask_cost_probe.cpp)
+  target_link_libraries(region_mask_cost_probe PRIVATE topopt)
+
+  # THE §4 DEMONSTRATION JOB (task 2026-08-15-lattice-regions, bar R4): a curved
+  # feature on his part, grid-split into sectors at different lattice depths,
+  # with the cut planes taken from core's own grid_split_cells.
+  add_executable(sector_lattice_job_gen EXCLUDE_FROM_ALL
+    tests/harness/sector_lattice_job_gen.cpp)
+  target_link_libraries(sector_lattice_job_gen PRIVATE topopt)
+
   # S2 (task 2026-08-08-smoothing-that-works-and-is-usable): the bake-off PR 306
   # stopped short of — Taubin against mean-curvature flow on the OPTIMIZER-CUT
   # population of his own four rungs, with PR 307's classifier deciding which

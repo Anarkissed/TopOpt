@@ -7055,6 +7055,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         floor_mm = lattice_cell_printability_floor_mm(
             topo, job.grading.min_extrudable_width_mm);
         if (pf_fit)
+          // ★ NO `roles` HERE, AND THAT IS A REAL LIMIT, NOT AN OVERSIGHT: the
+          // pre-flight runs BEFORE the import and before the grid exists, so a
+          // region-backed include has no mask yet and no derivable extent. Such
+          // regions are omitted from the forecast table below (and counted), and
+          // the run's own per-region verdicts report them for real. See the
+          // handoff §2(a) — closing this means voxelizing inside the pre-flight.
           pf_fit_cells = fit_region_cells(job, topo,
                                           job.grading.min_extrudable_width_mm);
         cell_mm = planned_cell_mm(job, /*swept_light_floor=*/false);
@@ -7128,6 +7134,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       };
       std::vector<PfRow> pf_rows;
       int thin_regions = 0, include_regions = 0;
+      // Region-backed includes the pre-flight cannot price (see above).
+      int unforecastable_regions = 0;
       double thinnest_mm = std::numeric_limits<double>::infinity();
       for (std::size_t ri = 0; ri < job.lattice.regions.size(); ++ri) {
         const JobLatticeRegion& r = job.lattice.regions[ri];
@@ -7136,6 +7144,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         // The region's THINNEST dimension — the one that bounds how many cells
         // can lie across the latticed body. ONE definition, shared with the fit
         // derivation, so the two cannot describe different regions.
+        // ★ A REGION-BACKED INCLUDE HAS NO DECLARED EXTENT (task
+        // 2026-08-15-lattice-regions). Reading half-extents that are all zero
+        // gives 0, and the derivation then throws "member_width_mm must be > 0"
+        // — which is exactly how this bit on the FIRST §4 run: the pre-flight
+        // reached the analytic reader before the fit path ever ran. Its extent
+        // is MEASURED from its mask, the same number fit_region_cells uses.
+        // ★ A REGION-BACKED INCLUDE HAS NO DECLARED EXTENT (task
+        // 2026-08-15-lattice-regions). Reading half-extents that are all zero
+        // gives 0, and the derivation then throws "member_width_mm must be > 0"
+        // — which is exactly how this bit on the FIRST §4 run: the pre-flight
+        // reached the analytic reader on a kind that has nothing for it to read.
+        // Its extent is only knowable after the import, so it is skipped here
+        // and counted; the run's per-region verdicts carry the real numbers.
+        if (r.kind == "region") { ++unforecastable_regions; continue; }
         const double extent_mm = lattice_region_thinnest_extent_mm(r);
         if (extent_mm < thinnest_mm) thinnest_mm = extent_mm;
         PfRow row;
