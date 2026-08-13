@@ -375,8 +375,11 @@ machine's core slice has no lib3mf, so the three `AppModelTests` 3MF-import
 cases refuse before they test anything ("3MF import requires lib3mf, which is
 not available in this build"). `build_core.sh` says so at configure time. The
 honest reading is 1449/1457 HERE and 1457/1457 in CI, and the three 3MF tests
-DID NOT RUN. Core registers 120 tests locally against CI's 122 for the same
-reason — report N/122, never N/N.
+DID NOT RUN. Core is **120/120 PASSED, 100%** (1781 s) — but that is 120 of CI's **122** for
+the same reason, so the two 3MF tests did not run. Report N/122, never N/N. The
+number is from the THIRD attempt: the first two were discarded because
+`topopt-cli` was relinked underneath them while `test_cli` was executing it, and
+a suite measured against a binary that changed mid-run is not a measurement.
 
 ★ **TWO traps this branch walked into, recorded so the next session does not.**
 

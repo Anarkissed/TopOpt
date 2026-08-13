@@ -23,8 +23,17 @@ APP — `swift test` in app/TopOptKit
   The 26 tests this branch adds (FaceRegionTests) all pass.
 
 CORE — `ctest` in build/
-  120 tests registered locally against CI's 122: `export_3mf` and
+  120/120 PASSED, 100%. Total 1781 s (cli_demo alone is 1414 s).
+
+  ★ 120 tests register locally against CI's 122: `export_3mf` and
   `threemf_import` do NOT register without lib3mf, and CMake says so at
-  configure time. Report N/122, not N/N.
+  configure time. So this is 120/122 of CI's suite, and the two 3MF tests DID
+  NOT RUN. Report N/122, never N/N.
 
   The 1 test this branch adds (`face_region`, 68 checks) passes.
+
+  ★ THE RUN THAT PRODUCED THIS NUMBER IS THE THIRD ATTEMPT, and the first two
+  are discarded on purpose: `topopt-cli` was relinked underneath them while
+  `test_cli` was executing it. A suite result measured against a binary that
+  changed mid-run is not a result. The number above is from a run with nothing
+  else competing and the binary settled.
