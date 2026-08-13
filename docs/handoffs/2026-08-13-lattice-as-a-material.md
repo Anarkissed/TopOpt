@@ -377,6 +377,21 @@ fraction of the ACTIVE envelope, so a frozen region that stopped costing its
 envelope **moves what the rung means**, and a latticed ladder cannot otherwise be
 compared with an unlatticed one.
 
+★ **MEASURED, not asserted** — `evidence/…/m7/run_info_checkbox.txt`, two real
+`topopt-cli` runs on the same fixture differing in ONE key:
+
+| `run_info` key | `minimize_plastic` **ON** | `minimize_plastic` **OFF** |
+|---|---|---|
+| `mode` | `minimize_plastic` | `minimize_plastic` |
+| `ladder_direction` | **`reduce`** | **`grow`** |
+| `achieved_solid_fraction` | **0.2698** | **0.3323** |
+
+★ The first two rows together ARE the proof: `mode` is **identical** across the
+two runs — it never carried the checkbox — while `ladder_direction` differs.
+And the third row behaves as `loadcase.cpp:369` says it must: the reduction
+ladder returns a **lighter** part (27.0% of the same part solid), the growth
+ladder a heavier one (33.2%).
+
 **(4) ★ B2 REMAINS MISSED AND REMAINS REPORTED.** Not revisited under the new
 convention. If it ever clears under SPENT that is a NEW measurement under a NEW
 convention and must be labelled as one — never as B2 passing.
