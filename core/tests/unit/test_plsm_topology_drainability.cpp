@@ -30,6 +30,7 @@
 // reading must call it sealed.
 
 #include <cstdio>
+#include <ctime>
 #include <vector>
 
 // ★ AT FILE SCOPE AND FIRST. `levelset_kernel.hpp` is a SHIM whose bodies are
@@ -114,6 +115,40 @@ int main() {
   check(man2.cavities == 0,
         "with a channel to the exterior the manufacturing reading is drainable");
   check(opt2.cavities == 0, "and so is the optimiser reading");
+
+  // ── ★ 5. WHAT A PER-ITERATION DRAINABILITY MONITOR WOULD COST ────────────
+  //
+  // Timed here rather than by differencing two probe runs: the machine was
+  // under external load during the cross-check and differencing attributed a
+  // 1.9x UNIFORM slowdown to the added measurement, which would have killed the
+  // cheapest option in the scoping on a measurement artefact. This is the same
+  // code on the same shape of grid, with nothing else in the process.
+  //
+  // NOT an assertion — a timing on a shared machine is not a contract. Printed
+  // so the scoping has a number that came from running it.
+  {
+    Dims big;
+    big.nx = 128; big.ny = 31; big.nz = 118;      // his grid, exactly
+    const std::size_t bn = static_cast<std::size_t>(big.nx) * big.ny * big.nz;
+    std::vector<double> bocc(bn, 1.0);
+    std::vector<char> bpart(bn, 1);
+    // ~20% void in compact pockets, the shipped-rung regime.
+    for (int k = 0; k < big.nz; ++k)
+      for (int j = 0; j < big.ny; ++j)
+        for (int i = 0; i < big.nx; ++i)
+          if (((i / 3) + (j / 3) + (k / 3)) % 5 == 0) bocc[big.at(i, j, k)] = 0.0;
+    auto bin = [&](std::size_t v) { return bpart[v] != 0; };
+    const int reps = 5;
+    const std::clock_t t0 = std::clock();
+    long long sink = 0;
+    for (int r = 0; r < reps; ++r) sink += void_topology(big, bocc, bin, true).components;
+    const double per = static_cast<double>(std::clock() - t0) /
+                       static_cast<double>(CLOCKS_PER_SEC) / reps;
+    std::printf("== 5. COST OF ONE DRAINABILITY READING ON A 128x31x118 GRID ==\n");
+    std::printf("     %.4f s per call (%d reps, %lld components seen)\n", per, reps, sink);
+    std::printf("     against a ~28 s state solve that is %.3f%% of an iteration\n",
+                per / 28.0 * 100.0);
+  }
 
   std::printf(g_fail ? "\nFAILED (%d)\n" : "\nOK\n", g_fail);
   return g_fail ? 1 : 0;

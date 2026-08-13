@@ -9,33 +9,77 @@ empty and stays empty.
 
 ---
 
-## 0. THE RECOMMENDATION
+## 0. THE RECOMMENDATION — REWRITTEN 2026-08-13
 
-**Turn the perimeter penalty on at C = 1, with `eta_voxels = 1.0`.**
+★★ **THE PERIMETER PENALTY IS SUPERSEDED. THE RECOMMENDATION IS THE ROBUST
+ERODE/DILATE TRIPLE, GATED ON DRAINABILITY.** The original §0 recommended C=1 on
+the strength of ten arms at one rung; Stage B ran twelve arms at two rungs and
+the ordering changed. This section is rewritten rather than patched.
 
-Measured at rung 0.7973 — the rung that puts the parametric path on SIMP's own
-printed-voxel count — against SIMP in the same probe invocation:
+### the shipped rung, 0.7973 (SIMP: n_cut 26,191, carved 7.5521, margin 3254.34)
 
-| | SIMP | PLSM as shipped | ★ **+ perimeter C=1** |
-|---|---|---|---|
-| internal surface (`n_cut`) | 26,191 | 31,520 (**+20.3%**) | **28,045 (+7.1%)** |
-| carved roughness | 7.5521 | 10.6486 | **8.7480** |
-| CAD error mm | 0.4293 | 0.4611 | **0.4385** |
-| certified margin | 3254.34 | 3252.15 | 3251.93 |
-| mass | 543.7 g | 543.7 g | 543.7 g |
-| sealed void | — | 16,131 mm³ | **7,974 mm³** |
+| | n_cut | vs SIMP | carved | margin | vs SIMP | sealed void | wall |
+|---|---|---|---|---|---|---|---|
+| perimeter C=1 (superseded) | 27,887 | +6.5% | 9.1155 | 3251 | −0.1% | 5,946 mm³ | 61 min |
+| ★ **robust triple** | **27,511** | **+5.0%** | **7.5190** | 3250 | −0.1% | **11,158 mm³** | 88 min |
 
-★ **It closes 65% of the internal-surface gap, improves CAD accuracy, and halves
-the trapped powder, at identical mass and unchanged margin.** It is one term in
-the shape-derivative velocity, needs no extra solve, and has no tuning parameter
-beyond C.
+★ **Its carved roughness beats SIMP outright — 7.5190 against 7.5521 — the first
+arm in five tasks to do so at the shipped volume**, and it beats the penalty on
+internal surface at identical margin.
 
-★ **On the margin, stated precisely rather than favourably.** 3251.93 against
-SIMP's 3254.34 is **−0.07%**. That is *below* SIMP, and I am not going to call it
-"parity" without the caveat: at this volume every arm measured lands within
-**0.2%** of every other (3242.9 to 3279.8 across ten designs), so the margin is
-not resolving differences between designs here — see §3. The honest statement is
-**"the margin does not move", not "the margin improves"**.
+### the light rung, 0.5283 (SIMP margin 3014.12)
+
+| | margin | vs SIMP | vs control | n_cut | vs control |
+|---|---|---|---|---|---|
+| control | 2183 | −27.6% | — | 88,066 | — |
+| ★ **robust triple** | **2605** | **−13.6%** | **+19.3%** | **77,723** | **−11.7%** |
+| perimeter C=1 | 1931 | −35.9% | −11.6% | 69,115 | −21.5% |
+| filter r=2 | 510 | −83.1% | — | — | — |
+| filter r=3 | 308 | −89.8% | — | — | — |
+
+★★ **The robust triple is the only mechanism that GAINS margin AND REMOVES
+SURFACE.** Every other arm trades one for the other, and the filters collapse.
+
+### ★ the wall-clock correction
+
+**1.4× the penalty at the shipped rung (88 min against 61) and 2.0× at the light
+rung (137 against 70).** ★ **NOT the 3× the original rejection table asserted** —
+that figure came from counting the robust formulation's three state solves, and
+it was an assumption, never a measurement. Recorded here so nobody re-inherits it.
+
+### ★ what blocks it, and it is the only thing
+
+**Sealed void 11,158 mm³ against the penalty's 5,946 — the worst arm on
+drainability.** Production's lattice step has refused a PLSM design over **337
+mm³**, so this is **33× the refusal threshold**. The robust triple cannot ship
+until drainability is gated; see `2026-08-13-in-region-drainability.md` §2, which
+recommends a per-iteration MONITOR at 0.0074 s (0.026% of an iteration).
+
+★ **These sealed-void figures were corrected on 2026-08-13 and are 33–49% lower
+than every earlier version.** `sealed_void.py` treated grid-boundary voxels as
+enclosed; 15,099 part voxels sit on that boundary. Both the harness and
+production had the rule right. The ORDERING is unchanged — robust is still the
+worst — so the blocker stands.
+
+### ★★ AND THE FINDING WITH NO OWNER
+
+**NOTHING CLEARS SIMP AT THE LIGHT RUNG, INCLUDING DOING NOTHING.** The
+unmodified control is **−27.6%** (2183 against 3014.12). That is a property of
+the parametric level set itself, not of any mechanism in this document. It is the
+largest open number on this branch, **no task is assigned to it**, and it is
+recorded here so it stops depending on anyone remembering.
+
+### the secondary recommendations
+
+1. ★ **η 2.0 → 1.0.** Now measured at the SHIPPED volume as a matched pair with
+   C=1: n_cut 27,887 vs 28,934 (**−3.6%**), carved 9.1155 vs 11.6466 (−21.7%),
+   CAD 0.4373 vs 0.4461, margins identical. ★ Direction confirmed; the magnitude
+   is a third of the −11.7% measured at rung 0.68.
+2. **`max_iterations`** — ★ **still HELD.** Margin curves turn over at both rungs:
+   the light-rung control peaks 2609 at it80 and falls to 2183 by it120 (−16.3%).
+   Surface wants shorter, margin wants longer, and the trade is still unpriced.
+3. ~~`hole_period_voxels` 8 → 16~~ **WITHDRAWN** (+1.8% worse at the shipped volume).
+4. **Drop the monotone enforcement, keep its counters.**
 
 ## 1. WHY THIS AND NOT THE OTHERS — the rejection table
 
@@ -47,10 +91,10 @@ are at the shipped convention.
 
 | mechanism | verdict | the number |
 |---|---|---|
-| ★ **perimeter penalty C=1** | **RECOMMENDED** | [.7973] +7.1% surface, margin flat, CAD better |
+| perimeter penalty C=1 | ★ **SUPERSEDED** by the robust triple (§0) | [.7973] +7.1% surface, margin flat, CAD better |
 | Helmholtz density filter r=1 | rejected | [0.68] −12.8% surface, less than half the penalty's, and CAD degrades |
 | Helmholtz filter r=2, r=3 | rejected | [0.68] margins 2095 / 1955 against SIMP's 3254 |
-| robust erode/dilate triple | rejected | [0.68] margin 3209 (fails), at 3× the compute |
+| ★ **robust erode/dilate triple** | ★ **RECOMMENDED** — this rejection was WRONG on both counts | [0.68] margin 3209; re-tested at both shipped rungs it is the best arm, and the compute is 1.4-2×, not 3× |
 | reaction-diffusion (Yamada) | rejected | [0.68] surface **+1.8% and +7.5% — it makes it worse** |
 | filter + penalty together | rejected | [0.68] 56,281 vs the penalty's 53,175 — they do not compound |
 | monotone no-nucleation | rejected | [0.68] −1.7% surface; the component count already falls on its own |
