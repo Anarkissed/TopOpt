@@ -1,0 +1,5 @@
+design,as_designed_voxels,as_printed_voxels,voxels_filled,mass_understated_pct,as_printed_vf
+SIMP,88424,90910,2486,2.8115,0.819718
+RB1_volcount,75415,80235,4820,6.3913,0.723464
+E1_c1_eta1,75415,77916,2501,3.3163,0.702554
+P3_c4,75414,76813,1399,1.8551,0.692608

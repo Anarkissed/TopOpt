@@ -1,0 +1,36 @@
+L0_none rung 0.5283 (control)
+  it40=1682.0  it60=2025.5  it80=2609.1  it100=2344.1  it120=2183.2
+  peak 2609.1@it80  final 2183.2  turnover -16.3%  vs SIMP 3014.1 = -27.6%
+L1_perim1 rung 0.5283 (perimeter C=1)
+  it40=1988.2  it60=2384.9  it80=1920.3  it100=2220.7  it120=1930.9
+  peak 2384.9@it60  final 1930.9  turnover -19.0%  vs SIMP 3014.1 = -35.9%
+BL_r2 rung 0.5283 (filter r=2)
+  it40=500.3  it60=403.8  it80=429.4  it100=491.8  it120=509.7
+  peak 509.7@it120  final 509.7  turnover +0.0%  vs SIMP 3014.1 = -83.1%
+BL_r3 rung 0.5283 (filter r=3)
+  it40=429.6  it60=317.9  it80=341.2  it100=307.7  it120=307.6
+  peak 429.6@it40  final 307.6  turnover -28.4%  vs SIMP 3014.1 = -89.8%
+BL_robust rung 0.5283 (robust triple)
+  it40=2422.8  it60=2324.1  it80=2715.5  it100=2751.9  it120=2605.4
+  peak 2751.9@it100  final 2605.4  turnover -5.3%  vs SIMP 3014.1 = -13.6%
+BL_stress rung 0.5283 (stress seed)
+  it40=395.0  it60=566.5  it80=966.2  it100=1430.7  it120=1953.2
+  peak 1953.2@it120  final 1953.2  turnover +0.0%  vs SIMP 3014.1 = -35.2%
+E2_c1_eta2 rung 0.7973 (C=1 eta=2)
+  it40=3251.4  it60=3246.8  it80=3253.2  it100=3252.2  it120=3252.3
+  peak 3253.2@it80  final 3252.3  turnover -0.0%  vs SIMP 3254.3 = -0.1%
+E1_c1_eta1 rung 0.7973 (C=1 eta=1)
+  it40=3251.8  it60=3251.9  it80=3249.4  it100=3253.9  it120=3251.0
+  peak 3253.9@it100  final 3251.0  turnover -0.1%  vs SIMP 3254.3 = -0.1%
+BS_r2 rung 0.7973 (filter r=2)
+  it40=3272.3  it60=3267.9  it80=3247.9  it100=3239.1  it120=3236.2
+  peak 3272.3@it40  final 3236.2  turnover -1.1%  vs SIMP 3254.3 = -0.6%
+BS_r3 rung 0.7973 (filter r=3)
+  it40=2964.8  it60=2963.9  it80=2963.4  it100=2962.8  it120=2962.8
+  peak 2964.8@it40  final 2962.8  turnover -0.1%  vs SIMP 3254.3 = -9.0%
+BS_robust rung 0.7973 (robust triple)
+  it40=3247.3  it60=3248.1  it80=3249.3  it100=3248.3  it120=3249.6
+  peak 3249.6@it120  final 3249.6  turnover +0.0%  vs SIMP 3254.3 = -0.1%
+BS_stress rung 0.7973 (stress seed)
+  it40=3268.4  it60=3279.8  it80=3277.3  it100=3277.3  it120=3271.7
+  peak 3279.8@it60  final 3271.7  turnover -0.2%  vs SIMP 3254.3 = +0.5%

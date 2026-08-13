@@ -1,0 +1,84 @@
+=== R7 assertion census: origin/main -> working tree ===
+
+1. TEST ASSERTION MESSAGES   before=3352  after=3366
+   REMOVED:
+     "no re-arm was attempted before any measurement asked for one"
+     "no re-armed retry carried before any measurement asked for one"
+     "once latched, never attempt again"
+     "shipped latch re-arm period is 0 — the latch is permanent for a run"
+     "the re-arm period is restored to the shipped 0"
+     "the re-arm period setter bites"
+     "the run-start latch reset preserves the re-arm PERIOD"
+     "the run-start latch reset zeroes the re-arm counters"
+   (nothing above = no assertion message disappeared)
+
+2. REGISTERED CTESTS   before=121  after=121
+   REMOVED:
+     lattice_depth_tie
+   ADDED:
+     plsm_topology_drainability
+
+3. PRODUCTION REFUSALS   before=418  after=418
+   REMOVED:
+   (nothing above = no production refusal disappeared)
+
+4. COMPARISON KINDS INSIDE CHECK() (before -> after; a DROP is the thing to look at)
+     !=         31 ->     31  
+     &&        289 ->    289  
+     <         225 ->    225  
+     <=        136 ->    136  
+     ==        842 ->    842  
+     >         260 ->    260  
+     >=         60 ->     60  
+     ||          2 ->      2  
+
+5. HARNESS MESSAGES (the whole of core/tests/harness as ONE bag)
+   before=6493  after=6557
+   REMOVED:
+     "../../src/fea/geneo.hpp"
+     "ARM %s  job=%s  out=%s  threads=%d  plsm_max_iterations=%d\n"
+     "ARM_RUNG arm=%s vf_requested=%.6f margin=%.9g accepted=%d\n"
+     "ARM_SUMMARY arm=%s total_cg=%lld design_iters=%lld wall_s=%.1f "
+     "FATAL: --seed must be simp or holes\n"
+     "[--threads N] [--iters N]\n"
+     "core/src/materials/materials.json"
+     "core/src/settings/rules.json"
+     "geneo_armed=%lld geneo_declined=%lld geneo_dim=%d geneo_builds=%lld "
+     "hier_attempts=%lld rearm_attempts=%lld rearm_carries=%lld "
+     "per-iteration record, so no figure of merit can be "
+     "reported. Refusing to print a summary.\n"
+     "requires the maintainer's actual part"
+     "robust_worst,robust_ratio,nuc_frozen,"
+     "seed        regular hole array, period %.0f voxels\n"
+     "solver_arm_sweep"
+     "solver_arm_sweep: %s missing — the run wrote no "
+     "solver_arm_sweep: no 'cg_iters' column in %s\n"
+     "solver_arm_sweep: unknown arm '%s'\n"
+     "solver_arm_sweep: unknown flag '%s'\n"
+     "the part is #{rho > 0.5}"
+     "usage: solver_arm_sweep <job.json> <out_dir> [--arm SPEC]... "
+   (nothing above = the two header moves dropped no refusal and no message)
+
+6. THE REMOVED HARNESS STRINGS, TRIAGED
+     *** GENUINELY DELETED ***: "../../src/fea/geneo.hpp"
+     *** GENUINELY DELETED ***: "ARM %s  job=%s  out=%s  threads=%d  plsm_max_iterations=%d\n"
+     *** GENUINELY DELETED ***: "ARM_RUNG arm=%s vf_requested=%.6f margin=%.9g accepted=%d\n"
+     *** GENUINELY DELETED ***: "ARM_SUMMARY arm=%s total_cg=%lld design_iters=%lld wall_s=%.1f "
+     REWRITTEN (its first 20 chars still occur — read it): "FATAL: --seed must be simp or holes\n"
+     *** GENUINELY DELETED ***: "[--threads N] [--iters N]\n"
+     *** GENUINELY DELETED ***: "core/src/materials/materials.json"
+     EXTENDED (a superset is still present): "core/src/settings/rules.json"
+     *** GENUINELY DELETED ***: "geneo_armed=%lld geneo_declined=%lld geneo_dim=%d geneo_builds=%lld "
+     *** GENUINELY DELETED ***: "hier_attempts=%lld rearm_attempts=%lld rearm_carries=%lld "
+     *** GENUINELY DELETED ***: "per-iteration record, so no figure of merit can be "
+     *** GENUINELY DELETED ***: "reported. Refusing to print a summary.\n"
+     *** GENUINELY DELETED ***: "requires the maintainer's actual part"
+     EXTENDED (a superset is still present): "robust_worst,robust_ratio,nuc_frozen,"
+     EXTENDED (a superset is still present): "seed        regular hole array, period %.0f voxels\n"
+     *** GENUINELY DELETED ***: "solver_arm_sweep"
+     *** GENUINELY DELETED ***: "solver_arm_sweep: %s missing — the run wrote no "
+     *** GENUINELY DELETED ***: "solver_arm_sweep: no 'cg_iters' column in %s\n"
+     *** GENUINELY DELETED ***: "solver_arm_sweep: unknown arm '%s'\n"
+     *** GENUINELY DELETED ***: "solver_arm_sweep: unknown flag '%s'\n"
+     *** GENUINELY DELETED ***: "the part is #{rho > 0.5}"
+     *** GENUINELY DELETED ***: "usage: solver_arm_sweep <job.json> <out_dir> [--arm SPEC]... "

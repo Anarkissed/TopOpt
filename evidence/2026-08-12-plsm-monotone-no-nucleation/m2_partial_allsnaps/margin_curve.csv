@@ -1,0 +1,2 @@
+field,printed_voxels,achieved_vf,fractional_samples,max_von_mises_mpa,margin_worst_case,margin_effective,accepted,min_feature_violations,load_path_connected,frozen_solid_below_iso,frozen_solid_total,frozen_void_above_iso,frozen_restored,mass_grams
+evidence/2026-08-12-plsm-monotone-no-nucleation/arms/MN_nucleating/snap/it0001,75415,0.680002524706,57176,0.0807473407418,681.13698228,141.038125564,1,4835,1,0,40216,0,0,464.210470634

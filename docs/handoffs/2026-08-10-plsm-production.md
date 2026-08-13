@@ -19,8 +19,8 @@ comparison is like-for-like.
 
 ## 0. THE ANSWERS, ONE LINE EACH
 
-**The knot lattice that ships, and the rule that derives it.** _[filled by
-`run_s2_frontier.sh`; see §3.]_ The RULE is `plsm_knots_for_grid`
+**The knot lattice that ships, and the rule that derives it.** **2 voxels per
+axis on his grid, 85,680 coefficients, 5.5x compression** (§3). The RULE is `plsm_knots_for_grid`
 (`core/src/simp/plsm.cpp`): the knot spacing is a **LENGTH** — 3.410558 mm, the
 smallest structure the basis may express — converted to voxels **through each
 axis's own spacing**, floored at 2 voxels. ★ **It takes no minimum and no maximum
@@ -30,11 +30,21 @@ blows the coefficient count past the voxel count, which is the trap PR 323 lost 
 day to and PR 324 reproduced on purpose.
 
 **Carved roughness, margin and mass against SIMP's 7.5521 / 3254.34 / 543.7 g.**
-_[§3.]_
+**7.6090 / 3297.30 / 538.7 g** — margin **+1.3%** ✓, mass **−0.9%** ✓, carved
+roughness **−0.8%** ✗. Two bars of three, at rung 0.68, the one rung that is a
+fair comparison (§3).
 
-**What the solver win is worth on SIMP.** _[§4.]_
+**What the solver win is worth on SIMP.** **69.4% fewer solver steps, 51.5% less
+wall** on the uncapped four-rung ladder (3776 s → 1832 s). ★ But it does NOT
+reproduce the design — compliance at matched iterations diverges up to 8.6% — it
+converges to a DIFFERENT design that is just as good, margins within 0.09%, every
+verdict unchanged. Section closed by maintainer decision, not by its result (§4).
 
-**Does a PLSM design still lattice and certify.** _[§5.]_
+**Does a PLSM design still lattice and certify.** **Yes, with one named caveat:**
+it is first REFUSED, correctly, because 7 of 215 cells sit in a sealed cavity with
+no path out — SIMP's rung 0.68 on the same recipe latticed and was accepted, so the
+sealed void is a property of the parametric design. With the check off it latticed
+and certified, verdict ACCEPTED on both paths (§5).
 
 ---
 
@@ -648,4 +658,4 @@ being started from scratch every single time, even though the answer barely
 changes from one step to the next and the code to reuse the previous answer had
 been sitting there unused for months — it just never reached the solver we
 actually run. Connecting it, and running the early steps at lower precision, is
-worth _[§4]_ on his own four-rung run.
+worth **69.4% of the solver steps and 51.5% of the wall** on his own four-rung run.

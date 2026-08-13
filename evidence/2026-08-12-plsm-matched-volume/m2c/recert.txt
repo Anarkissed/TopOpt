@@ -1,0 +1,15 @@
+== re-certification control ==
+field                evidence/2026-08-12-plsm-matched-volume/arms/W6_rods12/snap/it0060.f64
+binarized            no
+fractional samples   8953 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       88423 of 110904  (vf 0.797293)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016805188 MPa
+MARGIN worst case    3272.798898309
+margin effective     677.674878875   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    578
+mass                 543.7362 g
+load path connected  yes

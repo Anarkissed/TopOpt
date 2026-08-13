@@ -363,6 +363,17 @@ add_executable(test_lattice_material_model
 target_link_libraries(test_lattice_material_model PRIVATE topopt)
 add_test(NAME lattice_material_model COMMAND test_lattice_material_model)
 
+# The OPTIMISER and MANUFACTURING readings of the harness void topology
+# (task 2026-08-13-in-region-drainability). plsm_topology.hpp's `in_region` is a
+# template parameter; levelset_probe passes the ACTIVE set, which excludes the
+# frozen region, so a pocket walled in by a bolt boss scores as drainable. That
+# is right for the design region and wrong for the printer. This test pins BOTH
+# readings on one fixture so neither can drift into the other.
+add_executable(test_plsm_topology_drainability
+               tests/unit/test_plsm_topology_drainability.cpp)
+target_link_libraries(test_plsm_topology_drainability PRIVATE topopt)
+add_test(NAME plsm_topology_drainability COMMAND test_plsm_topology_drainability)
+
 # The PRODUCTION multiscale lattice material model (task multiscale-lattice-to):
 # the C(rho) curve the SIMP loop's material law becomes, its analytic
 # sensitivities against central differences, the exact three-block element
