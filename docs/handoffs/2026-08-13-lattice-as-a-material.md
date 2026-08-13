@@ -37,6 +37,39 @@ the load pad, and the combined region's **median** thickness is 10.2317 mm, whic
 clears the floor by 2.4%. **60.2% of that region's voxels clear it; 39.8% do
 not.** §0.2b. `evidence/…/m0/law.txt`, `evidence/…/m1/regions_r0.68.txt`.
 
+### 0.1b ★★ TWO OF §0'S OWN FINDINGS ARE RETRACTED. Read this before the tables.
+
+Both came from decisions I made in the instrument, not from the part, and both
+made the feature look worse than it is.
+
+★ **RETRACTED 1 — "the frozen region carries the part's peak stress" (§0.2).**
+I built regions by flood-filling the frozen set, and face 16's protection collar
+turns out to be 26-CONNECTED to the structural pads under the 22 load faces. So
+`load-pad-1` is *the declared wall fused with the load pads*, and the load pads
+sit directly under the applied force. **The 100%-of-part-peak figure is the load
+pads' stress attributed to a blob that also contains the wall.** It says nothing
+about the wall. `mask_step_face` (step.hpp) gives per-face provenance and would
+have separated them; I did not use it. §0.2's QUIET/LOAD-BEARING split is
+therefore **not a measurement of his declared regions** and should not be quoted
+as one.
+
+★ **RETRACTED 2 — "the light rung refuses the region holding 73% of the prize"
+(§0.3b).** That refusal was MY CODE, on a rule that should not have applied. The
+cells-per-member floor is a property of the region **and the cell**, not of the
+region alone: the same 6.8 mm member misses 5 cells at a 2 mm cell and clears
+them at a 1.3 mm one. My first cut took ONE cell for the whole run and refused
+everything that could not hold it. `lattice_derive_cell_for_member` has answered
+this since PR 302 and I did not call it. **With the cell fitted to each region's
+own thickness the floor is cleared by construction and the refusal disappears** —
+see §2.5. The rung-dependence measurement in §0.3b is real and still stands; what
+it does NOT show is that the region is un-latticeable.
+
+★ **What survives both retractions**, because it is arithmetic on the user's own
+print profile rather than on my region definition: §0.1's window, §1's law and
+its Gibson-Ashby gap, the drainability result, and — from the tables — that the
+STRUT bound binds in every certified cell and that latticing the anchor moves the
+solid region's margin by −0.003%.
+
 ### 0.2 ★ How much of the 247.3 g sits in QUIET regions: **NONE OF IT.**
 
 `evidence/…/m1/regions_r0.68.txt`. Measured on his converged rung 0.68 with one
@@ -448,6 +481,46 @@ lattice certification Phase 1. Nothing here lowers `printed_iso`.
 | octet grading law (`grade_lattice`) | a density field | ✔ unchanged — it reads the same 1.0 |
 | the load-path walk | `density > iso` | ✔ unchanged, and B5 states it separately because PR 324 measured 40 leaked frozen voxels out of 40,216 breaking it |
 
+### 2.5 ★★ THE CELL IS FITTED TO THE REGION — the difference between refusing and working
+
+The cells-per-member floor is a property of the region **and the cell**. Taking
+one cell for a whole run and refusing every region that cannot hold it throws
+away regions that are perfectly latticeable at a cell derived from their own
+thickness. That is what my first cut did, and on his part it refused the region
+holding 73% of the mass.
+
+`lattice_derive_cell_for_member` (lattice.hpp, PR 302) returns the admissible
+(cell, density) window from a member's own width and **the user's own stated
+strut width**. Its coarsest end — exactly N\* cells across, at the lightest
+density that still prints there — is the **minimum-mass certified lattice** for
+that member.
+
+| | |
+|---|---|
+| `LatticeRegionCellMode::Fit` | derive this region's cell from its own thickness |
+| `ResolvedLatticeDensityField::cell_mm` | the per-voxel cell it produces — which IS `LatticePosture::cell_size_field`, the SWEPT posture from `2026-08-01-lattice-cell-size-sweep`, so the certificate's regime guard asks each voxel about **its own** cell rather than one number for the part |
+| a Declared density below the fitted cell's printable floor | **RAISED** to it, and the raise is **REPORTED** — the user asked for one mass and got another, and that must never be silent |
+| refusal | only when **no** (cell, density) pair fits the member at the user's width — the one case a finer cell cannot rescue, whose remedy is a thicker member or a finer nozzle |
+
+★ **And every refusal now carries the number that fixes it.** "IT FITS AT ITS OWN
+CELL: at 1.6 mm this member holds exactly 5 cells, and the lightest density that
+prints there is 0.22" versus "NO FINER CELL RESCUES IT: it must be at least
+5.8659 mm across". *Too thin for a 2 mm cell* and *cannot be latticed* are very
+different statements and only one of them is usually true.
+
+Measured end to end (`test_frozen_lattice_c0`), same region, same declared
+density, floor enforced in both arms:
+
+```
+FIXED  member 24.000 mm = 4.00 cells at 6.00 mm  refused ->    0 latticed
+FIT    member 24.000 mm = 4.00 cells at 4.80 mm          -> 2304 latticed
+```
+
+★ **In the app this is what AUTO already meant.** PR 328's face card derives the
+cell as `depth / N*` and floors it at core's printability floor — the same
+derivation. So the card and the run now agree about which cell a region gets,
+instead of the card previewing one and the run refusing at another.
+
 ### 2.3 The four fields of the defect, and where each is fixed
 
 | | was | now | where |
@@ -564,7 +637,7 @@ has shipped five times here.
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
 | **R3** every arm at two rungs | ★ **HELD, and it paid for itself** — both tables complete (8/8 and 6/6), and the light rung REFUSED the region holding 73% of the prize while the shipped rung admitted it (§0.3b) |
 | **R4** NET, and margin as a curve | **MISSED** — no optimised arm ran, so there is no curve and no NET number. **No gross number is presented as a saving anywhere**, the app's own wording says so, and §0.4 settles the mass bound from the certified tables instead |
-| **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree |
+| **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree. ★ Read with §0.1b: the REGIONS those numbers are attributed to were built by connectivity, so a declared face's numbers are fused with its neighbour's |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
 | **R7** assertion census | **held** — §6 |
 | **R8** root cause with file and line, no placeholders, no root scratch | held |
@@ -660,6 +733,24 @@ is on the command line and in the record rather than hidden in a default, and th
 probe **prints the regions it skipped** — a table that silently omitted them would
 read as though they had been measured.
 
+### 7.1b ★ REGIONS BY PROVENANCE (the retraction in §0.1b)
+
+The probe builds regions by 26-connected components of the frozen set. That fuses
+a declared face protection with the structural pads it happens to touch, and then
+attributes the pads' stress to the wall. **The fix is to key regions on
+PROVENANCE — which declared thing froze each voxel — via `mask_step_face`**, which
+is public and is the same primitive `build_production_loadcase` uses to create
+those voxels in the first place.
+
+★ **Core needs no change for this**: `frozen_lattice_region_id` is already a
+per-voxel id supplied by the caller, and the APP is already right — it keys
+regions on `SelectionGroup.id`, which is provenance by construction. It is the
+probe (and, when it is wired, `run_job`) that must build the ids from the
+declaration rather than from connectivity.
+
+Until that is done, no per-region stress number measured on his part should be
+quoted for a declared face.
+
 ### 7.2 Mode 2's in-loop coupling (§3c)
 
 Built and exact: the β field, the t → ρ map, `lattice_beta_jacobian` (dρ_e/dβ_j),
@@ -727,26 +818,33 @@ densities you would actually pick and under-predicts by 26% at the light end. Th
 optimiser never sees that formula here — it uses the 19 real measurements — but
 it is worth writing down, because that formula is what most tools use.
 
-**Three, and this is the answer to the question that was actually asked: on his
-part, at his settings, it is not worth doing.** Every candidate was checked at
-two settings of the optimiser — a heavy one and a light one — and the result is
-blunt. At the light setting the big frozen region, which holds three quarters of
-the weight on offer, becomes too thin to lattice at all: the optimiser has carved
-material away from around it, and the collar drops from just over the five-cell
-minimum to well under it. What is left is the anchor pad, worth 67 grams, and the
-best it can do while keeping a sensible strength margin is about 27 grams — five
-percent of the part — *before* the optimiser puts material back, which it will,
-because the region carrying the peak stress is exactly the one being lightened.
+**Three: I measured this part and got two things wrong, and both were my
+software rather than the part.**
 
-That is a verdict on **this part with this nozzle and this cell size**, not on the
-idea. The arithmetic says what would change it: a finer lattice cell, a thicker
-protected collar, or a smaller nozzle. And one number is worth remembering — how
-much of a region can be latticed changes by nearly a factor of three between the
-heavy and light settings of the same run, so checking at one setting tells you
-almost nothing about the other.
+The first was how I grouped the regions. I found them by "what's touching what",
+and it turns out the protected wall is touching the pads that sit directly under
+where the load is applied. So my measurement fused them into one blob and then
+reported the pads' stress as if it were the wall's. That number should not be
+used.
 
-What is genuinely still open is the last loop: give the freed weight back to the
-optimiser and see how much of it comes back as material. That would sharpen the
-"27 grams" to a true net figure. It does not change the verdict — the gross is
-already below the line that was set in advance — and `queue.sh` is the button
-when someone wants the number.
+The second was worse. I had the software pick **one lattice cell size for the
+whole part** and refuse any region that was too thin to hold five of them. That
+is the wrong question: a wall that can't hold five 2 mm cells holds five 1.3 mm
+cells perfectly well. The software already had a function that works this out per
+region — it has since a task months ago — and I didn't call it. So when the
+optimiser stripped material and the wall got thinner, my code refused it, and I
+wrote that up as "the part can't be latticed". It can. That's now fixed: each
+region gets a cell derived from its own thickness, so the accuracy requirement is
+met by construction instead of by luck, and the only genuine refusal left is a
+member so thin that *no* cell works — where the software now tells you the
+thickness you'd need.
+
+**What still stands** is the arithmetic that doesn't depend on how I grouped
+things: what a lattice can and can't do at a given nozzle, the fact that the
+struts' own strength is what limits these designs rather than damage to the
+surrounding part, and that latticing the anchor pad barely disturbs the rest of
+the structure at all.
+
+**What's still open** is the last loop — give the freed weight back to the
+optimiser and see how much comes back as material — and re-measuring the part now
+that the two bugs above are fixed. `queue.sh` is the button for both.

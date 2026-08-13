@@ -425,6 +425,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     ///                         always an admissible density in the band for it to
     ///                         choose. That is the lattice-page redesign §4 rule,
     ///                         and it is the reason Auto is the default here.
+    ///                         ★ AUTO ALSO FITS THE CELL to the region's own
+    ///                         thickness (`LatticeRegionCellMode::Fit`), so the
+    ///                         cells-per-member floor is cleared by construction
+    ///                         rather than by luck. A fixed cell that the region
+    ///                         cannot hold is the ONE way this feature refuses,
+    ///                         and Auto never asks for one.
     ///   PRESENT               the user's fixed relative density f. 1.0 means
     ///                         SOLID and emits no lattice at all, byte-identically
     ///                         to not declaring the region (core's own C0 rule,

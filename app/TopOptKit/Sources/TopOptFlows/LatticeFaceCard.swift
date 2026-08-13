@@ -210,6 +210,12 @@ public enum LatticeFaceCardDerivation {
                                    verdict: .outOfRegime)
         }
 
+        // ★ THIS IS ALREADY "FIT": the cell is derived from THIS FACE'S OWN
+        // depth (`depth / N*`), which is exactly what
+        // `lattice_derive_cell_for_member` does in core and exactly what
+        // `LatticeRegionCellMode::Fit` now does in the optimiser. The card and
+        // the run therefore agree about which cell a region gets, instead of the
+        // card previewing one cell and the run refusing at another.
         let coarsest = depthMM / bounds.cellsPerMemberFloor
         let crosses = coarsest < bounds.printabilityFloorMM
         let cell = crosses ? bounds.printabilityFloorMM : coarsest
