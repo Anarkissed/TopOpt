@@ -25,12 +25,17 @@ PROBE=./build/frozen_lattice_probe
 
 # ── R1 FIRST. It is a BAR and a BLOCKED-STOP: if Lattice(f = 1.0) is not
 # byte-identical to Solid the material model is wrong and no result after it can be
-# trusted. Nothing below runs if this exits non-zero.
-mkdir -p "$HERE/r1"
-"$PROBE" "$STEP" "$MAT" "$REF" "$HERE/r1" --stage r1 --rung 0.68 --iters 8 \
-    --cell 2 --threads 3 > "$HERE/r1/r1_c0_inertness_run.txt" 2>&1
-grep -q "BYTE-IDENTICAL: YES" "$HERE/r1/r1_c0_inertness_run.txt" || {
-  echo "BLOCKED-STOP: R1 failed. See $HERE/r1/r1_c0_inertness_run.txt" >&2
+# trusted.
+#
+# ★ IT IS A CTEST, NOT A RUN ON HIS PART. "Byte-identical" is a statement about
+# WHICH BRANCHES THE CODE TAKES, and a synthetic wall exercises the same pins,
+# material law, volume budget, ladder, certification and receipt as a 468k-voxel
+# import. Running it on his part costs a pair of ladder runs — measured at 2h17m
+# on a shared machine — to learn the same bit. As a ctest it runs in seconds on
+# EVERY build instead of once by hand, and it carries its own positive control so
+# it cannot pass by the feature doing nothing.
+( cd "$REPO/build" && ctest -R frozen_lattice_c0 --output-on-failure ) || {
+  echo "BLOCKED-STOP: R1 failed. Nothing below is trustworthy." >&2
   exit 4
 }
 echo "R1 ok"
@@ -39,8 +44,12 @@ echo "R1 ok"
 # validity are re-read off it, so this costs one solve per rung and not five.
 mkdir -p "$HERE/m1"
 for RUNG in 0.68 0.26; do
+  # ★ --regions provenance (the default) keys a region on WHICH DECLARATION froze
+  # it. `connectivity` reproduces the superseded first cut, which fused face 16's
+  # collar with the load-face pads — kept only so the fusion can be seen.
   "$PROBE" "$STEP" "$MAT" "$REF" "$HERE/m1" --stage regions --rung "$RUNG" \
-      --cell 2 --threads 3 > "$HERE/m1/regions_r${RUNG}.txt" 2>&1
+      --cell 2 --threads 3 --regions provenance \
+      > "$HERE/m1/regions_provenance_r${RUNG}.txt" 2>&1
   echo "M1 rung $RUNG ok"
 done
 

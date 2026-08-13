@@ -12,7 +12,8 @@ Every bound in it stands as written; none was retuned.
 |---|---|
 | `r0_preregistration.md` | the bounds, and the stop rule |
 | `m0/law.txt` | **M0** — the ρ→stiffness law: the fit, the Gibson-Ashby comparison row by row, and the validity range in cells per member |
-| `m1/regions_r0.68.txt` | **M1** — his frozen set decomposed into regions, each one's strain energy and peak macro von Mises off ONE certification solve, the QUIET / LOAD-BEARING split, and the per-region validity |
+| `m1/regions_provenance_r0.68.txt` | **M1** — his frozen set decomposed by PROVENANCE (which declaration froze each voxel), each region's strain energy and peak macro von Mises off ONE certification solve, the QUIET / LOAD-BEARING split, and the per-region validity |
+| `m1/regions_r0.68.txt` | ★ the SUPERSEDED first cut, kept as the record. It keyed regions on 26-CONNECTIVITY, which fused face 16's protection collar with the load-face pads and attributed the pads' stress to the wall. **Do not quote its per-region stress.** `--regions connectivity` reproduces it |
 | `m2/assign_r*.txt`, `m2/r*/m2_assignment.csv` | **M2** — the Mode 1 assignment table, one certified analysis per cell |
 | `r7_assertion_census.txt` | R7, as a MESSAGE census against the merged `main` |
 | `assertion_census.sh` | the census, re-runnable |
@@ -25,6 +26,11 @@ cmake -S core -B build
 cmake --build build -j3 --target frozen_lattice_probe
 sh evidence/2026-08-13-lattice-as-a-material/queue.sh
 ```
+
+★ **Bar R1 is NOT in this queue, and that is deliberate.** "Byte-identical" is
+scale-independent, so it is a registered ctest on a synthetic wall
+(`frozen_lattice_c0`) that runs in seconds on every build, rather than a pair of
+ladder runs on his part. `ctest -R frozen_lattice_c0`.
 
 Nothing is cloned and nothing is downloaded. The only inputs are his STEP
 (`evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step`),
