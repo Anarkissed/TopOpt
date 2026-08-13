@@ -3,3 +3,30 @@
 [loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
 [loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
 [loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+== frozen_lattice_probe — a frozen region as a MATERIAL ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+stage       loop   rung 0.26   cell 2 mm   nozzle 0.45 mm   threads 8
+
+baseline    rung 0.26 from evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.259996)
+
+regions     14, keyed on provenance
+            11380 voxels claimed by more than one declaration (protection wins)
+-- M3 THE LOOP (bar R4): the NET saving across the freed-mass frontier --
+
+   ★ THE CONTROL IS A RE-OPTIMISATION, not the stored design: same rung, same
+     iteration cap, feature OFF. Comparing a re-optimised arm with a stored
+     design would fold the two runs' cap difference into the saving.
+
+   control (feature OFF): mass 360.1500 g  margin_eff 473.440098  accepted yes  120 iters  (1650 s)
+
+     return     mass g   NET dmass      margin     dmargin     iters    acc verdict
+       0.00   190.8532   -169.2968  104.231500     -77.98%       120    yes  banked (max mass) (1755 s)
+       0.50   275.8147    -84.3354  133.584416     -71.78%       110    yes  half returned (1347 s)
+       1.00   360.3949     +0.2449  146.864308     -68.98%        95    yes  mass-neutral (max margin) (1118 s)
+
+   ★ THE NET SAVING IS THE `NET dmass` COLUMN — both the control and each arm
+     re-optimised, so the optimiser has already put back whatever it wanted.
+   wrote evidence/2026-08-13-lattice-as-a-material/m3/r0.26/m3_loop.csv

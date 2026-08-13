@@ -207,7 +207,7 @@ seven of the fourteen regions drop below the floor (`load-20`, `load-1`,
 and `load-21` remain. The rung-dependence of §0.3b is confirmed across 14 regions
 rather than 2.
 
-### 0.4 ★★ THE NET MASS SAVING, MEASURED (bar R4): **−170.840 g, −31.4%**
+### 0.4 ★★ THE NET MASS SAVING, MEASURED AT BOTH RUNGS (bar R4): **−170.840 g (−31.4%)** and **−169.297 g (−47.0%)**
 
 `evidence/…/m3/loop_r0.68.txt`. Rung 0.68, every region latticed at f = 0.30 with
 its cell FITTED to its own thickness, four re-optimisations.
@@ -224,34 +224,59 @@ would fold the two runs' cap difference into the "saving".
 | 0.50 half back | 458.011 g | −85.713 g | 146.643 | −78.24% | 16 | yes |
 | 1.00 mass-neutral | 511.895 g | −31.829 g | 146.616 | −78.24% | 31 | yes |
 
-★★ **THE FINDING, AND IT INVERTS §0.2's PREDICTION: GIVING THE FREED MASS BACK
-BUYS NOTHING.** The margin is **146.877 / 146.643 / 146.616** across the three
-postures — a **0.18% spread** — while the mass varies by **139 g**. Handing the
-optimiser 139 g of budget to re-place near the frozen wall moves the certified
-margin by four hundredths of a percent.
+### 0.4b ★★ AND THE LIGHT RUNG CONTRADICTS IT — which is what bar R3 is for
 
-The reason is §0.3(a), now confirmed in the loop rather than per-cell: **the
-binding term is the lattice's own STRUT bound, not the structure's stiffness.**
-`margin_effective = min(solid-region margin, strut bound)`, the strut bound sits
-at ~147 while the solid margin is several hundred, so adding material to the
-active set cannot move the minimum. ★ **The buttressing coupling §3 predicted —
-94% of what the optimiser places landing within 5 mm of the frozen wall — is real
-about WHERE material goes and irrelevant to WHAT THE GATE SEES.** I wrote in §0.2
-that the mass-neutral posture "is not a variant to try — it is the one the
-measurement demands". **That is withdrawn.** Measured, it is the one posture that
-costs 139 g for nothing.
+`evidence/…/m3/loop_r0.26.txt`. Rung 0.26, everything else identical.
+Control: **360.150 g, margin 473.440, accepted, 120 iterations.**
+
+| `freed_mass_return` | mass | **NET Δmass** | margin | Δmargin |
+|---|---|---|---|---|
+| **0.00** banked | 190.853 g | ★ **−169.297 g (−47.0%)** | **104.232** | −77.98% |
+| 0.50 half back | 275.815 g | −84.335 g | **133.584** | −71.78% |
+| 1.00 mass-neutral | 360.395 g | +0.245 g | ★ **146.864** | −68.98% |
+
+★★ **AT THE LIGHT RUNG, RETURNING THE MASS BUYS 40.9% OF MARGIN** (104.232 →
+146.864). At the shipped rung it bought **0.18%**. Same feature, same density,
+same knob — opposite conclusions. **A one-rung answer here would have been
+confidently wrong either way**, which is precisely the case bar R3 and §4(b)
+exist to catch, and the second time in this task that the two rungs disagreed.
+
+★ **AND THE TWO RUNGS EXPLAIN EACH OTHER.** Look at where the margin *lands* at
+`return = 1.0`: **146.864** at rung 0.26 and **146.616** at rung 0.68 — the same
+ceiling to three digits. That ceiling is the latticed region's **strut bound**,
+which is a property of the lattice and its local stress, not of the rung. So:
+
+* at rung **0.68** the solid-region margin is several hundred, far above the
+  strut ceiling, so `min(solid, strut)` is the strut term at every posture and
+  returning mass cannot move it — **flat**;
+* at rung **0.26** the solid margin starts *below* the ceiling when the mass is
+  banked (104.2), so returning mass raises it until it meets the ceiling and
+  stops — **+40.9%, then pinned**.
+
+One mechanism, two behaviours, and the crossover is whether the part still has
+solid-region margin to spare.
+
+★ **SO §0.2's PREDICTION IS HALF RIGHT, AND I OVERGENERALISED FROM ONE RUNG.** I
+wrote that the mass-neutral posture "is not a variant to try — it is the one the
+measurement demands", then on the strength of rung 0.68 alone wrote that it "buys
+nothing". **Both are withdrawn.** What is true: returning the freed mass buys
+margin *only while the solid region is the binding term*, and on this part that is
+the light rung and not the shipped one.
 
 ★ **SO THE PRE-REGISTERED BOUNDS SPLIT CLEANLY, AND B3 PASSES BY A FACTOR OF
 FOUR.**
 
-* **B3** (NET ≥ 8.0% at the shipped rung): **−31.4% — PASSES**, ~4x the bound.
+* **B3** (NET ≥ 8.0% at the shipped rung): **−31.4% — PASSES**, ~4x the bound, and
+  **−47.0% at the light rung**.
   Every earlier statement in this handoff that B3 could not be met is
   **WITHDRAWN**; they were reasoning from GROSS cell-by-cell figures with the
   optimiser held still, and the loop is what R4 asked for precisely because that
   reasoning is not sound.
-* **B2** (margin ≥ 0.95x baseline): **−78.2% — MISSED**, and now known to be
-  **structurally unfixable by this knob**: no value of `freed_mass_return`
-  recovers it, because the binding term is not the one the knob moves.
+* **B2** (margin ≥ 0.95x baseline): **MISSED at both rungs** — −78.2% and −68.98%
+  at their best. At the shipped rung it is **structurally unfixable by this
+  knob** (the strut ceiling governs at every posture); at the light rung the knob
+  recovers 40.9% and still lands 69% short. The bound is unreachable on this part
+  either way.
 
 ★ **AND THE SHIPPED GATE ACCEPTS ALL THREE.** 146.6 against `margin_stop` 1.5 is
 **98x** the requirement. So the honest sentence for this part is: **you can take
@@ -699,7 +724,7 @@ has shipped five times here.
 | **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
 | **R3** every arm at two rungs | ★ **HELD, and it paid for itself** — both tables complete (8/8 and 6/6), and the light rung REFUSED the region holding 73% of the prize while the shipped rung admitted it (§0.3b) |
-| **R4** NET, and margin as a curve | ★ **NET HELD** — −170.840 g (−31.4%) measured across the freed-mass frontier with a re-optimised control (§0.4). The margin CURVE with a settling iteration is still not produced (the loop reports per-arm endpoints, not per-iteration margins), so R4 is **partly held**. |
+| **R4** NET, and margin as a curve | ★ **NET HELD AT BOTH RUNGS** — −170.840 g (−31.4%) at 0.68 and −169.297 g (−47.0%) at 0.26, across the freed-mass frontier with a re-optimised control (§0.4, §0.4b). The margin CURVE with a settling iteration is still not produced (the loop reports per-arm endpoints), so R4 is **partly held**. |
 | **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree. ★ Read with §0.1b: the REGIONS those numbers are attributed to were built by connectivity, so a declared face's numbers are fused with its neighbour's |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
 | **R7** assertion census | **held** — §6 |
