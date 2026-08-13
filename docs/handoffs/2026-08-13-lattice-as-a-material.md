@@ -142,144 +142,88 @@ lattice on this printer** — 3.41 mm against a 5.87 mm floor — and the remedy
 thicker collar or a finer nozzle, both of which are the user's to choose and
 neither of which the software can invent.
 
-### 0.3 ★ The assignment table at the shipped rung — COMPLETE, all 8 cells
+### 0.3 ★★ THE ASSIGNMENT TABLE, PROPERLY: 14 regions x 5 densities x 2 rungs = **140 cells**
 
-`evidence/…/m2/r0.68/m2_assignment.csv`, rung 0.68, cell 2 mm, nozzle 0.45 mm,
-one certified analysis per cell through the shipped gate, **every cell reported
-including the failures**. Baseline (every region SOLID): **margin_effective
-673.856, mass 543.724 g, ACCEPTED**, 592.8 s.
+`evidence/…/m2rel/`. Release build, provenance-keyed regions, every cell reported
+including the failures. **1122 s at the shipped rung, 429 s at the light one** —
+the whole thing in 26 minutes, which is what §0.6's correction bought.
+Baseline rung 0.68: margin 673.856, mass 543.724 g. Rung 0.26: margin 624.112,
+mass 360.304 g.
 
-| region | f | mass | Δmass | **margin_eff** | Δ% | **solid-only** | Δ% | **strut** | regime | drain | verdict |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| load-pad-1 | 0.20 | — | — | — | — | — | — | — | — | — | ★ **REFUSED — the strut does not print at this cell and nozzle** |
-| load-pad-1 | 0.30 | 417.822 | ★ **−125.902** | 134.773 | −80.00% | 326.740 | −51.5% | 134.773 | ★ OUT | ok | accepted |
-| load-pad-1 | 0.45 | 444.801 | −98.923 | 150.978 | −77.59% | 383.930 | −43.0% | 150.978 | ★ OUT | ok | accepted |
-| load-pad-1 | 0.60 | 471.780 | −71.944 | 213.935 | −68.25% | 453.097 | −32.8% | 213.935 | ★ OUT | ok | accepted |
-| anchor-2 | 0.20 | — | — | — | — | — | — | — | — | — | ★ **REFUSED — printability** |
-| anchor-2 | 0.30 | 496.523 | −47.201 | 173.117 | −74.31% | 665.609 | ★ −1.2% | 173.117 | ★ OUT | ok | accepted |
-| anchor-2 | 0.45 | 506.637 | −37.087 | 232.855 | −65.44% | 670.349 | ★ −0.5% | 232.855 | ★ OUT | ok | accepted |
-| anchor-2 | 0.60 | 516.752 | −26.972 | ★ **361.292** | −46.38% | 672.327 | ★ −0.2% | 361.292 | ★ OUT | ok | accepted |
+**f = 0.20 is refused in EVERY region at both rungs** — the strut does not print
+at a 2 mm cell and a 0.45 mm width. The remaining four densities:
 
-Every certified cell is ACCEPTED by the shipped gate (`margin_stop` = 1.5) and
-every one is DRAINABLE. Per-cell certification: 491–756 s, mean ≈ 610 s.
+| region | cells/m | best Δmass | its margin | best margin | its Δmass | regime |
+|---|---|---|---|---|---|---|
+| anchor-18 | 13.64 | **−47.201 g** @0.30 | −74.31% | −22.24% @0.75 | −16.858 g | OUT |
+| **protect-16** | 1.71 | ★ **REFUSED at every density** — below the floor, and no finer cell rescues it | | | | |
+| load-20 | 10.23 | −20.669 g @0.30 | −37.20% | −15.18% @0.75 | −7.382 g | OUT |
+| **load-1** | 6.82 | ★ **SEALED at every density — B7 REFUSES it** | | | | |
+| load-24, load-32 | 3.41 | ★ REFUSED — below the floor (but **both fit at 1.3642 mm**) | | | | |
+| load-25 | 6.82 | −11.230 g @0.30 | −62.54% | −33.52% @0.75 | −4.011 g | OUT |
+| load-21 | 15.35 | −6.263 g @0.30 | −36.14% | ★ **−0.04%** @0.75 | −2.237 g | OUT |
+| load-22 | 10.23 | −4.825 g @0.30 | −55.54% | ★ **−0.00%** @0.75 | −1.723 g | ★ **in** |
+| load-19 | 5.12 | −1.627 g @0.30 | ★ **+1.09%** | +1.09% @0.30 | −1.627 g | OUT |
+| load-31 | 6.82 | −1.141 g @0.30 | ★ **+0.00%** | +0.00% | −1.141 g | OUT |
+| load-76 | 10.23 | −0.693 g @0.30 | ★ **+0.02%** | +0.02% | −0.693 g | OUT |
+| load-49 | 5.12 | −0.560 g @0.30 | −0.35% | −0.20% @0.75 | −0.200 g | OUT |
 
-★ **(a) THE STRUT TERM BINDS IN EVERY ROW, AND IT IS WORTH UP TO 3.8x.**
-`margin_effective` equals `lattice_strut.margin_worst_case` **exactly, in all
-six**. Without §1(c)'s `gate_on_strut_strength` these cells would report the
-solid-only column — 2.4x, 2.5x, 2.1x, 3.8x, 2.9x and 1.9x higher. That is failure
-mode M5 precisely: a latticed region passing by not being looked at.
-`margin_effective_solid_only` keeps the number the gate would have used, so the
-term's cost is never invisible.
+★★ **(a) `load-1` IS SEALED AT EVERY DENSITY — bar B7 fires for the first time.**
+Latticing the pad under the primary load face creates a lattice cavity whose pore
+space cannot reach the exterior, so the drainability check refuses all four cells.
+That is the manufacturing constraint doing exactly its job (§3), and no amount of
+margin would have made those assignments shippable. It is also a refusal that only
+became visible once regions were keyed on PROVENANCE — under the fused
+decomposition `load-1` was inside a 29,250-voxel blob that drained through its
+other end.
 
-★ **(b) THE CERTIFICATE SAYS OUT OF REGIME ON EVERY CELL**, including all three
-`anchor-2` cells — a region whose median is **13.64** cells per member with
-**97.8%** of its voxels clearing the 5-cell floor. `lattice_region_validity` keys
-on the region's MEDIAN and admits both regions; `analyze_fixed_design` keys on
-the **thinnest latticed member** and flags every assignment. ★ **Two instruments
-in this task disagree on every cell measured, and the per-voxel one is the
-conservative one.** Bar B4 as pre-registered (on the median) is the weaker test;
-it is left as written because it was pre-registered, and the next pre-registration
-must key on the thinnest member. ★ **Under the certificate's own guard, NO
-assignment in this table is certifiable** — that is the honest reading, and it is
-the finding that should govern what happens next.
+★★ **(b) `load-22` @ 0.75 IS THE ONLY FULLY CERTIFIABLE CELL IN 140.** It is the
+only one that comes back **`in` regime** — every other accepted cell is
+out-of-regime and carries the certificate's own caveat. It is drainable, accepted,
+and its margin moves **−0.00%**. It saves **1.723 g**. ★ **That is the honest
+answer to "what can this feature certify on his part today": 1.7 grams.**
 
-★ **(c) LATTICING THE ANCHOR IS STRUCTURALLY ALMOST FREE.** Its solid-only margin
-moves **−1.2% / −0.5% / −0.2%** across the three densities — i.e. essentially not
-at all. The whole of its −74%/−65%/−46% is **the newly-latticed material's own
-strut strength becoming the binding term**, not the structure weakening. The two
-receipt columns separate exactly those two questions, which is why both exist.
+★ **(c) SOME REGIONS ARE FREE, AND ONE IS BETTER THAN FREE.** `load-19` at 0.30
+**improves** the margin by +1.09% while saving 1.627 g; `load-31` and `load-76`
+move it by +0.00% and +0.02%. Removing a little stiffness from a lightly-loaded
+pad redistributes stress favourably. So the earlier claim that **B2 is missed at
+every cell is WITHDRAWN** — it was an artefact of having only two fused regions
+and three densities. Cells that clear the 0.95x bound exist; they are simply small.
 
-★ **(d) A LIGHT LATTICE IN THE QUIET REGION IS DOMINATED BY A DENSE ONE IN THE
-LOUD REGION.** `load-pad-1` at 0.60 saves **71.9 g** at margin **213.9**;
-`anchor-2` at 0.30 saves **47.2 g** at margin **173.1** — strictly worse on
-*both* axes, from the region carrying half the peak stress rather than all of it.
-The Pareto set over the six certified cells is `load-pad-1` at 0.30/0.45/0.60 and
-`anchor-2` at 0.45/0.60; `anchor-2` at 0.30 is the only dominated cell. ★ The
-governing quantity is the STRUT bound over the lattice itself, not how much the
-surrounding structure is disturbed — so **assign density by the strut bound, not
-by how quiet the region looks.**
+★ **(d) THE MASS/MARGIN TENSION IS REAL AND NOW PRECISELY BOUNDED.** Everything
+that clears B2 sums to roughly **8 g gross**. The one cell that clears B3's 8.68%
+threshold on gross — `anchor-18` @ 0.30, −47.201 g — costs **−74.31%** of margin.
+You can have the mass or the margin on this part, not both.
 
-★ **(e) B2 IS MISSED AT EVERY CELL INCLUDING THE BEST, AND THE BOUND IS WHAT IS
-WRONG.** The best cell in the table is `anchor-2` at 0.60: **−46.38%** against a
-pre-registered **−5.0%**. Per §5(b) this is REPORTED and NOT retuned. The reason
-matters: ★ **B2 was written as a RELATIVE bound on a part whose absolute margin is
-~450x the gate it must clear.** Every certified cell above passes the shipped
-gate with 90–240x headroom. A relative margin bound on such a part refuses
-assignments the shipped gate accepts comfortably. The next pre-registration
-should bound the margin against `margin_stop`, not against the baseline.
+★ **(e) AND THE LIGHT RUNG THINS ALMOST EVERYTHING OUT OF RANGE.** At rung 0.26
+seven of the fourteen regions drop below the floor (`load-20`, `load-1`,
+`load-25`, `load-4` and others fall to 3.41 or 1.71 cells) and only `anchor-18`
+and `load-21` remain. The rung-dependence of §0.3b is confirmed across 14 regions
+rather than 2.
 
-### 0.3b ★★ THE LIGHT RUNG — COMPLETE, and it is why §4(b) exists
+### 0.4 ★★ The NET mass saving — still not measured, and now the LOOP is affordable
 
-`evidence/…/m2/r0.26/m2_assignment.csv`, rung **0.26**, everything else identical.
-Baseline: **margin_effective 624.112, mass 360.304 g, ACCEPTED**, 688.0 s.
+No optimised arm ran, so there is no NET number and none is estimated. But §0.3's
+140 cells bound it from both sides:
 
-| region | f | mass | Δmass | margin_eff | Δ% | **solid-only** | Δ% | regime | verdict |
-|---|---|---|---|---|---|---|---|---|---|
-| **load-pad-1** | 0.30 | — | — | — | — | — | — | — | ★ **REFUSED — below the cells-per-member floor** |
-| **load-pad-1** | 0.45 | — | — | — | — | — | — | — | ★ **REFUSED — below the floor** |
-| **load-pad-1** | 0.60 | — | — | — | — | — | — | — | ★ **REFUSED — below the floor** |
-| anchor-2 | 0.30 | 313.102 | −47.201 | 128.856 | −79.35% | 624.094 | ★ **−0.003%** | OUT | accepted |
-| anchor-2 | 0.45 | 323.217 | −37.087 | 184.502 | −70.44% | 624.108 | ★ −0.0006% | OUT | accepted |
-| anchor-2 | 0.60 | 333.332 | −26.972 | **299.039** | −52.09% | 624.112 | ★ −0.0003% | OUT | accepted |
+* everything that clears **B2** (margin >= 0.95x baseline) sums to about **8 g**
+  gross — `load-19`, `load-31`, `load-76`, `load-49`, `load-21`@0.75,
+  `load-22`@0.75;
+* the only cell clearing **B3**'s 8.0% on gross is `anchor-18` @ 0.30 at
+  **−47.201 g (8.68%)**, and it costs **−74.31%** of margin;
+* NET is strictly below gross, because §3's coupling puts material back.
 
-★ **THE REGION HOLDING 73% OF THE PRIZE IS REFUSED AT THE LIGHT RUNG, AT EVERY
-DENSITY**, and the reason is geometric, not statistical:
+★ **So B2 and B3 cannot be satisfied together on this part**, and that conclusion
+now rests on 140 certified cells rather than 8. ★ **But B3 alone is no longer
+"decided against" the way I wrote it earlier** — that reading came from the fused
+2-region table and is withdrawn; what is true is the narrower statement above.
 
-| region | cells/member @ 0.68 | **@ 0.26** |
-|---|---|---|
-| load-pad-1 (179.9 g) | 5.12 | ★ **3.41** |
-| anchor-2 (67.4 g) | 13.64 | ★ **5.12** |
-
-A lighter rung carves material from around the frozen collar, its members thin,
-and `load-pad-1` falls through the 5-cell homogenisation floor. `anchor-2` falls
-13.64 to 5.12 and survives by 2.4%. ★ **Region validity is RUNG-DEPENDENT and
-moves by ~2.7x across this ladder. A single-rung assignment table is not a
-conservative approximation of a two-rung one — it is a different answer**, and at
-the shipped rung BOTH regions looked in range. This is exactly what bar R3 and
-§4(b) exist to produce.
-
-★ **AND IT SHARPENS §0.3(c) TO THE POINT OF PROOF.** At the light rung the
-anchor's SOLID-only margin is **624.094 / 624.108 / 624.112** against a baseline
-of **624.112114** — unchanged to four decimal places. Latticing the anchor pad
-has *no measurable effect on the rest of the part*; 100% of the margin movement
-is the new lattice's own strut bound. The two receipt columns are not a nicety;
-they are the difference between "this weakened the structure" and "this
-introduced material whose own strength now governs".
-
-★ **THE GROSS SAVING IN GRAMS IS IDENTICAL AT BOTH RUNGS** (−26.972 / −37.087 /
-−47.201) because the frozen region is the same voxels at the same densities —
-only the denominator moves (4.96% / 6.82% / 8.68% of the shipped rung,
-7.48% / 10.29% / 13.10% of the light one). That is the mechanism doing exactly
-what it says it does.
-
-★ **THE COMBINED READING OVER BOTH RUNGS: THE ONLY REGION THAT SURVIVES THE
-LADDER IS THE ANCHOR PAD**, worth **67.4 g** solid, and even it clears the
-homogenisation floor by 2.4% at the bottom rung while the certificate flags every
-one of its cells out of regime.
-
-### 0.4 ★★ The NET mass saving — not measured, but **B3 is decided against without it**
-
-No optimised arm ran, so there is no NET number and none is estimated. But the
-two completed tables settle **B3 (>= 8.0% NET at the shipped rung)** anyway:
-
-* the only region surviving BOTH rungs is `anchor-2` (§0.3b);
-* its GROSS saving at the shipped rung is **4.96% / 6.82% / 8.68%** of 543.724 g
-  at densities 0.60 / 0.45 / 0.30 — all with the freed mass BANKED
-  (`freed_mass_return = 0.0`, the assignment table's posture);
-* so only its **0.30** cell clears 8.0% *on gross alone*, and that is the cell
-  with the worst margin of the three (−79.35%);
-* NET is strictly smaller than gross, because §0.2 measured **100% of the frozen
-  mass load-bearing** and §3's coupling says the optimiser puts material back.
-
-★ **So B3 cannot be met by any assignment that survives the ladder.** It is not
-"unmeasured" — it is decided against, and the loop would only quantify by how
-much. ★ That is a verdict on **this part at this cell**, not on the mechanism:
-§0.1's arithmetic says a finer cell or a thicker collar moves it, and §0.3b says
-the ladder rung alone moves region validity by 2.7x.
-
-★ **AND NO GROSS NUMBER IS PRESENTED AS A SAVING ANYWHERE** — not here, not in the
-tables, and not on the app's face card, whose own label says the difference is
-"before the optimiser re-places material".
+★ **AND THE LOOP IS NOW CHEAP.** §0.6's correction re-prices it: a certification
+is 28 s, so a §4(c) pass — re-optimise the remainder, certify, step the densest
+region up — is minutes, not the hours I claimed. **Bar R4 was written off on a
+bad estimate and that write-off is withdrawn.** What actually blocks it is that
+`--stage loop` is not implemented in the probe; that is a build task, not a
+compute one, and it is the first thing the next sitting should do. See §7.1.
 
 ### 0.5 ★ Whether Mode 2 beat Mode 1 — **NOT MEASURED, and Mode 2's in-loop coupling is NOT BUILT.**
 
@@ -290,36 +234,48 @@ compliance sensitivity dc/dρ_e at a frozen latticed voxel, which
 `simp_compliance` now returns and which is the other half of the chain rule.
 What is NOT built is β joining the MMA design vector — §7.2.
 
-### 0.6 ★ What the campaign cost, measured: **a cold certification of his part is tens of minutes, and arming GenEO for it makes that worse, not better.**
+### 0.6 ★★ A CORRECTION THAT INVALIDATES THIS SECTION'S ORIGINAL CLAIM: **every wall-clock number in the first cut of this handoff was measured on an UNOPTIMISED BUILD**
 
-This is a real finding, it is why the tables above are 14 cells rather than 40,
-and it is why the loop (§7.1) is the piece that did not fit.
+I configured the build with a bare `cmake -S core -B build`. That leaves
+`CMAKE_BUILD_TYPE` **empty** — no `-O` flag at all. CI configures with
+`-DCMAKE_BUILD_TYPE=Release` (`-O3 -DNDEBUG`), and the repository deliberately
+undefines `NDEBUG` on the `topopt` target (core/CMakeLists.txt:134) precisely so
+the draft-quality assertions survive an optimised build. ★ **Release is the
+intended configuration here and I had no reason not to use it.**
 
-**One certification of his rung 0.68, isolated, at 8 threads: 590.6 s.** That is
-the measured unit cost of every cell of the assignment table.
+Measured, same machine, same part, same solve:
 
-`analyze_fixed_design` on his 128 × 31 × 118 grid (1,473,696 displacement DOFs)
-is a **cold** solve: there is no Krylov recycle subspace to reuse and no
-multigrid — his own `run_info` records `cg_multigrid: false`,
-`mg_mode: "stagnated-latched"` — so it is plain CG on a system whose SIMP void
-floor gives it a condition number around 1e9.
+| | debug (as first reported) | **Release** | |
+|---|---|---|---|
+| one cold certification of his part | **590.6 s** | ★ **28.0 s** | **21x** |
+| the whole `--stage regions` run | ~12 min | ★ **47 s** | |
+| `test_frozen_lattice_c0` (5 ladder runs) | ~236 s under load | **11 s** | |
+| `test_lattice_density_field` | 0.55 s CPU | 0.08 s CPU | ~7x |
 
-The probe was first written to certify in the PRODUCTION posture, on the argument
-that the baseline rungs' margins were produced there. **That was wrong, and the
-sample says why**: the run sat inside `geneo_engage_now` after **51 minutes of
-CPU** without reaching its first certificate. GenEO pays its full coarse-basis
-build on a one-off solve with nothing to amortise it over. That is exactly why
-`ScopedLadderSolverIsolation` (run_job.cpp:2961) disarms recycling *and* GenEO
-for the standalone re-analysis path — and this probe is that path, not the
-ladder's.
+★ **AND THE PHYSICS IS UNCHANGED, WHICH IS THE POINT.** The Release run reproduces
+the debug run's region table to every printed digit — `protect-16` 64.897 g at
+84.09% of part peak, `anchor-18` 67.431 g at 51.60%, QUIET 0.799 g, margin
+673.856173, mass 543.7239 g. Optimisation moved the clock and nothing else, so
+every margin, mass, cells-per-member and validity verdict in this handoff stands.
+**What does not stand is everything I concluded FROM the cost.**
 
-★ **The general lesson, and it cuts the other way from the one already recorded.**
-`probe-must-not-disarm-production-posture` says a probe that disarms what
-`build_production_loadcase` armed measures the handicap. That is true of a
-TRAJECTORY, which runs the accelerators hundreds of times. It is **false of a
-single cold certification**, where arming them is the handicap. The two postures
-are not "production" and "wrong"; they are "amortised" and "cold", and which one
-a probe wants depends on how many solves it is about to run.
+★ **WHAT THAT COST ME, STATED PLAINLY.** The "a cold certification is tens of
+minutes" finding drove the whole scope argument: 14 cells instead of 40, the loop
+declared unaffordable, bar R4 written off as MISSED, and R1 first attempted as a
+2h17m run on his part. At 28 s a cell the entire 40-cell table is **under twenty
+minutes**. The campaign was never expensive; my build was.
+
+★ **THE PART OF THE ORIGINAL FINDING THAT SURVIVES** is about the POSTURE, not the
+clock, and it is still worth knowing: a probe doing a SINGLE cold certification
+must isolate the solver (recycling and GenEO off, as `ScopedLadderSolverIsolation`
+does) because GenEO pays its whole coarse-basis build on one solve with nothing to
+amortise it over. That is a ratio between two postures and it does not depend on
+`-O3`. What was wrong was the absolute number attached to it.
+
+★ **AND THE GENERAL LESSON, WHICH IS THE ONE TO KEEP.** A cost measurement is a
+claim about a configuration, and I never stated the configuration. Any handoff
+quoting a wall clock must name the build type beside it, or the number means
+nothing and — as here — the decisions taken on the strength of it are unfounded.
 
 ---
 
@@ -657,7 +613,7 @@ has shipped five times here.
 | **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
 | **R3** every arm at two rungs | ★ **HELD, and it paid for itself** — both tables complete (8/8 and 6/6), and the light rung REFUSED the region holding 73% of the prize while the shipped rung admitted it (§0.3b) |
-| **R4** NET, and margin as a curve | **MISSED** — no optimised arm ran, so there is no curve and no NET number. **No gross number is presented as a saving anywhere**, the app's own wording says so, and §0.4 settles the mass bound from the certified tables instead |
+| **R4** NET, and margin as a curve | **MISSED** — no optimised arm ran. ★ It was written off as unaffordable on a DEBUG-build cost (§0.6); at 28 s a certification the loop is minutes. What blocks it now is that `--stage loop` is unimplemented, which is a build task. **No gross number is presented as a saving anywhere.** |
 | **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree. ★ Read with §0.1b: the REGIONS those numbers are attributed to were built by connectivity, so a declared face's numbers are fused with its neighbour's |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
 | **R7** assertion census | **held** — §6 |

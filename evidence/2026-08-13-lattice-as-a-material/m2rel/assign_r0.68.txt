@@ -1,0 +1,95 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+== frozen_lattice_probe — a frozen region as a MATERIAL ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+stage       assign   rung 0.68   cell 2 mm   nozzle 0.45 mm   threads 8
+
+baseline    rung 0.68 from evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.679951)
+
+regions     14, keyed on provenance
+            11380 voxels claimed by more than one declaration (protection wins)
+-- M2 THE ASSIGNMENT TABLE — EVERY CELL, INCLUDING THE FAILURES --
+
+   baseline (every region SOLID): margin_eff 673.856173  accepted yes  mass 543.7239 g  (28.0 s)
+   margin_stop 1.500000   knockdown posture: infill 35%, width_aware off
+
+   region              f  cells/m    mass g   dmass g     margin    dmargin   strutM  regime  drain verdict
+   anchor-18        0.20    13.64         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   anchor-18        0.30    13.64   496.523   -47.201   173.1172    -74.31% 173.1172     OUT     ok  accepted (37 s)
+   anchor-18        0.45    13.64   506.637   -37.087   232.8552    -65.44% 232.8552     OUT     ok  accepted (36 s)
+   anchor-18        0.60    13.64   516.752   -26.972   361.2915    -46.38% 361.2915     OUT     ok  accepted (28 s)
+   anchor-18        0.75    13.64   526.866   -16.858   523.9916    -22.24% 523.9916     OUT     ok  accepted (28 s)
+   protect-16       0.20     1.71         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   protect-16       0.30     1.71         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   protect-16       0.45     1.71         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   protect-16       0.60     1.71         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   protect-16       0.75     1.71         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-20          0.20    10.23         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-20          0.30    10.23   523.054   -20.669   423.2028    -37.20% 423.2028     OUT     ok  accepted (27 s)
+   load-20          0.45    10.23   527.484   -16.240   390.3035    -42.08% 390.3035     OUT     ok  accepted (26 s)
+   load-20          0.60    10.23   531.913   -11.811   473.3129    -29.76% 473.3129     OUT     ok  accepted (26 s)
+   load-20          0.75    10.23   536.342    -7.382   571.5729    -15.18% 571.5729     OUT     ok  accepted (26 s)
+   load-1           0.20     6.82         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-1           0.30     6.82   528.921   -14.803   159.2031    -76.37% 159.2031     OUT   SEAL  SEALED — REFUSED (26 s)
+   load-1           0.45     6.82   532.093   -11.631   170.0063    -74.77% 170.0063     OUT   SEAL  SEALED — REFUSED (25 s)
+   load-1           0.60     6.82   535.265    -8.459   233.6634    -65.32% 233.6634     OUT   SEAL  SEALED — REFUSED (25 s)
+   load-1           0.75     6.82   538.437    -5.287   313.9570    -53.41% 313.9570     OUT   SEAL  SEALED — REFUSED (25 s)
+   load-24          0.20     3.41         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-24          0.30     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-24          0.45     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-24          0.60     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-24          0.75     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-25          0.20     6.82         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-25          0.30     6.82   532.494   -11.230   252.3982    -62.54% 252.3982     OUT     ok  accepted (25 s)
+   load-25          0.45     6.82   534.900    -8.824   277.9034    -58.76% 277.9034     OUT     ok  accepted (25 s)
+   load-25          0.60     6.82   537.307    -6.417   399.5763    -40.70% 399.5763     OUT     ok  accepted (24 s)
+   load-25          0.75     6.82   539.713    -4.011   447.9515    -33.52% 447.9515     OUT     ok  accepted (24 s)
+   load-21          0.20    15.35         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-21          0.30    15.35   537.461    -6.263   430.3072    -36.14% 430.3072     OUT     ok  accepted (24 s)
+   load-21          0.45    15.35   538.803    -4.921   418.0197    -37.97% 418.0197     OUT     ok  accepted (24 s)
+   load-21          0.60    15.35   540.145    -3.579   535.5791    -20.52% 535.5791     OUT     ok  accepted (24 s)
+   load-21          0.75    15.35   541.487    -2.237   673.5905     -0.04% 673.5905     OUT     ok  accepted (24 s)
+   load-4           0.20     6.82         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-4           0.30     6.82   538.219    -5.505   190.2638    -71.76% 190.2638     OUT     ok  accepted (24 s)
+   load-4           0.45     6.82   539.398    -4.326   260.7685    -61.30% 260.7685     OUT     ok  accepted (24 s)
+   load-4           0.60     6.82   540.578    -3.146   393.9143    -41.54% 393.9143     OUT     ok  accepted (23 s)
+   load-4           0.75     6.82   541.758    -1.966   539.7955    -19.89% 539.7955     OUT     ok  accepted (24 s)
+   load-22          0.20    10.23         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-22          0.30    10.23   538.899    -4.825   299.6057    -55.54% 299.6057      in     ok  accepted (24 s)
+   load-22          0.45    10.23   539.933    -3.791   394.5061    -41.46% 394.5061      in     ok  accepted (23 s)
+   load-22          0.60    10.23   540.967    -2.757   563.9491    -16.31% 563.9491      in     ok  accepted (23 s)
+   load-22          0.75    10.23   542.001    -1.723   673.8323     -0.00% 743.6526      in     ok  accepted (23 s)
+   load-19          0.20     5.12         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-19          0.30     5.12   542.097    -1.627   681.1732     +1.09% 696.7045     OUT     ok  accepted (23 s)
+   load-19          0.45     5.12   542.445    -1.278   677.9124     +0.60% 918.9357     OUT     ok  accepted (23 s)
+   load-19          0.60     5.12   542.794    -0.930   675.9218     +0.31% 1045.0753     OUT     ok  accepted (23 s)
+   load-19          0.75     5.12   543.143    -0.581   674.7011     +0.13% 1101.9370     OUT     ok  accepted (23 s)
+   load-32          0.20     3.41         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-32          0.30     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-32          0.45     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-32          0.60     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-32          0.75     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-31          0.20     6.82         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-31          0.30     6.82   542.583    -1.141   673.8571     +0.00% 904.9185     OUT     ok  accepted (23 s)
+   load-31          0.45     6.82   542.828    -0.896   673.8570     +0.00% 798.0569     OUT     ok  accepted (23 s)
+   load-31          0.60     6.82   543.072    -0.652   673.8568     +0.00% 932.4032     OUT     ok  accepted (23 s)
+   load-31          0.75     6.82   543.317    -0.407   673.8566     +0.00% 1086.6665     OUT     ok  accepted (23 s)
+   load-76          0.20    10.23         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-76          0.30    10.23   543.031    -0.693   674.0008     +0.02% 705.5577     OUT     ok  accepted (22 s)
+   load-76          0.45    10.23   543.179    -0.544   639.6897     -5.07% 639.6897     OUT     ok  accepted (22 s)
+   load-76          0.60    10.23   543.328    -0.396   673.9425     +0.01% 754.3673     OUT     ok  accepted (23 s)
+   load-76          0.75    10.23   543.476    -0.247   673.9108     +0.01% 829.6532     OUT     ok  accepted (23 s)
+   load-49          0.20     5.12         -         -          -          -        -       -      -  REFUSED (the strut does not print at this cell and nozzle)
+   load-49          0.30     5.12   543.164    -0.560   671.5076     -0.35% 1254.5085     OUT     ok  accepted (22 s)
+   load-49          0.45     5.12   543.284    -0.440   671.6788     -0.32% 1439.2541     OUT     ok  accepted (22 s)
+   load-49          0.60     5.12   543.404    -0.320   671.9928     -0.28% 2130.5903     OUT     ok  accepted (22 s)
+   load-49          0.75     5.12   543.524    -0.200   672.5280     -0.20% 2968.9226     OUT     ok  accepted (22 s)
+
+   wrote evidence/2026-08-13-lattice-as-a-material/m2rel/r0.68/m2_assignment.csv
+TOTAL=1122s EXIT=0
