@@ -385,6 +385,28 @@ PlsmCsr lattice_beta_jacobian(const VoxelGrid& grid,
                               const std::vector<char>* only_where,
                               const std::vector<int>& refused, int threads);
 
+// ★ THE CHAIN RULE, and the whole of what Mode 2 adds to a gradient. For any
+// grid-indexed physical sensitivity dF/drho_e, the beta-space gradient is
+//
+//     dF/dbeta_j = sum_e (dF/drho_e) * J[e][j]        (J = lattice_beta_jacobian)
+//
+// i.e. J^T applied to the per-voxel field. Two callers, one function:
+//
+//   * the OBJECTIVE — pass `SimpCompliance::dcompliance`. On a voxel overridden
+//     by the field, simp_compliance's entry is already dc/d(LATTICE relative
+//     density) rather than dc/d(design density), so no rescaling belongs here.
+//   * the VOLUME BUDGET — pass ones. A latticed voxel costs `rho` of a solid one,
+//     so d(mass)/d(beta) is exactly J^T(1) in voxel units, which is the same units
+//     `freed_mass_voxels` reports.
+//
+// Rows of J outside an Optimised region are empty, so a whole-grid field may be
+// passed unmasked: uncoupled voxels contribute nothing by construction rather
+// than by the caller remembering to zero them. Result size = J.cols, zero-filled.
+//
+// Throws std::invalid_argument if `dF_drho` is not J.rows long.
+std::vector<double> lattice_beta_chain(const PlsmCsr& jacobian,
+                                       const std::vector<double>& dF_drho);
+
 }  // namespace topopt
 
 #endif  // TOPOPT_LATTICE_DENSITY_FIELD_HPP

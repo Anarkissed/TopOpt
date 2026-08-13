@@ -11,11 +11,14 @@
 // where it is decidable without a solve.
 
 #include "topopt/lattice_density_field.hpp"
+#include "topopt/fea.hpp"
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_material.hpp"
 #include "topopt/materials.hpp"
+#include "topopt/simp.hpp"
 #include "topopt/voxel.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -53,6 +56,30 @@ VoxelGrid block(int n = 12, double spacing = 1.0) {
 
 std::vector<int> one_region(const VoxelGrid& g, int id = 1) {
   return std::vector<int>(g.voxel_count(), id);
+}
+
+// The x = 0 face fully clamped, and a transverse -z load on the free end face —
+// the same cantilever `test_simp.cpp` uses, so the fixture is not a new one.
+std::vector<DirichletBC> clamp_x0_face(const VoxelGrid& g) {
+  std::vector<DirichletBC> bcs;
+  for (int c = 0; c <= g.nz; ++c)
+    for (int b = 0; b <= g.ny; ++b) {
+      const int n = fea_node_index(g, 0, b, c);
+      bcs.push_back({n, 0, 0.0});
+      bcs.push_back({n, 1, 0.0});
+      bcs.push_back({n, 2, 0.0});
+    }
+  return bcs;
+}
+
+std::vector<NodalLoad> tip_load_z(const VoxelGrid& g, double total) {
+  std::vector<int> nodes;
+  for (int c = 0; c <= g.nz; ++c)
+    for (int b = 0; b <= g.ny; ++b) nodes.push_back(fea_node_index(g, g.nx, b, c));
+  std::vector<NodalLoad> loads;
+  const double per = total / static_cast<double>(nodes.size());
+  for (int n : nodes) loads.push_back({n, 2, per});
+  return loads;
 }
 
 LatticeRegionSpec declared(int id, double f) {
@@ -273,6 +300,118 @@ int main() {
     CHECK(J2.nnz() == 0,
           "a DECLARED region has no beta coupling — its sensitivity is zero, and "
           "that is the whole difference between the two modes");
+  }
+
+  // ── ★ dC/dbeta END TO END, against a central difference of the COMPLIANCE ──
+  //
+  // The Jacobian bar above checks one link. This checks the CHAIN the optimiser
+  // would actually descend: resolve -> tensor -> solve -> dc/d(lattice rho) ->
+  // J^T. A sign error or a missing factor anywhere in it produces a gradient
+  // that still LOOKS plausible and makes MMA wander, so the finite difference is
+  // taken on the compliance itself rather than on any intermediate.
+  {
+    LatticeBetaField B;
+    const LatticeBetaKnots k = lattice_beta_knots_for_grid(g, 0.0, 0.0, 0.0);
+    B.lattice = plsm_make_lattice(g.nx, g.ny, g.nz, k.dx, k.dy, k.dz, 2.0);
+    B.basis = PlsmBasisKind::Gaussian;
+    B.steepness = 1.0;
+    B.beta.assign(B.lattice.count(), 0.0);
+    for (std::size_t j = 0; j < B.beta.size(); ++j)
+      B.beta[j] = 0.31 * std::sin(0.9 * static_cast<double>(j) + 0.4);
+
+    LatticeRegionSpec opt;
+    opt.id = 1;
+    opt.name = "r1";
+    opt.mode = LatticeRegionMode::Optimised;
+
+    const LatticeMaterialModel M =
+        build_lattice_material_model(T, 2300.0, 0.35);
+
+    SimpParams p;
+    p.youngs_modulus = 2300.0;
+    p.poisson = 0.35;
+    p.penalty = 3.0;
+    p.lattice_material = &M;
+
+    const std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    const std::vector<NodalLoad> loads = tip_load_z(g, -4.0);
+    const std::vector<double> dens(g.voxel_count(), 1.0);
+
+    // ★ A TIGHT tolerance, because the finite difference differences two SOLVES.
+    // At the trajectory tolerance the CG noise is larger than the h-step effect
+    // and the check would compare solver residuals, not derivatives.
+    const double tol = 1e-13;
+    auto compliance_at = [&](const LatticeBetaField& bf) {
+      const ResolvedLatticeDensityField f =
+          resolve_lattice_density_field(g, rid, {opt}, T, &bf, nullptr, {});
+      std::vector<double> lr(g.voxel_count(), -1.0);
+      for (std::size_t e = 0; e < g.voxel_count(); ++e)
+        if (f.mask[e]) lr[e] = f.rho[e];
+      SimpParams q = p;
+      q.lattice_relative_density = &lr;
+      return simp_compliance(g, q, dens, bcs, loads, tol, 20000);
+    };
+
+    const ResolvedLatticeDensityField f =
+        resolve_lattice_density_field(g, rid, {opt}, T, &B, nullptr, {});
+    CHECK(f.latticed_voxels == g.voxel_count(),
+          "every voxel of the single Optimised region is latticed");
+    const SimpCompliance c0 = compliance_at(B);
+    const PlsmCsr J = lattice_beta_jacobian(g, rid, {opt}, T, B, nullptr, {}, 1);
+    const std::vector<double> grad = lattice_beta_chain(J, c0.dcompliance);
+    CHECK(grad.size() == B.beta.size(),
+          "the beta gradient is one number per coefficient");
+
+    // ★ THE PROBES MUST BE COEFFICIENTS THAT ACTUALLY MOVE THE COMPLIANCE.
+    // The knot lattice is PADDED, so its first and last coefficients can have no
+    // support inside the grid: probing those compares 0 against 0 and passes
+    // while measuring nothing. Pick the three largest |dC/dbeta| instead, and
+    // assert each is non-trivial before believing the agreement.
+    std::vector<std::size_t> order(grad.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+      return std::fabs(grad[a]) > std::fabs(grad[b]);
+    });
+    CHECK(order.size() >= 3 && std::fabs(grad[order[2]]) > 1e-12,
+          "at least three coefficients must have a NON-ZERO analytic gradient — "
+          "otherwise the comparison below is 0 == 0 and measures nothing");
+
+    double worst = 0.0;
+    for (std::size_t pi = 0; pi < 3; ++pi) {
+      const std::size_t j = order[pi];
+      CHECK(std::fabs(grad[j]) > 1e-12,
+            "positive control: this probe's analytic gradient is non-zero");
+      const double h = 1e-4;
+      LatticeBetaField up = B, dn = B;
+      up.beta[j] += h;
+      dn.beta[j] -= h;
+      const double fd =
+          (compliance_at(up).compliance - compliance_at(dn).compliance) /
+          (2.0 * h);
+      const double rel =
+          std::fabs(fd - grad[j]) / std::max(1e-30, std::fabs(fd));
+      if (rel > worst) worst = rel;
+      std::printf("  beta[%zu]: analytic %+.10e  central %+.10e  rel %.3e\n", j,
+                  grad[j], fd, rel);
+    }
+    CHECK(worst < 1e-5,
+          "dC/dbeta must agree with a central difference of the COMPLIANCE — "
+          "this is the gradient MMA descends in Mode 2, and a wrong one wanders "
+          "instead of failing");
+    std::printf("dC/dbeta vs central difference: worst rel err %.3e\n", worst);
+
+    // ★ AND A DECLARED REGION CONTRIBUTES NOTHING. Mode 1 is Mode 2 with an
+    // identically zero gradient — the fixed density is a CONSTANT field, so the
+    // optimiser sees no direction to move it in. That is the whole claim the
+    // brief rests on, stated as an assertion rather than as prose.
+    const PlsmCsr Jd = lattice_beta_jacobian(g, rid, {declared(1, 0.35)}, T, B,
+                                             nullptr, {}, 1);
+    const std::vector<double> gd = lattice_beta_chain(Jd, c0.dcompliance);
+    bool all_zero = true;
+    for (double v : gd) all_zero = all_zero && (v == 0.0);
+    CHECK(all_zero && gd.size() == B.beta.size(),
+          "a Declared region's beta gradient is EXACTLY zero — a fixed density "
+          "is a constant density field");
   }
 
   // ── the refusals ─────────────────────────────────────────────────────────

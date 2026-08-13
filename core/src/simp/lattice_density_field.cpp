@@ -506,4 +506,25 @@ PlsmCsr lattice_beta_jacobian(const VoxelGrid& grid,
   return J;
 }
 
+std::vector<double> lattice_beta_chain(const PlsmCsr& jacobian,
+                                       const std::vector<double>& dF_drho) {
+  if (dF_drho.size() != jacobian.rows)
+    throw std::invalid_argument(
+        "lattice_beta_chain: dF_drho size != jacobian.rows");
+  std::vector<double> g(jacobian.cols, 0.0);
+  // Serial, and deliberately. The accumulation is a scatter into a shared vector
+  // whose ORDER sets the rounding, so a thread-count-dependent partition would
+  // make the gradient depend on how many cores ran it — the one property a
+  // gradient must not have. It is O(nnz) with nnz = latticed voxels x the basis
+  // support (~27), which is under a millisecond beside the state solve it is
+  // chained onto (evidence/…/m5/cost.txt).
+  for (std::size_t e = 0; e < jacobian.rows; ++e) {
+    const double s = dF_drho[e];
+    if (s == 0.0) continue;
+    for (std::size_t p = jacobian.row[e]; p < jacobian.row[e + 1]; ++p)
+      g[static_cast<std::size_t>(jacobian.col[p])] += s * jacobian.val[p];
+  }
+  return g;
+}
+
 }  // namespace topopt
