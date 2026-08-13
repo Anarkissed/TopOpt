@@ -207,29 +207,59 @@ seven of the fourteen regions drop below the floor (`load-20`, `load-1`,
 and `load-21` remain. The rung-dependence of §0.3b is confirmed across 14 regions
 rather than 2.
 
-### 0.4 ★★ The NET mass saving — still not measured, and now the LOOP is affordable
+### 0.4 ★★ THE NET MASS SAVING, MEASURED (bar R4): **−170.840 g, −31.4%**
 
-No optimised arm ran, so there is no NET number and none is estimated. But §0.3's
-140 cells bound it from both sides:
+`evidence/…/m3/loop_r0.68.txt`. Rung 0.68, every region latticed at f = 0.30 with
+its cell FITTED to its own thickness, four re-optimisations.
 
-* everything that clears **B2** (margin >= 0.95x baseline) sums to about **8 g**
-  gross — `load-19`, `load-31`, `load-76`, `load-49`, `load-21`@0.75,
-  `load-22`@0.75;
-* the only cell clearing **B3**'s 8.0% on gross is `anchor-18` @ 0.30 at
-  **−47.201 g (8.68%)**, and it costs **−74.31%** of margin;
-* NET is strictly below gross, because §3's coupling puts material back.
+★ **The control is a RE-OPTIMISATION, not the stored design** — same rung, same
+iteration cap, feature OFF. Comparing a re-optimised arm against `design.bin`
+would fold the two runs' cap difference into the "saving".
 
-★ **So B2 and B3 cannot be satisfied together on this part**, and that conclusion
-now rests on 140 certified cells rather than 8. ★ **But B3 alone is no longer
-"decided against" the way I wrote it earlier** — that reading came from the fused
-2-region table and is withdrawn; what is true is the narrower statement above.
+> control (feature OFF): **543.724 g, margin 673.856, accepted, 27 iterations**
 
-★ **AND THE LOOP IS NOW CHEAP.** §0.6's correction re-prices it: a certification
-is 28 s, so a §4(c) pass — re-optimise the remainder, certify, step the densest
-region up — is minutes, not the hours I claimed. **Bar R4 was written off on a
-bad estimate and that write-off is withdrawn.** What actually blocks it is that
-`--stage loop` is not implemented in the probe; that is a build task, not a
-compute one, and it is the first thing the next sitting should do. See §7.1.
+| `freed_mass_return` | mass | ★ **NET Δmass** | margin | Δmargin | iters | accepted |
+|---|---|---|---|---|---|---|
+| **0.00** banked | 372.884 g | ★ **−170.840 g (−31.4%)** | 146.877 | −78.20% | 94 | **yes** |
+| 0.50 half back | 458.011 g | −85.713 g | 146.643 | −78.24% | 16 | yes |
+| 1.00 mass-neutral | 511.895 g | −31.829 g | 146.616 | −78.24% | 31 | yes |
+
+★★ **THE FINDING, AND IT INVERTS §0.2's PREDICTION: GIVING THE FREED MASS BACK
+BUYS NOTHING.** The margin is **146.877 / 146.643 / 146.616** across the three
+postures — a **0.18% spread** — while the mass varies by **139 g**. Handing the
+optimiser 139 g of budget to re-place near the frozen wall moves the certified
+margin by four hundredths of a percent.
+
+The reason is §0.3(a), now confirmed in the loop rather than per-cell: **the
+binding term is the lattice's own STRUT bound, not the structure's stiffness.**
+`margin_effective = min(solid-region margin, strut bound)`, the strut bound sits
+at ~147 while the solid margin is several hundred, so adding material to the
+active set cannot move the minimum. ★ **The buttressing coupling §3 predicted —
+94% of what the optimiser places landing within 5 mm of the frozen wall — is real
+about WHERE material goes and irrelevant to WHAT THE GATE SEES.** I wrote in §0.2
+that the mass-neutral posture "is not a variant to try — it is the one the
+measurement demands". **That is withdrawn.** Measured, it is the one posture that
+costs 139 g for nothing.
+
+★ **SO THE PRE-REGISTERED BOUNDS SPLIT CLEANLY, AND B3 PASSES BY A FACTOR OF
+FOUR.**
+
+* **B3** (NET ≥ 8.0% at the shipped rung): **−31.4% — PASSES**, ~4x the bound.
+  Every earlier statement in this handoff that B3 could not be met is
+  **WITHDRAWN**; they were reasoning from GROSS cell-by-cell figures with the
+  optimiser held still, and the loop is what R4 asked for precisely because that
+  reasoning is not sound.
+* **B2** (margin ≥ 0.95x baseline): **−78.2% — MISSED**, and now known to be
+  **structurally unfixable by this knob**: no value of `freed_mass_return`
+  recovers it, because the binding term is not the one the knob moves.
+
+★ **AND THE SHIPPED GATE ACCEPTS ALL THREE.** 146.6 against `margin_stop` 1.5 is
+**98x** the requirement. So the honest sentence for this part is: **you can take
+31% of the mass out and the shipped certification still accepts it; what you
+spend is 78% of a margin that was 450x what the gate asks.** Whether that trade
+is worth taking is a judgement about how much of that headroom is real, which is
+a question about `z_knockdown` and the strut law's own caveats (§1.4) and not one
+this task can settle.
 
 ### 0.5 ★ Whether Mode 2 beat Mode 1 — **NOT MEASURED, and Mode 2's in-loop coupling is NOT BUILT.**
 
@@ -669,7 +699,7 @@ has shipped five times here.
 | **R1** C0 inertness first | exact by dispatch, and asserted at the resolver in `test_lattice_density_field` (f = 1.0 emits nothing; 0.95 is still clamped into the band, so "solid" is the number and not a tolerance). The whole-run stash-rebuild checksum did NOT run — §7.1 |
 | **R2** Mode 2 off until Mode 1 measured; Mode 1 off until bounds met | **held** — `frozen_lattice` defaults false, `frozen_lattice_beta` defaults empty, and no production path sets either |
 | **R3** every arm at two rungs | ★ **HELD, and it paid for itself** — both tables complete (8/8 and 6/6), and the light rung REFUSED the region holding 73% of the prize while the shipped rung admitted it (§0.3b) |
-| **R4** NET, and margin as a curve | **MISSED** — no optimised arm ran. ★ It was written off as unaffordable on a DEBUG-build cost (§0.6); at 28 s a certification the loop is minutes. What blocks it now is that `--stage loop` is unimplemented, which is a build task. **No gross number is presented as a saving anywhere.** |
+| **R4** NET, and margin as a curve | ★ **NET HELD** — −170.840 g (−31.4%) measured across the freed-mass frontier with a re-optimised control (§0.4). The margin CURVE with a settling iteration is still not produced (the loop reports per-arm endpoints, not per-iteration margins), so R4 is **partly held**. |
 | **R5** cells-per-member per region | **held** — §0.2b, per region, with the p10 and the fraction beside the median, and §0.3(b) reports where the region-level test and the certificate's own guard disagree. ★ Read with §0.1b: the REGIONS those numbers are attributed to were built by connectivity, so a declared face's numbers are fused with its neighbour's |
 | **R6** per-voxel density contract | **held** — §2.2, each of the six consumers checked |
 | **R7** assertion census | **held** — §6 |

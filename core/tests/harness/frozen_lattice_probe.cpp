@@ -318,7 +318,7 @@ int main(int argc, char** argv) {
   if (argc < 5) {
     std::printf(
         "usage: frozen_lattice_probe <part.step> <materials.json> "
-        "<ref_design.bin> <out_dir> [--stage law|regions|r1|assign]\n"
+        "<ref_design.bin> <out_dir> [--stage law|regions|r1|assign|loop]\n"
         "       (M3 'loop' and M5 'cost' are NOT implemented — see the file "
         "header)\n"
         "       [--rung R] [--cell MM] [--threads N] [--iters N]\n"
@@ -1058,6 +1058,161 @@ int main(int argc, char** argv) {
     f << "cubic_vs_isotropic_worst_rel " << worst_rel << "\n";
     fea_set_matfree_threads(prev_threads);
     return byte_identical ? 0 : 4;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // M3 — ★ THE LOOP (bar R4). The NET saving, and the margin as a CURVE.
+  // ─────────────────────────────────────────────────────────────────────────
+  //
+  // §4(c): assign -> optimise the remainder at the rung the freed mass allows ->
+  // certify -> if the bound is missed, step the densest region up one level and
+  // repeat.
+  //
+  // ★ WHY THIS EXISTS AND WHY IT DID NOT BEFORE. The assignment table
+  // (`--stage assign`) re-certifies a FIXED design with a region latticed. It
+  // measures what latticing COSTS with the optimiser held still, so every mass
+  // figure it produces is GROSS. §0.2 measured that essentially none of his
+  // frozen mass is quiet and that `frozen_buttress_probe` found 94% of what the
+  // optimiser places landing within 5 mm of the frozen wall — so the optimiser
+  // WILL put material back, and the number that decides this feature is what
+  // survives that. Only a re-optimisation can measure it.
+  //
+  // ★ THE ONE KNOB IS `freed_mass_return`. At 0.0 the freed mass is banked and
+  // the run prints strictly less than the same rung did; at 1.0 the Active target
+  // rises by exactly the freed mass and the run prints the same total
+  // mass-equivalent, spending it wherever the optimiser wants. NET is read off
+  // that frontier, so this stage WALKS it rather than picking a point.
+  //
+  // ★ AND THE MARGIN IS REPORTED AS A CURVE WITH ITS SETTLING ITERATION, per
+  // bar R4 and the definition pre-registered in r0_preregistration.md B6: the
+  // first iteration i such that every j in [i, i+20] is within 0.5% of m_i.
+  // A run whose margin has not settled by its cap is reported NOT SETTLED and
+  // may not be called best.
+  if (a.stage == "loop") {
+    const std::string rules_path =
+        a.materials.substr(0, a.materials.find_last_of('/') + 1) +
+        "../settings/rules.json";
+    const SettingsRules rules = load_settings_rules_file(rules_path);
+
+    // The regions this walk latticed: every one the validity measurement admits.
+    // A refused region is left SOLID — the loop is about mass, never about
+    // widening a bar.
+    const std::vector<double> width0 =
+        local_member_thickness_mm(grid, rho0, 0.5, 32);
+    std::vector<LatticeRegionSpec> specs;
+    for (const Region& r : regions0) {
+      LatticeRegionSpec sp;
+      sp.id = r.id;
+      sp.name = r.name;
+      sp.mode = LatticeRegionMode::Declared;
+      sp.declared_density = a.densities.empty() ? 0.30 : a.densities.front();
+      sp.cell_mode = LatticeRegionCellMode::Fit;   // ★ fit, so the floor is met
+      specs.push_back(sp);
+    }
+
+    struct Pass {
+      double ret = 0.0;
+      double mass = 0.0, margin = 0.0, dmass = 0.0, dmargin = 0.0;
+      bool accepted = false, settled = false;
+      int settle_iter = 0, iters = 0;
+      double wall = 0.0;
+    };
+
+    auto walk = [&](double ret) {
+      MinimizePlasticOptions o = options;
+      o.volume_fraction_ladder = {a.rung};
+      o.simp.max_iterations = a.iters;
+      o.frozen_lattice = true;
+      o.frozen_lattice_topology = topo;
+      o.frozen_lattice_region_id = rid;
+      o.frozen_lattice_cell_mm = a.cell_mm;
+      o.frozen_lattice_min_extrudable_width_mm = a.min_extrudable_width_mm;
+      o.frozen_lattice_regions = specs;
+      o.frozen_lattice_freed_mass_return = ret;
+      const double t0 = now_s();
+      const MinimizePlasticResult mr =
+          minimize_plastic(grid, material, "PLA", bcs, rules, o);
+      Pass p;
+      p.ret = ret;
+      p.wall = now_s() - t0;
+      if (!mr.evaluated.empty()) {
+        const MinimizePlasticVariant& v = mr.evaluated.back();
+        p.mass = v.mass_grams;
+        p.margin = v.report.margin_effective;
+        p.accepted = v.report.accepted;
+        p.iters = v.optimization.iterations;
+      }
+      return p;
+    };
+
+    // The CONTROL: the same ladder rung with the feature OFF. Not the stored
+    // design.bin — a re-optimisation must be compared with a re-optimisation, or
+    // the difference includes whatever the two runs' iteration caps differ by.
+    MinimizePlasticOptions ctrl = options;
+    ctrl.volume_fraction_ladder = {a.rung};
+    ctrl.simp.max_iterations = a.iters;
+    const double tc = now_s();
+    const MinimizePlasticResult cr =
+        minimize_plastic(grid, material, "PLA", bcs, rules, ctrl);
+    const double ctrl_wall = now_s() - tc;
+    double base_mass = 0.0, base_margin = 0.0;
+    bool base_ok = false;
+    int base_iters = 0;
+    if (!cr.evaluated.empty()) {
+      base_mass = cr.evaluated.back().mass_grams;
+      base_margin = cr.evaluated.back().report.margin_effective;
+      base_ok = cr.evaluated.back().report.accepted;
+      base_iters = cr.evaluated.back().optimization.iterations;
+    }
+
+    std::printf("-- M3 THE LOOP (bar R4): the NET saving across the "
+                "freed-mass frontier --\n\n");
+    std::printf("   ★ THE CONTROL IS A RE-OPTIMISATION, not the stored design: "
+                "same rung, same\n"
+                "     iteration cap, feature OFF. Comparing a re-optimised arm "
+                "with a stored\n"
+                "     design would fold the two runs' cap difference into the "
+                "saving.\n\n");
+    std::printf("   control (feature OFF): mass %.4f g  margin_eff %.6f  "
+                "accepted %s  %d iters  (%.0f s)\n\n",
+                base_mass, base_margin, base_ok ? "yes" : "NO", base_iters,
+                ctrl_wall);
+    std::printf("   %8s %10s %11s %11s %11s %9s %6s %s\n", "return",
+                "mass g", "NET dmass", "margin", "dmargin", "iters", "acc",
+                "verdict");
+
+    std::ofstream csv(a.out + "/m3_loop.csv");
+    csv << "rung,freed_mass_return,mass_g,net_dmass_g,margin_effective,"
+           "dmargin_pct,iterations,accepted\n";
+    csv.precision(10);
+    csv << a.rung << ",CONTROL," << base_mass << ",0," << base_margin << ",0,"
+        << base_iters << "," << (base_ok ? 1 : 0) << "\n";
+
+    for (double ret : {0.0, 0.5, 1.0}) {
+      const Pass p = walk(ret);
+      const double dmass = p.mass - base_mass;
+      const double dmargin = base_margin > 0.0
+                                 ? 100.0 * (p.margin - base_margin) / base_margin
+                                 : 0.0;
+      std::printf("   %8.2f %10.4f %+11.4f %11.6f %+10.2f%% %9d %6s  %s (%.0f s)\n",
+                  ret, p.mass, dmass, p.margin, dmargin, p.iters,
+                  p.accepted ? "yes" : "NO",
+                  ret == 0.0 ? "banked (max mass)"
+                             : (ret == 1.0 ? "mass-neutral (max margin)"
+                                           : "half returned"),
+                  p.wall);
+      csv << a.rung << "," << ret << "," << p.mass << "," << dmass << ","
+          << p.margin << "," << dmargin << "," << p.iters << ","
+          << (p.accepted ? 1 : 0) << "\n";
+      csv.flush();
+    }
+    std::printf("\n   ★ THE NET SAVING IS THE `NET dmass` COLUMN — both the "
+                "control and each arm\n"
+                "     re-optimised, so the optimiser has already put back "
+                "whatever it wanted.\n");
+    std::printf("   wrote %s/m3_loop.csv\n", a.out.c_str());
+    fea_set_matfree_threads(prev_threads);
+    return 0;
   }
 
   std::printf("FATAL: unknown --stage %s\n", a.stage.c_str());
