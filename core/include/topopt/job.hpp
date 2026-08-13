@@ -154,7 +154,13 @@ struct JobOutput {
 // NO-OP (lattice cannot conjure material) and is reported in the receipt.
 struct JobLatticeRegion {
   std::string role;  // "include" | "exclude"
-  std::string kind;  // "bolt" (cylinder) | "face" (bounded slab)
+  // "bolt" (cylinder) | "face" (bounded slab) | ★ "region" (a face REGION —
+  // task 2026-08-15-lattice-regions). The first two are analytic predicates; the
+  // third is a VOXEL SET, resolved from `loads.face_regions` by `region_id` and
+  // walked `depth_mm` part-solid layers deep — the SAME primitive
+  // (mask_step_region) a protection uses, which is what makes §2(b)'s "the depth
+  // is one number" enforceable rather than merely intended.
+  std::string kind;
   // Bolt: a cylinder about axis_point + t·axis_dir, t in [-half_length, +half_length].
   Vec3 axis_point{0.0, 0.0, 0.0};
   Vec3 axis_dir{0.0, 0.0, 0.0};
@@ -175,6 +181,10 @@ struct JobLatticeRegion {
   // were unrelatable and drifted silently — 5 mm of protection under a 7 mm
   // lattice region, on the maintainer's own run.
   int face_id = -1;
+  // ★ WHICH FACE REGION THIS LATTICE REGION IS (kind == "region"). An id into
+  // `loads.face_regions`; -1 on the two analytic kinds. A sector of a grid split
+  // is exactly this: one region id, one depth, one verdict of its own.
+  int region_id = -1;
 };
 
 struct JobLattice {

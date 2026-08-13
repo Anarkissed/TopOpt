@@ -606,7 +606,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         if (fid < 0 || fid >= model.face_count) continue;
         const double requested_mm = lc.face_protection_depth_for(pi);
         const int depth_vox =
-            std::max(1, static_cast<int>(std::lround(requested_mm / grid.spacing)));
+            region_depth_layers(requested_mm, grid.spacing);
         // What `depth_vox` LAYERS actually reach, by mask_step_face's own rule
         // (a voxel is in iff its centre is within (depth - 0.5) spacings).
         const double effective_mm = depth_vox * grid.spacing;
@@ -642,7 +642,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
             region_or_throw(rid, "face protection");
         const double requested_mm = lc.face_protection_region_depth_for(pi);
         const int depth_vox =
-            std::max(1, static_cast<int>(std::lround(requested_mm / grid.spacing)));
+            region_depth_layers(requested_mm, grid.spacing);
         const double effective_mm = depth_vox * grid.spacing;
         DesignMask one = make_active_mask(grid);
         const std::size_t frozen = mask_step_region(

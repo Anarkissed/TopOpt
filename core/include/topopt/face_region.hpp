@@ -326,6 +326,32 @@ std::vector<std::size_t> grid_split_voxel_counts(
     const VoxelGrid& grid, const std::vector<int>& member_voxels,
     const std::vector<GridSplitCell>& cells);
 
+// ★ THE ONE mm → VOXEL-LAYER CONVERSION (task 2026-08-15-lattice-regions §2b,
+// bar R5).
+//
+// PR 328 §0 established that a face's PROTECTION depth and its LATTICE depth
+// must be the same number: 5 mm of protection under a 7 mm lattice region left
+// the lattice pass finding material only in the frozen collar — 79% of
+// everything it latticed was the protected skin, and the rest was void a lattice
+// cannot conjure material into.
+//
+// "The same number" is not enough on its own, because both are converted to
+// WHOLE VOXEL LAYERS against the run's grid, and two call sites rounding
+// independently is exactly how the two drift apart again. So the conversion is
+// spelled ONCE, here, and both `build_production_loadcase` (the protection) and
+// `lattice_role_regions_from_job` (the lattice) call it. Same mm, same grid,
+// same layer count, same voxels — structurally, not by agreement.
+//
+// Floored at 1: a protection always freezes a real skin, and a lattice region
+// always has a layer to fill.
+inline int region_depth_layers(double depth_mm, double spacing) {
+  if (!(spacing > 0.0)) return 1;
+  const double layers = depth_mm / spacing;
+  return layers > 0.0
+             ? (layers + 0.5 >= 1.0 ? static_cast<int>(layers + 0.5) : 1)
+             : 1;
+}
+
 // ★ THE SLIVER FLOOR, AND WHY THIS NUMBER.
 //
 // A 10x5 grid split is FIFTY sub-regions from one operation. On the maintainer's

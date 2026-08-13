@@ -360,14 +360,32 @@ bool LatticeBoundary::cell_may_overlap(const Vec3& cell_min, double cell_mm) con
   // A cell dropped here therefore provably contains no certifiable-latticed
   // voxel; a partially-overlapping cell stays active and its solid-role voxels
   // are simply masked solid — activation and mask cannot disagree.
+  //
+  // ★ A MASK-BACKED REGION TAKES THE EXACT BOX TEST, NOT THE BOUND (task
+  // 2026-08-15-lattice-regions §1b). A voxel set has no analytic signed
+  // distance, but this function is handed the whole CELL BOX — and against a
+  // voxel set the box test is exact where the Lipschitz bound is merely
+  // conservative. It is therefore strictly stronger, not a weakening: a cell it
+  // drops provably contains no set voxel, and a cell it keeps provably does.
   if (!includes_.empty()) {
     double best = -1e30;
-    for (const ClearanceGeometry& g : includes_)
+    bool mask_overlap = false;
+    for (const ClearanceGeometry& g : includes_) {
+      if (g.valid && g.mask) {
+        if (g.mask->overlaps_box(cell_min, cell_mm)) { mask_overlap = true; break; }
+        continue;  // this include provably misses the cell
+      }
       best = std::max(best, keep_out_signed_distance(g, c));
-    if (best <= -half_diag) return false;
+    }
+    if (!mask_overlap && best <= -half_diag) return false;
   }
-  for (const ClearanceGeometry& g : excludes_)
+  for (const ClearanceGeometry& g : excludes_) {
+    if (g.valid && g.mask) {
+      if (g.mask->contains_box(cell_min, cell_mm)) return false;
+      continue;
+    }
     if (keep_out_signed_distance(g, c) >= half_diag) return false;
+  }
   return true;
 }
 

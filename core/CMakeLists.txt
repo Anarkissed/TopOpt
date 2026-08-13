@@ -587,6 +587,15 @@ add_executable(test_face_region tests/unit/test_face_region.cpp)
 target_link_libraries(test_face_region PRIVATE topopt)
 add_test(NAME face_region COMMAND test_face_region)
 
+# A REGION AS A LATTICE REGION (task 2026-08-15-lattice-regions). The seam
+# between a pointwise PREDICATE and a VOXEL SET: the mask branch of the one
+# membership predicate, the mask's own grid, the exact cell-box tests that
+# replace the Lipschitz bound, and bar R5 — protection and lattice select the
+# same voxels at the same declared depth. Hand-built StepModel, no OCCT.
+add_executable(test_lattice_region_mask tests/unit/test_lattice_region_mask.cpp)
+target_link_libraries(test_lattice_region_mask PRIVATE topopt)
+add_test(NAME lattice_region_mask COMMAND test_lattice_region_mask)
+
 # BOTH DEFAULTS ARE ARMED (task 2026-08-06-arm-projection-and-void-check).
 # `output.project_cad_faces` and `lattice.require_lattice_void_reaches_exterior`
 # now default to TRUE. The default lives in the CORE so the CLI and the

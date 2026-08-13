@@ -93,6 +93,23 @@ bool face_plane_extent(const StepModel& model, int face_id, const Vec3& origin,
 // rasterizer and a physical band for the freeze predicate.
 bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
   if (!geom.valid) return false;
+  // ★ THE ONE BRANCH THAT MAKES A REGION A REGION (task 2026-08-15-lattice-
+  // regions §1b). A mask-backed geometry IS a voxel set: membership is the
+  // lookup, and every analytic field below is unread.
+  //
+  // `tol` IS DELIBERATELY IGNORED HERE, and that is a statement, not an
+  // oversight. On the analytic path tol inflates the region OUTWARD to build a
+  // band around its surface (the smoother's freeze predicate). A voxel set has
+  // no closed-form offset — inflating it would mean a dilation, i.e. a second
+  // EDT per query — so a mask answers the EXACT region at every tol. The
+  // consequence is bounded and one-directional: a positive tol asks for a
+  // region at least this big and gets exactly the region, so a mask-backed
+  // region is never reported as covering MORE than it does. Every lattice-role
+  // membership call passes tol == 0 (verified: run_job.cpp fit-cell field,
+  // per-region attribution, the certification mask, multiscale_region_mask, and
+  // LatticeBoundary::in_{include,exclude}_region), so on the path this field was
+  // built for the distinction does not arise at all.
+  if (geom.mask) return geom.mask->contains(p);
   if (geom.kind == ClearanceKind::Bolt) {
     const Vec3 rel = sub(p, geom.axis_point);
     const double t = dot(rel, geom.axis_dir);

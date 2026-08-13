@@ -22,6 +22,7 @@
 #include "topopt/build_frame.hpp"
 #include "topopt/cad_project.hpp"
 #include "topopt/clearance.hpp"
+#include "topopt/face_region.hpp"
 #include "topopt/coarsen.hpp"
 #include "topopt/design_store.hpp"
 #include "topopt/fea.hpp"
@@ -618,9 +619,87 @@ struct LatticeRoleRegions {
   std::vector<ClearanceGeometry> excludes;
 };
 
-LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job) {
+// ★ RESOLVE ONE face REGION INTO A VOXEL MASK (task 2026-08-15-lattice-regions).
+//
+// THE VOLUME IS THE PROTECTION'S VOLUME. `region_member_voxels` + `cut_voxels`
+// at `region_depth_layers(depth_mm, spacing)` layers is EXACTLY what
+// `mask_step_region` walks for a protection at the same depth — same primitive,
+// same rounding, same voxels. That identity is bar R5, and it is structural
+// here rather than agreed: both call the same two functions with the same
+// arguments.
+//
+// The mask carries the grid it was built on, so every later membership test
+// converts the query point into THIS lattice regardless of which grid the caller
+// is walking (an expanded design-box grid, the certification grid, the part
+// grid).
+std::shared_ptr<const ClearanceVoxelMask> region_lattice_mask(
+    const VoxelGrid& grid, const StepModel& model,
+    const ResolvedFaceRegion& region, double depth_mm) {
+  auto m = std::make_shared<ClearanceVoxelMask>();
+  m->nx = grid.nx;
+  m->ny = grid.ny;
+  m->nz = grid.nz;
+  m->spacing = grid.spacing;
+  m->origin = grid.origin;
+  m->inside.assign(grid.voxel_count(), 0);
+  const int layers = region_depth_layers(depth_mm, grid.spacing);
+  const std::vector<int> members =
+      region_member_voxels(grid, model, region, layers);
+  for (int idx : cut_voxels(grid, members, region.cuts))
+    if (idx >= 0 && static_cast<std::size_t>(idx) < m->inside.size())
+      m->inside[static_cast<std::size_t>(idx)] = 1;
+  return m;
+}
+
+// `model` / `grid` are needed ONLY by `kind == "region"`; a job with no
+// region-backed lattice region may pass nullptr and takes a byte-identical path.
+// A region-backed one with nothing to resolve against REFUSES rather than
+// resolving to an empty mask — an empty include region silently latticing
+// NOTHING is the failure this whole track exists to stop seeing.
+LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
+                                                 const StepModel* model,
+                                                 const VoxelGrid* grid) {
   LatticeRoleRegions rr;
+  std::vector<ResolvedFaceRegion> resolved;
+  bool resolved_done = false;
   for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.kind == "region") {
+      if (model == nullptr || grid == nullptr)
+        throw JobError(
+            "lattice region_id " + std::to_string(r.region_id) +
+            ": a \"region\" lattice region needs the imported model and the "
+            "run's grid to resolve its voxels, and this call site has neither. "
+            "This is a wiring defect, not a job error.");
+      if (!resolved_done) {
+        resolved = resolve_face_regions(*model, job.loads.face_regions);
+        resolved_done = true;
+      }
+      const ResolvedFaceRegion* found = nullptr;
+      for (const ResolvedFaceRegion& rr2 : resolved)
+        if (rr2.id == r.region_id) { found = &rr2; break; }
+      if (found == nullptr)
+        throw JobError(
+            "a \"region\" lattice region names region_id " +
+            std::to_string(r.region_id) +
+            ", which is not declared in \"loads.face_regions\". A region must "
+            "be declared once and referred to by id.");
+      ClearanceGeometry g;
+      g.valid = true;
+      g.kind = ClearanceKind::Face;  // unread while `mask` is set; a stable default
+      g.mask = region_lattice_mask(*grid, *model, *found, r.depth_mm);
+      if (g.mask->set_count() == 0)
+        throw JobError(
+            "lattice region " + std::to_string(r.region_id) +
+            (found->name.empty() ? "" : " \"" + found->name + "\"") +
+            " selects NO solid voxels at " + std::to_string(r.depth_mm) +
+            " mm depth on this grid (spacing " +
+            std::to_string(grid->spacing) +
+            " mm). It would lattice nothing and report success; it is refused "
+            "instead. Use a coarser depth, a finer resolution, or a region that "
+            "reaches part material.");
+      (r.role == "include" ? rr.includes : rr.excludes).push_back(std::move(g));
+      continue;
+    }
     ManualClearanceGeometry mg;
     ClearanceParams p;  // all margins zero: the primitive is the region
     if (r.kind == "bolt") {
@@ -763,6 +842,67 @@ double lattice_region_thinnest_extent_mm(const JobLatticeRegion& r) {
                         std::min(2.0 * r.half_u_mm, 2.0 * r.half_w_mm));
 }
 
+// ★ THE SAME QUESTION, ASKED OF A VOXEL SET (task 2026-08-15-lattice-regions
+// §1c). The analytic version above reads the region's thinnest DECLARED
+// dimension. A face region declares no dimensions — it is a set — so the
+// thickness has to be measured.
+//
+// IT IS NOT A SECOND MEASUREMENT. `local_member_thickness_mm` (voxel.hpp, PR
+// 206) is the Hildebrand inscribed-sphere thickness already used by the
+// width-aware knockdown gate and by the grading law's cells-per-member test:
+// tau(v) is the diameter of the largest ball that fits inside the set and
+// contains v. Run over a synthetic density that is 1 inside the region and 0
+// outside, it measures the REGION's own local thickness — exactly what "the
+// thinnest dimension of this volume" means, and by the same definition the
+// grading law compares a cell against. Reused, not re-derived, as §1c asks.
+//
+// ★ WHY THE MINIMUM AND NOT A PERCENTILE. `lattice_region_thinnest_extent_mm`
+// bounds how many cells can lie ACROSS the latticed body, and the fit law takes
+// cell = max(extent / N*, finest printable). A percentile would let the cell be
+// sized by material that the thinnest part of the region cannot hold, which is
+// precisely the "1.52 cells across, under the 5.00-cell floor" failure the fit
+// mode exists to prevent. The minimum is the conservative reading and the only
+// one that keeps the derived cell certifiable everywhere in the region.
+//
+// A ONE-VOXEL-DEEP region measures one voxel thick, which is honest: at that
+// depth there is no room for a cell, and the fit law will say so.
+// ★ IT MEASURES ON THE MASK'S OWN GRID, NOT THE CALLER'S, and that is a defect
+// this branch shipped for about ten minutes. The first version took the caller's
+// grid and indexed `mask.inside[i]` by the same i — which is correct only while
+// the two grids are the same lattice. On the DESIGN-BOX path `solved_grid` is an
+// EXPANDED grid with different dimensions, so the region would have been read as
+// an arbitrary reindexed scatter of voxels, silently, and the derived cell would
+// have been sized from a shape nobody declared. The mask carries the grid it was
+// built on precisely so this cannot happen; the parameter is gone.
+double region_thinnest_extent_mm(const ClearanceVoxelMask& mask) {
+  VoxelGrid grid;
+  grid.nx = mask.nx;
+  grid.ny = mask.ny;
+  grid.nz = mask.nz;
+  grid.spacing = mask.spacing;
+  grid.origin = mask.origin;
+  grid.tags.assign(mask.inside.size(), VoxelTag::Empty);
+  for (std::size_t i = 0; i < mask.inside.size(); ++i)
+    if (mask.inside[i]) grid.tags[i] = VoxelTag::Interior;
+  std::vector<double> dens(grid.voxel_count(), 0.0);
+  const std::size_t n =
+      std::min(dens.size(), mask.inside.size());
+  for (std::size_t i = 0; i < n; ++i)
+    if (mask.inside[i]) dens[i] = 1.0;
+  // The cap bounds cost at O(cap · voxels). A region thicker than the cap
+  // returns +inf from the primitive, which reads as "thicker than we measured"
+  // — the conservative direction for a thinnest-extent bound, and the same
+  // sentinel the grading law already handles.
+  const int cap = 64;
+  const std::vector<double> tau =
+      local_member_thickness_mm(grid, dens, 0.5, cap);
+  double thinnest = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < n; ++i)
+    if (mask.inside[i] && i < tau.size() && tau[i] > 0.0)
+      thinnest = std::min(thinnest, tau[i]);
+  return thinnest;
+}
+
 // What FIT derived for ONE declared include region.
 struct FitRegionCell {
   std::size_t job_region_index = 0;   // index into job.lattice.regions
@@ -792,15 +932,68 @@ struct FitRegionCell {
 // mirrors that resolver's own filtering — so a 1-based region id from the grading
 // call site indexes it directly. The call sites assert the two sizes agree rather
 // than trusting the mirror.
+// The derivation itself, shared by the analytic and the region-backed branches
+// of fit_region_cells so the two cannot describe different laws. `f.extent_mm`
+// must already be set — that is the ONLY thing the two branches derive
+// differently (declared half-extents vs a measured voxel-set thickness).
+void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
+                          double min_extrudable_width_mm, double n_star) {
+  const LatticeCellDerivation d =
+      lattice_derive_cell_for_member(topo, f.extent_mm, min_extrudable_width_mm);
+  f.min_printable_cell_mm = d.min_printable_cell_mm;
+  f.min_width_certifiable_mm = d.min_member_width_certifiable_mm;
+  f.min_width_buildable_mm = d.min_member_width_buildable_mm;
+  // FEASIBLE means a pair exists that PRINTS and PERCOLATES. The accuracy floor
+  // is not part of this test — a region that clears percolation but not accuracy
+  // is buildable and uncertifiable, which is a verdict, not a refusal.
+  f.feasible = d.feasible_percolation;
+  if (!f.feasible) return;
+  f.cell_mm = std::max(f.extent_mm / n_star, d.min_printable_cell_mm);
+  const double rho =
+      lattice_min_density_for_strut(topo, f.cell_mm, min_extrudable_width_mm);
+  f.relative_density = rho >= 0.0 ? rho : lattice_rho_max(topo);
+  f.strut_mm = octet_strut_diameter_mm(f.relative_density, f.cell_mm);
+  f.cells_per_member = f.extent_mm / f.cell_mm;
+  f.out_of_regime = f.cells_per_member < n_star;
+}
+
+// ★ `roles` / `grid` are needed ONLY to price a `kind == "region"` include: its
+// extent is MEASURED from its voxel mask (region_thinnest_extent_mm) rather than
+// read off declared half-extents. Both default to nullptr, so every existing
+// call site is unchanged and an all-analytic job takes the identical path.
+//
+// The extent is measured on the MASK's own grid, so no grid is passed here.
+//
+// A region-backed include with no `roles` supplied is DROPPED from this vector,
+// which would silently break the index mirror `includes` relies on — so the
+// call sites that can see a region kind pass them, and the mirror assertion at
+// each call site is what catches it if one does not.
 std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
                                             LatticeTopology topo,
-                                            double min_extrudable_width_mm) {
+                                            double min_extrudable_width_mm,
+                                            const LatticeRoleRegions* roles = nullptr) {
   std::vector<FitRegionCell> out;
   if (!(min_extrudable_width_mm > 0.0)) return out;
   const double n_star = lattice_cells_per_member_min(topo);
+  std::size_t include_index = 0;  // mirrors LatticeRoleRegions::includes order
   for (std::size_t ri = 0; ri < job.lattice.regions.size(); ++ri) {
     const JobLatticeRegion& r = job.lattice.regions[ri];
     if (r.role != "include") continue;
+    if (r.kind == "region") {
+      // The mask was resolved once by lattice_role_regions_from_job; its extent
+      // is measured, not declared.
+      if (roles == nullptr || include_index >= roles->includes.size() ||
+          !roles->includes[include_index].mask)
+        continue;
+      FitRegionCell f;
+      f.job_region_index = ri;
+      f.extent_mm =
+          region_thinnest_extent_mm(*roles->includes[include_index].mask);
+      fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star);
+      out.push_back(f);
+      ++include_index;
+      continue;
+    }
     // MIRRORS lattice_role_regions_from_job's validity filter, so the indices line
     // up. A degenerate region is dropped there and must be dropped here too.
     ManualClearanceGeometry mg;
@@ -822,31 +1015,12 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       mg.half_w_mm = r.half_w_mm;
     }
     if (!resolve_clearance_manual(mg, p).valid) continue;
+    ++include_index;
 
     FitRegionCell f;
     f.job_region_index = ri;
     f.extent_mm = lattice_region_thinnest_extent_mm(r);
-    const LatticeCellDerivation d =
-        lattice_derive_cell_for_member(topo, f.extent_mm, min_extrudable_width_mm);
-    f.min_printable_cell_mm = d.min_printable_cell_mm;
-    f.min_width_certifiable_mm = d.min_member_width_certifiable_mm;
-    f.min_width_buildable_mm = d.min_member_width_buildable_mm;
-    // FEASIBLE means a pair exists that PRINTS and PERCOLATES. The accuracy floor is
-    // not part of this test — a region that clears percolation but not accuracy is
-    // buildable and uncertifiable, which is a verdict, not a refusal (the pre-flight's
-    // case C).
-    f.feasible = d.feasible_percolation;
-    if (!f.feasible) { out.push_back(f); continue; }
-    f.cell_mm = std::max(f.extent_mm / n_star, d.min_printable_cell_mm);
-    const double rho =
-        lattice_min_density_for_strut(topo, f.cell_mm, min_extrudable_width_mm);
-    // Negative = "no band density prints here", which `feasible` already excluded;
-    // resolve the one-ULP frontier case to the band ceiling exactly as the derivation
-    // does rather than emitting a density of -1.
-    f.relative_density = rho >= 0.0 ? rho : lattice_rho_max(topo);
-    f.strut_mm = octet_strut_diameter_mm(f.relative_density, f.cell_mm);
-    f.cells_per_member = f.extent_mm / f.cell_mm;
-    f.out_of_regime = f.cells_per_member < n_star;
+    fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star);
     out.push_back(f);
   }
   return out;
@@ -3081,7 +3255,8 @@ LatticeVariantOutcome lattice_one_variant(
     std::vector<double> fit_field;
     if (gp.cell_mode == CellSizeMode::Fit) {
       fit_cells = fit_region_cells(job, gp.topology,
-                                   job.grading.min_extrudable_width_mm);
+                                   job.grading.min_extrudable_width_mm,
+                                   &lattice_roles);
       if (fit_cells.size() != lattice_roles.includes.size())
         throw JobError(
             "run_job: fit derivation and the resolved include regions disagree on "
@@ -4723,7 +4898,7 @@ std::string lattice_forecast_json(const JobDescription& job,
   std::vector<double> fc_fit_field;
   if (gp.cell_mode == CellSizeMode::Fit) {
     fc_fit_cells =
-        fit_region_cells(job, gp.topology, gp.min_extrudable_width_mm);
+        fit_region_cells(job, gp.topology, gp.min_extrudable_width_mm, &roles);
     if (fc_fit_cells.size() != roles.includes.size())
       throw JobError(
           "lattice_forecast: fit derivation and the resolved include regions "
@@ -5443,9 +5618,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     std::vector<double> fit_field;
     LatticeRoleRegions an_roles;
     if (gp.cell_mode == CellSizeMode::Fit) {
-      an_roles = lattice_role_regions_from_job(job);
+      an_roles = lattice_role_regions_from_job(job, &result.model, &model_grid);
       fit_cells = fit_region_cells(job, gp.topology,
-                                   job.grading.min_extrudable_width_mm);
+                                   job.grading.min_extrudable_width_mm,
+                                   &an_roles);
       if (fit_cells.size() != an_roles.includes.size())
         throw JobError(
             "analyze: fit derivation and the resolved include regions disagree on "
@@ -6036,7 +6212,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   if (job.lattice.forecast_only) {
     result.forecast_json = lattice_forecast_json(
         job, cert_grid, sd, lattice_keep_outs_from_job(job, result.model),
-        lattice_role_regions_from_job(job));
+        lattice_role_regions_from_job(job, &result.model, &model_grid));
     result.forecast_path = join_path(out_dir, "lattice_forecast.json");
     write_text_file(result.forecast_path, result.forecast_json);
     return result;
@@ -6169,7 +6345,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // object (Z3) and the strut-strength report rides the composite solve (Z5).
   const std::vector<ClearanceGeometry> lattice_kos =
       lattice_keep_outs_from_job(job, result.model);
-  const LatticeRoleRegions lattice_roles = lattice_role_regions_from_job(job);
+  const LatticeRoleRegions lattice_roles =
+      lattice_role_regions_from_job(job, &result.model, &model_grid);
   const LatticeVariantOutcome R =
       lattice_one_variant(v, job, model_grid, domain, options, material,
                           lattice_kos, lattice_roles, out_dir);
@@ -7779,8 +7956,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // The job's lattice ROLE regions (stage 1), resolved once — empty on a job
   // with no lattice.regions (byte-identical path).
   const LatticeRoleRegions lattice_roles =
-      job.lattice.present ? lattice_role_regions_from_job(job)
-                          : LatticeRoleRegions{};
+      job.lattice.present
+          // `grid` here IS the part grid build_production_loadcase voxelized
+          // (the solved domain expands it later); a region's voxels live on the
+          // part, so that is the lattice the mask is built in.
+          ? lattice_role_regions_from_job(job, &result.model, &grid)
+          : LatticeRoleRegions{};
 
   // ── MULTISCALE LATTICE TO (task multiscale-lattice-to) ─────────────────────
   // Arm the optimizer's lattice material law for THIS job, if the job asked and

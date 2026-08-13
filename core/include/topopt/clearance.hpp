@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cmath>
 #include <cstddef>
+#include <memory>
+#include <vector>
 
 #include "topopt/step.hpp"   // StepModel, StepFaceInfo
 #include "topopt/voxel.hpp"  // VoxelGrid, DesignMask, MaskValue
@@ -142,9 +145,139 @@ struct ClearanceRasterResult {
 // produce the IDENTICAL mask (BAR B2). `valid == false` => an empty region
 // (nothing to mark) — the same safe no-op the pre-split code produced for a
 // mismatched/untessellated face.
+// ★ A REGION IS A VOXEL SET; A ClearanceGeometry IS A PREDICATE
+// (task 2026-08-15-lattice-regions §1). THAT TYPE MISMATCH IS THE WHOLE TASK.
+//
+// Every membership test in the lattice pipeline — the certification mask, cell
+// activation, the multiscale material law, the fit-cell field, the per-region
+// attribution — asks the same question of a `ClearanceGeometry`: "is this point
+// inside?", answered by arithmetic on an axis and a radius, or a normal and four
+// extents. A face REGION (face_region.hpp) has no such closed form: it is a set
+// of voxels, produced by intersecting member faces with half-spaces.
+//
+// The resolution is NOT a parallel predicate at each call site. It is ONE
+// optional field here: when `mask` is set, this geometry IS that voxel set, and
+// `point_in_clearance_region` answers by array lookup instead of arithmetic.
+// Every existing consumer — including the ones nobody enumerated — is then
+// correct by construction, because they all already route through that one
+// predicate.
+//
+// THE MASK CARRIES ITS OWN GRID. Membership converts the query POINT to an index
+// in the mask's own lattice, never the caller's, so a caller working on an
+// expanded design-box grid, a certification grid or the part grid all get the
+// same answer for the same point in space. A point outside the mask's box is
+// OUTSIDE the region — which is right: a region is part surface, and material
+// the optimizer grew into a design box was never part of it.
+//
+// SHARED AND IMMUTABLE. A ClearanceGeometry is copied freely (into
+// LatticeBoundary, into per-variant pipelines, into forecasts); the mask is
+// 1 byte per voxel and must not be copied with it. See §3(b) of the handoff for
+// what ten of these cost on his grid.
+struct ClearanceVoxelMask {
+  std::vector<char> inside;      // grid-indexed, 1 == in the region
+  int nx = 0, ny = 0, nz = 0;
+  double spacing = 0.0;
+  Vec3 origin{0.0, 0.0, 0.0};
+
+  // The mask's own index for a model-space point, or -1 when p is outside the
+  // mask's box. Floor, not round: voxel (i,j,k) spans [origin + i·h, origin +
+  // (i+1)·h), so the voxel CONTAINING p is the one whose cell p falls in — the
+  // same convention `voxel_center` inverts.
+  long long index_of(const Vec3& p) const {
+    if (!(spacing > 0.0) || nx <= 0 || ny <= 0 || nz <= 0) return -1;
+    const double fx = (p.x - origin.x) / spacing;
+    const double fy = (p.y - origin.y) / spacing;
+    const double fz = (p.z - origin.z) / spacing;
+    if (!(fx >= 0.0) || !(fy >= 0.0) || !(fz >= 0.0)) return -1;
+    const long long i = static_cast<long long>(fx);
+    const long long j = static_cast<long long>(fy);
+    const long long k = static_cast<long long>(fz);
+    if (i >= nx || j >= ny || k >= nz) return -1;
+    return (k * static_cast<long long>(ny) + j) * static_cast<long long>(nx) + i;
+  }
+
+  bool contains(const Vec3& p) const {
+    const long long idx = index_of(p);
+    return idx >= 0 && static_cast<std::size_t>(idx) < inside.size() &&
+           inside[static_cast<std::size_t>(idx)] != 0;
+  }
+
+  // ── THE CELL-ACTIVATION TESTS (task 2026-08-15-lattice-regions §1b).
+  //
+  // `LatticeBoundary::cell_may_overlap` proves a cell can be dropped using a
+  // Lipschitz bound on an analytic signed distance. A voxel set has no such
+  // distance — but it does not need one, because the caller hands over the whole
+  // CELL BOX, and against a voxel set the box test is EXACT rather than bounded.
+  // These two are that exact test, and they are strictly stronger than the
+  // bound they replace.
+  //
+  // The box is [lo, lo+size] in model space. Both walk only the voxels the box
+  // covers, so cost is O(cells per lattice cell), not O(grid).
+  bool overlaps_box(const Vec3& lo, double size) const {
+    return box_scan(lo, size, /*want_all=*/false);
+  }
+  // True iff EVERY voxel the box covers is in the set (and it covers at least
+  // one). A box reaching outside the mask is NOT contained — outside is not in
+  // the region.
+  bool contains_box(const Vec3& lo, double size) const {
+    return box_scan(lo, size, /*want_all=*/true);
+  }
+
+  std::size_t voxel_count() const { return inside.size(); }
+  std::size_t set_count() const {
+    std::size_t n = 0;
+    for (char c : inside) n += (c != 0) ? 1u : 0u;
+    return n;
+  }
+
+ private:
+  // Walk the voxel indices whose CENTRES fall in [lo, lo+size]. `want_all`
+  // false returns true on the first set voxel (overlap); true returns false on
+  // the first unset voxel or the first index outside the mask (containment).
+  bool box_scan(const Vec3& lo, double size, bool want_all) const {
+    if (!(spacing > 0.0) || nx <= 0 || ny <= 0 || nz <= 0) return false;
+    // Voxel centre (i+0.5)·h + origin lies in [lo, lo+size] iff
+    // i ∈ [(lo-origin)/h - 0.5, (lo+size-origin)/h - 0.5].
+    auto lo_i = [&](double a, double o) {
+      return static_cast<long long>(std::ceil((a - o) / spacing - 0.5));
+    };
+    auto hi_i = [&](double a, double o) {
+      return static_cast<long long>(std::floor((a - o) / spacing - 0.5));
+    };
+    const long long i0 = lo_i(lo.x, origin.x), i1 = hi_i(lo.x + size, origin.x);
+    const long long j0 = lo_i(lo.y, origin.y), j1 = hi_i(lo.y + size, origin.y);
+    const long long k0 = lo_i(lo.z, origin.z), k1 = hi_i(lo.z + size, origin.z);
+    bool saw_any = false;
+    for (long long k = k0; k <= k1; ++k)
+      for (long long j = j0; j <= j1; ++j)
+        for (long long i = i0; i <= i1; ++i) {
+          const bool out = i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz;
+          if (out) {
+            if (want_all) return false;   // outside the mask is outside the set
+            continue;
+          }
+          const std::size_t idx = static_cast<std::size_t>(
+              (k * static_cast<long long>(ny) + j) * static_cast<long long>(nx) + i);
+          const bool set = idx < inside.size() && inside[idx] != 0;
+          saw_any = true;
+          if (want_all) {
+            if (!set) return false;
+          } else if (set) {
+            return true;
+          }
+        }
+    return want_all ? saw_any : false;
+  }
+};
+
 struct ClearanceGeometry {
   ClearanceKind kind = ClearanceKind::Bolt;
   bool valid = false;
+
+  // ★ NON-NULL => THIS GEOMETRY IS A VOXEL SET (see the note above). Every
+  // analytic field below is then unread. Null — the default — leaves this an
+  // ordinary analytic predicate, byte-identical to before the field existed.
+  std::shared_ptr<const ClearanceVoxelMask> mask;
 
   // Bolt: swept cylinder about `axis_point + t·axis_dir` (axis_dir is UNIT),
   // radius `radius`, axial band t ∈ [t_lo, t_hi] (already grown by the axial
