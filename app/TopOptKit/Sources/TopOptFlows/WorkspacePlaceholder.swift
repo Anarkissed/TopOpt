@@ -2538,8 +2538,15 @@ public struct WorkspacePlaceholder: View {
             switch id {
             // The Face-protection depth chip appears only once ≥ 1 face is protected (124).
             case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0
-            // The Paint toggle needs a mesh to brush on.
-            case .paint: return viewerMesh != nil
+            // ★ §2b — A CONTROL FOR A HIDDEN PRIMITIVE IS A DEAD CONTROL. The
+            // Design Box chip toggles the box's VISIBILITY and its drawer adds
+            // keep-outs; on the lattice stage neither is drawn, so the chip would
+            // appear to do nothing. Hidden with the primitive it controls, and —
+            // like the primitive — not disarmed: the box still bounds the run.
+            case .designBox: return visible.designBox
+            // The Paint toggle needs a mesh to brush on, and it paints face
+            // regions, which are the TO stage's business.
+            case .paint: return viewerMesh != nil && visible.groupPrimitives
             // CAD-face projection has nothing to project ONTO unless the part
             // came from a STEP B-rep. On an STL/3MF import every face is a
             // manufactured pseudo-face (handoff 134) with no analytic surface
@@ -4704,6 +4711,7 @@ public struct WorkspacePlaceholder: View {
             Spacer(minLength: 0)
             latticePrimitiveChip(g, ref, .include, label: "Lattice", on: role == .include)
             latticePrimitiveChip(g, ref, .exclude, label: "Solid", on: role == .exclude)
+            latticePrimitiveChip(g, ref, .off, label: "Off", on: role == nil)
             Text(String(format: "%.1f mm", project.latticeSlabDepthMM(ref, in: g.id)))
                 .font(.system(size: 10, weight: .bold)).monospacedDigit()
                 .foregroundStyle(DS.Color.textSecondary.color)
@@ -4722,32 +4730,37 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// One primitive's lattice / no-lattice chip. Tapping the lit chip again
-    /// CLEARS the override, so the primitive follows its group again — the same
-    /// idiom every other chip in this panel uses.
+    /// ★ One primitive's own answer: Lattice / Solid / Off (§3c). Three, not two —
+    /// see `LatticePrimitiveRole`: without an explicit "not a region", declaring
+    /// ONE face of a three-face group would silently declare the other two.
     private func latticePrimitiveChip(_ g: SelectionGroup, _ ref: LatticePrimitiveRef,
-                                      _ role: LatticeGroupRole, label: String,
+                                      _ role: LatticePrimitiveRole, label: String,
                                       on: Bool) -> some View {
-        let tint = role == .include
-            ? LatticeDensityProxy.densityColor(fraction: 0.5)
-            : LatticeDensityProxy.densityColor(fraction: 0.8)
+        let tint: RGBA
+        switch role {
+        case .include: tint = LatticeDensityProxy.densityColor(fraction: 0.5)
+        case .exclude: tint = LatticeDensityProxy.densityColor(fraction: 0.8)
+        case .off: tint = DS.Color.textQuaternary
+        }
         return Button {
-            if on {
-                project.lattice.primitiveRoles[ref.key] = nil
-            } else {
-                project.lattice.primitiveRoles[ref.key] = role
-                // A primitive saying "lattice here" is the declaration that turns
-                // the mode on — and the group must carry a role for the eligibility
-                // gate to let it through (§1a). Both, from the one tap.
-                if project.lattice.groupRoles[g.id] == nil {
-                    project.lattice.groupRoles[g.id] = role
-                    if project.lattice.groupDepthMM[g.id] == nil {
-                        project.lattice.groupDepthMM[g.id] =
-                            LatticeSlabDepth.clamp(project.lattice.paintDepthMM)
-                    }
+            guard !on else { return }   // it already says this; a re-tap is a no-op
+            // The declaring tap PINS this primitive's siblings to whatever they
+            // resolved to a moment ago, so setting one face never moves another.
+            LatticePrimitiveRoles.declare(
+                role, for: ref, siblings: project.latticePrimitiveRefs(g),
+                groupRole: project.latticeEligibleRoles()[g.id],
+                in: &project.lattice.primitiveRoles)
+            // The group must carry a role for the eligibility gate to let ANY of
+            // its primitives through (§1a), and a primitive saying "lattice here"
+            // is the declaration that turns the mode on. Both, from the one tap.
+            if role != .off, project.lattice.groupRoles[g.id] == nil {
+                project.lattice.groupRoles[g.id] = role.regionRole
+                if project.lattice.groupDepthMM[g.id] == nil {
+                    project.lattice.groupDepthMM[g.id] =
+                        LatticeSlabDepth.clamp(project.lattice.paintDepthMM)
                 }
-                if role == .include { project.lattice.enabled = true }
             }
+            if role == .include { project.lattice.enabled = true }
             refreshLatticeFaceCards()
         } label: {
             Text(label)

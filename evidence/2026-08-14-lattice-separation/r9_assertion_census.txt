@@ -1,0 +1,26 @@
+R9 — ASSERTION-MESSAGE CENSUS (task 2026-08-14-lattice-separation)
+Never weaken or delete an assertion. Counted by KIND over every tracked
+source/test file, base (9e96beb, the merge point of PR 329) vs this branch.
+
+kind                               base  branch   delta
+CHECK                              4262    4264      +2
+XCTAssertEqual                     2658    2707     +49
+XCTAssertFalse                      525     537     +12
+XCTAssertGreaterThan                234     235      +1
+XCTAssertGreaterThanOrEqual          35      35      +0
+XCTAssertLessThan                   104     106      +2
+XCTAssertLessThanOrEqual             35      37      +2
+XCTAssertNil                        365     371      +6
+XCTAssertNotEqual                    98      99      +1
+XCTAssertNotNil                     145     146      +1
+XCTAssertThrowsError                 16      16      +0
+XCTAssertTrue                      1007    1021     +14
+XCTUnwrap                           538     542      +4
+assert                              744     746      +2
+precondition                        280     280      +0
+schema_fail                         133     133      +0
+throw std::invalid_argument         342     342      +0
+throw std::logic_error               24      24      +0
+throw std::runtime_error             62      62      +0
+
+WEAKENED OR DELETED: NONE — every count is unchanged or up

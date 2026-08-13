@@ -164,6 +164,12 @@ public struct LatticeSetupWizard: View {
             .padding(.bottom, PageChrome.edge + PageChrome.actionButton)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Centred in the STAGE — the space the object occupies — not in the raw
+        // canvas, so the card can never land on top of the left modal. On a
+        // portrait iPad a full-width centring puts a 380 pt card 50 pt into a
+        // 348 pt panel, and overlapping chrome is the complaint this page is
+        // being rebuilt to answer.
+        .padding(.leading, PageChrome.panelWidth + PageChrome.edge * 2)
         .accessibilityIdentifier("wizard-card")
     }
 

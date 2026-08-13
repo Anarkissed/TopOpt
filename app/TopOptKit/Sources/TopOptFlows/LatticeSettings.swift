@@ -384,7 +384,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// A primitive with no entry follows its group's `groupRoles` declaration, so
     /// every snapshot written before this task resolves to exactly the roles it
     /// had. Read only through `LatticePrimitiveRoles`, never directly.
-    public var primitiveRoles: [String: LatticeGroupRole]
+    public var primitiveRoles: [String: LatticePrimitiveRole]
 
     /// ★ THE PER-PRIMITIVE DEPTH — the same override shape as the role, for the
     /// number the 3D depth plane drags (§3d). Absent ⇒ `groupDepthMM` ⇒
@@ -467,7 +467,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
                 groupDepthMM: [UUID: Double] = [:],
-                primitiveRoles: [String: LatticeGroupRole] = [:],
+                primitiveRoles: [String: LatticePrimitiveRole] = [:],
                 primitiveDepthMM: [String: Double] = [:],
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
@@ -559,7 +559,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Absent from every snapshot written before the separation task ⇒ empty ⇒
         // every primitive follows its group, which is the ONLY answer those
         // projects ever had (§3c).
-        primitiveRoles = try c.decodeIfPresent([String: LatticeGroupRole].self,
+        primitiveRoles = try c.decodeIfPresent([String: LatticePrimitiveRole].self,
                                                forKey: .primitiveRoles) ?? [:]
         primitiveDepthMM = try c.decodeIfPresent([String: Double].self,
                                                  forKey: .primitiveDepthMM) ?? [:]

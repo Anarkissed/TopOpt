@@ -129,7 +129,7 @@ public enum LatticeRegionEmission {
                                faceDepthMM: Double,
                                groupDepthMM: (UUID) -> Double = { _ in .nan },
                                runFaceID: @escaping (FaceID) -> Int = { Int($0) },
-                               primitiveRoles: [String: LatticeGroupRole] = [:],
+                               primitiveRoles: [String: LatticePrimitiveRole] = [:],
                                primitiveDepthMM: [String: Double] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []

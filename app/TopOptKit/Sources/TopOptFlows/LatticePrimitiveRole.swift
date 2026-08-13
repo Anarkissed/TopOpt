@@ -60,6 +60,42 @@ public enum LatticePrimitiveRef: Hashable, Sendable {
     }
 }
 
+/// ★ ONE PRIMITIVE'S OWN ANSWER, and it has THREE states, not two.
+///
+/// `LatticeGroupRole` has exactly two cases — `include` (material stays,
+/// latticed) and `exclude` (material stays, solid) — and both are REGIONS core
+/// emits. A per-primitive override needs a third answer that the two-case enum
+/// cannot express: **not a region at all**.
+///
+/// WITHOUT IT, "complete control with where the lattice goes" is not reachable.
+/// A group with three faces and no declaration would gain one the moment the user
+/// latticed ONE of them, and the other two — having no override — would follow it
+/// and be latticed as well. Setting one face would silently set three. So the
+/// tap that declares one primitive writes `off` on its siblings, and the group's
+/// declaration becomes a fallback nothing is relying on.
+///
+/// `off` NEVER reaches the wire: the emission skips it, exactly as it skips a
+/// primitive in an undeclared group.
+public enum LatticePrimitiveRole: String, Codable, Equatable, Sendable {
+    case include, exclude
+    /// Declared NOT to be a region. Distinct from "no answer yet", which is the
+    /// absence of a key.
+    case off
+
+    /// The wire role, or nil for `off`.
+    public var regionRole: LatticeGroupRole? {
+        switch self {
+        case .include: return .include
+        case .exclude: return .exclude
+        case .off: return nil
+        }
+    }
+
+    public init(_ role: LatticeGroupRole) {
+        self = role == .include ? .include : .exclude
+    }
+}
+
 /// How much of a group is latticed — what the group row shows now that it no
 /// longer decides (§3c).
 public enum LatticeGroupCoverage: String, Equatable, Sendable {
@@ -71,12 +107,13 @@ public enum LatticeGroupCoverage: String, Equatable, Sendable {
 
 public enum LatticePrimitiveRoles {
 
-    /// The role in force for one primitive: its own override when it has one,
-    /// otherwise its group's declaration.
+    /// The role in force for one primitive: its own override when it has one
+    /// (`off` ⇒ not a region), otherwise its group's declaration.
     public static func role(for ref: LatticePrimitiveRef,
                             groupRole: LatticeGroupRole?,
-                            overrides: [String: LatticeGroupRole]) -> LatticeGroupRole? {
-        overrides[ref.key] ?? groupRole
+                            overrides: [String: LatticePrimitiveRole]) -> LatticeGroupRole? {
+        if let own = overrides[ref.key] { return own.regionRole }
+        return groupRole
     }
 
     /// ALL / SOME / NONE of `refs` resolve to `.include`. An empty group is
@@ -84,7 +121,7 @@ public enum LatticePrimitiveRoles {
     /// would put a green "All" on a group that emits nothing.
     public static func coverage(refs: [LatticePrimitiveRef],
                                 groupRole: LatticeGroupRole?,
-                                overrides: [String: LatticeGroupRole])
+                                overrides: [String: LatticePrimitiveRole])
         -> LatticeGroupCoverage {
         guard !refs.isEmpty else { return .none }
         var included = 0
@@ -96,20 +133,40 @@ public enum LatticePrimitiveRoles {
         return included == refs.count ? .all : .some
     }
 
-    /// Set every primitive of a group to one role — the group row's "set all"
-    /// action. Writes an EXPLICIT override per primitive rather than only moving
-    /// the group declaration, so a later per-primitive change is a change against
-    /// a stated answer instead of against an invisible default.
-    public static func setAll(_ role: LatticeGroupRole?, refs: [LatticePrimitiveRef],
-                              in overrides: inout [String: LatticeGroupRole]) {
+    /// ★ DECLARE ONE PRIMITIVE, AND PIN ITS SIBLINGS TO WHAT THEY ALREADY WERE.
+    ///
+    /// This is the function that makes a per-primitive tap mean only itself. It
+    /// writes `ref`'s answer, and — for every other primitive of the same group
+    /// that has no answer yet — writes the one it currently RESOLVES to, so
+    /// changing the group's declaration underneath them can no longer move them.
+    /// A primitive that resolved to nothing is pinned `off`.
+    public static func declare(_ role: LatticePrimitiveRole,
+                               for ref: LatticePrimitiveRef,
+                               siblings: [LatticePrimitiveRef],
+                               groupRole: LatticeGroupRole?,
+                               in overrides: inout [String: LatticePrimitiveRole]) {
+        for s in siblings where s != ref && overrides[s.key] == nil {
+            if let r = groupRole {
+                overrides[s.key] = LatticePrimitiveRole(r)
+            } else {
+                overrides[s.key] = .off
+            }
+        }
+        overrides[ref.key] = role
+    }
+
+    /// Set every primitive of a group to one answer — the group row's "set all".
+    public static func setAll(_ role: LatticePrimitiveRole,
+                              refs: [LatticePrimitiveRef],
+                              in overrides: inout [String: LatticePrimitiveRole]) {
         for r in refs { overrides[r.key] = role }
     }
 
     /// Drop overrides whose primitive no longer exists. Keyed lookup already makes
     /// a stale entry inert; this keeps a long-lived project's snapshot from
     /// accumulating them.
-    public static func pruned(_ overrides: [String: LatticeGroupRole],
-                              live: Set<String>) -> [String: LatticeGroupRole] {
+    public static func pruned(_ overrides: [String: LatticePrimitiveRole],
+                              live: Set<String>) -> [String: LatticePrimitiveRole] {
         overrides.filter { live.contains($0.key) }
     }
 }

@@ -222,6 +222,46 @@ final class LatticeSeparationTests: XCTestCase {
                           "R3: two primitives in one group, two different regions")
     }
 
+    /// ★ THE THIRD STATE, AND WHY IT HAS TO EXIST. `LatticeGroupRole` is
+    /// include|exclude and BOTH are regions core emits, so a per-primitive answer
+    /// needs "not a region" as well — otherwise declaring ONE face of a three-face
+    /// group would silently declare the other two, and "complete control with
+    /// where the lattice goes" would not be reachable.
+    func testDeclaringOnePrimitivePinsItsSiblingsInsteadOfMovingThem() {
+        let (p, gid) = oneGroupTwoWalls()
+        p.lattice.groupRoles[gid] = nil          // an undeclared group…
+        p.force.setProtected(gid, true)          // …that is still eligible
+        XCTAssertNil(p.latticeEligibleRoles()[gid])
+
+        let a = LatticePrimitiveRef.face(group: gid, face: 16)
+        let b = LatticePrimitiveRef.face(group: gid, face: 17)
+        LatticePrimitiveRoles.declare(.include, for: a,
+                                      siblings: p.latticePrimitiveRefs(p.selection.groups[0]),
+                                      groupRole: p.latticeEligibleRoles()[gid],
+                                      in: &p.lattice.primitiveRoles)
+        p.lattice.groupRoles[gid] = .include     // what the tap also does
+
+        XCTAssertEqual(p.lattice.primitiveRoles[a.key], .include)
+        XCTAssertEqual(p.lattice.primitiveRoles[b.key], .off,
+                       "§3c: the sibling was PINNED to what it already was — "
+                       + "nothing, not carried along by the new declaration")
+        let faces = p.latticeJobRegions().regions.filter { $0.kind == .face }
+        XCTAssertEqual(faces.count, 1, "§3c: ONE face was declared, ONE is emitted")
+        XCTAssertEqual(faces.first?.faceID, 16)
+    }
+
+    func testOffIsNeverAWireRole() {
+        XCTAssertNil(LatticePrimitiveRole.off.regionRole)
+        XCTAssertEqual(LatticePrimitiveRole.include.regionRole, .include)
+        XCTAssertEqual(LatticePrimitiveRole.exclude.regionRole, .exclude)
+        // …and it overrides the group, rather than falling through to it.
+        let gid = UUID()
+        let ref = LatticePrimitiveRef.face(group: gid, face: 16)
+        XCTAssertNil(LatticePrimitiveRoles.role(for: ref, groupRole: .include,
+                                                overrides: [ref.key: .off]),
+                     "§3c: OFF means not a region, even inside a latticed group")
+    }
+
     func testTheGroupShowsASummaryRatherThanOwningTheDecision() {
         let (p, gid) = oneGroupTwoWalls()
         let g = p.selection.groups[0]
@@ -434,8 +474,8 @@ final class LatticeSeparationTests: XCTestCase {
         let head = d.headline
         XCTAssertNotNil(head, "§4c: the drawer opens with the reason")
         XCTAssertEqual(head?.verdict, .outOfRegime)
-        XCTAssertLessThanOrEqual(head?.text.split(separator: " ").count ?? 99, 4,
-                                 "R7: four words at most")
+        XCTAssertLessThanOrEqual(head?.text.split(separator: " ").count ?? 99, 3,
+                                 "R7: three words at most")
 
         XCTAssertNil(LatticeRegionDrawer.make(card: card(verdict: .certified),
                                               depthMM: 40, held: true).headline,
@@ -488,7 +528,14 @@ final class LatticeSeparationTests: XCTestCase {
             for r in d.rows { consider(r.label) }
         }
         let words = longest.split(separator: " ").count
-        XCTAssertLessThanOrEqual(words, 4,
+        XCTAssertLessThanOrEqual(words, 3,
             "R7: the longest string this task adds is \(words) words: “\(longest)”")
+        // NOTE the scope, because a bar that quietly narrows is not a bar: this
+        // counts the strings this TASK adds. The longest string the lattice stage
+        // can render is still `LatticeFaceRoleGate.Block.reason` — "Give this face
+        // a role first", 6 words — which PR 328 wrote and this task did not touch.
+        XCTAssertLessThanOrEqual(
+            LatticeFaceRoleGate.Block.undeclared.reason.split(separator: " ").count, 6,
+            "R7: and the one inherited sentence is still a phrase, not a paragraph")
     }
 }
