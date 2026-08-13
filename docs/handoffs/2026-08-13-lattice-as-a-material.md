@@ -4,19 +4,48 @@ Evidence: `evidence/2026-08-13-lattice-as-a-material/`. The pre-registration
 (`r0_preregistration.md`) was **committed before the first arm ran** — commit
 `00eff24`, whose tree contains that file and nothing else under that directory.
 
-★ **THE ASSIGNMENT TABLES ARE COMPLETE AT BOTH RUNGS; THE LOOP IS NOT RUN.**
-The mechanism is built and receipted, the law's validity range is measured, his
-frozen set is decomposed and priced, and **the assignment table is COMPLETE at
-BOTH rungs** — 8 cells at 0.68 and 6 at 0.26, failures included. ★ The light rung
-**refuses the region holding 73% of the prize** while the shipped rung admits it
-(§0.3b) — the finding the two-rung bar exists to produce — and between them they
-settle the pre-registered mass bound **against** the feature for this part at this
-cell (§0.4), without the loop needing to run. ★ **Under the certificate's own per-voxel regime guard,
-NONE of the assignments measured is certifiable** (§0.3b), and the pre-registered
-margin bound is missed at every cell for a reason that is a defect in the bound
-(§0.3e). What did not run — the loop (bar R4) and Mode 2's in-loop
-coupling — and the measured cost behind that, are in §0.6 and §7. **Nothing below is estimated, and no gross saving is presented
-as a saving.**
+## ★ READ THIS FIRST — the headline, and what in this document is superseded
+
+**The feature works, and on his part it takes 31–47% of the printed mass out at a
+margin the shipped gate still accepts by ~70–98x.**
+
+| | rung 0.68 | rung 0.26 |
+|---|---|---|
+| ★ **NET mass saved** (re-optimised control, freed mass banked) | **−170.840 g (−31.4%)** | **−169.297 g (−47.0%)** |
+| margin then | 146.877 (−78.2%) | 104.232 (−78.0%) |
+| accepted by the shipped gate | **yes**, 98x `margin_stop` | **yes**, 69x |
+| **B3** (NET ≥ 8.0%) | ★ **PASSES**, ~4x | ★ **PASSES**, ~6x |
+| **B2** (margin ≥ 0.95x) | **MISSED** | **MISSED** |
+
+So the trade is stated in one line: **you can remove a third to a half of the
+mass, and what you spend is roughly three quarters of a margin that was 450x what
+the gate requires.** Whether that headroom is real is a question about
+`z_knockdown` and the strut law's own caveats (§1.4), not one this task settles.
+
+★ **THIS DOCUMENT CONTAINS FIVE EXPLICIT WITHDRAWALS, AND THEY ARE KEPT RATHER
+THAN EDITED AWAY** so the reasoning is auditable. In order of how badly each
+misled:
+
+1. **"None of the frozen mass is quiet / the wall carries the peak stress"** —
+   an artefact of building regions by CONNECTIVITY, which fused the declared
+   collar with the load pads. Superseded by §0.2 (provenance, 14 regions).
+2. **"The light rung refuses the region holding 73% of the prize"** — that
+   refusal was MY code, refusing against one run-wide cell. Superseded by §2.5
+   (the cell is fitted per region).
+3. **"B3 cannot be met / is decided against"** — reasoned from GROSS per-cell
+   figures with the optimiser held still. Superseded by §0.4: B3 passes by ~4x.
+4. **"Giving the freed mass back buys nothing"** — true at rung 0.68, false at
+   0.26 where it buys 40.9%. Superseded by §0.4b.
+5. **"A cold certification is 590.6 s, so the campaign is unaffordable"** —
+   measured on a build with `CMAKE_BUILD_TYPE` empty. It is **28.0 s** in
+   Release. Superseded by §0.6, and it is the one that cost the most: four
+   scope decisions rested on it.
+
+★ **WHAT IS STILL NOT DONE**: the margin as a per-iteration CURVE with a settling
+iteration (bar R4's other half), Mode 2's β-in-MMA coupling, and §3(e)'s cost
+confirmation. §7 has each with what it would take.
+
+★ **Nothing below is estimated, and no gross figure is presented as a saving.**
 
 ---
 
@@ -733,43 +762,38 @@ has shipped five times here.
 
 ---
 
-## 5b. The test suites
+## 5b. The test suites — run overnight, under a watchdog
+
+**core, Release, CI's full denominator: `ctest` 123/123.**
+The two tests that had never run in this worktree (`export_3mf`, `threemf_import`)
+now register and pass. ★ Before that they were **silently absent**: `lib3mf` was
+installed but never on CMake's prefix path, so the suite reported "121/121
+passed" while being 2 short of CI. A local pass without CI's denominator is not a
+pass.
 
 **New, and green:**
 
-* `core` — `test_lattice_density_field` (registered as ctest `lattice_density_field`):
-  the C0 dispatch, the two floors, every refusal, and **the β field's analytic
-  Jacobian against a central difference — worst relative error 6.013e-10**.
-* `app` — `FrozenRegionAsMaterialTests`, **11 tests, 0 failures**, including the
-  Auto-never-refuses sweep across 0.5–60 mm of depth and the call-site test that
-  reads `WorkspacePlaceholder.swift`.
+* `frozen_lattice_c0` — bar R1 as a permanent guard: `Lattice(f = 1.0)` is
+  byte-identical to Solid over a WHOLE `minimize_plastic` run, with a positive
+  control (the same arming at f = 0.30 must move the design and the mass) so it
+  cannot pass by the feature doing nothing. **15.8 s.**
+* `lattice_density_field` — the two floors, every refusal, the fitted cell, and
+  the β Jacobian against central differences at **6.013e-10**. **0.11 s.**
 
-**A TARGETED `ctest` OVER THE CHANGED PATHS: 13 of 13.**
-`minimize_plastic`, `mbb`, `beam`, `v4`, `v5`, `stress`, `production_parity`,
-`lattice_certification`, `multiscale_material`, `protect_freeze_vs_solidity`,
-`designbox_lattice_recert`, `loadcase_analyze`, `nonconvergence_rejection`,
-`rung_infeasible`, `conditional_projection`, `mma_projection` — every test whose
-subject this diff touches. Total 5637 s.
+**app:** `AppModelTests` **31/31, 0 failures**, run directly against the built
+bundle — including the three 3MF tests that were failing with *"lib3mf not
+available in this build"* until `Package.swift` was fixed (§7.4).
 
-★ **AND THE ONE THAT FIRST CAME BACK RED WAS MY HARNESS, NOT THE CODE**, which is
-worth writing down because the red was convincing. `protect_freeze_vs_solidity`
-— the test closest to this change — reported `***Timeout` at **1200.03 s**. Two
-things were wrong with the run, both mine: I passed `--timeout 1200`, which is
-**tighter than the CI default that test actually runs under** (it declares none),
-and the machine was saturated by the assignment campaign throughout —
-`conditional_projection` took 960 s and `rung_infeasible` 932 s under the same
-contention. Re-run directly: **`protect_freeze_vs_solidity: all 26 checks
-passed`, exit 0.** A timeout is not a failure, and a self-imposed cap below CI's
-is a way to manufacture one.
+★ **`swift test` as a whole does NOT go green on this machine, and it is the
+documented flake, not this work.** `app-swift-test-gpu-flake`: an intermittent
+SIGTRAP in GPU-touching tests under parallel xctest workers, where the crashing
+test WANDERS and each passes in isolation. Observed here exactly: one run died in
+`AppModelTests`, the next in `RunModelTests` after **1023 tests**. Two further
+"failures" in the overnight log are **my own `pkill`** while re-ordering queues
+(`Terminated: 15` in those logs) and are not failures at all.
 
-★ **THE FULL LOCAL `ctest` STILL DID NOT RUN.** The subset above is chosen by
-what this diff touches, not by what is cheap, but it is a subset: **CI is what
-must confirm the rest.** And this worktree's `ctest` denominator is not CI's in
-any case — without `lib3mf` the `export_3mf` and `threemf_import` tests do not
-register (the configure step says so), so report N over CI's total, never N/N.
-
-The byte-identity argument for every existing path is not a test result, it is a
-construction, and it is stated so it can be checked by reading: every new option
+The byte-identity argument for every pre-existing path is a construction, not a
+test result, and is stated so it can be checked by reading: every new option
 defaults to the value that takes no new branch, `vf_target` reduces to
 `options.volume_fraction` by adding exactly 0.0, `SimpParams::lattice_relative_density`
 is null on every existing caller, and `gate_on_strut_strength` is false unless a
