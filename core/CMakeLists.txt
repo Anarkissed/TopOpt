@@ -76,6 +76,11 @@ add_library(topopt
   src/io/segment.cpp
   src/io/part.cpp
   src/io/face_tag.cpp
+  # THE REGION LAYER (task 2026-08-14-face-regions §1): the second layer of
+  # identity, over the face partition and never writing it. OCCT-free for the
+  # same reason face_tag.cpp is — a region must resolve wherever a mesh is,
+  # including the dependency-free iOS slices.
+  src/io/face_region.cpp
   src/io/face_overrides.cpp
   src/io/fields.cpp
   src/io/design_store.cpp
@@ -370,6 +375,17 @@ add_executable(test_lattice_material_model
 target_link_libraries(test_lattice_material_model PRIVATE topopt)
 add_test(NAME lattice_material_model COMMAND test_lattice_material_model)
 
+# The OPTIMISER and MANUFACTURING readings of the harness void topology
+# (task 2026-08-13-in-region-drainability). plsm_topology.hpp's `in_region` is a
+# template parameter; levelset_probe passes the ACTIVE set, which excludes the
+# frozen region, so a pocket walled in by a bolt boss scores as drainable. That
+# is right for the design region and wrong for the printer. This test pins BOTH
+# readings on one fixture so neither can drift into the other.
+add_executable(test_plsm_topology_drainability
+               tests/unit/test_plsm_topology_drainability.cpp)
+target_link_libraries(test_plsm_topology_drainability PRIVATE topopt)
+add_test(NAME plsm_topology_drainability COMMAND test_plsm_topology_drainability)
+
 # The PRODUCTION multiscale lattice material model (task multiscale-lattice-to):
 # the C(rho) curve the SIMP loop's material law becomes, its analytic
 # sensitivities against central differences, the exact three-block element
@@ -605,6 +621,15 @@ add_test(NAME smooth COMMAND test_smooth)
 add_executable(test_cad_project tests/unit/test_cad_project.cpp)
 target_link_libraries(test_cad_project PRIVATE topopt)
 add_test(NAME cad_project COMMAND test_cad_project)
+
+# THE REGION LAYER (task 2026-08-14-face-regions §1). Hand-built StepModel, so
+# no OCCT and no Eigen — it gates every CI config, which is what a layer this
+# load-bearing needs. Its headline assertion is that a one-member zero-cut
+# region tags EXACTLY the voxels tag_step_face tags: regions are the same
+# selection rule under a second name, which is why day one is byte-identical.
+add_executable(test_face_region tests/unit/test_face_region.cpp)
+target_link_libraries(test_face_region PRIVATE topopt)
+add_test(NAME face_region COMMAND test_face_region)
 
 # BOTH DEFAULTS ARE ARMED (task 2026-08-06-arm-projection-and-void-check).
 # `output.project_cad_faces` and `lattice.require_lattice_void_reaches_exterior`
@@ -1607,6 +1632,17 @@ if(OpenCASCADE_FOUND)
     tests/harness/cad_project_probe.cpp)
   target_link_libraries(cad_project_probe PRIVATE topopt)
 
+  # THE REGION LAYER, ON A REAL PART (task 2026-08-14-face-regions, R2/R3).
+  # Reports what the blend heuristic matched, the tap count before and after,
+  # and — the bar that matters — whether resolving a union and a 10x5 grid split
+  # moved `triangle_face`, the analytic surface table, the CAD attribution or the
+  # measured CAD error. Needs OCCT to import a STEP part.
+  #   cmake --build build --target face_region_probe
+  #   ./build/face_region_probe <part.step> <resolution>
+  add_executable(face_region_probe EXCLUDE_FROM_ALL
+    tests/harness/face_region_probe.cpp)
+  target_link_libraries(face_region_probe PRIVATE topopt)
+
   # S2 (task 2026-08-08-smoothing-that-works-and-is-usable): the bake-off PR 306
   # stopped short of — Taubin against mean-curvature flow on the OPTIMIZER-CUT
   # population of his own four rungs, with PR 307's classifier deciding which
@@ -1741,6 +1777,27 @@ if(OpenCASCADE_FOUND)
   add_executable(solver_arm_sweep EXCLUDE_FROM_ALL
     tests/harness/solver_arm_sweep.cpp)
   target_link_libraries(solver_arm_sweep PRIVATE topopt)
+
+  # ★ R2 (task 2026-08-13-plsm-production-settings): THE PRODUCTION
+  # VOLUME-FRACTION SENSITIVITY AGAINST A CENTRAL DIFFERENCE, on both
+  # functionals. It calls core/include/topopt/plsm_frac.hpp — the SHIPPED header
+  # — in the same order plsm_optimize calls it, so it verifies the gradient that
+  # runs and not a copy of it. `--heaviside` differences PR 324/325/326's
+  # gradient against its own density on the same design, as the control.
+  #   cmake --build build --target plsm_frac_fd_probe
+  #   ./build/plsm_frac_fd_probe <part.step> <materials.json> <out> --compliance
+  add_executable(plsm_frac_fd_probe EXCLUDE_FROM_ALL
+    tests/harness/plsm_frac_fd_probe.cpp)
+  target_link_libraries(plsm_frac_fd_probe PRIVATE topopt)
+
+  # R6 and item 4's counters, on ANY design field, through the SHIPPED
+  # `topopt::plsm_void_topology`. A SIMP rung and a PLSM rung come out of ONE
+  # implementation, so "sealed" means the same thing in both.
+  #   cmake --build build --target plsm_topology_probe
+  #   ./build/plsm_topology_probe <part.step> <field_prefix> [more...]
+  add_executable(plsm_topology_probe EXCLUDE_FROM_ALL
+    tests/harness/plsm_topology_probe.cpp)
+  target_link_libraries(plsm_topology_probe PRIVATE topopt)
 
   # ARM 1 (task 2026-08-10-parametric-level-set): THE GATE. Fits an ANALYTIC
   # phi(x) = sum_i alpha_i psi_i(x) to a design we already have, and extracts the

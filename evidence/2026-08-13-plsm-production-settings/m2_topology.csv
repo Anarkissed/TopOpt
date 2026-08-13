@@ -1,0 +1,11 @@
+field,b0_components,chi,b2_enclosed_solid,b1_tunnels,sealed_pockets,void_voxels,sealed_voxels,sealed_volume_mm3
+/Users/nadim/plsm_scratch/B_heaviside/dump/rung_0.68,34,25,0,9,22,23288,1602,7944.179977
+/Users/nadim/plsm_scratch/B_heaviside/dump/rung_0.26,20,-7,0,27,18,54927,30,148.767415
+/Users/nadim/plsm_scratch/C_eta1/dump/rung_0.68,24,16,0,8,9,22978,1979,9813.690496
+/Users/nadim/plsm_scratch/C_eta1/dump/rung_0.26,7,-8,0,15,3,53248,3,14.876742
+/Users/nadim/plsm_scratch/D_fraction/dump/rung_0.68,16,15,0,1,8,22529,1864,9243.415404
+/Users/nadim/plsm_scratch/D_fraction/dump/rung_0.26,4,-8,0,12,0,52334,0,0.000000
+/Users/nadim/plsm_scratch/A_ship/dump/rung_0.68,17,15,0,2,7,22590,1740,8628.510087
+/Users/nadim/plsm_scratch/A_ship/dump/rung_0.26,4,-7,0,11,0,52320,0,0.000000
+/Users/nadim/plsm_scratch/simp_dump/rung_0.68,16,16,0,0,10,22480,1034,5127.516914
+/Users/nadim/plsm_scratch/simp_dump/rung_0.26,2,-7,0,9,0,52309,0,0.000000

@@ -32,6 +32,17 @@ curve is FLAT from iteration 30 (3390 / 3394 / 3387 / 3389). It is not the bar �
 carved is still 22% above SIMP's — but it is the first arm in this line of work
 to move the surface materially without paying for it.
 
+> ★★ **READ THE WHOLE OF SECTION 0 AT THE PROBE'S VOLUME CONVENTION.** Every row
+> above prints **17.1% less material** than production does at the same nominal
+> rung — the probe targets `rung × part_solid` over every non-Empty voxel, the
+> shipped ladder targets `volume_fraction × n_active` with the frozen solid
+> outside the budget (75,281 against 88,424 printed voxels at rung 0.68). Two
+> specific magnitudes here have since been re-measured at the SHIPPED volume and
+> come out much smaller: **the "3× the internal surface" premise is +20.3%**, and
+> **η's −11.7% is −3.6%** (§7, superseded in place). The DIRECTIONS held in both
+> cases; the numbers did not. See
+> `docs/handoffs/2026-08-13-plsm-production-settings.md`.
+
 **2. Did the perimeter penalty behave differently on a parametric φ "because
 there is no reinitialisation to fight it", as PR 324 §10.3 predicted? — NO.**
 Turning the reinitialisation OFF at the same weight changes the emitted internal
@@ -394,6 +405,21 @@ C=1 with η halved to 1 voxel, against `P1_c1` at η = 2, matched iteration 60:
 and 27% of the carved roughness, AND took the settled margin from a still-rising
 3028 to 3389 (+4.1% over SIMP).** It is the single largest free improvement in
 this task, and it came from a knob nobody in this line of work had ever swept.
+
+> ★★ **SUPERSEDED ON 2026-08-13 — THE MAGNITUDE, NOT THE DIRECTION.** The
+> **−11.7%** above is at **rung 0.68 on the probe path**, which prints 17.1% less
+> material than production does at the same nominal rung. Re-measured as a
+> MATCHED PAIR at the SHIPPED volume convention (rung 0.7973), η = 1 against
+> η = 2 with everything else held: **n_cut 28,934 → 27,887, which is −3.6%**,
+> carved 11.6466 → 9.1155 (−21.7%), CAD 0.4461 → 0.4373, and **the margins are
+> IDENTICAL TO THREE DIGITS — 3252.3 against 3251.0.** So η is a SURFACE knob and
+> not a margin knob, the direction stands, and **the magnitude is about a third
+> of the number above.** Do not plan against −11.7%.
+>
+> η = 1 is now the production default (`PlsmOptions::eta_voxels`), and under the
+> volume-fraction ersatz shipped the same day η is out of the DENSITY entirely —
+> what it still moves is where marching cubes places a vertex in the analytic
+> export. See `docs/handoffs/2026-08-13-plsm-production-settings.md` §1.
 
 ★ **The two halves of the η question have OPPOSITE answers, and both had to be
 measured.** The extraction is provably insensitive to η (the crossing set is the

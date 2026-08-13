@@ -1,0 +1,31 @@
+== R1 — BYTE-IDENTICAL WHERE NOTHING SHOULD CHANGE ==
+
+One folder, one build directory, two binaries:
+  BEFORE  9e96bebf61e3c26719949de8a44aa08735a860b2 (the merge-base with main), checked out in place
+  AFTER   claude/plsm-production-settings-ship-7e17ab, with the OLD defaults PINNED in the plsm block
+  binaries b13a13b9e045de25e2940406a38221513bcabdea34293093ea1e62045f674e5c vs 6b2692e725e47092deaf112fd892a82b8ed47adc90c507b80904e5e244ea0b95 (checked distinct above)
+His own job document; the CLI forces the parametric path either way.
+
+-- design.bin: every evaluated rung's density field
+   BYTE-IDENTICAL  ( 14983608 bytes)
+
+-- report.json: every margin, mass, verdict and recommended setting
+   BYTE-IDENTICAL
+
+-- the exported meshes
+   variant_026.stl BYTE-IDENTICAL
+   variant_038.stl BYTE-IDENTICAL
+   variant_052.stl BYTE-IDENTICAL
+   variant_068.stl BYTE-IDENTICAL
+
+-- iterations.csv: every COMPUTED column (wall clocks and memory excluded,
+   they are wall clocks)
+   IDENTICAL across 240 iterations and 44 columns (minus the timing/memory columns)
+
+-- run_info.json is NOT compared, and the diff is shown instead: this task
+   ADDS keys to the receipt, which are empty/zero on a SIMP run.
+   keys added   (24): plsm_ersatz, plsm_frac_cut_cells, plsm_frac_eps_l1, plsm_frac_eps_mult, plsm_frac_mollified, plsm_frac_sample_wall_s, plsm_frac_samples, plsm_frac_sens_exact, plsm_frac_sens_wall_s, plsm_margin_peak, plsm_margin_peak_iteration, plsm_margin_plateau_probes, plsm_margin_plateau_tol, plsm_margin_probe_every, plsm_margin_probe_wall_s, plsm_sens_weight, plsm_stop_reason, plsm_void_chi, plsm_void_components, plsm_void_enclosed_solid, plsm_void_sealed_pockets, plsm_void_sealed_volume_mm3, plsm_void_sealed_voxels, plsm_void_tunnels
+   keys REMOVED (0): none
+   values changed on a SHARED key, excluding clocks (0): none
+   ★ 'keys REMOVED: none' and 'values changed: none' is the bar. An added
+     key is the receipt learning to say a feature did not run.

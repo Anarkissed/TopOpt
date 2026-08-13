@@ -1,0 +1,15 @@
+== re-certification control ==
+field                /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-11-plsm-restriction-operator/sources/rung_0.68.f64
+binarized            no
+fractional samples   28374 (before any thresholding)
+certification penalty 3 (production)
+printed voxels       88424 of 110904  (vf 0.797302)
+FrozenSolid BELOW iso 0 of 40216   FrozenVoid above 0
+frozen set restored  no
+max von Mises        0.016900494 MPa
+MARGIN worst case    3254.342744897
+margin effective     673.853296213   (gate: >= 1.5)
+VERDICT              ACCEPTED
+min-feature viols    407
+mass                 543.7239 g
+load path connected  yes

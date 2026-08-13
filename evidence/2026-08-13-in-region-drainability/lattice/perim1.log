@@ -1,0 +1,20 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 status=ok
+lattice-variant: rung vf=0.7973 (index 0 of /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-12-plsm-penalty-production/arms/E1_c1_eta1/design.bin) — NO ladder ran
+  design: fingerprint 8915912091249371881, 120 optimizer iterations originally
+  reproduction: recorded margin 3255.15 == reproduced 3255.15 (enforced)
+  solves: 3 certification (design iterations 0, variant meshes 0)
+  lattice: graded cell 4 mm, rho 0.09738..0.8828 over 1073 voxels
+  solid margin 3255 -> latticed margin 3109 (effective 643.8)
+  strut strength (REPORT, not gated): in-plane 763.8   interlayer 482   [OUT OF REGIME]
+  verdict: ACCEPTED
+mesh: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/fa4e935c-67ae-4d97-906f-96e56a28782f/scratchpad/lat_perim1/variant_080_lattice.stl
+receipt: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/fa4e935c-67ae-4d97-906f-96e56a28782f/scratchpad/lat_perim1/variant_080_lattice.report.json
+report: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/fa4e935c-67ae-4d97-906f-96e56a28782f/scratchpad/lat_perim1/lattice_variant_report.json
+provenance: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/fa4e935c-67ae-4d97-906f-96e56a28782f/scratchpad/lat_perim1/lattice_variant.json
+loadcase: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/fa4e935c-67ae-4d97-906f-96e56a28782f/scratchpad/lat_perim1/loadcase.json
+fields: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-page-core-hookup-bf5ecc/fa4e935c-67ae-4d97-906f-96e56a28782f/scratchpad/lat_perim1/fields.bin
+wall: 421.27 s
+EXIT=0

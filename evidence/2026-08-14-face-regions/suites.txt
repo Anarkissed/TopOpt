@@ -1,0 +1,39 @@
+=== THE SUITES, AND THEIR DENOMINATORS ===
+Task 2026-08-14-face-regions.
+
+APP — `swift test` in app/TopOptKit
+  1457 tests, 22 skipped, 8 FAILURES.
+
+  ★ ALL EIGHT ARE THE SAME ENVIRONMENTAL GAP, not this branch:
+
+      AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+      AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+      AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd
+
+      "3MF import requires lib3mf, which is not available in this build;
+       export the part as STL and import that instead"
+
+  `app/scripts/build_core.sh` says so at configure time on this machine:
+      "lib3mf: (none) — macOS slice is 3MF-free; run
+       app/scripts/build_lib3mf_macos.sh to enable"
+
+  So the honest number is 1449/1457 HERE, and the three 3MF tests DID NOT RUN
+  as intended. CI builds the slice with lib3mf and runs all of them.
+
+  The 26 tests this branch adds (FaceRegionTests) all pass.
+
+CORE — `ctest` in build/
+  120/120 PASSED, 100%. Total 1781 s (cli_demo alone is 1414 s).
+
+  ★ 120 tests register locally against CI's 122: `export_3mf` and
+  `threemf_import` do NOT register without lib3mf, and CMake says so at
+  configure time. So this is 120/122 of CI's suite, and the two 3MF tests DID
+  NOT RUN. Report N/122, never N/N.
+
+  The 1 test this branch adds (`face_region`, 68 checks) passes.
+
+  ★ THE RUN THAT PRODUCED THIS NUMBER IS THE THIRD ATTEMPT, and the first two
+  are discarded on purpose: `topopt-cli` was relinked underneath them while
+  `test_cli` was executing it. A suite result measured against a binary that
+  changed mid-run is not a result. The number above is from a run with nothing
+  else competing and the binary settled.

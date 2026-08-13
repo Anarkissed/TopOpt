@@ -1,0 +1,21 @@
+CORE ctest — task 2026-08-14-lattice-separation, on the REBASED tree
+
+Base 726160c (PR 331 face-regions). This branch does not touch core/ —
+`git diff --stat 726160c -- core/` is empty — but the BASE moved onto a branch
+that does, so the suite is re-run here rather than the pre-rebase 119/119 being
+quoted for a tree that no longer exists. The extra test is PR 331's face_region.
+
+NOT a CI pass: this machine has no lib3mf, so `export_3mf` and `threemf_import`
+do not REGISTER. 120 is 120 of CI's 122. Report N/122, never N/N.
+
+The host was NOT quiet — another worktree was running its own topopt-cli
+ladder — so the DURATIONS describe the host, not the code.
+
+117/120 Test #116: lattice_variant ..................   Passed  155.33 sec
+118/120 Test #106: design_stream ....................   Passed  295.01 sec
+119/120 Test #115: protect_freeze_vs_solidity .......   Passed  382.38 sec
+120/120 Test #105: cli_demo .........................   Passed  1283.44 sec
+
+100% tests passed out of 120
+
+Total Test time (real) = 1579.54 sec

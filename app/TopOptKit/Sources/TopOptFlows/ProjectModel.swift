@@ -51,6 +51,18 @@ public final class ProjectModel: ObservableObject {
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
 
+    /// ★ THE REGION LAYER (task 2026-08-14-face-regions §1) — the unions and the
+    /// split cells over this part's faces. Default EMPTY: with no region edits the
+    /// project emits exactly the job it emitted before this layer existed (bar R1).
+    /// Persisted on the project as the DEFINITION (filter + add/remove + cut
+    /// geometry), so a re-import re-evaluates it and reports what changed.
+    @Published public var faceRegions = FaceRegionModel()
+
+    /// The regions whose filter matches a different number of faces than it did
+    /// when it was authored — computed on the import that follows a restore, and
+    /// surfaced rather than absorbed (§3c). Empty when nothing drifted.
+    @Published public private(set) var faceRegionDrift: [FaceRegionModel.Drift] = []
+
     /// Paint-mode overlay (handoff 2026-07-25): the triangle→painted-face map for the imported
     /// part, the escape when tap-selection over-selects. Nil for a project with no paintable mesh.
     /// `@Published` value type: a brush stroke mutates it in place (via `paintStroke`), which
@@ -269,9 +281,35 @@ public final class ProjectModel: ObservableObject {
         // projection ARMED, which is what the new core default means; decoding it to
         // false would quietly opt every existing project out of the change.
         self.projectCADFaces = snapshot.projectCADFaces ?? true
+        self.faceRegions = snapshot.faceRegions ?? FaceRegionModel()
+        // ★ RE-EVALUATE THE PERSISTED REGIONS AGAINST THIS IMPORT, and report what
+        // moved (§3c / bar R6). A union is stored as a filter plus a hand
+        // add/remove list precisely so it CAN be re-evaluated; the one thing that
+        // must never happen is absorbing a change silently.
+        refreshFaceRegionDrift()
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
+    }
+
+    /// Re-evaluate every persisted region's filter against the CURRENT import and
+    /// record which ones now match a different number of faces than they did when
+    /// they were authored. Called on restore and after a re-import.
+    ///
+    /// ★ REPORTED, NEVER ABSORBED. A CAD edit renumbers B-rep faces; a union whose
+    /// filter used to catch seven blend faces and now catches five is a fact the
+    /// user has to see before they run. The core reports the same number on its own
+    /// side (`[loadcase] region ... drift=`), so a remote run says it too.
+    public func refreshFaceRegionDrift() {
+        guard let mesh = viewerMesh, !faceRegions.isEmpty else {
+            faceRegionDrift = []
+            return
+        }
+        var now: [RegionID: Int] = [:]
+        for r in faceRegions.regions where r.filter.any {
+            now[r.id] = FaceRegionGeometry.match(r.filter, in: mesh).count
+        }
+        faceRegionDrift = faceRegions.drift(matchedNow: now)
     }
 
     /// The Q2 message: which restored groups reference face ids the re-imported
@@ -455,19 +493,27 @@ public final class ProjectModel: ObservableObject {
     /// STL project (no face selection) — the run then falls back to self-weight.
     public func loadCase() -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
                                buildDirection: SIMD3<Double>,
-                               plateDirection: SIMD3<Double>) {
+                               plateDirection: SIMD3<Double>,
+                               anchorRegionIDs: [RegionID]) {
         var anchors: [Int] = []
+        var anchorRegions: [RegionID] = []
         var loads: [TopOptKit.LoadGroupSpec] = []
         for g in selection.groups {
             let kind = force.kind(for: g.id)
             if kind.isAnchor {
                 // Painted faces carry a live overlay id; the run sees the dense re-import id.
                 anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
+                // ★ A region rides ALONGSIDE the faces (task 2026-08-14-face-regions
+                // §3e). Region ids are NOT face ids and are never remapped through
+                // `resolvedRunFaceID` — a region is resolved core-side against the
+                // run's own import, which is the whole reason it survives one.
+                anchorRegions.append(contentsOf: g.regionIDs)
             } else if kind.isLoad {
                 let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
                 if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
-                                       force: SIMD3<Double>(f)))
+                                       force: SIMD3<Double>(f),
+                                       regionIDs: g.regionIDs))
                 }
             }
         }
@@ -481,7 +527,7 @@ public final class ProjectModel: ObservableObject {
         // job is byte-identical to what this project produced before. Non-zero
         // only when the user actually answered the second question.
         let plate = buildOrientation.plateUp.map { simd_normalize($0) } ?? SIMD3<Float>(0, 0, 0)
-        return (anchors, loads, SIMD3<Double>(up), SIMD3<Double>(plate))
+        return (anchors, loads, SIMD3<Double>(up), SIMD3<Double>(plate), anchorRegions)
     }
 
     /// The run's "Keep clear" clearances (handoff 100), derived from the selection +
@@ -554,29 +600,61 @@ public final class ProjectModel: ObservableObject {
     /// carries — so the barrier is exactly as deep as the lattice it feeds. For a
     /// protect-only group it is the project's global depth, unchanged.
     public func faceProtectionSpecs()
-        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double]) {
+        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
+            regionIDs: [RegionID], regionDepthsMM: [Double]) {
         guard viewerMesh != nil else {
-            return ([], force.faceProtectDepthMM, [])
+            return ([], force.faceProtectDepthMM, [], [], [])
         }
         var ids: [Int] = []
         var depths: [Double] = []
+        var regionIDs: [RegionID] = []
+        var regionDepths: [Double] = []
         var seen = Set<FaceID>()
+        var seenRegions = Set<RegionID>()
         for g in selection.groups where force.isProtected(g.id) {
             // A protected group that is ALSO a lattice region is one slab; a
             // protect-only group keeps the project's global depth.
             let latticed = lattice.enabled && lattice.groupRoles[g.id] != nil
-            let d = latticed
-                ? LatticeSlabDepth.depthMM(group: g.id,
-                                           perGroup: lattice.groupDepthMM,
-                                           fallbackMM: lattice.paintDepthMM)
-                : force.faceProtectDepthMM
             for f in g.faces where !seen.contains(f) {
                 seen.insert(f)
+                // ★ PER FACE (task 2026-08-14 §3d). The depth plane is draggable
+                // per face now, so the protection is resolved per face through the
+                // SAME `LatticeSlabDepth` call the region emission makes — which is
+                // what keeps R4 true when two faces of one group hold two depths.
+                let d = latticed
+                    ? LatticeSlabDepth.depthMM(
+                        ref: .face(group: g.id, face: f), group: g.id,
+                        perSelectable: lattice.selectableDepthMM,
+                        perGroup: lattice.groupDepthMM,
+                        fallbackMM: lattice.paintDepthMM)
+                    : force.faceProtectDepthMM
                 ids.append(Int(resolvedRunFaceID(f)))
                 depths.append(d)
             }
+            // ★ EACH REGION CARRIES ITS OWN DEPTH — which is what makes a grid
+            // split a hand-authored grading mechanism (PR 331 §6): ten sectors
+            // around a curved feature, each protected to a different depth, with
+            // the optimiser deciding none of it.
+            //
+            // ★ AND IT IS THE SAME DEPTH THE 3D HANDLE DRAGS (task 2026-08-14
+            // §3d, widened by the interrupt): resolved per REGION through the
+            // same `LatticeSlabDepth` call a face goes through, so PR 331's
+            // `face_protection_region_depths_mm` is FILLED from the one store
+            // rather than from a parallel one.
+            for r in g.regionIDs where !seenRegions.contains(r) {
+                seenRegions.insert(r)
+                let d = latticed
+                    ? LatticeSlabDepth.depthMM(
+                        ref: .region(group: g.id, region: r), group: g.id,
+                        perSelectable: lattice.selectableDepthMM,
+                        perGroup: lattice.groupDepthMM,
+                        fallbackMM: lattice.paintDepthMM)
+                    : force.faceProtectDepthMM
+                regionIDs.append(r)
+                regionDepths.append(d)
+            }
         }
-        return (ids, force.faceProtectDepthMM, depths)
+        return (ids, force.faceProtectDepthMM, depths, regionIDs, regionDepths)
     }
 
     /// The lattice region depth for `group`, in mm — the ONE number, read through
@@ -584,6 +662,73 @@ public final class ProjectModel: ObservableObject {
     public func latticeSlabDepthMM(_ group: UUID) -> Double {
         LatticeSlabDepth.depthMM(group: group, perGroup: lattice.groupDepthMM,
                                  fallbackMM: lattice.paintDepthMM)
+    }
+
+    /// The depth for ONE selectable (task 2026-08-14 §3d) — its own dragged
+    /// number, else its group's, else the project default. This is what the 3D
+    /// depth plane drags and what the protection freezes: one call, both
+    /// meanings, and for a REGION it is what fills PR 331's
+    /// `face_protection_region_depths_mm`.
+    public func latticeSlabDepthMM(_ ref: LatticeSelectableRef, in group: UUID) -> Double {
+        LatticeSlabDepth.depthMM(ref: ref, group: group,
+                                 perSelectable: lattice.selectableDepthMM,
+                                 perGroup: lattice.groupDepthMM,
+                                 fallbackMM: lattice.paintDepthMM)
+    }
+
+    /// The role in force for ONE selectable (§3c) — its own override, else its
+    /// group's declaration. nil ⇒ not latticed at all.
+    public func latticeSelectableRole(_ ref: LatticeSelectableRef,
+                                     in group: UUID) -> LatticeGroupRole? {
+        LatticeSelectableRoles.role(for: ref, groupRole: latticeEligibleRoles()[group],
+                                   overrides: lattice.selectableRoles)
+    }
+
+    /// ★ EVERYTHING INSIDE A GROUP THAT CAN BE LATTICED ON ITS OWN: its REGIONS
+    /// (PR 331), its B-rep faces, then its manual primitives — in the selection's
+    /// own order.
+    ///
+    /// ONE listing rule, so the row the user taps and the thing the run resolves
+    /// are the same set. A per-selectable control over a list the emission does
+    /// not walk would be the "decorative primitive" defect again, one level down.
+    ///
+    /// ★ REGIONS COME FIRST, because a region is the SUMMARY of faces the user
+    /// combined: PR 331's whole point is that a 24-face union is ONE row.
+    ///
+    /// ★ AND A GRID SPLIT'S CHILDREN ARE FOLDED BY PR 331'S OWN FLAG (bar R12).
+    /// `FaceRegionModel.roots` hides a parent's children until it is expanded, so
+    /// a 10×5 split is one row here as it is one row in the Regions sheet — there
+    /// is no second collapse mechanism in this panel.
+    public func latticeSelectableRefs(_ g: SelectionGroup) -> [LatticeSelectableRef] {
+        latticeRegionRefs(g)
+            + g.faces.map { LatticeSelectableRef.face(group: g.id, face: $0) }
+            + force.manualPrimitives(for: g.id).map { .primitive($0.id) }
+    }
+
+    /// The group's region rows, folded exactly as the Regions sheet folds them: a
+    /// collapsed parent contributes itself and hides its children (R12).
+    public func latticeRegionRefs(_ g: SelectionGroup) -> [LatticeSelectableRef] {
+        var out: [LatticeSelectableRef] = []
+        for r in g.regionIDs {
+            guard let region = faceRegions.region(r) else { continue }
+            // A child whose parent is also in this group is folded under it
+            // unless that parent is expanded — PR 331's `collapsed`, read, never
+            // duplicated.
+            if let parent = faceRegions.region(region.parentID),
+               g.regionIDs.contains(parent.id), parent.collapsed {
+                continue
+            }
+            out.append(.region(group: g.id, region: r))
+        }
+        return out
+    }
+
+    /// ALL / SOME / NONE of a group's selectables are latticed — the summary the
+    /// group row shows now that it does not own the decision (§3c).
+    public func latticeCoverage(_ g: SelectionGroup) -> LatticeGroupCoverage {
+        LatticeSelectableRoles.coverage(refs: latticeSelectableRefs(g),
+                                       groupRole: latticeEligibleRoles()[g.id],
+                                       overrides: lattice.selectableRoles)
     }
 
     /// Whether the anchored-bore AUTO clearance rule applies to a group (keep-clear
@@ -715,6 +860,194 @@ public final class ProjectModel: ObservableObject {
             }
         }
         return out
+    }
+
+    // MARK: - ★ THE LATTICE DEPTH PLANES (task 2026-08-14-lattice-separation §3d)
+
+    /// ★ A DRAGGABLE DEPTH PLANE PER FACE OR PRIMITIVE, expanding outward from the
+    /// face, dragged to set how far in the lattice may go.
+    ///
+    /// PR 328 built the slab's geometry and its number and put the DRAG on the
+    /// card's numeric field, and said so. This is the 3D handle it did not get to.
+    /// It is not new drag math: the plane is a `ClearanceVolume.slab` and the grab
+    /// is a `ClearanceHandle(role: .slabDepth)` — the same tested pair the
+    /// keep-clear face slabs have used since keep-clear Phase B. What is new is
+    /// where the dragged number LANDS: `LatticeSettings.selectableDepthMM`, which is
+    /// also the protection depth (bar R4).
+    ///
+    /// ★ THE NORMAL IS FLIPPED, and that is the whole difference from a keep-out.
+    /// A clearance slab reaches OUT of the part (it is space that must stay empty);
+    /// a lattice slab reaches IN (it is material that must be held and lightened).
+    /// `LatticeRegionEmission.spec(for:role:depthMM:faceID:)` flips it for the same
+    /// reason, so the plane on screen is the region in the job.
+    public struct LatticeDepthPlane: Identifiable {
+        public let ref: LatticeSelectableRef
+        public let groupID: UUID
+        /// The render/handle key: the run face id, or the manual sentinel.
+        public let faceKey: Int
+        public let role: LatticeGroupRole
+        public let depthMM: Double
+        public let volume: ClearanceVolume
+        public let handle: ClearanceHandle
+        public var id: String { ref.key }
+    }
+
+    /// Every lattice depth plane to draw and grab, in the selection's order.
+    /// Empty when lattice mode is off or nothing is declared — the TO page hides
+    /// these, and a page that has none draws none.
+    public func latticeDepthPlanes() -> [LatticeDepthPlane] {
+        guard lattice.enabled, let mesh = viewerMesh else { return [] }
+        let roles = latticeEligibleRoles()
+        var out: [LatticeDepthPlane] = []
+        for g in selection.groups {
+            guard let groupRole = roles[g.id] else { continue }
+            // ★ A REGION GETS A DEPTH PLANE TOO (the interrupt's §2c). A region is
+            // a voxel SET, not a surface, so the plane is built from the region's
+            // OWN frame — PR 331's `FaceRegionGeometry.frame`, the same PCA/shared-
+            // axis frame its split cuts use — and it is REFUSED rather than
+            // invented when the members do not face one way. See
+            // `latticeRegionDepthPlane`.
+            for r in latticeRegionRefs(g) {
+                guard let role = LatticeSelectableRoles.role(
+                        for: r, groupRole: groupRole,
+                        overrides: lattice.selectableRoles),
+                      let rid = r.regionID,
+                      let plane = latticeRegionDepthPlane(rid, ref: r, group: g.id,
+                                                          role: role, in: mesh)
+                else { continue }
+                out.append(plane)
+            }
+            for f in g.faces {
+                let ref = LatticeSelectableRef.face(group: g.id, face: f)
+                guard let role = LatticeSelectableRoles.role(
+                        for: ref, groupRole: groupRole,
+                        overrides: lattice.selectableRoles),
+                      let geo = mesh.faceGeometry(f), geo.isPlane,
+                      let outline = mesh.facePlaneOutline(
+                        f, planeNormal: SIMD3<Float>(geo.planeNormal),
+                        planeOrigin: SIMD3<Float>(geo.planeOrigin))
+                else { continue }
+                let depth = latticeSlabDepthMM(ref, in: g.id)
+                // INTO the part: the same flip the emission makes.
+                let inward = StepFaceGeometry(kind: .plane,
+                                              planeNormal: -geo.planeNormal,
+                                              planeOrigin: geo.planeOrigin)
+                let key = Int(resolvedRunFaceID(f))
+                let volume = ClearanceVolume.slab(faceID: key, geometry: inward,
+                                                  outline: outline, depthMM: depth)
+                guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
+                                                       axialSpan: nil).first
+                else { continue }
+                out.append(LatticeDepthPlane(ref: ref, groupID: g.id, faceKey: key,
+                                             role: role, depthMM: depth,
+                                             volume: volume, handle: h))
+            }
+            // A hand-placed FACE primitive is already a slab in its own frame, so
+            // its axis is the region direction and needs no flip. A BOLT primitive
+            // is a cylinder region — there is no depth to drag, so it gets no plane.
+            for mp in force.manualPrimitives(for: g.id) where mp.kind == .face {
+                let ref = LatticeSelectableRef.primitive(mp.id)
+                guard let role = LatticeSelectableRoles.role(
+                    for: ref, groupRole: groupRole,
+                    overrides: lattice.selectableRoles) else { continue }
+                let n = SIMD3<Float>(mp.axis)
+                let (u, v) = planeBasis(normal: n)
+                let outline = PlaneOutline(center: SIMD3<Float>(mp.center),
+                                           uAxis: u, vAxis: v,
+                                           halfU: Float(mp.halfUMM),
+                                           halfV: Float(mp.halfWMM))
+                let key = Self.manualFaceKey(mp.id)
+                let depth = lattice.selectableDepthMM[ref.key] ?? mp.resolvedDepthMM
+                let volume = ClearanceVolume.slab(faceID: key,
+                                                  geometry: mp.syntheticGeometry,
+                                                  outline: outline, depthMM: depth)
+                guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
+                                                       axialSpan: nil).first
+                else { continue }
+                out.append(LatticeDepthPlane(ref: ref, groupID: g.id, faceKey: key,
+                                             role: role, depthMM: depth,
+                                             volume: volume, handle: h))
+            }
+        }
+        return out
+    }
+
+    /// Write a dragged depth for one selectable — THE one number (§3d/R4).
+    /// Clamped through `LatticeSlabDepth` so a viewport drag cannot reach a depth
+    /// the card could not.
+    public func writeLatticeDepthMM(_ ref: LatticeSelectableRef, mm: Double) {
+        lattice.selectableDepthMM[ref.key] = LatticeSlabDepth.clamp(mm)
+    }
+
+    /// ★ ONE REGION'S DEPTH PLANE — or nil, honestly.
+    ///
+    /// A face has a plane; a region does not. What a region has is PR 331's
+    /// `FaceRegionGeometry.frame` — the PCA (or shared-cylinder) frame its split
+    /// cuts are already expressed in — plus its members' own outward normals.
+    ///
+    /// ★ THE PLANE IS REFUSED WHEN THE MEMBERS DO NOT FACE ONE WAY, and that
+    /// refusal is the honest half. A union wrapping a bore, or a union of a top
+    /// face and a side face, has no single direction "into the part": any plane
+    /// drawn for it would be a number the user could drag that means nothing.
+    /// `agreement` is the length of the area-weighted mean of the members'
+    /// outward unit normals — 1 when they are parallel, ~0 when they oppose — and
+    /// the threshold is 0.75, which a flat union clears and a wrap does not.
+    /// A region with no plane still carries its DEPTH (the drawer's number, and
+    /// PR 331's per-sector protection depth); what it does not get is a 3D grab.
+    public static let regionPlaneNormalAgreement = 0.75
+
+    func latticeRegionDepthPlane(_ rid: RegionID, ref: LatticeSelectableRef,
+                                 group: UUID, role: LatticeGroupRole,
+                                 in mesh: ViewerMesh) -> LatticeDepthPlane? {
+        guard let region = faceRegions.region(rid) else { return nil }
+        let members = FaceRegionGeometry.members(of: region, in: mesh)
+        guard !members.isEmpty else { return nil }
+
+        // The members' area-weighted outward direction.
+        let areas = FaceRegionGeometry.faceAreas(in: mesh)
+        var sum = SIMD3<Double>.zero
+        var weight = 0.0
+        for f in members {
+            guard let g = mesh.faceGeometry(f), g.isPlane,
+                  simd_length(g.planeNormal) > 1e-9 else { continue }
+            let a = areas[f] ?? 0
+            sum += simd_normalize(g.planeNormal) * a
+            weight += a
+        }
+        guard weight > 0 else { return nil }
+        let agreement = simd_length(sum) / weight
+        guard agreement >= Self.regionPlaneNormalAgreement else { return nil }
+        let outward = simd_normalize(sum)
+
+        // The extent comes from the region's OWN frame, so the plane covers what
+        // the region covers — including one sector of a grid split, whose frame
+        // is that sector's.
+        let frame = FaceRegionGeometry.frame(members: members, in: mesh)
+        guard frame.valid else { return nil }
+        let centre = frame.origin
+            + frame.u * ((frame.uLo + frame.uHi) / 2)
+            + frame.v * ((frame.vLo + frame.vHi) / 2)
+        let halfU = max(1e-3, (frame.uHi - frame.uLo) / 2)
+        let halfV = max(1e-3, (frame.vHi - frame.vLo) / 2)
+
+        let depth = latticeSlabDepthMM(ref, in: group)
+        // INTO the part: the same flip a face's plane makes.
+        let inward = StepFaceGeometry(kind: .plane, planeNormal: -outward,
+                                      planeOrigin: centre)
+        let outline = PlaneOutline(center: SIMD3<Float>(centre),
+                                   uAxis: SIMD3<Float>(frame.u),
+                                   vAxis: SIMD3<Float>(frame.v),
+                                   halfU: Float(halfU), halfV: Float(halfV))
+        // The render/handle key is the REGION id, kept distinct from a face key
+        // by construction: face keys are non-negative run face ids and manual
+        // primitives use a negative sentinel, so region ids (≥ 100) collide with
+        // neither.
+        let volume = ClearanceVolume.slab(faceID: rid, geometry: inward,
+                                          outline: outline, depthMM: depth)
+        guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
+                                               axialSpan: nil).first else { return nil }
+        return LatticeDepthPlane(ref: ref, groupID: group, faceKey: rid, role: role,
+                                 depthMM: depth, volume: volume, handle: h)
     }
 
     /// A stable NEGATIVE sentinel face key for a manual primitive, so it never
@@ -870,6 +1203,10 @@ public final class ProjectModel: ObservableObject {
                 self?.latticeSlabDepthMM(gid) ?? .nan
             },
             runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
+            // ★ §3c/§3d — the per-primitive role and depth overrides. Empty on
+            // every project that has not used them ⇒ the emission is unchanged.
+            selectableRoles: lattice.selectableRoles,
+            selectableDepthMM: lattice.selectableDepthMM,
             resolve: { [weak self] f in
                 guard let mesh = self?.viewerMesh, let geo = mesh.faceGeometry(f) else { return nil }
                 if geo.isCylinder {
@@ -1308,6 +1645,17 @@ public final class ProjectModel: ObservableObject {
         var acc = SIMD3<Float>.zero
         var found = false
         for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; found = true } }
+        // ★ A REGION CONTRIBUTES ITS MEMBERS' NORMALS (task 2026-08-14-face-regions).
+        // Without this a group holding ONLY a region would fall back to the +Z
+        // default and a "normal to the face" load would point the wrong way —
+        // silently, since nothing downstream can tell a defaulted normal from a
+        // measured one.
+        for r in g.regionIDs {
+            guard let region = faceRegions.region(r) else { continue }
+            for f in FaceRegionGeometry.members(of: region, in: mesh) {
+                if let nrm = mesh.faceNormal(f) { acc += nrm; found = true }
+            }
+        }
         guard found else { return nil }
         let len = simd_length(acc)
         return len > 1e-6 ? acc / len : nil
@@ -1339,7 +1687,8 @@ public final class ProjectModel: ObservableObject {
                                // omitted-when-default rule would make the OFF
                                // state the only one that survives a reopen only
                                // by accident of which value it happened to be.
-                               projectCADFaces: projectCADFaces)
+                               projectCADFaces: projectCADFaces,
+                               faceRegions: faceRegions.isEmpty ? nil : faceRegions)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

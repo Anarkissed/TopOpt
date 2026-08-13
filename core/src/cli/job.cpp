@@ -472,12 +472,125 @@ JobDescription parse_job(const std::string& json_text) {
 
     const JsonValue& lv = require_object(*loads_v, "loads");
     reject_unknown_keys(
-        lv, {"anchors", "anchor_face_ids", "groups", "clearances",
+        lv, {"anchors", "anchor_face_ids", "face_regions", "anchor_region_ids",
+             "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
              "infill_percent", "minimize_plastic", "wall_loops",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
     job.loads.present = true;
+
+    // ── THE REGION LAYER (task 2026-08-14-face-regions §1) ─────────────────
+    //
+    // A region is declared ONCE here and referred to by id from the anchors,
+    // the groups and the protections, so a union that feeds three consumers is
+    // written once and cannot drift between them.
+    //
+    // ★ A UNION IS NOT A LIST OF FACE IDS ON THE WIRE (§3c). What is stored is
+    // the defining FILTER plus an explicit add/remove list, re-evaluated on
+    // every import — a re-import after a CAD edit renumbers B-rep faces, and a
+    // stored id list would then point at whatever inherited the number.
+    // "filter_matched_at_author" records what the filter matched when the union
+    // was made, so the run REPORTS a change instead of absorbing it.
+    //
+    // ★ A SPLIT IS STORED AS GEOMETRY (§4e): "cuts" are model-space half-spaces
+    // (a point and a normal), never "region 24, half A".
+    if (const JsonValue* rs = find_key(lv, "face_regions")) {
+      if (rs->type != JsonValue::Type::Array)
+        schema_fail("\"loads.face_regions\" must be an array");
+      for (const JsonValue& rv : rs->arr) {
+        require_object(rv, "a face region");
+        reject_unknown_keys(rv,
+                            {"id", "name", "filter", "filter_matched_at_author",
+                             "add", "remove", "cuts", "parent_id"},
+                            "a face region");
+        FaceRegionSpec spec;
+        const double id =
+            require_number(require_key(rv, "id", "a face region"), "face region id");
+        if (id < 0.0 || id != std::floor(id))
+          schema_fail("a face region \"id\" must be a non-negative integer");
+        spec.id = static_cast<int>(id);
+        if (const JsonValue* nv = find_key(rv, "name"))
+          spec.name = require_string(*nv, "a face region name");
+        if (const JsonValue* av = find_key(rv, "add"))
+          spec.add = parse_int_array(*av, "a face region \"add\"");
+        if (const JsonValue* rmv = find_key(rv, "remove"))
+          spec.remove = parse_int_array(*rmv, "a face region \"remove\"");
+        if (const JsonValue* pv = find_key(rv, "parent_id"))
+          spec.parent_id =
+              static_cast<int>(require_number(*pv, "a face region parent_id"));
+        if (const JsonValue* mv = find_key(rv, "filter_matched_at_author"))
+          spec.filter_matched_at_author = static_cast<int>(
+              require_number(*mv, "face region filter_matched_at_author"));
+        if (const JsonValue* fv = find_key(rv, "filter")) {
+          const JsonValue& f = require_object(*fv, "a face region filter");
+          reject_unknown_keys(f,
+                              {"max_area_mm2", "min_area_mm2",
+                               "min_larger_neighbours", "larger_ratio", "kind",
+                               "cylinder_radius_mm", "cylinder_radius_tol_mm"},
+                              "a face region filter");
+          RegionFilter& rf = spec.filter;
+          if (const JsonValue* v = find_key(f, "max_area_mm2"))
+            rf.max_area_mm2 = require_number(*v, "filter max_area_mm2");
+          if (const JsonValue* v = find_key(f, "min_area_mm2"))
+            rf.min_area_mm2 = require_number(*v, "filter min_area_mm2");
+          if (const JsonValue* v = find_key(f, "min_larger_neighbours"))
+            rf.min_larger_neighbours =
+                static_cast<int>(require_number(*v, "filter min_larger_neighbours"));
+          if (const JsonValue* v = find_key(f, "larger_ratio"))
+            rf.larger_ratio = require_number(*v, "filter larger_ratio");
+          if (const JsonValue* v = find_key(f, "kind")) {
+            rf.kind = require_string(*v, "filter kind");
+            if (rf.kind != "plane" && rf.kind != "cylinder" && rf.kind != "other")
+              schema_fail(
+                  "a face region filter \"kind\" must be \"plane\", "
+                  "\"cylinder\" or \"other\" (got \"" + rf.kind + "\")");
+          }
+          if (const JsonValue* v = find_key(f, "cylinder_radius_mm"))
+            rf.cylinder_radius_mm = require_number(*v, "filter cylinder_radius_mm");
+          if (const JsonValue* v = find_key(f, "cylinder_radius_tol_mm"))
+            rf.cylinder_radius_tol_mm =
+                require_number(*v, "filter cylinder_radius_tol_mm");
+          if (rf.min_larger_neighbours > 0 && !(rf.larger_ratio > 1.0))
+            schema_fail(
+                "a face region filter's \"larger_ratio\" must be > 1 — a "
+                "neighbour the same size is not a LARGER neighbour, and the "
+                "blend signal is that the face sits between two bigger ones");
+        }
+        if (const JsonValue* cs = find_key(rv, "cuts")) {
+          if (cs->type != JsonValue::Type::Array)
+            schema_fail("a face region \"cuts\" must be an array");
+          for (const JsonValue& cv : cs->arr) {
+            require_object(cv, "a face region cut");
+            reject_unknown_keys(cv, {"point", "normal", "strict"},
+                                "a face region cut");
+            RegionCut cut;
+            cut.point = parse_vec3(require_key(cv, "point", "a face region cut"),
+                                   "a cut point");
+            cut.normal = parse_vec3(require_key(cv, "normal", "a face region cut"),
+                                    "a cut normal");
+            if (cut.normal.x == 0.0 && cut.normal.y == 0.0 && cut.normal.z == 0.0)
+              schema_fail("a face region cut \"normal\" must be non-zero");
+            if (const JsonValue* sv = find_key(cv, "strict"))
+              {
+                if (sv->type != JsonValue::Type::Bool)
+                  schema_fail("a face region cut \"strict\" must be a boolean");
+                cut.strict = sv->num != 0.0;
+              }
+            spec.cuts.push_back(cut);
+          }
+        }
+        if (!spec.filter.any() && spec.add.empty())
+          schema_fail(
+              "face region " + std::to_string(spec.id) +
+              " declares neither a filter nor any \"add\" faces — it would "
+              "resolve to nothing and tag nothing");
+        job.loads.face_regions.push_back(std::move(spec));
+      }
+    }
+    if (const JsonValue* arid = find_key(lv, "anchor_region_ids"))
+      job.loads.anchor_region_ids =
+          parse_int_array(*arid, "anchor_region_ids");
     // anchors: optional, given as geometric selectors ("anchors") OR raw B-rep
     // face ids ("anchor_face_ids", the id form the app produces). Empty => min-x
     // clamp fallback, like the app. The two forms compose.
@@ -492,14 +605,21 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("\"loads.groups\" must be an array");
       for (const JsonValue& gv : gs->arr) {
         require_object(gv, "a loads group");
-        reject_unknown_keys(gv, {"faces", "face_ids", "force"}, "a loads group");
+        reject_unknown_keys(gv, {"faces", "face_ids", "region_ids", "force"},
+                            "a loads group");
         JobLoadGroup grp;
         if (const JsonValue* fs = find_key(gv, "faces"))
           grp.faces = parse_selector_array(*fs, "faces");
         if (const JsonValue* fid = find_key(gv, "face_ids"))
           grp.face_ids = parse_int_array(*fid, "face_ids");
-        if (grp.faces.empty() && grp.face_ids.empty())
-          schema_fail("a loads group must give \"faces\" or \"face_ids\"");
+        // ★ A group may name REGIONS instead of (or as well as) faces. That is
+        // what turns his 23-face load group into one row.
+        if (const JsonValue* rid = find_key(gv, "region_ids"))
+          grp.region_ids = parse_int_array(*rid, "region_ids");
+        if (grp.faces.empty() && grp.face_ids.empty() && grp.region_ids.empty())
+          schema_fail(
+              "a loads group must give \"faces\", \"face_ids\" or "
+              "\"region_ids\"");
         grp.force = parse_vec3(require_key(gv, "force", "a loads group"),
                                "a loads group force");
         job.loads.groups.push_back(std::move(grp));
@@ -628,22 +748,39 @@ JobDescription parse_job(const std::string& json_text) {
         job.loads.face_protection_face_ids =
             parse_int_array(*fp, "face_protections");
       } else {
+        // The object form names EITHER a face_id (handoff 124) OR a region_id
+        // (task 2026-08-14-face-regions) — never both, because they are two
+        // different things and a protection that claimed to be both would leave
+        // the receipt unable to say which one it froze.
         for (const JsonValue& e : fp->arr) {
-          reject_unknown_keys(e, {"face_id", "depth_mm"}, "a face protection");
+          reject_unknown_keys(e, {"face_id", "region_id", "depth_mm"},
+                              "a face protection");
+          const JsonValue* fv = find_key(e, "face_id");
+          const JsonValue* rv = find_key(e, "region_id");
+          if ((fv == nullptr) == (rv == nullptr))
+            schema_fail(
+                "a \"face_protections\" entry must give exactly one of "
+                "\"face_id\" or \"region_id\"");
           const double id = require_number(
-              require_key(e, "face_id", "a face protection"),
-              "face_protections face_id");
+              fv != nullptr ? *fv : *rv,
+              fv != nullptr ? "face_protections face_id"
+                            : "face_protections region_id");
           if (id < 0.0 || id != std::floor(id))
-            schema_fail("every \"face_protections\" face_id must be a "
+            schema_fail("every \"face_protections\" id must be a "
                         "non-negative integer");
-          job.loads.face_protection_face_ids.push_back(static_cast<int>(id));
           double depth = -1.0;  // absent => the global depth
           if (const JsonValue* dv = find_key(e, "depth_mm")) {
             depth = require_number(*dv, "face_protections depth_mm");
             if (!(depth > 0.0))
               schema_fail("a \"face_protections\" depth_mm must be > 0");
           }
-          job.loads.face_protection_depths_mm.push_back(depth);
+          if (fv != nullptr) {
+            job.loads.face_protection_face_ids.push_back(static_cast<int>(id));
+            job.loads.face_protection_depths_mm.push_back(depth);
+          } else {
+            job.loads.face_protection_region_ids.push_back(static_cast<int>(id));
+            job.loads.face_protection_region_depths_mm.push_back(depth);
+          }
         }
       }
     }
@@ -878,7 +1015,11 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(*pl,
                         {"enabled", "basis", "knots", "support", "eta_voxels",
                          "max_iterations", "seed", "refit_every", "move",
-                         "cg_tolerance_loose", "warm_start"},
+                         "cg_tolerance_loose", "warm_start", "ersatz", "sens_weight",
+                         "frac_samples", "frac_eps_mult", "frac_mollified",
+                         "frac_sens_exact", "frac_eps_l1",
+                         "margin_probe_every", "margin_plateau_probes",
+                         "margin_plateau_tol"},
                         "plsm");
     job.has_plsm = true;
     const JsonValue& en = require_key(*pl, "enabled", "plsm");
@@ -943,6 +1084,71 @@ JobDescription parse_job(const std::string& json_text) {
       if (v->type != JsonValue::Type::Bool)
         schema_fail("\"plsm.warm_start\" must be a boolean");
       job.plsm_warm_start = (v->num != 0.0);
+    }
+    // ── the volume-fraction ersatz (task 2026-08-13, item 2) ────────────────
+    if (const JsonValue* v = find_key(*pl, "ersatz")) {
+      job.plsm_ersatz = require_nonempty_string(*v, "plsm.ersatz");
+      if (job.plsm_ersatz != "fraction" && job.plsm_ersatz != "heaviside")
+        schema_fail(
+            "\"plsm.ersatz\" must be \"fraction\" (the exact cell volume "
+            "fraction inside {phi < 0}, the production default) or "
+            "\"heaviside\" (the centre-sampled smoothed step it replaces)");
+    }
+    if (const JsonValue* v = find_key(*pl, "sens_weight")) {
+      job.plsm_sens_weight = require_nonempty_string(*v, "plsm.sens_weight");
+      if (job.plsm_sens_weight != "discrete" &&
+          job.plsm_sens_weight != "continuum")
+        schema_fail(
+            "\"plsm.sens_weight\" must be \"discrete\" (the derivative of the "
+            "stiffness law production actually runs, the default) or "
+            "\"continuum\" (the classical shape derivative's strain-energy "
+            "density, which is correct only for a LINEAR law and which R2 "
+            "measured 45-56% off on this path)");
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_samples")) {
+      const double x = require_number(*v, "plsm.frac_samples");
+      if (x < 2.0 || x > 16.0)
+        schema_fail(
+            "\"plsm.frac_samples\" must be in [2, 16] — 1 would put the only "
+            "sample back at the cell centre, which is the approximation the "
+            "volume fraction replaces");
+      job.plsm_frac_samples = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_eps_mult")) {
+      const double x = require_number(*v, "plsm.frac_eps_mult");
+      if (!(x > 0.0)) schema_fail("\"plsm.frac_eps_mult\" must be > 0");
+      job.plsm_frac_eps_mult = x;
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_mollified")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("\"plsm.frac_mollified\" must be a boolean");
+      job.plsm_frac_mollified = (v->num != 0.0);
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_sens_exact")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("\"plsm.frac_sens_exact\" must be a boolean");
+      job.plsm_frac_sens_exact = (v->num != 0.0);
+    }
+    if (const JsonValue* v = find_key(*pl, "frac_eps_l1")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("\"plsm.frac_eps_l1\" must be a boolean");
+      job.plsm_frac_eps_l1 = (v->num != 0.0);
+    }
+    // ── the margin-plateau stop (task 2026-08-13, item 3) ───────────────────
+    if (const JsonValue* v = find_key(*pl, "margin_probe_every")) {
+      const double x = require_number(*v, "plsm.margin_probe_every");
+      if (x < 0.0) schema_fail("\"plsm.margin_probe_every\" must be >= 0 (0 = off)");
+      job.plsm_margin_probe_every = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "margin_plateau_probes")) {
+      const double x = require_number(*v, "plsm.margin_plateau_probes");
+      if (x < 1.0) schema_fail("\"plsm.margin_plateau_probes\" must be >= 1");
+      job.plsm_margin_plateau_probes = static_cast<int>(x);
+    }
+    if (const JsonValue* v = find_key(*pl, "margin_plateau_tol")) {
+      const double x = require_number(*v, "plsm.margin_plateau_tol");
+      if (!(x >= 0.0)) schema_fail("\"plsm.margin_plateau_tol\" must be >= 0");
+      job.plsm_margin_plateau_tol = x;
     }
   }
 

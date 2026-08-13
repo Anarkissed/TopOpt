@@ -435,6 +435,12 @@ struct JobLoadGroup {
   // selection produces and the LAN worker forwards). Exactly one form per group.
   std::vector<JobFaceSelector> faces;  // every match tagged LOAD
   std::vector<int> face_ids;           // raw B-rep face ids, tagged LOAD
+  // ★ REGION ids (task 2026-08-14-face-regions §3e). A group may ALSO name
+  // regions declared in `loads.face_regions` — a union of blend faces, or one
+  // sector of a grid split. Regions and face ids compose: the group is the
+  // union of both, tagged in that order (face ids first, exactly as before, so
+  // a group that names no regions is byte-identical).
+  std::vector<int> region_ids;
   Vec3 force{0.0, 0.0, 0.0};           // fx, fy, fz in N
 };
 
@@ -545,6 +551,17 @@ struct JobLoadCase {
   bool present = false;                     // "loads" block was given
   std::vector<JobFaceSelector> anchors;     // geometric selectors -> FIXTURE
   std::vector<int> anchor_face_ids;         // OR raw B-rep face ids -> FIXTURE
+  // ★ THE REGION LAYER (task 2026-08-14-face-regions §1). Declared ONCE here and
+  // referred to by id from groups / anchors / protections, so a union that feeds
+  // three consumers is written once and cannot drift between them. Empty (the
+  // default) => no regions => byte-identical to every job written before this.
+  //
+  // ★ NOTHING HERE TOUCHES THE FACE PARTITION. A region is (member face ids) ∩
+  // (half-spaces); `StepModel::triangle_face` and `StepModel::faces` are read,
+  // never written, so CAD-face projection and every analytic-surface lookup are
+  // exactly as they were. See face_region.hpp.
+  std::vector<FaceRegionSpec> face_regions;
+  std::vector<int> anchor_region_ids;       // regions -> FIXTURE
   std::vector<JobLoadGroup> groups;         // distributed tractions
   std::vector<JobClearance> clearances;     // "Keep clear" keep-out regions
   // Handoff 124 — Face protections (preserve-skin). Raw B-rep face ids whose OWN
@@ -561,6 +578,12 @@ struct JobLoadCase {
   //     "face_protections": [ {"face_id": 16, "depth_mm": 7} ]
   // alongside the legacy integer form, which is still accepted unchanged.
   std::vector<double> face_protection_depths_mm;
+  // ★ PROTECTIONS BY REGION. Parallel vectors: one region id and one depth (mm,
+  // <= 0 => the global depth) per protected region. A grid split's fifty sectors
+  // each carrying their OWN depth is exactly this list — which is what makes a
+  // grid split a hand-authored grading mechanism (§6). Empty => byte-identical.
+  std::vector<int> face_protection_region_ids;
+  std::vector<double> face_protection_region_depths_mm;
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
   bool minimize_plastic = true;             // true = reduction ladder + pad
@@ -726,18 +749,40 @@ struct JobDescription {
   // follows a change of resolution. The schema offers no scalar form: a single
   // knot spacing for three axes is exactly the shape of the trap PR 323 lost a
   // day to (GridapTopOpt's alpha rule reading `minimum(el_size)` on a 4:1 slab).
+  //
+  // ★★ EVERY DEFAULT BELOW IS READ OUT OF `PlsmOptions` AND NOT RETYPED, AND
+  // THAT IS A DEFECT CLASS THIS TASK FOUND RATHER THAN A STYLE CHOICE. These
+  // fields are copied onto `MinimizePlasticOptions::plsm` WHENEVER a job carries
+  // a plsm block, so a hand-written default here SILENTLY OVERRIDES the
+  // production one for every job that uses the feature. `eta_voxels` and
+  // `max_iterations` were both duplicated as literals here; changing the
+  // production defaults alone would have shipped two no-ops.
   bool has_plsm = false;
   bool plsm_enabled = false;
-  std::string plsm_basis = "gaussian";
+  std::string plsm_basis = PlsmOptions{}.basis;
   double plsm_knots[3] = {0.0, 0.0, 0.0};  // VOXELS, per axis; 0 = derive
-  double plsm_support = 2.0;
-  double plsm_eta_voxels = 2.0;
-  int plsm_max_iterations = 60;
-  std::string plsm_seed = "inherit";
-  int plsm_refit_every = 5;
-  double plsm_move = 1.0;
-  double plsm_cg_tolerance_loose = 1e-4;
-  bool plsm_warm_start = true;
+  double plsm_support = PlsmOptions{}.support;
+  double plsm_eta_voxels = PlsmOptions{}.eta_voxels;
+  int plsm_max_iterations = PlsmOptions{}.max_iterations;
+  std::string plsm_seed = PlsmOptions{}.seed;
+  int plsm_refit_every = PlsmOptions{}.refit_every;
+  double plsm_move = PlsmOptions{}.move;
+  double plsm_cg_tolerance_loose = PlsmOptions{}.cg_tolerance_loose;
+  bool plsm_warm_start = PlsmOptions{}.warm_start;
+  // ── the volume-fraction ersatz and the margin-plateau stop (2026-08-13) ────
+  // "fraction" | "heaviside". The second is PR 324/325/326's centre-sampled
+  // smoothed Heaviside, kept reachable so the change is an A/B on this path.
+  std::string plsm_ersatz = "fraction";
+  // "discrete" | "continuum" — WHICH compliance weight. See PlsmSensWeight.
+  std::string plsm_sens_weight = "discrete";
+  int plsm_frac_samples = PlsmOptions{}.frac_samples;
+  double plsm_frac_eps_mult = PlsmOptions{}.frac_eps_mult;
+  bool plsm_frac_mollified = PlsmOptions{}.frac_mollified;
+  bool plsm_frac_sens_exact = PlsmOptions{}.frac_sens_exact;
+  bool plsm_frac_eps_l1 = PlsmOptions{}.frac_eps_l1;
+  int plsm_margin_probe_every = PlsmOptions{}.margin_probe_every;
+  int plsm_margin_plateau_probes = PlsmOptions{}.margin_plateau_probes;
+  double plsm_margin_plateau_tol = PlsmOptions{}.margin_plateau_tol;
 
   // Optional declared load case (the "loads" block). When present the run uses
   // build_production_loadcase (anchors + forces) instead of self-weight.

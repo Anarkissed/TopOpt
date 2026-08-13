@@ -1,0 +1,19 @@
+== 1. THE OPTIMISER READING — active set, frozen EXCLUDED ==
+     components 1   cavities 0
+  [PASS] the pocket is the only void component in the active set
+  [PASS] ★ the optimiser reading scores the frozen-walled pocket DRAINABLE (cavities == 0) — correct for the design region, wrong for the printer
+== 2. THE MANUFACTURING READING — whole part, frozen counts as SOLID ==
+     components 1   cavities 1
+  [PASS] the pocket is still one component over the part
+  [PASS] ★ the manufacturing reading scores it SEALED (cavities == 1)
+== 3. THE TWO READINGS DISAGREE, WHICH IS THE POINT ==
+  [PASS] one fixture, two predicates, two answers — a single reported number cannot serve both callers
+== 4. A POCKET OPEN TO THE EXTERIOR IS OPEN UNDER BOTH ==
+     optimiser cavities 0   manufacturing cavities 0
+  [PASS] with a channel to the exterior the manufacturing reading is drainable
+  [PASS] and so is the optimiser reading
+== 5. COST OF ONE DRAINABILITY READING ON A 128x31x118 GRID ==
+     0.0073 s per call (5 reps, 18920 components seen)
+     against a ~28 s state solve that is 0.026% of an iteration
+
+OK

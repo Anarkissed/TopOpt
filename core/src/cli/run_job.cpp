@@ -298,6 +298,27 @@ RunInfo build_run_info(const JobDescription& job,
     info.plsm_refit_every = options.plsm.refit_every;
     info.plsm_cg_tolerance_loose = options.plsm.cg_tolerance_loose;
     info.plsm_warm_start = options.plsm.warm_start;
+    // Task 2026-08-13-plsm-production-settings — the ersatz posture and the
+    // stopping rule's configuration. The MEASUREMENTS (stop reason, peak,
+    // counters, wall clocks) are filled post-run from the first evaluated
+    // variant, like the knot spacing above.
+    info.plsm_ersatz = options.plsm.ersatz == PlsmErsatz::VolumeFraction
+                           ? "fraction"
+                           : "heaviside";
+    info.plsm_frac_samples =
+        options.plsm.ersatz == PlsmErsatz::VolumeFraction
+            ? options.plsm.frac_samples
+            : 0;
+    info.plsm_sens_weight =
+        options.plsm.sens_weight == PlsmSensWeight::Discrete ? "discrete"
+                                                             : "continuum";
+    info.plsm_frac_eps_mult = options.plsm.frac_eps_mult;
+    info.plsm_frac_mollified = options.plsm.frac_mollified;
+    info.plsm_frac_sens_exact = options.plsm.frac_sens_exact;
+    info.plsm_frac_eps_l1 = options.plsm.frac_eps_l1;
+    info.plsm_margin_probe_every = options.plsm.margin_probe_every;
+    info.plsm_margin_plateau_probes = options.plsm.margin_plateau_probes;
+    info.plsm_margin_plateau_tol = options.plsm.margin_plateau_tol;
   }
   info.draft_quality = options.draft_quality;
   info.draft_loose_tol = options.draft_loose_tol;
@@ -367,8 +388,10 @@ std::optional<BuildFrameRotation> variant_bake_rotation(
 //
 // WHAT READS IT: `topopt::plsm_evaluate(lattice, basis, alpha, nx, ny, nz,
 // factor, threads)` reconstructs phi on any lattice from `<stem>_alpha.f64` plus
-// the `<stem>_alpha.meta` beside it, and the ersatz is `plsm_heaviside(-phi,
-// eta_voxels * spacing)`. `external_field_surface_probe` reads the resulting
+// the `<stem>_alpha.meta` beside it. ★ THE ERSATZ RECIPE IS THE ONE THE `ersatz`
+// KEY NAMES AND NOT A FIXED FORMULA — under `fraction` (the production default
+// since 2026-08-13) there is no eta in the density at all, and the .meta writes
+// the sub-cell recipe instead. `external_field_surface_probe` reads the resulting
 // occupancy field directly. Nothing in the shipped pipeline consumes it yet, and
 // that is stated rather than implied: it is an OUTPUT, not an input, until a
 // consumer exists.
@@ -404,7 +427,20 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
        "support)\n"
     << "# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, "
        "threads);\n"
-    << "# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).\n"
+    // ★ THE RECIPE FOLLOWS THE ERSATZ THE DESIGN WAS OPTIMISED UNDER, because a
+    // reader who rebuilds `rho` from `alpha` with the wrong one gets a different
+    // object. Under `fraction` there is no eta in the density at all, and a line
+    // that said there was would be a lie in the file that exists to be trusted.
+    << (variant.plsm_ersatz == PlsmErsatz::VolumeFraction
+            ? "# the ersatz is the VOLUME FRACTION of each cell inside {phi < 0}:\n"
+              "#   sample frac_samples^3 points per cell at\n"
+              "#     x = i + (p + 0.5)/k - 0.5   (the SAME lattice plsm_evaluate\n"
+              "#     uses at factor = k, so the two nest exactly)\n"
+              "#   and take the fraction with phi < 0 — mollified by the\n"
+              "#   quadrature band when frac_mollified (see plsm_frac.hpp).\n"
+              "#   FROZEN cells are STAMPED 1 / 0 by the mask, not sampled.\n"
+              "#   eta_voxels below does NOT enter this density.\n"
+            : "# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).\n")
     << "basis " << (variant.plsm_basis_kind == PlsmBasisKind::Gaussian
                         ? "gaussian" : "wendland") << "\n"
     // ★ THREE NUMBERS, PER AXIS. A reader that collapses these to one has
@@ -434,6 +470,54 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
     // every certification; this number being above 0.5 is why that cannot happen,
     // and plsm_optimize refuses to run when it is not.
     << "frozen_floor_occupancy " << variant.plsm_frozen_floor_occupancy << "\n"
+    // ── ★ THE ERSATZ THIS DESIGN WAS OPTIMISED UNDER (task 2026-08-13) ──────
+    // A reader that rebuilds phi from `alpha` must know which density the
+    // optimiser saw, because the two are not the same object: `heaviside` is
+    // H_eta at the cell centre, `fraction` is the exact cell volume fraction
+    // inside {phi < 0} by frac_samples^3 sub-samples. The `# the ersatz is
+    // plsm_heaviside(...)` line above is the HEAVISIDE recipe and is wrong for a
+    // fraction design — which is why the recipe is named here rather than only
+    // in a comment.
+    << "ersatz "
+    << (variant.plsm_ersatz == PlsmErsatz::VolumeFraction ? "fraction"
+                                                          : "heaviside")
+    << "\n"
+    << "sens_weight "
+    << (variant.plsm_sens_weight == PlsmSensWeight::Discrete ? "discrete"
+                                                             : "continuum")
+    << "\n"
+    << "frac_samples " << variant.plsm_frac_samples << "\n"
+    << "frac_cut_cells " << variant.plsm_frac_cut_cells << "\n"
+    << "frac_sample_wall_s " << variant.plsm_frac_sample_wall_s << "\n"
+    << "frac_sens_wall_s " << variant.plsm_frac_sens_wall_s << "\n"
+    // ── ★★ THE STOPPING RULE'S RECORD. A run that hit the ceiling and one whose
+    // certified margin plateaued are different objects.
+    << "stop_reason " << (variant.plsm_stop_reason.empty()
+                              ? std::string("unrecorded")
+                              : variant.plsm_stop_reason)
+    << "\n"
+    << "margin_peak_iteration " << variant.plsm_margin_peak_iteration << "\n"
+    << "margin_peak " << variant.plsm_margin_peak << "\n"
+    << "margin_probe_wall_s " << variant.plsm_margin_probe_wall_s << "\n"
+    << "# margin_probe: iteration margin load_path_ok — the CURVE the rule "
+       "watched. R4: never a point.\n";
+  for (std::size_t q = 0; q < variant.plsm_margin_probe_iterations.size(); ++q)
+    m << "margin_probe " << variant.plsm_margin_probe_iterations[q] << " "
+      << variant.plsm_margin_probe_values[q] << " "
+      << (q < variant.plsm_margin_probe_load_path_ok.size()
+              ? static_cast<int>(variant.plsm_margin_probe_load_path_ok[q])
+              : 0)
+      << "\n";
+  // ── ★ THE TOPOLOGY COUNTERS, ON EVERY RUN (the constraint does NOT ship) ──
+  m << "void_components " << variant.plsm_topology.components << "\n"
+    << "void_chi " << variant.plsm_topology.chi << "\n"
+    << "void_enclosed_solid " << variant.plsm_topology.enclosed_solid << "\n"
+    << "void_sealed_pockets " << variant.plsm_topology.sealed_pockets << "\n"
+    << "void_tunnels " << variant.plsm_topology.tunnels << "\n"
+    << "void_sealed_voxels " << variant.plsm_topology.sealed_voxels << "\n"
+    << "void_sealed_volume_mm3 " << variant.plsm_topology.sealed_volume_mm3
+    << "\n"
+    << "void_voxels " << variant.plsm_topology.void_voxels << "\n"
     // ★ AND THE FIELD IT IS NOT. This is the analytic design; the CERTIFIED
     // object is the voxel field in design.bin and the mesh beside it. A margin
     // computed on one is not a margin for the other — re-describing a design
@@ -4163,9 +4247,11 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // not carried. The round-trip test (core/tests/unit/test_job_loadcase_copy.cpp)
   // then locks the VALUES; this locks the COVERAGE, which is the half that was
   // missing.
-  const auto& [j_present, j_anchors, j_anchor_face_ids, j_groups, j_clearances,
+  const auto& [j_present, j_anchors, j_anchor_face_ids, j_face_regions,
+               j_anchor_region_ids, j_groups, j_clearances,
                j_face_protection_face_ids, j_face_protection_depth_mm,
-               j_face_protection_depths_mm,
+               j_face_protection_depths_mm, j_face_protection_region_ids,
+               j_face_protection_region_depths_mm,
                j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
@@ -4175,6 +4261,12 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   (void)j_present;
 
   ProductionLoadCase lc;
+  // ★ THE REGION LAYER travels verbatim (task 2026-08-14-face-regions §1): the
+  // specs are RESOLVED once inside build_production_loadcase, against the model
+  // it voxelizes, so the job never carries a resolved member list that could
+  // disagree with the import.
+  lc.face_regions = j_face_regions;
+  lc.anchor_region_ids = j_anchor_region_ids;
   // Anchors: raw B-rep ids (from the app) and/or geometric selectors compose.
   lc.anchor_face_ids = j_anchor_face_ids;
   for (const int id : resolve_selectors(model, j_anchors, "anchors"))
@@ -4184,6 +4276,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
     lg.face_ids = g.face_ids;
     for (const int id : resolve_selectors(model, g.faces, "loads group faces"))
       lg.face_ids.push_back(id);
+    lg.region_ids = g.region_ids;
     lg.force = g.force;
     lc.load_groups.push_back(std::move(lg));
   }
@@ -4240,6 +4333,10 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // COPIED: the PER-FACE depths (task 2026-08-12 §0a). Empty => every protection
   // uses the global depth, byte-identical to before the task.
   lc.face_protection_depths_mm = j_face_protection_depths_mm;
+  // COPIED: protections declared on a REGION, and their per-region depths (task
+  // 2026-08-14-face-regions). Empty => byte-identical to before the task.
+  lc.face_protection_region_ids = j_face_protection_region_ids;
+  lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
@@ -4321,7 +4418,16 @@ std::string loadcase_receipt_json(const JobDescription& job,
       s += "    {\"index\": " + std::to_string(g.index) + ", \"face_ids\": [";
       for (std::size_t f = 0; f < g.face_ids.size(); ++f)
         s += (f ? ", " : "") + std::to_string(g.face_ids[f]);
-      s += "], \"force_mag_n\": " + json_num(g.force_mag) +
+      s += "]";
+      // ★ AND THE REGIONS IT DECLARED (task 2026-08-14-face-regions). Written
+      // only when there are some, so a pre-region run's receipt is unchanged.
+      if (!g.region_ids.empty()) {
+        s += ", \"region_ids\": [";
+        for (std::size_t r = 0; r < g.region_ids.size(); ++r)
+          s += (r ? ", " : "") + std::to_string(g.region_ids[r]);
+        s += "]";
+      }
+      s += ", \"force_mag_n\": " + json_num(g.force_mag) +
            ", \"voxels_tagged\": " + std::to_string(g.voxels_tagged) +
            ", \"status\": \"" +
            (g.status == LoadGroupReport::Status::Ok
@@ -4348,7 +4454,18 @@ std::string loadcase_receipt_json(const JobDescription& job,
     for (std::size_t i = 0; i < setup->face_protection_reports.size(); ++i) {
       const ProductionRunSetup::FaceProtectionReport& f =
           setup->face_protection_reports[i];
+      // ★ A REGION PROTECTION REPORTS ITS REGION, not `face_id: -1` (task
+      // 2026-08-14-face-regions). A receipt that names a face which does not
+      // exist is worse than one that says nothing.
+      // ★ THE KEY IS EMITTED ONLY WHEN THERE IS A REGION. A receipt that names
+      // `face_id: -1` for a region protection claims a face that does not
+      // exist; a receipt that gains a `"region_id": -1` on every pre-region run
+      // is no longer byte-identical to the one it produced yesterday (bar R1).
+      // Both are avoided by writing the key only when it says something.
       s += "    {\"face_id\": " + std::to_string(f.face_id) +
+           (f.region_id >= 0
+                ? ", \"region_id\": " + std::to_string(f.region_id)
+                : std::string()) +
            ", \"voxels_frozen\": " + std::to_string(f.voxels_frozen) +
            ", \"depth_voxels\": " + std::to_string(f.depth_voxels) +
            ", \"depth_requested_mm\": " + json_num(f.depth_requested_mm) +
@@ -4358,6 +4475,33 @@ std::string loadcase_receipt_json(const JobDescription& job,
       s += (i + 1 < setup->face_protection_reports.size()) ? ",\n" : "\n";
     }
     s += "  ],\n";
+    // ★ WHAT EACH DECLARED REGION RESOLVED TO ON THIS IMPORT (task
+    // 2026-08-14-face-regions §3c). A union is persisted as a FILTER plus a hand
+    // add/remove list and re-evaluated on every import, so the receipt has to
+    // carry what it found — and `filter_drift`, which is the only place a CAD
+    // edit that renumbered faces becomes visible after the fact.
+    //
+    // The block is written ONLY when regions were declared, so a pre-region run
+    // produces the run_info.json it always produced (bar R1).
+    if (!setup->face_region_reports.empty()) {
+      s += "  \"face_regions\": [\n";
+      for (std::size_t i = 0; i < setup->face_region_reports.size(); ++i) {
+        const ProductionRunSetup::FaceRegionReport& r =
+            setup->face_region_reports[i];
+        s += "    {\"id\": " + std::to_string(r.id) +
+             ", \"name\": " + json_str(r.name) +
+             ", \"parent_id\": " + std::to_string(r.parent_id) +
+             ", \"member_faces\": " + std::to_string(r.member_faces) +
+             ", \"cuts\": " + std::to_string(r.cuts) +
+             ", \"area_mm2\": " + json_num(r.area_mm2) +
+             ", \"filter_matched\": " + std::to_string(r.filter_matched) +
+             (r.filter_drift_known
+                  ? ", \"filter_drift\": " + std::to_string(r.filter_drift)
+                  : std::string()) + "}";
+        s += (i + 1 < setup->face_region_reports.size()) ? ",\n" : "\n";
+      }
+      s += "  ],\n";
+    }
     // ★ THE ANCHOR/LOAD STRUCTURAL PAD, ON ITS OWN LINE (task 2026-08-12 §1f).
     // It freezes with the same FrozenSolid value at the same depth 3 as a
     // protection, and reading the two together is how "I protected one wall"
@@ -6477,6 +6621,18 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
       // it was right, and I still missed it. `s0_table.py` reading a 0 is what
       // caught it.)
       echo.anchor_pad_report = setup.anchor_pad_report;
+      // ★ AND IT BIT AGAIN (task 2026-08-14-face-regions). This branch added
+      // `face_region_reports`, emitted the block that writes them, watched
+      // loadcase.json come out WITHOUT it, and found the missing line here —
+      // three warnings deep in comments that all said "every new setup field
+      // has to be added here too". A hand-copied list cannot notice a field it
+      // was never told about. THE FIX IS THE ONE `production_loadcase_from_job`
+      // ALREADY USES: decompose by structured binding so the language forces
+      // every member to be named. It is not done here because the echo copies a
+      // deliberate SUBSET (setup.options has been moved from by this point), so
+      // the binding needs a `(void)` line per skipped field — worth doing, and
+      // out of scope for this branch's diff.
+      echo.face_region_reports = setup.face_region_reports;
       // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
       // onto the echo too, or the receipt would silently report a growth run as a
       // reduction one (the echo is a hand-copied subset, so every new setup field
@@ -6611,6 +6767,20 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     options.plsm.move = job.plsm_move;
     options.plsm.cg_tolerance_loose = job.plsm_cg_tolerance_loose;
     options.plsm.warm_start = job.plsm_warm_start;
+    options.plsm.ersatz = job.plsm_ersatz == "heaviside"
+                              ? PlsmErsatz::Heaviside
+                              : PlsmErsatz::VolumeFraction;
+    options.plsm.sens_weight = job.plsm_sens_weight == "continuum"
+                                  ? PlsmSensWeight::Continuum
+                                  : PlsmSensWeight::Discrete;
+    options.plsm.frac_samples = job.plsm_frac_samples;
+    options.plsm.frac_eps_mult = job.plsm_frac_eps_mult;
+    options.plsm.frac_mollified = job.plsm_frac_mollified;
+    options.plsm.frac_sens_exact = job.plsm_frac_sens_exact;
+    options.plsm.frac_eps_l1 = job.plsm_frac_eps_l1;
+    options.plsm.margin_probe_every = job.plsm_margin_probe_every;
+    options.plsm.margin_plateau_probes = job.plsm_margin_plateau_probes;
+    options.plsm.margin_plateau_tol = job.plsm_margin_plateau_tol;
     // The parametric path's own trajectory threads follow the solver's, so a
     // job that asked for three threads gets three here too rather than the
     // hardware's full count (which is what "he needs his machine" means).
@@ -8623,6 +8793,26 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.plsm_coefficients =
           static_cast<long long>(v0.plsm_lattice.count());
       run_info.plsm_frozen_floor_occupancy = v0.plsm_frozen_floor_occupancy;
+      // Task 2026-08-13 — WHAT ACTUALLY HAPPENED, from the first evaluated
+      // rung. `plsm_stop_reason` is the one that cannot be omitted: a run that
+      // hit the iteration ceiling and a run whose certified margin plateaued
+      // are different objects, and reading the second as the first is what made
+      // a 60-iteration cap look like a converged setting for three tasks.
+      run_info.plsm_stop_reason = v0.plsm_stop_reason;
+      run_info.plsm_margin_peak_iteration = v0.plsm_margin_peak_iteration;
+      run_info.plsm_margin_peak = v0.plsm_margin_peak;
+      run_info.plsm_margin_probe_wall_s = v0.plsm_margin_probe_wall_s;
+      run_info.plsm_frac_cut_cells =
+          static_cast<long long>(v0.plsm_frac_cut_cells);
+      run_info.plsm_frac_sample_wall_s = v0.plsm_frac_sample_wall_s;
+      run_info.plsm_frac_sens_wall_s = v0.plsm_frac_sens_wall_s;
+      run_info.plsm_void_components = v0.plsm_topology.components;
+      run_info.plsm_void_chi = v0.plsm_topology.chi;
+      run_info.plsm_void_enclosed_solid = v0.plsm_topology.enclosed_solid;
+      run_info.plsm_void_sealed_pockets = v0.plsm_topology.sealed_pockets;
+      run_info.plsm_void_tunnels = v0.plsm_topology.tunnels;
+      run_info.plsm_void_sealed_voxels = v0.plsm_topology.sealed_voxels;
+      run_info.plsm_void_sealed_volume_mm3 = v0.plsm_topology.sealed_volume_mm3;
     }
     // Handoff 131 — finalize the per-rung infeasibility outcome (one entry per
     // evaluated rung; all-false is the positive statement "no rung lost its load

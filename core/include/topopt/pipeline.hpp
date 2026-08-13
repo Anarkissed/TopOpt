@@ -1101,6 +1101,30 @@ struct MinimizePlasticVariant {
   // always carries a number above it and the receipt can say so.
   double plsm_frozen_floor_occupancy = 0.0;
 
+  // ── ★ THE VOLUME-FRACTION ERSATZ AND THE MARGIN-PLATEAU STOP (2026-08-13) ──
+  //
+  // ★ THE STOP REASON IS THE ONE FIELD HERE THAT CANNOT BE OMITTED. A run that
+  // hit the iteration ceiling and a run whose certified margin plateaued are
+  // different objects, and reading the second as the first is what made
+  // "max_iterations = 60" look like a converged setting for three tasks.
+  PlsmErsatz plsm_ersatz = PlsmErsatz::VolumeFraction;
+  PlsmSensWeight plsm_sens_weight = PlsmSensWeight::Discrete;
+  int plsm_frac_samples = 0;
+  std::size_t plsm_frac_cut_cells = 0;
+  double plsm_frac_sample_wall_s = 0.0;
+  double plsm_frac_sens_wall_s = 0.0;
+  // The counters, not the constraint (plsm_topology.hpp).
+  PlsmVoidTopology plsm_topology;
+  std::string plsm_stop_reason;
+  // The certified-margin curve the rule actually watched, and its peak. Reported
+  // as a CURVE because R4 has been reversed twice by a point measurement.
+  std::vector<int> plsm_margin_probe_iterations;
+  std::vector<double> plsm_margin_probe_values;
+  std::vector<char> plsm_margin_probe_load_path_ok;
+  double plsm_margin_probe_wall_s = 0.0;
+  int plsm_margin_peak_iteration = 0;
+  double plsm_margin_peak = 0.0;
+
   // Handoff 131 — true iff this rung was ENDED on the rung-infeasibility signature
   // (simp.hpp rung_infeasible): the optimizer severed the load path, so the design
   // is a corpse. Such a rung is NEVER accepted, its per-rung ANALYSIS IS SKIPPED

@@ -1,0 +1,54 @@
+# THE ANALYTIC DESIGN: phi(x) = sum_i alpha_i psi(|x - x_i|_R).
+# alpha is /tmp/plsmv/out/variant_038_alpha.f64, 7280 float64 in x-fastest knot order.
+# Rebuild with topopt::plsm_make_lattice(nx, ny, nz, knots_vox..., support)
+# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, threads);
+# the ersatz is the VOLUME FRACTION of each cell inside {phi < 0}:
+#   sample frac_samples^3 points per cell at
+#     x = i + (p + 0.5)/k - 0.5   (the SAME lattice plsm_evaluate
+#     uses at factor = k, so the two nest exactly)
+#   and take the fraction with phi < 0 — mollified by the
+#   quadrature band when frac_mollified (see plsm_frac.hpp).
+#   FROZEN cells are STAMPED 1 / 0 by the mask, not sampled.
+#   eta_voxels below does NOT enter this density.
+basis gaussian
+knots_vox 2 2 2
+support_vox 4 4 4
+counts 28 10 26
+pad 2 2 2
+n_coeff 7280
+n_voxels 25344
+compression 3.4813186813186814
+eta_voxels 1
+nx 48
+ny 12
+nz 44
+spacing 4.5474114736916302
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+requested_vf 0.38
+achieved_vf 0.37999996625611432
+frozen_floor_occupancy 0.90915494309189537
+ersatz fraction
+sens_weight discrete
+frac_samples 4
+frac_cut_cells 116
+frac_sample_wall_s 0.25153966760262847
+frac_sens_wall_s 0.029084751848131418
+stop_reason margin-plateau
+margin_peak_iteration 4
+margin_peak 5423.4715199245775
+margin_probe_wall_s 3.843110625
+# margin_probe: iteration margin load_path_ok — the CURVE the rule watched. R4: never a point.
+margin_probe 4 5423.4715199245775 1
+margin_probe 8 5409.5692870159037 1
+margin_probe 12 5423.7613470314318 1
+void_components 7
+void_chi 5
+void_enclosed_solid 0
+void_sealed_pockets 0
+void_tunnels 2
+void_sealed_voxels 0
+void_sealed_volume_mm3 0
+void_voxels 958
+# NOT CERTIFIED. The certificate in report.json belongs to the voxel field this was optimised on, at this resolution, and does NOT carry over to a re-evaluation at another one.

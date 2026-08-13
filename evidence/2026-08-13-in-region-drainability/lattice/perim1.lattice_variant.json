@@ -1,0 +1,44 @@
+{
+  "provenance": "latticed a finished variant",
+  "optimization": false,
+  "design_iterations": 0,
+  "optimizer_iterations_run": 0,
+  "variant_meshes_written": 0,
+  "analysis_solves": 3,
+  "analysis_solves_note": "certification solves only, no design loop: (1) the null-posture solve that reproduces this variant's RECORDED margin — the proof the load case and design are the originals; (2) the lattice pipeline's own null-posture reproduction; (3) the COMPOSITE certification; plus (4) the band-clamp counterfactual when any voxel was clamped",
+  "source": {
+    "design": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-page-core-hookup-bf5ecc/evidence/2026-08-12-plsm-penalty-production/arms/E1_c1_eta1/design.bin",
+    "variant_index": 0,
+    "requested_volume_fraction": 0.7973,
+    "achieved_volume_fraction": 0.7973021712,
+    "optimizer_iterations_originally": 120,
+    "design_fingerprint": "8915912091249371881",
+    "field_provenance": "the demand field this lattice is graded from is THIS variant's own certification von Mises field, recovered by the reproduction solve below from the stored design — not a simulation of the solid part, and not another run's field"
+  },
+  "reproduction": {
+    "recorded_margin_worst_case": 3255.148862,
+    "reproduced_margin_worst_case": 3255.148854,
+    "exact": false,
+    "relative_delta": 2.418454729e-09,
+    "band": 1e-06,
+    "note": "ENFORCED, not reported: a reproduction outside `band` throws and nothing is written. `band` is a multiple of the certification solve's own relative-residual tolerance, because the recorded margin came from a solve carrying a warm Krylov recycle subspace and this one is denied it by ScopedLadderSolverIsolation — two Krylov paths on one operator, so `exact` is false on any run whose solves fall back to Jacobi-CG"
+  },
+  "model": "M2_verticalStand.step",
+  "resolution": 128,
+  "load_source": "loadcase",
+  "loadcase_receipt": "loadcase.json",
+  "lattice": {
+    "topology": "octet",
+    "graded": true,
+    "cell_mm": 4,
+    "rho_min_used": 0.09738372186,
+    "rho_max_used": 0.8827762399,
+    "latticed_voxels": 1073,
+    "solid_margin_worst_case": 3255.148854,
+    "lattice_margin_worst_case": 3109.338153,
+    "lattice_margin_effective": 643.8282405,
+    "lattice_accepted": true,
+    "receipt": "variant_080_lattice.report.json"
+  },
+  "meshes": ["variant_080_lattice.stl"]
+}

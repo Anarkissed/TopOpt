@@ -232,10 +232,15 @@ public struct LatticePage: View {
                 } else {
                     // L4: the panel is only as tall as its content and sits CENTRED
                     // on the left edge (no stretched frame, no empty bottom).
-                    panelView(maxHeight: geo.size.height - 200)
-                        .frame(width: 348)
-                        .frame(maxHeight: .infinity, alignment: .center)
-                        .padding(.leading, DS.Space.xl4)
+                    //
+                    // ★ §6 (task 2026-08-14) — through the SHARED placement now.
+                    // `height − 200` is a number with no relationship to what is on
+                    // the screen; `PageChrome.sidePanelBand` is the band below the
+                    // identity rows and above the bottom edge, derived from the
+                    // same tokens those rows are built from.
+                    panelView(maxHeight: PageChrome.sidePanelBand(
+                        canvasHeight: geo.size.height))
+                        .pageLeftModal(canvasHeight: geo.size.height)
                 }
                 bottomRightCluster
                 if !gate.satisfied { gateOverlay }

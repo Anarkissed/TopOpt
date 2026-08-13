@@ -4,8 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "topopt/clearance.hpp"  // ClearanceParams, ClearanceKind
-#include "topopt/fea.hpp"        // DirichletBC, NodalLoad
+#include "topopt/clearance.hpp"    // ClearanceParams, ClearanceKind
+#include "topopt/face_region.hpp"  // FaceRegionSpec, ResolvedFaceRegion
+#include "topopt/fea.hpp"          // DirichletBC, NodalLoad
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/pipeline.hpp"   // MinimizePlasticOptions
 #include "topopt/step.hpp"       // StepModel
@@ -70,12 +71,27 @@ struct ProductionLoadCase {
   // Anchor B-rep faces: tagged Fixture and fully clamped.
   std::vector<int> anchor_face_ids;
 
+  // ★ THE REGION LAYER (task 2026-08-14-face-regions §1). Declared once,
+  // referred to by id from the anchors, the groups and the protections below.
+  // build_production_loadcase resolves them against `model` ONCE, so a union
+  // that three consumers read cannot resolve to three different things.
+  //
+  // A region is (member face ids) ∩ (half-spaces). Resolving one READS
+  // `StepModel::triangle_face` and `StepModel::faces`; it never writes either,
+  // so projection and every analytic-surface lookup are untouched. Empty (the
+  // default) => no regions => byte-identical to the pre-region run.
+  std::vector<FaceRegionSpec> face_regions;
+  std::vector<int> anchor_region_ids;  // regions tagged Fixture + clamped
+
   // One load group: a set of B-rep faces sharing a total force (newtons) that is
   // spread as a consistent distributed traction over the group's exposed faces
   // (topopt::traction_loads) — never a lumped point force. A zero-force group (or
   // one whose faces tag no voxels) contributes nothing.
   struct LoadGroup {
     std::vector<int> face_ids;
+    // Regions the group ALSO covers (ids into `face_regions`). Tagged after the
+    // face ids, so a group naming no regions is byte-identical.
+    std::vector<int> region_ids;
     Vec3 force{0.0, 0.0, 0.0};  // fx, fy, fz in N
   };
   std::vector<LoadGroup> load_groups;
@@ -195,11 +211,25 @@ struct ProductionLoadCase {
   // slabs.
   std::vector<double> face_protection_depths_mm;
 
+  // ★ PROTECTIONS BY REGION. Parallel: one region id and one depth (mm) each; a
+  // depth <= 0 means "use the global". Fifty sectors of a grid split, each with
+  // its own depth, is exactly this list — the hand-authored grading of §6.
+  std::vector<int> face_protection_region_ids;
+  std::vector<double> face_protection_region_depths_mm;
+
   // The depth (mm) in force for protection `i`, honouring the per-face override.
   double face_protection_depth_for(std::size_t i) const {
     if (i < face_protection_depths_mm.size() &&
         face_protection_depths_mm[i] > 0.0)
       return face_protection_depths_mm[i];
+    return face_protection_depth_mm;
+  }
+
+  // The same, for region protection `i`.
+  double face_protection_region_depth_for(std::size_t i) const {
+    if (i < face_protection_region_depths_mm.size() &&
+        face_protection_region_depths_mm[i] > 0.0)
+      return face_protection_region_depths_mm[i];
     return face_protection_depth_mm;
   }
 };
@@ -240,6 +270,7 @@ struct LoadGroupReport {
   };
   std::size_t index = 0;        // the group's position in lc.load_groups
   std::vector<int> face_ids;    // the group's declared faces
+  std::vector<int> region_ids;  // and the regions it declared (task face-regions)
   double force_mag = 0.0;       // |force| in newtons
   std::size_t voxels_tagged = 0;
   Status status = Status::Ok;
@@ -297,6 +328,11 @@ struct ProductionRunSetup {
   // Numbers shown to the user are these numbers. Empty when none was declared.
   struct FaceProtectionReport {
     int face_id = -1;
+    // ★ >= 0 when this protection was declared on a REGION rather than a face
+    // (task 2026-08-14-face-regions). `face_id` stays -1 in that case: a region
+    // is not a face and must never be reported as one — that conflation is the
+    // whole defect this task exists to fix.
+    int region_id = -1;
     std::size_t voxels_frozen = 0;   // part voxels this protection set FrozenSolid
     int depth_voxels = 0;            // the depth (layers) used on this run's grid
     bool thinner_than_depth = false; // the face's solid was shallower than depth
@@ -309,6 +345,26 @@ struct ProductionRunSetup {
     double depth_effective_mm = 0.0;
   };
   std::vector<FaceProtectionReport> face_protection_reports;
+
+  // ★ WHAT EACH DECLARED REGION RESOLVED TO ON THIS IMPORT (task
+  // 2026-08-14-face-regions §3c). A union is persisted as a FILTER plus a hand
+  // add/remove list and re-evaluated every import, so the one thing a receipt
+  // must never do is absorb a change: if the filter matched seven blend faces
+  // when the union was authored and matches five today, that is a CAD edit the
+  // user has to see. `filter_drift_known` says whether an author-time count was
+  // recorded at all; `filter_drift` is (now - then).
+  struct FaceRegionReport {
+    int id = -1;
+    std::string name;
+    int parent_id = -1;
+    std::size_t member_faces = 0;   // faces in the region on THIS import
+    std::size_t cuts = 0;           // half-spaces bounding it
+    double area_mm2 = 0.0;
+    int filter_matched = 0;         // what the filter alone matched, now
+    int filter_drift = 0;           // now - at authoring
+    bool filter_drift_known = false;
+  };
+  std::vector<FaceRegionReport> face_region_reports;
 
   // ★ THE ANCHOR/LOAD STRUCTURAL PAD, REPORTED SEPARATELY (task 2026-08-12 §1f).
   //

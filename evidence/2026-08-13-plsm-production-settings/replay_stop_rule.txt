@@ -1,0 +1,13 @@
+arm                               rung             cad  would stop  would return    actually returned             delta
+--------------------------------------------------------------------------------------------------------------------------
+L0_none        Stage A control    0.5283 light      20  ran out (it120)it80  2609.1    it120  2183.2                +19.5%
+L1_perim1      Stage A C=1        0.5283 light      20  it120       it60  2384.9    it120  1930.9                +23.5%
+E2_c1_eta2     Stage A C=1 eta=2  0.7973 shipped    20  it100       it40  3251.4    it120  3252.3                 -0.0%
+E1_c1_eta1     Stage A C=1 eta=1  0.7973 shipped    20  it100       it40  3251.8    it120  3251.0                 +0.0%
+H1_heaviside   PR 327 control     0.68 probe path   10  it110       it80  3276.0    it120  2640.4                +24.1%
+F1_frac4       PR 327 arm 1       0.68 probe path   10  ran out (it50)it50  3379.0    it57 compliance-plateau  3379.4    -0.0%
+A2_all         PR 327 arm 2       0.68 probe path   10  ran out (it60)it50  3392.0    it61 compliance-plateau  3391.1    +0.0%
+
+★ The 'delta' column is what STOPPING AT THE PEAK recovers over what the
+  run actually returned. Positive means the shipped rule would have
+  returned a BETTER-CERTIFIED design than the run did.

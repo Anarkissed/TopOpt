@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -66,18 +67,53 @@ void log_clearance(int face_id, ClearanceKind kind, std::size_t voxels_frozen,
 // and — the honest edge — whether the face's own solid was thinner than that
 // depth (so it froze what exists, no silent over-claim). A protection that tags no
 // solid voxels is flagged SKIP so the log surfaces the no-op rather than hiding it.
+// `region_id >= 0` names a REGION protection instead of a face one; the line
+// says which, because a region is not a face and reporting one as the other is
+// the exact conflation this task exists to end.
 void log_face_protection(int face_id, std::size_t voxels_frozen, int depth_voxels,
                          bool thinner_than_depth, double requested_mm,
-                         double effective_mm) {
+                         double effective_mm, int region_id = -1) {
   const LoadcaseLogFn& sink = loadcase_sink();
   if (!sink) return;
+  char what[32];
+  if (region_id >= 0)
+    std::snprintf(what, sizeof(what), "region=%d", region_id);
+  else
+    std::snprintf(what, sizeof(what), "face=%d", face_id);
   char buf[320];
   std::snprintf(buf, sizeof(buf),
-                "[loadcase] face-protection face=%d voxels_frozen=%zu depth=%d "
+                "[loadcase] face-protection %s voxels_frozen=%zu depth=%d "
                 "requested=%.4gmm effective=%.4gmm %s%s",
-                face_id, voxels_frozen, depth_voxels, requested_mm, effective_mm,
+                what, voxels_frozen, depth_voxels, requested_mm, effective_mm,
                 voxels_frozen == 0 ? "SKIP=no-solid-tagged" : "status=ok",
                 thinner_than_depth ? " thinner-than-depth" : "");
+  sink(std::string(buf));
+}
+
+// ★ ONE LINE PER DECLARED REGION (task 2026-08-14-face-regions §3c). What it
+// resolved to on THIS import, and — the line that matters — whether the filter
+// that defines it matches a different number of faces than it did when the user
+// authored it. A re-import after a CAD edit renumbers B-rep faces; a union that
+// silently absorbed that change would be wrong in a way nothing downstream could
+// notice, so the drift is stated here, in the run log, every time.
+void log_face_region(const ProductionRunSetup::FaceRegionReport& r) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  char buf[384];
+  std::string drift = "drift=unknown(not-recorded)";
+  if (r.filter_drift_known) {
+    char d[64];
+    std::snprintf(d, sizeof(d), "drift=%+d", r.filter_drift);
+    drift = d;
+  }
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] region %d \"%s\" faces=%zu cuts=%zu area=%.4gmm^2 "
+                "filter_matched=%d %s%s",
+                r.id, r.name.c_str(), r.member_faces, r.cuts, r.area_mm2,
+                r.filter_matched, drift.c_str(),
+                (r.filter_drift_known && r.filter_drift != 0)
+                    ? "  CHANGED SINCE AUTHORING — check this selection"
+                    : "");
   sink(std::string(buf));
 }
 
@@ -198,6 +234,82 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   VoxelGrid& grid = setup.grid;
   grid = voxelize(model.mesh, resolution);
 
+  // ★ RESOLVE THE REGION LAYER ONCE (task 2026-08-14-face-regions §1). Every
+  // consumer below — anchors, groups, protections — reads THIS map, so a union
+  // referenced three times cannot resolve to three different member sets.
+  // Resolution reads `model.triangle_face` / `model.faces` and writes neither.
+  std::map<int, const ResolvedFaceRegion*> region_by_id;
+  const std::vector<ResolvedFaceRegion> regions =
+      resolve_face_regions(model, lc.face_regions);
+  for (const ResolvedFaceRegion& r : regions) {
+    region_by_id[r.id] = &r;
+    ProductionRunSetup::FaceRegionReport rep;
+    rep.id = r.id;
+    rep.name = r.name;
+    rep.parent_id = r.parent_id;
+    rep.member_faces = r.member_faces.size();
+    rep.cuts = r.cuts.size();
+    rep.area_mm2 = r.area_mm2;
+    rep.filter_matched = r.filter_matched;
+    rep.filter_drift = r.filter_drift;
+    rep.filter_drift_known = r.filter_drift_known;
+    setup.face_region_reports.push_back(rep);
+    log_face_region(rep);
+  }
+  // A reference to a region that was never declared is a job-authoring error,
+  // not a silent no-op: it would tag nothing and report success.
+  auto region_or_throw = [&](int id, const std::string& context)
+      -> const ResolvedFaceRegion& {
+    const auto it = region_by_id.find(id);
+    if (it == region_by_id.end())
+      throw std::invalid_argument(
+          context + " names region " + std::to_string(id) +
+          ", which is not declared in this load case's regions. A region must "
+          "be declared once and referred to by id.");
+    return *it->second;
+  };
+
+  // ★ THE SLIVER GUARD, BEFORE ANYTHING IS TAGGED (task
+  // 2026-08-14-face-regions §5a, bar R5).
+  //
+  // A 10x5 grid split is FIFTY sub-regions from one operation. On a 10,554-voxel
+  // wall that is ~211 each and useful; on a 500-voxel face it is ten each and
+  // useless. The floor is kRegionSliverFloorVoxels = the size of the SMALLEST
+  // face his own CAD handed him (M2_verticalStand's faces 41-47, sixteen voxels
+  // each at resolution 128), so the guard refuses to manufacture anything
+  // smaller than the smallest thing the part itself produced.
+  //
+  // Only CUT regions are priced. A region with no cuts is a union or a plain
+  // face — whatever size the CAD made it, that size is the user's to select,
+  // and refusing it would be this code overruling the part.
+  {
+    std::map<std::vector<int>, std::vector<int>> member_voxels_by_faces;
+    for (const ResolvedFaceRegion& r : regions) {
+      if (r.cuts.empty()) continue;
+      auto it = member_voxels_by_faces.find(r.member_faces);
+      if (it == member_voxels_by_faces.end())
+        it = member_voxels_by_faces
+                 .emplace(r.member_faces, region_member_voxels(grid, model, r, 1))
+                 .first;
+      const std::size_t here = cut_voxels(grid, it->second, r.cuts).size();
+      if (here < kRegionSliverFloorVoxels)
+        throw std::invalid_argument(
+            "region " + std::to_string(r.id) +
+            (r.name.empty() ? "" : " \"" + r.name + "\"") + " holds " +
+            std::to_string(here) + " voxels at resolution " +
+            std::to_string(resolution) + " — under the floor of " +
+            std::to_string(kRegionSliverFloorVoxels) +
+            ". It is a SPLIT of a selection holding " +
+            std::to_string(it->second.size()) +
+            " voxels, so at most " +
+            std::to_string(it->second.size() / kRegionSliverFloorVoxels) +
+            " sub-regions can clear the floor here. Split it into fewer pieces, "
+            "or run at a finer resolution. (The floor is the size of the "
+            "smallest face this part's own CAD produced; a sub-region below it "
+            "selects too little to carry a role.)");
+    }
+  }
+
   // Anchors -> Fixture (clamped + retained). Snapshot the anchors-only grid as
   // the clean base for per-group traction, so each group's traction covers ONLY
   // its own faces (traction_loads spreads a force over every Load voxel it sees).
@@ -208,12 +320,16 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     validate_face_id(fid, model, "load case anchor");
   for (int fid : lc.anchor_face_ids)
     tag_step_face(grid, model, fid, VoxelTag::Fixture);
+  for (int rid : lc.anchor_region_ids)
+    tag_step_region(grid, model, region_or_throw(rid, "load case anchor"),
+                    VoxelTag::Fixture);
   const VoxelGrid base_grid = grid;
 
   std::vector<NodalLoad> external;
   // The load faces actually retained on the main grid (the non-zero groups),
   // collected so their structural pad is frozen alongside the anchors' below.
   std::vector<int> retained_load_faces;
+  std::vector<int> retained_load_regions;
   setup.load_group_reports.reserve(lc.load_groups.size());
   for (std::size_t gi = 0; gi < lc.load_groups.size(); ++gi) {
     const ProductionLoadCase::LoadGroup& group = lc.load_groups[gi];
@@ -225,9 +341,10 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // force was lost upstream). Log why, then skip — BEFORE resolving its
       // face ids, exactly as before the resolution task (a dead group's ids
       // are never validated, so pre-task jobs keep their behavior).
-      log_load_group(gi, group.face_ids.size(), force_mag, 0, "zero-force");
+      log_load_group(gi, group.face_ids.size() + group.region_ids.size(),
+                     force_mag, 0, "zero-force");
       setup.load_group_reports.push_back(
-          {gi, group.face_ids, force_mag, 0,
+          {gi, group.face_ids, group.region_ids, force_mag, 0,
            LoadGroupReport::Status::ZeroForce});
       continue;
     }
@@ -238,15 +355,20 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     VoxelGrid gg = base_grid;  // anchors only, no other group's Load
     for (int fid : group.face_ids)
       tag_step_face(gg, model, fid, VoxelTag::Load);
+    for (int rid : group.region_ids)
+      tag_step_region(gg, model,
+                      region_or_throw(rid, "load group " + std::to_string(gi)),
+                      VoxelTag::Load);
     const std::size_t tagged = count_tagged(gg, VoxelTag::Load);
     if (tagged == 0) {
       // The group's faces tagged NO solid voxels — a face smaller than a voxel
       // footprint at this resolution (handoff 099). Its traction can't be built,
       // so it contributes nothing and `external` stays empty for this group. Log
       // the reason (this is what the require_external_loads guard then refuses on).
-      log_load_group(gi, group.face_ids.size(), force_mag, 0, "zero-tagged");
+      log_load_group(gi, group.face_ids.size() + group.region_ids.size(),
+                     force_mag, 0, "zero-tagged");
       setup.load_group_reports.push_back(
-          {gi, group.face_ids, force_mag, 0,
+          {gi, group.face_ids, group.region_ids, force_mag, 0,
            LoadGroupReport::Status::ZeroTagged});
       continue;
     }
@@ -258,9 +380,21 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       tag_step_face(grid, model, fid, VoxelTag::Load);
       retained_load_faces.push_back(fid);
     }
-    log_load_group(gi, group.face_ids.size(), force_mag, tagged, "ok");
-    setup.load_group_reports.push_back(
-        {gi, group.face_ids, force_mag, tagged, LoadGroupReport::Status::Ok});
+    // Regions are retained on the main grid the same way. Their structural pad
+    // is frozen from the retained REGION list below, so a load applied to a
+    // union or to one sector of a grid split sits on the same pad a load face
+    // has always sat on — the pad is not a face-only privilege.
+    for (int rid : group.region_ids) {
+      tag_step_region(grid, model,
+                      region_or_throw(rid, "load group " + std::to_string(gi)),
+                      VoxelTag::Load);
+      retained_load_regions.push_back(rid);
+    }
+    log_load_group(gi, group.face_ids.size() + group.region_ids.size(),
+                   force_mag, tagged, "ok");
+    setup.load_group_reports.push_back({gi, group.face_ids, group.region_ids,
+                                        force_mag, tagged,
+                                        LoadGroupReport::Status::Ok});
   }
 
   // Dirichlet BCs from the Fixture voxels (clamp all 8 corner nodes, deduped).
@@ -423,7 +557,8 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   const bool want_pad = lc.minimize_plastic || (growth && kGrowthPathAnchorPad);
   setup.growth_anchor_pad = growth && want_pad;
   log_ladder_mode(growth, opts.volume_fraction_ladder, want_pad);
-  const bool want_protect = !lc.face_protection_face_ids.empty();
+  const bool want_protect = !lc.face_protection_face_ids.empty() ||
+                            !lc.face_protection_region_ids.empty();
   if (want_pad || want_protect) {
     DesignMask pad = make_active_mask(grid);
     if (want_pad) {
@@ -433,16 +568,27 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       for (int fid : retained_load_faces)
         mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
                        kProductionAnchorPadDepthVoxels, pad);
+      // A retained load REGION gets the same structural pad a retained load
+      // face gets. The pad is what ties a boundary condition into the body; a
+      // load applied to a union or to one sector of a grid split needs it for
+      // exactly the same reason (diagnosis 064).
+      for (int rid : retained_load_regions)
+        mask_step_region(grid, model, region_or_throw(rid, "retained load"),
+                         MaskValue::FrozenSolid,
+                         kProductionAnchorPadDepthVoxels, pad);
       // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
       // is the pad and only the pad — the protections below run after this.
       std::size_t pad_voxels = 0;
       for (std::size_t idx = 0; idx < pad.size(); ++idx)
         if (pad[idx] == MaskValue::FrozenSolid) ++pad_voxels;
-      setup.anchor_pad_report = {true, kProductionAnchorPadDepthVoxels,
-                                 lc.anchor_face_ids.size(),
-                                 retained_load_faces.size(), pad_voxels};
-      log_anchor_pad(kProductionAnchorPadDepthVoxels, lc.anchor_face_ids.size(),
-                     retained_load_faces.size(), pad_voxels);
+      setup.anchor_pad_report = {
+          true, kProductionAnchorPadDepthVoxels,
+          lc.anchor_face_ids.size() + lc.anchor_region_ids.size(),
+          retained_load_faces.size() + retained_load_regions.size(), pad_voxels};
+      log_anchor_pad(kProductionAnchorPadDepthVoxels,
+                     lc.anchor_face_ids.size() + lc.anchor_region_ids.size(),
+                     retained_load_faces.size() + retained_load_regions.size(),
+                     pad_voxels);
     }
     if (want_protect) {
       // ★ THE DEPTH IS PER FACE (task 2026-08-12 §0a). A face the user marked
@@ -452,7 +598,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // Each depth → voxel layers on THIS run's grid, floored at 1 so a protection
       // always freezes a real skin. mask_step_face walks part-SOLID layers, so
       // this NEVER frees void — it only pins existing part material.
-      setup.face_protection_reports.reserve(lc.face_protection_face_ids.size());
+      setup.face_protection_reports.reserve(
+          lc.face_protection_face_ids.size() +
+          lc.face_protection_region_ids.size());
       for (std::size_t pi = 0; pi < lc.face_protection_face_ids.size(); ++pi) {
         const int fid = lc.face_protection_face_ids[pi];
         if (fid < 0 || fid >= model.face_count) continue;
@@ -478,9 +626,37 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
           if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
         const bool thin = frozen_deeper == frozen;
         setup.face_protection_reports.push_back(
-            {fid, frozen, depth_vox, thin, requested_mm, effective_mm});
+            {fid, -1, frozen, depth_vox, thin, requested_mm, effective_mm});
         log_face_protection(fid, frozen, depth_vox, thin, requested_mm,
                             effective_mm);
+      }
+      // ★ PROTECTIONS DECLARED ON A REGION (task 2026-08-14-face-regions).
+      // Identical arithmetic, identical honesty: the same per-region mask, the
+      // same deeper-by-one probe for the thinner-than-depth signal, the same
+      // requested/effective pair. What changes is only WHAT is selected — and
+      // that fifty sectors of a grid split can each carry their own depth,
+      // which is what makes a grid split a hand-authored grading mechanism.
+      for (std::size_t pi = 0; pi < lc.face_protection_region_ids.size(); ++pi) {
+        const int rid = lc.face_protection_region_ids[pi];
+        const ResolvedFaceRegion& reg =
+            region_or_throw(rid, "face protection");
+        const double requested_mm = lc.face_protection_region_depth_for(pi);
+        const int depth_vox =
+            std::max(1, static_cast<int>(std::lround(requested_mm / grid.spacing)));
+        const double effective_mm = depth_vox * grid.spacing;
+        DesignMask one = make_active_mask(grid);
+        const std::size_t frozen = mask_step_region(
+            grid, model, reg, MaskValue::FrozenSolid, depth_vox, one);
+        DesignMask deeper = make_active_mask(grid);
+        const std::size_t frozen_deeper = mask_step_region(
+            grid, model, reg, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        for (std::size_t idx = 0; idx < pad.size(); ++idx)
+          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+        const bool thin = frozen_deeper == frozen;
+        setup.face_protection_reports.push_back(
+            {-1, rid, frozen, depth_vox, thin, requested_mm, effective_mm});
+        log_face_protection(-1, frozen, depth_vox, thin, requested_mm,
+                            effective_mm, rid);
       }
     }
     opts.design_mask = std::move(pad);

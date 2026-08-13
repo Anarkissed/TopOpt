@@ -1,0 +1,21 @@
+rung 0.68000000000000005
+requested_vf 0.68000000000000005
+achieved_vf 0.8197179542667532
+iterations 27
+accepted 1
+margin_worst_case 3254.3566371815937
+margin_effective 673.85617278791267
+max_von_mises_mpa 0.01690042184424884
+nx 128
+ny 31
+nz 118
+spacing 1.7052793026343613
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+iso 0.5
+factor 2
+interp tricubic
+lattice design
+voxels_above_iso 88424
+# AS PRINTED: void narrower than the 5x0.45 mm wall stack filled solid, which is what the slicer does

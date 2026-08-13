@@ -1,0 +1,17 @@
+rung 0.80
+requested_vf 0.79730000000000001
+nx 256
+ny 62
+nz 236
+spacing 0.85263965131718067
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+iso 0.5
+factor 1
+interp none
+achieved_vf 0.79729315443987592
+iterations 120
+wall_s 3603.1876654168591
+compliance 0.0024140024896324467
+# ANALYTIC: phi = sum alpha_i psi_i evaluated at the F=2 lattice; 85680 coefficients; frozen mask stamped by the containing coarse voxel
