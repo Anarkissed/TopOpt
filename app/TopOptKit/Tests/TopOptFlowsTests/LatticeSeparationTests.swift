@@ -333,6 +333,64 @@ final class LatticeSeparationTests: XCTestCase {
         XCTAssertEqual(byFace[17] ?? 0, 3.0, accuracy: 1e-12)
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // MARK: §3d — the depth PLANE, the thing the 3D handle grabs
+
+    /// ★ THE PLANE REACHES INTO THE PART, and that is the whole difference from a
+    /// keep-out. A clearance slab is space that must stay EMPTY, so it extrudes
+    /// along the outward face normal; a lattice slab is material that must be HELD
+    /// and lightened, so it extrudes the other way. `LatticeRegionEmission.spec`
+    /// flips it for the region; this flips it for the picture, so the plane on
+    /// screen is the region in the job.
+    func testEachLatticedFaceGetsADepthPlaneReachingIntoThePart() throws {
+        let (p, gid) = oneGroupTwoWalls()
+        let planes = p.latticeDepthPlanes()
+        XCTAssertEqual(planes.count, 2, "§3d: one plane per latticed face")
+
+        for plane in planes {
+            guard case let .slab(center, normal, _, _, _, _, depthMM) = plane.volume.shape
+            else { return XCTFail("§3d: a face plane is a SLAB, not \(plane.volume.shape)") }
+            XCTAssertEqual(Double(depthMM), 7.0, accuracy: 1e-4,
+                           "§3d: at the dragged depth, not the 4 mm project default")
+            // Face 16's outward normal is +z and 17's is −z; both slabs must run
+            // the OTHER way, into the material between them.
+            let expectedInward: SIMD3<Float> =
+                plane.faceKey == 16 ? SIMD3(0, 0, -1) : SIMD3(0, 0, 1)
+            XCTAssertEqual(simd_dot(normal, expectedInward), 1, accuracy: 1e-5,
+                           "§3d: the slab reaches INTO the part, not out of it")
+            // The grab knob sits at the slab's inner face, so dragging it along
+            // that normal IS the depth (the keep-clear `.slabDepth` pair, verbatim).
+            XCTAssertEqual(plane.handle.role, .slabDepth)
+            XCTAssertEqual(simd_distance(plane.handle.anchor, center), depthMM,
+                           accuracy: 1e-3)
+        }
+        XCTAssertEqual(Set(planes.map(\.faceKey)), [16, 17])
+        XCTAssertEqual(Set(planes.map(\.groupID)), [gid])
+    }
+
+    /// The handle writes the ONE depth, clamped like every other route to it —
+    /// so a viewport drag cannot reach a depth the card could not.
+    func testTheDepthPlaneHandleWritesTheOneNumber() {
+        let (p, gid) = oneGroupTwoWalls()
+        let ref = LatticePrimitiveRef.face(group: gid, face: 16)
+        p.writeLatticeDepthMM(ref, mm: 9.25)
+        XCTAssertEqual(p.latticeSlabDepthMM(ref, in: gid), 9.25, accuracy: 1e-12)
+        XCTAssertEqual(p.latticeSlabDepthMM(.face(group: gid, face: 17), in: gid),
+                       7.0, accuracy: 1e-12, "§3d: and it moved ONLY that face")
+        p.writeLatticeDepthMM(ref, mm: 1e6)
+        XCTAssertEqual(p.latticeSlabDepthMM(ref, in: gid), LatticeSlabDepth.maxMM,
+                       accuracy: 1e-12, "clamped, like the card's drag")
+    }
+
+    /// The TO page draws no depth planes — but they are still THERE to be built,
+    /// which is the difference between hidden and disabled (§2c).
+    func testTheDepthPlanesExistEvenWhereTheyAreNotDrawn() {
+        let (p, _) = oneGroupTwoWalls()
+        XCTAssertFalse(WorkspaceStageVisibility.of(.topology).latticeDepthPlanes)
+        XCTAssertEqual(p.latticeDepthPlanes().count, 2,
+                       "§2c: the model does not know about stages, and must not")
+    }
+
     func testTheDepthFallsBackGroupThenProject() {
         let gid = UUID()
         let ref = LatticePrimitiveRef.face(group: gid, face: 16)
