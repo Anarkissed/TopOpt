@@ -257,6 +257,53 @@ void a_sector_is_its_own_region() {
         "through space, so it separates the deep layers too");
 }
 
+// ★★ THE DEFECT THE §4 RUN CAUGHT, PINNED SO IT CANNOT COME BACK.
+//
+// `region_thinnest_extent_mm` originally took the MINIMUM of the Hildebrand
+// inscribed-sphere thickness over the region. On the maintainer's part that
+// returned 3.4106 mm — EXACTLY two voxels — for all four sectors of a bore
+// declared at 3.0 / 4.5 / 6.0 / 7.5 mm, so every sector derived the same cell,
+// the same density and the same strut, and the whole point of the feature was
+// lost while every unit test stayed green.
+//
+// The reason is structural: the largest ball that fits inside a set AND contains
+// a voxel ON THAT SET'S BOUNDARY is one or two voxels however thick the set is
+// elsewhere. The minimum is therefore a CONSTANT, not a measurement.
+//
+// This asserts the property that actually matters: A THICKER REGION MUST MEASURE
+// THICKER. Under the old minimum both slabs below return ~2 voxels and the
+// assertion fails; under the median they separate.
+void a_thicker_region_measures_thicker() {
+  const StepModel m = banded_cube();
+  const VoxelGrid grid = voxelize(m.mesh, 10);
+  const ResolvedFaceRegion r = resolve_face_regions(m, {spec_of(0, {3})})[0];
+
+  // The same face at two depths: 2 voxel layers and 5.
+  const std::shared_ptr<ClearanceVoxelMask> thin = mask_of(grid, m, r, 2.0);
+  const std::shared_ptr<ClearanceVoxelMask> thick = mask_of(grid, m, r, 5.0);
+  CHECK(thick->set_count() > thin->set_count(),
+        "the deeper region selects more voxels (the SELECTION half works)");
+
+  const double e_thin = region_thinnest_extent_mm(*thin);
+  const double e_thick = region_thinnest_extent_mm(*thick);
+  CHECK(e_thick > e_thin,
+        "★ A THICKER REGION MEASURES THICKER — the property the minimum could "
+        "not deliver, and the one the derived cell depends on");
+  // ★ AND IT SCALES WITH THE DECLARED DEPTH, which is the property the derived
+  // cell needs. Measured here: 2 layers -> 4.000 mm, 5 layers -> 10.000 mm at
+  // 1 mm spacing — a ratio of 2.5 against a declared ratio of 2.5. (The absolute
+  // values exceed the layer count because `region_member_voxels` selects every
+  // voxel within (depth - 0.5) spacings of the face TRIANGLES, so the set is
+  // thicker than a flat slab at the wall's corners; the inscribed sphere sees
+  // that. The RATIO is what the fit law reads.)
+  CHECK(e_thick / e_thin >= 2.0,
+        "★ and it SCALES with the declared depth — 2 layers vs 5 gives 2.5x");
+  CHECK(e_thin > 0.0 && std::isfinite(e_thin), "and both are finite and positive");
+  CHECK(std::isfinite(e_thick), "including the thicker one");
+  std::printf("    (extent: 2 layers -> %.3f mm, 5 layers -> %.3f mm)\n",
+              e_thin, e_thick);
+}
+
 }  // namespace
 
 int main() {
@@ -265,6 +312,7 @@ int main() {
   the_mask_answers_in_its_own_lattice();
   the_cell_box_tests_are_exact();
   a_sector_is_its_own_region();
+  a_thicker_region_measures_thicker();
   std::printf("test_lattice_region_mask: %d checks, %d failures\n", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;

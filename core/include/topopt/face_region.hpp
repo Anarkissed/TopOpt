@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/clearance.hpp"  // ClearanceVoxelMask
 #include "topopt/mesh.hpp"
 #include "topopt/step.hpp"
 #include "topopt/voxel.hpp"
@@ -325,6 +326,44 @@ std::vector<int> cut_voxels(const VoxelGrid& grid, const std::vector<int>& voxel
 std::vector<std::size_t> grid_split_voxel_counts(
     const VoxelGrid& grid, const std::vector<int>& member_voxels,
     const std::vector<GridSplitCell>& cells);
+
+// ★★ NOT THE MINIMUM — THE MEDIAN. A CORRECTION THE §4 RUN FORCED
+// (task 2026-08-15-lattice-regions §0).
+//
+// The first version took the MINIMUM of tau, arguing a percentile "would let the
+// cell be sized by material the thinnest part cannot hold". The argument is
+// sound; the implementation was still useless, because THE MINIMUM IS A CONSTANT
+// BY CONSTRUCTION: the largest ball that fits inside a set and contains a voxel
+// ON THAT SET'S BOUNDARY is ~1-2 voxels however thick the set is elsewhere. Every
+// region therefore measured ~2 voxels.
+//
+// Measured, not reasoned. Four sectors of one bore on M2_verticalStand at 128,
+// declared 3.0 / 4.5 / 6.0 / 7.5 mm = 2 / 3 / 4 / 4 voxel layers:
+//
+//     sector   declared   candidate voxels   extent_mm   cell_mm
+//        0       3.0 mm         308           3.4106     1.0950
+//        1       4.5 mm         372           3.4106     1.0950
+//        2       6.0 mm         522           3.4106     1.0950
+//        3       7.5 mm         781           3.4106     1.0950
+//
+// 3.4106 mm is EXACTLY 2 x the 1.70528 mm spacing, in all four. The depth reached
+// the SELECTION (308 -> 781 voxels, monotone) and did not reach the GRADING at
+// all: one cell, one density, one strut, `distinct_cells: 1`.
+//
+// The MEDIAN measures the body rather than the boundary, and the body is what
+// "how many cells lie across this" asks about — the same quantity
+// min(depth, 2*half_u, 2*half_w) reports for an analytic slab, which is a
+// DIMENSION of the slab and not a minimum over its points. It still adapts to a
+// genuinely thin region, which a declared depth alone would not.
+// ★ IT MEASURES ON THE MASK'S OWN GRID, NOT THE CALLER'S, and that is a defect
+// this branch shipped for about ten minutes. The first version took the caller's
+// grid and indexed `mask.inside[i]` by the same i — which is correct only while
+// the two grids are the same lattice. On the DESIGN-BOX path `solved_grid` is an
+// EXPANDED grid with different dimensions, so the region would have been read as
+// an arbitrary reindexed scatter of voxels, silently, and the derived cell would
+// have been sized from a shape nobody declared. The mask carries the grid it was
+// built on precisely so this cannot happen; the parameter is gone.
+double region_thinnest_extent_mm(const ClearanceVoxelMask& mask);
 
 // ★ THE ONE mm → VOXEL-LAYER CONVERSION (task 2026-08-15-lattice-regions §2b,
 // bar R5).

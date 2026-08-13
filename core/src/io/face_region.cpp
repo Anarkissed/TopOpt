@@ -749,4 +749,36 @@ std::size_t mask_step_region(const VoxelGrid& grid, const StepModel& model,
   return sel.size();
 }
 
+double region_thinnest_extent_mm(const ClearanceVoxelMask& mask) {
+  VoxelGrid grid;
+  grid.nx = mask.nx;
+  grid.ny = mask.ny;
+  grid.nz = mask.nz;
+  grid.spacing = mask.spacing;
+  grid.origin = mask.origin;
+  grid.tags.assign(mask.inside.size(), VoxelTag::Empty);
+  for (std::size_t i = 0; i < mask.inside.size(); ++i)
+    if (mask.inside[i]) grid.tags[i] = VoxelTag::Interior;
+  std::vector<double> dens(grid.voxel_count(), 0.0);
+  const std::size_t n =
+      std::min(dens.size(), mask.inside.size());
+  for (std::size_t i = 0; i < n; ++i)
+    if (mask.inside[i]) dens[i] = 1.0;
+  // The cap bounds cost at O(cap · voxels). A region thicker than the cap
+  // returns +inf from the primitive, which reads as "thicker than we measured"
+  // — the conservative direction for a thinnest-extent bound, and the same
+  // sentinel the grading law already handles.
+  const int cap = 64;
+  const std::vector<double> tau =
+      local_member_thickness_mm(grid, dens, 0.5, cap);
+  std::vector<double> body;
+  body.reserve(mask.set_count());
+  for (std::size_t i = 0; i < n; ++i)
+    if (mask.inside[i] && i < tau.size() && tau[i] > 0.0) body.push_back(tau[i]);
+  if (body.empty()) return std::numeric_limits<double>::infinity();
+  const std::size_t mid = body.size() / 2;
+  std::nth_element(body.begin(), body.begin() + mid, body.end());
+  return body[mid];
+}
+
 }  // namespace topopt
