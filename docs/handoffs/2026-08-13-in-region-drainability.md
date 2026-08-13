@@ -225,3 +225,41 @@ instead of finding out 88 minutes later.
 27.6% weaker than the old one **before any of our mechanisms are applied**. That
 is about the method itself, it is the biggest unanswered number here, and I have
 now raised it four times.
+
+---
+
+## 9. ★★ ADDENDUM — THE REFRAME: SEALED VOID BLOCKS LATTICING, NOT PRINTING
+
+Read-only follow-up to the reviewer's Decision 3. **The blocker is narrower than
+"blocked", and narrower again than the reframe assumed.**
+
+| file:line | what it establishes |
+|---|---|
+| `run_job.cpp:3466` | the check is behind `if (job.lattice.require_lattice_void_reaches_exterior)` |
+| `lattice_void.cpp:119-122` | **vacuous guard** — `latticed_voxels == 0` ⇒ `decidable = false`, returns before the walk |
+| `lattice_void.hpp:177` | the verdict is **`latticed_sealed > 0`** |
+| `lattice_void.cpp:231-239` | `latticed_sealed` counts only pockets **containing latticed voxels**; a sealed pocket in plain solid increments `sealed_pockets_without_lattice` and **does not refuse** |
+| `run_job.cpp:3503` | the refusal fires on `R.void_report.sealed()`, before any triangle is written |
+
+★★ **(a) THE ROBUST TRIPLE IS SHIPPABLE NOW FOR TO-ONLY JOBS.** No lattice ⇒ no
+latticed voxels ⇒ `sealed()` false ⇒ nothing refuses. The gate applies only to
+TO+lattice.
+
+★ **And even there, 11,158 mm³ is an UPPER BOUND, not the refusal quantity** —
+only the subset overlapping the lattice mask can refuse. Production's 337 mm³ was
+a pocket *with* lattice (7 of 215 cells), so the "33×" compares an upper bound to
+a realised value and overstates the gap. **Measuring the latticed subset is one
+`lattice-variant` run and is the right next step if TO+lattice matters.**
+
+★ **(b) A DOCUMENTATION DEFECT, worth its own small change.**
+`run_job.cpp:3463` states *"Off by default: `require_lattice_void_reaches_exterior`
+is false unless the job asks, and then this whole block is skipped"* — but
+`core/include/topopt/job.hpp:289` declares `bool require_lattice_void_reaches_exterior = true;`.
+**The comment is inverted; the check is armed by default.** Not fixed here — it is
+a production file and this task changes none.
+
+★ **(c) The perimeter penalty is NOT superseded where drainability binds.**
+Robust gives the better surface (carved 7.5190, beating SIMP's 7.5521) and the
+worse drainability (10.01%); C=1 gives the worse surface (9.1155) and roughly
+half the sealed void (5.33%). **Two answers to two questions.** Written into
+`PROPOSAL-1` §0 as a split recommendation rather than a flat replacement.

@@ -47,19 +47,47 @@ rung (137 against 70).** ★ **NOT the 3× the original rejection table asserted
 that figure came from counting the robust formulation's three state solves, and
 it was an assumption, never a measurement. Recorded here so nobody re-inherits it.
 
-### ★ what blocks it, and it is the only thing
+### ★★ what blocks it — AND IT BLOCKS LATTICING, NOT PRINTING
 
 **Sealed void 11,158 mm³ against the penalty's 5,946 — the worst arm on
-drainability.** Production's lattice step has refused a PLSM design over **337
-mm³**, so this is **33× the refusal threshold**. The robust triple cannot ship
-until drainability is gated; see `2026-08-13-in-region-drainability.md` §2, which
-recommends a per-iteration MONITOR at 0.0074 s (0.026% of an iteration).
+drainability.** But the refusal path is narrower than "blocked" implies, read at
+file and line:
 
-★ **These sealed-void figures were corrected on 2026-08-13 and are 33–49% lower
-than every earlier version.** `sealed_void.py` treated grid-boundary voxels as
-enclosed; 15,099 part voxels sit on that boundary. Both the harness and
-production had the rule right. The ORDERING is unchanged — robust is still the
-worst — so the blocker stands.
+| | |
+|---|---|
+| `run_job.cpp:3466` | the whole check is behind `if (job.lattice.require_lattice_void_reaches_exterior)` |
+| `lattice_void.cpp:119-122` | **VACUOUS guard** — `latticed_voxels == 0` returns `decidable = false` before any walk |
+| `lattice_void.hpp:177` | **the verdict is `latticed_sealed > 0`** |
+| `lattice_void.cpp:231-239` | and `latticed_sealed` only counts pockets **containing latticed voxels**; a sealed pocket in plain solid goes to `sealed_pockets_without_lattice` and **does not refuse** |
+
+★★ **SO THE ROBUST TRIPLE IS SHIPPABLE NOW FOR TO-ONLY JOBS.** With no lattice
+there are no latticed voxels, `sealed()` is false, and nothing refuses. An
+enclosed void inside a solid part is just a void.
+
+★ **And even on a latticed job the blocker is smaller than 11,158 mm³.** That
+figure is ALL sealed void in the part; only the subset overlapping the lattice
+mask can refuse. **11,158 mm³ is an upper bound, not the refusal quantity.**
+Production's 337 mm³ refusal was a pocket *with* lattice (7 of 215 cells), so the
+33× ratio compares an upper bound against a realised value and overstates the gap.
+
+★ **A documentation defect found on the way, worth its own fix:**
+`run_job.cpp:3463` says *"Off by default: `require_lattice_void_reaches_exterior`
+is false unless the job asks"* — but `job.hpp:289` declares it **`= true`**. The
+comment is wrong; the check is armed by default.
+
+### ★★ AND THE PERIMETER PENALTY IS NOT SUPERSEDED WHERE DRAINABILITY BINDS
+
+The corrected table supports a split recommendation, not a flat replacement:
+
+| | carved | sealed void |
+|---|---|---|
+| ★ robust triple | **7.5190** (beats SIMP) | **10.01%** (worst) |
+| ★ perimeter C=1 | 9.1155 | **5.33%** (roughly half) |
+
+★ **Robust is the right answer where surface binds; the perimeter penalty is the
+right answer where drainability binds — which is latticed parts.** They are
+answers to different questions, and the C sweep is retained as the reference for
+what a global interface tax costs.
 
 ### ★★ AND THE FINDING WITH NO OWNER
 
@@ -91,7 +119,7 @@ are at the shipped convention.
 
 | mechanism | verdict | the number |
 |---|---|---|
-| perimeter penalty C=1 | ★ **SUPERSEDED** by the robust triple (§0) | [.7973] +7.1% surface, margin flat, CAD better |
+| perimeter penalty C=1 | ★ **SUPERSEDED ON SURFACE, RETAINED FOR LATTICED PARTS** (§0) | [.7973] +7.1% surface, margin flat, CAD better |
 | Helmholtz density filter r=1 | rejected | [0.68] −12.8% surface, less than half the penalty's, and CAD degrades |
 | Helmholtz filter r=2, r=3 | rejected | [0.68] margins 2095 / 1955 against SIMP's 3254 |
 | ★ **robust erode/dilate triple** | ★ **RECOMMENDED** — this rejection was WRONG on both counts | [0.68] margin 3209; re-tested at both shipped rungs it is the best arm, and the compute is 1.4-2×, not 3× |
