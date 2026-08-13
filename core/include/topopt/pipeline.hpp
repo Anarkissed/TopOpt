@@ -736,7 +736,10 @@ struct MinimizePlasticOptions {
   int keyframe_count = 0;
 
   // ★ DIAGNOSTIC ONLY (task 2026-08-13-lattice-as-a-material, bar R4): the
-  // ANALYSIS density at EVERY iteration, with the 1-based iteration number.
+  // ANALYSIS density at EVERY iteration, with the 1-based iteration number
+  // ★ WITHIN THE CURRENT RUNG — the counter RESTARTS at each ladder rung, so a
+  // multi-rung run hands out 1..n, then 1..m. A caller that wants one continuous
+  // trajectory must either run a single rung or segment on the counter dropping.
   // Null by default and never set in production; with it null the driver takes
   // no new branch and the run is unchanged.
   //

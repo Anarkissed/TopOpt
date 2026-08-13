@@ -1298,8 +1298,25 @@ int main(int argc, char** argv) {
     const MinimizePlasticResult mr =
         minimize_plastic(grid, material, "PLA", bcs, rules, o);
     const double run_wall = now_s() - t_run;
-    std::printf("   the run: %zu iterations captured, %.1f s\n", traj.size(),
-                run_wall);
+    const int run_iters =
+        mr.evaluated.empty() ? 0 : mr.evaluated.back().optimization.iterations;
+    std::printf("   the run: %zu densities captured, %.1f s; the run REPORTS %d "
+                "iterations\n", traj.size(), run_wall, run_iters);
+
+    // ★ THE DRIVER MAY OPTIMISE MORE THAN ONCE PER RUNG. Draft-quality
+    // escalation (minimize_plastic.cpp:1766) re-runs `simp_optimize` on the same
+    // rung, and the hook sees BOTH passes, so `traj` can be longer than the
+    // iteration count the run reports. Concatenating two passes into one "curve"
+    // would put a discontinuity in the middle of it and call the result a
+    // trajectory. The curve is therefore the LAST `run_iters` captures — the pass
+    // that produced the design actually certified — and the trim is PRINTED.
+    if (run_iters > 0 && traj.size() > static_cast<std::size_t>(run_iters)) {
+      const std::size_t drop = traj.size() - static_cast<std::size_t>(run_iters);
+      std::printf("   ★ %zu captures DROPPED from the front: the driver ran more "
+                  "than one pass on this rung (draft escalation), and the curve "
+                  "is the pass that produced the certified design.\n", drop);
+      traj.erase(traj.begin(), traj.begin() + static_cast<std::ptrdiff_t>(drop));
+    }
     if (traj.empty()) {
       std::printf("   NOTHING CAPTURED — the hook never fired. Not a curve, and "
                   "not a result.\n");
@@ -1340,7 +1357,13 @@ int main(int argc, char** argv) {
 
     const double run_margin =
         mr.evaluated.empty() ? 0.0 : mr.evaluated.back().report.margin_effective;
-    const FixedDesignAnalysis check = certify(traj.back(), posture, false);
+    // ★ THE SAME STRUT GATE THE RUN USED. `minimize_plastic` arms
+    // gate_on_strut_strength whenever the run actually latticed something, so
+    // certifying here WITHOUT it would compare two different certificates and
+    // the "posture check" below would report a difference that is not a posture
+    // difference at all.
+    const bool gate = posture != nullptr && o.frozen_lattice_gate_on_strut_strength;
+    const FixedDesignAnalysis check = certify(traj.back(), posture, gate);
     const double rel = run_margin > 0.0
                            ? 100.0 * std::fabs(check.margin_effective - run_margin) /
                                  run_margin
@@ -1358,7 +1381,7 @@ int main(int argc, char** argv) {
     std::vector<double> m(traj.size(), 0.0);
     const double t_cert = now_s();
     for (std::size_t i = 0; i < traj.size(); ++i) {
-      const FixedDesignAnalysis an = certify(traj[i], posture, false);
+      const FixedDesignAnalysis an = certify(traj[i], posture, gate);
       m[i] = an.margin_effective;
       std::printf("   %4zu   %- 12.6f  %s\n", i + 1, m[i],
                   i == 0 ? "" :
