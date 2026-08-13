@@ -1,0 +1,234 @@
+# 2026-08-15 — lattice regions: closing the gap PR 331 named
+
+Evidence: `evidence/2026-08-15-lattice-regions/`
+Branch base: `726160c` — **PR 331's head, not main.** This task stacks on the
+face-region layer; every baseline below is that commit.
+
+> **"A grid split grades what is FROZEN, not what is LATTICED."**
+> — my own §6, PR 331.
+
+**★ THE HONEST HEADLINE FIRST: the mechanism is built and unit-tested; the two
+bars that need production runs are NOT MEASURED.** §0 marks each answer
+MEASURED or NOT. Nothing below is inferred from code reading and presented as a
+result.
+
+---
+
+## §0 — THE FIVE ANSWERS
+
+**Can a sector of a grid split now be a lattice region? YES — MEASURED at the
+unit level (34 checks), not yet on his part.** `"kind": "region"` with a
+`region_id` and a depth resolves the sector's voxel set and drives the same
+membership every analytic lattice region drives.
+
+**Latticed voxels per sector on his part: ★ NOT MEASURED.** The demonstration
+§4 asks for — grid-split a curved feature on `M2_verticalStand.step`, give the
+sectors different depths, run it, report per-sector counts against the last real
+run's 13,034 / 12% / 507 g — has not been run. **Until it is, this feature is
+not demonstrated, and the bar R4 language applies to me: a test against a path
+he cannot reach is not evidence.** What exists is a unit assertion that two
+sectors of one face at depths 1 and 3 select different, disjoint voxel sets.
+
+**Does the depth drive both protection and lattice? YES — MEASURED, and it is
+structural rather than agreed.** `region_depth_layers` is now the ONE mm→voxel-
+layer conversion, and `build_production_loadcase` calls it too; both sides then
+call the same `region_member_voxels` + `cut_voxels`. Asserted voxel-for-voxel at
+four depths (1.0, 2.6, 3.0, 4.4 mm) against `mask_step_region`, which is what the
+protection actually walks.
+
+**What does the mask-backed predicate cost against the geometric one? ★ NOT
+MEASURED (bar R6).** The prediction in §3(a) — an array index may beat the
+arithmetic — is untested and is not reported as a result.
+
+**Can density differ per sector, or is that a further change? IT ALREADY DOES,
+DERIVED — and a directly-authored per-sector density IS a further change.**
+Each region gets its own `FitRegionCell`: extent → `cell = max(extent/N*, finest
+printable)` → `relative_density = lattice_min_density_for_strut(topo, cell, w)` →
+strut. So two sectors at different depths get different extents and therefore
+different cells, densities and struts, and `fit_cell_field` writes the owning
+region's cell per voxel. **What you cannot do today is dial a sector to 25% and
+its neighbour to 40% at the same depth**: density is a function of the cell, not
+an input. That would need a per-region density override on the region entry plus
+a term in the grading law that honours it over the derived value — a small,
+well-localised change, and a separate one.
+
+---
+
+## §1 — THE TYPE MISMATCH, AND WHY MY OWN §6 WAS WRONG
+
+★ **A `ClearanceGeometry` is a PREDICATE evaluated pointwise; a face region is a
+VOXEL SET.** Every lattice membership question — the certification mask, cell
+activation, the multiscale material law, the fit-cell field, per-region
+attribution — is asked of a `ClearanceGeometry` and answered by arithmetic on an
+axis and a radius, or a normal and four extents. A region has no closed form.
+
+§6 said this needed "a mask-backed sibling of `point_in_clearance_region` in
+three places." **That was wrong, in a useful direction.** The three places were
+also not all of them: `point_in_clearance_region` is called on include regions at
+`run_job.cpp` fit-cell field and per-region attribution, twice more in the
+variant pipeline, and inside `LatticeBoundary::in_{include,exclude}_region` which
+the certification mask and `multiscale_region_mask` both route through — plus
+`subfloor_region_probe.cpp`. Writing a sibling at three of those would have left
+the rest silently analytic.
+
+**It is ONE optional field and ONE branch.** `ClearanceGeometry` gains a
+`std::shared_ptr<const ClearanceVoxelMask> mask`; `region_contains` returns
+`mask->contains(p)` when it is set. Every consumer — including the ones nobody
+enumerated — is then correct by construction, because they all already funnel
+through that predicate.
+
+### The three things that needed real thought
+
+**(a) The mask carries its own grid.** Membership converts the query POINT into
+the mask's own lattice, never the caller's. Without that, a caller walking the
+expanded design-box grid would index a different-sized array. ★ **I shipped that
+defect for about ten minutes**: the first `region_thinnest_extent_mm` took the
+caller's grid and indexed `mask.inside[i]` by the same `i`, which is correct only
+while the two grids are the same lattice. The parameter is gone.
+
+**(b) `tol` is ignored on a mask, and that is a statement.** On the analytic path
+`tol` inflates the region outward to build a band around its surface. A voxel set
+has no closed-form offset — inflating would mean a dilation, i.e. a second EDT
+per query — so a mask answers the EXACT region at every `tol`. The consequence is
+bounded and one-directional: a mask never reports covering MORE than it does.
+Verified: every lattice-role membership call passes `tol == 0`.
+
+**(c) `cell_may_overlap` gets the exact test, not a weaker one.** The Lipschitz
+bound needs an analytic signed distance a voxel set cannot supply. But the
+function is handed the whole CELL BOX, and against a voxel set the box test is
+EXACT where the bound is merely conservative — so `overlaps_box` /
+`contains_box` are **strictly stronger** than what they replace, not a relaxation.
+
+### §1(c) — the thickness, reused rather than re-derived
+
+`lattice_region_thinnest_extent_mm` reads a region's thinnest DECLARED dimension.
+A face region declares none. `region_thinnest_extent_mm` runs
+`local_member_thickness_mm` — the Hildebrand inscribed-sphere thickness already
+behind the width-aware knockdown gate and the grading law's cells-per-member test
+— over a synthetic density that is 1 inside the region, and takes the MINIMUM.
+
+The minimum, not a percentile: the extent bounds how many cells lie ACROSS the
+body and the fit law takes `max(extent/N*, finest printable)`. A percentile would
+let the cell be sized by material the thinnest part of the region cannot hold —
+precisely the "1.52 cells across, under the 5.00-cell floor" failure fit mode
+exists to prevent.
+
+---
+
+## §2 — WHAT THE PIPELINE NEEDS
+
+**(a) Per-sector verdicts — BUILT, bar R3.** `RunInfo::GradingFitRegion` already
+carries extent, cell, density, strut, cells-per-member, `out_of_regime`,
+candidate voxels and latticed voxels **per region**, so a sector carries its own
+verdict rather than inheriting a parent's. ★ **One defect found and fixed here:**
+`fill_grading_fit` recomputed `fit_region_cells` WITHOUT the resolved roles, so a
+region-backed include was dropped, the size check in `fill_fit_region_voxels`
+then returned early, and the whole per-region breakdown vanished for exactly the
+regions this task adds — the "green run that measures nothing" shape.
+
+**(b) The depth is one number — BUILT and ASSERTED.** See §0.
+
+**(c) The sliver guard on the lattice side — PARTIAL.** The resolver refuses a
+region-backed lattice region whose mask selects **no** solid voxels, naming the
+region, the depth, the grid spacing and the three ways out. What is NOT yet
+wired is the §5(a)-shaped refusal for a sector that resolves to voxels but is too
+thin to CERTIFY a lattice; today that surfaces as `out_of_regime` on the per-
+region verdict, which is a verdict rather than a refusal. Reusing
+`check_sliver`'s message shape there is a small change and is not done.
+
+**(d) Drainability per sector — NOT ANALYSED.** `lattice_void_escape` runs on the
+part's void network and is indifferent to which region latticed a voxel, so there
+is a good argument that sector boundaries change nothing. **That argument is not
+a measurement and I am not reporting it as one.** It needs the §4 run.
+
+---
+
+## §3 — COST — NOT MEASURED
+
+Both halves of §3 are open. §3(b) can be stated from the type: a mask is
+`1 byte × voxel_count`, so **457 KB per region on his 468,224-voxel grid, 4.6 MB
+for ten** — carried once and shared by `shared_ptr` through every copy of the
+`ClearanceGeometry` (which is why it is a `shared_ptr` and not a `vector`). §3(a),
+the per-call cost against the geometric predicate at the three sites, is
+unmeasured.
+
+---
+
+## BARS
+
+| bar | verdict |
+|---|---|
+| **R1** no verdict moves on a job with no region-backed lattice region | ★ **NOT MEASURED** — byte-identity not run |
+| **R2** layer 1 untouched, CAD error to the digit | ★ **NOT RE-MEASURED** on this branch |
+| **R3** per-sector verdicts, not part-wide | **BUILT** — `GradingFitRegion` per region; the dropped-region defect fixed |
+| **R4** the demonstration on his part | ★ **NOT DONE** |
+| **R5** the depth is one number | **MET** — structural, asserted at four depths |
+| **R6** cost at all three call sites | ★ **NOT MEASURED** |
+| **R7** no assertion weakened | **MET** — `r7_assertion_census.txt`, no category fell |
+| **R8** root cause with file and line; no placeholders; no root scratch | **MET** |
+
+Local suites: `test_lattice_region_mask` 34/34 and `test_face_region` 68/68; the
+lattice/job/clearance subset of `ctest` passed 14/14 before the last commit. **The
+full suite has not been re-run since**, and core registers 120 tests locally
+against CI's 122 (no lib3mf here) — report N/122.
+
+---
+
+## METHOD
+
+`core/include/topopt/clearance.hpp` — `ClearanceVoxelMask` (the set, its own
+grid, `contains` / `overlaps_box` / `contains_box`) and the optional field.
+`core/src/voxel/clearance.cpp` — the one branch. `core/src/cli/job.cpp` — the
+`"region"` kind, `region_id` required there and refused elsewhere.
+`core/src/cli/run_job.cpp` — `region_lattice_mask`, the resolver's new
+`(model, grid)` parameters at four call sites, `region_thinnest_extent_mm`,
+`fill_fit_region_cell` factored so the analytic and region branches cannot
+describe different laws. `core/include/topopt/face_region.hpp` —
+`region_depth_layers`, now also called by `build_production_loadcase`.
+
+### ★ WHAT THE NEXT SESSION SHOULD DO FIRST
+
+1. **The §4 run.** Everything else is secondary; without it this is a mechanism,
+   not a feature. Grid-split a curved feature on his part, different depths per
+   sector, report per-sector latticed voxels and derived cell/density/strut
+   against 13,034 / 12% / 507 g.
+2. **R1 byte-identity** against `726160c`, reusing
+   `evidence/2026-08-14-face-regions/r1_r2_byte_identity.sh` — it already
+   separates the design set from the receipts.
+3. **R6 cost**, and the §2(c) refusal.
+
+★ **A trap, since it cost this branch an hour of wrong evidence last time:**
+`cmake --build build --target topopt-cli` is a SILENT NO-OP. The target is
+`topopt_cli`; the hyphen is the output name and make thinks it is up to date.
+
+---
+
+## IN PLAIN LANGUAGE
+
+Last time I built the thing that lets you carve a face into sectors and treat
+each one separately, and I said plainly what it could not do: you could set how
+deep each sector was *protected*, but not how each sector was *latticed*. The
+lattice wanted a shape — a cylinder, a slab — and a sector is not a shape, it is
+a set of voxels.
+
+This closes that. A sector can now be a lattice region: you name it and give it a
+depth, and it latticed like any other region. Two sectors at different depths get
+different cells, different densities and different strut sizes, each reported on
+its own line — which is grading a lattice by hand, which is what you have been
+asking for since the lattice work started.
+
+Two things worth knowing. **The depth is now genuinely one number** — the
+protection and the lattice go through the same conversion and the same code, so
+they cannot drift apart the way they did when 5 mm of protection sat under a 7 mm
+lattice region and the lattice found material only in the frozen collar. And
+**density follows depth rather than being its own dial**: sectors at different
+depths do come out at different densities, but you cannot yet set one sector to
+25% and its neighbour to 40% at the same depth. That is a separate, small change
+and I have written down what it needs.
+
+**And the thing you should hold me to: I have not run this on your part.** The
+mechanism is built and the unit tests are green, but the measurement that would
+show ten sectors coming out at ten different densities on *M2_verticalStand* has
+not been done, and neither has the check that a job without any of this produces
+byte-identical results. Until those exist this is a mechanism, not a
+demonstrated feature, and the handoff says so in every place it matters.
