@@ -109,6 +109,7 @@ add_library(topopt
   # always-built base library beside semdot.cpp, and the dependency-free slices
   # that read a design field can read the region's density with it.
   src/simp/lattice_density_field.cpp
+  src/simp/mma_joint.cpp
   src/simp/grading.cpp
   src/simp/cell_plan.cpp
   src/simp/observability.cpp

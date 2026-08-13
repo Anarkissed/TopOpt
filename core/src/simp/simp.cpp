@@ -8,6 +8,8 @@
 
 #include "topopt/simp.hpp"
 
+#include "mma_joint.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -1396,12 +1398,11 @@ class ScopedSolveDeadline {
 // previous two designs and the current moving asymptotes L_j, U_j. All vectors
 // are grid-indexed (size voxel_count()); only design (solid) voxels carry
 // meaningful values.
-struct MmaState {
-  std::vector<double> xold1;  // design at iteration k-1
-  std::vector<double> xold2;  // design at iteration k-2
-  std::vector<double> low;    // lower asymptotes L_j
-  std::vector<double> upp;    // upper asymptotes U_j
-};
+// ★ The SAME four vectors `MmaJointState` carries, so it IS that type rather
+// than a second copy of it. Mode 2 widens the design vector with the lattice
+// field's beta coefficients (simp/mma_joint.hpp); a separate state struct here
+// would mean two things to keep in step for no benefit.
+using MmaState = MmaJointState;
 
 // One MMA design update. `st` carries the asymptotes + last two iterates across
 // calls; `mma_iter` is the 1-based MMA iteration number (asymptotes are
@@ -1460,103 +1461,14 @@ std::vector<double> mma_update(MmaState& st, int mma_iter, const VoxelGrid& grid
   for (double v : xphys) vol += v;
   const double g0 = vol - target;
 
-  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
-  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
-  const double albefa = 0.1, raa0 = 1e-5;
-
-  if (st.low.size() != N) {
-    st.low.assign(N, 0.0);
-    st.upp.assign(N, 0.0);
-  }
-
-  // 1. Moving asymptotes L_j, U_j.
-  for (std::size_t e : dof) {
-    const double xe = density[e];
-    if (mma_iter <= 2) {
-      st.low[e] = xe - asyinit * xrange;
-      st.upp[e] = xe + asyinit * xrange;
-    } else {
-      // Oscillation detector: sign of (x^k - x^{k-1})(x^{k-1} - x^{k-2}).
-      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
-      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
-      double L = xe - gamma * (st.xold1[e] - st.low[e]);
-      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
-      // Keep each asymptote within [0.01, 10] * xrange of the current point.
-      L = std::min(L, xe - 0.01 * xrange);
-      L = std::max(L, xe - 10.0 * xrange);
-      U = std::max(U, xe + 0.01 * xrange);
-      U = std::min(U, xe + 10.0 * xrange);
-      st.low[e] = L;
-      st.upp[e] = U;
-    }
-  }
-
-  // 2. Separable convex approximation coefficients and the move box [alpha, beta].
-  std::vector<double> p0(N, 0.0), q0(N, 0.0), p1(N, 0.0), q1(N, 0.0);
-  std::vector<double> alpha(N, 0.0), beta(N, 0.0);
-  double b = -g0;  // b = sum_j(p1/ux1 + q1/xl1) - g0
-  for (std::size_t e : dof) {
-    const double xe = density[e];
-    const double L = st.low[e], U = st.upp[e];
-    const double ux1 = U - xe, xl1 = xe - L;
-    const double dcp = std::max(dc[e], 0.0), dcm = std::max(-dc[e], 0.0);
-    const double dvp = std::max(dv[e], 0.0), dvm = std::max(-dv[e], 0.0);
-    p0[e] = ux1 * ux1 * (1.001 * dcp + 0.001 * dcm + raa0 / xrange);
-    q0[e] = xl1 * xl1 * (0.001 * dcp + 1.001 * dcm + raa0 / xrange);
-    p1[e] = ux1 * ux1 * (1.001 * dvp + 0.001 * dvm + raa0 / xrange);
-    q1[e] = xl1 * xl1 * (0.001 * dvp + 1.001 * dvm + raa0 / xrange);
-    b += p1[e] / ux1 + q1[e] / xl1;
-    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
-    beta[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
-  }
-
-  // 3. Dual solve for the single volume constraint. For a trial multiplier
-  // lambda >= 0 the primal minimiser of the separable subproblem is closed form:
-  //   x_j(lambda) = ( sqrt(p0+lambda*p1) L_j + sqrt(q0+lambda*q1) U_j )
-  //               / ( sqrt(p0+lambda*p1) + sqrt(q0+lambda*q1) )   (clamped to box).
-  auto candidate = [&](double lambda) {
-    std::vector<double> xnew(N, 0.0);
-    for (std::size_t e : dof) {
-      const double pl = std::sqrt(p0[e] + lambda * p1[e]);
-      const double ql = std::sqrt(q0[e] + lambda * q1[e]);
-      double xt = (pl * st.low[e] + ql * st.upp[e]) / (pl + ql);
-      if (xt < alpha[e]) xt = alpha[e];
-      if (xt > beta[e]) xt = beta[e];
-      xnew[e] = xt;
-    }
-    return xnew;
-  };
-  // The approximate constraint value g1(x) = sum_j(p1/(U-x) + q1/(x-L)) - b;
-  // it decreases monotonically in lambda, so bisect for g1 = 0 (KKT: lambda >= 0,
-  // g1 <= 0, complementarity). If the unconstrained optimum is already feasible,
-  // lambda stays 0.
-  auto gval = [&](const std::vector<double>& x) {
-    double s = 0.0;
-    for (std::size_t e : dof)
-      s += p1[e] / (st.upp[e] - x[e]) + q1[e] / (x[e] - st.low[e]);
-    return s - b;
-  };
-  double lambda = 0.0;
-  if (gval(candidate(0.0)) > 0.0) {
-    double l1 = 0.0, l2 = 1.0;
-    while (l2 < 1e30 && gval(candidate(l2)) > 0.0) l2 *= 2.0;
-    for (int it = 0; it < 100 && (l2 - l1) > 1e-9 * (1.0 + l1 + l2); ++it) {
-      const double lmid = 0.5 * (l1 + l2);
-      if (gval(candidate(lmid)) > 0.0)
-        l1 = lmid;
-      else
-        l2 = lmid;
-    }
-    lambda = 0.5 * (l1 + l2);
-  }
-  std::vector<double> xnew = candidate(lambda);
-
-  // 4. Roll the history forward (xold2 <- xold1 <- x). After iteration 1 xold2
-  // stays empty; the asymptote branch only reads xold1/xold2 for mma_iter >= 3,
-  // by which point both are full grid-sized vectors.
-  st.xold2 = st.xold1;
-  st.xold1 = density;
-  return xnew;
+  // ★ The subproblem itself lives in `mma_update_joint` (simp/mma_joint.hpp).
+  // ONE uniformly-boxed block is exactly this call, so what runs below is the
+  // same arithmetic in the same order on the same values — and Mode 2's second
+  // block reaches the identical solver rather than a parallel copy of it that
+  // would have to be kept in step by hand.
+  const std::vector<double> xmin_v(N, density_min), xmax_v(N, 1.0);
+  return mma_update_joint(st, mma_iter, density, dof, dc, dv, xmin_v, xmax_v, g0,
+                          move);
 }
 
 // One MMA design update with a Heaviside projection (handoff 114). The MMA-
