@@ -110,6 +110,13 @@ echo "branch $BRANCH   base $BASE"
 
 # AFTER — this tree, with the whole parametric path present and the mode OFF
 # (the job document carries no "plsm" block).
+# ★ THE STEP TRAVELS WITH THE JOB. A job document names its model RELATIVE TO
+# ITS OWN DIRECTORY, so writing the pinned copy into $SCRATCH without the
+# STEP beside it makes the model unresolvable — which is exactly what the
+# first attempt did, and `set -e` correctly aborted rather than producing
+# half a comparison. The original cannot be edited in place: the BEFORE
+# checkout would delete it.
+cp "$BAKE/M2_verticalStand.step" "$SCRATCH/"
 python3 "$HERE/r1_pin_job.py" "$JOB" "$SCRATCH/r1_pinned.json"
 cmake -S core -B build -DCMAKE_BUILD_TYPE=Release > /dev/null
 cmake --build build -j6 --target topopt_cli > /dev/null
