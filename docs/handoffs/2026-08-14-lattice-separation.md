@@ -24,10 +24,13 @@ all** — asserted on the project AND on the document
 
 **What was removed from the TO page.** The "Lattice settings · on / topology +
 infill setup" state banner; the "Lattice here" and "No lattice" chips on every
-group; the "Struts" toggle; the per-region readout (depth · held · grams · cell ·
-density · strut · regime flag); the lattice density shading on the part surface;
-and the Design Box and Paint chips are hidden on the lattice stage for the mirror
-reason. One button remains, top right, **green**, one word: **Lattice**.
+group; the "Struts" toggle **and the raymarched strut LAYER it arms** — separate
+state, so removing only the toggle would have left a lattice drawn over the
+topology page with no way to turn it off; the per-region readout (depth · held ·
+grams · cell · density · strut · regime flag); and the lattice density shading on
+the part surface. (The Design Box and Paint chips are hidden on the lattice stage
+for the mirror reason.) One button remains, top right, **green**, one word:
+**Lattice**.
 
 **Why the sample was invisible.** `LatticeSetupWizard` passed the renderer
 `reveal: Float(model.densityMode == .auto ? wipe : 1)` (line 75) with

@@ -494,7 +494,12 @@ public struct WorkspacePlaceholder: View {
                           // body is not drawn at all (alpha 0), it only keeps serving the
                           // pick/id pass; face markings read on the lattice instead (A4).
                           // 1 (opaque) otherwise — byte-identical when off.
-                          bodyAlpha: (showStrutPreview && strutScene != nil) ? 0 : 1,
+                          // …and the body is hidden ONLY where that layer is drawn
+                          // (§1a): the TO page no longer draws it, so the body must
+                          // not be made invisible for it either.
+                          bodyAlpha: (showStrutPreview && strutScene != nil
+                                      && (visible.latticeControls || showLatticePage))
+                              ? 0 : 1,
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
                           detentPulse: detentPulse,
                           // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
@@ -529,7 +534,14 @@ public struct WorkspacePlaceholder: View {
             // view's own face tints so markings read on the lattice (the body is not
             // drawn while this layer is up, bar A3). Non-interactive — orbit/tap
             // gestures fall through to the mesh view, whose pick structure is intact.
-            if showStrutPreview, let scene = strutScene {
+            //
+            // ★ AND NOT ON THE TO PAGE (task 2026-08-14 §1a). The toggle left with
+            // the rest of the lattice affordances, but the LAYER is separate state:
+            // turn it on, navigate back, and a raymarched lattice would have been
+            // drawn over the topology page with no control to turn it off. The
+            // ladder page keeps it — that page is about a lattice.
+            if showStrutPreview, visible.latticeControls || showLatticePage,
+               let scene = strutScene {
                 LatticeSDFPreviewView(camera: cameraModel, scene: scene,
                                       params: latticeProxy.params,
                                       sceneToken: strutSceneToken,
@@ -4897,15 +4909,6 @@ public struct WorkspacePlaceholder: View {
     /// The face-card preview grid. Coarse ON PURPOSE: the card answers "does this
     /// barrier hand the lattice anything", which does not need the run's 128.
     static let latticeCardPreviewResolution = 48
-
-    private func metricChip(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 0) {
-            Text(value).font(.system(size: 11, weight: .bold)).monospacedDigit()
-                .foregroundStyle(DS.Color.textPrimary.color)
-            Text(label).font(.system(size: 8.5, weight: .semibold))
-                .foregroundStyle(DS.Color.textQuaternary.color)
-        }
-    }
 
     /// The compact (unlocked) clearance summary — the pre-handoff layout, unchanged.
     @ViewBuilder private func compactClearanceEditor(_ g: SelectionGroup) -> some View {
