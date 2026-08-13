@@ -171,11 +171,17 @@ at a 2 mm cell and a 0.45 mm width. The remaining four densities:
 ★★ **(a) `load-1` IS SEALED AT EVERY DENSITY — bar B7 fires for the first time.**
 Latticing the pad under the primary load face creates a lattice cavity whose pore
 space cannot reach the exterior, so the drainability check refuses all four cells.
-That is the manufacturing constraint doing exactly its job (§3), and no amount of
-margin would have made those assignments shippable. It is also a refusal that only
-became visible once regions were keyed on PROVENANCE — under the fused
-decomposition `load-1` was inside a 29,250-voxel blob that drained through its
-other end.
+It is a refusal that only became visible once regions were keyed on PROVENANCE —
+under the fused decomposition `load-1` sat inside a 29,250-voxel blob that drained
+through its other end.
+
+★ **AND IT IS NARROWER THAN "the part cannot be built", which PR 333 establishes:
+sealed void blocks LATTICING, not PRINTING, and the refusal counts only pockets
+CONTAINING latticed voxels** (`lattice_void.cpp:231-239`; the report's own
+`sealed()` is `latticed_sealed > 0`). So the reading is precise: **`load-1` may
+still be printed SOLID** — it is one of the fourteen regions this feature offers
+to lighten, and the answer for that one is no. Nothing about the part's
+printability is in question, and the other thirteen regions are unaffected.
 
 ★★ **(b) `load-22` @ 0.75 IS THE ONLY FULLY CERTIFIABLE CELL IN 140.** It is the
 only one that comes back **`in` regime** — every other accepted cell is
@@ -314,9 +320,31 @@ as 23–52% with an exponent near 2.0; measured here on this library it is the s
 finding to the same magnitude, and the sign REVERSES across the band, so no
 single-exponent law is conservative everywhere. **The fitted curve does not
 inherit any of it**, because it interpolates the rows rather than an exponent.
-`knockdown_spec_for`'s width-aware composite is a *print-process strength*
-knockdown and is left exactly where it is — it is not, and must not be made
-into, a homogenised-stiffness law.
+★ **ON THE INSTRUCTION TO "ROUTE THE REGION'S STIFFNESS THROUGH
+`knockdown_spec_for`'s WIDTH-AWARE COMPOSITE", RESTATED BECAUSE IT HAS BEEN
+REPEATED.** The requirement behind it — *never let the optimiser see the raw
+f^1.5* — is met, and met more strongly than asked. But the literal routing is a
+category error and this handoff will not pretend otherwise:
+
+* `knockdown_spec_for` builds a **`KnockdownSpec`**, which scales the acceptance
+  gate's stress MARGIN (`gate_margin_effective`). It never enters the FEA
+  operator and is not a constitutive law. Stiffness cannot be routed through it.
+* **The optimiser's stiffness** comes from `LatticeMaterialModel` — the C1 fit to
+  the library's 19 MEASURED resolved rows. There is no f^1.5 anywhere on that
+  path, and §1.1 measures what the asymptotic form would have cost: −25.7% to
+  +26.8%, worst at the density a lightweighting assignment picks.
+* **The gate's knockdown** IS routed through the one builder: `minimize_plastic`
+  calls `knockdown_spec_for(options)` and hands it to `analyze_fixed_design`, so
+  this path and the CLI and the bridge gate identically.
+* **And for a LATTICED voxel the gate does not use f^1.5 at all.** Latticed
+  voxels are excluded from the solid maxima and gated by the measured
+  de-homogenised STRUT bound instead (§1.4). That is strictly better than the
+  width-aware composite for this case, and §0.3 measures it binding in every
+  certified cell.
+
+So: `knockdown_spec_for`'s composite is left exactly where it is — it is not, and
+must not be made into, a homogenised-stiffness law — and the requirement it was
+invoked for is satisfied by the measured tensor plus the measured strut bound.
 
 ### 1.2 ★ The validity range, in cells per member — and it is TWO bounds that bind opposite ways
 
@@ -457,6 +485,34 @@ lattice certification Phase 1. Nothing here lowers `printed_iso`.
 | clearances | the FrozenVoid overlay | ✔ untouched; a cleared voxel is not FrozenSolid so it can never enter the field |
 | octet grading law (`grade_lattice`) | a density field | ✔ unchanged — it reads the same 1.0 |
 | the load-path walk | `density > iso` | ✔ unchanged, and B5 states it separately because PR 324 measured 40 leaked frozen voxels out of 40,216 breaking it |
+
+### 2.4b ★ AGAINST PR 331 (`face-regions`): THIS WORK IS A VOXEL SET, SO NOTHING CHANGES
+
+PR 331's §6 records that **a region cannot yet be a lattice region**: core's
+`lattice.regions` are pure GEOMETRY that become `ClearanceGeometry` predicates
+evaluated pointwise (`run_job.cpp:621`, `:756`, `:856`), and a region is a voxel
+SET, not a predicate. *"A grid split grades what is FROZEN, not what is
+LATTICED."*
+
+★ **This feature is on the other side of that line and is unaffected.**
+
+| | |
+|---|---|
+| what it keys on | `frozen_lattice_region_id` — a **`std::vector<int>`, one id per voxel**. A SET, never a predicate. |
+| what it may touch | only voxels the effective mask holds **FrozenSolid** (`only_where`), i.e. exactly what a face protection and the anchor/load pads freeze |
+| what it does NOT touch | `lattice.regions`, `ClearanceGeometry`, and the pointwise-predicate path — `grep` over this task's sources finds none of them |
+
+So it does **not** assume grid-split sectors can carry lattice properties, and it
+does not need PR 331's §6 gap closed to work. It grades what is FROZEN, which is
+the half PR 331 says already exists.
+
+★ **And the shapes compose the right way round, which is worth recording for
+whoever picks up that gap.** PR 331's regions ARE voxel sets, and this feature's
+region input IS a per-voxel id field — so a `face_protection_region_ids` sector
+could feed `frozen_lattice_region_id` **directly**, with per-sector densities
+falling out of the existing `LatticeRegionSpec` list. That is an observation about
+two existing shapes, not a licence: ★ **the §6 gap is a separate task and nothing
+here builds toward it.**
 
 ### 2.5 ★★ THE CELL IS FITTED TO THE REGION — the difference between refusing and working
 

@@ -16,9 +16,17 @@
 //                        agreement of the cubic and isotropic laws at rho = 1.
 //   --stage assign   M2  the MODE 1 assignment table: region x density, certified,
 //                        EVERY CELL INCLUDING THE FAILURES.
-//   --stage loop     M3  assign -> re-optimise -> certify -> step up. The NET
-//                        saving per pass.
-//   --stage cost     M5  what the coefficient block costs against the state solve.
+//
+// ★ NOT IMPLEMENTED, AND DELIBERATELY NOT ADVERTISED AS IF THEY WERE:
+//   M3  the LOOP — assign, re-optimise the remainder, certify, step the densest
+//       region up, repeat. This is what bar R4's NET saving and margin curve
+//       need. It was skipped on a cost estimate taken from an UNOPTIMISED build
+//       (a certification measured 590.6 s; in Release it is 28.0 s), so the
+//       reason it is missing is not the reason originally given — it is simply
+//       unbuilt, and at 28 s a certification it is minutes of compute.
+//   M5  the COST confirmation the brief asks for in §3(e): PR 324 measured 99.5%
+//       of an iteration as the state solve, and doubling the coefficient block
+//       is claimed to land on that side of the ledger. NOT CONFIRMED HERE.
 //
 // ★ THE PROBLEM IS NOT RE-DERIVED. `build_production_loadcase` builds it from the
 // same transcription `levelset_probe` and `portable_problem_export` use, and the
@@ -310,7 +318,9 @@ int main(int argc, char** argv) {
   if (argc < 5) {
     std::printf(
         "usage: frozen_lattice_probe <part.step> <materials.json> "
-        "<ref_design.bin> <out_dir> [--stage law|regions|r1|assign|loop|cost]\n"
+        "<ref_design.bin> <out_dir> [--stage law|regions|r1|assign]\n"
+        "       (M3 'loop' and M5 'cost' are NOT implemented — see the file "
+        "header)\n"
         "       [--rung R] [--cell MM] [--threads N] [--iters N]\n"
         "       [--densities a,b,c] [--freed-mass-return X] [--allow-below-floor]\n");
     return 2;
