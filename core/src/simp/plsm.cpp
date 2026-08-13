@@ -51,8 +51,10 @@
 #include <stdexcept>
 #include <string>
 
+#include "topopt/plsm_frac.hpp"
 #include "topopt/plsm_kernel.hpp"
 #include "topopt/plsm_mma.hpp"
+#include "topopt/plsm_topology.hpp"
 
 namespace topopt {
 namespace {
@@ -63,15 +65,54 @@ double steady_s() {
       .count();
 }
 
-// The strain-energy density, recovered from the sensitivity core already
-// computed. dc/drho = -p rho^(p-1) E0 q with q = u^T K_unit u, so
-// q E(rho) / rho^p = q E0 is exactly -dc / (p rho^(p-1) E0) * E0 ... the form
-// below is PR 324's, verbatim: it returns q E0, the quantity the shape
-// derivative integrates. The 0.1 floor is the probe's and guards the rho_min
-// voxels, where rho^(p-1) underflows the division.
+// ── ★★ THE TWO COMPLIANCE WEIGHTS, AND WHY THE DEFAULT CHANGED ─────────────
+//
+// The measure (`delta`) says WHERE the boundary moves; the weight says WHAT THAT
+// COSTS. They are separate choices and only one of them was ever verified.
+//
+// `energy_from` is the CONTINUUM one: the strain-energy density `q E0` that the
+// classical shape derivative integrates, recovered from core's `dcompliance`.
+// It is correct when material appears across the interface as a 0 -> 1 JUMP —
+// which is the continuum picture, and which is also the DISCRETE picture when
+// the stiffness law is linear. GridapTopOpt's is: E(rho) = rho E0, p = 1.
+//
+// ★★ PRODUCTION'S IS NOT. The trajectory runs SIMP at penalty p = 3, so the
+// derivative of the ersatz compliance the solver actually minimises is
+//
+//     dC/dalpha_i = SUM_v (dC/drho_v) (1 - rho_min) d f_v/d alpha_i
+//
+// and the continuum weight differs from it by a per-voxel factor
+// `p (1 - rho_min) rho_v^(p-1)` — about 0.75 at rho = 0.5, and VARYING across
+// the band, so it is not even a constant rescaling a step size could absorb.
+//
+// ★★ R2 MEASURED IT AND IT IS LARGE: on this part the continuum weight
+// finite-differences at +56.0% and +45.0% on two random directions, FLAT to five
+// digits across a factor of ten in step size, while the discrete weight reads
+// −0.31% and +0.97% on the same directions and the same solves. Flatness is what
+// makes it a gradient error rather than noise — the criterion PR 327 established
+// for the `|grad phi|` defect, applied to the other half of the same expression.
+//
+// ★ AND SINGLE COEFFICIENTS DO NOT SHOW IT: the continuum weight reads 6-7%
+// there against the discrete form's 1.5-1.8%. This is the same trap PR 327's
+// sub-cell-psi ablation fell into — a single-coefficient check would have passed
+// it. Only a general direction, where many knots combine over the band, separates
+// the two.
+//
+// So `PlsmSensWeight::Discrete` is the default and `Continuum` is kept reachable,
+// because it is what PR 324/325/326/327 and the shipped `--plsm` mode all ran and
+// the control arm has to be able to reproduce it exactly.
 double energy_from(double dc, double rho, double p, double e0) {
   const double r = std::max(rho, 0.1);
   return -dc / (p * std::pow(r, p - 1.0) * e0);
+}
+
+// The DISCRETE weight: the derivative of the ACTUAL stiffness law. `dc` is
+// `dC/drho_v` as core computes it, and `rho = rho_min + (1 - rho_min) * f_v`, so
+// `drho/df = 1 - rho_min`. The sign is flipped for the same reason
+// `energy_from`'s is — the scatter's convention is that a POSITIVE weight is
+// material coming IN.
+double discrete_weight_from(double dc, double rho_min) {
+  return -dc * (1.0 - rho_min);
 }
 
 PlsmBasisKind parse_basis(const std::string& s) {
@@ -192,12 +233,28 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     throw std::invalid_argument("plsm_optimize: support must be >= 1");
   if (!(plsm.eta_voxels > 0.0))
     throw std::invalid_argument("plsm_optimize: eta_voxels must be > 0");
+  const bool frac = plsm.ersatz == PlsmErsatz::VolumeFraction;
+  // ★ REFUSED RATHER THAN CLAMPED. k = 1 is the cell centre — the substitution
+  // the fraction exists to remove, silently reinstated — and a large k is O(k^3)
+  // per active cell with nothing measured above 4. A caller that writes a number
+  // outside the band gets told, not corrected.
+  if (frac && (plsm.frac_samples < 2 || plsm.frac_samples > 16))
+    throw std::invalid_argument(
+        "plsm_optimize: frac_samples is the SUB-CELL sampling per axis and must "
+        "be in [2, 16], got " + std::to_string(plsm.frac_samples) +
+        " — 1 would put the only sample back at the cell centre, which is the "
+        "approximation the volume fraction replaces.");
+  if (frac && !(plsm.frac_eps_mult > 0.0))
+    throw std::invalid_argument(
+        "plsm_optimize: frac_eps_mult must be > 0 (it is the quadrature "
+        "bandwidth in units of the sample spacing; 1.0 is the derived value)");
 
   const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
   const double h = grid.spacing;
   const double eta = plsm.eta_voxels * h;
   const int threads = plsm_hw_threads(plsm.threads);
   const PlsmBasisKind basis = parse_basis(plsm.basis);
+  const int fk = plsm.frac_samples;
 
   // ★ THE MASK THE RUN ACTUALLY HOLDS FROZEN, not a second opinion about it.
   // `effective_design_mask` is the SAME function `simp_optimize`'s loop calls, so
@@ -224,6 +281,9 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
                                   plsm.support);
   out.basis_kind = basis;
   out.eta_voxels = plsm.eta_voxels;
+  out.ersatz = plsm.ersatz;
+  out.sens_weight = plsm.sens_weight;
+  out.frac_samples = frac ? fk : 0;
   out.spacing_mm = h;
   const PlsmKnotLattice& L = out.lattice;
 
@@ -235,14 +295,32 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   out.frozen_solid_voxels = fb.n_solid;
   out.frozen_void_voxels = fb.n_void;
   out.active_voxels = fb.n_active;
-  out.frozen_floor_occupancy = plsm_frozen_floor_occupancy(fb, plsm.eta_voxels);
+  // ── ★★ THE FLOOR OCCUPANCY IS WHAT THE RUN ACTUALLY GIVES THE FROZEN SET,
+  //    AND UNDER THE FRACTION THAT IS NOT AN `H_eta` ────────────────────────
+  //
+  // ★ THIS LINE WAS VESTIGIAL FOR ONE COMMIT AND THE ENUMERATION CAUGHT IT.
+  // Under `VolumeFraction` a FrozenSolid cell is STAMPED to 1.0 by
+  // `build_fields` — it is never sampled and `H_eta` is never evaluated on it —
+  // so reporting `H_eta(h/2)` here described a density the run does not use.
+  // The number came out 0.909155 while the actual occupancy was 1.0, the
+  // assertion below passed for a reason unrelated to what shipped, and the
+  // receipt published the wrong one. A guarantee that is measured on the wrong
+  // quantity is the shape of defect this whole task keeps finding.
+  //
+  // ★ THE ASSERTION ITSELF IS UNCHANGED AND STILL FIRES ON BOTH PATHS (R7 does
+  // not permit deleting a check because one path stopped needing it). What
+  // changes is that each path now reports ITS OWN floor: the stamped 1.0 under
+  // the fraction, `H_eta` of the shallowest frozen voxel under the Heaviside.
+  out.frozen_floor_occupancy =
+      frac ? 1.0 : plsm_frozen_floor_occupancy(fb, plsm.eta_voxels);
   // ★ THE ASSERTION PR 324 §5 PAID FOR. Every fit it ran was REJECTED on the LOAD
   // PATH, not on the margin, because an analytic phi leaked 40 frozen voxels of
   // 40,216 below the iso and `load_path_connected` then found no route from the
   // anchor to the load. Under the smooth boolean that cannot happen — phi_eff is
   // a `min` with a field that is <= -h/2 on the whole frozen set — and this is
   // where that stops being an argument and becomes a check the run cannot pass
-  // without. It is a property of (eta, the mask), so it is decidable here, once,
+  // without. It is a property of (eta, the mask) on the Heaviside path and of
+  // the STAMP on the fraction path, so either way it is decidable here, once,
   // before any wall clock is spent.
   if (fb.n_solid > 0 && !(out.frozen_floor_occupancy > 0.5))
     throw std::invalid_argument(
@@ -253,6 +331,43 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
         " FrozenSolid voxels) — the anchor-to-load walk would break and every "
         "certification would be rejected on the LOAD PATH. Reduce eta_voxels "
         "below 2.0 or widen the frozen pad.");
+
+  // ── ★ THE PROPERTY THE VOLUME-FRACTION PATH REPLACES THE BOOLEAN WITH ─────
+  //
+  // Under `VolumeFraction` the ersatz is sampled ONLY on the ACTIVE cells and
+  // the frozen ones are STAMPED (1 for FrozenSolid, 0 for FrozenVoid), so the
+  // load-path guarantee stops being a band-width argument and becomes exact. The
+  // reason that is legitimate — rather than the boolean being quietly dropped —
+  // is a property of the two distance fields, and it is CHECKED here rather than
+  // asserted in a comment:
+  //
+  //   `phi_eff = max(min(phi, phi_solid), -phi_void)` can only change the SIGN
+  //   of phi at a voxel where `phi_solid < 0` (a FrozenSolid voxel) or
+  //   `phi_void < 0` (a keep-out). Both distances are STRICTLY POSITIVE
+  //   everywhere else by construction — `plsm_build_frozen_boolean` seeds them
+  //   at +h/2 and `plsm_reinitialise` preserves the sign — so on every ACTIVE
+  //   cell the smooth boolean is a no-op on the sign, and a volume fraction
+  //   counts SIGNS. Stamping the frozen cells is therefore not an approximation
+  //   of the boolean; on this partition it IS the boolean.
+  //
+  // If that ever stops holding, the fraction would silently start ignoring a
+  // frozen region, which is exactly the failure PR 324 §5 spent a day on.
+  if (frac) {
+    std::size_t bad = 0;
+    for (std::size_t v = 0; v < n; ++v) {
+      if (grid.tags[v] == VoxelTag::Empty) continue;
+      if (eff[v] != MaskValue::FrozenSolid && !(fb.phi_solid[v] > 0.0)) ++bad;
+      if (eff[v] != MaskValue::FrozenVoid && !(fb.phi_void[v] > 0.0)) ++bad;
+    }
+    if (bad > 0)
+      throw std::invalid_argument(
+          "plsm_optimize: the frozen distance fields are not strictly positive "
+          "off their own sets (" + std::to_string(bad) +
+          " voxels) — the volume-fraction ersatz stamps the frozen cells and "
+          "relies on the smooth boolean being sign-neutral on the ACTIVE ones, "
+          "so a frozen region could be silently ignored. This is the load-path "
+          "failure PR 324 section 5 diagnosed, one representation later.");
+  }
 
   // ── the basis ─────────────────────────────────────────────────────────────
   const PlsmCsr Psi = plsm_build_A(nx, ny, nz, L, basis, threads);
@@ -347,11 +462,64 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     if (have_void) p = std::max(p, -fb.phi_void[v]);
     return p;
   };
+
+  // ── ★ THE VOLUME FRACTION'S OWN STATE ────────────────────────────────────
+  //
+  // `sample` is the set the sub-cell lattice is ever laid over: the ACTIVE
+  // cells, and nothing else. On his part that is 70,688 of 468,224 voxels — the
+  // other 397,536 are stamped by the mask and the optimiser never had any say
+  // over them.
+  std::vector<char> sample(n, 0);
+  if (frac)
+    for (std::size_t v = 0; v < n; ++v)
+      sample[v] = (grid.tags[v] != VoxelTag::Empty && eff[v] == MaskValue::Active)
+                      ? 1
+                      : 0;
+  PlsmFracCache fcache;
+  // The scale the quadrature bandwidth is tied to, per cell. L2 by default; L1
+  // when the (measured, and losing) Engquist-Tornberg-Tsai variant is armed.
+  std::vector<double> frac_gs(frac ? n : 0, 0.0);
+  auto refresh_frac_gradscale = [&]() {
+    if (!frac) return;
+    plsm_parallel_for(n, threads, [&](std::size_t v) {
+      if (!sample[v]) { frac_gs[v] = 0.0; return; }
+      const int i = static_cast<int>(v % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((v / static_cast<std::size_t>(nx)) %
+                                     static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(v / (static_cast<std::size_t>(nx) *
+                                          static_cast<std::size_t>(ny)));
+      frac_gs[v] = plsm.frac_eps_l1
+                       ? plsm_frac_grad_l1(nx, ny, nz, phi, i, j, k, h)
+                       : plsm_grad_mag(nx, ny, nz, phi, i, j, k, h);
+    });
+  };
+  // f_v at one ACTIVE cell, at a rigid offset of the level set. The mollified
+  // value is the default; both agree on the volume they measure to 0.037%.
+  auto frac_at = [&](std::size_t v, double offset) {
+    return plsm.frac_mollified
+               ? plsm_frac_of_soft(
+                     fcache, v,
+                     plsm_frac_eps(frac_gs[v], h, fk, plsm.frac_eps_mult), offset)
+               : plsm_frac_of(fcache, v, offset);
+  };
+
+  // ★ THE OCCUPANCY. Under `VolumeFraction` the frozen cells are STAMPED and the
+  // active ones carry the exact fraction; under `Heaviside` this is PR 324's
+  // smooth boolean, unmoved, so the A/B changes one thing.
   auto build_fields = [&](double offset) {
     for (std::size_t v = 0; v < n; ++v) {
-      const double o = grid.tags[v] == VoxelTag::Empty
-                           ? 0.0
-                           : plsm_heaviside(-phi_eff_at(v, offset), eta);
+      double o;
+      if (grid.tags[v] == VoxelTag::Empty) {
+        o = 0.0;
+      } else if (!frac) {
+        o = plsm_heaviside(-phi_eff_at(v, offset), eta);
+      } else if (eff[v] == MaskValue::FrozenSolid) {
+        o = 1.0;
+      } else if (eff[v] == MaskValue::FrozenVoid) {
+        o = 0.0;
+      } else {
+        o = frac_at(v, offset);
+      }
       occ[v] = o;
       rho[v] = rho_min + (1.0 - rho_min) * o;
     }
@@ -359,8 +527,38 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // ★ THE CONSTRAINT IS SIMP'S: the occupancy summed over the ACTIVE set against
   // `volume_fraction * n_active`. Frozen solid is printed either way and is
   // outside the budget, exactly as `simp_optimize`'s mask-aware overload has it.
+  //
+  // ★ AND UNDER THE FRACTION IT IS THE SAME FIELD THE DENSITY IS. That closes a
+  // drift the smeared ersatz carried: `H_eta` is antisymmetric about a PLANE, so
+  // summing it credited material that is not there wherever the boundary is
+  // CURVED — PR 327 §7 measured 365.8 voxels, 1.08% of extra stiffness, biased
+  // toward branched designs and invisible to a volume constraint that summed the
+  // same smeared field. Summing `f_v` IS summing the volume.
+  // ★ THE FRACTION'S BRANCH IS A DETERMINISTIC PARALLEL REDUCTION, AND BOTH
+  // WORDS ARE LOAD-BEARING. The bisection below evaluates this 100 times per
+  // iteration, and on his part each evaluation is 70,688 cells x 64 samples =
+  // 4.5 million mollified steps — serially that is over a second per iteration,
+  // several times the sampling it is meant to ride along with. Fixed chunks with
+  // the partials summed IN CHUNK ORDER make it reproducible run to run: a
+  // reduction whose combination order followed thread completion would move the
+  // seventh digit of the volume between two runs of the same job, and the
+  // constraint is compared against a target to that precision.
+  std::vector<double> vol_partial(
+      static_cast<std::size_t>(std::max(1, threads)), 0.0);
   auto active_volume_at = [&](double offset) {
     double s = 0.0;
+    if (frac) {
+      std::fill(vol_partial.begin(), vol_partial.end(), 0.0);
+      // `plsm_frac_parallel` hands the body its THREAD INDEX and chunks the
+      // range CONTIGUOUSLY, so partial `q` always covers the same cells in the
+      // same order however the threads are scheduled.
+      plsm_frac_parallel(fcache.ncell, threads, [&](std::size_t sl, int tid) {
+        vol_partial[static_cast<std::size_t>(tid)] +=
+            frac_at(static_cast<std::size_t>(fcache.cell[sl]), offset);
+      });
+      for (double p : vol_partial) s += p;
+      return s;
+    }
     for (std::size_t v = 0; v < n; ++v) {
       if (grid.tags[v] == VoxelTag::Empty) continue;
       if (eff[v] != MaskValue::Active) continue;
@@ -394,6 +592,19 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   std::vector<double> best_rho, best_occ, best_alpha;
   double best_compliance = std::numeric_limits<double>::infinity();
   int best_iter = -1;
+  // ── ★ THE MARGIN PEAK — a SECOND candidate design, and the one that ships
+  //    when a probe is attached. Held separately from the best-compliance
+  //    iterate because the two are not the same iterate: PR 326 measured a
+  //    margin that DOUBLED between iterations 40 and 60 while compliance moved
+  //    2%, and PR 327 measured a margin that PEAKED at 80 and fell 19.4% by 120
+  //    while compliance was flat.
+  std::vector<double> peak_rho, peak_occ, peak_alpha;
+  double peak_margin = -std::numeric_limits<double>::infinity();
+  int peak_iter = -1;
+  int stale_probes = 0;
+  bool margin_stop_now = false;
+  const bool margin_rule =
+      static_cast<bool>(plsm.margin_probe) && plsm.margin_probe_every > 0;
   FeaSolution warm;
   bool have_warm = false;
   bool non_convergent = false;
@@ -426,9 +637,33 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // if the design carried a per-voxel term beside it — and it moves the surface
     // by offset * sum_i psi_i, which is a near-rigid move because psi_sum is
     // nearly constant in the interior.
+    // ── ★ THE SUB-CELL SAMPLE CACHE, BUILT ONCE PER ITERATION ──────────────
+    //
+    // Before the offset, so the bisection can evaluate a candidate THROUGH the
+    // cache (phi = Psi alpha, so alpha_i += c moves every sample by c * SUM psi
+    // exactly) instead of re-evaluating the basis a hundred times. The chosen
+    // offset is then folded into the cache by that same identity, so the samples
+    // the density and the sensitivity read are the samples of the alpha the
+    // state solve is about to run on — not a rebuild that could differ.
+    if (frac) {
+      const double t_fb = steady_s();
+      plsm_frac_build(nx, ny, nz, L, basis, alpha, sample, fk, threads, fcache);
+      out.frac_sample_wall_s += steady_s() - t_fb;
+      refresh_frac_gradscale();
+    }
     const double offset = solve_offset(target_volume);
     for (double& c : alpha) c += offset;
+    if (frac) plsm_frac_shift(fcache, offset);
     sync();
+    if (frac) {
+      // |grad phi| moved with the offset (psi_sum is not exactly constant), and
+      // the bandwidth is a function of it. One more pass rather than a stale
+      // field: it is 468k central differences against a 28 s state solve.
+      refresh_frac_gradscale();
+      out.frac_cut_cells = fcache.n_boundary;
+      out.frac_full_cells = fcache.n_full;
+      out.frac_empty_cells = fcache.n_empty;
+    }
     build_fields(0.0);
 
     // ── THE STATE SOLVE. Core's, unmodified. ────────────────────────────────
@@ -469,6 +704,47 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       best_iter = it;
     }
 
+    // ── ★★ THE MARGIN PROBE, ON ITS CADENCE ─────────────────────────────────
+    //
+    // HERE, and not at the bottom of the loop, because `rho`, `occ` and `alpha`
+    // describe ONE design at exactly this point: the MMA update below moves
+    // alpha, and a probe taken after it would certify a field that no longer
+    // belongs to the coefficients stored beside it.
+    //
+    // ★ A PROBE THAT IS NOT LOAD-PATH CONNECTED IS DISCARDED, NOT RECORDED AS A
+    // PEAK. A severed design measures ~zero stress and therefore an enormous and
+    // meaningless margin; taking the maximum over margins without that guard
+    // would make the rule select the worst design in the run. The same is true
+    // of a certification solve that did not converge.
+    if (margin_rule && it % plsm.margin_probe_every == 0) {
+      const PlsmMarginProbe mp = plsm.margin_probe(rho);
+      out.margin_probe_iterations.push_back(it);
+      out.margin_probe_values.push_back(mp.margin);
+      out.margin_probe_load_path_ok.push_back(
+          static_cast<char>(mp.load_path_ok && !mp.non_convergent ? 1 : 0));
+      out.margin_probe_wall_s += mp.wall_s;
+      if (mp.load_path_ok && !mp.non_convergent) {
+        const bool improved =
+            peak_iter < 0 ||
+            mp.margin > peak_margin * (1.0 + plsm.margin_plateau_tol);
+        if (improved) {
+          peak_margin = mp.margin;
+          peak_iter = it;
+          peak_rho = rho;
+          peak_occ = occ;
+          peak_alpha = alpha;
+          stale_probes = 0;
+        } else {
+          // ★ The peak is KEPT even when a later probe is nominally higher but
+          // inside the tolerance: the design that ships is the one whose margin
+          // was measured, and re-selecting on noise would make the shipped
+          // design depend on the reproduction floor.
+          ++stale_probes;
+          if (stale_probes >= plsm.margin_plateau_probes) margin_stop_now = true;
+        }
+      }
+    }
+
     // ── THE SHAPE DERIVATIVE, WITH THE SURFACE DELTA ────────────────────────
     //
     // dJ/dalpha_i     = integral (C:eps(u):eps(u)) psi_i DH_eta(phi) |grad phi|
@@ -479,6 +755,19 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // density by a constant. The delta is evaluated at phi ITSELF because the
     // volume offset has already been folded into the coefficients, so {phi = 0}
     // is the one interface the ersatz, the constraint and this delta all read.
+    // ★ UNDER THE FRACTION THE MEASURE CHANGES AND THE `|grad phi|` GOES AWAY.
+    // `dfrac[v] = (1/k^3) SUM_s delta_q(phi_s)` is the derivative of f_v with
+    // respect to a rigid shift of phi, which is `dS/|grad phi|` by the co-area
+    // formula — and `dS/|grad phi|` is what the derivative of a VOLUME FRACTION
+    // actually is. The old `DH_eta(phi)*|grad phi|` is `dS`, the CONTINUUM shape
+    // derivative's measure, and the two agree only on a true signed distance.
+    // This phi is not one, and PR 327 §4 measured what that was costing: up to
+    // 23%, flat across two decades of step size.
+    if (frac) {
+      const double t_fs = steady_s();
+      plsm_frac_band(fcache, frac_gs, h, plsm.frac_eps_mult, delta, threads);
+      out.frac_sens_wall_s += steady_s() - t_fs;
+    }
     for (int k = 0; k < nz; ++k)
       for (int j = 0; j < ny; ++j)
         for (int i = 0; i < nx; ++i) {
@@ -488,10 +777,20 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
             raw_vel[v] = 0.0;
             continue;
           }
-          const double dh = plsm_dheaviside(phi[v], eta);
-          delta[v] = dh > 0.0 ? dh * plsm_grad_mag(nx, ny, nz, phi, i, j, k, h) : 0.0;
-          raw_vel[v] = energy_from(sc.dcompliance[v], rho[v], params.penalty,
-                                   params.youngs_modulus);
+          if (!frac) {
+            const double dh = plsm_dheaviside(phi[v], eta);
+            delta[v] =
+                dh > 0.0 ? dh * plsm_grad_mag(nx, ny, nz, phi, i, j, k, h) : 0.0;
+          }
+          // ★ THE WEIGHT. See the two functions at the top of this file: the
+          // continuum strain-energy density is right for a LINEAR stiffness law
+          // and production's trajectory is SIMP at p = 3. R2 measured the
+          // difference at 45-56% on a general direction, flat across step size.
+          raw_vel[v] =
+              plsm.sens_weight == PlsmSensWeight::Continuum
+                  ? energy_from(sc.dcompliance[v], rho[v], params.penalty,
+                                params.youngs_modulus)
+                  : discrete_weight_from(sc.dcompliance[v], rho_min);
         }
 
     // ★ THERE IS NO EXPLICIT VOLUME MULTIPLIER HERE, AND PR 324's DESCENT ARM IS
@@ -516,11 +815,37 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // consumes SENSITIVITIES and an extension produces a DESCENT DIRECTION, which
     // is not a derivative.
     {
-      std::vector<double> edelta(n, 0.0);
-      for (std::size_t v = 0; v < n; ++v) edelta[v] = raw_vel[v] * delta[v];
       std::vector<double> dc(L.count(), 0.0), dv(L.count(), 0.0);
-      plsm_spmv(PsiT, edelta, dc, threads);
-      plsm_spmv(PsiT, delta, dv, threads);
+      if (frac && plsm.frac_sens_exact) {
+        // ★ THE SCATTER, NOT `Psi^T`. `Psi` is built on the CELL-CENTRE lattice,
+        // so `Psi^T` evaluates psi_i at the centre and factors it out of the
+        // sub-cell sum — the same substitution this change exists to remove,
+        // made one level down, and it would have been INVISIBLE (still a descent
+        // direction, still converges). PR 327 §4(c)(i) priced it: ~15 percentage
+        // points of gradient accuracy on a general direction, and NOTHING on a
+        // single coefficient, so a single-coefficient check would have said the
+        // scatter was unnecessary.
+        //
+        // The two weights ride the SAME measure and differ only in w — the
+        // identity the whole level-set formulation rests on — so one pass over
+        // the samples produces both. `raw_vel` is the energy density already
+        // recovered above; the volume's weight is 1.
+        const double t_fs = steady_s();
+        std::vector<double> wc(n, 0.0), wv(n, 0.0);
+        for (std::size_t v = 0; v < n; ++v) {
+          if (!(delta[v] > 0.0)) continue;
+          wc[v] = raw_vel[v];
+          wv[v] = 1.0;
+        }
+        plsm_frac_scatter(fcache, nx, ny, nz, L, basis, frac_gs, h,
+                          plsm.frac_eps_mult, wc, dc, wv, dv, threads);
+        out.frac_sens_wall_s += steady_s() - t_fs;
+      } else {
+        std::vector<double> edelta(n, 0.0);
+        for (std::size_t v = 0; v < n; ++v) edelta[v] = raw_vel[v] * delta[v];
+        plsm_spmv(PsiT, edelta, dc, threads);
+        plsm_spmv(PsiT, delta, dv, threads);
+      }
       for (double& c : dc) c = -c;  // material IN lowers compliance
       std::vector<double> beta(L.count(), 0.0);
       for (std::size_t i2 = 0; i2 < L.count(); ++i2) beta[i2] = -alpha[i2];
@@ -638,14 +963,44 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       // not"). Without it a GenEO arm that engages reports FEWER CG iterations
       // while doing MORE work, and the table would read as a win. The two
       // GenEO timing splits come with it because they are what price the
-      // refresh against the deflation in wall terms. The rest of
-      // IterationPhaseTimes is left at its defaults: the PLSM loop has no
-      // filter, no projection and no OC/MMA density update, so filling those
-      // columns would be inventing phases that did not run.
+      // refresh against the deflation in wall terms.
       ob.phases.fea_solves = simp_compliance_call_count() - solves0;
       ob.phases.matvecs = fea_matvec_count() - matvecs0;
       ob.phases.solver_geneo_setup_ms = sc.cg.t_geneo_setup_ms;
       ob.phases.solver_geneo_apply_ms = sc.cg.t_geneo_apply_ms;
+      // ── ★★ AND THE WALL ITSELF, WHICH THIS PATH LEFT BLANK FROM PR 325 UNTIL
+      //    2026-08-13 ─────────────────────────────────────────────────────────
+      //
+      // ★ THE FOUR LINES ABOVE AND THE FOUR BELOW WERE ADDED BY TWO DIFFERENT
+      // TASKS, AND THE MERGE IS WHERE THEIR REASONING HAD TO BE RECONCILED. The
+      // work-counter block arrived with the sentence "the rest of
+      // IterationPhaseTimes is left at its defaults: the PLSM loop has no
+      // filter, no projection and no OC/MMA density update, so filling those
+      // columns would be inventing phases that did not run." ★ THAT IS RIGHT
+      // ABOUT `filter_ms`, `project_ms` AND `update_ms` AND WRONG ABOUT
+      // `total_ms`. The iteration's own wall is not a phase that did not run —
+      // it is the phase that ran, unrecorded. `iterations.csv` carried 0.000 in
+      // `total_ms`, `solve_ms` and `fea_ms` on every row of every parametric run
+      // while the SIMP path filled them (94,613.450 on his rung 0.68's first
+      // iteration), which reads as "measured, and it was zero" rather than
+      // "never measured".
+      //
+      // ★ FOUND BY NEEDING THE NUMBER, NOT BY READING THE CODE: this task's own
+      // cost table divided by `total_ms` and got a zero.
+      //
+      // ★ `residual_ms` IS THE POINT OF THE PARTITION AND IS FILLED HONESTLY.
+      // The named phases are subtracted from the iteration's wall and whatever
+      // is left is REPORTED, so time going somewhere unnamed is visible in the
+      // CSV instead of inferred. Here the unnamed part is the offset bisection,
+      // the sub-cell sampling, the MMA step and the re-fit — real work with no
+      // SIMP analogue. The two GenEO splits above are a SUB-split of `solve_ms`
+      // and not extra terms (simp.hpp), so subtracting `solve_ms` alone does not
+      // double-count them. `filter_ms` and `project_ms` stay 0 because this path
+      // genuinely has neither, which is a true statement rather than a gap.
+      ob.phases.total_ms = (steady_s() - t_it0) * 1000.0;
+      ob.phases.solve_ms = sc.t_solve_ms;
+      ob.phases.fea_ms = sc.t_solve_ms;
+      ob.phases.residual_ms = ob.phases.total_ms - ob.phases.solve_ms;
       options.observe(ob);
     }
     // `SimpOptimizeResult::history` is part of the contract — "history has
@@ -666,9 +1021,27 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     out.history_wall_s.push_back(steady_s() - t_it0);
     if (options.progress) options.progress(it, sc.compliance, 0.0);
 
-    // Convergence: the compliance plateau, on the window and tolerance the
-    // shipped MMA termination uses (window 10, tol 1e-3).
-    if (out.history_compliance.size() >= 10) {
+    // ── ★★ THE STOPPING RULE ────────────────────────────────────────────────
+    //
+    // The margin plateau, when a probe is attached. It fires here rather than at
+    // the probe so this iteration's observability, history and keyframe are all
+    // emitted first — a stopped run must not be missing its last row.
+    if (margin_stop_now) {
+      out.optimization.converged = true;
+      out.stop_reason = "margin-plateau";
+      break;
+    }
+
+    // The compliance plateau, on the window and tolerance the shipped MMA
+    // termination uses (window 10, tol 1e-3).
+    //
+    // ★ IT IS DISARMED WHEN A MARGIN PROBE IS ATTACHED, AND THAT IS THE POINT OF
+    // THE ITEM. PR 326 measured one arm's margin DOUBLE between iterations 40
+    // and 60 while its compliance moved 2%; another task's control arm was
+    // halted by this rule at iteration 56 while its margin was still climbing
+    // 3195 -> 3395. Compliance is not a convergence proxy for the margin, so
+    // where the margin is being watched this rule may not pre-empt it.
+    if (!margin_rule && out.history_compliance.size() >= 10) {
       const std::size_t m = out.history_compliance.size();
       double lo = out.history_compliance[m - 10], hi = lo;
       for (std::size_t q = m - 10; q < m; ++q) {
@@ -677,6 +1050,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       }
       if (hi > 0.0 && (hi - lo) / hi < 1e-3) {
         out.optimization.converged = true;
+        out.stop_reason = "compliance-plateau";
         break;
       }
     }
@@ -684,6 +1058,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
 
   out.total_wall_s = steady_s() - t_run0;
   out.best_iteration = best_iter;
+  out.margin_peak_iteration = peak_iter > 0 ? peak_iter : 0;
+  out.margin_peak = peak_iter > 0 ? peak_margin : 0.0;
+  if (cancelled) out.stop_reason = "cancelled";
+  else if (non_convergent) out.stop_reason = "non-convergent";
 
   r.iterations = done_iters;
   r.cancelled = cancelled;
@@ -700,22 +1078,50 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     return out;
   }
 
-  // ★ THE DESIGN THAT IS SHIPPED IS THE BEST-COMPLIANCE ITERATE, not whatever the
-  // loop stopped on: an MMA step can overshoot, and shipping an overshoot would
-  // report the scheme's worst moment as its result.
-  r.physical_density = best_rho;
+  // ── ★★ WHICH ITERATE SHIPS ────────────────────────────────────────────────
+  //
+  // WITHOUT a margin probe: the BEST-COMPLIANCE iterate, not whatever the loop
+  // stopped on — an MMA step can overshoot, and shipping an overshoot would
+  // report the scheme's worst moment as its result. That is the historical rule
+  // and it is unchanged on that path.
+  //
+  // ★ WITH a margin probe: THE PEAK-MARGIN ITERATE. Returning the last design,
+  // or the best-compliance one, is what the whole item is about: the endpoint
+  // understates the run's own best margin by 16-19% on every curve measured, and
+  // compliance does not find the peak because it is flat across it. If no probe
+  // was ever accepted — every one severed or non-convergent — this falls back to
+  // best-compliance and the stop reason says so, rather than shipping a design
+  // no certificate stands behind.
+  const bool ship_peak = peak_iter > 0 && !peak_rho.empty();
+  if (margin_rule && !ship_peak) out.stop_reason += "+no-accepted-probe";
+  const std::vector<double>& ship_rho = ship_peak ? peak_rho : best_rho;
+  const std::vector<double>& ship_occ = ship_peak ? peak_occ : best_occ;
+  r.physical_density = ship_rho;
   // An RBF coefficient has no voxel, so there is no honest per-voxel "design
   // variable" to report; `design` is a copy of the physical field, and the actual
   // design — the coefficients — is `out.alpha` beside it.
-  r.design = best_rho;
-  out.alpha = best_alpha;
+  r.design = ship_rho;
+  out.alpha = ship_peak ? peak_alpha : best_alpha;
+  out.best_iteration = ship_peak ? peak_iter : best_iter;
 
   double active_sum = 0.0;
   for (std::size_t v = 0; v < n; ++v)
     if (grid.tags[v] != VoxelTag::Empty && eff[v] == MaskValue::Active)
-      active_sum += best_occ[v];
+      active_sum += ship_occ[v];
   r.volume_fraction =
       fb.n_active > 0 ? active_sum / static_cast<double>(fb.n_active) : 0.0;
+
+  // ── ★ THE TOPOLOGY COUNTERS, ON THE DESIGN THAT SHIPS ────────────────────
+  // Milliseconds, on the same printed set the certificate and the export read.
+  // The CONSTRAINT that produced these does not ship (it bought 1.7% of the
+  // internal surface where a change of seed bought 9.4%); the counters do,
+  // because they are what made the finding legible in the first place.
+  {
+    std::vector<char> in_part(n, 0);
+    for (std::size_t v = 0; v < n; ++v)
+      in_part[v] = grid.tags[v] != VoxelTag::Empty ? 1 : 0;
+    out.topology = plsm_void_topology(nx, ny, nz, h, ship_occ, 0.5, in_part);
+  }
 
   // ── THE FINAL COMPLIANCE, TIGHT AND COLD ────────────────────────────────
   //

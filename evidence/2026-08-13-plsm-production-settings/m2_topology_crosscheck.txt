@@ -1,0 +1,20 @@
+== R6 / item 4 — THE SHIPPED COUNTERS, CROSS-CHECKED AGAINST AN INDEPENDENT IMPLEMENTATION ==
+
+SIMP's own rungs, production's run of record (design.bin -> design_rung_dump).
+Shipped: topopt::plsm_void_topology (union-find + anchored cell scan).
+Check:   crosscheck_topology.py    (BFS + explicit cell enumeration).
+Different algorithms, same inputs. Agreement is the check.
+
+== void topology, by the MANUFACTURING escape rule (6-connected void, exterior = the grid's boundary planes) ==
+grid 128 x 31 x 118   spacing 1.705279 mm   in-part voxels 110904 of 468224
+
+field                                          b0      chi  b2solid    b1tun  sealed_pk  sealed_vox  sealed%    sealed_mm3
+field,b0_components,chi,b2_enclosed_solid,b1_tunnels,sealed_pockets,void_voxels,sealed_voxels,sealed_volume_mm3
+/Users/nadim/plsm_scratch/simp_dump/rung_0.68       16       16        0        0         10        1034    4.60%      5127.517
+CSV,/Users/nadim/plsm_scratch/simp_dump/rung_0.68,16,16,0,0,10,22480,1034,5127.516914
+/Users/nadim/plsm_scratch/simp_dump/rung_0.26        2       -7        0        9          0           0    0.00%         0.000
+CSV,/Users/nadim/plsm_scratch/simp_dump/rung_0.26,2,-7,0,9,0,52309,0,0.000000
+
+-- the independent recomputation --
+rung 0.68  b0=16 chi=16 b2=0 b1=0 sealed_pockets=10 sealed_voxels=1034 void_voxels=22480
+rung 0.26  b0=2 chi=-7 b2=0 b1=9 sealed_pockets=0 sealed_voxels=0 void_voxels=52309

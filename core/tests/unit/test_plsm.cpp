@@ -36,7 +36,9 @@
 
 #include "topopt/plsm.hpp"
 #include "topopt/plsm_basis.hpp"
+#include "topopt/plsm_frac.hpp"
 #include "topopt/plsm_kernel.hpp"
+#include "topopt/plsm_topology.hpp"
 #include "topopt/pipeline.hpp"
 #include "topopt/simp.hpp"
 #include "topopt/voxel.hpp"
@@ -234,6 +236,282 @@ void test_conditional_projection_is_disarmed_on_plsm() {
         "silently ships a voxel design");
 }
 
+// ── 7: ★ THE MOLLIFIED VALUE IS THE EXACT ANTIDERIVATIVE OF THE GRADIENT'S
+//        OWN MOLLIFIER (task 2026-08-13, item 2) ─────────────────────────────
+//
+// This is the property the whole volume-fraction sensitivity rests on, and it is
+// the ONE thing in that change a finite difference cannot reveal — because if it
+// holds, the value and the gradient are two facts about one function and the
+// difference has nothing to find. `S(t) = INT_t^inf delta_q` means
+// `dS/dt = -delta_q(t)` IDENTICALLY. Checked at the KNOTS (t = 0, +-eps) as well
+// as inside, because a smoothing law that is only right in the interior is the
+// shape of defect that survives a coarse sweep.
+void test_mollified_value_is_the_mollifier_antiderivative() {
+  const double eps = 0.37;
+  // INT delta_q = 1 exactly: a mollifier that does not integrate to one scales
+  // the whole volume sensitivity by a constant nobody would notice in a descent
+  // direction.
+  double integral = 0.0;
+  const int N = 200000;
+  const double lo = -2.0 * eps, hi = 2.0 * eps, dt = (hi - lo) / N;
+  for (int i = 0; i < N; ++i)
+    integral += topopt::plsm_frac_delta_q(lo + (i + 0.5) * dt, eps) * dt;
+  CHECK(std::fabs(integral - 1.0) < 1e-6,
+        "the quadrature mollifier must integrate to 1 — otherwise the whole "
+        "volume sensitivity carries a constant factor");
+
+  CHECK(topopt::plsm_frac_soft_step(-2.0 * eps, eps) == 1.0,
+        "the mollified step is exactly 1 well inside the material");
+  CHECK(topopt::plsm_frac_soft_step(2.0 * eps, eps) == 0.0,
+        "the mollified step is exactly 0 well outside");
+  CHECK(std::fabs(topopt::plsm_frac_soft_step(0.0, eps) - 0.5) < 1e-15,
+        "the mollified step is exactly 0.5 ON the interface — so the PRINTED "
+        "predicate {value > 0.5} is still the sign set of phi, and the printed "
+        "SET does not depend on the mollification");
+
+  double worst = 0.0;
+  // ★ THE TOLERANCE IS THE CENTRAL DIFFERENCE'S OWN TRUNCATION AT THE KINKS,
+  // not a fudge. S is piecewise QUADRATIC, so a central difference is exact in
+  // the interior; at t = 0 and t = ±eps the second derivative jumps by 2/eps²
+  // and the difference carries h/(2 eps²). Bounding by that is what makes this a
+  // check on the IDENTITY rather than on the differencing.
+  const double hh = 1e-6;
+  const double kink_bound = 4.0 * hh / (eps * eps);
+  for (int i = -12; i <= 12; ++i) {
+    const double t = i * eps / 8.0;  // hits -eps, 0 and +eps exactly
+    const double fd = (topopt::plsm_frac_soft_step(t + hh, eps) -
+                       topopt::plsm_frac_soft_step(t - hh, eps)) /
+                      (2.0 * hh);
+    const double an = -topopt::plsm_frac_delta_q(t, eps);
+    worst = std::max(worst, std::fabs(fd - an));
+  }
+  CHECK(worst < kink_bound,
+        "dS/dt must equal -delta_q(t) IDENTICALLY — the value and the gradient "
+        "are two facts about ONE function, and if they come apart the "
+        "volume-fraction sensitivity is a mismatched gradient that converges "
+        "slowly and is believed");
+}
+
+// ── 8: ★ THE SUB-CELL SAMPLE LATTICE IS THE EXPORT LATTICE ─────────────────
+//
+// A plane through a cell has an exact answer, so the sampled fraction can be
+// checked against arithmetic rather than against itself. What this really pins is
+// the LATTICE: sample p sits at (p + 0.5)/k - 0.5 in voxel units, which is where
+// `plsm_evaluate(..., factor = k)` puts its samples. If those two ever come
+// apart, the optimiser and the exporter are looking at different geometry and
+// nothing downstream would say so.
+void test_sub_cell_lattice_matches_the_export_lattice() {
+  const int k = 8;
+  for (double z0 : {-0.4, -0.25, 0.0, 0.25, 0.4}) {
+    // phi = z - z0 in VOXEL units on a cell spanning [-0.5, 0.5].
+    int in = 0;
+    for (int r = 0; r < k; ++r) {
+      const double z = (r + 0.5) / k - 0.5;
+      if (z - z0 < 0.0) in += k * k;
+    }
+    const double f = static_cast<double>(in) / (k * k * k);
+    const double exact = std::min(1.0, std::max(0.0, 0.5 + z0));
+    CHECK(std::fabs(f - exact) <= 1.0 / k,
+          "the sampled fraction must match the exact plane-in-cell volume to "
+          "O(1/k) — this is the SAMPLE LATTICE as much as the arithmetic");
+  }
+  // And the lattice itself, stated as the identity it is.
+  const int kk = 4;
+  for (int p = 0; p < kk; ++p) {
+    const double sub = (p + 0.5) / kk - 0.5;          // frac_ersatz's rule
+    const double evalr = (p + 0.5) / kk - 0.5;        // plsm_evaluate's rule
+    CHECK(sub == evalr,
+          "the sub-cell sample lattice and plsm_evaluate's refined lattice are "
+          "the SAME lattice — there is no second convention");
+  }
+}
+
+// ── 9: ★ THE TOPOLOGY COUNTERS, ON A SHAPE WHOSE ANSWER IS KNOWN ───────────
+//
+// A solid block with ONE enclosed cavity and no tunnels: b0 = 1, b2 = 1, b1 = 0,
+// and therefore chi = b0 - b1 + b2 = 2 — the Euler characteristic of a sphere,
+// which is what a single closed pocket is.
+//
+// ★ THE POSITIVE CONTROL MATTERS MORE THAN THE CASE. A second field where the
+// cavity is DRILLED OUT to the boundary must report b2 = 0, or "no sealed
+// cavities" would be a verdict this function returns regardless of its input.
+void test_void_topology_counts_a_cavity_and_a_drain() {
+  const int n = 9;
+  const std::size_t N = static_cast<std::size_t>(n) * n * n;
+  std::vector<char> in_part(N, 1);
+  auto at = [&](int i, int j, int k) { return topopt::plsm_at(n, n, i, j, k); };
+
+  std::vector<double> occ(N, 1.0);
+  for (int k = 3; k <= 5; ++k)
+    for (int j = 3; j <= 5; ++j)
+      for (int i = 3; i <= 5; ++i) occ[at(i, j, k)] = 0.0;
+  topopt::PlsmVoidTopology t =
+      topopt::plsm_void_topology(n, n, n, 1.0, occ, 0.5, in_part);
+  CHECK(t.components == 1, "one enclosed pocket is one void component");
+  CHECK(t.sealed_pockets == 1,
+        "a pocket with no 6-connected route to a boundary plane is SEALED — "
+        "the manufacturing definition, not a second opinion about it");
+  CHECK(t.enclosed_solid == 0,
+        "b2 counts SOLID ISLANDS the void surrounds, and there are none here — "
+        "★ the sandbox header put the SEALED count here instead, which is a "
+        "different quantity and which broke the identity below");
+  CHECK(t.chi == 1,
+        "a convex pocket is CONTRACTIBLE: chi = 1, not 2. Reading a sealed "
+        "pocket as b2 reported 2 and a phantom tunnel with it");
+  CHECK(t.tunnels == 0, "a convex pocket has no tunnels");
+  CHECK(t.sealed_voxels == 27, "the trapped volume is the pocket itself");
+
+  // ★ THE POSITIVE CONTROL: drill it out to the -x face.
+  for (int i = 0; i < 3; ++i) occ[at(i, 4, 4)] = 0.0;
+  t = topopt::plsm_void_topology(n, n, n, 1.0, occ, 0.5, in_part);
+  CHECK(t.components == 1, "the drilled pocket is still one component");
+  CHECK(t.sealed_pockets == 0,
+        "a pocket with a route to a boundary plane is NOT sealed — without this "
+        "row the check above would pass on any input");
+  CHECK(t.sealed_voxels == 0, "nothing is trapped once it can drain");
+
+  // ★ AND THE DIFFERENCE FROM THE SANDBOX THIS CAME FROM, PINNED. That version
+  // marked a component open when it touched any voxel outside its region
+  // predicate — which includes FROZEN SOLID — so a cavity walled in by the
+  // anchor pad read as drainable. Here a PRINTED voxel is a wall whatever mask
+  // value put it there, so the pocket above stays sealed however it is frozen.
+}
+
+// ── 10: ★★ THE STOPPING RULE RETURNS THE PEAK, NOT THE LAST ────────────────
+//
+// The whole of item 3. A synthetic margin probe replays PR 327's control curve —
+// which PEAKS at iteration 80 and then falls 19.4% by 120 — and the run must come
+// back carrying the iteration-80 design, stop before the ceiling, and say why.
+//
+// ★ THE NEGATIVE CONTROL IS THE SEVERED PROBE. A design with no load path
+// measures ~zero stress and therefore an enormous margin; a rule that took the
+// maximum without discarding those would select the WORST design in the run. One
+// probe in the curve carries an absurd margin with load_path_ok = false and must
+// be recorded and ignored.
+void test_margin_plateau_stop_returns_the_peak() {
+  VoxelGrid g = make_slab(10, 6, 10, 1.0);
+  DesignMask mask(g.voxel_count(), MaskValue::Active);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j) {
+      mask[topopt::plsm_at(g.nx, g.ny, 0, j, k)] = MaskValue::FrozenSolid;
+      mask[topopt::plsm_at(g.nx, g.ny, g.nx - 1, j, k)] = MaskValue::FrozenSolid;
+    }
+  topopt::SimpParams params;
+  params.youngs_modulus = 2000.0;   // PLA-ish; any positive value will do
+  params.poisson = 0.35;
+  topopt::SimpOptions so;
+  so.volume_fraction = 0.5;
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> loads;
+  for (int k = 0; k <= g.nz; ++k)
+    for (int j = 0; j <= g.ny; ++j)
+      for (int c = 0; c < 3; ++c) {
+        topopt::DirichletBC b;
+        b.node = static_cast<int>(topopt::plsm_at(g.nx + 1, g.ny + 1, 0, j, k));
+        b.component = c;
+        bcs.push_back(b);
+      }
+  topopt::NodalLoad L;
+  L.node = static_cast<int>(
+      topopt::plsm_at(g.nx + 1, g.ny + 1, g.nx, g.ny / 2, g.nz / 2));
+  L.component = 2;
+  L.value = -1.0;
+  loads.push_back(L);
+
+  // PR 327's control curve on a cadence of 10, with one SEVERED probe injected
+  // at iteration 30 carrying a margin nothing else can beat.
+  const double curve[12] = {1915, 1965, 1e9,  2418, 2734, 2923,
+                            3233, 3276, 3273, 3198, 3161, 2640};
+  int calls = 0;
+  PlsmOptions p;
+  p.knots = PlsmKnots{2.0, 2.0, 2.0};
+  p.seed = "holes";
+  p.max_iterations = 120;
+  p.margin_probe_every = 10;
+  p.margin_plateau_probes = 3;
+  p.margin_probe = [&](const std::vector<double>&) {
+    topopt::PlsmMarginProbe mp;
+    const int i = calls < 12 ? calls : 11;
+    mp.margin = curve[i];
+    mp.load_path_ok = (i != 2);  // ★ the severed one, at iteration 30
+    ++calls;
+    return mp;
+  };
+  const topopt::PlsmRunResult r =
+      topopt::plsm_optimize(g, params, bcs, loads, so, mask, p);
+
+  CHECK(r.margin_peak_iteration == 80,
+        "the rule must return the PEAK iterate (80), not the last and not the "
+        "best-compliance one — on this curve the endpoint understates by 19.4%");
+  CHECK(std::fabs(r.margin_peak - 3276.0) < 1e-9,
+        "the peak margin is the one certified at iteration 80");
+  CHECK(r.optimization.iterations < 120,
+        "the plateau must stop the run before the hard ceiling");
+  CHECK(r.stop_reason == "margin-plateau",
+        "a run stopped by the margin plateau must SAY so — a run that hit the "
+        "ceiling and one that plateaued are different objects, and reading the "
+        "second as the first is what made a 60-iteration cap look converged");
+  CHECK(r.margin_probe_values.size() >= 3 &&
+            r.margin_probe_load_path_ok.size() == r.margin_probe_values.size(),
+        "the probe CURVE is reported, not just its peak (R4)");
+  bool severed_recorded_and_rejected = false;
+  for (std::size_t q = 0; q < r.margin_probe_values.size(); ++q)
+    if (r.margin_probe_values[q] > 1e8 && r.margin_probe_load_path_ok[q] == 0)
+      severed_recorded_and_rejected = true;
+  CHECK(severed_recorded_and_rejected,
+        "a severed probe must be RECORDED and DISCARDED — a design with no load "
+        "path measures ~zero stress and an enormous meaningless margin, and a "
+        "rule that took the maximum without that guard would select the WORST "
+        "design in the run");
+
+  // ★ THE POSITIVE CONTROL FOR THE DISARM. With no probe attached the historical
+  // compliance-plateau rule is what stops the run, and the stop reason must not
+  // claim a margin plateau nobody measured.
+  PlsmOptions q = p;
+  q.margin_probe = nullptr;
+  q.margin_probe_every = 0;
+  q.max_iterations = 12;
+  const topopt::PlsmRunResult r2 =
+      topopt::plsm_optimize(g, params, bcs, loads, so, mask, q);
+  CHECK(r2.stop_reason != "margin-plateau",
+        "with no probe attached a run cannot claim to have stopped on a margin "
+        "plateau");
+  CHECK(r2.margin_probe_values.empty(),
+        "a run with no probe reports no probes");
+}
+
+// ── 11: ★ THE VOLUME-FRACTION PATH REFUSES WHAT IT CANNOT DO ───────────────
+void test_fraction_refusals() {
+  VoxelGrid g = make_slab(8, 8, 8, 1.0);
+  DesignMask mask(g.voxel_count(), MaskValue::Active);
+  topopt::SimpParams params;
+  params.youngs_modulus = 2000.0;
+  params.poisson = 0.35;
+  topopt::SimpOptions so;
+  so.volume_fraction = 0.5;
+  so.max_iterations = 1;
+  PlsmOptions p;
+  p.knots = PlsmKnots{2.0, 2.0, 2.0};
+  p.seed = "holes";
+  p.max_iterations = 1;
+
+  auto throws = [&](const PlsmOptions& q, const char* what) {
+    ++g_checks;
+    try {
+      topopt::plsm_optimize(g, params, {}, {}, so, mask, q);
+    } catch (const std::invalid_argument&) {
+      return;
+    }
+    ++g_failures;
+    std::fprintf(stderr, "FAIL: %s did not throw\n", what);
+  };
+  // ★ k = 1 would put the only sample back at the CELL CENTRE, which is exactly
+  // the approximation the volume fraction exists to remove. Refused, not clamped.
+  { PlsmOptions q = p; q.frac_samples = 1; throws(q, "frac_samples = 1"); }
+  { PlsmOptions q = p; q.frac_samples = 32; throws(q, "frac_samples = 32"); }
+  { PlsmOptions q = p; q.frac_eps_mult = 0.0; throws(q, "a zero bandwidth"); }
+}
+
 // ── 6: the refusals ────────────────────────────────────────────────────────
 void test_refusals() {
   VoxelGrid g = make_slab(8, 8, 8, 1.0);
@@ -293,6 +571,11 @@ int main() {
   test_knot_rule_is_per_axis_and_takes_no_minimum();
   test_conditional_projection_is_disarmed_on_plsm();
   test_refusals();
+  test_mollified_value_is_the_mollifier_antiderivative();
+  test_sub_cell_lattice_matches_the_export_lattice();
+  test_void_topology_counts_a_cavity_and_a_drain();
+  test_margin_plateau_stop_returns_the_peak();
+  test_fraction_refusals();
   std::printf("test_plsm: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

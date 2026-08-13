@@ -272,6 +272,27 @@ RunInfo build_run_info(const JobDescription& job,
     info.plsm_refit_every = options.plsm.refit_every;
     info.plsm_cg_tolerance_loose = options.plsm.cg_tolerance_loose;
     info.plsm_warm_start = options.plsm.warm_start;
+    // Task 2026-08-13-plsm-production-settings — the ersatz posture and the
+    // stopping rule's configuration. The MEASUREMENTS (stop reason, peak,
+    // counters, wall clocks) are filled post-run from the first evaluated
+    // variant, like the knot spacing above.
+    info.plsm_ersatz = options.plsm.ersatz == PlsmErsatz::VolumeFraction
+                           ? "fraction"
+                           : "heaviside";
+    info.plsm_frac_samples =
+        options.plsm.ersatz == PlsmErsatz::VolumeFraction
+            ? options.plsm.frac_samples
+            : 0;
+    info.plsm_sens_weight =
+        options.plsm.sens_weight == PlsmSensWeight::Discrete ? "discrete"
+                                                             : "continuum";
+    info.plsm_frac_eps_mult = options.plsm.frac_eps_mult;
+    info.plsm_frac_mollified = options.plsm.frac_mollified;
+    info.plsm_frac_sens_exact = options.plsm.frac_sens_exact;
+    info.plsm_frac_eps_l1 = options.plsm.frac_eps_l1;
+    info.plsm_margin_probe_every = options.plsm.margin_probe_every;
+    info.plsm_margin_plateau_probes = options.plsm.margin_plateau_probes;
+    info.plsm_margin_plateau_tol = options.plsm.margin_plateau_tol;
   }
   info.draft_quality = options.draft_quality;
   info.draft_loose_tol = options.draft_loose_tol;
@@ -341,8 +362,10 @@ std::optional<BuildFrameRotation> variant_bake_rotation(
 //
 // WHAT READS IT: `topopt::plsm_evaluate(lattice, basis, alpha, nx, ny, nz,
 // factor, threads)` reconstructs phi on any lattice from `<stem>_alpha.f64` plus
-// the `<stem>_alpha.meta` beside it, and the ersatz is `plsm_heaviside(-phi,
-// eta_voxels * spacing)`. `external_field_surface_probe` reads the resulting
+// the `<stem>_alpha.meta` beside it. ★ THE ERSATZ RECIPE IS THE ONE THE `ersatz`
+// KEY NAMES AND NOT A FIXED FORMULA — under `fraction` (the production default
+// since 2026-08-13) there is no eta in the density at all, and the .meta writes
+// the sub-cell recipe instead. `external_field_surface_probe` reads the resulting
 // occupancy field directly. Nothing in the shipped pipeline consumes it yet, and
 // that is stated rather than implied: it is an OUTPUT, not an input, until a
 // consumer exists.
@@ -378,7 +401,20 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
        "support)\n"
     << "# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, "
        "threads);\n"
-    << "# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).\n"
+    // ★ THE RECIPE FOLLOWS THE ERSATZ THE DESIGN WAS OPTIMISED UNDER, because a
+    // reader who rebuilds `rho` from `alpha` with the wrong one gets a different
+    // object. Under `fraction` there is no eta in the density at all, and a line
+    // that said there was would be a lie in the file that exists to be trusted.
+    << (variant.plsm_ersatz == PlsmErsatz::VolumeFraction
+            ? "# the ersatz is the VOLUME FRACTION of each cell inside {phi < 0}:\n"
+              "#   sample frac_samples^3 points per cell at\n"
+              "#     x = i + (p + 0.5)/k - 0.5   (the SAME lattice plsm_evaluate\n"
+              "#     uses at factor = k, so the two nest exactly)\n"
+              "#   and take the fraction with phi < 0 — mollified by the\n"
+              "#   quadrature band when frac_mollified (see plsm_frac.hpp).\n"
+              "#   FROZEN cells are STAMPED 1 / 0 by the mask, not sampled.\n"
+              "#   eta_voxels below does NOT enter this density.\n"
+            : "# the ersatz is plsm_heaviside(-phi, eta_voxels * spacing).\n")
     << "basis " << (variant.plsm_basis_kind == PlsmBasisKind::Gaussian
                         ? "gaussian" : "wendland") << "\n"
     // ★ THREE NUMBERS, PER AXIS. A reader that collapses these to one has
@@ -408,6 +444,54 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
     // every certification; this number being above 0.5 is why that cannot happen,
     // and plsm_optimize refuses to run when it is not.
     << "frozen_floor_occupancy " << variant.plsm_frozen_floor_occupancy << "\n"
+    // ── ★ THE ERSATZ THIS DESIGN WAS OPTIMISED UNDER (task 2026-08-13) ──────
+    // A reader that rebuilds phi from `alpha` must know which density the
+    // optimiser saw, because the two are not the same object: `heaviside` is
+    // H_eta at the cell centre, `fraction` is the exact cell volume fraction
+    // inside {phi < 0} by frac_samples^3 sub-samples. The `# the ersatz is
+    // plsm_heaviside(...)` line above is the HEAVISIDE recipe and is wrong for a
+    // fraction design — which is why the recipe is named here rather than only
+    // in a comment.
+    << "ersatz "
+    << (variant.plsm_ersatz == PlsmErsatz::VolumeFraction ? "fraction"
+                                                          : "heaviside")
+    << "\n"
+    << "sens_weight "
+    << (variant.plsm_sens_weight == PlsmSensWeight::Discrete ? "discrete"
+                                                             : "continuum")
+    << "\n"
+    << "frac_samples " << variant.plsm_frac_samples << "\n"
+    << "frac_cut_cells " << variant.plsm_frac_cut_cells << "\n"
+    << "frac_sample_wall_s " << variant.plsm_frac_sample_wall_s << "\n"
+    << "frac_sens_wall_s " << variant.plsm_frac_sens_wall_s << "\n"
+    // ── ★★ THE STOPPING RULE'S RECORD. A run that hit the ceiling and one whose
+    // certified margin plateaued are different objects.
+    << "stop_reason " << (variant.plsm_stop_reason.empty()
+                              ? std::string("unrecorded")
+                              : variant.plsm_stop_reason)
+    << "\n"
+    << "margin_peak_iteration " << variant.plsm_margin_peak_iteration << "\n"
+    << "margin_peak " << variant.plsm_margin_peak << "\n"
+    << "margin_probe_wall_s " << variant.plsm_margin_probe_wall_s << "\n"
+    << "# margin_probe: iteration margin load_path_ok — the CURVE the rule "
+       "watched. R4: never a point.\n";
+  for (std::size_t q = 0; q < variant.plsm_margin_probe_iterations.size(); ++q)
+    m << "margin_probe " << variant.plsm_margin_probe_iterations[q] << " "
+      << variant.plsm_margin_probe_values[q] << " "
+      << (q < variant.plsm_margin_probe_load_path_ok.size()
+              ? static_cast<int>(variant.plsm_margin_probe_load_path_ok[q])
+              : 0)
+      << "\n";
+  // ── ★ THE TOPOLOGY COUNTERS, ON EVERY RUN (the constraint does NOT ship) ──
+  m << "void_components " << variant.plsm_topology.components << "\n"
+    << "void_chi " << variant.plsm_topology.chi << "\n"
+    << "void_enclosed_solid " << variant.plsm_topology.enclosed_solid << "\n"
+    << "void_sealed_pockets " << variant.plsm_topology.sealed_pockets << "\n"
+    << "void_tunnels " << variant.plsm_topology.tunnels << "\n"
+    << "void_sealed_voxels " << variant.plsm_topology.sealed_voxels << "\n"
+    << "void_sealed_volume_mm3 " << variant.plsm_topology.sealed_volume_mm3
+    << "\n"
+    << "void_voxels " << variant.plsm_topology.void_voxels << "\n"
     // ★ AND THE FIELD IT IS NOT. This is the analytic design; the CERTIFIED
     // object is the voxel field in design.bin and the mesh beside it. A margin
     // computed on one is not a margin for the other — re-describing a design
@@ -6585,6 +6669,20 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     options.plsm.move = job.plsm_move;
     options.plsm.cg_tolerance_loose = job.plsm_cg_tolerance_loose;
     options.plsm.warm_start = job.plsm_warm_start;
+    options.plsm.ersatz = job.plsm_ersatz == "heaviside"
+                              ? PlsmErsatz::Heaviside
+                              : PlsmErsatz::VolumeFraction;
+    options.plsm.sens_weight = job.plsm_sens_weight == "continuum"
+                                  ? PlsmSensWeight::Continuum
+                                  : PlsmSensWeight::Discrete;
+    options.plsm.frac_samples = job.plsm_frac_samples;
+    options.plsm.frac_eps_mult = job.plsm_frac_eps_mult;
+    options.plsm.frac_mollified = job.plsm_frac_mollified;
+    options.plsm.frac_sens_exact = job.plsm_frac_sens_exact;
+    options.plsm.frac_eps_l1 = job.plsm_frac_eps_l1;
+    options.plsm.margin_probe_every = job.plsm_margin_probe_every;
+    options.plsm.margin_plateau_probes = job.plsm_margin_plateau_probes;
+    options.plsm.margin_plateau_tol = job.plsm_margin_plateau_tol;
     // The parametric path's own trajectory threads follow the solver's, so a
     // job that asked for three threads gets three here too rather than the
     // hardware's full count (which is what "he needs his machine" means).
@@ -8569,6 +8667,26 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.plsm_coefficients =
           static_cast<long long>(v0.plsm_lattice.count());
       run_info.plsm_frozen_floor_occupancy = v0.plsm_frozen_floor_occupancy;
+      // Task 2026-08-13 — WHAT ACTUALLY HAPPENED, from the first evaluated
+      // rung. `plsm_stop_reason` is the one that cannot be omitted: a run that
+      // hit the iteration ceiling and a run whose certified margin plateaued
+      // are different objects, and reading the second as the first is what made
+      // a 60-iteration cap look like a converged setting for three tasks.
+      run_info.plsm_stop_reason = v0.plsm_stop_reason;
+      run_info.plsm_margin_peak_iteration = v0.plsm_margin_peak_iteration;
+      run_info.plsm_margin_peak = v0.plsm_margin_peak;
+      run_info.plsm_margin_probe_wall_s = v0.plsm_margin_probe_wall_s;
+      run_info.plsm_frac_cut_cells =
+          static_cast<long long>(v0.plsm_frac_cut_cells);
+      run_info.plsm_frac_sample_wall_s = v0.plsm_frac_sample_wall_s;
+      run_info.plsm_frac_sens_wall_s = v0.plsm_frac_sens_wall_s;
+      run_info.plsm_void_components = v0.plsm_topology.components;
+      run_info.plsm_void_chi = v0.plsm_topology.chi;
+      run_info.plsm_void_enclosed_solid = v0.plsm_topology.enclosed_solid;
+      run_info.plsm_void_sealed_pockets = v0.plsm_topology.sealed_pockets;
+      run_info.plsm_void_tunnels = v0.plsm_topology.tunnels;
+      run_info.plsm_void_sealed_voxels = v0.plsm_topology.sealed_voxels;
+      run_info.plsm_void_sealed_volume_mm3 = v0.plsm_topology.sealed_volume_mm3;
     }
     // Handoff 131 — finalize the per-rung infeasibility outcome (one entry per
     // evaluated rung; all-false is the positive statement "no rung lost its load

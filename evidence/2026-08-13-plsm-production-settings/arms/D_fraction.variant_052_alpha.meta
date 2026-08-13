@@ -1,0 +1,51 @@
+# THE ANALYTIC DESIGN: phi(x) = sum_i alpha_i psi(|x - x_i|_R).
+# alpha is /Users/nadim/plsm_scratch/D_fraction/variant_052_alpha.f64, 85680 float64 in x-fastest knot order.
+# Rebuild with topopt::plsm_make_lattice(nx, ny, nz, knots_vox..., support)
+# then topopt::plsm_evaluate(lattice, basis, alpha, nx*F, ny*F, nz*F, F, threads);
+# the ersatz is the VOLUME FRACTION of each cell inside {phi < 0}:
+#   sample frac_samples^3 points per cell at
+#     x = i + (p + 0.5)/k - 0.5   (the SAME lattice plsm_evaluate
+#     uses at factor = k, so the two nest exactly)
+#   and take the fraction with phi < 0 — mollified by the
+#   quadrature band when frac_mollified (see plsm_frac.hpp).
+#   FROZEN cells are STAMPED 1 / 0 by the mask, not sampled.
+#   eta_voxels below does NOT enter this density.
+basis gaussian
+knots_vox 2 2 2
+support_vox 4 4 4
+counts 68 20 63
+pad 2 2 2
+n_coeff 85680
+n_voxels 468224
+compression 5.4647992530345473
+eta_voxels 1
+nx 128
+ny 31
+nz 118
+spacing 1.7052793026343613
+ox -18.275750737198241
+oy -48.909974716000001
+oz 0
+requested_vf 0.52000000000000002
+achieved_vf 0.51999998761917465
+frozen_floor_occupancy 0.90915494309189537
+ersatz fraction
+sens_weight discrete
+frac_samples 4
+frac_cut_cells 5728
+frac_sample_wall_s 17.438787711784244
+frac_sens_wall_s 1.4816268323920667
+stop_reason iteration-ceiling
+margin_peak_iteration 0
+margin_peak 0
+margin_probe_wall_s 0
+# margin_probe: iteration margin load_path_ok — the CURVE the rule watched. R4: never a point.
+void_components 6
+void_chi 0
+void_enclosed_solid 0
+void_sealed_pockets 3
+void_tunnels 6
+void_sealed_voxels 3
+void_sealed_volume_mm3 14.876741529794113
+void_voxels 33863
+# NOT CERTIFIED. The certificate in report.json belongs to the voxel field this was optimised on, at this resolution, and does NOT carry over to a re-evaluation at another one.

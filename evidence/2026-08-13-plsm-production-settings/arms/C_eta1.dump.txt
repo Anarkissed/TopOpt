@@ -1,0 +1,10 @@
+== design_rung_dump ==
+
+/Users/nadim/plsm_scratch/C_eta1/design.bin
+grid 128 x 31 x 118, spacing 1.7052793026343613 mm, origin (-18.275750737198241, -48.909974716000001, 0)
+4 rungs
+
+rung 0.68  achieved 0.680000  iters 60  accepted 1  voxels>0.5 87926  -> /Users/nadim/plsm_scratch/C_eta1/dump/rung_0.68.f64
+rung 0.52  achieved 0.520000  iters 60  accepted 1  voxels>0.5 76399  -> /Users/nadim/plsm_scratch/C_eta1/dump/rung_0.52.f64
+rung 0.38  achieved 0.380000  iters 60  accepted 1  voxels>0.5 66282  -> /Users/nadim/plsm_scratch/C_eta1/dump/rung_0.38.f64
+rung 0.26  achieved 0.260000  iters 60  accepted 1  voxels>0.5 57656  -> /Users/nadim/plsm_scratch/C_eta1/dump/rung_0.26.f64

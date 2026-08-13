@@ -1693,6 +1693,27 @@ if(OpenCASCADE_FOUND)
     tests/harness/solver_arm_sweep.cpp)
   target_link_libraries(solver_arm_sweep PRIVATE topopt)
 
+  # ★ R2 (task 2026-08-13-plsm-production-settings): THE PRODUCTION
+  # VOLUME-FRACTION SENSITIVITY AGAINST A CENTRAL DIFFERENCE, on both
+  # functionals. It calls core/include/topopt/plsm_frac.hpp — the SHIPPED header
+  # — in the same order plsm_optimize calls it, so it verifies the gradient that
+  # runs and not a copy of it. `--heaviside` differences PR 324/325/326's
+  # gradient against its own density on the same design, as the control.
+  #   cmake --build build --target plsm_frac_fd_probe
+  #   ./build/plsm_frac_fd_probe <part.step> <materials.json> <out> --compliance
+  add_executable(plsm_frac_fd_probe EXCLUDE_FROM_ALL
+    tests/harness/plsm_frac_fd_probe.cpp)
+  target_link_libraries(plsm_frac_fd_probe PRIVATE topopt)
+
+  # R6 and item 4's counters, on ANY design field, through the SHIPPED
+  # `topopt::plsm_void_topology`. A SIMP rung and a PLSM rung come out of ONE
+  # implementation, so "sealed" means the same thing in both.
+  #   cmake --build build --target plsm_topology_probe
+  #   ./build/plsm_topology_probe <part.step> <field_prefix> [more...]
+  add_executable(plsm_topology_probe EXCLUDE_FROM_ALL
+    tests/harness/plsm_topology_probe.cpp)
+  target_link_libraries(plsm_topology_probe PRIVATE topopt)
+
   # ARM 1 (task 2026-08-10-parametric-level-set): THE GATE. Fits an ANALYTIC
   # phi(x) = sum_i alpha_i psi_i(x) to a design we already have, and extracts the
   # surface FROM THE FUNCTION on a refined lattice rather than from a resample of
