@@ -131,6 +131,7 @@ public enum LatticeRegionEmission {
                                runFaceID: @escaping (FaceID) -> Int = { Int($0) },
                                selectableRoles: [String: LatticeSelectableRole] = [:],
                                selectableDepthMM: [String: Double] = [:],
+                               groupDensities: [UUID: Double] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -148,8 +149,25 @@ public enum LatticeRegionEmission {
                 // A manual primitive carries its own resolved depth already (the
                 // clearance-metric chain); the per-primitive override wins over it
                 // exactly as it does for a face.
-                if let s = spec(for: p, role: role,
+                if var s = spec(for: p, role: role,
                                 depthMM: selectableDepthMM[ref.key] ?? d) {
+                    // ★ THE DIALLED DENSITY (task 2026-08-16-per-sector-density-
+                    // override), applied at the ONE place the emission goes
+                    // through — the same argument that put the role gate here.
+                    // Absent ⇒ nil ⇒ no key on the wire ⇒ core derives.
+                    //
+                    // ★ IT IS KEYED ON THE GROUP WHILE ROLE AND DEPTH ARE NOW
+                    // KEYED ON THE SELECTABLE (lattice-separation, PR 332). That
+                    // is a DELIBERATE, STATED limitation rather than an
+                    // oversight: a per-selectable density needs its own store
+                    // AND its own control, and inventing one here would ship a
+                    // field with no surface. What it MUST do is respect the
+                    // RESOLVED role, and it does — `role` here is the
+                    // selectable's own, so a primitive switched to exclude
+                    // inside an included group carries no density even though
+                    // its group states one.
+                    s.relativeDensity =
+                        density(for: g.id, role: role, densities: groupDensities)
                     out.append(s)
                 }
             }
@@ -159,8 +177,12 @@ public enum LatticeRegionEmission {
                     for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
                 let depth = selectableDepthMM[ref.key] ?? groupDepth
                 if let r = resolve(f),
-                   let s = spec(for: r, role: role, depthMM: depth,
+                   var s = spec(for: r, role: role, depthMM: depth,
                                 faceID: runFaceID(f)) {
+                    // The face's own resolved role, same gate as the primitives
+                    // above — see the note there on group- vs selectable-keying.
+                    s.relativeDensity =
+                        density(for: g.id, role: role, densities: groupDensities)
                     out.append(s)
                 } else {
                     skipped += 1
@@ -168,5 +190,21 @@ public enum LatticeRegionEmission {
             }
         }
         return Result(regions: out, skippedFaces: skipped)
+    }
+
+    /// ★ THE ONE GATE ON A DIALLED DENSITY. A density belongs to an INCLUDE
+    /// region and nothing else: an exclude region is frozen solid, so it has no
+    /// lattice whose density could be set, and core refuses the pairing outright
+    /// ("relative_density on a region that is not latticed"). Rather than let a
+    /// stale entry — a group the user dialled and then switched to exclude —
+    /// reach the wire and be refused, it is dropped here, where every emission
+    /// path passes. A non-positive or non-finite value is also dropped: core's
+    /// sentinel for "derive" is exactly `<= 0`, so those two spellings of
+    /// "nothing stated" must not become a key.
+    static func density(for id: UUID, role: LatticeGroupRole,
+                        densities: [UUID: Double]) -> Double? {
+        guard role == .include, let d = densities[id], d.isFinite, d > 0
+        else { return nil }
+        return d
     }
 }

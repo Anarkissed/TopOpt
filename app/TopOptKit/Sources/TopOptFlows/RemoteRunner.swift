@@ -785,32 +785,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             // lattice-face-specific `depth_mm` the schema requires. Empty → key
             // omitted → byte-identical to a pre-regions lattice job.
             if !lat.regions.isEmpty {
-                block["regions"] = lat.regions.map { r -> [String: Any] in
-                    let geometry: [String: Any] = r.kind == .face
-                        ? [
-                            "origin": [r.origin.x, r.origin.y, r.origin.z],
-                            "normal": [r.normal.x, r.normal.y, r.normal.z],
-                            "half_u_mm": r.halfUMM,
-                            "half_w_mm": r.halfWMM,
-                            "depth_mm": r.depthMM,
-                        ]
-                        : [
-                            "axis_point": [r.axisPoint.x, r.axisPoint.y, r.axisPoint.z],
-                            "axis_dir": [r.axisDir.x, r.axisDir.y, r.axisDir.z],
-                            "radius_mm": r.radiusMM,
-                            "half_length_mm": r.halfLengthMM,
-                        ]
-                    var entry: [String: Any] = ["role": r.role.rawValue,
-                                                "kind": r.kind.rawValue,
-                                                "geometry": geometry]
-                    // ★ The face this region was spawned from (task 2026-08-12
-                    // §0a). Core uses it to REFUSE a job whose protection depth
-                    // and lattice depth for the same face disagree — the check
-                    // that makes "one control, one value, one slab" enforceable
-                    // rather than merely intended.
-                    if let fid = r.faceID { entry["face_id"] = fid }
-                    return entry
-                }
+                // ONE encoder, shared with RelatticeRunner — see
+                // LatticeRegionSpec.wireDictionary for why it is not two.
+                block["regions"] = lat.regions.map { $0.wireDictionary }
             }
             job["lattice"] = block
         }

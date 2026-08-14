@@ -233,7 +233,12 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                                bounds: LatticeBounds?, running: Bool,
                                lineWidthMM: Double = 0,
                                cellSummary: String? = nil,
-                               designBoxActive: Bool = false) -> LatticeOptimizeSurface {
+                               designBoxActive: Bool = false,
+                               // ★ Regions whose dialled density core will refuse
+                               // (task 2026-08-16-per-sector-density-override).
+                               // Empty by default, so every existing call site and
+                               // every project that dials nothing is unchanged.
+                               densityRefusals: [(name: String, why: String)] = []) -> LatticeOptimizeSurface {
         // The cell phrase the button claims. In AUTO / SWEPT cell mode there is no
         // single target cell to name — the page passes the mode's own summary
         // ("Auto 4.6 mm", "Swept 4.6–8.0 mm") so the button never states a target the
@@ -267,6 +272,19 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         // conflation this task separated, and the one that also corrupts the wall
         // ring the width-aware gate sizes. The strut width resolves from the two
         // wall beads by rule, so "set them in print settings" is still the action.
+        // ★ A DIALLED DENSITY CORE WILL REFUSE (task 2026-08-16-per-sector-
+        // density-override). Same argument as the design-box refusal above, and
+        // the same shape: core refuses this job, so the button that would submit
+        // it says so with the REGION'S NAME rather than letting the user start a
+        // run and meet the refusal at the other end. Core's own refusal is fast
+        // (it lands before the solve) but "fast" is not "here".
+        if let first = densityRefusals.first {
+            let more = densityRefusals.count > 1
+                ? " (and \(densityRefusals.count - 1) more)" : ""
+            return LatticeOptimizeSurface(
+                enabled: false, label: "Optimize",
+                sub: "\(first.name): \(first.why)\(more)")
+        }
         if densityMode == .auto && lineWidthMM <= 0 {
             return LatticeOptimizeSurface(
                 enabled: false, label: "Optimize",
