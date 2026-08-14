@@ -275,9 +275,88 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         XCTAssertEqual(d.rows.first(where: { $0.label == "Saved" })?.value,
                        c.savedText)
         // ★ AND PR 331'S INVARIANT STILL HOLDS: adding two READ-ONLY rows must not
-        // add a second control. If this ever fails, the density control was
-        // re-sited without deciding the question above.
+        // add a second control.
         XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth"],
                        "exactly one row is a control and it is the depth")
+    }
+
+    /// ★ PR 331's control invariant, WITH ITS SECOND CASE. It was not wrong — it
+    /// was UNCONDITIONAL where it should be CONDITIONAL. The density is decided on
+    /// the settings page and the drawer follows that choice: only the per-region
+    /// mode says "I will state it myself", and only there is density a control.
+    ///
+    /// ★ TWO EXACT CASES, NEITHER RELAXED TO "one or more". The invariant exists
+    /// to stop a readout being mistaken for a control — a named defect on this
+    /// project — and a loose bound would not do that job.
+    func testTheDensityRowIsAControlONLYUnderPerRegion() {
+        let c = LatticeFaceCardDerivation.card(
+            faceID: 16, depthMM: 40, heldVoxels: 10_000, spacingMM: 1.705279303,
+            densityGCM3: 1.24, topology: topology, bounds: bounds,
+            limits: limits, declaredDensity: nil,
+            minExtrudableWidthMM: 0.45)
+
+        // CASE 1 — every other mode. Byte-identical to what PR 331 shipped.
+        let plain = LatticeRegionDrawer.make(card: c, depthMM: 40, held: false,
+                                             latticeReachesTheRun: true)
+        XCTAssertEqual(plain.modifiableRows.map(\.label), ["Depth"],
+                       "off per-region the drawer is exactly PR 331's: one "
+                     + "control, the depth")
+
+        // CASE 2 — per-region, and ONLY here.
+        let perRegion = LatticeRegionDrawer.make(card: c, depthMM: 40, held: false,
+                                                 latticeReachesTheRun: true,
+                                                 perRegionDensity: true)
+        XCTAssertEqual(perRegion.modifiableRows.map(\.label), ["Depth", "Density"],
+                       "under per-region the density is the SECOND control — and "
+                     + "exactly the second, not merely 'one or more'")
+
+        // ★ AND THE FACTS STAY FACTS in both cases (§2c). Cell, strut and the two
+        // mass rows are readouts and must never acquire control chrome.
+        for d in [plain, perRegion] {
+            let facts = Set(d.rows.filter { !$0.modifiable }.map(\.label))
+            XCTAssertTrue(facts.isSuperset(of: ["Cell", "Strut", "Cells across",
+                                                "As lattice", "Saved"]),
+                          "the derived rows are facts in BOTH cases")
+        }
+
+        // ★ THE ROWS THEMSELVES ARE OTHERWISE IDENTICAL — the flag changes what is
+        // a control, never what is shown. This is the C0 bar for the conditional.
+        XCTAssertEqual(plain.rows.map(\.label), perRegion.rows.map(\.label))
+        XCTAssertEqual(plain.rows.map(\.value), perRegion.rows.map(\.value))
+    }
+
+    /// ★ THREE GAPS, RECORDED RATHER THAN IMPLIED. `perRegionDensity` cannot be
+    /// true in a shipped build today, and this test exists so that fact is written
+    /// down next to the code rather than discovered later:
+    ///
+    ///   1. THE MODE DOES NOT EXIST. `LatticeDensityMode` is `uniform` / `auto`;
+    ///      there is no per-region case to set the flag from.
+    ///   2. THE VIEW CANNOT RENDER IT. `latticeDrawerBody` attaches `depthDrag` to
+    ///      EVERY modifiable row and hardcodes the `-depth` accessibility id
+    ///      (WorkspacePlaceholder.swift), so a second control would get the
+    ///      depth's gesture and a duplicate identifier. That is the rewrite's job.
+    ///   3. THE OVERRIDE DOES NOT REACH CORE. `LatticeSettings.frozenRegionDensity`
+    ///      is persisted but never read into `runSpec` / `latticeJobRegions`, so a
+    ///      number typed there would not change a run.
+    ///
+    /// A field that captures a number core ignores must be STATED as such.
+    func testTheDensityOverrideDoesNotYetReachTheRun() {
+        var s = LatticeSettings()
+        s.frozenRegionDensity[UUID()] = 0.30
+        // ★ THE MODE DOES NOT EXIST — asserted on the enum itself, so this stays
+        // true whatever the default becomes. When per-region lands, this fails and
+        // the gap note above must be UPDATED, never deleted.
+        XCTAssertNil(LatticeDensityMode(rawValue: "perRegion"),
+                     "there is no per-region density mode yet, so nothing can set "
+                   + "LatticeRegionDrawer's perRegionDensity flag")
+        let src = try? String(contentsOf: Self.repoRoot.appendingPathComponent(
+            "app/TopOptKit/Sources/TopOptFlows/LatticeSettings.swift"),
+            encoding: .utf8)
+        XCTAssertFalse(src?.contains("frozenRegionDensity") == true
+                       && src?.contains("regions.append") == true
+                       && src?.range(of: "frozenRegionDensity[^\\n]*regions",
+                                     options: .regularExpression) != nil,
+                       "if this fails the override now reaches the job and the "
+                     + "gap note above is stale — update it, do not delete it")
     }
 }
