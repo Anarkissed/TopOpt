@@ -1,0 +1,22 @@
+ARM thr=0  job=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/evidence/2026-08-16-geneo-tiling-sweep/job/job.json  out=/var/folders/zl/sj5nw1m16b7d42wq9ly1kyqm0000gn/T//geneo_engaged/eng12  threads=3  plsm_max_iterations=1
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+[preflight] load path CONNECTED: 5165 load voxels, 3348 anchor voxels, 110904 of 468224 voxels allowed to hold material; narrowest separating cross-section 3840 voxels (1.117e+04 mm^2) at 11/12 steps from the anchor; 4.50 ms
+NOTE: solve grid 128x31x118 has odd axis(es) [y=31] - geometric multigrid pads its INDEX SPACE to 128x32x120 (up to 4 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=4 iter=1
+VARIANT vf=0.680000 achieved=0.679999 printed=0.833405 margin=1751.28 accepted=1 mesh=/var/folders/zl/sj5nw1m16b7d42wq9ly1kyqm0000gn/T//geneo_engaged/eng12/variant_068.stl
+PROGRESS rung=1 rungs=4 iter=1
+VARIANT vf=0.520000 achieved=0.520000 printed=0.701003 margin=1383.13 accepted=1 mesh=/var/folders/zl/sj5nw1m16b7d42wq9ly1kyqm0000gn/T//geneo_engaged/eng12/variant_052.stl
+PROGRESS rung=2 rungs=4 iter=1
+VARIANT vf=0.380000 achieved=0.380000 printed=0.617904 margin=514.908 accepted=1 mesh=/var/folders/zl/sj5nw1m16b7d42wq9ly1kyqm0000gn/T//geneo_engaged/eng12/variant_038.stl
+PROGRESS rung=3 rungs=4 iter=1
+VARIANT vf=0.260000 achieved=0.260000 printed=0.502903 margin=106.9 accepted=1 mesh=/var/folders/zl/sj5nw1m16b7d42wq9ly1kyqm0000gn/T//geneo_engaged/eng12/variant_026.stl
+WARNING: multigrid solver "MultigridCG_Matfree" fell back to Jacobi-CG on the 128x31x118 solved grid (the hierarchy could not be built, OR the V-cycle stagnated on a high-contrast field) — expect a large slowdown. Linear solves ran Jacobi-CG; run_info.json records cg_multigrid=false. See iterations.csv for the per-solve record.
+ARM_RUNG arm=thr=0 vf_requested=0.680000 margin=1751.27987 accepted=1
+ARM_RUNG arm=thr=0 vf_requested=0.520000 margin=1383.13367 accepted=1
+ARM_RUNG arm=thr=0 vf_requested=0.380000 margin=514.907729 accepted=1
+ARM_RUNG arm=thr=0 vf_requested=0.260000 margin=106.899578 accepted=1
+ARM_SUMMARY arm=thr=0 total_cg=2561 design_iters=4 wall_s=1310.5 hier_attempts=1 rearm_attempts=0 rearm_carries=0 geneo_armed=12 geneo_declined=0 geneo_dim=1117 geneo_builds=2 alg1=0

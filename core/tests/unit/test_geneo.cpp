@@ -347,6 +347,93 @@ int main() {
     fea_reset_geneo_basis();
   }
 
+  // --- 6. R6 — THE SUBDOMAIN TILING IS PER-AXIS, NEVER KEYED TO A MINIMUM --
+  // Task geneo-subdomain-tiling-sweep. `tile_cores` steps x, y and z
+  // independently, and the whole subdomain-tiling sweep rests on that: N_t
+  // scales with the SUBDOMAIN COUNT, and the subdomain count on a slab is
+  // ceil(nx/c)*ceil(ny/c)*ceil(nz/c) — not (n/c)^3 for any single n.
+  //
+  // The trap this pins shut is a tiling keyed to one scalar derived from the
+  // grid: min(nx,ny,nz), or a cube root of the voxel count. His part is
+  // 128x31x118, a 4.1:1 slab, and handoff 2026-08-10-parametric-level-set
+  // records a day lost to GridapTopOpt's alpha rule doing exactly this —
+  // keying on `minimum(el_size)` and under-regularising by 5x on this shape.
+  //
+  // ★ THE ASSERTIONS ARE WRITTEN AGAINST AN EXTREME SLAB (24:1), NOT HIS PART.
+  // At his 4.1:1 the per-axis and minimum-keyed answers differ by a factor of
+  // ~17 — real, but a test that only just distinguishes them is a test that a
+  // future half-regression slips past. At 24:1 they differ by 576 vs 144, and
+  // the two cannot be confused for one another by any amount of rounding.
+  {
+    auto make_grid = [](int nx, int ny, int nz) {
+      VoxelGrid g;
+      g.nx = nx;
+      g.ny = ny;
+      g.nz = nz;
+      g.spacing = 1.0;
+      // ★ Sized from nx*ny*nz, NOT from voxel_count() — voxel_count() IS
+      // tags.size(), so sizing from it builds a grid of zero voxels and every
+      // count below would come back 0 and pass vacuously.
+      g.tags.assign(static_cast<std::size_t>(nx) * ny * nz,
+                    VoxelTag::Interior);
+      return g;
+    };
+
+    // A 96 x 4 x 96 slab: aspect ratio 24:1, tiled at 8.
+    const VoxelGrid slab = make_grid(96, 4, 96);
+    const fea_detail::GeneoTileCounts t8 =
+        fea_detail::geneo_tile_counts_for_test(slab, 8);
+    std::printf("R6 slab 96x4x96 core=8: tiles %dx%dx%d = %lld "
+                "(min extents %d,%d,%d)\n",
+                t8.tx, t8.ty, t8.tz, t8.total, t8.min_extent_x,
+                t8.min_extent_y, t8.min_extent_z);
+    CHECK(t8.tx == 12, "PER-AXIS: x tiles = ceil(96/8) = 12");
+    CHECK(t8.ty == 1, "PER-AXIS: y tiles = ceil(4/8) = 1 — the thin axis is "
+                      "covered by ONE tile, and does not drag the other axes");
+    CHECK(t8.tz == 12, "PER-AXIS: z tiles = ceil(96/8) = 12");
+    CHECK(t8.total == 144, "PER-AXIS subdomain count is 12*1*12 = 144");
+    CHECK(t8.total != 576,
+          "NOT MINIMUM-KEYED: keying the tiling to min(nx,ny,nz)=4 would give "
+          "24*1*24 = 576 subdomains — 4x the basis columns and 4x the refresh "
+          "cost the engagement gate is priced against");
+    CHECK(t8.min_extent_y == 4,
+          "the thin axis's single tile is 4 voxels deep — the tile is CLAMPED "
+          "to the grid, not padded out to the core size");
+
+    // The same slab one core size up: every axis must respond independently.
+    const fea_detail::GeneoTileCounts t16 =
+        fea_detail::geneo_tile_counts_for_test(slab, 16);
+    CHECK(t16.tx == 6 && t16.ty == 1 && t16.tz == 6 && t16.total == 36,
+          "PER-AXIS at core=16: 6x1x6 = 36 — x and z halve, y is already 1");
+
+    // ★ AND HIS ACTUAL PART, so the sweep's own table is pinned by a test and
+    // not merely by the arithmetic in a handoff. 128x31x118 is the grid the
+    // captured production run reports (solved_grid_dofs 1473696 = 3*129*32*119).
+    const VoxelGrid his = make_grid(128, 31, 118);
+    struct Expect { int core, tx, ty, tz; long long total; };
+    const Expect rows[] = {{8, 16, 4, 15, 960},
+                           {12, 11, 3, 10, 330},
+                           {16, 8, 2, 8, 128},
+                           {24, 6, 2, 5, 60}};
+    for (const Expect& e : rows) {
+      const fea_detail::GeneoTileCounts t =
+          fea_detail::geneo_tile_counts_for_test(his, e.core);
+      std::printf("R6 his part 128x31x118 core=%d: tiles %dx%dx%d = %lld\n",
+                  e.core, t.tx, t.ty, t.tz, t.total);
+      CHECK(t.tx == e.tx && t.ty == e.ty && t.tz == e.tz && t.total == e.total,
+            "his part tiles per-axis exactly as the sweep table states");
+    }
+    // The thin axis is still genuinely tiled at 24 — which is why the sweep
+    // stops there. At 32 it would collapse to a single y tile and the point
+    // would confound "coarser tiling" with "no tiling on one axis".
+    CHECK(fea_detail::geneo_tile_counts_for_test(his, 24).ty == 2,
+          "at core=24 the 31-voxel axis is still split in TWO — the last "
+          "sweep point that tiles every axis");
+    CHECK(fea_detail::geneo_tile_counts_for_test(his, 32).ty == 1,
+          "at core=32 it collapses to ONE tile — named so the sweep's choice "
+          "to stop at 24 is pinned by a test rather than by a comment");
+  }
+
   // --- 5. DETERMINISM ------------------------------------------------------
   // The engagement gate is a comparison of COUNTS, never of wall time, so the
   // arming point — and with it the CG route and the field it lands on — is

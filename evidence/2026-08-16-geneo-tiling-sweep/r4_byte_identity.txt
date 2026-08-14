@@ -1,0 +1,135 @@
+R4 — NO PRODUCTION DEFAULT MOVES
+================================
+
+The bar: "NO PRODUCTION DEFAULT MOVES. Byte-identity by stash-rebuild checksum
+where nothing should change. Any arming is a separate proposal with numbers
+attached."
+
+Part 1 is structural and is checked here. Part 2 is the run-level checksum and
+is at the bottom.
+
+
+1. THE SHIPPED RECIPE IS UNTOUCHED
+----------------------------------
+
+`geneo.hpp` carries the ARMED RECIPE TRIPWIRE — nine constants under a header
+comment that forbids changing any of them without re-running two harnesses and
+landing a new before/after table. `kGeneoCoreCells = 8` is the exact constant a
+tiling sweep would be tempted to edit.
+
+    $ git diff core/src/fea/geneo.hpp | grep -E "^[+-]constexpr|^[+-].*kGeneo"
+    (no output)
+
+NOT ONE `constexpr` LINE MOVED. The sweep drove `GeneoProbeConfig::core_cells`
+— the harness-only override surface that has existed since
+`geneo-standing-preconditioner-probe` — and never the constant.
+
+This is independently enforced at runtime, not just by my reading of the diff:
+`geneo_probe_defaults_match_tripwire()` asserts that every probe default IS the
+shipped constant, and `test_geneo` checks it on every run. That test passes
+(55 checks, 0 failures — `r6_test_geneo.txt`), so a probe default that had
+drifted from the tripwire would have failed a test rather than silently changing
+what production runs.
+
+
+2. THE DIFF, AND WHY NONE OF IT IS REACHABLE FROM PRODUCTION
+------------------------------------------------------------
+
+    core/src/fea/geneo.cpp                  | 29 ++++++++++
+    core/src/fea/geneo.hpp                  | 35 ++++++++++++
+    core/tests/harness/solver_arm_sweep.cpp | 18 +++++-
+    core/tests/unit/test_geneo.cpp          | 87 ++++++++++++++++++++++++++++
+    4 files changed, 168 insertions(+), 1 deletion(-)
+
+Two of the four files are tests. The two library files add exactly ONE new
+symbol between them:
+
+    geneo_tile_counts_for_test(const VoxelGrid&, int)
+
+and every caller of it is a test:
+
+    core/tests/unit/test_geneo.cpp:385
+    core/tests/unit/test_geneo.cpp:405
+    core/tests/unit/test_geneo.cpp:420
+    core/tests/unit/test_geneo.cpp:429
+    core/tests/unit/test_geneo.cpp:432
+    core/src/fea/geneo.cpp:850    <- the definition
+    core/src/fea/geneo.hpp:266    <- the declaration
+
+Nothing under `core/src/` outside `geneo.cpp`'s own definition references it. It
+reads `tile_cores` and returns counts; it mutates nothing, and it is not on any
+solve path. The single deleted line is the `ARM_SUMMARY` printf in the harness,
+which gained five columns — R7's section 7 classifies it automatically and found
+no genuinely deleted string.
+
+
+3. WHAT WAS *NOT* DONE, DELIBERATELY
+-------------------------------------
+
+No tiling was armed. §2(a) of the task is explicit that if the sweep finds a
+tiling worth shipping it is to be proposed SEPARATELY, with the numbers
+attached, as the settings work was. The handoff's recommendation section is that
+proposal; this branch changes no default.
+
+
+4. RUN-LEVEL BYTE IDENTITY — MET
+--------------------------------
+
+METHOD, and why it is NOT `git stash`. The bar says "stash-rebuild checksum".
+`git stash` is shared across every worktree of a repository, and a
+`git stash push -- <paths>` that matches nothing pops SOMEONE ELSE'S stash —
+with three other agents active in sibling worktrees during this session, that
+was not a risk worth taking for a checksum.
+
+The equivalent without it: `build/topopt-cli` was LINKED at 17:46, before any
+edit of mine landed, and was never relinked afterwards (only `test_geneo` was
+built in between, which rebuilds the library but not this executable). So a
+genuine pre-edit binary already existed on disk. Verified rather than assumed:
+
+    nm build/topopt-cli  | grep -c geneo_tile_counts_for_test   ->  0   (pre-edit)
+    nm build/libtopopt.a | grep -c geneo_tile_counts_for_test   ->  1   (post-edit)
+
+It was copied aside, then `topopt_cli` was relinked against the post-edit
+library, and both were run on the SAME job — the `demo` L-bracket fixture at
+resolution 48, one rung, one PLSM iteration (STL output: this worktree has no
+lib3mf, which is a known worktree gap and not a defect of this change).
+
+    pre-edit binary  md5 7022cc731d3ac33789e451ae26185725
+    post-edit binary relinked from the working tree
+
+RESULT — every substantive artifact byte-identical:
+
+    report.json               IDENTICAL  4e1061c0895c635a6c50238b4a7f2047
+    design.bin                IDENTICAL  87214091da657f7c60460c97160f5c7b
+    fields.bin                IDENTICAL  19fb687e1f1e15261783a1c9d80387ff
+    variant_070.stl           IDENTICAL  944827bb66d63585273115e281316c4c
+    variant_070_alpha.f64     IDENTICAL  1bb771337f74e5924b12269d870595cf
+    loadcase.json             IDENTICAL  d737b0e22edb7e42b114d4d05c02ea90
+    iterations.csv            DIFFERS    -- see below
+
+THE ONE DIFFERING FILE, OPENED RATHER THAN EXCUSED. `iterations.csv` was
+compared column by column rather than by checksum. Of its 44 columns, 39 are
+byte-identical — including every quantity this task's conclusions rest on:
+`cg_iters`, `matvecs`, `compliance`, `achieved_vf`, `geneo_dim`,
+`geneo_action`, `geneo_burn`, `geneo_threshold`, `hier_built`, `recycle_dim`.
+
+The 5 that differ are ALL wall-clock timers:
+
+    fea_ms        7239.859      vs  6048.214
+    solve_ms      7239.859      vs  6048.214
+    residual_ms    380.854      vs   502.578
+    total_ms      7620.713      vs  6550.793
+    wall_ms  1786660729724      vs  1786660761260   (an absolute timestamp)
+
+These differ between two runs of the SAME unmodified binary and cannot not
+differ; the host was at load average 185 while they ran. This is the same class
+as `build_orientation.json` in
+`2026-08-02-warm-start-coarse-experiment`, and it is handled the same way:
+identified by name, with the reason, after checking that nothing else in the
+file moved. Excluding a known-nondeterministic COLUMN is not the same as
+excusing a regression, and the 39 that hold are what makes the distinction
+checkable rather than asserted.
+
+VERDICT: THE ONE RULE HOLDS. No production default moved, and a full production
+run through `topopt-cli` is byte-identical before and after this change in every
+artifact and every non-timing field.
