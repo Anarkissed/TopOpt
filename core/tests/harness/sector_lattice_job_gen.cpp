@@ -100,6 +100,25 @@ int main(int argc, char** argv) {
   for (int i = 0; i < sectors; ++i)
     depths.push_back(sectors == 2 ? (i == 0 ? 3.0 : 7.5) : 3.0 + 1.5 * i);
 
+  // ★ THE RAMP MODE (task 2026-08-16-per-sector-density-override §4d). With a
+  // uniform depth given, every sector is declared at the SAME depth — so the
+  // derivation gives them all the SAME cell — and each carries its own
+  // `relative_density`, ramped linearly across the sectors. That isolates the
+  // one variable this task adds: with depth and cell held equal, ANY difference
+  // between the sectors is the override and nothing else. The varying-depth
+  // form above is PR 332's demonstration and is what you get without these args.
+  const double uniform_depth_mm = argc > 7 ? std::atof(argv[7]) : 0.0;
+  const double rho_lo = argc > 8 ? std::atof(argv[8]) : 0.0;
+  const double rho_hi = argc > 9 ? std::atof(argv[9]) : 0.0;
+  if (uniform_depth_mm > 0.0)
+    for (int i = 0; i < sectors; ++i) depths[(std::size_t)i] = uniform_depth_mm;
+  std::vector<double> rho((std::size_t)sectors, 0.0);
+  if (rho_lo > 0.0 && rho_hi > 0.0 && sectors > 1)
+    for (int i = 0; i < sectors; ++i)
+      rho[(std::size_t)i] = rho_lo + (rho_hi - rho_lo) * i / (sectors - 1);
+  else if (rho_lo > 0.0)
+    for (int i = 0; i < sectors; ++i) rho[(std::size_t)i] = rho_lo;
+
   std::string s = "{\n";
   s += "  \"material\": \"PLA\",\n  \"mode\": \"minimize_plastic\",\n";
   s += "  \"resolution\": " + std::to_string(res) + ",\n";
@@ -115,7 +134,12 @@ int main(int argc, char** argv) {
   for (int i = 0; i < sectors; ++i) {
     s += "      {\"role\": \"include\", \"kind\": \"region\", \"region_id\": " +
          std::to_string(200 + i) + ", \"geometry\": {\"depth_mm\": " +
-         std::to_string(depths[(std::size_t)i]) + "}}";
+         std::to_string(depths[(std::size_t)i]) + "}";
+    // Absent unless a ramp was asked for, so the no-ramp job is the byte-for-byte
+    // job this generator has always written.
+    if (rho[(std::size_t)i] > 0.0)
+      s += ", \"relative_density\": " + std::to_string(rho[(std::size_t)i]);
+    s += "}";
     s += (i + 1 < sectors) ? ",\n" : "\n";
   }
   s += "    ]},\n";

@@ -1631,6 +1631,13 @@ if(OpenCASCADE_FOUND)
     tests/harness/region_extent_probe.cpp)
   target_link_libraries(region_extent_probe PRIVATE topopt)
 
+  add_executable(sector_density_cost_probe EXCLUDE_FROM_ALL
+    tests/harness/sector_density_cost_probe.cpp)
+  target_link_libraries(sector_density_cost_probe PRIVATE topopt)
+
+  add_executable(cad_probe EXCLUDE_FROM_ALL tests/harness/cad_probe.cpp)
+  target_link_libraries(cad_probe PRIVATE topopt)
+
   add_executable(sector_lattice_job_gen EXCLUDE_FROM_ALL
     tests/harness/sector_lattice_job_gen.cpp)
   target_link_libraries(sector_lattice_job_gen PRIVATE topopt)

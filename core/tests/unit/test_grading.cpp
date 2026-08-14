@@ -112,6 +112,83 @@ int main() {
   CHECK(gf.cells_per_member_floor == n_star,
         "report floor == lattice_cells_per_member_min");
 
+  // ---- 1b. ★ PER-REGION STATED DENSITY (task 2026-08-16-per-sector-density-
+  //      override). The law must grade a voxel to the STATED density where one is
+  //      given, and derive exactly as before where none is — in the SAME field, so
+  //      one region can state while its neighbour derives. That is the whole
+  //      mechanism; if this fails nothing else in the task matters.
+  {
+    // Half the block states 0.30; the other half states nothing.
+    std::vector<double> stated(N, 0.0);
+    for (int k = 0; k < thick.nz; ++k)
+      for (int j = 0; j < thick.ny; ++j)
+        for (int i = 0; i < thick.nx; ++i)
+          if (i < thick.nx / 2) stated[thick.index(i, j, k)] = 0.30;
+
+    GradingLawParams sp = p;
+    sp.region_relative_density = &stated;
+    const GradedField S = grade_lattice(thick, dens, demand, nullptr, sp);
+
+    // The DERIVED half must be untouched: identical to the no-override run.
+    bool derived_half_identical = true, stated_half_is_stated = true;
+    std::size_t stated_latticed = 0;
+    for (int k = 0; k < thick.nz; ++k)
+      for (int j = 0; j < thick.ny; ++j)
+        for (int i = 0; i < thick.nx; ++i) {
+          const std::size_t e = thick.index(i, j, k);
+          if (!S.posture.mask[e]) continue;
+          if (i < thick.nx / 2) {
+            ++stated_latticed;
+            if (std::fabs(S.posture.relative_density[e] - 0.30) > 1e-12)
+              stated_half_is_stated = false;
+          } else if (gf.posture.mask[e] &&
+                     S.posture.relative_density[e] !=
+                         gf.posture.relative_density[e]) {
+            derived_half_identical = false;
+          }
+        }
+    CHECK(stated_latticed > 0, "the stated half actually latticed something");
+    CHECK(stated_half_is_stated,
+          "★ every latticed voxel of the stated half grades to EXACTLY 0.30");
+    CHECK(derived_half_identical,
+          "★ and the half that stated nothing is byte-for-byte the derived run — "
+          "one region can state while its neighbour derives");
+
+    // A field of all zeros must be indistinguishable from no field at all: that
+    // is what makes a job with no override byte-identical (bar R1).
+    std::vector<double> none(N, 0.0);
+    GradingLawParams np = p;
+    np.region_relative_density = &none;
+    const GradedField Z = grade_lattice(thick, dens, demand, nullptr, np);
+    CHECK(Z.posture.relative_density == gf.posture.relative_density,
+          "★ an all-zero stated field grades identically to no field — the "
+          "sentinel is 'derive', not 'zero density'");
+
+    // ★ AND IT MUST NOT DISTURB MULTISCALE: `prescribed` still wins outright.
+    std::vector<double> prescribed(N, 0.42);
+    GradingLawParams mp = p;
+    mp.prescribed_relative_density = &prescribed;
+    mp.region_relative_density = &stated;   // would say 0.30 on half
+    const GradedField M = grade_lattice(thick, dens, demand, nullptr, mp);
+    bool all_prescribed = true;
+    for (std::size_t e = 0; e < N; ++e)
+      if (M.posture.mask[e] &&
+          std::fabs(M.posture.relative_density[e] - 0.42) > 1e-12)
+        all_prescribed = false;
+    CHECK(all_prescribed,
+          "★ prescribed_relative_density still wins outright — the per-region "
+          "field is checked AFTER it, so multiscale cannot be moved by this");
+
+    bool threw = false;
+    std::vector<double> wrong(N - 1, 0.0);
+    GradingLawParams bad = p;
+    bad.region_relative_density = &wrong;
+    try {
+      grade_lattice(thick, dens, demand, nullptr, bad);
+    } catch (const std::invalid_argument&) { threw = true; }
+    CHECK(threw, "a wrong-sized stated field is refused, not read past");
+  }
+
   // ---- 2. L2 — NO uncertifiable point, checked independently of the law's assert --
   CHECK(gf.latticed_voxels > 0, "thick block grades some lattice");
   {
