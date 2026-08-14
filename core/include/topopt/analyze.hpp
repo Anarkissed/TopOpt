@@ -165,10 +165,17 @@ struct FixedDesignAnalysis {
   bool lattice_strength_uncertified = false;  // strut strength not gated (Phase 2)
 
   // --- Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report) ----
-  // REPORT ONLY. Filled AFTER the gate above from the SAME solve's stress tensor
-  // field; nothing here feeds `accepted`/`margin_effective` (bar L1) and
-  // `lattice_strength_uncertified` stays true — these are the measured NUMBERS the
-  // maintainer asked to see, not a gate. Present iff a lattice posture with >= 1
+  // REPORT ONLY UNLESS `gate_on_strut_strength` WAS ARMED (task 2026-08-13-
+  // lattice-as-a-material, §1c). Filled AFTER the gate above from the SAME
+  // solve's stress tensor field. With the flag OFF — the default, and bar L1 as
+  // it stands — nothing here feeds `accepted`/`margin_effective` and
+  // `lattice_strength_uncertified` stays true: these are the measured NUMBERS the
+  // maintainer asked to see, not a gate. With it ON, `margin_effective` is
+  // re-sealed as the min of the solid-region margin and
+  // `lattice_strut.margin_worst_case`, `accepted` follows, and
+  // `lattice_strength_uncertified` becomes false. `strut_gated` says which of the
+  // two happened, so a receipt never has to infer it.
+  // Present iff a lattice posture with >= 1
   // latticed voxel was applied AND the topology carries a measured strut law
   // (octet only — strut_strength.hpp; other topologies report nothing rather than
   // borrow octet's law).
@@ -183,6 +190,13 @@ struct FixedDesignAnalysis {
   double lattice_min_cells_per_member = 0.0;  // +inf if every latticed member
                                               // exceeds the thickness-EDT cap
   bool lattice_strut_out_of_regime = false;   // min_cells_per_member < floor
+  // Task 2026-08-13-lattice-as-a-material: the strut bound WAS folded into
+  // `margin_effective` / `accepted` (gate_on_strut_strength armed and a report
+  // produced). False on every pre-existing caller. `margin_effective_solid_only`
+  // keeps the number the gate WOULD have used without it, so the two are always
+  // comparable on one receipt and the strut term's cost is never invisible.
+  bool strut_gated = false;
+  double margin_effective_solid_only = 0.0;
 
   // --- BUILD-ORIENTATION RANKING (handoff 2026-08-01-build-direction-separation)
   // A RECOMMENDATION, filled strictly AFTER `accepted` / `margin_effective` were
@@ -327,7 +341,37 @@ FixedDesignAnalysis analyze_fixed_design(
     // exact loop/export disagreement this task exists to end. A multiscale run
     // therefore passes a threshold below the certified band's floor, so "printed"
     // means "not void". Must be in (0, 1).
-    double printed_iso = 0.5);
+    double printed_iso = 0.5,
+    // ── ★ GATE ON THE STRUT BOUND, NOT ONLY ON THE SOLID REGION (task
+    // 2026-08-13-lattice-as-a-material, §1c). false — the DEFAULT — is bar L1
+    // exactly as it stands and every existing caller is byte-for-byte: the strut
+    // report is a report, `lattice_strength_uncertified` says so, and nothing
+    // here reaches `accepted`.
+    //
+    // THE FAILURE MODE THIS CLOSES, and it is already recorded as M5: with the
+    // default `infill_percent = 100` the scalar knockdown is 1.0, so the gate
+    // certifies the SOLID envelope's margin over a region that is about to be
+    // printed as a lattice 5-12x more compliant. Handing the certification a
+    // `LatticePosture` fixes the COMPLIANCE and the macro stress field — the
+    // solve is of the real composite object. It does NOT by itself gate the
+    // latticed region's STRENGTH, because a latticed voxel is excluded from the
+    // solid maxima; without this flag that region is simply not gated, which is
+    // the same hole one stage later.
+    //
+    // Armed, the acceptance test becomes
+    //     margin_effective = min(solid-region effective margin,
+    //                            lattice_strut.margin_worst_case)
+    // — the measured PR 259 de-homogenisation bound, whose caveats travel with
+    // it: it is octet-only, it CLAMPS rho outside the law's span and counts the
+    // clamps, its interlayer half divides by the UNSOURCED z_knockdown, and it is
+    // valid only where homogenisation is (`lattice_strut_out_of_regime`). A
+    // caller that arms this MUST report `lattice_strut_out_of_regime` beside the
+    // verdict; an out-of-regime region is a REFUSAL, not a footnote.
+    //
+    // When armed AND a strut report was produced, `lattice_strength_uncertified`
+    // becomes false — the region's strength IS gated — and it stays true in every
+    // other case, including an armed gate the law could not evaluate.
+    bool gate_on_strut_strength = false);
 
 // ═══ THE MARGIN-REPRODUCTION BAND ═══════════════════════════════════════════
 // (task 2026-08-08-lattice-variant-margin-tolerance, S1)

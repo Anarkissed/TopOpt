@@ -108,6 +108,13 @@ add_library(topopt
   # solver — so it belongs in the always-built base library beside warm_start.cpp
   # and is available to the dependency-free slices that read a design field.
   src/simp/semdot.cpp
+  # THE LATTICE DENSITY FIELD over a frozen region (task 2026-08-13-lattice-as-a-
+  # material). Grid arithmetic over topopt/voxel.hpp, the measured lattice library
+  # and the header-only RBF basis — no Eigen and no solver — so it belongs in the
+  # always-built base library beside semdot.cpp, and the dependency-free slices
+  # that read a design field can read the region's density with it.
+  src/simp/lattice_density_field.cpp
+  src/simp/mma_joint.cpp
   src/simp/grading.cpp
   src/simp/cell_plan.cpp
   src/simp/observability.cpp
@@ -388,6 +395,32 @@ add_test(NAME plsm_topology_drainability COMMAND test_plsm_topology_drainability
 add_executable(test_multiscale_material tests/unit/test_multiscale_material.cpp)
 target_link_libraries(test_multiscale_material PRIVATE topopt)
 add_test(NAME multiscale_material COMMAND test_multiscale_material)
+
+# THE LATTICE DENSITY FIELD over a frozen region (task 2026-08-13-lattice-as-a-
+# material). The C0 bar R1 rests on, decided at the resolver where it needs no
+# solve; the two floors (homogenisation and printability) that bind in OPPOSITE
+# directions and are never merged into one verdict; the beta field's analytic
+# Jacobian against a central difference; and every refusal.
+# ★ BAR R1 as a GUARD, not a measurement: Lattice(f = 1.0) must be BYTE-IDENTICAL
+# to Solid, checked over a WHOLE minimize_plastic run — pins, material law,
+# volume budget, ladder, certification, receipt — on a synthetic wall that runs in
+# seconds. "Byte-identical" is scale-independent, so his 468k-voxel part learns
+# the same bit for hours of solve; this learns it on every CI build forever.
+# Carries its own POSITIVE CONTROL (the same arming at f = 0.30 must move the
+# design and the mass), so it cannot pass by the feature doing nothing.
+add_executable(test_frozen_lattice_c0 tests/validation/test_frozen_lattice_c0.cpp)
+target_link_libraries(test_frozen_lattice_c0 PRIVATE topopt)
+target_compile_definitions(test_frozen_lattice_c0 PRIVATE
+  MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+  SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+add_test(NAME frozen_lattice_c0 COMMAND test_frozen_lattice_c0)
+
+add_executable(test_lattice_density_field tests/unit/test_lattice_density_field.cpp)
+target_link_libraries(test_lattice_density_field PRIVATE topopt)
+target_include_directories(test_lattice_density_field PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(test_lattice_density_field PRIVATE
+  MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+add_test(NAME lattice_density_field COMMAND test_lattice_density_field)
 
 # De-homogenization probe instrument (lattice-dehomogenization probe,
 # 2026-07-31). The probe itself (tests/harness/lattice_dehomog_probe.cpp,
@@ -1735,6 +1768,22 @@ if(OpenCASCADE_FOUND)
   add_executable(levelset_probe EXCLUDE_FROM_ALL
     tests/harness/levelset_probe.cpp)
   target_link_libraries(levelset_probe PRIVATE topopt)
+
+  # M0-M5 (task 2026-08-13-lattice-as-a-material): the instrument for a FROZEN
+  # REGION AS A MATERIAL. Decomposes his frozen set into regions, measures the
+  # strain energy of each from a solve being run anyway, and runs the MODE 1
+  # assignment table through `analyze_fixed_design` — the shipped certification,
+  # in the shipped isolated posture — over the committed reference bakeoff's
+  # converged rungs. Writes no FEA of its own.
+  # ★ NOT `lattice_material_probe` — that name is TAKEN, by the multiscale-
+  # lattice-feasibility probe that measures the C(rho) fit's own bars. This one
+  # is about a FROZEN REGION, which is a different subject on the same library.
+  #   cmake --build build --target frozen_lattice_probe
+  #   ./build/frozen_lattice_probe <part.step> <materials.json> <ref/design.bin> \
+  #       <out> --stage law|regions|r1|assign|loop|cost
+  add_executable(frozen_lattice_probe EXCLUDE_FROM_ALL
+    tests/harness/frozen_lattice_probe.cpp)
+  target_link_libraries(frozen_lattice_probe PRIVATE topopt)
 
   # Task solver-speed-arm-and-diagnose: the two built accelerators (GenEO's
   # two-level deflation and the geometric V-cycle) are armed and not running, and

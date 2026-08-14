@@ -8,6 +8,8 @@
 
 #include "topopt/simp.hpp"
 
+#include "mma_joint.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -83,6 +85,22 @@ void validate_updater_options(const SimpOptions& o) {
     throw std::invalid_argument(
         "simp_optimize: MMA updater does not support a Heaviside projection "
         "schedule; use OC or clear options.projection");
+  // ★ MODE 2 (task 2026-08-13 §3). The coupling is read in exactly one place —
+  // the masked overload's plain-MMA branch — so every other combination would
+  // accept the option and then IGNORE it. A silently ignored design variable is
+  // worse than a refusal: the run looks like Mode 2 and optimises Mode 1, and
+  // nothing in the record says which happened.
+  if (o.lattice_coupling != nullptr) {
+    if (o.updater != SimpUpdater::MMA)
+      throw std::invalid_argument(
+          "simp_optimize: lattice_coupling (Mode 2) requires the MMA updater — "
+          "OC has no second design block");
+    if (!o.projection.empty() || o.mma_projection)
+      throw std::invalid_argument(
+          "simp_optimize: lattice_coupling (Mode 2) and a Heaviside projection "
+          "are mutually exclusive; the projected subproblem does not carry the "
+          "beta block");
+  }
 }
 
 // Validate the MMA Heaviside-projection opt-in (handoff 114). This is the
@@ -576,6 +594,17 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       params.lattice_region->size() != grid.voxel_count())
     throw std::invalid_argument(
         "simp_compliance: lattice_region size != voxel_count");
+  // Task 2026-08-13-lattice-as-a-material: the relative-density override. Null on
+  // every path that has not opted in, so `LR == nullptr` below is the whole
+  // pre-existing world.
+  const std::vector<double>* const LR = params.lattice_relative_density;
+  if (LR != nullptr && LM == nullptr)
+    throw std::invalid_argument(
+        "simp_compliance: lattice_relative_density is set but lattice_material "
+        "is null — there is no material law for it to be a density of");
+  if (LR != nullptr && LR->size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "simp_compliance: lattice_relative_density size != voxel_count");
 
   // Split this call into LINEAR SOLVE and SENSITIVITY SWEEP (task 2026-08-02-
   // iteration-phase-timing). The per-voxel modulus fill below is charged to the
@@ -610,7 +639,14 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
         // cells-per-member floor.
         if (LM != nullptr &&
             (params.lattice_region == nullptr || (*params.lattice_region)[e])) {
-          const CubicTensor C = LM->value(rho);
+          // The relative density the tensor is evaluated at. Normally the design
+          // density; a declared frozen region overrides it per voxel (see
+          // SimpParams::lattice_relative_density), because there the design
+          // density is the ENVELOPE occupancy (1.0) and the lattice's own
+          // relative density is a separate number.
+          const double lat_rho =
+              (LR != nullptr && (*LR)[e] >= 0.0) ? (*LR)[e] : rho;
+          const CubicTensor C = LM->value(lat_rho);
           lat_mask[e] = 1;
           lat_c11[e] = C.C11;
           lat_c12[e] = C.C12;
@@ -754,9 +790,21 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
             qB += ur * kb;
             qC += ur * kc;
           }
+          // THE SAME relative density the tensor was BUILT at, by the same rule —
+          // written once here and once in the fill loop above rather than cached,
+          // because a cached triplet and a re-derived derivative that disagreed
+          // about which rho they belong to is exactly the defect that would not
+          // show up in the compliance and would silently poison the gradient.
+          const double lat_rho =
+              (LR != nullptr && (*LR)[e] >= 0.0) ? (*LR)[e] : rho;
           double Cv[3], Cd[3];
-          LM->eval(rho, Cv, Cd);
+          LM->eval(lat_rho, Cv, Cd);
           compliance += Cv[0] * qA + Cv[1] * qB + Cv[2] * qC;
+          // dc/d(lat_rho). On the multiscale path lat_rho IS the design density
+          // and this is dc/d(design density), unchanged. On an overridden voxel it
+          // is the derivative with respect to the LATTICE relative density — what
+          // Mode 2 chains through d rho / d beta, and what no density updater ever
+          // reads because an overridden voxel is frozen.
           out.dcompliance[e] = -(Cd[0] * qA + Cd[1] * qB + Cd[2] * qC);
           continue;
         }
@@ -1366,12 +1414,11 @@ class ScopedSolveDeadline {
 // previous two designs and the current moving asymptotes L_j, U_j. All vectors
 // are grid-indexed (size voxel_count()); only design (solid) voxels carry
 // meaningful values.
-struct MmaState {
-  std::vector<double> xold1;  // design at iteration k-1
-  std::vector<double> xold2;  // design at iteration k-2
-  std::vector<double> low;    // lower asymptotes L_j
-  std::vector<double> upp;    // upper asymptotes U_j
-};
+// ★ The SAME four vectors `MmaJointState` carries, so it IS that type rather
+// than a second copy of it. Mode 2 widens the design vector with the lattice
+// field's beta coefficients (simp/mma_joint.hpp); a separate state struct here
+// would mean two things to keep in step for no benefit.
+using MmaState = MmaJointState;
 
 // One MMA design update. `st` carries the asymptotes + last two iterates across
 // calls; `mma_iter` is the 1-based MMA iteration number (asymptotes are
@@ -1430,103 +1477,14 @@ std::vector<double> mma_update(MmaState& st, int mma_iter, const VoxelGrid& grid
   for (double v : xphys) vol += v;
   const double g0 = vol - target;
 
-  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
-  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
-  const double albefa = 0.1, raa0 = 1e-5;
-
-  if (st.low.size() != N) {
-    st.low.assign(N, 0.0);
-    st.upp.assign(N, 0.0);
-  }
-
-  // 1. Moving asymptotes L_j, U_j.
-  for (std::size_t e : dof) {
-    const double xe = density[e];
-    if (mma_iter <= 2) {
-      st.low[e] = xe - asyinit * xrange;
-      st.upp[e] = xe + asyinit * xrange;
-    } else {
-      // Oscillation detector: sign of (x^k - x^{k-1})(x^{k-1} - x^{k-2}).
-      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
-      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
-      double L = xe - gamma * (st.xold1[e] - st.low[e]);
-      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
-      // Keep each asymptote within [0.01, 10] * xrange of the current point.
-      L = std::min(L, xe - 0.01 * xrange);
-      L = std::max(L, xe - 10.0 * xrange);
-      U = std::max(U, xe + 0.01 * xrange);
-      U = std::min(U, xe + 10.0 * xrange);
-      st.low[e] = L;
-      st.upp[e] = U;
-    }
-  }
-
-  // 2. Separable convex approximation coefficients and the move box [alpha, beta].
-  std::vector<double> p0(N, 0.0), q0(N, 0.0), p1(N, 0.0), q1(N, 0.0);
-  std::vector<double> alpha(N, 0.0), beta(N, 0.0);
-  double b = -g0;  // b = sum_j(p1/ux1 + q1/xl1) - g0
-  for (std::size_t e : dof) {
-    const double xe = density[e];
-    const double L = st.low[e], U = st.upp[e];
-    const double ux1 = U - xe, xl1 = xe - L;
-    const double dcp = std::max(dc[e], 0.0), dcm = std::max(-dc[e], 0.0);
-    const double dvp = std::max(dv[e], 0.0), dvm = std::max(-dv[e], 0.0);
-    p0[e] = ux1 * ux1 * (1.001 * dcp + 0.001 * dcm + raa0 / xrange);
-    q0[e] = xl1 * xl1 * (0.001 * dcp + 1.001 * dcm + raa0 / xrange);
-    p1[e] = ux1 * ux1 * (1.001 * dvp + 0.001 * dvm + raa0 / xrange);
-    q1[e] = xl1 * xl1 * (0.001 * dvp + 1.001 * dvm + raa0 / xrange);
-    b += p1[e] / ux1 + q1[e] / xl1;
-    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
-    beta[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
-  }
-
-  // 3. Dual solve for the single volume constraint. For a trial multiplier
-  // lambda >= 0 the primal minimiser of the separable subproblem is closed form:
-  //   x_j(lambda) = ( sqrt(p0+lambda*p1) L_j + sqrt(q0+lambda*q1) U_j )
-  //               / ( sqrt(p0+lambda*p1) + sqrt(q0+lambda*q1) )   (clamped to box).
-  auto candidate = [&](double lambda) {
-    std::vector<double> xnew(N, 0.0);
-    for (std::size_t e : dof) {
-      const double pl = std::sqrt(p0[e] + lambda * p1[e]);
-      const double ql = std::sqrt(q0[e] + lambda * q1[e]);
-      double xt = (pl * st.low[e] + ql * st.upp[e]) / (pl + ql);
-      if (xt < alpha[e]) xt = alpha[e];
-      if (xt > beta[e]) xt = beta[e];
-      xnew[e] = xt;
-    }
-    return xnew;
-  };
-  // The approximate constraint value g1(x) = sum_j(p1/(U-x) + q1/(x-L)) - b;
-  // it decreases monotonically in lambda, so bisect for g1 = 0 (KKT: lambda >= 0,
-  // g1 <= 0, complementarity). If the unconstrained optimum is already feasible,
-  // lambda stays 0.
-  auto gval = [&](const std::vector<double>& x) {
-    double s = 0.0;
-    for (std::size_t e : dof)
-      s += p1[e] / (st.upp[e] - x[e]) + q1[e] / (x[e] - st.low[e]);
-    return s - b;
-  };
-  double lambda = 0.0;
-  if (gval(candidate(0.0)) > 0.0) {
-    double l1 = 0.0, l2 = 1.0;
-    while (l2 < 1e30 && gval(candidate(l2)) > 0.0) l2 *= 2.0;
-    for (int it = 0; it < 100 && (l2 - l1) > 1e-9 * (1.0 + l1 + l2); ++it) {
-      const double lmid = 0.5 * (l1 + l2);
-      if (gval(candidate(lmid)) > 0.0)
-        l1 = lmid;
-      else
-        l2 = lmid;
-    }
-    lambda = 0.5 * (l1 + l2);
-  }
-  std::vector<double> xnew = candidate(lambda);
-
-  // 4. Roll the history forward (xold2 <- xold1 <- x). After iteration 1 xold2
-  // stays empty; the asymptote branch only reads xold1/xold2 for mma_iter >= 3,
-  // by which point both are full grid-sized vectors.
-  st.xold2 = st.xold1;
-  st.xold1 = density;
-  return xnew;
+  // ★ The subproblem itself lives in `mma_update_joint` (simp/mma_joint.hpp).
+  // ONE uniformly-boxed block is exactly this call, so what runs below is the
+  // same arithmetic in the same order on the same values — and Mode 2's second
+  // block reaches the identical solver rather than a parallel copy of it that
+  // would have to be kept in step by hand.
+  const std::vector<double> xmin_v(N, density_min), xmax_v(N, 1.0);
+  return mma_update_joint(st, mma_iter, density, dof, dc, dv, xmin_v, xmax_v, g0,
+                          move);
 }
 
 // One MMA design update with a Heaviside projection (handoff 114). The MMA-
@@ -2816,95 +2774,13 @@ std::vector<double> mma_update_masked(MmaState& st, int mma_iter,
   for (double v : xphys) vol += v;
   const double g0 = vol - target;
 
-  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
-  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
-  const double albefa = 0.1, raa0 = 1e-5;
-
-  if (st.low.size() != N) {
-    st.low.assign(N, 0.0);
-    st.upp.assign(N, 0.0);
-  }
-
-  // 1. Moving asymptotes L_j, U_j (Active voxels only).
-  for (std::size_t e : dof) {
-    const double xe = density[e];
-    if (mma_iter <= 2) {
-      st.low[e] = xe - asyinit * xrange;
-      st.upp[e] = xe + asyinit * xrange;
-    } else {
-      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
-      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
-      double L = xe - gamma * (st.xold1[e] - st.low[e]);
-      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
-      L = std::min(L, xe - 0.01 * xrange);
-      L = std::max(L, xe - 10.0 * xrange);
-      U = std::max(U, xe + 0.01 * xrange);
-      U = std::min(U, xe + 10.0 * xrange);
-      st.low[e] = L;
-      st.upp[e] = U;
-    }
-  }
-
-  // 2. Separable convex approximation coefficients + move box [alpha, beta].
-  std::vector<double> p0(N, 0.0), q0(N, 0.0), p1(N, 0.0), q1(N, 0.0);
-  std::vector<double> alpha(N, 0.0), beta(N, 0.0);
-  double b = -g0;
-  for (std::size_t e : dof) {
-    const double xe = density[e];
-    const double L = st.low[e], U = st.upp[e];
-    const double ux1 = U - xe, xl1 = xe - L;
-    const double dcp = std::max(dc[e], 0.0), dcm = std::max(-dc[e], 0.0);
-    const double dvp = std::max(dv[e], 0.0), dvm = std::max(-dv[e], 0.0);
-    p0[e] = ux1 * ux1 * (1.001 * dcp + 0.001 * dcm + raa0 / xrange);
-    q0[e] = xl1 * xl1 * (0.001 * dcp + 1.001 * dcm + raa0 / xrange);
-    p1[e] = ux1 * ux1 * (1.001 * dvp + 0.001 * dvm + raa0 / xrange);
-    q1[e] = xl1 * xl1 * (0.001 * dvp + 1.001 * dvm + raa0 / xrange);
-    b += p1[e] / ux1 + q1[e] / xl1;
-    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
-    beta[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
-  }
-
-  // 3. Dual solve for the single volume constraint. Frozen voxels keep their
-  // pinned x (1 or 0); only Active voxels take the closed-form primal minimiser.
-  auto candidate = [&](double lambda) {
-    std::vector<double> xnew = density;  // preserves FrozenSolid=1, FrozenVoid=0
-    for (std::size_t e : dof) {
-      const double pl = std::sqrt(p0[e] + lambda * p1[e]);
-      const double ql = std::sqrt(q0[e] + lambda * q1[e]);
-      double xt = (pl * st.low[e] + ql * st.upp[e]) / (pl + ql);
-      if (xt < alpha[e]) xt = alpha[e];
-      if (xt > beta[e]) xt = beta[e];
-      xnew[e] = xt;
-    }
-    return xnew;
-  };
-  auto gval = [&](const std::vector<double>& x) {
-    double s = 0.0;
-    for (std::size_t e : dof)
-      s += p1[e] / (st.upp[e] - x[e]) + q1[e] / (x[e] - st.low[e]);
-    return s - b;
-  };
-  double lambda = 0.0;
-  if (gval(candidate(0.0)) > 0.0) {
-    double l1 = 0.0, l2 = 1.0;
-    while (l2 < 1e30 && gval(candidate(l2)) > 0.0) l2 *= 2.0;
-    for (int it = 0; it < 100 && (l2 - l1) > 1e-9 * (1.0 + l1 + l2); ++it) {
-      const double lmid = 0.5 * (l1 + l2);
-      if (gval(candidate(lmid)) > 0.0)
-        l1 = lmid;
-      else
-        l2 = lmid;
-    }
-    lambda = 0.5 * (l1 + l2);
-  }
-  std::vector<double> xnew = candidate(lambda);
-
-  // 4. Roll history forward (xold2 <- xold1 <- x). Frozen voxels store their
-  // constant pin here too; the asymptote branch only reads xold1/xold2 for
-  // Active voxels (mma_iter >= 3), so the frozen entries are inert.
-  st.xold2 = st.xold1;
-  st.xold1 = density;
-  return xnew;
+  // ★ The subproblem is `mma_update_joint` (simp/mma_joint.hpp), the same one the
+  // unmasked overload uses. Restricting to Active voxels is entirely a matter of
+  // which indices are in `dof`; the mathematics does not change, and Mode 2's
+  // beta block joins the SAME call rather than a fifth copy of the subproblem.
+  const std::vector<double> xmin_v(N, density_min), xmax_v(N, 1.0);
+  return mma_update_joint(st, mma_iter, density, dof, dc, dv, xmin_v, xmax_v, g0,
+                          move);
 }
 
 // Project the Active voxels of a filtered field in place (M6.3). Frozen and
@@ -3155,6 +3031,30 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   for (MaskValue m : eff)
     if (m == MaskValue::Active) n_active += 1.0;
 
+  // ★ THE TARGET FRACTION THE BUDGET IS ACTUALLY RUN AT (task 2026-08-13-lattice-
+  // as-a-material). `freed_mass_return * freed_mass_voxels` is 0.0 on every run
+  // that has not declared a lattice density field over its frozen region — and
+  // adding 0.0 to a positive double is exact — so `vf_target` IS
+  // `options.volume_fraction`, bit-for-bit, on every existing path. See
+  // SimpOptions::freed_mass_return for what the two ends of the knob mean.
+  //
+  // Clamped at 1.0: the Active set cannot hold more than its own envelope, and a
+  // frozen region big enough to overflow it would otherwise ask the OC bisection
+  // for a target it can never reach and saturate every rung to the same all-solid
+  // design (the same failure the Empty-counting budget caused, above).
+  if (!(options.freed_mass_return >= 0.0 && options.freed_mass_return <= 1.0))
+    throw std::invalid_argument(
+        "simp_optimize: freed_mass_return must be in [0, 1]");
+  if (!(options.freed_mass_voxels >= 0.0))
+    throw std::invalid_argument(
+        "simp_optimize: freed_mass_voxels must be >= 0");
+  const double vf_target =
+      n_active > 0.0
+          ? std::min(1.0, options.volume_fraction +
+                              options.freed_mass_return *
+                                  options.freed_mass_voxels / n_active)
+          : options.volume_fraction;
+
   // Achieved Active-voxel physical volume fraction of a filtered field (the
   // filter is 0 on frozen/empty, so the whole-field sum is the Active sum).
   auto active_volfrac = [&](const std::vector<double>& xphys_active) {
@@ -3169,7 +3069,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   std::vector<double> x(grid.voxel_count(), 0.0);
   if (options.initial_design.empty()) {
     for (std::size_t e = 0; e < x.size(); ++e) {
-      if (eff[e] == MaskValue::Active) x[e] = options.volume_fraction;
+      if (eff[e] == MaskValue::Active) x[e] = vf_target;
       else if (eff[e] == MaskValue::FrozenSolid) x[e] = 1.0;
       // FrozenVoid / Empty stay 0
     }
@@ -3181,7 +3081,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     for (std::size_t e = 0; e < x.size(); ++e)
       if (eff[e] == MaskValue::Active) is_design[e] = 1;
     x = warm_start_design(options.initial_design, filter, is_design,
-                          options.volume_fraction, params.density_min);
+                          vf_target, params.density_min);
     // Reapply the pins the uniform start carries: FrozenSolid -> 1, every
     // non-Active voxel -> 0 (the Active-only filter already yields 0 off the
     // Active set, but pin explicitly so FrozenSolid is full material).
@@ -3194,6 +3094,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // MMA updater state (ROADMAP M7.mma.4). Unused when updater == OC; the masked
   // loop owns a single continuous MMA iteration count across all stages, exactly
   // like the unconstrained overload.
+  // ★ MODE 2's beta block carries its OWN asymptotes under BANKED, where the two
+  // blocks are separate subproblems. Unused (and unallocated) when no coupling.
+  MmaJointState beta_state;
   MmaState mma_state;
   int mma_iter = 0;
 
@@ -3308,7 +3211,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // exactly where the Heaviside projection stands and does its job.
       if (options.semdot) {
         SemdotField sf = semdot_volume_fractions(grid, xphys, eff,
-                                                 options.volume_fraction * n_active,
+                                                 vf_target * n_active,
                                                  options.semdot_grid_points);
         xphys = std::move(sf.volume_fraction);
       }
@@ -3321,8 +3224,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // drives the TRAJECTORY solve, the certified solve below never does.
       // SEMDOT then forces p = 1 on top (semdot_law): the thresholding is the
       // penalization, and continuation is refused under it anyway.
-      const SimpParams traj_params = semdot_law(
+      SimpParams traj_params = semdot_law(
           penalty_for_iteration(params, options, result.iterations + 1), options);
+      // ★ MODE 2: the field is resolved at THIS iteration's coefficients and the
+      // override is pointed at it BEFORE the solve, so the tensor the solve sees
+      // and the dc/drho it returns belong to the same beta. Pointing it after
+      // would give the gradient of a field the solve never used.
+      if (options.lattice_coupling != nullptr)
+        traj_params.lattice_relative_density =
+            &options.lattice_coupling->relative_density();
       // ACTIVE DOMAIN: trajectory-only, on the ANALYSIS grid (the design box) —
       // the grid the dilution lives on and the one this feature exists for.
       double af = 1.0;
@@ -3392,7 +3302,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         sp.mark();
         x_new = mma_update_masked_projected(
             mma_state, ++mma_iter, grid, filter, eff, x, xtilde, c.dcompliance,
-            cur_beta, eta, options.volume_fraction, cur_move,
+            cur_beta, eta, vf_target, cur_move,
             params.density_min);
         sp.charge(sp.update);
       } else if (st.project) {
@@ -3404,21 +3314,84 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         sp.mark();
         x_new = oc_update_masked_projected(grid, filter, eff, x, xtilde,
                                            c.dcompliance, st.beta, eta,
-                                           options.volume_fraction, st.move,
+                                           vf_target, st.move,
                                            params.density_min);
+        sp.charge(sp.update);
+      } else if (options.updater == SimpUpdater::MMA &&
+                 options.lattice_coupling != nullptr &&
+                 options.lattice_coupling->shares_budget()) {
+        // ★ MODE 2, SPENT (minimize_plastic OFF / the GROWTH ladder). ONE budget
+        // covers both blocks, so they must be updated TOGETHER: MMA's dual
+        // multiplier prices the whole thing, and whichever block buys stiffness
+        // more cheaply per unit mass gets the mass. Updating them separately
+        // would let each spend the same budget.
+        sp.mark();
+        LatticeDesignCoupling& L = *options.lattice_coupling;
+        std::vector<double> ones_lat(grid.voxel_count(), 0.0);
+        const std::vector<double>& lr = L.relative_density();
+        for (std::size_t e = 0; e < ones_lat.size(); ++e)
+          if (lr[e] >= 0.0) ones_lat[e] = 1.0;
+        // The total: the Active target PLUS what the field is allowed. Under
+        // SPENT the split between them is what MMA solves, which is exactly why
+        // `freed_mass_return` has no meaning here — see the handoff §0.5.
+        const double total_target =
+            vf_target * n_active + L.mass_allowance_voxels();
+        const std::vector<double> joint = mma_update_masked_lattice(
+            mma_state, ++mma_iter, grid, filter, eff, x, L.coefficients(),
+            c.dcompliance, L.chain(c.dcompliance), L.chain(ones_lat),
+            L.occupied_mass_voxels(), total_target, L.coefficient_min(),
+            L.coefficient_max(), st.move, params.density_min);
+        x_new.assign(joint.begin(),
+                     joint.begin() + static_cast<std::ptrdiff_t>(grid.voxel_count()));
+        L.set_coefficients(std::vector<double>(
+            joint.begin() + static_cast<std::ptrdiff_t>(grid.voxel_count()),
+            joint.end()));
         sp.charge(sp.update);
       } else if (options.updater == SimpUpdater::MMA) {
         // Passive-region MMA (M7.mma.4): the same single-volume-constraint MMA
         // subproblem as the plain overload, restricted to Active voxels.
         sp.mark();
         x_new = mma_update_masked(mma_state, ++mma_iter, grid, filter, eff, x,
-                                  c.dcompliance, options.volume_fraction,
+                                  c.dcompliance, vf_target,
                                   st.move, params.density_min);
         sp.charge(sp.update);
+        // ★ MODE 2, BANKED (minimize_plastic ON / the REDUCTION ladder). The two
+        // blocks are priced SEPARATELY, so their KKT systems DECOUPLE and each
+        // is an independent 1-D dual. The Active update above is therefore the
+        // shipped call, unchanged and byte-identical; only this second, smaller
+        // subproblem is new. The field redistributes its OWN allowance — denser
+        // where it carries, lighter where it does not — at the same part mass
+        // Mode 1 would have printed.
+        if (options.lattice_coupling != nullptr) {
+          sp.mark();
+          LatticeDesignCoupling& L = *options.lattice_coupling;
+          std::vector<double> ones_lat(grid.voxel_count(), 0.0);
+          const std::vector<double>& lr = L.relative_density();
+          for (std::size_t e = 0; e < ones_lat.size(); ++e)
+            if (lr[e] >= 0.0) ones_lat[e] = 1.0;
+          const std::vector<double> b = L.coefficients();
+          const std::size_t nb = b.size();
+          std::vector<std::size_t> bdof(nb);
+          for (std::size_t j = 0; j < nb; ++j) bdof[j] = j;
+          std::vector<double> bmin(nb, L.coefficient_min()),
+              bmax(nb, L.coefficient_max());
+          std::vector<double> dobj = L.chain(c.dcompliance);
+          const std::vector<double> dmass = L.chain(ones_lat);
+          double sc = 0.0;
+          for (double v : dobj) sc = std::max(sc, std::fabs(v));
+          if (sc > 0.0)
+            for (double& v : dobj) v /= sc;
+          const double g0 =
+              L.occupied_mass_voxels() - L.mass_allowance_voxels();
+          L.set_coefficients(mma_update_joint(beta_state, mma_iter, b, bdof,
+                                              dobj, dmass, bmin, bmax, g0,
+                                              st.move));
+          sp.charge(sp.update);
+        }
       } else {
         sp.mark();
         x_new = oc_update_masked(grid, filter, eff, x, c.dcompliance,
-                                 options.volume_fraction, st.move,
+                                 vf_target, st.move,
                                  params.density_min);
         sp.charge(sp.update);
       }
@@ -3446,7 +3419,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (options.semdot) {
         apply_mask_pins(eff, xafter);
         SemdotField sf = semdot_volume_fractions(
-            grid, xafter, eff, options.volume_fraction * n_active,
+            grid, xafter, eff, vf_target * n_active,
             options.semdot_grid_points);
         semdot_vf_now = n_active > 0.0 ? sf.achieved_volume / n_active : 0.0;
         xafter = std::move(sf.volume_fraction);
@@ -3653,7 +3626,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   double semdot_final_vf = 0.0;
   if (options.semdot) {
     SemdotField sf = semdot_volume_fractions(grid, result.physical_density, eff,
-                                             options.volume_fraction * n_active,
+                                             vf_target * n_active,
                                              options.semdot_grid_points);
     semdot_final_vf = n_active > 0.0 ? sf.achieved_volume / n_active : 0.0;
     result.semdot = true;

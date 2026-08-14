@@ -150,7 +150,8 @@ FixedDesignAnalysis analyze_fixed_design(
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
     bool load_path_ok, double part_solid, const LatticePosture* lattice,
     bool score_build_orientation, bool build_direction_inferred,
-    bool auto_apply_build_orientation, double printed_iso) {
+    bool auto_apply_build_orientation, double printed_iso,
+    bool gate_on_strut_strength) {
   // THE PRINTED-SET THRESHOLD for this analysis. Shadows the file-scope M3.5
   // constant so every "is there material here" test in this function asks the
   // caller's question — 0.5 for every classic run (identical to the constant it
@@ -437,6 +438,7 @@ FixedDesignAnalysis analyze_fixed_design(
   out.max_interlayer_tension = max_interlayer;
   out.margin = margin;
   out.margin_effective = margin_effective;
+  out.margin_effective_solid_only = margin_effective;
   out.accepted = load_path_ok && margin_ok;
 
   // Lattice reporting (all default when no posture was applied). `margin`/`accepted`
@@ -490,6 +492,32 @@ FixedDesignAnalysis analyze_fixed_design(
         out.lattice_min_cells_per_member = min_cpm;
         out.lattice_strut_out_of_regime =
             min_cpm < lattice_cells_per_member_min(lattice->topology);
+      }
+
+      // ── ★ THE STRUT TERM IN THE GATE (task 2026-08-13-lattice-as-a-material,
+      // §1c). OFF by default, and bar L1 stands for every caller that leaves it
+      // off: the block above is a report and `accepted` is already sealed.
+      //
+      // Armed, the acceptance test takes the WORSE of the solid region's
+      // effective margin and the measured de-homogenised strut bound, so a
+      // latticed region can no longer pass by not being looked at. Nothing else
+      // is recomputed — this is a `min` over two numbers the same solve already
+      // produced — and `margin_effective_solid_only` keeps the number the gate
+      // would have used, so the term's cost is on the receipt rather than folded
+      // invisibly into one figure.
+      //
+      // The out-of-regime case is NOT special-cased here into a pass: if the
+      // homogenisation floor is missed, `lattice_strut_out_of_regime` is set and
+      // the CALLER refuses on it. Quietly widening the gate for a region whose
+      // macro stress is out of regime would be this term pretending to certify
+      // something it cannot.
+      if (gate_on_strut_strength && out.lattice_strut_report) {
+        out.strut_gated = true;
+        out.lattice_strength_uncertified = false;
+        const double strut_margin = out.lattice_strut.margin_worst_case;
+        if (strut_margin < out.margin_effective)
+          out.margin_effective = strut_margin;
+        out.accepted = load_path_ok && (out.margin_effective >= margin_stop);
       }
     }
   }
@@ -565,6 +593,7 @@ FixedDesignAnalysis analyze_fixed_design(
                                          material.z_knockdown, max_von_mises,
                                          out.max_interlayer_tension);
       out.margin_effective = applied.margin_effective;
+      out.margin_effective_solid_only = applied.margin_effective;
       out.accepted = applied.would_be_accepted;
       out.support_volume_voxels = applied.support_voxels;
       assert(out.margin.interlayer == applied.macro_interlayer_margin &&
@@ -584,6 +613,19 @@ FixedDesignAnalysis analyze_fixed_design(
             out.applied_build_dir, material.yield_strength_mpa,
             material.z_knockdown);
         out.lattice_strut_report = out.lattice_strut.evaluated;
+      }
+      // ★ AND THE STRUT TERM GOES BACK IN. The scorer's candidate row prices the
+      // SOLID-region gate expression only, so the re-seal three lines up would
+      // otherwise DROP the strut term that `gate_on_strut_strength` put in — a
+      // latticed part would be gated at one orientation and not at the one it is
+      // actually certified at. Re-folded here, from the report just re-evaluated
+      // at the APPLIED direction, so the two features compose instead of one
+      // silently undoing the other.
+      if (out.strut_gated && out.lattice_strut_report) {
+        const double strut_margin = out.lattice_strut.margin_worst_case;
+        if (strut_margin < out.margin_effective)
+          out.margin_effective = strut_margin;
+        out.accepted = load_path_ok && (out.margin_effective >= margin_stop);
       }
       // NOTHING ELSE MOVES. von_mises_field, stress_tensor_field,
       // displacement_field, mass_grams, printed_voxels/fraction, max_von_mises,

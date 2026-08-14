@@ -63,6 +63,32 @@ struct SimpParams {
   // and the pointers copy with it; nothing here takes ownership.
   const LatticeMaterialModel* lattice_material = nullptr;
   const std::vector<char>* lattice_region = nullptr;
+
+  // ── ★ WHERE THE LATTICE'S RELATIVE DENSITY COMES FROM (task 2026-08-13-
+  // lattice-as-a-material). Null is the entire multiscale world above,
+  // byte-for-byte: the tensor is evaluated at the voxel's own DESIGN density.
+  //
+  // A FROZEN region declared as lattice is the case this exists for. Its design
+  // density stays 1.0 — the cell fills the voxel's envelope, and the pore space
+  // is a property of the MATERIAL, not of the occupancy, so every downstream
+  // instrument that reads one density per voxel still reads 1.0 and still gets
+  // the answer it got before (bar R6). Its RELATIVE density is a different
+  // number and it travels here.
+  //
+  // Grid-indexed, size grid.voxel_count(). At a voxel selected by
+  // `lattice_region`:
+  //     entry <  0  -> evaluate C at the DESIGN density (the multiscale case)
+  //     entry >= 0  -> evaluate C at THIS number instead
+  // Entries at voxels the region does not select are never read.
+  //
+  // The SENSITIVITY `SimpCompliance::dcompliance` at an overridden voxel is
+  // dc/d(that relative density) — the derivative Mode 2's chain rule needs. It is
+  // NOT dc/d(design density), which is zero there because the design density does
+  // not enter the tensor. A frozen voxel's design density never moves, so no
+  // updater reads it; a Mode 2 beta step reads exactly this.
+  const std::vector<double>* lattice_relative_density = nullptr;
+
+
 };
 
 // SIMP Young's modulus for a design density: E(rho) = clamp(rho, rho_min, 1)^p
@@ -107,6 +133,54 @@ enum class SolverKind { JacobiCG, MultigridCG, MultigridCG_Matfree };
 std::vector<double> simp_uniform_density(const VoxelGrid& grid, double value);
 
 // Result of a SIMP compliance analysis.
+// ★ MODE 2 — THE LATTICE DENSITY FIELD AS DESIGN VARIABLES, INSIDE THE LOOP
+// (task 2026-08-13-lattice-as-a-material §3, the maintainer's §0.5 ruling).
+//
+// An abstract seam so `simp.cpp` stays free of lattice types: it knows only that
+// there is a SECOND BLOCK of design variables with a box, a sensitivity chain and
+// a mass. `lattice_density_field.hpp` implements it.
+//
+// ★ THE CONVENTION IS READ FROM `minimize_plastic`, NOT FROM AN OPTION OF ITS
+// OWN — one user-facing control, one meaning. `shares_budget()` IS that ruling:
+//
+//   false — BANKED (minimize_plastic ON, the REDUCTION ladder). The two blocks
+//           are priced SEPARATELY: the Active target is untouched and the field
+//           holds its own mass allowance, so Mode 2 REDISTRIBUTES the region's
+//           mass — denser where it carries, lighter where it does not — at the
+//           SAME part mass Mode 1 would print. The saving leaves the part.
+//   true  — SPENT (minimize_plastic OFF, the GROWTH ladder). ONE budget covers
+//           both blocks, so MMA moves mass between the lattice and the Active
+//           set and the freed mass is re-placed inside the same total.
+//
+// ★ The two are different OPTIMISATION PROBLEMS, not one problem with a flag:
+// separate constraints decouple the KKT system, so BANKED solves two independent
+// 1-D duals (and the Active block's update is then LITERALLY the shipped
+// `mma_update_masked` call, unchanged), while SPENT solves one shared dual.
+struct LatticeDesignCoupling {
+  virtual ~LatticeDesignCoupling() = default;
+
+  // The per-voxel lattice relative density for the CURRENT coefficients, in the
+  // form `lattice_relative_density` takes: grid-indexed, entry < 0 = not
+  // latticed. Recomputed by `refresh()`.
+  virtual const std::vector<double>& relative_density() const = 0;
+  // Mass-equivalent voxels the field currently OCCUPIES (sum of rho over
+  // latticed voxels) — what a budget constrains, not the freed mass.
+  virtual double occupied_mass_voxels() const = 0;
+
+  virtual const std::vector<double>& coefficients() const = 0;
+  virtual void set_coefficients(const std::vector<double>& b) = 0;  // re-resolves
+  virtual double coefficient_min() const = 0;
+  virtual double coefficient_max() const = 0;
+
+  // J^T applied to a grid-indexed per-voxel sensitivity dF/drho.
+  virtual std::vector<double> chain(const std::vector<double>& dF_drho) const = 0;
+
+  // The block's own allowance, in voxel-equivalents. Read ONLY when
+  // shares_budget() is false.
+  virtual double mass_allowance_voxels() const = 0;
+  virtual bool shares_budget() const = 0;
+};
+
 struct SimpCompliance {
   FeaSolution solution;             // penalized displacement field
   double compliance = 0.0;          // c = f^T u  (= sum_e E(rho_e) u_e^T K_unit u_e)
@@ -953,6 +1027,51 @@ struct SimpIterationObservation {
 
 struct SimpOptions {
   double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
+
+  // ── ★ THE FROZEN REGION'S MASS IS INSIDE THE BUDGET (task 2026-08-13-lattice-
+  // as-a-material). Zero — the default — is the entire existing world: the Active
+  // target is `volume_fraction * n_active` exactly, adding 0.0 to a positive
+  // double changes not one bit, and every existing run is byte-for-byte.
+  //
+  // A frozen region declared as lattice at relative density f stops costing its
+  // envelope and starts costing f x its envelope. `freed_mass_voxels` is the
+  // mass-equivalent voxel count that frees, summed over the region:
+  // sum (1 - rho_e). It is the fourth row of the defect table — the region's mass
+  // was OUTSIDE the volume budget and it has to be INSIDE it — and this is where
+  // it enters.
+  //
+  // `freed_mass_return` in [0, 1] says how much of it the optimiser gets back:
+  //
+  //   0.0  BANK IT. The Active target is unchanged, so the run prints strictly
+  //        less material than the same rung did with the region solid. This is
+  //        the assignment table's posture (§4a) — it measures what latticing
+  //        COSTS in margin with nothing given back.
+  //   1.0  MASS-NEUTRAL. The Active target rises by exactly the freed mass, so
+  //        the run's total printed mass-equivalent equals what the SAME rung
+  //        printed with the region solid, and the optimiser re-places the freed
+  //        material where it wants it. This is the posture §3's buttressing
+  //        measurement demands: 94% of what it places lands within 5 mm of the
+  //        wall, so removing the wall's stiffness without letting it compensate
+  //        measures a handicap, not the mechanism.
+  //
+  // Between them is the frontier the §4c loop walks, and the NET saving is read
+  // off it. THE RUNG'S MEANING IS NOT REDEFINED: at f = 1 (nothing latticed)
+  // freed_mass_voxels is 0 and every posture is the shipped one.
+  double freed_mass_voxels = 0.0;
+  double freed_mass_return = 0.0;
+
+  // ★ MODE 2 (task 2026-08-13 §3): the lattice density field's coefficients join
+  // THIS run's design vector. Null by default — with it null the loop takes no
+  // new branch and every existing run is byte-for-byte. Only the MASKED overload
+  // reads it, and only under the plain MMA updater: a projection stage has its
+  // own subproblem, and silently ignoring the coupling there would be worse than
+  // refusing, so `validate_updater_options` refuses that combination outright.
+  //
+  // The caller owns the object and it must outlive the call. See
+  // LatticeDesignCoupling for what BANKED and SPENT mean and why they are two
+  // different optimisation problems rather than one with a flag.
+  LatticeDesignCoupling* lattice_coupling = nullptr;
+
   double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
   double move = 0.2;             // OC/MMA move limit
   // --- Adaptive move limit (handoff 2026-07-26-adaptive-move) --------------

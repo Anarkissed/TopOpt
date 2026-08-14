@@ -1,0 +1,33 @@
+=== R7 assertion census: main -> working tree ===
+
+1. TEST ASSERTION MESSAGES   before=3352  after=3430
+   REMOVED:
+   (nothing above = no assertion message disappeared)
+
+2. REGISTERED CTESTS   before=121  after=123
+   REMOVED:
+   ADDED:
+     frozen_lattice_c0
+     lattice_density_field
+
+3. PRODUCTION REFUSALS   before=418  after=445
+   REMOVED:
+   (nothing above = no production refusal disappeared)
+
+4. COMPARISON KINDS INSIDE CHECK() (before -> after; a DROP is the thing to look at)
+     !=         31 ->     34  
+     &&        289 ->    297  
+     <         225 ->    237  
+     <=        136 ->    136  
+     ==        842 ->    853  
+     >         260 ->    263  
+     >=         60 ->     60  
+     ||          2 ->      2  
+
+5. HARNESS MESSAGES (the whole of core/tests/harness as ONE bag)
+   before=6493  after=6631
+   REMOVED:
+   (nothing above = no harness refusal and no harness message disappeared)
+
+6. THE REMOVED HARNESS STRINGS, TRIAGED
+     nothing was removed

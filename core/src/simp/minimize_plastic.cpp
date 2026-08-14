@@ -670,6 +670,333 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // gate refuses (task 2026-08-03-selfweight-clearance-void-crash).
   DesignMask mask = design_domain_mask(domain, options);
 
+  // --- ★ LATTICE AS A MATERIAL over the FROZEN region -------------------------
+  //     (task 2026-08-13-lattice-as-a-material)
+  //
+  // Resolved ONCE per run, before the ladder, for the same reason the multiscale
+  // block above is: every rung of one run must optimise against the same material
+  // curve over the same region, or a rung comparison is comparing two parts.
+  //
+  // ★ THE VALIDITY MEASUREMENT IS TAKEN ON THE FULLY SOLID PART, and that is the
+  // conservative direction rather than a convenience. A design can only REMOVE
+  // material and removing material only thins members, so a region's
+  // cells-per-member on the solid part is an UPPER BOUND on what any rung of this
+  // run can give it. A region that misses the homogenisation floor there misses
+  // it everywhere, and refusing on that bound cannot refuse a region a later rung
+  // would have rescued. Each rung re-measures on its OWN converged design for the
+  // receipt (R5), so the number a user reads is that rung's, not this bound.
+  FrozenLatticeReport fl_report;             // copied onto `result` once it exists
+  std::vector<char> fl_mask;                 // grid-indexed, 1 = latticed frozen
+  std::vector<double> fl_rho;                // its relative density there
+  // ★ MODE 2's coupling, held across the WHOLE ladder so beta carries from rung
+  // to rung exactly as the density warm start does — restarting it each rung
+  // would throw away the field the previous rung paid for.
+  std::unique_ptr<LatticeFieldCoupling> fl_coupling;
+  std::vector<double> lat_rho_override;      // owns SimpParams::lattice_relative_density
+  std::unique_ptr<LatticeMaterialModel> fl_model;
+  std::vector<LatticeRegionValidity> fl_validity;
+  std::vector<int> fl_refused;
+  double fl_freed_mass_voxels = 0.0;
+  std::size_t fl_latticed_voxels = 0;
+  ResolvedLatticeDensityField fl_field;
+  if (options.frozen_lattice) {
+    std::string why;
+    if (!lattice_material_model_trustworthy(options.frozen_lattice_topology, &why))
+      throw std::invalid_argument(
+          "minimize_plastic: frozen_lattice cannot be armed on this topology — " +
+          why);
+    if (options.multiscale_lattice &&
+        options.multiscale_topology != options.frozen_lattice_topology)
+      throw std::invalid_argument(
+          "minimize_plastic: multiscale_lattice and frozen_lattice declare "
+          "DIFFERENT topologies. One run optimises against one material curve; "
+          "two curves in one compliance would make the objective a function of "
+          "which voxel you asked about.");
+    if (options.frozen_lattice_region_id.empty())
+      throw std::invalid_argument(
+          "minimize_plastic: frozen_lattice is armed but no "
+          "frozen_lattice_region_id was supplied — there is no region to lattice");
+    if (options.frozen_lattice_region_id.size() != G.voxel_count())
+      throw std::invalid_argument(
+          "minimize_plastic: frozen_lattice_region_id size != solved-grid "
+          "voxel_count (build it against minimize_plastic_solved_grid)");
+    // ★ PRINTABILITY IS ENTIRELY USER INPUT — REFUSE, NEVER ASSUME. The minimum
+    // extrudable strut width comes from the project's print profile, which the
+    // user chose and the software may not change. There is no default that is
+    // right for two different nozzles, and a strut narrower than one bead does
+    // not come out of ANY of them. A run that cannot state the number cannot
+    // decide printability, and a lattice whose printability was never decided is
+    // not something to emit.
+    if (!(options.frozen_lattice_min_extrudable_width_mm > 0.0) ||
+        !std::isfinite(options.frozen_lattice_min_extrudable_width_mm))
+      throw std::invalid_argument(
+          "minimize_plastic: frozen_lattice is armed but "
+          "frozen_lattice_min_extrudable_width_mm is not set (it must be finite "
+          "and > 0). This is the MINIMUM EXTRUDABLE STRUT WIDTH from the "
+          "project's own print profile — the job's "
+          "\"min_extrudable_width_mm\" / the app's strut line width. It has no "
+          "default: a 0.25 mm nozzle and a 0.8 mm nozzle disagree about the "
+          "printability floor by more than 3x, so assuming one would either "
+          "refuse a lattice that prints or approve one that comes out as gaps.");
+
+    // The frozen set the LOOP holds — `effective_design_mask`, not the caller's
+    // raw mask, for the reason that function's own comment gives: a receipt built
+    // from the raw mask under-counts the frozen set by every anchor/load-face
+    // voxel the loop pins on its own, and the maintainer's case is exactly a run
+    // whose frozen set is dominated by a face-protection collar.
+    const DesignMask fl_eff = effective_design_mask(G, mask);
+    std::vector<char> frozen_solid(G.voxel_count(), 0);
+    for (std::size_t e = 0; e < frozen_solid.size(); ++e)
+      frozen_solid[e] = fl_eff[e] == MaskValue::FrozenSolid ? 1 : 0;
+
+    // Cells per member, PER REGION, on the fully solid part (the bound above).
+    if (options.frozen_lattice_cell_mm > 0.0) {
+      std::vector<double> solid_field(G.voxel_count(), 0.0);
+      for (std::size_t e = 0; e < solid_field.size(); ++e)
+        solid_field[e] = G.tags[e] == VoxelTag::Empty ? 0.0 : 1.0;
+      // The SAME thickness-EDT cap the width-aware gate and the strut-strength
+      // regime guard use (analyze.cpp kWidthAwareThicknessCapVoxels = 32), so a
+      // region's cells-per-member here and the cells-per-member the certificate
+      // reports are the same measurement and cannot disagree about a member being
+      // "thicker than we measured".
+      constexpr int kFrozenLatticeThicknessCapVoxels = 32;
+      const std::vector<double> width = local_member_thickness_mm(
+          G, solid_field, kIso, kFrozenLatticeThicknessCapVoxels);
+      fl_validity = lattice_region_validity(
+          G, options.frozen_lattice_region_id, options.frozen_lattice_regions,
+          width, options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
+          options.frozen_lattice_min_extrudable_width_mm);
+      // ★ REFUSE ONLY WHAT NO CELL CAN RESCUE. The cells-per-member floor is a
+      // property of the region AND the cell, not of the region alone: a 6.8 mm
+      // wall misses 5 cells at a 2 mm cell and clears them at a 1.3 mm one. An
+      // earlier cut of this task refused on the RUN'S cell and threw away every
+      // region that was perfectly latticeable at a cell derived from its own
+      // thickness — which on his part was the region holding 73% of the prize.
+      //
+      // So a region in cell mode FIT is refused only when
+      // `lattice_derive_cell_for_member` says NO (cell, density) pair in the band
+      // fits its member at the user's own stated strut width. That is the one
+      // case a finer cell cannot fix, and its remedy is a thicker member or a
+      // finer nozzle — which the refusal names.
+      for (std::size_t q = 0; q < fl_validity.size(); ++q) {
+        const LatticeRegionValidity& v = fl_validity[q];
+        const bool fits =
+            q < options.frozen_lattice_regions.size() &&
+                    options.frozen_lattice_regions[q].cell_mode ==
+                        LatticeRegionCellMode::Fit
+                ? v.fit_feasible
+                : v.in_validity_range;
+        if (!fits) fl_refused.push_back(v.id);
+      }
+    }
+    // ★ THE SECOND BAR, AND IT BINDS FROM THE OTHER DIRECTION: PRINTABILITY. A
+    // density whose strut is thinner than one bead does not come out of the
+    // nozzle, whatever the homogenisation floor says. It is REFUSED and never
+    // clamped up: clamping would print a heavier lattice than the user asked for
+    // and report the lighter one, which is the one failure mode a mass feature
+    // must not have. A MODE 2 region takes the same bar as a band NARROWING,
+    // because there the density is the optimiser's to choose and the honest move
+    // is to give it a printable interval rather than a refusal.
+    std::vector<LatticeRegionSpec> fl_specs = options.frozen_lattice_regions;
+    if (options.frozen_lattice_cell_mm > 0.0) {
+      const double lightest = lattice_min_density_for_strut(
+          options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
+          options.frozen_lattice_min_extrudable_width_mm);
+      for (LatticeRegionSpec& s : fl_specs) {
+        // ★ A FITTED REGION IS NOT JUDGED AT THE RUN'S CELL. Its density floor
+        // is the fitted cell's own, and `resolve_lattice_density_field` RAISES a
+        // lighter declaration to it and reports the raise. Refusing here would
+        // refuse it for failing a test about a cell it is not built at.
+        if (s.cell_mode == LatticeRegionCellMode::Fit) continue;
+        if (s.mode == LatticeRegionMode::Declared &&
+            s.declared_density < kLatticeSolidAt &&
+            !lattice_density_printable(
+                options.frozen_lattice_topology, s.declared_density,
+                options.frozen_lattice_cell_mm,
+                options.frozen_lattice_min_extrudable_width_mm)) {
+          if (options.frozen_lattice_refuse_below_floor)
+            fl_refused.push_back(s.id);
+        }
+        if (s.mode == LatticeRegionMode::Optimised && lightest > 0.0)
+          s.optimised_rho_min = std::max(s.optimised_rho_min, lightest);
+      }
+    } else if (options.frozen_lattice_refuse_below_floor) {
+      // No cell => no way to ask the cells-per-member question => nothing may be
+      // approved. Refusing loudly beats latticing a region whose law nobody
+      // measured the validity of (§1d).
+      throw std::invalid_argument(
+          "minimize_plastic: frozen_lattice is armed with no "
+          "frozen_lattice_cell_mm, so the cells-per-member validity of the "
+          "rho->stiffness law cannot be measured for any region. Set the cell "
+          "size, or set frozen_lattice_refuse_below_floor = false to MEASURE an "
+          "unvalidated run (which is not certifiable and reports itself as such).");
+    }
+    if (!options.frozen_lattice_refuse_below_floor) fl_refused.clear();
+
+    LatticeBetaField beta_field;
+    const bool have_beta = !options.frozen_lattice_beta.empty();
+    if (have_beta) {
+      LatticeBetaKnots k = options.frozen_lattice_beta_knots;
+      if (!(k.dx > 0.0 && k.dy > 0.0 && k.dz > 0.0))
+        k = lattice_beta_knots_for_grid(G, 0.0, 0.0, 0.0);
+      beta_field.lattice = plsm_make_lattice(G.nx, G.ny, G.nz, k.dx, k.dy, k.dz,
+                                             options.frozen_lattice_beta_support);
+      if (options.frozen_lattice_beta_basis == "wendland")
+        beta_field.basis = PlsmBasisKind::Wendland;
+      else if (options.frozen_lattice_beta_basis == "gaussian")
+        beta_field.basis = PlsmBasisKind::Gaussian;
+      else
+        throw std::invalid_argument(
+            "minimize_plastic: frozen_lattice_beta_basis must be \"gaussian\" "
+            "or \"wendland\", got \"" + options.frozen_lattice_beta_basis + "\"");
+      beta_field.support = options.frozen_lattice_beta_support;
+      beta_field.steepness = options.frozen_lattice_beta_steepness;
+      beta_field.beta = options.frozen_lattice_beta;
+    }
+
+    fl_field = resolve_lattice_density_field(
+        G, options.frozen_lattice_region_id, fl_specs,
+        options.frozen_lattice_topology, have_beta ? &beta_field : nullptr,
+        &frozen_solid, fl_refused,
+        fl_validity.empty() ? nullptr : &fl_validity);
+    fl_mask = fl_field.mask;
+    fl_rho = fl_field.rho;
+    fl_latticed_voxels = fl_field.latticed_voxels;
+    fl_freed_mass_voxels = fl_field.freed_mass_voxels;
+
+    // ★ MODE 2 (task 2026-08-13 §3, and the maintainer's §0.5 ruling). Built
+    // ONLY when a surviving region is actually Optimised: a run whose regions
+    // are all Declared is Mode 1 and must take no new branch at all.
+    //
+    // ★ THE CONVENTION IS `growth_ladder`, WHICH IS THE `minimize_plastic`
+    // CHECKBOX — cli/loadcase.cpp sets `growth = !lc.minimize_plastic`. It is
+    // read here rather than given an option of its own, because that checkbox
+    // ALREADY is the question "am I chasing lightness or performance?" and a
+    // second control deciding the same thing is exactly the duplication that
+    // produced the probe/ladder volume mismatch.
+    //
+    //   minimize_plastic ON  -> reduction ladder -> shares_budget FALSE -> BANKED
+    //   minimize_plastic OFF -> growth ladder    -> shares_budget TRUE  -> SPENT
+    //
+    // The allowance is the SEED field's own occupied mass (passed as 0.0, which
+    // the coupling resolves to exactly that): under BANKED the region holds the
+    // mass Mode 1 would have printed and Mode 2 only redistributes it.
+    if (have_beta && !fl_field.empty()) {
+      bool any_optimised = false;
+      for (const LatticeRegionSpec& s2 : fl_specs)
+        if (s2.mode == LatticeRegionMode::Optimised &&
+            std::find(fl_refused.begin(), fl_refused.end(), s2.id) ==
+                fl_refused.end())
+          any_optimised = true;
+      if (any_optimised)
+        fl_coupling = std::make_unique<LatticeFieldCoupling>(
+            G, options.frozen_lattice_region_id, fl_specs,
+            options.frozen_lattice_topology, beta_field, frozen_solid,
+            fl_refused, fl_validity, /*allowance_voxels=*/0.0,
+            /*shares_budget=*/growth_ladder, kLatticeBetaBox,
+            fea_matfree_thread_count());
+    }
+
+    // ★ C0 (bar R1): a field that lattices NOTHING — every region solid, or every
+    // declared density 1.0, or every region refused — arms not one branch below.
+    // The run is byte-identical to one that never set `frozen_lattice`.
+    if (fl_latticed_voxels > 0) {
+      if (ms_model == nullptr) {
+        ms_model.reset(new LatticeMaterialModel(build_lattice_material_model(
+            options.frozen_lattice_topology, material.youngs_modulus_mpa,
+            material.poisson)));
+        params.lattice_material = ms_model.get();
+      }
+      // The lattice REGION the material law applies over is the union: whatever
+      // multiscale already selected, plus the latticed frozen voxels. A null
+      // multiscale region meant "every design voxel", and that already covers
+      // these, so it stays null.
+      const bool region_is_everything =
+          options.multiscale_lattice && options.multiscale_region.empty();
+      if (!region_is_everything) {
+        if (ms_region.empty()) ms_region.assign(G.voxel_count(), 0);
+        for (std::size_t e = 0; e < fl_mask.size(); ++e)
+          if (fl_mask[e]) ms_region[e] = 1;
+        params.lattice_region = &ms_region;
+      }
+      // WHERE THE LAW READS ITS RELATIVE DENSITY. -1 means "the voxel's own
+      // design density" — the multiscale case, unchanged — and a frozen latticed
+      // voxel overrides it with the declared/derived rho, because ITS design
+      // density is the envelope occupancy (1.0) and not a relative density.
+      lat_rho_override.assign(G.voxel_count(), -1.0);
+      for (std::size_t e = 0; e < fl_mask.size(); ++e)
+        if (fl_mask[e]) lat_rho_override[e] = fl_rho[e];
+      params.lattice_relative_density = &lat_rho_override;
+    }
+
+    // The receipt. Filled whether or not anything was latticed — a run that
+    // declared a field and latticed NOTHING because every region was refused is
+    // exactly the run whose receipt has to say so, region by region.
+    FrozenLatticeReport& flr = fl_report;
+    flr.armed = true;
+    flr.topology = lattice_topology_name(options.frozen_lattice_topology);
+    flr.cell_mm = options.frozen_lattice_cell_mm;
+    flr.min_extrudable_width_mm = options.frozen_lattice_min_extrudable_width_mm;
+    flr.refuse_below_floor = options.frozen_lattice_refuse_below_floor;
+    flr.gate_on_strut_strength =
+        fl_latticed_voxels > 0 && options.frozen_lattice_gate_on_strut_strength;
+    flr.freed_mass_return =
+        fl_freed_mass_voxels > 0.0 ? options.frozen_lattice_freed_mass_return : 0.0;
+    for (char c : frozen_solid)
+      if (c) ++flr.frozen_solid_voxels;
+    flr.latticed_voxels = fl_latticed_voxels;
+    flr.freed_mass_voxels = fl_freed_mass_voxels;
+    for (std::size_t q = 0; q < fl_specs.size(); ++q) {
+      const LatticeRegionSpec& spec = fl_specs[q];
+      FrozenLatticeReport::Region r;
+      r.id = spec.id;
+      r.name = spec.name;
+      r.mode = lattice_region_mode_name(spec.mode);
+      r.declared_density = spec.declared_density;
+      r.latticed = q < fl_field.region_latticed_voxels.size()
+                       ? fl_field.region_latticed_voxels[q]
+                       : 0;
+      r.mean_rho =
+          q < fl_field.region_mean_rho.size() ? fl_field.region_mean_rho[q] : 0.0;
+      r.freed_mass_voxels = q < fl_field.region_freed_mass_voxels.size()
+                                ? fl_field.region_freed_mass_voxels[q]
+                                : 0.0;
+      for (const LatticeRegionValidity& v : fl_validity) {
+        if (v.id != spec.id) continue;
+        r.voxels = v.voxels;
+        r.member_width_median_mm = v.member_width_median_mm;
+        r.cells_per_member_median = v.cells_per_member_median;
+        r.cells_per_member_p10 = v.cells_per_member_p10;
+        r.floor_certifiable = v.floor_certifiable;
+        r.floor_buildable = v.floor_buildable;
+        r.fraction_above_floor = v.fraction_above_floor;
+        r.in_validity_range = v.in_validity_range;
+        r.buildable_not_certifiable = v.buildable_not_certifiable;
+        r.refusal = v.refusal;
+        break;
+      }
+      r.cell_mode = lattice_region_cell_mode_name(spec.cell_mode);
+      r.cell_used_mm = q < fl_field.region_cell_mm.size() &&
+                               fl_field.region_cell_mm[q] > 0.0
+                           ? fl_field.region_cell_mm[q]
+                           : options.frozen_lattice_cell_mm;
+      r.density_raised_to_print =
+          q < fl_field.region_density_raised.size() &&
+          fl_field.region_density_raised[q] != 0;
+      for (const LatticeRegionValidity& v : fl_validity) {
+        if (v.id != spec.id) continue;
+        r.fit_feasible = v.fit_feasible;
+        r.fit_cell_mm = v.fit_cell_mm;
+        r.fit_min_density = v.fit_min_density;
+        break;
+      }
+      r.refused =
+          std::find(fl_refused.begin(), fl_refused.end(), spec.id) != fl_refused.end();
+      flr.regions.push_back(std::move(r));
+    }
+  }
+
+
   // Handoff 080 (Option 2 — "whole-domain optimize"): on a design-box run that does
   // NOT freeze the imported part, the part is an Active design region the optimizer
   // may remove. Two quantities must then be normalised to the PART rather than to
@@ -732,7 +1059,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           // so this is byte-identical to the pre-082 whole-domain run.
           if (t == VoxelTag::Load || t == VoxelTag::Fixture ||
               mask[idx] == MaskValue::FrozenSolid) {
-            frozen_effective += 1.0;
+            // ★ AND HERE IS THE FOURTH ROW OF THE DEFECT TABLE (task
+            // 2026-08-13-lattice-as-a-material): a frozen voxel spends its
+            // ENVELOPE against the part budget only if it is SOLID. Declared as a
+            // lattice at relative density rho it spends rho, because that is the
+            // material it is made of. `fl_rho` is empty on every run that has not
+            // declared a field, so this is `+= 1.0` bit-for-bit everywhere else.
+            frozen_effective +=
+                (!fl_mask.empty() && fl_mask[idx]) ? fl_rho[idx] : 1.0;
             continue;
           }
           if (mask[idx] != MaskValue::Active) continue;  // FrozenVoid
@@ -757,6 +1091,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   MinimizePlasticResult result;
+  // The lattice density field's receipt, resolved before this struct existed
+  // (it has to be built before the volume budget reads it). Moved on here so the
+  // caller reads it off the run and not off a second object.
+  result.frozen_lattice = std::move(fl_report);
   result.report.material = material_name;
   result.growth_ladder = growth_ladder;  // task 2026-08-03-growth-ladder
   // Record the grid every evaluated variant's fields are indexed to — the
@@ -1069,6 +1407,28 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // to a system it no longer describes. Inert when recycling is off.
     if (options.krylov_recycle_reset_per_rung) fea_reset_krylov_recycle_space();
     SimpOptions opt = options.simp;
+    // ★ THE FREED MASS, INTO THE BUDGET (task 2026-08-13-lattice-as-a-material).
+    // Both stay 0.0 unless a lattice density field actually latticed something,
+    // and `vf_target` inside simp_optimize is then `volume_fraction` bit-for-bit.
+    // See SimpOptions::freed_mass_return for what the two ends of the knob mean
+    // and why the assignment table and the buttressing measurement need opposite
+    // ends of it.
+    opt.freed_mass_voxels = fl_freed_mass_voxels;
+    opt.freed_mass_return =
+        fl_freed_mass_voxels > 0.0 ? options.frozen_lattice_freed_mass_return : 0.0;
+    // ★ MODE 2. Null on every Mode 1 run, so the loop takes no new branch there.
+    //
+    // ★ AND UNDER MODE 2 THE FREED-MASS KNOB IS SUPPRESSED, not merely ignored.
+    // `freed_mass_return` splits a CONSTANT saving between the two blocks; under
+    // Mode 2 that split is what MMA solves, and the lattice's mass is on the
+    // constraint's left-hand side instead of folded into the target. Leaving the
+    // knob live would fold the same mass in twice — the double-count this whole
+    // convention exists to avoid — and it would do so silently.
+    opt.lattice_coupling = fl_coupling.get();
+    if (fl_coupling) {
+      opt.freed_mass_return = 0.0;
+      opt.freed_mass_voxels = 0.0;
+    }
     // Handoff 123 — when the conditional gate fires, this rung runs in TWO
     // phases (grayscale MMA, then β-projection seeded from it) as two
     // simp_optimize calls. The projection phase's own iteration counter restarts
@@ -1261,6 +1621,36 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           std::max(1, total_iters / std::max(1, options.keyframe_count));
       opt.keyframe = [&variant, &G, kIso](const std::vector<double>& d) {
         variant.keyframe_meshes.push_back(marching_cubes(G, d, kIso));
+      };
+    }
+
+    // ★ DIAGNOSTIC ONLY (task 2026-08-13-lattice-as-a-material, bar R4). A probe
+    // that wants the margin as a per-iteration CURVE needs the analysis density
+    // at EVERY iteration, which no production consumer wants. Null by default;
+    // nothing in production sets it, and with it null not one line below runs.
+    //
+    // ★ It COMPOSES with the playback keyframe rather than replacing it — an
+    // earlier draft assigned `opt.keyframe` directly and would have silently
+    // disabled playback for any caller that asked for both.
+    //
+    // ★ AND IT MUST NOT CERTIFY IN HERE. `analyze_fixed_design` is not pure
+    // (2026-08-11), so calling it mid-loop would let a diagnostic change the
+    // trajectory it is measuring. The hook HANDS OUT the density; certifying it
+    // is the caller's problem, offline.
+    if (options.iteration_density) {
+      const auto playback = opt.keyframe;
+      // ★ The playback hook keeps ITS OWN cadence. Forcing the stride to 1 for
+      // the diagnostic would otherwise hand playback every iteration instead of
+      // the ~keyframe_count it asked for — a diagnostic must not change what the
+      // other consumer receives.
+      const int playback_stride = std::max(1, opt.keyframe_stride);
+      int seen = 0;
+      opt.keyframe_stride = 1;
+      opt.keyframe = [&options, playback, playback_stride,
+                      seen](const std::vector<double>& d) mutable {
+        ++seen;
+        if (playback && (seen - 1) % playback_stride == 0) playback(d);
+        options.iteration_density(seen, d);
       };
     }
 
@@ -1848,6 +2238,49 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       ms_posture.reset();
     }
 
+    // ★ AND THE FROZEN REGION JOINS THE POSTURE (task 2026-08-13-lattice-as-a-
+    // material). The certification must solve the object that will be PRINTED, and
+    // a declared frozen region is printed as a lattice. Its voxels' DESIGN density
+    // is 1.0 — they are frozen, fully occupied envelopes — so no threshold test
+    // applies to them and none is made: they are latticed because the run declared
+    // them so, at the relative density it declared, which is the same field the
+    // optimiser's own compliance was evaluated with.
+    //
+    // Merged onto the multiscale posture rather than replacing it, so a run that
+    // is BOTH multiscale and frozen-lattice certifies one composite object. When
+    // multiscale is off this creates the posture, and that is the whole reason a
+    // classic SIMP run can now certify a latticed frozen region at all.
+    if (fl_latticed_voxels > 0) {
+      if (ms_posture == nullptr) {
+        ms_posture.reset(new LatticePosture());
+        ms_posture->topology = options.frozen_lattice_topology;
+        ms_posture->cell_size_mm = options.frozen_lattice_cell_mm;
+        ms_posture->mask.assign(G.voxel_count(), 0);
+        ms_posture->relative_density.assign(G.voxel_count(), 0.0);
+      }
+      for (std::size_t e = 0; e < fl_mask.size(); ++e) {
+        if (!fl_mask[e]) continue;
+        ms_posture->mask[e] = 1;
+        ms_posture->relative_density[e] = fl_rho[e];
+      }
+      // ★ AND THE FITTED CELL GOES WITH IT. `analyze_fixed_design`'s
+      // cells-per-member regime guard asks "how many cells across this member?",
+      // and on a run whose regions were each fitted to their own thickness there
+      // is no single right answer to ask it with. `LatticePosture::cell_size_field`
+      // is exactly the SWEPT posture that question needs (handoff
+      // 2026-08-01-lattice-cell-size-sweep) — each voxel judged at ITS OWN cell.
+      // Without this the certificate would judge a 1.3 mm-cell region against the
+      // run's 2 mm and report it out of regime when it is not.
+      if (!fl_field.cell_mm.empty()) {
+        if (ms_posture->cell_size_field.size() != G.voxel_count())
+          ms_posture->cell_size_field.assign(G.voxel_count(),
+                                             ms_posture->cell_size_mm);
+        for (std::size_t e = 0; e < fl_mask.size(); ++e)
+          if (fl_mask[e] && fl_field.cell_mm[e] > 0.0)
+            ms_posture->cell_size_field[e] = fl_field.cell_mm[e];
+      }
+    }
+
     const std::vector<double>& rho = variant.optimization.physical_density;
 
     // --- The CONNECTIVITY BELT ------------------------------------------------
@@ -1951,7 +2384,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         bake_plan.auto_apply,
         // The printed-set threshold this run reads designs at (0.5 on every
         // classic run — byte-identical; below the band floor when multiscale).
-        kIso);
+        // A frozen-lattice run does NOT move it: a latticed frozen voxel's DESIGN
+        // density is 1.0, so nothing about it needs the threshold lowered, and
+        // lowering it would change how the ACTIVE set is read for no reason (bar
+        // R6 — every instrument keeps reading one density per voxel).
+        kIso,
+        // ★ §1(c): gate on the measured strut bound over the latticed region, not
+        // only on the solid region's margin. Armed only when this run actually
+        // latticed something, so bar L1 stands everywhere else.
+        fl_latticed_voxels > 0 && options.frozen_lattice_gate_on_strut_strength);
 
     // --- Handoff 2026-07-27-nonconvergence-rejection: CERTIFICATION NON-CONVERGENT ─
     // The trajectory converged to a connected design, but the CERTIFICATION solve —

@@ -1,0 +1,25 @@
+MMA REFACTOR BYTE-IDENTITY — mma_update delegating to mma_update_joint
+
+Build: Release (-DCMAKE_BUILD_TYPE=Release), this machine.
+Guard: the two test_mma binaries MUST differ, else the comparison is one
+binary against itself (the trap that made a 2026-08-06 R1 bar vacuous).
+  before sha256[0:16] = 95edeebfff92a8f1
+  after  sha256[0:16] = 18d82c56a0ee6fee
+
+BEFORE (HEAD~1, the shipped mma_update):
+MMA cantilever_24x8x8   : OC c=88.367194 vf=0.3000 it=92 | MMA c=88.085132 vf=0.3000 it=54 | rel=0.319%
+MMA clamped_beam_48x8x8 : OC c=16.816726 vf=0.3000 it=150 | MMA c=16.802770 vf=0.3000 it=51 | rel=0.083%
+masked MMA cantilever_16x8x8: OC c=35.257993 vf=0.3000 it=68 | MMA c=34.993063 vf=0.3000 it=57 | rel=0.751%
+[plateau term] self-weight 32x4x16: plateau it=118 c=3.626442e+01 | cap60 c=3.690369e+01 | cap250 c=3.587378e+01  (plateau beats cap60 by 1.73%)
+mma: all 39 checks passed
+
+AFTER (delegating to mma_update_joint):
+MMA cantilever_24x8x8   : OC c=88.367194 vf=0.3000 it=92 | MMA c=88.085132 vf=0.3000 it=54 | rel=0.319%
+MMA clamped_beam_48x8x8 : OC c=16.816726 vf=0.3000 it=150 | MMA c=16.802770 vf=0.3000 it=51 | rel=0.083%
+masked MMA cantilever_16x8x8: OC c=35.257993 vf=0.3000 it=68 | MMA c=34.993063 vf=0.3000 it=57 | rel=0.751%
+[plateau term] self-weight 32x4x16: plateau it=118 c=3.626442e+01 | cap60 c=3.690369e+01 | cap250 c=3.587378e+01  (plateau beats cap60 by 1.73%)
+mma: all 39 checks passed
+
+diff: IDENTICAL — every compliance digit and every iteration count, over the
+plain, the MASKED and the plateau-termination paths. Iteration counts are the
+sensitive part: any floating-point difference at all would move them.

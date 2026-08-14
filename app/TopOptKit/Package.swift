@@ -149,7 +149,17 @@ var packageTargets: [Target] = [
         // so macOS build/tests and CI are unaffected.
         dependencies: ["TopOptKit"]
             + iosBinaryNames.map { .target(name: $0, condition: .when(platforms: [.iOS])) },
-        swiftSettings: [.interoperabilityMode(.Cxx)]
+        swiftSettings: [.interoperabilityMode(.Cxx)],
+        // ★ AND THE lib3mf FLAGS, WHICH DO NOT ARRIVE ON THEIR OWN. `-l3mf` is a
+        // `.unsafeFlags` linker setting on TopOptKit, and SwiftPM does NOT
+        // propagate those transitively to a test bundle. The bundle links the
+        // core statically, so `threemf.cpp.o` drags in `_lib3mf_*` and the link
+        // fails with undefined symbols — on a checkout that HAS lib3mf, which is
+        // the checkout where 3MF is supposed to work. Symptom before this line:
+        // `swift test` could not link at all with lib3mf present, and 8 3MF tests
+        // failed with "not available in this build" when it was absent. Gated on
+        // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
+        linkerSettings: macOSLib3mfLinkerFlags
     ),
     // M7.2 design system: SwiftUI-only, no C++ interop (so it needs none of
     // the bridge's Cxx build settings and stays cross-platform).
@@ -174,7 +184,17 @@ var packageTargets: [Target] = [
         // TopOptKitTests). iOS-gated; empty on macOS / OCCT-free checkouts.
         dependencies: ["TopOptFlows"]
             + iosBinaryNames.map { .target(name: $0, condition: .when(platforms: [.iOS])) },
-        swiftSettings: [.interoperabilityMode(.Cxx)]
+        swiftSettings: [.interoperabilityMode(.Cxx)],
+        // ★ AND THE lib3mf FLAGS, WHICH DO NOT ARRIVE ON THEIR OWN. `-l3mf` is a
+        // `.unsafeFlags` linker setting on TopOptKit, and SwiftPM does NOT
+        // propagate those transitively to a test bundle. The bundle links the
+        // core statically, so `threemf.cpp.o` drags in `_lib3mf_*` and the link
+        // fails with undefined symbols — on a checkout that HAS lib3mf, which is
+        // the checkout where 3MF is supposed to work. Symptom before this line:
+        // `swift test` could not link at all with lib3mf present, and 8 3MF tests
+        // failed with "not available in this build" when it was absent. Gated on
+        // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
+        linkerSettings: macOSLib3mfLinkerFlags
     ),
     // Carrier for the iOS OCCT/lib3mf frameworks. The app's xcodeproj links the
     // `TopOptOCCT` product; the shim keeps that product valid on an OCCT-free

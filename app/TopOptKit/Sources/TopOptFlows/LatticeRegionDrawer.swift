@@ -91,9 +91,24 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
     /// `lattice.regions` are geometry predicates and a region is a voxel set
     /// (PR 331 §6) — so no cell verdict is worth leading with. The depth still is:
     /// it is PR 331's per-sector protection depth and the run consumes it.
+    /// `perRegionDensity` — ★ THE DENSITY IS ALREADY DECIDED ON THE LATTICE
+    /// SETTINGS PAGE, and the drawer FOLLOWS that choice rather than duplicating
+    /// it. Only the per-region mode says "I will state it myself", so only then
+    /// does the density row become a control. Every other mode leaves this false
+    /// and the drawer is exactly what PR 331 shipped.
+    ///
+    /// ★ A Bool, not `LatticeDensityMode`, and deliberately: that enum has no
+    /// per-region case yet (`uniform` / `auto` only), and adding one would touch
+    /// a Codable enum and three switch sites outside this change — past the scope
+    /// stop. When the per-region mode lands it sets this flag; nothing else moves.
+    ///
+    /// ★ NOTHING CAN SET IT TRUE TODAY. See the three gaps recorded beside the
+    /// property test in FrozenRegionAsMaterialTests: the mode does not exist, the
+    /// view cannot render a second control, and the override does not reach core.
     public static func make(card: LatticeFaceCard?, depthMM: Double,
                             held: Bool,
-                            latticeReachesTheRun: Bool = true) -> LatticeRegionDrawer {
+                            latticeReachesTheRun: Bool = true,
+                            perRegionDensity: Bool = false) -> LatticeRegionDrawer {
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
                 headline: Headline(text: "Frozen, not latticed", verdict: .outOfRegime),
@@ -131,8 +146,17 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", c.depthMM),
                              modifiable: true),
             LatticeDrawerRow(label: "Hands over", value: c.heldText),
+            // ★ WHAT IT WILL WEIGH, AND THE DIFFERENCE (task 2026-08-13-lattice-
+            // as-a-material §7b). "Hands over" alone is half a sentence: the
+            // reason to hand material to a lattice is what comes back lighter,
+            // and that number was one multiplication away and not on screen.
+            LatticeDrawerRow(label: "As lattice", value: c.latticedText),
+            LatticeDrawerRow(label: "Saved", value: c.savedText),
             LatticeDrawerRow(label: "Cell", value: c.cellText),
-            LatticeDrawerRow(label: "Density", value: c.densityText),
+            // ★ A FACT in every mode but one. Under per-region the user states
+            // this number, so there it is the second control — and ONLY there.
+            LatticeDrawerRow(label: "Density", value: c.densityText,
+                             modifiable: perRegionDensity),
             LatticeDrawerRow(label: "Strut", value: c.strutText),
             LatticeDrawerRow(label: "Cells across", value: c.cellsText),
         ]
@@ -140,8 +164,10 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                                    verdict: c.verdict, rows: rows, held: held)
     }
 
-    /// ★ §4b, as a property rather than a convention: exactly one row is a
-    /// control, and it is the depth. Asserted, so a later hand cannot make the
-    /// derived cell look editable.
+    /// ★ §4b, as a property rather than a convention. TWO EXACT CASES, never
+    /// relaxed to "one or more" — the invariant's job is to stop a readout being
+    /// mistaken for a control, and a loose bound does not do that job:
+    ///   * not per-region → EXACTLY ["Depth"]
+    ///   * per-region     → EXACTLY ["Depth", "Density"]
     public var modifiableRows: [LatticeDrawerRow] { rows.filter(\.modifiable) }
 }

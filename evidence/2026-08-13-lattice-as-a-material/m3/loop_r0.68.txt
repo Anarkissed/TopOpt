@@ -1,0 +1,32 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+== frozen_lattice_probe — a frozen region as a MATERIAL ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+stage       loop   rung 0.68   cell 2 mm   nozzle 0.45 mm   threads 8
+
+baseline    rung 0.68 from evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.679951)
+
+regions     14, keyed on provenance
+            11380 voxels claimed by more than one declaration (protection wins)
+-- M3 THE LOOP (bar R4): the NET saving across the freed-mass frontier --
+
+   ★ THE CONTROL IS A RE-OPTIMISATION, not the stored design: same rung, same
+     iteration cap, feature OFF. Comparing a re-optimised arm with a stored
+     design would fold the two runs' cap difference into the saving.
+
+   control (feature OFF): mass 543.7239 g  margin_eff 673.856173  accepted yes  27 iters  (361 s)
+
+     return     mass g   NET dmass      margin     dmargin     iters    acc verdict
+       0.00   372.8836   -170.8403  146.877459     -78.20%        94    yes  banked (max mass) (1420 s)
+       0.50   458.0111    -85.7128  146.642657     -78.24%        16    yes  half returned (614 s)
+       1.00   511.8953    -31.8286  146.615535     -78.24%        31    yes  mass-neutral (max margin) (1223 s)
+
+   ★ THE NET SAVING IS THE `NET dmass` COLUMN — both the control and each arm
+     re-optimised, so the optimiser has already put back whatever it wanted.
+   wrote evidence/2026-08-13-lattice-as-a-material/m3/r0.68/m3_loop.csv

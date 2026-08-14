@@ -57,6 +57,25 @@ public struct LatticeFaceCard: Equatable, Sendable {
     /// That material as a volume (mm³) and a mass (g) — what the lattice lightens.
     public let heldVolumeMM3: Double
     public let heldMassG: Double
+    /// ★ AND WHAT IT WILL WEIGH AS A LATTICE (task 2026-08-13-lattice-as-a-
+    /// material §7b). `heldMassG` alone states what the barrier hands over; the
+    /// whole point of handing it to a lattice is the DIFFERENCE, and the card was
+    /// stopping one number short of it.
+    ///
+    /// It is `heldMassG * relativeDensity`, because relative density is exactly
+    /// the fraction of the envelope the struts fill — the same arithmetic core's
+    /// own mass accounting does (`analyze_fixed_design`: a solid printed voxel
+    /// counts 1, a latticed one counts its relative density).
+    ///
+    /// ★ AND IT IS A GROSS SAVING, WHICH IS WHY `savedMassG` IS NAMED AND NOT
+    /// JUST SHOWN. `frozen_buttress_probe` measured 94% of everything the
+    /// optimiser places landing within 5 mm of the frozen wall: lighten that wall
+    /// and the optimiser puts material back nearby. The NET saving is a property
+    /// of the RUN, not of this card, and the card must not be read as promising
+    /// it.
+    public let latticedMassG: Double
+    /// heldMassG - latticedMassG. Non-negative; 0 when there is nothing to lattice.
+    public let savedMassG: Double
     /// The cell Auto picks here (mm), 0 when there is nothing to pick for.
     public let cellMM: Double
     /// The relative density Auto picks here.
@@ -76,6 +95,13 @@ public struct LatticeFaceCard: Equatable, Sendable {
         self.heldVoxels = heldVoxels
         self.heldVolumeMM3 = heldVolumeMM3
         self.heldMassG = heldMassG
+        // ★ A VERDICT OF `noMaterial` OR A ZERO DENSITY LIGHTENS NOTHING, and the
+        // card must show a dash rather than "0.0 g saved" — the two read very
+        // differently to someone deciding whether to drag the depth further.
+        self.latticedMassG = relativeDensity > 0 ? heldMassG * relativeDensity
+                                                 : heldMassG
+        self.savedMassG = relativeDensity > 0 ? heldMassG * (1 - relativeDensity)
+                                              : 0
         self.cellMM = cellMM
         self.relativeDensity = relativeDensity
         self.strutDiameterMM = strutDiameterMM
@@ -105,6 +131,17 @@ public struct LatticeFaceCard: Equatable, Sendable {
     public var cellsText: String {
         cellsPerMember > 0 ? String(format: "%.1f", cellsPerMember) : "—"
     }
+    /// "3.7 g" — what that material weighs once it is a lattice.
+    public var latticedText: String {
+        heldVoxels == 0 || relativeDensity <= 0
+            ? "—" : String(format: "%.1f g", latticedMassG)
+    }
+    /// "−8.7 g" — the difference, and the whole point of the feature. A MINUS
+    /// sign, because it is mass leaving the part.
+    public var savedText: String {
+        heldVoxels == 0 || relativeDensity <= 0
+            ? "—" : String(format: "−%.1f g", savedMassG)
+    }
 }
 
 public enum LatticeFaceCardDerivation {
@@ -121,11 +158,36 @@ public enum LatticeFaceCardDerivation {
     /// homogenizes: Auto takes the printability floor (which builds) and the
     /// verdict is `outOfRegime`. ★ It never refuses — a default that refuses is
     /// not a default (§4c).
+    /// ★ `declaredDensity` IS §7a's CONTROL (task 2026-08-13-lattice-as-a-
+    /// material): nil means AUTO — the optimiser's own choice, which is what
+    /// every control on this page defaults to and which ★ CAN NEVER REFUSE,
+    /// because it picks inside core's certifiable band. A number means MODE 1, a
+    /// declared constant density, which is the constant case of the same graded
+    /// field and not a second feature.
+    ///
+    /// A declared density is CLAMPED INTO THE BAND (there is no certificate
+    /// outside it) but its PRINTABILITY is not clamped — a strut thinner than one
+    /// bead does not come out of the nozzle at any density, so the verdict falls
+    /// to `outOfRegime` and the strut figure on the card says why. Silently
+    /// raising the density to make it print would print a heavier lattice than
+    /// the user asked for and report the lighter one.
     public static func card(faceID: Int, depthMM: Double, heldVoxels: Int,
                             spacingMM: Double, densityGCM3: Double,
                             topology: LatticeType,
                             bounds: TopOptKit.LatticeCellBounds,
-                            limits: TopOptKit.LatticeLimits) -> LatticeFaceCard {
+                            limits: TopOptKit.LatticeLimits,
+                            declaredDensity: Double? = nil,
+                            // ★ PRINTABILITY IS ENTIRELY USER INPUT, and this is
+                            // it: the minimum extrudable strut width from the
+                            // project's own print profile
+                            // (`PrintParams.strutLineWidthMM`), which the user
+                            // chose and the app may not change. There is NO
+                            // default — a 0.25 mm nozzle and a 0.8 mm nozzle
+                            // disagree about the printability floor by more than
+                            // 3x. 0 means UNKNOWN, and an unknown printability
+                            // does not certify: the card falls to `outOfRegime`
+                            // rather than quietly passing the strut test.
+                            minExtrudableWidthMM: Double) -> LatticeFaceCard {
         let voxelMM3 = spacingMM * spacingMM * spacingMM
         let volume = Double(heldVoxels) * voxelMM3
         let mass = volume * densityGCM3 / 1000.0          // mm³ · g/cm³ → g
@@ -148,21 +210,55 @@ public enum LatticeFaceCardDerivation {
                                    verdict: .outOfRegime)
         }
 
+        // ★ THIS IS ALREADY "FIT": the cell is derived from THIS FACE'S OWN
+        // depth (`depth / N*`), which is exactly what
+        // `lattice_derive_cell_for_member` does in core and exactly what
+        // `LatticeRegionCellMode::Fit` now does in the optimiser. The card and
+        // the run therefore agree about which cell a region gets, instead of the
+        // card previewing one cell and the run refusing at another.
         let coarsest = depthMM / bounds.cellsPerMemberFloor
         let crosses = coarsest < bounds.printabilityFloorMM
         let cell = crosses ? bounds.printabilityFloorMM : coarsest
         // Auto's density is the LIGHTEST the band allows — "low stress → the
         // lowest density that region can take" (§4a). Grading moves it up where
         // the stress is; this is the floor the card states.
-        let rho = limits.rhoMin > 0 ? limits.rhoMin : 0.1
+        let auto = limits.rhoMin > 0 ? limits.rhoMin : 0.1
+        // A DECLARED density is clamped into the band; AUTO is the band floor.
+        // 1.0 declared means SOLID — no lattice, nothing saved — which is core's
+        // own C0 rule (`kLatticeSolidAt`) and the reason bar R1 can be exact.
+        var rho = auto
+        var solidByDeclaration = false
+        if let d = declaredDensity {
+            if d >= 1.0 { solidByDeclaration = true }
+            rho = min(max(d, limits.rhoMin), limits.rhoMax)
+        }
+        if solidByDeclaration {
+            return LatticeFaceCard(faceID: faceID, depthMM: depthMM,
+                                   heldVoxels: heldVoxels, heldVolumeMM3: volume,
+                                   heldMassG: mass, cellMM: 0,
+                                   relativeDensity: 0, strutDiameterMM: 0,
+                                   cellsPerMember: 0, verdict: .noMaterial)
+        }
         let diameter = 2 * topology.strutRadiusMM(relativeDensity: rho, cellMM: cell)
         let cells = cell > 0 ? depthMM / cell : 0
+        // The strut must be at least one bead wide. AUTO cannot fail this — the
+        // cell was chosen at or above core's printability floor, which is defined
+        // at the band's LIGHTEST density — but a DECLARED density can, and when it
+        // does the card says out-of-regime rather than quietly raising it.
+        //
+        // ★ AND AN UNKNOWN WIDTH IS NOT A PASS. An earlier cut read
+        // `minExtrudableWidthMM <= 0` as "skip the test", so a project whose print
+        // profile had not reached this call certified every density as printable.
+        // Unknown printability is `outOfRegime`: the card says it cannot tell,
+        // which is the honest verdict and the one a user can act on.
+        let printable = minExtrudableWidthMM > 0 && diameter >= minExtrudableWidthMM
         return LatticeFaceCard(faceID: faceID, depthMM: depthMM,
                                heldVoxels: heldVoxels, heldVolumeMM3: volume,
                                heldMassG: mass, cellMM: cell,
                                relativeDensity: rho, strutDiameterMM: diameter,
                                cellsPerMember: cells,
-                               verdict: crosses ? .outOfRegime : .certified)
+                               verdict: (crosses || !printable) ? .outOfRegime
+                                                                : .certified)
     }
 
     /// The PART verdict and the per-region breakdown that produced it (§5b). A

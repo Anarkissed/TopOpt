@@ -4994,7 +4994,16 @@ public struct WorkspacePlaceholder: View {
                     faceID: fid, depthMM: depthsCopy[i],
                     heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topology: topology,
-                    bounds: bounds, limits: limits)
+                    bounds: bounds, limits: limits,
+                    // ★ PRINTABILITY IS USER INPUT AND HAS NO DEFAULT (task
+                    // 2026-08-13-lattice-as-a-material §1b). `widthMM` is the
+                    // project's own strut line width — the SAME value this
+                    // closure already hands `latticeCellBounds` two lines up, so
+                    // the card's verdict and the cell bounds it is judged
+                    // against cannot disagree about the nozzle. A card built
+                    // without it would fall back to "cannot tell", never to a
+                    // silent pass.
+                    minExtrudableWidthMM: widthMM)
             }
             await MainActor.run {
                 guard token == latticeCardsToken else { return }   // a newer drag won

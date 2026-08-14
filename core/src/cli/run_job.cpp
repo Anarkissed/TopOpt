@@ -190,6 +190,32 @@ RunInfo build_run_info(const JobDescription& job,
       job.source_format.empty() ? format_name(part_format_for_path(job.model))
                                 : job.source_format;
   info.resolution = job.resolution;
+  // ★ THE CHECKBOX, ON THE RECORD (task 2026-08-13 §0.5). `info.mode` above is
+  // `job.mode` — the job KIND — and reads "minimize_plastic" on every
+  // optimisation run whichever way the user ticked the box, so it has never
+  // answered "which ladder ran". This does. It mirrors cli/loadcase.cpp's own
+  // rule (`growth = !lc.minimize_plastic`) rather than re-deriving it, and it is
+  // filled in the ONE shared builder so all four run_info write sites agree by
+  // construction instead of by three copies kept in step.
+  //
+  // A self-weight job carries no loadcase and so no checkbox; it is left empty
+  // (JSON null) rather than asserting a default the user never chose.
+  if (job.loads.present)
+    info.ladder_direction = job.loads.minimize_plastic ? "reduce" : "grow";
+
+  // ★ AND WHAT THAT CHOICE MEANS FOR A LATTICE — READ FROM THE MODE, never from
+  // an option of its own. The maintainer's ruling: `minimize_plastic` ALREADY is
+  // the question "am I chasing lightness or performance?", and a second hidden
+  // convention deciding the same thing is precisely the duplication that
+  // produced the probe/ladder volume mismatch. One user-facing control, one
+  // meaning, no new knob.
+  if (!options.frozen_lattice || options.frozen_lattice_regions.empty())
+    info.lattice_budget_convention = "none";
+  else if (!job.loads.present)
+    info.lattice_budget_convention = "banked";  // no checkbox: the reduce default
+  else
+    info.lattice_budget_convention =
+        job.loads.minimize_plastic ? "banked" : "spent";
   info.load_source = job.loads.present ? "loadcase" : "self_weight";
   info.solver = solver_name(options.simp.solver);
   // cg_multigrid / mg_levels are an OBSERVED outcome, unknown until the run
@@ -8862,6 +8888,34 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.cg_multigrid = result.pipeline.used_multigrid;
     run_info.mg_levels = result.pipeline.mg_levels;
     run_info.cg_multigrid_observed = true;  // outcome now known -> emit real values
+    // ★ ACHIEVED MASS AS A FRACTION OF THE SOLID PART (task 2026-08-13 §0.5).
+    // The rung is a fraction of the ACTIVE envelope, so a frozen region that
+    // stopped costing its envelope moves what the rung MEANS — and a latticed
+    // ladder then cannot be compared with an unlatticed one at all. This is the
+    // one number that survives that: the same denominator either way.
+    //
+    // The denominator is the PART grid, not the design box. The numerator is the
+    // RECOMMENDED variant, i.e.
+    // the last accepted rung, which is the recommendation under BOTH ladders.
+    // Mass here is analyze.cpp's own formula, not a re-derivation: density_g_cm3
+    // x voxel-equivalents x voxel_volume / 1000.
+    {
+      // `grid` here is `setup.grid` — the PART grid, BEFORE design-box
+      // expansion (`resolve_design_domain` derives the solved grid from it), so
+      // the box's empty space is correctly not part of "the solid part".
+      const double solid_voxels = static_cast<double>(grid.solid_count());
+      const double solid_mass_g = material.density_g_cm3 * solid_voxels *
+                                  grid.voxel_volume() / 1000.0;
+      const MinimizePlasticVariant* rec = nullptr;
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+        if (v.accepted) rec = &v;
+      // Left unobserved (JSON null) when nothing was accepted or the part has no
+      // solid voxels — a 0.0 would read like a measured weightless part.
+      if (rec != nullptr && solid_mass_g > 0.0) {
+        run_info.achieved_solid_fraction = rec->mass_grams / solid_mass_g;
+        run_info.achieved_solid_fraction_observed = true;
+      }
+    }
     // Lattice CERTIFICATION posture (handoff 2026-07-29-lattice-certification-e2e,
     // bars E1/E3). When the job declared a lattice block, each accepted variant was
     // re-certified against the octet tensor (emit_lattice → certify_latticed_variant),

@@ -1,0 +1,29 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+== frozen_lattice_probe — a frozen region as a MATERIAL ==
+
+part        evidence/2026-08-09-reference-implementation-bakeoff/M2_verticalStand.step (78 B-rep faces)
+grid        128 x 31 x 118 = 468224 voxels, spacing 1.705279303 mm
+part solid  110904 voxels;  mask Active 70688 / FrozenSolid 40216 / FrozenVoid 357320
+stage       assign   rung 0.26   cell 2 mm   nozzle 0.45 mm   threads 8
+
+baseline    rung 0.26 from evidence/2026-08-09-reference-implementation-bakeoff/s2_simp_baseline/design.bin (achieved 0.259996)
+
+-- M2 THE ASSIGNMENT TABLE — EVERY CELL, INCLUDING THE FAILURES --
+
+   baseline (every region SOLID): margin_eff 624.112114  accepted yes  mass 360.3038 g  (688.0 s)
+   margin_stop 1.500000   knockdown posture: infill 35%, width_aware off
+
+   region              f  cells/m    mass g   dmass g     margin    dmargin   strutM  regime  drain verdict
+   load-pad-1       0.30     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-pad-1       0.45     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   load-pad-1       0.60     3.41         -         -          -          -        -       -      -  REFUSED (below the cells-per-member floor)
+   anchor-2         0.30     5.12   313.102   -47.201   128.8563    -79.35% 128.8563     OUT     ok  accepted (882 s)
+   anchor-2         0.45     5.12   323.217   -37.087   184.5019    -70.44% 184.5019     OUT     ok  accepted (869 s)
+   anchor-2         0.60     5.12   333.332   -26.972   299.0388    -52.09% 299.0388     OUT     ok  accepted (708 s)
+
+   wrote evidence/2026-08-13-lattice-as-a-material/m2/r0.26/m2_assignment.csv
+EXIT=0

@@ -1,0 +1,47 @@
+THE CHECKBOX, ON THE RECORD — run_info.json, two real topopt-cli runs
+
+Same fixture (evidence/2026-07-27-wall-loops-plumbing/job_wall_loops_5.json,
+l-bracket.step, resolution 16), differing in ONE key: loads.minimize_plastic.
+Release build. Both runs exited 0.
+
+run_info key                 minimize_plastic ON    minimize_plastic OFF  
+---------------------------- ---------------------- ----------------------
+mode                         minimize_plastic       minimize_plastic      
+ladder_direction             reduce                 grow                  
+lattice_budget_convention    none                   none                  
+achieved_solid_fraction      0.2698170732           0.3323170732          
+
+* THE PROOF IS THE FIRST ROW AND THE SECOND TOGETHER. `mode` is IDENTICAL
+  across the two runs — it is the job KIND and has never carried the
+  checkbox — while `ladder_direction` differs. That is precisely why every
+  run this project has produced looked the same here.
+
+* AND THE THIRD MEASURED ROW IS THE POINT OF THE FEATURE. ON lands at 27.0%
+  of the same part solid, OFF at 33.2%: the reduction ladder returns a
+  LIGHTER part, the growth ladder a heavier one, exactly as loadcase.cpp:369
+  describes. Without this number a latticed ladder cannot be compared with an
+  unlatticed one at all, because latticing moves what the rung MEANS.
+
+* `lattice_budget_convention` is "none" in both because this fixture declares
+  no lattice region — the question did not arise, and the record says so
+  rather than asserting a convention nothing exercised.
+
+── A THIRD RUN: NO LOADCASE, SO NO CHECKBOX ────────────────────────────────
+
+The M6.2 demo job (l-bracket.step, self-weight, no `loads` block) run on the same
+build:
+
+  mode                         minimize_plastic
+  load_source                  self_weight
+  ladder_direction             null          <-- asserts NOTHING
+  lattice_budget_convention    none
+  achieved_solid_fraction      0.1874123422
+
+* A self-weight job carries no load case and therefore no checkbox, so
+  `ladder_direction` is JSON null rather than the "reduce" a default would have
+  written. An unknown input is a refusal to answer, never a default — the same
+  rule that fixed the printability floor earlier in this task.
+
+* `achieved_solid_fraction` is still MEASURED (18.7%), because that outcome is
+  known whether or not a checkbox was ever offered. The two fields are null for
+  different reasons and neither borrows the other's excuse.
