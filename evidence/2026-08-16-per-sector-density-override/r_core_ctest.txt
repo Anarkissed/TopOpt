@@ -1,4 +1,16 @@
-CORE CTEST — 121 of 121 PASSED, on the reverted (clean) binary.
+CORE CTEST — TWO RUNS. THE ONE THAT COUNTS IS THE SECOND.
+
+★ RUN 2, ON THE REBASED TREE (the merge target): 122 of 122 PASSED.
+  Total Test time (real) = 2573.49 sec. Zero failures, zero timeouts.
+  The DENOMINATOR MOVED: 121 registered before the rebase, 122 after — main's
+  merges (#330-#333) added a test. Quoting the old number against the new tree
+  would have been wrong, which is why it is re-stated here rather than reused.
+  lib3mf is still absent (ctest -N reports 0 of export_3mf / threemf_import), so
+  this is 122 OF CI'S 124.
+
+RUN 1, on the pre-rebase tree: 121 of 121 PASSED, on the reverted (clean)
+binary. Kept below because its diagnosis of the sabotage incident is the
+substance, not the count.
 
   Total Test time (real) = 2959.25 sec
   binary md5 273f0941263a236a76564388c0226268
@@ -9,8 +21,9 @@ CORE CTEST — 121 of 121 PASSED, on the reverted (clean) binary.
     export_3mf  and  threemf_import
   DO NOT REGISTER here — confirmed by 'ctest -N | grep -c' returning 0.
   CI (.github/workflows/ci.yml) installs lib3mf via vcpkg and runs ctest with
-  --no-tests=error, so CI's suite is 123. This run is 121 OF CI'S 123, and
-  the two it does not cover are the 3MF import/export pair.
+  --no-tests=error, so CI's suite is the local count + 2. On the PRE-REBASE tree
+  that was 121 of CI's 123; on the REBASED tree it is 122 of CI's 124. The two
+  it does not cover are the 3MF import/export pair, in both cases.
 
   A pass here is therefore NOT a claim that CI passes. It is a claim about
   121 named tests, with the two absent ones named.

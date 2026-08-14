@@ -83,6 +83,25 @@ are both populated *with a density stated* — the reader can see what the user
 asked for and what the derivation would have chosen, and the app reads the valid
 range straight off it. `r_4d_ramp.txt`.
 
+**Does the core suite pass? ★ 122 of 122 ON THE REBASED TREE** — the merge
+target, not the branch base (2573 s, zero failures, zero timeouts). The
+DENOMINATOR MOVED: 121 registered before the rebase, 122 after, because main's
+merges (#330-#333) added a test. lib3mf is still absent from this worktree
+(`ctest -N` reports 0 of `export_3mf` / `threemf_import`), so this is **122 of
+CI's 124**. `r_core_ctest.txt`.
+
+**Does the app suite pass? 1484 passed on the rebased tree, 0 signal deaths.**
+Three failures, all `AppModelTests` 3MF import — the documented worktree lib3mf
+gap, whose own refusal text names the cause ("3MF import requires lib3mf, which
+is not available in this build").
+
+★ **It had to be re-run, and the first attempt was worthless.** I ran the app
+suite straight after the rebase without rebuilding the vendored core. On this
+repo that does not fail to link — it hangs or double-frees, and the log ended
+truncated mid-line at the same test that crashed the last time a stale vendor was
+in play. `app/scripts/build_core.sh` after ANY rebase onto core changes, then
+re-run. The 126-pass figure from before that rebuild is discarded, not reported.
+
 **Does a density core cannot print refuse, with the number, before the run?
 MEASURED — and the refusal was moved to where it is worth having.** A density of
 0.06 on a 2.7284 mm cell gives a 0.274 mm strut against a 0.42 mm profile width
@@ -340,6 +359,8 @@ it*.
 - **The app section has never run on a device or simulator.** `r3_app_surface.txt`
   is the model's own output through the real bridge, and is labelled as such.
 - **The 3MF pair** (`export_3mf`, `threemf_import`) does not register in this
-  worktree, so this branch's core evidence is 121 of CI's 123.
+  worktree, so this branch's core evidence is **122 of CI's 124** on the rebased
+  tree (121 of 123 before the rebase — main's merges added a test, so the
+  denominator moved and is re-stated rather than reused).
 
 Everything else in §0 is measured.
