@@ -1,0 +1,33 @@
+=== §2(d) — DOES SECTOR-LATTICING BREAK THE VOID-ESCAPE NETWORK? ===
+NO. Measured on M2_verticalStand.step @ 128, variant 068, four region-backed
+lattice sectors of one bore at 3.0 / 4.5 / 6.0 / 7.5 mm.
+
+  sealed                          False
+  latticed_cells                  1983
+  latticed_voxels_reached         1983     ← EVERY latticed voxel is reached
+  sealed_cells                       0
+  sealed pockets                    16
+    of those, containing lattice     0
+    of those, touching an include    0     (include_regions: [] on all 16)
+  sealed_pockets_without_lattice    18
+
+★ THE ESCAPE NETWORK RESOLVES ACROSS SECTOR BOUNDARIES. The task's own test is
+  "a lattice that drains only within its own sector is not drainable". All 1983
+  latticed voxels are reached by ONE escape network spanning all four sectors —
+  not four separate ones — and `sealed` is false.
+
+★ AND SECTORING DID NOT CREATE SEALED LATTICE. The 16 sealed pockets contain
+  ZERO latticed voxels and touch ZERO include regions: they are void in the
+  part's own geometry, where no sector put a lattice and none could. The
+  distinction matters — a sealed pocket that CONTAINED lattice would be a
+  drainage defect this feature caused; one that does not is the part's shape.
+
+WHY THIS IS EXPECTED, stated so the result is not read as luck: `lattice_void_escape`
+walks the part's void connectivity, which is a property of the DESIGN, not of which
+region latticed a voxel. Sectoring changes which voxels are latticed, never how void
+connects. The measurement confirms the reasoning rather than replacing it.
+
+CAVEAT, NAMED: this is run 1 (the MINIMUM-extent run, whose grading was degenerate
+— see r4_sectors_his_part.txt). The four sectors latticed the same voxels either way,
+so the void picture is unaffected by that defect; the median re-run's own escape
+figures are in r4_sectors_median.txt and should agree.

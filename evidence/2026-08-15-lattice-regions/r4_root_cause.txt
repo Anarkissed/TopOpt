@@ -1,0 +1,40 @@
+=== WHY EVERY SECTOR MEASURED 3.4106 mm — AND IT IS NOT THE STATISTIC ===
+
+Two fixes were tried and BOTH failed identically: the MINIMUM of the
+inscribed-sphere thickness, then its MEDIAN. Both returned 3.4106 mm (exactly
+2 x the 1.70528 mm spacing) for sectors declared 3.0 / 4.5 / 6.0 / 7.5 mm.
+
+Rather than guess a third statistic, region_extent_probe printed the mask's own
+bounding box and the FULL tau distribution per sector:
+
+ sector  declared  layers  mask bbox (i x j x k)   tau: min p25 med p75 p90 max
+   0       3.0       2      100 x 2 x 53  (308)    3.411 3.411 3.411 3.411 3.411 3.411
+   1       4.5       3      102 x 1 x 55  (372)    3.411 3.411 3.411 3.411 3.411 3.411
+   2       6.0       4      104 x 1 x 57  (522)    3.411 3.411 3.411 3.411 3.411 3.411
+   3       7.5       4      104 x 2 x 57  (781)    3.411 3.411 3.411 3.411 3.411 3.411
+
+★ min == p25 == median == max. The distribution is a POINT. No statistic over it
+  could ever have separated the sectors, so neither fix was ever going to work.
+
+★ THE BOUNDING BOXES SAY WHY. The bore's axis is j. Its axial extent is about
+  six voxels, and I split it into FOUR axial slices — so each sector is 1-2
+  VOXELS TALL along j, while spanning ~100 x ~55 voxels around and through the
+  wall. The set's thinnest dimension is therefore the SLICE HEIGHT, ~2 voxels,
+  in every sector. The declared depth grows i and k (100 -> 104, 53 -> 57) and
+  never touches the binding dimension.
+
+★★ SO region_thinnest_extent_mm WAS CORRECT ALL ALONG. It reports the region's
+   thinnest dimension, and for these sectors that dimension really is the slice
+   height. It is also CONSISTENT with the analytic law it mirrors: a "face"
+   lattice region takes min(depth, 2*half_u, 2*half_w), which on a 2-voxel-tall
+   slab would likewise return the slab height, not the depth.
+
+★★ THE DEFECT WAS THE EXPERIMENT. I split a six-voxel-tall bore four ways, which
+   makes the split height binding and makes the depth incapable of mattering —
+   then read the resulting flat table as a defect in the code, twice, and
+   "fixed" it twice.
+
+WHAT A VALID DEMONSTRATION NEEDS: sectors whose OTHER dimensions are large
+compared with the declared depth, so the depth is the thinnest dimension and
+therefore the one the fit law reads. Re-run on face 15 (the part's largest,
+1.71e4 mm^2, 6081 voxels one layer deep) split 1x2 — see r4_sectors_large.txt.

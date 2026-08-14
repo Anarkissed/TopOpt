@@ -1,0 +1,12 @@
+=== R7 — ASSERTION CENSUS ===
+By message-bearing construct over core/ and app/, baseline vs HEAD.
+Baseline is PR 331's head (726160c) — this task stacks on it.
+
+  CHECK( (core tests)      base  4128   branch  4162   +34
+  XCTAssert*               base  5197   branch  5197   +0
+  schema_fail(             base   142   branch   146   +4
+  throw JobError(          base    74   branch    78   +4
+  throw std::              base   441   branch   441   +0
+
+  No category fell. The added refusals are the two §2(c) guards, the
+  region-resolution refusals, and the schema's region_id rules.

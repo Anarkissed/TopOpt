@@ -1,0 +1,65 @@
+=== R1 — no regions: BASE cli vs BRANCH cli ===
+base   /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/base331build/topopt-cli
+branch /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/face-regions-union-split-grid-c52969/build/topopt-cli
+-- the DESIGN set, raw (design.bin, fields.bin, report.json, meshes, alpha) --
+   identical, byte for byte (      23 files)
+-- the receipts, with the timestamps/fingerprint stripped --
+R1 PASS — every artifact identical (      26 files)
+
+=== R2 — face_ids vs an equivalent identity REGION, same (branch) cli ===
+-- the DESIGN set, raw --
+R2 PASS — a region tags exactly what its face tags, to the byte
+         (      23 design artifacts identical)
+
+-- and the RECEIPTS, which SHOULD differ: they record the declaration --
+--- /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/r1fix/branch_faces.norm.sha256	2026-08-13 06:35:59
++++ /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/r1fix/branch_regions.norm.sha256	2026-08-13 06:38:31
+@@ -1,7 +1,7 @@
+ 8097767058d1b6e6dbaac33d9a61d60f46a5d7e725c57f106823a62c76fea326  ./design.bin
+ ba6328ac7897aa7ba8e4c6096b9c45a9cab50fb1cfbcd7d2a8f304cffb321cf0  ./fields.bin
+ 7565e029da76fbdbee8e44ee5d1131431101b78ec4cfe7ca8c8dfcf92d2a4abb  ./iterations.csv
+-1b53832e2753a8a3e1e305f8d7c323cdf9d64a8bdacc2b181b0547c502a3954c  ./loadcase.json
++3b17f973ce8a1972c2450a51c25b5bf2bc41e8f03feb6e69f887c0c0a21c48af  ./loadcase.json
+ f6df476a27b2112fdddc1981e61cbb9696afde2c6065333cd0c826859262f148  ./report.json
+ 4f89346522f2a1076d87680cb735c0155ca7e5873faf620a83b1a7cf66ed6545  ./run_info.json
+ 8a897b14da4ebc462e44f897b27c8394d3d528ff0c11d3fefa896a31392f7953  ./variant_026.stl
+   the differing files, and the lines that differ:
+   --- run_info.json
+3c3
+---
+62c62
+---
+133c133
+---
+139c139
+<   "lattice_export": {"topology": "octet", "cell_size_mm": 1.2, "strut_radius_min_mm": 0.21, "strut_radius_max_mm": 0.230145, "latticed_cells": 6768, "region_voxels": 15678, "triangles": 7012892, "variant_count": 4, "ungradeable_variants": 0, "void_escape": {"rule": "the void space inside any lattice must reach the exterior", "connectivity": 6, "connectivity_note": "face adjacency only: an edge or corner touch shares zero area and is not an aperture", "sealed": false, "sealed_variants": 0, "sealed_cells": 0, "sealed_voxels": 0, "sealed_volume_mm3": 0, "latticed_cells": 6768, "latticed_voxels_reached": 6768, "reachable_void_volume_mm3": 535267.0898, "escape_depth_voxels": 0, "escape_faces": "-x,+x,-y,+y,-z,+z", "sealed_pockets_without_lattice": 0, "bfs_visits": 96410, "wall_seconds": 0.001988751}, "emit_stl": true, "emit_3mf": false, "interpenetrating_soup": true, "gen_seconds": 10.55757421, "gen_fraction": 0.07566160558, "skin": "none", "clipped_struts": 43901, "landings": 44178, "anchor_nodes": 0, "skin_triangles": 0, "rim_triangles": 0, "interior_volume_mm3": 19664.70834, "skin_volume_mm3": 0, "rim_volume_mm3": 0, "include_regions": 1, "exclude_regions": 0, "solid_region_voxels": 8910, "solid_region_volume_mm3": 58732.91016, "solid_region_triangles": 17892, "include_void_voxels": 1680, "include_void_by_clearance": 0, "forecast_include_regions": 1, "forecast_region_too_thin": 0, "forecast_required_member_mm": 6, "forecast_thinnest_region_mm": 6, "frozen_printed_voxels": 13472, "frozen_latticed": 5848, "frozen_kept_solid": 7624, "frozen_cells_not_emitted": 0, "frozen_voxels_strut_and_solid": 0, "frozen_strut_and_solid_unexplained": 0, "frozen_in_exclude_latticed": 0},
+---
+>   "lattice_export": {"topology": "octet", "cell_size_mm": 1.2, "strut_radius_min_mm": 0.21, "strut_radius_max_mm": 0.230145, "latticed_cells": 6768, "region_voxels": 15678, "triangles": 7012892, "variant_count": 4, "ungradeable_variants": 0, "void_escape": {"rule": "the void space inside any lattice must reach the exterior", "connectivity": 6, "connectivity_note": "face adjacency only: an edge or corner touch shares zero area and is not an aperture", "sealed": false, "sealed_variants": 0, "sealed_cells": 0, "sealed_voxels": 0, "sealed_volume_mm3": 0, "latticed_cells": 6768, "latticed_voxels_reached": 6768, "reachable_void_volume_mm3": 535267.0898, "escape_depth_voxels": 0, "escape_faces": "-x,+x,-y,+y,-z,+z", "sealed_pockets_without_lattice": 0, "bfs_visits": 96410, "wall_seconds": 0.001629167}, "emit_stl": true, "emit_3mf": false, "interpenetrating_soup": true, "gen_seconds": 10.64680467, "gen_fraction": 0.07129035684, "skin": "none", "clipped_struts": 43901, "landings": 44178, "anchor_nodes": 0, "skin_triangles": 0, "rim_triangles": 0, "interior_volume_mm3": 19664.70834, "skin_volume_mm3": 0, "rim_volume_mm3": 0, "include_regions": 1, "exclude_regions": 0, "solid_region_voxels": 8910, "solid_region_volume_mm3": 58732.91016, "solid_region_triangles": 17892, "include_void_voxels": 1680, "include_void_by_clearance": 0, "forecast_include_regions": 1, "forecast_region_too_thin": 0, "forecast_required_member_mm": 6, "forecast_thinnest_region_mm": 6, "frozen_printed_voxels": 13472, "frozen_latticed": 5848, "frozen_kept_solid": 7624, "frozen_cells_not_emitted": 0, "frozen_voxels_strut_and_solid": 0, "frozen_strut_and_solid_unexplained": 0, "frozen_in_exclude_latticed": 0},
+   --- loadcase.json
+12c12
+<     {"index": 0, "face_ids": [2], "force_mag_n": 60, "voxels_tagged": 672, "status": "ok"}
+---
+>     {"index": 0, "face_ids": [], "region_ids": [100], "force_mag_n": 60, "voxels_tagged": 672, "status": "ok"}
+18a19,21
+>   "face_regions": [
+>     {"id": 100, "name": "load wall", "parent_id": -1, "member_faces": 1, "cuts": 0, "area_mm2": 2400, "filter_matched": 0}
+>   ],
+
+=== R5 — the sliver guard refuses BEFORE anything runs ===
+R5 PASS — refused. The message:
+topopt-cli: run: cannot build the declared load case against model "l-bracket.step": region 101 "wall 1" holds 0 voxels at resolution 32 — under the floor of 16. It is a SPLIT of a selection holding 672 voxels, so at most 42 sub-regions can clear the floor here. Split it into fewer pieces, or run at a finer resolution. (The floor is the size of the smallest face this part's own CAD produced; a sub-region below it selects too little to carry a role.)
+
+=== NOTE ON THIS FILE ===
+Measured against the FINAL binary (after the median change and the
+inf->null fix), with BOTH jobs carrying the same lattice block. Exit 0;
+R1, R2 and R5 all pass.
+
+Two earlier attempts are not reproduced here and both were MY errors:
+  * the first added a lattice block to the R1 job only, so the faces arm
+    emitted variant_*_lattice.* the regions arm never produced and 'R2
+    FAIL' was the script comparing two different physics;
+  * an earlier R1 differed on run_info.json alone, and an exhaustive
+    key-by-key walk showed all six differing values were wall clocks,
+    including gen_fraction (generation seconds over total seconds), which
+    was then added to the strip list BY NAME rather than by widening a
+    pattern.

@@ -1,0 +1,14 @@
+part        evidence/2026-08-12-lattice-page-redesign/M2_verticalStand.step
+grid        128x31x118  spacing 1.7053 mm  voxels 468224
+region      face 15, 6081 voxels one layer deep
+mask memory 468224 bytes (1 byte/voxel) = 457.2 KB; ten of them 4.5 MB
+
+=== 1+2. POINT MEMBERSHIP over every solid voxel (the fit-cell field and multiscale sweeps) ===
+analytic slab       0.68 ms/sweep   (630 inside)
+voxel mask          0.67 ms/sweep   (30405 inside)
+mask / analytic    0.986 x  -> the mask is FASTER
+
+=== 3. CELL ACTIVATION (cell_may_overlap, cell = 8 voxels) ===
+analytic slab       0.01 ms   (60 cells active)
+voxel mask          0.41 ms   (117 cells active)
+mask / analytic   41.916 x  -> the mask is SLOWER

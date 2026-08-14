@@ -1,0 +1,21 @@
+=== ctest subset after the R3 fix (task 2026-08-15-lattice-regions) ===
+ctest -R "face_region|lattice_region_mask|lattice_hookup|lattice_variant|cli_demo|job"
+
+    Start 115: lattice_hookup
+6/8 Test #115: lattice_hookup ...................   Passed   17.60 sec
+    Start 117: lattice_variant
+7/8 Test #117: lattice_variant ..................   Passed  136.01 sec
+    Start 121: mesh_job
+8/8 Test #121: mesh_job .........................   Passed    6.37 sec
+
+100% tests passed out of 8
+Total Test time (real) = 1570.69 sec
+
+These are the paths the change actually runs through: the resolver's new
+(model, grid) parameters at four call sites, the mask branch of
+point_in_clearance_region, the exact cell-box tests in cell_may_overlap, and the
+per-region receipt fix.
+
+★ THE FULL SUITE HAS NOT BEEN RE-RUN on this branch. Core registers 120 tests
+locally against CI's 122 — the two lib3mf tests do not register here. Report
+N/122, never N/N.

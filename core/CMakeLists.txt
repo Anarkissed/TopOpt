@@ -598,6 +598,15 @@ add_executable(test_face_region tests/unit/test_face_region.cpp)
 target_link_libraries(test_face_region PRIVATE topopt)
 add_test(NAME face_region COMMAND test_face_region)
 
+# A REGION AS A LATTICE REGION (task 2026-08-15-lattice-regions). The seam
+# between a pointwise PREDICATE and a VOXEL SET: the mask branch of the one
+# membership predicate, the mask's own grid, the exact cell-box tests that
+# replace the Lipschitz bound, and bar R5 — protection and lattice select the
+# same voxels at the same declared depth. Hand-built StepModel, no OCCT.
+add_executable(test_lattice_region_mask tests/unit/test_lattice_region_mask.cpp)
+target_link_libraries(test_lattice_region_mask PRIVATE topopt)
+add_test(NAME lattice_region_mask COMMAND test_lattice_region_mask)
+
 # BOTH DEFAULTS ARE ARMED (task 2026-08-06-arm-projection-and-void-check).
 # `output.project_cad_faces` and `lattice.require_lattice_void_reaches_exterior`
 # now default to TRUE. The default lives in the CORE so the CLI and the
@@ -1609,6 +1618,22 @@ if(OpenCASCADE_FOUND)
   add_executable(face_region_probe EXCLUDE_FROM_ALL
     tests/harness/face_region_probe.cpp)
   target_link_libraries(face_region_probe PRIVATE topopt)
+
+  # WHAT THE MASK-BACKED PREDICATE COSTS (task 2026-08-15-lattice-regions, R6).
+  add_executable(region_mask_cost_probe EXCLUDE_FROM_ALL
+    tests/harness/region_mask_cost_probe.cpp)
+  target_link_libraries(region_mask_cost_probe PRIVATE topopt)
+
+  # THE §4 DEMONSTRATION JOB (task 2026-08-15-lattice-regions, bar R4): a curved
+  # feature on his part, grid-split into sectors at different lattice depths,
+  # with the cut planes taken from core's own grid_split_cells.
+  add_executable(region_extent_probe EXCLUDE_FROM_ALL
+    tests/harness/region_extent_probe.cpp)
+  target_link_libraries(region_extent_probe PRIVATE topopt)
+
+  add_executable(sector_lattice_job_gen EXCLUDE_FROM_ALL
+    tests/harness/sector_lattice_job_gen.cpp)
+  target_link_libraries(sector_lattice_job_gen PRIVATE topopt)
 
   # S2 (task 2026-08-08-smoothing-that-works-and-is-usable): the bake-off PR 306
   # stopped short of — Taubin against mean-curvature flow on the OPTIMIZER-CUT

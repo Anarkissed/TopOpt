@@ -1242,7 +1242,8 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("\"lattice.regions\" must be an array");
       for (const JsonValue& rv : regs->arr) {
         require_object(rv, "a lattice region");
-        reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id"},
+        reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
+                                 "region_id"},
                             "a lattice region");
         JobLatticeRegion reg;
         // Optional provenance: the B-rep face this region was spawned from, so
@@ -1261,9 +1262,28 @@ JobDescription parse_job(const std::string& json_text) {
                       "\"exclude\" (got \"" + reg.role + "\")");
         reg.kind = require_nonempty_string(
             require_key(rv, "kind", "a lattice region"), "lattice region kind");
-        if (reg.kind != "bolt" && reg.kind != "face")
-          schema_fail("a lattice region \"kind\" must be \"bolt\" or \"face\" "
-                      "(got \"" + reg.kind + "\")");
+        if (reg.kind != "bolt" && reg.kind != "face" && reg.kind != "region")
+          schema_fail("a lattice region \"kind\" must be \"bolt\", \"face\" or "
+                      "\"region\" (got \"" + reg.kind + "\")");
+        // ★ A REGION-BACKED LATTICE REGION (task 2026-08-15-lattice-regions).
+        // It names a face region and a depth; there is no analytic geometry to
+        // give, and offering one would be a second source of truth for the same
+        // volume. `region_id` is REQUIRED here and REFUSED on the other two
+        // kinds — a bolt that also named a region would leave the run unable to
+        // say which volume it latticed.
+        if (const JsonValue* rid = find_key(rv, "region_id")) {
+          if (reg.kind != "region")
+            schema_fail("only a \"region\" lattice region may give a "
+                        "\"region_id\" (this one is \"" + reg.kind + "\")");
+          const double d = require_number(*rid, "lattice region region_id");
+          if (d < 0.0 || d != std::floor(d))
+            schema_fail("a lattice region \"region_id\" must be a non-negative "
+                        "integer");
+          reg.region_id = static_cast<int>(d);
+        } else if (reg.kind == "region") {
+          schema_fail("a \"region\" lattice region must give a \"region_id\" "
+                      "naming one of \"loads.face_regions\"");
+        }
         const JsonValue& gv = require_object(
             require_key(rv, "geometry", "a lattice region"),
             "lattice region geometry");
@@ -1289,6 +1309,17 @@ JobDescription parse_job(const std::string& json_text) {
           const Vec3& ad = reg.axis_dir;
           if (ad.x * ad.x + ad.y * ad.y + ad.z * ad.z <= 0.0)
             schema_fail("a bolt lattice region \"axis_dir\" must be non-zero");
+        } else if (reg.kind == "region") {
+          // ★ ONE NUMBER: the depth. The volume is the face region's own voxel
+          // set walked this far into the part solid — nothing else to declare,
+          // and nothing else accepted.
+          reject_unknown_keys(gv, {"depth_mm"}, "a region lattice geometry");
+          reg.depth_mm = require_number(
+              require_key(gv, "depth_mm", "a region lattice geometry"),
+              "lattice region depth_mm");
+          if (!(reg.depth_mm > 0.0))
+            schema_fail("a region lattice region \"depth_mm\" must be > 0 (a "
+                        "zero-depth region marks nothing)");
         } else {  // face
           reject_unknown_keys(
               gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm"},

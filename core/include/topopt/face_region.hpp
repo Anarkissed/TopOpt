@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/clearance.hpp"  // ClearanceVoxelMask
 #include "topopt/mesh.hpp"
 #include "topopt/step.hpp"
 #include "topopt/voxel.hpp"
@@ -325,6 +326,70 @@ std::vector<int> cut_voxels(const VoxelGrid& grid, const std::vector<int>& voxel
 std::vector<std::size_t> grid_split_voxel_counts(
     const VoxelGrid& grid, const std::vector<int>& member_voxels,
     const std::vector<GridSplitCell>& cells);
+
+// ★★ THE MEDIAN — AND THE ARC IS WORTH MORE THAN THE ANSWER
+// (task 2026-08-15-lattice-regions).
+//
+// This changed three times. The record matters because the wrong turns were
+// caused by measuring one degenerate case and generalising from it.
+//
+//   1. MINIMUM. Four bore sectors declared 3.0/4.5/6.0/7.5 mm all returned
+//      3.4106 mm, so the minimum looked boundary-dominated and degenerate.
+//   2. MEDIAN. Same four sectors, same 3.4106 mm. So that diagnosis looked
+//      wrong too, and it was reverted to the minimum.
+//   3. `region_extent_probe` printed the DISTRIBUTION instead of one number,
+//      on two different regions, and settled it:
+//
+//   the four BORE sectors (split height binding, ~2 voxels tall):
+//        min == p25 == median == max == 3.411 for every sector
+//        -> the distribution is a POINT; NO statistic can separate them, and
+//           the region really IS that thin. Nothing was broken here.
+//
+//   ONE LARGE FACE split in two, depths 3.0 and 7.5 mm (depth binding):
+//        sector 0  bbox 126x2x56    min 3.411   median  6.821
+//        sector 1  bbox 117x4x104   min 3.411   median 13.642
+//        -> the MINIMUM is 3.411 for BOTH, though one body is twice as thick.
+//           The MEDIAN tracks the declared depth exactly, 2x for 2x.
+//
+// So the minimum IS boundary-dominated — a voxel on a set's boundary has a ~1-2
+// voxel inscribed ball however thick the body is — and the median measures the
+// body. Step 1's diagnosis was right; step 2 tested it on the one region where
+// nothing could have worked, and step 2's revert generalised from that.
+//
+// ★ THE LESSON, RECORDED BECAUSE IT COST THREE CHANGES: when a measurement comes
+// back flat, print the DISTRIBUTION before changing the statistic. The probe
+// that settled this runs in seconds and existed after the second wrong fix.
+//
+// The median is also what the fit law needs: it asks how many cells lie ACROSS
+// the latticed body, and the body's thickness — not its thinnest boundary voxel
+// — is that quantity.
+double region_thinnest_extent_mm(const ClearanceVoxelMask& mask);
+
+// ★ THE ONE mm → VOXEL-LAYER CONVERSION (task 2026-08-15-lattice-regions §2b,
+// bar R5).
+//
+// PR 328 §0 established that a face's PROTECTION depth and its LATTICE depth
+// must be the same number: 5 mm of protection under a 7 mm lattice region left
+// the lattice pass finding material only in the frozen collar — 79% of
+// everything it latticed was the protected skin, and the rest was void a lattice
+// cannot conjure material into.
+//
+// "The same number" is not enough on its own, because both are converted to
+// WHOLE VOXEL LAYERS against the run's grid, and two call sites rounding
+// independently is exactly how the two drift apart again. So the conversion is
+// spelled ONCE, here, and both `build_production_loadcase` (the protection) and
+// `lattice_role_regions_from_job` (the lattice) call it. Same mm, same grid,
+// same layer count, same voxels — structurally, not by agreement.
+//
+// Floored at 1: a protection always freezes a real skin, and a lattice region
+// always has a layer to fill.
+inline int region_depth_layers(double depth_mm, double spacing) {
+  if (!(spacing > 0.0)) return 1;
+  const double layers = depth_mm / spacing;
+  return layers > 0.0
+             ? (layers + 0.5 >= 1.0 ? static_cast<int>(layers + 0.5) : 1)
+             : 1;
+}
 
 // ★ THE SLIVER FLOOR, AND WHY THIS NUMBER.
 //

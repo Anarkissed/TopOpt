@@ -1,0 +1,11 @@
+=== FULL core ctest, FINAL (after the §2(c) refusal) ===
+
+100% tests passed out of 121
+
+Total Test time (real) = 1254.47 sec
+
+121/121, 100%. Run AFTER refuse_infeasible_region_lattice landed, so the
+new refusal is covered by the suite rather than only by the subset.
+121 registered locally against CI's 123 — export_3mf and threemf_import do
+NOT register without lib3mf here. Report N/123, never N/N.
+121 = PR 331's 120 plus this task's lattice_region_mask.

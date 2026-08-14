@@ -1,0 +1,35 @@
+=== R4 — FOUR SECTORS OF A CURVED FEATURE, EACH AT ITS OWN LATTICE DEPTH ===
+M2_verticalStand.step @ 128 (468,224 voxels, spacing 1.70528 mm)
+face 4 (CYLINDRICAL, 1741 mm^2) split 1x4 ALONG its own axis.
+Each sector is a region-backed lattice region AND a protection at the SAME depth.
+
+--- RUN 1: extent = MINIMUM of the inscribed-sphere thickness -------------
+ sector  declared  layers  extent_mm  cell_mm    rho  strut  c/mem  regime  cand_vox  latticed
+      0       3.0       2     3.4106   1.0950  0.600  0.420   3.11     OUT       308       308
+      1       4.5       3     3.4106   1.0950  0.600  0.420   3.11     OUT       372       372
+      2       6.0       4     3.4106   1.0950  0.600  0.420   3.11     OUT       522       522
+      3       7.5       4     3.4106   1.0950  0.600  0.420   3.11     OUT       781       781
+
+★ WHAT WORKS: four region-backed lattice regions resolved from VOXEL MASKS
+  on his own part, each with its OWN verdict row, and the declared depth
+  drives SELECTION monotonically — 308 -> 372 -> 522 -> 781 candidate
+  voxels. Every one latticed (latticed == candidate, 0 solid fallback).
+
+★ WHAT DOES NOT: extent_mm is 3.4106 in ALL FOUR — EXACTLY 2 x the 1.70528 mm
+  spacing — so one cell, one density, one strut, distinct_cells = 1.
+  THE DEPTHS DO NOT GRADE THE LATTICE. Per §4(b): if the sectors do not
+  differ, the feature does not work whatever the unit tests say.
+
+★ ROOT CAUSE, and it is my own §1(c) choice, not a wiring slip:
+  region_thinnest_extent_mm took the MINIMUM of the Hildebrand thickness
+  over the region. The largest ball that fits inside a set and contains a
+  voxel ON THAT SET'S BOUNDARY is ~1-2 voxels however thick the set is
+  elsewhere — so the minimum is a CONSTANT by construction and cannot
+  discriminate a 2-layer sector from a 4-layer one. It is not noisy; it is
+  degenerate. I argued for it over a percentile on conservatism grounds and
+  the argument was right about conservatism and wrong about usefulness.
+
+  fit block: distinct_cells=1 out_of_regime_voxels=483 no_derivation=0
+  part level: latticed_cells=7932 triangles=8520832 include_regions=4
+
+--- RUN 2: extent = MEDIAN (the fix) — see r4_sectors_median.txt ----------
