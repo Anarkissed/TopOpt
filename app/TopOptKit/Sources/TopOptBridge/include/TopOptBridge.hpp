@@ -1099,6 +1099,45 @@ struct LatticeCellBounds {
 LatticeCellBounds lattice_cell_bounds(const std::string& topology,
                                       double min_extrudable_width_mm);
 
+// ★ ONE REGION'S DERIVATION, EVALUATED BY CORE (task
+// 2026-08-16-per-sector-density-override, §2d/§3).
+//
+// The per-region density field needs four numbers to be honest about what the
+// user is dialling: the cell that region's thickness derives, the LIGHTEST
+// density that prints at that cell (the floor of the valid range), the band
+// ceiling, and — for whatever the user has typed — the strut it produces and
+// whether it still prints.
+//
+// Every one of them is computed HERE, by the same core functions
+// `fill_fit_region_cell` calls in run_job.cpp, in the same order:
+//   lattice_derive_cell_for_member → cell = max(extent/N*, min_printable_cell)
+//   lattice_min_density_for_strut  → the derived density at that cell
+//   octet_strut_diameter_mm        → the strut at the density in force
+// so the field's live readout and the run's refusal cannot quote different
+// numbers. The app deriving any of this itself is precisely the mistake that
+// put its octet law 1.4x off core's (see lattice_cell_bounds above).
+//
+// `stated_relative_density` <= 0 means AUTO: `relative_density` then equals
+// `derived_relative_density` and `prints` is true by construction.
+struct LatticeRegionDerivation {
+  bool valid = false;          // known topology, positive width and extent
+  bool feasible = false;       // a printing AND percolating pair exists at all
+  double cell_mm = 0.0;
+  double derived_relative_density = 0.0;   // the FLOOR of the valid range
+  double rho_max = 0.0;                    // the CEILING of the valid range
+  double relative_density = 0.0;           // the one in force
+  double strut_mm = 0.0;                   // at the one in force
+  double cells_per_member = 0.0;
+  bool out_of_regime = false;  // under the ACCURACY floor: buildable, uncertified
+  // ★ Whether the density in force PRINTS at this region's cell. False is exactly
+  // the condition core refuses the job on (refuse_unprintable_stated_density), so
+  // the field can say so before the run rather than after.
+  bool prints = false;
+};
+LatticeRegionDerivation lattice_region_derivation(
+    const std::string& topology, double member_width_mm,
+    double min_extrudable_width_mm, double stated_relative_density);
+
 std::vector<std::string> lattice_certifiable_topologies();
 
 // The topology names the core GEOMETRY GENERATOR can emit (topopt::

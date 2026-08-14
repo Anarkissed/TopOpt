@@ -1110,6 +1110,55 @@ public enum TopOptKit {
                                     b.percolation_cells_per_member_floor)
     }
 
+    /// ★ ONE REGION'S DERIVATION, AS CORE COMPUTES IT (task
+    /// 2026-08-16-per-sector-density-override). The valid range a per-region
+    /// density field may offer is exactly `[derivedRelativeDensity, rhoMax]` —
+    /// the densities that print at this region's own cell — and `strutMM` /
+    /// `cellsPerMember` are the live readout beside the field.
+    ///
+    /// Every number comes from the core functions run_job calls, so the field and
+    /// the run's refusal cannot disagree. Nothing here is derived in Swift.
+    public struct LatticeRegionDerivation: Equatable, Sendable {
+        public let valid: Bool
+        public let feasible: Bool
+        public let cellMM: Double
+        public let derivedRelativeDensity: Double
+        public let rhoMax: Double
+        public let relativeDensity: Double
+        public let strutMM: Double
+        public let cellsPerMember: Double
+        public let outOfRegime: Bool
+        /// False is exactly what core refuses the job on, so the field can say so
+        /// before the run instead of an hour into it.
+        public let prints: Bool
+        public init(valid: Bool, feasible: Bool, cellMM: Double,
+                    derivedRelativeDensity: Double, rhoMax: Double,
+                    relativeDensity: Double, strutMM: Double,
+                    cellsPerMember: Double, outOfRegime: Bool, prints: Bool) {
+            self.valid = valid; self.feasible = feasible; self.cellMM = cellMM
+            self.derivedRelativeDensity = derivedRelativeDensity
+            self.rhoMax = rhoMax; self.relativeDensity = relativeDensity
+            self.strutMM = strutMM; self.cellsPerMember = cellsPerMember
+            self.outOfRegime = outOfRegime; self.prints = prints
+        }
+    }
+
+    /// Core's derivation for a region whose thinnest dimension is
+    /// `memberWidthMM`. `statedRelativeDensity <= 0` means AUTO. Never throws.
+    public static func latticeRegionDerivation(
+        topology: String, memberWidthMM: Double, minExtrudableWidthMM: Double,
+        statedRelativeDensity: Double = 0) -> LatticeRegionDerivation {
+        let d = topoptbridge.lattice_region_derivation(
+            std.string(topology), memberWidthMM, minExtrudableWidthMM,
+            statedRelativeDensity)
+        return LatticeRegionDerivation(
+            valid: d.valid, feasible: d.feasible, cellMM: d.cell_mm,
+            derivedRelativeDensity: d.derived_relative_density,
+            rhoMax: d.rho_max, relativeDensity: d.relative_density,
+            strutMM: d.strut_mm, cellsPerMember: d.cells_per_member,
+            outOfRegime: d.out_of_regime, prints: d.prints)
+    }
+
     /// The topology names the core can RUN and certify today (the seven cubic
     /// topologies). The UI reads this to mark which picker entries are certifiable
     /// rather than assuming.
