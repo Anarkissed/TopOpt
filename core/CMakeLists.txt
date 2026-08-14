@@ -358,6 +358,10 @@ add_executable(test_grading tests/unit/test_grading.cpp)
 target_link_libraries(test_grading PRIVATE topopt)
 add_test(NAME grading COMMAND test_grading)
 
+add_executable(test_lattice_refusal tests/unit/test_lattice_refusal.cpp)
+target_link_libraries(test_lattice_refusal PRIVATE topopt)
+add_test(NAME lattice_refusal COMMAND test_lattice_refusal)
+
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
 # lattice_material_model.hpp (nothing in production consumes it); this test

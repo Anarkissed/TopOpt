@@ -83,12 +83,13 @@ are both populated *with a density stated* — the reader can see what the user
 asked for and what the derivation would have chosen, and the app reads the valid
 range straight off it. `r_4d_ramp.txt`.
 
-**Does the core suite pass? ★ 122 of 122 ON THE REBASED TREE** — the merge
-target, not the branch base (2573 s, zero failures, zero timeouts). The
+**Does the core suite pass? ★ 123 of 123 ON THE REBASED TREE** — the merge
+target, not the branch base (2467 s, zero failures, zero timeouts; 122 before
+this review response added `lattice_refusal`). The
 DENOMINATOR MOVED: 121 registered before the rebase, 122 after, because main's
 merges (#330-#333) added a test. lib3mf is still absent from this worktree
-(`ctest -N` reports 0 of `export_3mf` / `threemf_import`), so this is **122 of
-CI's 124**. `r_core_ctest.txt`.
+(`ctest -N` reports 0 of `export_3mf` / `threemf_import`), so this is **123 of
+CI's 125**. `r_core_ctest.txt`.
 
 **Does the app suite pass? 1484 passed on the rebased tree, 0 signal deaths.**
 Three failures, all `AppModelTests` 3MF import — the documented worktree lib3mf
@@ -101,6 +102,50 @@ repo that does not fail to link — it hangs or double-frees, and the log ended
 truncated mid-line at the same test that crashed the last time a stale vendor was
 in play. `app/scripts/build_core.sh` after ANY rebase onto core changes, then
 re-run. The 126-pass figure from before that rebuild is discarded, not reported.
+
+**★ CAN THE HOISTED PRE-SOLVE REFUSAL FIRE WHEN NOTHING IS STATED? NO — PROVED,
+NOT SAMPLED (bar R1').** The refusal's decision is now
+`lattice_stated_density_unprintable` (lattice.hpp/lattice.cpp); the wrapper in
+run_job.cpp only builds the message. Its first line is the unreachability:
+
+```
+stated_relative_density <= 0  =>  ALWAYS false
+```
+
+`test_lattice_refusal.cpp` asserts that over **600 (cell, width) combinations** —
+cells 0.1…100 mm, widths 0.1…2.0 mm, and every spelling of "nothing stated"
+(`0.0`, `-0.0`, `-1e-300`, negatives) — plus degenerate cells and unset widths.
+**Quantified over region shapes, not over his part**, because the hoisted call
+fires right after the regions resolve and therefore sees whatever design the
+ladder returned.
+
+★ **SABOTAGE-VERIFIED, twice.** Inverting the sentinel (`> 0` → `>= 0`) turns
+**exactly one** check red — the unreachability — and nothing else. Replacing the
+body with the trivial `return false` turns **exactly two** red: the positive
+control and the strut-law agreement. So the unreachability is not satisfied by a
+function that always says no. Reverted, rebuilt, `9 checks, 0 failures`.
+
+**★ WHY THIS SUPERSEDES RE-RUNNING THE LADDER.** This task's delta has exactly two
+surfaces. The grading branch is settled in `test_grading.cpp` and sabotage-
+verified there. The hoisted refusal was the entire remaining gap and is now
+settled the same way. **With both provably unreachable when nothing is stated,
+part-level byte-identity follows by construction** — and an unreachability proof
+covers ALL jobs where a byte-diff covers one. R1's original measurement stands as
+written, against `ace0d900`, with its caveat intact; this is the argument beside
+it, not a replacement for it.
+
+**★ DOES PR 330's MARGIN-PLATEAU STOP CHANGE THE DESIGN R1's JOB RETURNS? NO —
+IT IS UNREACHABLE ON THAT PATH.** The rule lives only in `core/src/simp/plsm.cpp`
+(:729, :743); `minimize_plastic.cpp` contains **zero** occurrences of
+`margin_plateau`. The optimizer block the merge added is gated at
+`core/src/simp/minimize_plastic.cpp:1277` — `if (options.plsm.mode ==
+PlsmMode::Parametric)`, whose own comment at :1269 reads "PlsmMode::Off IS THE
+DEFAULT AND IS THE ENTIRE EXISTING WORLD". `options.plsm.mode` becomes
+`Parametric` only at `core/src/cli/run_job.cpp:7037-7038`, under `if
+(job.has_plsm && job.plsm_enabled)`. **R1's job carries no `plsm` block**, so
+`has_plsm` is false, the mode stays `Off`, and the merged stopping rule cannot
+run. The design the ladder returns is therefore unchanged by it, and R1's
+measurement transfers directly — **the caveat is smaller than I first wrote it.**
 
 **Does a density core cannot print refuse, with the number, before the run?
 MEASURED — and the refusal was moved to where it is worth having.** A density of

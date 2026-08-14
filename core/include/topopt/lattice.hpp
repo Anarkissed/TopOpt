@@ -219,6 +219,32 @@ double lattice_subfloor_aggregate_cap_fraction();
 // ±quantization the handoff logs; a diameter quoted to microns is false precision.
 double octet_strut_diameter_mm(double rho, double cell_size_mm);
 
+// ★ DOES A STATED PER-REGION DENSITY REFUSE AT THIS CELL? (task
+// 2026-08-16-per-sector-density-override, bar R1'.)
+//
+// Extracted from run_job.cpp's `refuse_unprintable_stated_density` so the
+// question can be ASSERTED rather than merely read. The throwing wrapper there
+// calls this and does nothing else to decide; it only builds the message.
+//
+// ★★ THE PROPERTY THAT MATTERS IS AN UNREACHABILITY, NOT A HAPPY PATH:
+//
+//        stated_relative_density <= 0  =>  ALWAYS false
+//
+// for EVERY cell size and EVERY extrusion width — including shapes no part in
+// the test corpus produces. `<= 0` is core's sentinel for "nothing stated,
+// derive", so this is exactly the statement that a job with no override cannot
+// be refused by this branch, whatever design the optimizer hands it and whatever
+// regions resolve against that design. That is what makes the C0 inertness of
+// this task's hoisted pre-solve refusal a proof rather than a sample: a
+// byte-diff covers ONE job, this covers all of them.
+//
+// True means the strut this density produces at `cell_mm` is thinner than the
+// profile's extrusion width, i.e. it cannot be printed. NEVER clamped: the
+// caller refuses with the number.
+bool lattice_stated_density_unprintable(double stated_relative_density,
+                                        double cell_mm,
+                                        double min_extrudable_width_mm);
+
 // ★ THE PRINTABILITY FLOOR — the SMALLEST cell edge (mm) at which `topo`'s thinnest
 // certifiable strut (the one at lattice_rho_min) still prints at the stated minimum
 // extrudable width. Below it the lowest-density struts come out under one bead.

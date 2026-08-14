@@ -1146,9 +1146,15 @@ void refuse_unprintable_stated_density(
           "print profile's extrusion width and there is no safe default for it: "
           "whether a stated density prints at all is a question about the "
           "nozzle. Declare it and re-run.");
+    // ★ THE DECISION IS lattice_stated_density_unprintable's, not this
+    // function's (bar R1'). This wrapper only builds the message. The predicate
+    // is asserted in test_lattice_refusal.cpp, including the unreachability that
+    // makes a no-override job inert here for EVERY region shape.
+    if (!lattice_stated_density_unprintable(f.stated_relative_density, f.cell_mm,
+                                            min_extrudable_width_mm))
+      continue;
     const double strut =
         octet_strut_diameter_mm(f.stated_relative_density, f.cell_mm);
-    if (strut + 1e-12 >= min_extrudable_width_mm) continue;
     throw JobError(
         "lattice region " + std::to_string(r.region_id) +
         ": a stated relative_density of " +
