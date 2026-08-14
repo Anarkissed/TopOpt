@@ -18,10 +18,12 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <random>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -840,6 +842,33 @@ bool geneo_probe_defaults_match_tripwire() {
 
 void geneo_request_rebuild() {
   if (g_geneo.have_basis) g_geneo.rebuild_scheduled = true;
+}
+
+// R6 — reports what tile_cores ACTUALLY produced. Calls the shipped function so
+// the assertion in test_geneo binds to the production tiling and not to a copy
+// of it; see the header for why the per-axis rule is worth pinning on a slab.
+GeneoTileCounts geneo_tile_counts_for_test(const VoxelGrid& g, int core) {
+  const std::vector<Block> cores = tile_cores(g, core);
+  GeneoTileCounts t;
+  t.total = static_cast<long long>(cores.size());
+  if (cores.empty()) return t;
+  // Distinct start planes per axis == the number of tiles on that axis. Counted
+  // from the emitted blocks rather than recomputed as ceil(n/core), so a change
+  // that made tile_cores disagree with its own arithmetic is caught here.
+  std::set<int> sx, sy, sz;
+  t.min_extent_x = t.min_extent_y = t.min_extent_z = INT_MAX;
+  for (const Block& b : cores) {
+    sx.insert(b.x0);
+    sy.insert(b.y0);
+    sz.insert(b.z0);
+    t.min_extent_x = std::min(t.min_extent_x, b.x1 - b.x0);
+    t.min_extent_y = std::min(t.min_extent_y, b.y1 - b.y0);
+    t.min_extent_z = std::min(t.min_extent_z, b.z1 - b.z0);
+  }
+  t.tx = static_cast<int>(sx.size());
+  t.ty = static_cast<int>(sy.size());
+  t.tz = static_cast<int>(sz.size());
+  return t;
 }
 
 long long geneo_probe_coarse_matvecs() { return g_probe_coarse_matvecs; }

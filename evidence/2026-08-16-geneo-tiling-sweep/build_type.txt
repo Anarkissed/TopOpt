@@ -1,0 +1,9 @@
+CMAKE_BUILD_TYPE, verified before any wall-clock number is quoted (R3):
+CMAKE_BUILD_TYPE:STRING=Release
+
+The optimisation flags actually reaching the compiler:
+CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+CMAKE_CXX_FLAGS_RELEASE-ADVANCED:INTERNAL=1
+
+solver_arm_sweep md5 (one binary for every sweep point):
+389b1bcefc12a38569df5bd1af50be50

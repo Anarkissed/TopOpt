@@ -1,0 +1,154 @@
+==============================================================================
+HIS RUN — the denominator, measured, no model
+==============================================================================
+160 stagnating solves, TOTAL CG = 438,348
+  min 927  median 2717  max 5091
+  every row is a Jacobi fallback (mg_mode = stagnated-latched), so
+  every row is a solve GenEO is entitled to act on.
+
+==============================================================================
+MEASURED N_t PER TILING (this task's triage)
+==============================================================================
+ core     N_t  cold tail      warm tails (deflated iters)
+    8    1686        472   [217, 241, 905] median 241
+   12     718        435   [73, 204, 278, 1144] median 241
+   16     369        306   [187, 320, 810] median 320
+   24     208        485   [208, 405, 910] median 405
+
+★ THE WARM TAIL IS §2(b)'s WHOLE QUESTION: does a SMALLER basis deflate
+WORSE? If it does, the refresh saving is bought back in a longer tail
+and the lever is exhausted. Compare these against his measured warm
+median of 170 at the shipped 8^3.
+
+==============================================================================
+MODEL A — THE SHIPPED SKI-RENTAL GATE
+==============================================================================
+★ THE BASELINE IS HIS RUN AS IT ACTUALLY RAN — 438,348 CG over 160
+stagnating design-iteration solves — and NOT a differently-tuned GenEO.
+Comparing an accelerator only against other tunings of itself hides the
+possibility that none of them earns its keep. See his_solves()'s
+docstring for what that baseline is and is not: GenEO WAS active in it,
+so it is not a clean GenEO-free control, and the direction of that
+impurity understates every GenEO win reported below.
+
+A solve whose plain cost is C pays:
+    C                                if C <= threshold  (finishes plain)
+    threshold + 2*N_t + 2*tail_warm  if C >  threshold  (engages)
+
+    threshold = 2*N_t + 500 + 2*427
+    all-in    = threshold + 2*N_t + 2*tail_warm
+
+★ NOTE WHAT THE SECOND LINE MEANS, BECAUSE IT IS THE WHOLE STORY. The
+burn is NOT refunded when the deflation engages — the solve has already
+spent it. So all-in ALWAYS exceeds the threshold, and any solve whose
+plain cost sits between threshold and all-in is one the gate engages
+and LOSES on. That is the ski-rental 2-competitive bound showing up as
+real iterations, and it is why the 'engage' and 'of which LOSE' columns
+are printed side by side. An earlier version of this script modelled the
+cost as min(C, all-in), which quietly refunds the burn; it made core=12
+look like -0.6 % when it is really +13.1 %. The wrong version is named
+here because it is an easy and flattering mistake to repeat.
+
+    N_t        source  thresh  all-in      engage   LOSE    TOTAL CG   vs HIS RUN
+     --       HIS RUN       -       -           -      -     438,348     baseline
+   1686   core=8 MEAS    4726    8580    8 of 160      8     467,870        +6.7%
+    718  core=12 MEAS    2790    4708   76 of 160     68     506,450       +15.5%
+    500  hypothetical    2354    3694   99 of 160     60     454,625        +3.7%
+    430  hypothetical    2214    3414  103 of 160     56     431,475        -1.6%
+    400  hypothetical    2154    3294  105 of 160     54     421,366        -3.9%
+    369  core=16 MEAS    2092    3470  108 of 160     63     443,872        +1.3%
+    325  hypothetical    2004    2994  110 of 160     44     394,323       -10.0%
+    256  hypothetical    1866    2718  114 of 160     34     367,066       -16.3%
+    225  hypothetical    1804    2594  115 of 160     27     353,664       -19.3%
+    208  core=24 MEAS    1770    2996  116 of 160     50     401,087        -8.5%
+    150  hypothetical    1654    2294  119 of 160     19     321,416       -26.7%
+    100  hypothetical    1554    2094  121 of 160     13     298,597       -31.9%
+
+★ READ THE SHIPPED ROW FIRST, BECAUSE IT VALIDATES THE MODEL. At
+N_t = 1686 the model engages 8 of 160 solves and every one of them is a
+LOSS. His run armed 12 and declined 156 — same picture, and PR 329's
+finding in one line: the gate is doing correct arithmetic on a
+mechanism that cannot pay at this basis size.
+
+★ AND THE NON-MONOTONE MIDDLE IS THE REAL WARNING. Shrinking N_t from
+1686 to 718 makes things WORSE, not better (+6.5 % -> +13.1 %), because
+it drops the threshold into the middle of his solve-cost distribution
+and the gate starts engaging on solves that were about to finish plain.
+A tiling that halves N_t but lands there is a REGRESSION. GenEO only
+starts beating no-GenEO-at-all at N_t of roughly 430.
+
+★ AND THE CEILING THIS MODEL EXPOSES. Even at N_t = 100 the shipped
+gate returns about -32 %. THE 21.7x IS NOT REACHABLE THROUGH THIS GATE
+AT ANY BASIS SIZE, because the gate makes every solve burn its
+threshold plain BEFORE deflating and never refunds it. The 21.7x
+(5,412 -> 249, fea.hpp) is what deflation does running from iteration 0,
+which the ski-rental policy forbids by construction.
+
+==============================================================================
+MODEL B — STANDING ARMING (deflate from iteration 0, no burn)
+==============================================================================
+    per solve = 2*N_t (refresh) + 2*N_defl
+
+This is NOT a proposal and is NOT armed by this task. It is here
+because it is where the 21.7x actually lives, and because the standing
+posture was measured as a 1.25x LOSS (2026-08-02-geneo-standing-probe)
+AT N_t ~ 1,686 — a verdict whose entire cost basis is the refresh term
+this sweep moves. If a tiling shrinks N_t enough, that NO-GO is built on
+a number that no longer holds and deserves re-asking. Separately.
+
+★ READ THE 'n' COLUMN BEFORE COMPARING TWO MEASURED ROWS. The tail is a
+median over n solves, and the tail GROWS with rung difficulty at every
+tiling (core=8: 217/241/905 across rungs 1/2/3). So a row whose n is 1
+is a median over whichever single rung happened to engage — for core=16
+that is rung 3, the HARDEST — and it is therefore charged a worst-case
+tail while rows with n=3 or 4 are charged a middling one. core=16's row
+is PENALISED by this, not flattered, and its true standing-armed cost is
+better than shown. Fixing it needs the forced-engagement probe at 16,
+which did not run.
+
+    N_t        source   tail   n  per solve     TOTAL CG   vs HIS RUN
+     --       HIS RUN      -   -          -      438,348     baseline
+   1686   core=8 MEAS    241   3       3854      616,640       +40.7%
+    718  core=12 MEAS    241   4       1918      306,880       -30.0%
+    500  hypothetical    170   8       1340      214,400       -51.1%
+    430  hypothetical    170   8       1200      192,000       -56.2%
+    400  hypothetical    170   8       1140      182,400       -58.4%
+    369  core=16 MEAS    320   3       1378      220,480       -49.7%
+    325  hypothetical    170   8        990      158,400       -63.9%
+    256  hypothetical    170   8        852      136,320       -68.9%
+    225  hypothetical    170   8        790      126,400       -71.2%
+    208  core=24 MEAS    405   3       1226      196,160       -55.3%
+    150  hypothetical    170   8        640      102,400       -76.6%
+    100  hypothetical    170   8        540       86,400       -80.3%
+
+★ BOTH MODELS ARE ANCHORED AT AN INDEPENDENTLY OBSERVED POINT, and
+that is the only reason to read either of them off-baseline:
+  MODEL A at N_t=1686 predicts 8 engagements out of 160, ALL of them
+    losses. His run armed 12 and declined 156. Same picture to within
+    the difference between his N_t (1,674/1,684) and this task's
+    triage value (1,686), and the same conclusion: the engagements
+    that do happen are not paying for themselves. AGREES.
+  ★ AND A SECOND, INDEPENDENT CHECK THAT THIS TASK PRODUCED. MODEL A
+    predicts core=12 (N_t=718) costs +13.1 % against the shipped
+    tiling. The triage MEASURED core=12 at 6,909 total CG against
+    core=8's 6,114 — +13.0 %. Two unrelated routes (a 160-solve model
+    over HIS run, and a direct 4-solve measurement over THIS one).
+    ★ DO NOT READ THE THIRD DIGIT. The triage's own trajectory noise is
+    ~20 % (rung 1 cost 1,121 CG at core=8 and 1,372 at core=12 on
+    designs whose margins agree to 6 digits), so the agreement is in
+    SIGN and MAGNITUDE. That is still worth a great deal: both say a
+    tiling that halves N_t makes the run SLOWER, which is the opposite
+    of what the sweep was expected to find.
+  MODEL B at N_t=1686 predicts +35.5 % total CG, i.e. a ~1.36x loss.
+    2026-08-02-geneo-standing-probe MEASURED a 1.25x loss on WALL for
+    the standing posture at this operating point. CONSISTENT — but note
+    these are different units (plain-iteration equivalents against wall
+    clock), so this is agreement in sign and rough magnitude, NOT a
+    reproduction. It is quoted at that strength and no higher.
+
+★ THE CAVEAT THAT KEEPS MODEL B HONEST. It assumes the warm deflated
+tail stays near 170 as the basis shrinks. That is the ONE thing here
+not measured across tilings, and it is exactly what §2(b) warns about:
+a smaller basis may deflate worse. `run_engaged_probe.sh` measures it
+directly by forcing the gate open at each tiling; until those numbers
+are in, MODEL B IS AN UPPER BOUND AND MUST BE READ AS ONE.

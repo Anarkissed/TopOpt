@@ -230,6 +230,41 @@ const GeneoProbeConfig& geneo_probe_config();
 void geneo_set_probe_config(const GeneoProbeConfig& cfg);  // tests/harness only
 bool geneo_probe_defaults_match_tripwire();  // the shipped recipe is the default
 
+// =========================================================================
+// R6 — THE TILING IS PER-AXIS, AND THIS IS WHAT PINS IT (task
+// geneo-subdomain-tiling-sweep).
+// =========================================================================
+// TEST/HARNESS ONLY. Reports what `tile_cores` (geneo.cpp) actually produced
+// for a grid and a core size. It does not tile anything itself and no
+// production path calls it — it exists so the per-axis rule is asserted against
+// the SHIPPED function rather than against a reimplementation of it in a test,
+// which is the failure mode that lets a rule pass its own test and break in
+// production.
+//
+// WHY THE RULE NEEDS PINNING AT ALL. `tile_cores` steps each axis
+// independently, so a grid of 128x31x118 at core=24 tiles 6 x 2 x 5. The trap
+// it must never regress into is keying the tiling to a single scalar derived
+// from the grid — `std::min(nx,ny,nz)`, or a cube-root of the voxel count.
+// On his part the thin axis is 31 against a long axis of 128, a 4.1:1 slab, so
+// a minimum-keyed tiling would size EVERY axis to the thin one and multiply the
+// subdomain count — and N_t with it — by roughly the aspect ratio squared. That
+// is not hypothetical: handoff 2026-08-10-parametric-level-set records a day
+// lost to `GridapTopOpt`'s alpha rule keying on `minimum(el_size)` and
+// under-regularising by 5x on exactly this slab.
+struct GeneoTileCounts {
+  int tx = 0;  // tiles along x
+  int ty = 0;  // tiles along y
+  int tz = 0;  // tiles along z
+  long long total = 0;
+  // The SMALLEST extent produced on each axis — the last tile's remainder when
+  // the axis does not divide evenly. Reported so a test can tell a genuine
+  // per-axis tiling (short remainder tiles) from a padded or clamped one.
+  int min_extent_x = 0;
+  int min_extent_y = 0;
+  int min_extent_z = 0;
+};
+GeneoTileCounts geneo_tile_counts_for_test(const VoxelGrid& g, int core);
+
 // W5b: force a full basis rebuild at the next geneo_solve_begin (the harness
 // calls this at a CONTINUATION-parameter change, the paper's forced-rebuild
 // point). Inert unless a basis is held; the shipped degradation policy is

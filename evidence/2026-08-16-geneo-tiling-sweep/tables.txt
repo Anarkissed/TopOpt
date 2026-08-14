@@ -1,0 +1,224 @@
+
+==============================================================================
+§1(a)  WHAT EACH TILING MEANS IN VOXELS ON HIS 128 x 31 x 118 GRID
+==============================================================================
+PER-AXIS, NEVER A MINIMUM. `tile_cores` (core/src/fea/geneo.cpp:167)
+steps x, y and z independently, so the subdomain count is
+ceil(nx/c)*ceil(ny/c)*ceil(nz/c) and NOT (n/c)^3 for any single n.
+His part is a 4.1:1 slab (128 long, 31 thin); a tiling keyed to the
+thin axis would size every axis to 31 and multiply the subdomain count
+— and N_t, and the refresh the gate is priced against — with it.
+Pinned by test_geneo's R6 block against a 24:1 synthetic slab.
+
+ core  tiles x  tiles y  tiles z  subdomains   last-tile x,y,z
+    8       16        4       15         960     8,  7,  6
+   12       11        3       10         330     8,  7, 10
+   16        8        2        8         128    16, 15,  6
+   24        6        2        5          60     8,  7, 22
+   32        4        1        4          16    32, 31, 22  <- y collapses to ONE tile
+
+32 is shown but is NOT a sweep point: with y at a single tile it
+confounds 'coarser tiling' with 'no tiling on one axis'. 24 is the
+last point that still tiles every axis, which is why the sweep stops
+there.
+
+==============================================================================
+§1(b)  N_t PER TILING — the one-solve triage
+==============================================================================
+N_t is decided on the FIRST solve: the basis is built once per
+structure and its dimension is a property of that build. So one
+design iteration per rung answers this, and does it deterministically
+— N_t is a COUNT and a contended host cannot change it.
+
+★ TWO N_t COLUMNS, AND THE DIFFERENCE BETWEEN THEM IS A FINDING.
+`N_t first` is the dimension of the basis built on the run's FIRST
+stagnating solve. `N_t final` is what the run was still holding at the
+end. They differ when the basis DEGRADED and the scheduled rebuild
+returned a different dimension — which is what happened at core=12
+(718 -> 1123) and did not happen at core=8 (built once, never rebuilt).
+Production experiences the FINAL number for most of a run, so the
+headline fall is 1.5x and not the 2.35x the first build suggests.
+
+ core  subdomains  N_t first  N_t final  modes/sub  basis MB  refresh 2*N_t  implied thresh
+    8         960       1686       1686       1.76     40.31           3372            4726
+   12         330        718       1123       3.40     52.86           2246            3600
+   16         128        369        603       4.71     53.20           1206            2560
+   24          60        208        370       6.17     63.23            740            2094
+
+Against the shipped 8^3 (N_t = 1686):
+  core=8   N_t  1686  =  1.00x the shipped   subdomains  1.00x
+  core=12  N_t  1123  =  0.67x the shipped   subdomains  0.34x
+  core=16  N_t   603  =  0.36x the shipped   subdomains  0.13x
+  core=24  N_t   370  =  0.22x the shipped   subdomains  0.06x
+
+If N_t fell exactly with the subdomain count the two ratios would
+match. Where N_t falls SLOWER, each larger subdomain is carrying more
+modes — block_m = 20 caps it at 20 per subdomain, and that cap is the
+mechanism that would flatten the curve.
+
+THE BAR THE THRESHOLD MUST CLEAR: his 160 stagnating solves cost a
+MEDIAN of 2,717 plain CG iterations (min 927, max 5,091), against his
+observed threshold of 4702. ★ NOT ~4,400 — that is the median of
+the 8 declines in his DECISION LOG, which records transitions only and
+so holds the hardest 5 % of the 156 declines rather than a sample.
+
+A tiling whose implied threshold drops under ~2,700 is one where the
+gate starts engaging routinely. ★ THAT IS A NECESSARY CONDITION AND NOT
+A SUFFICIENT ONE, and on this part it is not even a desirable one on its
+own: cost_model.py shows the gate ENGAGING MORE while the run gets
+SLOWER, because engagements near the threshold lose. Read cost_model.txt
+and the §2(b) trade table before drawing anything from this column.
+
+==============================================================================
+§2(b)  DEFLATION QUALITY PER TILING — does a smaller basis deflate WORSE?
+==============================================================================
+★ THIS IS THE AXIS THAT SEPARATES §2(a) FROM §2(b), and it is readable
+from the triage without any extra run. On every point, rung 0's first
+solve is the BUILD solve: it burns exactly kGeneoTriggerIters = 500
+plain iterations, then deflates to convergence. So
+
+      deflated tail  =  cg_iters(rung 0, iter 1)  -  500
+
+is the number of DEFLATED iterations that basis needed to finish a solve
+plain Jacobi could not. A coarser tiling buys a cheaper refresh (2*N_t)
+and pays for it here. If the tail grows faster than N_t shrinks, the
+lever is exhausted and the answer is §2(b).
+
+ core     N_t  rung0 cg   burn   tail  refresh 2*N_t  engage thresh  all-in equiv
+   12     718       935    500    435           1436           2806          5112
+   16     369       806    500    306            738           1850          3200
+   24     208       985    500    485            416           1886          3272
+    8    1686       972    500    472           3372           4816          9132
+
+READ IT AGAINST THE PLAIN ALTERNATIVE — AND AGAINST THE RIGHT ONE.
+★ A CORRECTION THIS TABLE CARRIES SO NOBODY REPEATS IT. His TYPICAL
+stagnating solve costs 2,717 CG (median of all 160 rows of his
+iterations.csv). It does NOT cost ~4,400: that figure is the median of
+the 8 declines in his DECISION LOG, and the log records transitions
+only, so those 8 are the solves that immediately followed an engage —
+systematically the hardest, 5 % of the 156 declines. Using 4,400 puts
+the break-even at N_t = 669 when it is really near 256, i.e. it calls a
+tiling a win that is not one.
+
+★ THE BREAK-EVEN, IN CLOSED FORM. Substituting the gate's own cost
+model (geneo.hpp: refresh = 2*N_t, a deflated iteration = 2 plain):
+
+    all-in equiv = threshold + 2*N_t + 2*tail
+                 = (2*N_t + 500 + 2*tail) + 2*N_t + 2*tail
+                 = 4*N_t + 4*tail + 500
+
+so beating a MEDIAN 2,717-iteration plain solve needs
+
+    ★  N_t + tail  <  554  ★
+
+At the shipped 8^3 that sum is 1686 + 472 = 2158, i.e. 3.9x over.
+
+★ AND THIS CLOSED FORM IS THE COARSE VIEW, NOT THE ANSWER. It compares
+against ONE representative solve. `cost_model.py` does the honest
+version — it runs the gate's rule against ALL 160 of his measured solve
+costs, one at a time, and finds a NON-MONOTONE result this one-number
+form cannot show: shrinking N_t from 1686 to 718 makes the run WORSE,
+because it drops the threshold into the middle of his cost distribution
+and the gate starts engaging on solves that were about to finish plain.
+Read cost_model.txt before quoting anything from this block.
+
+AND ONE FRAMING THIS TABLE DELIBERATELY DOES NOT USE. If a hot basis
+could deflate from iteration 0 — no burn — the cost would be just
+2*N_t + 2*N_defl, which at 8^3 is 3372 + 944 = 4316 against 5,412 for
+his hardest plain solve: already a win. The SHIPPED ski-rental gate
+forbids that, by design and for a measured reason (arming every solve
+lost 1.25x on wall — 2026-08-02-geneo-standing-probe). So the gate
+policy is itself a term in the economics, and a tiling that made N_t
+small enough would reopen the standing-preconditioner question that was
+closed at N_t ~ 1,686. That is a SEPARATE proposal and is not armed
+here; it is flagged because the sweep is what would justify re-asking.
+
+==============================================================================
+§1(c)  TOTAL CG ITERATIONS PER TILING — ★ THE FIGURE OF MERIT
+==============================================================================
+★ TOTAL CG ITERATIONS, NOT THE ARMED COUNT. A smaller basis that
+engages on every solve and deflates badly is WORSE than a large one
+that engages rarely. The armed/declined columns are a DIAGNOSTIC of
+what the gate did; the total-CG column is the result. Read them in
+that order.
+
+R1: iteration counts are the EVIDENCE (deterministic, contention-immune);
+wall is CONTEXT and on this host it was measured under load — see
+host_load.txt. Every wall figure here is from a Release build
+(CMAKE_BUILD_TYPE=Release, recorded in build_type.txt).
+
+★ ONE CONFOUND IN THIS COLUMN, NAMED RATHER THAN BURIED, AND IT IS
+LARGER THAN IT LOOKS. GenEO is exact to the SOLVER TOLERANCE, not to
+the last bit, so two tilings finish rung 0 with fields agreeing to
+~1e-8 and hand slightly different designs to the next rung.
+
+How small that design difference is, and how big its effect: at core=8
+and core=12 the certified margins agree at EVERY rung to all six
+printed digits (1751.28 / 1383.13 / 514.952) — yet rung 1 cost 1,121 CG
+at core=8 and 1,372 at core=12, a 22 % swing. A perturbation too small
+to move the margin in the 6th digit moves the iteration count by a
+fifth, because CG counts are sensitive to where a residual lands
+relative to a fixed tolerance.
+
+CONSEQUENCE: at --iters 1 a total-CG difference below roughly 20 %
+between tilings CANNOT be attributed to the lever. This is why the
+handoff leans on the cost-model decomposition (N_t, tail, threshold —
+all trajectory-independent, all read per solve) and treats total CG as
+a confirming measurement rather than the sole one.
+
+no arms/ directory yet
+
+==============================================================================
+§1(d)  THE (burn - threshold) DISTRIBUTION PER TILING
+==============================================================================
+This is what says whether a tiling moved the gate from 'misses by 7%'
+to 'clears comfortably' or merely to 'misses by 4%'. A NEGATIVE value
+is a solve that finished plain before the armed alternative would have
+paid for itself — a DECLINE, and a correct one.
+
+★ FROM THE PER-ITERATION CSV COLUMNS, NOT THE DECISION LOG. The log
+records transitions only, so its declines are the hardest ones and not
+a sample of the distribution (geneo.hpp, kGeneoDecisionLogCap).
+
+HIS RUN (shipped 8^3): no solve wrote a nonzero geneo_threshold — no basis was
+  ever held, or these columns post-date the binary that ran it.
+triage core12 (--iters 1, EASY solves): 3 solves with a basis held, median threshold 2806
+  (burn - threshold): min -1434  median -1083  max 0
+  2 DECLINED; they missed by a median of 1258 iterations = 44.9% of the threshold
+triage core16 (--iters 1, EASY solves): 3 solves with a basis held, median threshold 1850
+  (burn - threshold): min -399  median -174  max 0
+  2 DECLINED; they missed by a median of 286 iterations = 15.5% of the threshold
+triage core24 (--iters 1, EASY solves): 3 solves with a basis held, median threshold 1886
+  (burn - threshold): min -424  median -170  max 0
+  2 DECLINED; they missed by a median of 297 iterations = 15.7% of the threshold
+triage core8 (--iters 1, EASY solves): 3 solves with a basis held, median threshold 4816
+  (burn - threshold): min -3695  median -3366  max -2245
+  3 DECLINED; they missed by a median of 3366 iterations = 69.9% of the threshold
+
+==============================================================================
+R5  THE CERTIFIED MARGIN AT EVERY TILING — GenEO IS EXACT
+==============================================================================
+Every term in the preconditioner is SPD, so the deflation changes the
+CG ROUTE and never the converged field or the stopping test. A margin
+that moved with the tiling would mean that claim is false, so this is
+a real check and not a formality.
+
+     vf          core=12          core=16          core=24           core=8
+  0.680    1751.27987(1)    1751.27986(1)    1751.27987(1)    1751.27987(1)
+  0.520     1383.1277(1)     1383.1277(1)     1383.1277(1)     1383.1277(1)
+  0.380    514.951762(1)    514.951762(1)    514.951762(1)    514.951762(1)
+  0.260    106.908685(1)    106.908685(1)    106.908685(1)    106.908685(1)
+
+(value(accepted)) — accepted=1 is an ACCEPT verdict.
+
+★ THE RIGHT BAR IS NOT BIT-IDENTITY, AND SAYING SO MATTERS.
+GenEO is exact to the SOLVER TOLERANCE (1e-8), not to the last bit: it
+changes the CG route, so two tilings reach the same field to 1e-8 and
+then hand slightly different fields to an optimiser that can amplify
+the difference over a ladder. So a margin that moves by ~1e-6 relative
+is the expected behaviour of an exact method, and a margin that moves
+by PERCENT is the thing that would falsify the exactness claim. Both
+are reported below rather than collapsed into one pass/fail.
+  core=16 vs core=12: max rel move 5.710e-09 at vf=0.68; verdict flips: 0 — consistent with exactness
+  core=24 vs core=12: IDENTICAL; verdict flips: 0 — consistent with exactness
+  core=8 vs core=12: IDENTICAL; verdict flips: 0 — consistent with exactness

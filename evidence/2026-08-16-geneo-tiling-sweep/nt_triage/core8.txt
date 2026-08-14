@@ -1,0 +1,1 @@
+core=8  N_t=1686  basis_MB=40.31  refresh(2*N_t)=3372  implied_threshold=4726  builds=1  armed=1  declined=11
