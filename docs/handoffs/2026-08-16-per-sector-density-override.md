@@ -168,10 +168,20 @@ armed), so I had compared a configuration with itself. Verified directly: the
 explicit-true run is byte-identical to a key-absent run.
 
 The consequence is the opposite of my first reading: **both §4(b) arms had
-projection armed and running**, so their identical meshes ARE R3's answer.
-`cad_probe` confirms the operation is large on this part — 78 B-rep faces (not
-fitted), 29,679 of 41,070 vertices attributed, **20,084 displaced, up to 1.70
-mm**. An explicit `project_cad_faces: false` arm is running as the on/off control.
+projection armed and running**, so their identical meshes ARE R3's answer. It is
+non-vacuous two ways over: `cad_probe` shows the operation is large on this part
+(78 B-rep faces, not fitted; 29,679 of 41,070 vertices attributed; **20,084
+displaced, up to 1.70 mm**), and an explicit `project_cad_faces: false` arm
+exports a **different** mesh on every rung. Three-way:
+
+```
+projection OFF vs armed                    ->  DIFFERS    (projection is live)
+override vs control, both armed            ->  IDENTICAL  (R3's answer)
+override vs control, upstream artifacts    ->  IDENTICAL
+```
+
+Turning projection off changes every exported mesh; changing a region's density
+changes none of them. **R3 MET.**
 
 **Is a job with no override byte-identical? ★ MEASURED — YES, all four rungs.**
 The same no-override job on his part, run in parallel on the pre-task binary
@@ -327,8 +337,6 @@ it*.
 
 *(Kept honest and current; see §0 for what each depends on.)*
 
-- **R3's on/off control** — an explicit `project_cad_faces: false` arm, RUNNING.
-  R3's own measurement is done; this is the control that proves it non-vacuous.
 - **The app section has never run on a device or simulator.** `r3_app_surface.txt`
   is the model's own output through the real bridge, and is labelled as such.
 - **The 3MF pair** (`export_3mf`, `threemf_import`) does not register in this

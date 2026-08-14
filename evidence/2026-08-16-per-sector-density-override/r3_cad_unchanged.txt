@@ -40,8 +40,24 @@ the control arm's own exported mesh:
   operation displaces 20,084 of them, up to 1.70 mm. Projection is a live,
   large operation on this part — not a no-op that would make R3 vacuous.
 
-=== POSITIVE CONTROL 2 (RUNNING): AN EXPLICIT project_cad_faces=false ARM ===
-The only honest on/off control. If its exported mesh DIFFERS from the armed
-runs, projection demonstrably shaped the bytes that R3 compares.
-STATUS AT WRITING: RUNNING. This file will be wrong until that line is
-replaced with a measurement — it is not a result yet.
+=== POSITIVE CONTROL 2: AN EXPLICIT project_cad_faces=false ARM — MEASURED ===
+The only honest on/off control: the same job with "project_cad_faces": false,
+full production ladder, rc=0 at 01:59:17. Against the armed runs:
+
+    variant_026.stl  DIFFERS      variant_052.stl  DIFFERS
+    variant_038.stl  DIFFERS      variant_068.stl  DIFFERS
+
+Projection demonstrably SHAPED the bytes R3 compares. Turning it off changes
+every exported mesh; changing a region's density changes none of them.
+
+=== VERDICT — R3 MET ===
+With CAD projection ARMED (the default) and DEMONSTRABLY ACTIVE — proven two
+ways, by the displacement measurement above and by an explicit off arm that
+produces different files — applying a per-region density override leaves the
+CAD-projected mesh BYTE-IDENTICAL on every rung.
+
+The three-way result in one place:
+    projection OFF        vs armed            ->  DIFFERS   (projection is live)
+    override vs control, both armed           ->  IDENTICAL (R3's answer)
+    override vs control, upstream artifacts   ->  IDENTICAL (design.bin, fields.bin,
+                                                             loadcase.json)
