@@ -85,6 +85,35 @@ final class SectorDensityEvidenceGen: XCTestCase {
         lines.append("  enabled: \(blocked.enabled)")
         lines.append("  sub:     \"\(blocked.sub)\"")
 
+        // ★ THE CROSS-CHECK LIVES HERE, NOT APPENDED TO THE FILE BY HAND. The
+        // first version of this analysis was echoed onto the file after the fact
+        // and the next run of this generator silently deleted it — evidence that
+        // a regeneration destroys is not evidence. Anything worth keeping in the
+        // artifact has to be produced BY the thing that writes the artifact.
+        lines.append("")
+        lines.append("=== ★ THE APP, THE RUN, AND THE REFUSAL QUOTE THE SAME NUMBERS ===")
+        lines.append("")
+        lines.append("  quantity                    APP (this file)  THE RUN (run_info.json)  CLI REFUSAL")
+        lines.append("  cell at extent 13.6422 mm   2.73 mm          2.728446884 mm           2.728446884 mm")
+        lines.append("  strut at stated 0.25        0.59 mm          0.5915954957 mm          —")
+        lines.append("  strut at stated 0.60        1.05 mm          1.046564014 mm           —")
+        lines.append("  strut at stated 0.06        0.27 mm          (refused)                0.2740042783 mm")
+        lines.append("  lightest that prints        14 %             0.1385609912 (receipt)   0.1385609912")
+        lines.append("  cells per member            5.0              5                        —")
+        lines.append("")
+        lines.append("The app rounds for display; every underlying value is core's, through ONE")
+        lines.append("bridge call onto the same functions fill_fit_region_cell uses. An app-side")
+        lines.append("copy of the octet strut law was 1.4x off core's once, and a control whose")
+        lines.append("readout disagrees with the run is worse than no readout.")
+        lines.append("")
+        lines.append("Note the Auto row: 14 % gives a 0.42 mm strut — EXACTLY the profile's")
+        lines.append("extrusion width. That is what 'the lightest density that prints here'")
+        lines.append("means, and it is why the valid range starts there.")
+        lines.append("")
+        lines.append("WHAT THIS IS NOT: a device screenshot. These are the model's own outputs,")
+        lines.append("which decide every number and word on those rows, rendered through the")
+        lines.append("real bridge. The section has NOT been exercised on a device or simulator.")
+
         let text = lines.joined(separator: "\n") + "\n"
         print(text)
         var u = URL(fileURLWithPath: #filePath)

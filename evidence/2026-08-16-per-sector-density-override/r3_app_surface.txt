@@ -41,24 +41,23 @@ both sectors measure 13.64223442 mm through the body; profile width 0.42 mm
 
 === ★ THE APP, THE RUN, AND THE REFUSAL QUOTE THE SAME NUMBERS ===
 
-  quantity                    APP (this file)   THE RUN (run_info.json)   CLI REFUSAL
-  cell at extent 13.6422 mm   2.73 mm           2.728446884 mm            2.728446884 mm
-  strut at stated 0.25        0.59 mm           0.5915954957 mm           —
-  strut at stated 0.60        1.05 mm           1.046564014 mm            —
-  strut at stated 0.06        0.27 mm           (refused)                 0.2740042783 mm
-  lightest that prints        14 %              —                         0.1385609912
-  cells per member            5.0               5                         —
+  quantity                    APP (this file)  THE RUN (run_info.json)  CLI REFUSAL
+  cell at extent 13.6422 mm   2.73 mm          2.728446884 mm           2.728446884 mm
+  strut at stated 0.25        0.59 mm          0.5915954957 mm          —
+  strut at stated 0.60        1.05 mm          1.046564014 mm           —
+  strut at stated 0.06        0.27 mm          (refused)                0.2740042783 mm
+  lightest that prints        14 %             0.1385609912 (receipt)   0.1385609912
+  cells per member            5.0              5                        —
 
-The app rounds for display; every underlying value is core's. This is the
-point of routing the whole readout through ONE bridge call onto the same
-functions fill_fit_region_cell uses: an app-side copy of the octet strut law
-was 1.4x off core's once, and a control whose readout disagrees with the run
-is worse than no readout.
+The app rounds for display; every underlying value is core's, through ONE
+bridge call onto the same functions fill_fit_region_cell uses. An app-side
+copy of the octet strut law was 1.4x off core's once, and a control whose
+readout disagrees with the run is worse than no readout.
 
 Note the Auto row: 14 % gives a 0.42 mm strut — EXACTLY the profile's
-extrusion width. That is what 'the lightest density that prints here' means,
-and it is why the valid range starts there.
+extrusion width. That is what 'the lightest density that prints here'
+means, and it is why the valid range starts there.
 
 WHAT THIS IS NOT: a device screenshot. These are the model's own outputs,
-which decide every number and word on those rows, rendered through the real
-bridge. The section has NOT been exercised on a device or simulator.
+which decide every number and word on those rows, rendered through the
+real bridge. The section has NOT been exercised on a device or simulator.
