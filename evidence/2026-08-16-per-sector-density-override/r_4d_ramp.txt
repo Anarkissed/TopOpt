@@ -1,0 +1,47 @@
+§4(d) — A DENSITY RAMP ACROSS FOUR SECTORS AT ONE DEPTH.
+
+Face 15 grid-split 4x1 by core's own grid_split_cells (so the job carries the
+geometry the splitter produced, not a hand-typed approximation). ALL FOUR
+sectors declared at depth_mm 7.5 — verified from the job itself:
+    region 200 depth 7.5 stated 0.2       region 202 depth 7.5 stated 0.466667
+    region 201 depth 7.5 stated 0.333333  region 203 depth 7.5 stated 0.6
+Full production ladder, rc=0.
+
+=== THE RECEIPT ===
+    distinct_cells=1  out_of_regime_voxels=1888  no_derivation_voxels=0  density_raised=0
+    rho_min_used=0.2  rho_max_used=0.6  strut 0.5178592186 .. 1.046564014
+  idx  extent_mm    cell_mm   STATED   derived  IN FORCE  strut_mm  c/mem  regime  latticed
+  -----------------------------------------------------------------------------------------
+    0    13.6422     2.7284  0.2000    0.1386    0.2000    0.5179   5.00   ok      6214
+    1    13.6422     2.7284  0.3333    0.1386    0.3333    0.7122   5.00   ok      7792
+    2    13.6422     2.7284  0.4667    0.1386    0.4667    0.8861   5.00   ok      5173
+    3    13.6422     2.7284  0.6000    0.1386    0.6000    1.0466   5.00   ok      6335
+
+★ FOUR DISTINCT DENSITIES AND FOUR DISTINCT STRUTS AT ONE CELL AND ONE DEPTH.
+  0.2000 / 0.3333 / 0.4667 / 0.6000 — the ramp, verbatim, to 4 figures.
+  0.5179 / 0.7122 / 0.8861 / 1.0466 mm struts — a 2.02x spread.
+  All four at cell 2.728446884 mm and exactly 5.00 cells per member, all in
+  regime. The depth fixes the cell; the override alone moves the density.
+
+★ THE STATED AND DERIVED COLUMNS ARE BOTH POPULATED, which is the receipt fix
+  this task made working end to end WITH a density stated. Every row records
+  derived = 0.1386 beside its stated value: the reader can see what the user
+  asked for AND what the derivation would have chosen, and the app reads the
+  valid range [0.1386, 0.8999] straight off it. Before the fix the receipt
+  carried only the density in force and could not answer either question.
+
+=== EVERY RUNG ACCEPTED, NOTHING CLAMPED ===
+  variant_026  rho 0.2000..0.6000  strut 0.5179..1.0466  323.61 g  accepted  clamp 0/0
+  variant_038  rho 0.2000..0.6000  strut 0.5179..1.0466  365.89 g  accepted  clamp 0/0
+  variant_052  rho 0.2000..0.6000  strut 0.5179..1.0466  416.45 g  accepted  clamp 0/0
+  variant_068  rho 0.2000..0.6000  strut 0.5179..1.0466  474.36 g  accepted  clamp 0/0
+
+  clamped_lo = clamped_hi = 0 on every rung, and
+  density_raised_for_print_voxels = 0.
+  NOT ONE of the four stated densities was moved by so much as a rounding.
+
+=== WHAT THIS ADDS OVER §4(b) ===
+§4(b) showed TWO densities at one depth. This shows the mechanism is not a
+two-case special: four regions, four values, one cell, one depth, monotone in
+both density and strut, and the per-sector voxel counts (6214 / 7792 / 5173 /
+6335) show the split is real geometry rather than four names for one set.

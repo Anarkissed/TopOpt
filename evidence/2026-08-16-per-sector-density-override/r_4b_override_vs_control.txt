@@ -1,0 +1,66 @@
+§4(b) — OVERRIDE vs CONTROL, ON HIS PART. THE DECISIVE COMPARISON.
+
+The task's own test: "IF THE TWO SECTORS COME OUT IDENTICAL, THE OVERRIDE IS
+NOT REACHING THE GRADING LAW and nothing else in the task matters."
+
+M2_verticalStand.step, resolution 128, face 15 split 1x2 by ONE plane, BOTH
+sectors declared at depth 7.5 mm. The two jobs are identical but for two
+"relative_density" keys. Full production ladder, 4 rungs, both arms rc=0.
+
+=== THE ANSWER ===
+
+                       sector 200        sector 201
+  CONTROL  (nothing stated)   0.1386            0.1386        <- IDENTICAL
+  OVERRIDE (0.25 / 0.60)      0.2500            0.6000        <- DIFFERENT
+
+  strut, control              0.4200 mm         0.4200 mm
+  strut, override             0.5916 mm         1.0466 mm
+
+The two sectors come out IDENTICAL without the override and DIFFERENT with
+it, at the same depth, on the same cell (2.728446884 mm), at the same 5.00
+cells per member, both in regime. That is the test, and it passes.
+
+=== ONE VARIABLE MOVED, AND ONLY ONE ===
+  IDENTICAL between the arms:  design.bin, fields.bin, loadcase.json, and
+                               ALL FOUR variant STLs (026/038/052/068)
+  DIFFERS between the arms:    the lattice STLs
+
+★ The SIMP design is BYTE-IDENTICAL. The override does not touch the
+  optimizer at all — it acts only where it should, at the grading step that
+  fills an already-decided design. A user dialling a sector's density gets a
+  different LATTICE, never a different PART.
+
+=== EVERY RUNG, BOTH ARMS, ALL EIGHT ACCEPTED ===
+  variant   OVERRIDE rho / mass / margin        CONTROL rho / mass / margin
+  026       0.25-0.60  320.81 g   539.6         0.1386-0.8999  293.44 g   793.5
+  038       0.25-0.60  363.09 g   642.2         0.1386-0.8999  333.35 g   708.2
+  052       0.25-0.60  413.66 g  1151.0         0.1386-0.8999  387.40 g  1814.1
+  068       0.25-0.60  471.57 g  2008.0         0.1386-0.8999  442.40 g  1972.5
+  (margin required 1.5 throughout)
+
+=== ★ THE BEHAVIOUR A USER MUST KNOW: A STATED DENSITY REPLACES THE GRADING ===
+
+Look at the CONTROL's rho range: 0.1386 .. 0.8999 — the WHOLE certifiable
+band. That is the grading law doing its job, ramping density with stress
+across the region. The OVERRIDE's range is 0.2500 .. 0.6000: EXACTLY the two
+stated numbers and nothing between them.
+
+So a stated density does NOT cap, scale, or bias the stress-driven grading.
+It REPLACES it inside that region, which becomes UNIFORM at the stated value.
+That is what "dial this sector to 25 %" has to mean to be worth having, and
+it is what the law does — the branch returns the stated value and never
+reaches the demand term. But it is a real trade the user is making: they are
+giving up per-voxel stress grading inside that region in exchange for saying
+what the region weighs. Both are legitimate; only one is what they asked for.
+
+Corroborating number: density_raised_for_print_voxels is 16792 in the CONTROL
+and 0 in the OVERRIDE. In the control, the stress-graded density fell below
+printable in 16,792 voxels and the law raised them to the 0.42 mm floor (hence
+the control's 0.4200 mm minimum strut). With 0.25 and 0.60 stated, nothing
+needed raising — and nothing was silently changed.
+
+=== MASS ===
+The override is HEAVIER at every rung (+29.2 g, +6.6 % at 068), which is the
+honest direction: 0.25 and 0.60 are both above the 0.1386 the derivation
+picks, so asking for them asks for material. The point of the feature is not
+to save mass; it is to put the mass WHERE THE USER WANTS IT.

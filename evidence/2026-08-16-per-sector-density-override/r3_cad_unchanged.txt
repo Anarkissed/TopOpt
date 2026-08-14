@@ -1,0 +1,47 @@
+R3 — THE CAD-PROJECTED GEOMETRY IS UNCHANGED BY A DENSITY OVERRIDE.
+
+=== THE MEASUREMENT ===
+The §4(b) arms — identical jobs but for two "relative_density" keys — export
+BYTE-IDENTICAL variant meshes on every rung:
+    variant_026.stl  IDENTICAL      variant_052.stl  IDENTICAL
+    variant_038.stl  IDENTICAL      variant_068.stl  IDENTICAL
+and, upstream of them, design.bin / fields.bin / loadcase.json are identical
+too. Layer 1 — the CAD face identity used for projection — is untouched to
+the byte by a density override.
+
+=== ★ THE TRAP I FELL INTO, AND THE CONTROL THAT MATTERS ===
+
+I first built the control as "same job, project_cad_faces on vs off" by
+ADDING "project_cad_faces": true to one arm and leaving the key absent in
+the other. The two runs came out byte-identical and I concluded projection
+was a NO-OP and that R3 would pass vacuously.
+
+THAT WAS BACKWARDS. output.project_cad_faces is ARMED BY DEFAULT — core's
+own test_default_arming.cpp says an ABSENT key must mean ARMED — so I had
+compared a configuration WITH ITSELF. Verified directly: the explicit-true
+run is byte-identical to a key-absent run (variant_026 and variant_068).
+
+  ⇒ Both §4(b) arms had CAD projection ARMED AND RUNNING. Their identical
+    meshes are therefore R3's answer, not an artefact of a disabled feature.
+
+=== POSITIVE CONTROL 1: IS PROJECTION CAPABLE OF MOVING THIS PART? ===
+cad_probe re-runs the exact operation run_job runs — attribute_to_cad_faces
+then project_onto_cad_faces, with cad_project_options_for_grid(1.7053) — on
+the control arm's own exported mesh:
+
+    part          face_count=78  faces.size()=78  faces_are_fitted=0
+    variant mesh  41070 vertices, 27381 triangles
+    options       tolerance_mm=1.7053  (from spacing 1.7053)
+    attribution   attributed=29679  ambiguous=472  seam=7059  of 41070
+    displacement  moved=20084 vertices  max=1.7006 mm  mean(moved)=0.0449696 mm
+    VERDICT       projection is ACTIVE — R3 can discriminate on this job
+
+  78 B-rep faces, not fitted; 29,679 of 41,070 vertices attributed; the
+  operation displaces 20,084 of them, up to 1.70 mm. Projection is a live,
+  large operation on this part — not a no-op that would make R3 vacuous.
+
+=== POSITIVE CONTROL 2 (RUNNING): AN EXPLICIT project_cad_faces=false ARM ===
+The only honest on/off control. If its exported mesh DIFFERS from the armed
+runs, projection demonstrably shaped the bytes that R3 compares.
+STATUS AT WRITING: RUNNING. This file will be wrong until that line is
+replaced with a measurement — it is not a result yet.
