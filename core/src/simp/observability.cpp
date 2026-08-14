@@ -1277,6 +1277,10 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"feasible\": " + bool_json(R.feasible);
         gr += ", \"cell_mm\": " + fmt(R.cell_mm);
         gr += ", \"relative_density\": " + fmt(R.relative_density);
+        gr += ", \"stated_relative_density\": " +
+              fmt(R.stated_relative_density);
+        gr += ", \"derived_relative_density\": " +
+              fmt(R.derived_relative_density);
         gr += ", \"strut_mm\": " + fmt(R.strut_mm);
         gr += ", \"cells_per_member\": " + fmt(R.cells_per_member);
         gr += ", \"out_of_regime\": " + bool_json(R.out_of_regime);

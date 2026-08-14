@@ -913,7 +913,19 @@ struct RunInfo {
     double extent_mm = 0.0;          // thinnest declared dimension
     bool feasible = false;           // a printing AND percolating pair exists
     double cell_mm = 0.0;            // the derived cell
-    double relative_density = 0.0;   // lightest band density printing at it
+    double relative_density = 0.0;   // THE ONE IN FORCE — stated if stated, else derived
+    // ★ STATED vs DERIVED, NEVER FLATTENED (task 2026-08-16-per-sector-density-
+    // override). `relative_density` above is what the region was BUILT at. On its
+    // own it cannot answer "did he ask for this, or did the derivation pick it?",
+    // and PR 332 was bitten by exactly that shape — a per-region receipt that
+    // dropped a distinction it was the only witness to. So both are reported:
+    //   stated  == 0  ->  nothing was stated; relative_density IS derived
+    //   stated  >  0  ->  he stated it, and `derived` is what he overrode
+    // `derived` is also the FLOOR of the valid range the app offers (§2d): the
+    // densities that print at this region's cell are exactly [derived, rho_max],
+    // so the app reads the range off the receipt instead of re-deriving it.
+    double stated_relative_density = 0.0;
+    double derived_relative_density = 0.0;
     double strut_mm = 0.0;
     double cells_per_member = 0.0;
     bool out_of_regime = false;      // under the ACCURACY floor: buildable, uncertified
