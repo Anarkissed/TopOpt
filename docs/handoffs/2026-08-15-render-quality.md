@@ -334,6 +334,17 @@ reverted all of them: re-baselining other tasks' evidence inside this PR would r
 their claims in a diff nobody reviewing those claims is reading. They will regenerate on
 their own next run, and the difference is the feature, not a regression.
 
+### The live `MTKView` path is exercised, not assumed
+
+Everything else in the evidence goes through `renderOffscreen`, which builds its own
+render pass descriptor. **The shipping path does not** — `MTKView` builds it, and at
+`sampleCount > 1` it owns the multisample colour and depth textures and makes the
+drawable the *resolve* target. A mismatch between `view.sampleCount` and any pipeline's
+`rasterSampleCount`, or a G-buffer sized from the multisample texture instead of the
+resolve texture, is a **Metal validation abort on a real device** that no offscreen test
+would ever see. `RenderQualityLiveViewTests` drives `draw(in:)` on an actual `MTKView` at
+4× and at 1×: 6 draws and 1,070,289 vertices, identical at both.
+
 ### Test suite
 
 `swift test` on the full package: **1,529 tests, 25 skipped, 8 failures — all 8 from the

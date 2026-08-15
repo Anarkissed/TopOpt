@@ -845,3 +845,72 @@ final class RenderQualityEvidenceGen: XCTestCase {
               + String(format: "%016llx", hash) + " (identical before and after rendering)")
     }
 }
+
+#if canImport(MetalKit) && (os(macOS) || os(iOS))
+import MetalKit
+
+/// ★ THE LIVE `MTKView` PATH — the one thing every other test in this file misses.
+///
+/// Everything else here goes through `renderOffscreen`, which builds its own render
+/// pass descriptor. The SHIPPING path does not: `MTKView` builds it, and when
+/// `sampleCount > 1` it owns the multisample colour texture, owns a matching
+/// multisample depth texture, and makes the DRAWABLE the resolve target. §3b is
+/// `view.sampleCount = renderer.sampleCount` and a matching `rasterSampleCount` on
+/// seven pipelines — and if those disagree, or if the G-buffer is sized from the
+/// multisample texture instead of the resolve texture, the failure is a Metal
+/// validation abort on a real device and NOTHING in an offscreen test would say so.
+///
+/// So this drives `draw(in:)` on an actual `MTKView` at 4×, then at 1×, and checks the
+/// frame was really encoded.
+@MainActor
+final class RenderQualityLiveViewTests: XCTestCase {
+
+    private func drive(sampleCount: Int) throws -> (draws: Int, verts: Int) {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let r = MeshRenderer(device: device, sampleCount: sampleCount) else {
+            throw XCTSkip("no Metal device")
+        }
+        var model = LatticeWizardModel(settings: LatticeSettings())
+        model.stage = .lattice
+        r.setMesh(model.stageMesh())
+        r.quality = .all
+
+        let view = MTKView(frame: CGRect(x: 0, y: 0, width: 512, height: 384), device: device)
+        view.colorPixelFormat = MeshRenderer.colorFormat
+        view.depthStencilPixelFormat = MeshRenderer.depthFormat
+        view.sampleCount = r.sampleCount           // exactly what `configure` does
+        view.isPaused = true
+        view.enableSetNeedsDisplay = true
+        view.drawableSize = CGSize(width: 512, height: 384)
+        view.delegate = r
+        r.mtkView(view, drawableSizeWillChange: view.drawableSize)
+
+        guard view.currentRenderPassDescriptor != nil, view.currentDrawable != nil else {
+            throw XCTSkip("headless MTKView produced no drawable on this host")
+        }
+        // The real entry point, including present + commit.
+        r.draw(in: view)
+        return (r.lastFrameDrawCalls, r.lastFrameVertices)
+    }
+
+    func testTheShippingMTKViewPathEncodesAFullQualityFrameAt4xMSAA() throws {
+        let msaa = try drive(sampleCount: 4)
+        // .all on a mesh with no volumes = stage + body + G-buffer + SSAO + blur +
+        // footprint. The exact number matters less than that the frame was ENCODED:
+        // a mismatched sample count aborts before any draw is counted.
+        XCTAssertGreaterThan(msaa.draws, 4,
+                             "§3b: the live MTKView path encoded only \(msaa.draws) draws at "
+                             + "4× MSAA — the multisample pass did not run")
+        XCTAssertGreaterThan(msaa.verts, 0, "§3b: no geometry reached the live path")
+
+        // And 1× must still work — a device that cannot do 4× falls back to it.
+        let single = try drive(sampleCount: 1)
+        XCTAssertEqual(single.draws, msaa.draws,
+                       "the same frame must encode the same draws at 1× and 4× — only the "
+                       + "sample count differs")
+        XCTAssertEqual(single.verts, msaa.verts)
+        print("LIVE MTKView — 4×: \(msaa.draws) draws / \(msaa.verts) verts · "
+              + "1×: \(single.draws) draws / \(single.verts) verts")
+    }
+}
+#endif
