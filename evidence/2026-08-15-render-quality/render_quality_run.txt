@@ -1,0 +1,144 @@
+Test Suite 'Selected tests' started at 2026-08-15 00:19:46.696.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-08-15 00:19:46.697.
+Test Suite 'RenderQualityEvidenceGen' started at 2026-08-15 00:19:46.697.
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testAORadiusSweepOnHisContent]' started.
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testAORadiusSweepOnHisContent]' passed (12.520 seconds).
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testExportIsByteIdenticalAfterRendering]' started.
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testExportIsByteIdenticalAfterRendering]' passed (0.062 seconds).
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testRenderQualityOnHisContent]' started.
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testRenderQualityOnHisContent]' passed (35.130 seconds).
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testStateColoursAfterAOAndLighting]' started.
+Test Case '-[TopOptFlowsTests.RenderQualityEvidenceGen testStateColoursAfterAOAndLighting]' passed (0.445 seconds).
+Test Suite 'RenderQualityEvidenceGen' passed at 2026-08-15 00:20:34.855.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 48.157 (48.158) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-08-15 00:20:34.855.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 48.157 (48.158) seconds
+Test Suite 'Selected tests' passed at 2026-08-15 00:20:34.855.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 48.157 (48.159) seconds
+
+================================================================================
+§1(a) / R3 — SSAO RADIUS SWEPT ON HIS OWN CONTENT
+Radius = fraction × the part's SMALLEST bounding-box side. The number in each
+cell is the percentage of the PART'S OWN pixels whose shading AO moves by more
+than 4 levels — i.e. how much of the part the occlusion is actually reaching.
+================================================================================
+   fraction lattice (r mm)bracket (r mm)to (r mm)
+       0.06      51.3%   0.6      3.7%   1.2      5.7%   1.6
+       0.12      64.3%   1.3      4.7%   2.4      8.8%   3.1
+       0.24      58.6%   2.5      6.7%   4.8     15.6%   6.2
+       0.36      54.5%   3.8     10.1%   7.2     20.6%   9.4
+       0.50      49.2%   5.3     13.6%  10.0     25.4%  13.0
+       0.70      41.1%   7.4     17.6%  14.0     28.7%  18.2
+
+★ WHAT THIS TABLE SAYS, INCLUDING THE PART THAT REFUTES ME. The shipped fraction
+is 0.5. Coverage is governed by the ABSOLUTE radius,
+not by which bounding-box side the fraction is taken of — the rule was changed on
+a hypothesis that a fraction of the LARGEST side was mis-scaling his bracket, and
+this sweep does not support it: both rules land in the same place on his parts.
+And his bracket's low column is THE PART, not the tuning. A flat plate seen
+face-on has almost nothing to occlude itself with; coverage climbs monotonically
+to 17.6% at a 14 mm radius and never approaches the lattice's, so no radius fixes
+it. The two cases §1 actually names — the lattice and the TO result — are the two
+that move, and they move a lot. Past ~0.5 of the thickness the occlusion also
+stops describing the crevice BETWEEN two features and becomes a broad darkening
+of anything near anything, which is not the job §1 gives it.
+================================================================================
+R5 — WallMount_ShelfBracket.stl re-export FNV-1a: e43074dcdfd2c023 (identical before and after rendering)
+
+================================================================================
+RENDER QUALITY — GPU: Apple M2 Pro
+Frame time = MeshRenderer.measureFrameGPUSeconds(size: 1024, stage: true),
+minimum of 40 encoded frames. NOT a wall clock, NOT a pixel readback.
+
+★ ONE RENDERER PER MSAA SETTING, with `quality` flipped between measurements.
+A first cut built a fresh renderer for every row, and the table came back
+NON-MONOTONE — the world-lighting row, which adds a handful of ALU ops and no
+pass at all, measured FASTER than the shipped renderer. That was allocation and
+first-use cost being differenced, not shading. The `noise floor` row below
+re-measures the very first configuration LAST on the same renderer: any delta
+smaller than that number is this harness, not the feature.
+================================================================================
+
+== Lattice sample · 2 mm cell (his cell size) — 118920 triangles ==
+   part covers 44.6% of the 1024² frame (467717 px) — every Δ below is over THOSE pixels
+   config        ms      Δms vs before   mean|Δ| on part   % part moved   mean|Δ| off part
+   00_before   0.917        +0.000            0.00           0.0%             0.00
+   01_ao_low   1.379        +0.463           12.89          49.8%             0.00
+   02_ao   1.850        +0.933           12.90          49.2%             0.00
+   03_light   1.039        +0.122           52.21         100.0%             0.00
+   04_ao_light   1.954        +1.037           48.07          99.9%             0.00
+   05_msaa   2.043        +1.126           47.64          99.9%             0.12
+   06_edges   2.036        +1.120           49.36          99.9%             0.12
+   07_shadow   2.050        +1.133           49.36          99.9%             0.36
+   08_all   2.060        +1.144           49.08          99.9%             0.36
+   noise floor    0.031 ms  ← largest disagreement between two independent sweeps (on 08_all). Deltas below this are the harness.
+
+== His bracket · WallMount_ShelfBracket.stl — 2224 triangles ==
+   part covers 14.1% of the 1024² frame (147965 px) — every Δ below is over THOSE pixels
+   config        ms      Δms vs before   mean|Δ| on part   % part moved   mean|Δ| off part
+   00_before   0.096        +0.000            0.00           0.0%             0.00
+   01_ao_low   0.296        +0.200            2.50          13.4%             0.00
+   02_ao   0.342        +0.246            2.53          13.6%             0.00
+   03_light   0.098        +0.002           41.71         100.0%             0.00
+   04_ao_light   0.334        +0.238           42.76         100.0%             0.00
+   05_msaa   0.679        +0.582           42.75         100.0%             0.07
+   06_edges   0.687        +0.591           45.66         100.0%             0.07
+   07_shadow   0.661        +0.565           45.66         100.0%             0.28
+   08_all   0.686        +0.589           54.98         100.0%             0.27
+   noise floor    0.110 ms  ← largest disagreement between two independent sweeps (on 05_msaa). Deltas below this are the harness.
+
+== TO result on his bracket (topopt-cli run) — 34472 triangles ==
+   part covers 8.8% of the 1024² frame (92149 px) — every Δ below is over THOSE pixels
+   config        ms      Δms vs before   mean|Δ| on part   % part moved   mean|Δ| off part
+   00_before   0.337        +0.000            0.00           0.0%             0.00
+   01_ao_low   0.565        +0.228            5.44          25.5%             0.00
+   02_ao   0.472        +0.135            5.50          25.4%             0.00
+   03_light   0.348        +0.011           44.97          99.3%             0.00
+   04_ao_light   0.612        +0.275           45.06          99.2%             0.00
+   05_msaa   0.998        +0.661           44.87          99.1%             0.05
+   06_edges   0.992        +0.655           44.38          99.1%             0.05
+   07_shadow   1.043        +0.707           44.38          99.1%             0.26
+   08_all   1.006        +0.669           47.65          99.4%             0.25
+   noise floor    0.273 ms  ← largest disagreement between two independent sweeps (on 05_msaa). Deltas below this are the harness.
+
+================================================================================
+★ THE 44 ms IN THE TASK IS NOT A FRAME TIME.
+LatticeSetupWizard.swift:328 `latencyReadout` prints `lastLatencyMS`, which
+LatticeSetupWizard.swift:393 `rebuild()` measures with CFAbsoluteTimeGetCurrent
+around `model.stageMesh(progress:)` — a CPU mesh BUILD, once per settings change.
+Its own doc comment says so: "The measured build+upload time for the object on
+screen." Measured here on the same 2 mm-cell sample: 866 ms to build 118920 triangles — and
+118920 is EXACTLY the triangle count in the readout he quoted, so this is
+his picture and not one like it.
+Nothing in the app displays a frame time. The tables above are the renderer's
+cost; that number is the mesh builder's, and the two are not comparable.
+================================================================================
+
+================================================================================
+R7 / §4 — THE STATE COLOURS, AFTER AO AND LIGHTING (his bracket)
+Mean rendered RGB of each state's own pixels (pixels attributed by the
+renderer's OWN id pass, not by matching colours).
+================================================================================
+   anchor / fixed before (102,150,118)   after ( 91,112,111)
+   protected before ( 68, 93, 89)   after ( 54, 66, 66)
+   latticed · include before (132,124,159)   after ( 93, 90,110)
+   latticed · exclude before (111,105,142)   after (102, 99,136)
+
+   closest pair BEFORE    33.3  (latticed · include ↔ latticed · exclude)
+   closest pair AFTER     22.9  (anchor / fixed ↔ latticed · include)
+
+Not in this capture, and why:
+  • KEEP-OUT RED and the DESIGN BOX are translucent GLASS volumes drawn through
+    `ground_fragment` / `contact_fragment`. They receive no AO and no key light,
+    so §4's premise — "with real shading, less saturation still reads" — is not
+    true of them: taking saturation off an unlit volume only makes it weaker.
+    Their saturation is unchanged, and keep-out red is additionally the app's one
+    "forbidden" signal, which is a job hue is doing on purpose.
+  • The STRESS and DENSITY ramps are DATA, read against a printed legend. Their
+    hue is the measured value; desaturating them would not make them subtler, it
+    would make them wrong. `tintsAreState` is what keeps them out of this.
+================================================================================
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

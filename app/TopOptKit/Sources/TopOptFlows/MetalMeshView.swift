@@ -48,6 +48,48 @@ private struct ViewerUniforms {
     /// each rest vertex before the MVP. Appended AFTER mvp/normalMatrix so the id
     /// pass (which reads only that prefix) is unaffected.
     var flex: SIMD4<Float> = .zero
+    // ── render-quality (task 2026-08-15-render-quality) ───────────────────────
+    // Appended AFTER `flex`, again so every shader that reads only the earlier
+    // prefix (`id_vertex` reads `mvp`; `depth_vertex` reads mvp/modelView/flex) is
+    // byte-unaffected. §2: the light is fixed in the WORLD, so the fragment needs a
+    // WORLD normal and a WORLD position — the existing `normalMatrix` is view·model,
+    // which is exactly what made the old shading a headlight.
+    /// Model rotation only (upper-left 3×3 of `model`), padded — world-space normals.
+    var worldNormalMatrix: simd_float4x4 = matrix_identity_float4x4
+    /// The model matrix — world position, for the view vector and the rim/fresnel.
+    var model: simd_float4x4 = matrix_identity_float4x4
+    /// view·model — eye-space depth, for the §3d depth fade (and the G-buffer).
+    var modelView: simd_float4x4 = matrix_identity_float4x4
+    /// Camera world position (`.w` unused).
+    var eye: SIMD4<Float> = .zero
+}
+
+/// The body fragment's render-quality parameters (buffer 2) — must match
+/// `ShadeParams` in `viewerShaderSource`. Every strength is a plain 0…1 multiplier
+/// and 0 means OFF, so the BEFORE capture is the same shader with zeros rather than
+/// a second code path that could drift from the shipping one.
+private struct ShadeParams {
+    /// x = AO strength, y = edge strength, z = 1/aoTexWidth, w = 1/aoTexHeight.
+    var ao: SIMD4<Float> = .zero
+    /// x = depth-fade strength, y = fade-start eye-Z, z = fade-end eye-Z,
+    /// w = world-lighting flag (0 = the old view-locked headlight, 1 = §2's rig).
+    var fade: SIMD4<Float> = .zero
+    /// §4: x = STATE-tint desaturation, 0 = the tint exactly as authored. Applied in
+    /// the shader, after the protect-crosshatch colour test, so the desaturation
+    /// cannot break the exact-RGB protocol that test depends on.
+    var tint: SIMD4<Float> = .zero
+}
+
+/// The SSAO + edge pass uniforms (§1, §3a) — must match `AOUniforms` in
+/// `aoShaderSource`.
+private struct AOUniforms {
+    /// x = tan(fovX/2), y = tan(fovY/2), z = texture width, w = texture height.
+    var proj: SIMD4<Float>
+    /// x = radius (world mm), y = intensity, z = depth bias (world mm), w = sample count.
+    var params: SIMD4<Float>
+    /// x = edge depth threshold (relative to eye-Z), y = edge normal threshold,
+    /// z = the far sentinel that marks "no part here", w = unused.
+    var edge: SIMD4<Float>
 }
 
 // The load-path ribbon uniforms — must match `LPUniforms` in `loadPathShaderSource`.
@@ -67,16 +109,33 @@ private struct StageUniforms {
     var centerXZ: SIMD2<Float>   // floor-plane centre (fade origin)
     var spacing: Float           // minor grid spacing
     var fadeRadius: Float
-    var _pad: Float = 0          // 16-byte tail alignment
+    /// §3c contact shadow: the world-XZ rectangle the footprint texture covers —
+    /// (originX, originZ, sizeX, sizeZ). A zero size means no shadow, and the neutral
+    /// 1×1 texture is bound instead — the term is then an exact identity.
+    var shadowRect: SIMD4<Float> = .zero
+    /// §3c: shadow strength; 0 = off.
+    var shadowStrength: Float = 0
+    var _pad: SIMD3<Float> = .zero   // 16-byte tail alignment
 }
 
 // The depth-prepass uniforms — must match `DUniforms` in `depthPrepassShaderSource`.
 // `modelView` = view·model (eye-space transform); `flex.x` = the displacement scale (so the
 // captured depth tracks the visible, flexed part).
+/// The §3c footprint pass uniforms — must match `ShUniforms` in `shadowShaderSource`.
+private struct ShadowUniforms {
+    var model: simd_float4x4
+    var rect: SIMD4<Float>
+    var flex: SIMD4<Float>
+}
+
 private struct DepthPrepassUniforms {
     var mvp: simd_float4x4
     var modelView: simd_float4x4
     var flex: SIMD4<Float> = .zero
+    /// Appended for the G-buffer's normal attachment (render quality §1/§3a): the
+    /// view·model rotation, i.e. the SAME eye-space normal the body shader has always
+    /// used — so AO and the body are lit off one definition of "which way is out".
+    var normalMatrix: simd_float4x4 = matrix_identity_float4x4
 }
 
 // The contact-pass uniforms — must match `CUniforms` in `contactShaderSource`.
@@ -94,8 +153,14 @@ private let viewerShaderSource = """
 using namespace metal;
 
 struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; float4 tint [[attribute(2)]]; };
-struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight; };
-struct Uniforms { float4x4 mvp; float4x4 normalMatrix; float4 flex; };
+struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight;
+              float3 wnormal; float3 wpos; float eyeZ; float3 eyeWS [[flat]]; };
+struct Uniforms { float4x4 mvp; float4x4 normalMatrix; float4 flex;
+                  float4x4 worldNormalMatrix; float4x4 model; float4x4 modelView; float4 eye; };
+// Render-quality parameters (task 2026-08-15-render-quality). Every strength is a
+// 0…1 multiplier and ZERO IS OFF — the before/after captures run this one shader
+// with zeros rather than a second, drifting copy of it.
+struct ShadeParams { float4 ao; float4 fade; float4 tint; };
 
 // buffer(3) carries the per-vertex FEA displacement (mm); `flex.x` scales it
 // (exaggeration·amplitude). At scale 0 the buffer contributes nothing, so the
@@ -109,6 +174,12 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
     o.vnormal  = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
     o.tint = in.tint;
     o.mheight = in.position.y;   // model-space height (rest), for the M7.8 reveal scrub
+    // §2 / §3d: the WORLD normal + WORLD position (so the light can stay put while the
+    // camera orbits) and the EYE depth (so the far side of a dense lattice can recede).
+    o.wnormal = (u.worldNormalMatrix * float4(in.normal, 0.0)).xyz;
+    o.wpos    = (u.model * float4(p, 1.0)).xyz;
+    o.eyeZ    = -(u.modelView * float4(p, 1.0)).z;   // eye looks down −Z → positive into the screen
+    o.eyeWS   = u.eye.xyz;                           // flat: one value for the whole draw
     return o;
 }
 
@@ -120,28 +191,124 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 // (a == 1, blending off) is byte-identical to before while a translucent pipeline
 // (a < 1, premultiplied "over" blending) shows the flow through the walls.
 fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
-                                constant float& bodyAlpha [[buffer(1)]]) {
+                                constant float& bodyAlpha [[buffer(1)]],
+                                constant ShadeParams& sp [[buffer(2)]],
+                                texture2d<float, access::sample> aoTex [[texture(0)]]) {
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
         if (t > reveal.x) discard_fragment();
     }
     float3 N = normalize(in.vnormal);
-    // Neutral-clay: soft half-Lambert key + gentle hemisphere fill over a light
-    // base, faint cool fresnel. Front faces have N.z > 0 (eye looks down −Z).
+
+    // ── §1 AMBIENT OCCLUSION + §3a EDGES ────────────────────────────────────────
+    // ONE bilinear fetch of the RG texture the SSAO pass wrote: R = openness
+    // (1 = fully open, 0 = fully occluded), G = the screen-space silhouette/crease
+    // edge. Both strengths are zero in the BEFORE capture, which makes this whole
+    // block an identity.
+    constexpr sampler aoSmp(filter::linear, address::clamp_to_edge);
+    float2 aoUV = in.position.xy * float2(sp.ao.z, sp.ao.w);
+    float2 aoEdge = aoTex.sample(aoSmp, aoUV).rg;
+    float openness = mix(1.0, aoEdge.r, clamp(sp.ao.x, 0.0, 1.0));
+    // AO belongs on the AMBIENT term (that is what it models — how much of the sky
+    // a point can see). A fraction of it also rides the direct terms, which is not
+    // physical but is what makes a lattice's interior read as depth rather than noise.
+    float ambientAO = openness;
+    float directAO  = mix(1.0, openness, 0.45);
+
+    // ── §2 LIGHTING ─────────────────────────────────────────────────────────────
+    // fade.w == 0 → the ORIGINAL view-locked headlight AND the original tint
+    //   composite, kept verbatim: with the two strengths at zero this branch is
+    //   BYTE-IDENTICAL to the shipped shader, so the BEFORE capture is the shipped
+    //   picture rather than a reconstruction of it.
+    // fade.w == 1 → a WORLD-space key/fill/rim over a hemisphere ambient. World, not
+    //   eye: orbit the camera and the highlight stays on the same face of the part,
+    //   which is the defect §2(c) names.
     float3 clay = float3(0.78, 0.77, 0.75);
-    float3 key  = normalize(float3(0.30, 0.60, 0.72));
-    // NB: avoid the name `half` — a reserved 16-bit-float type in MSL that makes
-    // makeLibrary fail (silently blanking the whole stage).
-    float  keyWrap = clamp(dot(N, key) * 0.5 + 0.5, 0.0, 1.0);
-    float  fill = clamp(dot(N, float3(-0.45, -0.25, 0.40)) * 0.5 + 0.5, 0.0, 1.0);
-    float  lighting = 0.60 + 0.42 * keyWrap + 0.12 * fill;
-    float3 color = clay * lighting;
-    float  fres = pow(1.0 - clamp(N.z, 0.0, 1.0), 4.0) * 0.10;
-    color += float3(0.10, 0.12, 0.16) * fres;
-    // Selection tint: mix in the group colour (kept lit); tint.a encodes strength
-    // (active group stronger). No tint → tint.a == 0 → unchanged.
-    if (in.tint.a > 0.001) {
-        color = mix(color, in.tint.rgb * (0.55 + 0.45 * lighting), in.tint.a);
+    float3 color;
+    if (sp.fade.w > 0.5) {
+        float3 Nw = normalize(in.wnormal);
+        float3 V  = normalize(in.eyeWS - in.wpos);
+        // The viewer draws with cullMode .none over meshes of mixed winding, so a
+        // face pointing away from the eye is a BACK face, not an unlit one: flip it
+        // toward the viewer rather than letting it go black.
+        if (dot(Nw, V) < 0.0) { Nw = -Nw; }
+        // Hemisphere ambient (a two-colour analytic IBL): cool sky above, warm floor
+        // bounce below. This is §2(a)'s "small studio HDR" reduced to its two dominant
+        // spherical-harmonic terms — the part of an HDR that actually shapes a matte
+        // CAD surface — at one dot product instead of a cubemap fetch.
+        // ★ TUNED ON HIS BRACKET, NOT ON A SPHERE (§2d). The first values here were
+        // ambient 0.150→0.400 with a 0.42 fill, and on a sphere they were fine. On his
+        // bracket, from a camera looking at the side the key does NOT reach, the body
+        // came back at roughly 40% grey — legible, but darker than the flat headlight it
+        // replaced, and a user orbiting a part WILL find that side. A fixed world light
+        // means one side is always the shadow side; the fix is a stronger ambient floor
+        // and a stronger fill, not a light that follows the camera back.
+        float  up = Nw.y * 0.5 + 0.5;
+        float3 ambient = mix(float3(0.225, 0.212, 0.205), float3(0.470, 0.500, 0.550), up);
+        // KEY: high, front-left, in WORLD space.
+        float3 keyDir = normalize(float3(-0.38, 0.82, 0.42));
+        float  keyN   = clamp((dot(Nw, keyDir) + 0.18) / 1.18, 0.0, 1.0);   // wrapped a little
+        float3 keyTerm = float3(0.92, 0.90, 0.86) * keyN * 0.72;
+        // FILL: low, right, cool and weak — it opens the shadow side without flattening.
+        float3 fillDir = normalize(float3(0.72, 0.10, 0.55));
+        float  fillN   = clamp(dot(Nw, fillDir) * 0.5 + 0.5, 0.0, 1.0);
+        float3 fillTerm = float3(0.30, 0.35, 0.44) * fillN * 0.55;
+        float3 shade = ambient * ambientAO + (keyTerm + fillTerm) * directAO;
+        // RIM: a narrow grazing edge from behind — what separates one strut from the
+        // strut behind it. Fresnel-weighted, so it lives only on silhouettes.
+        float3 rimDir = normalize(float3(0.30, 0.30, -0.90));
+        float  fres = pow(1.0 - clamp(dot(Nw, V), 0.0, 1.0), 3.5);
+        float3 rim = float3(0.38, 0.44, 0.56) * fres
+                   * clamp(dot(Nw, rimDir) * 0.5 + 0.5, 0.0, 1.0) * 0.55 * directAO;
+        // Region/selection tint tints the ALBEDO, not the finished pixel. That one
+        // move is what §4 rests on: a tinted region now carries the SAME occlusion,
+        // key, fill and rim as bare clay, so it reads as a shaded solid instead of a
+        // flat colour laid over the part. tint.a == 0 → albedo is clay → unchanged.
+        //
+        // ★ §4 — AND THAT IS WHY THE SATURATION CAN COME DOWN. "The purple fucking
+        // colour should never happen again (same with the green)": those colours were
+        // as loud as they were because flat shading left HUE as the only channel that
+        // could say "this region is different". With occlusion and a real key/fill/rim
+        // the region already reads as a shaded solid, so the hue only has to IDENTIFY
+        // it, not carry it. `sp.tint.x` is how much saturation is removed; the result is
+        // also lifted back toward clay's brightness so a deep indigo becomes a muted
+        // slate rather than a dark stain on an otherwise light material.
+        float3 tintRGB = in.tint.rgb;
+        if (sp.tint.x > 0.001) {
+            const float3 LUMA = float3(0.2126, 0.7152, 0.0722);
+            float tl = dot(tintRGB, LUMA);
+            tintRGB = mix(float3(tl), tintRGB, clamp(1.0 - sp.tint.x, 0.0, 1.0));
+            float cl = dot(clay, LUMA);
+            tintRGB *= mix(1.0, cl / max(tl, 1e-3), clamp(sp.tint.y, 0.0, 1.0));
+            tintRGB = clamp(tintRGB, 0.0, 1.0);
+        }
+        float3 albedo = mix(clay, tintRGB, clamp(in.tint.a, 0.0, 1.0));
+        color = albedo * shade + rim;
+    } else {
+        // ORIGINAL (before): soft half-Lambert key + hemisphere fill in EYE space.
+        float3 key  = normalize(float3(0.30, 0.60, 0.72));
+        // NB: avoid the name `half` — a reserved 16-bit-float type in MSL that makes
+        // makeLibrary fail (silently blanking the whole stage).
+        float  keyWrap = clamp(dot(N, key) * 0.5 + 0.5, 0.0, 1.0);
+        float  fill = clamp(dot(N, float3(-0.45, -0.25, 0.40)) * 0.5 + 0.5, 0.0, 1.0);
+        float  lighting = 0.60 + 0.42 * keyWrap + 0.12 * fill;
+        color = clay * lighting * (ambientAO * 0.55 + directAO * 0.45);
+        float  fres = pow(1.0 - clamp(N.z, 0.0, 1.0), 4.0) * 0.10;
+        color += float3(0.10, 0.12, 0.16) * fres;
+        if (in.tint.a > 0.001) {
+            color = mix(color, in.tint.rgb * (0.55 + 0.45 * lighting), in.tint.a);
+        }
+    }
+    // §3a: the dark crease/silhouette line, laid on last so it survives the tint.
+    color *= mix(1.0, 0.30, clamp(aoEdge.g * sp.ao.y, 0.0, 1.0));
+    // §3d DEPTH FADE: on a dense lattice the far side reads THROUGH the near side and
+    // the whole part becomes one texture. Recede the far material toward the stage's
+    // own backdrop colour so the two separate. Strength is capped by the caller
+    // (`Self.depthFadeStrength`) well below opaque — this is a depth CUE, never fog:
+    // at full fade the material is still 55% itself, so no region is ever hidden.
+    if (sp.fade.x > 0.001) {
+        float t = clamp((in.eyeZ - sp.fade.y) / max(sp.fade.z - sp.fade.y, 1e-4), 0.0, 1.0);
+        color = mix(color, float3(0.055, 0.070, 0.110), t * clamp(sp.fade.x, 0.0, 1.0));
     }
     // Handoff 124 — Face protection crosshatch. A protected face carries the UNIQUE
     // mint-teal PROTECT_RGB (WorkspacePlaceholder.protectFaceRGB); recognise it by
@@ -221,13 +388,23 @@ fragment float4 ground_fragment(GOut in [[stage_in]]) {
 // Reuses the mesh's position+flex buffers so the captured depth matches the visible part EXACTLY
 // (same mvp, same flex displacement). Runs only on a redraw when a translucent volume is present
 // (gated in `encode`) — STATIC, no idle-time cost (the 108 rule).
+//
+// ★ RENDER QUALITY (task 2026-08-15-render-quality): this pass is now also the app's
+// G-BUFFER. It gained a SECOND colour attachment — the eye-space NORMAL — because
+// SSAO (§1) and the crease/silhouette edge (§3a) both need a normal per pixel, and
+// re-rasterising the part a third time to get one would double the geometry cost of
+// the feature. Attachment 0 is UNCHANGED (same format, same eye-Z, same sentinel),
+// so the contact pass below reads exactly the bytes it always did. It now also runs
+// whenever AO/edges are on, not only when a translucent volume is present.
 private let depthPrepassShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
 
-struct DIn  { float3 position [[attribute(0)]]; };
-struct DOut { float4 position [[position]]; float eyeZ; };
-struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; };
+struct DIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; };
+struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; };
+struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; float4x4 normalMatrix; };
+struct GBuf { float  eyeZ    [[color(0)]];      // R32Float — unchanged, the contact pass reads this
+              float4 enormal [[color(1)]]; };   // RGBA16Float — eye-space normal (xyz), w unused
 
 vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]],
                          constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
@@ -235,10 +412,201 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
     DOut o;
     o.position = u.mvp * float4(p, 1.0);
     o.eyeZ = -(u.modelView * float4(p, 1.0)).z;   // eye looks down −Z → positive into the screen
+    o.enormal = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
     return o;
 }
 
-fragment float depth_fragment(DOut in [[stage_in]]) { return in.eyeZ; }
+fragment GBuf depth_fragment(DOut in [[stage_in]]) {
+    GBuf o;
+    o.eyeZ = in.eyeZ;
+    // Face the normal toward the eye. The mesh draws with cullMode .none, so a
+    // back-facing triangle's raw normal points away and the AO hemisphere would be
+    // built on the wrong side of the surface — every sample behind the wall, every
+    // pixel reported fully occluded. Eye space makes the test one sign check.
+    float3 n = normalize(in.enormal);
+    if (n.z < 0.0) { n = -n; }
+    o.enormal = float4(n, 0.0);
+    return o;
+}
+"""
+
+// ★ §3c CONTACT SHADOW — the part's own FOOTPRINT, not an ellipse.
+// One orthographic pass straight down onto the stage floor's XZ rectangle, writing
+// 1.0 wherever the part covers it. It is re-rendered only when the mesh, the settle
+// rotation or the floor rectangle changes — never on a camera move and never on an
+// idle frame (the 108 rule), because a drop shadow from directly above does not
+// depend on where the camera is. The softness comes from the target's low resolution
+// plus a 3×3 tap in `stage_fragment`; there is no blur pass.
+private let shadowShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct ShIn  { float3 position [[attribute(0)]]; };
+struct ShOut { float4 position [[position]]; };
+// `rect` = (originX, originZ, sizeX, sizeZ) — the same world-XZ rectangle
+// `stage_fragment` maps its floor hit into, so the two cannot disagree.
+struct ShUniforms { float4x4 model; float4 rect; float4 flex; };
+
+vertex ShOut shadow_vertex(ShIn in [[stage_in]], constant ShUniforms& u [[buffer(1)]],
+                           constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
+    float3 p = in.position + u.flex.x * float3(disp[vid]);   // match viewer_vertex's flex
+    float3 w = (u.model * float4(p, 1.0)).xyz;
+    float2 uv = (w.xz - u.rect.xy) / max(u.rect.zw, float2(1e-6));
+    ShOut o;
+    // uv.y = 0 must land on texture ROW 0, which is NDC y = +1.
+    o.position = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
+    return o;
+}
+
+fragment float shadow_fragment(ShOut in [[stage_in]]) { return 1.0; }
+"""
+
+// ★ §1 SCREEN-SPACE AMBIENT OCCLUSION + §3a EDGES, in ONE full-screen pass over the
+// G-buffer above. Both outputs are per-pixel screen-space quantities derived from the
+// same two texture reads, so computing them together costs one pass instead of two:
+//
+//   R = OPENNESS in [0,1]. 1 = the point sees the whole hemisphere, 0 = fully closed
+//       in. Classic hemisphere-sampled SSAO: reconstruct the eye-space position from
+//       (pixel, eye-Z), throw `N` samples into the hemisphere around the eye-space
+//       normal, and count how many land BEHIND the depth buffer. On a lattice that is
+//       the answer everywhere — which is the point: this is the term that turns "flat
+//       grey struts with nothing between them" into structure.
+//
+//   G = EDGE in [0,1]. A depth-and-normal discontinuity: a large relative jump in
+//       eye-Z (a silhouette, incl. against the empty background sentinel) or a sharp
+//       normal turn (a crease). Deliberately narrow and applied at only 70% darkening
+//       by the body shader — §3a says subtle, not a cartoon outline.
+//
+// The per-pixel kernel rotation is INTERLEAVED GRADIENT NOISE, not a random texture:
+// one fract() instead of a texture fetch and a bind, and its 3×3 spatial period is
+// exactly what the blur below is sized to remove.
+private let aoShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct AOUniforms { float4 proj; float4 params; float4 edge; };
+struct AOOut { float4 pos [[position]]; };
+
+vertex AOOut ao_vertex(uint vid [[vertex_id]]) {
+    float2 p = float2(float((vid << 1) & 2), float(vid & 2));   // (0,0)(2,0)(0,2)
+    AOOut o;
+    o.pos = float4(p * 2.0 - 1.0, 0.0, 1.0);
+    return o;
+}
+
+// Eye-space position of the pixel at fragment coord `px` holding eye depth `z`.
+// (Fragment coords run y-DOWN and match texture rows exactly, which is why every
+// read here is an integer `read()` and there is not a single uv flip in this file.)
+static float3 eyeFromPixel(float2 px, float z, float4 proj) {
+    float2 uv  = (px + 0.5) / float2(proj.z, proj.w);
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    return float3(ndc.x * proj.x * z, ndc.y * proj.y * z, -z);
+}
+
+// The inverse: where an eye-space point lands, in fragment coords.
+static float2 pixelFromEye(float3 e, float4 proj) {
+    float z = max(-e.z, 1e-6);
+    float2 ndc = float2(e.x / (proj.x * z), e.y / (proj.y * z));
+    return float2((ndc.x * 0.5 + 0.5) * proj.z, (0.5 - ndc.y * 0.5) * proj.w);
+}
+
+fragment float4 ao_fragment(AOOut in [[stage_in]], constant AOUniforms& u [[buffer(0)]],
+                            texture2d<float, access::read> depthTex [[texture(0)]],
+                            texture2d<float, access::read> normalTex [[texture(1)]]) {
+    int W = int(u.proj.z), H = int(u.proj.w);
+    int2 px = int2(in.pos.xy);
+    float z = depthTex.read(uint2(px)).x;
+    // Background: no part at this pixel. Fully open, no edge — and NO sample loop,
+    // so the cost of this pass scales with how much of the screen the part covers.
+    if (z >= u.edge.z) { return float4(1.0, 0.0, 0.0, 1.0); }
+
+    float3 N = normalize(normalTex.read(uint2(px)).xyz);
+    float3 P = eyeFromPixel(float2(px), z, u.proj);
+
+    // ── R: ambient occlusion ────────────────────────────────────────────────────
+    float radius = u.params.x, intensity = u.params.y;
+    // The bias grows with depth: at 1 px the depth buffer's own quantisation grows
+    // with z too, and a constant bias that is right up close self-occludes far away.
+    float bias = max(u.params.z, z * 0.0015);
+    int   nSamples = int(u.params.w);
+    float ign = fract(52.9829189 * fract(dot(float2(px), float2(0.06711056, 0.00583715))));
+    float ang0 = ign * 6.2831853;
+    // A tangent frame around N — the hemisphere the samples are thrown into.
+    float3 up = (abs(N.z) < 0.9) ? float3(0.0, 0.0, 1.0) : float3(1.0, 0.0, 0.0);
+    float3 T1 = normalize(cross(up, N));
+    float3 T2 = cross(N, T1);
+    float occ = 0.0;
+    for (int i = 0; i < nSamples; ++i) {
+        float t = (float(i) + 0.5) / float(nSamples);
+        float r = sqrt(t);                       // cosine-weighted over the disc
+        float a = ang0 + float(i) * 2.3999632;   // golden angle — an even spiral at any N
+        float3 dir = T1 * (cos(a) * r) + T2 * (sin(a) * r) + N * sqrt(max(0.0, 1.0 - r * r));
+        // Vary the sample DISTANCE as well as the direction, so one kernel resolves
+        // both the tight crevice between two struts and the open bay beside them.
+        float3 S = P + dir * (radius * (0.30 + 0.70 * t));
+        float2 sp = pixelFromEye(S, u.proj);
+        if (sp.x < 0.0 || sp.y < 0.0 || sp.x >= float(W) || sp.y >= float(H)) { continue; }
+        float sceneZ = depthTex.read(uint2(sp)).x;
+        if (sceneZ >= u.edge.z) { continue; }    // sample fell on empty background
+        // Occluded when the surface at that pixel is NEARER than the sample point.
+        if (sceneZ < -S.z - bias) {
+            // Range check: an occluder far outside the radius (a foreground object,
+            // not a neighbouring strut) must not cast AO through empty space.
+            occ += clamp(radius / max(abs(z - sceneZ), 1e-5), 0.0, 1.0);
+        }
+    }
+    float openness = clamp(1.0 - (occ / float(nSamples)) * intensity, 0.0, 1.0);
+
+    // ── G: silhouette + crease edge ─────────────────────────────────────────────
+    // Four-neighbour depth and normal differences. The depth threshold is RELATIVE
+    // to eye-Z, so one setting holds from a 20 mm cell to a 200 mm bracket and does
+    // not thicken as the camera pulls back.
+    float dMax = 0.0, nMin = 1.0;
+    for (int k = 0; k < 4; ++k) {
+        int2 o = (k == 0) ? int2(1, 0) : (k == 1) ? int2(-1, 0) : (k == 2) ? int2(0, 1) : int2(0, -1);
+        int2 q = clamp(px + o, int2(0), int2(W - 1, H - 1));
+        float qz = depthTex.read(uint2(q)).x;
+        // A neighbour on the background is a SILHOUETTE: the strongest edge there is.
+        if (qz >= u.edge.z) { dMax = max(dMax, z * 4.0); continue; }
+        dMax = max(dMax, abs(qz - z));
+        nMin = min(nMin, dot(N, normalize(normalTex.read(uint2(q)).xyz)));
+    }
+    float depthEdge  = smoothstep(z * u.edge.x, z * u.edge.x * 3.0, dMax);
+    float normalEdge = smoothstep(u.edge.y, u.edge.y * 0.35, nMin);   // nMin FALLS as the crease sharpens
+    float edge = clamp(max(depthEdge, normalEdge), 0.0, 1.0);
+
+    return float4(openness, edge, 0.0, 1.0);
+}
+
+// The AO blur. Raw SSAO is noisy by construction — `nSamples` directions cannot
+// resolve a hemisphere — and the interleaved-gradient rotation puts that noise on a
+// 3×3 screen period, so a 4×4 box average removes essentially all of it. It is
+// DEPTH-AWARE: a neighbour more than a few percent of eye-Z away is a different
+// surface and is dropped, which is what stops AO bleeding across a silhouette. The
+// EDGE channel is passed through UNTOUCHED — blurring it is how a crisp crease line
+// becomes a grey smear.
+fragment float4 aoblur_fragment(AOOut in [[stage_in]], constant AOUniforms& u [[buffer(0)]],
+                                texture2d<float, access::read> aoTex [[texture(0)]],
+                                texture2d<float, access::read> depthTex [[texture(1)]]) {
+    int W = int(u.proj.z), H = int(u.proj.w);
+    int2 px = int2(in.pos.xy);
+    float2 c = aoTex.read(uint2(px)).rg;
+    float z = depthTex.read(uint2(px)).x;
+    if (z >= u.edge.z) { return float4(c.r, c.g, 0.0, 1.0); }
+    float sum = 0.0, wsum = 0.0;
+    for (int dy = -2; dy <= 1; ++dy) {
+        for (int dx = -2; dx <= 1; ++dx) {
+            int2 q = clamp(px + int2(dx, dy), int2(0), int2(W - 1, H - 1));
+            float qz = depthTex.read(uint2(q)).x;
+            if (qz >= u.edge.z) { continue; }
+            if (abs(qz - z) > z * 0.03) { continue; }
+            sum += aoTex.read(uint2(q)).r;
+            wsum += 1.0;
+        }
+    }
+    float ao = (wsum > 0.0) ? (sum / wsum) : c.r;
+    return float4(ao, c.g, 0.0, 1.0);
+}
 """
 
 // The CONTACT pass (device round 3, items 7+8, parts b+c): ONE shader variant shared by BOTH the
@@ -382,6 +750,8 @@ struct StageUniforms {
     float2   centerXZ;  // floor plane centre (x,z) — the fade origin
     float    spacing;   // minor grid spacing (world units)
     float    fadeRadius;// world distance at which the grid fully fades out
+    float4   shadowRect;     // §3c — (originX, originZ, sizeX, sizeZ) in world XZ
+    float    shadowStrength; // §3c — 0 = off
 };
 
 struct SOut { float4 pos [[position]]; float2 uv; };
@@ -400,7 +770,8 @@ static float gridMask(float2 coord) {
     return 1.0 - min(min(g.x, g.y), 1.0);
 }
 
-fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]]) {
+fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]],
+                               texture2d<float, access::sample> shadowTex [[texture(0)]]) {
     float2 ndc = in.uv;
 
     // Backdrop: a deep charcoal-blue vertical gradient (darker up top, a touch lighter toward
@@ -440,6 +811,39 @@ fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [
             float3 gridCol = float3(0.34, 0.52, 0.80);
             float a = (minor * 0.16 + major * 0.34) * fade * graze;
             col = mix(col, gridCol, clamp(a, 0.0, 1.0));
+
+            // ★ §3c CONTACT SHADOW. Right now the part FLOATS. `shadowTex` is the
+            // part's own footprint — the silhouette it casts straight down, rendered
+            // orthographically from above into a small R8 target — so this is the real
+            // outline of a bracket or a lattice block, not an ellipse standing in for
+            // one. Nine taps spread over one texel of the (deliberately low-resolution)
+            // footprint give the soft edge; the resolution IS the blur kernel, which is
+            // why there is no separate blur pass.
+            //
+            // HONESTY, and it is in the doc too: this is a DROP shadow from directly
+            // above, not a shadow map from the key light, and its softness does not grow
+            // with height above the floor — a part held 100 mm up casts the same edge as
+            // one resting on it. For grounding the part, which is what §3c asks for, that
+            // is the whole of what is needed; for a light-accurate shadow it is not.
+            if (U.shadowStrength > 0.001 && U.shadowRect.z > 0.0 && U.shadowRect.w > 0.0) {
+                float2 suv = (xz - U.shadowRect.xy) / U.shadowRect.zw;
+                if (all(suv > 0.0) && all(suv < 1.0)) {
+                    constexpr sampler shSmp(filter::linear, address::clamp_to_edge);
+                    float2 texel = 1.0 / float2(shadowTex.get_width(), shadowTex.get_height());
+                    float occ = 0.0;
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            occ += shadowTex.sample(shSmp, suv + float2(dx, dy) * texel).r;
+                        }
+                    }
+                    occ /= 9.0;
+                    // Fade the shadow out toward the edge of its own rectangle so the
+                    // footprint's border can never read as a hard square on the floor.
+                    float2 e = min(suv, 1.0 - suv);
+                    float border = smoothstep(0.0, 0.06, min(e.x, e.y));
+                    col *= 1.0 - clamp(occ * U.shadowStrength * border * graze, 0.0, 0.85);
+                }
+            }
         }
     }
 
@@ -573,6 +977,180 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// re-created only when the drawable size changes — so a steady camera reuses them.
     private var sceneDepthColorTex: MTLTexture?
     private var sceneDepthZTex: MTLTexture?
+
+    // ── RENDER QUALITY (task 2026-08-15-render-quality) ───────────────────────────
+    /// The G-buffer's eye-space NORMAL attachment (§1/§3a), sized with the depth pair.
+    private var sceneNormalTex: MTLTexture?
+    /// The SSAO+edge target (RG: openness, edge) and the blur's destination. Two
+    /// textures, ping-ponged: a fragment shader may not read the attachment it writes.
+    private var aoRawTex: MTLTexture?
+    private var aoBlurTex: MTLTexture?
+    /// A 1×1 "fully open, no edge" texture. The body fragment DECLARES the AO texture,
+    /// so something must always be bound — Metal drops the draw otherwise (the same
+    /// missing-binding trap `loadpath_fragment` and `contact_fragment` document). This
+    /// is what it gets when AO is off, and it makes that path an exact identity.
+    private var aoNeutralTex: MTLTexture?
+    /// The SSAO pass (§1) and its depth-aware blur. Optional: a nil disables AO and
+    /// edges and the body falls back to the neutral texture — everything still renders.
+    private let aoPipeline: MTLRenderPipelineState?
+    private let aoBlurPipeline: MTLRenderPipelineState?
+    /// True on a real GPU when both AO pipelines built. A test pins this so a shader
+    /// typo fails loudly instead of silently reverting to the flat-grey look.
+    var aoPipelinesDidBuild: Bool { aoPipeline != nil && aoBlurPipeline != nil }
+    /// True on a real GPU when the §3c footprint pipeline built — same reason.
+    var shadowPipelineDidBuild: Bool { shadowPipeline != nil }
+    /// The exact §3c footprint MSL the app ships.
+    static var shadowShaderSourceForTesting: String { shadowShaderSource }
+    /// The exact SSAO MSL the app ships, exposed so a headless test compiles it.
+    static var aoShaderSourceForTesting: String { aoShaderSource }
+
+    /// How much of the render-quality work runs. Every member defaults ON in
+    /// production; the evidence generator turns them off ONE AT A TIME to capture a
+    /// before/after pair per item through the SHIPPING shader (§ R1) rather than a
+    /// second copy of it.
+    struct Quality: OptionSet, Sendable {
+        let rawValue: Int
+        /// §1 — screen-space ambient occlusion.
+        static let ambientOcclusion = Quality(rawValue: 1 << 0)
+        /// §2 — the world-space key/fill/rim rig (off ⇒ the original headlight).
+        static let worldLighting    = Quality(rawValue: 1 << 1)
+        /// §3a — screen-space silhouette + crease lines.
+        static let edges            = Quality(rawValue: 1 << 2)
+        /// §3c — the soft contact shadow under the part on the stage floor.
+        static let contactShadow    = Quality(rawValue: 1 << 3)
+        /// §3d — the far side of dense geometry recedes.
+        static let depthFade        = Quality(rawValue: 1 << 4)
+        static let none: Quality = []
+        static let all: Quality = [.ambientOcclusion, .worldLighting, .edges,
+                                   .contactShadow, .depthFade]
+    }
+    /// Production is `.all`. Set to `.none` for the "before" capture.
+    var quality: Quality = .all
+
+    /// SSAO sample count. §1(b) asks for the cost at a LOW and a HIGH setting rather
+    /// than one picked silently, so both are named here and both are measured in the
+    /// evidence. `high` is production.
+    enum AOQuality: Int, Sendable { case low = 8, high = 16 }
+    var aoQuality: AOQuality = .high
+
+    /// ★ SSAO RADIUS — SWEPT ON HIS OWN CONTENT (§1a, R3), AND THE SWEEP REFUTED THE
+    /// REASON I CHANGED THE RULE.
+    ///
+    /// The hypothesis was that a fraction of the LARGEST bounding-box side mis-scales an
+    /// elongated part: his bracket's largest side is the 200 mm arm while the geometry
+    /// that can occlude itself is an order of magnitude smaller, so AO reached only 15%
+    /// of its pixels. `testAORadiusSweepOnHisContent` swept the radius across all three
+    /// of his parts and the story did not hold up. What governs coverage is the ABSOLUTE
+    /// radius, and both rules land in the same place on his parts:
+    ///
+    ///     radius (mm)   lattice   bracket   TO result      ← % of the PART's pixels
+    ///        0.6 / 1.2 / 1.6       51.3%      3.7%    5.7%    whose shading AO moves
+    ///        1.3 / 2.4 / 3.1       64.3%      4.7%    8.8%
+    ///        3.8 / 7.2 / 9.4       54.5%     10.1%   20.6%
+    ///        5.3 / 10.0 / 13.0     49.2%     13.6%   25.4%
+    ///        7.4 / 14.0 / 18.2     41.1%     17.6%   28.7%
+    ///
+    /// ★ AND HIS BRACKET'S LOW NUMBER IS NOT A TUNING FAILURE — IT IS THE PART. A
+    /// flat plate seen face-on has almost nothing to occlude itself with; AO darkens
+    /// where geometry crowds itself, and on that bracket most of the visible area is
+    /// open plate. No radius fixes that, and the sweep shows it: coverage climbs
+    /// monotonically to 17.6% at a 14 mm radius and never approaches the lattice's.
+    /// The two cases §1 actually names — the lattice and the TO result — are at 49%
+    /// and 25% at the shipped setting, and those are the pictures that change.
+    ///
+    /// The rule stays a fraction of the SMALLEST bounding-box side, not because the
+    /// sweep preferred it (it did not distinguish them) but because it degrades more
+    /// gracefully on a part his three do not cover: a long thin rod, where a fraction of
+    /// the 500 mm length would throw the kernel a hundred times past every feature.
+    static let aoRadiusFraction: Float = 0.50
+    /// A per-renderer override in world mm, for that sweep. Nil in production — the
+    /// rule above decides.
+    var aoRadiusOverrideMM: Float?
+    /// SSAO strength on the ambient term. Above ~1.5 the crevices crush to black.
+    static let aoIntensity: Float = 1.15
+    /// How much of the AO reaches the body — the body shader's `sp.ao.x`.
+    static let aoStrength: Float = 0.90
+    /// Edge darkening (§3a). Subtle: the line multiplies the pixel by 0.30 at full
+    /// strength, and this scales that.
+    static let edgeStrength: Float = 0.55
+    /// Edge thresholds: depth jump RELATIVE to eye-Z, and the normal dot below which a
+    /// crease starts to read (cos 35° ≈ 0.82).
+    static let edgeDepthThreshold: Float = 0.0035
+    static let edgeNormalThreshold: Float = 0.82
+    /// §3d depth fade. Capped WELL below opaque on purpose — at the far plane the
+    /// material is still 55% itself, so this can never hide a region the user needs.
+    static let depthFadeStrength: Float = 0.45
+    /// Where the fade starts, as a fraction of the part's eye-space depth span. The
+    /// near HALF of the part is untouched; only the far half recedes.
+    static let depthFadeStart: Float = 0.45
+
+    /// MSAA sample count for the on-screen and offscreen colour passes (§3b). 4× is
+    /// the Apple-GPU sweet spot (tile-memory resolve, no extra bandwidth off-chip).
+    /// An INIT parameter, not a static, because the pipelines bake it — so the
+    /// evidence generator builds one renderer at 1× and one at 4× and captures both.
+    let sampleCount: Int
+    /// The MSAA colour target (nil at 1×), re-created on a size change.
+    private var msaaColorTex: MTLTexture?
+
+    /// §3c: the part's floor footprint and the pipeline that draws it. Optional — a
+    /// nil just means no contact shadow; the stage still draws.
+    private let shadowPipeline: MTLRenderPipelineState?
+    private var shadowTex: MTLTexture?
+    /// A 1×1 zero texture — bound to the stage draw whenever there is no shadow, for
+    /// the same missing-binding reason `aoNeutralTex` exists.
+    private var shadowNeutralTex: MTLTexture?
+    /// What the cached footprint was rendered FOR. The shadow is re-rendered only when
+    /// this changes — a camera orbit does not move a drop shadow, so it must not
+    /// re-render one (the 108 rule).
+    private var shadowKey: ShadowKey?
+    private struct ShadowKey: Equatable {
+        let mesh: ViewerMeshSignature?
+        let rotation: SIMD4<Float>
+        let rect: SIMD4<Float>
+        let flex: Float
+    }
+    /// The world-XZ rectangle the footprint covers, and its strength. Nil until a
+    /// footprint has been rendered this frame.
+    private var shadowRect: SIMD4<Float> = .zero
+    /// The footprint target's resolution. Low ON PURPOSE: the texel size IS the blur
+    /// radius of the 3×3 tap in `stage_fragment`, so a bigger target would give a
+    /// HARDER shadow, not a better one.
+    static let shadowResolution = 192
+    /// §3c strength — how dark the floor goes directly under the part.
+    static let contactShadowStrength: Float = 0.55
+
+    // ── §4 REGION STATE COLOURS ───────────────────────────────────────────────────
+    /// How much saturation comes off a STATE tint on its way to being geometry, and
+    /// how far the result is lifted back toward clay's brightness. Tuned on the
+    /// all-states capture in evidence/2026-08-15-render-quality (R7), AFTER §1 and §2
+    /// landed — which is the order §4 demands, because how little saturation still
+    /// reads is a question you cannot answer under flat shading.
+    /// §4: the two VOLUME colours, named here rather than written as literals at the
+    /// call site — so the all-states capture (R7) shows the shipping colours and cannot
+    /// drift from them. They are NOT desaturated with the state tints, and the reason
+    /// is in the capture's own printout: these are unlit translucent glass, drawn
+    /// through `ground_fragment`/`contact_fragment`, so §4's premise ("with real
+    /// shading, less saturation still reads") is simply not true of them. Keep-out red
+    /// is additionally the app's one "forbidden" signal.
+    static let designBoxColor = SIMD4<Float>(0.30, 0.78, 0.55, 0.85)
+    static let keepOutColor = SIMD4<Float>(0.95, 0.42, 0.38, 0.9)
+    static let stateTintDesaturation: Float = 0.50
+    static let stateTintBrightnessLift: Float = 0.55
+    /// ★ WHY THIS IS IN THE RENDERER AND NOT IN THE COLOUR TOKENS. §4(c): geometry
+    /// tints only — no button, no chip, no legend swatch. `LatticeDensityProxy
+    /// .densityColor`, `DS.Color.groupPalette` and `ForceModel.anchorColor` are all
+    /// read by SwiftUI chips and legends as well as by the mesh, so editing any of them
+    /// would change controls this task must not touch. Desaturating HERE — at the one
+    /// point in the app where a colour becomes a triangle's albedo — reaches every
+    /// state tint and reaches nothing else.
+    ///
+    /// ★ AND WHY IT IS SCOPED TO *STATE* TINTS. A continuous DATA ramp (the stress
+    /// heatmap, the density field) encodes a measured value in its hue and is read
+    /// against a printed legend. Desaturating that would not make it subtler, it would
+    /// make it WRONG — and the legend beside it would no longer be the scale on the
+    /// part. `tintsAreState` is set by whichever setter last filled the tint buffer, so
+    /// the distinction is made where it is actually known.
+    private var tintsAreState = false
     /// Whether the contact treatment (parts b+c) runs. Always true in production; a test flips it
     /// off to capture the BEFORE (plain depth-biased faces) against the AFTER for the same geometry.
     var contactShadingEnabled = true
@@ -645,6 +1223,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The depth-prepass colour target (items 7+8, parts b+c): one float per pixel = the opaque
     /// part's eye-space depth, read by the contact fragment.
     static let sceneDepthFormat: MTLPixelFormat = .r32Float
+    /// The G-buffer's second attachment: the eye-space normal (render quality §1/§3a).
+    static let gbufferNormalFormat: MTLPixelFormat = .rgba16Float
+    /// The SSAO+edge target: R = openness, G = edge. 8 bits each is plenty for a term
+    /// that is blurred and then multiplied into a shade — and it is a quarter of the
+    /// bandwidth of a float target read once per body fragment.
+    static let aoFormat: MTLPixelFormat = .rg8Unorm
+    /// The §3c footprint target: one coverage byte per floor texel.
+    static let shadowFormat: MTLPixelFormat = .r8Unorm
     /// The eye-space depth written where NO part covers a pixel — large enough that the contact
     /// read sees "nothing behind" (no line, full brightness) for a volume floating in free space.
     static let sceneDepthFar: Float = 1e30
@@ -662,7 +1248,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     static var lastInitError: String?
 
-    init?(device: MTLDevice) {
+    /// - Parameter sampleCount: MSAA samples for the colour passes (§3b). 4 in
+    ///   production; the evidence generator passes 1 to capture the aliased "before".
+    init?(device: MTLDevice, sampleCount: Int = 4) {
+        let msaa = max(1, sampleCount)
+        // A device that cannot do the asked-for sample count silently falls back to
+        // 1× rather than failing to build — the picture is then aliased, not absent.
+        let raster = device.supportsTextureSampleCount(msaa) ? msaa : 1
         guard let queue = device.makeCommandQueue() else {
             Self.lastInitError = "makeCommandQueue nil"; return nil
         }
@@ -698,6 +1290,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         pd.vertexDescriptor = vd
         pd.colorAttachments[0].pixelFormat = Self.colorFormat
         pd.depthAttachmentPixelFormat = Self.depthFormat
+        pd.rasterSampleCount = raster            // §3b MSAA
 
         let dsd = MTLDepthStencilDescriptor()
         dsd.depthCompareFunction = .less
@@ -762,6 +1355,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             gpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             gpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
             gpd.depthAttachmentPixelFormat = Self.depthFormat
+            gpd.rasterSampleCount = raster       // §3b MSAA
             groundPipe = try? device.makeRenderPipelineState(descriptor: gpd)
         }
         // CAD-stage backdrop pipeline (item 9, optional: nil → the flat clear colour). No vertex
@@ -776,6 +1370,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             spd.fragmentFunction = sff
             spd.colorAttachments[0].pixelFormat = Self.colorFormat
             spd.depthAttachmentPixelFormat = Self.depthFormat
+            spd.rasterSampleCount = raster       // §3b MSAA
             stagePipe = try? device.makeRenderPipelineState(descriptor: spd)
         }
         // Depth-prepass pipeline (items 7+8, parts b+c): the opaque part → eye-space depth in an
@@ -790,14 +1385,59 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             dvd.attributes[0].format = .float3     // position
             dvd.attributes[0].offset = 0
             dvd.attributes[0].bufferIndex = 0
-            dvd.layouts[0].stride = MemoryLayout<Float>.stride * 6   // pos+normal (normal unused)
+            dvd.attributes[1].format = .float3     // normal — the G-buffer's second output
+            dvd.attributes[1].offset = MemoryLayout<Float>.stride * 3
+            dvd.attributes[1].bufferIndex = 0
+            dvd.layouts[0].stride = MemoryLayout<Float>.stride * 6   // pos+normal
             let dpd = MTLRenderPipelineDescriptor()
             dpd.vertexFunction = dvf
             dpd.fragmentFunction = dff
             dpd.vertexDescriptor = dvd
-            dpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat   // R32Float eye-Z
+            dpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat        // R32Float eye-Z
+            dpd.colorAttachments[1].pixelFormat = Self.gbufferNormalFormat     // eye-space normal
             dpd.depthAttachmentPixelFormat = Self.depthFormat
+            // The G-buffer is 1× on purpose: AO and the edge are low-frequency screen
+            // terms, and multisampling their INPUT would cost 4× the depth/normal
+            // bandwidth to change nothing a 4×4 blur does not already smooth over.
             depthPrepassPipe = try? device.makeRenderPipelineState(descriptor: dpd)
+        }
+        // §3c footprint pipeline: position only, one R8 colour attachment, no depth
+        // (any coverage counts — the shadow does not care which surface was nearest).
+        var shadowPipe: MTLRenderPipelineState? = nil
+        if let shLib = try? device.makeLibrary(source: shadowShaderSource, options: nil),
+           let shvf = shLib.makeFunction(name: "shadow_vertex"),
+           let shff = shLib.makeFunction(name: "shadow_fragment") {
+            let svd = MTLVertexDescriptor()
+            svd.attributes[0].format = .float3     // position
+            svd.attributes[0].offset = 0
+            svd.attributes[0].bufferIndex = 0
+            svd.layouts[0].stride = MemoryLayout<Float>.stride * 6   // pos+normal (normal unused)
+            let sspd = MTLRenderPipelineDescriptor()
+            sspd.vertexFunction = shvf
+            sspd.fragmentFunction = shff
+            sspd.vertexDescriptor = svd
+            sspd.colorAttachments[0].pixelFormat = Self.shadowFormat
+            shadowPipe = try? device.makeRenderPipelineState(descriptor: sspd)
+        }
+        // SSAO + edge pipelines (§1, §3a). Two full-screen passes over the G-buffer,
+        // no vertex buffer (the vertex_id triangle trick), no depth attachment, no
+        // blending — they WRITE the AO texture the body shader then reads.
+        var aoPipe: MTLRenderPipelineState? = nil
+        var aoBlurPipe: MTLRenderPipelineState? = nil
+        if let aLib = try? device.makeLibrary(source: aoShaderSource, options: nil),
+           let avf = aLib.makeFunction(name: "ao_vertex"),
+           let aff = aLib.makeFunction(name: "ao_fragment"),
+           let abf = aLib.makeFunction(name: "aoblur_fragment") {
+            let apd = MTLRenderPipelineDescriptor()
+            apd.vertexFunction = avf
+            apd.fragmentFunction = aff
+            apd.colorAttachments[0].pixelFormat = Self.aoFormat
+            aoPipe = try? device.makeRenderPipelineState(descriptor: apd)
+            let bpd = MTLRenderPipelineDescriptor()
+            bpd.vertexFunction = avf
+            bpd.fragmentFunction = abf
+            bpd.colorAttachments[0].pixelFormat = Self.aoFormat
+            aoBlurPipe = try? device.makeRenderPipelineState(descriptor: bpd)
         }
         // Contact pipeline (items 7+8, parts b+c): the ONE variant both the design-box and
         // clearance FACE draws use. Same vertex layout + premultiplied "over" blend as the ground
@@ -827,6 +1467,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             cpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             cpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
             cpd.depthAttachmentPixelFormat = Self.depthFormat
+            cpd.rasterSampleCount = raster       // §3b MSAA
             contactPipe = try? device.makeRenderPipelineState(descriptor: cpd)
         }
         // Load-path ribbon pipeline (optional: falls back to the ground line pipeline).
@@ -862,6 +1503,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             lpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             lpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
             lpd.depthAttachmentPixelFormat = Self.depthFormat
+            lpd.rasterSampleCount = raster       // §3b MSAA
             lpPipe = try? device.makeRenderPipelineState(descriptor: lpd)
         }
 
@@ -893,6 +1535,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             cpd.colorAttachments[0].destinationRGBBlendFactor = .one
             cpd.colorAttachments[0].destinationAlphaBlendFactor = .one
             cpd.depthAttachmentPixelFormat = Self.depthFormat
+            cpd.rasterSampleCount = raster       // §3b MSAA
             cometPipe = try? device.makeRenderPipelineState(descriptor: cpd)
         }
 
@@ -914,6 +1557,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             tpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             tpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
             tpd.depthAttachmentPixelFormat = Self.depthFormat
+            tpd.rasterSampleCount = raster       // §3b MSAA
             translucentPipe = try? device.makeRenderPipelineState(descriptor: tpd)
         }
 
@@ -950,6 +1594,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.cometPipeline = cometPipe
         self.translucentBodyPipeline = translucentPipe
         self.translucentBodyDepthState = device.makeDepthStencilState(descriptor: tdsd) ?? depth
+        self.aoPipeline = aoPipe
+        self.aoBlurPipeline = aoBlurPipe
+        self.shadowPipeline = shadowPipe
+        self.sampleCount = raster
         super.init()
     }
 
@@ -1421,6 +2069,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     func setHighlights(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>) {
         lastFaceTint = faceTint       // remembered so a detent pulse can layer over them (item 2)
         lastActiveFaces = activeFaces
+        tintsAreState = true          // §4: these are ROLES (selection, anchor, protect, lattice)
         buildTintBuffer(faceTint: faceTint, activeFaces: activeFaces, pulse: currentPulse())
     }
 
@@ -1461,6 +2110,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// have one entry per flat vertex (`vertexDrawCount`); a mismatch is ignored.
     func setStressTints(_ colors: [SIMD4<Float>]) {
         guard vertexDrawCount > 0, colors.count == vertexDrawCount else { return }
+        tintsAreState = false         // §4: a DATA ramp — its hue is the datum, hands off
         var tints = [Float](repeating: 0, count: vertexDrawCount * 4)
         for v in 0..<vertexDrawCount {
             let c = colors[v]
@@ -1723,11 +2373,39 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // line + interior occlusion where the volume meets the part. Gated on there being a volume
         // AND both contact pipelines having built, so it costs NOTHING otherwise, and — like every
         // other pass here — runs only on a redraw, never on an idle frame (the 108 rule).
+        //
+        // ★ RENDER QUALITY (§1/§3a): the same pass is now ALSO the G-buffer SSAO and the
+        // edge detector read, so it runs whenever either of those is on as well. One
+        // rasterisation of the part serves the contact read, the occlusion and the
+        // edges — the alternative was three.
         var sceneDepthTex: MTLTexture? = nil
-        if contactShadingEnabled, (designBoxFaceCount > 0 || clearanceFaceCount > 0), contactPipeline != nil,
-           let ctex = rpd.colorAttachments[0].texture {
-            sceneDepthTex = encodeDepthPrepass(width: ctex.width, height: ctex.height,
-                                               uniforms: uniforms, into: cmd)
+        var aoTex: MTLTexture? = nil
+        var aoSize: (w: Int, h: Int)? = nil
+        let wantsContact = contactShadingEnabled && (designBoxFaceCount > 0 || clearanceFaceCount > 0)
+            && contactPipeline != nil
+        let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
+        // The G-buffer is single-sampled, so it is sized from the RESOLVE target when
+        // the colour pass is multisampled (§3b) — `resolveTexture` is the 1× surface.
+        let colorTex = rpd.colorAttachments[0].resolveTexture ?? rpd.colorAttachments[0].texture
+        if wantsContact || wantsAO, let ctex = colorTex {
+            let g = encodeDepthPrepass(width: ctex.width, height: ctex.height,
+                                       uniforms: uniforms, into: cmd)
+            sceneDepthTex = g?.depth
+            if wantsAO, let g {
+                aoTex = encodeAO(gbuffer: g, aspect: aspect, into: cmd)
+                if aoTex != nil { aoSize = (g.depth.width, g.depth.height) }
+            }
+        }
+        var shade = makeShadeParams(aoSize: aoSize)
+
+        // ★ §3c: the footprint, in its OWN pass before the main one (a render pass
+        // cannot sample the texture another encoder in the same pass is writing). The
+        // stage uniform is built here too, so the rectangle the footprint is rendered
+        // into is literally the same value the stage fragment maps its floor hit with.
+        let stageUniforms = makeStageUniforms(aspect: aspect)
+        var shadowFootprint: MTLTexture? = nil
+        if drawStage, quality.contains(.contactShadow) {
+            shadowFootprint = contactShadowTexture(floorRect: stageUniforms.shadowRect, into: cmd)
         }
 
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
@@ -1736,11 +2414,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // (`lineOverlayDepthState`), so the part / box / grid drawn after occlude it. Its uniform
         // is rebuilt only here, on a redraw (camera/mesh change), never on an idle frame.
         if drawStage, let spipe = stagePipeline {
-            var su = makeStageUniforms(aspect: aspect)
+            var su = stageUniforms
+            if shadowFootprint != nil { su.shadowStrength = Self.contactShadowStrength }
             enc.setRenderPipelineState(spipe)
             enc.setDepthStencilState(lineOverlayDepthState)
             enc.setVertexBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
             enc.setFragmentBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
+            enc.setFragmentTexture(shadowFootprint ?? neutralShadowTexture(), index: 0)
             countedDraw(enc, .triangle, 3)
         }
 
@@ -1758,6 +2438,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
         enc.setFragmentBytes(&revealParams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
         enc.setFragmentBytes(&bodyAlphaVal, length: MemoryLayout<Float>.stride, index: 1)
+        // Render quality: the AO/edge texture and the strengths that scale it.
+        // `viewer_fragment` DECLARES both, so both must be bound on every path —
+        // Metal drops the draw on a missing binding, the trap `contact_fragment` and
+        // `loadpath_fragment` each document above. With no AO this is the neutral
+        // 1×1 and zero strengths, i.e. an exact identity.
+        enc.setFragmentBytes(&shade, length: MemoryLayout<ShadeParams>.stride, index: 2)
+        enc.setFragmentTexture(aoTex ?? neutralAOTexture(), index: 0)
         countedDraw(enc, .triangle, vertexDrawCount)
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
@@ -1785,14 +2472,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         encodeVolume(enc: enc, mvp: uniforms.mvp,
                      faceBuffer: designBoxFaceBuffer, faceCount: designBoxFaceCount,
                      lineBuffer: designBoxLineBuffer, lineCount: designBoxLineCount,
-                     sceneDepthTex: sceneDepthTex)
+                     sceneDepthTex: wantsContact ? sceneDepthTex : nil)
 
         // Keep-clear v2 (Part 3): the clearance volumes — the SAME MODEL-space depth-tested pass
         // and the SAME contact variant as the design box (one shader, both consumers).
         encodeVolume(enc: enc, mvp: uniforms.mvp,
                      faceBuffer: clearanceFaceBuffer, faceCount: clearanceFaceCount,
                      lineBuffer: clearanceLineBuffer, lineCount: clearanceLineCount,
-                     sceneDepthTex: sceneDepthTex)
+                     sceneDepthTex: wantsContact ? sceneDepthTex : nil)
         // Round-2 L21: the x-ray edge pass — depth-ALWAYS, low alpha — so a primitive
         // buried inside the opaque body (fresh primitives spawn at the model centre)
         // still reads as a ghost wireframe instead of rendering as nothing.
@@ -1869,8 +2556,22 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             SIMD4<Float>(vm.columns.1.x, vm.columns.1.y, vm.columns.1.z, 0),
             SIMD4<Float>(vm.columns.2.x, vm.columns.2.y, vm.columns.2.z, 0),
             SIMD4<Float>(0, 0, 0, 1)))
+        // Render quality §2: the WORLD normal basis — the model's rotation alone, with
+        // the view left out. That single omission is the headlight fix: the light
+        // directions in `viewer_fragment` are constants, so which space the normal
+        // arrives in decides whether they are nailed to the camera or to the world.
+        let worldNormal4 = simd_float4x4(columns: (
+            SIMD4<Float>(model.columns.0.x, model.columns.0.y, model.columns.0.z, 0),
+            SIMD4<Float>(model.columns.1.x, model.columns.1.y, model.columns.1.z, 0),
+            SIMD4<Float>(model.columns.2.x, model.columns.2.y, model.columns.2.z, 0),
+            SIMD4<Float>(0, 0, 0, 1)))
+        let e = camera.eye
         return ViewerUniforms(mvp: mvp, normalMatrix: normal4,
-                              flex: SIMD4<Float>(flexScale, 0, 0, 0))
+                              flex: SIMD4<Float>(flexScale, 0, 0, 0),
+                              worldNormalMatrix: worldNormal4,
+                              model: model,
+                              modelView: vm,
+                              eye: SIMD4<Float>(e.x, e.y, e.z, 1))
     }
 
     /// The ground's MVP: plain camera view·projection (world-space floor).
@@ -1894,9 +2595,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Fetch (re-creating on a size change) the depth-prepass colour + depth textures. `.private`
     /// (GPU-only): the prepass writes them and the contact pass reads them within one command
     /// buffer, so they never touch the CPU. Nil if the device can't allocate them.
-    private func sceneDepthTextures(width: Int, height: Int) -> (color: MTLTexture, depth: MTLTexture)? {
-        if let c = sceneDepthColorTex, let z = sceneDepthZTex, c.width == width, c.height == height {
-            return (c, z)
+    private func sceneDepthTextures(width: Int, height: Int)
+        -> (color: MTLTexture, depth: MTLTexture, normal: MTLTexture)? {
+        if let c = sceneDepthColorTex, let z = sceneDepthZTex, let n = sceneNormalTex,
+           c.width == width, c.height == height {
+            return (c, z, n)
         }
         let cd = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.sceneDepthFormat, width: width, height: height, mipmapped: false)
@@ -1906,11 +2609,169 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             pixelFormat: Self.depthFormat, width: width, height: height, mipmapped: false)
         zd.usage = [.renderTarget]
         zd.storageMode = .private
-        guard let c = device.makeTexture(descriptor: cd), let z = device.makeTexture(descriptor: zd) else {
+        let nd = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.gbufferNormalFormat, width: width, height: height, mipmapped: false)
+        nd.usage = [.renderTarget, .shaderRead]
+        nd.storageMode = .private
+        guard let c = device.makeTexture(descriptor: cd), let z = device.makeTexture(descriptor: zd),
+              let n = device.makeTexture(descriptor: nd) else {
             return nil
         }
-        sceneDepthColorTex = c; sceneDepthZTex = z
-        return (c, z)
+        sceneDepthColorTex = c; sceneDepthZTex = z; sceneNormalTex = n
+        return (c, z, n)
+    }
+
+    /// The SSAO pair (raw + blurred), sized with the G-buffer. Two, because a
+    /// fragment shader cannot read the attachment it is writing.
+    private func aoTextures(width: Int, height: Int) -> (raw: MTLTexture, blur: MTLTexture)? {
+        if let a = aoRawTex, let b = aoBlurTex, a.width == width, a.height == height { return (a, b) }
+        let d = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.aoFormat, width: width, height: height, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]
+        d.storageMode = .private
+        guard let a = device.makeTexture(descriptor: d),
+              let b = device.makeTexture(descriptor: d) else { return nil }
+        aoRawTex = a; aoBlurTex = b
+        return (a, b)
+    }
+
+    /// ★ §3c: render (or reuse) the part's floor footprint. Returns the texture and
+    /// fills `shadowRect`. Everything about this is CACHED on `ShadowKey`: orbit the
+    /// camera a thousand times and this pass runs zero times, because a shadow cast
+    /// straight down does not depend on where the camera is.
+    private func contactShadowTexture(floorRect: SIMD4<Float>, into cmd: MTLCommandBuffer) -> MTLTexture? {
+        guard let spipe = shadowPipeline, vertexDrawCount > 0,
+              let vbuf = vertexBuffer, let fbuf = flexBuffer,
+              floorRect.z > 0, floorRect.w > 0 else { return nil }
+        let key = ShadowKey(mesh: mesh.map(meshSignature),
+                            rotation: SIMD4<Float>(modelRotation.vector),
+                            rect: floorRect, flex: flexScale)
+        shadowRect = floorRect
+        if key == shadowKey, let t = shadowTex { return t }
+        if shadowTex == nil {
+            let d = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: Self.shadowFormat, width: Self.shadowResolution,
+                height: Self.shadowResolution, mipmapped: false)
+            d.usage = [.renderTarget, .shaderRead]
+            d.storageMode = .private
+            shadowTex = device.makeTexture(descriptor: d)
+        }
+        guard let tex = shadowTex else { return nil }
+        let rp = MTLRenderPassDescriptor()
+        rp.colorAttachments[0].texture = tex
+        rp.colorAttachments[0].loadAction = .clear
+        rp.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        rp.colorAttachments[0].storeAction = .store
+        guard let e = cmd.makeRenderCommandEncoder(descriptor: rp) else { return nil }
+        var u = ShadowUniforms(model: modelMatrix(), rect: floorRect,
+                               flex: SIMD4<Float>(flexScale, 0, 0, 0))
+        e.setRenderPipelineState(spipe)
+        e.setCullMode(.none)
+        e.setVertexBuffer(vbuf, offset: 0, index: 0)
+        e.setVertexBuffer(fbuf, offset: 0, index: 3)
+        e.setVertexBytes(&u, length: MemoryLayout<ShadowUniforms>.stride, index: 1)
+        countedDraw(e, .triangle, vertexDrawCount)
+        e.endEncoding()
+        shadowKey = key
+        return tex
+    }
+
+    /// The 1×1 zero texture bound to the stage draw when there is no shadow.
+    private func neutralShadowTexture() -> MTLTexture? {
+        if let t = shadowNeutralTex { return t }
+        let d = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.shadowFormat, width: 1, height: 1, mipmapped: false)
+        d.usage = [.shaderRead]
+        #if os(macOS)
+        d.storageMode = .managed
+        #else
+        d.storageMode = .shared
+        #endif
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var px: [UInt8] = [0]
+        t.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &px, bytesPerRow: 1)
+        shadowNeutralTex = t
+        return t
+    }
+
+    /// The 1×1 "fully open, no edge" texture bound whenever AO is off — see
+    /// `aoNeutralTex`. Built once, on first use.
+    private func neutralAOTexture() -> MTLTexture? {
+        if let t = aoNeutralTex { return t }
+        let d = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.aoFormat, width: 1, height: 1, mipmapped: false)
+        d.usage = [.shaderRead]
+        #if os(macOS)
+        d.storageMode = .managed
+        #else
+        d.storageMode = .shared
+        #endif
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var px: [UInt8] = [255, 0]   // R = openness 1.0, G = edge 0.0
+        t.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &px, bytesPerRow: 2)
+        aoNeutralTex = t
+        return t
+    }
+
+    /// The MSAA colour target for a `size`×`size` offscreen pass (§3b). Nil at 1×.
+    private func msaaTexture(width: Int, height: Int) -> MTLTexture? {
+        guard sampleCount > 1 else { return nil }
+        if let t = msaaColorTex, t.width == width, t.height == height { return t }
+        let d = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.colorFormat, width: width, height: height, mipmapped: false)
+        d.textureType = .type2DMultisample
+        d.sampleCount = sampleCount
+        d.usage = [.renderTarget]
+        d.storageMode = .private
+        msaaColorTex = device.makeTexture(descriptor: d)
+        return msaaColorTex
+    }
+
+    /// The part's eye-space depth span (near, far) over its transformed bounding box —
+    /// what the §3d fade is expressed in, so "the far half recedes" means the far half
+    /// of THIS part rather than a fixed distance in millimetres.
+    private func partEyeDepthRange() -> (near: Float, far: Float)? {
+        guard let mesh, !mesh.isEmpty else { return nil }
+        let mv = modelViewMatrix()
+        var lo = Float.greatestFiniteMagnitude, hi = -Float.greatestFiniteMagnitude
+        let mn = mesh.bounds.min, mx = mesh.bounds.max
+        for xi in [mn.x, mx.x] { for yi in [mn.y, mx.y] { for zi in [mn.z, mx.z] {
+            let e = mv * SIMD4<Float>(xi, yi, zi, 1)
+            lo = Swift.min(lo, -e.z); hi = Swift.max(hi, -e.z)
+        }}}
+        return hi > lo ? (lo, hi) : nil
+    }
+
+    /// The part's SMALLEST bounding-box side (world mm) — the length the SSAO radius is
+    /// a fraction of. See `aoRadiusFraction` for why the smallest and not the largest.
+    private func partExtent() -> Float {
+        guard let mesh, !mesh.isEmpty else { return 1 }
+        let d = mesh.bounds.max - mesh.bounds.min
+        return Swift.max(Swift.min(Swift.min(d.x, d.y), d.z), 1e-3)
+    }
+
+    /// The body fragment's render-quality block for this frame. `aoSize` is the AO
+    /// texture's size (zero when there is none — the neutral 1×1 is bound instead and
+    /// both strengths go to zero, which makes the shader an identity).
+    private func makeShadeParams(aoSize: (w: Int, h: Int)?) -> ShadeParams {
+        var sp = ShadeParams()
+        if let s = aoSize, s.w > 0, s.h > 0 {
+            sp.ao = SIMD4<Float>(quality.contains(.ambientOcclusion) ? Self.aoStrength : 0,
+                                 quality.contains(.edges) ? Self.edgeStrength : 0,
+                                 1 / Float(s.w), 1 / Float(s.h))
+        }
+        if quality.contains(.depthFade), let r = partEyeDepthRange() {
+            let start = r.near + (r.far - r.near) * Self.depthFadeStart
+            sp.fade = SIMD4<Float>(Self.depthFadeStrength, start, r.far, 0)
+        }
+        sp.fade.w = quality.contains(.worldLighting) ? 1 : 0
+        // §4 rides on §2: under the old flat headlight, desaturating a state tint would
+        // just make it hard to see, because hue was all it had. It is applied only when
+        // the shading that replaces it is actually on.
+        if quality.contains(.worldLighting), tintsAreState {
+            sp.tint = SIMD4<Float>(Self.stateTintDesaturation, Self.stateTintBrightnessLift, 0, 0)
+        }
+        return sp
     }
 
     /// Run the depth prepass (items 7+8, parts b+c): render the opaque part's eye-space depth into
@@ -1918,7 +2779,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Called only when a translucent volume is present (gated by the caller). Returns the colour
     /// texture on success, nil if the prepass could not be encoded (→ the caller keeps the plain draw).
     private func encodeDepthPrepass(width: Int, height: Int, uniforms: ViewerUniforms,
-                                    into cmd: MTLCommandBuffer) -> MTLTexture? {
+                                    into cmd: MTLCommandBuffer) -> (depth: MTLTexture, normal: MTLTexture)? {
         guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
               let vbuf = vertexBuffer, let fbuf = flexBuffer,
               let tex = sceneDepthTextures(width: width, height: height) else { return nil }
@@ -1927,13 +2788,21 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         pd.colorAttachments[0].loadAction = .clear
         pd.colorAttachments[0].clearColor = MTLClearColor(red: Double(Self.sceneDepthFar), green: 0, blue: 0, alpha: 0)
         pd.colorAttachments[0].storeAction = .store
+        // The G-buffer's normal attachment (render quality §1/§3a). Cleared to zero —
+        // a zero-length normal only ever appears where eye-Z is the far sentinel, and
+        // the AO pass returns before it reads one.
+        pd.colorAttachments[1].texture = tex.normal
+        pd.colorAttachments[1].loadAction = .clear
+        pd.colorAttachments[1].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pd.colorAttachments[1].storeAction = .store
         pd.depthAttachment.texture = tex.depth
         pd.depthAttachment.loadAction = .clear
         pd.depthAttachment.clearDepth = 1.0
         pd.depthAttachment.storeAction = .dontCare
         guard let penc = cmd.makeRenderCommandEncoder(descriptor: pd) else { return nil }
         var du = DepthPrepassUniforms(mvp: uniforms.mvp, modelView: modelViewMatrix(),
-                                      flex: SIMD4<Float>(flexScale, 0, 0, 0))
+                                      flex: SIMD4<Float>(flexScale, 0, 0, 0),
+                                      normalMatrix: uniforms.normalMatrix)
         penc.setRenderPipelineState(dpipe)
         penc.setDepthStencilState(depthState)   // .less, write on — nearest part surface wins
         penc.setCullMode(.none)                  // match the main mesh draw
@@ -1942,7 +2811,48 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
         countedDraw(penc, .triangle, vertexDrawCount)
         penc.endEncoding()
-        return tex.color
+        return (tex.color, tex.normal)
+    }
+
+    /// ★ §1 + §3a: the SSAO and edge passes. Two full-screen draws over the G-buffer
+    /// (AO+edge, then a depth-aware blur of the AO channel only) producing the RG
+    /// texture the body fragment multiplies into its ambient term. Returns nil when
+    /// the pipelines are unavailable — the body then binds the neutral 1×1 and the
+    /// picture is the un-occluded one, never a broken one.
+    private func encodeAO(gbuffer: (depth: MTLTexture, normal: MTLTexture), aspect: Float,
+                          into cmd: MTLCommandBuffer) -> MTLTexture? {
+        guard let apipe = aoPipeline, let bpipe = aoBlurPipeline,
+              let ao = aoTextures(width: gbuffer.depth.width, height: gbuffer.depth.height) else { return nil }
+        let w = Float(gbuffer.depth.width), h = Float(gbuffer.depth.height)
+        // tan(fov/2) per axis straight off the projection the frame is being drawn
+        // with — P[1][1] = 1/tan(fovY/2), P[0][0] = that over the aspect — so the AO
+        // pass cannot drift from the camera the way a second copy of the fov would.
+        let proj = camera.projectionMatrix(aspect: aspect)
+        let tanY = 1 / Swift.max(proj.columns.1.y, 1e-6)
+        let tanX = 1 / Swift.max(proj.columns.0.x, 1e-6)
+        let radius = aoRadiusOverrideMM ?? (partExtent() * Self.aoRadiusFraction)
+        var u = AOUniforms(
+            proj: SIMD4<Float>(tanX, tanY, w, h),
+            params: SIMD4<Float>(radius, Self.aoIntensity, radius * 0.02, Float(aoQuality.rawValue)),
+            edge: SIMD4<Float>(Self.edgeDepthThreshold, Self.edgeNormalThreshold, Self.sceneDepthFar, 0))
+
+        func fullScreen(_ pipe: MTLRenderPipelineState, into target: MTLTexture,
+                        tex0: MTLTexture, tex1: MTLTexture) {
+            let rp = MTLRenderPassDescriptor()
+            rp.colorAttachments[0].texture = target
+            rp.colorAttachments[0].loadAction = .dontCare   // every pixel is written
+            rp.colorAttachments[0].storeAction = .store
+            guard let e = cmd.makeRenderCommandEncoder(descriptor: rp) else { return }
+            e.setRenderPipelineState(pipe)
+            e.setFragmentBytes(&u, length: MemoryLayout<AOUniforms>.stride, index: 0)
+            e.setFragmentTexture(tex0, index: 0)
+            e.setFragmentTexture(tex1, index: 1)
+            countedDraw(e, .triangle, 3)
+            e.endEncoding()
+        }
+        fullScreen(apipe, into: ao.raw, tex0: gbuffer.depth, tex1: gbuffer.normal)
+        fullScreen(bpipe, into: ao.blur, tex0: ao.raw, tex1: gbuffer.depth)
+        return ao.blur
     }
 
     /// Draw one translucent MODEL-space volume (the design box OR a clearance region) — its faces
@@ -2013,12 +2923,21 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             hi = camera.target + SIMD3<Float>(r, r, r)
         }
         let extent = Swift.max(hi.x - lo.x, hi.z - lo.z, 1e-3)
+        // §3c: the footprint's world-XZ rectangle — the part's own XZ span with a 12%
+        // margin, so the 3×3 soft tap has somewhere to fall off INTO rather than
+        // clipping at the part's silhouette.
+        let mx = extent * 0.12
+        let rect = SIMD4<Float>(lo.x - mx, lo.z - mx,
+                                Swift.max(hi.x - lo.x + 2 * mx, 1e-3),
+                                Swift.max(hi.z - lo.z + 2 * mx, 1e-3))
         return StageUniforms(invVP: inv,
                              eye: camera.eye,
                              floorY: lo.y - extent * 0.02,
                              centerXZ: SIMD2<Float>((lo.x + hi.x) * 0.5, (lo.z + hi.z) * 0.5),
                              spacing: extent / 6,
-                             fadeRadius: extent * 6)
+                             fadeRadius: extent * 6,
+                             shadowRect: rect,
+                             shadowStrength: 0)   // filled in by `encode` once the footprint exists
     }
 
     /// Render the current mesh + camera to an offscreen BGRA texture and return the
@@ -2039,13 +2958,23 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             pixelFormat: Self.depthFormat, width: size, height: size, mipmapped: false)
         ddesc.usage = [.renderTarget]
         ddesc.storageMode = .private
+        if sampleCount > 1 { ddesc.textureType = .type2DMultisample; ddesc.sampleCount = sampleCount }
         guard let color = device.makeTexture(descriptor: cdesc),
               let depth = device.makeTexture(descriptor: ddesc),
               let cmd = queue.makeCommandBuffer() else { return nil }
         let rpd = MTLRenderPassDescriptor()
-        rpd.colorAttachments[0].texture = color
+        // §3b: measure the SHIPPING frame — multisampled and resolved, exactly as the
+        // on-screen path draws it. Timing a 1× pass and reporting it as the cost of a
+        // 4× one would understate the very item being priced.
+        if let msaa = msaaTexture(width: size, height: size) {
+            rpd.colorAttachments[0].texture = msaa
+            rpd.colorAttachments[0].resolveTexture = color
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+        } else {
+            rpd.colorAttachments[0].texture = color
+            rpd.colorAttachments[0].storeAction = .store
+        }
         rpd.colorAttachments[0].loadAction = .clear
-        rpd.colorAttachments[0].storeAction = .store
         rpd.depthAttachment.texture = depth
         rpd.depthAttachment.loadAction = .clear
         rpd.depthAttachment.clearDepth = 1.0
@@ -2068,15 +2997,24 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             pixelFormat: Self.depthFormat, width: size, height: size, mipmapped: false)
         ddesc.usage = [.renderTarget]
         ddesc.storageMode = .private
+        if sampleCount > 1 { ddesc.textureType = .type2DMultisample; ddesc.sampleCount = sampleCount }
         guard let color = device.makeTexture(descriptor: cdesc),
               let depth = device.makeTexture(descriptor: ddesc),
               let cmd = queue.makeCommandBuffer() else { return nil }
 
         let rpd = MTLRenderPassDescriptor()
-        rpd.colorAttachments[0].texture = color
+        // §3b: the captured evidence goes through the SAME multisample+resolve the
+        // screen does, so a before/after pair is a pair of shipping frames.
+        if let msaa = msaaTexture(width: size, height: size) {
+            rpd.colorAttachments[0].texture = msaa
+            rpd.colorAttachments[0].resolveTexture = color
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+        } else {
+            rpd.colorAttachments[0].texture = color
+            rpd.colorAttachments[0].storeAction = .store
+        }
         rpd.colorAttachments[0].loadAction = .clear
         rpd.colorAttachments[0].clearColor = clear
-        rpd.colorAttachments[0].storeAction = .store
         rpd.depthAttachment.texture = depth
         rpd.depthAttachment.loadAction = .clear
         rpd.depthAttachment.clearDepth = 1.0
@@ -2442,6 +3380,12 @@ extension MetalMeshView {
         view.isPaused = true                 // draw on demand (battery)
         view.enableSetNeedsDisplay = true
         if let device, let renderer = MeshRenderer(device: device) {
+            // §3b ANTI-ALIASING. `MTKView` owns the multisample texture and the
+            // resolve when `sampleCount > 1` — the drawable becomes the resolve
+            // target — so the whole feature is this one line plus a matching
+            // `rasterSampleCount` on the pipelines. The renderer reports what it
+            // actually got: a device that cannot do 4× falls back to 1× in its init.
+            view.sampleCount = renderer.sampleCount
             context.coordinator.renderer = renderer
             view.delegate = renderer
         }
@@ -2759,9 +3703,9 @@ extension MetalMeshView {
                 appliedDesignBox = inputs.designBox
                 appliedKeepOuts = inputs.keepOutBoxes
                 renderer.setDesignBoxes(design: inputs.designBox,
-                                        designColor: SIMD4<Float>(0.30, 0.78, 0.55, 0.85),
+                                        designColor: MeshRenderer.designBoxColor,
                                         keepOuts: inputs.keepOutBoxes,
-                                        keepOutColor: SIMD4<Float>(0.95, 0.42, 0.38, 0.9))
+                                        keepOutColor: MeshRenderer.keepOutColor)
                 dirty = true
             }
 

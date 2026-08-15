@@ -69,8 +69,20 @@ final class LatticeSeparationEvidenceGen: XCTestCase {
 
     /// ★ §7 / R6 — the before and the after, through the real shader.
     func testTheSampleIsVisibleOnEntryAndTheOldRevealBlankedIt() throws {
+        // ★ 1× SAMPLED ON PURPOSE (task 2026-08-15-render-quality added 4× MSAA as the
+        // renderer's default). The claim this file makes is about the DISCARD RULE —
+        // `reveal = 0` threw away every fragment of a mesh that had been built and
+        // uploaded — and it is asserted as EXACTLY ZERO lit pixels, which is the right
+        // strength for it. Under 4× MSAA that assertion started reporting 5 lit pixels
+        // out of 230,400, and the cause is not the reveal: the shader discards on
+        // `t > reveal.x`, so at reveal 0 the zero-height sliver of vertices at exactly
+        // t == 0 survives, and multisampling is simply the first thing whose sample
+        // points ever landed on it. Weakening `== 0` to `< 10` would have hidden a
+        // property of the reveal behind a property of the anti-aliasing; pinning the
+        // sampling this test was written under keeps the assertion at full strength and
+        // keeps it measuring the thing it names.
         guard let device = MTLCreateSystemDefaultDevice(),
-              let renderer = MeshRenderer(device: device) else {
+              let renderer = MeshRenderer(device: device, sampleCount: 1) else {
             throw XCTSkip("no Metal device")
         }
         // The wizard's own entry state: Stage A, one cell, the project defaults.
