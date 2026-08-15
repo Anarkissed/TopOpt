@@ -17,9 +17,9 @@ Evidence: `evidence/2026-08-15-render-quality/`.
 | | |
 |---|---|
 | **Renderer** | **Custom Metal.** `MeshRenderer: NSObject, MTKViewDelegate` — [MetalMeshView.swift:873](../../app/TopOptKit/Sources/TopOptFlows/MetalMeshView.swift). No SceneKit, no RealityKit anywhere in `app/` (zero matches for either). Every shader is MSL in a Swift string literal, compiled at runtime. **Screen-space post-processing was therefore available without replacing the render path** — the BLOCKED-STOP does not apply. |
-| **AO cost on his part** | +0.93 ms on the lattice, +0.25 ms on his bracket, +0.14 ms on the TO result, at 1024². |
+| **AO cost on his part** | **+5.2 ms on the lattice**, +0.8 ms on his bracket, +0.9 ms on the TO result, at 2048². |
 | **Lighting: IBL or matcap?** | **Neither, and on purpose: a world-space key/fill/rim over a two-colour hemisphere ambient.** A matcap is a lookup by *eye-space* normal — it is camera-locked by construction, which is the exact defect §2(c) names, and it also bakes colour, which would fight every region tint. A cubemap IBL buys, on a matte clay material, essentially the two terms the hemisphere already gives, at a texture fetch instead of one dot product. |
-| **Total frame-time delta** | **0.92 → 2.06 ms** (lattice, ×2.25) · **0.10 → 0.69 ms** (bracket) · **0.34 → 1.01 ms** (TO result). All at 1024² on an Apple M2 Pro. A 60 Hz budget is 16.6 ms. |
+| **Total frame-time delta** | **1.39 → 7.02 ms** (lattice, ×5.05) · **0.27 → 2.87 ms** (bracket) · **0.63 → 3.42 ms** (TO result). At **2048²** on an Apple M2 Pro. A 60 Hz budget is 16.6 ms, so the lattice — the worst case — now spends **42% of it**. ★ See the correction below: an earlier draft of this table quoted 1024² and reported ~1 ms, which understated the real cost by 4×. |
 | **Could the state colours be desaturated after?** | **Yes — 50% of the saturation came off every state tint** and all four states stay unambiguous (closest pair 22.9 in RGB, against a floor of 18). Two exclusions, both stated below with reasons. |
 
 ---
@@ -79,28 +79,51 @@ latticed·include, latticed·exclude, the design box and a keep-out, all in one 
 
 ## R2 — frame time, per item and together
 
-**Apple M2 Pro**, `measureFrameGPUSeconds(size: 1024, stage: true)` — Metal's own
+**Apple M2 Pro**, `measureFrameGPUSeconds(size: 2048, stage: true)` — Metal's own
 `gpuEndTime − gpuStartTime` for one encoded frame, no readback. Same probe
 `LatticeSDFProfileTests` and `LatticeProxyProfileTests` price against.
 
+**★ TIMED AT 2048², AND THAT IS A CORRECTION TO AN EARLIER DRAFT OF THIS TABLE.** The
+first version measured at 1024², where his bracket's whole frame costs 0.12 ms — close
+enough to the resolution floor of a GPU timestamp that the harness disagreed with itself
+by 0.345 ms against a 0.59 ms headline, and the run failed its own noise-floor bar. A
+re-run then *passed* at 0.158 ms, which is worse than failing: **a bar that flips on the
+draw is not a bar.** More rounds do not fix it — the jitter is a fixed per-command-buffer
+spike, so a minimum over more single frames never converges it away. Timing a frame with
+4× the pixels does, because every item here is a screen-space cost that scales with pixel
+count while that spike does not. Two consecutive runs now clear the bar with 4–100×
+margin. 2048² is also nearer an iPad Pro's real drawable than 1024².
+
+**★ AND THE 4× IS NOT FREE — the honest cost is 5.6 ms on his lattice, not the ~1 ms an
+earlier draft of this handoff reported.** The pictures did not change; the measurement
+did, and the larger frame is the one worth quoting.
+
 | config | lattice (118,920 tris) | bracket (2,224) | TO result (34,472) |
 |---|---|---|---|
-| 00 shipped | 0.917 | 0.096 | 0.337 |
-| 01 AO ×8 | 1.379 | 0.296 | 0.565 |
-| 02 AO ×16 | 1.850 | 0.342 | 0.472 |
-| 03 lighting alone | 1.039 | 0.098 | 0.348 |
-| 04 AO + lighting | 1.954 | 0.334 | 0.612 |
-| 05 + 4× MSAA | 2.043 | 0.679 | 0.998 |
-| 06 + edges | 2.036 | 0.687 | 0.992 |
-| 07 + contact shadow | 2.050 | 0.661 | 1.043 |
-| 08 + depth fade (all) | **2.060** | **0.686** | **1.006** |
-| **noise floor** | **0.031** | **0.110** | **0.273** |
+| 00 shipped | 1.389 | 0.273 | 0.631 |
+| 01 AO ×8 | 4.351 | 1.197 | 1.497 |
+| 02 AO ×16 | 6.614 | 1.079 | 1.541 |
+| 03 lighting alone | 1.679 | 0.301 | 0.673 |
+| 04 AO + lighting | 6.930 | 1.056 | 1.582 |
+| 05 + 4× MSAA | 7.006 | 3.059 | 3.421 |
+| 06 + edges | 7.011 | 3.103 | 3.512 |
+| 07 + contact shadow | 7.004 | 3.198 | 3.566 |
+| 08 + depth fade (all) | **7.016** | **2.865** | **3.422** |
+| **noise floor** | **0.036** | **0.395** | **0.225** |
 
 **★ READ THE NOISE-FLOOR ROW BEFORE READING ANY OTHER.** It is the largest disagreement
 between two independent interleaved sweeps of the same nine configurations. **Any delta
 smaller than it is this harness, not the feature** — which is why §2's lighting
-(+0.002 to +0.12 ms) is reported as *free*: it adds ALU and no pass, and on two of three
-parts the measurement cannot even see it.
+(+0.03 to +0.29 ms) is reported as *nearly free*: it adds ALU and no render pass, and on
+two of three parts it is within a factor of two of the floor.
+
+**Where the cost actually is.** On the lattice it is SSAO (+5.2 ms) — 118,920 triangles
+of thin geometry means the G-buffer pass rasterises a lot and the AO kernel then reads a
+heavily-varying depth buffer. On the two brackets it is **4× MSAA** (+2.0 and +1.8 ms),
+which is a bandwidth cost and barely moves with triangle count. Anyone needing that time
+back has two one-property-write levers: `aoQuality = .low` (half the SSAO cost, and on
+his content a 0.01 difference in mean part-pixel Δ — visually equivalent here), and
+`sampleCount: 2`.
 
 **★ AND THE MEASUREMENT DESIGN IS PART OF THE RESULT.** The first version of this table
 benchmarked each configuration to completion before starting the next, and came back
@@ -117,9 +140,11 @@ paid equally by all of them and cancels in the delta.
 around `model.stageMesh(progress:)` — **a CPU mesh build**, once per settings change. Its
 own doc comment says so: *"The measured build+upload time for the object on screen."*
 Measured here on that same 2 mm-cell sample: **865 ms** to build those 118,920 triangles.
-Nothing in the app displays a frame time. The renderer's cost is 0.92 ms and was never
-44; the "headroom" the task infers from 44 ms is real, but it is not the headroom that
-number describes.
+Nothing in the app displays a frame time. The renderer's cost was 1.39 ms at 2048² and
+was never 44; the headroom the task infers from 44 ms is real, but it is not the headroom
+that number describes — and at 7.0 ms the treated lattice frame uses 42% of a 60 Hz
+budget, which is a genuine constraint rather than the rounding error "1 ms out of 44"
+would have suggested.
 
 ### Where the measurement was taken
 
@@ -361,7 +386,13 @@ every state is still perfectly clear.
 Plus smoother edges (no more jagged struts), a faint dark outline on the geometry, and a
 soft shadow on the floor so the part stops floating in space.
 
-All of it costs about **1 ms a frame**. The budget for smooth motion is about 16 ms.
+**What it costs.** On his lattice — the heaviest thing the app draws — the frame goes
+from 1.4 ms to 7.0 ms at full iPad-class resolution. The budget for smooth 60 fps motion
+is 16.6 ms, so it fits with room to spare, but it is not free: it is about 40% of that
+budget where before it was 8%. I first reported this as "about 1 ms" from a
+lower-resolution measurement; that was 4× optimistic and I have corrected it. If it ever
+needs to come back down, halving the shadow-detail quality gives back roughly half of it
+and, on his own content, looks the same.
 
 Two honest caveats. The floor shadow is a straight-down drop shadow, not a real
 light-accurate one — it grounds the part, which is what it is for, but a part floating

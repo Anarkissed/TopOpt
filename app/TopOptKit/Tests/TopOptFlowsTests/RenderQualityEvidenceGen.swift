@@ -152,8 +152,19 @@ final class RenderQualityEvidenceGen: XCTestCase {
     /// the minimum over all rounds, so any state one configuration leaves is paid by
     /// every other one equally and cancels in the delta. `quality` is a plain property
     /// write, so a round is nine writes and nine encodes on the same pipelines.
+    /// ★ TIMED AT 2048², CAPTURED AT 1024², AND THE REASON IS RESOLVABILITY.
+    /// At 1024² his bracket's whole frame costs 0.12 ms — close enough to the floor of
+    /// what a GPU timestamp can resolve that this harness disagreed with itself by
+    /// 0.345 ms across two sweeps, against a total treatment cost of 0.59 ms, and the
+    /// run failed its own noise-floor bar. A re-run then passed at 0.158 ms, which is
+    /// worse than failing: a bar that flips on the draw is not a bar. More rounds do not
+    /// fix it — the jitter is a fixed per-command-buffer spike, so a minimum over more
+    /// single frames never converges it away. Timing a frame with 4× the pixels does,
+    /// because every item added by this task is a SCREEN-SPACE cost that scales with the
+    /// pixel count while that spike does not. 2048² is also nearer an iPad Pro's real
+    /// drawable than 1024² is.
     private func sweep(_ configs: [Config], renderers: [Int: MeshRenderer],
-                       size: Int = 1024, rounds: Int = 41) -> [String: Double] {
+                       size: Int = 2048, rounds: Int = 41) -> [String: Double] {
         var best: [String: Double] = [:]
         for round in 0..<rounds {
             for c in configs {
@@ -240,6 +251,23 @@ final class RenderQualityEvidenceGen: XCTestCase {
         return n > 0 ? sum / Double(n) : 0
     }
 
+    /// The fraction of the WHOLE FRAME whose colour moves by more than 4 levels. The
+    /// part-masked metric above is the right one for §1/§2/§4, which shade the part —
+    /// but MSAA moves silhouette pixels, the contact shadow moves floor pixels, and the
+    /// depth fade moves far material. Scoring those on part pixels only would report
+    /// them as no-ops, which is the same wrong-denominator mistake in a new place.
+    private func movedWholeFrame(_ a: [UInt8], _ b: [UInt8]) -> Double {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var moved = 0
+        let n = a.count / 4
+        for i in 0..<n {
+            var mx = 0
+            for c in 0..<3 { mx = Swift.max(mx, abs(Int(a[i * 4 + c]) - Int(b[i * 4 + c]))) }
+            if mx > 4 { moved += 1 }
+        }
+        return Double(moved) / Double(n)
+    }
+
     private func raw(_ r: MeshRenderer, size: Int) -> [UInt8]? {
         let bg = DS.Color.background
         return r.renderOffscreen(size: size,
@@ -304,8 +332,11 @@ final class RenderQualityEvidenceGen: XCTestCase {
 
         ================================================================================
         RENDER QUALITY — GPU: \(device.name)
-        Frame time = MeshRenderer.measureFrameGPUSeconds(size: 1024, stage: true),
+        Frame time = MeshRenderer.measureFrameGPUSeconds(size: 2048, stage: true),
         minimum of 40 encoded frames. NOT a wall clock, NOT a pixel readback.
+        TIMED at 2048², CAPTURED at 1024² — at 1024² the cheapest of his three frames is
+        too cheap to time against this machine's per-command-buffer jitter, and the
+        noise-floor bar below flipped between runs. See `sweep`.
 
         ★ ONE RENDERER PER MSAA SETTING, with `quality` flipped between measurements.
         A first cut built a fresh renderer for every row, and the table came back
@@ -333,12 +364,21 @@ final class RenderQualityEvidenceGen: XCTestCase {
             print(String(format: "   part covers %.1f%% of the 1024² frame (%d px) — every "
                          + "Δ below is over THOSE pixels", 100.0 * Double(maskCount) / (1024 * 1024),
                          maskCount))
-            print("   config        ms      Δms vs before   mean|Δ| on part   % part moved   mean|Δ| off part")
+            print("   config        ms      Δms vs before   mean|Δ| on part   % part moved   "
+                  + "mean|Δ| off part   % frame moved vs PREV")
 
             let times = sweep(configs, renderers: renderers)
             var baseMS = 0.0
             var before: [UInt8] = []
-            var rows: [(String, Double, Double, Double, Double)] = []
+            var prev: [UInt8] = []
+            // ★ THE ADJACENT COLUMN, AND WHY IT EXISTS. Every other difference here is
+            // against 00_before, which prices the CUMULATIVE treatment — and under a
+            // cumulative column an item that does nothing at all is invisible, because
+            // the items before it already moved the pixels. This column is each
+            // configuration against the one IMMEDIATELY before it, which differs from it
+            // by exactly one item. It is what turns "there is a picture for every item"
+            // into "every item demonstrably changes the picture".
+            var rows: [(String, Double, Double, Double, Double, Double)] = []
             for c in configs {
                 guard let r = renderers[c.samples] else { continue }
                 r.quality = c.quality
@@ -348,9 +388,12 @@ final class RenderQualityEvidenceGen: XCTestCase {
                 if c.key == "00_before" { baseMS = ms; before = px }
                 let d = diff(before, px, mask: mask)
                 let off = diffOffPart(before, px, mask: mask)
-                rows.append((c.key, ms, d.mean, d.moved, off))
-                print(String(format: "   %-12@ %7.3f   %+11.3f   %13.2f   %11.1f%%   %14.2f",
-                             c.key as NSString, ms, ms - baseMS, d.mean, d.moved * 100, off))
+                let adj = prev.isEmpty ? 0 : movedWholeFrame(prev, px)
+                prev = px
+                rows.append((c.key, ms, d.mean, d.moved, off, adj))
+                print(String(format: "   %-12@ %7.3f   %+11.3f   %13.2f   %11.1f%%   %14.2f   %18.2f%%",
+                             c.key as NSString, ms, ms - baseMS, d.mean, d.moved * 100, off,
+                             adj * 100))
                 try write(r, size: 1024, name: "\(p.key)_\(c.key).png")
             }
 
@@ -378,8 +421,24 @@ final class RenderQualityEvidenceGen: XCTestCase {
                               + "against a total treatment cost of \(headline) ms — these "
                               + "per-item costs are not resolvable and must not be quoted")
 
-            func row(_ k: String) -> (String, Double, Double, Double, Double)? {
+            func row(_ k: String) -> (String, Double, Double, Double, Double, Double)? {
                 rows.first { $0.0 == k }
+            }
+
+            // ★ EVERY ITEM MUST CHANGE THE PICTURE — measured against its own
+            // predecessor, so no item can ride on the ones before it. Without these four
+            // assertions §3a, §3b and §3d ship on a screenshot alone, and a later change
+            // could no-op any of them with nothing in this file going red. 0.4% of the
+            // frame is a low bar on purpose: the smallest of these (4× MSAA on his
+            // bracket, whose silhouette is a small fraction of the frame) measures 0.65%.
+            for (key, name) in [("05_msaa", "§3b anti-aliasing"), ("06_edges", "§3a edges"),
+                                ("07_shadow", "§3c contact shadow"),
+                                ("08_all", "§3d depth fade")] {
+                guard let r = row(key) else { continue }
+                XCTAssertGreaterThan(r.5, 0.004,
+                                     "\(name) on \(p.key): switching it on moved only "
+                                     + "\(r.5 * 100)% of the frame against the configuration "
+                                     + "immediately before it — it is a no-op here")
             }
 
             // ★ R1/§1(c): AO must visibly change the SHADING OF THE GEOMETRY. Measured

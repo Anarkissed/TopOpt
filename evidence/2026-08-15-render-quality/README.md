@@ -14,7 +14,8 @@ Console output of the run these files came from: `render_quality_run.txt`
 
 ## The pictures
 
-Three parts, all his. Nine configurations each, at 1024², **same camera, same clear
+Three parts, all his. Nine configurations each, **captured** at 1024² (frame times are
+**timed** at 2048² — see the handoff for why), **same camera, same clear
 colour** — only `MeshRenderer.quality` (and, for the MSAA rows, the sample count) differs.
 Each configuration adds exactly one item to the one before it, so **any two adjacent
 files are that item's before/after pair**.
@@ -66,6 +67,9 @@ This is a test as well as a capture — a screenshot nobody measured is not evid
 - every difference is measured over the **part's own pixels**, from a mask the renderer
   renders itself — an earlier version averaged over the whole frame, 90% of which is
   backdrop AO cannot touch, and reported that AO had moved his bracket by 0.4 grey levels;
+- **every item changes the picture against the configuration immediately before it**, not
+  just against `00_before` — without that, §3a/§3b/§3d would ship on a screenshot alone
+  and a later change could no-op any of them silently;
 - the frame-time table carries its **own noise floor** (two independent interleaved
   sweeps), and the run fails if the harness cannot resolve half the headline cost;
 - **R5**: the exported STL is byte-identical (FNV-1a `e43074dcdfd2c023`) before and after
