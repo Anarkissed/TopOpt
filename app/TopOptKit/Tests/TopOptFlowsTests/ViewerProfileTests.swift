@@ -112,15 +112,40 @@ final class ViewerProfileTests: XCTestCase {
         _ = renderer.renderOffscreen(size: 512, stage: true)
         print(String(format: "results at rest/orbit: %d draw calls, %d vertices/frame",
                      renderer.lastFrameDrawCalls, renderer.lastFrameVertices))
-        XCTAssertEqual(renderer.lastFrameDrawCalls, 2, "stage + body")
-        XCTAssertEqual(renderer.lastFrameVertices, idx.count + 3,
-                       "the body soup plus the stage's fullscreen triangle")
+        // ★ UPDATED BY task 2026-08-15-render-quality, and NOT by relaxing it.
+        // This census is skipped unless TOPOPT_VIEWER_PROFILE_DIR is set, so it never
+        // ran in CI and never went red — but "stage + body" stopped being the frame the
+        // moment the viewer gained SSAO. Leaving a stale exact-equality here would have
+        // failed on the next person who profiled, with a number nobody could explain.
+        //
+        // The results frame is now SIX draws, and each one is independently pinned by
+        // `RenderQualityEvidenceGen.testTheNewPassesAreNotEncodedWhenOff`, which
+        // measures the same counter with the quality flags switched one at a time:
+        //
+        //     stage backdrop          1   (fullscreen triangle, 3 verts)
+        //     body                    1   (the soup)
+        //     G-buffer  (§1/§3a)      1   (the soup again — eye depth + normal)
+        //     SSAO      (§1)          1   (fullscreen triangle, 3 verts)
+        //     AO blur   (§1)          1   (fullscreen triangle, 3 verts)
+        //     contact footprint (§3c) 1   (the soup again — orthographic, from above)
+        //
+        // so the vertex total is 3 × the soup + 9. That arithmetic is confirmed
+        // independently on the LIVE MTKView path: the lattice sample (356,760 soup
+        // vertices) reports exactly 1,070,289 = 3 × 356,760 + 9.
+        XCTAssertEqual(renderer.lastFrameDrawCalls, 6,
+                       "stage + body + G-buffer + SSAO + blur + contact footprint")
+        XCTAssertEqual(renderer.lastFrameVertices, idx.count * 3 + 9,
+                       "the soup three times (body, G-buffer, footprint) plus three "
+                       + "fullscreen triangles (stage, SSAO, blur)")
 
         // Thumbnail / video export path (no stage): the body alone.
         _ = renderer.renderOffscreen(size: 512, stage: false)
         print(String(format: "offscreen export: %d draw calls, %d vertices/frame",
                      renderer.lastFrameDrawCalls, renderer.lastFrameVertices))
-        XCTAssertEqual(renderer.lastFrameDrawCalls, 1)
+        // No stage backdrop and no contact footprint (§3c is gated on `drawStage` — a
+        // thumbnail has no floor to cast onto), so: body + G-buffer + SSAO + blur.
+        XCTAssertEqual(renderer.lastFrameDrawCalls, 4,
+                       "body + G-buffer + SSAO + blur; no stage, no footprint")
     }
 
     /// GPU time (ms) of the full results frame — stage backdrop + body — measured by

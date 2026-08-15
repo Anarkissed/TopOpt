@@ -997,6 +997,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// True on a real GPU when both AO pipelines built. A test pins this so a shader
     /// typo fails loudly instead of silently reverting to the flat-grey look.
     var aoPipelinesDidBuild: Bool { aoPipeline != nil && aoBlurPipeline != nil }
+    /// The GPU this renderer is on. Exposed so a skipped frame-budget assertion can
+    /// NAME the device it declined to hold — a skip that does not say which machine it
+    /// let off is indistinguishable from a budget nobody checks.
+    var deviceName: String { device.name }
     /// True on a real GPU when the §3c footprint pipeline built — same reason.
     var shadowPipelineDidBuild: Bool { shadowPipeline != nil }
     /// The exact §3c footprint MSL the app ships.
