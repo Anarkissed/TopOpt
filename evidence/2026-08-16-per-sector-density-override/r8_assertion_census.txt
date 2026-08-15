@@ -1,0 +1,43 @@
+R8 — THE ASSERTION CENSUS, AND EVERY CORE CHECK SABOTAGED TO PROVE IT DISCRIMINATES.
+
+A check that cannot fail is not evidence. Each of the three core assertions
+below was verified by BREAKING the mechanism it watches and confirming the
+named check — and only it — turned red. The suite is the same 26,321 checks
+throughout; nothing was filtered.
+
+CORE — core/tests/unit/test_grading.cpp, 6 new CHECK() calls:
+  1. the stated half actually latticed something          (a positive control:
+     without it, 2 and 3 pass vacuously on an empty mask)
+  2. ★ every latticed voxel of the stated half grades to EXACTLY 0.30
+  3. ★ the half that stated nothing is byte-for-byte the derived run
+  4. ★ an all-zero stated field grades identically to no field
+  5. ★ prescribed_relative_density still wins outright (multiscale untouched)
+  6. a wrong-sized stated field is refused, not read past
+
+SABOTAGE 1 — the law returns the stated density * 0.999 (a 0.1% error):
+    FAIL (line 152): every latticed voxel of the stated half grades to EXACTLY 0.30
+    grading: 26321 checks, 1 failures
+  ⇒ check 2 discriminates at 0.1%.
+
+SABOTAGE 2 — the sentinel becomes >= 0 instead of > 0 (i.e. 'zero IS a density'):
+    FAIL (line 155): the half that stated nothing is byte-for-byte the derived run
+    FAIL (line 165): an all-zero stated field grades identically to no field
+    grading: 26321 checks, 2 failures
+  ⇒ checks 3 and 4 are what make bar R1 mechanical: they are the reason an
+    absent override cannot change a single voxel.
+
+REVERTED, both times, and re-run clean:
+    grading: 26321 checks, 0 failures
+
+APP — app/TopOptKit/Tests/TopOptFlowsTests/SectorDensityTests.swift:
+  58 assertions across 10 tests, all passing. One of them
+  (testDerivationComesFromCoreAndAgreesWithTheCellBounds) is NOT stubbed: it
+  calls the real bridge and checks its cell against the OTHER core-backed
+  reading the page already trusts, so an app-side re-derivation could not
+  pass it.
+
+FULL APP SUITE: 1443 passed, 0 signal deaths, 3 failures — all three are
+3MF import (AppModelTests), the documented worktree lib3mf gap that
+build_core.sh names in its own output:
+  ==> lib3mf: (none) — macOS slice is 3MF-free; run app/scripts/build_lib3mf_macos.sh
+  They fail on 'expected non-nil ImportedFile' — a missing importer, not logic.

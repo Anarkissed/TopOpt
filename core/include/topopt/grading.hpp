@@ -148,6 +148,27 @@ struct GradingLawParams {
   // rule" mistake this mode exists to undo.
   const std::vector<double>* fit_cell_size_mm = nullptr;
 
+  // ── PER-REGION STATED DENSITY (task 2026-08-16-per-sector-density-override) ────
+  // Grid-indexed (size grid.voxel_count()). A value > 0 is the relative density the
+  // USER STATED for the declared region this voxel belongs to, and it is graded to
+  // VERBATIM (up to the same band clamp everything else takes). A value <= 0 — and
+  // the whole field being null, the DEFAULT — means DERIVE, i.e. the existing
+  // demand -> density map, byte-for-byte.
+  //
+  // ★ WHY A SECOND FIELD AND NOT `prescribed_relative_density`. That one is
+  // all-or-nothing: it is read whenever it is non-null, so a run could not state a
+  // density for ONE region and derive the rest. Overloading it with a
+  // "<= 0 means derive" sentinel would ALSO change multiscale, where a prescribed
+  // 0.0 currently clamps to rho_min and is COUNTED as a clamp — it would silently
+  // start deriving from stress instead. So this is additive and cannot move that
+  // path: `prescribed` is still checked first and is untouched.
+  //
+  // ★ THE DENSITY IS STATED; THE CELL IS NOT. The region's cell stays the DERIVED
+  // one (fit_cell_size_mm above), and the strut follows from the pair. See the
+  // handoff §1(c) for why, and for what re-deriving the cell would have done
+  // instead.
+  const std::vector<double>* region_relative_density = nullptr;
+
   // HOW THESE TWO COMPOSE (multiscale x sub-floor retention). A multiscale run
   // prescribes rho and stops using `demand` FOR THE DENSITY — but it still hands
   // in the variant's real von Mises field, and that is what the retention

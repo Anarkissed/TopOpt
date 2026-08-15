@@ -42,6 +42,10 @@ GradedField grade_lattice(const VoxelGrid& grid,
     throw std::invalid_argument("grade_lattice: demand.size() != voxel_count");
   if (region && region->size() != n)
     throw std::invalid_argument("grade_lattice: region->size() != voxel_count");
+  if (params.region_relative_density != nullptr &&
+      params.region_relative_density->size() != n)
+    throw std::invalid_argument(
+        "grade_lattice: region_relative_density->size() != voxel_count");
   if (params.prescribed_relative_density != nullptr &&
       params.prescribed_relative_density->size() != n)
     throw std::invalid_argument(
@@ -296,6 +300,12 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // L2 assertion) is unchanged.
     if (params.prescribed_relative_density != nullptr)
       return (*params.prescribed_relative_density)[e];
+    // ★ A PER-REGION STATED DENSITY (task 2026-08-16-per-sector-density-override).
+    // Checked AFTER `prescribed` so multiscale is untouched, and gated on > 0 so a
+    // voxel no override covers derives exactly as before.
+    if (params.region_relative_density != nullptr &&
+        (*params.region_relative_density)[e] > 0.0)
+      return (*params.region_relative_density)[e];
     const double frac =
         demand_max > 0.0 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
                          : 0.0;

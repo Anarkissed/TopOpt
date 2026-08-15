@@ -185,6 +185,15 @@ struct JobLatticeRegion {
   // `loads.face_regions`; -1 on the two analytic kinds. A sector of a grid split
   // is exactly this: one region id, one depth, one verdict of its own.
   int region_id = -1;
+  // ★ THE STATED RELATIVE DENSITY for this region (task 2026-08-16-per-sector-
+  // density-override). <= 0 — the DEFAULT — means DERIVE, and every job written
+  // before this field existed is byte-identical.
+  //
+  // When stated, the region's CELL stays the derived one and the strut follows
+  // from (cell, density); a density too light to print a strut at the profile's
+  // `min_extrudable_width_mm` REFUSES with the number rather than being clamped.
+  // See the handoff §1(c).
+  double relative_density = 0.0;
 };
 
 struct JobLattice {

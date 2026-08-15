@@ -1,0 +1,63 @@
+R1 — C0 INERTNESS. A JOB WITH NO OVERRIDE IS INERT. COMPLETE, ALL 4 RUNGS.
+
+METHOD. The SAME job — his part, resolution 128, two region-backed lattice
+regions, cell_mode fit, NO "relative_density" anywhere — run on two binaries
+IN PARALLEL on one machine, both Release, full production ladder:
+  BASE  ace0d900 (PR 332's head = this task's branch base)
+  NEW   this tree, md5 273f0941263a236a76564388c0226268
+Both finished 20:47:58, rc=0. 26 files each. NOTHING below is filtered.
+
+=== 20 OF 26 FILES BYTE-IDENTICAL — the whole design set, raw ===
+  design.bin   fields.bin   loadcase.json
+  variant_{026,038,052,068}.stl
+  variant_{026,038,052,068}_alpha.f64
+  variant_{026,038,052,068}_lattice.stl
+  variant_{026,038,052,068}_lattice.report.json
+  report.json  (and the remaining run artifacts)
+
+=== THE 6 THAT DIFFER, EXHAUSTIVELY ===
+
+1-4. variant_{026,038,052,068}_alpha.meta — 2 differing lines each, and
+     ZERO of them are non-path (checked: grep -vc 'out_base/|out_new/' = 0).
+     The file embeds its own output directory in a comment and I named the
+     two directories differently. MY EXPERIMENT, NOT THE CODE.
+
+5.   iterations.csv — 241 rows both arms, header IDENTICAL, and 41 of its 44
+     columns never differ on any row. The three that do:
+         wall_ms, geneo_setup_ms, geneo_apply_ms      — all clocks.
+
+6.   run_info.json — 4 keys differ, in TWO groups:
+
+     (a) CLOCKS — 5 values, one of them in disguise:
+           created_wall_ms                  1786656766472 vs 1786656766915
+           preflight_ms                     4.4809 vs 4.2095
+           lattice_export.gen_seconds       814.4502 vs 821.3753
+           lattice_export.gen_fraction      0.069540 vs 0.070149
+           lattice_export.void_escape.wall_seconds  0.03714 vs 0.04173
+         ★ gen_fraction is generation seconds over total seconds — A CLOCK
+           WEARING A FRACTION'S CLOTHES. It is on the strip list BY NAME
+           because it slipped through on an earlier task, and here it is,
+           behaving exactly as that note predicted.
+
+     (b) THE TWO RECEIPT FIELDS THIS TASK ADDS — ADDED, never changed:
+           ONLY-IN-NEW  grading.fit.regions[0].stated_relative_density  = 0
+           ONLY-IN-NEW  grading.fit.regions[0].derived_relative_density = 0.1385609912
+           ONLY-IN-NEW  grading.fit.regions[1].stated_relative_density  = 0
+           ONLY-IN-NEW  grading.fit.regions[1].derived_relative_density = 0.1385609912
+         A structural walk of both documents reports NO 'VALUE' difference
+         anywhere in the grading block — only these four additions.
+
+=== VERDICT ===
+Every byte a user receives is identical. The receipt gains two fields, which
+is the declared change, and no existing value moves. Everything else is a
+clock or a directory name I chose. C0 INERTNESS HOLDS.
+
+=== ★ AND THIS IS ALSO THE END-TO-END PROOF OF THE NEW RECEIPT FIELDS ===
+I flagged earlier that stated_/derived_relative_density were unit-tested but
+NOT verified end-to-end (the completed override run predated them). They are
+now, and on the hardest case — a run with NOTHING stated:
+    stated_relative_density  = 0            <- 'nothing was stated', correct
+    derived_relative_density = 0.1385609912 <- the derivation's own number
+That 0.1385609912 is the SAME value the CLI refusal quotes as 'the lightest
+printable density' (r4_refusals.txt) and the same the app shows as its 14 %
+valid-range floor (r3_app_surface.txt). One number, three surfaces.

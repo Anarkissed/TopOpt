@@ -970,6 +970,12 @@ double lattice_region_thinnest_extent_mm(const JobLatticeRegion& r) {
 // What FIT derived for ONE declared include region.
 struct FitRegionCell {
   std::size_t job_region_index = 0;   // index into job.lattice.regions
+  // ★ The density the derivation WOULD have chosen, kept alongside the one in
+  // force, so a receipt can show both and the app can show the valid range
+  // (§2d): [derived, rho_max] is exactly the set of densities that print at
+  // this region's cell.
+  double derived_relative_density = 0.0;
+  double stated_relative_density = 0.0;  // 0 = none stated
   double extent_mm = 0.0;             // the thinnest declared dimension
   bool feasible = false;              // a printable AND percolating pair exists
   double cell_mm = 0.0;               // the derived cell (0 when infeasible)
@@ -1000,8 +1006,31 @@ struct FitRegionCell {
 // of fit_region_cells so the two cannot describe different laws. `f.extent_mm`
 // must already be set — that is the ONLY thing the two branches derive
 // differently (declared half-extents vs a measured voxel-set thickness).
+// ★ THE STATED DENSITY ENTERS HERE, AT THE DENSITY STEP, AND THE CELL DOES NOT
+// MOVE (task 2026-08-16-per-sector-density-override §1c).
+//
+// The derived chain is extent -> cell = max(extent/N*, finest printable) ->
+// rho = the LIGHTEST density whose strut still prints at that cell -> strut.
+// A stated rho replaces the third step only. The consequences, both measured
+// (evidence r0_density_range.txt):
+//
+//   * the strut becomes cell * phi(rho) and RISES with rho, so the region stays
+//     printable and stays at exactly N* cells per member — it keeps certifying;
+//   * a rho BELOW the derived one implies a strut under the profile's bead and
+//     is REFUSED with the number. It is refusable rather than clampable because
+//     the derived density IS the floor of the valid range at a fixed cell.
+//
+// ★ WHAT RE-DERIVING THE CELL WOULD HAVE DONE (cell = w / phi(rho)): the strut
+// would be pinned at exactly the bead width for EVERY density, so nothing could
+// ever refuse — but cells-per-member would fall with rho, and on his part a
+// stated 0.25 against a 6.8211 mm body gives 3.52 cells per member, i.e. the
+// region silently stops certifying. Both readings are honest; this one keeps
+// certification and refuses what it cannot do, and the other trades
+// certification away without the user asking. The full table for both is in
+// r0_density_range.txt.
 void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
-                          double min_extrudable_width_mm, double n_star) {
+                          double min_extrudable_width_mm, double n_star,
+                          double stated_density = 0.0) {
   const LatticeCellDerivation d =
       lattice_derive_cell_for_member(topo, f.extent_mm, min_extrudable_width_mm);
   f.min_printable_cell_mm = d.min_printable_cell_mm;
@@ -1015,7 +1044,10 @@ void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
   f.cell_mm = std::max(f.extent_mm / n_star, d.min_printable_cell_mm);
   const double rho =
       lattice_min_density_for_strut(topo, f.cell_mm, min_extrudable_width_mm);
-  f.relative_density = rho >= 0.0 ? rho : lattice_rho_max(topo);
+  f.derived_relative_density = rho >= 0.0 ? rho : lattice_rho_max(topo);
+  f.stated_relative_density = stated_density;
+  f.relative_density =
+      stated_density > 0.0 ? stated_density : f.derived_relative_density;
   f.strut_mm = octet_strut_diameter_mm(f.relative_density, f.cell_mm);
   f.cells_per_member = f.extent_mm / f.cell_mm;
   f.out_of_regime = f.cells_per_member < n_star;
@@ -1053,7 +1085,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       f.job_region_index = ri;
       f.extent_mm =
           region_thinnest_extent_mm(*roles->includes[include_index].mask);
-      fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star);
+      fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
+                           r.relative_density);
       out.push_back(f);
       ++include_index;
       continue;
@@ -1084,7 +1117,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
     FitRegionCell f;
     f.job_region_index = ri;
     f.extent_mm = lattice_region_thinnest_extent_mm(r);
-    fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star);
+    fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
+                         r.relative_density);
     out.push_back(f);
   }
   return out;
@@ -1106,6 +1140,63 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
 // percolating pair exists at any cell, so there is nothing to build.
 //
 // Scoped to `kind == "region"`: an analytic include behaves exactly as it did.
+// ★ §2(a) — A STATED DENSITY TOO LIGHT TO PRINT REFUSES, WITH THE NUMBER
+// (task 2026-08-16-per-sector-density-override). NEVER a silent clamp: clamping
+// turns the user's instruction into a different part, and this project has been
+// bitten by that exact shape before.
+//
+// `min_extrudable_width_mm` is USER INPUT from his print profile, and core's
+// convention is that 0 means UNSET, never "use a sensible number" — so a stated
+// density with no profile width refuses too rather than being checked against a
+// default nobody chose.
+//
+// ★ MEASURED: that width branch is UNREACHABLE from the CLI. The schema already
+// refuses both `lattice.min_extrudable_width_mm` and
+// `grading.min_extrudable_width_mm` at 0 when their block is present, so a job
+// cannot arrive here with an unset width — verified by running two jobs that try
+// (evidence 2026-08-16-per-sector-density-override/r4_refusals.txt). It stays as
+// a guard for direct callers of this namespace, and is NOT claimed as a
+// demonstrated refusal anywhere in the handoff.
+void refuse_unprintable_stated_density(
+    const JobDescription& job, const std::vector<FitRegionCell>& cells,
+    LatticeTopology topo, double min_extrudable_width_mm) {
+  for (const FitRegionCell& f : cells) {
+    if (!(f.stated_relative_density > 0.0)) continue;
+    if (f.job_region_index >= job.lattice.regions.size()) continue;
+    const JobLatticeRegion& r = job.lattice.regions[f.job_region_index];
+    if (!(min_extrudable_width_mm > 0.0))
+      throw JobError(
+          "lattice region " + std::to_string(r.region_id) +
+          " states relative_density " + json_num(f.stated_relative_density) +
+          ", but \"min_extrudable_width_mm\" is unset (0). That value is the "
+          "print profile's extrusion width and there is no safe default for it: "
+          "whether a stated density prints at all is a question about the "
+          "nozzle. Declare it and re-run.");
+    // ★ THE DECISION IS lattice_stated_density_unprintable's, not this
+    // function's (bar R1'). This wrapper only builds the message. The predicate
+    // is asserted in test_lattice_refusal.cpp, including the unreachability that
+    // makes a no-override job inert here for EVERY region shape.
+    if (!lattice_stated_density_unprintable(f.stated_relative_density, f.cell_mm,
+                                            min_extrudable_width_mm))
+      continue;
+    const double strut =
+        octet_strut_diameter_mm(f.stated_relative_density, f.cell_mm);
+    throw JobError(
+        "lattice region " + std::to_string(r.region_id) +
+        ": a stated relative_density of " +
+        json_num(f.stated_relative_density) + " puts this region's strut at " +
+        json_num(strut) + " mm, under your profile's " +
+        json_num(min_extrudable_width_mm) +
+        " mm extrusion width, so it cannot be printed. At this region's " +
+        json_num(f.cell_mm) + " mm cell the lightest printable density is " +
+        json_num(f.derived_relative_density) +
+        " — state that or heavier (up to " + json_num(lattice_rho_max(topo)) +
+        "), or declare a deeper region so the derivation picks a larger cell. "
+        "The density is NOT clamped: a part you did not ask for is worse than a "
+        "refusal.");
+  }
+}
+
 void refuse_infeasible_region_lattice(const JobDescription& job,
                                       const std::vector<FitRegionCell>& cells,
                                       double min_extrudable_width_mm) {
@@ -1125,6 +1216,36 @@ void refuse_infeasible_region_lattice(const JobDescription& job,
         " mm to certify one). Declare a deeper region, run at a finer "
         "resolution, or split the parent into fewer pieces.");
   }
+}
+
+// ★ THE PER-VOXEL STATED DENSITY (task 2026-08-16-per-sector-density-override).
+// Built exactly like `fit_cell_field` and by the SAME membership test, so a voxel
+// gets the cell and the density of the SAME region and the two cannot disagree
+// about which region owns it. 0.0 where no region states one — the law's sentinel
+// for "derive", so a job with no override hands in an all-zero field that is
+// behaviourally identical to handing in nothing.
+std::vector<double> region_density_field(
+    const VoxelGrid& grid, const std::vector<ClearanceGeometry>& includes,
+    const std::vector<FitRegionCell>& cells) {
+  std::vector<double> out(grid.voxel_count(), 0.0);
+  if (includes.size() != cells.size()) return out;  // caller asserts; never guess
+  bool any = false;
+  for (const FitRegionCell& c : cells)
+    if (c.stated_relative_density > 0.0) any = true;
+  if (!any) return out;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
+                     grid.origin.y + (j + 0.5) * grid.spacing,
+                     grid.origin.z + (k + 0.5) * grid.spacing};
+        for (std::size_t ri = 0; ri < includes.size(); ++ri)
+          if (point_in_clearance_region(includes[ri], c, 0.0)) {
+            out[grid.index(i, j, k)] = cells[ri].stated_relative_density;
+            break;
+          }
+      }
+  return out;
 }
 
 // The per-voxel desired cell the grading law's Fit mode consumes: the derived cell of
@@ -1217,6 +1338,8 @@ void fill_grading_fit(RunInfo& gi, const GradedField& gf,
     R.feasible = f.feasible;
     R.cell_mm = f.cell_mm;
     R.relative_density = f.relative_density;
+    R.stated_relative_density = f.stated_relative_density;
+    R.derived_relative_density = f.derived_relative_density;
     R.strut_mm = f.strut_mm;
     R.cells_per_member = f.cells_per_member;
     R.out_of_regime = f.out_of_regime;
@@ -3362,12 +3485,15 @@ LatticeVariantOutcome lattice_one_variant(
     // so every other mode's call is byte-identical.
     std::vector<FitRegionCell> fit_cells;
     std::vector<double> fit_field;
+    std::vector<double> rho_field;
     if (gp.cell_mode == CellSizeMode::Fit) {
       fit_cells = fit_region_cells(job, gp.topology,
                                    job.grading.min_extrudable_width_mm,
                                    &lattice_roles);
       refuse_infeasible_region_lattice(job, fit_cells,
                                        job.grading.min_extrudable_width_mm);
+      refuse_unprintable_stated_density(job, fit_cells, gp.topology,
+                                        job.grading.min_extrudable_width_mm);
       if (fit_cells.size() != lattice_roles.includes.size())
         throw JobError(
             "run_job: fit derivation and the resolved include regions disagree on "
@@ -3375,6 +3501,9 @@ LatticeVariantOutcome lattice_one_variant(
             "at another region's cell");
       fit_field = fit_cell_field(solved_grid, lattice_roles.includes, fit_cells);
       gp.fit_cell_size_mm = &fit_field;
+      // ★ The stated densities ride the SAME membership test as the cells above.
+      rho_field = region_density_field(solved_grid, lattice_roles.includes, fit_cells);
+      gp.region_relative_density = &rho_field;
     }
     gp.min_cell_size_mm = job.grading.cell_min_mm;
     gp.max_cell_size_mm = job.grading.cell_max_mm;
@@ -5007,6 +5136,7 @@ std::string lattice_forecast_json(const JobDescription& job,
   // with the mode, so none of them can read a field that no longer applies.
   std::vector<FitRegionCell> fc_fit_cells;
   std::vector<double> fc_fit_field;
+  std::vector<double> fc_rho_field;
   if (gp.cell_mode == CellSizeMode::Fit) {
     fc_fit_cells =
         fit_region_cells(job, gp.topology, gp.min_extrudable_width_mm, &roles);
@@ -5016,6 +5146,8 @@ std::string lattice_forecast_json(const JobDescription& job,
           "disagree on how many regions this job has");
     fc_fit_field = fit_cell_field(grid, roles.includes, fc_fit_cells);
     gp.fit_cell_size_mm = &fc_fit_field;
+    fc_rho_field = region_density_field(grid, roles.includes, fc_fit_cells);
+    gp.region_relative_density = &fc_rho_field;
   }
   const GradedField gf =
       grade_lattice(grid, sd.density, flat_demand, &cand, gp);
@@ -5727,6 +5859,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // as `fit_no_derivation_voxels` rather than guessing a cell for them.
     std::vector<FitRegionCell> fit_cells;
     std::vector<double> fit_field;
+    std::vector<double> an_rho_field;
     LatticeRoleRegions an_roles;
     if (gp.cell_mode == CellSizeMode::Fit) {
       an_roles = lattice_role_regions_from_job(job, &result.model, &model_grid);
@@ -5739,6 +5872,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
             "how many regions this job has");
       fit_field = fit_cell_field(design_grid, an_roles.includes, fit_cells);
       gp.fit_cell_size_mm = &fit_field;
+      an_rho_field = region_density_field(design_grid, an_roles.includes, fit_cells);
+      gp.region_relative_density = &an_rho_field;
     }
     const GradedField gf =
         grade_lattice(design_grid, density, a.von_mises_field, nullptr, gp);
@@ -8109,6 +8244,37 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           // part, so that is the lattice the mask is built in.
           ? lattice_role_regions_from_job(job, &result.model, &grid)
           : LatticeRoleRegions{};
+
+  // ★ REFUSE HERE, BEFORE THE SOLVE (task 2026-08-16-per-sector-density-override).
+  // Both region refusals — infeasible geometry and an unprintable stated density —
+  // also run inside the grading step below, which is where they were born. But
+  // that step runs PER VARIANT, AFTER minimize_plastic: on his part that is over
+  // an hour of solving before the user is told a number they typed cannot print.
+  // A refusal that arrives after the work is nearly worthless.
+  //
+  // Everything both checks read is already known at this point: the job, and the
+  // regions resolved against the part grid one statement above. Nothing here
+  // needs the solved design. The pre-flight is EARLIER still and cannot host
+  // this — it runs before the import, so a "region" kind has no body to measure
+  // there (that is exactly why the pre-flight skips-and-counts them).
+  //
+  // ★ The copies below stay. This is a duplicate guard, not a move: the grading
+  // step is reached by other callers, and a refusal must not depend on which
+  // entry point ran. Identical inputs, identical predicate, so the two cannot
+  // disagree — the first one to see the job wins, and that is this one.
+  if (job.lattice.present && !lattice_roles.includes.empty()) {
+    CellSizeMode preflight_mode = CellSizeMode::Fixed;
+    if (resolve_cell_mode(job.grading.cell_mode, preflight_mode) &&
+        preflight_mode == CellSizeMode::Fit) {
+      const std::vector<FitRegionCell> early_cells = fit_region_cells(
+          job, LatticeTopology::Octet, job.grading.min_extrudable_width_mm,
+          &lattice_roles);
+      refuse_infeasible_region_lattice(job, early_cells,
+                                       job.grading.min_extrudable_width_mm);
+      refuse_unprintable_stated_density(job, early_cells, LatticeTopology::Octet,
+                                        job.grading.min_extrudable_width_mm);
+    }
+  }
 
   // ── MULTISCALE LATTICE TO (task multiscale-lattice-to) ─────────────────────
   // Arm the optimizer's lattice material law for THIS job, if the job asked and

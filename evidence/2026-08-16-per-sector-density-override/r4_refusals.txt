@@ -1,0 +1,19 @@
+R4 — A STATED DENSITY THAT CANNOT PRINT REFUSES, WITH THE NUMBER.
+Binary: Aug 13 16:30  CMAKE_BUILD_TYPE=CMAKE_BUILD_TYPE:STRING=Release
+
+=== (1) OUT OF BAND (0.98) — refused by the SCHEMA, before any work ===
+topopt-cli: job.json: a lattice region "relative_density" must lie in the certifiable band [0.05
+047, 0.8999] (got 0.98). Outside it the homogenized tensor has no measurement behind it, so the 
+density cannot be certified at any cell.
+
+=== (2) IN BAND BUT UNPRINTABLE (0.06) — refused BEFORE THE SOLVE, 15 s ===
+topopt-cli: lattice region 200: a stated relative_density of 0.06 puts this region's strut at 0.
+2740042783 mm, under your profile's 0.42 mm extrusion width, so it cannot be printed. At this re
+gion's 2.728446884 mm cell the lightest printable density is 0.1385609912 — state that or heavier
+ (up to 0.89988), or declare a deeper region so the derivation picks a larger cell. The density 
+is NOT clamped: a part you did not ask for is worse than a refusal.
+
+=== (3) the two 'unset extrusion width' attempts — the schema gets there first,
+        so refuse_unprintable_stated_density's width branch is UNREACHABLE from the CLI
+topopt-cli: job.json: lattice "min_extrudable_width_mm" must be > 0
+topopt-cli: job.json: grading "min_extrudable_width_mm" must be > 0

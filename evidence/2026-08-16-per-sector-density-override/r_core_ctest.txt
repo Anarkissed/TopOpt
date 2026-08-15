@@ -1,0 +1,39 @@
+CORE CTEST — TWO RUNS. THE ONE THAT COUNTS IS THE SECOND.
+
+★ RUN 2, ON THE REBASED TREE (the merge target): 122 of 122 PASSED.
+  Total Test time (real) = 2573.49 sec. Zero failures, zero timeouts.
+  The DENOMINATOR MOVED: 121 registered before the rebase, 122 after — main's
+  merges (#330-#333) added a test. Quoting the old number against the new tree
+  would have been wrong, which is why it is re-stated here rather than reused.
+  lib3mf is still absent (ctest -N reports 0 of export_3mf / threemf_import), so
+  this is 122 OF CI'S 124.
+
+RUN 1, on the pre-rebase tree: 121 of 121 PASSED, on the reverted (clean)
+binary. Kept below because its diagnosis of the sabotage incident is the
+substance, not the count.
+
+  Total Test time (real) = 2959.25 sec
+  binary md5 273f0941263a236a76564388c0226268
+  grep -c '>= 0.0)' core/src/simp/grading.cpp  ->  0   (the sabotage is gone)
+
+★ THE DENOMINATOR IS NOT CI'S, AND THIS IS THE HONEST FORM OF THE NUMBER.
+  Locally registered: 121. lib3mf is absent from this worktree, so
+    export_3mf  and  threemf_import
+  DO NOT REGISTER here — confirmed by 'ctest -N | grep -c' returning 0.
+  CI (.github/workflows/ci.yml) installs lib3mf via vcpkg and runs ctest with
+  --no-tests=error, so CI's suite is the local count + 2. On the PRE-REBASE tree
+  that was 121 of CI's 123; on the REBASED tree it is 122 of CI's 124. The two
+  it does not cover are the 3MF import/export pair, in both cases.
+
+  A pass here is therefore NOT a claim that CI passes. It is a claim about
+  121 named tests, with the two absent ones named.
+
+=== WHY THIS RUN EXISTS AT ALL ===
+  An earlier full run returned 120/121 with 'grading' FAILING. The cause was
+  mine: an R8 sabotage (the law's sentinel flipped from > 0 to >= 0) that my
+  revert script never undid, because it raised an IndexError before the
+  restore. I then misread a build-time 'grep -c error' of 0 as a pass while
+  the test's own output, three lines below, read '26321 checks, 2 failures'.
+  The suite caught it. The two failing checks were exactly the two that
+  sabotage targets, which is itself the R8 evidence working as designed.
+  Source reverted, binary rebuilt, suite re-run: the numbers above.

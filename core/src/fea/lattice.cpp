@@ -618,6 +618,18 @@ CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,
   return out;
 }
 
+bool lattice_stated_density_unprintable(double stated_relative_density,
+                                        double cell_mm,
+                                        double min_extrudable_width_mm) {
+  // ★ THE UNREACHABILITY, AND IT IS THE FIRST LINE ON PURPOSE. Nothing below can
+  // run for a job that states no density, so no later change to the arithmetic
+  // can make an absent override refusable.
+  if (!(stated_relative_density > 0.0)) return false;
+  if (!(cell_mm > 0.0) || !(min_extrudable_width_mm > 0.0)) return false;
+  const double strut = octet_strut_diameter_mm(stated_relative_density, cell_mm);
+  return strut + 1e-12 < min_extrudable_width_mm;
+}
+
 double octet_relative_density(double cell_mm, double strut_radius_mm) {
   if (!(cell_mm > 0.0) || !std::isfinite(cell_mm))
     throw std::invalid_argument(

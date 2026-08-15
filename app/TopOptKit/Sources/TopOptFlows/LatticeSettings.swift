@@ -71,10 +71,54 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// can check the depth tie: a face that is both protected and latticed must
     /// carry ONE depth, and core refuses the job when it carries two.
     public var faceID: Int? = nil
+    /// ★ The density the user DIALLED for this region (task
+    /// 2026-08-16-per-sector-density-override), or nil for auto. Emitted as the
+    /// job's `relative_density`; absent when nil, so a job with no override is
+    /// byte-identical to a pre-task one. Never set on an exclude region.
+    public var relativeDensity: Double? = nil
 
     public init(role: LatticeGroupRole, kind: Kind) {
         self.role = role
         self.kind = kind
+    }
+
+    /// ★ THE ONE WIRE ENCODER for a lattice region (task
+    /// 2026-08-16-per-sector-density-override). There were TWO hand-copied
+    /// copies of this dictionary — RemoteRunner's optimize job and
+    /// RelatticeRunner's re-lattice job — and they had ALREADY diverged: the
+    /// re-lattice copy dropped `face_id`. Adding a third field to both by hand is
+    /// exactly the one-sided edit RelatticeRunner's own header says it collapsed
+    /// the grading dictionary to prevent. So both now call this.
+    ///
+    /// The `face_id` divergence is closed as a side effect and is provably inert:
+    /// the re-lattice path's regions come from `variantRegions`, which emits only
+    /// from manual primitives and never sets `faceID`, so the key was nil there
+    /// and stays absent. Its bytes do not move.
+    public var wireDictionary: [String: Any] {
+        let geometry: [String: Any] = kind == .face
+            ? [
+                "origin": [origin.x, origin.y, origin.z],
+                "normal": [normal.x, normal.y, normal.z],
+                "half_u_mm": halfUMM,
+                "half_w_mm": halfWMM,
+                "depth_mm": depthMM,
+            ]
+            : [
+                "axis_point": [axisPoint.x, axisPoint.y, axisPoint.z],
+                "axis_dir": [axisDir.x, axisDir.y, axisDir.z],
+                "radius_mm": radiusMM,
+                "half_length_mm": halfLengthMM,
+            ]
+        var entry: [String: Any] = ["role": role.rawValue, "kind": kind.rawValue,
+                                    "geometry": geometry]
+        // The face this region was spawned from (task 2026-08-12 §0a) — core uses
+        // it to refuse a job whose protection depth and lattice depth for the same
+        // face disagree.
+        if let fid = faceID { entry["face_id"] = fid }
+        // The DIALLED density. Absent means AUTO means core derives, so a project
+        // that never touched it produces the identical job (bar R1).
+        if let rho = relativeDensity { entry["relative_density"] = rho }
+        return entry
     }
 
     /// Core rejects zero-extent regions ("a zero-extent region marks nothing") and
@@ -365,6 +409,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// and an entry whose group is gone is inert (lookup by id finds nothing).
     /// Empty by default ⇒ absent from old snapshots ⇒ they decode unchanged.
     public var groupRoles: [UUID: LatticeGroupRole]
+    /// ★ PER-REGION RELATIVE DENSITY (task 2026-08-16-per-sector-density-override),
+    /// keyed by the SAME `SelectionGroup.id` as `groupRoles`. This is the one thing
+    /// the region layer could not yet say: dial this sector to 25% and its
+    /// neighbour to 40% AT THE SAME DEPTH.
+    ///
+    /// ★ ABSENT MEANS AUTO, and auto means core derives — it does NOT mean zero and
+    /// it does NOT mean a default this app picked. An empty dictionary emits no
+    /// `relative_density` key at all, so a project that never touches this produces
+    /// a byte-identical job (bar R1). The same reason `groupRoles` is empty by
+    /// default and the same reason core's sentinel is `> 0`.
+    ///
+    /// Only an INCLUDE group can carry one: an exclude region is frozen solid and
+    /// has no lattice to set a density on. `LatticeRegionEmission` applies that
+    /// gate at the single place the emission goes through, so no call site can
+    /// forget it, and core refuses the pairing independently.
+    public var groupDensities: [UUID: Double]
     /// Depth (mm) a face-role lattice region reaches into the part — the
     /// `depth_mm` the emitted `lattice.regions` face entries carry (round-2),
     /// and the legacy painted-include preview depth. Since the depth redesign
@@ -496,6 +556,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 paintedIncludeFaces: [Int] = [],
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
+                groupDensities: [UUID: Double] = [:],
                 groupDepthMM: [UUID: Double] = [:],
                 selectableRoles: [String: LatticeSelectableRole] = [:],
                 selectableDepthMM: [String: Double] = [:],
@@ -528,6 +589,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.paintedIncludeFaces = paintedIncludeFaces
         self.paintDepthMM = paintDepthMM
         self.groupRoles = groupRoles
+        self.groupDensities = groupDensities
         self.groupDepthMM = groupDepthMM
         self.selectableRoles = selectableRoles
         self.selectableDepthMM = selectableDepthMM
@@ -544,6 +606,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
+        case groupDensities
         case groupDepthMM        // the ONE dragged depth per group (task 2026-08-12 §0a)
         // The per-SELECTABLE role + depth (task 2026-08-14-lattice-separation
         // §3c/§3d). Named `primitive*` before PR 331 landed and made the unit
@@ -591,6 +654,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
+        // Absent in every snapshot written before this task ⇒ [:] ⇒ auto everywhere,
+        // which is exactly what those projects ran. A default must not rewrite history.
+        groupDensities = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDensities) ?? [:]
         // Absent from every pre-task snapshot ⇒ empty ⇒ every group falls back to
         // `paintDepthMM`, which is exactly the depth those projects emitted.
         groupDepthMM = try c.decodeIfPresent([UUID: Double].self, forKey: .groupDepthMM) ?? [:]
@@ -644,6 +710,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
+        try c.encode(groupDensities, forKey: .groupDensities)
         try c.encode(groupDepthMM, forKey: .groupDepthMM)
         try c.encode(frozenRegionDensity, forKey: .frozenRegionDensity)
         try c.encode(selectableRoles, forKey: .selectableRoles)

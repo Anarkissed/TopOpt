@@ -1149,7 +1149,8 @@ public final class ProjectModel: ObservableObject {
             roles: lattice.groupRoles,
             primitives: resolvedLatticePrimitives,
             includePrimitives: lattice.includePrimitives.map {
-                ($0, $0.resolvedDepthMM) })
+                ($0, $0.resolvedDepthMM) },
+            groupDensities: lattice.groupDensities)
     }
 
     /// A role group's manual primitives with their slab depths resolved through
@@ -1207,7 +1208,16 @@ public final class ProjectModel: ObservableObject {
             // every project that has not used them ⇒ the emission is unchanged.
             selectableRoles: lattice.selectableRoles,
             selectableDepthMM: lattice.selectableDepthMM,
-            resolve: { [weak self] f in
+            groupDensities: lattice.groupDensities,
+            resolve: resolvedLatticeFace)
+    }
+
+    /// A face's exact B-rep geometry as the emission needs it; nil when the face
+    /// has none (STL pseudo-face, cone, spline). Extracted so the whole-part
+    /// emission and the per-group one used by the density control resolve faces
+    /// through ONE closure — two copies could disagree about which faces exist.
+    private var resolvedLatticeFace: (FaceID) -> LatticeRegionEmission.ResolvedFace? {
+        { [weak self] f in
                 guard let mesh = self?.viewerMesh, let geo = mesh.faceGeometry(f) else { return nil }
                 if geo.isCylinder {
                     guard let span = mesh.faceAxialSpan(
@@ -1225,7 +1235,43 @@ public final class ProjectModel: ObservableObject {
                                   halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
                 }
                 return nil
-            })
+        }
+    }
+
+    /// ★ THE PER-REGION DENSITY CONTROL'S ROWS (task
+    /// 2026-08-16-per-sector-density-override, §3). One row per INCLUDE role
+    /// group, each carrying core's own derivation for that group's thinnest
+    /// region — the valid range, the cell, the strut, the cells-per-member.
+    ///
+    /// The regions are produced by `latticeJobRegions()` filtered to ONE group at
+    /// a time through the same emission the run uses, so a group whose faces have
+    /// no usable B-rep geometry contributes no row rather than a row about a
+    /// region that will never be emitted. Run == picture, the whole page's rule.
+    public func latticeSectorDensityRows() -> [LatticeSectorDensity.Row] {
+        let roles = latticeEligibleRoles()
+        // The emission's order is the selection's own: include primitives first,
+        // then each role group's primitives and faces in group order. Rebuilding
+        // per group by re-running the emission with a single-group selection is
+        // the only way to attribute a region to its group WITHOUT a second
+        // ordering assumption, and it is the same function either way.
+        return LatticeSectorDensity.rows(
+            groups: selection.groups, roles: roles,
+            densities: lattice.groupDensities,
+            regionsFor: { [weak self] gid in
+                guard let self, let g = self.selection.groups.first(where: { $0.id == gid })
+                else { return [] }
+                return LatticeRegionEmission.regions(
+                    groups: [g], roles: roles,
+                    primitives: self.resolvedLatticePrimitives,
+                    includePrimitives: [],
+                    faceDepthMM: self.lattice.paintDepthMM,
+                    groupDepthMM: { [weak self] id in self?.latticeSlabDepthMM(id) ?? .nan },
+                    runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
+                    groupDensities: self.lattice.groupDensities,
+                    resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
+            },
+            topology: lattice.topologyID,
+            minExtrudableWidthMM: printParams.strutLineWidthMM)
     }
 
     // MARK: - lattice page role helpers (handoff 2026-07-30-lattice-page)

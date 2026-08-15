@@ -1,0 +1,76 @@
+R2 — EVERY PER-VOXEL DENSITY CONSUMER, ENUMERATED AND CHECKED.
+
+METHOD. The override is applied in ONE place — grade_lattice's rho_of, one branch
+after `prescribed` — and its only output is LatticePosture::relative_density.
+So the census question is exactly: WHO READS THAT FIELD, and does any consumer
+re-derive a density of its own instead? The enumeration below is the complete
+`relative_density` grep over core/src + core/include, file by file, nothing
+filtered out. (Bar: do not filter a check you cite as evidence.)
+
+  36  core/src/cli/run_job.cpp        1  core/src/simp/observability.cpp
+   9  core/src/fea/lattice.cpp        1  core/src/orient/build_orientation.cpp
+   8  core/src/simp/analyze.cpp       5  core/include/topopt/lattice.hpp
+   8  core/src/cli/job.cpp            2  core/include/topopt/strut_strength.hpp
+   7  core/src/simp/grading.cpp       2  core/include/topopt/grading.hpp
+   4  core/src/fea/strut_strength.cpp 2  core/include/topopt/analyze.hpp
+   3  core/src/simp/minimize_plastic.cpp  1 core/include/topopt/observability.hpp
+                                      1  core/include/topopt/job.hpp
+
+CONSUMER                          READS                          VERDICT
+1 CERTIFICATION (analyze.cpp      lattice->relative_density[e],   ✓ PER-VOXEL. The
+  :204,208,210)                   per voxel, for the cubic        override reaches
+                                  tensor AND the band assert      it with no change.
+2 BAND ASSERT (analyze.cpp :208)  same, per voxel                 ✓ and it is why
+                                  the SCHEMA band-checks a stated density: an
+                                  out-of-band override would trip this assert deep
+                                  in certification instead of at the job. Refused
+                                  at parse instead (r4_refusals.txt case 1).
+3 MASS (analyze.cpp :349)         rho = relative_density[idx]     ✓ per voxel — a
+                                  heavier sector weighs more, which is the point.
+4 STRUT STRENGTH                  vector param, rho =             ✓ per voxel.
+  (strut_strength.cpp :89,130)    relative_density[e]
+5 ORIENTATION SCORING             passes facts.lattice->          ✓ pass-through.
+  (build_orientation.cpp :289)    relative_density whole
+6 MULTISCALE (minimize_plastic    writes its OWN posture from     ✓ SEPARATE LANE.
+  :1766,1777)                     the optimizer's pd             `prescribed` is
+                                  tested BEFORE the region field in rho_of, so
+                                  multiscale is untouched. Asserted in the unit
+                                  test (test_grading.cpp, "prescribed still wins").
+7 PER-REGION RECEIPT              R.relative_density              ✓ FIXED HERE — it
+  (observability.cpp :1253)                                       reported only the
+                                  density in force, so a reader could not tell a
+                                  stated 0.25 from a derived 0.25. Now carries
+                                  stated_relative_density (0 = none) and
+                                  derived_relative_density beside it. Same defect
+                                  shape as PR 332's dropped region kind.
+8 PRE-FLIGHT FORECAST             builds GradingLawParams with    ✓ CORRECTLY BLIND.
+  (run_job.cpp :4840 params,      NO region_relative_density      The forecast
+  :5345 note)                                                     predicts the
+                                  latticed/solid SPLIT, which the cells-per-member
+                                  rule decides and which "does not see density at
+                                  all" (its own words, :5345). A stated density
+                                  does not move the cell, so the split is
+                                  unchanged. The forecast carries NO mass number
+                                  (its keys are listed in r2_forecast_keys.txt),
+                                  so there is no mass estimate to diverge.
+9 DERIVATION WINDOW               densest_/lightest_relative_     ✓ NOT A FORECAST
+  (lattice.cpp :552-568)          density                         of the run — it
+                                  is the admissible window for a member of a given
+                                  width. The stated density is checked against
+                                  exactly that window by
+                                  refuse_unprintable_stated_density.
+
+NOT CONSUMERS — checked, and the reason they are not:
+  MIN-FEATURE. Its sources are smooth.cpp, simp.cpp, voxelize.cpp,
+  gate_diagnosis.cpp — none of which contains the string relative_density at all
+  (they do not appear in the census above). In analyze.cpp the only min_feature
+  line is :520; the relative_density lines are 181/183/204/208/210/349/465/583.
+  Disjoint. Min-feature reads the DESIGN density (SIMP rho) and geometry.
+  FROZEN / PROTECT MASKS and CLEARANCES. Same: boolean voxel sets over the design
+  field, upstream of the lattice posture. grading.cpp contains no line naming both
+  a freeze/protect and a density.
+
+CONCLUSION. Every consumer of the per-voxel lattice density reads the posture
+field the law writes, per voxel; none re-derives one. One consumer (7) was
+flattening stated vs derived and is fixed. One (8) is deliberately blind and says
+so in its own text. Nothing else needed a change.
