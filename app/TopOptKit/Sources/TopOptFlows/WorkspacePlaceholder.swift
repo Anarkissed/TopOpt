@@ -129,8 +129,12 @@ public struct WorkspacePlaceholder: View {
     /// §6 — how far the cut has been nudged off the piece's centre, in mm, along
     /// the plane's own normal (the only direction that moves it).
     @State private var cutOffsetMM: Double = 0
-    /// §6(b) — the wireframe switch. ON by default: it is what the stage is for.
-    @State private var surfaceWireframeOn = true
+    /// §6(b) — the wireframe switch. ★ OFF BY DEFAULT (maintainer, 2026-08-16: "I
+    /// also don't want the wireframe view to be the default. Please turn off all
+    /// views by default"). A view aid is something you reach for, not the resting
+    /// state of the page — and the stage reads as the part rather than as a drawing
+    /// of it until you ask.
+    @State private var surfaceWireframeOn = false
     /// §6 — X-RAY, its own switch. Off by default: seeing every hidden edge at once
     /// is a specific request, not the resting state of a page about surfaces.
     @State private var surfaceXrayOn = false
@@ -625,7 +629,12 @@ public struct WorkspacePlaceholder: View {
                           // ★ §6(b) — THE B-REP WIREFRAME, on the surface stage
                           // only. The stage-visibility table owns the decision, so
                           // a new affordance cannot appear on a stage by accident.
-                          showWireframe: visible.wireframe && surfaceWireframeOn,
+                          // ★ …OR WHENEVER THERE IS A PREVIEW TO DRAW. The line layer is
+                          // the only channel these reach the renderer through, so a
+                          // pattern being aimed has to open it regardless of the
+                          // view toggle. See `surfacePreviewLineBuffer`.
+                          showWireframe: (visible.wireframe && surfaceWireframeOn)
+                              || !surfacePreviewLineBuffer.isEmpty,
                           designBox: (showDesignGizmo && !showSmoothingPage
                                       && visible.designBox)
                               ? project.designBox.box : nil,
@@ -3989,8 +3998,12 @@ public struct WorkspacePlaceholder: View {
 
     /// ★ THE GRID A PATTERN *WOULD* MAKE — the only thing on screen that has not
     /// happened yet, so the only thing drawn in the accent colour.
+    /// ★ NOT GATED ON THE WIREFRAME TOGGLE. The wireframe is a VIEW; this is the
+    /// thing being decided right now. With the toggle off by default, gating the
+    /// preview on it would leave the pattern tool aiming at a grid nobody can see —
+    /// the toggle would silently be a prerequisite for a tool.
     private var surfacePreviewLineBuffer: [Float] {
-        guard visible.surfaceEditing, surfaceWireframeOn, surfaceTool == .pattern,
+        guard visible.surfaceEditing, surfaceTool == .pattern,
               let mesh = viewerMesh, let f = surfacePatternFace,
               let p = surfacePatternPreview else { return [] }
         // ★ CLIPPED TO THE SELECTED PIECE. Without this the grid is traced across

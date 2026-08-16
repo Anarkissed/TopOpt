@@ -130,9 +130,8 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
     /// says where the CONTROL appears; whether the lines are drawn is the toggle's
     /// business.
     ///
-    /// True on Topology and Surface. It stays false on the LATTICE stage, whose
-    /// geometry is a lattice preview rather than the imported B-rep — the edge set
-    /// would describe a surface that stage is not showing.
+    /// ★ TRUE ON ALL THREE STAGES. It was false on the lattice stage for a reason
+    /// that turned out not to be worth a missing control — see `of(_:)`.
     public let wireframe: Bool
     /// ★ §6 — the face-editing affordances: the hover preview, the cut's rotate
     /// control, the similar-faces double tap.
@@ -180,10 +179,21 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
                                             latticeControls: false,
                                             wireframe: true)
         case .lattice:
+            // ★ AND THE LATTICE STAGE GETS THEM TOO (maintainer, 2026-08-16:
+            // "Please add the wireframe and xray view in the Lattice stage").
+            //
+            // I had left this false and written a reason: the stage can be showing a
+            // lattice PREVIEW rather than the imported B-rep, so the edge set would
+            // describe a surface it is not drawing. That reason was real but small —
+            // the stage shows the part itself most of the time, and where it does
+            // not, `SurfaceWireframe.edges` finds no face partition and draws
+            // nothing rather than drawing nonsense. Withholding a view control on a
+            // maybe is the worse trade.
             return WorkspaceStageVisibility(designBox: false, groupPrimitives: false,
                                             keepOuts: false,
                                             latticeDepthPlanes: true,
-                                            latticeControls: true)
+                                            latticeControls: true,
+                                            wireframe: true)
         case .surface:
             // ★ §6(a) — "NO PRIMITIVES ARE VISIBLE IN THIS MODE. None. Not dimmed
             // — hidden." Every primitive column is false, and the wireframe is on

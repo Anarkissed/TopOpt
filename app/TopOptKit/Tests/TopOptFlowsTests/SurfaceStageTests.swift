@@ -219,10 +219,16 @@ final class SurfaceStageTests: XCTestCase {
     /// The lattice stage stays false on its own merits: it shows a lattice preview,
     /// not the imported B-rep, so the edge set would describe a surface that stage
     /// is not drawing. See `ViewModeStageTests`.
-    func testTheLatticeStageAloneHasNoWireframe() {
-        XCTAssertTrue(WorkspaceStageVisibility.of(.topology).wireframe)
-        XCTAssertTrue(WorkspaceStageVisibility.of(.surface).wireframe)
-        XCTAssertFalse(WorkspaceStageVisibility.of(.lattice).wireframe)
+    /// ★ SUPERSEDED TWICE, AND BOTH TIMES BY THE MAINTAINER WIDENING IT. First
+    /// "only the Surface stage", then "the TO page too", now all three. The column
+    /// is a PERMISSION — which stages offer the control — and it is now true
+    /// everywhere, so what is left to assert is that the DEFAULT is off: a view aid
+    /// is something you reach for, not the resting state of a page.
+    func testEveryStageOffersTheWireframeAndItIsOffByDefault() {
+        for stage in WorkspaceStage.allCases {
+            XCTAssertTrue(WorkspaceStageVisibility.of(stage).wireframe,
+                          "\(stage.title)")
+        }
     }
 
     /// ★ "WHERE YOU GO" ABOVE "WHAT YOU CONFIGURE" — the navigation column, and

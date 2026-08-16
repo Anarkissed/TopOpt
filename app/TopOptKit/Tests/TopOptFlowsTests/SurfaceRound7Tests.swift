@@ -289,16 +289,13 @@ final class LiveWireframeTests: XCTestCase {
 
 final class ViewModeStageTests: XCTestCase {
 
-    func testTopologyAndSurfaceOfferTheWireframe() {
-        XCTAssertTrue(WorkspaceStageVisibility.of(.topology).wireframe,
-                      "★ 'keep wireframe and xray view throughout the entire app'")
-        XCTAssertTrue(WorkspaceStageVisibility.of(.surface).wireframe)
-    }
-
-    /// The lattice stage shows a lattice preview, not the imported B-rep — its edge
-    /// set would describe a surface that stage is not showing.
-    func testTheLatticeStageDoesNot() {
-        XCTAssertFalse(WorkspaceStageVisibility.of(.lattice).wireframe)
+    /// ★ EVERY STAGE OFFERS THEM (maintainer, 2026-08-16: "Please add the wireframe
+    /// and xray view in the Lattice stage" — completing "throughout the entire app").
+    func testEveryStageOffersTheWireframe() {
+        for stage in WorkspaceStage.allCases {
+            XCTAssertTrue(WorkspaceStageVisibility.of(stage).wireframe,
+                          "★ \(stage.title) offers the view controls")
+        }
     }
 }
 

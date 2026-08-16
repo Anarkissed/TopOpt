@@ -450,3 +450,37 @@ the mechanism) and the fixed one.
 ## Suite
 
 `swift test`: **1740 tests, 22 skipped, 8 failures** — all 8 the known lib3mf gap.
+
+---
+
+# Round 7g — the views on every stage, and off by default
+
+"Please add the wireframe and xray view in the Lattice stage. I also don't want the
+wireframe view to be the default. Please turn off all views by default."
+
+* `WorkspaceStageVisibility.wireframe` is now true on all three stages. It was false
+  on the lattice stage for a stated reason — that stage can show a lattice PREVIEW
+  rather than the imported B-rep, so the edge set would describe a surface it is not
+  drawing. The reason was real but small: the stage shows the part itself most of the
+  time, and where it does not, `SurfaceWireframe.edges` finds no face partition and
+  draws nothing rather than nonsense. Withholding a view control on a maybe is the
+  worse trade.
+* `surfaceWireframeOn` defaults to FALSE (x-ray already did). A view aid is something
+  you reach for, not the resting state of a page.
+
+## ★ AND ONE THING THAT WOULD HAVE BROKEN QUIETLY
+
+The pattern PREVIEW reaches the renderer through the wireframe's line channel, and
+both it and `showWireframe` were gated on the same toggle. Turning the default off
+would therefore have left the pattern tool aiming at a grid nobody could see — the
+view toggle would have become a silent prerequisite for a TOOL.
+
+So the preview is no longer gated on the toggle, and `showWireframe` opens whenever
+there are preview lines to draw. The wireframe is a view; the preview is the thing
+being decided.
+
+## Suite
+
+`swift test`: **1739 tests, 22 skipped, 8 failures** — all 8 the known lib3mf gap.
+(One test fewer than 7f: two stage-visibility tests collapsed into one that loops
+over `WorkspaceStage.allCases`, so a fourth stage could not be added without it.)
