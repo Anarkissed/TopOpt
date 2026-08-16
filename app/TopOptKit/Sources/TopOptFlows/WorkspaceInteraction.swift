@@ -116,3 +116,36 @@ public enum WorkspacePaint {
         }
     }
 }
+
+/// ★ WHAT A TAP ON A REGION-OWNED PIECE DOES, on the Topology page.
+///
+/// Extracted from the view for one reason: the rule is two optionals compared, and
+/// comparing two optionals is exactly where it went wrong.
+///
+/// ★ THE DEFECT THIS EXISTS TO PIN. The view asked
+/// `owner?.id == selection.activeGroupID`, meaning "is this piece already in the
+/// group I am building?". An ISOLATED piece belongs to no group, so `owner` is nil;
+/// on a page where nothing has been selected yet `activeGroupID` is nil too — and
+/// `nil == nil` is TRUE. So the tap took the "already mine, drop it and stop"
+/// branch and did nothing whatsoever, every time, for the one kind of piece that is
+/// unowned by design. The maintainer met it as "the face is still not selectable on
+/// its own … it is impossible to highlight it as part of any group selection."
+public enum TopologyPieceTap {
+
+    public enum Outcome: Equatable, Sendable {
+        /// The piece was in the active group: take it out, and stop.
+        case removeOnly
+        /// Anything else: take it from whoever had it and give it to the active
+        /// group, starting one if there is none.
+        case moveToActive
+    }
+
+    /// `owner` is the group holding the piece (nil = nobody); `active` is the group
+    /// being built (nil = none yet).
+    public static func route(owner: UUID?, active: UUID?) -> Outcome {
+        // ★ AN OWNER IS REQUIRED. "No owner" can never mean "owned by the active
+        // group", however the two optionals happen to compare.
+        guard let owner, owner == active else { return .moveToActive }
+        return .removeOnly
+    }
+}

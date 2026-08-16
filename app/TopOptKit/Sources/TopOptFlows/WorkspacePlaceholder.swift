@@ -111,6 +111,93 @@ public struct WorkspacePlaceholder: View {
     // never blocks. `latticeDepthDragSeed` holds the depth a drag started from.
     @State private var latticeFaceCards: [UUID: LatticeFaceCard] = [:]
     @State private var latticeDepthDragSeed: Double?
+    /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
+    @State private var diagnosisPopoverGroup: UUID?
+    /// ★ §5 — which DEPTH field has the numeric keypad open. Keyed by the row's
+    /// identifier so a group row and a selectable row cannot share one pad.
+    @State private var depthPadKey: String?
+    /// ★ §6(g) — THE HOVERED CUT. Where the pencil currently is over the model,
+    /// as a cut plane, before anything is committed. Nil when nothing is hovered.
+    @State private var hoveredCut: SurfaceCut?
+    /// ★ §6(h) — the rotation applied to the hovered/held cut, in degrees.
+    @State private var cutRotation: Double = 0
+    /// The cut the user has TAPPED and is now aiming — the one the checkmark
+    /// commits. Nil while merely hovering.
+    @State private var heldCut: SurfaceCut?
+    /// Where the current rotate drag started, so successive drags accumulate.
+    @State private var cutRotationBase: Double = 0
+    /// §6 — how far the cut has been nudged off the piece's centre, in mm, along
+    /// the plane's own normal (the only direction that moves it).
+    @State private var cutOffsetMM: Double = 0
+    /// §6(b) — the wireframe switch. ON by default: it is what the stage is for.
+    @State private var surfaceWireframeOn = true
+    /// §6 — X-RAY, its own switch. Off by default: seeing every hidden edge at once
+    /// is a specific request, not the resting state of a page about surfaces.
+    @State private var surfaceXrayOn = false
+    /// ★ THE ARMED TOOL. `select` by default — the one tool that edits nothing, so
+    /// arriving on the stage cannot make the first exploratory tap destructive.
+    @State private var surfaceTool: SurfaceTool = .initial
+    /// The region an action will act on — a HALF of a cut face, once one is cut.
+    @State private var surfaceSelected: RegionID?
+    /// The tapped FACE when it has no region of its own — so an ordinary face can
+    /// be selected and lit without selection quietly creating model state.
+    @State private var surfaceSelectedFace: FaceID?
+    /// The pattern tool's grid, before it is committed.
+    @State private var patternColumns = 3
+    @State private var patternRows = 1
+    /// §7 — the user's own rotation of the grid, ON TOP of the automatic alignment
+    /// to the face's longest edge. Drag the knob; releases on 15°.
+    @State private var patternRotation: Double = 0
+    @State private var patternRotationBase: Double = 0
+    /// The face the pattern tool is aimed at.
+    @State private var surfacePatternFace: FaceID?
+    /// The PIECE the pattern divides — the region under the tap, captured at the
+    /// tap. Looked up later it becomes "the deepest region on this face", which
+    /// after a cut is one particular half and not necessarily the one you touched.
+    @State private var surfacePatternPiece: RegionID?
+    /// ★ THE UNION TOOL ACCUMULATES *REGIONS*, NOT FACES.
+    ///
+    /// ★ THIS IS WHY MULTI-SELECT COULD NOT REACH TWO. The two halves of a cut face
+    /// are two REGIONS sharing ONE CAD face id — a cut never re-partitions layer 1.
+    /// Held as a `Set<FaceID>`, tapping either half hands the set the SAME id, so
+    /// the second tap toggled the first one back OFF. The count sat at 1 forever,
+    /// which is exactly what "Still cannot select the two split faces to union
+    /// them" looks like. A set of FACES cannot represent two pieces of one face;
+    /// only a set of REGIONS can.
+    @State private var surfaceUnion = SurfaceUnion()
+    /// §6(c) — the filter derived from the tapped face, and the face it came from.
+    /// §6(c) — the KINDS of face currently selected. A multi-select of RULES, not
+    /// of faces: see `SurfaceSimilar`.
+    @State private var similar = SurfaceSimilar()
+    /// ★ THE FACES A SELECT-SIMILAR HANDED TO THE NEXT TOOL. Empty unless a tool
+    /// was picked while a similar selection was live; the cut and pattern confirms
+    /// read it so their action lands on ALL of them rather than on the one face the
+    /// controls happen to be aimed at.
+    @State private var surfaceCarried: [FaceID] = []
+    /// Where the current move drag started, and how fast it slides.
+    @State private var cutOffsetBase: Double = 0
+    /// Why the last surface tap was refused, shown in the panel. Nil when it wasn't.
+    @State private var surfaceRefusal: String?
+
+    /// ★ THE SURFACE STAGE'S SCRATCHPAD (maintainer, 2026-08-16: "I think we should
+    /// have a 'Save' button on the Surfaces page. This way someone can fuck around
+    /// and mess things up, and just go back and nothing is saved. Everything should
+    /// reset when you leave and come back — unless it has been saved").
+    ///
+    /// What the model looked like on ENTERING the stage. Leaving without saving puts
+    /// it back; Save drops it, which is what makes the edits permanent.
+    @State private var surfaceEntrySnapshot: SurfaceScratch?
+
+    /// ★ The bottom bar's MEASURED height — its CONTENT only, without the inset
+    /// that lifts it off the bottom edge. Seeded at the one-line Optimize height
+    /// so the first frame is right. Read through `bottomBarClearance`, never
+    /// directly: the inset is part of what a view above the bar has to clear.
+    @State private var bottomBarHeight: CGFloat = 50
+
+    /// ★ HOW FAR ABOVE THE BOTTOM EDGE ANYTHING MUST SIT TO CLEAR THE BAR — the
+    /// bar's measured content plus the inset it floats on. One expression, so a
+    /// second call site cannot clear a different amount than the first.
+    private var bottomBarClearance: CGFloat { bottomBarHeight + DS.Space.xl4 }
     @State private var latticeCardsToken = 0
 
     // DEFECT 2 — the manual-primitive TRANSFORM GIZMO. `gizmoTarget` is the primitive the
@@ -396,7 +483,50 @@ public struct WorkspacePlaceholder: View {
             MetalMeshView(mesh: stageMesh,
                           camera: cameraModel,
                           selection: selection,
-                          faceTints: roleTints,                 // D3/D5: anchor faces tint green
+                          // ★ §6 — THE SURFACE STAGE DOES NOT WEAR THE TO PAGE'S
+                          // COLOURS (maintainer, 2026-08-14: "all colours from the
+                          // TO page cannot be the same in the Surface page … they
+                          // should all have a slight blue hue to differentiate
+                          // faces that can be modified and faces that can't").
+                          //
+                          // ★ SUPPRESSED, NOT OVERDRAWN. `roleTints` is the ROLE
+                          // palette — anchor green, load red, lattice violet — and
+                          // those answer a question this stage does not ask. Left
+                          // in and merely covered, a role colour would survive
+                          // wherever the surface tint has nothing to say, and the
+                          // page would read as two colour systems at once. Here
+                          // colour means ONE thing: this face can be modified.
+                          faceTints: visible.surfaceEditing ? [:] : roleTints,
+                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : nil,
+                          extraLines: surfaceCutLineBuffer,
+                          previewLines: surfacePreviewLineBuffer,
+                          // ★ A UNION'S INTERNAL EDGES ARE NOT EDGES ANY MORE.
+                          // Two faces combined ARE one face, so the B-rep line
+                          // between them stops being a boundary — leaving it drawn
+                          // says the union did not happen.
+                          weldedFaces: visible.wireframe && surfaceWireframeOn
+                              ? project.surfaceWeldedFaces() : [],
+                          // ★ THE SURFACE RIBBON IS GONE. It widened each segment in
+                          // the plane of ONE face normal and collapsed to nothing
+                          // wherever a curve turned edge-on to it — the stray gold
+                          // ticks on the maintainer's curved face. The wide-line
+                          // pipeline widens in SCREEN space and has no such blind
+                          // direction, so the traces ride the wireframe instead.
+                          cutRibbon: nil,
+                          cutPlane: visible.surfaceEditing && surfaceTool != .union
+                              ? SurfaceTint.planeFor(surfaceSelected,
+                                                     in: project.faceRegions) : nil,
+                          // ★ §6 — THE PICKED PIECES, each as its own half-space
+                          // chain, so a tap lights the PIECE and not the whole face
+                          // it belongs to ("why are they being considered one face
+                          // when I tapped only one of them?"). Union only: the other
+                          // tools act on one piece and use `cutPlane` above.
+                          pickChains: visible.surfaceEditing && surfaceTool == .union
+                              ? SurfaceTint.pickChains(
+                                  surfaceUnion.partialPicks(regions: project.faceRegions),
+                                  in: project.faceRegions)
+                              : [],
+                          xray: surfaceXrayOn,
                           settleRotation: settleQuat,           // D2: settle onto the floor
                           settleAnimated: !reduceMotion,
                           showGround: showGround,
@@ -408,6 +538,46 @@ public struct WorkspacePlaceholder: View {
                           // computed from.
                           faceToolActive: !showSmoothingPage,
                           onPickFace: handlePick,
+                          // ★ §6 — the same tap, with its 3D point. Only the point
+                          // distinguishes the two halves of a cut face.
+                          onPickPoint: { fid, pt in
+                              guard let m = viewerMesh else { return false }
+                              if visible.surfaceEditing {
+                                  handleSurfacePick(fid, at: pt, mesh: m)
+                                  return true
+                              }
+                              // ★ ON THE TOPOLOGY PAGE, A DIVIDED FACE IS TAPPED BY
+                              // THE PIECE. Its pieces are independent selections —
+                              // one can join a group while its sibling stays out —
+                              // and only the hit POINT can tell them apart.
+                              return handleTopologyPiecePick(fid, at: pt, mesh: m)
+                          },
+                          // ★ TAPPING NOTHING CLEARS THE SELECTION (maintainer:
+                          // "touching the ground or the air (i.e. nothing) should
+                          // de-select all selected faces"). A tap that hit no
+                          // geometry is an intent to stop working on the last
+                          // thing, not a no-op — and leaving a piece lit while the
+                          // user has visibly moved on makes the next action apply
+                          // somewhere they are no longer looking.
+                          onMiss: {
+                              guard visible.surfaceEditing else { return }
+                              // ★ CLEARING THE SELECTION IS NOT THE SAME AS THROWING
+                              // AWAY WORK IN PROGRESS. A tap on the ground clears
+                              // what is SELECTED, as asked. It must NOT empty a
+                              // union that is being built: the pick can miss on a
+                              // glancing tap near a silhouette, and one such miss
+                              // silently reset the set to nothing — after which the
+                              // next tap put it back to one face, forever.
+                              //
+                              // The ✕ on the cluster is how a union is abandoned,
+                              // and it is right there.
+                              surfaceSelected = nil
+                              surfaceSelectedFace = nil
+                              surfaceRefusal = nil
+                              heldCut = nil
+                              hoveredCut = nil
+                              if surfaceTool != .union { surfacePatternFace = nil }
+                          },
                           onProjection: { projection = $0 },
                           // Round-6 item 4 (redo gesture updated 2026-07-25): two-finger
                           // double-tap undoes, THREE-finger double-tap redoes.
@@ -452,6 +622,10 @@ public struct WorkspacePlaceholder: View {
                           // Primitives should NOT be visible on the Lattice page."
                           // VISIBILITY ONLY — `project.designBox` is untouched, so
                           // the box still bounds the run from either stage (§2c).
+                          // ★ §6(b) — THE B-REP WIREFRAME, on the surface stage
+                          // only. The stage-visibility table owns the decision, so
+                          // a new affordance cannot appear on a stage by accident.
+                          showWireframe: visible.wireframe && surfaceWireframeOn,
                           designBox: (showDesignGizmo && !showSmoothingPage
                                       && visible.designBox)
                               ? project.designBox.box : nil,
@@ -529,6 +703,24 @@ public struct WorkspacePlaceholder: View {
                               smoothingPageModel?.notePencilOnlyRefusedFinger()
                           })
                 .ignoresSafeArea()
+                // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
+                //
+                // ★ HOVER IS NOT A TOUCH. A pencil held above the glass reports on a
+                // separate event stream, so mounted here it yields the hovered cut
+                // line WITHOUT contending for a touch: the viewport orbits exactly as
+                // it did before this stage existed. Mounted instead on the drawing
+                // overlay (with the `.contentShape` such an overlay needs), it took
+                // the whole viewport with it — see that overlay's note.
+                //
+                // On hardware with no hover this simply never fires, and the stage
+                // still works by tap.
+                .onContinuousHover { phase in
+                    guard visible.surfaceEditing, heldCut == nil else { return }
+                    switch phase {
+                    case let .active(p): hoveredCut = cutUnder(p)
+                    case .ended:         hoveredCut = nil
+                    }
+                }
 
             // Strut preview: the raymarched true-strut layer, riding the SAME shared
             // orbit camera AND the same settle model transform as the mesh view (one
@@ -561,7 +753,13 @@ public struct WorkspacePlaceholder: View {
             // would let a user move the very geometry the freeze mask was computed
             // against, behind a page that could not react to it.
             if !fullScreenPageUp {
-                arrowsOverlay.ignoresSafeArea()                 // D6: in-scene force arrow shafts
+                // ★ §6(a) — NOT ON THE SURFACE STAGE. Force arrows are a TOPOLOGY
+                // affordance: they answer "what is pushing on this part", which is
+                // not a question this stage asks. `visible.groupPrimitives` is the
+                // stage table's own word for "the TO page's in-scene editors".
+                if visible.groupPrimitives {
+                    arrowsOverlay.ignoresSafeArea()             // D6: force arrow shafts
+                }
                 // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
                 // being edited (the setup phase, below) — the persistent dim arrow + "down" tag are
                 // REMOVED as viewport clutter; the "Gravity set · <axis>" chip is the at-a-glance
@@ -588,6 +786,8 @@ public struct WorkspacePlaceholder: View {
                 }
                 // ★ §3d — THE 3D DEPTH-PLANE HANDLES, the lattice stage's own tool.
                 if visible.latticeDepthPlanes { latticeDepthHandlesOverlay.ignoresSafeArea() }
+                // ★ §6(g) — THE HOVERED CUT LINE, the surface stage's own tool.
+                if visible.surfaceEditing { surfaceCutOverlay.ignoresSafeArea() }
             }
             // The lattice region's transform gizmo — only while the lattice panel is open
             // and a region exists, so it never coincides with the force gizmo (U5). It is
@@ -628,9 +828,46 @@ public struct WorkspacePlaceholder: View {
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
                 if viewerMesh != nil { stageNavigationButtonOverlay }
                 if viewerMesh != nil { latticeSettingsButtonOverlay }
+                // ★ SAVE, in the slot the greyed-out "Lattice" button vacated.
+                surfaceSaveButtonOverlay
+                // ★ §6 — THE SURFACE STAGE'S TOOLS, on the right BELOW THE GIZMO
+                // (maintainer, 2026-08-14: "I am not seeing any of the tools
+                // required for the Surface stage").
+                if viewerMesh != nil, visible.surfaceEditing {
+                    surfaceToolsPanel
+                    // ★ the confirm floats NEXT TO the action, not in the tray.
+                    surfaceActionCluster.ignoresSafeArea()
+                }
+                // ★ THE WIREFRAME AND X-RAY, ON THE TOPOLOGY PAGE TOO (maintainer,
+                // 2026-08-16: "We should keep wireframe and xray view throughout
+                // the entire app. Please add to the TO page side-by-side just below
+                // the position gizmo (with padding between them)"). The Surface
+                // stage keeps them in its own tray, where the rest of its tools are.
+                if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
+                    viewModeToggles
+                }
             }
-            if !fullScreenPageUp { loadOverlays.ignoresSafeArea() }  // D3/D4/D5: tappable pills at each arrow
-            if !fullScreenPageUp { bottomBar }
+            // ★ AND NEITHER ARE THE LOAD PILLS — the weight readout and its
+            // Gravity/Push/Pull switch. The maintainer found the whole load editor
+            // sitting on the Surface stage: "Anything from the TO page like the
+            // Load indicator should not be visible on this stage."
+            if !fullScreenPageUp, visible.groupPrimitives {
+                loadOverlays.ignoresSafeArea()                  // D3/D4/D5: load pills
+            }
+            if !fullScreenPageUp {
+                bottomBar
+                    // ★ REFUSE AN IMPLAUSIBLE READING (see `BottomBarMeasurement`).
+                    // A height near the viewport's is the expanded frame, not a
+                    // bar, and adopting it pushes every view that clears the bar
+                    // off the screen.
+                    .onPreferenceChange(BottomBarHeightKey.self) { h in
+                        if let ok = BottomBarMeasurement.accept(
+                            measured: h,
+                            viewport: projection?.viewportSize.height ?? 0) {
+                            bottomBarHeight = ok
+                        }
+                    }
+            }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
@@ -909,7 +1146,7 @@ public struct WorkspacePlaceholder: View {
         for g in selection.groups {
             let c = force.tint(for: g)
             let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1)
-            for f in g.faces { tints[f] = v }
+            for f in groupTintedFaces(g) { tints[f] = v }
         }
         // Handoff 124 — a protected face gets the UNIQUE protect mint-teal, applied
         // AFTER the role tints so it wins: the mesh shader recognises this exact
@@ -917,9 +1154,26 @@ public struct WorkspacePlaceholder: View {
         // red clearance VOLUMES that read "forbidden").
         let p = Self.protectFaceRGB
         for g in selection.groups where force.isProtected(g.id) {
-            for f in g.faces { tints[f] = SIMD4<Float>(p.x, p.y, p.z, 1) }
+            for f in groupTintedFaces(g) { tints[f] = SIMD4<Float>(p.x, p.y, p.z, 1) }
         }
         return tints
+    }
+
+    /// ★ EVERY FACE A GROUP CONTAINS — BY EITHER MEMBERSHIP.
+    ///
+    /// Maintainer, 2026-08-16: "It's showing as something was selected — but it
+    /// won't show the highlight."
+    ///
+    /// ★ THE THIRD PLACE `faces` WAS READ WITHOUT `regionIDs`. He tapped the
+    /// isolated band, it joined Group A, the panel said so — and the model stayed
+    /// grey, because the tint was built from `g.faces` alone and that group holds
+    /// its surface as a REGION. The selection was real and invisible.
+    ///
+    /// A group has two memberships and what it CONTAINS is the union of them, so
+    /// anything that answers "which faces are in this group" has to ask both. This
+    /// is that question, once.
+    private func groupTintedFaces(_ g: SelectionGroup) -> Set<FaceID> {
+        Set(g.faces).union(project.latticeRegionCoveredFaces(g))
     }
 
     /// The per-vertex density tints the lattice proxy paints the body with, or nil when
@@ -991,6 +1245,17 @@ public struct WorkspacePlaceholder: View {
     /// its regions must stay visible.
     private var stageVolumeItems: [ClearanceRenderItem] {
         if showLatticePage { return latticeRegionRenderItems }
+        // ★ §6(a) — THE SURFACE STAGE DRAWS NO VOLUMES AT ALL (maintainer,
+        // 2026-08-14: "should not show any of the primitives or the design box on
+        // screen … hidden from view to make things clearer").
+        //
+        // ★ THE DEFECT THIS FIXES was a FALL-THROUGH, not a missing gate. This
+        // read `latticeDepthPlanes ? planes : keepOuts` — a two-way choice written
+        // when there were two stages. A third stage that wants NEITHER took the
+        // else branch and drew the topology stage's keep-out boxes, over a stage
+        // whose whole point is an unobstructed look at the surface. The
+        // visibility table already said `keepOuts == false`; nothing read it here.
+        if !visible.keepOuts, !visible.latticeDepthPlanes { return [] }
         return visible.latticeDepthPlanes ? latticeDepthPlaneItems : keepOutRenderItems
     }
 
@@ -1082,6 +1347,12 @@ public struct WorkspacePlaceholder: View {
             return
         }
         guard let mesh = viewerMesh else { return }
+        // ★ §6 — IN THE SURFACE STAGE A TAP ARMS A CUT, not a selection. The stage
+        // has no roles and no loads; its one subject is the face under the finger.
+        // ★ §6 — the surface stage is served by `onPickPoint`, which carries the
+        // 3D hit; this callback has only the face id and would select the wrong
+        // half. Nothing to do here.
+        if visible.surfaceEditing { return }
         if force.phase == .setup {
             if let n = mesh.faceNormal(faceID) {
                 force.setGravity(faceNormal: n, face: faceID)
@@ -1106,7 +1377,8 @@ public struct WorkspacePlaceholder: View {
         // same Selections library, and L23/M2 still holds — nothing is removed or
         // stolen from a group on a lattice surface; removal lives on the TO page.
         if stage == .lattice {
-            let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
+            let loop = project.surfaceLoopRespectingRegions(
+                FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
             if let gid = LatticeLibraryTap.route(faceID: faceID, loop: loop,
                                                  selection: &selection) {
                 latticeDisclosure.toggle(gid.uuidString)
@@ -1117,7 +1389,8 @@ public struct WorkspacePlaceholder: View {
         }
         if showLatticePage {
             if latticePageModel.libraryOpen {
-                let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
+                let loop = project.surfaceLoopRespectingRegions(
+                FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
                 let gid = LatticeLibraryTap.route(faceID: faceID, loop: loop,
                                                   selection: &selection)
                 // T2: a tap on one of the group's own cleared faces reveals its
@@ -1145,7 +1418,8 @@ public struct WorkspacePlaceholder: View {
             project.refreshFaceRegionDrift()
             return
         }
-        let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
+        let loop = project.surfaceLoopRespectingRegions(
+                FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
         WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force)
         // Round-2 T2: primitive chips are reachable ONLY by tapping the primitive,
         // one of its faces, or its group row in the library — a tap that merely
@@ -1298,24 +1572,39 @@ public struct WorkspacePlaceholder: View {
         guard let mesh = viewerMesh else { return [] }
         var pts: [SIMD3<Float>] = []
         for g in selection.groups where force.kind(for: g.id).isAnchor {
-            for f in g.faces { if let c = mesh.faceCentroid(f) { pts.append(c) } }
+            // Both memberships — an anchor held as a region must still rasterise.
+            for f in groupTintedFaces(g) {
+                if let c = mesh.faceCentroid(f) { pts.append(c) }
+            }
         }
         return pts
     }
 
     /// A group's model-space centroid (mean of its faces' centroids).
+    ///
+    /// ★ OVER BOTH MEMBERSHIPS. A group whose surface is held as a REGION rather
+    /// than as bare faces had NO centroid at all, so every control anchored to it
+    /// fell back to a default position — which is why the Anchor/Load row appeared
+    /// at the bottom of the screen instead of beside the face ("the 'load/anchor…'
+    /// is not close to the actual face"). See `groupTintedFaces`.
     private func groupCentroidModel(_ g: SelectionGroup) -> SIMD3<Float>? {
         guard let mesh = viewerMesh else { return nil }
         var sum = SIMD3<Float>.zero, n = 0
-        for f in g.faces { if let c = mesh.faceCentroid(f) { sum += c; n += 1 } }
+        for f in groupTintedFaces(g) {
+            if let c = mesh.faceCentroid(f) { sum += c; n += 1 }
+        }
         return n > 0 ? sum / Float(n) : nil
     }
 
-    /// A group's model-space outward normal (mean of its faces' normals).
+    /// A group's model-space outward normal (mean of its faces' normals). Over both
+    /// memberships, for the same reason as the centroid — a load arrow on a
+    /// region-held group had no direction to point in.
     private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
         guard let mesh = viewerMesh else { return nil }
         var acc = SIMD3<Float>.zero, found = false
-        for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; found = true } }
+        for f in groupTintedFaces(g) {
+            if let nrm = mesh.faceNormal(f) { acc += nrm; found = true }
+        }
         guard found else { return nil }
         let len = simd_length(acc)
         return len > 1e-6 ? acc / len : nil
@@ -1428,6 +1717,7 @@ public struct WorkspacePlaceholder: View {
             id: "chrome.orientationGizmo",
             anchor: CGPoint(x: W - 74, y: 74), bounds: CGSize(width: 132, height: 132),
             touch: CGSize(width: 132, height: 132), priority: .chrome))
+
 
         if force.phase == .edit {
             // The transform gizmo's shape test (if one is up). A clearance knob keeps its home on
@@ -1648,12 +1938,16 @@ public struct WorkspacePlaceholder: View {
     /// LatticeProxyLayout + LatticeProxyKeepOutTests). Off by default.
     private var latticePreviewOverlay: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
-            HStack(spacing: DS.Space.s) {
-                // Round-2 T1: the Lattice chip that lived here became the big
-                // top-right entry button (`stageNavigationButtonOverlay`). The
-                // whole overlay is a LATTICE-STAGE affordance now (§1a).
-                if project.lattice.enabled { strutPreviewChip }
-            }
+            // ★ THE STRUTS CHIP MOVED INTO THE SELECTIONS MODAL (maintainer,
+            // 2026-08-14): "The 'Struts' chip is in the middle of the 'Selections'
+            // modal. Just floating. Make it attached to the bottom-right corner,
+            // inside the 'selections' modal."
+            //
+            // It was mounted here, LEADING-anchored and offset down from the top
+            // bar — a screen-space guess that happened to land on top of the
+            // panel's rows. It is now the last row INSIDE `selectionsPanel`, so
+            // it cannot overlap what it sits on. Only the honesty banner stays
+            // floating, and only while the layer is actually up.
             // Honesty banner (bar P1): whenever the strut layer is up the user is told
             // in place what they are looking at — the live analytic strut field, not
             // the worker's exported mesh.
@@ -2333,13 +2627,17 @@ public struct WorkspacePlaceholder: View {
                 Text(showStrutPreview ? "Struts · on" : "Struts")
                     .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
             }
+            // ★ §4(c) — NOT PURPLE. This chip read its tint off the DENSITY RAMP
+            // (`densityColor(0.75)`), which is where the purple chrome came from.
+            // The ramp is the LATTICE'S colour language and belongs on the
+            // lattice itself; a toggle chip is chrome and wears the accent (S7).
             .foregroundStyle(showStrutPreview
-                ? LatticeDensityProxy.densityColor(fraction: 0.75).color
+                ? DS.Color.accent.color
                 : DS.Color.textSecondary.color)
             .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
             .background(Capsule().fill(DS.Surface.panel.color)
                 .overlay(Capsule().strokeBorder(
-                    (showStrutPreview ? LatticeDensityProxy.densityColor(fraction: 0.6).opacity(0.6)
+                    (showStrutPreview ? DS.Color.accent.opacity(0.6)
                                       : DS.Color.strokeSubtle).color, lineWidth: 1)))
         }
         .buttonStyle(.plain)
@@ -2393,26 +2691,159 @@ public struct WorkspacePlaceholder: View {
     /// prerequisites message, not a description of the lattice — and says nothing
     /// at all once it is enabled.
     ///
-    /// Optimize's stature (height 64), TOP RIGHT, LEFT of the position gizmo,
-    /// which never moves on any page (L4).
-    private var stageNavigationButtonOverlay: some View {
+    /// ★ §4 — THE STAGE BUTTON. **ONLY THE COLOUR CHANGED.**
+    ///
+    /// ★ THE MAINTAINER'S CORRECTION, IN SESSION, AND IT SUPERSEDES §4(a)/§4(b)
+    /// AS WRITTEN: "I meant for the 'Lattice' button to be a dark blue like the
+    /// *colour* of the chips with the icons! But stay the size and position they
+    /// are at the top of the screen just to the left of the gizmo with the perfect
+    /// amount of spacing. This is the same space where 'Lattice Settings' will be
+    /// on the other page."
+    ///
+    /// So the size (64 pt, Optimize's stature) and the slot (top-right, LEFT of
+    /// the gizmo by `gizmoClearance`) are UNCHANGED. What changed is one thing:
+    ///
+    ///   ★ the fill was `DS.Color.accentGreen` (#30D158) and is now
+    ///     `DS.Color.accent` (#0A84FF) — the dark blue the bottom-right chips use
+    ///     for their ICONS (`gravityChip`'s `arrow.down.to.line`, and every chip
+    ///     beside it). §4(c): "The purple fucking colour should never happen again
+    ///     (same with the green)."
+    ///
+    /// ★ AND IT SITS AT THE TOP OF THE SCREEN, NOT CENTRED ON THE GIZMO — his
+    /// second correction. It used to be offset by `(gizmoSize - 64) / 2`, which
+    /// centred a 64 pt button inside the 210 pt gizmo and pushed it 81 pt down.
+    /// Its top edge now lines up with the gizmo's own top inset, so the two read
+    /// as one top row. The gizmo itself does not move (§4d / rule S10).
+    ///
+    /// It still says what is MISSING while disabled — a prerequisites message,
+    /// not a description of the lattice — and says nothing once enabled.
+    @ViewBuilder private var stageNavigationButtonOverlay: some View {
+        // ★ THE WAY BACK — top-left, under the project name. Topology is the root
+        // and carries none.
+        if let back = stage.back {
+            stageNavButton(to: back, icon: "chevron.left")
+                .modifier(StageNavPlacement(stage: stage))
+        }
+        // ★ THE WAY FORWARD — the top-right column, LEFT of the gizmo.
+        //
+        // ★ "WHERE YOU GO" ABOVE "WHAT YOU CONFIGURE" (the maintainer's phrase,
+        // approved 2026-08-14). This column is NAVIGATION ONLY; the lattice
+        // stage's Settings button renders BELOW it, offset by
+        // `settingsButtonTopInset`, never among it.
+        VStack(alignment: .trailing, spacing: PageChrome.gap) {
+            ForEach(stage.forward, id: \.rawValue) { dest in
+                stageNavButton(to: dest, icon: Self.stageIcon(dest))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.trailing, PageChrome.gizmoClearance)
+        // ★ THE GIZMO'S VISIBLE TOP, NOT ITS FRAME'S. See
+        // `PageChrome.gizmoAlignedTop` — the housing is 90% of the frame and
+        // centred, so `gizmoInset` alone left these ~10 pt high.
+        .padding(.top, PageChrome.gizmoAlignedTop)
+    }
+
+    /// One stage's glyph.
+    static func stageIcon(_ s: WorkspaceStage) -> String {
+        switch s {
+        case .topology: return "chevron.left"
+        case .lattice:  return "square.grid.3x3.fill"
+        case .surface:  return "square.on.square.dashed"
+        }
+    }
+
+    // MARK: ★ CHANGING STAGE — and the Surface stage's save/revert
+    //
+    // Maintainer, 2026-08-16: "I think we should have a 'Save' button on the
+    // 'Surfaces' page. This way someone can fuck around and mess things up, and
+    // just go back and nothing is saved. Everything should reset when you leave and
+    // come back — unless it has been saved."
+
+    /// ★ THE ONE PLACE THE STAGE CHANGES. Routed through a function rather than
+    /// assigned at each button, because "leaving Surface reverts unsaved work" has
+    /// to be true of EVERY way out — a second `stage = dest` somewhere else is a
+    /// silent hole in the promise.
+    private func goToStage(_ dest: WorkspaceStage) {
+        if stage == .surface, dest != .surface {
+            if let snap = surfaceEntrySnapshot,
+               project.surfaceHasEdits(since: snap) {
+                project.surfaceRestore(snap)
+                // ★ SAY SO. A silent revert is indistinguishable from a crash that
+                // ate the work; the whole point is that discarding is SAFE, and
+                // safe is only useful if it is also legible.
+                model.toast = "Surface edits discarded — use Save to keep them."
+            }
+            surfaceEntrySnapshot = nil
+            surfaceResetTools()
+        }
+        if dest == .surface, stage != .surface {
+            surfaceEntrySnapshot = project.surfaceCaptureScratch()
+            surfaceResetTools()
+        }
+        stage = dest
+        latticeDisclosure.closeAll()
+        if dest == .lattice { refreshLatticeFaceCards() }
+    }
+
+    /// Whether anything has been committed since entering the stage (or since the
+    /// last save). DERIVED, never a flag: a flag has to be set at every commit site
+    /// and one missed site makes Save quietly do nothing.
+    private var surfaceDirty: Bool {
+        guard let snap = surfaceEntrySnapshot else { return false }
+        return project.surfaceHasEdits(since: snap)
+    }
+
+    /// ★ SAVE: keep what has been done, and make THAT the new "back to". Nothing is
+    /// written anywhere new — the edits were always live in the model — what
+    /// changes is that leaving no longer takes them away.
+    private func surfaceSave() {
+        surfaceEntrySnapshot = project.surfaceCaptureScratch()
+        project.sealUndoStep()
+        model.toast = "Surface edits saved."
+    }
+
+    /// Put every tool back to its resting state, so the stage is entered the same
+    /// way every time.
+    private func surfaceResetTools() {
+        surfaceTool = .initial
+        surfaceSelected = nil
+        surfaceSelectedFace = nil
+        heldCut = nil
+        hoveredCut = nil
+        surfaceUnion.clear()
+        surfacePatternFace = nil
+        surfacePatternPiece = nil
+        similar.clear()
+        surfaceCarried = []
+        surfaceRefusal = nil
+    }
+
+    /// How far down the Settings button sits: clear of every forward nav button
+    /// in the column above it. DERIVED from the count, so adding a stage can
+    /// never leave the two stacked on top of each other.
+    private var settingsButtonTopInset: CGFloat {
+        PageChrome.gizmoInset
+            + CGFloat(stage.forward.count) * (PageChrome.compactButton + PageChrome.gap)
+    }
+
+    private func stageNavButton(to dest: WorkspaceStage, icon: String) -> some View {
         let entry = LatticeEntryButtonGate.compute(gravitySet: force.gravityIsSet,
                                                    anchors: force.anchorCount(in: selection.groups),
                                                    loads: force.loadCount(in: selection.groups))
-        // Leaving the lattice stage is never gated — it is a way back.
-        let enabled = stage == .lattice || entry.enabled
+        // ★ ONLY THE LATTICE DESTINATION IS GATED — it needs an anchor, a load and
+        // gravity before a lattice means anything. Going BACK, and going to
+        // SURFACE (which edits the CAD faces themselves), never are.
+        let enabled = dest != .lattice || entry.enabled
         return Button {
             guard enabled else { return }
-            stage = stage == .topology ? .lattice : .topology
-            latticeDisclosure.closeAll()
-            if stage == .lattice { refreshLatticeFaceCards() }
+            goToStage(dest)
         } label: {
             VStack(spacing: 2) {
                 HStack(spacing: DS.Space.s) {
-                    Image(systemName: stage == .topology
-                          ? "square.grid.3x3.fill" : "chevron.left")
-                        .font(.system(size: 14, weight: .bold))
-                    Text(stage.navigationTitle).dsStyle(DS.TypeScale.headline)
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .bold))
+                    Text(dest.title)
+                        .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                 }
                 if !enabled {
                     Text(entry.subtitle)
@@ -2421,25 +2852,170 @@ public struct WorkspacePlaceholder: View {
                 }
             }
             .foregroundStyle((enabled ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.horizontal, DS.Space.xl5).frame(height: 64)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                .fill(enabled ? DS.Color.accentGreen.opacity(0.85).color
-                              : DS.Color.fillDisabled.color))
-            .dsShadow(enabled ? DS.Shadow.accentGlow : DS.Shadow.panel)
+            .modifier(StageNavChrome(stage: stage))
+            // ★ THE COLOUR: `accentDeep` + `accentDeepEdge`. A DARKER blue than
+            // Optimize's `accent`, because these buttons NAVIGATE and Optimize
+            // ACTS — with a lighter hairline so the deep fill has an edge instead
+            // of reading as a flat slab. See `DS.Color.accentDeep`.
+            .background(
+                RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .fill(enabled ? DS.Color.accentDeep.color
+                                  : DS.Color.fillDisabled.color)
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                        .strokeBorder((enabled ? DS.Color.accentDeepEdge
+                                               : DS.Color.strokeSubtle).color,
+                                      lineWidth: 1.5)))
+            .dsShadow(enabled ? DS.Shadow.accentDeepGlow : DS.Shadow.panel)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .accessibilityIdentifier("stage-nav-\(stage.rawValue)")
-        .accessibilityLabel(enabled ? stage.navigationTitle
+        .accessibilityIdentifier("stage-nav-\(dest.rawValue)")
+        .accessibilityLabel(enabled ? dest.title
                             : "Lattice — needs \(entry.missing.joined(separator: " and "))")
-        // Top-right, LEFT of the 210 pt orientation gizmo in the absolute corner.
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.trailing, OrientationGizmoView.standardSize + DS.Space.s * 2)
-        .padding(.top, DS.Space.s + (OrientationGizmoView.standardSize - 64) / 2)
     }
 
-    /// ★ The LATTICE stage's own top-right control, below the navigation button:
-    /// the settings wizard. It lives here, not on the TO page (§1a/§5).
+    /// ★ WHERE THE STAGE BUTTON SITS, AND IT DIFFERS BY STAGE.
+    ///
+    /// **TO stage — "Lattice" goes FORWARD.** Top-right, LEFT of the gizmo by
+    /// exactly `gizmoClearance`: the slot the maintainer calls "the perfect amount
+    /// of spacing", and the slot **Lattice Settings occupies on the other page**.
+    /// ★ At the TOP OF THE SCREEN, not centred on the gizmo — it used to be
+    /// `DS.Space.s + (gizmoSize − 64) / 2`, 81 pt down, centring a 64 pt button
+    /// inside the 210 pt gizmo. Its top edge now matches the gizmo's own inset.
+    ///
+    /// **Lattice stage — "Topology" goes BACK.** ★ His instruction: *"put the
+    /// 'Topology' button below the name of the project. It should be flush with
+    /// the LEFT side of the screen, directly below the name and < arrow with the
+    /// regular padding between the two."* So it is LEADING-aligned on the same
+    /// `DS.Space.xl4` inset the back chevron uses, one `PageChrome.gap` below the
+    /// identity row — which frees the top-right slot for Settings, so each page
+    /// has exactly one button in that corner.
+    ///
+    /// Every number is derived from the chrome's own tokens (`chrome` is
+    /// `.padding(.top, DS.Space.xl3)` over 42 pt controls at
+    /// `.padding(.leading, DS.Space.xl4)`), so the two cannot drift apart.
+    /// ★ HOW TALL THE STAGE BUTTON IS, and it differs by stage for the same
+    /// reason its position does.
+    ///
+    /// **TO stage — "Lattice" keeps Optimize's stature** (`PageChrome.actionButton`,
+    /// 64 pt). His instruction: *"stay the size and position they are at the top of
+    /// the screen."*
+    ///
+    /// **Lattice stage — "Topology" is AS THIN AS THE PROJECT NAME.** His
+    /// instruction: *"make the 'Topology' button as thin as the name of the project
+    /// as well."* It is thin BY CONSTRUCTION rather than by a matched constant: the
+    /// name capsule is `.padding(.vertical, 9).padding(.horizontal, DS.Space.l)`
+    /// around `DS.TypeScale.bodyStrong` (`chrome`, this file), and so is this. Edit
+    /// one and the other has to be edited too — a shared number could drift.
+    private struct StageNavChrome: ViewModifier {
+        let stage: WorkspaceStage
+        func body(content: Content) -> some View {
+            switch stage {
+            case .topology:
+                // ★ THE SAME HEIGHT AS "SETTINGS" (maintainer, 2026-08-14): "The
+                // 'lattice' button on the TO stage and the 'Settings' button on
+                // the Lattice Stage should be the same height. Make them both the
+                // height of the 'Settings' button." That is
+                // `PageChrome.compactButton` (48) — they share one top-right slot
+                // across the two pages, so they must share its stature.
+                content.padding(.horizontal, DS.Space.xl5)
+                    .frame(height: PageChrome.compactButton)
+            case .lattice, .surface:
+                content.padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            }
+        }
+    }
+
+    private struct StageNavPlacement: ViewModifier {
+        let stage: WorkspaceStage
+        /// The identity row's height — the circle buttons the title bar is built from.
+        static let identityRowHeight: CGFloat = 42
+
+        func body(content: Content) -> some View {
+            switch stage {
+            case .topology:
+                content
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, PageChrome.gizmoClearance)
+                    // ★ Aligned to the gizmo's VISIBLE top — see
+                    // `PageChrome.gizmoAlignedTop`.
+                    .padding(.top, PageChrome.gizmoAlignedTop)
+            case .lattice, .surface:
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, DS.Space.xl4)
+                    .padding(.top, DS.Space.xl3 + Self.identityRowHeight
+                             + PageChrome.gap)
+            }
+        }
+    }
+
+    /// ★ THE SURFACE STAGE'S TOP SLOT: SAVE, AT FULL STATURE.
+    ///
+    /// Maintainer, 2026-08-16: "Please make the Save button much larger and place
+    /// it where the greyed out 'Lattice' button is (removing the greyed out lattice
+    /// button)."
+    ///
+    /// ★ AND IT EARNS THAT SLOT. This stage's default is DISCARD — walk away and
+    /// the work goes — so Save is not one control among several, it is the only one
+    /// that makes anything permanent. It gets the size and the position the page's
+    /// most consequential action gets everywhere else (`PageChrome.actionButton`,
+    /// the stature "Lattice" and "Optimize" wear), and it says how much is riding on
+    /// it rather than making the user remember.
+    @ViewBuilder private var surfaceSaveButtonOverlay: some View {
+        if stage == .surface, viewerMesh != nil {
+            Button { surfaceSave() } label: {
+                VStack(spacing: 2) {
+                    HStack(spacing: DS.Space.s) {
+                        Image(systemName: surfaceDirty
+                              ? "checkmark.circle.fill" : "checkmark.circle")
+                            .font(.system(size: 15, weight: .bold))
+                        Text("Save").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
+                    }
+                    // ★ THE SECOND LINE IS THE WARNING, not decoration. With edits
+                    // pending it says what leaving would cost; with none it says
+                    // there is nothing to lose.
+                    Text(surfaceDirty ? "or leave and lose these edits"
+                                      : "no changes yet")
+                        .font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
+                        .lineLimit(1)
+                }
+                .foregroundStyle((surfaceDirty ? DS.Color.textPrimary
+                                               : DS.Color.textDisabled).color)
+                .padding(.horizontal, DS.Space.xl3)
+                .frame(height: PageChrome.actionButton)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                        .fill(surfaceDirty ? DS.Color.accent.color
+                                           : DS.Color.fillDisabled.color)
+                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                            .strokeBorder((surfaceDirty ? DS.Color.accentDeepEdge
+                                                        : DS.Color.strokeSubtle).color,
+                                          lineWidth: 1.5)))
+                .dsShadow(surfaceDirty ? DS.Shadow.accentDeepGlow : DS.Shadow.panel)
+            }
+            .buttonStyle(.plain)
+            .disabled(!surfaceDirty)
+            .accessibilityIdentifier("surface-save")
+            .accessibilityLabel(surfaceDirty ? "Save surface edits"
+                                             : "Save — nothing to save yet")
+            // The slot the greyed-out "Lattice" button used to occupy.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.trailing, PageChrome.gizmoClearance)
+            // ★ Aligned to the gizmo's VISIBLE top — see
+            // `PageChrome.gizmoAlignedTop`.
+            .padding(.top, PageChrome.gizmoAlignedTop)
+        }
+    }
+
+    /// ★ THE LATTICE STAGE'S TOP-RIGHT CONTROL — and it now has that corner to
+    /// itself. The settings wizard lives here, not on the TO page (§1a/§5).
+    ///
+    /// ★ This IS the slot the maintainer means by *"the same space where 'Lattice
+    /// Settings' will be on the other page"*: the TO page puts "Lattice" here, the
+    /// lattice page puts "Settings" here, and now that "Topology" has moved
+    /// top-left under the project name there is exactly ONE button in this corner
+    /// on either page.
     @ViewBuilder private var latticeSettingsButtonOverlay: some View {
         if stage == .lattice {
             Button { showLatticeWizard = true } label: {
@@ -2450,16 +3026,30 @@ public struct WorkspacePlaceholder: View {
                 }
                 .foregroundStyle(DS.Color.textPrimary.color)
                 .padding(.horizontal, DS.Space.xl).frame(height: PageChrome.compactButton)
-                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                    .fill(LatticeDensityProxy.densityColor(fraction: 0.75).opacity(0.85).color))
-                .dsShadow(DS.Shadow.panel)
+                // ★ §4(c) — NOT PURPLE. This was
+                // `LatticeDensityProxy.densityColor(fraction: 0.75)` — a point on
+                // the DENSITY RAMP used as chrome, which is where the purple came
+                // from. It is the SAME `accentDeep` + `accentDeepEdge` pair the
+                // stage button wears: all three NAVIGATE, none of them runs
+                // anything.
+                .background(
+                    RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                        .fill(DS.Color.accentDeep.color)
+                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                            .strokeBorder(DS.Color.accentDeepEdge.color,
+                                          lineWidth: 1.5)))
+                .dsShadow(DS.Shadow.accentDeepGlow)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("lattice-settings")
+            // ★ THE TOP-RIGHT SLOT, exactly where the TO page's "Lattice" button
+            // sits: LEFT of the gizmo by `gizmoClearance`, top edge on the gizmo's
+            // own inset. It moved UP into the space "Topology" vacated.
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .padding(.trailing, OrientationGizmoView.standardSize + DS.Space.s * 2)
-            .padding(.top, DS.Space.s + (OrientationGizmoView.standardSize - 64) / 2
-                     + 64 + PageChrome.gap)
+            .padding(.trailing, PageChrome.gizmoClearance)
+            // ★ Aligned to the gizmo's VISIBLE top — see
+            // `PageChrome.gizmoAlignedTop`.
+            .padding(.top, PageChrome.gizmoAlignedTop)
         }
     }
 
@@ -2496,8 +3086,15 @@ public struct WorkspacePlaceholder: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, DS.Space.xl4)
-        .padding(.bottom, DS.Space.xl4 + 50 + DS.Space.m)   // clear the bottom bar buttons (Optimize)
+        // ★ CLEAR THE BAR'S REAL HEIGHT, not a guess. This was
+        // `DS.Space.xl4 + 50 + DS.Space.m` — a hardcoded 50 pt for Optimize. A
+        // DISABLED Optimize carries a "what is missing" subtitle and is taller
+        // than that, so the bar grew up into the Gravity chip and the two
+        // overlapped. `bottomBarHeight` is measured, so the cluster cannot be
+        // wrong at any size the bar becomes.
+        .padding(.bottom, bottomBarClearance + DS.Space.m)
         .onPreferenceChange(SettingsChipWidthKey.self) { settingsChipWidths = $0 }
+        .animation(DS.Motion.emphasized, value: bottomBarClearance)          // bar grew/shrank
         .animation(DS.Motion.emphasized, value: showDesignGizmo)   // drawer open/close + reflow
         .animation(DS.Motion.emphasized, value: paintActive)       // paint drawer open/close
     }
@@ -3313,6 +3910,1115 @@ public struct WorkspacePlaceholder: View {
         .coordinateSpace(name: Self.clearanceStageSpace)
     }
 
+
+
+    // MARK: ★ §6 — THE SURFACE STAGE'S COLOUR AND ITS SELECTION
+
+    /// Every face the Topology page put in a group — the faces this stage may act
+    /// on, and therefore the ones it tints.
+    /// ★ EVERY FACE OF THE PART — this stage acts on all of them.
+    ///
+    /// The name is now historical: it once meant "the faces the Topology page
+    /// grouped", which was also the permission. The permission is gone; what a face
+    /// belongs to is carried by `surfaceGroupHues` and shown as a hint of colour.
+    private var surfaceGroupedFaces: Set<FaceID> {
+        guard let mesh = viewerMesh else { return [] }
+        return Set(0..<Int32(mesh.faceGeometry.count))
+    }
+
+    /// ★ THE ONE BLUE, PER VERTEX. Per VERTEX and not per face because a cut does
+    /// not create a face: both halves keep the same id, and a `[FaceID: colour]`
+    /// map cannot tell them apart no matter what colour it holds.
+    private var surfaceVertexTints: [Float] {
+        guard let mesh = viewerMesh else { return [] }
+        return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
+                                  regions: project.faceRegions,
+                                  selected: surfaceSelected,
+                                  // Whole-face picks are coloured directly…
+                                  // The matches light exactly as tapped faces do —
+                                  // they are whole faces, so no fragment test.
+                                  picked: surfaceTool == .similar
+                                      ? similarMatches
+                                      : (surfaceTool == .union
+                                         ? surfaceUnion.wholeFacePicks(
+                                             regions: project.faceRegions, mesh: mesh)
+                                         : surfaceSelectedFace.map { [$0] } ?? []),
+                                  // …and only the PARTS are handed to the shader.
+                                  // Every other tool tests the SELECTED region's
+                                  // faces, which is where its one cut plane applies.
+                                  fragmentTested: surfaceTool == .union
+                                      ? surfaceUnionPickedFaces
+                                      : surfaceSelectedTestedFaces,
+                                  groupColours: surfaceGroupHues)
+    }
+
+    /// ★ WHICH WAY THE PLANE'S NORMAL POINTS ON SCREEN: +1 when it runs to the
+    /// right, −1 when it runs to the left. The move drag multiplies by this, so a
+    /// rightward drag always moves the cut rightward however the part is turned.
+    private var cutMoveSign: Double {
+        guard let held = heldCut, let proj = projection else { return 1 }
+        let cut = held.rotated(by: SurfaceCut.snap(cutRotation))
+        let a = settledWorld(SIMD3<Float>(cut.point))
+        let b = settledWorld(SIMD3<Float>(cut.point + cut.normal * cutMoveScale * 40))
+        guard let pa = proj.project(a), let pb = proj.project(b) else { return 1 }
+        return (pb.x - pa.x) >= 0 ? 1 : -1
+    }
+
+    /// mm per point of drag on the move knob — the piece's own size, so the knob
+    /// crosses it in about a screen's worth of travel on any part.
+    private var cutMoveScale: Double {
+        guard let m = viewerMesh else { return 0.1 }
+        return Double(m.bounds.radius) / 260
+    }
+
+    /// ★ THE CUT BOUNDARIES, AS REAL LINES — every committed cut, plus the grid a
+    /// pattern WOULD make while it is being aimed. Drawn with the wireframe, so a
+    /// divided face reads as two pieces with an edge between them at any
+    /// tessellation, and the pattern can be seen before it is committed.
+    private var surfaceCutLineBuffer: [Float] {
+        // ★ ON EVERY STAGE THAT DRAWS THE WIREFRAME, NOT JUST THIS ONE. A cut is a
+        // real boundary of the surface once it is made, so it belongs to the edge
+        // set wherever that edge set is shown — which is how the Topology page now
+        // shows what the Surface stage did to it (maintainer: "The wireframe
+        // doesn't reflect the unions or cuts I made. This needs to be updated
+        // live").
+        guard visible.wireframe, surfaceWireframeOn, let mesh = viewerMesh
+        else { return [] }
+        return SurfaceCutLines.committed(regions: project.faceRegions, in: mesh)
+    }
+
+    /// ★ THE GRID A PATTERN *WOULD* MAKE — the only thing on screen that has not
+    /// happened yet, so the only thing drawn in the accent colour.
+    private var surfacePreviewLineBuffer: [Float] {
+        guard visible.surfaceEditing, surfaceWireframeOn, surfaceTool == .pattern,
+              let mesh = viewerMesh, let f = surfacePatternFace,
+              let p = surfacePatternPreview else { return [] }
+        // ★ CLIPPED TO THE SELECTED PIECE. Without this the grid is traced across
+        // the whole FACE — including the sibling half of a cut, which is not what
+        // is being patterned. The SAME piece the cells were measured within:
+        // reading a different one here is how the count and the drawing came to
+        // disagree.
+        return SurfaceCutLines.preview(
+            cells: p.cells, face: f, in: mesh,
+            within: surfacePatternPiece
+                .flatMap { project.faceRegions.region($0)?.cuts } ?? [])
+    }
+
+    // ★ `surfaceCutRibbon` DELETED (2026-08-16). It built two triangles per
+    // segment, widened in the plane of a single face normal — which is correct on
+    // a flat face and degenerate on a curved one: wherever the segment ran
+    // parallel to that normal the in-plane perpendicular collapsed and the ribbon
+    // vanished. On the maintainer's curved face a full divider line rendered as
+    // two or three stray ticks. The wide-line pipeline (`wideline_vertex`) expands
+    // every segment in SCREEN space, where there is no such direction, so the cut
+    // traces now ride the wireframe and this layer had nothing left to do.
+
+    /// The faces the single-plane cut test applies to: the selected region's own,
+    /// and only when it IS a cut (a whole region has no plane to test).
+    private var surfaceSelectedTestedFaces: Set<FaceID> {
+        guard let id = surfaceSelected,
+              project.faceRegions.region(id)?.isCut == true else { return [] }
+        return Set(project.latticeRegionMemberFaces(id))
+    }
+
+    /// ★ EACH GROUPED FACE'S OWN GROUP COLOUR, for the Surface stage's muted hue.
+    /// Read from `force.tint(for:)` — the SAME source the TO page paints with, so a
+    /// group cannot read red on one page and orange on the other.
+    private var surfaceGroupHues: [FaceID: SIMD3<Float>] {
+        var out: [FaceID: SIMD3<Float>] = [:]
+        for g in selection.groups {
+            let c = force.tint(for: g)
+            let v = SIMD3<Float>(Float(c.r), Float(c.g), Float(c.b))
+            for f in g.faces { out[f] = v }
+        }
+        return out
+    }
+
+    /// §6(c) — the faces the derived rule currently matches. Recomputed rather
+    /// than stored: the RULE is the membership, and a cached id list is exactly
+    /// the drift PR 331 measured (a 24-face union grew to 32 after a CAD edit).
+    private var similarMatches: Set<FaceID> {
+        guard let mesh = viewerMesh else { return [] }
+        return similar.matches(in: mesh)
+    }
+
+    /// ★ THE TOPOLOGY PAGE'S TAP ON A DIVIDED FACE (maintainer, 2026-08-15: "I want
+    /// to be able to go *back* to the TO page and deselect any face that I have cut
+    /// up as its own piece, removing it from the Group. I would also like to be able
+    /// to add it to another Group — these faces need to be selectable afterwards").
+    ///
+    /// Returns true when it handled the tap. A face with no pieces returns false and
+    /// the ordinary face route runs, byte-for-byte as before.
+    ///
+    /// ★ A REGION BELONGS TO EXACTLY ONE GROUP — the same invariant `faces` keeps —
+    /// so adding a piece to a group removes it from whichever held it. That is what
+    /// "add it to another Group" means, and doing it in one step is what stops a
+    /// piece being claimed twice.
+    private func handleTopologyPiecePick(_ faceID: FaceID, at point: SIMD3<Float>?,
+                                         mesh: ViewerMesh) -> Bool {
+        guard force.phase == .edit, !showLatticePage, !regionsOpen else { return false }
+
+        // ★ ANY FACE A REGION COVERS IS TAPPED BY ITS REGION — not just a DIVIDED
+        // one, which is all this used to handle.
+        //
+        // ★ WHY THAT WAS THE BUG. The maintainer isolated a curved surface with
+        // select-similar, came back here, and "it stayed connected to its group".
+        // An isolate produces a region with no CUTS, so this returned false, the
+        // ordinary face route ran, and it toggled the group's `faces` list — while
+        // the REGION carried on covering exactly those faces. The group therefore
+        // still contained them, by the other of its two memberships. A face covered
+        // by a region has to be reached through that region or it cannot be reached
+        // at all.
+        let covering = project.faceRegions.regions.filter {
+            FaceRegionGeometry.members(of: $0, in: mesh).contains(faceID)
+        }
+        guard !covering.isEmpty else { return false }
+
+        // Which piece is under the finger, resolved up through any union.
+        let hit = point.flatMap {
+            SurfaceTint.regionAt(point: SIMD3<Double>($0), face: faceID,
+                                 mesh: mesh, regions: project.faceRegions)
+        } ?? project.surfaceCutTarget(face: faceID)
+        guard let piece = hit.map({ project.faceRegions.outermostUnion(containing: $0) })
+        else { return false }
+
+        project.sealUndoStep()
+        let owner = selection.groups.first { $0.regionIDs.contains(piece) }
+        // ★ AND THE RAW FACES GO WITH IT. A group holds BOTH a `faces` list and a
+        // `regionIDs` list, and `latticeRegionCoveredFaces` subtracts one from the
+        // other — so dropping only the region leaves the bare face behind, still in
+        // the group, still emitted. That is the same defect from the other side:
+        // one surface, two memberships, and both have to move together.
+        let faces = project.surfaceResolvedFaces(piece)
+        // ★ A GROUP HOLDING THE PIECE'S *PARENT* HOLDS THE PIECE IMPLICITLY, so
+        // dropping the piece alone changes nothing and the face freezes lit. The
+        // ancestor is replaced by the pieces it stands for first — see
+        // `ProjectModel.surfaceDetachPiece`.
+        for g in selection.groups { project.surfaceDetachPiece(piece, from: g.id) }
+        // `removeRegions` drops the id from EVERY group, which is the invariant a
+        // region belongs to exactly one — so a move is a remove then an add, and a
+        // piece can never be claimed twice.
+        selection.removeRegions([piece])
+        for g in selection.groups { selection.removeFaces(faces, from: g.id) }
+
+        // ★ `if let owner`, NOT `owner?.id == activeGroupID`.
+        //
+        // ★ THE BUG THAT MADE AN ISOLATED PIECE UNSELECTABLE. An isolated piece
+        // belongs to NO group, so `owner` is nil; on a page where nothing is
+        // selected yet `activeGroupID` is ALSO nil — and `nil == nil` is true. The
+        // tap therefore took the "already in the active group, remove it and stop"
+        // branch and did nothing at all, every time, for the one kind of piece that
+        // has no owner by design. Optional equality quietly turned "owned by the
+        // active group" into "owned by nobody, and nothing is active".
+        switch TopologyPieceTap.route(owner: owner?.id,
+                                      active: selection.activeGroupID) {
+        case .removeOnly:
+            break   // it was in the active group; the removal above is the whole act
+        case .moveToActive:
+            if selection.activeGroupID == nil { selection.addGroup() }
+            if let target = selection.activeGroupID {
+                selection.addRegions([piece], to: target)
+            }
+        }
+        force.sync(groups: selection.groups)
+        return true
+    }
+
+    /// ★ ONE TAP, ROUTED BY THE ARMED TOOL. `select` edits nothing; the rest arm a
+    /// confirm and commit nothing until it is tapped.
+    ///
+    /// `point` is the 3D hit — the only thing that distinguishes the two halves of
+    /// a cut face, since they share a face id.
+    private func handleSurfacePick(_ faceID: FaceID, at point: SIMD3<Float>?,
+                                   mesh: ViewerMesh) {
+        // ★ ONLY A FACE THE TO PAGE ALREADY GROUPED (maintainer: "cuts and unions
+        // can only happen on faces that are grouped together from the TO page").
+        //
+        // ★ AND THE REASON IS NOT TIDINESS. A region carries a ROLE, a DEPTH and a
+        // lattice choice, and all three live on the GROUP. Acting on an ungrouped
+        // face manufactures a region that belongs to no group — it appears in no
+        // Selections list, and there is nowhere to give it any of the three. It is
+        // geometry a user can make and then cannot reach.
+        // ★ EVERY FACE IS EDITABLE HERE. NO GATE.
+        //
+        // This used to refuse any face the Topology page had not grouped. The
+        // maintainer named the cost: "It wouldn't make sense to group a bunch of
+        // faces together, only to ungroup most of them and re-group them according
+        // to their new cuts. It should be that all faces are editable right away."
+        // The gate forced the workflow backwards — group, come here, cut, go back
+        // and regroup — and it was the reason a union could not reach two pieces on
+        // a part with one grouped face.
+        //
+        // Grouping stays VISIBLE: a grouped face wears a hint of its group's colour
+        // (`surfaceGroupHues`), an ungrouped one stays neutral. That distinction is
+        // real and worth showing. It is no longer a permission.
+        surfaceRefusal = nil
+
+        // ★ WHICH PIECE. With a point, the half-space test picks the HALF that was
+        // tapped; without one (no hit, e.g. the id pass answered but the ray
+        // missed), the deepest region holding the face.
+        // ★ THE PIECE UNDER THE FINGER, RESOLVED UP THROUGH ANY UNION. Once pieces
+        // are combined they ARE one piece, so a tap on either selects the whole.
+        // Landing on the part is why two combined faces still selected separately.
+        //
+        // ★ AND A FACE WITH NO REGION IS STILL SELECTABLE. Selection is not an edit,
+        // so it does not manufacture one — the tapped FACE is remembered instead and
+        // lit directly. Requiring a region is why "select still won't highlight any
+        // face at the start. It requires a cut first."
+        let hitPiece = point.map {
+            SurfaceTint.regionAt(point: SIMD3<Double>($0), face: faceID,
+                                 mesh: mesh, regions: project.faceRegions)
+        } ?? project.surfaceCutTarget(face: faceID)
+        surfaceSelected = hitPiece.map {
+            project.faceRegions.outermostUnion(containing: $0)
+        }
+        surfaceSelectedFace = surfaceSelected == nil ? faceID : nil
+
+        surfaceEngage(surfaceTool, face: faceID, mesh: mesh)
+    }
+
+    /// ★ POINT THE ARMED TOOL AT WHAT IS SELECTED — without clearing anything.
+    ///
+    /// The one place a tool decides what it does with a piece, so a TAP and a TOOL
+    /// SWITCH cannot mean different things (maintainer, 2026-08-16: "When a face is
+    /// selected with the selection tool and a tool is changed, the tool's action
+    /// should automatically be turned on on the selected face"). Before this, the
+    /// tray button threw the selection away and the switch was a dead end: you had
+    /// to find the same face and tap it a second time.
+    private func surfaceEngage(_ tool: SurfaceTool, face faceID: FaceID,
+                               mesh: ViewerMesh) {
+        switch tool {
+        case .select:
+            heldCut = nil
+
+        case .cut:
+            // ★ THE MIDDLE OF THE PIECE YOU TAPPED, not of the face it came from
+            // (maintainer: "I tried cutting again and the cut line was in the exact
+            // spot it had been when the two faces were one").
+            //
+            // `centred(onFace:)` reads the FACE's frame, and a cut does not change
+            // the face — so cutting a half put the line back through the middle of
+            // the original, i.e. exactly along the cut that made it. Reading the
+            // REGION's own frame puts it through the middle of the half, which is
+            // what "cut this in two" means the second time as much as the first.
+            heldCut = surfaceSelected.flatMap {
+                SurfaceCut.centred(onRegion: $0, of: faceID,
+                                   regions: project.faceRegions, in: mesh)
+            } ?? SurfaceCut.centred(onFace: faceID, in: mesh)
+            cutRotation = 0
+            cutRotationBase = 0
+            cutOffsetMM = 0
+            cutOffsetBase = 0
+            hoveredCut = nil
+
+        case .similar:
+            // ★ §6(c) — DERIVE A RULE FROM THE TAP, don't freeze a list.
+            //
+            // PR 331 measured why: storing the matches makes a union "a stale id
+            // list wearing a filter's clothes", and a simulated CAD edit grew a
+            // 24-face union to 32. The FILTER is the membership, so it is what is
+            // stored and what is re-evaluated on the next import.
+            // ★ MULTI-SELECT OF KINDS. Tap a face and its kind joins; tap a face
+            // already covered and that kind leaves. The rules are stored, never
+            // their matches — see `SurfaceSimilar`.
+            guard let f = project.surfaceSimilarFilter(to: faceID) else { break }
+            similar.toggle(seed: faceID, filter: f) { pick in
+                Set(FaceRegionGeometry.match(pick.filter, in: mesh))
+            }
+
+        case .union:
+            // ★ A UNION IS MANY PIECES, SO THE TOOL ACCUMULATES (maintainer: "you
+            // select a face, and click union … then select another face, and
+            // another, and however many more, and you press the checkmark when
+            // you're done").
+            //
+            // ★ AND TAPPING A PICKED PIECE DROPS IT AGAIN (maintainer, 2026-08-16:
+            // "When multi-selecting in Union, tapping a selected face should
+            // unselect it"). `SurfaceUnion.toggle` has always done that; what made
+            // it look like it did not is the line below it. `surfaceSelected` is set
+            // by every tap, and the tint lights the SELECTED region as well as the
+            // picked ones — so a piece toggled OFF stayed blue, because it was now
+            // merely selected. In union the picks ARE the selection; nothing else
+            // may light.
+            if let r = surfaceSelected ?? project.surfaceEnsureRegion(for: faceID) {
+                surfaceUnion.toggle(r)
+            }
+            surfaceSelected = nil
+            surfaceSelectedFace = nil
+
+        case .pattern:
+            surfacePatternFace = faceID
+            surfacePatternPiece = surfaceSelected
+        }
+    }
+
+    /// The face the current selection sits on — a selected PIECE's face, or the
+    /// face selected directly when it has no region.
+    private var surfaceSelectedFaceID: FaceID? {
+        if let f = surfaceSelectedFace { return f }
+        if let r = surfaceSelected {
+            return project.surfaceResolvedFaces(r).first
+        }
+        return nil
+    }
+
+    /// ★ SWITCHING TOOL: abandon the last tool's work in progress, then point the
+    /// new one at whatever is still selected.
+    private func surfaceSwitch(to tool: SurfaceTool) {
+        // ★ A SELECT-SIMILAR SELECTION SURVIVES THE SWITCH, AND THE NEW TOOL ACTS ON
+        // ALL OF IT (maintainer, 2026-08-16: "ensure that if a tool is touched after
+        // similar faces are selected, that it works" — the tool's action goes "to
+        // all the similar faces").
+        //
+        // Captured BEFORE the reset below, which is what clears it.
+        let carried: [FaceID] = surfaceTool == .similar && !similar.isEmpty
+            ? Array(similarMatches).sorted() : []
+
+        surfaceTool = tool
+        heldCut = nil
+        hoveredCut = nil
+        surfaceRefusal = nil
+        surfaceUnion.clear()
+        surfacePatternFace = nil
+        surfacePatternPiece = nil
+        similar.clear()
+        guard let mesh = viewerMesh else { return }
+
+        if !carried.isEmpty {
+            surfaceCarried = carried
+            switch tool {
+            case .select:
+                // Nothing to arm; the set stays lit so it can be handed to a tool.
+                surfaceSelected = nil
+                surfaceSelectedFace = carried.first
+            case .union:
+                // ★ EVERY MATCH BECOMES A PICK. Confirm and they are one piece.
+                for f in carried {
+                    if let r = project.surfaceEnsureRegion(for: f) {
+                        surfaceUnion.toggle(r)
+                    }
+                }
+            case .cut, .pattern:
+                // Aimed at the first, COMMITTED across all — see the confirms,
+                // which read `surfaceCarried`.
+                if let f = carried.first { surfaceEngage(tool, face: f, mesh: mesh) }
+            case .similar:
+                break
+            }
+            return
+        }
+
+        surfaceCarried = []
+        guard let face = surfaceSelectedFaceID else { return }
+        surfaceEngage(tool, face: face, mesh: mesh)
+    }
+
+    /// The face the pattern tool will split, once one is tapped.
+    private var surfacePatternPreview: (cells: [FaceRegionGeometry.GridCell],
+                                        verdict: SliverVerdict)? {
+        guard let f = surfacePatternFace else { return nil }
+        return project.surfacePatternPreview(face: f, columns: patternColumns,
+                                             rows: patternRows,
+                                             rotationDegrees: patternRotation,
+                                             piece: surfacePatternPiece)
+    }
+
+    // MARK: ★ VIEW MODE — the wireframe and its x-ray, on every stage that has them
+    //
+    // ★ ONE PAIR OF SWITCHES, SHARED ACROSS STAGES. The maintainer asked for the
+    // view to persist ("keep wireframe and xray view throughout the entire app"),
+    // and two independent copies of the state is precisely how a view mode stops
+    // persisting: turn it on here, walk next door, and it is off again. So these
+    // read and write the SAME `surfaceWireframeOn` / `surfaceXrayOn` the Surface
+    // tray does. Which stages offer them is `WorkspaceStageVisibility.wireframe`.
+
+    /// The two toggles, SIDE BY SIDE with padding between them, in the slot
+    /// directly under the position gizmo.
+    @ViewBuilder private var viewModeToggles: some View {
+        HStack(spacing: DS.Space.s) {
+            viewModeButton("grid", label: "Wireframe", on: surfaceWireframeOn) {
+                surfaceWireframeOn.toggle()
+            }
+            viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
+                surfaceXrayOn.toggle()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        // ★ BELOW THE GIZMO, in the slot `gizmoClearance` defines — the same one
+        // the Surface tray uses, so the two stages put the control in one place.
+        .padding(.top, PageChrome.gizmoClearance + PageChrome.gap)
+        .padding(.trailing, PageChrome.gizmoInset)
+    }
+
+    private func viewModeButton(_ icon: String, label: String, on: Bool,
+                                action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle((on ? DS.Color.textPrimary
+                                     : DS.Color.textTertiary).color)
+                .frame(width: 40, height: 40)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                        .fill(on ? DS.Color.accentDeep.opacity(0.55).color
+                                 : DS.Surface.bar.color)
+                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.pill,
+                                                  style: .continuous)
+                            .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: ★ §6 — THE SURFACE STAGE'S TOOL PANEL
+    //
+    // ★ THE TOOLS LIVE IN A PANEL, NOT ON THE VIEWPORT. The first attempt put the
+    // tap and the rotate drag on a layer over the model, and that layer ate orbit
+    // and pinch outright — the stage became one you could not turn the part in.
+    // A panel cannot do that: it occupies its own rectangle, the viewport keeps
+    // every gesture it had, and the maintainer can see what the stage offers
+    // instead of having to discover it ("I am not seeing any of the tools").
+    //
+    // It sits on the RIGHT, BELOW THE GIZMO — the slot `PageChrome.gizmoClearance`
+    // and `gizmoInset` already define, so it lines up with the stage-nav column
+    // above it rather than being placed by eye.
+
+    // ★ AN ICON TRAY, NOT A TEXT MODAL (maintainer, 2026-08-14: "The modal on the
+    // right should be about half that width and think of it more like an icon tray
+    // - not a full text modal … Think Adobe Photoshop's tools").
+    //
+    // ★ AND THE CONFIRM IS NOT IN IT. A checkmark inside the tray puts the verb an
+    // arm's length from the thing it acts on; Photoshop's options never live in the
+    // tool well either. The ✓ / rotate / ✕ float NEXT TO THE ACTION on the model —
+    // see `surfaceActionCluster`.
+    //
+    // ~60 pt wide against the old panel's 260: a 44 pt target with the tray's own
+    // padding either side, and nothing else.
+    @ViewBuilder private var surfaceToolsPanel: some View {
+        VStack(spacing: DS.Space.xs) {
+            ForEach(SurfaceTool.allCases, id: \.rawValue) { tool in
+                Button {
+                    // Abandons the last tool's work in progress, then arms this one
+                    // on whatever is still selected — see `surfaceSwitch`.
+                    surfaceSwitch(to: tool)
+                } label: {
+                    Image(systemName: tool.icon)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle((surfaceTool == tool
+                                          ? DS.Color.textPrimary
+                                          : DS.Color.textTertiary).color)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                                .fill(surfaceTool == tool
+                                      ? DS.Color.accentDeep.color : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tool.title)
+            }
+
+            // ★ WIDTH-BOUND. A bare `Divider()` in a VStack expands to the widest
+            // width offered — which here is the whole viewport, so the tray's
+            // background became a full-screen band and its icons centred on it.
+            Divider().overlay(DS.Color.strokePanel.color)
+                .frame(width: 28).padding(.vertical, 2)
+
+            // §6(b) — the wireframe, as one more icon rather than a labelled switch.
+            Button { surfaceWireframeOn.toggle() } label: {
+                Image(systemName: "grid")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle((surfaceWireframeOn
+                                      ? DS.Color.textPrimary
+                                      : DS.Color.textTertiary).color)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                            .fill(surfaceWireframeOn
+                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Wireframe")
+
+            // ★ X-RAY, SEPARATELY. `#` decides whether there are lines; this
+            // decides whether they show THROUGH the solid. They were one control
+            // and the wireframe was washed out because of it.
+            Button { surfaceXrayOn.toggle() } label: {
+                Image(systemName: "square.stack.3d.up")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle((surfaceXrayOn
+                                      ? DS.Color.textPrimary
+                                      : DS.Color.textTertiary).color)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                            .fill(surfaceXrayOn
+                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("X-ray")
+
+        }
+        .padding(DS.Space.xs)
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.panelSmall, style: .continuous)
+                .fill(DS.Surface.panel.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall,
+                                          style: .continuous)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+        )
+        .dsShadow(DS.Shadow.panel)
+        // ONE LINE saying what a tap does, to the LEFT of the tray — a tray of
+        // icons must not be a guessing game, and this is the only text the stage
+        // carries.
+        .overlay(alignment: .topLeading) {
+            Text(surfaceRefusal ?? surfaceHint)
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle((surfaceRefusal == nil
+                                  ? DS.Color.textTertiary : DS.Color.warning).color)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 160, alignment: .trailing)
+                .offset(x: -172, y: 10)
+                .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.top, PageChrome.gizmoClearance + PageChrome.gap)
+        .padding(.trailing, PageChrome.gizmoInset)
+    }
+
+    // ★ §6/§7 — THE ACTION CLUSTER: every tool's confirm, FLOATING NEXT TO WHAT IT
+    // ACTS ON (maintainer: "Add a floating checkbox, rotation icon, or 'x' *next*
+    // to the cut/action, not in the modal as a confirmation").
+    //
+    // One cluster serves all four tools, anchored to the point the action is
+    // aimed at, so the verb is never an arm's length from its object. `select`
+    // carries none: selecting is not a change, so there is nothing to confirm.
+    @ViewBuilder private var surfaceActionCluster: some View {
+        if visible.surfaceEditing, let proj = projection, let at = surfaceActionAnchor(proj) {
+            HStack(spacing: DS.Space.xs) {
+                switch surfaceTool {
+                case .select:
+                    EmptyView()
+
+                case .cut:
+                    if let held = heldCut {
+                        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
+                            releaseCut()
+                        }
+                        // ★ §6(h) — ROTATE, 15° DETENTS. The drag lives on this knob
+                        // and not on the viewport: on the viewport it consumed the
+                        // camera's own gestures and orbit stopped working.
+                        ZStack {
+                            Circle().fill(DS.Surface.bar.color)
+                            VStack(spacing: 0) {
+                                Image(systemName: "rotate.3d")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(DS.Color.textPrimary.color)
+                                Text("\(Int(cutAngleDegrees))°")
+                                    .dsStyle(DS.TypeScale.caption)
+                                    .foregroundStyle(DS.Color.textTertiary.color)
+                                    .monospacedDigit()
+                            }
+                        }
+                        .frame(width: 52, height: 52)
+                        // ★ A TAP IS A QUARTER TURN. The common case by far is
+                        // "the other way" — across the piece instead of along it —
+                        // and asking for a 90° drag to get there is a chore. The
+                        // drag stays for everything in between.
+                        .onTapGesture {
+                            cutRotation = SurfaceCut.snap(cutRotation + 90)
+                            cutRotationBase = cutRotation
+                        }
+                        .gesture(
+                            DragGesture(minimumDistance: 4)
+                                .onChanged { g in
+                                    cutRotation = cutRotationBase
+                                        + Double(g.translation.width) * 0.8
+                                }
+                                .onEnded { _ in
+                                    cutRotation = SurfaceCut.snap(cutRotation)
+                                    cutRotationBase = cutRotation
+                                }
+                        )
+                        // ★ MOVE — the half-way point is a default, not a verdict.
+                        // The drag slides the plane along its OWN normal, the only
+                        // direction that moves a plane; sliding it within itself
+                        // changes nothing and sliding it out of the face is
+                        // meaningless.
+                        ZStack {
+                            Circle().fill(DS.Surface.bar.color)
+                            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                        }
+                        .frame(width: 44, height: 44)
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { g in
+                                    // ★ DRAG RIGHT ALWAYS MOVES RIGHT. The offset
+                                    // runs along the plane's NORMAL, and that normal
+                                    // points left or right on screen depending on
+                                    // where the camera is and how far the cut has
+                                    // been rotated — so a fixed mapping is correct
+                                    // from one side and INVERTED from the other,
+                                    // which is exactly what "working about half the
+                                    // time and the other half, it's inverted" is.
+                                    // Projecting the normal onto the screen gives
+                                    // the sign, so the control matches the hand.
+                                    cutOffsetMM = cutOffsetBase
+                                        + Double(g.translation.width)
+                                            * cutMoveScale * cutMoveSign
+                                }
+                                .onEnded { _ in cutOffsetBase = cutOffsetMM }
+                        )
+                        surfaceClusterConfirm {
+                            // ★ ACROSS EVERY FACE A SELECT-SIMILAR HANDED OVER, each
+                            // through its OWN centre at the same angle — see
+                            // `surfaceCarried`. Otherwise just the one aimed at.
+                            let kids = surfaceCarried.count > 1
+                                ? project.commitSurfaceCut(
+                                    faces: surfaceCarried,
+                                    rotationDegrees: cutRotation,
+                                    offsetMM: cutOffsetMM)
+                                : project.commitSurfaceCut(
+                                    held.rotated(by: SurfaceCut.snap(cutRotation))
+                                        .moved(byMM: cutOffsetMM))
+                            if surfaceCarried.count > 1 {
+                                model.toast = "Cut \(surfaceCarried.count) faces."
+                            }
+                            surfaceCarried = []
+                            releaseCut()
+                            // ★ SELECT A HALF, so the split is visible the moment it
+                            // is made rather than only after a further tap.
+                            surfaceSelected = kids.first
+                        }
+                    }
+
+                case .similar:
+                    if !similar.isEmpty {
+                        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
+                            similar.clear()
+                        }
+                        // ★ THE COUNT BELONGS HERE, unlike on union. These faces
+                        // were DERIVED, not tapped — the user has not counted them
+                        // and cannot, so the number is the only way to know whether
+                        // the rule caught what was meant before acting on it.
+                        surfaceClusterLabel(similarMatches.count == 1
+                                            ? "1 like this"
+                                            : "\(similarMatches.count) selected")
+                        // ★ ISOLATE — "make all the similar faces (even if it's a
+                        // singular one) into its own face, disconnecting from every
+                        // other face it is currently connected with". Enabled at ONE
+                        // match, because isolating a single face is a real thing to
+                        // want: it is how you pull one face out of a union.
+                        //
+                        // ★ AND IT SPLITS BY CONNECTIVITY. "If they are *not*
+                        // directly attached to one another, they should separate
+                        // into isolated pieces … However, if multi-select connects
+                        // the pieces, then they are all made into a single face
+                        // group." That is `commitSurfaceIsolate(faces:named:)`.
+                        surfaceClusterButton("scissors.badge.ellipsis",
+                                             tint: DS.Color.textPrimary) {
+                            let faces = Array(similarMatches).sorted()
+                            let name = similar.seeds.first.map { "Face \($0) & like it" }
+                                ?? "Isolated"
+                            let made = project.commitSurfaceIsolate(faces: faces,
+                                                                    named: name)
+                            similar.clear()
+                            // ★ AND SAY THAT IT HAPPENED (maintainer: "We need some
+                            // sort of confirmation for the cutting of the
+                            // select-similar step. Otherwise, there is no visual cue
+                            // to show that it worked").
+                            //
+                            // Isolating is invisible by nature: the faces do not
+                            // move, do not change shape and — until now — did not
+                            // even change colour, because the tool stayed on
+                            // `similar` and kept lighting its MATCHES. Dropping to
+                            // `select` with a new piece selected lights what was
+                            // made, and the toast says how it came out.
+                            surfaceSelected = made.first
+                            surfaceTool = .select
+                            surfaceSelectedFace = nil
+                            model.toast = made.count > 1
+                                ? "Isolated \(faces.count) faces into \(made.count) "
+                                  + "separate pieces — they do not touch, so each is "
+                                  + "its own selection."
+                                : "Isolated \(faces.count == 1 ? "this face" : "\(faces.count) faces") "
+                                  + "into one piece — it is now its own selection "
+                                  + "on the Topology page."
+                        }
+                        // ★ NO ✓ (maintainer, 2026-08-16: "What exactly does the
+                        // checkbox of the 'select-similar' do? In my mind it
+                        // shouldn't be there").
+                        //
+                        // It made a filter-defined UNION of every match — one row,
+                        // one role, one depth. That is a real operation and the
+                        // Regions sheet still offers it, but as the FIRST answer to
+                        // "these faces are alike" it is the wrong one: it welds them
+                        // together when the whole point of selecting them is to get
+                        // at them. Removed rather than left as a second confusing
+                        // verb next to ✂.
+                    }
+
+                case .union:
+                    if !surfaceUnion.isEmpty {
+                        // ★ ✓ AND ✕, NOTHING ELSE (maintainer: "what is with the
+                        // '36 faces' section? No need for that. Just have a
+                        // checkbox and 'x'"). What is selected is already visible
+                        // ON THE MODEL — every picked face is lit — so a number
+                        // restating it is a second, worse copy of the same fact.
+                        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
+                            surfaceUnion.clear()
+                        }
+                        surfaceClusterConfirm(enabled: surfaceUnion.canCommit) {
+                            surfaceSelected = project.commitSurfaceUnion(surfaceUnion)
+                            surfaceUnion.clear()
+                        }
+                    }
+
+                case .pattern:
+                    if surfacePatternFace != nil {
+                        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
+                            surfacePatternFace = nil
+                            surfacePatternPiece = nil
+                        }
+                        // ★ §7 — COLUMNS x ROWS, with the SLIVER VERDICT on the
+                        // confirm. The guard is priced at the run's own voxel
+                        // spacing, so the panel refuses with the number the run
+                        // would, and the confirm is simply not tappable when it does.
+                        surfaceClusterStepper("col", value: $patternColumns)
+                        surfaceClusterStepper("row", value: $patternRows)
+                        // ★ §7 — TURN THE GRID. The automatic alignment is the
+                        // face's longest straight edge; this is the override for
+                        // when that is not the axis you meant.
+                        ZStack {
+                            Circle().fill(DS.Color.chipSolid.color)
+                                .overlay(Circle().strokeBorder(
+                                    DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1))
+                            VStack(spacing: 0) {
+                                Image(systemName: "rotate.3d")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(DS.Color.textPrimary.color)
+                                Text("\(Int(patternRotation))°")
+                                    .dsStyle(DS.TypeScale.caption)
+                                    .foregroundStyle(DS.Color.textTertiary.color)
+                                    .monospacedDigit()
+                            }
+                        }
+                        .frame(width: 52, height: 52)
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { g in
+                                    // ★ FOLDED AS IT TURNS. A grid is symmetric
+                                    // every 90°, so an accumulating raw drag shows
+                                    // meaningless numbers (−405° on his screen) for
+                                    // grids already named inside one quarter-turn.
+                                    patternRotation = SurfacePatternAxis.foldAngle(
+                                        patternRotationBase
+                                            + Double(g.translation.width) * 0.5)
+                                }
+                                .onEnded { _ in
+                                    patternRotation = SurfacePatternAxis.foldAngle(
+                                        SurfaceCut.snap(patternRotation))
+                                    patternRotationBase = patternRotation
+                                }
+                        )
+                        let preview = surfacePatternPreview
+                        surfaceClusterLabel(preview.map {
+                            $0.verdict.ok ? "\($0.cells.count) pieces" : $0.verdict.reason
+                        } ?? "—", warn: preview.map { !$0.verdict.ok } ?? false)
+                        surfaceClusterConfirm(enabled: preview?.verdict.ok ?? false) {
+                            guard let face = surfacePatternFace else { return }
+                            // ★ ACROSS EVERY CARRIED FACE — same grid, each in its
+                            // own frame. A face the grid does not fit is skipped
+                            // rather than failing the batch.
+                            let kids = surfaceCarried.count > 1
+                                ? project.commitSurfacePattern(
+                                    faces: surfaceCarried, columns: patternColumns,
+                                    rows: patternRows, rotationDegrees: patternRotation)
+                                : project.commitSurfacePattern(
+                                    face: face, columns: patternColumns, rows: patternRows,
+                                    rotationDegrees: patternRotation,
+                                    piece: surfacePatternPiece)
+                            if surfaceCarried.count > 1 {
+                                model.toast = "Patterned \(surfaceCarried.count) faces."
+                            }
+                            surfaceCarried = []
+                            surfaceSelected = kids.first
+                            surfacePatternFace = nil
+                            surfacePatternPiece = nil
+                        }
+                    }
+                }
+            }
+            // ★ KEPT ON SCREEN. Anchored to a point on the model, the cluster can
+            // sit under the top chrome or off an edge — where it cannot be tapped
+            // at all. Clamped into the viewport with room for its own height.
+            // ★ WHERE THE CLUSTER SITS DEPENDS ON WHETHER THE TOOL STILL NEEDS THE
+            // MODEL — not on whether it is "an action".
+            //
+            // CUT and PATTERN each aim at ONE face: after that tap the model is no
+            // longer being touched, so their controls belong AT the thing they act
+            // on. UNION keeps taking taps — every further face joins the set — and a
+            // cluster floating over the part then sits on the very faces you are
+            // trying to tap, which is why a union could be neither built nor
+            // confirmed ("I cannot multi-select for the union", "Pressing the
+            // checkbox for the union is impossible").
+            //
+            // So UNION alone docks. Docking pattern too was over-correction: it
+            // moved a control away from its subject for a problem pattern does not
+            // have ("The pattern action chips are no longer on the face they are
+            // meant to be").
+            .position(x: surfaceDocksCluster
+                      ? (projection?.viewportSize.width ?? 1032) / 2
+                      : min(max(at.x, 200),
+                            max((projection?.viewportSize.width ?? 1032) - 200, 200)),
+                      y: surfaceDocksCluster
+                      ? (projection?.viewportSize.height ?? 1376) - bottomBarClearance - 40
+                      : min(max(at.y - 84, 96),
+                            max((projection?.viewportSize.height ?? 1376)
+                                - bottomBarClearance - 90, 96)))
+        }
+    }
+
+    /// The faces the picked PIECES resolve to — what the viewport lights. Two
+    /// halves of one face light that face; the count in the hint is what says two
+    /// distinct pieces are held.
+    /// The faces the picked PIECES live on — the `member` set the fragment stage
+    /// tests its half-space chains against. The chains decide what actually lights.
+    private var surfaceUnionPickedFaces: Set<FaceID> {
+        guard let mesh = viewerMesh else { return [] }
+        return Set(surfaceUnion.facesTouched(regions: project.faceRegions, mesh: mesh))
+    }
+
+    /// ★ THE HINT, WITH THE COUNT WHERE ONE MATTERS. Union accumulates, and a
+    /// tool that accumulates has to say how much it has — otherwise a tap that did
+    /// not register and a tap that did look identical.
+    private var surfaceHint: String {
+        // ★ THE COUNT IS SHOWN EVEN AT ZERO. Otherwise a tap that TOGGLED A PIECE
+        // OFF and a tap that never registered read identically — both fall back to
+        // the tool's generic hint, and there is no way to tell "you tapped the same
+        // piece twice" from "the tap did nothing".
+        if surfaceTool == .similar, let mesh = viewerMesh {
+            return similar.hint(in: mesh)
+        }
+        guard surfaceTool == .union, let mesh = viewerMesh else {
+            return surfaceTool.hint
+        }
+        return surfaceUnion.hint(regions: project.faceRegions, mesh: mesh)
+    }
+
+    /// ★ WHICH TOOLS DOCK: the ones that keep taking taps on the model. Only union
+    /// does — every further tap adds a face, so its controls must never be on top
+    /// of the part.
+    private var surfaceDocksCluster: Bool { false }
+
+    /// Where the cluster floats: the point the armed tool is aimed at.
+    private func surfaceActionAnchor(_ proj: CameraProjection) -> CGPoint? {
+        guard let mesh = viewerMesh else { return nil }
+        let model: SIMD3<Double>?
+        switch surfaceTool {
+        case .select:  model = nil
+        case .cut:     model = heldCut?.point
+        // The cluster floats over the CENTRE OF EVERYTHING PICKED, so it stays
+        // with the selection as it grows rather than anchoring to the first tap.
+        // ★ OVER WHAT IS PICKED — the centre of the whole set, so it stays with the
+        // selection as it grows rather than anchoring to the first tap. Lifted well
+        // clear by the placement below, so it does not sit on the faces still to be
+        // tapped ("Same with union").
+        // ★ OVER EVERYTHING SELECTED, not over the first tap — the selection is a
+        // multi-select now and can span the part.
+        case .similar: model = similar.isEmpty ? nil
+            : FaceRegionGeometry.frame(members: Array(similarMatches).sorted(),
+                                       in: mesh).origin
+        case .union:   model = surfaceUnion.isEmpty ? nil
+            : FaceRegionGeometry.frame(members: Array(surfaceUnionPickedFaces).sorted(),
+                                       in: mesh).origin
+        // Pattern floats over the face it will divide, like the cut does.
+        case .pattern: model = surfacePatternFace.map {
+            FaceRegionGeometry.frame(members: [$0], in: mesh).origin
+        }
+        }
+        guard let m = model else { return nil }
+        if surfaceDocksCluster { return .zero }   // docked: the slot is fixed
+        return proj.project(settledWorld(SIMD3<Float>(m)))
+    }
+
+    private func surfaceClusterButton(_ icon: String, tint: RGBA,
+                                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(tint.color)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(DS.Color.chipSolid.color)
+                    .overlay(Circle().strokeBorder(
+                        DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The ✓. Disabled when the action would be refused, so the guard is visible
+    /// BEFORE the tap rather than as a message after it.
+    private func surfaceClusterConfirm(enabled: Bool = true,
+                                       action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle((enabled ? DS.Color.textPrimary
+                                          : DS.Color.textTertiary).color)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(enabled ? DS.Color.accentDeep.color
+                                                  : DS.Surface.bar.color))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    private func surfaceClusterLabel(_ text: String, warn: Bool = false) -> some View {
+        Text(text)
+            .dsStyle(DS.TypeScale.caption)
+            .foregroundStyle((warn ? DS.Color.warning : DS.Color.textSecondary).color)
+            .lineLimit(2)
+            .frame(maxWidth: 140)
+            .padding(.horizontal, DS.Space.s)
+            .frame(height: 52)
+            .background(Capsule().fill(DS.Color.chipSolid.color)
+                .overlay(Capsule().strokeBorder(
+                    DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
+    }
+
+    /// A −/+ pair with its number, for the pattern grid. Typed entry is the
+    /// Regions sheet's job; here the values are 1..12 and a stepper is the faster
+    /// control at that range.
+    private func surfaceClusterStepper(_ label: String,
+                                       value: Binding<Int>) -> some View {
+        HStack(spacing: 2) {
+            Button { value.wrappedValue = max(1, value.wrappedValue - 1) } label: {
+                // ★ THE WHOLE 44 pt IS THE TARGET, NOT THE GLYPH. A bare `Image`
+                // in a button is hit-tested on its DRAWN pixels — an 11 pt minus
+                // sign is a ~10 pt target however large the frame around it, which
+                // is why these could not be pressed. `contentShape` makes the frame
+                // the target, and 44 is Apple's minimum.
+                Image(systemName: "minus").font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(width: 44, height: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            VStack(spacing: -2) {
+                Text("\(value.wrappedValue)")
+                    .dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .monospacedDigit()
+                Text(label)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            Button { value.wrappedValue = min(12, value.wrappedValue + 1) } label: {
+                Image(systemName: "plus").font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(width: 44, height: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .background(Capsule().fill(DS.Color.chipSolid.color)
+            .overlay(Capsule().strokeBorder(
+                DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
+    }
+
+    /// The held cut's angle, snapped, wrapped into 0..<360.
+    private var cutAngleDegrees: Double {
+        var d = SurfaceCut.snap(cutRotation).truncatingRemainder(dividingBy: 360)
+        if d < 0 { d += 360 }
+        return d
+    }
+
+    // MARK: ★ §6(g)/(h) — THE HOVERED CUT LINE AND ITS ROTATE CONTROL
+
+    /// ★ §6(g) — "WITH A PENCIL, SHOW THE HOVERED POSITION while attempting a cut
+    /// — the cut line follows the hover before it is committed."
+    ///
+    /// The hover runs through the SAME ray cast the tap picker uses
+    /// (`CameraProjection.ray` → `FacePicker.hit`), so the line cannot disagree
+    /// with the face a tap would select. `onContinuousHover` reports a pencil
+    /// hovering above the glass on an M-series iPad; on hardware without hover it
+    /// simply never fires and the mode still works by tap.
+    @ViewBuilder private var surfaceCutOverlay: some View {
+        if visible.surfaceEditing {
+            GeometryReader { _ in
+                ZStack(alignment: .topLeading) {
+                    if let proj = projection {
+                        // The line being aimed: the held one if a face is chosen,
+                        // otherwise whatever the pencil is over.
+                        if let base = heldCut ?? hoveredCut {
+                            let cut = base.rotated(by: cutRotation)
+                                .moved(byMM: heldCut == nil ? 0 : cutOffsetMM)
+                            let seg = cut.previewSegment(halfLengthMM: cutPreviewHalfLengthMM)
+                            if let a = proj.project(settledWorld(SIMD3<Float>(seg.a))),
+                               let b = proj.project(settledWorld(SIMD3<Float>(seg.b))) {
+                                Path { p in p.move(to: a); p.addLine(to: b) }
+                                    .stroke(DS.Color.accentDeepEdge.color,
+                                            // Thin: it marks a plane, it is not an
+                                            // object with a width of its own.
+                                            style: StrokeStyle(lineWidth: 1.5,
+                                                               lineCap: .round,
+                                                               dash: heldCut == nil ? [6, 5] : []))
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    }
+                }
+            }
+            // ★ PURELY VISUAL, AND THAT IS LOAD-BEARING. This layer covers the
+            // whole viewport. Mounted with a `.contentShape(Rectangle())` plus a
+            // tap and a drag, it ATE THE VIEWPORT: orbit and pinch stopped working
+            // the moment the Surface stage was entered, and `simultaneousGesture`
+            // did not rescue it — the SwiftUI hit-test layer still wins over the
+            // MTKView beneath. Caught on device; no test would have.
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func releaseCut() {
+        heldCut = nil
+        hoveredCut = nil
+        cutRotation = 0
+        cutRotationBase = 0
+    }
+
+
+    /// ★ EFFECTIVELY INFINITE (maintainer: "Make the line infinitely thin and
+    /// infinitely long. It needs to cut the entire way through the object both
+    /// length and width").
+    ///
+    /// A cut IS a half-space: the plane has no ends, and it divides the whole part,
+    /// not the patch near where you tapped. Drawn at 0.6 x the bounding radius the
+    /// line stopped inside the face and read as a short stroke someone had drawn
+    /// on it — which invites exactly the question of what happens past the end.
+    /// The part's full diagonal always spans it from any angle, so the line leaves
+    /// the silhouette on both sides and the plane's endlessness is visible.
+    private var cutPreviewHalfLengthMM: Double {
+        guard let m = viewerMesh else { return 1000 }
+        let b = m.bounds
+        let d = SIMD3<Double>(SIMD3<Float>(b.max.x - b.min.x,
+                                           b.max.y - b.min.y,
+                                           b.max.z - b.min.z))
+        return simd_length(d)          // a full diagonal EITHER SIDE of the point
+    }
+
+    /// The cut plane under a view point, or nil on a miss.
+    private func cutUnder(_ p: CGPoint) -> SurfaceCut? {
+        guard let proj = projection, let mesh = viewerMesh,
+              let ray = proj.ray(throughViewPoint: p) else { return nil }
+        return SurfaceCut.at(rayOrigin: ray.origin, rayDir: ray.dir, mesh: mesh)
+    }
+
     // MARK: ★ §3d — THE DEPTH PLANE'S 3D HANDLE
 
     /// ★ THE GRAB HANDLE PR 328 DID NOT GET TO. Each latticed face's slab carries
@@ -3329,6 +5035,13 @@ public struct WorkspacePlaceholder: View {
                 ForEach(project.latticeDepthPlanes()) { plane in
                     if let at = proj.project(settledWorld(plane.handle.anchor)) {
                         latticeDepthKnob(active: draggingDepthPlane == plane.id)
+                            // ★ A GRABBABLE TARGET. The knob draws at 22 pt, which
+                            // is half Apple's 44 pt minimum — "I cannot drag the
+                            // face primitive out" is partly that you have to hit a
+                            // 22 pt dot buried in the model. The DRAWN size is
+                            // unchanged; the TOUCH area is the standard 44.
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
                             .gesture(latticeDepthPlaneDrag(plane))
                             .position(at)
                     }
@@ -4274,6 +5987,19 @@ public struct WorkspacePlaceholder: View {
                     }
                     .frame(maxHeight: 360)
                 }
+                // ★ THE STRUTS TOGGLE, INSIDE THE PANEL, BOTTOM-RIGHT (maintainer,
+                // 2026-08-14). It used to float over these rows from
+                // `latticePreviewOverlay`. It is a lattice-stage affordance, so it
+                // appears with the lattice controls and nowhere else.
+                if visible.latticeControls, project.lattice.enabled {
+                    HStack {
+                        Spacer(minLength: 0)
+                        strutPreviewChip
+                    }
+                    .padding(.horizontal, DS.Space.l)
+                    .padding(.bottom, DS.Space.m)
+                    .padding(.top, DS.Space.s)
+                }
             }
         }
         // §6/§3a: the ONE panel width every page uses, so the lattice stage and the
@@ -4638,6 +6364,92 @@ public struct WorkspacePlaceholder: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // ★ §3(a) — THE BADGE RIDES THE COLLAPSED ROW. His words: "We shouldn't
+        // have to expand the drawer to see all the data presented to know EXACTLY
+        // how to fix any issue."
+        if block == nil { latticeDiagnosisBadge(g) }
+    }
+
+    /// ★ §3 — THE BADGE AND ITS (i), on the collapsed row.
+    ///
+    /// The badge says what is wrong in plain words (§3d — "Out of regime" is
+    /// jargon and meant nothing to him) and the (i) opens the pop-up that names
+    /// EVERY failure with its number, its target and the fix with its value
+    /// (§3b/§3c).
+    @ViewBuilder private func latticeDiagnosisBadge(_ g: SelectionGroup) -> some View {
+        let d = latticeDiagnosis(g)
+        if let badge = d.badge {
+            let tint = latticeVerdictTint(d.severity)
+            HStack(spacing: DS.Space.xs) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 9, weight: .bold))
+                Text(badge)
+                    .font(.system(size: 10, weight: .bold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { diagnosisPopoverGroup = g.id } label: {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("How to fix this")
+                .accessibilityIdentifier("lattice-diagnosis-info-\(g.id.uuidString)")
+                .popover(isPresented: Binding(
+                    get: { diagnosisPopoverGroup == g.id },
+                    set: { if !$0 { diagnosisPopoverGroup = nil } })) {
+                    latticeDiagnosisPopover(d)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(tint.color)
+            .padding(.vertical, 4).padding(.horizontal, DS.Space.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                .fill(tint.opacity(0.16).color))
+            .accessibilityIdentifier("lattice-diagnosis-\(g.id.uuidString)")
+        }
+    }
+
+    /// ★ §3(b)/§3(e) — THE POP-UP: every failure, and it LEADS WITH THE FIX.
+    private func latticeDiagnosisPopover(_ d: LatticeFaceDiagnosis) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            ForEach(Array(d.problems.enumerated()), id: \.offset) { _, p in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(p.what)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    ForEach(p.fixes, id: \.self) { fix in
+                        HStack(alignment: .top, spacing: DS.Space.xs) {
+                            Image(systemName: "wrench.and.screwdriver.fill")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(DS.Color.accent.color)
+                            Text(fix)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                        }
+                    }
+                    Text(p.measured)
+                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                }
+            }
+        }
+        .padding(DS.Space.ml)
+        .frame(maxWidth: 320, alignment: .leading)
+        .accessibilityIdentifier("lattice-diagnosis-popover")
+    }
+
+    /// The diagnosis for one group, from its card plus core's own two floors.
+    private func latticeDiagnosis(_ g: SelectionGroup) -> LatticeFaceDiagnosis {
+        guard let card = latticeFaceCards[g.id] else {
+            return LatticeFaceDiagnosis(badge: nil, severity: .certified,
+                                        problems: [])
+        }
+        let limits = TopOptKit.latticeLimits(topology: project.lattice.lattice.id)
+        return LatticeFaceDiagnosis.of(
+            card: card,
+            cellsPerMemberFloor: limits.minCellsPerMember,
+            nozzleWidthMM: project.printParams.strutLineWidthMM)
     }
 
     /// ★ §4a/§4b/§4c — THE DRAWER, beneath the group squircle. The out-of-regime
@@ -4645,14 +6457,23 @@ public struct WorkspacePlaceholder: View {
     /// depth is the only control; everything else is a FACT, presented as a fact.
     @ViewBuilder private func latticeGroupDrawer(_ g: SelectionGroup) -> some View {
         latticeDrawerBody(latticeDrawer(g), depthDrag: latticeGroupDepthDrag(g),
-                          identifier: "lattice-drawer-\(g.id.uuidString)")
+                          identifier: "lattice-drawer-\(g.id.uuidString)",
+                          // ★ §5/§2(d) — typing writes the SAME number the drag
+                          // writes, through the same clamp.
+                          writeDepth: { mm in
+                              // ★ ONE ENTRY POINT, so a typed group depth cannot
+                              // be shadowed by an override a drag left behind.
+                              project.writeGroupDepthMM(g.id, mm: mm)
+                              refreshLatticeFaceCards()
+                          })
     }
 
     /// ★ THE ONE DRAWER LAYOUT. A group row and a selectable row render THIS —
     /// so "a region and a face behave identically" (bar R13) is a property of
     /// there being one view, not of two views being kept in step.
     @ViewBuilder private func latticeDrawerBody<G: Gesture>(
-        _ drawer: LatticeRegionDrawer, depthDrag: G, identifier: String) -> some View {
+        _ drawer: LatticeRegionDrawer, depthDrag: G, identifier: String,
+        writeDepth: ((Double) -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let head = drawer.headline {
                 let tint = latticeVerdictTint(head.verdict)
@@ -4677,16 +6498,45 @@ public struct WorkspacePlaceholder: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(DS.Color.textQuaternary.color)
                     Spacer(minLength: 0)
-                    // ★ §4b — ONLY the depth is a control. A derived row gets no
-                    // gesture and no control chrome: it is a fact, not a picker.
+                    // ★ §4b — a DERIVED row gets no gesture and no control
+                    // chrome: it is a fact, not a picker.
+                    //
+                    // ★ AND A MODIFIABLE ROW IS KEYED BY ITS OWN LABEL — PR 334's
+                    // GAP 2, CLOSED. This branch used to attach `depthDrag` to
+                    // EVERY modifiable row and hardcode the `-depth` identifier,
+                    // which was safe only while "Depth" was the sole control. Now
+                    // that "Per region" reveals a second one, the Density row
+                    // would have inherited the DEPTH's drag and a duplicate id —
+                    // a control that silently edits the wrong number. Each row
+                    // gets its own slug, and only the depth gets the depth drag.
                     if row.modifiable {
+                        let slug = row.label.lowercased()
+                        let padKey = "\(identifier)-\(slug)"
                         Text(row.value)
                             .font(.system(size: 11, weight: .bold)).monospacedDigit()
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .padding(.vertical, 3).padding(.horizontal, DS.Space.sm)
                             .background(Capsule().fill(DS.Color.fillSelected.color))
-                            .gesture(depthDrag)
-                            .accessibilityIdentifier("\(identifier)-depth")
+                            .contentShape(Rectangle())
+                            .modifier(LatticeDrawerRowGesture(
+                                isDepth: slug == "depth", drag: depthDrag))
+                            // ★ §5 — AND IT TYPES. His rule, stated twice: "Any
+                            // input MUST be selectable and a small numeric
+                            // keyboard pop-up to input the number — NOT just touch
+                            // inputs." A 0.05 mm-per-point scrub cannot land on a
+                            // round number by finger. The drag stays as the coarse
+                            // adjustment and writes through the same setter.
+                            .onTapGesture { if writeDepth != nil { depthPadKey = padKey } }
+                            .numberPad(Binding(get: { depthPadKey == padKey },
+                                               set: { if !$0 { depthPadKey = nil } }),
+                                       config: .init(title: row.label, unit: "mm",
+                                                     allowsDecimal: true),
+                                       seed: Double(row.value.replacingOccurrences(
+                                            of: " mm", with: "")) ?? 0) { v in
+                                guard let v, let write = writeDepth else { return }
+                                write(v)
+                            }
+                            .accessibilityIdentifier(padKey)
                     } else {
                         Text(row.value)
                             .font(.system(size: 11, weight: .bold)).monospacedDigit()
@@ -4709,6 +6559,17 @@ public struct WorkspacePlaceholder: View {
         .accessibilityIdentifier(identifier)
     }
 
+    /// ★ PR 334's GAP 2, as a type. Only the DEPTH row carries the depth drag;
+    /// every other modifiable row (today: Density, under "Per region") is a
+    /// tappable control with its own identifier and no inherited gesture.
+    private struct LatticeDrawerRowGesture<G: Gesture>: ViewModifier {
+        let isDepth: Bool
+        let drag: G
+        func body(content: Content) -> some View {
+            if isDepth { content.gesture(drag) } else { content }
+        }
+    }
+
     /// ★ §3c — ONE ROW PER SELECTABLE, each with its own lattice / no-lattice.
     /// "Otherwise, what the fuck are they doing?" — they decide now, and since PR
     /// 331 a REGION is one of them and behaves identically (bar R13).
@@ -4726,10 +6587,45 @@ public struct WorkspacePlaceholder: View {
                     // deliberate expand doing, and it is one mechanism, not two.
                     if latticeDisclosure.isExpanded(ref, regions: project.faceRegions) {
                         latticeSelectableDrawer(g, ref)
+                        // ★ §1(a) — THE FACES, AS CHILDREN OF THE REGION. They
+                        // are not rows of their own any more (see
+                        // `latticeSelectableRefs`); they appear here, under the
+                        // region that owns them, and only when it is open.
+                        if let rid = ref.regionID { latticeRegionFaceChildren(rid) }
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// ★ §1(b) — A FACE INSIDE A REGION INHERITS AND SHOWS NO CHIPS OF ITS OWN.
+    ///
+    /// Deliberately not a `latticePrimitiveRow`: no Lattice/Solid/Off, no depth
+    /// pill, no disclosure. It is a LIST OF WHAT IS IN THE REGION — the answer to
+    /// "which faces did my filter actually catch?" — and giving it controls would
+    /// rebuild the twenty-three-row page one level down.
+    @ViewBuilder private func latticeRegionFaceChildren(_ rid: RegionID) -> some View {
+        let faces = project.latticeRegionMemberFaces(rid)
+        if !faces.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(faces, id: \.self) { f in
+                    HStack(spacing: DS.Space.xs) {
+                        // A leader dot, so a child reads as belonging to the row
+                        // above it rather than as a row that lost its controls.
+                        Circle().fill(DS.Color.textQuaternary.color)
+                            .frame(width: 3, height: 3)
+                        Text("Face \(project.runFaceID(f))")
+                            .font(.system(size: 9, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(DS.Color.textQuaternary.color)
+                        Spacer(minLength: 0)
+                    }
+                    .accessibilityIdentifier("lattice-region-child-\(rid)-\(f)")
+                }
+            }
+            .padding(.leading, DS.Space.xl)
+            .padding(.top, 2)
+            .accessibilityIdentifier("lattice-region-children-\(rid)")
         }
     }
 
@@ -4779,7 +6675,21 @@ public struct WorkspacePlaceholder: View {
                 .foregroundStyle(DS.Color.textSecondary.color)
                 .padding(.vertical, 3).padding(.horizontal, DS.Space.xs)
                 .background(Capsule().fill(DS.Color.fillSelected.color))
+                .contentShape(Rectangle())
                 .gesture(latticePrimitiveDepthDrag(g, ref))
+                // ★ §5 — AND IT TYPES. Same setter as the drag and as the 3D
+                // handle, so §2(d)'s "they cannot diverge" survives the third
+                // route to the number.
+                .onTapGesture { depthPadKey = "row-depth-\(ref.key)" }
+                .numberPad(Binding(get: { depthPadKey == "row-depth-\(ref.key)" },
+                                   set: { if !$0 { depthPadKey = nil } }),
+                           config: .init(title: "Depth", unit: "mm",
+                                         allowsDecimal: true),
+                           seed: project.latticeSlabDepthMM(ref, in: g.id)) { v in
+                    guard let v else { return }
+                    project.writeLatticeDepthMM(ref, mm: v)
+                    refreshLatticeFaceCards()
+                }
                 .accessibilityIdentifier("lattice-primitive-depth-\(ref.key)")
         }
         // ★ R14 — PR 331's SMALL-FACE POLICY (§5c): rows below the sliver floor
@@ -4877,8 +6787,8 @@ public struct WorkspacePlaceholder: View {
             .onChanged { v in
                 let seed = latticeDepthDragSeed ?? seedDepth
                 if latticeDepthDragSeed == nil { latticeDepthDragSeed = seedDepth }
-                project.lattice.groupDepthMM[g.id] =
-                    LatticeSlabDepth.clamp(seed + Double(v.translation.width) * 0.05)
+                project.writeGroupDepthMM(
+                    g.id, mm: seed + Double(v.translation.width) * 0.05)
             }
             .onEnded { _ in
                 latticeDepthDragSeed = nil
@@ -4910,7 +6820,17 @@ public struct WorkspacePlaceholder: View {
     private func latticeDrawer(_ g: SelectionGroup) -> LatticeRegionDrawer {
         LatticeRegionDrawer.make(card: latticeFaceCards[g.id],
                                  depthMM: project.latticeSlabDepthMM(g.id),
-                                 held: force.isProtected(g.id))
+                                 held: force.isProtected(g.id),
+                                 perRegionDensity: perRegionDensity)
+    }
+
+    /// ★ §8(c) — SELECTING "PER REGION" IS WHAT MAKES PR 334's DRAWER ROW APPEAR.
+    /// That is the entire wiring: PR 334 built the conditional row and asserted it
+    /// as two exact cases, and recorded that "NOTHING CAN SET IT TRUE TODAY"
+    /// because `LatticeDensityMode` had no per-region case. It has one now, and
+    /// this is the single expression that connects them.
+    private var perRegionDensity: Bool {
+        project.lattice.densityMode == .perRegion
     }
 
     /// ★ THE DRAWER BENEATH ONE SELECTABLE (the interrupt's §2b) — the SAME
@@ -4924,9 +6844,14 @@ public struct WorkspacePlaceholder: View {
             card: latticeFaceCards[g.id],
             depthMM: project.latticeSlabDepthMM(ref, in: g.id),
             held: force.isProtected(g.id),
-            latticeReachesTheRun: ref.latticeReachesTheRun)
+            latticeReachesTheRun: ref.latticeReachesTheRun,
+            perRegionDensity: perRegionDensity)
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
-                          identifier: "lattice-drawer-\(ref.key)")
+                          identifier: "lattice-drawer-\(ref.key)",
+                          writeDepth: { mm in
+                              project.writeLatticeDepthMM(ref, mm: mm)
+                              refreshLatticeFaceCards()
+                          })
             .padding(.leading, DS.Space.m)
     }
 
@@ -5601,6 +7526,24 @@ public struct WorkspacePlaceholder: View {
             printParamsButton
             optimizeButton
         }
+        // ★ THE BAR MEASURES ITSELF. Its height is not a constant: Optimize grows
+        // a second line when it is DISABLED (it says what is missing), and the
+        // hint capsule wraps. The chip cluster above it used a hardcoded 50, so a
+        // taller bar ran straight through the Gravity chip — his screenshot.
+        //
+        // ★ THIS MEASUREMENT MUST SIT INSIDE THE `maxHeight: .infinity` FRAME, NOT
+        // OUTSIDE IT. Mounted after that frame, the GeometryReader measures the
+        // EXPANDED frame — the whole viewport, ~1376 pt — instead of the bar's own
+        // ~90. Every view that clears the bar then pads itself off the bottom of
+        // the screen and the ZStack grows to twice the display, taking the top
+        // chrome, the orientation gizmo, the stage buttons and the bar itself out
+        // of view (SwiftUI logs it as "Bound preference BottomBarHeightKey tried
+        // to update multiple times per frame"). Pinned by
+        // `BottomBarMeasurementTests.testTheMeasurementIsPublishedInsideTheExpandedFrame`.
+        .background(GeometryReader { g in
+            Color.clear.preference(key: BottomBarHeightKey.self,
+                                   value: g.size.height)
+        })
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.horizontal, DS.Space.xl4)
         .padding(.bottom, DS.Space.xl4)

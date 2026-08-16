@@ -1,0 +1,40 @@
+=== 1. THE PART ===
+part            evidence/2026-08-15-lattice-and-face-ui/s12/job/M2_verticalStand.step
+resolution      128   spacing 1.70528 mm
+faces           78
+
+=== 2. SURFACE KIND, WHOLE PART ===
+plane            36  (46.2%)   <- these get a primitive TODAY
+cylinder         12  (15.4%)   <- NO PRIMITIVE
+other            30  (38.5%)   <- NO PRIMITIVE
+
+★ 42 of 78 faces (53.8%) DRAW NOTHING when set to Lattice.
+
+=== 3. HIS DECLARED FACES ===
+id     kind       primitive today
+20     plane      yes
+1      other      *** NONE ***
+4      cylinder   *** NONE ***
+19     cylinder   *** NONE ***
+21     cylinder   *** NONE ***
+22     other      *** NONE ***
+25     other      *** NONE ***
+26     other      *** NONE ***
+27     other      *** NONE ***
+32     cylinder   *** NONE ***
+41     other      *** NONE ***
+42     other      *** NONE ***
+43     other      *** NONE ***
+44     other      *** NONE ***
+45     other      *** NONE ***
+46     other      *** NONE ***
+47     other      *** NONE ***
+49     other      *** NONE ***
+75     other      *** NONE ***
+76     other      *** NONE ***
+24     plane      yes
+31     plane      yes
+
+declared        22
+get a primitive 3
+GET NOTHING     19  (86.4% of his own selection)

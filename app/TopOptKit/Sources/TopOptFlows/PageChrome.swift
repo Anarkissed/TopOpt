@@ -229,6 +229,28 @@ public enum PageChrome {
     /// two never overlap: the gizmo's width plus its insets.
     public static var gizmoClearance: CGFloat { gizmoSize + gizmoInset * 2 }
 
+    /// ★ HOW FAR THE GIZMO'S *VISIBLE* TOP SITS BELOW ITS FRAME'S TOP.
+    ///
+    /// The widget's frame is `gizmoSize` square, but the frosted housing a user
+    /// actually sees is `GizmoLayout.housingFraction` (0.90) of that and CENTRED —
+    /// so there is a transparent margin of `(1 − 0.90) / 2` all round, about 10.5 pt
+    /// at the standard 210.
+    ///
+    /// ★ AND THAT MARGIN IS WHY THE TOP BUTTONS LOOKED HIGH. They padded down by
+    /// `gizmoInset`, exactly as the gizmo's FRAME does — so their tops lined up with
+    /// a frame edge that is invisible, and sat ~10 pt above the glass edge beside
+    /// them. Correct arithmetic against the wrong edge. Maintainer, 2026-08-16: "the
+    /// 'Save' button is too high. The top of the button needs to be in-line with the
+    /// top of the gizmo. I also noticed the 'Lattice' button is too high as well."
+    public static var gizmoVisualInset: CGFloat {
+        gizmoSize * (1 - GizmoLayout.housingFraction) / 2
+    }
+
+    /// The top padding for chrome that must line up with the gizmo's visible top
+    /// edge. Every top-right control uses this rather than `gizmoInset`, so they
+    /// cannot drift apart one page at a time.
+    public static var gizmoAlignedTop: CGFloat { gizmoInset + gizmoVisualInset }
+
     // MARK: - derived
 
     /// Clearance a bottom-anchored panel needs above a bottom-right action

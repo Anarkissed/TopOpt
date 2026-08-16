@@ -38,14 +38,22 @@ public struct EditSnapshot: Equatable, Sendable {
     /// region — is one undo step through the SAME history as every other edit (BAR U4).
     /// Defaulted so existing `EditSnapshot(...)` call sites are unchanged.
     public var lattice: LatticeSettings
+    /// ★ THE REGION LAYER (§6). Every cut, union and pattern on the Surface stage
+    /// lives here — and until it joined the slice, NONE of them were undoable: the
+    /// header's undo was reading a snapshot that did not contain them, so it saw no
+    /// change to reverse. Defaulted so existing `EditSnapshot(...)` call sites are
+    /// unchanged.
+    public var faceRegions: FaceRegionModel
 
     public init(selection: SelectionModel, force: ForceModel, designBox: DesignBoxModel,
-                paint: PaintModel? = nil, lattice: LatticeSettings = LatticeSettings()) {
+                paint: PaintModel? = nil, lattice: LatticeSettings = LatticeSettings(),
+                faceRegions: FaceRegionModel = FaceRegionModel()) {
         self.selection = selection
         self.force = force
         self.designBox = designBox
         self.paint = paint
         self.lattice = lattice
+        self.faceRegions = faceRegions
     }
 }
 

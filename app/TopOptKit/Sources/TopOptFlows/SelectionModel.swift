@@ -97,6 +97,19 @@ public struct SelectionGroup: Identifiable, Equatable, Sendable, Codable {
         regionIDs.removeAll { drop.contains($0) }
     }
 
+    /// Replace the whole list — a restore, never an edit. See
+    /// `SelectionModel.setRegions(_:for:)`.
+    mutating func replaceRegions(_ ids: [RegionID]) { regionIDs = ids }
+
+    /// ★ WHAT "EMPTY" MEANS FOR A GROUP — AND IT IS NOT `faces.isEmpty`.
+    ///
+    /// A group holds TWO memberships, `faces` and `regionIDs`, and it contains the
+    /// union of them. The empty-group cleanups tested only the first, so a group
+    /// holding an isolated PIECE (which is a region and owns no bare faces) counted
+    /// as empty and was deleted the moment anything triggered a sweep — the
+    /// selection appeared, then vanished.
+    var isEmptySelection: Bool { faces.isEmpty && regionIDs.isEmpty }
+
     /// The group's colour, from the design palette (`this.COLORS`), by `colorIndex`.
     public var color: RGBA {
         let palette = DS.Color.groupPalette
@@ -219,7 +232,7 @@ public struct SelectionModel: Equatable, Sendable, Codable {
 
         // Drop groups the steal/deselect emptied — but keep the active one so the
         // user can keep tapping into it (design's filter keeps `id === active.id`).
-        groups.removeAll { $0.faces.isEmpty && $0.id != activeID }
+        groups.removeAll { $0.isEmptySelection && $0.id != activeID }
     }
 
     /// Group-TARGETED face add for programmatic flows (the lattice page's paint
@@ -232,7 +245,7 @@ public struct SelectionModel: Equatable, Sendable, Codable {
             groups[i].removeFaces(keys)
         }
         groups[idx].addFaces(keys)
-        groups.removeAll { $0.faces.isEmpty && $0.id != id && $0.id != activeGroupID }
+        groups.removeAll { $0.isEmptySelection && $0.id != id && $0.id != activeGroupID }
     }
 
     /// Group-targeted face removal (the paint pane's tap-again-to-remove). The
@@ -270,7 +283,7 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     /// invariant kept by `pickFaces`.
     public mutating func clearActive() {
         activeGroupID = nil
-        groups.removeAll { $0.faces.isEmpty }
+        groups.removeAll { $0.isEmptySelection }
     }
 
     /// Put regions into a group (the union commit path). A region belongs to
@@ -284,16 +297,29 @@ public struct SelectionModel: Equatable, Sendable, Codable {
         }
         groups[idx].addRegions(ids)
         groups.removeAll {
-            $0.faces.isEmpty && $0.regionIDs.isEmpty && $0.id != group
+            $0.isEmptySelection && $0.id != group
                 && $0.id != activeGroupID
         }
+    }
+
+    /// ★ RESTORE a group's region list wholesale — the Surface stage's revert.
+    ///
+    /// Deliberately NOT `addRegions`: that one STEALS, because a live edit must
+    /// keep the one-group-per-region invariant as it goes. A restore is replaying
+    /// a state that already satisfied the invariant, and stealing during the replay
+    /// would let the group restored last take pieces from the ones restored before
+    /// it — the groups would come back in an order-dependent shape rather than the
+    /// one that was captured.
+    public mutating func setRegions(_ ids: [RegionID], for group: UUID) {
+        guard let idx = groups.firstIndex(where: { $0.id == group }) else { return }
+        groups[idx].replaceRegions(ids)
     }
 
     /// Drop regions from every group (a dissolve, or a re-import that lost them).
     public mutating func removeRegions(_ ids: [RegionID]) {
         for i in groups.indices { groups[i].removeRegions(ids) }
         groups.removeAll {
-            $0.faces.isEmpty && $0.regionIDs.isEmpty && $0.id != activeGroupID
+            $0.isEmptySelection && $0.id != activeGroupID
         }
     }
 

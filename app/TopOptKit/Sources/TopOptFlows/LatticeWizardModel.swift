@@ -32,20 +32,35 @@ import simd
 /// flies into the sample and tiles it → density and boundary finish, with the
 /// stress-field wipe on Auto. PR 328 had the first two; `finish` is the third,
 /// which existed as a set of controls with no stage of its own.
+/// ★ TWO VIEWS, NOT THREE STAGES (maintainer, 2026-08-14).
+///
+/// ★ HIS INSTRUCTION: *"Combine the two modals together… Also make it so you can
+/// go back and forth. These are now 'views'. One cell or a lattice. Do not
+/// include the 'Finish' section."*
+///
+/// The page was a three-stage WIZARD you advanced through with Next, and its
+/// stage list was mirrored by a floating card that duplicated every control. It
+/// is now TWO VIEWS you switch between freely, and the switch lives at the bottom
+/// of the one modal:
+///
+///     ONE CELL      what a single cell IS      — Type, Thickness
+///     IN THE PART   what it does to the part   — Cell size (+ its number, if it
+///                                                has one), Density, Finish
+///
+/// ★ `finish` IS NOT A VIEW. Density and Finish are things you do to the lattice
+/// IN THE PART, so they live in that view; there is no third tab for them.
 public enum LatticeWizardStage: Int, Equatable, Sendable, CaseIterable {
     /// One cell, large, centred, rotatable.
     case cell = 0
-    /// The cell has tiled the sample part.
+    /// The cell has tiled the sample part — and everything that happens to it
+    /// there: its size, its density, its boundary finish.
     case lattice = 1
-    /// Density and boundary finish, on the tiled part.
-    case finish = 2
 
     /// ★ Three words at most (R7).
     public var title: String {
         switch self {
         case .cell: return "One cell"
         case .lattice: return "In the part"
-        case .finish: return "Finish"
         }
     }
 
@@ -82,14 +97,28 @@ public enum LatticeWizardSetting: String, Equatable, Sendable, CaseIterable {
         }
     }
 
-    /// The stage whose VISUAL OUTPUT shows this setting doing something.
+    /// The view whose VISUAL OUTPUT shows this setting doing something.
+    ///
+    /// ★ `size` MOVED OUT OF "ONE CELL" (maintainer, 2026-08-14): *"do not include
+    /// 'Size' twice. Remove size from the 'one cell' view. Put it below the 'cell
+    /// size' area in the 'part' view. Auto needs no cell size, fixed needs one,
+    /// and swept needs a range. All of these are in the part view."*
+    ///
+    /// It was asked TWICE — once as "Size" under ONE CELL and again as the swept
+    /// window under Cell size — which is the duplication he is removing. There is
+    /// now one place a cell dimension is entered, and `cellSizeMode` decides
+    /// whether it is nothing, one number, or two.
     public var stage: LatticeWizardStage {
         switch self {
-        case .type, .size, .thickness: return .cell
-        case .cellSize: return .lattice
-        case .density, .finish: return .finish
+        case .type, .thickness: return .cell
+        case .size, .cellSize, .density, .finish: return .lattice
         }
     }
+
+    /// ★ `size` is not a row of its own any more — it is rendered by `cellSize`
+    /// as that mode's own field(s), directly beneath the mode segment. Listing it
+    /// separately would put the number back in two places.
+    public var isRenderedByCellSize: Bool { self == .size }
 }
 
 /// One cinematic. The view plays it; this says what it IS.
@@ -139,6 +168,17 @@ public struct LatticeWizardModel: Equatable, Sendable {
     // ── the selections (Stage B) ────────────────────────────────────────────
     public var densityMode: LatticeDensityMode
     public var cellSizeMode: LatticeCellSizeMode
+    /// ★ §9(a) — THE SWEEP WINDOW'S TWO ENDS.
+    ///
+    /// ★ THIS IS THE DEFECT, AND IT IS AN ABSENCE. `LatticeSettings` has carried
+    /// `cellMinMM`/`cellMaxMM` since the cell-size-sweep task, and `runSpec`
+    /// emits them as `cell_min_mm` / `cell_max_mm` — but this model never read
+    /// them, so the wizard's "Swept" segment had nothing to show and nothing to
+    /// write. His 2:42 AM screenshot ("Swept" selected, no range fields at all)
+    /// is exactly that: the mode could not express a range even in principle,
+    /// and `applied(to:)` handed the project back whatever it already had.
+    public var cellMinMM: Double
+    public var cellMaxMM: Double
     public var boundary: LatticeBoundaryTreatment
 
     /// The top-centre disclaimer (§3b) — one line, an X, dismissible, and it
@@ -150,12 +190,19 @@ public struct LatticeWizardModel: Equatable, Sendable {
                 relativeDensity: Double = 0.35,
                 densityMode: LatticeDensityMode = .auto,
                 cellSizeMode: LatticeCellSizeMode = .auto,
-                boundary: LatticeBoundaryTreatment = .fullSkin) {
+                cellMinMM: Double = LatticeSettings.defaultCellMinMM,
+                cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
+                // ★ DEFAULT NONE (maintainer, 2026-08-14): "it should
+                // default to 'none'". A bare lattice is what the page
+                // should open on; a dressing is something you add.
+                boundary: LatticeBoundaryTreatment = .none) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.relativeDensity = relativeDensity
         self.densityMode = densityMode
         self.cellSizeMode = cellSizeMode
+        self.cellMinMM = cellMinMM
+        self.cellMaxMM = cellMaxMM
         self.boundary = boundary
     }
 
@@ -165,6 +212,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.init(topologyID: s.topologyID, cellMM: s.cellMM,
                   relativeDensity: max(0.05, s.maxRelativeDensity),
                   densityMode: s.densityMode, cellSizeMode: s.cellSizeMode,
+                  cellMinMM: s.cellMinMM, cellMaxMM: s.cellMaxMM,
                   boundary: s.boundary)
     }
 
@@ -176,9 +224,37 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.maxRelativeDensity = relativeDensity
         out.densityMode = densityMode
         out.cellSizeMode = cellSizeMode
+        // ★ §9(a) — and the window goes back with them, so a range typed in the
+        // wizard is the range the job carries.
+        out.cellMinMM = cellMinMM
+        out.cellMaxMM = cellMaxMM
         out.boundary = boundary
         out.enabled = true
         return out
+    }
+
+    /// ★ §9(b)/§9(d) — A SWEEP THAT CANNOT SWEEP, NAMED BEFORE THE RUN.
+    ///
+    /// `cell_plan_max_level` (core/src/simp/cell_plan.cpp:43-51) builds a DYADIC
+    /// ladder: the levels are `min · 2^L`. A window narrower than 2× therefore
+    /// holds exactly ONE level, every block lands on it, and the receipt comes
+    /// back `distinct_cells: 1` with `strut_radius_min_mm == strut_radius_max_mm`
+    /// — which is precisely what his 2.0–4.0 mm run reported (0.225 / 0.225) and
+    /// what read as the mode being broken.
+    ///
+    /// ★ 2.0–4.0 IS EXACTLY 2×, so it holds TWO levels and is not warned about.
+    /// The collapse he saw therefore came from the SECOND half of the rule, not
+    /// the window: a block takes level L only when `need_max == L`, and `need` is
+    /// derived from the block's thinnest DENSITY. A flat density field gives every
+    /// block the same `need`, so every block takes the same level.
+    public var sweptWindowWarning: String? {
+        guard cellSizeMode == .swept, cellMinMM > 0, cellMaxMM >= cellMinMM
+        else { return nil }
+        if cellMaxMM < cellMinMM * 2 {
+            return String(format: "This window holds one cell size. Widen it to "
+                          + "%.1f mm or more to sweep.", cellMinMM * 2)
+        }
+        return nil
     }
 
     public var lattice: LatticeType { LatticeType.named(topologyID) }
@@ -194,12 +270,12 @@ public struct LatticeWizardModel: Equatable, Sendable {
 
     public mutating func finishedPlaying() { playing = nil }
 
-    /// ★ THE NEXT BUTTON (§5a). One decision at a time, in the middle of the
-    /// screen; Next advances to the stage after this one and plays its entry
-    /// cinematic. Nil at the end — the view shows Save & Exit there instead.
+    /// ★ GO BACK AND FORTH BETWEEN THE TWO VIEWS (maintainer, 2026-08-14). This
+    /// was `advance()` — a one-way Next through three stages. The views are now
+    /// switchable in either direction from the segment at the bottom of the modal,
+    /// so this exists only for the keyboard/next affordance and wraps.
     public mutating func advance() {
-        guard let n = stage.next else { return }
-        move(to: n)
+        move(to: stage == .cell ? .lattice : .cell)
     }
 
     public var hasNext: Bool { stage.next != nil }
@@ -221,7 +297,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         switch s {
         case .cell: playing = nil; playToken += 1
         case .lattice: play(.tile)
-        case .finish: play(densityMode == .auto ? .stressWipeAndDive : .boundarySwap)
         }
     }
 
@@ -253,6 +328,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// the stage whose visual output is the density.
     public mutating func setDensityMode(_ m: LatticeDensityMode) {
         densityMode = m
+        // Density is an IN-THE-PART setting now, so showing it means showing the
+        // tiled sample — never the lone cell.
         stage = LatticeWizardSetting.density.stage
         play(m == .auto ? .stressWipeAndDive : .tile)
     }
@@ -295,9 +372,15 @@ public struct LatticeWizardModel: Equatable, Sendable {
         let cells = stage == .cell
             ? 1
             : max(1, Int((Double(cellsAcross) * max(0, min(1, progress))).rounded()))
+        // ★ §10 — THE FINISH REACHES THE GEOMETRY. This call omitted `boundary`
+        // entirely, so None / Rim / Skin all produced the same mesh and the chips
+        // were decoration. The lone cell shows no boundary — a single cell has no
+        // block to dress — so the finish appears in the IN THE PART view, which is
+        // also the view its control now lives in.
         return LatticeSamplePatch.mesh(lattice: lattice, cellMM: cellMM,
                                        cells: cells,
-                                       relativeDensity: relativeDensity)
+                                       relativeDensity: relativeDensity,
+                                       boundary: stage == .cell ? .none : boundary)
     }
 
     /// The triangle count the current stage will draw — the latency budget, known

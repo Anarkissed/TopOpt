@@ -160,6 +160,12 @@ public struct ClearanceVolume: Equatable, Sendable {
         case slab(center: SIMD3<Float>, normal: SIMD3<Float>,
                   uAxis: SIMD3<Float>, vAxis: SIMD3<Float>,
                   halfU: Float, halfV: Float, depthMM: Float)
+        /// ★ THE DISTANCE-FIELD OFFSET OF A SELECTED SURFACE (task
+        /// 2026-08-15-lattice-and-face-ui §2b): the face's own tessellation and
+        /// that surface pushed inward by the depth. ONE rule for every face
+        /// kind — a plane gives a slab, a cylinder gives an annular tube, a
+        /// curved face gives a shell that follows it. See `FaceOffsetShell`.
+        case shell(FaceOffsetShell)
         /// A no-op region: a Bolt on a non-cylinder face, or a region that resolved
         /// to nothing. Rendered hollow/dashed with "no effect" wording — the picture
         /// must not promise what the run won't do (degenerate honesty).
@@ -212,6 +218,14 @@ public struct ClearanceVolume: Equatable, Sendable {
             center: o.center, normal: simd_normalize(SIMD3<Float>(geometry.planeNormal)),
             uAxis: o.uAxis, vAxis: o.vAxis, halfU: o.halfU, halfV: o.halfV,
             depthMM: Float(Swift.max(0, depthMM))))
+    }
+
+    /// ★ THE LATTICE PRIMITIVE FOR **ANY** SELECTED SURFACE (§2a/§2b). Never
+    /// degenerate for a face that has triangles, which is every face the user can
+    /// tap — this is what makes "a primitive is ALWAYS created" a property of the
+    /// constructor rather than a hope about its callers.
+    public static func shell(faceID: Int, shell: FaceOffsetShell) -> ClearanceVolume {
+        ClearanceVolume(faceID: faceID, kind: .face, shape: .shell(shell))
     }
 }
 
@@ -442,9 +456,46 @@ public enum ClearanceHandles {
             // measured from the plane (`center` lies on it, so it is the plane origin).
             return [ClearanceHandle(role: .slabDepth, anchor: center + n * depthMM,
                                     planeOrigin: center, planeNormal: n)]
+        case let .shell(s):
+            // ★ §2(d) — THE HANDLE AND THE NUMBER ARE ONE VALUE, on any surface.
+            // The grab point is the CENTROID of the offset surface and the axis is
+            // the mean travel direction, so dragging it measures the same mm the
+            // drawer's field types — see `LatticeDepthTieTests`.
+            guard !s.base.isEmpty else { return [] }
+            var origin = SIMD3<Float>.zero
+            var travel = SIMD3<Float>.zero
+            for k in 0..<s.base.count {
+                origin += s.base[k]
+                travel += s.offset[k] - s.base[k]
+            }
+            let n = Float(s.base.count)
+            origin /= n
+            let len = simd_length(travel)
+            // A zero-depth shell has no travel yet; fall back to the surface's own
+            // mean inward normal so the handle still exists AND still points in.
+            let dir = len > 1e-6 ? travel / len : shellMeanInward(s)
+            return [ClearanceHandle(role: .slabDepth,
+                                    anchor: origin + dir * Float(s.reachedDepthMM),
+                                    planeOrigin: origin, planeNormal: dir)]
         case .degenerate:
             return []
         }
+    }
+
+    /// The shell's mean inward direction, recovered from its own triangles — used
+    /// only when the depth is 0 and there is no travel vector to read.
+    private static func shellMeanInward(_ s: FaceOffsetShell) -> SIMD3<Float> {
+        var acc = SIMD3<Float>.zero
+        var i = 0
+        while i + 2 < s.indices.count {
+            let a = s.base[Int(s.indices[i])]
+            let b = s.base[Int(s.indices[i + 1])]
+            let c = s.base[Int(s.indices[i + 2])]
+            acc += simd_cross(b - a, c - a)
+            i += 3
+        }
+        let l = simd_length(acc)
+        return l > 1e-9 ? -(acc / l) : SIMD3<Float>(0, 0, 1)
     }
 }
 

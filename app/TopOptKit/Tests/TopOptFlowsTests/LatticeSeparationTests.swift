@@ -347,22 +347,37 @@ final class LatticeSeparationTests: XCTestCase {
         let planes = p.latticeDepthPlanes()
         XCTAssertEqual(planes.count, 2, "§3d: one plane per latticed face")
 
+        // ★ The primitive became the distance-field OFFSET of the face's own
+        // surface (task 2026-08-15-lattice-and-face-ui §2b) so that a CURVED face
+        // gets one too — the old slab needed a plane and silently skipped 86.4%
+        // of the faces the maintainer declares. Every property below is the one
+        // this test always asserted; it is now checked at EVERY vertex instead of
+        // on a single fitted normal, which is strictly stronger.
         for plane in planes {
-            guard case let .slab(center, normal, _, _, _, _, depthMM) = plane.volume.shape
-            else { return XCTFail("§3d: a face plane is a SLAB, not \(plane.volume.shape)") }
-            XCTAssertEqual(Double(depthMM), 7.0, accuracy: 1e-4,
+            guard case let .shell(s) = plane.volume.shape
+            else { return XCTFail("§3d: a face primitive is an offset shell, "
+                                  + "not \(plane.volume.shape)") }
+            XCTAssertFalse(s.isEmpty, "§3d: the primitive has geometry")
+            XCTAssertEqual(s.reachedDepthMM, 7.0, accuracy: 1e-4,
                            "§3d: at the dragged depth, not the 4 mm project default")
-            // Face 16's outward normal is +z and 17's is −z; both slabs must run
-            // the OTHER way, into the material between them.
+            // Face 16's outward normal is +z and 17's is −z; both must run the
+            // OTHER way, into the material between them.
             let expectedInward: SIMD3<Float> =
                 plane.faceKey == 16 ? SIMD3(0, 0, -1) : SIMD3(0, 0, 1)
-            XCTAssertEqual(simd_dot(normal, expectedInward), 1, accuracy: 1e-5,
-                           "§3d: the slab reaches INTO the part, not out of it")
-            // The grab knob sits at the slab's inner face, so dragging it along
-            // that normal IS the depth (the keep-clear `.slabDepth` pair, verbatim).
+            for k in 0..<s.base.count {
+                let travel = s.offset[k] - s.base[k]
+                XCTAssertEqual(simd_dot(simd_normalize(travel), expectedInward), 1,
+                               accuracy: 1e-5,
+                               "§3d: it reaches INTO the part, not out of it")
+                XCTAssertEqual(Double(simd_length(travel)), 7.0, accuracy: 1e-4,
+                               "§3d: by the depth, at every point")
+            }
+            // The grab knob sits on the offset surface, so dragging it along that
+            // normal IS the depth (the keep-clear `.slabDepth` pair, verbatim).
             XCTAssertEqual(plane.handle.role, .slabDepth)
-            XCTAssertEqual(simd_distance(plane.handle.anchor, center), depthMM,
-                           accuracy: 1e-3)
+            XCTAssertEqual(simd_distance(plane.handle.anchor,
+                                         plane.handle.planeOrigin),
+                           Float(s.reachedDepthMM), accuracy: 1e-3)
         }
         XCTAssertEqual(Set(planes.map(\.faceKey)), [16, 17])
         XCTAssertEqual(Set(planes.map(\.groupID)), [gid])
@@ -431,18 +446,53 @@ final class LatticeSeparationTests: XCTestCase {
         XCTAssertEqual(m.playing, .boundarySwap,
                        "R5: …to that stage's visual OUTPUT, so it is seen live")
 
-        // …and back: touching a stage-A setting returns the wizard to stage A.
+        // …and back: touching a ONE-CELL setting returns the wizard to that view.
+        // ★ UPDATED (maintainer, 2026-08-14): the setting used here was `.size`,
+        // which he moved OUT of the "one cell" view — "Remove size from the 'one
+        // cell' view. Put it below the 'cell size' area in the 'part' view." So
+        // the test now uses a setting that is still a one-cell decision, and the
+        // COUPLING it asserts is unchanged.
         m.finishedPlaying()
-        m.touched(.size)
+        m.touched(.thickness)
         XCTAssertEqual(m.stage, .cell)
 
-        // The wizard → the modal: Next walks the stages in §5d's order, and the
-        // modal renders each stage's settings under its own sub-title.
+        // ★ AND THE TWO VIEWS GO BOTH WAYS. This was a one-way Next through three
+        // stages; they are now two switchable views ("make it so you can go back
+        // and forth"), so advancing from the second returns to the first.
         m.advance()
         XCTAssertEqual(m.stage, .lattice)
         m.advance()
-        XCTAssertEqual(m.stage, .finish)
-        XCTAssertFalse(m.hasNext, "the last stage offers Save & Exit, not Next")
+        XCTAssertEqual(m.stage, .cell, "the views switch in BOTH directions")
+    }
+
+    /// ★ THE NEW STRUCTURE, ASSERTED (maintainer, 2026-08-14). Two views, and the
+    /// cell dimension asked for exactly once.
+    func testThereAreTwoViewsAndFinishIsNotOneOfThem() {
+        XCTAssertEqual(LatticeWizardStage.allCases.count, 2,
+                       "\"These are now 'views'. One cell or a lattice.\"")
+        XCTAssertEqual(LatticeWizardStage.allCases.map(\.title),
+                       ["One cell", "In the part"])
+        // Finish is a SETTING of the in-the-part view, never a view of its own.
+        XCTAssertEqual(LatticeWizardSetting.finish.stage, .lattice,
+                       "\"Do not include the 'Finish' section\" — as a view")
+        XCTAssertEqual(LatticeWizardSetting.density.stage, .lattice)
+    }
+
+    /// ★ THE CELL DIMENSION IS ASKED FOR ONCE. It used to be "Size" under ONE CELL
+    /// *and* the swept window under Cell size — "Having the same thing asked twice
+    /// is wasteful."
+    func testTheCellDimensionIsAskedForOnceInThePartView() {
+        XCTAssertEqual(LatticeWizardSetting.size.stage, .lattice,
+                       "size moved OUT of the one-cell view")
+        XCTAssertTrue(LatticeWizardSetting.size.isRenderedByCellSize,
+                      "and it is drawn BY the cell-size row, not as a row of its own")
+        XCTAssertEqual(LatticeWizardStage.cell.settings, [.type, .thickness],
+                       "so 'One cell' holds Type and Thickness and nothing else")
+        XCTAssertEqual(
+            LatticeWizardStage.lattice.settings.filter { !$0.isRenderedByCellSize },
+            [.cellSize, .density, .finish],
+            "and 'In the part' renders Cell size (which owns the number), "
+            + "Density and Finish")
     }
 
     /// ★ §5c — the side modal's sub-titles ARE the wizard's stages. One table read
@@ -468,8 +518,8 @@ final class LatticeSeparationTests: XCTestCase {
     /// so a user who knows what they want is never walked through it.
     func testTheSideModalSkipsTheWizard() {
         var m = LatticeWizardModel()
-        m.jump(to: .finish)
-        XCTAssertEqual(m.stage, .finish)
+        m.jump(to: .lattice)
+        XCTAssertEqual(m.stage, .lattice)
         XCTAssertNil(m.playing, "§5b: a jump is not a lesson")
     }
 

@@ -19,6 +19,48 @@ struct SettingsChipWidthKey: PreferenceKey {
     }
 }
 
+/// ★ THE BOTTOM BAR'S MEASURED HEIGHT. The settings cluster sits above the bar
+/// and has to clear it — and the bar is NOT a fixed height: a DISABLED Optimize
+/// carries a second line saying what is missing. A hardcoded clearance let the
+/// two overlap, which is what the maintainer's screenshot shows.
+struct BottomBarHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// ★ THE GUARD THIS MEASUREMENT SHIPPED WITHOUT — and the defect it now refuses.
+///
+/// The measuring `GeometryReader` was mounted AFTER the bar's
+/// `.frame(maxHeight: .infinity)`, so it measured the EXPANDED frame — the whole
+/// viewport — rather than the bar. On a 13-inch iPad that is 1376 pt instead of
+/// ~90. Every view that clears the bar then padded itself off the bottom of the
+/// screen and the ZStack grew to twice the display, taking the top chrome, the
+/// orientation gizmo, the stage buttons and the bar itself out of view. SwiftUI
+/// logged only "Bound preference BottomBarHeightKey tried to update multiple
+/// times per frame", which names the symptom and not the cause.
+///
+/// ★ THE MODIFIER ORDER IS THE REAL FIX (the measurement now sits inside the
+/// frame). This is the second line of defence: a bar is a BAR, and no bar is
+/// nearly as tall as the viewport it sits in. A measurement that large is the
+/// expanded frame, and using it is worse than keeping the previous value.
+enum BottomBarMeasurement {
+
+    /// The largest share of the viewport a bottom bar may plausibly occupy. The
+    /// real bar is ~90 pt of 1376 (6.5%) with a one-line Optimize and ~112 pt
+    /// (8.1%) with the disabled two-line one; the broken reading was 100%.
+    static let maxViewportShare: CGFloat = 0.35
+
+    /// The height to adopt, or nil to keep what is already held.
+    static func accept(measured: CGFloat, viewport: CGFloat) -> CGFloat? {
+        guard measured.isFinite, measured > 0 else { return nil }
+        guard viewport > 0 else { return measured }
+        guard measured <= viewport * maxViewportShare else { return nil }
+        return measured
+    }
+}
+
 /// A stable identity for each bottom-right settings chip. The `allCases` order is the DEFAULT
 /// (and tie-break) order — used before any width is measured and whenever two chips measure
 /// equal, so the layout is deterministic frame-to-frame.

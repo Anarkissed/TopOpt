@@ -97,9 +97,38 @@ public struct LatticeRegionSpec: Equatable, Sendable {
 /// each accepted variant from that variant's OWN final stress field (the receipt
 /// records the provenance). Bar B6 stands: auto still never silently means
 /// uniform — a graded job carries NO uniform cell/radius at all.
+/// ★ THREE MODES, NOT FOUR (task 2026-08-15-lattice-and-face-ui §8).
+///
+///     AUTO        density derived from the FEA        ← the default, unchanged
+///     UNIFORM     one density everywhere              ← unchanged
+///     PER REGION  each region states its own          ← NEW
+///
+/// ★ "SWEPT" IS NOT ONE OF THEM and never was: the only `swept` in this file is
+/// `LatticeCellSizeMode.swept`, which belongs to CELL SIZE and only to cell size.
+/// §8(a) asked for a swept DENSITY option to be removed if one existed anywhere in
+/// code or copy — none does, and this comment is the record of that check.
+///
+/// ★ `perRegion` IS "NOT AUTO" EVERYWHERE. Every existing site tests `== .auto`,
+/// so a per-region job takes the ungraded path exactly as `uniform` does; the
+/// per-region numbers are captured by the UI and, until PR 331's per-sector
+/// density override lands in core, NOT consumed by the run. That gap is asserted
+/// in `FrozenRegionAsMaterialTests` and surfaced on the row — never silent.
 public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
     case uniform
     case auto
+    /// ★ §8 — each region states its own density. Reveals PR 334's conditional
+    /// drawer row (`LatticeRegionDrawer.make(perRegionDensity:)`), which is the
+    /// whole of the wiring that mode was built for and could not reach.
+    case perRegion
+
+    /// ★ Two words at most (R14).
+    public var title: String {
+        switch self {
+        case .auto: return "Auto"
+        case .uniform: return "Uniform"
+        case .perRegion: return "Per region"
+        }
+    }
 }
 
 /// How the CELL SIZE is chosen (handoff 2026-08-01-lattice-cell-size-sweep, bar R6).
@@ -485,7 +514,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 // `LatticeCoreCapability.rimEmitsNothingOnVoxelParts`. Core's own job
                 // schema has always defaulted to "diagrid" (`job.hpp`); the app was
                 // the one overriding it with the choice that does nothing.
-                boundary: LatticeBoundaryTreatment = .fullSkin,
+                // ★ NONE (maintainer, 2026-08-14): "it should default to
+                // 'none'". A bare lattice is the starting point; a rim or a
+                // skin is something you choose to add.
+                boundary: LatticeBoundaryTreatment = .none,
                 // ★ §4b (task 2026-08-12) — AUTO IS THE DEFAULT. A user who sets
                 // his faces and presses Auto on everything must get a lattice
                 // with no further questions. The DECODE fallbacks below stay
@@ -586,7 +618,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // decode fallback describes HISTORY and does not follow the new default
         // (task 2026-08-03-variant-postprocessing-fix). Such a project opens with
         // the "this emits nothing" warning showing, which is the honest outcome.
-        boundary = try c.decodeIfPresent(LatticeBoundaryTreatment.self, forKey: .boundary) ?? .rim
+        // ★ …and the same default when the key is absent, so a project that
+        // never chose a finish opens on none rather than on rim.
+        boundary = try c.decodeIfPresent(LatticeBoundaryTreatment.self, forKey: .boundary) ?? .none
         densityMode = try c.decodeIfPresent(LatticeDensityMode.self, forKey: .densityMode) ?? .uniform
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
@@ -766,10 +800,27 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // by rule from the wall beads — which is pinned below.
         if densityMode == .auto {
             guard lineWidthMM > 0 else { return nil }
-            // Cell-size mode (bar R6). Only the GRADED job can carry a mode other than
-            // fixed, and both sweep ends are pushed up onto CORE's printability floor —
-            // the app never states a cell core would refuse.
-            let floor = b.cellFloorMM ?? 0
+            // ★★ §9(b) — THIS IS WHERE THE SWEEP COLLAPSED, AND IT WAS THE WRONG
+            // FLOOR.
+            //
+            // It read `b.cellFloorMM` — core's LIGHT-end printability floor,
+            // **4.93 mm** on his part — and pushed BOTH ends of the window up onto
+            // it. His 2.0 – 4.0 mm window therefore reached the job as
+            // **4.93 – 4.93**: min == max, so `cell_plan_max_level` (a DYADIC
+            // ladder, core/src/simp/cell_plan.cpp:43-51) returns 0, one level
+            // exists, every block takes it, and the receipt comes back
+            // `distinct_cells: 1` with `strut_radius_min_mm == strut_radius_max_mm`
+            // == 0.225. That is the entire "a swept window that emits one cell is
+            // not a sweep" defect, and it was app-side all along.
+            //
+            // ★ AND THE APP ALREADY KNEW THE RIGHT ANSWER. PR 310 moved the swept
+            // floor to the DENSE-end floor (`cellFloorDensestMM`, ~1.17 mm — his
+            // own run records `min_printable_cell_mm: 1.173`), and
+            // `LatticeCellEntry.entryFloorMM` has used it for TYPED entry ever
+            // since. So the control accepted 2.0 mm and the emission threw it
+            // away: two floors, two answers, one silent overwrite. There is one
+            // floor now, and it is the one the control is bounded by.
+            let floor = LatticeCellEntry.entryFloorMM(b)
             let lo = Swift.max(cellMinMM, floor)
             let hi = Swift.max(cellMaxMM, lo)
             // Core refuses a non-positive ladder end, so a snapshot carrying one falls
@@ -914,6 +965,21 @@ public enum LatticeCellEntry {
     public static func dragged(_ v: Double, _ b: LatticeBounds?) -> Double {
         let r = range(b)
         return Swift.min(r.upperBound, Swift.max(r.lowerBound, (v * 2).rounded() / 2))
+    }
+
+    /// ★ §9(f) — IF A CLAMP FIRES IT MUST SAY SO ON SCREEN, WITH THE NUMBER IT
+    /// CLAMPED TO.
+    ///
+    /// The swept window's ends are pushed up onto `entryFloorMM` when they fall
+    /// below it (`LatticeSettings.runSpec`). That used to happen against the WRONG
+    /// floor and in silence, which is how a 2.0 – 4.0 mm window became 4.93 – 4.93
+    /// without a word on screen. Returns nil when nothing was clamped.
+    public static func sweptClampNote(minMM: Double, maxMM: Double,
+                                      _ b: LatticeBounds?) -> String? {
+        let floor = entryFloorMM(b)
+        guard minMM < floor - 1e-9 || maxMM < floor - 1e-9 else { return nil }
+        return String(format: "Raised to %.2f mm — below that no strut prints at "
+                      + "this line width.", floor)
     }
 
     /// TYPING is EXACT to two decimals — what the refusals quote, and what the

@@ -76,6 +76,14 @@ final class LatticeRetentionControlTests: XCTestCase {
         // thing it names. The legacy-snapshot side decodes to `.fixed` as it
         // always has, so the comparison is still like for like.
         s.cellSizeMode = .fixed
+        // ★ STATED for the same reason, one control later (task
+        // 2026-08-15-lattice-and-face-ui): the maintainer moved the boundary
+        // default from `.fullSkin` to `.none` ("it should default to 'none'").
+        // The legacy snapshot this is compared against names `"boundary":
+        // "fullSkin"` explicitly, so the fixture names it too — otherwise this
+        // test stops measuring "the SUB-FLOOR controls are untouched" and starts
+        // measuring which finish happens to be the current default.
+        s.boundary = .fullSkin
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5
         return s

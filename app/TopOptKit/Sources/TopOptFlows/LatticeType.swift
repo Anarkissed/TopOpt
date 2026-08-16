@@ -90,7 +90,17 @@ public extension LatticeType {
 
     /// The seven ported lattices, densest last. `octet` is the maintainer's default
     /// (the print-tested cell, PR-201).
-    static let family: [LatticeType] = [sc, bcc, bccz, fcc, fccz, diamond, octet]
+    /// ★ OCTET FIRST (maintainer, 2026-08-14): *"Octet Truss should be the first
+    /// one on the LEFT. Currently it's the last in line and the default. It reads
+    /// backwards. Place it on the far left of the list and first to view."*
+    ///
+    /// It IS the default (`named(_:)` falls back to it, and the wizard opens on
+    /// it), and it was the seventh of seven — so the picker opened showing six
+    /// types the user had not chosen, with the chosen one off the right edge.
+    /// The order is the picker's reading order and nothing else depends on it:
+    /// the only other consumers iterate the whole list (`LatticeModeEvidenceGen`)
+    /// or look up by id (`named`, `displayName(forID:)`).
+    static let family: [LatticeType] = [octet, sc, bcc, bccz, fcc, fccz, diamond]
 
     /// Look up a lattice by its stable id; falls back to `octet`.
     static func named(_ id: String) -> LatticeType {
