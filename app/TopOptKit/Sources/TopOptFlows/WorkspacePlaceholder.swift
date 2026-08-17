@@ -119,6 +119,10 @@ public struct WorkspacePlaceholder: View {
     // and `LatticeRegionDrawer.depthDivergence` is what proves it.
     @State private var latticeSelectableCards: [String: LatticeFaceCard] = [:]
     @State private var latticeDepthDragSeed: Double?
+    // ★ The depth detent currently HELD (maintainer, 2026-08-17). Non-nil while a
+    // drag is magnetised to a candidate; the hysteresis band is measured from it,
+    // so it must span frames. Cleared on `onEnded`.
+    @State private var latticeDepthDetent: LatticeDepthDetent.Candidate?
     /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
     @State private var diagnosisPopoverGroup: UUID?
     /// ★ §5 — which DEPTH field has the numeric keypad open. Keyed by the row's
@@ -5107,10 +5111,14 @@ public struct WorkspacePlaceholder: View {
                 guard let ray = proj.ray(throughViewPoint: v.location),
                       let value = world.value(rayOrigin: ray.origin, rayDir: ray.dir)
                 else { return }
-                project.writeLatticeDepthMM(ref, mm: Double(value))
+                // ★ MAGNETIC DETENTS (maintainer, 2026-08-17). The 3D handle and
+                // the row chip resolve through the SAME call, so the two cannot
+                // develop different feels.
+                project.writeLatticeDepthMM(ref, mm: snappedDepthMM(Double(value)))
             }
             .onEnded { _ in
                 draggingDepthPlane = nil
+                latticeDepthDetent = nil
                 ClearanceHaptics.release()
                 refreshLatticeFaceCards()
             }
@@ -6853,13 +6861,40 @@ public struct WorkspacePlaceholder: View {
             .onChanged { v in
                 let seed = latticeDepthDragSeed ?? seedDepth
                 if latticeDepthDragSeed == nil { latticeDepthDragSeed = seedDepth }
+                // ★ THE SAME DETENT CALL THE 3D HANDLE MAKES.
                 project.writeLatticeDepthMM(
-                    ref, mm: seed + Double(v.translation.width) * 0.05)
+                    ref,
+                    mm: snappedDepthMM(seed + Double(v.translation.width) * 0.05))
             }
             .onEnded { _ in
                 latticeDepthDragSeed = nil
+                latticeDepthDetent = nil
                 refreshLatticeFaceCards()
             }
+    }
+
+    /// ★ THE ONE DETENT CALL BOTH DEPTH DRAGS GO THROUGH (maintainer,
+    /// 2026-08-17: "I'd like ... the primitive to have magnetic detents").
+    ///
+    /// ★ THE MAGNET THAT MATTERS IS AT THE DEPTH THIS REGION STARTS TO CERTIFY —
+    /// core's `N* × min_printable_cell`, 5.87 mm at his 0.45 mm bead. That is the
+    /// number this whole task turned on and the one he had no way to find: the
+    /// card did not show it, and the card's own arithmetic implied 24.65 mm,
+    /// which was 4.2× wrong. Round millimetres come along as ordinary magnets.
+    ///
+    /// The held candidate lives in `latticeDepthDetent` so the hysteresis spans
+    /// frames; `onEnded` clears it. A FRESH entry ticks the same haptic the
+    /// design box's face detent ticks — a held one must not buzz every frame.
+    private func snappedDepthMM(_ rawMM: Double) -> Double {
+        let r = LatticeDepthDetent.resolve(
+            rawMM: rawMM,
+            candidates: LatticeDepthDetent.candidates(
+                topology: project.lattice.topologyID,
+                minExtrudableWidthMM: project.printParams.strutLineWidthMM),
+            current: latticeDepthDetent)
+        latticeDepthDetent = r.snapped
+        if r.didSnap { ClearanceHaptics.detent() }
+        return r.mm
     }
 
     /// ★ §8(c) — SELECTING "PER REGION" IS WHAT MAKES PR 334's DRAWER ROW APPEAR.
