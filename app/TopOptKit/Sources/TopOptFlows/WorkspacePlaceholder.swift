@@ -1047,8 +1047,8 @@ public struct WorkspacePlaceholder: View {
             }
             Spacer()
         }
-        .padding(.top, DS.Space.s)
-        .padding(.trailing, DS.Space.s)
+        .padding(.top, PageChrome.gizmoInset)
+        .padding(.trailing, PageChrome.gizmoInset)
     }
 
     private var replacementPromptBinding: Binding<Bool> {
@@ -3094,7 +3094,7 @@ public struct WorkspacePlaceholder: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, DS.Space.xl4)
+        .padding(.trailing, PageChrome.edge)   // ★ the one right-hand line
         // ★ CLEAR THE BAR'S REAL HEIGHT, not a guess. This was
         // `DS.Space.xl4 + 50 + DS.Space.m` — a hardcoded 50 pt for Optimize. A
         // DISABLED Optimize carries a "what is missing" subtitle and is taller
@@ -4359,8 +4359,11 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         // ★ BELOW THE GIZMO, in the slot `gizmoClearance` defines — the same one
         // the Surface tray uses, so the two stages put the control in one place.
-        .padding(.top, PageChrome.gizmoClearance + PageChrome.gap)
-        .padding(.trailing, PageChrome.gizmoInset)
+        .padding(.top, PageChrome.belowGizmo)
+        // ★ ON `edge`, LIKE EVERYTHING ELSE ON THIS SIDE. These sat on
+        // `gizmoInset` — the gizmo's FRAME — and so stood ~16 pt proud of both the
+        // gizmo's glass and the bottom-right chips.
+        .padding(.trailing, PageChrome.edge)
     }
 
     private func viewModeButton(_ icon: String, label: String, on: Bool,
@@ -4499,8 +4502,10 @@ public struct WorkspacePlaceholder: View {
                 .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.top, PageChrome.gizmoClearance + PageChrome.gap)
-        .padding(.trailing, PageChrome.gizmoInset)
+        .padding(.top, PageChrome.belowGizmo)
+        // ★ ON `edge` — the same right-hand line as the gizmo's glass and the
+        // bottom-right chips.
+        .padding(.trailing, PageChrome.edge)
     }
 
     // ★ §6/§7 — THE ACTION CLUSTER: every tool's confirm, FLOATING NEXT TO WHAT IT

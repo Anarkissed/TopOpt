@@ -1134,3 +1134,67 @@ final class DetachPieceFromGroupTests: XCTestCase {
                       + "expanding rather than dropping the parent wholesale")
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: ★ ONE RIGHT-HAND LINE
+//
+// Maintainer, 2026-08-16: "the view buttons are too close to the edge. Please put
+// them in-line with the gizmo and all the chips at the bottom-right corner. The
+// padding to the right needs to be *exactly* the same … I am very particular about
+// keeping things lined up perfectly."
+//
+// There were THREE right-hand edges on one screen: the view toggles on 8 (the
+// gizmo's FRAME inset), the gizmo's visible glass on 18.5, and the bottom-right chip
+// stack on `edge` (24). Each was individually defensible and together they were
+// three lines.
+
+final class RightEdgeAlignmentTests: XCTestCase {
+
+    /// ★ THE INVARIANT: the gizmo's VISIBLE edge is `PageChrome.edge`, the same
+    /// number every other right-side control pads by. Derived, so changing `edge`
+    /// moves all of them together and changing the gizmo's housing fraction is
+    /// absorbed rather than leaving it 10 pt proud.
+    func testTheGizmosGlassSitsExactlyOnTheSharedEdge() {
+        XCTAssertEqual(PageChrome.gizmoInset + PageChrome.gizmoVisualInset,
+                       PageChrome.edge, accuracy: 1e-9,
+                       "★ the gizmo's glass and the chips share one line")
+    }
+
+    /// …and the top is the same number, so the gizmo's glass is inset equally from
+    /// the top and the side rather than by two different constants.
+    func testTheTopAlignmentIsTheSameNumberAsTheSide() {
+        XCTAssertEqual(PageChrome.gizmoAlignedTop, PageChrome.edge, accuracy: 1e-9)
+    }
+
+    /// ★ THE FRAME INSET IS SMALLER THAN THE EDGE, and that is the whole point —
+    /// the transparent margin is what the two differ by.
+    func testTheFrameIsInsetLessThanTheGlass() {
+        XCTAssertLessThan(PageChrome.gizmoInset, PageChrome.edge)
+        XCTAssertEqual(PageChrome.edge - PageChrome.gizmoInset,
+                       PageChrome.gizmoVisualInset, accuracy: 1e-9)
+    }
+
+    /// ★ A CONTROL UNDER THE GIZMO CLEARS ITS TOUCH TARGET, not just its picture.
+    /// The frame takes the orbit gesture over its whole square, so a control that
+    /// merely cleared the glass would have its top strip swallowed.
+    func testBelowGizmoClearsTheFrameNotJustTheGlass() {
+        let frameBottom = PageChrome.gizmoInset + PageChrome.gizmoSize
+        XCTAssertGreaterThanOrEqual(PageChrome.belowGizmo, frameBottom,
+                                    "★ it must clear the gesture target")
+        // …and it still reads as about one edge-width below the glass.
+        let glassBottom = PageChrome.gizmoAlignedTop + PageChrome.gizmoSize
+            - PageChrome.gizmoVisualInset * 2
+        XCTAssertEqual(PageChrome.belowGizmo - glassBottom, PageChrome.edge,
+                       accuracy: 4,
+                       "★ and reads as an even margin below it")
+    }
+
+    /// ★ AND THE CLEARANCE STILL DESCRIBES THE GIZMO. `gizmoClearance` is what
+    /// chrome to the LEFT of the gizmo pads by; it has to keep clearing the frame
+    /// now that the frame moved.
+    func testTheLeftwardClearanceStillClearsTheFrame() {
+        XCTAssertGreaterThanOrEqual(PageChrome.gizmoClearance,
+                                    PageChrome.gizmoInset + PageChrome.gizmoSize,
+                                    "★ chrome left of the gizmo cannot overlap it")
+    }
+}

@@ -544,3 +544,60 @@ was run at the pre-merge commit first, where it passed.
 the merged tree rather than carried over from before it.
 
 App builds for the iPad Pro 13-inch simulator.
+
+---
+
+# Round 7i — one right-hand line
+
+"The view buttons are too close to the edge. Please put them in-line with the gizmo
+and all the chips at the bottom-right corner. The padding to the right needs to be
+*exactly* the same … I am very particular about keeping things lined up perfectly."
+
+## There were THREE right edges, and each was individually defensible
+
+| control | inset from the right | why |
+|---|---|---|
+| view toggles (mine) | **8** | padded by `gizmoInset`, the gizmo's FRAME |
+| the gizmo's visible glass | **18.5** | frame at 8, plus the housing's 10.5 transparent margin |
+| bottom-right chip stack | **24** | `DS.Space.xl4`, i.e. `PageChrome.edge` |
+
+Nobody chose three lines; three call sites each chose a reasonable number.
+
+## The rule, stated once
+
+**Every floating right-side control's VISIBLE edge sits on `PageChrome.edge`.**
+
+`gizmoInset` is now DERIVED — `edge − gizmoVisualInset` — so the gizmo's FRAME goes
+wherever puts its GLASS on the shared line. Measured after:
+
+    gizmo frame inset      13.5
+    gizmo GLASS from edge  24.0
+    chips / view buttons   24.0
+
+And because `gizmoAlignedTop` is `gizmoInset + gizmoVisualInset`, it now reduces to
+`edge` too — the glass is inset the same from the top as from the side, and so is
+everything aligned to it.
+
+## Two more that the audit turned up
+
+* **Two gizmo placements hard-coded `DS.Space.s`** (the workspace and the results
+  screen) instead of naming the constant, so the "shared" inset was shared by
+  copy. Both now read `PageChrome.gizmoInset`.
+* **The controls UNDER the gizmo** padded by `gizmoClearance + gap`, which is a
+  HORIZONTAL clearance used as a vertical one — 36 pt below the glass, against 24 at
+  the sides. Now `PageChrome.belowGizmo`, which takes the larger of "clear the
+  gizmo's touch target" (the frame takes the orbit gesture over its whole square)
+  and "one gap below the glass": 22.5 below the glass, clearing the frame by 12.
+
+`LatticeChromeLayout.edge` already derived from `PageChrome.edge`, so the lattice
+page followed for free.
+
+## Pinned
+
+`RightEdgeAlignmentTests` — five invariants, including that a control under the
+gizmo clears its GESTURE TARGET and not merely its picture, and that `gizmoClearance`
+still clears the frame now that the frame moved.
+
+## Suite
+
+`swift test`: **1762 tests, 25 skipped, 8 failures** — all 8 the known lib3mf gap.
