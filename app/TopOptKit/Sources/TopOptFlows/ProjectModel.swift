@@ -691,6 +691,35 @@ public final class ProjectModel: ObservableObject {
                                  fallbackMM: lattice.paintDepthMM)
     }
 
+    /// ★ THE DENSITY IN FORCE FOR ONE SELECTABLE (maintainer, 2026-08-17: "There
+    /// is no *actual* way to modify the density value when the lattice density
+    /// setting is set to per-region").
+    ///
+    /// The same precedence shape the role and the depth use: the selectable's own
+    /// stated number, else its group's, else the MODE's answer (Uniform states
+    /// one; Auto and Per-region-with-nothing-stated state none and core derives).
+    /// nil ⇒ AUTO ⇒ no `relative_density` key on the wire.
+    public func latticeSelectableDensity(_ ref: LatticeSelectableRef,
+                                         in group: UUID) -> Double? {
+        if let d = lattice.selectableDensity[ref.key], d.isFinite, d > 0 { return d }
+        return latticeDeclaredDensity(group)
+    }
+
+    /// Write one selectable's density. `nil` (or a non-positive value) CLEARS it
+    /// back to the group's/mode's answer — "no number stated" must be spellable,
+    /// because core's own sentinel for "derive it" is exactly the absence of a key.
+    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?) {
+        guard let f = fraction, f.isFinite, f > 0 else {
+            lattice.selectableDensity.removeValue(forKey: ref.key)
+            return
+        }
+        let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
+        // Clamped into core's certifiable band — there is no certificate outside
+        // it, and a value core would refuse must not be storable from a keypad.
+        lattice.selectableDensity[ref.key] =
+            Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+    }
+
     /// ★ WHAT THE FACE CARDS MUST BE DERIVED FROM (task
     /// 2026-08-17-lattice-stage-repair §2). One entry per thing the lattice panel
     /// shows a drawer for: the group itself, and every selectable inside it that
@@ -715,7 +744,6 @@ public final class ProjectModel: ObservableObject {
         var out: [(key: String, faceID: Int, depthMM: Double,
                    declaredDensity: Double?)] = []
         for g in selection.groups where lattice.groupRoles[g.id] != nil {
-            let rho = latticeDeclaredDensity(g.id)
             // ★ NO GROUP CARD (maintainer, 2026-08-17). There used to be one more
             // entry here, keyed by the group's UUID and built from
             // `g.faces.first` at the GROUP's depth — one arbitrary face standing
@@ -727,8 +755,12 @@ public final class ProjectModel: ObservableObject {
             // fabricated card left for anything to read.
             for ref in latticeSelectableRefs(g) {
                 guard let f = latticeCardFace(ref, in: g) else { continue }
+                // ★ EACH SELECTABLE'S OWN DENSITY, not the group's — the card
+                // must be derived at the number that selectable's drawer shows
+                // and its region emits (maintainer, 2026-08-17).
                 out.append((ref.key, Int(runFaceID(f)),
-                            latticeSlabDepthMM(ref, in: g.id), rho))
+                            latticeSlabDepthMM(ref, in: g.id),
+                            latticeSelectableDensity(ref, in: g.id)))
             }
         }
         return out
@@ -2053,6 +2085,8 @@ public final class ProjectModel: ObservableObject {
             selectableRoles: lattice.selectableRoles,
             selectableDepthMM: lattice.selectableDepthMM,
             groupDensities: lattice.groupDensities,
+            // ★ THE PER-REGION DENSITY REACHES THE JOB (maintainer, 2026-08-17).
+            selectableDensity: lattice.selectableDensity,
             resolve: resolvedLatticeFace)
     }
 
@@ -2112,6 +2146,7 @@ public final class ProjectModel: ObservableObject {
                     groupDepthMM: { [weak self] id in self?.latticeSlabDepthMM(id) ?? .nan },
                     runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
                     groupDensities: self.lattice.groupDensities,
+                    selectableDensity: self.lattice.selectableDensity,
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,

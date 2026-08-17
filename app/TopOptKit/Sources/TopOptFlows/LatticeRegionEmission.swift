@@ -132,6 +132,13 @@ public enum LatticeRegionEmission {
                                selectableRoles: [String: LatticeSelectableRole] = [:],
                                selectableDepthMM: [String: Double] = [:],
                                groupDensities: [UUID: Double] = [:],
+                               // ★ THE PER-SELECTABLE DENSITY (maintainer,
+                               // 2026-08-17). The note below used to say a
+                               // per-selectable density "needs its own store AND
+                               // its own control"; both exist now, and this is
+                               // where the store reaches the wire. Empty ⇒ the
+                               // group's, so an untouched project is unchanged.
+                               selectableDensity: [String: Double] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -166,8 +173,9 @@ public enum LatticeRegionEmission {
                     // selectable's own, so a primitive switched to exclude
                     // inside an included group carries no density even though
                     // its group states one.
-                    s.relativeDensity =
-                        density(for: g.id, role: role, densities: groupDensities)
+                    s.relativeDensity = density(
+                        for: g.id, role: role, densities: groupDensities,
+                        stated: selectableDensity[LatticeSelectableRef.primitive(p.id).key])
                     out.append(s)
                 }
             }
@@ -181,8 +189,9 @@ public enum LatticeRegionEmission {
                                 faceID: runFaceID(f)) {
                     // The face's own resolved role, same gate as the primitives
                     // above — see the note there on group- vs selectable-keying.
-                    s.relativeDensity =
-                        density(for: g.id, role: role, densities: groupDensities)
+                    s.relativeDensity = density(
+                        for: g.id, role: role, densities: groupDensities,
+                        stated: selectableDensity[ref.key])
                     out.append(s)
                 } else {
                     skipped += 1
@@ -201,10 +210,16 @@ public enum LatticeRegionEmission {
     /// path passes. A non-positive or non-finite value is also dropped: core's
     /// sentinel for "derive" is exactly `<= 0`, so those two spellings of
     /// "nothing stated" must not become a key.
+    /// ★ `stated` is the SELECTABLE's own density and WINS over its group's
+    /// (maintainer, 2026-08-17) — the same precedence the role and the depth
+    /// already use. The include-only gate and the "non-positive means derive"
+    /// rule apply to both, because core refuses the same pairings either way.
     static func density(for id: UUID, role: LatticeGroupRole,
-                        densities: [UUID: Double]) -> Double? {
-        guard role == .include, let d = densities[id], d.isFinite, d > 0
-        else { return nil }
+                        densities: [UUID: Double],
+                        stated: Double? = nil) -> Double? {
+        guard role == .include else { return nil }
+        if let d = stated, d.isFinite, d > 0 { return d }
+        guard let d = densities[id], d.isFinite, d > 0 else { return nil }
         return d
     }
 }

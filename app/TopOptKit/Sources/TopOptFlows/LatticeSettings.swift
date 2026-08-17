@@ -483,6 +483,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (bar R4).
     public var selectableDepthMM: [String: Double]
 
+    /// ★ THE PER-SELECTABLE DENSITY — the store `LatticeRegionEmission` recorded
+    /// as missing (maintainer, 2026-08-17: "There is no *actual* way to modify
+    /// the density value when the lattice density setting is set to per-region").
+    ///
+    /// ★ THE EMISSION SAID SO IN SO MANY WORDS and shipped the gap deliberately:
+    /// "a per-selectable density needs its own store AND its own control, and
+    /// inventing one here would ship a field with no surface." Both arrive
+    /// together now — this is the store, and the drawer's Density row is the
+    /// surface. Until now the only density on the wire was keyed by GROUP, so a
+    /// per-region field could only have edited every face of the group at once.
+    ///
+    /// Keyed by `LatticeSelectableRef.key`, exactly like the role and the depth.
+    /// Absent ⇒ the group's `groupDensities` ⇒ the mode's own answer ⇒ AUTO, so
+    /// every snapshot written before this task emits precisely what it did.
+    public var selectableDensity: [String: Double]
+
     // ── SUB-FLOOR RETENTION, the user's raw choices (task
     // 2026-08-05-lattice-retention-app-control). All OFF / absent by default, so
     // an untouched project emits exactly today's job (bar R1), and absent from
@@ -592,6 +608,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 groupDepthMM: [UUID: Double] = [:],
                 selectableRoles: [String: LatticeSelectableRole] = [:],
                 selectableDepthMM: [String: Double] = [:],
+                selectableDensity: [String: Double] = [:],
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
@@ -625,6 +642,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.groupDepthMM = groupDepthMM
         self.selectableRoles = selectableRoles
         self.selectableDepthMM = selectableDepthMM
+        self.selectableDensity = selectableDensity
         if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
     }
 
@@ -644,7 +662,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // §3c/§3d). Named `primitive*` before PR 331 landed and made the unit
         // bigger than a primitive; the legacy keys below decode so a snapshot
         // written against the earlier name still opens with its choices intact.
-        case selectableRoles, selectableDepthMM
+        case selectableRoles, selectableDepthMM, selectableDensity
         case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
@@ -711,6 +729,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                                   forKey: .selectableDepthMM)
             ?? c.decodeIfPresent([String: Double].self,
                                  forKey: .primitiveDepthMM) ?? [:]
+        // Absent from every snapshot before 2026-08-17 ⇒ empty ⇒ the group's
+        // density ⇒ the mode's answer, which is exactly what those emitted.
+        selectableDensity = try c.decodeIfPresent([String: Double].self,
+                                                  forKey: .selectableDensity) ?? [:]
         // Absent from every snapshot written before this task ⇒ off / core's own
         // number ⇒ those projects keep emitting exactly the job they emitted.
         retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
@@ -749,6 +771,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(frozenRegionDensity, forKey: .frozenRegionDensity)
         try c.encode(selectableRoles, forKey: .selectableRoles)
         try c.encode(selectableDepthMM, forKey: .selectableDepthMM)
+        try c.encode(selectableDensity, forKey: .selectableDensity)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,

@@ -6527,9 +6527,24 @@ public struct WorkspacePlaceholder: View {
     /// ★ THE ONE DRAWER LAYOUT. A group row and a selectable row render THIS —
     /// so "a region and a face behave identically" (bar R13) is a property of
     /// there being one view, not of two views being kept in step.
+    /// The keypad's starting value for one row, parsed from the string the row
+    /// already renders — "10.0 mm" ▸ 10.0, "27%" ▸ 27. Pure, so the parsing that
+    /// the wrong-setter bug got away with is now assertable.
+    static func latticeRowSeed(_ row: LatticeDrawerRow) -> Double {
+        Double(row.value
+            .replacingOccurrences(of: " mm", with: "")
+            .replacingOccurrences(of: "%", with: "")
+            .trimmingCharacters(in: .whitespaces)) ?? 0
+    }
+
     @ViewBuilder private func latticeDrawerBody<G: Gesture>(
         _ drawer: LatticeRegionDrawer, depthDrag: G, identifier: String,
-        writeDepth: ((Double) -> Void)? = nil) -> some View {
+        writeDepth: ((Double) -> Void)? = nil,
+        // ★ THE DENSITY'S OWN SETTER (maintainer, 2026-08-17). It takes PERCENT,
+        // because that is what the keypad shows and what the row renders; the
+        // model and the job speak fractions, and the ONE conversion happens at
+        // the call site, exactly as `sectorDensityRow` on the lattice page does.
+        writeDensity: ((Double) -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let head = drawer.headline {
                 let tint = latticeVerdictTint(head.verdict)
@@ -6568,6 +6583,12 @@ public struct WorkspacePlaceholder: View {
                     if row.modifiable {
                         let slug = row.label.lowercased()
                         let padKey = "\(identifier)-\(slug)"
+                        // ★ THE SETTER IS THE ROW'S OWN (maintainer, 2026-08-17).
+                        // One `writeDepth` used to serve every modifiable row, so
+                        // the Density keypad wrote the depth. The row's `kind`
+                        // chooses both the setter and the unit now.
+                        let write: ((Double) -> Void)? = row.kind == .density
+                            ? writeDensity : writeDepth
                         Text(row.value)
                             .font(.system(size: 11, weight: .bold)).monospacedDigit()
                             .foregroundStyle(DS.Color.textPrimary.color)
@@ -6575,21 +6596,26 @@ public struct WorkspacePlaceholder: View {
                             .background(Capsule().fill(DS.Color.fillSelected.color))
                             .contentShape(Rectangle())
                             .modifier(LatticeDrawerRowGesture(
-                                isDepth: slug == "depth", drag: depthDrag))
+                                isDepth: row.kind == .depth, drag: depthDrag))
                             // ★ §5 — AND IT TYPES. His rule, stated twice: "Any
                             // input MUST be selectable and a small numeric
                             // keyboard pop-up to input the number — NOT just touch
                             // inputs." A 0.05 mm-per-point scrub cannot land on a
                             // round number by finger. The drag stays as the coarse
                             // adjustment and writes through the same setter.
-                            .onTapGesture { if writeDepth != nil { depthPadKey = padKey } }
+                            .onTapGesture { if write != nil { depthPadKey = padKey } }
                             .numberPad(Binding(get: { depthPadKey == padKey },
                                                set: { if !$0 { depthPadKey = nil } }),
-                                       config: .init(title: row.label, unit: "mm",
+                                       // ★ THE ROW'S OWN UNIT. "DENSITY 35 mm"
+                                       // is what the shared-setter bug looked
+                                       // like on screen.
+                                       config: .init(title: row.label,
+                                                     unit: row.unit,
                                                      allowsDecimal: true),
-                                       seed: Double(row.value.replacingOccurrences(
-                                            of: " mm", with: "")) ?? 0) { v in
-                                guard let v, let write = writeDepth else { return }
+                                       // …and its own seed: the depth reads
+                                       // "10.0 mm", the density reads "27%".
+                                       seed: Self.latticeRowSeed(row)) { v in
+                                guard let v, let write else { return }
                                 write(v)
                             }
                             .accessibilityIdentifier(padKey)
@@ -6930,6 +6956,13 @@ public struct WorkspacePlaceholder: View {
                           identifier: "lattice-drawer-\(ref.key)",
                           writeDepth: { mm in
                               project.writeLatticeDepthMM(ref, mm: mm)
+                              refreshLatticeFaceCards()
+                          },
+                          // ★ THE KEYPAD SPEAKS PERCENT; the project and the job
+                          // speak fraction, as core's band does. ONE conversion,
+                          // here — the same shape `sectorDensityRow` uses.
+                          writeDensity: { pct in
+                              project.writeLatticeDensity(ref, fraction: pct / 100)
                               refreshLatticeFaceCards()
                           })
             .padding(.leading, DS.Space.m)

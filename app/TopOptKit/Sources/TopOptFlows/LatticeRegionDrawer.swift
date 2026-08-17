@@ -31,17 +31,63 @@ import Foundation
 
 /// One line in the drawer.
 public struct LatticeDrawerRow: Equatable, Sendable {
+
+    /// ★ WHICH NUMBER THIS ROW EDITS — and therefore WHICH SETTER AND WHICH UNIT
+    /// (maintainer, 2026-08-17: "each time I tried, it instead filled the depth
+    /// value no matter which region I attempted to change").
+    ///
+    /// ★ THE BUG THIS TYPE MAKES UNREPRESENTABLE. `latticeDrawerBody` took ONE
+    /// `writeDepth` closure and gave it to EVERY modifiable row, with the unit
+    /// hardcoded to `"mm"`. The gesture had already been split off correctly (only
+    /// Depth got the drag) — but the KEYPAD had not, so tapping Density opened a
+    /// pad titled "DENSITY", labelled mm, that wrote the depth. A control that
+    /// silently edits a different number is the worst kind on this page, and the
+    /// file's own comment warned about exactly this class while the pad still did
+    /// it. A row now CARRIES its kind, and the view switches the setter and the
+    /// unit on it rather than assuming.
+    public enum Kind: String, Equatable, Sendable {
+        /// A derived fact — no gesture, no keypad, no control chrome.
+        case fact
+        /// The slab depth, in mm. Draggable AND typeable.
+        case depth
+        /// The relative density, as a PERCENT in the UI and a fraction in the
+        /// model. Typeable only, and only under the per-region mode.
+        case density
+    }
+
     /// One or two words.
     public let label: String
     /// The value, already formatted.
     public let value: String
-    /// ★ §4b — TRUE only for the depth. Everything else is a FACT, not a control.
-    public let modifiable: Bool
+    /// ★ §4b — anything but `.fact` is a control. Everything else is a FACT.
+    public let kind: Kind
 
-    public init(label: String, value: String, modifiable: Bool = false) {
+    /// The unit the keypad shows for this row — and the unit is part of the
+    /// CORRECTNESS, not the styling: "DENSITY 35 mm" is how the wrong-setter bug
+    /// looked on screen.
+    public var unit: String {
+        switch kind {
+        case .depth: return "mm"
+        case .density: return "%"
+        case .fact: return ""
+        }
+    }
+
+    /// ★ §4b, unchanged in meaning: a row that is not modifiable is not given a
+    /// gesture. Kept as a derived property so every existing call site and test
+    /// reads the same thing it always did.
+    public var modifiable: Bool { kind != .fact }
+
+    public init(label: String, value: String, kind: Kind = .fact) {
         self.label = label
         self.value = value
-        self.modifiable = modifiable
+        self.kind = kind
+    }
+
+    /// Back-compatible spelling for the call sites that predate `Kind`.
+    public init(label: String, value: String, modifiable: Bool) {
+        self.init(label: label, value: value,
+                  kind: modifiable ? .depth : .fact)
     }
 }
 
@@ -153,7 +199,7 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             // One value, one source; the card's copy is checked against it by
             // `depthDivergence` rather than trusted.
             LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", depthMM),
-                             modifiable: true),
+                             kind: .depth),
             LatticeDrawerRow(label: "Hands over", value: c.heldText),
             // ★ WHAT IT WILL WEIGH, AND THE DIFFERENCE (task 2026-08-13-lattice-
             // as-a-material §7b). "Hands over" alone is half a sentence: the
@@ -163,9 +209,13 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             LatticeDrawerRow(label: "Saved", value: c.savedText),
             LatticeDrawerRow(label: "Cell", value: c.cellText),
             // ★ A FACT in every mode but one. Under per-region the user states
-            // this number, so there it is the second control — and ONLY there.
+            // this number, so there it is the second control — and ONLY there
+            // (maintainer, 2026-08-17: "ensure this can be editable — only when
+            // the per-region setting has been selected"). `.density` carries its
+            // own setter and its own unit; before this task it inherited the
+            // DEPTH's, which is why typing here wrote millimetres of depth.
             LatticeDrawerRow(label: "Density", value: c.densityText,
-                             modifiable: perRegionDensity),
+                             kind: perRegionDensity ? .density : .fact),
             LatticeDrawerRow(label: "Strut", value: c.strutText),
             LatticeDrawerRow(label: "Cells across", value: c.cellsText),
         ]
