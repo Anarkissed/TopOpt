@@ -148,10 +148,10 @@ Asserted **in both directions**, plus the protection tie (R3):
 
 | bar | state |
 |---|---|
-| R1 one fix, one run, one report | ✅ fix 1 only; §1 not started |
-| R2 auto density honest | ⬜ not started |
+| R1 one fix, one run, one report | ✅ held until the maintainer said "keep going" |
+| R2 auto density honest | ✅ derived from core, or an honest refusal |
 | R3 depth ⇄ handle, both directions + protection | ✅ 5 assertions |
-| R4 one region certifies end to end | ⬜ blocked on §1 |
+| R4 one region certifies end to end | ✅ 6.00 mm on his part |
 | R5 nothing regresses | ✅ 1538 app tests, 0 failures — enumerated below |
 | R6 root cause with file and line | ✅ §1 and §2 both |
 | R7 no assertion weakened or deleted | ✅ census below |
@@ -286,6 +286,119 @@ re-run green afterwards). The supported path, not yet run here:
 ```
 
 ---
+
+---
+
+## §OVERNIGHT — THE 2026-08-17 BATCH (seven asks, in one message)
+
+| # | ask | state |
+|---|---|---|
+| 1 | Selections minimize to bottom-left | ✅ — the bug was MODIFIER ORDER |
+| 2 | Per-region density must update the PREVIEW | ✅ — via the demand field |
+| 3 | Preview "looks cheap … part of the model?" | ★ **DIAGNOSED, NOT SHIPPED** — see below |
+| 4 | "Lattice Preview" notice under the modal | ✅ — attached by layout |
+| 5 | Expand **handle** (drag + number) | ✅ — 3D knob, selected-only |
+| 6 | "Lattice" button beside Optimize; hint chip gone | ✅ |
+| 7 | CAD surfaces → drawer with a toggle + blurb | ✅ |
+
+### 1 — the minimize bug was the MODIFIER ORDER, not the alignment
+
+`PageLeftModal` applied its paddings **after** `.frame(maxHeight: .infinity)` —
+padding a view that is already its parent's size, so the padded result OVERFLOWS
+and SwiftUI centres the overflow. Setting the alignment to `.bottomLeading` was
+therefore correct and had **no effect on screen**, which is exactly what he
+reported. Paddings now come first, then the expanding frame.
+
+★ And the rest position is orientation-aware, because he named the reason: the
+action row now carries BOTH `Lattice` and `Optimize`, so in PORTRAIT the panel
+rests `PageChrome.edge + 76 pt` above the corner; in LANDSCAPE the corner itself.
+
+### 2 — the density reaches the preview through the DEMAND field
+
+The raymarcher grades a strut from one number per cell:
+`rho = rhoMin + (rhoMax − rhoMin) · demand^gamma`, or `uniformRho` when there is
+no demand grid. A per-region density therefore needs a PER-CELL input, and that
+is what the demand grid is. `LatticeRegionMask.densityDemand` inverts the
+shader's own mapping — `demand = ((rho − rhoMin)/(rhoMax − rhoMin))^(1/gamma)` —
+so **nothing in the shader changed** and the number on the card is the number the
+struts are drawn at. Round-tripped through the shader's formula in a test.
+
+Nothing stated ⇒ nil ⇒ the caller keeps the field it had, so an untouched
+project's preview is byte-identical.
+
+### ★★ 3 — WHY THE PREVIEW LOOKS PASTED ON: IT HAS NO DEPTH BUFFER
+
+Not a shading problem — a COMPOSITING one.
+
+* the model's view: `depthStencilPixelFormat = MeshRenderer.depthFormat`
+  (MetalMeshView.swift:4030) — it has depth.
+* the strut view: `isOpaque = false`, alpha-blended, and **no depth attachment
+  anywhere** (LatticeSDFMetal.swift:812).
+
+So the struts are a separate transparent layer composited OVER the model image.
+They can never be occluded by the part, never receive its contact shadow or AO,
+and are lit by their own light. A sticker over a photograph.
+
+★ **AND THE RAYMARCH IS ALREADY THE CHEAP OPTION** — 13.9 ms at 1024², from this
+repo's own render-quality evidence. Instanced strut GEOMETRY would be far heavier
+at 10⁵ struts. So the answer is not a different technique; it is putting the
+existing one in the right pass:
+
+1. the fragment shader returns `{ float4 color [[color(0)]]; float depth
+   [[depth(any)]] }` — it already computes `hitPos`, so the depth is one matrix
+   multiply it currently throws away;
+2. draw the struts INSIDE `MeshRenderer`'s pass, into the same colour + depth
+   attachments, instead of a second `MTKView`;
+3. they then share the model's key light, AO and contact shadow for free, and the
+   part's walls genuinely occlude them.
+
+Same GPU cost. **NOT SHIPPED TONIGHT, DELIBERATELY**: it merges the two render
+paths and is guarded by `LatticeProxyProfileTests` and
+`ViewerVisibilityRegressionTests`; getting it subtly wrong yields a black viewer,
+which is a far worse thing to wake up to than a preview that looks cheap. It is a
+well-scoped half-day with device eyes on it.
+
+### 5 — the expand HANDLE
+
+A 3D knob on the slab's in-plane edge, dragged at the same 0.05 mm/pt scrub the
+depth chip uses, writing the SAME `writeLatticeExpandMM` the drawer row writes —
+so the handle and the number cannot diverge. ★ Visible only for the ACTIVE
+group's selectables ("make it only visible when the group/face/primitive is
+selected"): every latticed face casts a depth handle, but an expand handle on
+every face at once is a field of knobs.
+
+### 6 — the bottom bar, and its resulting order
+
+**`[hint (Topology only)] … [Compute] [Print Parameters] [Lattice] [Optimize]`**
+
+`Lattice` has Optimize's stature and sits to its left; it is the other thing you
+can ask the screen to DO, not a modifier on the first. It runs core's new
+`lattice_part` mode through `RunRequest.withJobMode` — the optimize request with
+ONE key changed, so the load case, resolution, material, protections and lattice
+block are the ones the user configured rather than re-authored.
+
+### 7 — CAD surfaces is a DRAWER, not a deletion
+
+★ **The removal brief was wrong about what this is, and the finding was reported
+before cutting.** `projectCADFaces` has five readers, and one is the RUN: it is
+saved in the project, travels as `output.project_cad_faces`, and core uses it to
+decide whether the exported mesh is snapped back onto the CAD geometry
+(job.cpp:1192, run_job.cpp:598). Deleting the chip would have stranded a live
+export setting stuck ON with no way to reach it.
+
+His answer was better than all three options I offered: keep it, and make it
+explain itself. The drawer carries an on/off switch and three sentences — what it
+does, what ON costs, what OFF costs — with the trade-off line switching to the
+side you are actually on. The Surface stage was never reached through this chip
+(`WorkspaceStage.forward`), so nothing became unreachable either way.
+
+### The one that bit twice
+
+Three guards assert "exactly ONE selections panel definition exists" by COUNTING
+a source substring. Splitting the panel into a column + its card tripped all
+three — so the helper was RENAMED rather than the guards edited. Then the doc
+comment explaining that decision QUOTED the searched string and tripped them
+again. **A source-text guard counts comments too.**
 
 ## PLAIN LANGUAGE
 

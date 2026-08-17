@@ -720,6 +720,20 @@ public final class ProjectModel: ObservableObject {
             Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
     }
 
+    /// ★ THE IN-PLANE EXPAND IN FORCE FOR ONE SELECTABLE (maintainer,
+    /// 2026-08-17). 0 ⇒ the slab is exactly the face it came from.
+    public func latticeExpandMM(_ ref: LatticeSelectableRef) -> Double {
+        LatticeSlabExpand.clamp(lattice.selectableExpandMM[ref.key] ?? 0)
+    }
+
+    /// Write one selectable's in-plane expand, clamped. 0 CLEARS it — "exactly
+    /// the face" must be spellable, and it is the default every older project has.
+    public func writeLatticeExpandMM(_ ref: LatticeSelectableRef, mm: Double) {
+        let v = LatticeSlabExpand.clamp(mm)
+        if v <= 0 { lattice.selectableExpandMM.removeValue(forKey: ref.key) }
+        else { lattice.selectableExpandMM[ref.key] = v }
+    }
+
     /// ★ WHAT THE FACE CARDS MUST BE DERIVED FROM (task
     /// 2026-08-17-lattice-stage-repair §2). One entry per thing the lattice panel
     /// shows a drawer for: the group itself, and every selectable inside it that
@@ -2085,8 +2099,12 @@ public final class ProjectModel: ObservableObject {
             selectableRoles: lattice.selectableRoles,
             selectableDepthMM: lattice.selectableDepthMM,
             groupDensities: lattice.groupDensities,
-            // ★ THE PER-REGION DENSITY REACHES THE JOB (maintainer, 2026-08-17).
+            // ★ THE PER-REGION DENSITY AND THE IN-PLANE EXPAND REACH THE JOB
+            // (maintainer, 2026-08-17). A control whose value no run consumes is
+            // the decorative-primitive defect — these two lines are what stop it,
+            // and `LatticeSlabExpandTests` caught this one missing.
             selectableDensity: lattice.selectableDensity,
+            selectableExpandMM: lattice.selectableExpandMM,
             resolve: resolvedLatticeFace)
     }
 
@@ -2147,6 +2165,7 @@ public final class ProjectModel: ObservableObject {
                     runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
                     groupDensities: self.lattice.groupDensities,
                     selectableDensity: self.lattice.selectableDensity,
+                    selectableExpandMM: self.lattice.selectableExpandMM,
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,

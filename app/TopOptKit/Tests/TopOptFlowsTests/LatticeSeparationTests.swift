@@ -620,8 +620,11 @@ final class LatticeSeparationTests: XCTestCase {
     func testOnlyTheDepthIsAControl() {
         let d = LatticeRegionDrawer.make(card: card(verdict: .certified),
                                          depthMM: 40, held: false)
-        XCTAssertEqual(d.modifiableRows.count, 1)
-        XCTAssertEqual(d.modifiableRows.first?.label, "Depth")
+        // ★ TWO CONTROLS SINCE 2026-08-17: the depth and the in-plane EXPAND
+        // ("I'd like a way to expand them with a handle ... x and y"). Still an
+        // EXACT list, never relaxed to "one or more" — that exactness is what
+        // stops a readout being mistaken for a control.
+        XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth", "Expand"])
     }
 
     // ─────────────────────────────────────────────────────────────────────

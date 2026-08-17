@@ -159,6 +159,23 @@ public struct RunRequest: Equatable, Sendable {
     /// screen that was produced the other way.
     public let projectCADFaces: Bool
 
+    /// ★ WHICH QUESTION THIS RUN ASKS CORE (maintainer, 2026-08-17: "a 'Lattice
+    /// This' button ... which only lattices the selection and does not
+    /// optimize").
+    ///
+    /// `"minimize_plastic"` is the optimize run and the DEFAULT, so every
+    /// existing call site and every stored request means exactly what it did.
+    /// `"lattice_part"` lattices the imported part with no optimization at all —
+    /// core's own mode, added in this task, sharing the whole downstream
+    /// pipeline (load case, certification solves, grading law, mesh emission).
+    /// ★ A `var` DELIBERATELY, and the only one on this type. `withJobMode`
+    /// copies the struct and changes this one field — a hand-written copy
+    /// initializer over ~30 fields is exactly where a dropped key hides, and
+    /// this codebase has already paid for one of those (the mesh-job-params
+    /// skeleton). Still part of the synthesized `==`, so switching modes
+    /// invalidates a stale result rather than reusing it.
+    public var jobMode: String
+
     /// True for a STEP/STP part (B-rep source). NOT a proxy for "has a load case":
     /// an STL/3MF part also carries selectable faces (segmentation pseudo-faces,
     /// handoff 134) and runs the load-case path when one is declared. Kept only to
@@ -192,7 +209,8 @@ public struct RunRequest: Equatable, Sendable {
                 lattice: LatticeSpec? = nil,
                 // Defaults to core's own default. A caller that says nothing gets
                 // the armed posture, which is the whole point of arming it.
-                projectCADFaces: Bool = true) {
+                projectCADFaces: Bool = true,
+                jobMode: String = "minimize_plastic") {
         self.modelPath = modelPath
         self.sourceFormat = sourceFormat
         self.material = material
@@ -223,6 +241,16 @@ public struct RunRequest: Equatable, Sendable {
         self.projectID = projectID
         self.lattice = lattice
         self.projectCADFaces = projectCADFaces
+        self.jobMode = jobMode
+    }
+
+    /// The same request, asking a different question of core. A COPY rather than
+    /// an in-place edit, so a request already handed to a runner cannot change
+    /// mode underneath it.
+    public func withJobMode(_ mode: String) -> RunRequest {
+        var copy = self
+        copy.jobMode = mode
+        return copy
     }
 }
 

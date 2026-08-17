@@ -79,13 +79,35 @@ public struct LatticeSDFScene {
     /// selection changes WITHOUT rebuilding the whole scene (bar A4).
     public var mesh: ViewerMesh
 
-    public init(mesh: ViewerMesh, field: StressField?, latticeID: String, maxDim: Int = 128) {
+    /// ★ `regions` CLIPS THE PREVIEW TO WHAT IS ACTUALLY SET TO LATTICE
+    /// (maintainer, 2026-08-17: "Can you confirm that the preview will only show
+    /// what is *actually* set to lattice"). It was NOT: occupancy came from the
+    /// whole part mesh and no region reached this path at all, so the struts
+    /// filled the entire interior regardless of the declarations. Empty ⇒ no
+    /// clipping, which is what the settings page's sample block needs.
+    public init(mesh: ViewerMesh, field: StressField?, latticeID: String,
+                maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
+                // ★ The band and gamma the raymarcher grades with, so a stated
+                // per-region density can be inverted into the demand value that
+                // comes back out as exactly that density (maintainer,
+                // 2026-08-17). Defaults leave every existing call unchanged.
+                rhoMin: Double = 0, rhoMax: Double = 1, gamma: Double = 1) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
-        self.occupancy = LatticePreviewOccupancy.occupancy(
-            positions: mesh.positions, indices: mesh.indices, bounds: mesh.bounds, maxDim: maxDim)
+        self.occupancy = LatticeRegionMask.clipped(
+            LatticePreviewOccupancy.occupancy(
+                positions: mesh.positions, indices: mesh.indices,
+                bounds: mesh.bounds, maxDim: maxDim),
+            to: regions)
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
-        self.demand = LatticePreviewOccupancy.demand(like: occupancy, field: field)
+        // ★ A STATED PER-REGION DENSITY OUTRANKS THE STRESS FIELD. It is the
+        // user's own number for that region; grading it by stress instead would
+        // draw struts at a density they did not ask for and the run will not
+        // build. With nothing stated this falls through to exactly what it was.
+        self.demand = LatticeRegionMask.densityDemand(
+            like: occupancy, regions: regions,
+            rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma)
+            ?? LatticePreviewOccupancy.demand(like: occupancy, field: field)
         self.bounds = mesh.bounds
         self.mesh = mesh
     }

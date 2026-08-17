@@ -423,10 +423,10 @@ JobDescription parse_job(const std::string& json_text) {
   // FINISHED variant of a completed run with NO optimization). The validation
   // stays STRICT: anything else is refused here, before any work.
   if (job.mode != "minimize_plastic" && job.mode != "analyze" &&
-      job.mode != "lattice_variant")
+      job.mode != "lattice_variant" && job.mode != "lattice_part")
     schema_fail(
-        "\"mode\" must be \"minimize_plastic\", \"analyze\" or "
-        "\"lattice_variant\" (got \"" +
+        "\"mode\" must be \"minimize_plastic\", \"analyze\", "
+        "\"lattice_variant\" or \"lattice_part\" (got \"" +
         job.mode + "\")");
   job.resolution = require_positive_int(
       require_key(root, "resolution", "the job"), "resolution");
@@ -1619,7 +1619,9 @@ JobDescription parse_job(const std::string& json_text) {
       schema_fail(
           "\"variant\" is only allowed with \"mode\": \"lattice_variant\" (got "
           "mode \"" +
-          job.mode + "\")");
+          job.mode +
+          "\"). \"lattice_part\" lattices the IMPORTED PART and selects no "
+          "variant, so it takes no \"variant\" block.");
     const JsonValue& v = require_object(*vv, "variant");
     reject_unknown_keys(v,
                         {"design", "index", "volume_fraction", "fingerprint",
@@ -1684,8 +1686,30 @@ JobDescription parse_job(const std::string& json_text) {
   } else if (job.mode == "lattice_variant") {
     schema_fail(
         "\"mode\": \"lattice_variant\" requires a \"variant\" block naming the "
-        "finished design to lattice (its run's design.bin + which rung)");
+        "finished design to lattice (its run's design.bin + which rung). To "
+        "lattice the IMPORTED PART with no optimization, use \"mode\": "
+        "\"lattice_part\", which needs no variant.");
   }
+  // ★ "lattice_part" — LATTICE THE PART AS IMPORTED, NO OPTIMIZATION (task
+  // 2026-08-17-lattice-stage-repair; maintainer: "implement a 'Lattice This'
+  // button ... which only lattices the selection and does not optimize").
+  //
+  // ★ WHY A MODE AND NOT A FLAG. `lattice_variant` is defined by the thing it
+  // selects — a finished design in a design.bin, chosen by index, fraction or
+  // fingerprint — and it REFUSES without one. There is no design here: the
+  // "design" is the part itself, every in-part voxel solid. Spelling that as a
+  // variant block with a sentinel would make `variant` mean two different kinds
+  // of thing; a mode says which question is being asked.
+  //
+  // Everything else is shared verbatim: the same load case, the same
+  // certification solves, the same grading law, the same mesh emission. Only
+  // where the density field comes from differs, which is exactly one branch in
+  // `lattice_variant_job`.
+  if (job.mode == "lattice_part" && !job.lattice.present)
+    schema_fail(
+        "\"mode\": \"lattice_part\" requires a \"lattice\" block — it exists to "
+        "lattice the imported part, and a job with no lattice work to do is a "
+        "mistake rather than a no-op");
   // A lattice_variant job with no lattice work to do is a mistake, not a no-op:
   // refuse it here rather than run three certification solves and write a file
   // identical to one the run already produced.

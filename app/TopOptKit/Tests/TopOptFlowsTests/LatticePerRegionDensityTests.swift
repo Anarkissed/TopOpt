@@ -61,11 +61,11 @@ final class LatticePerRegionDensityTests: XCTestCase {
         let off = drawer(perRegion: false)
         XCTAssertEqual(off.rows.first { $0.label == "Density" }?.kind, .fact,
                        "★ not a control when the mode does not ask for one")
-        XCTAssertEqual(off.modifiableRows.map(\.label), ["Depth"],
+        XCTAssertEqual(off.modifiableRows.map(\.label), ["Depth", "Expand"],
                        "§4b: exactly one control off per-region")
         XCTAssertEqual(drawer(perRegion: true).modifiableRows.map(\.label),
-                       ["Depth", "Density"],
-                       "§4b: exactly two under it")
+                       ["Depth", "Density", "Expand"],
+                       "§4b: exactly three under it")
         // …and the READOUT survives either way: the density is the number this
         // whole task was about and hiding it would undo that.
         XCTAssertNotNil(off.rows.first { $0.label == "Density" })

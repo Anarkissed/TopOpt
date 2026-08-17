@@ -142,6 +142,17 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
     /// control, the similar-faces double tap.
     public let surfaceEditing: Bool
 
+    /// ★ WHETHER THE BOTTOM BAR CARRIES THE SELECTION HINT (maintainer,
+    /// 2026-08-17: "remove the 'tap more faces to grow the selection...' chip
+    /// ... from both the lattice and the Surfaces stage. This should give enough
+    /// room for both Optimize and Lattice buttons").
+    ///
+    /// TRUE on Topology only. There the sentence is the one thing telling a new
+    /// user how to make a selection at all; on the other two stages a selection
+    /// already exists — that is the precondition for being there — so it is noise
+    /// occupying the width the second action button needs.
+    public var showsSelectionHint: Bool { !latticeControls && !surfaceEditing }
+
     public init(designBox: Bool, groupPrimitives: Bool, keepOuts: Bool,
                 latticeDepthPlanes: Bool, latticeControls: Bool,
                 wireframe: Bool = false, surfaceEditing: Bool = false) {

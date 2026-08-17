@@ -664,7 +664,10 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         var job: [String: Any] = [
             "model": (request.modelPath as NSString).lastPathComponent,
             "material": request.material,
-            "mode": "minimize_plastic",
+            // ★ THE RUN'S OWN MODE (maintainer, 2026-08-17). "minimize_plastic"
+            // for Optimize; "lattice_part" for the Lattice button, which
+            // lattices the selection and runs no ladder at all.
+            "mode": request.jobMode,
             "resolution": request.resolution,
             // ★ `project_cad_faces` IS SENT EXPLICITLY, ALWAYS — never omitted to
             // ride core's default (task 2026-08-06-arm-projection-and-void-check,

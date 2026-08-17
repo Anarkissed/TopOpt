@@ -252,6 +252,16 @@ public final class AppModel: ObservableObject {
         return (materialsPath, rulesPath)
     }
 
+    /// ★ THE "LATTICE" BUTTON'S REQUEST (maintainer, 2026-08-17) — the SAME
+    /// request the Optimize button builds, with one key changed. Deliberately
+    /// not a second builder: the load case, the resolution, the material, the
+    /// protections and the lattice block must be the ones the user configured,
+    /// and re-authoring them is how two front-ends drift.
+    public func makeLatticeRunRequest() -> RunRequest? {
+        guard let base = makeRunRequest() else { return nil }
+        return base.withJobMode("lattice_part")
+    }
+
     public func makeRunRequest() -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }

@@ -499,6 +499,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// every snapshot written before this task emits precisely what it did.
     public var selectableDensity: [String: Double]
 
+    /// ★ THE IN-PLANE EXPAND (maintainer, 2026-08-17: "the primitives are the
+    /// same shape as the face that they are derived from. I'd like a way to
+    /// expand them with a handle to be able to get the outside walls that might
+    /// be otherwise impossible to get latticed (i.e. the chamfer)").
+    ///
+    /// An OUTWARD margin in mm added to the slab's two in-plane half-extents —
+    /// ★ X AND Y ONLY, never the depth, which is its own control and its own
+    /// handle ("all the other axis *except* the depth that was set"). A face's
+    /// lattice slab is built from that face's own outline, so a chamfer just off
+    /// its edge falls outside it; this grows the slab past the outline to take
+    /// the surrounding wall in.
+    ///
+    /// Keyed by `LatticeSelectableRef.key`. Absent ⇒ 0 ⇒ the slab is exactly the
+    /// face, which is what every snapshot before this task emitted.
+    public var selectableExpandMM: [String: Double]
+
     // ── SUB-FLOOR RETENTION, the user's raw choices (task
     // 2026-08-05-lattice-retention-app-control). All OFF / absent by default, so
     // an untouched project emits exactly today's job (bar R1), and absent from
@@ -609,6 +625,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 selectableRoles: [String: LatticeSelectableRole] = [:],
                 selectableDepthMM: [String: Double] = [:],
                 selectableDensity: [String: Double] = [:],
+                selectableExpandMM: [String: Double] = [:],
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
@@ -643,6 +660,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.selectableRoles = selectableRoles
         self.selectableDepthMM = selectableDepthMM
         self.selectableDensity = selectableDensity
+        self.selectableExpandMM = selectableExpandMM
         if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
     }
 
@@ -663,6 +681,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // bigger than a primitive; the legacy keys below decode so a snapshot
         // written against the earlier name still opens with its choices intact.
         case selectableRoles, selectableDepthMM, selectableDensity
+        case selectableExpandMM
         case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
@@ -733,6 +752,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // density ⇒ the mode's answer, which is exactly what those emitted.
         selectableDensity = try c.decodeIfPresent([String: Double].self,
                                                   forKey: .selectableDensity) ?? [:]
+        // Absent ⇒ 0 ⇒ the slab is exactly the face, as every older snapshot.
+        selectableExpandMM = try c.decodeIfPresent([String: Double].self,
+                                                   forKey: .selectableExpandMM) ?? [:]
         // Absent from every snapshot written before this task ⇒ off / core's own
         // number ⇒ those projects keep emitting exactly the job they emitted.
         retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
@@ -772,6 +794,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(selectableRoles, forKey: .selectableRoles)
         try c.encode(selectableDepthMM, forKey: .selectableDepthMM)
         try c.encode(selectableDensity, forKey: .selectableDensity)
+        try c.encode(selectableExpandMM, forKey: .selectableExpandMM)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,

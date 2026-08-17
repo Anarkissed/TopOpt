@@ -332,7 +332,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
                        c.savedText)
         // ★ AND PR 331'S INVARIANT STILL HOLDS: adding two READ-ONLY rows must not
         // add a second control.
-        XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth"],
+        XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth", "Expand"],
                        "exactly one row is a control and it is the depth")
     }
 
@@ -353,7 +353,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         // CASE 1 — every other mode. Byte-identical to what PR 331 shipped.
         let plain = LatticeRegionDrawer.make(card: c, depthMM: 40, held: false,
                                              latticeReachesTheRun: true)
-        XCTAssertEqual(plain.modifiableRows.map(\.label), ["Depth"],
+        XCTAssertEqual(plain.modifiableRows.map(\.label), ["Depth", "Expand"],
                        "off per-region the drawer is exactly PR 331's: one "
                      + "control, the depth")
 
@@ -361,7 +361,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         let perRegion = LatticeRegionDrawer.make(card: c, depthMM: 40, held: false,
                                                  latticeReachesTheRun: true,
                                                  perRegionDensity: true)
-        XCTAssertEqual(perRegion.modifiableRows.map(\.label), ["Depth", "Density"],
+        XCTAssertEqual(perRegion.modifiableRows.map(\.label), ["Depth", "Density", "Expand"],
                        "under per-region the density is the SECOND control — and "
                      + "exactly the second, not merely 'one or more'")
 

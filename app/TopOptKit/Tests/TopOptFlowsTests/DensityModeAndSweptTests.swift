@@ -46,14 +46,14 @@ final class DensityModeAndSweptTests: XCTestCase {
         for mode in [LatticeDensityMode.auto, .uniform] {
             let d = LatticeRegionDrawer.make(card: card(), depthMM: 6, held: false,
                                              perRegionDensity: mode == .perRegion)
-            XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth"],
+            XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth", "Expand"],
                            "§8(d): \(mode.rawValue) leaves the drawer as PR 331 "
                          + "shipped it — exactly one control")
         }
         let perRegion = LatticeRegionDrawer.make(card: card(), depthMM: 6,
                                                  held: false,
                                                  perRegionDensity: true)
-        XCTAssertEqual(perRegion.modifiableRows.map(\.label), ["Depth", "Density"],
+        XCTAssertEqual(perRegion.modifiableRows.map(\.label), ["Depth", "Density", "Expand"],
                        "§8(c): per-region adds the Density control, and only it")
     }
 

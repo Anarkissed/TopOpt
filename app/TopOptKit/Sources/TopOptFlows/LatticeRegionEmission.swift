@@ -74,8 +74,15 @@ public enum LatticeRegionEmission {
     /// bolt region over its exact axial span; a plane becomes a face slab reaching
     /// `depthMM` into the part (the depth the user dragged that face's primitive
     /// to). `faceID` rides along so core can check the depth tie (§0a).
+    /// ★ `expandMM` GROWS THE SLAB IN PLANE ONLY (maintainer, 2026-08-17) — the
+    /// two half-extents perpendicular to the depth, never the depth itself. A
+    /// face's slab is exactly that face's outline, so a chamfer just off its edge
+    /// is outside it; this reaches past the outline to take the surrounding wall
+    /// in. A BOLT region has no in-plane extents to grow — its radius is its
+    /// shape — so it ignores the value rather than pretending to widen.
     public static func spec(for face: ResolvedFace, role: LatticeGroupRole,
-                            depthMM: Double, faceID: Int? = nil)
+                            depthMM: Double, faceID: Int? = nil,
+                            expandMM: Double = 0)
         -> LatticeRegionSpec? {
         switch face {
         case .cylinder(let axisPoint, let axisDir, let radius, let lo, let hi):
@@ -96,8 +103,10 @@ public enum LatticeRegionEmission {
             // slab must reach INTO the part, not out of it.
             s.origin = center
             s.normal = -ManualPrimitive.unit(normal)
-            s.halfUMM = halfU
-            s.halfWMM = halfW
+            // ★ IN PLANE ONLY. `depthMM` is untouched below.
+            let e = expandMM.isFinite && expandMM > 0 ? expandMM : 0
+            s.halfUMM = halfU + e
+            s.halfWMM = halfW + e
             s.depthMM = depthMM
             return s.isValid ? s : nil
         }
@@ -139,6 +148,10 @@ public enum LatticeRegionEmission {
                                // where the store reaches the wire. Empty ⇒ the
                                // group's, so an untouched project is unchanged.
                                selectableDensity: [String: Double] = [:],
+                               // ★ THE IN-PLANE EXPAND, per selectable
+                               // (maintainer, 2026-08-17). Empty ⇒ 0 ⇒ the slab
+                               // is exactly the face, byte-identical to before.
+                               selectableExpandMM: [String: Double] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -186,7 +199,8 @@ public enum LatticeRegionEmission {
                 let depth = selectableDepthMM[ref.key] ?? groupDepth
                 if let r = resolve(f),
                    var s = spec(for: r, role: role, depthMM: depth,
-                                faceID: runFaceID(f)) {
+                                faceID: runFaceID(f),
+                                expandMM: selectableExpandMM[ref.key] ?? 0) {
                     // The face's own resolved role, same gate as the primitives
                     // above — see the note there on group- vs selectable-keying.
                     s.relativeDensity = density(

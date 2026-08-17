@@ -53,6 +53,9 @@ public struct LatticeDrawerRow: Equatable, Sendable {
         /// The relative density, as a PERCENT in the UI and a fraction in the
         /// model. Typeable only, and only under the per-region mode.
         case density
+        /// ★ THE IN-PLANE EXPAND, in mm (maintainer, 2026-08-17) — how far the
+        /// slab reaches PAST the face it came from, in x and y, never in depth.
+        case expand
     }
 
     /// One or two words.
@@ -67,7 +70,7 @@ public struct LatticeDrawerRow: Equatable, Sendable {
     /// looked on screen.
     public var unit: String {
         switch kind {
-        case .depth: return "mm"
+        case .depth, .expand: return "mm"
         case .density: return "%"
         case .fact: return ""
         }
@@ -154,7 +157,8 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
     public static func make(card: LatticeFaceCard?, depthMM: Double,
                             held: Bool,
                             latticeReachesTheRun: Bool = true,
-                            perRegionDensity: Bool = false) -> LatticeRegionDrawer {
+                            perRegionDensity: Bool = false,
+                            expandMM: Double = 0) -> LatticeRegionDrawer {
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
                 headline: Headline(text: "Frozen, not latticed", verdict: .outOfRegime),
@@ -218,6 +222,13 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                              kind: perRegionDensity ? .density : .fact),
             LatticeDrawerRow(label: "Strut", value: c.strutText),
             LatticeDrawerRow(label: "Cells across", value: c.cellsText),
+            // ★ HOW FAR THIS SLAB REACHES PAST ITS FACE (maintainer,
+            // 2026-08-17). A second CONTROL, in mm like the depth, and the only
+            // other one — it grows x and y, never the depth. 0 mm is "exactly the
+            // face", which is what every project had before it existed.
+            LatticeDrawerRow(label: "Expand",
+                             value: String(format: "%.1f mm", expandMM),
+                             kind: .expand),
         ]
         return LatticeRegionDrawer(headline: head, collapsedValue: c.heldText,
                                    verdict: c.verdict, rows: rows, held: held)
@@ -246,7 +257,7 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
     /// ★ §4b, as a property rather than a convention. TWO EXACT CASES, never
     /// relaxed to "one or more" — the invariant's job is to stop a readout being
     /// mistaken for a control, and a loose bound does not do that job:
-    ///   * not per-region → EXACTLY ["Depth"]
-    ///   * per-region     → EXACTLY ["Depth", "Density"]
+    ///   * not per-region → EXACTLY ["Depth", "Expand"]
+    ///   * per-region     → EXACTLY ["Depth", "Density", "Expand"]
     public var modifiableRows: [LatticeDrawerRow] { rows.filter(\.modifiable) }
 }
