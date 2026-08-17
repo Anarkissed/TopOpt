@@ -133,11 +133,49 @@ Asserted **in both directions**, plus the protection tie (R3):
 | R2 auto density honest | ⬜ not started |
 | R3 depth ⇄ handle, both directions + protection | ✅ 5 assertions |
 | R4 one region certifies end to end | ⬜ blocked on §1 |
-| R5 nothing regresses | ✅ 1538 app tests, 0 failures |
+| R5 nothing regresses | ✅ 1538 app tests, 0 failures — enumerated below |
 | R6 root cause with file and line | ✅ §1 and §2 both |
 | R7 no assertion weakened or deleted | ✅ census below |
 | R8 cost measured directly, Release verified | ✅ `CMAKE_BUILD_TYPE=Release`; no wall-clock claim made |
 | R9 no placeholders, no root scratch | ✅ |
+
+### R5 — the four things that already work, enumerated and re-run
+
+The whole 1538-test suite is green, but R5 asks for these four by name, so they
+are named and their guards were re-run against the rebuilt core:
+
+| what must not regress | guard | result |
+|---|---|---|
+| the error badge, counting BOTH failures | `LatticeForecastTests` (12) | ✅ |
+| the blue Topology button under the project name | `LatticesAreInTheAppGateTests` (3) | ✅ |
+| the face/surface stage — "I can finally choose per face" | `FaceRegionTests` (26) + `LatticeSeparationRegionTests` (12) | ✅ |
+| the render work | `ViewerTests` (33) + `ViewerVisibilityRegressionTests` (2) | ✅ |
+
+★ The face stage is the one this change actually touches — the per-selectable
+drawer is the same surface — so its two suites are the load-bearing ones here,
+and `LatticeSeparationRegionTests` drives the region/face pair specifically.
+
+### ★ THE SIMULATOR IN THIS WORKTREE CANNOT IMPORT STEP — SAID, NOT GLOSSED
+
+The app builds and launches on the iPad Pro 13" simulator with this fix in it.
+It cannot open `M2_verticalStand.step` there, because this worktree's iOS core
+slice is built **OCCT-free** (`build_core.sh`: `ios-arm64-simulator (Eigen,
+OCCT-free)`). That is the pre-existing gap memory
+`viewer-blank-on-sim-is-occt-import-gap` describes, NOT anything this change
+caused, and it is why the §0(c) reproduction is analytic rather than on-device.
+
+A shortcut — symlinking the main checkout's `.build-occt-ios/install`,
+`vendor/occt-ios`, `vendor/lib3mf-ios` and `occt-frameworks.generated.json` —
+got the core slice built WITH OCCT but the app still failed to link (47 OCCT
+symbols undefined; `swift package describe` showed 1 binary target, not 48, so
+the manifest never declared them through the symlinked tree). It was REVERTED
+rather than left half-wired, and the core was rebuilt back to the OCCT-free
+slice (EXIT=0, all three slices vendored, 118 lattice/region/viewer tests
+re-run green afterwards). The supported path, not yet run here:
+
+```
+./app/scripts/build_occt_ios.sh && ./app/scripts/build_core.sh
+```
 
 ---
 
