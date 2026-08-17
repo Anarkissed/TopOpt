@@ -50,11 +50,17 @@ public struct SurfaceInputDiscipline: Equatable, Sendable {
     /// The maintainer's toggle: editing to the pencil, camera to the fingers.
     public let pencilOnly: Bool
 
-    /// ★ §2(c) — HAS THIS DEVICE EVER PRODUCED A PENCIL CONTACT?
+    /// HAS THIS DEVICE EVER PRODUCED A PENCIL CONTACT?
     ///
     /// There is no public "is an Apple Pencil paired" API; the only honest signal
     /// is a `UITouch` whose `type` is `.pencil`, which the view already partitions
     /// its recognizers by. So the app learns this by being touched.
+    ///
+    /// ★ IT NO LONGER DECIDES ANYTHING. It used to gate `enforced`; now it picks
+    /// which of the tray's two hint lines is shown — see `pencilAbsent`. Kept
+    /// because "a pencil has never touched this screen" is the one case where the
+    /// user needs to be told where the escape is, and that is worth a line of its
+    /// own rather than a generic one.
     public let pencilSeen: Bool
 
     public init(pencilOnly: Bool, pencilSeen: Bool) {
@@ -67,19 +73,33 @@ public struct SurfaceInputDiscipline: Equatable, Sendable {
     public static let off = SurfaceInputDiscipline(pencilOnly: false,
                                                    pencilSeen: false)
 
-    /// ★ §2(c) — THE BUTTON MUST NOT STRAND A FINGER-ONLY USER.
+    /// ★★ LATCHED MEANS ENFORCED. No pencil-seen precondition.
     ///
-    /// Turning it on with no pencil ever seen would leave a stage that refuses to
-    /// edit and offers no other way in — the one outcome §2(c) forbids. So the
-    /// separation is only ENFORCED once a pencil has actually touched the glass.
-    /// The toggle still latches (it is a preference, and it is the user's), and
-    /// the tray says out loud that it is waiting — see `waitingForPencil`.
-    public var enforced: Bool { pencilOnly && pencilSeen }
+    /// ── AND THE GATE THAT USED TO BE HERE ────────────────────────────────────
+    ///
+    /// This read `pencilOnly && pencilSeen`: the separation waited until a `.pencil`
+    /// touch had actually arrived, so that latching it on a device with no pencil
+    /// could not leave a stage that refuses to edit with the only input the user
+    /// has. ★ THAT REASONING WAS SOUND AND IS NOT OVERRULED — it is SUPERSEDED,
+    /// because the stranding it guarded against cannot happen: the TOGGLE ITSELF is
+    /// not routed through this discipline, so a finger can always untick it, and it
+    /// is always on screen. It is its own escape hatch. (Maintainer: "the checkbox
+    /// can be UNCHECKED with a finger or a pencil." Gated by
+    /// `SurfacePencilToggleExemptionTests`, which fail if anyone ever routes it
+    /// through.)
+    ///
+    /// ★ AND THE WAIT WAS NOT MERELY REDUNDANT, IT WAS THE DEFECT. Pencil mode
+    /// exists for Jul 31 item (4) — "Moving the camera while modifying a primitive
+    /// is very difficult; touches suddenly change the primitive's location/size/
+    /// angle." Waiting for a pencil leaves a window at the START OF EVERY SESSION
+    /// in which a stray finger can still move the thing you are working on: exactly
+    /// the case the mode was built to eliminate, still live in the first seconds,
+    /// every time.
+    public var enforced: Bool { pencilOnly }
 
-    /// On, but inert because nothing has ever written on this screen with a
-    /// pencil. The tray's hint line reads this rather than leaving the button lit
-    /// over a stage where nothing changed.
-    public var waitingForPencil: Bool { pencilOnly && !pencilSeen }
+    /// On, and no pencil has ever touched this screen. The tray's hint line reads
+    /// this to pick the more helpful of its two lines.
+    public var pencilAbsent: Bool { pencilOnly && !pencilSeen }
 
     /// ★ THE ONE ROUTING DECISION. Every recognizer asks this.
     public func admits(_ contact: SurfaceContact, _ intent: SurfaceIntent) -> Bool {

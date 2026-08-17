@@ -202,30 +202,53 @@ final class SurfaceInputDisciplineTests: XCTestCase {
                       "★ and nothing withholds them from the pencil either")
     }
 
-    /// ★ §2(c) — A DEVICE WITH NO PENCIL PAIRED IS NEVER STRANDED.
+    /// ★★ ADDENDUM §1 — LATCHED MEANS ENFORCED, WITH NO PENCIL-SEEN PRECONDITION.
     ///
-    /// There is no "is a pencil paired" API to ask, so the only honest signal is a
-    /// pencil contact having been seen. Until one has, the toggle latches (it is
-    /// the user's preference) but withholds NOTHING — a finger goes on editing.
-    func testWithNoPencilEverSeenTheModeWithholdsNothing() {
+    /// ★ THIS REPLACES AN ASSERTION THAT SAID THE OPPOSITE, BY RULING, NOT BY
+    /// WEAKENING. `testWithNoPencilEverSeenTheModeWithholdsNothing` used to assert
+    /// `enforced == false` and `admits(.finger, .edit) == true` before a pencil had
+    /// been seen. The maintainer's ruling: "ENFORCE IMMEDIATELY WHEN THE TOGGLE IS
+    /// LATCHED."
+    ///
+    /// ★ AND THE REASON IS THE ORIGINAL PURPOSE, NOT A PREFERENCE. Jul 31 item (4):
+    /// "Moving the camera while modifying a primitive is very difficult — touches
+    /// suddenly change the primitive's location/size/angle." Pencil mode exists to
+    /// stop accidental finger edits, and a wait-for-pencil gate leaves a window at
+    /// the start of every session where exactly that can still happen — the case it
+    /// was built to eliminate.
+    ///
+    /// ★ WHAT MAKES IT SAFE is not this type: it is that the TOGGLE itself is not
+    /// routed through the discipline, so a finger can always untick it. See
+    /// `SurfacePencilToggleExemptionTests`.
+    func testLatchingEnforcesImmediatelyWithNoPencilEverSeen() {
         let d = SurfaceInputDiscipline(pencilOnly: true, pencilSeen: false)
-        XCTAssertFalse(d.enforced, "★ nothing is separated yet")
-        XCTAssertTrue(d.waitingForPencil, "★ and the stage says so")
-        XCTAssertTrue(d.admits(.finger, .edit),
-                      "★ THE ONE OUTCOME §2(c) FORBIDS: a stage that refuses to "
-                      + "edit with the only input the user has")
-        XCTAssertTrue(d.admits(.finger, .camera))
+        XCTAssertTrue(d.enforced,
+                      "★ latched IS enforced — no pencil-seen precondition")
+        XCTAssertFalse(d.admits(.finger, .edit),
+                       "★ THE MIRROR HALF OF §2(c): with the mode latched a finger "
+                       + "does NOT edit, from the very first touch of the session")
+        XCTAssertTrue(d.admits(.finger, .camera),
+                      "…but fingers still move the view (§3a, unchanged)")
+        XCTAssertFalse(d.admits(.pencil, .camera))
+        XCTAssertTrue(d.admits(.pencil, .edit))
     }
 
-    /// And the moment a pencil does touch the glass, the separation engages
-    /// without the user having to press anything again.
-    func testSeeingAPencilEngagesTheModeThatWasAlreadyOn() {
-        let waiting = SurfaceInputDiscipline(pencilOnly: true, pencilSeen: false)
-        let seen = SurfaceInputDiscipline(pencilOnly: waiting.pencilOnly,
-                                          pencilSeen: true)
-        XCTAssertFalse(waiting.enforced)
-        XCTAssertTrue(seen.enforced)
-        XCTAssertFalse(seen.waitingForPencil)
+    /// Whether a pencil has been seen no longer decides ANYTHING about enforcement —
+    /// the two states are identical. `pencilSeen` survives only to pick the more
+    /// helpful of the two hint lines.
+    func testSeeingAPencilNoLongerChangesWhatIsEnforced() {
+        let unseen = SurfaceInputDiscipline(pencilOnly: true, pencilSeen: false)
+        let seen = SurfaceInputDiscipline(pencilOnly: true, pencilSeen: true)
+        XCTAssertEqual(unseen.enforced, seen.enforced, "★ identical")
+        for contact in [SurfaceContact.finger, .pencil] {
+            for intent in [SurfaceIntent.edit, .camera, .undoRedo] {
+                XCTAssertEqual(unseen.admits(contact, intent),
+                               seen.admits(contact, intent),
+                               "★ \(contact)/\(intent) must not depend on pencilSeen")
+            }
+        }
+        XCTAssertTrue(unseen.pencilAbsent, "★ but the STAGE still says which it is")
+        XCTAssertFalse(seen.pencilAbsent)
     }
 
     /// A pencil seen with the mode OFF changes nothing — the signal is not the
@@ -235,6 +258,121 @@ final class SurfaceInputDisciplineTests: XCTestCase {
         XCTAssertFalse(d.enforced)
         XCTAssertTrue(d.admits(.finger, .edit))
         XCTAssertTrue(d.admits(.pencil, .camera))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: ★★ ADDENDUM §2 — THE TOGGLE IS EXEMPT FROM THE DISCIPLINE IT TURNS ON
+//
+// His exact condition: "the checkbox can be UNCHECKED with a finger or a pencil."
+// That is what makes immediate enforcement safe — latch it with no pencil and the
+// stage refuses to edit, but the one control that turns it off still answers to a
+// finger, and it is always on screen.
+//
+// ★ AND IT WAS ALREADY EXEMPT — NO GUARD WAS ADDED, because none was needed. §2(a):
+// "if it is an ordinary control outside the stage's gesture layer, NOTHING IS
+// NEEDED and you should say so rather than adding a guard that guards nothing."
+// The discipline is consulted ONLY by the MTKView's own gesture recognizers; the
+// pencil button is a SwiftUI `Button` in `surfaceToolsPanel`, a sibling view above
+// that MTKView, which consumes its own hit test and never reaches a recognizer.
+//
+// ★ SO THE PROTECTION IS A GATE ON THE SOURCE, NOT A BRANCH IN THE CODE. What must
+// never happen is somebody LATER routing the toggle through the discipline — the
+// exact mistake `undoRedo`'s named case protects against. These tests fail if that
+// ever happens, which is the only place the guarantee can live given that the
+// correct implementation is the ABSENCE of a check.
+
+final class SurfacePencilToggleExemptionTests: XCTestCase {
+
+    private func source(_ name: String) throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()      // TopOptFlowsTests
+            .deletingLastPathComponent()      // Tests
+            .deletingLastPathComponent()      // TopOptKit
+            .appendingPathComponent("Sources/TopOptFlows/\(name)")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// ★ §2(c), FIRST HALF — WITH THE MODE LATCHED AND NO PENCIL EVER SEEN, A
+    /// FINGER CAN STILL UNCHECK IT.
+    ///
+    /// The toggle's whole action is `surfacePencilOnly.toggle()`. Nothing else, and
+    /// nothing conditional: no discipline, no contact kind, no pencil-seen check.
+    /// A SwiftUI Button takes a finger tap on any device, so this IS the escape.
+    func testTheToggleActionIsUnconditionalAndAsksNothingAboutTheContact() throws {
+        let src = try source("WorkspacePlaceholder.swift")
+        XCTAssertTrue(src.contains("Button { surfacePencilOnly.toggle() } label: {"),
+                      "★ the pencil button's action must stay a bare toggle — a "
+                      + "finger tap on it can never be refused")
+        // ★ EXACTLY TWO THINGS WRITE THE LATCH: its `@State` declaration's initial
+        // value, and the button. A third writer is a third way for the mode to
+        // change that neither this test nor the user has seen.
+        let writes = src.components(separatedBy: "surfacePencilOnly")
+            .dropFirst()
+            .filter { $0.hasPrefix(".toggle()") || $0.hasPrefix(" = ") }
+        XCTAssertEqual(writes.count, 2,
+                       "★ the declaration (`= false`) and the button (`.toggle()`), "
+                       + "and nothing else: got \(writes.map { $0.prefix(12) })")
+        XCTAssertTrue(src.contains("@State private var surfacePencilOnly = false"),
+                      "★ and it is still OFF by default (§3b, unchanged)")
+    }
+
+    /// ★ AND THE TOGGLE IS NOT ROUTED THROUGH THE DISCIPLINE. Every consultation of
+    /// `admits(_:_:)` lives in the MTKView's recognizers; none is anywhere near the
+    /// tray that holds the button.
+    func testTheDisciplineIsNeverConsultedInTheToolTray() throws {
+        let src = try source("WorkspacePlaceholder.swift")
+        // ★ ISOLATE THE TRAY'S OWN BODY, and only it. The end marker is the NEXT
+        // property declaration at the type's indentation — the first slice I wrote
+        // looked for `// MARK:` and ran hundreds of lines past the panel into the
+        // hint line's own property, where a legitimate `surfaceDiscipline` read
+        // lives. A mis-scoped gate reports someone else's code as this one's defect.
+        guard let start = src.range(of: "private var surfaceToolsPanel: some View {")
+        else { return XCTFail("the tools panel moved — re-point this gate") }
+        let rest = src[start.upperBound...]
+        let end = rest.range(of: "\n    @ViewBuilder private var")
+            ?? rest.range(of: "\n    private var")
+        let tray = String(rest[rest.startIndex..<(end?.lowerBound ?? rest.endIndex)])
+        // A runaway-slice guard, generously above the panel's real size (126 lines,
+        // ~6.7 k chars — it is five tool buttons and three switches with their
+        // styling). The next property is 27 k further on, so this only ever fires if
+        // the end marker stops matching.
+        XCTAssertLessThan(tray.count, 12_000,
+                          "★ the slice must be the PANEL, not half the file")
+
+        XCTAssertTrue(tray.contains("surfacePencilOnly.toggle()"),
+                      "the button really is in this slice")
+        XCTAssertFalse(tray.contains("admits("),
+                       "★ THE TRAY MUST NOT ASK THE DISCIPLINE ANYTHING. Routing "
+                       + "the toggle through it would let pencil mode withhold its "
+                       + "own off switch — the stranding case §2 exists to prevent")
+        XCTAssertFalse(tray.contains("surfaceDiscipline"),
+                       "★ nor read it by any other name")
+        XCTAssertFalse(tray.contains("pencilSeen"),
+                       "★ and the button must not be gated on a pencil having been "
+                       + "seen either — that is the gate the addendum removed")
+    }
+
+    /// ★ THE DISCIPLINE'S CONSULTATIONS ARE ALL IN THE GESTURE LAYER, and there are
+    /// only the intents PR 339 named. A fourth intent appearing here without a test
+    /// is how the toggle would quietly acquire a gate.
+    func testEveryDisciplineConsultationIsInTheGestureLayer() throws {
+        let workspace = try source("WorkspacePlaceholder.swift")
+        let asks = workspace.components(separatedBy: "surfaceDiscipline.").dropFirst()
+        // The page reads it to BUILD the value and to pick a hint line; it never
+        // asks `admits` — only the recognizers do.
+        for a in asks {
+            XCTAssertFalse(a.hasPrefix("admits("),
+                           "★ the page must not gate anything on the discipline "
+                           + "itself; that belongs to the MTKView's recognizers")
+        }
+        let mesh = try source("MetalMeshView.swift")
+        let intents = ["edit", "camera", "undoRedo"]
+        for m in mesh.components(separatedBy: "inputDiscipline.admits(").dropFirst() {
+            let arg = m.prefix(while: { $0 != ")" })
+            XCTAssertTrue(intents.contains(where: { arg.contains(".\($0)") }),
+                          "★ unknown intent consulted: \(arg)")
+        }
     }
 }
 

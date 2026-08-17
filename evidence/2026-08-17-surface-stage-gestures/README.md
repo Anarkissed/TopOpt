@@ -39,3 +39,22 @@ all — there is no pencil hardware, so no `.pencil` `UITouch` can arrive. See t
 | `r7_longest_string.txt` | R7 — the longest string added and its word count. |
 | `r8_assertion_census.txt` | R8 — every deleted line, read whole; no assertion deleted or weakened. |
 | `r5_full_suite.txt` | R5 — the whole package suite, so nothing that already worked regressed. |
+
+---
+
+# ADDENDUM — pencil mode enforces immediately; the toggle is the escape
+
+| File | What it shows |
+|---|---|
+| `08_latched_finger_does_not_edit.png` | Latched with a finger on a simulator that has no pencil: the hint reads *"Pencil edits. No pencil here — tap this again to use fingers."* and a finger tap on a face selects **nothing**. Enforcement is immediate. |
+| `09_a_finger_unlatched_it.png` | ★ THE ESCAPE HATCH, live: the same finger taps the button again and the mode unlatches — the hint returns to *"Tap a face to select it."* This is §2(c)'s first half on the device. |
+| `10_editing_works_again_after_unlatching.png` | And the face selects again. The loop closes. |
+| `addendum_r1_failing_first.txt` | R1 — the failing-first run, 6 failures on the mirror half of §2(c) before the change. |
+| `addendum_r2_hint_text.txt` | R2 — the removed line, the two new lines, char and word counts. |
+| `addendum_r4_full_suite.txt` | R4 — 1795 tests, 24 skipped, **0 failures**, and the verified `topopt_cli` rebuild (R6). |
+| `addendum_r5_assertion_census.txt` | R5 — all seven removed assertions accounted for one by one. |
+
+★ Still not injectable by this harness: a pencil contact (no simulator can produce one), so
+the *pencil* half of the discipline remains covered by `SurfaceInputDisciplineTests` rather
+than by a screenshot. Everything a **finger** does under the latched mode is demonstrated
+above.

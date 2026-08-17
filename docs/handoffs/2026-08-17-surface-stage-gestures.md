@@ -262,6 +262,155 @@ build-environment provisioning; none is a repository change.
 
 ---
 
+# ADDENDUM — pencil mode enforces immediately; the toggle is the escape
+
+One behavioural change to PR 339. The button, the latch, the preference and the
+`SurfaceIntent` / `admits(_:_:)` structure all stand.
+
+## The one-liners
+
+**Did the toggle need an exemption, or did it already have one? ★ IT ALREADY HAD ONE —
+no guard was added, because none was needed.** Every consultation of the discipline is
+inside `MetalMeshView`'s own gesture recognizers; the pencil button is a SwiftUI `Button`
+in `surfaceToolsPanel`, a sibling view above that MTKView, which consumes its own hit test
+and never reaches a recognizer. §2(a) says to say so rather than add a guard that guards
+nothing, so I did not add `.modeToggle` to `SurfaceIntent`. The guarantee lives instead in
+three gates in `SurfacePencilToggleExemptionTests`, which fail if anyone ever routes the
+toggle through the discipline — the same class of protection `undoRedo`'s named case gives,
+placed where the correct implementation is the *absence* of a check.
+
+**The new hint text.** Two lines, picked by whether a pencil has ever touched this screen:
+*"Pencil edits, fingers move the view."* (36 chars, **6 words**) when one has, and
+*"Pencil edits. No pencil here — tap this again to use fingers."* (61 chars, **12 words**)
+when none has — that user cannot edit at all, and the one thing they need is where the
+escape is. The old line, *"Pencil only — no pencil seen yet, so fingers still edit."*,
+became false the moment enforcement went immediate and was replaced, not kept.
+
+**Undo/redo and the rest of PR 339 are unchanged** —
+`testUndoAndRedoSurvivePencilModeFromEitherContact` still passes, and so does every other
+PR 339 test; the taps, the detents, the visibility assertions and the disambiguation table
+were not touched. Enumerated under R4.
+
+## §1 — the wait-for-pencil gate is gone
+
+`enforced` was `pencilOnly && pencilSeen`; it is now `pencilOnly`. Latched means enforced,
+from the first touch of the session.
+
+★ **My no-pencil-paired reasoning was sound and the guard was right to write — it is
+superseded by §2, not overruled.** The stranding it prevented (latch it with no pencil, the
+stage goes inert, no way back) genuinely cannot happen, because the toggle answers to a
+finger and is always on screen. Both the reasoning and the reason it no longer applies are
+kept in `SurfaceInputDiscipline.enforced`'s own doc comment rather than deleted.
+
+★ **And the wait was not merely redundant, it was the defect.** Pencil mode exists for
+Jul 31 item (4) — *"Moving the camera while modifying a primitive is very difficult;
+touches suddenly change the primitive's location/size/angle."* Waiting for a pencil left a
+window at the **start of every session** in which a stray finger could still move the thing
+being worked on: exactly the case the mode was built to eliminate, live in the first
+seconds, every time.
+
+`pencilSeen` survives but no longer decides anything about enforcement — it picks which of
+the two hint lines is shown, which is why it was kept rather than deleted, and
+`testSeeingAPencilNoLongerChangesWhatIsEnforced` asserts it changes nothing else across
+every contact × intent pair. `waitingForPencil` was renamed `pencilAbsent`, since nothing
+waits any more.
+
+## The bars
+
+**R1 — failing test first for both halves of §2(c).** Captured in
+`addendum_r1_failing_first.txt`. The mirror half failed exactly as it should:
+
+```
+testLatchingEnforcesImmediatelyWithNoPencilEverSeen
+  XCTAssertTrue failed  - ★ latched IS enforced — no pencil-seen precondition
+  XCTAssertFalse failed - ★ THE MIRROR HALF OF §2(c): with the mode latched a
+                            finger does NOT edit, from the very first touch
+testSeeingAPencilNoLongerChangesWhatIsEnforced
+  XCTAssertEqual failed: ("false") is not equal to ("true")  - ★ identical
+  XCTAssertEqual failed: ("true") is not equal to ("false")  - ★ finger/edit
+                            must not depend on pencilSeen
+  Executed 6 tests, with 6 failures
+```
+
+★ **The first half could not fail first, and I did not manufacture a failure.** "With the
+mode latched and no pencil ever seen, a finger unchecks the toggle" was *already true* —
+that is R3's answer. Its three gates passed on arrival (`Executed 3 tests, with 0
+failures` in the same run), and §2(a) anticipates exactly this outcome. Instead of a
+synthetic failure I demonstrated it on the device, which is stronger:
+
+| Step (all with a finger, on a simulator with no pencil in existence) | Result |
+|---|---|
+| Latch the toggle | hint: *"Pencil edits. No pencil here — tap this again to use fingers."* — `08` |
+| Tap a face | **nothing selects** — enforcement is immediate — `08` |
+| Tap the toggle again | **it unlatches**; hint returns to *"Tap a face to select it."* — `09` |
+| Tap a face | selects again — `10` |
+
+Two of my gates were mis-scoped on their first run and I fixed the gates, not the product:
+the tray slice ended on `// MARK:` and ran ~27 k characters past the panel into the hint
+line's own legitimate `surfaceDiscipline` read, and the writer count forgot that the
+`@State` declaration is itself a write. Both are recorded in the test comments so the next
+person does not repeat them.
+
+**R2 — the hint text and its word count.** `addendum_r2_hint_text.txt`; 6 words and 12
+words, quoted above. Longest new shipped string 61 chars.
+
+**R3 — was the toggle already exempt?** ★ **Yes. No guard was added.** The routing evidence
+is above and gated by `testTheDisciplineIsNeverConsultedInTheToolTray`,
+`testTheToggleActionIsUnconditionalAndAsksNothingAboutTheContact` and
+`testEveryDisciplineConsultationIsInTheGestureLayer`.
+
+**R4 — PR 339 confirmed unchanged.** Not assumed; re-run.
+
+| PR 339 behaviour | Confirmed by |
+|---|---|
+| Undo/redo survive pencil mode | `testUndoAndRedoSurvivePencilModeFromEitherContact` — passes |
+| Off by default, both contacts do everything | `testOffByDefaultBothContactsDoEverything` |
+| On: editing pencil-only, camera fingers-only | `testOnSeparatesEditingFromCameraMovement` |
+| Seeing a pencil does not turn the mode on | `testSeeingAPencilDoesNotTurnTheModeOn` |
+| §1 taps: one face / the ones like it / §1(e) disambiguation | `SurfaceTapMeaningTests`, 7 tests |
+| §3 detents, free angles, idempotence | `SurfaceCutDetentTests`, 7 tests |
+| §4 one visibility test per stage | `ThreeStageVisibilityTests`, 5 tests |
+| Wireframe, x-ray, pattern tool, the cut, tool tray, default tool, ¼ turn | `SurfaceStageNoRegressionTests`, 4 tests |
+| The measured match count on his part | `SurfaceDoubleTapMatchEvidence` — 24-of-78 still asserted |
+
+**R5 — assertion census.** `addendum_r5_assertion_census.txt`, read whole. Seven assertions
+were removed and **every one is accounted for individually**: three are pure renames
+(`waitingForPencil` → `pencilAbsent`) still asserting the same fact, one was kept and
+*gained* a message, one was subsumed by a strictly stronger assertion, and **two were
+inverted by the maintainer's explicit ruling** — not weakened, but made as the opposite
+claim, just as loudly. The concern the inverted pair encoded did not go unguarded: it moved
+to the three toggle-exemption gates. 19 `XCTAssert` lines added, 7 removed. No production
+guard, refusal or `return` was deleted; the only production deletion is the `&& pencilSeen`
+conjunct, which *is* the ruling.
+
+**R6 (housekeeping, not a bar) — the local `topopt-cli` is rebuilt.** ★ And it was the
+documented trap, for the fifth time: `--target topopt-cli` no-ops silently (that hyphenated
+name is the output *file*, so make calls it up to date); the real target is `topopt_cli`.
+Rebuilt with the underscore and verified the binary actually moved rather than trusting the
+exit code — sha256 `66d1c76ca005b4e8…` → `3b6b0bbe767624f0…`, mtime 7 Aug → 17 Aug.
+`testCoreCLIParsesTheEmittedRegions` now passes, so the phantom `unknown key "plsm"`
+failure is gone for good rather than merely explained.
+
+## §3 — what did not change
+
+Camera movement is still fingers-only under the discipline; the addendum changes *when* it
+engages, not *what* it does. Off by default, unchanged. Nothing else in PR 339 moved. The
+bottom-right control stack, the lattice stage and `core/` were not touched — `git diff
+--stat` for the addendum alone:
+
+```
+ SurfaceInputDiscipline.swift    |  44 ++--   `enforced`, and `pencilAbsent`
+ WorkspacePlaceholder.swift      |  24 +--    the hint line, and nothing else
+ SurfaceStageGesturesTests.swift | 178 ++++-- the ruling + the 3 exemption gates
+ 3 files changed, 205 insertions(+), 41 deletions(-)
+```
+
+Three files, and one of them is the tests. `MetalMeshView.swift` — the gesture layer — is
+untouched by the addendum: the recognizers already asked `admits(_:_:)`, and only what that
+answers changed.
+
+---
+
 ## In plain language
 
 Four things changed on the Surface stage, and none of them changed how it looks or how it
@@ -275,10 +424,19 @@ happens. Double tap only means this while the Select tool is armed; with the sci
 the grid out, two taps are just two taps, as before.
 
 **There is a new pencil button.** Off, everything works as it does today. On, the pencil
-does the editing and fingers move the view — which is what he asked for back in July. If
-no pencil has ever touched the screen, the button does not lock him out; it says so, and
-fingers keep working until a pencil actually shows up. Undo and redo are finger gestures
-and they keep working either way, because undoing is not editing.
+does the editing and fingers move the view — which is what he asked for back in July.
+
+It takes effect **the moment you press it**, not once a pencil turns up. I had built it the
+cautious way first: wait for a real pencil touch, so nobody could lock themselves out of a
+stage they had no pencil for. He was right that this was backwards. The whole reason the
+mode exists is the complaint that a stray finger moves the thing you are working on — and
+waiting left that hole open at the start of every single session, which is precisely the
+moment you are most likely to brush the screen. Nobody gets locked out either, because the
+button that turned it on always answers to a finger and is always sitting there. It is its
+own way back.
+
+Undo and redo are finger gestures and they keep working either way, because undoing is not
+editing.
 
 **The cut's rotate knob now really has detents.** It used to *look* like it had them and
 actually behave like a 15° stepper — you could not ask for 37°. Now it lands on the 15s if

@@ -4952,16 +4952,22 @@ public struct WorkspacePlaceholder: View {
     /// tool that accumulates has to say how much it has — otherwise a tap that did
     /// not register and a tap that did look identical.
     private var surfaceHint: String {
-        // ★ §2(c) — SAY IT OUT LOUD WHEN THE MODE IS ON AND INERT. The button
-        // latches whether or not a pencil has ever been seen, because it is a
-        // preference; but a lit button over a stage where nothing changed is a lie.
-        // This is the line that keeps the mode from stranding anybody.
+        // ★ THE MODE IS ON: SAY WHAT IT IS DOING, AND WHERE THE WAY OUT IS.
         //
-        // ★ AND ONLY IN THAT CASE. Once a pencil has been seen the mode is doing
-        // what the lit button says, so the line goes back to the tool — the stage
-        // carries one line of text and it belongs to whatever is armed.
-        if surfaceDiscipline.waitingForPencil {
-            return "Pencil only — no pencil seen yet, so fingers still edit."
+        // The old line here read "Pencil only — no pencil seen yet, so fingers still
+        // edit." ★ THAT BECAME FALSE THE MOMENT ENFORCEMENT WENT IMMEDIATE, so it is
+        // replaced rather than kept: fingers no longer edit, from the first touch.
+        //
+        // ★ TWO LINES, AND THE DIFFERENCE IS WHO NEEDS WHICH. With a pencil in play
+        // the rule is the whole story. With no pencil ever seen the stage cannot be
+        // edited at all, and the ONE thing that user needs is where the escape is —
+        // this button, which takes a finger. Saying "tap this again" beats a generic
+        // line, and it is why `pencilSeen` still exists at all.
+        if surfaceDiscipline.pencilAbsent {
+            return "Pencil edits. No pencil here — tap this again to use fingers."
+        }
+        if surfaceDiscipline.enforced {
+            return "Pencil edits, fingers move the view."
         }
         // ★ THE COUNT IS SHOWN EVEN AT ZERO. Otherwise a tap that TOGGLED A PIECE
         // OFF and a tap that never registered read identically — both fall back to
