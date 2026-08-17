@@ -711,22 +711,51 @@ public final class ProjectModel: ObservableObject {
     /// region whose members have gone) contributes nothing rather than a card
     /// about a face it does not own.
     public func latticeCardInputs()
-        -> [(key: String, faceID: Int, depthMM: Double)] {
-        var out: [(key: String, faceID: Int, depthMM: Double)] = []
+        -> [(key: String, faceID: Int, depthMM: Double, declaredDensity: Double?)] {
+        var out: [(key: String, faceID: Int, depthMM: Double,
+                   declaredDensity: Double?)] = []
         for g in selection.groups where lattice.groupRoles[g.id] != nil {
+            let rho = latticeDeclaredDensity(g.id)
             // The GROUP row's card — the face the group's slab is built on, at the
             // group's own depth. Unchanged from before this task.
             if let f = g.faces.first {
                 out.append((g.id.uuidString, Int(runFaceID(f)),
-                            latticeSlabDepthMM(g.id)))
+                            latticeSlabDepthMM(g.id), rho))
             }
             for ref in latticeSelectableRefs(g) {
                 guard let f = latticeCardFace(ref, in: g) else { continue }
                 out.append((ref.key, Int(runFaceID(f)),
-                            latticeSlabDepthMM(ref, in: g.id)))
+                            latticeSlabDepthMM(ref, in: g.id), rho))
             }
         }
         return out
+    }
+
+    /// ★ THE DENSITY THIS GROUP'S CARD MUST BE DERIVED AT, or nil for AUTO
+    /// (task 2026-08-17-lattice-stage-repair §1d).
+    ///
+    /// ★ THE DEFECT THIS REMOVES. `refreshLatticeFaceCards` never passed
+    /// `declaredDensity` at all — the parameter existed on
+    /// `LatticeFaceCardDerivation.card` and no shipping call site used it. So a
+    /// user who set Uniform and typed a number, or dialled ONE sector on the
+    /// lattice page, still read the same figure Auto showed. That is what made
+    /// "the density is stuck at 5%" true in EVERY mode and narrowed the break to
+    /// the app: PR 336 had already proved the per-region override reaches core's
+    /// grading law (0.25 and 0.60 on two sectors at one depth, measured).
+    ///
+    /// The precedence is the SAME one the emitted job uses: a per-group stated
+    /// density wins (`LatticeRegionEmission.density(for:role:densities:)` puts it
+    /// on the wire as `relative_density`); otherwise UNIFORM mode states the
+    /// single density the run generates at, which is the range's dense end
+    /// (`LatticeBounds.generateRelativeDensity`, the shipped generator's own
+    /// rule); otherwise AUTO, where nil means "core derives it".
+    public func latticeDeclaredDensity(_ group: UUID) -> Double? {
+        if let stated = lattice.groupDensities[group] { return stated }
+        guard lattice.densityMode == .uniform else { return nil }  // AUTO
+        return LatticeBounds.compute(
+            settings: lattice,
+            limits: TopOptKit.latticeLimits(topology: lattice.topologyID),
+            lineWidthMM: printParams.strutLineWidthMM).generateRelativeDensity
     }
 
     /// The B-rep face one selectable's slab preview is built on, or nil.

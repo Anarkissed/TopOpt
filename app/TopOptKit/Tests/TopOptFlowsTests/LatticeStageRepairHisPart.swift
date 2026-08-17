@@ -58,9 +58,6 @@ final class LatticeStageRepairHisPart: XCTestCase {
             faceID: faceID, depthMM: depthMM,
             heldVoxels: preview.voxels.first ?? 0, spacingMM: preview.spacingMM,
             densityGCM3: Self.densityGCM3, topology: LatticeType.octet,
-            bounds: TopOptKit.latticeCellBounds(topology: "octet",
-                                                minExtrudableWidthMM: w),
-            limits: TopOptKit.latticeLimits(topology: "octet"),
             minExtrudableWidthMM: w)
     }
 
@@ -106,28 +103,36 @@ final class LatticeStageRepairHisPart: XCTestCase {
         }
 
         let base = try XCTUnwrap(cards[4.0])
-        // ★ THE FAILURE, ON HIS PART: the default depth reproduces his card.
-        XCTAssertEqual(base.densityText, "5%")
-        XCTAssertEqual(base.cellText, "4.93 mm")
-        XCTAssertEqual(base.cellsText, "0.8")
-        XCTAssertEqual(base.verdict, .outOfRegime)
+        // ★ HIS 4 mm DEPTH, RE-DERIVED FROM CORE. Every number has moved off the
+        // figures on his screenshot, and each moved toward core's own answer.
+        XCTAssertEqual(base.cellText, "1.17 mm", "was 4.93 mm — the LIGHT-end floor")
+        XCTAssertEqual(base.densityText, "60%", "was 5% — the band floor")
+        XCTAssertEqual(base.cellsText, "3.4", "was 0.8")
+        XCTAssertEqual(base.strutDiameterMM, Self.strutLineWidthMM, accuracy: 1e-3,
+                       "was 0.32 mm on the app's own law; core's is one bead")
+        XCTAssertEqual(base.verdict, .outOfRegime,
+                       "★ 3.4 < 5: STILL out of regime at 4 mm, and honestly so — "
+                       + "but for ONE reason now, not two. The strut prints.")
 
-        // ★ AFTER FIX 1 THE DEPTH IS REACHABLE, SO CELLS ACROSS MOVES. It moves
-        // the way the card's own arithmetic says it must — depth / cell — and the
-        // cell here is still the card's own (that is §1's defect, not §2's).
+        // ★★ AND THE DEPTH THAT CERTIFIES IS REACHABLE. Core's requirement is
+        // N* x the DENSE-end floor = 5.87 mm, not the 24.65 mm the old card's
+        // arithmetic implied.
+        let atSix = try XCTUnwrap(cards[6.0])
+        XCTAssertGreaterThanOrEqual(atSix.cellsPerMember, 5.0 - 1e-9,
+                                    "★ 6 mm clears the 5-cells floor")
+        XCTAssertEqual(atSix.verdict, .certified,
+                       "★★ R4: a region on HIS PART certifies at 6 mm depth")
+
+        // ★ AND DENSITY NOW MOVES WITH THE REGION — R1(d), the thing fix 1 could
+        // not do. Deeper region -> coarser cell -> LIGHTER lattice.
         let deep = try XCTUnwrap(cards[24.65])
-        XCTAssertGreaterThan(deep.cellsPerMember, base.cellsPerMember,
-                             "★ §2: dragging the handle moves CELLS ACROSS")
-        XCTAssertEqual(deep.cellsPerMember, 5.0, accuracy: 0.02,
-                       "24.65 mm is exactly 5 cells at the card's 4.93 mm cell")
-
-        // ★ AND DENSITY DOES NOT MOVE — R1(d), stated rather than glossed.
-        XCTAssertEqual(deep.densityText, "5%",
-                       "★ §1 is NOT fixed by this: the density is still the band "
-                       + "floor at every depth")
+        XCTAssertLessThan(deep.relativeDensity, base.relativeDensity,
+                          "★ §1: the density is DERIVED now, and a deeper region "
+                          + "gets a lighter lattice")
+        XCTAssertEqual(deep.verdict, .certified)
 
         let report = """
-        R1 — THE READOUT ON HIS PART, AFTER FIX 1 (§2: depth is one value)
+        R1 — THE READOUT ON HIS PART, AFTER FIX 1 AND FIX 2
         part      M2_verticalStand.step
         face      \(faceID)   (\(base.heldVoxels) held voxels at 4 mm, \
         \(base.heldText))
@@ -136,16 +141,28 @@ final class LatticeStageRepairHisPart: XCTestCase {
 
         \(rows.joined(separator: "\n"))
 
+        HIS SCREENSHOT, FOR COMPARISON (all four wrong, all four app-side)
+          depth 4.0 mm | density 5% | cells across 0.8 | cell 4.93 mm | strut 0.32 mm
+
         VERDICT
-          DEPTH        now the SELECTABLE's own number — a handle drag reaches the
-                       derivation (it did not before; the card was built per GROUP)
-          CELLS ACROSS moves with it: \(String(format: "%.2f", base.cellsPerMember)) \
-        at 4 mm -> \(String(format: "%.2f", deep.cellsPerMember)) at 24.65 mm
-          DENSITY      UNCHANGED at 5% — the band floor, at every depth. §1 next.
-          in regime?   NO at his 4 mm. The card says 24.65 mm is what it takes;
-                       core says 5.87 mm. That gap is §1's defect, not §2's.
+          DEPTH        the SELECTABLE's own number — a handle drag reaches the
+                       derivation (fix 1; the card was built per GROUP before)
+          DENSITY      DERIVED by core: \(base.densityText) at 4 mm, \
+        \(deep.densityText) at 24.65 mm. Deeper region -> coarser cell ->
+                       LIGHTER lattice. It was 5% at every depth before (fix 2).
+          CELLS ACROSS \(String(format: "%.2f", base.cellsPerMember)) at 4 mm -> \
+        \(String(format: "%.2f", atSix.cellsPerMember)) at 6 mm -> \
+        \(String(format: "%.2f", deep.cellsPerMember)) at 24.65 mm
+          STRUT        \(base.strutText) — one bead exactly, from CORE's law. The
+                       badge's 2nd problem ("0.32 mm, under your nozzle") is GONE:
+                       it was the app's own octet law, 1.4x off.
+          in regime?   NO at 4 mm (3.4 < 5) — honestly, and for ONE reason now.
+                       ★ YES at 6.00 mm: \(atSix.verdict.label), \
+        \(String(format: "%.2f", atSix.cellsPerMember)) cells across, \
+        \(atSix.densityText), \(atSix.strutText) strut.
+                       The old card implied 24.65 mm was needed. It is 5.87 mm.
         """
-        writeEvidence("r1_fix1_depth_on_his_part.txt", report)
+        writeEvidence("r1_fix2_card_rederived_on_his_part.txt", report)
         print(report)
     }
 }

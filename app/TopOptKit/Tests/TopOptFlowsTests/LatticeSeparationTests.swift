@@ -578,7 +578,6 @@ final class LatticeSeparationTests: XCTestCase {
             faceID: 16, depthMM: verdict == .outOfRegime ? 4.0 : 40.0,
             heldVoxels: verdict == .noMaterial ? 0 : 12_000,
             spacingMM: 1.70527, densityGCM3: 1.24, topology: .octet,
-            bounds: bounds, limits: limits,
             minExtrudableWidthMM: profileWidthMM)
     }
 

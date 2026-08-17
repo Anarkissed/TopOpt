@@ -193,8 +193,7 @@ final class LatticeDepthIsOneValueTests: XCTestCase {
         func card(at d: Double) -> LatticeFaceCard {
             LatticeFaceCardDerivation.card(
                 faceID: 1, depthMM: d, heldVoxels: 5000, spacingMM: 1.7,
-                densityGCM3: 1.24, topology: LatticeType.octet,
-                bounds: bounds, limits: limits, minExtrudableWidthMM: w)
+                densityGCM3: 1.24, topology: LatticeType.octet, minExtrudableWidthMM: w)
         }
         // AGREEING — no divergence, and the row shows it.
         XCTAssertNil(LatticeRegionDrawer.depthDivergence(card: card(at: 9), depthMM: 9))
@@ -252,6 +251,245 @@ final class LatticeDepthIsOneValueTests: XCTestCase {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ §1 / R2 — AUTO IS A REAL DERIVED VALUE OR AN HONEST REFUSAL
+//
+// ★ HIS WORDS: "the density and depth are stuck at 5% and 4mm respectively."
+//
+// ★ ROOT CAUSE, WITH FILE AND LINE. `LatticeFaceCard.swift:225` (pre-fix):
+//
+//     let auto = limits.rhoMin > 0 ? limits.rhoMin : 0.1
+//
+// `limits.rhoMin` is core's `lattice_rho_min(Octet)` = 0.05047, which formats as
+// "5%". It is the BAND FLOOR, reported as though Auto had chosen it — the exact
+// defect class of a readout that looks like a decision and is not. It is NOT the
+// documented auto-density deadlock: there is no stress field in this path to
+// fall back FROM, no depth in the expression, and no fallback branch at all.
+//
+// AND `WorkspacePlaceholder.refreshLatticeFaceCards` never passed
+// `declaredDensity`, so Uniform and Per-region read the same 5% — which is what
+// made it true in EVERY mode, and what narrowed the break to the app.
+//
+// THE FIX. The card asks CORE (`TopOptKit.latticeRegionDerivation`, the bridge
+// onto `lattice_derive_cell_for_member` / `lattice_min_density_for_strut` /
+// `octet_strut_diameter_mm` — the same functions the run calls). Auto is now
+// `derivedRelativeDensity`: the lightest density whose strut still PRINTS at
+// this region's own cell.
+
+@MainActor
+final class LatticeAutoDensityIsDerivedTests: XCTestCase {
+
+    static let w = 0.45
+
+    private func card(depth: Double, declared: Double? = nil) -> LatticeFaceCard {
+        LatticeFaceCardDerivation.card(
+            faceID: 1, depthMM: depth, heldVoxels: 5000, spacingMM: 1.7,
+            densityGCM3: 1.24, topology: LatticeType.octet,
+            declaredDensity: declared, minExtrudableWidthMM: Self.w)
+    }
+
+    /// ★ R2's core claim: Auto is no longer the band floor. The SAME assertion
+    /// that caught the defect — hold everything fixed, move the depth — now
+    /// shows the density MOVING, which is what makes it a derivation.
+    func testAutoDensityMovesWithTheDepthInsteadOfSittingOnTheBandFloor() {
+        let limits = TopOptKit.latticeLimits(topology: "octet")
+        let shallow = card(depth: 4.0)
+        let deep = card(depth: 40.0)
+
+        XCTAssertNotEqual(shallow.relativeDensity, deep.relativeDensity,
+                          accuracy: 1e-9,
+                          "★ R2: a derivation depends on the region; a floor does "
+                          + "not. Before the fix these were the identical 0.05047.")
+        // ★ THE DIRECTION, MEASURED, AND IT IS THE OPPOSITE OF THE OBVIOUS GUESS.
+        // A THICKER slab admits a COARSER cell, and a strut's diameter is LINEAR
+        // in cell size — so a coarse cell clears one bead at a LIGHT density
+        // while a fine cell needs a heavy one. Auto therefore gets LIGHTER as the
+        // region gets deeper, which is the whole prize: a deep region is where a
+        // lattice actually saves mass.
+        XCTAssertGreaterThan(deep.cellMM, shallow.cellMM,
+                             "a thicker slab takes a coarser cell")
+        XCTAssertLessThan(deep.relativeDensity, shallow.relativeDensity,
+                          "★ …and a coarser cell prints at a LIGHTER density: "
+                          + "60% at 4 mm, the 5% band floor at 40 mm")
+        // ★ AND WHERE THE FLOOR *IS* THE ANSWER, IT PRINTS. This is the honest
+        // form of R2: the objection was never "5% is a forbidden number", it was
+        // "5% was returned without deriving anything". At 40 mm the derivation
+        // genuinely lands on the floor — and unlike before, the strut that
+        // produces clears the nozzle, so the card certifies instead of refusing.
+        XCTAssertEqual(deep.relativeDensity, limits.rhoMin, accuracy: 1e-9)
+        XCTAssertGreaterThanOrEqual(deep.strutDiameterMM, Self.w - 1e-9,
+                                    "the floor's strut PRINTS at this cell")
+        XCTAssertEqual(deep.verdict, .certified)
+        // And it is INSIDE the band at both ends — a derivation, not an escape.
+        for c in [shallow, deep] {
+            XCTAssertGreaterThanOrEqual(c.relativeDensity, limits.rhoMin - 1e-9)
+            XCTAssertLessThanOrEqual(c.relativeDensity, limits.rhoMax + 1e-9)
+        }
+    }
+
+    /// ★ AND IT AGREES WITH CORE EXACTLY — not "close to", the same number. The
+    /// card is now a VIEW of core's derivation, so a disagreement is impossible
+    /// by construction rather than by keeping two laws in step.
+    func testEveryNumberOnTheCardIsCoresOwn() {
+        for depth in [4.0, 5.87, 8.0, 20.0, 40.0] {
+            let c = card(depth: depth)
+            let d = TopOptKit.latticeRegionDerivation(
+                topology: "octet", memberWidthMM: depth,
+                minExtrudableWidthMM: Self.w)
+            XCTAssertEqual(c.cellMM, d.cellMM, accuracy: 1e-12, "cell @\(depth)")
+            XCTAssertEqual(c.relativeDensity, d.relativeDensity, accuracy: 1e-12,
+                           "density @\(depth)")
+            XCTAssertEqual(c.strutDiameterMM, d.strutMM, accuracy: 1e-12,
+                           "strut @\(depth)")
+            XCTAssertEqual(c.cellsPerMember, d.cellsPerMember, accuracy: 1e-12,
+                           "cells across @\(depth)")
+        }
+    }
+
+    /// ★ THE STRUT "PROBLEM" WAS AN ARTEFACT, AND IT IS GONE. The app's own
+    /// octet law is 1.4x off core's (memory:
+    /// app-octet-strut-law-differs-from-core); the card used it to judge
+    /// printability at a cell core had chosen to give exactly one bead, so it
+    /// refused its own Auto answer. Auto can no longer fail the strut test.
+    func testAutoCanNoLongerRefuseItsOwnStrut() {
+        for depth in stride(from: 2.0, through: 40.0, by: 2.0) {
+            let c = card(depth: depth)
+            guard c.cellMM > 0 else { continue }   // core states no answer: fine
+            XCTAssertGreaterThanOrEqual(
+                c.strutDiameterMM, Self.w - 1e-9,
+                "★ Auto's strut prints at depth \(depth) — it is the LIGHTEST "
+                + "density that reaches one bead at this cell, by construction")
+        }
+        // The old app law, for the record: it under-reports by ~1.4x, which is
+        // exactly what turned a printable strut into the badge's 2nd problem.
+        let bounds = TopOptKit.latticeCellBounds(topology: "octet",
+                                                 minExtrudableWidthMM: Self.w)
+        let appDia = 2 * LatticeType.octet.strutRadiusMM(
+            relativeDensity: TopOptKit.latticeLimits(topology: "octet").rhoMin,
+            cellMM: bounds.printabilityFloorMM)
+        XCTAssertEqual(appDia, 0.32, accuracy: 5e-3)
+    }
+
+    /// ★ §1(d) — UNIFORM AND PER-REGION HONOUR THEIR OWN NUMBERS, and they are
+    /// three DIFFERENT answers at one depth. Before the fix all three read 5%.
+    func testTheThreeModesGiveThreeDifferentDensities() {
+        let auto = card(depth: 8.0)
+        let uniform = card(depth: 8.0, declared: 0.30)
+        let perRegion = card(depth: 8.0, declared: 0.75)
+
+        XCTAssertEqual(uniform.relativeDensity, 0.30, accuracy: 1e-9,
+                       "★ Uniform honours a typed number")
+        XCTAssertEqual(perRegion.relativeDensity, 0.75, accuracy: 1e-9,
+                       "★ Per-region honours its own")
+        XCTAssertEqual(Set([auto, uniform, perRegion].map {
+            (($0.relativeDensity) * 1e6).rounded()
+        }).count, 3, "three modes, three answers — not one figure three times")
+        // Same cell in all three: the density is a FILL choice, not a cell choice.
+        XCTAssertEqual(uniform.cellMM, auto.cellMM, accuracy: 1e-12)
+        XCTAssertEqual(perRegion.cellMM, auto.cellMM, accuracy: 1e-12)
+        // …and a heavier declared density makes a thicker strut, from core's law.
+        XCTAssertGreaterThan(perRegion.strutDiameterMM, uniform.strutDiameterMM)
+    }
+
+    /// ★ R2's other half: a DECLARED density that cannot print is REFUSED, not
+    /// quietly raised. Silently printing a heavier lattice than asked for, and
+    /// silently emitting an unprintable strut, are both worse than saying so.
+    func testADeclaredDensityTooLightToPrintIsRefusedNotRaised() {
+        let limits = TopOptKit.latticeLimits(topology: "octet")
+        let thin = card(depth: 8.0, declared: limits.rhoMin)
+        XCTAssertEqual(thin.relativeDensity, limits.rhoMin, accuracy: 1e-9,
+                       "the number the user asked for is REPORTED, not moved")
+        XCTAssertLessThan(thin.strutDiameterMM, Self.w,
+                          "…and the strut it really makes is under one bead")
+        XCTAssertEqual(thin.verdict, .outOfRegime, "…so the card refuses it")
+    }
+
+    /// ★ AND A MEMBER NO LATTICE FITS SAYS SO, rather than certifying by
+    /// omission. R2: never a silent pass.
+    func testAMemberNoLatticeFitsIsRefusedRatherThanCertified() {
+        let tiny = card(depth: 0.4)          // under core's percolation floor
+        XCTAssertEqual(tiny.verdict, .outOfRegime)
+        XCTAssertEqual(tiny.cellMM, 0, "no cell is stated, because none exists")
+        XCTAssertEqual(tiny.densityText, "—", "and no density is invented")
+    }
+
+    /// ★ AN UNKNOWN NOZZLE IS STILL NOT A PASS — the pre-existing guard this
+    /// rewrite must not have dropped (it was `minExtrudableWidthMM > 0` inline;
+    /// core now refuses the derivation outright, which is the same verdict).
+    func testAnUnknownExtrusionWidthStillDoesNotCertify() {
+        let c = LatticeFaceCardDerivation.card(
+            faceID: 1, depthMM: 20, heldVoxels: 5000, spacingMM: 1.7,
+            densityGCM3: 1.24, topology: LatticeType.octet,
+            minExtrudableWidthMM: 0)
+        XCTAssertEqual(c.verdict, .outOfRegime,
+                       "printability is USER INPUT and unknown is not a pass")
+    }
+
+    /// ★ 1.0 DECLARED IS STILL SOLID — core's C0 rule, checked before core is
+    /// asked. Another pre-existing behaviour this rewrite must not have dropped.
+    func testDeclaringSolidIsStillSolid() {
+        let c = card(depth: 20, declared: 1.0)
+        XCTAssertEqual(c.verdict, .noMaterial)
+        XCTAssertEqual(c.savedText, "—", "solid saves nothing, and says so")
+    }
+
+    // ── the app half of §1(d): the mode's density REACHES the card ─────────
+
+    func testTheProjectResolvesEachModesDensityForTheCard() {
+        let p = ProjectModel(id: UUID(), name: "D", material: "PLA",
+                             process: .fdm, importedFile: nil, importedMesh: nil)
+        p.selection.addGroup()
+        let gid = p.selection.groups[0].id
+        p.lattice.enabled = true
+        p.lattice.groupRoles[gid] = .include
+        p.printParams.strutLineWidthMM = Self.w
+
+        p.lattice.densityMode = .auto
+        XCTAssertNil(p.latticeDeclaredDensity(gid),
+                     "★ AUTO states nothing — core derives, and the job carries "
+                     + "no relative_density key")
+
+        p.lattice.densityMode = .uniform
+        let uniform = p.latticeDeclaredDensity(gid)
+        XCTAssertNotNil(uniform, "★ UNIFORM states the density the run builds at")
+        XCTAssertEqual(uniform ?? 0, LatticeBounds.compute(
+            settings: p.lattice,
+            limits: TopOptKit.latticeLimits(topology: p.lattice.topologyID),
+            lineWidthMM: Self.w).generateRelativeDensity, accuracy: 1e-12,
+            "…the SAME number the emitted job generates at, not a second copy")
+
+        p.lattice.groupDensities[gid] = 0.42
+        XCTAssertEqual(p.latticeDeclaredDensity(gid) ?? 0, 0.42, accuracy: 1e-12,
+                       "★ PER-REGION wins over the mode, as it does on the wire")
+        p.lattice.densityMode = .auto
+        XCTAssertEqual(p.latticeDeclaredDensity(gid) ?? 0, 0.42, accuracy: 1e-12,
+                       "…and over Auto too")
+    }
+
+    /// ★ AND IT REACHES THE CARD LIST — the value-type/call-site gap that has
+    /// shipped a defect five times in this repo.
+    func testTheDeclaredDensityIsCarriedOnTheShippingCardList() {
+        let p = ProjectModel(id: UUID(), name: "D", material: "PLA",
+                             process: .fdm, importedFile: nil, importedMesh: nil)
+        p.selection.addGroup()
+        p.selection.pickFaces([1])
+        let gid = p.selection.groups[0].id
+        p.lattice.enabled = true
+        p.lattice.groupRoles[gid] = .include
+        p.printParams.strutLineWidthMM = Self.w
+        p.lattice.densityMode = .auto
+
+        XCTAssertTrue(p.latticeCardInputs().allSatisfy { $0.declaredDensity == nil },
+                      "Auto: nothing stated")
+        p.lattice.groupDensities[gid] = 0.42
+        let inputs = p.latticeCardInputs()
+        XCTAssertFalse(inputs.isEmpty, "the group contributes at least one card")
+        XCTAssertTrue(inputs.allSatisfy { ($0.declaredDensity ?? 0) == 0.42 },
+                      "★ §1(d): the stated density reaches EVERY card the panel "
+                      + "draws for this group, group row and selectable alike")
+    }
+}
+
 final class LatticeStageRepairEvidence: XCTestCase {
 
     /// His print profile's strut extrusion width. Not a default — printability is
@@ -285,9 +523,18 @@ final class LatticeStageRepairEvidence: XCTestCase {
     // ─────────────────────────────────────────────────────────────────────
     // R0 — the reproduction
 
-    /// ★ EVERY NUMBER ON HIS CARD, FROM THE SHIPPING CODE. If this test ever stops
-    /// reproducing them the fix is being measured against the wrong baseline.
-    func testHisCardIsReproducedExactlyByTheShippingDerivation() {
+    /// ★★ THE BEFORE/AFTER RECORD. This test was written BEFORE the fix and
+    /// asserted his screenshot's numbers verbatim, to prove the failure was real
+    /// and reproduced by the code rather than by a picture. Fix 2 landed and the
+    /// behaviour CHANGED ON PURPOSE, so it now asserts both halves: the OLD
+    /// numbers are the ones his card showed and are GONE, and the new ones are
+    /// core's own.
+    ///
+    /// ★ It is not deleted and nothing in it is weakened. Every figure he saw is
+    /// still named here, with the arithmetic that produced it, because that is
+    /// the only durable record of what was wrong — and the assertions now pin the
+    /// DISTANCE between the two, which is a stronger claim than either alone.
+    func testHisCardsOldNumbersAreGoneAndTheNewOnesAreCores() {
         let w = Self.hisStrutLineWidthMM
         let bounds = TopOptKit.latticeCellBounds(topology: "octet",
                                                  minExtrudableWidthMM: w)
@@ -308,66 +555,109 @@ final class LatticeStageRepairEvidence: XCTestCase {
         let card = LatticeFaceCardDerivation.card(
             faceID: 15, depthMM: Self.hisDepthMM, heldVoxels: voxels,
             spacingMM: spacing, densityGCM3: densityGCM3,
-            topology: LatticeType.octet, bounds: bounds, limits: limits,
+            topology: LatticeType.octet,
             minExtrudableWidthMM: w)
 
-        // ★ THE FOUR NUMBERS.
+        // ★ THE MASS ROWS ARE UNCHANGED — they never depended on the broken
+        // derivation, and his 85.2 g still reproduces exactly.
         XCTAssertEqual(card.depthMM, 4.0, accuracy: 1e-9)
-        XCTAssertEqual(card.cellMM, 4.93, accuracy: 5e-3,
-                       "his card's 4.93 mm cell")
-        XCTAssertEqual(card.cellsPerMember, 0.81, accuracy: 5e-3,
-                       "his card's 0.8 cells across")
-        XCTAssertEqual(card.relativeDensity, 0.05047, accuracy: 1e-4,
-                       "his card's 5% IS band_rho_min, exactly")
-        XCTAssertEqual(card.strutDiameterMM, 0.32, accuracy: 5e-3,
-                       "his card's 0.32 mm strut")
-        XCTAssertEqual(card.verdict, .outOfRegime)
-        // …and the strings the drawer actually renders.
-        XCTAssertEqual(card.cellText, "4.93 mm")
-        XCTAssertEqual(card.cellsText, "0.8")
-        XCTAssertEqual(card.densityText, "5%")
-        XCTAssertEqual(card.strutText, "0.32 mm")
         XCTAssertEqual(card.heldText, "85.2 g")
 
-        // ★ AND THE 5% IS THE BAND FLOOR, NOT A GRADED VALUE. Same card, same
-        // everything, at a depth that is comfortably in regime: the density does
-        // not move, because the Auto branch never looks at the depth.
+        // ── WHAT HIS SCREENSHOT SHOWED, and the arithmetic behind each ────────
+        // These are the OLD values. Each is asserted to be what the old code
+        // produced — by reconstructing it here — and then asserted GONE.
+        let oldCell = bounds.printabilityFloorMM          // LIGHT-end floor
+        let oldCells = Self.hisDepthMM / oldCell
+        let oldDensity = limits.rhoMin                     // the band floor
+        let oldStrut = 2 * LatticeType.octet.strutRadiusMM(
+            relativeDensity: oldDensity, cellMM: oldCell)  // the APP's own law
+        XCTAssertEqual(oldCell, 4.93, accuracy: 5e-3, "his card's 4.93 mm cell")
+        XCTAssertEqual(oldCells, 0.81, accuracy: 5e-3, "his 0.8 cells across")
+        XCTAssertEqual(oldDensity, 0.05047, accuracy: 1e-4, "his 5% IS band_rho_min")
+        XCTAssertEqual(oldStrut, 0.32, accuracy: 5e-3, "his 0.32 mm strut")
+
+        // ── AND EVERY ONE OF THEM IS GONE ────────────────────────────────────
+        XCTAssertNotEqual(card.cellMM, oldCell, accuracy: 0.1)
+        XCTAssertNotEqual(card.cellsPerMember, oldCells, accuracy: 0.1)
+        XCTAssertNotEqual(card.relativeDensity, oldDensity, accuracy: 0.01)
+        XCTAssertNotEqual(card.strutDiameterMM, oldStrut, accuracy: 0.01)
+        XCTAssertEqual(card.cellText, "1.17 mm")
+        XCTAssertEqual(card.cellsText, "3.4")
+        XCTAssertEqual(card.densityText, "60%")
+        XCTAssertEqual(card.strutText, "0.45 mm")
+        // ★ Still out of regime at 4 mm — honestly, and for ONE reason now
+        // (3.4 < 5), not two. The strut prints.
+        XCTAssertEqual(card.verdict, .outOfRegime)
+        XCTAssertGreaterThanOrEqual(card.strutDiameterMM, w - 1e-9)
+
+        // ★ THE DISTANCE, PINNED. This is the claim the handoff makes and the
+        // reason the brief's "needs 24.65 mm" advice was wrong by 4.2x.
+        XCTAssertEqual(oldCell / card.cellMM, 4.2, accuracy: 0.05,
+                       "the old cell was 4.2x too coarse")
+        XCTAssertEqual(w / oldStrut, 1.4, accuracy: 0.02,
+                       "and the old strut law 1.4x off core's")
+
+        // ★ AND THE DENSITY IS NO LONGER THE SAME NUMBER AT EVERY DEPTH — the
+        // assertion that CAUGHT the defect, inverted. It used to be identical at
+        // 4 mm and 40 mm because the Auto branch never looked at the depth.
         let deep = LatticeFaceCardDerivation.card(
             faceID: 15, depthMM: 40, heldVoxels: voxels, spacingMM: spacing,
-            densityGCM3: densityGCM3, topology: LatticeType.octet,
-            bounds: bounds, limits: limits, minExtrudableWidthMM: w)
-        XCTAssertEqual(deep.relativeDensity, card.relativeDensity, accuracy: 1e-12,
-                       "★ §1(b): the density is the BAND FLOOR — it is the same "
-                       + "number at 4 mm and at 40 mm, so it is not graded and "
-                       + "not derived; it is `limits.rhoMin` reported as a choice")
-        XCTAssertEqual(deep.relativeDensity, limits.rhoMin, accuracy: 1e-12)
+            densityGCM3: densityGCM3, topology: LatticeType.octet, minExtrudableWidthMM: w)
+        XCTAssertNotEqual(deep.relativeDensity, card.relativeDensity,
+                          accuracy: 1e-9,
+                          "★ §1(b): it is DERIVED now — it moves with the region. "
+                          + "Before the fix both were 0.05047.")
     }
 
-    /// ★ §1(d) — AND IT IS 5% IN EVERY MODE, because the call site never passes a
-    /// declared density at all. This is the narrowing the brief asked for: the
-    /// break is in the APP, not core.
-    func testTheCardsOwnDeclaredDensityInletIsNeverUsedByTheAppCallSite() throws {
+    /// ★ §1(d) — INVERTED BY THE FIX. This test was written to PIN THE DEFECT:
+    /// the app never handed the card a declared density, so Uniform and
+    /// Per-region read the same 5% Auto did, and the break was app-side. It now
+    /// asserts the opposite, on the same source file, so the defect cannot creep
+    /// back by someone dropping the argument again.
+    ///
+    /// A source-text assertion, deliberately: the value-type test above proves
+    /// the DERIVATION honours a declared density, and this proves the SHIPPING
+    /// call site supplies one — the pair that memory
+    /// `tests-on-value-types-miss-call-sites` says has shipped a defect five
+    /// times when only the first half exists.
+    func testTheAppCallSiteHandsTheCardTheModesOwnDensity() throws {
         let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"),
             encoding: .utf8)
-        // The ONE call site that builds the cards the drawer shows.
-        XCTAssertTrue(src.contains("LatticeFaceCardDerivation.card("),
-                      "the call site still exists")
-        // Read the whole call, not a filtered view of it (R7).
         guard let r = src.range(of: "LatticeFaceCardDerivation.card(") else {
             return XCTFail("the card call site moved — re-read it before trusting this")
         }
-        let call = String(src[r.lowerBound...].prefix(1400))
-        guard let end = call.range(of: "minExtrudableWidthMM: widthMM)") else {
-            return XCTFail("could not bound the call")
+        // Read the WHOLE call by balancing its parentheses, not a fixed-length
+        // slice: the previous cut bounded it on a literal argument string and
+        // broke the moment that argument moved (R7 — do not filter a check you
+        // cite as evidence).
+        var depth = 0
+        var end = src.index(before: r.upperBound)
+        var i = end
+        while i < src.endIndex {
+            if src[i] == "(" { depth += 1 }
+            else if src[i] == ")" {
+                depth -= 1
+                if depth == 0 { end = i; break }
+            }
+            i = src.index(after: i)
         }
-        let text = String(call[..<end.upperBound])
-        XCTAssertFalse(text.contains("declaredDensity"),
-                       "★ §1(d): the app NEVER hands the card a declared density, "
-                       + "so Uniform and Per-region read 5% exactly like Auto — "
-                       + "the break is app-side")
+        XCTAssertGreaterThan(depth, -1, "the call's parentheses balanced")
+        let text = String(src[r.lowerBound...end])
+        XCTAssertTrue(text.contains("declaredDensity:"),
+                      "★ §1(d): the app hands the card the MODE'S OWN density. "
+                      + "Without this argument Uniform and Per-region read the "
+                      + "identical figure Auto does — the original defect.")
+        XCTAssertTrue(text.contains("rhosCopy"),
+                      "…and it is the per-card resolved value, not a constant")
+        // ★ AND THE DEAD PARAMETERS ARE GONE — injected bounds are how the card
+        // came to disagree with core in the first place.
+        XCTAssertFalse(text.contains("bounds:"),
+                       "the card no longer accepts injected cell bounds")
+        XCTAssertFalse(text.contains("limits:"),
+                       "…nor injected band limits; core is the one source")
     }
 
     /// ★ §3 — WHAT CORE SAYS ABOUT THE SAME REGION. The card's two routes out are

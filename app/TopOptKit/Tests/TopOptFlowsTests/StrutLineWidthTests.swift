@@ -258,10 +258,23 @@ final class StrutLineWidthTests: XCTestCase {
         // TopOptKit), which is the very field S0 restored. Redirecting it would have
         // corrupted the wall ring. The five real lattice sites all pass
         // `lineWidthMM:`, which is what this walk counts.
-        XCTAssertEqual(strutSites, 5,
-                       "the five audited lattice sites (AppModel 1, LatticePage 2, "
-                       + "WorkspacePlaceholder 2). If this number moved, audit the "
-                       + "new site and update the count.")
+        // ★ SIX SINCE 2026-08-17-lattice-stage-repair §1, and the sixth was
+        // AUDITED rather than the count merely bumped — which is what the message
+        // below asks of whoever moves it.
+        //
+        // NEW SITE: `ProjectModel.latticeDeclaredDensity` (ProjectModel.swift).
+        // It resolves the density a face card is derived at, and in UNIFORM mode
+        // that is `LatticeBounds.compute(...).generateRelativeDensity` — the
+        // single density the RUN generates at. `LatticeBounds.compute` uses its
+        // `lineWidthMM` for the STRUT printability floor (`0.5 * lineWidthMM`
+        // against the strut radius) and for core's cell floor, both of which are
+        // lattice questions about a lone unsupported extrusion. A wall bead here
+        // would put the card's density on the wrong printability floor and make
+        // it disagree with the run. `strutLineWidthMM` is correct.
+        XCTAssertEqual(strutSites, 6,
+                       "the six audited lattice sites (AppModel 1, LatticePage 2, "
+                       + "WorkspacePlaceholder 2, ProjectModel 1). If this number "
+                       + "moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"
                       + offenders.joined(separator: "\n"))

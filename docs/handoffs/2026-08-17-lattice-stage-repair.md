@@ -43,18 +43,37 @@ beneath it kept showing 4 mm, with a cell, a strut, a cells-across and a mass al
 computed at 4 mm. **Not a stale cache — the per-selectable depth was never an
 input to the derivation.**
 
-**What does the card read after both fixes? NOT MEASURED YET — §1 has not
-landed.** After fix 1 alone, on `M2_verticalStand.step`, face 2:
+**What does the card read after both fixes? ★ MEASURED — on
+`M2_verticalStand.step`, face 2, his 0.45 mm bead:**
 
-```
-4.0 mm (the default)   density 5%  cells across 0.8  cell 4.93 mm  strut 0.32 mm  Out of regime
-24.65 mm (dragged)     density 5%  cells across 5.0  cell 4.93 mm  strut 0.32 mm  Out of regime
-```
+| depth | density | cells across | cell | strut | verdict |
+|---|---|---|---|---|---|
+| **4.00 mm** (his default) | **60%** | **3.4** | **1.17 mm** | **0.45 mm** | Out of regime |
+| **6.00 mm** | 58% | **5.0** | 1.20 mm | 0.45 mm | ★ **Certified** |
+| 8.00 mm | 37% | 5.0 | 1.60 mm | 0.45 mm | Certified |
+| 12.00 mm | 20% | 5.0 | 2.40 mm | 0.45 mm | Certified |
+| 24.65 mm | 5% | 5.0 | 4.93 mm | 0.45 mm | Certified |
 
-**Does one region on his part certify? NOT MEASURED YET.** Fix 1 alone cannot
-make one certify, and the reason is stated rather than glossed: even at 5.00
-cells across the verdict stays out-of-regime, because the card's strut test fails
-on the app's own octet law. That is §1's defect, and it is next.
+His screenshot, for comparison: `4.0 mm · 5% · 0.8 cells · 4.93 mm · 0.32 mm`.
+**All four were wrong and all four were app-side.**
+
+★ **THE DIRECTION IS THE OPPOSITE OF THE OBVIOUS GUESS, and it is the prize.** A
+deeper region admits a COARSER cell; strut diameter is LINEAR in cell size; so a
+coarse cell clears one bead at a LIGHT density. Auto therefore gets *lighter* as
+the region gets deeper — 60% at 4 mm, 5% at 24.65 mm. A deep region is exactly
+where a lattice saves mass. (My first assertion asserted the reverse and failed;
+the measurement corrected it.)
+
+★ And the 5% at 24.65 mm is not the old bug returning: there the derivation
+genuinely lands on the band floor, and unlike before, the strut it produces
+(0.45 mm) PRINTS, so the card certifies instead of refusing. The objection was
+never "5% is a forbidden number" — it was "5% was returned without deriving
+anything".
+
+**Does one region on his part certify? ★ YES — at 6.00 mm depth: Certified, 5.00
+cells across, 58% density, 0.45 mm strut**
+(`r1_fix2_card_rederived_on_his_part.txt`). Core's requirement is N* × the
+DENSE-end floor = **5.87 mm**, not the 24.65 mm the old card implied.
 
 ---
 
@@ -138,6 +157,95 @@ Asserted **in both directions**, plus the protection tie (R3):
 | R7 no assertion weakened or deleted | ✅ census below |
 | R8 cost measured directly, Release verified | ✅ `CMAKE_BUILD_TYPE=Release`; no wall-clock claim made |
 | R9 no placeholders, no root scratch | ✅ |
+
+### Fix 2 (§1) — the card asks CORE instead of re-deriving in Swift
+
+`LatticeFaceCardDerivation.card` now makes ONE call to
+`TopOptKit.latticeRegionDerivation` — the bridge onto
+`lattice_derive_cell_for_member`, `lattice_min_density_for_strut` and
+`octet_strut_diameter_mm`, the same functions the RUN calls. The cell, the
+density, the strut and the cells-across are all core's; the app authors none of
+them. `LatticeSectorDensity` (PR 336) already did this correctly — the face card
+was the one surface that did not.
+
+Three separate errors went with it:
+
+1. the cell was `max(depth/N*, printabilityFloorMM)` — the floor at the band's
+   LIGHTEST density. Core uses the DENSEST-end floor. 4.93 vs 1.17 mm, 4.2×.
+2. `let auto = limits.rhoMin` — the band floor as Auto's answer, unconditional.
+3. the strut came from `LatticeType.strutRadiusMM`, the app's own octet law,
+   1.4× off core's — so the card refused its OWN Auto answer at a cell core had
+   chosen to give exactly one bead. **That refusal was an artefact and it is
+   gone.**
+
+And the app half of §1(d): `ProjectModel.latticeDeclaredDensity` resolves the
+mode's own number — per-group stated ▸ Uniform's generate density ▸ Auto (nil) —
+through the same precedence the emitted job uses, and
+`refreshLatticeFaceCards` passes it. **No shipping call site passed
+`declaredDensity` at all before**, which is why "stuck at 5%" was true in every
+mode.
+
+R2 is asserted in both halves: Auto is a real derived value (it moves with the
+region, agrees with core to 1e-12 at five depths, and its strut always prints),
+and where core has no answer — unknown nozzle, member no lattice fits, declared
+density too light to print — the card **refuses with the numbers it has** and
+never certifies by omission. 10 assertions in
+`LatticeAutoDensityIsDerivedTests`.
+
+### ★ WHAT FIX 2 BROKE, AND WHAT THAT TAUGHT — 23 failures, read one by one
+
+The first full sweep after fix 2 went **23 red**. Two were real defects in my own
+change; the rest were fixtures tuned against numbers that describe no real
+topology. None was glossed.
+
+**★ DEFECT 1 — I left `bounds` and `limits` as DEAD PARAMETERS.** The rewrite
+ignored them while every caller still passed them. That is precisely the defect
+class this task exists to remove — an input that looks like it decides something
+and does not — and I had shipped it into the very function I was fixing. Both are
+now **gone from the signature**; `LatticeFaceCard` reads core and nothing else.
+
+**★ DEFECT 2 — a declared density was BLANKED when the region could not take a
+lattice.** The infeasible path returned `relativeDensity: 0`, so a user who typed
+5% into a region nothing fits saw an empty row instead of "5%, and it will not
+work here". That erases the user's own input; the refusal belongs in the VERDICT,
+not in silence. Fixed, and asserted.
+
+**★ ONE DELIBERATE CONTRACT CHANGE, marked rather than quietly loosened.** The
+shipped bar was *"Auto can never refuse — a default that refuses is not a
+default"* (§4c of the 2026-08-12 task). Below core's percolation floor there is
+no lattice at all — the generator emits debris — and R2 of THIS task says Auto
+must either derive a real value or say it cannot. So Auto now refuses there,
+honestly. `testAutoNeverRefusesAtAnyDepthAndSaysSoWhereItCannot` states the
+supersession in those terms, asserts the SAME property everywhere a lattice is
+possible, and **counts both arms** so a sweep that only ever hit one branch
+cannot pass while measuring half of it.
+
+**★ THREE FIXTURES WERE TUNED TO INJECTED NUMBERS AND WOULD NOW PASS
+VACUOUSLY.** `bounds(floor: 4.6026, cpm: 5)` and `limits(rhoMin: 0.2, rhoMax:
+0.8)` describe no real topology. Under core's law a 30 mm slab certifies at
+*every* nozzle and a 7 mm slab certifies at 0.45 mm — so the "thin slab", "one
+bad region" and "profile changes the verdict" arms had all become no-ops. Each
+was re-tuned to real values where the property genuinely flips (an 8 mm slab:
+certified at 0.25 and 0.45 mm, out of regime at 0.80 mm) and each now asserts
+that its negative arm really is negative. **No assertion was deleted; several are
+stronger.**
+
+**★ AND A SIXTH LINE-WIDTH SITE, caught by its own tripwire.**
+`StrutLineWidthTests.testNoLatticeLineWidthSiteReadsAWallBead` counts the lattice
+sites reading `printParams.strutLineWidthMM` and says "if this number moved,
+audit the new site and update the count." `ProjectModel.latticeDeclaredDensity`
+is the sixth. Audited: in UNIFORM mode it resolves the density the RUN generates
+at, via `LatticeBounds.compute`, whose `lineWidthMM` drives the STRUT
+printability floor — a lone unsupported extrusion, not a wall loop. A wall bead
+there would put the card's density on the wrong floor and make it disagree with
+the run. The count is updated **with that audit written down**, not bumped.
+
+**★ MY OWN EVIDENCE HYGIENE FAILED FIRST.** I launched that sweep through
+`grep -E "error:|Executed"`, which discarded every per-test failure line — so I
+had "23 failures" and no way to see which. That is memory
+`do-not-filter-a-check-you-cite-as-evidence`, on my own branch, and it cost a
+full 24-minute re-run. Subsequent sweeps write the **whole** log and are read
+unfiltered.
 
 ### R5 — the four things that already work, enumerated and re-run
 

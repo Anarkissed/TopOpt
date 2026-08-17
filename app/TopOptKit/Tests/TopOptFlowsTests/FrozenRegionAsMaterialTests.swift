@@ -45,8 +45,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
                       declared: Double? = nil) -> LatticeFaceCard {
         LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: depthMM, heldVoxels: heldVoxels,
-            spacingMM: 1.705279303, densityGCM3: 1.24, topology: topology,
-            bounds: bounds, limits: limits, declaredDensity: declared,
+            spacingMM: 1.705279303, densityGCM3: 1.24, topology: topology, declaredDensity: declared,
             minExtrudableWidthMM: 0.45)
     }
 
@@ -117,20 +116,58 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         XCTAssertLessThan(declared.savedMassG, auto.savedMassG)
     }
 
-    /// ★ AUTO CAN NEVER REFUSE. Swept across depths from far under core's
-    /// printability floor to far over it, Auto must never produce a verdict the
-    /// user cannot proceed from — `outOfRegime` still BUILDS and says so; what it
-    /// must never be is an error the default state puts the page into.
-    func testAutoNeverRefusesAtAnyDepth() {
+    /// ★ AUTO CAN NEVER REFUSE — ★★ NARROWED, DELIBERATELY, BY BAR R2 OF TASK
+    /// 2026-08-17-lattice-stage-repair. This is a CONTRACT CHANGE and it is
+    /// marked as one rather than quietly loosened.
+    ///
+    /// The original claim was "Auto must ALWAYS pick a cell and a density, at
+    /// every depth". That was written when the card derived its own numbers and
+    /// could therefore always produce some. Now it asks CORE, and core answers
+    /// `feasible_percolation == false` for a member no (cell, density) pair in
+    /// the band can span — below that width the strut network is not connected
+    /// and the generator emits DEBRIS, not a lattice.
+    ///
+    /// ★ R2: "AUTO MUST NOT SILENTLY FALL BACK. Either it produces a real graded
+    /// density, or it says so." Printing a cell for a member that cannot hold one
+    /// is exactly the silent fallback R2 forbids — it is how the old card came to
+    /// report `5% · 4.93 mm` for a 4 mm slab. So the sweep now asserts the SAME
+    /// property everywhere a lattice is genuinely possible, and asserts the
+    /// HONEST REFUSAL where it is not.
+    ///
+    /// ★ AND THE ORIGINAL'S REAL POINT SURVIVES INTACT: Auto never puts the page
+    /// into an error state — `noMaterial` (which means "nothing to lighten") is
+    /// still never produced while material is present, at ANY depth.
+    func testAutoNeverRefusesAtAnyDepthAndSaysSoWhereItCannot() {
+        var possible = 0, refused = 0
         for d in stride(from: 0.5, through: 60.0, by: 0.5) {
             let c = card(depthMM: d)
             XCTAssertNotEqual(c.verdict, .noMaterial,
                               "Auto produced 'no material' with material present at depth \(d)")
-            XCTAssertGreaterThan(c.relativeDensity, 0,
-                                 "Auto must always pick a density (depth \(d))")
-            XCTAssertGreaterThan(c.cellMM, 0,
-                                 "Auto must always pick a cell (depth \(d))")
+            // Core's own answer for this member, asked independently.
+            let core = TopOptKit.latticeRegionDerivation(
+                topology: topology.id, memberWidthMM: d,
+                minExtrudableWidthMM: 0.45)
+            if core.valid && core.feasible {
+                possible += 1
+                XCTAssertGreaterThan(c.relativeDensity, 0,
+                                     "Auto must pick a density where one exists (depth \(d))")
+                XCTAssertGreaterThan(c.cellMM, 0,
+                                     "Auto must pick a cell where one exists (depth \(d))")
+                XCTAssertGreaterThanOrEqual(c.strutDiameterMM, 0.45 - 1e-9,
+                                            "…and it must PRINT (depth \(d))")
+            } else {
+                refused += 1
+                XCTAssertEqual(c.verdict, .outOfRegime,
+                               "★ R2: where no lattice fits, the card SAYS SO "
+                               + "rather than quoting a cell (depth \(d))")
+                XCTAssertEqual(c.cellMM, 0,
+                               "…and quotes no cell, because none exists (depth \(d))")
+            }
         }
+        // ★ BOTH ARMS WERE EXERCISED — a sweep that only ever hit one branch
+        // would pass this test while measuring half of it.
+        XCTAssertGreaterThan(possible, 0, "the sweep reached feasible depths")
+        XCTAssertGreaterThan(refused, 0, "the sweep reached infeasible depths")
     }
 
     /// SOLID is 1.0 and it emits NO lattice — core's own `kLatticeSolidAt` rule,
@@ -166,7 +203,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         // declaring right at the band's bottom on a slab whose Auto cell is fine.
         let c = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 8, heldVoxels: 1000, spacingMM: 1.0,
-            densityGCM3: 1.24, topology: topology, bounds: bounds, limits: limits,
+            densityGCM3: 1.24, topology: topology,
             declaredDensity: limits.rhoMin, minExtrudableWidthMM: 5.0)
         XCTAssertEqual(c.verdict, .outOfRegime)
         XCTAssertEqual(c.relativeDensity, limits.rhoMin, accuracy: 1e-9,
@@ -197,27 +234,48 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         // a fine nozzle and thin enough that they DO for a coarse one. A slab
         // that crosses at every width would report out-of-regime three times and
         // this test would pass while measuring nothing.
+        // ★★ THE SLAB AND THE DENSITY ARE RE-CHOSEN AGAINST CORE'S REAL LAW (task
+        // 2026-08-17-lattice-stage-repair §1). The old fixture — a 30 mm slab at
+        // 0.30 — was tuned against the card's own arithmetic, which used the
+        // printability floor at the band's LIGHTEST density. Core uses the
+        // DENSEST-end floor, which is 4.2x finer, so under core's law a 30 mm
+        // slab certifies at ALL THREE widths and this test's flip vanished.
+        //
+        // ★ THE PROPERTY UNDER TEST IS UNCHANGED and the numbers are core's:
+        //   N* x (width / phi(rho_max)) is the member a profile needs.
+        //     0.25 mm -> 3.26 mm   0.45 mm -> 5.87 mm   0.80 mm -> 10.43 mm
+        // An 8 mm slab straddles the third and not the first two — so the SAME
+        // lattice is certifiable on a fine and a mid nozzle and is NOT on a
+        // coarse one, which is exactly what the test has always claimed.
+        //
+        // 0.40 rather than 0.30 because the strut must clear the MID bead too: at
+        // the 1.6 mm cell an 8 mm slab takes, 0.30 gives 0.390 mm — under 0.45,
+        // so the mid arm would fail the PRINT test and the test would flip for
+        // the wrong reason.
         func cardAt(_ width: Double) -> LatticeFaceCard {
             LatticeFaceCardDerivation.card(
-                faceID: 16, depthMM: 30, heldVoxels: 1000, spacingMM: 1.0,
-                densityGCM3: 1.24, topology: topology,
-                bounds: TopOptKit.latticeCellBounds(topology: topology.id,
-                                                    minExtrudableWidthMM: width),
-                limits: limits, declaredDensity: 0.30,
+                faceID: 16, depthMM: 8, heldVoxels: 1000, spacingMM: 1.0,
+                densityGCM3: 1.24, topology: topology, declaredDensity: 0.40,
                 minExtrudableWidthMM: width)
         }
         // Same slab, same declared density, three profiles.
         let fine = cardAt(0.25), mid = cardAt(0.45), coarse = cardAt(0.80)
-        XCTAssertEqual(fine.relativeDensity, 0.30, accuracy: 1e-9)
-        XCTAssertEqual(coarse.relativeDensity, 0.30, accuracy: 1e-9)
+        XCTAssertEqual(fine.relativeDensity, 0.40, accuracy: 1e-9)
+        XCTAssertEqual(coarse.relativeDensity, 0.40, accuracy: 1e-9,
+                       "★ and the declaration is REPORTED even where it is "
+                       + "refused — the verdict carries the refusal, not silence")
         XCTAssertEqual(fine.verdict, .certified,
-                       "a 0.25 mm profile leaves room for a 30 mm slab")
-        XCTAssertEqual(mid.verdict, .certified, "and so does a 0.45 mm one")
+                       "a 0.25 mm profile needs only 3.26 mm of member")
+        XCTAssertEqual(mid.verdict, .certified, "a 0.45 mm one needs 5.87 mm")
         XCTAssertEqual(coarse.verdict, .outOfRegime,
-                       "★ a 0.80 mm profile pushes core's printability floor above "
-                     + "what a 30 mm slab can homogenize, and the SAME lattice "
-                     + "stops being certifiable — that is why the width has no "
-                     + "default")
+                       "★ a 0.80 mm profile needs 10.43 mm, which an 8 mm slab "
+                     + "does not have — the SAME lattice stops being certifiable, "
+                     + "and that is why the width has no default")
+        // …and the reason is the CELL being forced coarser, not a print failure.
+        XCTAssertGreaterThan(coarse.cellMM, mid.cellMM,
+                             "the coarse profile forces a coarser cell")
+        XCTAssertLessThan(coarse.cellsPerMember, 5.0,
+                          "…which is what drops it under N*")
         XCTAssertNotEqual(fine.verdict, coarse.verdict,
                           "the SAME lattice must be judged differently under a "
                         + "0.25 mm and a 0.80 mm profile (fine \(fine.verdict), "
@@ -230,8 +288,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
     func testAnUnknownWidthDoesNotCertifyAsPrintable() {
         let unknown = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 40, heldVoxels: 10_000, spacingMM: 1.705279303,
-            densityGCM3: 1.24, topology: topology, bounds: bounds,
-            limits: limits, declaredDensity: nil, minExtrudableWidthMM: 0)
+            densityGCM3: 1.24, topology: topology, declaredDensity: nil, minExtrudableWidthMM: 0)
         XCTAssertEqual(unknown.verdict, .outOfRegime,
                        "with no stated width the card must say it cannot tell, "
                      + "not silently certify")
@@ -260,8 +317,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
     func testTheCardsMassNumbersAreOnTheDrawer() {
         let c = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 40, heldVoxels: 10_000, spacingMM: 1.705279303,
-            densityGCM3: 1.24, topology: topology, bounds: bounds,
-            limits: limits, declaredDensity: nil,
+            densityGCM3: 1.24, topology: topology, declaredDensity: nil,
             minExtrudableWidthMM: 0.45)
         let d = LatticeRegionDrawer.make(card: c, depthMM: 40, held: false,
                                          latticeReachesTheRun: true)
@@ -291,8 +347,7 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
     func testTheDensityRowIsAControlONLYUnderPerRegion() {
         let c = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 40, heldVoxels: 10_000, spacingMM: 1.705279303,
-            densityGCM3: 1.24, topology: topology, bounds: bounds,
-            limits: limits, declaredDensity: nil,
+            densityGCM3: 1.24, topology: topology, declaredDensity: nil,
             minExtrudableWidthMM: 0.45)
 
         // CASE 1 — every other mode. Byte-identical to what PR 331 shipped.

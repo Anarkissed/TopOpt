@@ -6927,10 +6927,12 @@ public struct WorkspacePlaceholder: View {
         var keys: [String] = []
         var ids: [Int] = []
         var depths: [Double] = []
+        var rhos: [Double?] = []
         for i in inputs {
             keys.append(i.key)
             ids.append(i.faceID)
             depths.append(i.depthMM)
+            rhos.append(i.declaredDensity)
         }
         guard !ids.isEmpty else {
             latticeFaceCards = [:]
@@ -6946,10 +6948,8 @@ public struct WorkspacePlaceholder: View {
         let widthMM = project.printParams.strutLineWidthMM
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
+        let rhosCopy = rhos
         Task.detached(priority: .userInitiated) {
-            let bounds = TopOptKit.latticeCellBounds(topology: topology.id,
-                                                     minExtrudableWidthMM: widthMM)
-            let limits = TopOptKit.latticeLimits(topology: topology.id)
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
                 resolution: resolution) else { return }
@@ -6959,7 +6959,15 @@ public struct WorkspacePlaceholder: View {
                     faceID: fid, depthMM: depthsCopy[i],
                     heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topology: topology,
-                    bounds: bounds, limits: limits,
+                    // ★ THE MODE'S OWN DENSITY, WHICH NO CALL SITE PASSED UNTIL
+                    // NOW (task 2026-08-17-lattice-stage-repair §1d). nil is
+                    // AUTO and means core derives; a number is what the user
+                    // stated, resolved by `ProjectModel.latticeDeclaredDensity`
+                    // through the same precedence the emitted job uses. Without
+                    // this the card read the identical figure in Uniform, in
+                    // Per-region and in Auto — which is why "stuck at 5%" was
+                    // true in every mode.
+                    declaredDensity: rhosCopy[i],
                     // ★ PRINTABILITY IS USER INPUT AND HAS NO DEFAULT (task
                     // 2026-08-13-lattice-as-a-material §1b). `widthMM` is the
                     // project's own strut line width — the SAME value this
