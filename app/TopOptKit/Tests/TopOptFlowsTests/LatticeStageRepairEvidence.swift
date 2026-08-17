@@ -128,8 +128,13 @@ final class LatticeDepthIsOneValueTests: XCTestCase {
                        "★ §2: the DRAG reaches the depth the card is derived at")
         XCTAssertEqual(depth(face.key) ?? 0, 4.0, accuracy: 1e-12,
                        "…and moved ONLY that selectable")
-        XCTAssertEqual(depth(gid.uuidString) ?? 0, 4.0, accuracy: 1e-12,
-                       "…and not the group's own row either")
+        // ★ THE GROUP ROW'S CARD IS GONE (maintainer, 2026-08-17 — per FACE only),
+        // so there is no group entry to check for movement. The stronger claim
+        // replaces it: the group is not in the list AT ALL, which is what makes a
+        // fabricated group depth unrepresentable rather than merely unmoved.
+        XCTAssertNil(depth(gid.uuidString),
+                     "★ no card is keyed by the GROUP — the drawer it fed "
+                     + "described a slab no primitive owns")
 
         // …and it is the SAME number `latticeSlabDepthMM` resolves, not a copy.
         XCTAssertEqual(depth(region.key) ?? 0,
@@ -225,29 +230,35 @@ final class LatticeDepthIsOneValueTests: XCTestCase {
         var checked = 0
         for input in p.latticeCardInputs() {
             // What the view will LABEL this drawer with, resolved independently.
-            let shown: Double
-            if input.key == gid.uuidString {
-                shown = p.latticeSlabDepthMM(gid)
-            } else if let ref = p.latticeSelectableRefs(g).first(where: {
+            // ★ EVERY entry is a SELECTABLE now — the group's own card is gone
+            // (2026-08-17, per FACE only), so a key that is not a selectable's is
+            // a defect rather than a case to handle.
+            guard let ref = p.latticeSelectableRefs(g).first(where: {
                 $0.key == input.key
-            }) {
-                shown = p.latticeSlabDepthMM(ref, in: gid)
-            } else {
+            }) else {
                 return XCTFail("a card key with no drawer behind it: \(input.key)")
             }
-            XCTAssertEqual(input.depthMM, shown, accuracy: 1e-12,
+            XCTAssertEqual(input.depthMM, p.latticeSlabDepthMM(ref, in: gid),
+                           accuracy: 1e-12,
                            "★ R3: the depth the card is DERIVED at and the depth "
                            + "the drawer is LABELLED with are one value, for "
                            + "\(input.key)")
             checked += 1
         }
-        XCTAssertGreaterThanOrEqual(checked, 3,
-                                    "the group, the region and the face were all "
-                                    + "checked — a vacuous pass is not a pass")
-        // …and they really are three DIFFERENT numbers, so the check above is not
+        // ★ THE GROUP DEPTH IS SET TO 6.0 ABOVE AND MUST APPEAR NOWHERE. It is
+        // still a real fallback for a selectable that has no override — the two
+        // here both do — so its absence from the list is the point: no card is
+        // derived at a depth that belongs to no primitive.
+        XCTAssertFalse(p.latticeCardInputs().contains { $0.depthMM == 6.0 },
+                       "★ the group's 6.0 mm feeds no card: both selectables "
+                       + "carry their own, and the group has no row of its own")
+        XCTAssertGreaterThanOrEqual(checked, 2,
+                                    "the region and the face were both checked — "
+                                    + "a vacuous pass is not a pass")
+        // …and they really are DIFFERENT numbers, so the check above is not
         // passing because everything is still the 4 mm default.
-        XCTAssertEqual(Set(p.latticeCardInputs().map { $0.depthMM }).count, 3,
-                       "three distinct depths, so the invariant is under load")
+        XCTAssertEqual(Set(p.latticeCardInputs().map { $0.depthMM }).count, 2,
+                       "two distinct depths, so the invariant is under load")
     }
 }
 

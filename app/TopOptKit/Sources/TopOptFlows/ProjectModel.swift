@@ -716,12 +716,15 @@ public final class ProjectModel: ObservableObject {
                    declaredDensity: Double?)] = []
         for g in selection.groups where lattice.groupRoles[g.id] != nil {
             let rho = latticeDeclaredDensity(g.id)
-            // The GROUP row's card — the face the group's slab is built on, at the
-            // group's own depth. Unchanged from before this task.
-            if let f = g.faces.first {
-                out.append((g.id.uuidString, Int(runFaceID(f)),
-                            latticeSlabDepthMM(g.id), rho))
-            }
+            // ★ NO GROUP CARD (maintainer, 2026-08-17). There used to be one more
+            // entry here, keyed by the group's UUID and built from
+            // `g.faces.first` at the GROUP's depth — one arbitrary face standing
+            // for the whole group. It fed a drawer of cell/density/strut/
+            // cells-across numbers for a slab NO PRIMITIVE OWNS and no handle can
+            // drag, which is why he could never bring it into regime. It is not
+            // computed at all now: the group's badge and its grams total are
+            // aggregated from the SELECTABLE cards below, so there is no
+            // fabricated card left for anything to read.
             for ref in latticeSelectableRefs(g) {
                 guard let f = latticeCardFace(ref, in: g) else { continue }
                 out.append((ref.key, Int(runFaceID(f)),
@@ -750,12 +753,27 @@ public final class ProjectModel: ObservableObject {
     /// (`LatticeBounds.generateRelativeDensity`, the shipped generator's own
     /// rule); otherwise AUTO, where nil means "core derives it".
     public func latticeDeclaredDensity(_ group: UUID) -> Double? {
+        // A stated per-group density wins in EVERY mode — it is the number the
+        // job carries as `relative_density`.
         if let stated = lattice.groupDensities[group] { return stated }
-        guard lattice.densityMode == .uniform else { return nil }  // AUTO
-        return LatticeBounds.compute(
-            settings: lattice,
-            limits: TopOptKit.latticeLimits(topology: lattice.topologyID),
-            lineWidthMM: printParams.strutLineWidthMM).generateRelativeDensity
+        switch lattice.densityMode {
+        case .uniform:
+            // The single density the run generates at — the range's dense end,
+            // the shipped generator's own rule.
+            return LatticeBounds.compute(
+                settings: lattice,
+                limits: TopOptKit.latticeLimits(topology: lattice.topologyID),
+                lineWidthMM: printParams.strutLineWidthMM).generateRelativeDensity
+        case .auto:
+            return nil                       // core derives
+        case .perRegion:
+            // ★ PER REGION WITH NOTHING STATED FOR THIS ONE IS STILL AUTO, and
+            // that is the honest reading: the mode says "I will state it myself",
+            // not "assume a number for me". A region the user has not dialled
+            // shows what core WILL derive, exactly as the sector-density rows on
+            // the lattice page do, and the emitted job carries no key for it.
+            return nil
+        }
     }
 
     /// The B-rep face one selectable's slab preview is built on, or nil.

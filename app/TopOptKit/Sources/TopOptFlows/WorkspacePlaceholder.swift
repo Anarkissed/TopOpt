@@ -6192,7 +6192,11 @@ public struct WorkspacePlaceholder: View {
               case .latticeSummary:
                   latticeSummaryRow(g)
               case .latticeDrawer:
-                  if latticeDisclosure.isExpanded(g.id.uuidString) { latticeGroupDrawer(g) }
+                  // ★ NOT BUILT — no stage lists this section any more
+                  // (maintainer, 2026-08-17: per FACE only). The case survives so
+                  // the switch stays exhaustive and so a future stage cannot
+                  // re-enable it by accident without coming through here.
+                  EmptyView()
               case .latticePrimitiveRows:
                   if latticeDisclosure.isExpanded(g.id.uuidString) { latticePrimitiveRows(g) }
               }
@@ -6352,8 +6356,17 @@ public struct WorkspacePlaceholder: View {
         let block = latticeRoleBlock(g)
         let open = latticeDisclosure.isExpanded(g.id.uuidString)
         let coverage = project.latticeCoverage(g)
-        let drawer = latticeDrawer(g)
-        let tint = latticeVerdictTint(drawer.verdict)
+        // ★ THE TOTAL AND THE COLOUR COME FROM THE FACES, NOT FROM A GROUP CARD
+        // (maintainer, 2026-08-17). `latticeDrawer(g)` and its card are gone: the
+        // grams are the SUM of what the latticed selectables hand over, and the
+        // colour is the worst verdict among them. Both describe things that
+        // exist; the group card described a slab no primitive owned.
+        let cards = latticedSelectableCards(g)
+        let handedOverG = cards.reduce(0.0) { $0 + $1.heldMassG }
+        let collapsedValue = cards.isEmpty || handedOverG <= 0
+            ? "—" : String(format: "%.1f g", handedOverG)
+        let tint = latticeVerdictTint(
+            LatticeFaceCardDerivation.partSummary(cards).verdict)
         HStack(spacing: DS.Space.s) {
             if let b = block {
                 // ★ SAY WHY, IN FIVE WORDS (R7). Never a paragraph, never silence.
@@ -6378,8 +6391,9 @@ public struct WorkspacePlaceholder: View {
                             .padding(.vertical, 3).padding(.horizontal, DS.Space.xs)
                             .background(Capsule().fill(DS.Color.fillSelected.color))
                         Spacer(minLength: 0)
-                        // ★ THE ONE NUMBER: what this barrier hands the lattice.
-                        Text(drawer.collapsedValue)
+                        // ★ THE ONE NUMBER: what this group's latticed faces hand
+                        // the lattice, summed.
+                        Text(collapsedValue)
                             .dsStyle(DS.TypeScale.bodyStrong).monospacedDigit()
                             .foregroundStyle(tint.color)
                     }
@@ -6466,33 +6480,41 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// The diagnosis for one group, from its card plus core's own two floors.
+    /// ★ THE GROUP'S BADGE, FROM ITS FACES (maintainer, 2026-08-17). It was built
+    /// from `latticeFaceCards[g.id]` — the group card derived at `g.faces.first`,
+    /// which is the fabrication he asked to be removed. It is now the union of
+    /// the diagnoses of the selectables that are ACTUALLY latticed, so the badge
+    /// describes things that exist and that a handle can move.
     private func latticeDiagnosis(_ g: SelectionGroup) -> LatticeFaceDiagnosis {
-        guard let card = latticeFaceCards[g.id] else {
-            return LatticeFaceDiagnosis(badge: nil, severity: .certified,
-                                        problems: [])
-        }
         let limits = TopOptKit.latticeLimits(topology: project.lattice.lattice.id)
-        return LatticeFaceDiagnosis.of(
-            card: card,
-            cellsPerMemberFloor: limits.minCellsPerMember,
-            nozzleWidthMM: project.printParams.strutLineWidthMM)
+        let nozzle = project.printParams.strutLineWidthMM
+        let each = latticedSelectableCards(g).map {
+            LatticeFaceDiagnosis.of(card: $0,
+                                    cellsPerMemberFloor: limits.minCellsPerMember,
+                                    nozzleWidthMM: nozzle)
+        }
+        return LatticeFaceDiagnosis.merged(each)
     }
 
-    /// ★ §4a/§4b/§4c — THE DRAWER, beneath the group squircle. The out-of-regime
-    /// flag is its HEADLINE (it is the one line that predicts a wasted run); the
-    /// depth is the only control; everything else is a FACT, presented as a fact.
-    @ViewBuilder private func latticeGroupDrawer(_ g: SelectionGroup) -> some View {
-        latticeDrawerBody(latticeDrawer(g), depthDrag: latticeGroupDepthDrag(g),
-                          identifier: "lattice-drawer-\(g.id.uuidString)",
-                          // ★ §5/§2(d) — typing writes the SAME number the drag
-                          // writes, through the same clamp.
-                          writeDepth: { mm in
-                              // ★ ONE ENTRY POINT, so a typed group depth cannot
-                              // be shadowed by an override a drag left behind.
-                              project.writeGroupDepthMM(g.id, mm: mm)
-                              refreshLatticeFaceCards()
-                          })
+    /// The cards for the selectables in `g` that carry a lattice role — the only
+    /// ones whose regime a badge or a total may speak for. A selectable set to
+    /// Solid or Off has no lattice to certify and must not colour the group.
+    private func latticedSelectableCards(_ g: SelectionGroup) -> [LatticeFaceCard] {
+        project.latticeSelectableRefs(g).compactMap { ref in
+            guard project.latticeSelectableRole(ref, in: g.id) == .include,
+                  let c = latticeSelectableCards[ref.key] else { return nil }
+            return c
+        }
     }
+
+    // ★ `latticeGroupDrawer` IS GONE (maintainer, 2026-08-17): "There is a 'per
+    // Group' set of notes regarding the lattice that doesn't make sense. It
+    // should be per face *only*." It rendered a cell, a density, a strut and a
+    // cells-across derived at `g.faces.first` — one arbitrary face standing for
+    // the whole group, at a depth no primitive owns and no handle drags. The
+    // drawer layout below is unchanged and is still what every SELECTABLE row
+    // opens; only the group's copy of it is removed. `WorkspaceStageVisibility
+    // .rowSections` no longer lists `.latticeDrawer`, so it is not built.
 
     /// ★ THE ONE DRAWER LAYOUT. A group row and a selectable row render THIS —
     /// so "a region and a face behave identically" (bar R13) is a property of
@@ -6840,21 +6862,14 @@ public struct WorkspacePlaceholder: View {
             }
     }
 
-    /// The drawer for a group, built from the face card the barrier preview
-    /// produced. ONE builder, so the collapsed row and the open drawer can never
-    /// state two different verdicts.
-    private func latticeDrawer(_ g: SelectionGroup) -> LatticeRegionDrawer {
-        LatticeRegionDrawer.make(card: latticeFaceCards[g.id],
-                                 depthMM: project.latticeSlabDepthMM(g.id),
-                                 held: force.isProtected(g.id),
-                                 perRegionDensity: perRegionDensity)
-    }
-
     /// ★ §8(c) — SELECTING "PER REGION" IS WHAT MAKES PR 334's DRAWER ROW APPEAR.
     /// That is the entire wiring: PR 334 built the conditional row and asserted it
     /// as two exact cases, and recorded that "NOTHING CAN SET IT TRUE TODAY"
     /// because `LatticeDensityMode` had no per-region case. It has one now, and
     /// this is the single expression that connects them.
+    ///
+    /// ★ It survived the removal of the group drawer (2026-08-17) — it belongs to
+    /// the SELECTABLE drawer and was only sitting next to the group's copy.
     private var perRegionDensity: Bool {
         project.lattice.densityMode == .perRegion
     }
