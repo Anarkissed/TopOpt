@@ -484,3 +484,63 @@ being decided.
 `swift test`: **1739 tests, 22 skipped, 8 failures** — all 8 the known lib3mf gap.
 (One test fewer than 7f: two stage-visibility tests collapsed into one that loops
 over `WorkspaceStage.allCases`, so a fourth stage could not be added without it.)
+
+---
+
+# Round 7h — the merge with main, and a crash that was neither side's code
+
+18 commits, including `render-quality` (which reworked the viewer's shading) and
+`per-sector-density-override`.
+
+## The conflict was a UNION, not a choice
+
+Both sides grew the SAME shader structs: `render-quality` added world-space shading
+fields to `VOut` plus a `ShadeParams`; this branch added the cut's per-fragment
+half-space test, which needs `mpos`/`member` and `CutUniforms`. Taking either side
+whole would have silently dropped a feature whose Swift half was still wired up.
+
+* `VIn` / `VOut` / `Uniforms` carry both sides' fields.
+* The fragment takes main's new lighting WHOLE, and the cut resolves ONCE into an
+  effective `tint` that both of its shading branches read. Written any other way the
+  cut would have to be applied in two places and could drift between them.
+* `CutUniforms` moved from fragment `buffer(2)` to `buffer(3)` — the shading is the
+  binding with a texture beside it, so it was the cheaper move.
+
+## ★ A REAL BUG IN THIS BRANCH THAT THE CONFLICT EXPOSED
+
+§6 widened the tint buffer to EIGHT floats per vertex (rgba + the flags carrying
+`member`) and widened `setStressTints`'s allocation to match — but left its loop
+writing at `v * 4`. Every colour after the first landed in the previous vertex's
+FLAGS slot: the stress/lattice ramp scrambled, and the channel that drives the cut
+test filled with colour data.
+
+The Surface stage never showed it (it uses the already-8-wide `setVertexTints`); the
+lattice proxy and the smoothing brush go through here. It surfaced only because
+`render-quality` touched that same line for its own reason and the conflict put the
+two numbers side by side.
+
+## ★ AND THEN SIGNAL 6, WHICH WAS NEITHER SIDE'S CODE
+
+`DefaultArmingEvidenceGen` passed BEFORE the merge and aborted after it. The stack:
+
+    ___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED
+    topopt::JobLatticeRegion::~JobLatticeRegion()
+
+Heap corruption destroying a core struct. `per-sector-density-override` added fields
+to `JobLatticeRegion`, so the merged HEADERS and the VENDORED BINARY disagreed —
+`scripts/build_core.sh` fixed it with no code change at all.
+
+★ This is the documented trap, and it is worth restating: **a stale vendored core
+does not fail to link.** It builds, it runs, and it corrupts memory at a destructor.
+The only reason it was not misdiagnosed as a merge-resolution error is that the test
+was run at the pre-merge commit first, where it passed.
+
+## Verification on the MERGED tree
+
+`swift test`: **1757 tests, 25 skipped, 8 failures** — all 8 the known lib3mf gap.
+(1739 → 1757 is main's own 18.)
+
+★ `RealPartPatternTests` passes, so face 4's **32 / 33 / 34** is re-verified against
+the merged tree rather than carried over from before it.
+
+App builds for the iPad Pro 13-inch simulator.
