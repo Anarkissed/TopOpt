@@ -1661,6 +1661,16 @@ if(OpenCASCADE_FOUND)
     tests/harness/region_mask_cost_probe.cpp)
   target_link_libraries(region_mask_cost_probe PRIVATE topopt)
 
+  # ★ WHY "LATTICE" ON A FACE OFTEN DRAWS NOTHING (task
+  # 2026-08-15-lattice-and-face-ui §2a). Prices the app's `isPlane` guard —
+  # the one that silently skips a curved face — against a real part's surface
+  # kinds and against the maintainer's own declared face list.
+  #   cmake --build build --target lattice_primitive_probe
+  #   ./build/lattice_primitive_probe <part.step> <resolution> [face ids...]
+  add_executable(lattice_primitive_probe EXCLUDE_FROM_ALL
+    tests/harness/lattice_primitive_probe.cpp)
+  target_link_libraries(lattice_primitive_probe PRIVATE topopt)
+
   # THE §4 DEMONSTRATION JOB (task 2026-08-15-lattice-regions, bar R4): a curved
   # feature on his part, grid-split into sectors at different lattice depths,
   # with the cut planes taken from core's own grid_split_cells.

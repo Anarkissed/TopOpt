@@ -53,6 +53,9 @@ public struct LatticeSetupWizard: View {
     /// previous task — kept, because it is the page's own honesty about latency).
     @State private var lastLatencyMS: Double = 0
     @State private var mesh: ViewerMesh?
+    /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
+    /// field's id, so every number on this page types as well as drags.
+    @State private var numberPadField: String?
 
     public init(project: ProjectModel, onExit: @escaping () -> Void) {
         self.project = project
@@ -65,13 +68,12 @@ public struct LatticeSetupWizard: View {
             ZStack {
                 DS.Color.background.color.ignoresSafeArea()
                 stageView
-                wizardCard
-                HStack(spacing: 0) {
-                    selectionsModal
-                        // ★ §6 — centre-left, vertically centred, clear of both edges.
-                        .pageLeftModal(canvasHeight: geo.size.height)
-                    Spacer(minLength: 0)
-                }
+                // ★ ONE MODAL (maintainer, 2026-08-14): *"Combine the two modals
+                // together. Place the one on the right at the very bottom of the
+                // one on the left."* The floating wizard card is gone; its view
+                // switch is the last row inside this panel.
+                selectionsModal
+                    .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
                 disclaimer
                 saveAndExit
             }
@@ -130,9 +132,25 @@ public struct LatticeSetupWizard: View {
 
     // MARK: ★ §5a — THE WIZARD, CENTRE STAGE
 
-    /// One decision at a time, in the middle of the screen, with the sample
-    /// responding live. The card holds THIS stage's settings and nothing else; the
-    /// modal on the left holds all of them, always.
+    /// ★ §11(a) — THE CARD IS THE WIZARD'S PROGRESS, NOT A SECOND COPY OF THE
+    /// CONTROLS.
+    ///
+    /// ★ THE DEFECT, IN HIS SCREENSHOT: "A DUPLICATE 'FINISH' PANEL FLOATS IN THE
+    /// MIDDLE-BOTTOM OF THE SCREEN, overlapping the model, carrying its own
+    /// Density and Finish rows AND ITS OWN 'SAVE & EXIT' — while a second
+    /// 'Save & Exit' sits bottom-right."
+    ///
+    /// ★ ROOT CAUSE. This card rendered `model.stage.settings` through
+    /// `settingControl`, and `selectionsModal` rendered EVERY stage's settings
+    /// through the same function — so on the Finish stage the Density and Finish
+    /// editors existed TWICE on one screen, once in the left modal and once in a
+    /// 380 pt panel floating over the model. It was duplication by construction,
+    /// not a layout accident.
+    ///
+    /// ★ THE FIX. Each control exists ONCE, in the left modal — the panel §11(c)
+    /// requires every page to have. The card keeps what only it can carry: which
+    /// stage you are on, and the way forward. It is now a short bar rather than a
+    /// stack of editors, so it stops covering the object the page exists to show.
     private var wizardCard: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
@@ -148,9 +166,6 @@ public struct LatticeSetupWizard: View {
                         .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
                         .foregroundStyle(DS.Color.textPrimary.color)
                     Spacer(minLength: 0)
-                }
-                ForEach(model.stage.settings, id: \.rawValue) { s in
-                    settingControl(s, titled: true)
                 }
                 nextButton
             }
@@ -173,27 +188,30 @@ public struct LatticeSetupWizard: View {
         .accessibilityIdentifier("wizard-card")
     }
 
-    /// ★ NEXT advances the wizard (§5a). On the last stage there is nothing to
-    /// advance to, so the card offers the same Save & Exit the corner does rather
-    /// than a button that does nothing.
-    private var nextButton: some View {
-        Button {
-            if model.hasNext { model.advance() } else { saveAndClose() }
-        } label: {
-            HStack(spacing: DS.Space.s) {
-                Text(model.hasNext ? "Next" : "Save & Exit")
-                    .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                if model.hasNext {
-                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
+    /// ★ NEXT advances the wizard (§5a).
+    ///
+    /// ★ §11(a)/R13 — AND ON THE LAST STAGE IT IS NOT A SECOND "SAVE & EXIT".
+    /// It used to relabel itself, which put TWO buttons carrying that exact text
+    /// on one screen: this one, mid-card, and the page's own bottom-right action.
+    /// There is now ONE Save & Exit on the page and it is the corner's, which is
+    /// where every other page in the app puts its primary action (§0 rule S17).
+    @ViewBuilder private var nextButton: some View {
+        if model.hasNext {
+            Button { model.advance() } label: {
+                HStack(spacing: DS.Space.s) {
+                    Text("Next")
+                        .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
                 }
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(DS.Color.accent.color))
             }
-            .foregroundStyle(DS.Color.textPrimary.color)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 11)
-            .background(Capsule().fill(DS.Color.accent.color))
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("wizard-next")
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("wizard-next")
     }
 
     // MARK: the persistent left modal (§5b/§5c) — every selection, always live
@@ -202,41 +220,69 @@ public struct LatticeSetupWizard: View {
     /// `LatticeWizardStage`, each group holding exactly `stage.settings`, and the
     /// group the wizard is on is lit. Tapping a sub-title jumps the wizard there;
     /// changing a control inside it moves the wizard there too.
+    ///
+    /// ★ IT SHOWS ONE VIEW AT A TIME, AND IT HUGS ITS CONTENT.
+    ///
+    /// ★ HIS TWO INSTRUCTIONS THAT SHAPE THIS: *"Why is the modal so big and so up
+    /// high in the way? Cut it as small as possible and drop it as low as possible
+    /// without making anything hidden or making anything requiring scrolling"* and
+    /// *"These are now 'views'."*
+    ///
+    /// ★ THE SIZE DEFECT WAS A `ScrollView`, AND IT WAS MINE. I wrapped this body
+    /// in one so it could scroll if it outgrew its band — but a `ScrollView` takes
+    /// ALL the height it is offered, so the panel stopped hugging its content and
+    /// ran nearly the full screen with empty glass below the last control. It is
+    /// gone: showing one view at a time is what makes scrolling unnecessary, which
+    /// is the fix he actually asked for.
     private var selectionsModal: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
-            ForEach(LatticeWizardStage.allCases, id: \.rawValue) { stage in
-                VStack(alignment: .leading, spacing: 7) {
-                    stageSubTitle(stage)
-                    ForEach(stage.settings, id: \.rawValue) { s in
-                        settingControl(s, titled: true)
-                    }
-                }
+            ForEach(model.stage.settings.filter { !$0.isRenderedByCellSize },
+                    id: \.rawValue) { s in
+                settingControl(s, titled: true)
             }
             latencyReadout
+            // ★ THE CARD, MOVED HERE: "place the one on the right at the very
+            // bottom of the one on the left."
+            viewSwitcher
         }
         .padding(DS.Space.ml)
+        .frame(width: PageChrome.panelWidth, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
             .fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+        .animation(DS.Motion.emphasized, value: model.stage)
     }
 
-    private func stageSubTitle(_ s: LatticeWizardStage) -> some View {
-        let on: Bool = (model.stage == s)
-        return Button { model.jump(to: s) } label: {
-            HStack(spacing: DS.Space.xs) {
-                Circle().fill((on ? DS.Color.accent : DS.Color.strokeSubtle).color)
-                    .frame(width: 6, height: 6)
-                Text(s.title.uppercased())
-                    .font(.system(size: 9.5, weight: .heavy)).tracking(0.6)
-                    .foregroundStyle((on ? DS.Color.textSecondary
-                                         : DS.Color.textQuaternary).color)
-                Spacer(minLength: 0)
+    /// ★ THE VIEW SWITCH — the whole of what the floating card is now. Two views,
+    /// switchable in EITHER direction ("make it so you can go back and forth"),
+    /// and no third tab for Finish.
+    private var viewSwitcher: some View {
+        HStack(spacing: 2) {
+            ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
+                let on: Bool = (model.stage == s)
+                Button { model.jump(to: s); rebuild(); frameSample() } label: {
+                    Text(s.title)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle((on ? DS.Color.textPrimary
+                                             : DS.Color.textTertiary).color)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        // ★ "make the view buttons the same blue as they used to
+                        // be" — the wizard's own accent, which is what its Next
+                        // button and its lit stage pip wore before the card was
+                        // folded into this panel.
+                        .background(Capsule().fill(on ? DS.Color.accent.color
+                                                      : Color.clear))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("wizard-stage-\(s.rawValue)")
             }
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("wizard-stage-\(s.rawValue)")
+        .padding(2)
+        .background(Capsule().fill(DS.Color.background.opacity(0.35).color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
     }
 
     // MARK: ONE control per setting, rendered by the card AND the modal
@@ -254,14 +300,14 @@ public struct LatticeSetupWizard: View {
             switch s {
             case .type: typeRow
             case .size:
-                scrubRow(value: model.cellMM, unit: "mm", step: 0.05, range: 1...20) {
-                    model.cellMM = $0
-                    model.touched(.size)
-                    rebuild()
-                }
+                // ★ NEVER RENDERED HERE. `isRenderedByCellSize` filters it out of
+                // the list; the cell dimension is drawn by `.cellSize` below, as
+                // whatever that mode needs. Asking for it twice is the duplication
+                // the maintainer removed.
+                EmptyView()
             case .thickness:
-                scrubRow(value: model.relativeDensity * 100, unit: "%", step: 0.4,
-                         range: 5...90) {
+                scrubRow("thickness", value: model.relativeDensity * 100, unit: "%",
+                         step: 0.4, range: 5...90) {
                     model.relativeDensity = $0 / 100
                     model.touched(.thickness)
                     rebuild()
@@ -270,24 +316,96 @@ public struct LatticeSetupWizard: View {
                 segmentRow(["Auto", "Fixed", "Swept"], selected: cellModeIndex) { i in
                     model.setCellSizeMode([.auto, .fixed, .swept][i])
                 }
+                // ★ THE CELL DIMENSION LIVES HERE AND NOWHERE ELSE (maintainer,
+                // 2026-08-14): *"Auto needs no cell size, fixed needs one, and
+                // swept needs a range."* One row, three shapes, decided by the
+                // mode directly above it.
+                switch model.cellSizeMode {
+                case .auto, .fit:
+                    // Core picks it. Nothing to enter, so nothing is offered —
+                    // a field the user cannot set would be the readout-that-looks-
+                    // like-a-picker defect again.
+                    EmptyView()
+                case .fixed:
+                    scrubRow("size", value: model.cellMM, unit: "mm", step: 0.05,
+                             range: 1...20) {
+                        model.cellMM = $0
+                        model.touched(.size)
+                        rebuild()
+                    }
+                case .swept:
+                    sweptRange
+                }
             case .density:
-                segmentRow(["Auto", "Uniform"],
-                           selected: model.densityMode == .auto ? 0 : 1) { i in
-                    model.setDensityMode(i == 0 ? .auto : .uniform)
+                // ★ §8 — THREE MODES. Auto is the default and must never refuse.
+                segmentRow([LatticeDensityMode.auto.title,
+                            LatticeDensityMode.uniform.title,
+                            LatticeDensityMode.perRegion.title],
+                           selected: densityModeIndex) { i in
+                    model.setDensityMode([.auto, .uniform, .perRegion][i])
+                }
+                if model.densityMode == .perRegion {
+                    // ★ §8(e) — THE GAP, SURFACED. PR 331 landed the region layer
+                    // but NOT the per-sector density override in the grading law,
+                    // so a number typed here is captured and not yet consumed.
+                    // Saying so beats a control that silently does nothing — the
+                    // Diagrid-readout defect, which this project has already paid
+                    // for once.
+                    Text("Set each region's density in its drawer. Core still "
+                         + "derives density from the cell — these are saved, not "
+                         + "yet run.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.warning.color)
+                        .accessibilityIdentifier("wizard-per-region-gap")
                 }
             case .finish:
                 segmentRow(["None", "Rim", "Skin"], selected: boundaryIndex) { i in
                     model.setBoundary([.none, .rim, .fullSkin][i])
                 }
+                // ★ §10(b) — A STATED FACT, NOT A PICKER. Core implements exactly
+                // ONE skin, and the old "Skin pattern — Diagrid" readout looked
+                // like an unselected control. It is presented as what it is until
+                // a second pattern exists.
+                if model.boundary == .fullSkin {
+                    Text("Skin pattern: Diagrid — the only one core builds.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .accessibilityIdentifier("wizard-skin-pattern-fact")
+                }
             }
         }
     }
 
+    /// ★ §11(b) — EVERY LATTICE TYPE MUST BE REACHABLE. His screenshot shows the
+    /// picker clipped at the modal's right edge with a chip reading "F…". A
+    /// horizontal `ScrollView` was already here; what was missing is
+    /// `fixedSize()` on the chips, so SwiftUI compressed the row to the modal's
+    /// 348 pt instead of letting it overflow and scroll. A truncated chip is a
+    /// lattice the user cannot pick.
+    /// ★ THE SELECTED TYPE IS THE FIRST ONE VISIBLE (maintainer, 2026-08-14):
+    /// *"If starting with Octet Truss it should be the first one visible."*
+    ///
+    /// His screenshot opens on "Octet truss" with the row showing "…entred cubic",
+    /// "FCC + Z", "Diamond" — four chips, none of them the one that is selected,
+    /// and the leading one cut off mid-word.
+    ///
+    /// ★ SCROLLING CANNOT DO THIS, AND I TRIED IT FIRST. Octet truss was the LAST
+    /// entry in `LatticeType.family`, so `scrollTo(anchor: .leading)` clamps at the
+    /// end of the content and parks it at the RIGHT edge — exactly where it
+    /// already was. A selection that is last can never be scrolled to the front.
+    ///
+    /// ★ SO THE LIST ITSELF WAS REORDERED — see `LatticeType.family`, where octet
+    /// now leads. That is what he asked for ("place it on the far left of the
+    /// list"), and it makes this row a plain stable list again: no snapshot, no
+    /// per-appearance shuffling, nothing that moves a chip out from under a finger.
+    /// The row still SCROLLS — there are more types than fit 348 pt — it just
+    /// starts from the selected one instead of from whatever happens to be first.
     private var typeRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: DS.Space.xs) {
                 ForEach(LatticeType.family, id: \.id) { t in typeChip(t) }
             }
+            .padding(.trailing, DS.Space.xs)
         }
     }
 
@@ -298,6 +416,8 @@ public struct LatticeSetupWizard: View {
         return Button { model.setTopology(t.id) } label: {
             Text(t.displayName)
                 .font(.system(size: 11, weight: .bold))
+                .lineLimit(1)
+                .fixedSize()                     // ★ §11(b): never truncate a type
                 .foregroundStyle(ink)
                 .padding(.vertical, 6)
                 .padding(.horizontal, DS.Space.sm)
@@ -308,6 +428,31 @@ public struct LatticeSetupWizard: View {
         .accessibilityIdentifier("wizard-type-\(t.id)")
     }
 
+    /// ★ §9(a) — THE SWEEP WINDOW: two ends, both typed, plus what the sweep
+    /// actually keys on and what a too-narrow window will do.
+    @ViewBuilder private var sweptRange: some View {
+        HStack(spacing: DS.Space.s) {
+            scrubRow("cellMin", value: model.cellMinMM, unit: "mm", step: 0.05,
+                     range: 0.1...20) { model.cellMinMM = $0; rebuild() }
+            Text("–").dsStyle(DS.TypeScale.headline)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            scrubRow("cellMax", value: model.cellMaxMM, unit: "mm", step: 0.05,
+                     range: 0.1...20) { model.cellMaxMM = $0; rebuild() }
+        }
+        // ★ §9(d) — WHICH FIELD DRIVES THE SWEEP, said plainly. Not stress:
+        // `plan_cell_sizes` reads each block's thinnest DENSITY (printability)
+        // and thinnest MEMBER WIDTH (the cells-per-member ceiling).
+        Text("Core picks a cell per block from its density and member width.")
+            .dsStyle(DS.TypeScale.caption2)
+            .foregroundStyle(DS.Color.textQuaternary.color)
+        if let warn = model.sweptWindowWarning {
+            Text(warn)
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.warning.color)
+                .accessibilityIdentifier("wizard-swept-narrow")
+        }
+    }
+
     private var cellModeIndex: Int {
         switch model.cellSizeMode {
         case .auto: return 0
@@ -315,11 +460,44 @@ public struct LatticeSetupWizard: View {
         default: return 2
         }
     }
+    private var densityModeIndex: Int {
+        switch model.densityMode {
+        case .auto: return 0
+        case .uniform: return 1
+        case .perRegion: return 2
+        }
+    }
     private var boundaryIndex: Int {
         switch model.boundary {
         case .none: return 0
         case .rim: return 1
         case .fullSkin: return 2
+        }
+    }
+
+    /// ★ AS LOW AS POSSIBLE, WITHOUT HIDING ANYTHING.
+    ///
+    /// His words: *"drop it as low as possible without making anything hidden."*
+    /// So the panel is BOTTOM-anchored in the band rather than centred in it, and
+    /// the band still starts below the identity rows (`PageChrome.noteTop`) and
+    /// still stops clear of the Save & Exit cluster — a panel that reached the
+    /// bottom edge would sit under that button, which is "hidden".
+    ///
+    /// `maxHeight` on the band is what keeps it honest: the panel hugs its content
+    /// (it has no `ScrollView` any more) and can only be as tall as the band, so
+    /// "as low as possible" can never become "off the bottom".
+    private struct WizardModalPlacement: ViewModifier {
+        let canvasHeight: CGFloat
+        func body(content: Content) -> some View {
+            content
+                .frame(maxHeight: PageChrome.sidePanelBand(canvasHeight: canvasHeight),
+                       alignment: .bottom)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                // ★ "make the entire modal in-line with the bottom of the
+                // screen… make the padding equal on both sides". One inset,
+                // leading and bottom, so the panel's corner mirrors Save & Exit's.
+                .padding(.leading, PageChrome.edge)
+                .padding(.bottom, PageChrome.edge)
         }
     }
 
@@ -420,7 +598,16 @@ public struct LatticeSetupWizard: View {
                 dive()
             }
         case .boundarySwap:
+            // ★ §10 — AND PULL THE CAMERA BACK OUT TO SEE IT.
+            //
+            // The Auto-density cinematic ends with `dive()`, which pans to the
+            // densest point and zooms to 0.45 — INSIDE the lattice. A boundary
+            // swap used to only cross-fade the mesh, so a rim or a skin was being
+            // built correctly and drawn from a viewpoint buried inside the struts.
+            // That is the second half of "there is no skin or rim visible": a
+            // FINISH is a thing you look at from OUTSIDE, so showing one re-frames.
             withAnimation(.easeInOut(duration: c.duration)) { rebuild() }
+            withAnimation(.easeInOut(duration: c.duration)) { frameSample() }
         }
         model.finishedPlaying()
     }
@@ -464,7 +651,18 @@ public struct LatticeSetupWizard: View {
 
     // MARK: small shared bits (no prose anywhere)
 
-    private func scrubRow(value: Double, unit: String, step: Double,
+    /// ★ §5 — EVERY NUMERIC FIELD IS TAPPABLE AND OPENS THE NUMERIC KEYPAD.
+    ///
+    /// ★ HIS RULE, STATED TWICE: "Any input MUST be selectable and a small numeric
+    /// keyboard pop-up to input the number — NOT just touch inputs." He reports
+    /// the drag-only fields made it "all but impossible to actually input a round
+    /// number into most of the values for lattices" — which is exactly true of a
+    /// 0.05-mm-per-point scrub: landing on 3.00 mm by finger is luck.
+    ///
+    /// Drag REMAINS, as the coarse adjustment. Typing is now always available, and
+    /// both write through the SAME `set` closure, so there is no parallel entry
+    /// path and no second clamp.
+    private func scrubRow(_ id: String, value: Double, unit: String, step: Double,
                           range: ClosedRange<Double>,
                           set: @escaping (Double) -> Void) -> some View {
         Text(String(format: "%.2f %@", value, unit))
@@ -474,10 +672,20 @@ public struct LatticeSetupWizard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
                 .fill(DS.Color.fillSelected.color))
+            .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 1).onChanged { v in
                 let next = value + Double(v.translation.width) * step
                 set(Swift.min(range.upperBound, Swift.max(range.lowerBound, next)))
             })
+            .onTapGesture { numberPadField = id }
+            .numberPad(Binding(get: { numberPadField == id },
+                               set: { if !$0 { numberPadField = nil } }),
+                       config: .init(title: "", unit: unit, allowsDecimal: true),
+                       seed: value) { v in
+                guard let v else { return }
+                set(Swift.min(range.upperBound, Swift.max(range.lowerBound, v)))
+            }
+            .accessibilityIdentifier("wizard-field-\(id)")
     }
 
     private func segmentRow(_ names: [String], selected: Int,

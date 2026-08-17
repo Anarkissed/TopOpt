@@ -221,13 +221,72 @@ public enum PageChrome {
     /// so the placement constants below live beside it. The AE7 test asserts the
     /// two agree, so this can never drift from the view's own size.
     public static var gizmoSize: CGFloat { OrientationGizmoView.standardSize }
-    /// The gizmo sits in the ABSOLUTE top-right corner with this inset on BOTH
-    /// edges — the workspace's own placement (design-overhaul 109, round-2 item
-    /// 4), now the shared one. Every page that shows a gizmo shows it here.
-    public static let gizmoInset: CGFloat = DS.Space.s
+    /// ★ THE GIZMO'S FRAME INSET — DERIVED, SO ITS *GLASS* LANDS ON `edge`.
+    ///
+    /// The gizmo sits in the top-right corner (design-overhaul 109, round-2 item 4),
+    /// and this is the inset of its FRAME on both edges. It used to be `DS.Space.s`
+    /// (8) flat, which put the frame at 8 and therefore the visible housing at 18.5
+    /// — while the bottom-right chip stack sits on `edge` (24) and the view toggles
+    /// sat on 8. Three different right-hand edges on one screen.
+    ///
+    /// Maintainer, 2026-08-16: "the view buttons are too close to the edge. Please
+    /// put them in-line with the gizmo and all the chips at the bottom-right corner.
+    /// The padding to the right needs to be *exactly* the same … I am very
+    /// particular about keeping things lined up perfectly."
+    ///
+    /// So the FRAME inset is now whatever puts the GLASS on `edge`. Everything
+    /// visible on the right-hand side then shares one number, top and side alike —
+    /// see `gizmoAlignedTop`, which reduces to `edge` for the same reason.
+    public static var gizmoInset: CGFloat { edge - gizmoVisualInset }
     /// How far a page's own top-right chrome must stay clear of the gizmo so the
     /// two never overlap: the gizmo's width plus its insets.
     public static var gizmoClearance: CGFloat { gizmoSize + gizmoInset * 2 }
+
+    /// ★ HOW FAR THE GIZMO'S *VISIBLE* TOP SITS BELOW ITS FRAME'S TOP.
+    ///
+    /// The widget's frame is `gizmoSize` square, but the frosted housing a user
+    /// actually sees is `GizmoLayout.housingFraction` (0.90) of that and CENTRED —
+    /// so there is a transparent margin of `(1 − 0.90) / 2` all round, about 10.5 pt
+    /// at the standard 210.
+    ///
+    /// ★ AND THAT MARGIN IS WHY THE TOP BUTTONS LOOKED HIGH. They padded down by
+    /// `gizmoInset`, exactly as the gizmo's FRAME does — so their tops lined up with
+    /// a frame edge that is invisible, and sat ~10 pt above the glass edge beside
+    /// them. Correct arithmetic against the wrong edge. Maintainer, 2026-08-16: "the
+    /// 'Save' button is too high. The top of the button needs to be in-line with the
+    /// top of the gizmo. I also noticed the 'Lattice' button is too high as well."
+    public static var gizmoVisualInset: CGFloat {
+        gizmoSize * (1 - GizmoLayout.housingFraction) / 2
+    }
+
+    /// The top padding for chrome that must line up with the gizmo's visible top
+    /// edge. Every top-right control uses this rather than `gizmoInset`, so they
+    /// cannot drift apart one page at a time.
+    ///
+    /// With `gizmoInset` derived from `edge`, this reduces to `edge` — the gizmo's
+    /// glass is the same distance from the top as from the side, and so is
+    /// everything aligned to it.
+    public static var gizmoAlignedTop: CGFloat { gizmoInset + gizmoVisualInset }
+
+    /// ★ THE TOP INSET FOR A CONTROL THAT SITS *UNDER* THE GIZMO.
+    ///
+    /// Two things have to be true and they do not give the same number:
+    ///
+    ///   * it must clear the gizmo's FRAME, because the frame is what takes the
+    ///     orbit gesture (`contentShape(Rectangle())` over the full square) — a
+    ///     control overlapping it would be un-tappable in its top strip;
+    ///   * it should read as one `gap` below the gizmo's GLASS, which is what the
+    ///     eye measures from.
+    ///
+    /// The frame is the larger, so it decides — and the remaining distance from the
+    /// glass then lands within a couple of points of `edge`, which is why this
+    /// looks even rather than merely being safe. Taking the glass alone would leave
+    /// 1.5 pt of the gizmo's own touch target underneath the control.
+    public static var belowGizmo: CGFloat {
+        max(gizmoInset + gizmoSize,                       // clear the touch target
+            gizmoAlignedTop + gizmoSize - gizmoVisualInset * 2)  // …and the glass
+            + gap
+    }
 
     // MARK: - derived
 

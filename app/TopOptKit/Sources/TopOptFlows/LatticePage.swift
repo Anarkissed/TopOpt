@@ -1018,16 +1018,30 @@ public struct LatticePage: View {
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
             }
-            // Density MODE — uniform vs auto (B6).
+            // ★ §8 — DENSITY MODE: THREE MODES, NOT TWO. Auto (from the FEA) ·
+            // Uniform (one everywhere) · Per region (each region states its own).
+            // Auto stays the default and is never a refusal.
             card {
                 HStack {
                     Text("Density mode").dsStyle(DS.TypeScale.body)
                     Spacer()
-                    segment(["Uniform", "Auto"],
-                            selected: project.lattice.densityMode == .auto ? 1 : 0,
-                            enabled: [true, autoGate.offered]) { i in
-                        project.lattice.densityMode = i == 1 ? .auto : .uniform
+                    segment([LatticeDensityMode.auto.title,
+                             LatticeDensityMode.uniform.title,
+                             LatticeDensityMode.perRegion.title],
+                            selected: densityModeIndex,
+                            enabled: [autoGate.offered, true, true]) { i in
+                        project.lattice.densityMode = [.auto, .uniform, .perRegion][i]
                     }
+                }
+                if project.lattice.densityMode == .perRegion {
+                    // ★ §8(e) — the gap, on screen. PR 331 landed the region layer;
+                    // the per-sector density override in the grading law did not.
+                    Text("Set each region's density in its drawer. Core still "
+                         + "derives density from the cell — these are saved, not "
+                         + "yet run.")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.warning.color)
+                        .accessibilityIdentifier("density-per-region-gap")
                 }
                 if let reason = autoGate.unavailableReason {
                     Text(reason).dsStyle(DS.TypeScale.caption)
@@ -1247,6 +1261,15 @@ public struct LatticePage: View {
     /// pass — so they are offered only when Density mode is Auto. Greyed with the
     /// reason below rather than silently ignored.
     private var cellModeGraded: Bool { project.lattice.densityMode == .auto }
+
+    /// ★ §8 — the segment index for the three density modes.
+    private var densityModeIndex: Int {
+        switch project.lattice.densityMode {
+        case .auto: return 0
+        case .uniform: return 1
+        case .perRegion: return 2
+        }
+    }
     /// Per region additionally needs the LINKED core to take `"cell_mode": "fit"` —
     /// an unknown value kills the whole job at schema validation, so the segment is
     /// greyed with the reason rather than offered and silently downgraded.
@@ -1286,6 +1309,32 @@ public struct LatticePage: View {
 
     /// TYPING is EXACT to two decimals (S3).
     private func clampCell(_ v: Double) -> Double { LatticeCellEntry.typed(v, bounds) }
+
+    /// ★ §9(e) — WHAT THE SWEEP ACTUALLY DOES, naming the floor that actually
+    /// binds. Two short sentences (R14).
+    private var sweptCaption: String {
+        let floor = LatticeCellEntry.entryFloorMM(bounds)
+        return String(format: "Core picks a cell per block from its density and "
+                      + "member width. Nothing goes below %.2f mm — under that no "
+                      + "strut prints at this line width.", floor)
+    }
+
+    /// ★ §9(d)/§9(b) — THE WINDOW THAT CANNOT SWEEP, named BEFORE the run.
+    ///
+    /// The plan's levels are `S0 · 2^L` (`cell_plan_max_level`,
+    /// core/src/simp/cell_plan.cpp:43-51), so a window under 2× holds exactly ONE
+    /// level and every block lands on it: `distinct_cells = 1`, one strut radius,
+    /// no sweep. His 2.0–4.0 mm window is exactly 2×, which is the smallest window
+    /// that can hold two.
+    private var sweptFlatWarning: String? {
+        let lo = project.lattice.cellMinMM, hi = project.lattice.cellMaxMM
+        guard lo > 0, hi >= lo else { return nil }
+        if hi < lo * 2 {
+            return String(format: "This window holds one cell size. Widen it to "
+                          + "%.1f mm or more to sweep.", lo * 2)
+        }
+        return nil
+    }
 
     @ViewBuilder private var cellModeBody: some View {
         switch project.lattice.cellSizeMode {
@@ -1344,12 +1393,45 @@ public struct LatticePage: View {
                     project.lattice.cellMaxMM = Swift.max(clampCell(v), project.lattice.cellMinMM)
                 }
             }
-            Text(bounds.cellFloorMM == nil
-                 ? "Core grades the cell across this window — fine where the stress is high, coarse where it is low."
-                 : String(format: "Core grades the cell across this window — fine where the stress is high, coarse where it is low. Neither end goes below core's %.1f mm floor.",
-                          cellFloorMM))
+            // ★ §9(d)/§9(e) — THE CAPTION WAS WRONG TWICE, AND BOTH ARE FIXED.
+            //
+            // 1. "fine where the stress is high, coarse where it is low" describes
+            //    a STRESS-driven sweep. There isn't one. `plan_cell_sizes`
+            //    (core/src/simp/cell_plan.cpp:186-199) picks each block's level
+            //    from `need` — the smallest level whose strut still prints at that
+            //    block's THINNEST DENSITY — bounded by `cap`, the largest level
+            //    still spanning N* cells of its THINNEST MEMBER. Density and
+            //    member width. Stress never enters.
+            //
+            // 2. "Neither end goes below core's 4.9 mm floor" named
+            //    `bounds.cellFloorMM`, the LIGHT-end floor. The control's actual
+            //    bound is `LatticeCellEntry.entryFloorMM`, which reads
+            //    `cellFloorDensestMM` (~1.17 mm) — PR 310's dense floor. His own
+            //    run confirms it: `min_printable_cell_mm: 1.173`. So his 2.0–4.0
+            //    window was ALWAYS legal and nothing clamped it; the caption was
+            //    stale, and it read as though the app had silently overruled him.
+            Text(sweptCaption)
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
+            // ★ §9(f) — A CLAMP THAT FIRES SAYS SO, WITH THE NUMBER.
+            if let note = LatticeCellEntry.sweptClampNote(
+                minMM: project.lattice.cellMinMM,
+                maxMM: project.lattice.cellMaxMM, bounds) {
+                Text(note)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .accessibilityIdentifier("swept-clamp-note")
+            }
+            if let flat = sweptFlatWarning {
+                // ★ §9(d) — AND WHEN THE SWEEP CANNOT SEPARATE ANYTHING, SAY SO
+                // BEFORE THE RUN. A window narrower than 2x has ONE dyadic level
+                // (`cell_plan_max_level`: levels are S0·2^L), so it emits one cell
+                // and `distinct_cells` comes back 1 — which is what his receipt
+                // showed and what read as the mode being broken.
+                Text(flat)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+            }
         case .fit:
             // ★ THE COPY, IN HIS TERMS (task 2026-08-07, S2b). What it DOES, on his
             // part, in the words he used. The words "advanced" and "expert" are

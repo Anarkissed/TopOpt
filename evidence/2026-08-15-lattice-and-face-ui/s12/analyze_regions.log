@@ -1,0 +1,15 @@
+[loadcase] region 100 "protected wall" faces=1 cuts=0 area=1.181e+04mm^2 filter_matched=0 drift=unknown(not-recorded)
+[loadcase] load-group 0: faces=22 |F|=33.4N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+analyze: M2_verticalStand.step as solid part (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.02545 MPa   worst-case margin: 2162 (required 1.5)
+  load case: declared external load
+  verdict: ACCEPTED
+  voxel mass: 682 g
+  min-feature violations: 36
+report: evidence/2026-08-15-lattice-and-face-ui/s12/out_regions/analysis_report.json
+provenance: evidence/2026-08-15-lattice-and-face-ui/s12/out_regions/analysis.json
+fields: evidence/2026-08-15-lattice-and-face-ui/s12/out_regions/fields.bin

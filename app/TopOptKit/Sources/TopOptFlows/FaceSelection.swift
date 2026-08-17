@@ -43,8 +43,67 @@ public enum FacePicker {
         return mesh.faceIDs[t]
     }
 
+    /// ★ THE HIT, NOT JUST THE FACE (task 2026-08-15 §6). The face id, the point
+    /// ON the surface, and that triangle's own normal.
+    public struct Hit: Equatable, Sendable {
+        public let faceID: FaceID
+        public let triangle: Int
+        public let point: SIMD3<Float>
+        public let normal: SIMD3<Float>
+    }
+
+    /// ★ THE POINT THE PICKER ALWAYS COMPUTED AND DISCARDED.
+    ///
+    /// `pickTriangle` runs Möller–Trumbore and keeps the ray parameter in `bestT`
+    /// to find the NEAREST triangle — then returns only the index, throwing the
+    /// distance away. The Surface stage needs the POINT for every hover and every
+    /// cut, so this returns it: `origin + dir · t`, plus the triangle's normal.
+    ///
+    /// It is the SAME cast the tap picker uses, so a hover and a tap can never
+    /// disagree about what is under the pencil.
+    public static func hit(rayOrigin: SIMD3<Float>, rayDir: SIMD3<Float>,
+                           mesh: ViewerMesh) -> Hit? {
+        guard !mesh.isEmpty else { return nil }
+        var bestT = Float.greatestFiniteMagnitude
+        var bestTri: Int? = nil
+        let idx = mesh.indices
+        var tri = 0
+        var i = 0
+        while i + 2 < idx.count {
+            let p0 = position(idx[i], mesh)
+            let p1 = position(idx[i + 1], mesh)
+            let p2 = position(idx[i + 2], mesh)
+            if let t = rayTriangle(origin: rayOrigin, dir: rayDir,
+                                   p0: p0, p1: p1, p2: p2), t < bestT {
+                bestT = t
+                bestTri = tri
+            }
+            i += 3
+            tri += 1
+        }
+        guard let t = bestTri else { return nil }
+        let b = t * 3
+        let p0 = position(idx[b], mesh)
+        let p1 = position(idx[b + 1], mesh)
+        let p2 = position(idx[b + 2], mesh)
+        let n = simd_cross(p1 - p0, p2 - p0)
+        let face: FaceID = t < mesh.faceIDs.count ? mesh.faceIDs[t] : -1
+        return Hit(faceID: face, triangle: t,
+                   point: rayOrigin + rayDir * bestT,
+                   normal: simd_length(n) > 1e-9 ? simd_normalize(n) : n)
+    }
+
     /// Resolve the index of the nearest triangle a normalized tap hits (face-id-
     /// agnostic, so it also works for an STL). Returns nil on a miss / empty mesh.
+    /// The camera-space twin of `hit(rayOrigin:rayDir:mesh:)`, built on the SAME
+    /// `ray(camera:aspect:point:)` the tap picker uses — so the point this returns
+    /// is on the triangle that pick selected, never a second opinion.
+    public static func hit(mesh: ViewerMesh, camera: OrbitCamera,
+                           aspect: Float, point: CGPoint) -> Hit? {
+        let (origin, dir) = ray(camera: camera, aspect: aspect, point: point)
+        return hit(rayOrigin: origin, rayDir: dir, mesh: mesh)
+    }
+
     public static func pickTriangle(mesh: ViewerMesh, camera: OrbitCamera,
                                     aspect: Float, point: CGPoint) -> Int? {
         guard !mesh.isEmpty else { return nil }
@@ -72,7 +131,7 @@ public enum FacePicker {
 
     /// The world-space ray (origin at the eye, unit direction) through a normalized
     /// tap point. Unprojects the near and far clip points and connects them.
-    static func ray(camera: OrbitCamera, aspect: Float,
+    public static func ray(camera: OrbitCamera, aspect: Float,
                     point: CGPoint) -> (origin: SIMD3<Float>, dir: SIMD3<Float>) {
         let ndcX = Float(point.x) * 2 - 1
         let ndcY = 1 - Float(point.y) * 2          // flip: tap y is down, NDC y is up

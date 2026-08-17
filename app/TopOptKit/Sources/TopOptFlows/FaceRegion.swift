@@ -138,10 +138,57 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
     /// one tap is worse than the problem he started with (§5b).
     public var collapsed: Bool
 
+    /// ★ A UNION OF PARTS (§6c). The regions this one is the union OF.
+    ///
+    /// ★ WHY A REGION NEEDED THIS. Everything else here is
+    /// `faces ∩ (intersection of half-spaces)` — one part. That cannot express
+    /// "these two pieces I tapped, together": a union of two disjoint pieces is not
+    /// an intersection of anything. Without it the union tool had no honest commit,
+    /// and the version that shipped absorbed the pieces' whole FACES — dragging in
+    /// siblings nobody selected, which the maintainer ruled out in terms.
+    ///
+    /// With it the rule is exactly what he asked for: the pieces you tapped, and
+    /// only those, become one piece. A region with parts owns no faces and no cuts
+    /// of its own; it RESOLVES to the union of its parts, shows as one row with one
+    /// role and one depth, and expands to its parts at emission.
+    ///
+    /// EMPTY BY DEFAULT and omitted from the encoding when empty, so a project that
+    /// never made a union is byte-identical to what it was before this existed
+    /// (PR 331's bar R1).
+    public var parts: [RegionID]
+
+    /// ★ WHICH OF THIS REGION'S OWN CUTS ARE A BOUNDARY BETWEEN TWO PIECES —
+    /// i.e. which of them should be DRAWN as an edge.
+    ///
+    /// ★ WHY THE TWO ARE NOT THE SAME LIST. `cuts` is MEMBERSHIP: every half-space
+    /// a point must satisfy to be in this region. On a curved strip some of those
+    /// are structural — a wedge's far bound stops the piece continuing round the
+    /// bend — and drawing them scatters lines through surface the piece does not
+    /// even touch. `GridCell` has carried the distinction since the pattern tool
+    /// was built, and `splitGrid` THREW IT AWAY: the region kept only `cuts`, so
+    /// the wireframe had to guess which cut was an edge ("the last one, if it isn't
+    /// strict") and guessed wrong on every grid cell.
+    ///
+    /// ★ NIL MEANS "ALL OF THEM", which is what a plain two-way cut wants and what
+    /// every region that predates this is. An EMPTY ARRAY means "this region draws
+    /// none of its own bounds" — a real answer, and the one the first cell of an arc
+    /// grid gives, since each interior boundary is drawn by exactly one of the two
+    /// pieces that meet on it. Omitted from the encoding when nil, so a project that
+    /// never patterned anything stays byte-identical (PR 331's bar R1).
+    public var edges: [RegionCut]?
+
+    /// True when this region IS a union of parts rather than a face selection.
+    public var isUnionOfParts: Bool { !parts.isEmpty }
+
+    /// The cuts to DRAW for this region — `edges` when it names them, otherwise
+    /// every cut. One accessor so no caller has to remember the nil-means-all rule.
+    public var drawnCuts: [RegionCut] { edges ?? cuts }
+
     public init(id: RegionID, name: String, filter: RegionFilter = RegionFilter(),
                 filterMatchedAtAuthor: Int = -1, add: [FaceID] = [],
                 remove: [FaceID] = [], cuts: [RegionCut] = [],
-                parentID: RegionID = -1, collapsed: Bool = true) {
+                parentID: RegionID = -1, collapsed: Bool = true,
+                parts: [RegionID] = [], edges: [RegionCut]? = nil) {
         self.id = id
         self.name = name
         self.filter = filter
@@ -151,6 +198,52 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
         self.cuts = cuts
         self.parentID = parentID
         self.collapsed = collapsed
+        self.parts = parts
+        self.edges = edges
+    }
+
+    // ── Codable, BY HAND, for one reason ──────────────────────────────────
+    //
+    // ★ A SYNTHESISED ENCODING WOULD WRITE `"parts":[]` INTO EVERY PROJECT that
+    // never made a union — breaking the byte-identity bar PR 331 set (a project
+    // with no region edits produces the job it produced yesterday, to the byte).
+    // Written out, `parts` appears only when it holds something.
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, filter, filterMatchedAtAuthor, add, remove, cuts
+        case parentID, collapsed, parts, edges
+    }
+
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(RegionID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        filter = try c.decodeIfPresent(RegionFilter.self, forKey: .filter) ?? RegionFilter()
+        filterMatchedAtAuthor = try c.decodeIfPresent(Int.self,
+                                                      forKey: .filterMatchedAtAuthor) ?? -1
+        add = try c.decodeIfPresent([FaceID].self, forKey: .add) ?? []
+        remove = try c.decodeIfPresent([FaceID].self, forKey: .remove) ?? []
+        cuts = try c.decodeIfPresent([RegionCut].self, forKey: .cuts) ?? []
+        parentID = try c.decodeIfPresent(RegionID.self, forKey: .parentID) ?? -1
+        collapsed = try c.decodeIfPresent(Bool.self, forKey: .collapsed) ?? true
+        parts = try c.decodeIfPresent([RegionID].self, forKey: .parts) ?? []
+        edges = try c.decodeIfPresent([RegionCut].self, forKey: .edges)
+    }
+
+    public func encode(to e: Encoder) throws {
+        var c = e.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(filter, forKey: .filter)
+        try c.encode(filterMatchedAtAuthor, forKey: .filterMatchedAtAuthor)
+        try c.encode(add, forKey: .add)
+        try c.encode(remove, forKey: .remove)
+        try c.encode(cuts, forKey: .cuts)
+        try c.encode(parentID, forKey: .parentID)
+        try c.encode(collapsed, forKey: .collapsed)
+        // ★ ONLY WHEN IT HOLDS SOMETHING — see the note above.
+        if !parts.isEmpty { try c.encode(parts, forKey: .parts) }
+        if let edges { try c.encode(edges, forKey: .edges) }
     }
 
     /// True when this region is exactly ONE face with no filter and no cut — an
@@ -283,7 +376,18 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
                                       filterMatchedAtAuthor: parent.filterMatchedAtAuthor,
                                       add: parent.add, remove: parent.remove,
                                       cuts: parent.cuts + [cut], parentID: id,
-                                      collapsed: true))
+                                      collapsed: true,
+                                      // ★ THE NEW BOUNDARY, DRAWN ONCE. Both halves
+                                      // are bounded by the same plane; the first
+                                      // owns the line so the second does not draw a
+                                      // second copy of it, and NEITHER redraws the
+                                      // parent's cuts (which belong to whatever made
+                                      // them). This replaces the old guess in
+                                      // `SurfaceCutLines.committed` — "the region's
+                                      // last cut, if it isn't the strict one" —
+                                      // which was right for a manual cut and wrong
+                                      // for every grid cell.
+                                      edges: k == 0 ? [cut] : []))
             out.append(cid)
         }
         setCollapsed(id, false)
@@ -306,10 +410,53 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
                                       filterMatchedAtAuthor: parent.filterMatchedAtAuthor,
                                       add: parent.add, remove: parent.remove,
                                       cuts: parent.cuts + c.cuts, parentID: id,
-                                      collapsed: true))
+                                      collapsed: true,
+                                      // ★ THE CELL'S OWN EDGE LIST, CARRIED THROUGH.
+                                      // Dropping it here is why a committed pattern's
+                                      // boundaries could not be drawn correctly: the
+                                      // wireframe had to guess which cut was an edge.
+                                      edges: c.drawn))
             out.append(cid)
         }
         setCollapsed(id, true)  // collapsed by default: one row, not fifty
+        return out
+    }
+
+    /// ★ SPLIT A REGION INTO ITS DETACHED PATCHES (maintainer, 2026-08-16: "If a cut
+    /// leaves a small piece alone, it should be its own part … even if it's a tiny
+    /// piece, it should be its *own* face").
+    ///
+    /// A no-op when the region's surface is one connected patch — which is the
+    /// ordinary case — and when no honest set of separating planes exists. See
+    /// `SurfaceComponents` for why "no honest set" is a real answer and not a
+    /// failure to try hard enough.
+    ///
+    /// Returns the new pieces, or [] when nothing was split.
+    @discardableResult
+    public mutating func splitDetached(_ id: RegionID,
+                                       in mesh: ViewerMesh) -> [RegionID] {
+        guard let parent = region(id),
+              let pieces = SurfaceComponents.detachedPieces(of: parent, in: mesh),
+              pieces.count >= 2 else { return [] }
+        var out: [RegionID] = []
+        for (k, cuts) in pieces.enumerated() {
+            let cid = nextID
+            nextID += 1
+            regions.append(FaceRegion(id: cid, name: "\(parent.name)·\(k + 1)",
+                                      filter: parent.filter,
+                                      filterMatchedAtAuthor: parent.filterMatchedAtAuthor,
+                                      add: parent.add, remove: parent.remove,
+                                      cuts: cuts, parentID: id, collapsed: true,
+                                      // ★ A SEPARATOR IS NOT AN EDGE. It floats in
+                                      // the gap BETWEEN two patches, where there is
+                                      // no surface at all — tracing it would draw a
+                                      // line across nothing. The real boundary here
+                                      // is the cut that detached them, and that is
+                                      // drawn by the region this one came from.
+                                      edges: []))
+            out.append(cid)
+        }
+        setCollapsed(id, true)
         return out
     }
 
@@ -318,6 +465,117 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
     public mutating func revertSplit(_ id: RegionID) {
         let kids = children(of: id).map(\.id)
         for k in kids { _ = dissolve(k) }
+    }
+
+    // MARK: - union of parts (§6c)
+
+    /// ★ COMBINE THE PICKED PIECES, AND ONLY THOSE. The new region owns no faces
+    /// and no cuts; it IS the union of `ids`, which become its children so the row
+    /// list folds them under it exactly as a split's children fold.
+    ///
+    /// Nothing is dissolved and nothing else is drawn in — that is the whole point.
+    @discardableResult
+    public mutating func unionOfParts(_ ids: [RegionID], named name: String) -> RegionID? {
+        let live = ids.filter { region($0) != nil }
+        guard live.count >= 2 else { return nil }
+        let id = nextID
+        nextID += 1
+        regions.append(FaceRegion(id: id, name: name, parentID: -1,
+                                  collapsed: true, parts: live))
+        // The parts hang off the union, so one operation adds ONE row (§5b).
+        for pid in live {
+            guard let i = regions.firstIndex(where: { $0.id == pid }) else { continue }
+            regions[i].parentID = id
+        }
+        return id
+    }
+
+    /// ★ ISOLATE: MAKE THESE FACES THEIR OWN REGION, AND TAKE THEM OUT OF EVERY
+    /// OTHER ONE (§6c — the maintainer's "disconnecting from every other face it is
+    /// currently connected with").
+    ///
+    /// A face can sit in several regions at once — a hand-picked union, a
+    /// filter-defined selection, its own identity region. Making a NEW region for it
+    /// does not change that: the face keeps whatever role and depth those other
+    /// regions carry, and "its own face" is not what happened.
+    ///
+    /// So isolating does two things: it creates the region, and it REMOVES those
+    /// faces from every other region that still resolves to them —
+    ///   * from an explicit member list, by dropping the id;
+    ///   * from a FILTER-defined region, by adding an explicit `remove` entry,
+    ///     which is exactly the correction PR 331 built `remove` for (§2c: "a
+    ///     heuristic that cannot be corrected by hand is worse than no heuristic");
+    ///   * a region left with nothing at all is dissolved, since an empty region is
+    ///     a row that resolves to no surface.
+    ///
+    /// Returns the new region, or nil when there is nothing to isolate.
+    @discardableResult
+    public mutating func isolate(faces: [FaceID], named name: String,
+                                 in mesh: ViewerMesh) -> RegionID? {
+        let wanted = Set(faces)
+        guard !wanted.isEmpty else { return nil }
+
+        // Take them out of everything that currently holds them.
+        var doomed: [RegionID] = []
+        for i in regions.indices {
+            let before = Set(FaceRegionGeometry.members(of: regions[i], in: mesh))
+            let overlap = before.intersection(wanted)
+            guard !overlap.isEmpty else { continue }
+
+            regions[i].add.removeAll { wanted.contains($0) }
+            for f in overlap where !regions[i].remove.contains(f) {
+                regions[i].remove.append(f)
+            }
+            regions[i].remove.sort()
+
+            if FaceRegionGeometry.members(of: regions[i], in: mesh).isEmpty {
+                doomed.append(regions[i].id)
+            }
+        }
+        for id in doomed { _ = dissolve(id) }
+
+        // And give them one of their own.
+        let id = nextID
+        nextID += 1
+        regions.append(FaceRegion(id: id, name: name, add: faces.sorted()))
+        return id
+    }
+
+    /// ★ THE OUTERMOST THING A PIECE BELONGS TO — walk up through any unions that
+    /// have absorbed it.
+    ///
+    /// Selection must land here, not on the part. Once two pieces are combined they
+    /// ARE one piece, so tapping either has to select the whole: resolving to the
+    /// part instead is why "the two faces are still separate when I try to select
+    /// it" even after the cut line between them had gone.
+    public func outermostUnion(containing id: RegionID) -> RegionID {
+        var current = id
+        var guard_ = 0
+        while guard_ < regions.count {
+            guard_ += 1
+            guard let owner = regions.first(where: { $0.parts.contains(current) })
+            else { return current }
+            current = owner.id
+        }
+        return current
+    }
+
+    /// ★ THE LEAVES A REGION RESOLVES TO — itself, or its parts (recursively).
+    ///
+    /// A union owns nothing directly, so every consumer that wants faces, cuts or
+    /// voxels has to go through this rather than reading the region itself. Cycles
+    /// cannot occur (a union's parts always predate it) but the visited set makes
+    /// that true by construction rather than by argument.
+    public func resolvedLeaves(_ id: RegionID) -> [RegionID] {
+        var out: [RegionID] = []
+        var seen: Set<RegionID> = []
+        func walk(_ rid: RegionID) {
+            guard !seen.contains(rid), let r = region(rid) else { return }
+            seen.insert(rid)
+            if r.isUnionOfParts { r.parts.forEach(walk) } else { out.append(rid) }
+        }
+        walk(id)
+        return out
     }
 
     // MARK: - edits

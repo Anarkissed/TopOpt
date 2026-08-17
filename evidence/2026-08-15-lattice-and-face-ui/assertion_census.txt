@@ -1,0 +1,97 @@
+R16 — ASSERTION CENSUS (read whole, not through a filter)
+Base 247a6bbc vs this branch. Counting XCTAssert* / XCTUnwrap / XCTFail.
+
+NEW TEST FILES
+  LatticePrimitiveAlwaysTests.swift        29   R2/R3/R4
+  LatticeFaceDiagnosisTests.swift          25   R7/R14
+  DensityModeAndSweptTests.swift           32   R10/R11
+                                          ---
+                                           86   added
+
+EXISTING FILES THIS TASK TOUCHED
+  LatticeSeparationTests.swift            105 -> 107   (+2)
+  LatticeSeparationRegionTests.swift       47 ->  52   (+5)
+  FrozenRegionAsMaterialTests.swift        50 ->  50   ( 0)
+  DesignOverhaulRound2Tests.swift          15 ->  15   ( 0)
+
+NO CATEGORY FELL.
+
+THE FOUR ASSERTIONS WHOSE SUBJECT MOVED — none deleted, each restated:
+
+1. LatticeSeparationTests.testEachLatticedFaceGetsADepthPlaneReachingIntoThePart
+   WAS: `case .slab(...)` + one nominal normal + one depth.
+   NOW: `case .shell(...)` + the SAME two properties checked at EVERY vertex.
+   WHY: §2(b) replaced the plane-only slab with the distance-field offset so a
+   CURVED face gets a primitive at all. Strictly stronger: per-vertex, not nominal.
+
+2. LatticeSeparationRegionTests.testAFlatRegionGetsADepthPlaneReachingIntoThePart
+   Same change, same reason, same strengthening.
+
+3. LatticeSeparationRegionTests
+     .testAWrappingRegionGetsNoDepthPlaneRatherThanAMeaninglessOne
+   -> .testAWrappingRegionGetsAPrimitiveThatFollowsEachMember
+   WAS: XCTAssertNil — a wrapping region gets NO primitive.
+   NOW: XCTAssertNotNil, PLUS a direct assertion of the original concern (the
+        shell follows BOTH members instead of averaging them into one direction
+        that describes neither).
+   WHY: DELIBERATE INVERSION, mandated by §2(a): "It ALWAYS has to create a
+        primitive. IF THERE ISN'T ONE MADE, IT IS BROKEN." The old refusal was
+        right ABOUT A SLAB; §2(b)'s shape makes refusal unnecessary. The concern
+        the old test protected is now asserted directly rather than via refusal.
+
+4. FrozenRegionAsMaterialTests.testTheDensityOverrideDoesNotYetReachTheRun
+   WAS: XCTAssertNil(LatticeDensityMode(rawValue: "perRegion")) — gap 1, "the
+        mode does not exist".
+   NOW: XCTAssertNotNil — the mode exists (§8).
+   WHY: THE TEST ITSELF ASKED FOR THIS: "When per-region lands, this fails and
+        the gap note above must be UPDATED, never deleted." The three-gap note is
+        updated in place: gaps 1 and 2 marked CLOSED with what closed them, gap 3
+        (the override does not reach core) LEFT OPEN and still asserted.
+
+TESTS I BROKE MID-TASK AND FIXED RATHER THAN WEAKENED
+  DesignOverhaulRound2Tests.testChipsOrderAscendingByWidth
+  DesignOverhaulRound2Tests.testChipsUnmeasuredParksAtBottom
+  Both broke because §4(b) added `.stageNav` to SettingsChipID. Each file already
+  documents the convention — every new chip is MEASURED so the test keeps testing
+  the ORDER rather than which chips exist — and that convention was followed:
+  `.stageNav: 145` added to both width maps, expected order updated.
+
+──────────────────────────────────────────────────────────────────────────────
+ADDENDUM — the review rounds (maintainer feedback after the first handoff)
+
+TWO MORE ASSERTIONS WHOSE SUBJECT MOVED. Both because he moved a DEFAULT that a
+test had pinned as a literal. Neither was deleted or relaxed.
+
+5. LatticeRetentionControlTests
+     .testUntouchedControlsSerializeToTheIdentical{Job,RelatticeJob}
+   WAS: `gradedSettings()` inherited `LatticeSettings`' boundary default, which
+        was `.fullSkin` and matched the legacy snapshot it is compared against.
+   NOW: the fixture STATES `s.boundary = .fullSkin`.
+   WHY: he moved the default to `.none` ("it should default to 'none'"). The file
+        ALREADY sets this precedent one control earlier, for `cellSizeMode`, with
+        the reason written out: "a fixture that silently tracks a default measures
+        whichever default is current rather than the thing it names". These tests
+        are about the SUB-FLOOR controls being untouched; the finish is a
+        different control. The byte-identity assertion itself is untouched.
+
+6. VariantEntryGatingTests.testChoosingRimOnlyWarnsAndIsNotTheDefault
+   WAS: XCTAssertEqual(LatticeSettings().boundary, .fullSkin)
+   NOW: XCTAssertEqual(..., .none)
+        + XCTAssertNotEqual(..., .rim)
+        + XCTAssertNil(boundaryProducesNothing(default, voxelDerived: true))
+   WHY: the test's SUBJECT is "the default must never be a treatment that silently
+        emits nothing" — Rim on a voxel-derived part is provably zero geometry.
+        `.fullSkin` was one value satisfying that; `.none` is another (asking for
+        no dressing and getting none is not a surprise). It now asserts THE RULE,
+        which holds for any future default, rather than one value. STRICTLY
+        STRONGER than what it replaced: 1 assertion became 3.
+
+AND ONE SET REVERTED, NOT KEPT:
+   DesignOverhaulRound2Tests.testChipsOrderAscendingByWidth / …ParksAtBottom were
+   edited during a WRONG first reading of §4(b) (the Lattice button moved into the
+   bottom-right chip cluster). The maintainer corrected the reading; the chip and
+   the test edits were both reverted. `DesignOverhaulRound2Tests.swift` and
+   `WorkspaceChipLayout.swift` are byte-identical to base 247a6bbc.
+
+FINAL SUITE: 1550 tests, 22 skipped, 8 failures — all 8 the lib3mf gap.
+This task adds 26 tests and moved the failure count by zero.

@@ -1625,8 +1625,8 @@ public struct ResultsScreen: View {
             }
             Spacer()
         }
-        .padding(.top, DS.Space.s)
-        .padding(.trailing, DS.Space.s)
+        .padding(.top, PageChrome.gizmoInset)
+        .padding(.trailing, PageChrome.gizmoInset)
     }
 
     // MARK: - Bottom-right: orientation cube + sheet

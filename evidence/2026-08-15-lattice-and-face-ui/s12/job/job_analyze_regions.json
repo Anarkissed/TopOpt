@@ -1,0 +1,100 @@
+{
+ "mode": "analyze",
+ "bake_build_orientation": "off",
+ "build_orientation_report": true,
+ "model": "M2_verticalStand.step",
+ "output": {
+  "report": "report.json",
+  "mesh_format": "stl",
+  "smooth_factor": 2,
+  "mesh_prefix": "variant"
+ },
+ "loads": {
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "infill_percent": 35,
+  "groups": [
+   {
+    "force": [
+     0,
+     0,
+     -33.36170196533203
+    ],
+    "face_ids": [
+     20,
+     1,
+     4,
+     19,
+     21,
+     22,
+     25,
+     26,
+     27,
+     32,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     49,
+     75,
+     76,
+     24,
+     31
+    ]
+   }
+  ],
+  "wall_line_width_outer_mm": 0.42,
+  "anchor_face_ids": [
+   18
+  ],
+  "minimize_plastic": true,
+  "wall_line_width_mm": 0.45,
+  "face_protections": [
+   16
+  ],
+  "face_protection_depth_mm": 5,
+  "wall_loops": 5,
+  "face_regions": [
+   {
+    "id": 100,
+    "name": "protected wall",
+    "add": [
+     16
+    ]
+   }
+  ]
+ },
+ "resolution": 128,
+ "lattice": {
+  "topology": "octet",
+  "emit_stl": true,
+  "skin": "none",
+  "min_extrudable_width_mm": 0.45,
+  "emit_3mf": false,
+  "regions": [
+   {
+    "role": "include",
+    "kind": "region",
+    "region_id": 100,
+    "geometry": {
+     "depth_mm": 5
+    }
+   }
+  ]
+ },
+ "material": "PLA",
+ "grading": {
+  "subfloor_per_region": true,
+  "topology": "octet",
+  "cell_mm": 2,
+  "min_extrudable_width_mm": 0.45,
+  "retain_subfloor_in_unloaded_regions": true,
+  "report_region_cells": true
+ }
+}

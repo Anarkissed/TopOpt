@@ -335,7 +335,7 @@ public final class ProjectModel: ObservableObject {
     /// The current undoable slice — the value copy the history snapshots and restores.
     public var editSnapshot: EditSnapshot {
         EditSnapshot(selection: selection, force: force, designBox: designBox, paint: paint,
-                     lattice: lattice)
+                     lattice: lattice, faceRegions: faceRegions)
     }
 
     /// Whether an undo is available RIGHT NOW — a committed step, OR an in-flight edit the debounce
@@ -366,6 +366,14 @@ public final class ProjectModel: ObservableObject {
     /// Fold the current settled slice into the history as one undo step, if it differs from the
     /// baseline. Idempotent and cheap on a no-op (it never touches the `@Published undo` unless a
     /// real step is recorded, so it can't re-arm its own debounce forever).
+    /// ★ SEAL THE CURRENT STATE AS AN UNDO STEP, so the NEXT edit starts a new one.
+    ///
+    /// Surface actions are discrete — a cut, then a union, then a pattern — and each
+    /// has to undo on its own. Left to the debounce they fold together: one undo
+    /// after cut-then-union reversed BOTH, taking away a cut the user never asked to
+    /// lose. Every surface commit seals first, so its predecessor is already a step.
+    public func sealUndoStep() { commitUndoSnapshot() }
+
     private func commitUndoSnapshot() {
         let snap = editSnapshot
         guard undo.baseline != snap else { return }
@@ -394,6 +402,9 @@ public final class ProjectModel: ObservableObject {
         force = s.force
         designBox = s.designBox
         lattice = s.lattice
+        // ★ §6 — the region layer restores with everything else, so a cut, a union
+        // or a pattern undoes through the SAME history as every other edit.
+        faceRegions = s.faceRegions
         // Restore the paint overlay too, so undoing/redoing a brush stroke reverts the exact
         // painted triangles (not just the group membership). Only when the project actually has a
         // paint overlay — a nil snapshot on a paintable project would wrongly erase all paint.
@@ -641,7 +652,11 @@ public final class ProjectModel: ObservableObject {
             // same `LatticeSlabDepth` call a face goes through, so PR 331's
             // `face_protection_region_depths_mm` is FILLED from the one store
             // rather than from a parallel one.
-            for r in g.regionIDs where !seenRegions.contains(r) {
+            // ★ THE EFFECTIVE REGIONS, NOT THE TREE. A cut's parent and its
+            // children both resolve to the same surface; emitting both describes it
+            // twice with two roles and two depths, and the run keeps whichever was
+            // written last. `surfaceEffectiveRegions` is the one definition.
+            for r in surfaceEffectiveRegions(of: g) where !seenRegions.contains(r) {
                 seenRegions.insert(r)
                 let d = latticed
                     ? LatticeSlabDepth.depthMM(
@@ -699,10 +714,712 @@ public final class ProjectModel: ObservableObject {
     /// `FaceRegionModel.roots` hides a parent's children until it is expanded, so
     /// a 10×5 split is one row here as it is one row in the Regions sheet — there
     /// is no second collapse mechanism in this panel.
+    /// ★ §1(a) — A FACE COVERED BY ONE OF THIS GROUP'S REGIONS IS **NOT** A ROW.
+    ///
+    /// ★ THE DEFECT THIS FIXES, MEASURED ON HIS OWN PART. This function used to
+    /// return the regions AND every one of the group's raw faces, unconditionally.
+    /// His load group carries **22 face ids**
+    /// (`evidence/2026-08-07-lattice-variants-on-screen/run_his/job.json`), so
+    /// combining them into ONE region gave him **1 region row + 22 face rows =
+    /// 23 rows**, each with its own Lattice/Solid/Off chips, its own depth and its
+    /// own out-of-regime readout. His words: *"That's completely untennable… This
+    /// was all supposed to make things EASIER for the user!"*
+    ///
+    /// PR 331 measured the selection cost going 22 taps → 2. The LIST never
+    /// followed. It does now: a face that a region of this group already covers
+    /// is that region's CHILD (`latticeRegionMemberFaces`), shown only when the
+    /// region is expanded and carrying no chips of its own (§1b) — the role, the
+    /// lattice choice, the depth and the verdict are the REGION's.
     public func latticeSelectableRefs(_ g: SelectionGroup) -> [LatticeSelectableRef] {
-        latticeRegionRefs(g)
-            + g.faces.map { LatticeSelectableRef.face(group: g.id, face: $0) }
+        let covered = latticeRegionCoveredFaces(g)
+        return latticeRegionRefs(g)
+            + g.faces.filter { !covered.contains($0) }
+                     .map { LatticeSelectableRef.face(group: g.id, face: $0) }
             + force.manualPrimitives(for: g.id).map { .primitive($0.id) }
+    }
+
+    /// Every face any region of `g` resolves to — the set `latticeSelectableRefs`
+    /// subtracts. Reads EVERY region of the group, not just the unfolded rows: a
+    /// collapsed grid split still owns its parent's faces, and a face must not
+    /// pop back up as a top-level row merely because the row holding it is shut.
+    public func latticeRegionCoveredFaces(_ g: SelectionGroup) -> Set<FaceID> {
+        guard viewerMesh != nil, !g.regionIDs.isEmpty else { return [] }
+        // ★ THROUGH THE ONE RESOLVER — a parent whose children superseded it must
+        // not also claim its faces.
+        var out: Set<FaceID> = []
+        for r in surfaceEffectiveRegions(of: g) {
+            out.formUnion(surfaceResolvedFaces(r))
+        }
+        return out
+    }
+
+    /// ★ §1(a)/§1(b) — THE FACES UNDERNEATH ONE REGION ROW, as collapsed children.
+    /// Display only: they inherit the region's role, depth and verdict and are
+    /// given no controls, which is what "role, lattice choice, depth and verdict
+    /// are per REGION" means as a property rather than as a convention.
+    public func latticeRegionMemberFaces(_ rid: RegionID) -> [FaceID] {
+        guard let mesh = viewerMesh, let region = faceRegions.region(rid)
+        else { return [] }
+        return FaceRegionGeometry.members(of: region, in: mesh)
+    }
+
+    // MARK: - ★ §6(i)/(j) — COMMITTING A SURFACE CUT
+
+    /// The region a cut through `face` should divide: the DEEPEST live region
+    /// whose members contain it, so cutting a piece that was already cut divides
+    /// the piece you pointed at and not its whole parent again.
+    ///
+    /// Nil when the face belongs to no region yet — the caller makes one.
+    public func surfaceCutTarget(face: FaceID) -> RegionID? {
+        guard let mesh = viewerMesh else { return nil }
+        /// How many parents a region has above it — its depth in the split tree.
+        func depth(_ r: FaceRegion) -> Int {
+            var d = 0, cur = r
+            while let p = faceRegions.region(cur.parentID) { d += 1; cur = p }
+            return d
+        }
+        return faceRegions.regions
+            .filter { FaceRegionGeometry.members(of: $0, in: mesh).contains(face) }
+            .max { depth($0) < depth($1) }?
+            .id
+    }
+
+    /// ★ §6(i)/(j) — CUT A FACE IN TWO, along a plane the user aimed on the model.
+    ///
+    /// The cut divides the face's REGION, because a region is what carries a role,
+    /// a depth and a lattice choice — a bare face id carries none of those, and
+    /// LAYER 1 is never re-partitioned (a cut face is still the same CAD face, so
+    /// projection and the analytic-surface lookups are untouched).
+    ///
+    /// If the face has no region, an IDENTITY region is made for it first and
+    /// joins whichever group already owns the face, so the two halves appear as
+    /// rows in that group's Selections list rather than in no list at all.
+    ///
+    /// Returns the two children, or [] when nothing could be cut.
+    @discardableResult
+    public func commitSurfaceCut(_ cut: SurfaceCut) -> [RegionID] {
+        sealUndoStep()          // each surface action is its own undo step
+        guard let mesh = viewerMesh else { return [] }
+        let target: RegionID
+        if let existing = surfaceCutTarget(face: cut.faceID) {
+            target = existing
+        } else {
+            let rid = faceRegions.union(faces: [cut.faceID],
+                                        named: "Face \(cut.faceID)")
+            // Join the group that already owns the face, if one does.
+            if let g = selection.groups.first(where: { $0.faces.contains(cut.faceID) }) {
+                selection.addRegions([rid], to: g.id)
+            }
+            target = rid
+        }
+        let kids = faceRegions.splitManual(target, point: cut.point, normal: cut.normal)
+        // ★ AND A HALF THAT FELL INTO SEPARATE PATCHES BECOMES SEPARATE PIECES
+        // (maintainer, 2026-08-16: "If a cut leaves a small piece alone, it should
+        // be its own part … even if it's a tiny piece"). Cutting an L, a C or an
+        // arc off-centre leaves one side of the plane holding the body of the face
+        // AND a scrap round the far end, with nothing joining them; sharing a region
+        // they would share a role, a depth and one row in Selections, and the scrap
+        // could never be given its own.
+        //
+        // Returns the DEEPEST live pieces, so the caller selects and the lattice
+        // receives what the user can actually see as separate.
+        var leaves: [RegionID] = []
+        for k in kids {
+            let detached = faceRegions.splitDetached(k, in: mesh)
+            leaves += detached.isEmpty ? [k] : detached
+        }
+        if !kids.isEmpty { objectWillChange.send() }
+        return leaves
+    }
+
+    // MARK: - ★ §6/§7 — THE REST OF THE SURFACE TOOLSET
+    //
+    // ★ EVERY MECHANISM BELOW ALREADY EXISTED AND HAD NO CONTROL SURFACE. PR 331
+    // built union, the filter, the grid split and the sliver guard, and reached
+    // them only from the Regions sheet — so on the page the maintainer actually
+    // works on, they did not exist ("Where are all the other tools? Union?
+    // Pattern?"). These are the entry points the Surface panel calls; the work is
+    // the wiring, not the geometry.
+
+    /// ★ §6(c)/(d) — THE FACES LIKE THIS ONE. A filter DERIVED from a tapped face,
+    /// never a stored id list: PR 331 measured that storing the matches turns a
+    /// union into "a stale id list wearing a filter's clothes", and a simulated CAD
+    /// edit grew a 24-face union to 32.
+    ///
+    /// Two rules, in order:
+    ///   * a SMALL face flanked by larger ones is a blend — the signature §2(a)
+    ///     measured, and the one that finds fillets and chamfers together.
+    ///   * otherwise, the same analytic KIND (plane with plane, bore with bore).
+    public func surfaceSimilarFilter(to face: FaceID) -> RegionFilter? {
+        guard let mesh = viewerMesh else { return nil }
+        let areas = FaceRegionGeometry.faceAreas(in: mesh)
+        guard let a = areas[face], a > 0 else { return nil }
+        let sorted = areas.values.filter { $0 > 0 }.sorted()
+        guard !sorted.isEmpty else { return nil }
+        let median = sorted[sorted.count / 2]
+
+        // ── 1. A BORE: the same kind AND the same radius ────────────────────
+        //
+        // ★ "ALL THE M3 HOLES" IS THE QUESTION, not "every cylinder". Kind alone
+        // caught all 12 cylinders on his part regardless of size, which lumps a
+        // 1.5 mm bore in with a 40 mm fillet.
+        //
+        // ★ AND THIS COMES FIRST, BEFORE THE BLEND RULE. A small bore is still a
+        // BORE: measured, a 9 mm² cylinder fell through the blend branch and
+        // matched 19 faces — every small feature on the part — when what was
+        // wanted was the other holes of its size.
+        if let g = mesh.faceGeometry(face), g.kind == .cylinder,
+           g.cylinderRadiusMM > 0 {
+            var f = RegionFilter()
+            f.kind = "cylinder"
+            f.cylinderRadiusMM = g.cylinderRadiusMM
+            // Loose enough for tessellation noise, tight enough to separate the
+            // drill sizes a part actually uses.
+            f.cylinderRadiusTolMM = max(0.05, g.cylinderRadiusMM * 0.05)
+            return f
+        }
+
+        // ── 2. A BLEND: small, and flanked by larger faces ──────────────────
+        //
+        // The signature §2(a) measured. "Small FOR THIS PART" — the threshold is
+        // read off the part rather than guessed in millimetres.
+        if a < median * 0.5 {
+            return RegionFilter.blend(maxAreaMM2: a * 1.5)
+        }
+
+        // ── 3. ANYTHING ELSE: the same kind AND a comparable size ───────────
+        //
+        // ★ KIND ALONE IS NOT SIMILARITY. Measured on his part: tapping the
+        // largest plane matched 36 of 78 faces — 46% of the model — and the
+        // largest `other` matched 30. "Every plane" is not what a person means by
+        // "the ones like this"; a face of comparable SIZE is. The band is
+        // generous (half to double) because a person means "about this big", not
+        // a tolerance.
+        var f = RegionFilter()
+        switch mesh.faceGeometry(face)?.kind {
+        case .plane:    f.kind = "plane"
+        case .cylinder: f.kind = "cylinder"
+        default:        f.kind = "other"
+        }
+        f.minAreaMM2 = a * 0.5
+        f.maxAreaMM2 = a * 2.0
+        return f
+    }
+
+    /// ★ §6(c) — ISOLATE THE MATCHES: make them their own face, disconnected from
+    /// every other region that held them. See `FaceRegionModel.isolate`.
+    @discardableResult
+    public func commitSurfaceIsolate(_ filter: RegionFilter,
+                                     named name: String) -> RegionID? {
+        commitSurfaceIsolate(faces: viewerMesh.map { FaceRegionGeometry.match(filter, in: $0) } ?? [],
+                             named: name).first
+    }
+
+    /// ★ ISOLATE A SET OF FACES — ONE PIECE PER *CONNECTED* GROUP OF THEM.
+    ///
+    /// Maintainer, 2026-08-16: "When cutting similar pieces, if they are *not*
+    /// directly attached to one another, they should separate into isolated pieces.
+    /// E.g. … 3 isolated faces that are considered similar; they should be cut into
+    /// 3 separate faces, each individually selectable. However, if multi-select
+    /// connects the pieces, then they are all made into a single face group."
+    ///
+    /// That rule is exactly connectivity, and it is the same rule a CUT already
+    /// follows (`SurfaceComponents`): things that do not touch are not one thing.
+    /// Faces that DO touch — including two different "kinds" brought together by a
+    /// multi-select — stay one piece, because they are one piece.
+    ///
+    /// Returns the new regions, outermost first by size. Empty when nothing matched.
+    @discardableResult
+    public func commitSurfaceIsolate(faces: [FaceID],
+                                     named name: String) -> [RegionID] {
+        guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
+        sealUndoStep()
+
+        // ★ CONNECTED GROUPS OF THE SELECTED FACES. Adjacency is face-level and
+        // already derived for the loop walk; here it is restricted to the selection,
+        // so "connected" means connected THROUGH THE SELECTION and not through the
+        // rest of the part.
+        let wanted = Set(faces)
+        let adjacency = SurfaceComponents.faceAdjacency(in: mesh)
+        var seen: Set<FaceID> = []
+        var clusters: [[FaceID]] = []
+        for f in faces.sorted() where !seen.contains(f) {
+            var stack = [f], group: [FaceID] = []
+            seen.insert(f)
+            while let cur = stack.popLast() {
+                group.append(cur)
+                for n in adjacency[cur] ?? []
+                where wanted.contains(n) && !seen.contains(n) {
+                    seen.insert(n)
+                    stack.append(n)
+                }
+            }
+            clusters.append(group.sorted())
+        }
+        guard !clusters.isEmpty else { return [] }
+
+        var out: [RegionID] = []
+        for (k, cluster) in clusters.sorted(by: { $0.count > $1.count }).enumerated() {
+            let label = clusters.count == 1 ? name : "\(name) \(k + 1)"
+            if let rid = faceRegions.isolate(faces: cluster, named: label, in: mesh) {
+                out.append(rid)
+            }
+        }
+        // ★ AN ISOLATED PIECE JOINS NOTHING (maintainer, 2026-08-16: "The isolated
+        // face was not selectable on its own and when I accidentally selected the
+        // face next to it, it was part of the group of faces that were highlighted.
+        // These must be selectable and cannot be part of a group").
+        //
+        // ★ AND THE OLD BEHAVIOUR WAS SELF-CONTRADICTORY. Isolating means
+        // "disconnect this from everything it is currently connected with" — and
+        // then it ADDED the new region to the very group those faces came from. So
+        // the piece was disconnected at the REGION layer and still owned at the
+        // GROUP layer: tapping its neighbour lit it, because they were groupmates.
+        //
+        // Disconnecting means both. The faces leave every group, the regions join
+        // none, and each piece stands alone — selectable on the Topology page, ready
+        // to be given to whichever group the user chooses.
+        if !out.isEmpty {
+            for g in selection.groups { selection.removeFaces(faces, from: g.id) }
+        }
+        force.sync(groups: selection.groups)
+        objectWillChange.send()
+        return out
+    }
+
+    /// ★ APPLY A CUT TO EVERY FACE IN A SELECTION (maintainer, 2026-08-16: "The
+    /// select-similar should only be to add a tool's action to all the similar
+    /// faces or to cut them out as a group/individual faces").
+    ///
+    /// Each face is cut through ITS OWN centre along ITS OWN frame, rotated by the
+    /// same angle — so "cut all of these in half the same way" means the same thing
+    /// on each of them rather than one plane swept across the part.
+    @discardableResult
+    public func commitSurfaceCut(faces: [FaceID], rotationDegrees: Double = 0,
+                                 offsetMM: Double = 0) -> [RegionID] {
+        guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
+        var out: [RegionID] = []
+        for f in faces.sorted() {
+            guard let base = SurfaceCut.centred(onFace: f, in: mesh) else { continue }
+            out += commitSurfaceCut(base.rotated(by: SurfaceCut.snap(rotationDegrees))
+                                        .moved(byMM: offsetMM))
+        }
+        return out
+    }
+
+    /// ★ AND A PATTERN TO EVERY FACE IN A SELECTION. Same grid on each face, in
+    /// each face's own frame — a face the grid does not fit is skipped rather than
+    /// failing the whole batch, and the count says how many took it.
+    @discardableResult
+    public func commitSurfacePattern(faces: [FaceID], columns: Int, rows: Int,
+                                     rotationDegrees: Double = 0) -> [RegionID] {
+        guard viewerMesh != nil, !faces.isEmpty else { return [] }
+        var out: [RegionID] = []
+        for f in faces.sorted() {
+            out += commitSurfacePattern(face: f, columns: columns, rows: rows,
+                                        rotationDegrees: rotationDegrees)
+        }
+        return out
+    }
+
+    /// ★ TAKE ONE PIECE OUT OF A GROUP THAT HOLDS ITS WHOLE.
+    ///
+    /// Maintainer, 2026-08-16: "I attempted to cut out one of the faces of the 3
+    /// isolated/grouped faces above and it didn't disconnect it. Instead, it made it
+    /// not be able to be de-selectable/re-selectable."
+    ///
+    /// ★ WHY IT FROZE. A group holds REGIONS, and a region that has been cut is
+    /// represented by its CHILDREN (`surfaceEffectiveRegions`). So a group holding
+    /// the PARENT contains every child implicitly. Removing one child from the group
+    /// therefore changed nothing at all — the parent still spoke for it — and the
+    /// piece stayed lit whatever was tapped. Adding it back did nothing either. From
+    /// the outside: frozen.
+    ///
+    /// The fix is to make the implicit explicit exactly when it stops being true:
+    /// replace the ancestor with the pieces it stands for, and then the one piece
+    /// can leave on its own.
+    public func surfaceDetachPiece(_ piece: RegionID, from group: UUID) {
+        guard let g = selection.groups.first(where: { $0.id == group }) else { return }
+
+        // Every ancestor of `piece` that the group holds, nearest first.
+        var ancestors: [RegionID] = []
+        var cur = faceRegions.region(piece)?.parentID ?? -1
+        var guard_ = 0
+        while let r = faceRegions.region(cur), guard_ < faceRegions.regions.count {
+            guard_ += 1
+            if g.regionIDs.contains(r.id) { ancestors.append(r.id) }
+            cur = r.parentID
+        }
+        for ancestor in ancestors {
+            // What the ancestor actually stands for, minus the piece leaving.
+            let stands = surfaceEffectiveRegions(from: ancestor).filter { $0 != piece }
+            selection.removeRegions([ancestor])
+            if !stands.isEmpty { selection.addRegions(stands, to: group) }
+        }
+        selection.removeRegions([piece])
+        force.sync(groups: selection.groups)
+        objectWillChange.send()
+    }
+
+    /// How many faces a filter matches right now — shown BEFORE the union is made,
+    /// so "select similar" is never a leap.
+    public func surfaceMatchCount(_ filter: RegionFilter) -> Int {
+        guard let mesh = viewerMesh else { return 0 }
+        return FaceRegionGeometry.match(filter, in: mesh).count
+    }
+
+    /// ★ §6(c) — UNION THE FACES THE USER PICKED into ONE region.
+    ///
+    /// A HAND-PICKED union stores its members explicitly and carries no filter:
+    /// PR 331's rule is that the filter IS the membership when one exists, and
+    /// `add` holds only what was tapped in on top of it. With no filter, `add` is
+    /// the whole membership, which is exactly what a multi-select means.
+    /// The region a face belongs to, creating an identity one if it has none —
+    /// so a tool that works on PIECES always has a piece to work with.
+    @discardableResult
+    public func surfaceEnsureRegion(for face: FaceID) -> RegionID? {
+        guard viewerMesh != nil else { return nil }
+        if let existing = surfaceCutTarget(face: face) { return existing }
+        let rid = faceRegions.union(faces: [face], named: "Face \(face)")
+        if let g = selection.groups.first(where: { $0.faces.contains(face) }) {
+            selection.addRegions([rid], to: g.id)
+        }
+        objectWillChange.send()
+        return rid
+    }
+
+    /// ★ UNION PIECES. The members are the union of the sources' member faces.
+    ///
+    /// ★ A LIMIT WORTH STATING: a region is `faces ∩ (intersection of half-spaces)`,
+    /// so the union of two DISJOINT halves of one face is not expressible in this
+    /// model — an intersection cannot describe "either side". Unioning two halves
+    /// of the same face therefore yields that whole face back, which is coherent
+    /// and explainable; unioning pieces of DIFFERENT faces does what it says.
+    /// ★ NOT IMPLEMENTED, DELIBERATELY. See `SurfaceUnion`: the only union today's
+    /// `FaceRegion` can express absorbs WHOLE FACES — pieces the user never picked —
+    /// and that must never happen. The region shape needs a `parts` list first, plus
+    /// expansion at the two emission sites. Returning nil keeps the confirm disabled
+    /// rather than shipping the wrong behaviour quietly.
+    @discardableResult
+    public func commitSurfaceUnion(_ u: SurfaceUnion) -> RegionID? {
+        sealUndoStep()          // each surface action is its own undo step
+        guard viewerMesh != nil, u.hasEnoughToCombine else { return nil }
+        guard let rid = faceRegions.unionOfParts(u.pieces,
+                                                 named: "Union of \(u.count)")
+        else { return nil }
+        // The union joins the group any of its parts belonged to, so it appears in
+        // the Selections list where a role and a depth can be given to it.
+        if let g = selection.groups.first(where: { g in
+            u.pieces.contains { g.regionIDs.contains($0) }
+        }) {
+            selection.addRegions([rid], to: g.id)
+        }
+        objectWillChange.send()
+        return rid
+    }
+
+    /// Every face a region resolves to, following a union down to its parts.
+    public func surfaceResolvedFaces(_ id: RegionID) -> [FaceID] {
+        guard let mesh = viewerMesh else { return [] }
+        var out: Set<FaceID> = []
+        for leaf in faceRegions.resolvedLeaves(id) {
+            guard let r = faceRegions.region(leaf) else { continue }
+            out.formUnion(FaceRegionGeometry.members(of: r, in: mesh))
+        }
+        return out.sorted()
+    }
+
+    @discardableResult
+    public func commitSurfaceUnion(faces: [FaceID]) -> RegionID? {
+        guard viewerMesh != nil, !faces.isEmpty else { return nil }
+        let rid = faceRegions.union(faces: faces,
+                                    named: faces.count > 1
+                                        ? "Union of \(faces.count)" : "Face \(faces[0])")
+        if let g = selection.groups.first(where: { g in
+            faces.contains { g.faces.contains($0) }
+        }) {
+            selection.addRegions([rid], to: g.id)
+        }
+        objectWillChange.send()
+        return rid
+    }
+
+    /// ★ §6(c) — UNION the faces a filter matches into ONE region. The FILTER is
+    /// stored, not its matches, and `filterMatchedAtAuthor` records the count so a
+    /// later CAD edit is REPORTED as drift rather than absorbed silently.
+    @discardableResult
+    public func commitSurfaceUnion(_ filter: RegionFilter, named name: String) -> RegionID? {
+        guard let mesh = viewerMesh else { return nil }
+        let matched = FaceRegionGeometry.match(filter, in: mesh)
+        guard !matched.isEmpty else { return nil }
+        let rid = faceRegions.union(faces: [], named: name, filter: filter,
+                                    matchedAtAuthor: matched.count)
+        if let g = selection.groups.first(where: { g in
+            matched.contains { g.faces.contains($0) }
+        }) {
+            selection.addRegions([rid], to: g.id)
+        }
+        objectWillChange.send()
+        return rid
+    }
+
+    /// ★ §7 — THE PATTERN TOOL: split a face into an n x m grid in its OWN frame,
+    /// refusing before it manufactures anything smaller than the smallest face the
+    /// CAD itself produced (`kRegionSliverFloorVoxels` = 16 — the size of his own
+    /// faces 41-47 at resolution 128).
+    ///
+    /// Returns the verdict WITHOUT splitting, so the panel can show the smallest
+    /// piece and the refusal reason while the user is still choosing n and m.
+    /// `piece` is the region the pattern divides — the one that was TAPPED. It is
+    /// passed in rather than looked up: `surfaceCutTarget` returns the DEEPEST
+    /// region holding the face, which after a cut is one particular half and not
+    /// necessarily the half under the finger. Reading it here put the grid on the
+    /// wrong piece — "the pattern doesn't go to the selected face".
+    public func surfacePatternPreview(face: FaceID, columns: Int, rows: Int,
+                                      rotationDegrees: Double = 0,
+                                      piece: RegionID? = nil)
+        -> (cells: [FaceRegionGeometry.GridCell], verdict: SliverVerdict)? {
+        guard let mesh = viewerMesh else { return nil }
+        // ★ §7 — THE GRID RUNS ALONG THE SHAPE. The frame's own axes come from the
+        // member vertices' principal direction, which is pulled off by wherever the
+        // tessellation is dense; the face's longest STRAIGHT EDGE is what a person
+        // means by "in line with it". The user's own rotation is added on top, so
+        // the automatic answer is a starting point and never a verdict.
+        let frame = FaceRegionGeometry.frame(members: [face], in: mesh)
+            .rotatedInPlane(byDegrees:
+                SurfacePatternAxis.alignmentDegrees(face: face, in: mesh)
+                    + rotationDegrees,
+                members: [face], in: mesh)
+        // ★ EQUAL AREA, not equal parameter — see `SurfacePatternAxis.areaCells`.
+        // Even steps across the frame's extent leave the last column a sliver on
+        // any face that is not a rectangle.
+        // ★ CONFINED TO THE SELECTED PIECE. A pattern on one half of a cut face
+        // divides THAT HALF; measuring over the whole face made the count disagree
+        // with the drawing.
+        let target = (piece ?? surfaceCutTarget(face: face))
+            .flatMap { faceRegions.region($0) }
+        // ★ AND SAY WHY WHEN IT REFUSES, IN ITS OWN WORDS. The grid used to answer
+        // `[]` for every failure and the panel guessed one message — "Too many
+        // pieces for this face" — which was wrong for the case that actually bites
+        // on a curve ("170° per piece is too wide to cut with a plane"). The
+        // geometry knows why; it now says so.
+        let cells: [FaceRegionGeometry.GridCell]
+        switch SurfacePatternAxis.grid(face: face, frame: frame,
+                                       columns: columns, rows: rows, in: mesh,
+                                       within: target?.cuts ?? []) {
+        case .success(let c):
+            cells = c
+        case .failure(let refusal):
+            return ([], SliverVerdict(ok: false, minCellVoxels: 0, emptyCells: 0,
+                                      memberVoxels: 0,
+                                      maxCellsBudget: columns * rows,
+                                      floorVoxels: kRegionSliverFloorVoxels,
+                                      reason: refusal.reason))
+        }
+        guard !cells.isEmpty else {
+            return ([], SliverVerdict(ok: false, minCellVoxels: 0, emptyCells: 0,
+                                      memberVoxels: 0,
+                                      maxCellsBudget: columns * rows,
+                                      floorVoxels: kRegionSliverFloorVoxels,
+                                      reason: "Too many pieces for this face."))
+        }
+        // ★ PRICED AT THE RUN'S OWN SPACING, so the panel refuses with the number
+        // the run would — the same path the Regions sheet prices against.
+        let spacing = surfaceVoxelSpacingMM(mesh)
+        let per = FaceRegionGeometry.cellVoxelCounts(members: [face], in: mesh,
+                                                     cells: cells, spacingMM: spacing)
+        let member = FaceRegionGeometry.memberVoxelEstimate(members: [face], in: mesh,
+                                                            spacingMM: spacing)
+        let verdict = FaceRegionModel.checkSliver(cellVoxels: per, memberVoxels: member)
+        return (cells, verdict)
+    }
+
+    /// Commit the pattern. Refuses on a failing verdict — the guard is not advisory.
+    @discardableResult
+    public func commitSurfacePattern(face: FaceID, columns: Int, rows: Int,
+                                     rotationDegrees: Double = 0,
+                                     piece: RegionID? = nil) -> [RegionID] {
+        sealUndoStep()          // each surface action is its own undo step
+        guard let p = surfacePatternPreview(face: face, columns: columns, rows: rows,
+                                            rotationDegrees: rotationDegrees,
+                                            piece: piece),
+              p.verdict.ok else { return [] }
+        let splitTarget = piece ?? surfaceCutTarget(face: face) ?? {
+            let rid = faceRegions.union(faces: [face], named: "Face \(face)")
+            if let g = selection.groups.first(where: { $0.faces.contains(face) }) {
+                selection.addRegions([rid], to: g.id)
+            }
+            return rid
+        }()
+        let kids = faceRegions.splitGrid(splitTarget, cells: p.cells)
+        if !kids.isEmpty { objectWillChange.send() }
+        return kids
+    }
+
+    /// One voxel, in mm, at the run's own resolution — the same derivation
+    /// `FaceRegionSheetModel` uses, so the two surfaces price a split identically.
+    private func surfaceVoxelSpacingMM(_ mesh: ViewerMesh) -> Double {
+        let b = mesh.bounds
+        let span = Double(max(b.max.x - b.min.x,
+                              max(b.max.y - b.min.y, b.max.z - b.min.z)))
+        let n = quality.resolution
+        return n > 0 ? span / Double(n) : 0
+    }
+
+    /// ★ A FACE LOOP STOPS AT A PIECE THAT HAS BEEN MADE ITS OWN.
+    ///
+    /// Maintainer, 2026-08-16: "I select-similar'd the curved face … I couldn't
+    /// select the face. I selected the face next to it, and it was automatically
+    /// selected with it … it should be its own isolated face."
+    ///
+    /// ★ WHY IT CAME ALONG. `FaceTopology.loop` walks the run of connected CURVED
+    /// faces — the "tap inside a bore and get the whole tube" rule — and it is pure
+    /// geometry: it has never heard of regions. His isolated band is curved and
+    /// touches other curved faces, so tapping ANY of them swept it up, whatever the
+    /// region layer said. Isolating had worked perfectly and was then overruled one
+    /// layer down.
+    ///
+    /// ★ AND THE FIX BELONGS HERE, NOT IN THE WALK. `FaceTopology` is geometry and
+    /// should stay geometry; what a face BELONGS to is layer 2, and this is layer
+    /// 2's veto over what the walk proposes.
+    ///
+    /// The rule is exact: a loop member is kept only if it is covered by the SAME
+    /// regions as the face that was tapped. So an isolated set of several faces
+    /// still selects together (they share their region), a face in no region still
+    /// loops with other faces in no region, and a piece that has been made its own
+    /// is never dragged in by a neighbour.
+    public func surfaceLoopRespectingRegions(_ loop: [FaceID],
+                                             from face: FaceID) -> [FaceID] {
+        guard let mesh = viewerMesh, loop.count > 1, !faceRegions.isEmpty
+        else { return loop }
+        func owners(_ f: FaceID) -> Set<RegionID> {
+            var out: Set<RegionID> = []
+            for r in faceRegions.regions
+            where FaceRegionGeometry.members(of: r, in: mesh).contains(f) {
+                out.insert(r.id)
+            }
+            return out
+        }
+        let mine = owners(face)
+        return loop.filter { $0 == face || owners($0) == mine }
+    }
+
+    /// ★ THE FACE SETS A UNION HAS WELDED INTO ONE — what the wireframe must stop
+    /// drawing an edge between. See `SurfaceWireframe.edges(of:welded:)`.
+    ///
+    /// A region with two or more member faces and NO cuts is a union of whole
+    /// faces, however it was made — tapped in by hand, combined from a similar
+    /// filter, or built from parts. A region WITH cuts is a piece, and its edge to
+    /// a neighbour is still a real boundary for the rest of the face it came from,
+    /// so pieces contribute nothing here.
+    public func surfaceWeldedFaces() -> [Set<FaceID>] {
+        guard let mesh = viewerMesh else { return [] }
+        var out: [Set<FaceID>] = []
+        for r in faceRegions.regions {
+            var faces: Set<FaceID> = []
+            for leaf in faceRegions.resolvedLeaves(r.id) {
+                guard let part = faceRegions.region(leaf), !part.isCut else { continue }
+                faces.formUnion(FaceRegionGeometry.members(of: part, in: mesh))
+            }
+            if faces.count >= 2 { out.append(faces) }
+        }
+        return out
+    }
+
+    // MARK: - ★ THE SURFACE STAGE'S SCRATCHPAD (leave without saving = revert)
+
+    /// Snapshot what a Surface session can throw away. See `SurfaceScratch`.
+    public func surfaceCaptureScratch() -> SurfaceScratch {
+        SurfaceScratch.capture(regions: faceRegions, groups: selection.groups)
+    }
+
+    /// Whether anything has been committed since that snapshot.
+    public func surfaceHasEdits(since s: SurfaceScratch) -> Bool {
+        s.differs(regions: faceRegions, groups: selection.groups)
+    }
+
+    /// ★ PUT IT ALL BACK. Regions AND group membership together — see
+    /// `SurfaceScratch` for why restoring one without the other is worse than
+    /// restoring neither.
+    ///
+    /// A group created ENTIRELY during the session had no entry in the snapshot;
+    /// its regions are dropped rather than left pointing at regions that no longer
+    /// exist. A group that existed keeps its faces untouched — no surface tool
+    /// changes those, so they are not the session's to revert.
+    public func surfaceRestore(_ s: SurfaceScratch) {
+        faceRegions = s.regions
+        for g in selection.groups {
+            selection.setRegions(s.groupRegions[g.id] ?? [], for: g.id)
+        }
+        // Any region the snapshot does not contain cannot be referred to any more.
+        let live = Set(s.regions.regions.map(\.id))
+        for g in selection.groups {
+            let stale = g.regionIDs.filter { !live.contains($0) }
+            if !stale.isEmpty { selection.removeRegions(stale) }
+        }
+        force.sync(groups: selection.groups)
+        objectWillChange.send()
+    }
+
+    // MARK: - ★ WHAT A GROUP ACTUALLY CONTAINS (the one resolver)
+
+    /// ★ THE OUTERMOST REGION COVERING EACH FACE, AND NOTHING ELSE.
+    ///
+    /// ★ THE OVERLAP THIS EXISTS TO KILL. A region layer is a TREE: cut a face and
+    /// its two halves live alongside their parent; union three pieces and the union
+    /// lives alongside its parts. Ask "what does this group contain" by unioning
+    /// `members(of:)` over every region in it and the same surface is described
+    /// TWICE — once by the parent and once by each child. Downstream that is not a
+    /// cosmetic problem: each description carries its own role and depth, and the
+    /// run takes whichever the emission happened to write last.
+    ///
+    /// The maintainer put it plainly: "It can't have the original face and the other
+    /// two cut faces from it. It needs to only bring in the cut faces. And same with
+    /// a union; it can't pass along the 3 cut faces over, it needs to only pass
+    /// along the singular union'ed face."
+    ///
+    /// So there is ONE definition, here, and every consumer goes through it: walk to
+    /// the OUTERMOST region covering a face — up through unions, down past any
+    /// parent whose children have superseded it — and emit that.
+    public func surfaceEffectiveRegions(of g: SelectionGroup) -> [RegionID] {
+        // ★ A PIECE EXPLICITLY GIVEN TO ANOTHER GROUP IS NOT THIS GROUP'S.
+        //
+        // A parent expands to its children — that is how a cut hands its pieces on.
+        // But once a piece has been moved to a different group on the Topology page,
+        // its parent must stop speaking for it, or the piece is claimed by both: the
+        // group that holds the parent AND the group it was moved to. One surface,
+        // two roles, and the run keeps whichever was written last.
+        var claimedElsewhere: Set<RegionID> = []
+        for other in selection.groups where other.id != g.id {
+            claimedElsewhere.formUnion(other.regionIDs)
+        }
+        var out: [RegionID] = []
+        var seen: Set<RegionID> = []
+        for r in g.regionIDs {
+            for id in surfaceEffectiveRegions(from: r)
+            where !seen.contains(id) && !claimedElsewhere.contains(id) {
+                seen.insert(id)
+                out.append(id)
+            }
+        }
+        return out
+    }
+
+    /// The effective descendants of one region: itself if nothing has superseded
+    /// it, otherwise the pieces that have.
+    public func surfaceEffectiveRegions(from id: RegionID) -> [RegionID] {
+        // A region absorbed into a union is represented BY that union.
+        let top = faceRegions.outermostUnion(containing: id)
+        guard let r = faceRegions.region(top) else { return [] }
+
+        // A union speaks for its parts.
+        if r.isUnionOfParts { return [top] }
+
+        // A cut or grid split is superseded by its children — they cover the same
+        // surface between them, and they are what the user then works with.
+        let kids = faceRegions.children(of: top).filter { !$0.isUnionOfParts }
+        guard !kids.isEmpty else { return [top] }
+        return kids.flatMap { surfaceEffectiveRegions(from: $0.id) }
     }
 
     /// The group's region rows, folded exactly as the Regions sheet folds them: a
@@ -917,30 +1634,29 @@ public final class ProjectModel: ObservableObject {
                 else { continue }
                 out.append(plane)
             }
+            // ★ §2(a) — A PRIMITIVE IS ALWAYS CREATED, FOR EVERY FACE KIND.
+            //
+            // This loop used to require `geo.isPlane` and a plane outline, and
+            // `continue`d silently otherwise. On his own part that skipped 19 of
+            // the 22 faces he declares (86.4%) and 42 of the part's 78 (53.8%) —
+            // measured by `lattice_primitive_probe`. The shape is now the
+            // distance-field offset of the face's OWN surface (§2b,
+            // `FaceOffsetShell`), which is one rule for planes, cylinders and
+            // everything else, so there is nothing left to skip on.
             for f in g.faces {
                 let ref = LatticeSelectableRef.face(group: g.id, face: f)
                 guard let role = LatticeSelectableRoles.role(
                         for: ref, groupRole: groupRole,
-                        overrides: lattice.selectableRoles),
-                      let geo = mesh.faceGeometry(f), geo.isPlane,
-                      let outline = mesh.facePlaneOutline(
-                        f, planeNormal: SIMD3<Float>(geo.planeNormal),
-                        planeOrigin: SIMD3<Float>(geo.planeOrigin))
+                        overrides: lattice.selectableRoles)
                 else { continue }
                 let depth = latticeSlabDepthMM(ref, in: g.id)
-                // INTO the part: the same flip the emission makes.
-                let inward = StepFaceGeometry(kind: .plane,
-                                              planeNormal: -geo.planeNormal,
-                                              planeOrigin: geo.planeOrigin)
                 let key = Int(resolvedRunFaceID(f))
-                let volume = ClearanceVolume.slab(faceID: key, geometry: inward,
-                                                  outline: outline, depthMM: depth)
-                guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
-                                                       axialSpan: nil).first
+                guard let plane = latticeFacePrimitive(faces: [f], ref: ref,
+                                                       group: g.id, key: key,
+                                                       role: role, depthMM: depth,
+                                                       in: mesh)
                 else { continue }
-                out.append(LatticeDepthPlane(ref: ref, groupID: g.id, faceKey: key,
-                                             role: role, depthMM: depth,
-                                             volume: volume, handle: h))
+                out.append(plane)
             }
             // A hand-placed FACE primitive is already a slab in its own frame, so
             // its axis is the region direction and needs no flip. A BOLT primitive
@@ -979,6 +1695,31 @@ public final class ProjectModel: ObservableObject {
         lattice.selectableDepthMM[ref.key] = LatticeSlabDepth.clamp(mm)
     }
 
+    /// ★ WRITE THE GROUP'S DEPTH — AND MAKE IT STICK (maintainer, 2026-08-14):
+    /// *"I need to be able to drag the primitive OR put a number in the 'Depth'
+    /// field and see the primitive pulled to that depth. They need to be locked
+    /// together."*
+    ///
+    /// ★ THE DEFECT THIS REMOVES. The group drawer's field used to assign
+    /// `lattice.groupDepthMM[group]` directly. But `LatticeSlabDepth.depthMM`
+    /// resolves a PER-SELECTABLE override FIRST — so the moment the user dragged a
+    /// primitive's knob (which writes `selectableDepthMM`), the group's field went
+    /// inert for that face: the number in the drawer changed and the primitive did
+    /// not move. Dragging the handle is the OTHER HALF of the feature he is
+    /// asking for, so reaching this state is not an unusual sequence; it is the
+    /// normal one.
+    ///
+    /// Setting the group's depth is a statement about the whole group, so it
+    /// CLEARS the per-selectable overrides inside it. A later drag on one face
+    /// re-establishes that face's own number, which is what a per-face drag means.
+    public func writeGroupDepthMM(_ group: UUID, mm: Double) {
+        lattice.groupDepthMM[group] = LatticeSlabDepth.clamp(mm)
+        guard let g = selection.groups.first(where: { $0.id == group }) else { return }
+        for ref in latticeSelectableRefs(g) {
+            lattice.selectableDepthMM.removeValue(forKey: ref.key)
+        }
+    }
+
     /// ★ ONE REGION'S DEPTH PLANE — or nil, honestly.
     ///
     /// A face has a plane; a region does not. What a region has is PR 331's
@@ -996,58 +1737,56 @@ public final class ProjectModel: ObservableObject {
     /// PR 331's per-sector protection depth); what it does not get is a 3D grab.
     public static let regionPlaneNormalAgreement = 0.75
 
+    /// ★ §2(a)/§2(b) — THE ONE PRIMITIVE BUILDER, for a face row AND a region row.
+    ///
+    /// A region's primitive is the offset of its MEMBERS' combined surface, which
+    /// is §2(b)'s "the primitive's shape matches the unioned face's shape" taken
+    /// literally: a union of 24 blend faces offsets those 24 faces, not a box
+    /// around them.
+    ///
+    /// The handle rides the shell's own extremes, so dragging it and typing the
+    /// number are the same value (§2d) whatever the surface is.
+    func latticeFacePrimitive(faces: [FaceID], ref: LatticeSelectableRef,
+                              group: UUID, key: Int, role: LatticeGroupRole,
+                              depthMM: Double,
+                              in mesh: ViewerMesh) -> LatticeDepthPlane? {
+        guard let shell = FaceOffsetShell.build(faces: faces, in: mesh,
+                                                depthMM: depthMM)
+        else { return nil }
+        let volume = ClearanceVolume.shell(faceID: key, shell: shell)
+        guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
+                                               axialSpan: nil).first
+        else { return nil }
+        return LatticeDepthPlane(ref: ref, groupID: group, faceKey: key, role: role,
+                                 depthMM: depthMM, volume: volume, handle: h)
+    }
+
+    /// ★ ONE REGION'S PRIMITIVE — and it no longer refuses.
+    ///
+    /// This function used to return nil FOUR ways: no members, no member that is
+    /// a PLANE (`g.isPlane`), normals that disagree by more than 0.75, and an
+    /// invalid PCA frame. Three of those four are properties of the region being
+    /// CURVED, which is exactly the case §2 asks to support — his own question
+    /// was about a curved face, and he guessed "a doughnut shape".
+    ///
+    /// The distance-field rule answers it without a special case: the primitive is
+    /// the region's own surface pushed inward, so a union wrapping a bore gets the
+    /// tube it should get instead of nothing at all. The only remaining nil is
+    /// "this region resolves to no triangles", which is not a shape question.
     func latticeRegionDepthPlane(_ rid: RegionID, ref: LatticeSelectableRef,
                                  group: UUID, role: LatticeGroupRole,
                                  in mesh: ViewerMesh) -> LatticeDepthPlane? {
         guard let region = faceRegions.region(rid) else { return nil }
         let members = FaceRegionGeometry.members(of: region, in: mesh)
         guard !members.isEmpty else { return nil }
-
-        // The members' area-weighted outward direction.
-        let areas = FaceRegionGeometry.faceAreas(in: mesh)
-        var sum = SIMD3<Double>.zero
-        var weight = 0.0
-        for f in members {
-            guard let g = mesh.faceGeometry(f), g.isPlane,
-                  simd_length(g.planeNormal) > 1e-9 else { continue }
-            let a = areas[f] ?? 0
-            sum += simd_normalize(g.planeNormal) * a
-            weight += a
-        }
-        guard weight > 0 else { return nil }
-        let agreement = simd_length(sum) / weight
-        guard agreement >= Self.regionPlaneNormalAgreement else { return nil }
-        let outward = simd_normalize(sum)
-
-        // The extent comes from the region's OWN frame, so the plane covers what
-        // the region covers — including one sector of a grid split, whose frame
-        // is that sector's.
-        let frame = FaceRegionGeometry.frame(members: members, in: mesh)
-        guard frame.valid else { return nil }
-        let centre = frame.origin
-            + frame.u * ((frame.uLo + frame.uHi) / 2)
-            + frame.v * ((frame.vLo + frame.vHi) / 2)
-        let halfU = max(1e-3, (frame.uHi - frame.uLo) / 2)
-        let halfV = max(1e-3, (frame.vHi - frame.vLo) / 2)
-
-        let depth = latticeSlabDepthMM(ref, in: group)
-        // INTO the part: the same flip a face's plane makes.
-        let inward = StepFaceGeometry(kind: .plane, planeNormal: -outward,
-                                      planeOrigin: centre)
-        let outline = PlaneOutline(center: SIMD3<Float>(centre),
-                                   uAxis: SIMD3<Float>(frame.u),
-                                   vAxis: SIMD3<Float>(frame.v),
-                                   halfU: Float(halfU), halfV: Float(halfV))
-        // The render/handle key is the REGION id, kept distinct from a face key
-        // by construction: face keys are non-negative run face ids and manual
+        // The render/handle key is the REGION id, kept distinct from a face key by
+        // construction: face keys are non-negative run face ids and manual
         // primitives use a negative sentinel, so region ids (≥ 100) collide with
         // neither.
-        let volume = ClearanceVolume.slab(faceID: rid, geometry: inward,
-                                          outline: outline, depthMM: depth)
-        guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
-                                               axialSpan: nil).first else { return nil }
-        return LatticeDepthPlane(ref: ref, groupID: group, faceKey: rid, role: role,
-                                 depthMM: depth, volume: volume, handle: h)
+        return latticeFacePrimitive(faces: members, ref: ref, group: group,
+                                    key: rid, role: role,
+                                    depthMM: latticeSlabDepthMM(ref, in: group),
+                                    in: mesh)
     }
 
     /// A stable NEGATIVE sentinel face key for a manual primitive, so it never

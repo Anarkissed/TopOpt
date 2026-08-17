@@ -172,6 +172,14 @@ public enum FaceRegionGeometry {
         public var v = SIMD3<Double>(0, 1, 0)
         public var axialLo = 0.0, axialHi = 0.0
         public var uLo = 0.0, uHi = 0.0, vLo = 0.0, vHi = 0.0
+
+        /// This frame turned in its own plane, with its extent RE-MEASURED along
+        /// the new axes — see `rotateFrameInPlane`.
+        public func rotatedInPlane(byDegrees deg: Double, members: [FaceID],
+                                   in mesh: ViewerMesh) -> Frame {
+            FaceRegionGeometry.rotateFrameInPlane(self, byDegrees: deg,
+                                                  members: members, in: mesh)
+        }
     }
 
     public static func frame(members: [FaceID], in mesh: ViewerMesh) -> Frame {
@@ -238,6 +246,48 @@ public enum FaceRegionGeometry {
     ///
     /// ★ A BUTTON, NOT A DRAG. Rotating precisely with a finger on a small face
     /// while also having placed a point is fiddly, and he asked for a button.
+    // ★ §7 — TURN A FRAME IN ITS OWN PLANE. The grid is laid out in (u, v), so
+    // rotating those two axes rotates the whole pattern without moving its centre
+    // or leaving the surface.
+    /// ★ AND THE BOUNDS MUST BE RE-MEASURED. `uLo/uHi/vLo/vHi` are the members'
+    /// extent ALONG u AND v — turn the axes and leave the numbers, and the grid is
+    /// placed at parameters that no longer correspond to the shape. On anything but
+    /// a square face the cuts then land partly or wholly OFF it: nothing to trace,
+    /// so the preview draws nothing, and a nonsense split if it is committed. That
+    /// is both "Still can't see the Pattern look" and "it made a ridiculous shape".
+    ///
+    /// So this overload takes the members and re-measures. The bounds-free version
+    /// below is kept only for callers that do not lay anything out in the frame.
+    public static func rotateFrameInPlane(_ frame: Frame, byDegrees deg: Double,
+                                          members: [FaceID],
+                                          in mesh: ViewerMesh) -> Frame {
+        var f = rotateFrameInPlane(frame, byDegrees: deg)
+        guard f.valid, !f.cylindrical else { return f }
+        let pts = memberVertices(members, in: mesh)
+        guard !pts.isEmpty else { return f }
+        var uLo = Double.greatestFiniteMagnitude, uHi = -Double.greatestFiniteMagnitude
+        var vLo = Double.greatestFiniteMagnitude, vHi = -Double.greatestFiniteMagnitude
+        for p in pts {
+            let d = p - f.origin
+            let u = simd_dot(d, f.u), v = simd_dot(d, f.v)
+            uLo = min(uLo, u); uHi = max(uHi, u)
+            vLo = min(vLo, v); vHi = max(vHi, v)
+        }
+        f.uLo = uLo; f.uHi = uHi; f.vLo = vLo; f.vHi = vHi
+        return f
+    }
+
+    public static func rotateFrameInPlane(_ frame: Frame,
+                                          byDegrees deg: Double) -> Frame {
+        guard frame.valid, abs(deg) > 1e-9 else { return frame }
+        var f = frame
+        let a = deg * .pi / 180
+        let c = cos(a), s = sin(a)
+        f.u = simd_normalize(frame.u * c + frame.v * s)
+        f.v = simd_normalize(frame.v * c - frame.u * s)
+        return f
+    }
+
     public static func snapNormals(_ frame: Frame) -> [SIMD3<Double>] {
         guard frame.valid else { return [] }
         let u = frame.cylindrical ? frame.axisDir : frame.u
@@ -251,7 +301,35 @@ public enum FaceRegionGeometry {
     public struct GridCell: Equatable, Sendable {
         public let i: Int
         public let j: Int
+        /// Every half-space the cell is bounded by — its MEMBERSHIP.
         public let cuts: [RegionCut]
+        /// ★ THE SUBSET THAT IS A VISIBLE BOUNDARY BETWEEN TWO PIECES.
+        ///
+        /// A cell on a curved strip needs LATERAL bounds as well as dividers: a
+        /// plane placed a third of the way along a U passes through the other arm
+        /// too, so without a box confining the cell to its own stretch the piece
+        /// continues round the bend. Those bounds are structure — they decide what
+        /// is IN the cell — but they are not edges, and drawing them scatters extra
+        /// lines across the face.
+        ///
+        /// ★ NIL means "every cut is a boundary" — what a plain axis grid wants, and
+        /// what every caller that predates this got. An EMPTY ARRAY means "this cell
+        /// draws nothing", which is a real and necessary answer: in an arc grid each
+        /// interior boundary is drawn by exactly one of the two cells that meet on
+        /// it, so the other one draws none of its own bounds. Collapsing empty into
+        /// nil (the first shape this had) made the first cell of every grid redraw
+        /// its neighbour's divider.
+        public let drawn: [RegionCut]?
+
+        public init(i: Int, j: Int, cuts: [RegionCut], drawn: [RegionCut]? = nil) {
+            self.i = i
+            self.j = j
+            self.cuts = cuts
+            self.drawn = drawn
+        }
+
+        /// The cuts to draw for this cell, with the nil-means-all rule applied once.
+        public var drawnCuts: [RegionCut] { drawn ?? cuts }
     }
 
     /// Place an N x M grid split in the region's own coordinates.

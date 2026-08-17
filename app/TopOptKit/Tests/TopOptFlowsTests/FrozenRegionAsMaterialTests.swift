@@ -325,30 +325,38 @@ final class FrozenRegionAsMaterialTests: XCTestCase {
         XCTAssertEqual(plain.rows.map(\.value), perRegion.rows.map(\.value))
     }
 
-    /// ★ THREE GAPS, RECORDED RATHER THAN IMPLIED. `perRegionDensity` cannot be
-    /// true in a shipped build today, and this test exists so that fact is written
-    /// down next to the code rather than discovered later:
+    /// ★ THREE GAPS, RECORDED RATHER THAN IMPLIED — AND TWO OF THEM ARE NOW
+    /// CLOSED. This note is UPDATED, never deleted, exactly as it asked to be
+    /// (task 2026-08-15-lattice-and-face-ui §8):
     ///
-    ///   1. THE MODE DOES NOT EXIST. `LatticeDensityMode` is `uniform` / `auto`;
-    ///      there is no per-region case to set the flag from.
-    ///   2. THE VIEW CANNOT RENDER IT. `latticeDrawerBody` attaches `depthDrag` to
-    ///      EVERY modifiable row and hardcodes the `-depth` accessibility id
-    ///      (WorkspacePlaceholder.swift), so a second control would get the
-    ///      depth's gesture and a duplicate identifier. That is the rewrite's job.
-    ///   3. THE OVERRIDE DOES NOT REACH CORE. `LatticeSettings.frozenRegionDensity`
-    ///      is persisted but never read into `runSpec` / `latticeJobRegions`, so a
-    ///      number typed there would not change a run.
+    ///   1. ~~THE MODE DOES NOT EXIST.~~ ★ CLOSED. `LatticeDensityMode` gained
+    ///      `perRegion`, and `WorkspacePlaceholder.perRegionDensity` is the one
+    ///      expression that sets the flag from it (§8c).
+    ///   2. ~~THE VIEW CANNOT RENDER IT.~~ ★ CLOSED. `latticeDrawerBody` used to
+    ///      attach `depthDrag` to EVERY modifiable row and hardcode the `-depth`
+    ///      identifier; each modifiable row is now keyed by its own label slug and
+    ///      only the depth row gets the depth drag
+    ///      (`LatticeDrawerRowGesture`). Without that, the Density row would have
+    ///      inherited the DEPTH's gesture — a control silently editing the wrong
+    ///      number.
+    ///   3. ★ STILL OPEN — THE OVERRIDE DOES NOT REACH CORE.
+    ///      `LatticeSettings.frozenRegionDensity` is persisted but never read into
+    ///      `runSpec` / `latticeJobRegions`, so a number typed there does not
+    ///      change a run. PR 331's own handoff says why: "density is a function of
+    ///      the cell, not an input… that would need a per-region density override
+    ///      on the region entry plus a term in the grading law that honours it."
     ///
-    /// A field that captures a number core ignores must be STATED as such.
+    /// ★ A FIELD THAT CAPTURES A NUMBER CORE IGNORES MUST BE STATED AS SUCH, and
+    /// it is: the per-region mode carries a warning line on both the wizard
+    /// (`wizard-per-region-gap`) and the lattice page (`density-per-region-gap`).
     func testTheDensityOverrideDoesNotYetReachTheRun() {
         var s = LatticeSettings()
         s.frozenRegionDensity[UUID()] = 0.30
-        // ★ THE MODE DOES NOT EXIST — asserted on the enum itself, so this stays
-        // true whatever the default becomes. When per-region lands, this fails and
-        // the gap note above must be UPDATED, never deleted.
-        XCTAssertNil(LatticeDensityMode(rawValue: "perRegion"),
-                     "there is no per-region density mode yet, so nothing can set "
-                   + "LatticeRegionDrawer's perRegionDensity flag")
+        // ★ GAP 1 IS CLOSED, and asserted in its new direction: the mode EXISTS
+        // now, so the flag has something to come from.
+        XCTAssertNotNil(LatticeDensityMode(rawValue: "perRegion"),
+                        "§8: the per-region density mode exists and is what sets "
+                      + "LatticeRegionDrawer's perRegionDensity flag")
         let src = try? String(contentsOf: Self.repoRoot.appendingPathComponent(
             "app/TopOptKit/Sources/TopOptFlows/LatticeSettings.swift"),
             encoding: .utf8)

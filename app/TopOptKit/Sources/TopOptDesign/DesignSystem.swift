@@ -58,6 +58,11 @@ public enum DS {
         // Base surfaces & ink
         /// Page background `#060608`.
         public static let background = RGBA(hex: 0x060608)
+        /// ★ A SOLID CHIP FILL for controls that float OVER the model. The bar's
+        /// translucent fill disappears against a brightly tinted face, which left
+        /// the Surface stage's confirm and cancel almost invisible and very hard to
+        /// hit. Opaque, so a control reads against anything behind it.
+        public static let chipSolid = RGBA(hex: 0x14161C)
         /// Primary text `#f2f2f5`.
         public static let textPrimary = RGBA(hex: 0xF2F2F5)
         /// Success / "Optimized ✓" green `#30D158`.
@@ -86,6 +91,37 @@ public enum DS {
         // Appearance section (`accentColor.options`).
         /// Default accent `#0A84FF`.
         public static let accent = RGBA(hex: 0x0A84FF)
+        /// ★ THE STAGE-NAVIGATION BLUE `#004080` — deliberately DARKER than
+        /// `accent` (task 2026-08-15-lattice-and-face-ui §4).
+        ///
+        /// ★ THE MAINTAINER'S REASON, and it is a semantic one rather than a
+        /// taste: "make all 3 stage buttons a *darker* blue? I want them to be
+        /// different from the 'Optimize' button."
+        ///
+        /// `accent` is what a page's PRIMARY ACTION wears — Optimize, Save & Exit,
+        /// the wizard's Next. The three stage buttons ("Lattice", "Topology",
+        /// "Settings") do not DO anything to the model; they MOVE YOU BETWEEN
+        /// PAGES. Giving navigation its own deeper blue keeps "this runs something"
+        /// and "this takes me somewhere" apart at a glance, which is exactly what
+        /// one shared accent could not do.
+        ///
+        /// ★ IT IS A PAIR, NOT A COLOUR. `#004080` is max-channel 128 against the
+        /// accent's 255 — half its lightness — which separates it decisively but
+        /// leaves a large flat button that can read as dead on a near-black page.
+        /// `accentDeepEdge` is the answer the maintainer asked for ("a bit of a
+        /// lighter blue highlight around it"): a hairline of the SAME hue, light
+        /// enough to catch the eye and give the shape an edge. Use them together —
+        /// the fill alone is the thing that looked wrong.
+        ///
+        /// ★ THE VALUES TRIED, so this is not re-litigated. `#0A4D8F` and
+        /// `#005EBD` read fine but sat closer to the accent; `#061D95` went
+        /// near-navy; `#0077F0` was only 15/255 from the accent, which defeats the
+        /// whole point of the token.
+        public static let accentDeep = RGBA(hex: 0x004080)
+        /// ★ THE HIGHLIGHT that rides `accentDeep`'s edge. Same hue (210°), ~1.9×
+        /// the lightness, so it reads as a rim-light on the fill rather than as a
+        /// second colour. Never used as a fill.
+        public static let accentDeepEdge = RGBA(hex: 0x3D8FD6)
         /// Accent option: cyan `#64D2FF`.
         public static let accentCyan = RGBA(hex: 0x64D2FF)
         /// Accent option: purple `#BF5AF2`.
@@ -238,6 +274,14 @@ public enum DS {
         public static let toast = Shadow(color: RGBA(0, 0, 0, 0.50), radius: 40, y: 12)
         /// Accent glow under primary buttons `0 6px 24px rgba(10,132,255,0.4)`.
         public static let accentGlow = Shadow(color: RGBA(10, 132, 255, 0.40), radius: 24, y: 6)
+        /// The stage-navigation glow — `accentDeep` at the same alpha, so a
+        /// navigation button does not halo in the PRIMARY-ACTION blue it is
+        /// deliberately not wearing.
+        /// The glow carries the EDGE colour, not the fill: a `#004080` halo on a
+        /// near-black page is invisible, and the point of the glow is to lift the
+        /// button off the background.
+        public static let accentDeepGlow = Shadow(color: RGBA(61, 143, 214, 0.35),
+                                                  radius: 24, y: 6)
     }
 
     // MARK: - Typography

@@ -152,15 +152,56 @@ private let viewerShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
 
-struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; float4 tint [[attribute(2)]]; };
+// ★ MERGED, NOT PICKED (2026-08-16). `render-quality` added world-space shading
+// fields to `VOut` and a `ShadeParams`; this task added the cut's per-fragment
+// half-space test, which needs `mpos`/`member` and its own uniforms. Both sides
+// grew the SAME structs, so the resolution is their union — taking either side
+// whole would have silently dropped a feature that still has its Swift half.
+struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]];
+              float4 tint [[attribute(2)]]; float4 flags [[attribute(3)]]; };
 struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight;
+              // §6 — the cut's half-space test, per fragment.
+              float3 mpos; float member;
+              // render-quality — world-space shading + eye depth.
               float3 wnormal; float3 wpos; float eyeZ; float3 eyeWS [[flat]]; };
+// ★ §6 — THE CUT, TESTED PER FRAGMENT.
+//
+// A cut is a HALF-SPACE, so which side a point is on is a question about the
+// POINT — and the only place every point exists is the fragment stage. Decided
+// per vertex, the boundary can only fall on vertices and the GPU smears between
+// them; decided per TRIANGLE, it can only fall on triangle edges, and on a coarse
+// tessellation of a curved face that reads as shattered glass ("look at the face,
+// it looks like a glass piece broken apart"). Neither is where the plane is.
+//
+// `plane` is (normal.xyz, -dot(normal, point)) in MODEL space, so the test is one
+// dot product. `member` marks the fragments this applies to — the faces belonging
+// to the selected region — and is written per vertex because face membership IS a
+// per-face fact, not a per-point one.
+struct CutUniforms {
+    float4 plane;
+    float4 colSelected;
+    float4 colSibling;
+    float  enabled;
+    // ★ PICK GROUPS — up to 4 PIECES, each an intersection of up to 4 half-spaces,
+    // laid out consecutively in `pickPlanes` with `pickCounts` giving each one's
+    // length. A fragment is "picked" when it satisfies EVERY plane of ANY group.
+    //
+    // ★ WHY THIS EXISTS. A piece of a cut face resolves to the whole FACE, so
+    // lighting a picked piece by its member faces lit its siblings too: one tap
+    // appeared to select two pieces, and a second tap could not be seen to
+    // register at all. A piece is defined by its half-spaces, so only a
+    // half-space test can draw exactly it.
+    float4 pickPlanes[16];
+    int4   pickCounts;
+    int    pickGroups;
+};
 struct Uniforms { float4x4 mvp; float4x4 normalMatrix; float4 flex;
                   float4x4 worldNormalMatrix; float4x4 model; float4x4 modelView; float4 eye; };
 // Render-quality parameters (task 2026-08-15-render-quality). Every strength is a
 // 0…1 multiplier and ZERO IS OFF — the before/after captures run this one shader
 // with zeros rather than a second, drifting copy of it.
 struct ShadeParams { float4 ao; float4 fade; float4 tint; };
+
 
 // buffer(3) carries the per-vertex FEA displacement (mm); `flex.x` scales it
 // (exaggeration·amplitude). At scale 0 the buffer contributes nothing, so the
@@ -174,6 +215,8 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
     o.vnormal  = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
     o.tint = in.tint;
     o.mheight = in.position.y;   // model-space height (rest), for the M7.8 reveal scrub
+    o.mpos = in.position;        // §6: rest model position, for the cut's half-space test
+    o.member = in.flags.x;       // §6: 1 on faces of the selected region
     // §2 / §3d: the WORLD normal + WORLD position (so the light can stay put while the
     // camera orbits) and the EYE depth (so the far side of a dense lattice can recede).
     o.wnormal = (u.worldNormalMatrix * float4(in.normal, 0.0)).xyz;
@@ -193,6 +236,12 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
                                 constant float& bodyAlpha [[buffer(1)]],
                                 constant ShadeParams& sp [[buffer(2)]],
+                                // ★ MOVED TO 3 BY THE MERGE. `render-quality` took
+                                // buffer(2) for `ShadeParams`; the cut's uniforms had
+                                // it first but the shading is the one with a texture
+                                // binding beside it, so this is the cheaper move. The
+                                // Swift `setFragmentBytes` index moves with it.
+                                constant CutUniforms& cut [[buffer(3)]],
                                 texture2d<float, access::sample> aoTex [[texture(0)]]) {
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
@@ -224,6 +273,43 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
     //   eye: orbit the camera and the highlight stays on the same face of the part,
     //   which is the defect §2(c) names.
     float3 clay = float3(0.78, 0.77, 0.75);
+    // ★ §6 — THE CUT, EXACTLY, AND IT IS DECIDED BEFORE THE SHADING.
+    //
+    // The merge with `render-quality` put a whole new lighting model here, and the
+    // cut is not a lighting question — it decides WHICH TINT this fragment carries.
+    // So it is resolved once, into `tint`, and both shading branches read that
+    // instead of `in.tint`. Written any other way the cut would have to be applied
+    // twice and could drift between the two.
+    //
+    // On the selected region's faces the side is decided HERE, per fragment, from
+    // the fragment's own model position: the boundary is then the plane itself, at
+    // any tessellation, and a triangle the plane crosses is split by it rather than
+    // being forced whole to one side.
+    float4 tint = in.tint;
+    if (cut.enabled > 0.5 && in.member > 0.5) {
+        float d = dot(cut.plane.xyz, in.mpos) + cut.plane.w;
+        tint = (d >= 0.0) ? cut.colSelected : cut.colSibling;
+    }
+    // ★ THE PICKED PIECES (union tool). Inside EVERY plane of ANY group.
+    if (cut.pickGroups > 0 && in.member > 0.5) {
+        int base = 0;
+        bool anyIn = false;
+        for (int g = 0; g < 4; ++g) {
+            if (g >= cut.pickGroups) break;
+            int n = (g == 0) ? cut.pickCounts.x
+                  : (g == 1) ? cut.pickCounts.y
+                  : (g == 2) ? cut.pickCounts.z : cut.pickCounts.w;
+            bool allIn = true;
+            for (int k = 0; k < 4; ++k) {
+                if (k >= n) break;
+                float4 pl = cut.pickPlanes[base + k];
+                if (dot(pl.xyz, in.mpos) + pl.w < 0.0) { allIn = false; break; }
+            }
+            if (n > 0 && allIn) { anyIn = true; break; }
+            base += n;
+        }
+        tint = anyIn ? cut.colSelected : cut.colSibling;
+    }
     float3 color;
     if (sp.fade.w > 0.5) {
         float3 Nw = normalize(in.wnormal);
@@ -273,7 +359,7 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
         // it, not carry it. `sp.tint.x` is how much saturation is removed; the result is
         // also lifted back toward clay's brightness so a deep indigo becomes a muted
         // slate rather than a dark stain on an otherwise light material.
-        float3 tintRGB = in.tint.rgb;
+        float3 tintRGB = tint.rgb;
         if (sp.tint.x > 0.001) {
             const float3 LUMA = float3(0.2126, 0.7152, 0.0722);
             float tl = dot(tintRGB, LUMA);
@@ -282,7 +368,7 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
             tintRGB *= mix(1.0, cl / max(tl, 1e-3), clamp(sp.tint.y, 0.0, 1.0));
             tintRGB = clamp(tintRGB, 0.0, 1.0);
         }
-        float3 albedo = mix(clay, tintRGB, clamp(in.tint.a, 0.0, 1.0));
+        float3 albedo = mix(clay, tintRGB, clamp(tint.a, 0.0, 1.0));
         color = albedo * shade + rim;
     } else {
         // ORIGINAL (before): soft half-Lambert key + hemisphere fill in EYE space.
@@ -295,8 +381,8 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
         color = clay * lighting * (ambientAO * 0.55 + directAO * 0.45);
         float  fres = pow(1.0 - clamp(N.z, 0.0, 1.0), 4.0) * 0.10;
         color += float3(0.10, 0.12, 0.16) * fres;
-        if (in.tint.a > 0.001) {
-            color = mix(color, in.tint.rgb * (0.55 + 0.45 * lighting), in.tint.a);
+        if (tint.a > 0.001) {
+            color = mix(color, tint.rgb * (0.55 + 0.45 * lighting), tint.a);
         }
     }
     // §3a: the dark crease/silhouette line, laid on last so it survives the tint.
@@ -309,6 +395,7 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
     if (sp.fade.x > 0.001) {
         float t = clamp((in.eyeZ - sp.fade.y) / max(sp.fade.z - sp.fade.y, 1e-4), 0.0, 1.0);
         color = mix(color, float3(0.055, 0.070, 0.110), t * clamp(sp.fade.x, 0.0, 1.0));
+
     }
     // Handoff 124 — Face protection crosshatch. A protected face carries the UNIQUE
     // mint-teal PROTECT_RGB (WorkspacePlaceholder.protectFaceRGB); recognise it by
@@ -375,6 +462,56 @@ vertex GOut ground_vertex(GIn in [[stage_in]], constant GUniforms& u [[buffer(1)
 }
 
 fragment float4 ground_fragment(GOut in [[stage_in]]) {
+    return float4(in.color.rgb * in.color.a, in.color.a);   // premultiplied
+}
+
+// ★ WIDE LINES, MEASURED IN SCREEN SPACE (§6b).
+//
+// Metal rasterises a `.line` primitive at exactly ONE PIXEL. On a retina iPad
+// that is a hairline: the maintainer could not see the wireframe however dark it
+// was drawn, because there was almost nothing of it to see. Line width is not a
+// pipeline setting in Metal — the only way to get a thick line is to stop drawing
+// lines and draw QUADS instead.
+//
+// Each segment arrives as SIX vertices (two triangles) carrying the same two
+// endpoints; `side` says which corner this vertex is. Both ends are projected to
+// clip space FIRST, the perpendicular is taken in NDC, and the corner is offset by
+// a width expressed in NDC — so the thickness is defined in SCREEN space and does
+// not change as the part is zoomed. That is the property asked for: "the lines
+// look like the thickness doesn't change".
+//
+// `u.width.x` is the half-width in NDC-y units; `.y` corrects for aspect so a
+// vertical line is as thick as a horizontal one.
+struct WIn  { float3 a [[attribute(0)]]; float3 b [[attribute(1)]];
+              float4 color [[attribute(2)]]; float2 side [[attribute(3)]]; };
+struct WOut { float4 position [[position]]; float4 color; };
+struct WUniforms { float4x4 mvp; float4 width; };
+
+vertex WOut wideline_vertex(WIn in [[stage_in]], constant WUniforms& u [[buffer(1)]]) {
+    WOut o;
+    float4 ca = u.mvp * float4(in.a, 1.0);
+    float4 cb = u.mvp * float4(in.b, 1.0);
+    // Guard the degenerate cases rather than dividing by zero behind the camera.
+    float wa = max(abs(ca.w), 1e-5), wb = max(abs(cb.w), 1e-5);
+    float2 na = ca.xy / wa, nb = cb.xy / wb;
+    float2 dir = nb - na;
+    // Aspect-correct the direction so the perpendicular is right on screen, not
+    // in NDC — otherwise a vertical line comes out thinner than a horizontal one.
+    dir.x *= u.width.y;
+    float len = max(length(dir), 1e-6);
+    float2 perp = float2(-dir.y, dir.x) / len;
+    perp.x /= u.width.y;
+
+    // side.x: 0 = the a end, 1 = the b end. side.y: -1 / +1 across the line.
+    float4 clip = (in.side.x < 0.5) ? ca : cb;
+    float w = (in.side.x < 0.5) ? wa : wb;
+    clip.xy += perp * in.side.y * u.width.x * w;
+    o.position = clip;
+    o.color = in.color;
+    return o;
+}
+
+fragment float4 wideline_fragment(WOut in [[stage_in]]) {
     return float4(in.color.rgb * in.color.a, in.color.a);   // premultiplied
 }
 """
@@ -890,6 +1027,22 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// thick-ribbon pipeline is unavailable. Empty = off.
     private var loadPathBuffer: MTLBuffer?
     private var loadPathVertexCount = 0
+    /// ★ §6(b) — THE SURFACE STAGE'S B-REP WIREFRAME. A stride-7 (pos + rgba)
+    /// line list built by `SurfaceWireframe.edges(of:)` and drawn on the ground
+    /// pipeline, like every other line layer here. Empty on every other stage.
+    private var wireframeBuffer: MTLBuffer?
+    private var wideLinePipeline: MTLRenderPipelineState?
+    private var wideWireBuffer: MTLBuffer?
+    private var wideWireVertexCount = 0
+    private var ribbonBuffer: MTLBuffer?
+    private var ribbonVertexCount = 0
+    /// §6 — the per-vertex tint that overrides the per-face one while it is set.
+    private var vertexTintOverride: [Float]?
+    /// §6 — draw the line set through the solid (x-ray) rather than depth-tested.
+    var xrayLines = false
+    private var cutUniforms = CutUniformsSwift(plane: .zero, colSelected: .zero,
+                                               colSibling: .zero, enabled: 0)
+    private var wireframeVertexCount = 0
     /// M7.viz.4 load-path: the expanded THICK-RIBBON geometry (stride-12: segStart xyz,
     /// segEnd xyz, side, endFlag, rgba — 6 verts per glyph). Drawn by `loadPathPipeline`
     /// when it built; billboarded to a constant screen width in the vertex shader.
@@ -1162,6 +1315,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// loudly on a typo (the pipeline is otherwise built with `try?`, i.e. nil-on-failure).
     static var stageShaderSourceForTesting: String { stageShaderSource }
     private var modelCenter = SIMD3<Float>.zero
+    /// The model transform the pick must undo to reach model space — the SAME
+    /// centre and rotation `modelMatrix()` draws with, so a ray cannot disagree
+    /// with the geometry it is aimed at.
+    var pickModelFrame: (centre: SIMD3<Float>, rotation: simd_quatf) {
+        (modelCenter, modelRotation)
+    }
     /// The currently-displayed model rotation (animates toward `settleTo`).
     private var modelRotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
     private var settleFrom = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
@@ -1285,8 +1444,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         vd.attributes[2].format = .float4          // selection tint (rgba)
         vd.attributes[2].offset = 0
         vd.attributes[2].bufferIndex = 2
+        // ★ §6 — the per-vertex FLAGS ride in the same buffer: .x marks a face of
+        // the selected region, the fragments the cut's half-space test applies to.
+        vd.attributes[3].format = .float4
+        vd.attributes[3].offset = MemoryLayout<Float>.stride * 4
+        vd.attributes[3].bufferIndex = 2
         vd.layouts[0].stride = MemoryLayout<Float>.stride * 6
-        vd.layouts[2].stride = MemoryLayout<Float>.stride * 4
+        vd.layouts[2].stride = MemoryLayout<Float>.stride * 8
 
         let pd = MTLRenderPipelineDescriptor()
         pd.vertexFunction = vfn
@@ -1361,7 +1525,44 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             gpd.depthAttachmentPixelFormat = Self.depthFormat
             gpd.rasterSampleCount = raster       // §3b MSAA
             groundPipe = try? device.makeRenderPipelineState(descriptor: gpd)
+
+            // ★ THE WIDE-LINE PIPELINE (§6b). Same library, same blending as the ground
+            // lines; the difference is entirely in the vertex stage, which expands each
+            // segment into a screen-space quad.
+            if let wvf = gLib.makeFunction(name: "wideline_vertex"),
+               let wff = gLib.makeFunction(name: "wideline_fragment") {
+                let wd = MTLRenderPipelineDescriptor()
+                wd.vertexFunction = wvf
+                wd.fragmentFunction = wff
+                wd.colorAttachments[0].pixelFormat = Self.colorFormat
+                wd.colorAttachments[0].isBlendingEnabled = true
+                wd.colorAttachments[0].rgbBlendOperation = .add
+                wd.colorAttachments[0].alphaBlendOperation = .add
+                wd.colorAttachments[0].sourceRGBBlendFactor = .one
+                wd.colorAttachments[0].sourceAlphaBlendFactor = .one
+                wd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+                wd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+                wd.depthAttachmentPixelFormat = Self.depthFormat
+
+                let wvd = MTLVertexDescriptor()
+                wvd.attributes[0].format = .float3            // a
+                wvd.attributes[0].offset = 0
+                wvd.attributes[0].bufferIndex = 0
+                wvd.attributes[1].format = .float3            // b
+                wvd.attributes[1].offset = MemoryLayout<Float>.stride * 3
+                wvd.attributes[1].bufferIndex = 0
+                wvd.attributes[2].format = .float4            // rgba
+                wvd.attributes[2].offset = MemoryLayout<Float>.stride * 6
+                wvd.attributes[2].bufferIndex = 0
+                wvd.attributes[3].format = .float2            // side
+                wvd.attributes[3].offset = MemoryLayout<Float>.stride * 10
+                wvd.attributes[3].bufferIndex = 0
+                wvd.layouts[0].stride = MemoryLayout<Float>.stride * 12
+                wd.vertexDescriptor = wvd
+                wideLinePipeline = try? device.makeRenderPipelineState(descriptor: wd)
+            }
         }
+
         // CAD-stage backdrop pipeline (item 9, optional: nil → the flat clear colour). No vertex
         // buffer (the gl_VertexID full-screen triangle); opaque (it REPLACES the clear), no
         // depth involvement (drawn first, `lineOverlayDepthState`).
@@ -2040,6 +2241,45 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 let edges = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6],
                              [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
                 for e in edges { seg(all[e[0]], all[e[1]], ecol) }
+            case let .shell(s):
+                // ★ §2(a)/§2(b) — THE OFFSET SHELL: the selected surface, the same
+                // surface pushed inward, and the skirt joining their boundary. One
+                // draw for a plane, a bore or a fillet — the geometry already made
+                // the distinction unnecessary (`FaceOffsetShell`).
+                var k = 0
+                while k + 2 < s.indices.count {
+                    let i0 = Int(s.indices[k]), i1 = Int(s.indices[k + 1])
+                    let i2 = Int(s.indices[k + 2])
+                    tri(s.base[i0], s.base[i1], s.base[i2], fcol)          // the face
+                    tri(s.offset[i2], s.offset[i1], s.offset[i0], fcol)    // its offset
+                    k += 3
+                }
+                // The SKIRT rides the boundary — the edges used by exactly one
+                // triangle. Interior edges are shared and must not be walled, or
+                // the shell fills with sheets.
+                var use: [UInt64: Int] = [:]
+                var edge: [UInt64: (UInt32, UInt32)] = [:]
+                k = 0
+                while k + 2 < s.indices.count {
+                    let t3 = [s.indices[k], s.indices[k + 1], s.indices[k + 2]]
+                    for e in 0..<3 {
+                        let a = t3[e], b = t3[(e + 1) % 3]
+                        let key = a < b ? (UInt64(a) << 32 | UInt64(b))
+                                        : (UInt64(b) << 32 | UInt64(a))
+                        use[key, default: 0] += 1
+                        edge[key] = (a, b)
+                    }
+                    k += 3
+                }
+                for (key, n) in use where n == 1 {
+                    guard let (a, b) = edge[key] else { continue }
+                    let ia = Int(a), ib = Int(b)
+                    tri(s.base[ia], s.base[ib], s.offset[ib], fcol)
+                    tri(s.base[ia], s.offset[ib], s.offset[ia], fcol)
+                    seg(s.base[ia], s.base[ib], ecol)
+                    seg(s.offset[ia], s.offset[ib], ecol)
+                    seg(s.base[ia], s.offset[ia], ecol)
+                }
             case .degenerate:
                 // Hollow honesty: a small dashed cross-ring at the face-derived point is
                 // meaningless without geometry, so a degenerate volume simply draws
@@ -2070,6 +2310,68 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// Rebuild the per-vertex tint buffer from the selection: each grouped face's
     /// vertices carry that group's colour; the active group is tinted more strongly.
+    /// ★ §6 — A PER-VERTEX TINT, OVERRIDING THE PER-FACE ONE.
+    ///
+    /// A cut does not create a face (LAYER 1 is never re-partitioned), so both
+    /// halves of a cut face carry the SAME face id and a `[FaceID: colour]` map
+    /// cannot draw them differently. The tint buffer was ALREADY per-vertex —
+    /// `buildTintBuffer` writes one RGBA per vertex and only *chooses* by face —
+    /// so the halves need no shader and no new pipeline, just the choice made
+    /// per vertex instead. `SurfaceTint` makes it; this uploads it.
+    ///
+    /// Empty clears the override and the per-face path resumes unchanged.
+    func setVertexTints(_ rgba: [Float]) {
+        guard vertexDrawCount > 0, rgba.count == vertexDrawCount * 8 else {
+            vertexTintOverride = nil
+            buildTintBuffer(faceTint: lastFaceTint, activeFaces: lastActiveFaces,
+                            pulse: currentPulse())
+            return
+        }
+        vertexTintOverride = rgba
+        // ★ HANDS OFF THESE ONES (merge with `render-quality`, 2026-08-16).
+        //
+        // `tintsAreState` turns on §4's desaturation, which exists to tame the loud
+        // GROUP PALETTE under the new world lighting. The Surface stage's tints are
+        // not from that palette: `SurfaceTint` picks one blue in three exact depths
+        // (0.06 / 0.25 / 0.72) chosen so "grouped", "sibling" and "selected" are
+        // told apart at a glance, and the group hue it blends in is already muted at
+        // source. Desaturating them would lift all three toward clay and collapse
+        // the very distinction they encode.
+        //
+        // This setter bypasses `buildTintBuffer`, so without saying so it would
+        // inherit whatever the last page set — which is a state nobody chose.
+        tintsAreState = false
+        tintBuffer = rgba.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// ★ §6 — THE CUT PLANE THE FRAGMENT STAGE TESTS. `plane` is
+    /// (normal.xyz, -dot(normal, point)) in MODEL space. Disabled draws exactly as
+    /// before, so every other page is untouched.
+    func setCutPlane(_ plane: SIMD4<Float>, selected: SIMD4<Float>,
+                     sibling: SIMD4<Float>, enabled: Bool,
+                     pickGroups: [[SIMD4<Float>]] = []) {
+        var u = CutUniformsSwift(plane: plane, colSelected: selected,
+                                 colSibling: sibling, enabled: enabled ? 1 : 0)
+        // Flatten the picked pieces' half-space chains, bounded at 4 groups of 4.
+        var flat: [SIMD4<Float>] = []
+        var counts = SIMD4<Int32>.zero
+        let groups = Array(pickGroups.prefix(4))
+        for (i, g) in groups.enumerated() {
+            let planes = Array(g.prefix(4))
+            counts[i] = Int32(planes.count)
+            flat += planes
+        }
+        withUnsafeMutableBytes(of: &u.pickPlanes) { raw in
+            let dst = raw.bindMemory(to: SIMD4<Float>.self)
+            for (i, pl) in flat.prefix(16).enumerated() { dst[i] = pl }
+        }
+        u.pickCounts = counts
+        u.pickGroups = Int32(groups.count)
+        cutUniforms = u
+    }
+
     func setHighlights(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>) {
         lastFaceTint = faceTint       // remembered so a detent pulse can layer over them (item 2)
         lastActiveFaces = activeFaces
@@ -2115,11 +2417,25 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     func setStressTints(_ colors: [SIMD4<Float>]) {
         guard vertexDrawCount > 0, colors.count == vertexDrawCount else { return }
         tintsAreState = false         // §4: a DATA ramp — its hue is the datum, hands off
-        var tints = [Float](repeating: 0, count: vertexDrawCount * 4)
+        // ★ STRIDE 8, AND THE INDEXING WAS WRONG — A BUG THIS MERGE EXPOSED.
+        //
+        // §6 widened the tint buffer to EIGHT floats per vertex (rgba + the flags
+        // that carry `member`), and widened the allocation here to match — but left
+        // the loop writing at `v * 4`. So every colour after the first landed in the
+        // previous vertex's FLAGS slot: the stress/lattice ramp was scrambled, and
+        // the flags channel filled with colour data, which is what drives the cut's
+        // per-fragment test. The Surface stage never showed it because it uses
+        // `setVertexTints` (already 8-wide); the lattice proxy and the smoothing
+        // brush go through here.
+        //
+        // It surfaced because `render-quality` touched the same line for its own
+        // reason and the conflict put the two numbers side by side.
+        var tints = [Float](repeating: 0, count: vertexDrawCount * 8)
         for v in 0..<vertexDrawCount {
             let c = colors[v]
-            tints[v * 4] = c.x; tints[v * 4 + 1] = c.y
-            tints[v * 4 + 2] = c.z; tints[v * 4 + 3] = c.w
+            tints[v * 8] = c.x; tints[v * 8 + 1] = c.y
+            tints[v * 8 + 2] = c.z; tints[v * 8 + 3] = c.w
+            // flags stay zero: a data ramp is on no region's face.
         }
         tintBuffer = tints.withUnsafeBytes {
             device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
@@ -2144,6 +2460,86 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// (not a multiple of the stride-7 layout) is ignored. Empty clears the overlay.
     /// Builds BOTH the thick-ribbon geometry (the primary draw) and keeps the raw line
     /// buffer as the fallback for when the ribbon pipeline is unavailable.
+    /// ★ §6(b) — upload the B-rep edge set. `verts` is the raw xyz line list from
+    /// `SurfaceWireframe.edges(of:)`; the colour is applied here so the geometry
+    /// stays a pure function of the mesh. Empty clears the layer.
+    /// ★ TWO COLOURS IN ONE BUFFER. The colour is packed PER VERTEX, so the
+    /// vertices past `accentFrom` can carry a different one at no cost: the B-rep
+    /// wireframe stays a quiet structural blue while the pattern preview — the
+    /// thing being decided right now — is drawn in a colour that reads instantly
+    /// against it. Washed out, a preview cannot answer "what will it look like".
+    /// ★ §6/§7 — THE CUT/PATTERN RIBBONS: triangles, not lines, so they are wide
+    /// enough to see, drawn depth-ALWAYS so the surface they lie on cannot swallow
+    /// them. This is the layer that answers "I want to see the pattern much easier".
+    func setCutRibbon(_ verts: [Float], rgba: SIMD4<Float>) {
+        guard !verts.isEmpty, verts.count % 3 == 0 else {
+            ribbonBuffer = nil; ribbonVertexCount = 0; return
+        }
+        var packed: [Float] = []
+        packed.reserveCapacity(verts.count / 3 * 7)
+        var i = 0
+        while i + 2 < verts.count {
+            packed.append(verts[i]); packed.append(verts[i + 1]); packed.append(verts[i + 2])
+            packed.append(rgba.x * rgba.w); packed.append(rgba.y * rgba.w)
+            packed.append(rgba.z * rgba.w); packed.append(rgba.w)
+            i += 3
+        }
+        ribbonVertexCount = packed.count / 7
+        ribbonBuffer = packed.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    func setWireframe(_ verts: [Float], rgba: SIMD4<Float>,
+                      accentFrom: Int = .max, accent: SIMD4<Float> = .zero) {
+        guard !verts.isEmpty, verts.count % 3 == 0 else {
+            wireframeBuffer = nil; wireframeVertexCount = 0
+            wideWireBuffer = nil; wideWireVertexCount = 0; return
+        }
+        var packed: [Float] = []
+        packed.reserveCapacity(verts.count / 3 * 7)
+        var i = 0
+        while i + 2 < verts.count {
+            packed.append(verts[i]); packed.append(verts[i + 1]); packed.append(verts[i + 2])
+            let c = i >= accentFrom ? accent : rgba
+            // Premultiplied — the ground pipeline blends src .one / dst 1−srcA.
+            packed.append(c.x * c.w)
+            packed.append(c.y * c.w)
+            packed.append(c.z * c.w)
+            packed.append(c.w)
+            i += 3
+        }
+        wireframeVertexCount = packed.count / 7
+        wireframeBuffer = packed.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+
+        // ★ AND THE SAME SEGMENTS AS QUADS. Six vertices per segment, each carrying
+        // BOTH endpoints plus which corner it is — the vertex stage needs both ends
+        // to know which way is across the line on screen.
+        var quads: [Float] = []
+        quads.reserveCapacity(verts.count / 6 * 6 * 12)
+        var j = 0
+        while j + 5 < verts.count {
+            let ax = verts[j], ay = verts[j + 1], az = verts[j + 2]
+            let bx = verts[j + 3], by = verts[j + 4], bz = verts[j + 5]
+            let c = j >= accentFrom ? accent : rgba
+            // side.x: 0 = a end, 1 = b end. side.y: which side of the line.
+            let corners: [(Float, Float)] = [(0, -1), (0, 1), (1, -1),
+                                             (0, 1), (1, 1), (1, -1)]
+            for (endFlag, sideFlag) in corners {
+                quads += [ax, ay, az, bx, by, bz,
+                          c.x * c.w, c.y * c.w, c.z * c.w, c.w,
+                          endFlag, sideFlag]
+            }
+            j += 6
+        }
+        wideWireVertexCount = quads.count / 12
+        wideWireBuffer = quads.isEmpty ? nil : quads.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
     func setLoadPath(_ verts: [Float]) {
         guard !verts.isEmpty, verts.count % 7 == 0, verts.count % 14 == 0 else {
             clearLoadPath(); return
@@ -2288,21 +2684,29 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private func buildTintBuffer(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>,
                                  pulse: (face: FaceID, color: SIMD4<Float>)? = nil) {
         guard vertexDrawCount > 0 else { tintBuffer = nil; return }
-        var tints = [Float](repeating: 0, count: vertexDrawCount * 4)
+        // ★ THE OVERRIDE WINS. Otherwise any selection change downstream would
+        // rebuild from the face map and silently erase the two halves.
+        if let v = vertexTintOverride, v.count == vertexDrawCount * 8 {
+            tintBuffer = v.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+            return
+        }
+        var tints = [Float](repeating: 0, count: vertexDrawCount * 8)
         for v in 0..<vertexDrawCount {
             let fid = v < flatFaceIDs.count ? FaceID(bitPattern: flatFaceIDs[v]) : -1
             // The detent PULSE overrides its face's tint with the gold envelope colour, bypassing
             // the selection alpha-clamp so the flash can outshine a highlight (item 2).
             if let pulse, fid == pulse.face {
                 let c = pulse.color
-                tints[v * 4] = c.x; tints[v * 4 + 1] = c.y
-                tints[v * 4 + 2] = c.z; tints[v * 4 + 3] = c.w
+                tints[v * 8] = c.x; tints[v * 8 + 1] = c.y
+                tints[v * 8 + 2] = c.z; tints[v * 8 + 3] = c.w
                 continue
             }
             guard var c = faceTint[fid] else { continue }
             c.w = activeFaces.contains(fid) ? 0.75 : 0.45   // active group brighter
-            tints[v * 4] = c.x; tints[v * 4 + 1] = c.y
-            tints[v * 4 + 2] = c.z; tints[v * 4 + 3] = c.w
+            tints[v * 8] = c.x; tints[v * 8 + 1] = c.y
+            tints[v * 8 + 2] = c.z; tints[v * 8 + 3] = c.w
         }
         tintBuffer = tints.withUnsafeBytes {
             device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
@@ -2449,6 +2853,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // 1×1 and zero strengths, i.e. an exact identity.
         enc.setFragmentBytes(&shade, length: MemoryLayout<ShadeParams>.stride, index: 2)
         enc.setFragmentTexture(aoTex ?? neutralAOTexture(), index: 0)
+        // ★ §6 — the cut's half-space, tested per fragment. INDEX 3: the shading
+        // above took 2 in the merge, and the same rule applies — the shader declares
+        // it, so it is bound on every path.
+        var cu = cutUniforms
+        enc.setFragmentBytes(&cu, length: MemoryLayout<CutUniformsSwift>.stride, index: 3)
         countedDraw(enc, .triangle, vertexDrawCount)
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
@@ -2525,6 +2934,82 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setVertexBuffer(lbuf, offset: 0, index: 0)
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             countedDraw(enc, .line, loadPathVertexCount)
+        }
+
+        // ★ §6(b) — THE B-REP WIREFRAME, DEPTH-ALWAYS.
+        //
+        // ★ IT WAS DEPTH-TESTED AND THEREFORE INVISIBLE. A B-rep edge lies exactly
+        // ON the two faces that meet at it, so at equal depth it z-fights the body
+        // and loses almost every fragment: the maintainer turned the switch on and
+        // reported "there is no difference in the view of the model with it on" —
+        // and he was right, the pass was running and drawing nothing you could see.
+        // Depth-ALWAYS is what every other line overlay here uses (the load path,
+        // the flow guides, the clearance x-ray) for exactly this reason.
+        if wideWireVertexCount > 0, let wpipe = wideLinePipeline, let wbuf = wideWireBuffer {
+            // ★ WIDTH IN SCREEN SPACE, WITH A FALLOFF PAST THE FRAMING DISTANCE.
+            //
+            // The half-width is in NDC, so it is the same apparent thickness at any
+            // zoom — which is the point. Beyond the distance the viewer frames the
+            // part at, it tapers: a part zoomed far out would otherwise become a mat
+            // of lines with no shape left in it.
+            struct WU { var mvp: simd_float4x4; var width: SIMD4<Float> }
+            let radius = max(mesh?.bounds.radius ?? 1, 1e-3)
+            let framing = radius * 2.6          // roughly how the viewer frames a part
+            let zoomOut = max(camera.distance / framing, 1)
+            let halfWidth = 0.0022 / min(zoomOut * zoomOut, 6)
+            var wu = WU(mvp: uniforms.mvp,
+                        width: SIMD4<Float>(halfWidth, max(aspect, 1e-3), 0, 0))
+            enc.setRenderPipelineState(wpipe)
+            if xrayLines {
+                enc.setDepthStencilState(lineOverlayDepthState)
+            } else {
+                enc.setDepthStencilState(depthState)
+                enc.setDepthBias(-2.0, slopeScale: -1.5, clamp: 0)
+            }
+            enc.setVertexBuffer(wbuf, offset: 0, index: 0)
+            enc.setVertexBytes(&wu, length: MemoryLayout<WU>.stride, index: 1)
+            countedDraw(enc, .triangle, wideWireVertexCount)
+            if !xrayLines { enc.setDepthBias(0, slopeScale: 0, clamp: 0) }
+        } else if wireframeVertexCount > 0, let wpipe = groundPipeline,
+                  let wbuf = wireframeBuffer {
+            var mvp = uniforms.mvp
+            enc.setRenderPipelineState(wpipe)
+            // ★ TWO DIFFERENT VIEWS, AND THEY WERE ONE (maintainer: "the wireframe
+            // is mixed with an x-ray view … xray view should be selectable").
+            //
+            //   WIREFRAME  depth-TESTED, with a depth BIAS. A B-rep edge lies
+            //              exactly ON the faces that meet at it, so at equal depth
+            //              it z-fights the body and loses — which is why this was
+            //              depth-always in the first place. The bias nudges the
+            //              lines toward the camera by a fraction of a depth unit:
+            //              they win against the surface they lie on and are still
+            //              HIDDEN by geometry genuinely in front. That is a
+            //              wireframe.
+            //   X-RAY      depth-ALWAYS: every edge shows through the solid. That
+            //              is a different question and now a different switch.
+            if xrayLines {
+                enc.setDepthStencilState(lineOverlayDepthState)
+            } else {
+                enc.setDepthStencilState(depthState)
+                enc.setDepthBias(-2.0, slopeScale: -1.5, clamp: 0)
+            }
+            enc.setVertexBuffer(wbuf, offset: 0, index: 0)
+            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            countedDraw(enc, .line, wireframeVertexCount)
+            // Restore: every later pass expects no bias.
+            if !xrayLines { enc.setDepthBias(0, slopeScale: 0, clamp: 0) }
+        }
+
+        // ★ THE CUT / PATTERN RIBBONS, ON TOP OF EVERYTHING. Depth-ALWAYS: a
+        // preview exists to be looked at, and one hidden behind the face it
+        // describes answers no question.
+        if ribbonVertexCount > 0, let rpipe = groundPipeline, let rbuf = ribbonBuffer {
+            var mvp = uniforms.mvp
+            enc.setRenderPipelineState(rpipe)
+            enc.setDepthStencilState(lineOverlayDepthState)
+            enc.setVertexBuffer(rbuf, offset: 0, index: 0)
+            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            countedDraw(enc, .triangle, ribbonVertexCount)
         }
 
         // Load-path FLOW (handoff 070): the faint guide routes then the glowing comet
@@ -3082,15 +3567,55 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return ids
     }
 
+    /// ★ WHAT THE ID PASS ACTUALLY ANSWERED — THREE OUTCOMES, NOT TWO.
+    ///
+    /// `pickFaceID` returns `FaceID?`, which collapses two completely different
+    /// answers into one `nil`: "the id pass ran and there is NOTHING under this
+    /// pixel", and "the id pass could not run at all". The tap handler treated
+    /// both the same way — fall through to the CPU `FacePicker` — and that is the
+    /// whole of the bug the maintainer reported as "when tapping just off to the
+    /// side of the model, on the floor, faces are randomly selected".
+    ///
+    /// ★ AND WHY THE FALLBACK ANSWERS AT ALL ON A TAP THAT HIT NOTHING. The CPU
+    /// picker casts a WORLD-space ray at MODEL-space vertices. Once gravity is set
+    /// the part is drawn through a settle rotation, so the geometry the ray meets
+    /// is the part in its ORIGINAL pose — sitting somewhere else on screen
+    /// entirely. A tap on empty floor to the lower right of the drawn part passes
+    /// straight through the un-rotated part, and the picker dutifully names the
+    /// face it crossed. It is not random: it is the same wrong face every time
+    /// from the same place, which is exactly what was described ("with union it
+    /// will select the large right side, with the selection tool the very front
+    /// face").
+    ///
+    /// Naming the third case is what lets the caller do the only correct thing:
+    /// on `.background`, MISS — never ask a second opinion of a question that has
+    /// already been answered.
+    enum FaceIDPass: Equatable {
+        case face(FaceID)
+        /// The pass ran; that pixel is empty space.
+        case background
+        /// The pass could not run (no pipeline / nothing to draw).
+        case unavailable
+    }
+
+    /// Resolve the face id at a normalized tap point (x,y ∈ [0,1], y down) via the
+    /// id pass, keeping "empty space" and "no pass" apart.
+    func pickFacePass(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> FaceIDPass {
+        guard let ids = renderFaceIDOffscreen(width: width, height: height)
+        else { return .unavailable }
+        let px = Swift.min(Swift.max(Int(p.x * CGFloat(width)), 0), width - 1)
+        let py = Swift.min(Swift.max(Int(p.y * CGFloat(height)), 0), height - 1)
+        let raw = ids[py * width + px]
+        return raw == idBackground ? .background : .face(FaceID(bitPattern: raw))
+    }
+
     /// Resolve the face id at a normalized tap point (x,y ∈ [0,1], y down) via the
     /// id pass. Returns nil on a miss / when the id pass is unavailable — the caller
     /// then falls back to the CPU `FacePicker`.
     func pickFaceID(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> FaceID? {
-        guard let ids = renderFaceIDOffscreen(width: width, height: height) else { return nil }
-        let px = Swift.min(Swift.max(Int(p.x * CGFloat(width)), 0), width - 1)
-        let py = Swift.min(Swift.max(Int(p.y * CGFloat(height)), 0), height - 1)
-        let raw = ids[py * width + px]
-        return raw == idBackground ? nil : FaceID(bitPattern: raw)
+        if case .face(let f) = pickFacePass(atNormalizedPoint: p, width: width,
+                                            height: height) { return f }
+        return nil
     }
 }
 
@@ -3099,6 +3624,51 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
 /// The inputs the workspace hands the viewer each SwiftUI update. Bundled so the
 /// two platform representables (and the Coordinator) share one signature.
+/// ★ THE IDENTITY OF A PER-VERTEX TINT — AND WHY IT HASHES THE WHOLE ARRAY.
+///
+/// This was `(count, first 16 floats)`, to avoid comparing ~37,000 floats on every
+/// body evaluation. It was WRONG, and wrong in the way that is hardest to see: a
+/// cut changes the colour of vertices in the MIDDLE of the buffer and changes the
+/// count not at all, so the key compared EQUAL and the renderer never re-uploaded.
+/// The commit had already happened — regions were split, the model was correct —
+/// and the screen simply never changed. From the outside that is indistinguishable
+/// from a cut that does nothing, which is exactly how it was reported: "I press the
+/// checkbox, and the face stays exactly the way it is."
+///
+/// A hash over the whole buffer cannot be fooled that way. It is O(n) once per body
+/// evaluation on a few tens of thousands of floats — microseconds — against a
+/// re-upload it was trying to avoid that costs about the same.
+/// The Swift mirror of the shader's `CutUniforms`. Field order and padding must
+/// match the MSL declaration exactly — SIMD4 is 16-byte aligned on both sides, and
+/// the trailing float is padded to 16 by `stride`.
+struct CutUniformsSwift {
+    var plane: SIMD4<Float>
+    var colSelected: SIMD4<Float>
+    var colSibling: SIMD4<Float>
+    var enabled: Float
+    /// 16 planes: up to 4 pieces of up to 4 half-spaces each, consecutive.
+    var pickPlanes: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+                     SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+                     SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+                     SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
+        = (.zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero,
+           .zero, .zero, .zero, .zero, .zero, .zero, .zero, .zero)
+    var pickCounts: SIMD4<Int32> = .zero
+    var pickGroups: Int32 = 0
+}
+
+struct VertexTintKey: Equatable {
+    let count: Int
+    let hash: Int
+
+    init(_ rgba: [Float]) {
+        count = rgba.count
+        var h = Hasher()
+        for f in rgba { h.combine(f) }
+        hash = h.finalize()
+    }
+}
+
 struct MeshViewInputs {
     var mesh: ViewerMesh?
     /// The shared orbit-camera source of truth (STEP 1). When present the viewer reads
@@ -3109,6 +3679,42 @@ struct MeshViewInputs {
     var selection: SelectionModel?
     /// Per-face tint (rgba) — role-aware (anchor green); overrides the palette.
     var faceTints: [FaceID: SIMD4<Float>]?
+    /// §6 — a per-VERTEX tint that overrides `faceTints` (the two halves of a cut
+    /// face share a face id, so a per-face map cannot separate them).
+    var vertexTints: [Float]?
+    /// §6 — extra model-space line segments drawn with the wireframe: the traces
+    /// of every committed cut, and the grid a pattern would make. Flat list,
+    /// x,y,z per vertex, two vertices per segment.
+    var extraLines: [Float]?
+    /// §6/§7 — the same traces widened into surface ribbons, so they can be seen.
+    ///
+    /// ★ NO LONGER USED, AND WHY. `SurfaceCutLines.ribbon` widens each segment in
+    /// the plane of ONE face normal, which is correct on a flat face and degenerate
+    /// on a curved one: where the segment runs parallel to that normal the
+    /// perpendicular collapses and the ribbon disappears. That is the two or three
+    /// stray gold ticks on the maintainer's curved face where a whole line should
+    /// have been. The wide-line pipeline expands every segment in SCREEN space
+    /// instead, which has no such degenerate direction — so the traces ride the
+    /// wireframe and this layer is redundant. Kept as an input so the smoothing and
+    /// lattice pages, which pass nothing, are untouched.
+    var cutRibbon: [Float]?
+    /// §6 — face sets a union has combined; the B-rep edges INSIDE one of these are
+    /// no longer boundaries and are not drawn.
+    var weldedFaces: [Set<FaceID>] = []
+    /// §7 — lines for something NOT YET COMMITTED (the pattern grid being aimed).
+    /// Drawn in the accent colour, because a boundary that exists and one that is
+    /// being decided must not look alike. `extraLines` is the committed set and is
+    /// drawn as structure, in the same grey as the B-rep edges it has joined.
+    var previewLines: [Float] = []
+    /// §6 — the cut plane the fragment stage tests, model space, as
+    /// (normal.xyz, -dot(normal, point)). Nil draws exactly as before.
+    var cutPlane: SIMD4<Float>?
+    /// §6 — the picked pieces, each as its own chain of half-spaces, so the
+    /// fragment stage can light the PIECE rather than its whole face.
+    var pickChains: [[SIMD4<Float>]] = []
+    /// §6 — X-RAY: the line set draws through the solid. Separate from
+    /// `showWireframe`, which decides whether there are lines at all.
+    var xray: Bool = false
     /// The settle rotation to display (gravity → world −Y); identity = un-settled.
     var settleRotation: simd_quatf
     /// Animate the settle (false = snap, for reduced-motion).
@@ -3117,6 +3723,12 @@ struct MeshViewInputs {
     var showGround: Bool
     var faceToolActive: Bool
     var onPickFace: ((FaceID) -> Void)?
+    /// §6 — the same pick, WITH the 3D point, offered FIRST and able to consume
+    /// the tap. Returning true means "handled"; the face-id callback is then not
+    /// called. A divided face needs the point to know WHICH PIECE was tapped, so the
+    /// point-aware handler has to get first refusal — otherwise the face-id route
+    /// has already acted on the whole face by the time the point arrives.
+    var onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)?
     /// Tap that hit no face (drop the pending group, M7.6).
     var onMiss: (() -> Void)?
     /// Published each time the camera changes, so overlays can project 3D points.
@@ -3144,6 +3756,11 @@ struct MeshViewInputs {
     /// M7.viz.4 load-path: line segments (pos+rgba, stride 7) tracing the dominant
     /// principal-stress direction over the variant. nil = overlay off.
     var loadPathSegments: [Float]? = nil
+    /// ★ §6(b) — THE SURFACE STAGE'S B-REP WIREFRAME. `true` builds the edge set
+    /// from the mesh's own face partition (`SurfaceWireframe`) and draws it; the
+    /// geometry is derived here rather than passed in, so a caller cannot hand the
+    /// renderer a wireframe that disagrees with the mesh it is drawing over.
+    var showWireframe: Bool = false
     /// M7.viz.4 load-path: the flow-animation phase in [0, 1). Advanced by the results
     /// ticker; scrolls the traveling dash along the ribbons. Changing it re-draws (a
     /// cheap per-frame uniform), which is what animates the flow. 0 = static.
@@ -3223,14 +3840,25 @@ public struct MetalMeshView: UIViewRepresentable {
 
     public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
+                vertexTints: [Float]? = nil,
+                extraLines: [Float]? = nil,
+                previewLines: [Float] = [],
+                weldedFaces: [Set<FaceID>] = [],
+                cutRibbon: [Float]? = nil,
+                cutPlane: SIMD4<Float>? = nil,
+                pickChains: [[SIMD4<Float>]] = [],
+                xray: Bool = false,
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
                 showGround: Bool = false, faceToolActive: Bool = false,
-                onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
+                onPickFace: ((FaceID) -> Void)? = nil,
+                onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
+                onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
+                showWireframe: Bool = false,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
@@ -3241,12 +3869,17 @@ public struct MetalMeshView: UIViewRepresentable {
                 brushRequiresPencil: Bool = false,
                 onBrushRefused: ((BrushInput) -> Void)? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
+                                vertexTints: vertexTints, extraLines: extraLines,
+                                cutRibbon: cutRibbon,
+                                weldedFaces: weldedFaces, previewLines: previewLines, cutPlane: cutPlane, pickChains: pickChains, xray: xray,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
-            faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
+            faceToolActive: faceToolActive, onPickFace: onPickFace,
+            onPickPoint: onPickPoint, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
-            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
+            loadPathSegments: loadPathSegments, showWireframe: showWireframe,
+            loadPathFlow: loadPathFlow,
             designBox: designBox, keepOutBoxes: keepOutBoxes,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
@@ -3315,14 +3948,25 @@ public struct MetalMeshView: NSViewRepresentable {
 
     public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
+                vertexTints: [Float]? = nil,
+                extraLines: [Float]? = nil,
+                previewLines: [Float] = [],
+                weldedFaces: [Set<FaceID>] = [],
+                cutRibbon: [Float]? = nil,
+                cutPlane: SIMD4<Float>? = nil,
+                pickChains: [[SIMD4<Float>]] = [],
+                xray: Bool = false,
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
                 showGround: Bool = false, faceToolActive: Bool = false,
-                onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
+                onPickFace: ((FaceID) -> Void)? = nil,
+                onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
+                onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
+                showWireframe: Bool = false,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
@@ -3333,12 +3977,17 @@ public struct MetalMeshView: NSViewRepresentable {
                 brushRequiresPencil: Bool = false,
                 onBrushRefused: ((BrushInput) -> Void)? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
+                                vertexTints: vertexTints, extraLines: extraLines,
+                                cutRibbon: cutRibbon,
+                                weldedFaces: weldedFaces, previewLines: previewLines, cutPlane: cutPlane, pickChains: pickChains, xray: xray,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
-            faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
+            faceToolActive: faceToolActive, onPickFace: onPickFace,
+            onPickPoint: onPickPoint, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
-            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
+            loadPathSegments: loadPathSegments, showWireframe: showWireframe,
+            loadPathFlow: loadPathFlow,
             designBox: designBox, keepOutBoxes: keepOutBoxes,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
@@ -3411,6 +4060,11 @@ extension MetalMeshView {
         private weak var boundView: MTKView?
         private var appliedSignature: ViewerMeshSignature?
         private var appliedTint: TintKey?
+        private var appliedVertexTint: VertexTintKey?
+        private var appliedExtraLineCount = -1
+        private var appliedCutPlane: SIMD4<Float>??
+        private var appliedRibbonCount = -1
+        private var appliedPickShape: [Int] = []
         private var lastSettleVector: SIMD4<Float>?
         /// M7.8: whether a stress overlay is currently uploaded, and the last reveal.
         private var appliedStress = false
@@ -3425,6 +4079,7 @@ extension MetalMeshView {
         private var appliedFlexScale: Float = 0
         /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
         private var appliedLoadPath = false
+        private var appliedWireframe = false
         private var appliedLoadPathFlow: Float = 0
         /// Load-path FLOW (handoff 070): whether the comet flow is on, the last comet
         /// key (re-upload each animation tick), guide signature, and body alpha.
@@ -3444,6 +4099,7 @@ extension MetalMeshView {
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
+        private var onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)?
         private var onMiss: (() -> Void)?
         private var onProjection: ((CameraProjection) -> Void)?
         private var onUndo: (() -> Void)?
@@ -3473,6 +4129,7 @@ extension MetalMeshView {
             attachCameraModel(inputs.camera, to: view, renderer: renderer)
             faceToolActive = inputs.faceToolActive
             onPickFace = inputs.onPickFace
+            onPickPoint = inputs.onPickPoint
             onMiss = inputs.onMiss
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo
@@ -3615,6 +4272,37 @@ extension MetalMeshView {
                     renderer.setHighlights(faceTint: tint, activeFaces: active)
                     dirty = true
                 }
+                // ★ §6 — THE PER-VERTEX OVERRIDE, APPLIED AFTER the face map so it
+                // wins. Keyed by count + head rather than compared whole: it is
+                // four floats per vertex, and a full compare on every body
+                // evaluation is the "viewer lag = selectedMesh rebuild" mistake in
+                // a new place.
+                let vkey = inputs.vertexTints.map { VertexTintKey($0) }
+                if vkey != appliedVertexTint {
+                    appliedVertexTint = vkey
+                    renderer.setVertexTints(inputs.vertexTints ?? [])
+                    dirty = true
+                }
+                // ★ §6 — the plane itself is four floats; comparing it is free, so
+                // it is compared rather than keyed.
+                let rkey = inputs.cutRibbon?.count ?? 0
+                if rkey != appliedRibbonCount {
+                    appliedRibbonCount = rkey
+                    renderer.setCutRibbon(inputs.cutRibbon ?? [],
+                                          rgba: SIMD4<Float>(1.0, 0.78, 0.20, 0.95))
+                    dirty = true
+                }
+                let pkey = inputs.pickChains.map(\.count)
+                if inputs.cutPlane != appliedCutPlane || pkey != appliedPickShape {
+                    appliedCutPlane = inputs.cutPlane
+                    appliedPickShape = pkey
+                    renderer.setCutPlane(inputs.cutPlane ?? .zero,
+                                         selected: SurfaceTint.selected,
+                                         sibling: SurfaceTint.sibling,
+                                         enabled: inputs.cutPlane != nil,
+                                         pickGroups: inputs.pickChains)
+                    dirty = true
+                }
             }
 
             // M7.8 morph scrub reveal.
@@ -3648,6 +4336,67 @@ extension MetalMeshView {
             // M7.viz.4 load-path: upload the segment buffer on mesh change / first
             // arrival (a variant selection changes the mesh → dirty → rebuild); clear
             // when the overlay turns off so a stale variant's glyphs can't linger.
+            // ★ §6(b) — the wireframe follows the MESH, so it rebuilds whenever the
+            // mesh does and clears the moment the stage turns it off.
+            if inputs.showWireframe {
+                if renderer.xrayLines != inputs.xray { renderer.xrayLines = inputs.xray; dirty = true }
+                // ★ HASHED, NOT COUNTED — THE SAME TRAP `VertexTintKey` ALREADY PAID
+                // FOR ONCE ON THIS BRANCH.
+                //
+                // This was `extraLines?.count`. A cut that MOVES a boundary rather
+                // than adding one — re-cutting a piece, rotating a pattern, undoing
+                // and redoing — changes every coordinate in the buffer and the count
+                // not at all, so the key compared equal and the lines on screen were
+                // the previous ones. The commit had happened; the screen had not
+                // moved. Indistinguishable from a tool that does nothing, which is
+                // how it gets reported.
+                var h = Hasher()
+                h.combine(inputs.extraLines?.count ?? 0)
+                for f in inputs.extraLines ?? [] { h.combine(f) }
+                h.combine(inputs.previewLines.count)
+                for f in inputs.previewLines { h.combine(f) }
+                for set in inputs.weldedFaces { h.combine(set.sorted()) }
+                let lineKey = h.finalize()
+                if dirty || !appliedWireframe || lineKey != appliedExtraLineCount {
+                    appliedExtraLineCount = lineKey
+                    appliedWireframe = true
+                    // ★ THE CUT TRACES RIDE WITH THE WIREFRAME (maintainer: "the
+                    // cuts need to be visible in the wireframe view after any cut
+                    // is made"). Same buffer, same pass: a cut boundary IS an edge
+                    // of the surface once it exists, so it belongs to the same
+                    // line set as the B-rep edges rather than to a layer of its own.
+                    let base = inputs.mesh.map {
+                        SurfaceWireframe.edges(of: $0, welded: inputs.weldedFaces)
+                    } ?? []
+                    // ★ TWO BANDS: what EXISTS, and what is being DECIDED.
+                    // A committed cut is an edge of the surface, so it is drawn in
+                    // the same grey as every other edge — it stops being news the
+                    // moment it is made. The pattern preview is the only thing on
+                    // screen that has not happened yet, and it is the only thing
+                    // that wears the accent.
+                    let structure = base + (inputs.extraLines ?? [])
+                    renderer.setWireframe(
+                        structure + inputs.previewLines,
+                        // ★ DARK GREY, NOT BLUE. The stage tints faces blue, so a
+                        // blue wireframe competes with the very thing it is meant
+                        // to sit on top of and reads as part of the fill. A dark
+                        // neutral line has nothing to compete with: it lands
+                        // legibly on the pale wash, the deep selection blue and the
+                        // untinted body alike.
+                        rgba: SIMD4<Float>(0.14, 0.15, 0.17, 1.0),
+                        accentFrom: structure.count,
+                        // Warm white-gold: nothing else on this page is warm, so a
+                        // cut trace and a pattern preview cannot be mistaken for
+                        // structure.
+                        accent: SIMD4<Float>(1.0, 0.86, 0.40, 1.0))
+                    dirty = true
+                }
+            } else if appliedWireframe {
+                appliedWireframe = false
+                renderer.setWireframe([], rgba: .zero)
+                dirty = true
+            }
+
             if let segments = inputs.loadPathSegments {
                 if dirty || !appliedLoadPath {
                     appliedLoadPath = true
@@ -3793,12 +4542,53 @@ extension MetalMeshView {
             guard size.width > 0, size.height > 0 else { return }
             let normalized = CGPoint(x: location.x / size.width, y: location.y / size.height)
             let w = Int(view.drawableSize.width), h = Int(view.drawableSize.height)
-            let faceID = renderer.pickFaceID(atNormalizedPoint: normalized, width: w, height: h)
-                ?? renderer.mesh.flatMap {
-                    FacePicker.pick(mesh: $0, camera: renderer.camera,
-                                    aspect: Float(size.width / size.height), point: normalized)
-                }
-            if let faceID { onPickFace?(faceID) } else { onMiss?() }
+
+            // ★ ONE RAY, IN *MODEL* SPACE, FOR EVERYTHING BELOW.
+            //
+            // The mesh is drawn through a settle rotation (the part is dropped onto
+            // the floor), so the camera's ray is in WORLD space while
+            // `mesh.positions` are in MODEL space. Undoing the display transform
+            // once, here, is what makes the CPU fallback and the hit point agree
+            // with the GPU id pass instead of quietly answering about a part in a
+            // pose nothing is drawn in.
+            let modelRay: (origin: SIMD3<Float>, dir: SIMD3<Float>) = {
+                let (o, d) = FacePicker.ray(camera: renderer.camera,
+                                            aspect: Float(size.width / size.height),
+                                            point: normalized)
+                let frame = renderer.pickModelFrame
+                let inv = frame.rotation.inverse
+                return (frame.centre + inv.act(o - frame.centre), inv.act(d))
+            }()
+            let surfaceHit = renderer.mesh.flatMap {
+                FacePicker.hit(rayOrigin: modelRay.origin, rayDir: modelRay.dir, mesh: $0)
+            }
+
+            // ★ THE PASS DECIDES, AND A BACKGROUND PIXEL IS A MISS — FULL STOP.
+            //
+            // This used to be `pickFaceID(…) ?? FacePicker.pick(…)`, which asks the
+            // CPU picker to second-guess a pass that already said "nothing here".
+            // See `FaceIDPass`: that is why a tap on the floor beside the part
+            // selected a face.
+            let faceID: FaceID?
+            switch renderer.pickFacePass(atNormalizedPoint: normalized, width: w, height: h) {
+            case .face(let f):
+                faceID = f
+            case .background:
+                faceID = nil                       // ★ answered: empty space.
+            case .unavailable:
+                // No GPU pass at all — the CPU picker is the only answer available,
+                // and it now casts the SAME model-space ray, so a miss is a miss.
+                faceID = surfaceHit.flatMap { $0.faceID >= 0 ? $0.faceID : nil }
+            }
+
+            // ★ §6 — THE HIT POINT, ALONGSIDE THE FACE. A cut does not create a
+            // face, so both halves answer to the same id: the FACE says which
+            // surface, and only the POINT says which half.
+            if let faceID {
+                // ★ THE POINT-AWARE HANDLER GETS FIRST REFUSAL. It is the only one
+                // that can tell two pieces of one face apart.
+                if onPickPoint?(faceID, surfaceHit?.point) != true { onPickFace?(faceID) }
+            } else { onMiss?() }
         }
 
         #if os(iOS)
@@ -3991,6 +4781,14 @@ extension MetalMeshView.Coordinator: UIGestureRecognizerDelegate {
 public struct MetalMeshView: View {
     public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
+                vertexTints: [Float]? = nil,
+                extraLines: [Float]? = nil,
+                previewLines: [Float] = [],
+                weldedFaces: [Set<FaceID>] = [],
+                cutRibbon: [Float]? = nil,
+                cutPlane: SIMD4<Float>? = nil,
+                pickChains: [[SIMD4<Float>]] = [],
+                xray: Bool = false,
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
                 settleAnimated: Bool = false, showGround: Bool = false,
                 faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil,
@@ -3999,6 +4797,7 @@ public struct MetalMeshView: View {
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
+                showWireframe: Bool = false,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,

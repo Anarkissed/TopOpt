@@ -478,9 +478,25 @@ final class VariantEntryGatingTests: XCTestCase {
     }
 
     func testChoosingRimOnlyWarnsAndIsNotTheDefault() {
-        XCTAssertEqual(LatticeSettings().boundary, .fullSkin,
-                       "the DEFAULT must be a treatment that can actually emit — "
-                       + "“Rim only” was the default and is provably zero geometry")
+        // ★ UPDATED (maintainer, 2026-08-14): "it should default to 'none'". THE
+        // RULE THIS TEST PROTECTS IS UNCHANGED — the default must never be a
+        // treatment that silently emits nothing — and it is now asserted as the
+        // RULE rather than by pinning one value that happened to satisfy it.
+        //
+        // `.none` satisfies it for a different reason than `.fullSkin` did: asking
+        // for no dressing and getting none is not a surprise, whereas asking for a
+        // rim and getting zero geometry is exactly the defect this guards.
+        XCTAssertEqual(LatticeSettings().boundary, LatticeBoundaryTreatment.none,
+                       "the default finish is “none” — a bare lattice is the "
+                       + "starting point; a dressing is something you add")
+        XCTAssertNotEqual(LatticeSettings().boundary, .rim,
+                          "“Rim only” was the default and is provably zero "
+                          + "geometry on a voxel-derived part")
+        XCTAssertNil(LatticeCoreCapability.boundaryProducesNothing(
+            skinJobValue: LatticeSettings().boundary.jobSkinValue,
+            voxelDerived: true),
+            "★ THE RULE: WHATEVER the default is, it must not be one that emits "
+            + "nothing. This holds for any future default, not just this one.")
         let warn = LatticeCoreCapability.boundaryProducesNothing(
             skinJobValue: LatticeBoundaryTreatment.rim.jobSkinValue, voxelDerived: true)
         XCTAssertNotNil(warn, "choosing “Rim only” must warn")

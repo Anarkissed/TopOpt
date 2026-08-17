@@ -289,15 +289,34 @@ final class LatticeSeparationRegionTests: XCTestCase {
     /// ★ THE SMALL-FACE POLICY (§5c): rows below the floor are DIMMED, not
     /// hidden. The restructure must not have dropped them from the list — losing
     /// them would lose a selection his CAD does hand him.
+    ///
+    /// ★ UPDATED BY task 2026-08-15-lattice-and-face-ui §1(a), and STRENGTHENED
+    /// rather than relaxed. The band (face 8) is a MEMBER of this fixture's
+    /// region, and §1(a) says a member is the region's CHILD, not a row of its
+    /// own — otherwise his 22-face group renders 23 rows, which is the defect
+    /// that task exists to fix. The rule this test protects is "hiding it would
+    /// LOSE a selection his CAD hands him", so the test now asserts BOTH halves:
+    /// a small face that is in no region still gets its own row, and a small face
+    /// that IS in a region is still reachable underneath it. Nothing is lost;
+    /// only the level changed.
     func testASmallSelectableIsListedAndFlaggedNotHidden() {
-        let (p, gid, _) = projectWithARegionAndAFace()
-        // Put the BAND (10 mm², the small one) in the group as a plain face.
-        p.selection.addFaces([8], to: gid)
+        let (p, gid, rid) = projectWithARegionAndAFace()
+        // The BAND (10 mm², the small one) is a MEMBER of the region — so it is
+        // reachable as its CHILD, which is where §1(a) puts it.
+        XCTAssertTrue(p.latticeRegionMemberFaces(rid).contains(8),
+                      "R14/§5c: the small face is not LOST — it is listed under "
+                      + "the region that holds it (faces 41-47 are 16 voxels)")
 
+        // And a small face in NO region keeps a row of its own, which is what the
+        // dimming rule acts on.
+        p.selection.addFaces([0], to: gid)
         let refs = p.latticeSelectableRefs(p.selection.groups[0])
-        XCTAssertTrue(refs.contains(.face(group: gid, face: 8)),
-                      "R14/§5c: the small face is LISTED — hiding it would lose a "
-                      + "selection his CAD hands him (faces 41-47 are 16 voxels)")
+        XCTAssertTrue(refs.contains(.face(group: gid, face: 0)),
+                      "R14/§5c: a face outside every region is LISTED — hiding it "
+                      + "would lose a selection his CAD hands him")
+        XCTAssertFalse(refs.contains(.face(group: gid, face: 8)),
+                       "§1(a): a region MEMBER is a child, never a second "
+                       + "top-level row — that is the 23-rows defect")
         let mesh = p.viewerMesh!
         let small = FaceRegionGeometry.memberVoxelEstimate(
             members: [8], in: mesh, spacingMM: 1.0)
@@ -319,29 +338,68 @@ final class LatticeSeparationRegionTests: XCTestCase {
         let regionPlane = try XCTUnwrap(
             planes.first { $0.ref == .region(group: gid, region: rid) },
             "§3d: the +x wall and its band face one way, so they have a plane")
-        guard case let .slab(_, normal, _, _, _, _, depth) = regionPlane.volume.shape
-        else { return XCTFail("a region plane is a SLAB") }
-        XCTAssertEqual(simd_dot(normal, SIMD3<Float>(-1, 0, 0)), 1, accuracy: 1e-5,
-                       "§3d: INTO the part — the members' outward normal, flipped")
-        XCTAssertEqual(Double(depth), 7.0, accuracy: 1e-4, "at the group's depth")
+        // ★ The primitive is now the distance-field OFFSET of the region's own
+        // surface (task 2026-08-15 §2b), not a fitted slab — so the assertion is
+        // made on the geometry itself, which is STRONGER: it holds at every
+        // vertex rather than on one nominal normal.
+        guard case let .shell(s) = regionPlane.volume.shape
+        else { return XCTFail("a region primitive is an offset shell") }
+        XCTAssertFalse(s.isEmpty, "§3d: the region's primitive has geometry")
+        for k in 0..<s.base.count {
+            let travel = s.offset[k] - s.base[k]
+            XCTAssertEqual(simd_dot(simd_normalize(travel), SIMD3<Float>(-1, 0, 0)),
+                           1, accuracy: 1e-5,
+                           "§3d: INTO the part — the members' outward normal, flipped")
+            XCTAssertEqual(Double(simd_length(travel)), 7.0, accuracy: 1e-4,
+                           "at the group's depth, at EVERY point")
+        }
         XCTAssertEqual(regionPlane.handle.role, .slabDepth,
                        "R13: the same grab a face's plane gets")
     }
 
-    /// ★ AND IT IS REFUSED, NOT INVENTED, when the members do not face one way.
-    /// A union of the +x wall and the top has no single "into the part": any
-    /// plane drawn for it would be a number the user could drag that means
-    /// nothing.
-    func testAWrappingRegionGetsNoDepthPlaneRatherThanAMeaninglessOne() {
+    /// ★ SUPERSEDED AND INVERTED BY task 2026-08-15-lattice-and-face-ui §2(a),
+    /// deliberately, with the original concern kept.
+    ///
+    /// This test used to require a wrapping region to get NO primitive, on the
+    /// argument that a single flat plane drawn for it would be "a number the user
+    /// could drag that means nothing". That argument was right ABOUT A SLAB and
+    /// wrong about the feature: the maintainer's rule is now
+    ///
+    ///     "It ALWAYS has to create a primitive. IF THERE ISN'T ONE MADE, IT IS
+    ///      BROKEN."
+    ///
+    /// and §2(b) supplies the shape that makes refusal unnecessary — the offset
+    /// of the region's OWN surface. A wrap no longer needs one direction, because
+    /// each part of it travels along its own.
+    ///
+    /// So the assertion flips from "nil" to "not nil", and the ORIGINAL CONCERN
+    /// is asserted directly instead of via the refusal: the geometry must follow
+    /// the members rather than invent a single meaningless direction.
+    func testAWrappingRegionGetsAPrimitiveThatFollowsEachMember() throws {
         let (p, gid, _) = projectWithARegionAndAFace()
         let wrap = p.faceRegions.union(faces: [3, 1], named: "wrap")
         p.selection.addRegions([wrap], to: gid)
 
-        let planes = p.latticeDepthPlanes()
-        XCTAssertNil(planes.first { $0.ref == .region(group: gid, region: wrap) },
-                     "§3d: no plane for a region with no direction")
-        // …and the region is still LISTED and still carries a depth, so what it
-        // loses is the 3D grab, not the number.
+        let plane = try XCTUnwrap(
+            p.latticeDepthPlanes().first { $0.ref == .region(group: gid, region: wrap) },
+            "§2a: a wrapping region MUST get a primitive — a missing one is broken")
+        guard case let .shell(s) = plane.volume.shape
+        else { return XCTFail("a region primitive is an offset shell") }
+
+        // ★ THE ORIGINAL CONCERN, ASSERTED DIRECTLY. The +x wall's points travel
+        // −x and the top's travel −z: the shell follows each member instead of
+        // averaging them into one direction that describes neither.
+        var sawMinusX = false, sawMinusZ = false
+        for k in 0..<s.base.count {
+            let d = simd_normalize(s.offset[k] - s.base[k])
+            if simd_dot(d, SIMD3<Float>(-1, 0, 0)) > 0.99 { sawMinusX = true }
+            if simd_dot(d, SIMD3<Float>(0, 0, -1)) > 0.99 { sawMinusZ = true }
+        }
+        XCTAssertTrue(sawMinusX && sawMinusZ,
+                      "§2b: the wrap's primitive follows BOTH members, rather "
+                      + "than inventing one direction that describes neither")
+
+        // …and the region is still LISTED and still carries the same depth.
         XCTAssertTrue(p.latticeSelectableRefs(p.selection.groups[0])
                         .contains(.region(group: gid, region: wrap)))
         XCTAssertEqual(p.latticeSlabDepthMM(.region(group: gid, region: wrap),

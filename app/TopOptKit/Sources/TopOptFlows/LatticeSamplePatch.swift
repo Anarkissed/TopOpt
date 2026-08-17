@@ -27,8 +27,25 @@ public enum LatticeSamplePatch {
     /// sized to relative density `relativeDensity` via r = L·√(ρ/K). Returns a
     /// render-ready `ViewerMesh` (smooth-shaded — the struts are round) centred on
     /// the origin. `sides` is the prism cross-section (8 → the worker's 32-tri strut).
+    /// ★ `boundary` — WHAT DRESSES THE BLOCK'S OUTER SURFACE, and until now this
+    /// builder had no such parameter (task 2026-08-15 §10).
+    ///
+    /// ★ THE DEFECT, EXACTLY: the wizard's None / Rim / Skin chips wrote
+    /// `model.boundary` and **this function never read it**, so all three produced
+    /// byte-identical geometry. The maintainer's report — *"The finish still
+    /// doesn't work. There is no skin or rim visible."* — was not a rendering
+    /// problem or a camera problem. There was nothing to render.
+    ///
+    ///   NONE  bare struts — what every finish drew before.
+    ///   RIM   the boundary dressing on the block's EDGES: a frame of beams along
+    ///         the twelve edges of the patch, which is what a rim IS (core's rim
+    ///         rides the pairs of boundary faces that meet at an edge).
+    ///   SKIN  the anchored DIAGRID surface: crossing diagonals lying in each of
+    ///         the six outer faces, tied to the strut nodes on that face.
     public static func mesh(lattice: LatticeType, cellMM: Double, cells: Int,
-                            relativeDensity: Double, sides: Int = 8) -> ViewerMesh {
+                            relativeDensity: Double,
+                            boundary: LatticeBoundaryTreatment = .none,
+                            sides: Int = 8) -> ViewerMesh {
         let n = max(1, cells)
         let S = lattice.denominator
         let unit = Float(cellMM) / Float(S)                 // world mm per integer step
@@ -77,6 +94,65 @@ public enum LatticeSamplePatch {
 
         for (a, b) in segments { emitStrut(world(a), world(b), radius: radius, sides: sides, pos: &pos, idx: &idx) }
         for p in nodePts { emitNode(world(p), radius: radius, pos: &pos, idx: &idx) }
+
+        // ── ★ THE BOUNDARY FINISH, ON THE SAMPLE (task 2026-08-15 §10) ──────────
+        switch boundary {
+        case .none:
+            break
+        case .rim:
+            // A frame along the twelve edges of the block. Slightly heavier than a
+            // strut so it reads as a DRESSING rather than as more lattice — the
+            // whole point is that you can see which finish you picked.
+            let e = Float(extent)
+            let rimR = radius * 1.6
+            let c: [SIMD3<Float>] = [
+                SIMD3(0, 0, 0), SIMD3(e, 0, 0), SIMD3(e, e, 0), SIMD3(0, e, 0),
+                SIMD3(0, 0, e), SIMD3(e, 0, e), SIMD3(e, e, e), SIMD3(0, e, e),
+            ].map { $0 * unit - SIMD3<Float>(repeating: e * unit * 0.5) }
+            let edges = [(0, 1), (1, 2), (2, 3), (3, 0),
+                         (4, 5), (5, 6), (6, 7), (7, 4),
+                         (0, 4), (1, 5), (2, 6), (3, 7)]
+            for (i, j) in edges {
+                emitStrut(c[i], c[j], radius: rimR, sides: sides, pos: &pos, idx: &idx)
+            }
+        case .fullSkin:
+            // ★ THE ANCHORED DIAGRID. One diagonal lattice lying IN each of the six
+            // outer faces, spanning cell to cell — so it is tied to the strut nodes
+            // it lands on rather than floating over them. Diagrid is the only skin
+            // core builds, which is why the wizard states it as a fact.
+            // Heavy enough to read as a SURFACE rather than as more lattice —
+            // the same weight the rim uses, because both are dressings.
+            let skinR = radius * 1.6
+            let step = Float(S)
+            let half = Float(extent) * unit * 0.5
+            func w(_ x: Float, _ y: Float, _ z: Float) -> SIMD3<Float> {
+                SIMD3<Float>(x, y, z) * unit - SIMD3<Float>(repeating: half)
+            }
+            // For each of the 3 axes, the 2 faces at its low and high extreme.
+            for axis in 0..<3 {
+                for face in 0..<2 {
+                    let fixed = face == 0 ? Float(0) : Float(extent)
+                    for a in 0..<n {
+                        for b in 0..<n {
+                            let u0 = Float(a) * step, u1 = u0 + step
+                            let v0 = Float(b) * step, v1 = v0 + step
+                            // both diagonals of this face cell -> a diagrid
+                            func p(_ u: Float, _ v: Float) -> SIMD3<Float> {
+                                switch axis {
+                                case 0:  return w(fixed, u, v)
+                                case 1:  return w(u, fixed, v)
+                                default: return w(u, v, fixed)
+                                }
+                            }
+                            emitStrut(p(u0, v0), p(u1, v1), radius: skinR,
+                                      sides: sides, pos: &pos, idx: &idx)
+                            emitStrut(p(u1, v0), p(u0, v1), radius: skinR,
+                                      sides: sides, pos: &pos, idx: &idx)
+                        }
+                    }
+                }
+            }
+        }
 
         return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
     }
