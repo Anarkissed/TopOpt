@@ -58,9 +58,45 @@ public struct SurfaceCut: Equatable, Sendable {
     /// and lands on the nearest 15° when released, which is what a detent IS.
     public static let detentDegrees = 15.0
 
-    /// Snap an angle (degrees) to the nearest detent.
+    /// Snap an angle (degrees) to the nearest detent. ★ A QUANTISER: every input
+    /// lands on a multiple of 15. Correct for the ¼-turn button, which means "the
+    /// other way" and nothing else. NOT what a rotate drag should do — see
+    /// `settle`.
     public static func snap(_ degrees: Double) -> Double {
         (degrees / detentDegrees).rounded() * detentDegrees
+    }
+
+    /// ★ HOW CLOSE THE DRAG HAS TO FINISH FOR A DETENT TO TAKE IT. Beyond this the
+    /// angle is the user's, to the degree.
+    ///
+    /// 3° is a fifth of the spacing: wide enough that landing on a detent needs no
+    /// precision (the knob's 0.8°/pt gearing makes it ~4 pt of travel either side),
+    /// narrow enough that four fifths of every gap is still freely reachable.
+    public static let detentCaptureDegrees = 3.0
+
+    /// ★ §3(b)/(c) — SETTLE ONTO A DETENT, OR STAY WHERE YOU WERE PUT.
+    ///
+    /// ★ AND THIS IS THE DIFFERENCE THAT MATTERS. `snap` rounds EVERY angle to a
+    /// multiple of 15, so the drag could not finish anywhere else: 37° became 30°
+    /// and there was no way to ask for 37°. His words were "rotate the cut in any
+    /// angle with detents every 15 degrees" — the detents ASSIST, they do not
+    /// restrict. So a release near a detent is taken by it, and a release in the
+    /// open keeps the angle it was given.
+    ///
+    /// Idempotent: a settled angle is either a detent (which settles to itself) or
+    /// further than the capture window from one (which settles to itself). That is
+    /// what lets every downstream consumer apply it without changing the result.
+    public static func settle(_ degrees: Double) -> Double {
+        let nearest = snap(degrees)
+        return abs(degrees - nearest) <= detentCaptureDegrees ? nearest : degrees
+    }
+
+    /// Which detent index an angle is currently sitting in — how many 15° steps
+    /// the drag has passed. The rotate knob ticks the haptics when this CHANGES,
+    /// which is the "resists briefly at each" half of a detent: you feel every one
+    /// go by even when you sail through it.
+    public static func detentIndex(_ degrees: Double) -> Int {
+        Int((degrees / detentDegrees).rounded())
     }
 
     /// This cut with its plane rotated `degrees` about the FACE's normal. The

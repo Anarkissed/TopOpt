@@ -1,0 +1,14 @@
+=== R2 — THE HINT LINE'S NEW TEXT ===
+
+REMOVED (false the moment enforcement went immediate):
+  "Pencil only — no pencil seen yet, so fingers still edit."
+  56 chars, 11 words
+
+ADDED — two lines, chosen by whether a pencil has ever touched this screen:
+  "Pencil edits, fingers move the view."
+  36 chars, 6 words   — a pencil has been seen: the rule is the whole story
+  "Pencil edits. No pencil here — tap this again to use fingers."
+  61 chars, 12 words   — no pencil ever seen: the ONE thing needed is where the escape is
+
+LONGEST NEW SHIPPED STRING: 61 chars, 12 words.
+Still one line of text on the stage at a time. No sheet, no modal, no toast.

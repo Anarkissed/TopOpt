@@ -3729,6 +3729,15 @@ struct MeshViewInputs {
     /// point-aware handler has to get first refusal — otherwise the face-id route
     /// has already acted on the whole face by the time the point arrives.
     var onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)?
+    /// ★ §1(b) — THE SECOND TAP. A DOUBLE tap with the same one contact, carrying
+    /// the same face and point the single tap does.
+    ///
+    /// ★ nil IS HOW IT STAYS OUT OF THE WAY, and that is not a nicety. A single tap
+    /// can only be delivered once its double-tap sibling has failed, and that costs
+    /// the system's double-tap interval on EVERY pick. Left nil the recognizer is
+    /// disabled, a disabled recognizer fails immediately, and tap-select is exactly
+    /// as quick as it was — everywhere but the one tool that asked for this.
+    var onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)?
     /// Tap that hit no face (drop the pending group, M7.6).
     var onMiss: (() -> Void)?
     /// Published each time the camera changes, so overlays can project 3D points.
@@ -3807,6 +3816,14 @@ struct MeshViewInputs {
     /// once at the start of the drag so the page can say why, at the moment the
     /// user tries it, instead of leaving disabled buttons downstream to imply it.
     var onBrushRefused: ((BrushInput) -> Void)? = nil
+    /// ★ §2 — WHICH CONTACT MAY EDIT AND WHICH MAY DRIVE THE CAMERA. `.off` is
+    /// every stage but the Surface one, and the Surface one until the pencil
+    /// button is pressed: both contacts do everything.
+    var inputDiscipline: SurfaceInputDiscipline = .off
+    /// ★ §2(c) — A PENCIL CONTACT WAS SEEN. There is no "is a pencil paired" API,
+    /// so the page learns it here, from the recognizer that only a pencil can
+    /// drive. Until it fires, the discipline stays inert however the toggle is set.
+    var onPencilSeen: (() -> Void)? = nil
 }
 
 /// The phase of a paint brush sample (handoff 2026-07-25): a stroke runs `.began` → `.moved`* →
@@ -3852,6 +3869,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
+                onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
@@ -3867,14 +3885,16 @@ public struct MetalMeshView: UIViewRepresentable {
                 paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
                 onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)? = nil,
                 brushRequiresPencil: Bool = false,
-                onBrushRefused: ((BrushInput) -> Void)? = nil) {
+                onBrushRefused: ((BrushInput) -> Void)? = nil,
+                inputDiscipline: SurfaceInputDiscipline = .off,
+                onPencilSeen: (() -> Void)? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
                                 weldedFaces: weldedFaces, previewLines: previewLines, cutPlane: cutPlane, pickChains: pickChains, xray: xray,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace,
-            onPickPoint: onPickPoint, onMiss: onMiss,
+            onPickPoint: onPickPoint, onPickDouble: onPickDouble, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
@@ -3886,7 +3906,8 @@ public struct MetalMeshView: UIViewRepresentable {
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
             paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush,
             brushRequiresPencil: brushRequiresPencil,
-            onBrushRefused: onBrushRefused)
+            onBrushRefused: onBrushRefused,
+            inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -3908,8 +3929,48 @@ public struct MetalMeshView: UIViewRepresentable {
             [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
         let pinch = UIPinchGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handlePinch(_:)))
+        // ★ ONE TAP RECOGNIZER PER CONTACT KIND, for the same reason the pans have
+        // one each (bar U2): the allowed-type sets are disjoint, so WHICH contact
+        // tapped is a fact rather than an inference. §2's pencil mode needs that
+        // fact — a pencil is always exactly one touch, so counting cannot give it.
         let tap = UITapGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handleTap(_:)))
+        tap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue),
+                                 NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        let pencilTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePencilTap(_:)))
+        pencilTap.allowedTouchTypes =
+            [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+
+        // ★ §1(b) — THE DOUBLE TAP, one per contact kind as well.
+        //
+        // ★ AND EACH SINGLE TAP WAITS ON ITS OWN SIBLING, NOT THE OTHER'S. A
+        // pencil double tap must not hold up a finger's pick, and vice versa;
+        // pairing them across kinds would make each contact pay the other's
+        // double-tap interval for nothing.
+        //
+        // ★ DISABLED UNLESS THE PAGE WANTS ONE. `apply` enables these only while
+        // `onPickDouble` is non-nil — the Select tool on the Surface stage and
+        // nowhere else (§1e). A disabled recognizer fails at once, so the
+        // `require(toFail:)` above it costs nothing wherever the page has no
+        // second meaning for a second tap.
+        let doubleTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.allowedTouchTypes = tap.allowedTouchTypes
+        doubleTap.isEnabled = false
+        let pencilDoubleTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePencilDoubleTap(_:)))
+        pencilDoubleTap.numberOfTapsRequired = 2
+        pencilDoubleTap.allowedTouchTypes = pencilTap.allowedTouchTypes
+        pencilDoubleTap.isEnabled = false
+        tap.require(toFail: doubleTap)
+        pencilTap.require(toFail: pencilDoubleTap)
+        context.coordinator.doubleTapRecognizers = [doubleTap, pencilDoubleTap]
+
         // Undo/redo taps (round-6 item 4; redo gesture updated for paint mode, handoff 2026-07-25):
         // TWO-finger double-tap = undo, THREE-finger double-tap = redo. Distinct touch counts, so
         // neither can satisfy the other's recognizer — no `require(toFail:)` is needed — and both
@@ -3933,6 +3994,9 @@ public struct MetalMeshView: UIViewRepresentable {
         view.addGestureRecognizer(pencilPan)
         view.addGestureRecognizer(pinch)
         view.addGestureRecognizer(tap)
+        view.addGestureRecognizer(pencilTap)
+        view.addGestureRecognizer(doubleTap)
+        view.addGestureRecognizer(pencilDoubleTap)
         view.addGestureRecognizer(undoTap)
         view.addGestureRecognizer(redoTap)
         return view
@@ -3960,6 +4024,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
+                onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
@@ -3975,14 +4040,16 @@ public struct MetalMeshView: NSViewRepresentable {
                 paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
                 onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)? = nil,
                 brushRequiresPencil: Bool = false,
-                onBrushRefused: ((BrushInput) -> Void)? = nil) {
+                onBrushRefused: ((BrushInput) -> Void)? = nil,
+                inputDiscipline: SurfaceInputDiscipline = .off,
+                onPencilSeen: (() -> Void)? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
                                 weldedFaces: weldedFaces, previewLines: previewLines, cutPlane: cutPlane, pickChains: pickChains, xray: xray,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace,
-            onPickPoint: onPickPoint, onMiss: onMiss,
+            onPickPoint: onPickPoint, onPickDouble: onPickDouble, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
@@ -3994,7 +4061,8 @@ public struct MetalMeshView: NSViewRepresentable {
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
             paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush,
             brushRequiresPencil: brushRequiresPencil,
-            onBrushRefused: onBrushRefused)
+            onBrushRefused: onBrushRefused,
+            inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -4008,9 +4076,26 @@ public struct MetalMeshView: NSViewRepresentable {
                                                        action: #selector(Coordinator.handleMagnify(_:)))
         let click = NSClickGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handleClick(_:)))
+        // ★ §1(b) — THE SECOND CLICK, so the Mac slice offers the same two
+        // meanings the iPad does rather than a stage that behaves differently
+        // depending on what it is running on. There is no pencil here, so §2's
+        // discipline is inert (`SurfaceInputDiscipline` reports every macOS
+        // contact as a finger) exactly as the smoothing brush's "Pencil only" is.
+        let doubleClick = NSClickGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDoubleClick(_:)))
+        doubleClick.numberOfClicksRequired = 2
+        doubleClick.isEnabled = false
+        // ★ NO FAILURE REQUIREMENT HERE, unlike iOS: AppKit has no
+        // `require(toFail:)`. So on a Mac the first click selects and the second
+        // then selects the similar set — the double's action fully supersedes the
+        // single's, so the end state is the same, and a plain click stays
+        // instantaneous rather than waiting out a double-click interval.
+        context.coordinator.doubleTapRecognizers = [doubleClick]
         view.addGestureRecognizer(pan)
         view.addGestureRecognizer(magnify)
         view.addGestureRecognizer(click)
+        view.addGestureRecognizer(doubleClick)
         return view
     }
 
@@ -4109,6 +4194,18 @@ extension MetalMeshView {
         private var onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)?
         private var brushRequiresPencil = false
         private var onBrushRefused: ((BrushInput) -> Void)?
+        /// ★ §1(b) — the second tap's handler, and §2's discipline.
+        private var onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)?
+        private var inputDiscipline: SurfaceInputDiscipline = .off
+        private var onPencilSeen: (() -> Void)?
+        /// The double-tap recognizers, held so `apply` can switch them off again —
+        /// which is what keeps a single tap immediate everywhere the page has no
+        /// second meaning for a second tap.
+        #if os(iOS)
+        var doubleTapRecognizers: [UIGestureRecognizer] = []
+        #elseif os(macOS)
+        var doubleTapRecognizers: [NSGestureRecognizer] = []
+        #endif
 
         /// THE ONE ROUTING DECISION (task 2026-08-05, bar D1). Both pan
         /// recognizers ask this value where a drag goes, so "is the brush armed"
@@ -4138,6 +4235,17 @@ extension MetalMeshView {
             onBrush = inputs.onBrush
             brushRequiresPencil = inputs.brushRequiresPencil
             onBrushRefused = inputs.onBrushRefused
+            onPickDouble = inputs.onPickDouble
+            inputDiscipline = inputs.inputDiscipline
+            onPencilSeen = inputs.onPencilSeen
+            #if os(iOS) || os(macOS)
+            // ★ THE LATENCY GATE (§1b). Off ⇒ the single tap's `require(toFail:)`
+            // is satisfied instantly and a pick is as immediate as it ever was.
+            let wantsDouble = inputs.onPickDouble != nil
+            for r in doubleTapRecognizers where r.isEnabled != wantsDouble {
+                r.isEnabled = wantsDouble
+            }
+            #endif
 
             var dirty = false
             let sig = inputs.mesh.map(meshSignature)
@@ -4536,7 +4644,11 @@ extension MetalMeshView {
         /// Resolve a tap at `location` (view coordinates, origin top-left) to a face
         /// id — id pass first, CPU `FacePicker` as fallback. Reports the hit, or
         /// `onMiss` when the tap hit empty space (M7.6: drop the pending group).
-        private func pick(at location: CGPoint, in view: MTKView) {
+        /// `deliver` overrides where the answer goes — the double tap uses it so
+        /// both taps resolve the face through the SAME ray, rather than a second
+        /// hit-test that could disagree with the first about what was under them.
+        private func pick(at location: CGPoint, in view: MTKView,
+                          deliver: ((FaceID?, SIMD3<Float>?) -> Void)? = nil) {
             guard faceToolActive, !paintActive, let renderer else { return }
             let size = view.bounds.size
             guard size.width > 0, size.height > 0 else { return }
@@ -4584,6 +4696,10 @@ extension MetalMeshView {
             // ★ §6 — THE HIT POINT, ALONGSIDE THE FACE. A cut does not create a
             // face, so both halves answer to the same id: the FACE says which
             // surface, and only the POINT says which half.
+            if let deliver {
+                deliver(faceID, surfaceHit?.point)
+                return
+            }
             if let faceID {
                 // ★ THE POINT-AWARE HANDLER GETS FIRST REFUSAL. It is the only one
                 // that can tell two pieces of one face apart.
@@ -4614,7 +4730,14 @@ extension MetalMeshView {
         /// does now.
         @objc func handlePencilPan(_ g: UIPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
+            if g.state == .began { onPencilSeen?() }
             guard gesture.route(.pencil, touches: g.numberOfTouches) == .paint else {
+                // ★ §2(a) — CAMERA MOVEMENT IS FINGERS-ONLY once the discipline is
+                // on. The fall-through below is the app-wide guarantee that a
+                // pencil can always orbit; pencil mode is the user asking for
+                // exactly that guarantee to be lifted, so it is asked here and
+                // nowhere else.
+                guard inputDiscipline.admits(.pencil, .camera) else { return }
                 driveCamera(g, in: view, pan: false)
                 return
             }
@@ -4707,10 +4830,60 @@ extension MetalMeshView {
                 return
             }
             if gesture.armed { return }   // a parked brush is not a face picker
+            // ★ §2(a) — EDITING IS PENCIL-ONLY once the discipline is on, and a
+            // tap that selects a face is an action, not movement.
+            guard inputDiscipline.admits(.finger, .edit) else { return }
             pick(at: loc, in: view)
         }
 
+        /// ★ THE PENCIL'S OWN TAP. Same pick, and the place a pencil is FIRST SEEN
+        /// without having to drag anything (§2c).
+        @objc func handlePencilTap(_ g: UITapGestureRecognizer) {
+            guard let view = g.view as? MTKView else { return }
+            onPencilSeen?()
+            let loc = g.location(in: view)
+            if gesture.admits(.pencil) {
+                onBrush?(loc, .began, .pencil)
+                onBrush?(loc, .ended, .pencil)
+                return
+            }
+            if gesture.armed { return }
+            guard inputDiscipline.admits(.pencil, .edit) else { return }
+            pick(at: loc, in: view)
+        }
+
+        /// ★ §1(b) — THE SECOND TAP, from a finger.
+        @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
+            guard inputDiscipline.admits(.finger, .edit) else { return }
+            pickDouble(g)
+        }
+
+        /// ★ §1(b) — and from the pencil, which is the only contact that may do it
+        /// while pencil mode is on.
+        @objc func handlePencilDoubleTap(_ g: UITapGestureRecognizer) {
+            onPencilSeen?()
+            guard inputDiscipline.admits(.pencil, .edit) else { return }
+            pickDouble(g)
+        }
+
+        /// Resolve a double tap to a face + point and hand it over. Shares
+        /// `pick`'s ray so the two taps cannot disagree about what was under them.
+        private func pickDouble(_ g: UITapGestureRecognizer) {
+            guard let view = g.view as? MTKView, let onPickDouble else { return }
+            guard !gesture.armed else { return }   // a brush is not a face picker
+            pick(at: g.location(in: view), in: view) { face, point in
+                guard let face else { return }   // a double tap on air changes nothing
+                onPickDouble(face, point)
+            }
+        }
+
         // Undo/redo taps: two-finger double-tap → undo, three-finger double-tap → redo (2026-07-25).
+        //
+        // ★ NOT GATED ON THE DISCIPLINE, DELIBERATELY (§2d / bar R3). "The
+        // undo/redo gestures already work and are finger gestures … they must keep
+        // working with pencil mode on. Undo is not an edit." Withholding them
+        // would make the mode a trap: the finger that turned it on could not take
+        // back what the pencil did.
         @objc func handleUndoTap(_ g: UITapGestureRecognizer) {
             guard g.state == .ended else { return }
             onUndo?()
@@ -4760,7 +4933,23 @@ extension MetalMeshView {
             // AppKit view coordinates are y-up; the pick expects y-down (top-left).
             var p = g.location(in: view)
             p.y = view.bounds.height - p.y
+            // A Mac contact is always a finger as far as the discipline is
+            // concerned; with no pencil to have been seen it never enforces.
+            guard inputDiscipline.admits(.finger, .edit) else { return }
             pick(at: p, in: view)
+        }
+
+        /// ★ §1(b) — the Mac's second click.
+        @objc func handleDoubleClick(_ g: NSClickGestureRecognizer) {
+            guard let view = g.view as? MTKView, let onPickDouble else { return }
+            guard !gesture.armed else { return }
+            guard inputDiscipline.admits(.finger, .edit) else { return }
+            var p = g.location(in: view)
+            p.y = view.bounds.height - p.y
+            pick(at: p, in: view) { face, point in
+                guard let face else { return }
+                onPickDouble(face, point)
+            }
         }
         #endif
     }
@@ -4792,6 +4981,7 @@ public struct MetalMeshView: View {
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
                 settleAnimated: Bool = false, showGround: Bool = false,
                 faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil,
+                onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil, onProjection: ((CameraProjection) -> Void)? = nil,
                 onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
@@ -4806,7 +4996,9 @@ public struct MetalMeshView: View {
                 paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
                 onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)? = nil,
                 brushRequiresPencil: Bool = false,
-                onBrushRefused: ((BrushInput) -> Void)? = nil) {}
+                onBrushRefused: ((BrushInput) -> Void)? = nil,
+                inputDiscipline: SurfaceInputDiscipline = .off,
+                onPencilSeen: (() -> Void)? = nil) {}
     public var body: some View { DS.Color.background.color }
 }
 
