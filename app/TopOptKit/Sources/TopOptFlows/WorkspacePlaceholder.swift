@@ -183,6 +183,27 @@ public struct WorkspacePlaceholder: View {
     /// Why the last surface tap was refused, shown in the panel. Nil when it wasn't.
     @State private var surfaceRefusal: String?
 
+    /// ★ §2 — PENCIL MODE. His ask from the Jul 31 round, TO-page item (5): "an
+    /// option to do movement with fingers only and actions with the pencil only".
+    /// ★ OFF BY DEFAULT (§2b) — both inputs do everything, as today.
+    @State private var surfacePencilOnly = false
+    /// ★ §2(c) — SET THE FIRST TIME A PENCIL TOUCHES THE VIEWPORT. There is no
+    /// "pencil paired" API to ask; the discipline stays inert until this is true,
+    /// so the button can never leave a finger-only user unable to edit.
+    @State private var surfacePencilSeen = false
+    /// ★ §1(b)/§3 — the detent the rotate drag last passed, so the haptics tick
+    /// once per detent crossed rather than once per touch event.
+    @State private var cutRotationDetent = 0
+
+    /// ★ §2 — WHAT THE VIEWPORT'S RECOGNIZERS ASK. `.off` anywhere but the Surface
+    /// stage: this task owns the Surface stage's input handling and nothing else,
+    /// so no other stage's gestures can change under the button.
+    private var surfaceDiscipline: SurfaceInputDiscipline {
+        guard visible.surfaceEditing else { return .off }
+        return SurfaceInputDiscipline(pencilOnly: surfacePencilOnly,
+                                      pencilSeen: surfacePencilSeen)
+    }
+
     /// ★ THE SURFACE STAGE'S SCRATCHPAD (maintainer, 2026-08-16: "I think we should
     /// have a 'Save' button on the Surfaces page. This way someone can fuck around
     /// and mess things up, and just go back and nothing is saved. Everything should
@@ -556,6 +577,20 @@ public struct WorkspacePlaceholder: View {
                               // and only the hit POINT can tell them apart.
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
                           },
+                          // ★ §1(b) — DOUBLE TAP = THE ONES LIKE IT.
+                          //
+                          // ★ §1(e) — AND ONLY WITH THE SELECT TOOL. Handing this
+                          // over is what MOUNTS the recognizer; with a cut, a
+                          // pattern or a union armed it is nil, the recognizer is
+                          // disabled, and a second tap is simply a second tap —
+                          // the behaviour those tools already have, with none of
+                          // the single tap's latency added to them. The handler
+                          // re-checks the tool anyway, because a value that gates
+                          // a gesture should not be the only thing that gates its
+                          // effect.
+                          onPickDouble: surfaceDoubleTapSelectsSimilar
+                              ? { fid, _ in handleSurfaceDoubleTap(fid) }
+                              : nil,
                           // ★ TAPPING NOTHING CLEARS THE SELECTION (maintainer:
                           // "touching the ground or the air (i.e. nothing) should
                           // de-select all selected faces"). A tap that hit no
@@ -710,6 +745,13 @@ public struct WorkspacePlaceholder: View {
                           onBrushRefused: { _ in
                               guard showSmoothingPage, smoothTools.pencilOnly else { return }
                               smoothingPageModel?.notePencilOnlyRefusedFinger()
+                          },
+                          // ★ §2 — the pencil-mode discipline, Surface stage only.
+                          inputDiscipline: surfaceDiscipline,
+                          // ★ §2(c) — the only honest "a pencil exists" signal
+                          // there is: one has touched the glass.
+                          onPencilSeen: {
+                              if !surfacePencilSeen { surfacePencilSeen = true }
                           })
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
@@ -3966,7 +4008,7 @@ public struct WorkspacePlaceholder: View {
     /// rightward drag always moves the cut rightward however the part is turned.
     private var cutMoveSign: Double {
         guard let held = heldCut, let proj = projection else { return 1 }
-        let cut = held.rotated(by: SurfaceCut.snap(cutRotation))
+        let cut = held.rotated(by: SurfaceCut.settle(cutRotation))
         let a = settledWorld(SIMD3<Float>(cut.point))
         let b = settledWorld(SIMD3<Float>(cut.point + cut.normal * cutMoveScale * 40))
         guard let pa = proj.project(a), let pb = proj.project(b) else { return 1 }
@@ -4220,6 +4262,7 @@ public struct WorkspacePlaceholder: View {
             } ?? SurfaceCut.centred(onFace: faceID, in: mesh)
             cutRotation = 0
             cutRotationBase = 0
+            cutRotationDetent = 0
             cutOffsetMM = 0
             cutOffsetBase = 0
             hoveredCut = nil
@@ -4275,9 +4318,45 @@ public struct WorkspacePlaceholder: View {
         return nil
     }
 
+    /// ★ §1(b) — THE SECOND TAP: SELECT EVERY FACE LIKE THE ONE UNDER IT.
+    ///
+    /// ★ THE RULE IS PR 331'S, NOT A NEW ONE (§1c). `surfaceSimilarFilter` is the
+    /// signature that was MEASURED on his own part — same kind, same radius within
+    /// tolerance, bores ahead of blends, size band rather than kind alone. A
+    /// `kind`-only filter matched 36 of his 78 faces where this matches 4, and it
+    /// has already been proven wrong on this exact bracket. Nothing here invents a
+    /// second definition of "similar"; it points the tap at the one that exists.
+    ///
+    /// ★ AND IT LANDS IN THE SIMILAR TOOL, WHICH IS WHY IT IS CORRECTABLE (§1d). A
+    /// heuristic that cannot be corrected by hand is worse than no heuristic — so
+    /// the double tap does not commit anything. It arms `similar`, whose count is
+    /// reported on the action cluster and in the hint line, and whose every
+    /// further tap ADDS a kind or DROPS the kind under it. He fixes the match by
+    /// tapping, exactly as he would fix a selection.
+    private func handleSurfaceDoubleTap(_ faceID: FaceID) {
+        // ★ §1(e) — SELECT-TOOL ONLY, asked from the same table that decided
+        // whether to mount the recognizer. The second lock, so the behaviour
+        // cannot outlive a mistake in the wiring.
+        guard surfaceDoubleTapSelectsSimilar, viewerMesh != nil else { return }
+        surfaceSwitch(to: .similar, aimedAt: faceID)
+    }
+
+    /// Whether a second tap means anything right now — `SurfaceTool.meaning`'s
+    /// answer, read by the mount and by the handler.
+    private var surfaceDoubleTapSelectsSimilar: Bool {
+        SurfaceTool.meaning(taps: 2, tool: surfaceTool,
+                            surfaceStage: visible.surfaceEditing)
+            == .selectSimilarFaces
+    }
+
     /// ★ SWITCHING TOOL: abandon the last tool's work in progress, then point the
     /// new one at whatever is still selected.
-    private func surfaceSwitch(to tool: SurfaceTool) {
+    ///
+    /// `aimedAt` overrides "whatever is still selected" with a specific face — the
+    /// double tap uses it, because the tap that named the face never fired as a
+    /// single tap (it was held back so this one could happen) and so never became
+    /// the selection.
+    private func surfaceSwitch(to tool: SurfaceTool, aimedAt: FaceID? = nil) {
         // ★ A SELECT-SIMILAR SELECTION SURVIVES THE SWITCH, AND THE NEW TOOL ACTS ON
         // ALL OF IT (maintainer, 2026-08-16: "ensure that if a tool is touched after
         // similar faces are selected, that it works" — the tool's action goes "to
@@ -4322,7 +4401,14 @@ public struct WorkspacePlaceholder: View {
         }
 
         surfaceCarried = []
-        guard let face = surfaceSelectedFaceID else { return }
+        guard let face = aimedAt ?? surfaceSelectedFaceID else { return }
+        // A face named by a double tap is what the new tool aims at, and it
+        // replaces whatever was lit — otherwise the old selection stays on screen
+        // beside the new one and neither reads as the answer.
+        if aimedAt != nil {
+            surfaceSelected = nil
+            surfaceSelectedFace = nil
+        }
         surfaceEngage(tool, face: face, mesh: mesh)
     }
 
@@ -4477,6 +4563,29 @@ public struct WorkspacePlaceholder: View {
             .buttonStyle(.plain)
             .accessibilityLabel("X-ray")
 
+            // ★ §2 — THE PENCIL BUTTON. ★ THE ONLY NEW CONTROL IN THIS TASK, and
+            // it is built to the tray it sits in rather than to a new idea: the
+            // same 44×44 target, the same `DS.Radius.pill` corner, the same
+            // 17 pt semibold glyph, the same `accentDeep` fill at 0.55 when on and
+            // `textTertiary` glyph when off, in the same `DS.Space.xs` column as
+            // the wireframe and x-ray switches directly above it. It is a VIEW-ish
+            // switch, not a tool, so it belongs below the divider with those two
+            // and not in the tool well above it.
+            Button { surfacePencilOnly.toggle() } label: {
+                Image(systemName: "applepencil")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle((surfacePencilOnly
+                                      ? DS.Color.textPrimary
+                                      : DS.Color.textTertiary).color)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
+                            .fill(surfacePencilOnly
+                                  ? DS.Color.accentDeep.opacity(0.55).color : Color.clear)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Pencil only")
         }
         .padding(DS.Space.xs)
         .background(
@@ -4548,18 +4657,44 @@ public struct WorkspacePlaceholder: View {
                         // and asking for a 90° drag to get there is a chore. The
                         // drag stays for everything in between.
                         .onTapGesture {
+                            // ★ STILL `snap`, NOT `settle`. A ¼-turn button means
+                            // "square to what it is now", so it lands ON a detent
+                            // from wherever the drag left the angle — including
+                            // from a free one.
                             cutRotation = SurfaceCut.snap(cutRotation + 90)
                             cutRotationBase = cutRotation
+                            cutRotationDetent = SurfaceCut.detentIndex(cutRotation)
                         }
+                        // ★ §3 — DETENTS EVERY 15°, AND EVERY ANGLE BETWEEN THEM
+                        // STILL REACHABLE. His words: "rotate the cut in any angle
+                        // with detents every 15 degrees" — the detents ASSIST.
+                        //
+                        // ★ WHICH OF THE TWO §3(b) OFFERS: SETTLE ON RELEASE, plus
+                        // a haptic tick at each detent crossed. Not a resistance
+                        // curve — bending the angle away from the finger mid-drag
+                        // makes the readout disagree with the hand, and on a knob
+                        // geared at 0.8°/pt that reads as the control sticking.
+                        // The drag stays exactly linear; releasing WITHIN 3° of a
+                        // detent is taken by it, and releasing anywhere else keeps
+                        // the angle to the degree (`SurfaceCut.settle`).
                         .gesture(
                             DragGesture(minimumDistance: 4)
                                 .onChanged { g in
                                     cutRotation = cutRotationBase
                                         + Double(g.translation.width) * 0.8
+                                    // One tick per detent passed, so the 15s can be
+                                    // felt going by even when the drag sails past.
+                                    let d = SurfaceCut.detentIndex(cutRotation)
+                                    if d != cutRotationDetent {
+                                        cutRotationDetent = d
+                                        ClearanceHaptics.detent()
+                                    }
                                 }
                                 .onEnded { _ in
-                                    cutRotation = SurfaceCut.snap(cutRotation)
+                                    cutRotation = SurfaceCut.settle(cutRotation)
                                     cutRotationBase = cutRotation
+                                    cutRotationDetent =
+                                        SurfaceCut.detentIndex(cutRotation)
                                 }
                         )
                         // ★ MOVE — the half-way point is a default, not a verdict.
@@ -4603,7 +4738,7 @@ public struct WorkspacePlaceholder: View {
                                     rotationDegrees: cutRotation,
                                     offsetMM: cutOffsetMM)
                                 : project.commitSurfaceCut(
-                                    held.rotated(by: SurfaceCut.snap(cutRotation))
+                                    held.rotated(by: SurfaceCut.settle(cutRotation))
                                         .moved(byMM: cutOffsetMM))
                             if surfaceCarried.count > 1 {
                                 model.toast = "Cut \(surfaceCarried.count) faces."
@@ -4817,6 +4952,17 @@ public struct WorkspacePlaceholder: View {
     /// tool that accumulates has to say how much it has — otherwise a tap that did
     /// not register and a tap that did look identical.
     private var surfaceHint: String {
+        // ★ §2(c) — SAY IT OUT LOUD WHEN THE MODE IS ON AND INERT. The button
+        // latches whether or not a pencil has ever been seen, because it is a
+        // preference; but a lit button over a stage where nothing changed is a lie.
+        // This is the line that keeps the mode from stranding anybody.
+        //
+        // ★ AND ONLY IN THAT CASE. Once a pencil has been seen the mode is doing
+        // what the lit button says, so the line goes back to the tool — the stage
+        // carries one line of text and it belongs to whatever is armed.
+        if surfaceDiscipline.waitingForPencil {
+            return "Pencil only — no pencil seen yet, so fingers still edit."
+        }
         // ★ THE COUNT IS SHOWN EVEN AT ZERO. Otherwise a tap that TOGGLED A PIECE
         // OFF and a tap that never registered read identically — both fall back to
         // the tool's generic hint, and there is no way to tell "you tapped the same
@@ -4952,7 +5098,7 @@ public struct WorkspacePlaceholder: View {
 
     /// The held cut's angle, snapped, wrapped into 0..<360.
     private var cutAngleDegrees: Double {
-        var d = SurfaceCut.snap(cutRotation).truncatingRemainder(dividingBy: 360)
+        var d = SurfaceCut.settle(cutRotation).truncatingRemainder(dividingBy: 360)
         if d < 0 { d += 360 }
         return d
     }
@@ -5008,6 +5154,7 @@ public struct WorkspacePlaceholder: View {
         hoveredCut = nil
         cutRotation = 0
         cutRotationBase = 0
+        cutRotationDetent = 0
     }
 
 

@@ -1,0 +1,17 @@
+merge base: 500833ed629dfbb3c987a8a3629b8f54d80bfc4a
+ .../Sources/TopOptFlows/MetalMeshView.swift        | 208 ++++++++++++++++++++-
+ .../Sources/TopOptFlows/ProjectModel.swift         |   2 +-
+ app/TopOptKit/Sources/TopOptFlows/SurfaceCut.swift |  38 +++-
+ .../Sources/TopOptFlows/SurfaceTool.swift          |  43 +++++
+ .../Sources/TopOptFlows/WorkspacePlaceholder.swift | 159 +++++++++++++++-
+ 5 files changed, 434 insertions(+), 16 deletions(-)
+--- untracked ---
+ M app/TopOptKit/Sources/TopOptFlows/MetalMeshView.swift
+ M app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift
+ M app/TopOptKit/Sources/TopOptFlows/SurfaceCut.swift
+ M app/TopOptKit/Sources/TopOptFlows/SurfaceTool.swift
+ M app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift
+?? app/TopOptKit/Sources/TopOptFlows/SurfaceInputDiscipline.swift
+?? app/TopOptKit/Tests/TopOptFlowsTests/SurfaceDoubleTapMatchEvidence.swift
+?? app/TopOptKit/Tests/TopOptFlowsTests/SurfaceStageGesturesTests.swift
+?? evidence/2026-08-17-surface-stage-gestures/

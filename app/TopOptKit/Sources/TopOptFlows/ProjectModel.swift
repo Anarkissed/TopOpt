@@ -1001,7 +1001,7 @@ public final class ProjectModel: ObservableObject {
         var out: [RegionID] = []
         for f in faces.sorted() {
             guard let base = SurfaceCut.centred(onFace: f, in: mesh) else { continue }
-            out += commitSurfaceCut(base.rotated(by: SurfaceCut.snap(rotationDegrees))
+            out += commitSurfaceCut(base.rotated(by: SurfaceCut.settle(rotationDegrees))
                                         .moved(byMM: offsetMM))
         }
         return out

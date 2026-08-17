@@ -1,0 +1,70 @@
+=== R8 ASSERTION CENSUS — read WHOLE, not through a filter ===
+merge base: 500833ed629dfbb3c987a8a3629b8f54d80bfc4a   (a two-point diff against the MERGE BASE, never a moving head:
+ a diff against current origin/main has already once read another branch's
+ additions as this branch's deletions.)
+New files are 'git add -N' so their assertions are IN this census, not outside it.
+
+--- 1. EVERY LINE THIS BRANCH DELETES, in full (16) ---
+  DEL                 onBrushRefused: ((BrushInput) -> Void)? = nil) {
+  DEL             onPickPoint: onPickPoint, onMiss: onMiss,
+  DEL             onBrushRefused: onBrushRefused)
+  DEL                 onBrushRefused: ((BrushInput) -> Void)? = nil) {
+  DEL             onPickPoint: onPickPoint, onMiss: onMiss,
+  DEL             onBrushRefused: onBrushRefused)
+  DEL         private func pick(at location: CGPoint, in view: MTKView) {
+  DEL                 onBrushRefused: ((BrushInput) -> Void)? = nil) {}
+  DEL             out += commitSurfaceCut(base.rotated(by: SurfaceCut.snap(rotationDegrees))
+  DEL     /// Snap an angle (degrees) to the nearest detent.
+  DEL         let cut = held.rotated(by: SurfaceCut.snap(cutRotation))
+  DEL     private func surfaceSwitch(to tool: SurfaceTool) {
+  DEL         guard let face = surfaceSelectedFaceID else { return }
+  DEL                                     cutRotation = SurfaceCut.snap(cutRotation)
+  DEL                                     held.rotated(by: SurfaceCut.snap(cutRotation))
+  DEL         var d = SurfaceCut.snap(cutRotation).truncatingRemainder(dividingBy: 360)
+
+  VERDICT: no XCTAssert, no assert(), no precondition, no assertion MESSAGE is
+  deleted or weakened. The one guard among them —
+    guard let face = surfaceSelectedFaceID else { return }
+  — is REPLACED by
+    guard let face = aimedAt ?? surfaceSelectedFaceID else { return }
+  which admits strictly MORE (a face named by a double tap) and still refuses
+  when there is nothing to aim at. Widened, not weakened.
+
+--- 2. TEST FUNCTIONS REMOVED (deleted-test sweep on my own diff) ---
+  (none — the list above is empty)
+
+--- 3. ASSERTIONS ADDED ---
+  XCTAssert lines added: 92
+  of which carry a MESSAGE: 29
+
+--- 4. TEST FUNCTIONS ADDED ---
+  ADD     func testTheDoubleTapMatchCountOnHisPart() throws {
+  ADD     func testOneTapWithSelectSelectsOneFace() {
+  ADD     func testTwoTapsWithSelectSelectsTheSimilarFaces() {
+  ADD     func testASecondTapMeansNothingUnderTheOtherTools() {
+  ADD     func testTheRuleDoesNotReachOffTheSurfaceStage() {
+  ADD     func testTheDoubleTapArmsTheMeasuredRuleAndNotAKindFilter() throws {
+  ADD     func testTheMatchIsCorrectableByTapAndCommitsNothing() throws {
+  ADD     func testTheMatchCountIsReported() throws {
+  ADD     func testOffByDefaultBothContactsDoEverything() {
+  ADD     func testOnSeparatesEditingFromCameraMovement() {
+  ADD     func testUndoAndRedoSurvivePencilModeFromEitherContact() {
+  ADD     func testWithNoPencilEverSeenTheModeWithholdsNothing() {
+  ADD     func testSeeingAPencilEngagesTheModeThatWasAlreadyOn() {
+  ADD     func testSeeingAPencilDoesNotTurnTheModeOn() {
+  ADD     func testTheDetentsAreEveryFifteenDegrees() {
+  ADD     func testAReleaseNearADetentSettlesOntoIt() {
+  ADD     func testEveryAngleBetweenTheDetentsIsStillReachable() {
+  ADD     func testTheCaptureWindowIsNarrowerThanTheGap() {
+  ADD     func testSettlingIsIdempotent() {
+  ADD     func testTheDetentIndexAdvancesOncePerDetent() {
+  ADD     func testAFreeAngleReachesTheCutPlane() throws {
+  ADD     func testTopologyShowsItsPrimitivesAndTheDesignBoxAndNoLattice() {
+  ADD     func testLatticeShowsItsDepthPrimitivesAndNeitherTheBoxNorTheGroupPrimitives() {
+  ADD     func testSurfaceShowsNoPrimitivesAtAllAndOnlyTheFaceTools() {
+  ADD     func testTheWireframeAndItsXrayReachAllThreeStages() {
+  ADD     func testEveryStageHasARowInTheTable() {
+  ADD     func testTheDefaultToolIsStillSelect() {
+  ADD     func testTheToolTrayIsUnchanged() {
+  ADD     func testTheQuarterTurnButtonStillLandsOnADetent() {
+  ADD     func testThePatternRotationStillReleasesOnFifteens() {
