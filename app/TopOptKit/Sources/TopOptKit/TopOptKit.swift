@@ -1353,6 +1353,86 @@ public enum TopOptKit {
         return Int(n)
     }
 
+    /// ★ LATTICE A JOB DOCUMENT, ON DEVICE (maintainer, 2026-08-17: "Can you
+    /// please make it run on the iPad as well").
+    ///
+    /// Runs core's `lattice_variant_job` on the SAME job.json the LAN path
+    /// builds — one document, two executors — and returns where it put the
+    /// latticed mesh. Accepts `lattice_part` (lattice the imported part, no
+    /// optimization) and `lattice_variant` (lattice a finished design).
+    ///
+    /// A lattice run has NO LADDER: a small fixed number of certification
+    /// solves, which is why this is viable on device at all where an optimize
+    /// ladder is not.
+    public struct LatticeJobOutcome: Equatable, Sendable {
+        public let meshPaths: [String]
+        public let reportPath: String
+        public let latticeReceiptPath: String
+        public let latticedVoxels: Int
+        public let achievedVolumeFraction: Double
+        public let marginWorstCase: Double
+        public let graded: Bool
+        public let cellMM: Double
+        public let rhoMinUsed: Double
+        public let rhoMaxUsed: Double
+        public let analysisSolves: Int
+        public let wallSeconds: Double
+    }
+
+    public static func runLatticeJob(jobPath: String, jobDir: String,
+                                     outDir: String, materialsPath: String,
+                                     rulesPath: String) throws -> LatticeJobOutcome {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.run_lattice_job(std.string(jobPath), std.string(jobDir),
+                                             std.string(outDir),
+                                             std.string(materialsPath),
+                                             std.string(rulesPath), &err)
+        try throwIfFailed(err)
+        return LatticeJobOutcome(
+            meshPaths: Array(r.mesh_paths).map { String($0) },
+            reportPath: String(r.report_path),
+            latticeReceiptPath: String(r.lattice_receipt_path),
+            latticedVoxels: Int(r.latticed_voxels),
+            achievedVolumeFraction: r.achieved_volume_fraction,
+            marginWorstCase: r.reproduced_margin_worst_case,
+            graded: r.graded, cellMM: r.cell_size_mm,
+            rhoMinUsed: r.rho_min_used, rhoMaxUsed: r.rho_max_used,
+            analysisSolves: Int(r.analysis_solves),
+            wallSeconds: r.wall_seconds)
+    }
+
+    /// ★ THE LATTICE RUN'S RESULT, AS THE ONE OUTCOME SHAPE THE APP ALREADY
+    /// RENDERS (maintainer, 2026-08-17). A lattice job produces exactly ONE
+    /// object, so this is a single-variant outcome — no ladder, no rungs.
+    ///
+    /// ★ EVERY NUMBER IS CORE'S OR THE MESH'S. The volume fraction, the margin
+    /// and the cell are what `lattice_variant_job` returned; the triangles and
+    /// the geometry are read back from the file it wrote. Nothing is estimated —
+    /// a fabricated margin on a certification result would be the worst possible
+    /// invention on this screen.
+    public static func latticeOutcome(meshPath: String,
+                                      result: LatticeJobOutcome)
+        throws -> OptimizeOutcome {
+        let mesh = try importMesh(path: meshPath)
+        let v = OptimizeVariant(
+            requestedVolumeFraction: result.achievedVolumeFraction,
+            achievedVolumeFraction: result.achievedVolumeFraction,
+            massGrams: 0,
+            supportVolumeVoxels: 0,
+            meshTriangleCount: mesh.indices.count / 3,
+            worstCaseMargin: result.marginWorstCase,
+            // ★ ACCEPTED IS THE MARGIN'S OWN VERDICT, not a default. A lattice
+            // job that ran to completion still has a certification behind it.
+            accepted: result.marginWorstCase > 0,
+            v3Passes: result.marginWorstCase > 0,
+            meshVertices: mesh.vertices,
+            meshIndices: mesh.indices)
+        return OptimizeOutcome(variants: [v], stoppedOnMargin: false,
+                               cancelled: false,
+                               acceptedCount: v.accepted ? 1 : 0,
+                               computedRemotely: false)
+    }
+
     /// ★ HOW MUCH MATERIAL EACH FACE HANDS THE LATTICE, before any run (task
     /// 2026-08-12 §0b). One voxelization for every face, at the caller's
     /// resolution; `depthsMM` is each face's OWN dragged depth. Returns the

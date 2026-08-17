@@ -76,24 +76,36 @@ public struct PageLeftModal: ViewModifier {
     }
 
     public func body(content: Content) -> some View {
-        content
-            .frame(width: PageChrome.panelWidth)
-            .frame(maxHeight: PageChrome.sidePanelBand(canvasHeight: canvasHeight))
-            // ★★ THE PADDINGS COME BEFORE THE EXPANDING FRAME, AND THAT ORDER IS
-            // THE WHOLE BUG (maintainer, 2026-08-17: "The Selections doesn't
-            // minimize to the bottom left corner yet").
-            //
-            // They used to be applied AFTER `.frame(maxHeight: .infinity)`, which
-            // pads a view that is already the size of its parent — so the padded
-            // result OVERFLOWS the parent and SwiftUI centres the overflow. The
-            // alignment was correct and had no effect, which is why setting it to
-            // `.bottomLeading` changed nothing on screen. Padding first, then
-            // expand, and the alignment finally means something.
-            .padding(.top, minimized ? 0 : PageChrome.noteTop)
-            .padding(.bottom, minimizedBottomInset)
-            .padding(.leading, PageChrome.edge)
-            .frame(maxWidth: .infinity, maxHeight: .infinity,
-                   alignment: minimized ? .bottomLeading : .leading)
+        // ★★ EXPLICIT SIZE + A SPACER, NOT ALIGNMENT-ON-AN-EXPANDING-FRAME
+        // (maintainer, 2026-08-17, reporting it a SECOND time: "The minimize does
+        // not seem to function still").
+        //
+        // The previous cut set `alignment: .bottomLeading` on a
+        // `.frame(maxHeight: .infinity)` and re-ordered the paddings to stop the
+        // overflow. It STILL centred on device. Rather than reason about which
+        // modifier is proposing what a third time, this pushes the panel with a
+        // SPACER inside a frame whose height is stated OUTRIGHT by the caller's
+        // geometry. A spacer cannot be defeated by an overflow or by a parent's
+        // alignment: whatever height the container has, the spacer eats the
+        // remainder and the content lands against the edge.
+        //
+        // ★ THE OPEN PANEL IS UNCHANGED IN INTENT — his §6 standard ("centre of
+        // the left side, doesn't reach the top or bottom") is now a spacer on
+        // BOTH sides, which is the same picture by a mechanism that is not
+        // sensitive to sizing.
+        VStack(spacing: 0) {
+            if minimized {
+                Spacer(minLength: 0)                       // push to the bottom
+            } else {
+                Spacer(minLength: PageChrome.noteTop)      // centred in the band
+            }
+            content.frame(width: PageChrome.panelWidth, alignment: .leading)
+            Spacer(minLength: minimized ? 0 : PageChrome.edge)
+        }
+        .padding(.leading, PageChrome.edge)
+        .padding(.bottom, minimizedBottomInset)
+        .padding(.top, minimized ? 0 : PageChrome.noteTop)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

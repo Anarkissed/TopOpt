@@ -660,7 +660,18 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     // `internal` (not `private`) so `@testable` unit tests can diff the emitted
     // job.json across model sources without standing up a worker — the mesh-job-params
     // field-equivalence gate lives in JobJSONEquivalenceTests.
-    func buildJobJSON() throws -> Data {
+    func buildJobJSON() throws -> Data { try Self.buildJobJSON(request) }
+
+    /// ★ STATIC, SO THE ON-DEVICE PATH RUNS THE SAME DOCUMENT (maintainer,
+    /// 2026-08-17: "Can you please make it run on the iPad as well"). The
+    /// on-device lattice writes THIS job.json to a temp directory and hands it to
+    /// `TopOptKit.runLatticeJob`, which calls core's own parser and core's own
+    /// `lattice_variant_job`. One builder, two executors — an on-device lattice
+    /// and a worker lattice cannot describe different runs, which is a property
+    /// of there being one function rather than of two mappings kept in step.
+    ///
+    /// It only ever read `request`; nothing about a live connection was involved.
+    static func buildJobJSON(_ request: RunRequest) throws -> Data {
         var job: [String: Any] = [
             "model": (request.modelPath as NSString).lastPathComponent,
             "material": request.material,

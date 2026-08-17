@@ -2012,10 +2012,28 @@ public struct WorkspacePlaceholder: View {
             // density are live shader params and need no rebake).
             if !project.lattice.enabled {
                 showStrutPreview = false
-            } else if showStrutPreview,
-                      let scene = strutScene,
-                      scene.preview.lattice.id != latticeProxy.params.latticeID {
-                buildStrutScene()
+            } else if showStrutPreview {
+                // ★★ REBAKE ON ANY LATTICE CHANGE, NOT ONLY A TYPE CHANGE
+                // (maintainer, 2026-08-17: "I am still not seeing the lattice
+                // preview change based on the density percentage change").
+                //
+                // ★ THE OLD CONDITION WAS CORRECT WHEN IT WAS WRITTEN and its
+                // comment said why: "cell size and density are live shader
+                // params and need no rebake". That stopped being true in this
+                // task. Density is now baked into the DEMAND grid (it has to be
+                // — a per-region density needs one value per cell, and the
+                // shader has only one uniform), the region clipping is baked
+                // into the OCCUPANCY grid, and the in-plane expand moves those
+                // regions. All three are bake-time inputs now, so a preview that
+                // only rebakes on a topology change shows none of them.
+                //
+                // ★ NOT WHILE A HANDLE IS HELD. A bake is ~a second; a drag
+                // writes every frame. The drags rebake on `.onEnded` instead,
+                // so the picture lands once, when the value settles.
+                if draggingExpandPlane == nil, draggingDepthPlane == nil,
+                   latticeDepthDragSeed == nil {
+                    buildStrutScene()
+                }
             }
         }
         .onChange(of: showLatticePage) { open in if open { syncLatticeProxy() } }
@@ -5237,8 +5255,17 @@ public struct WorkspacePlaceholder: View {
     /// exactly where the drawer the user is reading is.
     private func latticeExpandHandleIsVisible(_ plane: ProjectModel.LatticeDepthPlane) -> Bool {
         guard visible.latticeDepthPlanes else { return false }
-        guard let active = selection.activeGroupID else { return false }
-        return plane.groupID == active
+        // ★ "SELECTED" MEANS EITHER WAY IN (maintainer, 2026-08-17: "I do not see
+        // a handle for the expansion of a face"). The first cut required
+        // `selection.activeGroupID`, which is set by tapping the group's BODY —
+        // but the natural way to reach a face's controls is to EXPAND its row,
+        // which writes the disclosure and never touches the active group. So a
+        // user looking straight at the Expand number had no handle beside it.
+        // Either route counts now: the active group, or an open drawer.
+        if latticeDisclosure.isExpanded(plane.ref,
+                                        regions: project.faceRegions) { return true }
+        if latticeDisclosure.isExpanded(plane.groupID.uuidString) { return true }
+        return plane.groupID == selection.activeGroupID
     }
 
     /// Where the expand knob sits: OUT along the slab's in-plane u axis, at the
@@ -5292,6 +5319,9 @@ public struct WorkspacePlaceholder: View {
                 draggingExpandPlane = nil
                 ClearanceHaptics.release()
                 refreshLatticeFaceCards()
+                // The expand moves the region the preview is clipped to, so the
+                // picture is rebaked ONCE, when the value settles.
+                if showStrutPreview { buildStrutScene() }
             }
     }
 
@@ -5322,6 +5352,7 @@ public struct WorkspacePlaceholder: View {
                 latticeDepthDetent = nil
                 ClearanceHaptics.release()
                 refreshLatticeFaceCards()
+                if showStrutPreview { buildStrutScene() }
             }
     }
 
@@ -6180,9 +6211,21 @@ public struct WorkspacePlaceholder: View {
     /// instead of a number that has to keep being right.
     private var selectionsPanel: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
+            // ★ ABOVE THE CARD WHEN MINIMIZED (maintainer, 2026-08-17: "The
+            // 'lattice preview' notification should go *on top* of the minimized
+            // selections modal when it is in the bottom left corner"). Below it
+            // when the panel is open, where "under the modal" is what reads.
+            if selectionsCollapsed { latticePreviewNotice }
             selectionsLibraryCard
-            // Off the card, tucked to its bottom edge, and only while the layer
-            // it describes is actually up.
+            if !selectionsCollapsed { latticePreviewNotice }
+        }
+        .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed))
+    }
+
+    /// The honesty banner for the strut layer — one row, shown only while that
+    /// layer is actually up.
+    @ViewBuilder private var latticePreviewNotice: some View {
+        VStack(alignment: .leading, spacing: 0) {
             if showStrutPreview, let scene = strutScene {
                 Text(scene.preview.previewLabel)
                     .dsStyle(DS.TypeScale.caption2)
@@ -6195,7 +6238,6 @@ public struct WorkspacePlaceholder: View {
                     .accessibilityIdentifier("lattice-preview-notice")
             }
         }
-        .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed))
     }
 
     /// ★ THE NAME AVOIDS A PREFIX COLLISION, DELIBERATELY. Three separate guards
@@ -8095,19 +8137,19 @@ public struct WorkspacePlaceholder: View {
     /// ★ WHAT IT NEEDS, AND IT SAYS SO WHILE DISABLED — the same rule Optimize
     /// follows. A lattice run needs a lattice to build: the mode on, and at least
     /// one selectable actually set to Lattice.
-    /// ★ AND IT NEEDS A WORKER, WHICH IT SAYS RATHER THAN PRETENDS.
+    /// ★ IT RUNS ON DEVICE TOO (maintainer, 2026-08-17: "Can you please make it
+    /// run on the iPad as well. I imagine that the lattice work is much less
+    /// intensive than optimization").
     ///
-    /// `lattice_part` is a JOB MODE: it reaches core through the job document,
-    /// which only the LAN path writes (`RemoteRunner.buildJobJSON`). The
-    /// ON-DEVICE bridge runs `run_minimize_plastic` and takes no mode at all — so
-    /// an on-device "Lattice" would silently run an OPTIMIZE. That is precisely
-    /// the defect class this whole task exists to remove (a control that looks
-    /// like one decision and performs another), so the button is DISABLED there
-    /// and says why, rather than doing the wrong thing quietly.
+    /// ★ HE WAS RIGHT ABOUT THE COST AND THE GATE IS GONE. A lattice run has NO
+    /// LADDER — a small fixed number of certification solves — so it was never
+    /// the optimizer's cost that kept it on the LAN. It was PLUMBING: `jobMode`
+    /// reached core through the job document and only the LAN path wrote one.
+    /// `RunModel.latticeBridgeRunner` now writes the SAME document to a temp
+    /// directory and hands it to core's own parser, so both routes run the same
+    /// job. The only requirement left is a lattice to build.
     var canLatticeThis: Bool {
-        compute.activeRemote != nil
-            && project.lattice.enabled
-            && !project.latticeJobRegions().regions.isEmpty
+        project.lattice.enabled && !project.latticeJobRegions().regions.isEmpty
     }
 
     private var latticeThisSummary: String {
@@ -8115,8 +8157,6 @@ public struct WorkspacePlaceholder: View {
         let n = project.latticeJobRegions().regions
             .filter { $0.role == .include }.count
         if n == 0 { return "nothing set to lattice" }
-        // ★ The honest blocker, named — not "unavailable".
-        guard compute.activeRemote != nil else { return "needs a LAN worker" }
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 

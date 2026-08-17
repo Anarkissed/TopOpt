@@ -1864,6 +1864,58 @@ AnalyzeResult smooth_brush_and_recertify_loadcase(
   }
 }
 
+LatticeJobResult run_lattice_job(const std::string& job_path,
+                                 const std::string& job_dir,
+                                 const std::string& out_dir,
+                                 const std::string& materials_path,
+                                 const std::string& rules_path,
+                                 BridgeError& err) {
+  LatticeJobResult out;
+  try {
+    bridge_log("lattice_job: ENTER job='" + job_path + "' out='" + out_dir + "'");
+    // ★ CORE'S OWN PARSER, ON THE SAME DOCUMENT THE LAN PATH SENDS. Nothing is
+    // re-authored here: the anchors, the loads, the clearances, the protections,
+    // the resolution, the material and the lattice block are the bytes the app
+    // already knows how to write. That is what makes an on-device lattice and a
+    // worker lattice the same run rather than two mappings kept in step.
+    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    if (job.mode != "lattice_part" && job.mode != "lattice_variant") {
+      err.ok = false;
+      err.message = "run_lattice_job: mode must be \"lattice_part\" or "
+                    "\"lattice_variant\" (got \"" + job.mode + "\")";
+      return out;
+    }
+    const topopt::MaterialLibrary materials =
+        topopt::load_materials_file(materials_path);
+    const topopt::SettingsRules rules =
+        topopt::load_settings_rules_file(rules_path);
+    const topopt::LatticeVariantJobResult r =
+        topopt::lattice_variant_job(job, job_dir, out_dir, materials, rules);
+    out.mesh_paths = r.mesh_paths;
+    out.report_path = r.report_path;
+    out.lattice_receipt_path = r.lattice_receipt_path;
+    out.latticed_voxels = r.latticed_voxels;
+    out.achieved_volume_fraction = r.achieved_volume_fraction;
+    out.reproduced_margin_worst_case = r.reproduced_margin_worst_case;
+    out.graded = r.graded;
+    out.cell_size_mm = r.cell_size_mm;
+    out.rho_min_used = r.rho_min_used;
+    out.rho_max_used = r.rho_max_used;
+    out.analysis_solves = r.analysis_solves;
+    out.wall_seconds = r.wall_seconds;
+    bridge_log("lattice_job: DONE latticed_voxels=" +
+               std::to_string(out.latticed_voxels) + " meshes=" +
+               std::to_string(out.mesh_paths.size()) + " solves=" +
+               std::to_string(out.analysis_solves));
+    return out;
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    bridge_log(std::string("lattice_job: THREW: ") + e.what());
+    return LatticeJobResult{};
+  }
+}
+
 OptimizeResult run_minimize_plastic_loadcase(
     const std::string& step_path, const std::string& material_name,
     const std::string& materials_path, const std::string& rules_path,

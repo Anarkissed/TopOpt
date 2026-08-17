@@ -75,6 +75,37 @@ final class LatticeActionBarTests: XCTestCase {
                        "★ gone from Surface")
     }
 
+    /// ★★ AND IT RUNS ON DEVICE (maintainer, 2026-08-17: "Can you please make it
+    /// run on the iPad as well"). The gate is gone — a lattice run has no ladder,
+    /// so its cost was never the reason; the reason was that only the LAN path
+    /// wrote a job document. Both write one now.
+    ///
+    /// ★ THE ROUTING IS AT THE ONE ON-DEVICE ENTRY POINT every caller goes
+    /// through, so a lattice request cannot reach the optimizer by coming in a
+    /// different way. Asserted on the SOURCE, because the alternative failure —
+    /// a mode field nothing local reads — is invisible to a value-type test and
+    /// is exactly what shipped before.
+    func testTheOnDeviceRunnerRoutesOnTheMode() throws {
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/RunModel.swift"),
+            encoding: .utf8)
+        guard let r = src.range(of: "public static func bridgeRunner(") else {
+            return XCTFail("the on-device entry point moved")
+        }
+        let head = String(src[r.lowerBound...].prefix(1200))
+        XCTAssertTrue(head.contains("request.jobMode == \"lattice_part\""),
+                      "★ the ONE on-device entry point routes on the mode — "
+                      + "without this a lattice request silently optimizes")
+        XCTAssertTrue(head.contains("latticeBridgeRunner"),
+                      "…to the lattice runner")
+        // ★ AND THE ON-DEVICE RUN USES THE LAN PATH'S OWN JOB BUILDER, so the two
+        // cannot describe different runs.
+        XCTAssertTrue(src.contains("RemoteRun.buildJobJSON(request)"),
+                      "★ ONE job document, two executors")
+    }
+
     /// ★ THE BUTTON RUNS A DIFFERENT QUESTION, not a different pipeline. Its
     /// request is the optimize request with ONE key changed, so the load case,
     /// resolution, material, protections and lattice block are the ones the user
