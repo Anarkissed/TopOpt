@@ -45,6 +45,33 @@ final class PageLeftModalPlacementTests: XCTestCase {
                        accuracy: 0.001, "★ landscape: the corner itself")
     }
 
+    /// ★★ THE THIRD REPORT, AND THE ACTUAL DEFECT: "The minimize does not seem to
+    /// function still."
+    ///
+    /// Both earlier cuts stated the intent correctly and both centred the panel on
+    /// device. The second one pushed with `Spacer(minLength: 0)` BELOW the content
+    /// as well as above — and a zero-minimum spacer is still FLEXIBLE, so the two
+    /// split the free height evenly and the panel lands in the middle. Nothing
+    /// about that is visible in an inset value, which is why the previous test
+    /// passed while the screen disagreed.
+    ///
+    /// So the placement is asserted where it actually lives: WHICH SPACERS EXIST.
+    func testMinimizedHasNoSpacerBelowItSoItCannotCentre() {
+        let mini = PageLeftModal(canvasHeight: 1300, minimized: true,
+                                 canvasWidth: 1000)
+        XCTAssertTrue(mini.hasSpacerAbove, "★ the space is all ABOVE it")
+        XCTAssertFalse(mini.hasSpacerBelow,
+                       "★ a spacer below — even minLength 0 — is flexible and "
+                       + "splits the free height, which centres the panel")
+
+        // OPEN keeps his §6 standard: a spacer on both sides ⇒ centred in the band.
+        let open = PageLeftModal(canvasHeight: 1300, minimized: false,
+                                 canvasWidth: 1000)
+        XCTAssertTrue(open.hasSpacerAbove)
+        XCTAssertTrue(open.hasSpacerBelow,
+                      "★ open is centre-left and never touches top or bottom")
+    }
+
     /// An OPEN panel is unaffected in either orientation — his earlier standard
     /// ("centre of the left side, doesn't reach the top or bottom") still holds.
     func testAnOpenPanelKeepsTheCentredStandardInBothOrientations() {

@@ -75,6 +75,22 @@ public struct PageLeftModal: ViewModifier {
         PageChrome.edge + (minimized && !isLandscape ? Self.minimizedPortraitLift : 0)
     }
 
+    // ★★ WHICH SPACERS EXIST IS THE WHOLE PLACEMENT — and it is a VALUE, so it can
+    // be asserted (maintainer, 2026-08-17, reporting the minimize a THIRD time).
+    //
+    // ★ THE DEFECT THE THIRD CUT SHIPPED: a `Spacer(minLength: 0)` is still a
+    // FLEXIBLE spacer. With one above and one below, the two split the free height
+    // evenly and the panel CENTRES — which is exactly what "does not seem to
+    // function" looked like on device, twice over, with the intent stated
+    // correctly in the source both times. A spacer that must not push has to be
+    // ABSENT, not zero-minimum.
+    //
+    // So the rule is stated once, here, as two booleans:
+    //   OPEN       spacer above AND below  ⇒ centred in the band (his §6)
+    //   MINIMIZED  spacer above ONLY       ⇒ hard against the bottom inset
+    var hasSpacerAbove: Bool { true }
+    var hasSpacerBelow: Bool { !minimized }
+
     public func body(content: Content) -> some View {
         // ★★ EXPLICIT SIZE + A SPACER, NOT ALIGNMENT-ON-AN-EXPANDING-FRAME
         // (maintainer, 2026-08-17, reporting it a SECOND time: "The minimize does
@@ -94,13 +110,11 @@ public struct PageLeftModal: ViewModifier {
         // BOTH sides, which is the same picture by a mechanism that is not
         // sensitive to sizing.
         VStack(spacing: 0) {
-            if minimized {
-                Spacer(minLength: 0)                       // push to the bottom
-            } else {
-                Spacer(minLength: PageChrome.noteTop)      // centred in the band
-            }
+            Spacer(minLength: minimized ? 0 : PageChrome.noteTop)
             content.frame(width: PageChrome.panelWidth, alignment: .leading)
-            Spacer(minLength: minimized ? 0 : PageChrome.edge)
+            // ★ ABSENT when minimized — see `hasSpacerBelow`. A zero-minimum
+            // spacer here is what centred it the last two times.
+            if hasSpacerBelow { Spacer(minLength: PageChrome.edge) }
         }
         .padding(.leading, PageChrome.edge)
         .padding(.bottom, minimizedBottomInset)
