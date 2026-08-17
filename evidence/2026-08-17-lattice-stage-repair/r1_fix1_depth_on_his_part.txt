@@ -1,0 +1,19 @@
+R1 — THE READOUT ON HIS PART, AFTER FIX 1 (§2: depth is one value)
+part      M2_verticalStand.step
+face      2   (596 held voxels at 4 mm, 69.5 g)
+profile   strut line width 0.45 mm, PLA
+preview   48³ (the card's own grid, not the run's)
+
+4.0 mm (the default)    depth 4.00 mm   | density 5%    | cells across 0.8   | cell 4.93 mm   | strut 0.32 mm  | Out of regime
+6.00 mm (dragged)       depth 6.00 mm   | density 5%    | cells across 1.2   | cell 4.93 mm   | strut 0.32 mm  | Out of regime
+8.00 mm (dragged)       depth 8.00 mm   | density 5%    | cells across 1.6   | cell 4.93 mm   | strut 0.32 mm  | Out of regime
+12.00 mm (dragged)      depth 12.00 mm  | density 5%    | cells across 2.4   | cell 4.93 mm   | strut 0.32 mm  | Out of regime
+24.65 mm (dragged)      depth 24.65 mm  | density 5%    | cells across 5.0   | cell 4.93 mm   | strut 0.32 mm  | Out of regime
+
+VERDICT
+  DEPTH        now the SELECTABLE's own number — a handle drag reaches the
+               derivation (it did not before; the card was built per GROUP)
+  CELLS ACROSS moves with it: 0.81 at 4 mm -> 5.00 at 24.65 mm
+  DENSITY      UNCHANGED at 5% — the band floor, at every depth. §1 next.
+  in regime?   NO at his 4 mm. The card says 24.65 mm is what it takes;
+               core says 5.87 mm. That gap is §1's defect, not §2's.

@@ -1,0 +1,29 @@
+HIS CARD vs CORE — 2026-08-17-lattice-stage-repair, before any fix
+strut line width           0.45 mm
+band                       0.05047 … 0.89988
+cells-per-member floor N*  5.0
+printability floor, LIGHT  4.931378498367851 mm   <- the card's cell
+printability floor, DENSE  1.173173434139347 mm
+
+CARD at depth 4.0 mm
+  cell            4.931378498367851 mm
+  cells across    0.8111322222222223
+  density         0.05047          (= band floor, unconditional)
+  strut           0.31981171372628187 mm       (app's law; core's is 0.45 mm)
+  verdict         out of regime, 2 problems
+
+CORE at member 4.0 mm — THE SAME REGION, CORE'S OWN LAW
+  cell            1.173173434139347 mm     (the DENSE floor)
+  cells across    3.4095555555555555
+  density         0.6   (lightest that PRINTS at that cell)
+  strut           0.45 mm
+  prints          true
+  out of regime   true    (3.4 < 5 — still short, but 4.2x
+                                         closer than the card's 0.8)
+
+CORE: the member width that DOES certify
+  N* x dense floor  5.865867170696735 mm
+  at 5.8664537574138045 mm: cell 1.1732907514827609 mm, density 0.5999130302389263, strut 0.45 mm, 5.0 cells across, prints true
+
+★ The card's "at cell 4.93 mm the region needs >= 24.65 mm depth" is an
+  artefact of quoting the LIGHT-end floor. Core's requirement is 5.865867170696735 mm.

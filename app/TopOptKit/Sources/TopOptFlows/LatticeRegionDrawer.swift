@@ -143,7 +143,16 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             head = nil
         }
         let rows = [
-            LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", c.depthMM),
+            // ★ THE DEPTH ROW PRINTS THE DEPTH IT WAS HANDED, NOT THE CARD'S
+            // (task 2026-08-17-lattice-stage-repair §2). `depthMM` is the value
+            // `ProjectModel.latticeSlabDepthMM(ref:in:)` resolves for the thing
+            // this drawer is about — the SAME number the 3D handle drags and the
+            // row chip shows. The card carries a depth too, and until this task
+            // the row printed THAT one: the cards were derived per GROUP, so a
+            // face or region dragged to its own depth kept showing its group's.
+            // One value, one source; the card's copy is checked against it by
+            // `depthDivergence` rather than trusted.
+            LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", depthMM),
                              modifiable: true),
             LatticeDrawerRow(label: "Hands over", value: c.heldText),
             // ★ WHAT IT WILL WEIGH, AND THE DIFFERENCE (task 2026-08-13-lattice-
@@ -162,6 +171,26 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
         ]
         return LatticeRegionDrawer(headline: head, collapsedValue: c.heldText,
                                    verdict: c.verdict, rows: rows, held: held)
+    }
+
+    /// ★ THE "THEY CANNOT DIVERGE" CHECK, AS A FUNCTION RATHER THAN A COMMENT
+    /// (task 2026-08-17-lattice-stage-repair §2 / bar R3) — the same shape
+    /// `LatticeSlabDepth.mismatches` already uses for the protection/region pair.
+    ///
+    /// A card is DERIVED at some depth: its cell, its cells-across, its strut and
+    /// its mass are all functions of that depth. The drawer is LABELLED with the
+    /// depth in force for the thing it is about. If those two are not the same
+    /// number the drawer is showing arithmetic from one depth under a label from
+    /// another — which is exactly what it did before this task, and what made a
+    /// dragged handle look like it had done nothing.
+    ///
+    /// Returns nil when they agree. Non-nil is a programming error at the CALL
+    /// SITE, never something a user can cause, so it is asserted in tests rather
+    /// than rendered.
+    public static func depthDivergence(card: LatticeFaceCard?, depthMM: Double)
+        -> (cardMM: Double, shownMM: Double)? {
+        guard let c = card else { return nil }
+        return abs(c.depthMM - depthMM) > 1e-9 ? (c.depthMM, depthMM) : nil
     }
 
     /// ★ §4b, as a property rather than a convention. TWO EXACT CASES, never

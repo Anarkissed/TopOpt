@@ -691,6 +691,64 @@ public final class ProjectModel: ObservableObject {
                                  fallbackMM: lattice.paintDepthMM)
     }
 
+    /// ★ WHAT THE FACE CARDS MUST BE DERIVED FROM (task
+    /// 2026-08-17-lattice-stage-repair §2). One entry per thing the lattice panel
+    /// shows a drawer for: the group itself, and every selectable inside it that
+    /// carries a lattice role — each paired with the B-rep face its slab is built
+    /// on and ★ THE DEPTH IN FORCE FOR IT, resolved through the same
+    /// `latticeSlabDepthMM` the 3D handle and the protection spec go through.
+    ///
+    /// ★ THE DEFECT THIS FUNCTION EXISTS TO REMOVE. `refreshLatticeFaceCards`
+    /// previously previewed ONE face per group at the GROUP's depth, and the
+    /// drawer beneath a face or region row was then handed that group card while
+    /// being labelled with the selectable's own number. So the card's cell,
+    /// cells-across, strut and mass were all arithmetic at a depth the row was
+    /// not showing — and dragging one face's handle moved the label and nothing
+    /// else. Deriving from THIS list makes the two the same number by
+    /// construction.
+    ///
+    /// A selectable with no B-rep face behind it (a hand-placed primitive, or a
+    /// region whose members have gone) contributes nothing rather than a card
+    /// about a face it does not own.
+    public func latticeCardInputs()
+        -> [(key: String, faceID: Int, depthMM: Double)] {
+        var out: [(key: String, faceID: Int, depthMM: Double)] = []
+        for g in selection.groups where lattice.groupRoles[g.id] != nil {
+            // The GROUP row's card — the face the group's slab is built on, at the
+            // group's own depth. Unchanged from before this task.
+            if let f = g.faces.first {
+                out.append((g.id.uuidString, Int(runFaceID(f)),
+                            latticeSlabDepthMM(g.id)))
+            }
+            for ref in latticeSelectableRefs(g) {
+                guard let f = latticeCardFace(ref, in: g) else { continue }
+                out.append((ref.key, Int(runFaceID(f)),
+                            latticeSlabDepthMM(ref, in: g.id)))
+            }
+        }
+        return out
+    }
+
+    /// The B-rep face one selectable's slab preview is built on, or nil.
+    ///
+    /// A REGION is a set of faces (PR 331), and the preview walks ONE face — the
+    /// region's first member, which is the face its frame is built from. That
+    /// over-states a sector's held material exactly as the group card did before
+    /// this task, so the mass rows are no worse; the four numbers this task is
+    /// about (depth, cell, density, cells across) do not read the voxel count at
+    /// all, so they are exact.
+    func latticeCardFace(_ ref: LatticeSelectableRef, in g: SelectionGroup) -> FaceID? {
+        switch ref {
+        case let .face(_, f): return f
+        case .primitive: return nil            // no B-rep face to preview
+        case let .region(_, rid):
+            guard let mesh = viewerMesh, let region = faceRegions.region(rid) else {
+                return nil
+            }
+            return FaceRegionGeometry.members(of: region, in: mesh).first
+        }
+    }
+
     /// The role in force for ONE selectable (§3c) — its own override, else its
     /// group's declaration. nil ⇒ not latticed at all.
     public func latticeSelectableRole(_ ref: LatticeSelectableRef,

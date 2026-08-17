@@ -110,6 +110,14 @@ public struct WorkspacePlaceholder: View {
     // computed off the main thread from ONE voxelization and cached, so a drag
     // never blocks. `latticeDepthDragSeed` holds the depth a drag started from.
     @State private var latticeFaceCards: [UUID: LatticeFaceCard] = [:]
+    // ★ AND ONE CARD PER SELECTABLE, AT THAT SELECTABLE'S OWN DEPTH (task
+    // 2026-08-17-lattice-stage-repair §2). Keyed by `LatticeSelectableRef.key`.
+    // Before this task there was only the group dictionary above, and the drawer
+    // under a face or a region row was handed the GROUP's card while being
+    // labelled with the selectable's own depth — so dragging a face's 3D handle
+    // moved the label and nothing else on the card. The two are one value now,
+    // and `LatticeRegionDrawer.depthDivergence` is what proves it.
+    @State private var latticeSelectableCards: [String: LatticeFaceCard] = [:]
     @State private var latticeDepthDragSeed: Double?
     /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
     @State private var diagnosisPopoverGroup: UUID?
@@ -6858,8 +6866,12 @@ public struct WorkspacePlaceholder: View {
     /// lattice choice cannot reach the run yet.
     @ViewBuilder private func latticeSelectableDrawer(_ g: SelectionGroup,
                                                       _ ref: LatticeSelectableRef) -> some View {
+        // ★ THIS SELECTABLE'S OWN CARD, derived at THIS selectable's own depth
+        // (task 2026-08-17-lattice-stage-repair §2). It was the GROUP's card
+        // under a per-selectable depth label until this task, which is why
+        // dragging a face's handle moved the number and nothing under it.
         let drawer = LatticeRegionDrawer.make(
-            card: latticeFaceCards[g.id],
+            card: latticeSelectableCards[ref.key],
             depthMM: project.latticeSlabDepthMM(ref, in: g.id),
             held: force.isProtected(g.id),
             latticeReachesTheRun: ref.latticeReachesTheRun,
@@ -6899,23 +6911,34 @@ public struct WorkspacePlaceholder: View {
     /// row as the material figure it is, and the depth→layers rounding is core's
     /// own, so the number tracks the run's rule at the run's grid too.
     private func refreshLatticeFaceCards() {
-        let roleGroups = selection.groups.filter { project.lattice.groupRoles[$0.id] != nil }
-        guard !roleGroups.isEmpty, let path = project.importedFile?.path else {
+        guard let path = project.importedFile?.path else {
             latticeFaceCards = [:]
+            latticeSelectableCards = [:]
             return
         }
-        // One face per group — the first, which is the face the slab is built on.
-        var groupForFace: [Int: UUID] = [:]
+        // ★ ONE ENTRY PER DRAWER, AT THAT DRAWER'S OWN DEPTH (task
+        // 2026-08-17-lattice-stage-repair §2). `latticeCardInputs` resolves each
+        // one through `latticeSlabDepthMM`, the same call the 3D handle and the
+        // protection spec go through, so the card is derived at the depth the row
+        // is labelled with. `face_slab_preview` walks each (face, depth) pair
+        // independently, so the same face appearing twice at two depths is two
+        // honest answers, not a collision.
+        let inputs = project.latticeCardInputs()
+        var keys: [String] = []
         var ids: [Int] = []
         var depths: [Double] = []
-        for g in roleGroups {
-            guard let f = g.faces.first else { continue }
-            let rid = Int(project.runFaceID(f))
-            groupForFace[rid] = g.id
-            ids.append(rid)
-            depths.append(project.latticeSlabDepthMM(g.id))
+        for i in inputs {
+            keys.append(i.key)
+            ids.append(i.faceID)
+            depths.append(i.depthMM)
         }
-        guard !ids.isEmpty else { latticeFaceCards = [:]; return }
+        guard !ids.isEmpty else {
+            latticeFaceCards = [:]
+            latticeSelectableCards = [:]
+            return
+        }
+        let keysCopy = keys
+        let groupKeys = Set(selection.groups.map(\.id.uuidString))
         latticeCardsToken += 1
         let token = latticeCardsToken
         let resolution = Self.latticeCardPreviewResolution
@@ -6930,10 +6953,9 @@ public struct WorkspacePlaceholder: View {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
                 resolution: resolution) else { return }
-            var cards: [UUID: LatticeFaceCard] = [:]
+            var byKey: [String: LatticeFaceCard] = [:]
             for (i, fid) in ids.enumerated() where i < preview.voxels.count {
-                guard let gid = groupForFace[fid] else { continue }
-                cards[gid] = LatticeFaceCardDerivation.card(
+                byKey[keysCopy[i]] = LatticeFaceCardDerivation.card(
                     faceID: fid, depthMM: depthsCopy[i],
                     heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topology: topology,
@@ -6948,9 +6970,23 @@ public struct WorkspacePlaceholder: View {
                     // silent pass.
                     minExtrudableWidthMM: widthMM)
             }
+            // The group cards keep their UUID key (the group row reads them by
+            // group id); everything else is keyed by `LatticeSelectableRef.key`.
+            var groupCards: [UUID: LatticeFaceCard] = [:]
+            var selectableCards: [String: LatticeFaceCard] = [:]
+            for (k, c) in byKey {
+                if groupKeys.contains(k), let id = UUID(uuidString: k) {
+                    groupCards[id] = c
+                } else {
+                    selectableCards[k] = c
+                }
+            }
+            let finalGroupCards = groupCards
+            let finalSelectableCards = selectableCards
             await MainActor.run {
                 guard token == latticeCardsToken else { return }   // a newer drag won
-                latticeFaceCards = cards
+                latticeFaceCards = finalGroupCards
+                latticeSelectableCards = finalSelectableCards
             }
         }
     }
