@@ -158,6 +158,57 @@ final class LatticeActionBarTests: XCTestCase {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ "I'd like the number to also be draggable (drag right = + | left = -)"
+
+@MainActor
+final class LatticeDrawerScrubTests: XCTestCase {
+
+    /// ★ EVERY MODIFIABLE ROW MOVES, AND IN ITS OWN UNIT. The depth already
+    /// scrubbed; density and expand did not, so the only way to change them was
+    /// the keypad. The step is per KIND, because a percent and a millimetre are
+    /// not the same distance under a thumb.
+    func testEachModifiableKindHasItsOwnScrubStep() {
+        XCTAssertEqual(WorkspacePlaceholder.latticeRowScrubStep(.density), 0.5,
+                       accuracy: 1e-12,
+                       "★ percent per point — the whole band inside one thumb travel")
+        XCTAssertEqual(WorkspacePlaceholder.latticeRowScrubStep(.expand), 0.05,
+                       accuracy: 1e-12,
+                       "★ mm per point — the SAME feel as the depth, deliberately")
+        XCTAssertEqual(WorkspacePlaceholder.latticeRowScrubStep(.depth), 0.05,
+                       accuracy: 1e-12)
+    }
+
+    /// ★ A FACT DOES NOT MOVE. `.fact` rows carry no setter and must carry no
+    /// travel either — a derived number that slides under the finger is the
+    /// "control that looks like it decides something" defect in miniature.
+    func testAFactRowHasNoTravel() {
+        XCTAssertEqual(WorkspacePlaceholder.latticeRowScrubStep(.fact), 0,
+                       accuracy: 1e-12)
+    }
+
+    /// ★ RIGHT IS PLUS. Every step is positive, so a rightward translation can
+    /// only increase the value — his rule, stated as a property rather than
+    /// left to the sign of a literal.
+    func testRightIsAlwaysPlus() {
+        for k in [LatticeDrawerRow.Kind.density, .expand, .depth] {
+            XCTAssertGreaterThan(WorkspacePlaceholder.latticeRowScrubStep(k), 0,
+                                 "drag right = + for \(k)")
+        }
+    }
+
+    /// The scrub seeds from the string the row RENDERS, so the seed and the
+    /// setter are in one unit — the pairing that the wrong-setter bug broke.
+    func testTheSeedIsParsedInTheRowsOwnUnit() {
+        XCTAssertEqual(WorkspacePlaceholder.latticeRowSeed(
+            LatticeDrawerRow(label: "Density", value: "27%", kind: .density)),
+                       27, accuracy: 1e-9)
+        XCTAssertEqual(WorkspacePlaceholder.latticeRowSeed(
+            LatticeDrawerRow(label: "Expand", value: "3.5 mm", kind: .expand)),
+                       3.5, accuracy: 1e-9)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // MARK: 3 — "Density is controllable in each region - but it is not updating
 //            the lattice preview of it"
 

@@ -29,6 +29,7 @@
 // pins this as a known boundary rather than leaving it to be found on a run.
 
 import Foundation
+import simd
 
 public enum LatticeSlabExpand {
 
@@ -52,5 +53,51 @@ public enum LatticeSlabExpand {
         -> (halfUMM: Double, halfWMM: Double) {
         let e = clamp(expandMM)
         return (halfUMM + e, halfWMM + e)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // MARK: ★ WHERE THE GRAB KNOB SITS
+
+    /// ★★ THE HANDLE HAD NOWHERE TO BE (maintainer, 2026-08-17, reporting it a
+    /// SECOND time: "Expand still does not work - still does not have a
+    /// handle").
+    ///
+    /// ★ THE DEFECT, and it is a reading error, not a layout one. The first cut
+    /// built the knob's offset direction from `ClearanceHandle.axisDir` — but
+    /// that type states outright that "only the fields the role needs are
+    /// populated; the rest stay zero", and a `.slabDepth` handle populates
+    /// `planeOrigin`/`planeNormal`. **`axisDir` is ZERO on every lattice depth
+    /// plane.** `simd_normalize(.zero)` is NaN, a NaN anchor projects to
+    /// nothing, and the knob was never placed — while the visibility rule I
+    /// spent the previous cut on was correct the whole time.
+    ///
+    /// So the offset is derived HERE, from the normal that is actually
+    /// populated, and it REFUSES rather than producing NaN. A caller that hands
+    /// in a degenerate normal gets `nil` and draws no knob, which is a visible
+    /// absence instead of an invisible NaN.
+    ///
+    /// - Parameters:
+    ///   - anchor: the depth knob's own anchor — the knob rides out from it.
+    ///   - normal: the slab's face normal (`ClearanceHandle.planeNormal`).
+    ///   - baseMM: the resting offset, so the two knobs never overlap at 0.
+    ///   - expandMM: the current expand; the knob is literally on the edge it moves.
+    public static func knobAnchor(anchor: SIMD3<Float>, normal: SIMD3<Float>,
+                                  baseMM: Float, expandMM: Double)
+        -> SIMD3<Float>? {
+        let len = simd_length(normal)
+        guard len > 1e-6, normal.x.isFinite, normal.y.isFinite, normal.z.isFinite
+        else { return nil }
+        let n = normal / len
+        // Any unit vector perpendicular to the slab normal — the same basis rule
+        // `LatticeRegionMask` uses, so the knob points along an axis that grows.
+        // The seed is chosen away from `n` so the cross product is never short.
+        let seed: SIMD3<Float> = abs(n.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
+        let cross = simd_cross(n, seed)
+        let cl = simd_length(cross)
+        guard cl > 1e-6 else { return nil }
+        let u = cross / cl
+        let out = anchor + u * (baseMM + Float(clamp(expandMM)))
+        guard out.x.isFinite, out.y.isFinite, out.z.isFinite else { return nil }
+        return out
     }
 }

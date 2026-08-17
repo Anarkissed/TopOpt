@@ -18,6 +18,71 @@ import TopOptKit
 @MainActor
 final class LatticeSlabExpandTests: XCTestCase {
 
+    // ─────────────────────────────────────────────────────────────────────
+    // MARK: ★ THE KNOB'S ANCHOR — the reason there was no handle
+
+    /// ★★ THE SHIPPED DEFECT, PINNED AT ITS EXACT INPUT (maintainer,
+    /// 2026-08-17, second report: "Expand still does not work - still does not
+    /// have a handle").
+    ///
+    /// The first cut built the offset direction from `ClearanceHandle.axisDir`.
+    /// That type documents "only the fields the role needs are populated; the
+    /// rest stay zero", and a `.slabDepth` handle — which is what EVERY lattice
+    /// depth plane carries — populates `planeOrigin`/`planeNormal` and leaves
+    /// `axisDir` at `.zero`. `simd_normalize(.zero)` is NaN, `.position(NaN)`
+    /// draws nothing, and the knob was invisible on every part.
+    ///
+    /// So the zero vector is fed in DELIBERATELY here: the contract is that a
+    /// direction that cannot be normalised yields `nil` — a refusal the caller
+    /// can act on — and never a NaN point that silently disappears.
+    func testAZeroNormalRefusesInsteadOfProducingANaNAnchor() {
+        let out = LatticeSlabExpand.knobAnchor(
+            anchor: SIMD3(1, 2, 3), normal: .zero, baseMM: 8, expandMM: 0)
+        XCTAssertNil(out, "★ a zero normal is the shipped condition — refuse it")
+    }
+
+    /// The normal that IS populated on a slab-depth handle places a real knob:
+    /// finite, off the depth anchor, and PERPENDICULAR to the normal — so the
+    /// knob never rides along the axis the depth control already owns.
+    func testItPlacesTheKnobPerpendicularToTheSlabNormal() throws {
+        let anchor = SIMD3<Float>(0, 0, 0)
+        let n = SIMD3<Float>(0, 0, 1)
+        let at = try XCTUnwrap(LatticeSlabExpand.knobAnchor(
+            anchor: anchor, normal: n, baseMM: 8, expandMM: 0))
+        XCTAssertTrue(at.x.isFinite && at.y.isFinite && at.z.isFinite)
+        XCTAssertEqual(simd_length(at - anchor), 8, accuracy: 1e-4,
+                       "★ at the resting offset, so it never sits under the depth knob")
+        XCTAssertEqual(simd_dot(at - anchor, n), 0, accuracy: 1e-4,
+                       "★ IN PLANE — the expand never moves along the depth axis")
+    }
+
+    /// The knob rides OUT as the expand grows, so the handle is on the edge it
+    /// moves rather than parked at a fixed spot.
+    func testTheKnobRidesOutWithTheExpand() throws {
+        let a = SIMD3<Float>(0, 0, 0), n = SIMD3<Float>(0, 1, 0)
+        let near = try XCTUnwrap(LatticeSlabExpand.knobAnchor(
+            anchor: a, normal: n, baseMM: 8, expandMM: 0))
+        let far = try XCTUnwrap(LatticeSlabExpand.knobAnchor(
+            anchor: a, normal: n, baseMM: 8, expandMM: 20))
+        XCTAssertEqual(simd_length(far - a) - simd_length(near - a), 20,
+                       accuracy: 1e-3)
+    }
+
+    /// A non-unit normal is fine — it is normalised, not trusted.
+    func testItNormalisesTheNormalItIsGiven() throws {
+        let a = SIMD3<Float>(0, 0, 0)
+        let at = try XCTUnwrap(LatticeSlabExpand.knobAnchor(
+            anchor: a, normal: SIMD3(0, 0, 7), baseMM: 8, expandMM: 0))
+        XCTAssertEqual(simd_length(at - a), 8, accuracy: 1e-4)
+    }
+
+    /// A non-finite normal refuses too — the same failure the zero vector had,
+    /// arriving by a different route.
+    func testANonFiniteNormalAlsoRefuses() {
+        XCTAssertNil(LatticeSlabExpand.knobAnchor(
+            anchor: .zero, normal: SIMD3(.nan, 0, 1), baseMM: 8, expandMM: 0))
+    }
+
     // MARK: the value math — in plane ONLY
 
     func testItGrowsBothInPlaneHalfExtentsAndNothingElse() {

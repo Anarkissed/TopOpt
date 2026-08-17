@@ -119,6 +119,13 @@ public struct WorkspacePlaceholder: View {
     // and `LatticeRegionDrawer.depthDivergence` is what proves it.
     @State private var latticeSelectableCards: [String: LatticeFaceCard] = [:]
     @State private var latticeDepthDragSeed: Double?
+    /// ★ THE VALUE A *NON-DEPTH* DRAWER SCRUB STARTED FROM (maintainer,
+    /// 2026-08-17: "I'd like the number to also be draggable (drag right = + |
+    /// Drag left = -)"). Held across frames for the same reason the depth's seed
+    /// is: the row re-renders with the new number every frame, so re-reading the
+    /// row as the seed would compound the translation and the value would
+    /// accelerate away under the finger.
+    @State private var latticeRowScrubSeed: Double?
     // ★ The depth detent currently HELD (maintainer, 2026-08-17). Non-nil while a
     // drag is magnetised to a candidate; the hysteresis band is measured from it,
     // so it must span frames. Cleared on `onEnded`.
@@ -2031,7 +2038,7 @@ public struct WorkspacePlaceholder: View {
                 // writes every frame. The drags rebake on `.onEnded` instead,
                 // so the picture lands once, when the value settles.
                 if draggingExpandPlane == nil, draggingDepthPlane == nil,
-                   latticeDepthDragSeed == nil {
+                   latticeDepthDragSeed == nil, latticeRowScrubSeed == nil {
                     buildStrutScene()
                 }
             }
@@ -5223,7 +5230,8 @@ public struct WorkspacePlaceholder: View {
                     // handle on every face at once is a field of knobs. It appears
                     // for the active group's selectables and nowhere else.
                     if latticeExpandHandleIsVisible(plane),
-                       let ex = proj.project(settledWorld(latticeExpandAnchor(plane))) {
+                       let world = latticeExpandAnchor(plane),
+                       let ex = proj.project(settledWorld(world)) {
                         latticeExpandKnob(active: draggingExpandPlane == plane.id)
                             .frame(width: 44, height: 44)
                             .contentShape(Circle())
@@ -5268,17 +5276,21 @@ public struct WorkspacePlaceholder: View {
         return plane.groupID == selection.activeGroupID
     }
 
-    /// Where the expand knob sits: OUT along the slab's in-plane u axis, at the
-    /// current expanded half-extent, so the knob is literally on the edge it
-    /// moves. Offset from the depth knob so the two never overlap.
-    private func latticeExpandAnchor(_ plane: ProjectModel.LatticeDepthPlane) -> SIMD3<Float> {
-        let e = Float(project.latticeExpandMM(plane.ref))
-        let n = simd_normalize(plane.handle.axisDir)
-        // Any unit vector perpendicular to the slab axis — the same basis rule
-        // `LatticeRegionMask` uses, so the knob points along the axis that grows.
-        let a: SIMD3<Float> = abs(n.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
-        let u = simd_normalize(simd_cross(n, a))
-        return plane.handle.anchor + u * (Self.latticeExpandKnobBaseMM + e)
+    /// Where the expand knob sits: OUT along an in-plane axis, at the current
+    /// expanded half-extent, so the knob is literally on the edge it moves.
+    /// Offset from the depth knob so the two never overlap.
+    ///
+    /// ★ READS `planeNormal`, NOT `axisDir` — the first cut read `axisDir`,
+    /// which `ClearanceHandle` leaves ZERO for a `.slabDepth` role, so every
+    /// anchor was NaN and no knob was ever placed. `nil` here means "no
+    /// direction to grow along", and the caller draws nothing.
+    private func latticeExpandAnchor(_ plane: ProjectModel.LatticeDepthPlane)
+        -> SIMD3<Float>? {
+        LatticeSlabExpand.knobAnchor(
+            anchor: plane.handle.anchor,
+            normal: plane.handle.planeNormal,
+            baseMM: Self.latticeExpandKnobBaseMM,
+            expandMM: project.latticeExpandMM(plane.ref))
     }
 
     /// How far out the knob sits when the expand is 0, so it is never buried in
@@ -6888,7 +6900,16 @@ public struct WorkspacePlaceholder: View {
                             .background(Capsule().fill(DS.Color.fillSelected.color))
                             .contentShape(Rectangle())
                             .modifier(LatticeDrawerRowGesture(
-                                isDepth: row.kind == .depth, drag: depthDrag))
+                                isDepth: row.kind == .depth,
+                                // ★ A ROW SCRUBS ONLY IF IT HAS A SETTER. No
+                                // setter ⇒ no gesture, so a drag can never be a
+                                // control that moves nothing.
+                                scrubbable: row.kind != .depth && write != nil,
+                                drag: depthDrag,
+                                scrub: latticeRowScrub(
+                                    kind: row.kind,
+                                    seed: Self.latticeRowSeed(row),
+                                    write: { v in write?(v) })))
                             // ★ §5 — AND IT TYPES. His rule, stated twice: "Any
                             // input MUST be selectable and a small numeric
                             // keyboard pop-up to input the number — NOT just touch
@@ -6936,12 +6957,60 @@ public struct WorkspacePlaceholder: View {
     /// ★ PR 334's GAP 2, as a type. Only the DEPTH row carries the depth drag;
     /// every other modifiable row (today: Density, under "Per region") is a
     /// tappable control with its own identifier and no inherited gesture.
-    private struct LatticeDrawerRowGesture<G: Gesture>: ViewModifier {
+    /// ★ AND NOW EVERY MODIFIABLE ROW SCRUBS (maintainer, 2026-08-17: "I'd like
+    /// the number to also be draggable (drag right = + | Drag left = -)").
+    ///
+    /// The DEPTH keeps its own drag — it carries the magnetic detents and the
+    /// protection tie, which no other row has. Every other modifiable row gets
+    /// the generic scrub, which writes through that row's OWN setter in that
+    /// row's OWN unit. A fact row still gets nothing, so the "a control that
+    /// looks like it decides something" defect cannot come back through here.
+    private struct LatticeDrawerRowGesture<G: Gesture, S: Gesture>: ViewModifier {
         let isDepth: Bool
+        let scrubbable: Bool
         let drag: G
+        let scrub: S
         func body(content: Content) -> some View {
-            if isDepth { content.gesture(drag) } else { content }
+            if isDepth { content.gesture(drag) }
+            else if scrubbable { content.gesture(scrub) }
+            else { content }
         }
+    }
+
+    /// ★ HOW FAR ONE POINT OF DRAG MOVES A ROW, PER KIND. Pure and static so the
+    /// feel is a value a test can pin rather than a literal buried in a gesture.
+    ///
+    /// The DEPTH's 0.05 mm/pt is the shipped scrub, and the expand matches it
+    /// deliberately — "an in-plane reach and a depth are the same kind of
+    /// quantity to a user" (`LatticeSlabExpand`). Density is in PERCENT, and
+    /// 0.5 %/pt puts the whole printable band (~5 %…90 %) inside a ~170 pt
+    /// drag, which is a comfortable thumb travel on the panel.
+    static func latticeRowScrubStep(_ kind: LatticeDrawerRow.Kind) -> Double {
+        switch kind {
+        case .density: return 0.5      // percent per point
+        case .expand:  return 0.05     // mm per point
+        case .depth:   return 0.05     // mm per point (its own drag uses this)
+        case .fact:    return 0        // a fact does not move
+        }
+    }
+
+    /// The generic drawer scrub: seed once, then track the translation. Rebakes
+    /// the strut preview ONCE, when the value settles — a bake is ~a second and
+    /// a drag writes every frame.
+    private func latticeRowScrub(kind: LatticeDrawerRow.Kind, seed: Double,
+                                 write: @escaping (Double) -> Void) -> some Gesture {
+        let step = Self.latticeRowScrubStep(kind)
+        return DragGesture(minimumDistance: 1)
+            .onChanged { v in
+                let s = latticeRowScrubSeed ?? seed
+                if latticeRowScrubSeed == nil { latticeRowScrubSeed = seed }
+                write(s + Double(v.translation.width) * step)
+            }
+            .onEnded { _ in
+                latticeRowScrubSeed = nil
+                refreshLatticeFaceCards()
+                if showStrutPreview { buildStrutScene() }
+            }
     }
 
     /// ★ §3c — ONE ROW PER SELECTABLE, each with its own lattice / no-lattice.
