@@ -528,7 +528,8 @@ public extension LatticeRegionEmission {
         groups: [SelectionGroup],
         roles: [UUID: LatticeGroupRole],
         primitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)],
-        includePrimitives: [(prim: ManualPrimitive, depthMM: Double)]) -> Result {
+        includePrimitives: [(prim: ManualPrimitive, depthMM: Double)],
+        groupDensities: [UUID: Double] = [:]) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
         for (p, d) in includePrimitives {
@@ -536,8 +537,16 @@ public extension LatticeRegionEmission {
         }
         for g in groups {
             guard let role = roles[g.id] else { continue }
+            // ★ The dialled density rides the re-lattice job too (task
+            // 2026-08-16-per-sector-density-override). Through the SAME gate as
+            // the optimize path, so the two cannot disagree about which regions
+            // may carry one.
+            let rho = density(for: g.id, role: role, densities: groupDensities)
             for (p, d) in primitives(g.id) {
-                if let s = spec(for: p, role: role, depthMM: d) { out.append(s) }
+                if var s = spec(for: p, role: role, depthMM: d) {
+                    s.relativeDensity = rho
+                    out.append(s)
+                }
             }
             skipped += g.faces.count
         }

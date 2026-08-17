@@ -1,0 +1,37 @@
+part        /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-face-regions-union-split-grid-c52969/7552104f-4810-42d6-9a11-b1d53bd1ee2c/scratchpad/d1/M2_verticalStand.step
+grid        128x31x118  spacing 1.7053 mm  voxels 468224
+regions     2, 25514 voxels between them
+
+=== 1. THE PER-VOXEL STATED-DENSITY FIELD, built ONCE per run ===
+membership sweep alone         1.096 ms   (this already happens: fit_cell_field)
++ writing the density          1.099 ms   (510280 voxels written)
+MARGINAL COST                  0.004 ms  <- what this task adds here
+
+=== 2. THE LAW'S EXTRA BRANCH, once per graded variant ===
+whole grid (468224 voxels)        0.5863 ms
+  (the branch is evaluated only for LATTICED voxels, so this is an upper bound)
+
+=== 3. THE PRE-SOLVE REFUSAL, once per run ===
+fit_region_cells for 2 regions     23.56 ms  (thinnest median extent 3.4106 mm)
+  ★ This is a DUPLICATE of work the grading step already does, moved ahead of
+     the solve. It buys a refusal in seconds instead of after minimize_plastic.
+
+HOW TO READ THIS: every number above is one-per-run or one-per-variant, against a
+solve that takes minutes per rung. Nothing here is inside an iteration.
+
+BUILD: CMAKE_BUILD_TYPE:STRING=Release — a bare
+cmake -S core -B build carries NO -O and has cost a whole measurement campaign
+on this project before, so the type is quoted with the numbers.
+
+TOTAL, in the shape the run pays it:
+  once per RUN      ~23.6 ms   (the pre-solve refusal) + 0.004 ms (the field)
+  once per VARIANT   ~0.59 ms  (the law's branch, upper bound)
+
+Against a solve that takes MINUTES per rung, and 4 rungs per run. The 23.6 ms
+is the price of learning in 15 seconds — rather than after minimize_plastic —
+that a density cannot print.
+
+★ MEASURED DIRECTLY, NOT DIFFERENCED. Two runs of a multi-hour solve were
+once differenced on this project to price a millisecond mechanism and gave
++26 s/iteration for something costing 0.0074 s — 3500x wrong. None of the
+numbers above come from subtracting one wall clock from another.

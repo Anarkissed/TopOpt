@@ -1,0 +1,63 @@
+=== THE SECTOR DENSITY SECTION, as the page renders it ===
+part: M2_verticalStand, face 15 split 1x2, both sectors 7.5 mm deep
+both sectors measure 13.64223442 mm through the body; profile width 0.42 mm
+
+--- untouched project (what a user sees before dialling anything) ---
+  Sector 1   [Auto] 14 %
+      14% · 2.73 mm cell · 0.42 mm strut · 5.0 cells per member
+      valid here: 14–90 %
+  Sector 2   [Auto] 14 %
+      14% · 2.73 mm cell · 0.42 mm strut · 5.0 cells per member
+      valid here: 14–90 %
+
+--- after dialling 25 % and 60 % — the task's headline ---
+  Sector 1          25 %
+      25% · 2.73 mm cell · 0.59 mm strut · 5.0 cells per member
+      valid here: 14–90 %
+  Sector 2          60 %
+      60% · 2.73 mm cell · 1.05 mm strut · 5.0 cells per member
+      valid here: 14–90 %
+
+--- a density core will REFUSE (6 %) ---
+  Sector 1          6 %
+      6% · 2.73 mm cell · 0.27 mm strut · 5.0 cells per member
+      valid here: 14–90 %
+      ⚠︎ 0.27 mm strut, under the profile's extrusion width — the lightest that prints here is 14%
+
+--- a region too thin to lattice at all (0.5 mm) ---
+  Sliver          30 %
+      no lattice fits this region
+      ⚠︎ this region cannot carry a lattice at any density
+      (no valid range offered: true)
+
+--- the one-line summary on the collapsed ladder row ---
+  nothing dialled "auto · 2 regions"
+  one dialled     "1 of 2 dialled"
+  both dialled    "25–60% across 2 regions"
+
+--- and the Optimize button, with a refusable density present ---
+  enabled: false
+  sub:     "Sector 1: 0.27 mm strut, under the profile's extrusion width"
+
+=== ★ THE APP, THE RUN, AND THE REFUSAL QUOTE THE SAME NUMBERS ===
+
+  quantity                    APP (this file)  THE RUN (run_info.json)  CLI REFUSAL
+  cell at extent 13.6422 mm   2.73 mm          2.728446884 mm           2.728446884 mm
+  strut at stated 0.25        0.59 mm          0.5915954957 mm          —
+  strut at stated 0.60        1.05 mm          1.046564014 mm           —
+  strut at stated 0.06        0.27 mm          (refused)                0.2740042783 mm
+  lightest that prints        14 %             0.1385609912 (receipt)   0.1385609912
+  cells per member            5.0              5                        —
+
+The app rounds for display; every underlying value is core's, through ONE
+bridge call onto the same functions fill_fit_region_cell uses. An app-side
+copy of the octet strut law was 1.4x off core's once, and a control whose
+readout disagrees with the run is worse than no readout.
+
+Note the Auto row: 14 % gives a 0.42 mm strut — EXACTLY the profile's
+extrusion width. That is what 'the lightest density that prints here'
+means, and it is why the valid range starts there.
+
+WHAT THIS IS NOT: a device screenshot. These are the model's own outputs,
+which decide every number and word on those rows, rendered through the
+real bridge. The section has NOT been exercised on a device or simulator.

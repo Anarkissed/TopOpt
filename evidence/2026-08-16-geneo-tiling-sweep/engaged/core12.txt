@@ -1,0 +1,1 @@
+core=12  N_t=718  warm_solves=3  warm_tails=[204, 278, 1144]  median_warm_tail=278  cold_build_tail=435

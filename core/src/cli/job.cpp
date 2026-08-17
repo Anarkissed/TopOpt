@@ -1,5 +1,7 @@
 #include "topopt/job.hpp"
 
+#include "topopt/lattice.hpp"
+
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
 
 #include <cctype>
@@ -273,6 +275,13 @@ const JsonValue& require_key(const JsonValue& v, const std::string& key,
   if (found == nullptr)
     schema_fail("missing required key \"" + key + "\" in " + where);
   return *found;
+}
+
+// Short %g text for a number inside a schema diagnostic.
+std::string fmt_g(double v) {
+  char b[32];
+  std::snprintf(b, sizeof(b), "%.4g", v);
+  return std::string(b);
 }
 
 std::string require_string(const JsonValue& v, const std::string& name) {
@@ -1243,7 +1252,7 @@ JobDescription parse_job(const std::string& json_text) {
       for (const JsonValue& rv : regs->arr) {
         require_object(rv, "a lattice region");
         reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
-                                 "region_id"},
+                                 "region_id", "relative_density"},
                             "a lattice region");
         JobLatticeRegion reg;
         // Optional provenance: the B-rep face this region was spawned from, so
@@ -1283,6 +1292,30 @@ JobDescription parse_job(const std::string& json_text) {
         } else if (reg.kind == "region") {
           schema_fail("a \"region\" lattice region must give a \"region_id\" "
                       "naming one of \"loads.face_regions\"");
+        }
+        // ★ THE STATED DENSITY (task 2026-08-16-per-sector-density-override).
+        // Optional; absent means DERIVED. Validated against the library band
+        // HERE, because a density outside it has no measured tensor and the
+        // grading law would silently clamp it — turning the user's instruction
+        // into a different part, which §2(c) forbids.
+        if (const JsonValue* dv = find_key(rv, "relative_density")) {
+          if (reg.role != "include")
+            schema_fail(
+                "only an \"include\" lattice region may state a "
+                "\"relative_density\" — an exclude region is kept SOLID and has "
+                "no lattice to set a density for");
+          reg.relative_density =
+              require_number(*dv, "lattice region relative_density");
+          const double lo = lattice_rho_min(LatticeTopology::Octet);
+          const double hi = lattice_rho_max(LatticeTopology::Octet);
+          if (!(reg.relative_density >= lo && reg.relative_density <= hi))
+            schema_fail(
+                "a lattice region \"relative_density\" must lie in the "
+                "certifiable band [" + fmt_g(lo) + ", " +
+                fmt_g(hi) + "] (got " +
+                fmt_g(reg.relative_density) +
+                "). Outside it the homogenized tensor has no measurement behind "
+                "it, so the density cannot be certified at any cell.");
         }
         const JsonValue& gv = require_object(
             require_key(rv, "geometry", "a lattice region"),

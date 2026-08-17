@@ -185,7 +185,9 @@ public struct LatticePage: View {
             // the width the run will actually use.
             lineWidthMM: project.printParams.strutLineWidthMM,
             cellSummary: cellSummaryText,
-            designBoxActive: project.designBox.isActive)
+            designBoxActive: project.designBox.isActive,
+            densityRefusals:
+                LatticeSectorDensity.refusals(project.latticeSectorDensityRows()))
     }
 
     private var clearanceCount: Int { project.clearanceSpecs().count }
@@ -719,6 +721,11 @@ public struct LatticePage: View {
             // when nothing is protected, so a part with no Protect affix sees the
             // page exactly as before.
             protectedRegionsSection
+            // 4c · SECTOR DENSITY (task 2026-08-16-per-sector-density-override,
+            // §3) — dial THIS region to 25% and its neighbour to 40% at the same
+            // depth. Hidden entirely when no group carries a lattice-include
+            // role, so a part that declares no regions sees the page unchanged.
+            sectorDensitySection
             // 5 · Boundary — the single three-way question, INLINE (L15).
             VStack(alignment: .leading, spacing: DS.Space.xs) {
                 Text("Boundary").font(.system(size: 11.5))
@@ -1475,6 +1482,93 @@ public struct LatticePage: View {
             if let v, v > 0 { write(v) }
         }
         .accessibilityLabel("\(title): \(text). Tap to type.")
+    }
+
+    // MARK: - Sector density (task 2026-08-16-per-sector-density-override, §3)
+    //
+    // ★ IT LIVES ON THE LATTICE PAGE, NOT THE TO PAGE. A density is a property of
+    // the LATTICE inside a region — the TO page's groups answer "what is this
+    // face for", and a region there may not be latticed at all. Putting the field
+    // where the lattice is declared is also what keeps "Auto" meaningful: auto is
+    // core's derivation from this page's own cell mode, which the TO page cannot
+    // see.
+    //
+    // ★ AUTO IS THE DEFAULT AND IT IS NOT A NUMBER. An untouched row shows the
+    // density core WILL derive, drawn in the secondary weight, and writes NOTHING
+    // to the project — so the emitted job carries no `relative_density` key and is
+    // byte-identical to a pre-task one. Tapping the value opens the same numeric
+    // keypad every other number on this page uses; clearing it returns to Auto.
+    @ViewBuilder private var sectorDensitySection: some View {
+        let rows = project.latticeSectorDensityRows()
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Sector density").font(.system(size: 11.5))
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                    Spacer()
+                    Text(LatticeSectorDensity.summary(rows))
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                }
+                ForEach(rows) { r in sectorDensityRow(r) }
+                // The refusals core WOULD raise, raised here instead — before the
+                // import rather than after it. Named per region, never a count.
+                ForEach(LatticeSectorDensity.refusals(rows), id: \.name) { f in
+                    Text("\(f.name): \(f.why)")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(DS.Color.warning.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DS.Space.s)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                .fill(DS.Color.fillSubtle.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
+    }
+
+    @ViewBuilder private func sectorDensityRow(_ r: LatticeSectorDensity.Row) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+                Text(r.name).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
+                Spacer(minLength: DS.Space.xs)
+                if r.isAuto {
+                    Text("Auto").font(.system(size: 11))
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                }
+                tappableNumber(
+                    key: "sector-density-\(r.id)",
+                    text: "\(Int((r.derivation.relativeDensity * 100).rounded())) %",
+                    title: "\(r.name) density", unit: "%",
+                    seed: r.derivation.relativeDensity * 100) { v in
+                        // The keypad speaks percent; the project and the job speak
+                        // fraction, as core's band does. ONE conversion, here.
+                        project.lattice.groupDensities[r.id] = v / 100
+                    }
+                if !r.isAuto {
+                    Button {
+                        project.lattice.groupDensities.removeValue(forKey: r.id)
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                    .accessibilityLabel("Return \(r.name) to Auto")
+                }
+            }
+            Text(r.readout)
+                .font(.system(size: 10.5))
+                .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+            if let range = r.validRange {
+                Text(String(format: "valid here: %.0f–%.0f %%",
+                            range.lowerBound * 100, range.upperBound * 100))
+                    .font(.system(size: 10))
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.30).color)
+            }
+        }
     }
 
     private var bandNote: String {

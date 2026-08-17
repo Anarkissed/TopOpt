@@ -135,24 +135,11 @@ public enum RelatticeJobBuilder {
             block["min_extrudable_width_mm"] = w
         }
         if !lat.regions.isEmpty {
-            block["regions"] = lat.regions.map { r -> [String: Any] in
-                let geometry: [String: Any] = r.kind == .face
-                    ? [
-                        "origin": [r.origin.x, r.origin.y, r.origin.z],
-                        "normal": [r.normal.x, r.normal.y, r.normal.z],
-                        "half_u_mm": r.halfUMM,
-                        "half_w_mm": r.halfWMM,
-                        "depth_mm": r.depthMM,
-                    ]
-                    : [
-                        "axis_point": [r.axisPoint.x, r.axisPoint.y, r.axisPoint.z],
-                        "axis_dir": [r.axisDir.x, r.axisDir.y, r.axisDir.z],
-                        "radius_mm": r.radiusMM,
-                        "half_length_mm": r.halfLengthMM,
-                    ]
-                return ["role": r.role.rawValue, "kind": r.kind.rawValue,
-                        "geometry": geometry]
-            }
+            // ONE encoder, shared with RemoteRunner (task 2026-08-16-per-sector-
+            // density-override). This copy had already drifted — it dropped
+            // `face_id` — which is the one-sided edit this file's own grading
+            // comment above warns about, in the very next block.
+            block["regions"] = lat.regions.map { $0.wireDictionary }
         }
         // Absent unless asked for, so a real re-lattice job is byte-identical to
         // the one this builder has always produced.

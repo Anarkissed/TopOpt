@@ -285,16 +285,32 @@ int main(int argc, char** argv) {
                 arm.name.c_str(), v.requested_volume_fraction,
                 v.report.margin.worst_case, v.accepted ? 1 : 0);
 
+  // ── §1(b) of the tiling sweep asks for BUILD SECONDS per tiling, and the
+  // basis build is the one cost that a coarser tiling makes WORSE (the local
+  // eigenproblems grow with the cube of the core size) while it makes the
+  // per-solve refresh cheaper. It was not in this line because no prior task
+  // needed it split out from the run's wall.
+  //
+  // ★ IT IS A WALL FIGURE AND IS LABELLED AS ONE. `geneo_coarse_matvecs` beside
+  // it is the same cost in the unit a contended host cannot change — the
+  // refresh's N_t full operator applies — so a reader on a loaded machine has a
+  // deterministic number to use and does not have to trust the seconds.
   std::printf(
       "ARM_SUMMARY arm=%s total_cg=%lld design_iters=%lld wall_s=%.1f "
       "hier_attempts=%lld rearm_attempts=%lld rearm_carries=%lld "
       "geneo_armed=%lld geneo_declined=%lld geneo_dim=%d geneo_builds=%lld "
-      "alg1=%d\n",
+      "geneo_build_s=%.1f geneo_refresh_s=%.1f geneo_apply_s=%.1f "
+      "geneo_coarse_matvecs=%lld geneo_basis_mb=%.2f alg1=%d\n",
       arm.name.c_str(), total_cg, design_iters, wall_s, hier_attempts,
       topopt::fea_matfree_mg_rearm_attempts(),
       topopt::fea_matfree_mg_rearm_carries(), topopt::fea_geneo_armed_solves(),
       topopt::fea_geneo_declined_solves(), topopt::fea_geneo_basis_dim(),
       topopt::fea_geneo_basis_builds(),
+      topopt::fea_detail::geneo_probe_build_seconds(),
+      topopt::fea_detail::geneo_probe_refresh_seconds(),
+      topopt::fea_detail::geneo_probe_apply_seconds(),
+      topopt::fea_detail::geneo_probe_coarse_matvecs(),
+      static_cast<double>(topopt::fea_geneo_basis_bytes()) / (1024.0 * 1024.0),
       topopt::fea_mg_algebraic_level1_enabled() ? 1 : 0);
   std::fflush(stdout);
   return 0;

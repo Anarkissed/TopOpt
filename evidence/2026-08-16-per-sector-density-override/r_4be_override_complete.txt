@@ -1,0 +1,35 @@
+=== OVERRIDE ARM, COMPLETE — sector 200 states 0.25, sector 201 states 0.60, BOTH at depth 7.5 mm ===
+    distinct_cells=1  out_of_regime_voxels=1888  no_derivation_voxels=0  density_raised=0
+    rho_min_used=0.25  rho_max_used=0.6  strut 0.5915954957 .. 1.046564014
+  idx  extent_mm    cell_mm   STATED   derived  IN FORCE  strut_mm  c/mem  regime  latticed
+  -----------------------------------------------------------------------------------------
+    0    13.6422     2.7284    auto       nan    0.2500    0.5916   5.00   ok     16308
+    1    13.6422     2.7284    auto       nan    0.6000    1.0466   5.00   ok      9206
+
+EVERY RUNG OF THE LADDER, all four ACCEPTED:
+  variant   rho range        strut range (mm)    latticed   mass
+  026       0.2500..0.6000   0.5916..1.0466        25514    320.81 g   accepted
+  038       0.2500..0.6000   0.5916..1.0466        25514    363.09 g   accepted
+  052       0.2500..0.6000   0.5916..1.0466        25514    413.66 g   accepted
+  068       0.2500..0.6000   0.5916..1.0466        25514    471.57 g   accepted
+
+★ THE TWO STATED DENSITIES ARE HELD ON EVERY RUNG. The mass moves with the
+  rung (the SIMP design gets lighter); the lattice the two sectors carry does
+  not drift, because the density is a property of the REGION now, not of the
+  run. 16308 + 9206 = 25514 latticed voxels, split per sector.
+
+★ density_raised_for_print_voxels = 0. NOT ONE VOXEL was silently raised to
+  make it printable. That is the positive statement behind "no silent clamp";
+  the field exists precisely to make a silent raise visible, and it reads 0.
+
+★ no_derivation_voxels = 0 — every candidate voxel got a derivation.
+  out_of_regime_voxels = 1888 is the part's OTHER material (printed_outside_
+  regions = 42572), not these sectors: both regions report out_of_regime=false
+  and sit at exactly 5.00 cells per member, the certification floor.
+
+CAVEAT, STATED PLAINLY: the STATED/derived columns above read 'auto'/nan
+because this run's process exec'd at 16:21:26, BEFORE the receipt gained
+stated_relative_density / derived_relative_density. The densities in force
+(0.25, 0.60) are the run's own numbers and are not affected. The new receipt
+fields are verified by the unit suite but NOT yet end-to-end; the control and
+ramp runs, on the current binary, are what will show them.

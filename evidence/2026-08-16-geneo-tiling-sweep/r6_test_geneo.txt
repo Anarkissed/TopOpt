@@ -1,0 +1,11 @@
+plain: 628 iterations
+armed#1: 591 iterations, action=3, Nt=288, burn=500
+armed#2: 628 iterations, action=5, burn=628, threshold=1258 (expected 1258)
+armed#3 (moduli moved, gate opened): 248 iterations, action=2
+via multigrid entry: #1 638 iters action=3 dim=288 burn=500 thr=0 | #2 795 iters action=5 dim=288 burn=795 thr=1352
+R6 slab 96x4x96 core=8: tiles 12x1x12 = 144 (min extents 8,4,8)
+R6 his part 128x31x118 core=8: tiles 16x4x15 = 960
+R6 his part 128x31x118 core=12: tiles 11x3x10 = 330
+R6 his part 128x31x118 core=16: tiles 8x2x8 = 128
+R6 his part 128x31x118 core=24: tiles 6x2x5 = 60
+test_geneo: 55 checks, 0 failures

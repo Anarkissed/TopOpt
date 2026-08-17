@@ -2136,6 +2136,36 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
   return b;
 }
 
+LatticeRegionDerivation lattice_region_derivation(
+    const std::string& topology, double member_width_mm,
+    double min_extrudable_width_mm, double stated_relative_density) {
+  LatticeRegionDerivation d;
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return d;
+  if (!(member_width_mm > 0.0) || !(min_extrudable_width_mm > 0.0)) return d;
+  d.valid = true;
+  d.rho_max = topopt::lattice_rho_max(topo);
+  const topopt::LatticeCellDerivation w = topopt::lattice_derive_cell_for_member(
+      topo, member_width_mm, min_extrudable_width_mm);
+  // FEASIBLE is percolation, not accuracy — the same boundary run_job draws, and
+  // for the same reason: buildable-and-uncertifiable is a verdict, not a refusal.
+  d.feasible = w.feasible_percolation;
+  if (!d.feasible) return d;
+  const double n_star = topopt::lattice_cells_per_member_min(topo);
+  d.cell_mm = std::max(member_width_mm / n_star, w.min_printable_cell_mm);
+  const double rho = topopt::lattice_min_density_for_strut(topo, d.cell_mm,
+                                                           min_extrudable_width_mm);
+  d.derived_relative_density = rho >= 0.0 ? rho : d.rho_max;
+  d.relative_density = stated_relative_density > 0.0 ? stated_relative_density
+                                                     : d.derived_relative_density;
+  if (topo == topopt::LatticeTopology::Octet)
+    d.strut_mm = topopt::octet_strut_diameter_mm(d.relative_density, d.cell_mm);
+  d.cells_per_member = member_width_mm / d.cell_mm;
+  d.out_of_regime = d.cells_per_member < n_star;
+  d.prints = d.strut_mm + 1e-12 >= min_extrudable_width_mm;
+  return d;
+}
+
 std::vector<std::string> lattice_certifiable_topologies() {
   // The core certification library's covered set, in core order — mirrored directly
   // from core so it can never drift from the enum (handoff
