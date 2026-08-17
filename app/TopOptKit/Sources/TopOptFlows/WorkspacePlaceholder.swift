@@ -8095,8 +8095,19 @@ public struct WorkspacePlaceholder: View {
     /// ★ WHAT IT NEEDS, AND IT SAYS SO WHILE DISABLED — the same rule Optimize
     /// follows. A lattice run needs a lattice to build: the mode on, and at least
     /// one selectable actually set to Lattice.
+    /// ★ AND IT NEEDS A WORKER, WHICH IT SAYS RATHER THAN PRETENDS.
+    ///
+    /// `lattice_part` is a JOB MODE: it reaches core through the job document,
+    /// which only the LAN path writes (`RemoteRunner.buildJobJSON`). The
+    /// ON-DEVICE bridge runs `run_minimize_plastic` and takes no mode at all — so
+    /// an on-device "Lattice" would silently run an OPTIMIZE. That is precisely
+    /// the defect class this whole task exists to remove (a control that looks
+    /// like one decision and performs another), so the button is DISABLED there
+    /// and says why, rather than doing the wrong thing quietly.
     var canLatticeThis: Bool {
-        project.lattice.enabled && !project.latticeJobRegions().regions.isEmpty
+        compute.activeRemote != nil
+            && project.lattice.enabled
+            && !project.latticeJobRegions().regions.isEmpty
     }
 
     private var latticeThisSummary: String {
@@ -8104,6 +8115,8 @@ public struct WorkspacePlaceholder: View {
         let n = project.latticeJobRegions().regions
             .filter { $0.role == .include }.count
         if n == 0 { return "nothing set to lattice" }
+        // ★ The honest blocker, named — not "unavailable".
+        guard compute.activeRemote != nil else { return "needs a LAN worker" }
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 

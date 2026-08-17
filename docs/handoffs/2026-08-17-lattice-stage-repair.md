@@ -377,6 +377,15 @@ can ask the screen to DO, not a modifier on the first. It runs core's new
 ONE key changed, so the load case, resolution, material, protections and lattice
 block are the ones the user configured rather than re-authored.
 
+★★ **AND IT REQUIRES A LAN WORKER, WHICH IT SAYS.** `lattice_part` is a JOB MODE:
+it reaches core through the job document, and only the LAN path writes one
+(`RemoteRunner.buildJobJSON`). The ON-DEVICE bridge calls `run_minimize_plastic`
+and takes no mode at all — so an on-device "Lattice" would have silently run an
+OPTIMIZE. That is exactly the defect class this task exists to remove, so the
+button is DISABLED without a worker and its sub-line reads "needs a LAN worker"
+rather than going quiet. Wiring the mode through the on-device bridge is the
+obvious follow-up and is NOT done.
+
 ### 7 — CAD surfaces is a DRAWER, not a deletion
 
 ★ **The removal brief was wrong about what this is, and the finding was reported
