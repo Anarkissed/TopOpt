@@ -1,0 +1,54 @@
+=== 1. THE PART ===
+part                 Fixtures/M2_verticalStand.step
+faces                78  (78 with area)
+median face area     167.8 mm^2
+kinds                cylinder 12  other 30  plane 36
+
+=== 2. PR 331'S PART-LEVEL BLEND FILTER (the 24-of-78) ===
+threshold            41.95 mm^2  (0.25 x median)
+blend  (small + 2 larger)   24 faces   <- PR 331 measured 24
+kind == other               30 faces   <- the NAIVE reading (PR 331: 30)
+`other` MISSES              13 of the blend matches   <- PR 331: 13
+`other` OVER-CATCHES        19 faces the blend filter rejects   <- PR 331: 19
+
+=== 3. THE DOUBLE TAP, ONE SEED AT A TIME ===
+(`surfaceSimilarFilter(to:)` — the shipped signature. Its threshold is
+ read off the TAPPED face, so the count is per seed, not per part.)
+
+seeds that yield a rule     78 of 78 (0 have no area and yield none)
+matches  min/median/max     1 / 7 / 32
+mean                        9.81 faces  (12.6% of the part)
+  blend             seeds 31   min/med/max 2 / 20 / 32
+  bore (radius)     seeds 12   min/med/max 1 / 6 / 6
+  kind + size band  seeds 35   min/med/max 1 / 6 / 10
+
+count -> how many seeds give it
+  1   ##### 5
+  2   ###### 6
+  3   ###### 6
+  4   ####### 7
+  5   ### 3
+  6   ############ 12
+  7   ##### 5
+  8   #### 4
+  9   ###### 6
+  10  ##### 5
+  13  ## 2
+  16  # 1
+  20  ##### 5
+  23  # 1
+  24  ### 3
+  25  # 1
+  28  # 1
+  30  ### 3
+  32  ## 2
+
+=== 4. WHY THE NUMBER DIFFERS FROM 24 ===
+PR 331's 24 is ONE filter over the WHOLE part at 0.25 x median.
+The double tap derives a filter FROM THE TAP, so on this part it
+gives 1-32 faces depending on which face is tapped, median 7.
+Both numbers are reproduced above from the same part, so neither is
+being taken on trust. The 24 is unchanged (24); the
+per-seed spread is what a TAP can produce and is new information.
+A KIND-ONLY filter's worst seed still matches 36 of 78 faces
+(46% of the model) — the wrong answer PR 331 proved wrong, not used here.

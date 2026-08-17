@@ -1,0 +1,39 @@
+=== R5 — THE WHOLE PACKAGE SUITE ===
+
+	 Executed 1792 tests, with 24 tests skipped and 1 failure (0 unexpected) in 512.957 (513.080) seconds
+
+--- the one failure, in full ---
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/app/TopOptKit/Tests/TopOptFlowsTests/LatticePageRound2Tests.swift:318: error: -[TopOptFlowsTests.LatticePageRound2Tests testCoreCLIParsesTheEmittedRegions] : XCTAssertFalse failed - core rejected the emitted regions schema: …topopt-cli: job.json: unknown key "plsm" in the job
+
+--- AND IT IS NOT MINE. Proven, not argued: ---
+  the SAME test fails with this branch's changes REVERTED
+  (git apply -R of the whole diff against the merge base, then re-applied):
+
+    Executed 1 test, with 1 failure (0 unexpected) in 0.373 seconds
+    LatticePageRound2Tests.swift:318: core rejected the emitted regions
+    schema: …topopt-cli: job.json: unknown key "plsm" in the job
+
+  CAUSE: a STALE LOCAL CLI in this worktree, not a schema defect.
+    -rwxr-xr-x@ 1 nadim  staff  2752328 Aug  7 23:13 core/build/topopt-cli
+    core/ last moved 2026-08-14 (PR 336); the binary was built 2026-08-07.
+    The job emitter on main writes a "plsm" key the 7 Aug binary predates.
+    The test SKIPS when core/build/topopt-cli is absent, which is why CI is green.
+
+  AND THIS BRANCH CANNOT HAVE CAUSED IT: it mentions 'plsm' zero times
+  and touches no job emission —
+    occurrences of 'plsm' in the whole diff: 0
+
+--- R5 ENUMERATION: what already worked, and still does ---
+    wireframe            untouched; testTheWireframeAndItsXrayReachAllThreeStages
+    x-ray                untouched; same test
+    undo / redo          ungated by construction; testUndoAndRedoSurvivePencilMode…
+                         + demonstrated on his part (06, 07)
+    pattern tool         untouched; still uses snap — testThePatternRotationStill…
+    the cut              unchanged but for the angle it is handed;
+                         testAFreeAngleReachesTheCutPlane
+    selections list      untouched; no file under it appears in the diff
+    tool tray            five tools, same order/icons/hints — testTheToolTrayIsUnchanged
+    default tool         still select — testTheDefaultToolIsStillSelect
+    quarter-turn button  still lands on a detent — testTheQuarterTurnButton…
+    tap latency          unchanged off the Select tool: the double-tap recognizer is
+                         DISABLED there, so require(toFail:) is satisfied instantly

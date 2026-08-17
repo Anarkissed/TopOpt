@@ -71,3 +71,46 @@ public enum SurfaceTool: Int, CaseIterable, Hashable, Sendable {
     /// why it is the default; the rest all commit through a confirm.
     public var edits: Bool { self != .select }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: ★ §1 — WHAT A TAP MEANS
+
+extension SurfaceTool {
+
+    /// One tap's meaning, given how many taps it was and what is armed.
+    public enum TapMeaning: Equatable, Sendable {
+        /// §1(a) — one tap, Select armed: light the face under it and nothing else.
+        case selectOneFace
+        /// §1(b) — two taps, Select armed: every face like it joins the selection.
+        case selectSimilarFaces
+        /// One tap with a tool armed: that tool aims at the face.
+        case toolAction
+        /// Nothing happens — the second tap of a double under a tool that has no
+        /// second meaning for one, or a tap outside the Surface stage.
+        case ignored
+    }
+
+    /// ★ §1(e) — HOW A SELECT-TOOL TAP IS TOLD APART FROM A CUT OR PATTERN TAP.
+    ///
+    /// ★ ONE TABLE, ASKED TWICE. The view asks it to decide whether to MOUNT a
+    /// double-tap recognizer at all, and the handler asks it again before acting.
+    /// That is deliberate: the gesture layer and the effect must not be able to
+    /// disagree about which tool is armed, and gating only the recognizer would
+    /// leave the effect standing if the mount condition were ever loosened.
+    ///
+    /// ★ AND WHY MOUNTING MATTERS AS WELL AS GUARDING. A single tap can only be
+    /// delivered once its double-tap sibling has failed, so a mounted double tap
+    /// costs every pick the system's double-tap interval. Under a cut or a pattern
+    /// there is no second meaning to wait for, so nothing is mounted and those
+    /// tools keep the immediate tap they have today.
+    public static func meaning(taps: Int, tool: SurfaceTool,
+                               surfaceStage: Bool) -> TapMeaning {
+        // The rule belongs to the Surface stage. Elsewhere the workspace's own
+        // pick handling is untouched by any of this.
+        guard surfaceStage else { return .ignored }
+        if taps >= 2 {
+            return tool == .select ? .selectSimilarFaces : .ignored
+        }
+        return tool == .select ? .selectOneFace : .toolAction
+    }
+}

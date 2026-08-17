@@ -1,0 +1,14 @@
+=== ADDENDUM — THE WHOLE PACKAGE SUITE, AFTER THE CLI REBUILD ===
+
+	 Executed 1795 tests, with 24 tests skipped and 0 failures (0 unexpected) in 712.360 (712.518) seconds
+  swift test's own exit code: 0
+
+★ ZERO FAILURES. PR 339 reported 1792 tests / 1 failure; that one was the stale
+  local topopt-cli (R6), now rebuilt, so the suite is clean rather than merely
+  explained. +3 net tests from the addendum (2 renamed, 3 new).
+
+--- the CLI rebuild, verified rather than trusted ---
+  target        topopt_cli   (NOT topopt-cli — that no-ops silently, 5th time)
+  sha256        66d1c76ca005b4e8...  ->  3b6b0bbe767624f0...
+  mtime         Aug  7 23:13:38 2026  ->  Aug 17 05:54:55 2026
+  the test      LatticePageRound2Tests.testCoreCLIParsesTheEmittedRegions: PASSES

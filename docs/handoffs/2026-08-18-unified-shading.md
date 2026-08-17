@@ -4,6 +4,29 @@ Task: `unified-shading`. Branch `claude/unified-shading-lattice-shell-4ac47b`,
 merge base `500833ed`. Evidence: `evidence/2026-08-18-unified-shading/`.
 Device: **Apple M2 Pro, macOS, headless — NOT the maintainer's iPad.** See R3.
 
+> **Merged with `origin/main` (`849a6cf2`, PR #339 `surface-stage-gestures`) after the
+> work above.** Two conflicts, both in the SwiftUI layer and both the same shape: that
+> task and this one each appended fields to `MeshViewInputs`, parameters to the three
+> `MetalMeshView` initialisers and arguments to the workspace's call site. **Resolved as
+> the union in every case** — nothing was dropped from either side, and no behaviour was
+> chosen between them. All of that task's changes to `MetalMeshView.swift` land at line
+> 3729 and beyond (the inputs struct, the representables and the gesture extension); every
+> change in this task's renderer work is above it, so the two never touched the same code,
+> only the same parameter lists. The one judgement call: the non-MetalKit `MetalMeshView`
+> stub does **not** get a `latticeLayer:` parameter, because `LatticeLayerInputs` carries a
+> `LatticeSDFScene` and that type is MetalKit-only — it cannot be mirrored into that branch
+> the way `DetentPulse` and `BrushPhase` are. Nothing is lost: `WorkspacePlaceholder` holds
+> a `LatticeSDFScene` in its own `@State` and so is MetalKit-only regardless of the stub.
+> Post-merge: **1807 executed, 28 skipped, 8 failures** — the same three pre-existing 3MF
+> cases, and both tasks' suites pass (`UnifiedShadingTests` 9/9,
+> `SurfaceStageGesturesTests` + `SurfaceStageTests` + `SurfaceRound7Tests` all green).
+> The shell's frame digest is **unchanged** by the merge (see R7). One flake seen and
+> chased down: `LatticeProxyProfileTests.testProxyVsRealOnMaintainerBracket` reported a
+> 1.59× ON/OFF ratio against its 1.35 bound on one full-suite run and 0.95–1.08× on five
+> subsequent runs including a second full suite — its own comment documents exactly this
+> flake history (0.97× then 1.43× on one commit), and it measures a renderer path with no
+> lattice layer in it.
+
 The maintainer's complaint was *"I want something that looks like it could be a PART
 of the model — NOT something that looks literally pasted on top of it."* The task's
 diagnosis was that the shell and the lattice were being lit, occluded, depth-tested
