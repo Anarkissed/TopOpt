@@ -726,11 +726,18 @@ public final class ProjectModel: ObservableObject {
         LatticeSlabExpand.clamp(lattice.selectableExpandMM[ref.key] ?? 0)
     }
 
-    /// Write one selectable's in-plane expand, clamped. 0 CLEARS it — "exactly
-    /// the face" must be spellable, and it is the default every older project has.
+    /// Write one selectable's in-plane expand, clamped. ZERO CLEARS it —
+    /// "exactly the face" must be spellable, and it is the default every older
+    /// project has.
+    ///
+    /// ★ AND IT MAY BE NEGATIVE (maintainer, 2026-08-17: "Can we make the
+    /// expansion *also* take a negative value? I'd like to see us also be able
+    /// to make it smaller in the x/y axis as well"). So the clear test is `== 0`
+    /// and not `<= 0` — the old spelling would have silently discarded every
+    /// shrink and left the drawer reading 0.0 mm after a leftward drag.
     public func writeLatticeExpandMM(_ ref: LatticeSelectableRef, mm: Double) {
         let v = LatticeSlabExpand.clamp(mm)
-        if v <= 0 { lattice.selectableExpandMM.removeValue(forKey: ref.key) }
+        if v == 0 { lattice.selectableExpandMM.removeValue(forKey: ref.key) }
         else { lattice.selectableExpandMM[ref.key] = v }
     }
 

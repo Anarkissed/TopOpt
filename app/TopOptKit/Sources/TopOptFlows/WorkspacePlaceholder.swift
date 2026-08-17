@@ -2676,39 +2676,13 @@ public struct WorkspacePlaceholder: View {
             .ignoresSafeArea(.keyboard)
     }
 
-    /// The strut-preview toggle chip — shows the ACTUAL lattice geometry, raymarched
-    /// with zero triangles (handoff 2026-07-29-lattice-preview). Off by default.
-    private var strutPreviewChip: some View {
-        Button {
-            if showStrutPreview {
-                showStrutPreview = false
-            } else {
-                showStrutPreview = true
-                if strutScene == nil { buildStrutScene() }
-            }
-        } label: {
-            HStack(spacing: DS.Space.xs) {
-                Image(systemName: "cube.transparent").font(.system(size: 12, weight: .bold))
-                Text(showStrutPreview ? "Struts · on" : "Struts")
-                    .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
-            }
-            // ★ §4(c) — NOT PURPLE. This chip read its tint off the DENSITY RAMP
-            // (`densityColor(0.75)`), which is where the purple chrome came from.
-            // The ramp is the LATTICE'S colour language and belongs on the
-            // lattice itself; a toggle chip is chrome and wears the accent (S7).
-            .foregroundStyle(showStrutPreview
-                ? DS.Color.accent.color
-                : DS.Color.textSecondary.color)
-            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
-            .background(Capsule().fill(DS.Surface.panel.color)
-                .overlay(Capsule().strokeBorder(
-                    (showStrutPreview ? DS.Color.accent.opacity(0.6)
-                                      : DS.Color.strokeSubtle).color, lineWidth: 1)))
-        }
-        .buttonStyle(.plain)
-        .dsShadow(DS.Shadow.panel)
-        .help("Show the actual strut lattice, raymarched live — a preview of the geometry, not the exported mesh.")
-    }
+    // ★ `strutPreviewChip` IS GONE, NOT ORPHANED (maintainer, 2026-08-17: "I have
+    // changed my mind regarding where to put the lattice preview view"). Its one
+    // call site inside the Selections panel was removed and the toggle is now the
+    // third `viewModeButton` under the position gizmo, so it wears the same
+    // chrome as the wireframe and the x-ray rather than resembling them. A
+    // private view kept alive with no caller is exactly the dead affordance this
+    // page has been shedding.
 
     /// Bake the strut-preview scene (occupancy + exact part SDF + segment soup) OFF
     /// the main thread — ~a second on a big part, once per mesh/lattice-type/result
@@ -4504,12 +4478,40 @@ public struct WorkspacePlaceholder: View {
     /// The two toggles, SIDE BY SIDE with padding between them, in the slot
     /// directly under the position gizmo.
     @ViewBuilder private var viewModeToggles: some View {
-        HStack(spacing: DS.Space.s) {
-            viewModeButton("grid", label: "Wireframe", on: surfaceWireframeOn) {
-                surfaceWireframeOn.toggle()
+        VStack(alignment: .trailing, spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.s) {
+                viewModeButton("grid", label: "Wireframe", on: surfaceWireframeOn) {
+                    surfaceWireframeOn.toggle()
+                }
+                viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
+                    surfaceXrayOn.toggle()
+                }
             }
-            viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
-                surfaceXrayOn.toggle()
+            // ★★ THE LATTICE PREVIEW IS A *VIEW*, SO IT LIVES WITH THE VIEWS
+            // (maintainer, 2026-08-17: "I have changed my mind regarding where to
+            // put the lattice preview view. It should be next to the other views
+            // below the position gizmo. Can you place it below the other two and
+            // only in the Lattice stage?").
+            //
+            // ★ AND IT IS THE SAME BUTTON as the wireframe and the x-ray, not a
+            // chip that resembles one: same `viewModeButton`, same 40 pt square,
+            // same on-tint. It was a capsule chip inside the Selections panel,
+            // which is where a SETTING belongs; showing the struts changes
+            // nothing about the job, so it belongs here.
+            //
+            // ★ LATTICE STAGE ONLY, and only once a lattice is configured —
+            // `visible.latticeControls` is the stage column, and there is
+            // nothing to preview with lattice mode off.
+            if visible.latticeControls, project.lattice.enabled {
+                viewModeButton("cube.transparent", label: "Lattice preview",
+                               on: showStrutPreview) {
+                    if showStrutPreview {
+                        showStrutPreview = false
+                    } else {
+                        showStrutPreview = true
+                        if strutScene == nil { buildStrutScene() }
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -5231,7 +5233,14 @@ public struct WorkspacePlaceholder: View {
                     // for the active group's selectables and nowhere else.
                     if latticeExpandHandleIsVisible(plane),
                        let world = latticeExpandAnchor(plane),
-                       let ex = proj.project(settledWorld(world)) {
+                       let raw = proj.project(settledWorld(world)) {
+                        // ★ AND THEN PUSHED CLEAR OF THE DEPTH KNOB IN SCREEN
+                        // SPACE. The millimetre offset makes the knob ride out
+                        // with the value; this makes the two never touch at any
+                        // zoom, which a millimetre offset cannot promise.
+                        let ex = proj.project(settledWorld(plane.handle.anchor))
+                            .map { LatticeSlabExpand.separated(knob: raw, from: $0) }
+                            ?? raw
                         latticeExpandKnob(active: draggingExpandPlane == plane.id)
                             .frame(width: 44, height: 44)
                             .contentShape(Circle())
@@ -6317,19 +6326,13 @@ public struct WorkspacePlaceholder: View {
                     }
                     .frame(maxHeight: 360)
                 }
-                // ★ THE STRUTS TOGGLE, INSIDE THE PANEL, BOTTOM-RIGHT (maintainer,
-                // 2026-08-14). It used to float over these rows from
-                // `latticePreviewOverlay`. It is a lattice-stage affordance, so it
-                // appears with the lattice controls and nowhere else.
-                if visible.latticeControls, project.lattice.enabled {
-                    HStack {
-                        Spacer(minLength: 0)
-                        strutPreviewChip
-                    }
-                    .padding(.horizontal, DS.Space.l)
-                    .padding(.bottom, DS.Space.m)
-                    .padding(.top, DS.Space.s)
-                }
+                // ★★ THE STRUTS TOGGLE LEFT THIS PANEL (maintainer, 2026-08-17:
+                // "I have changed my mind regarding where to put the lattice
+                // preview view. It should be next to the other views below the
+                // position gizmo"). It is now the third `viewModeButton` under
+                // the gizmo — see `viewModeToggles`. Nothing replaces it here:
+                // this panel is for what the RUN will do, and showing the struts
+                // changes nothing about the run.
             }
         }
         // §6/§3a: the ONE panel width every page uses, so the lattice stage and the

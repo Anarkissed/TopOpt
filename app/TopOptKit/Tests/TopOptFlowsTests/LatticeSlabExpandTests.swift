@@ -83,6 +83,91 @@ final class LatticeSlabExpandTests: XCTestCase {
             anchor: .zero, normal: SIMD3(.nan, 0, 1), baseMM: 8, expandMM: 0))
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // MARK: ★ "at least 1 cm away from the depth handle … currently it is touching"
+
+    /// ★★ THE SEPARATION IS A *SCREEN*-SPACE FLOOR, AND THAT IS THE POINT.
+    /// `knobAnchor` offsets by MILLIMETRES; how far apart that lands on screen
+    /// depends on the zoom, so framed to the whole part the two 44 pt targets
+    /// overlapped. Raising the millimetres would fix one zoom and break another.
+    func testTwoNearKnobsArePushedApartToTheFloor() {
+        let depth = CGPoint(x: 100, y: 100)
+        let out = LatticeSlabExpand.separated(knob: CGPoint(x: 104, y: 100),
+                                              from: depth)
+        let d = hypot(Double(out.x - depth.x), Double(out.y - depth.y))
+        XCTAssertEqual(d, LatticeSlabExpand.knobSeparationPT, accuracy: 1e-6)
+        XCTAssertGreaterThan(out.x, depth.x, "★ pushed along the SAME direction")
+    }
+
+    /// A knob already clear of the depth handle is left exactly where the
+    /// millimetre offset put it — the floor is a floor, not a fixed distance.
+    func testAKnobAlreadyClearIsNotMoved() {
+        let far = CGPoint(x: 400, y: 100)
+        XCTAssertEqual(LatticeSlabExpand.separated(knob: far,
+                                                   from: CGPoint(x: 100, y: 100)),
+                       far)
+    }
+
+    /// Exactly coincident knobs still get a direction — no divide-by-zero, no
+    /// NaN, and no knob left sitting under the other one.
+    func testCoincidentKnobsStillSeparate() {
+        let p = CGPoint(x: 50, y: 50)
+        let out = LatticeSlabExpand.separated(knob: p, from: p)
+        XCTAssertEqual(hypot(Double(out.x - p.x), Double(out.y - p.y)),
+                       LatticeSlabExpand.knobSeparationPT, accuracy: 1e-6)
+    }
+
+    /// ★ 72 pt is comfortably past his "at least 1 cm", at any sane scale.
+    func testTheFloorClearsHisOneCentimetreAsk() {
+        XCTAssertGreaterThanOrEqual(LatticeSlabExpand.knobSeparationPT, 72)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // MARK: ★ "make the expansion *also* take a negative value"
+
+    /// ★ SHRINK IS A FIRST-CLASS VALUE, not a clamped-away accident. The floor
+    /// is the ceiling's mirror, so the control is symmetric.
+    func testTheMarginMayBeNegativeAndTheBoundsAreSymmetric() {
+        XCTAssertEqual(LatticeSlabExpand.minMM, -LatticeSlabExpand.maxMM,
+                       accuracy: 1e-12)
+        XCTAssertEqual(LatticeSlabExpand.clamp(-3), -3, accuracy: 1e-12)
+    }
+
+    /// A negative margin takes BOTH in-plane half-extents in, and depth is
+    /// still untouched — the same invariant the growth direction has.
+    func testANegativeMarginShrinksBothInPlaneAxes() {
+        let e = LatticeSlabExpand.expanded(halfUMM: 10, halfWMM: 4, by: -2)
+        XCTAssertEqual(e.halfUMM, 8, accuracy: 1e-12)
+        XCTAssertEqual(e.halfWMM, 2, accuracy: 1e-12)
+    }
+
+    /// ★ A SHRINK CANNOT INVERT THE SLAB. Past the face's own half-extent an
+    /// axis bottoms out at a sliver rather than going negative — a negative
+    /// width is not a smaller region, it is a region that stopped being one.
+    /// The two axes floor INDEPENDENTLY, so a long thin face keeps its length
+    /// after its width has already bottomed out.
+    func testAShrinkPastTheFaceFloorsPerAxisInsteadOfInverting() {
+        let e = LatticeSlabExpand.expanded(halfUMM: 20, halfWMM: 1, by: -5)
+        XCTAssertEqual(e.halfUMM, 15, accuracy: 1e-12,
+                       "★ the long axis is unaffected by the short one's floor")
+        XCTAssertEqual(e.halfWMM, LatticeSlabExpand.minHalfExtentMM,
+                       accuracy: 1e-12)
+        XCTAssertGreaterThan(e.halfWMM, 0, "★ never inverted")
+    }
+
+    /// The knob rides OUT for a shrink too — it must not walk back through the
+    /// depth knob and come out the far side.
+    func testTheKnobRidesOutForAShrinkAsWell() throws {
+        let a = SIMD3<Float>(0, 0, 0), n = SIMD3<Float>(0, 0, 1)
+        let shrunk = try XCTUnwrap(LatticeSlabExpand.knobAnchor(
+            anchor: a, normal: n, baseMM: 8, expandMM: -12))
+        let grown = try XCTUnwrap(LatticeSlabExpand.knobAnchor(
+            anchor: a, normal: n, baseMM: 8, expandMM: 12))
+        XCTAssertEqual(simd_length(shrunk - a), simd_length(grown - a),
+                       accuracy: 1e-4, "★ same travel, opposite MEANING")
+        XCTAssertGreaterThan(simd_length(shrunk - a), 8)
+    }
+
     // MARK: the value math — in plane ONLY
 
     func testItGrowsBothInPlaneHalfExtentsAndNothingElse() {
@@ -97,15 +182,33 @@ final class LatticeSlabExpandTests: XCTestCase {
         XCTAssertEqual(e.halfWMM, 4, accuracy: 1e-12)
     }
 
-    /// Clamped, and a negative or NaN reach is "no expand" rather than a shrink —
-    /// the control is an OUTWARD one and must not be able to eat the face.
-    func testItIsClampedAndNeverShrinksTheFace() {
-        XCTAssertEqual(LatticeSlabExpand.clamp(-5), 0, accuracy: 1e-12)
+    /// ★★ THIS TEST USED TO ASSERT THE OPPOSITE, AND IT IS SUPERSEDED BY AN
+    /// EXPLICIT INSTRUCTION — not weakened to make a build pass (bar R7).
+    ///
+    /// It read `testItIsClampedAndNeverShrinksTheFace`, and pinned
+    /// `clamp(-5) == 0` plus "★ never inward". That was the right rule for the
+    /// control as first specified — "It needs to expand outward" — and it is the
+    /// wrong rule now: "Can we make the expansion *also* take a negative value?
+    /// I'd like to see us also be able to make it smaller in the x/y axis as
+    /// well" (maintainer, 2026-08-17). A rule the user has reversed in writing
+    /// is a rule that changes; the assertion is REPLACED with the new one so the
+    /// reversal is recorded rather than silently dropped.
+    ///
+    /// ★ WHAT DID NOT CHANGE, and is still asserted below: NaN is not a value,
+    /// the ceiling still holds, ZERO is still exactly the face, and the reach is
+    /// still IN-PLANE ONLY. Only the sign became free.
+    func testItIsClampedAndNowShrinksOnPurpose() {
+        // Unchanged: nonsense is refused, and the ceiling holds.
         XCTAssertEqual(LatticeSlabExpand.clamp(.nan), 0, accuracy: 1e-12)
         XCTAssertEqual(LatticeSlabExpand.clamp(1e9), LatticeSlabExpand.maxMM,
                        accuracy: 1e-12)
+        // ★ REVERSED, deliberately: a negative reach is now a SHRINK, not a zero.
+        XCTAssertEqual(LatticeSlabExpand.clamp(-5), -5, accuracy: 1e-12)
+        XCTAssertEqual(LatticeSlabExpand.clamp(-1e9), LatticeSlabExpand.minMM,
+                       accuracy: 1e-12, "★ and the floor mirrors the ceiling")
         let e = LatticeSlabExpand.expanded(halfUMM: 10, halfWMM: 4, by: -3)
-        XCTAssertEqual(e.halfUMM, 10, accuracy: 1e-12, "★ never inward")
+        XCTAssertEqual(e.halfUMM, 7, accuracy: 1e-12, "★ inward, on purpose")
+        XCTAssertEqual(e.halfWMM, 1, accuracy: 1e-12)
     }
 
     // MARK: ★ IT REACHES THE JOB
