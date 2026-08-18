@@ -1,0 +1,15 @@
+=== R7 — THE LONGEST STRING ADDED ===
+
+--- SHIPPED (user-facing text)
+  file  app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift
+  chars 56   words 11
+  text  "Pencil only — no pencil seen yet, so fingers still edit."
+
+--- TEST (assertion messages)
+  file  app/TopOptKit/Tests/TopOptFlowsTests/SurfaceDoubleTapMatchEvidence.swift
+  chars 76   words 9
+  text  "kind == other               \(kindOther.count) faces   <- the NAIVE reading "
+
+The stage carries ONE line of text at a time (the tray's hint). Every new
+shipped string is a hint-line variant or an accessibility label; nothing
+added a paragraph, a sheet, a modal or a toast.

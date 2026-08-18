@@ -1,0 +1,68 @@
+=== ADDENDUM R5 — ASSERTION CENSUS, read WHOLE, not through a filter ===
+Two-point diff: HEAD f721ba44 (PR 339) -> working tree. Merge base for the
+branch as a whole is 500833ed; PR 339's own census is r8_assertion_census.txt.
+
+--- SEVEN ASSERTIONS WERE REMOVED. Every one asserted the rule the maintainer
+    OVERTURNED, and every one is accounted for below. None was dropped.
+
+  1. DEL  XCTAssertFalse(d.enforced, "★ nothing is separated yet")
+     NOW  XCTAssertTrue(d.enforced, "★ latched IS enforced — no pencil-seen
+          precondition")                    [testLatchingEnforcesImmediately…]
+     WHY  INVERTED BY RULING §1(a): "ENFORCE IMMEDIATELY WHEN THE TOGGLE IS
+          LATCHED." The assertion is not weaker — it is the opposite claim, made
+          just as loudly.
+
+  2. DEL  XCTAssertTrue(d.waitingForPencil, "★ and the stage says so")
+     NOW  XCTAssertTrue(unseen.pencilAbsent, "★ but the STAGE still says which it
+          is")                              [testSeeingAPencilNoLonger…]
+     WHY  PURE RENAME of the predicate (`waitingForPencil` -> `pencilAbsent`;
+          nothing waits any more). Same fact, still asserted.
+
+  3. DEL  XCTAssertTrue(d.admits(.finger, .edit),
+            "★ THE ONE OUTCOME §2(c) FORBIDS: a stage that refuses to edit with
+             the only input the user has")
+     NOW  XCTAssertFalse(d.admits(.finger, .edit),
+            "★ THE MIRROR HALF OF §2(c): with the mode latched a finger does NOT
+             edit, from the very first touch of the session")
+                                            [testLatchingEnforcesImmediately…]
+     WHY  INVERTED BY RULING. ★ AND THE CONCERN IT ENCODED DID NOT GO
+          UNGUARDED — it moved to where it belongs: three tests in
+          SurfacePencilToggleExemptionTests pin that the toggle itself is not
+          routed through the discipline, so the stranding this assertion feared
+          is prevented by the escape hatch instead of by a wait.
+
+  4. DEL  XCTAssertTrue(d.admits(.finger, .camera))
+     NOW  XCTAssertTrue(d.admits(.finger, .camera),
+            "…but fingers still move the view (§3a, unchanged)")
+     WHY  KEPT, and it GAINED a message. §3(a): camera stays fingers-only.
+
+  5. DEL  XCTAssertFalse(waiting.enforced)
+     NOW  XCTAssertEqual(unseen.enforced, seen.enforced, "★ identical")
+          + XCTAssertTrue(d.enforced) on the same input
+     WHY  SUBSUMED and strengthened: the new pair asserts that `pencilSeen`
+          decides NOTHING, across every contact x intent pair, not just this one.
+
+  6. DEL  XCTAssertTrue(seen.enforced)
+     NOW  XCTAssertTrue(d.enforced)          [testOnSeparatesEditingFrom…]
+     WHY  STILL TRUE, still asserted, unchanged in meaning.
+
+  7. DEL  XCTAssertFalse(seen.waitingForPencil)
+     NOW  XCTAssertFalse(seen.pencilAbsent)  [testSeeingAPencilNoLonger…]
+     WHY  PURE RENAME, as (2).
+
+--- NO TEST FUNCTION WAS SILENTLY REMOVED ---
+  Removed: testWithNoPencilEverSeenTheModeWithholdsNothing,
+           testSeeingAPencilEngagesTheModeThatWasAlreadyOn
+  Both named the overturned rule in their own titles, so both were RENAMED
+  rather than kept lying:
+           -> testLatchingEnforcesImmediatelyWithNoPencilEverSeen
+           -> testSeeingAPencilNoLongerChangesWhatIsEnforced
+  Net test count: 2 removed, 2 renamed replacements + 3 new = +3.
+
+  XCTAssert lines added by the addendum: 19
+  XCTAssert lines removed:               7
+
+--- AND NOTHING IN THE PRODUCT LOST A GUARD ---
+  The one production deletion is the `&& pencilSeen` conjunct in `enforced`,
+  which is the ruling itself. No refusal, no guard, no `return` was removed:
+  DEL             return "Pencil only — no pencil seen yet, so fingers still edit."

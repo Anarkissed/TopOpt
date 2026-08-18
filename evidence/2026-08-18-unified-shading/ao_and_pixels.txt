@@ -1,0 +1,17 @@
+UNIFIED SHADING — GPU: Apple M2 Pro
+★ NOT AN iPAD. This is a macOS headless capture on the same M2 Pro every render
+measurement in this repo is taken on, so it is comparable to the existing
+baselines — and it is NOT the device the maintainer uses. See R3 in the handoff.
+
+Part: WallMount_ShelfBracket.stl · octet lattice · 8.0 mm cell
+Camera: azimuth 0.72, elevation 0.38, zoom 0.8
+Captured at 1024² · 4× MSAA · body hidden (the lattice stage, bar A3)
+
+§3b THE AO BUFFER — the fraction of COVERED pixels with openness < 0.85, and the
+mean openness over those pixels. The denominator is the covered set because most
+of the frame is backdrop the AO pass early-outs of.
+    BEFORE (shell only, the shipped G-buffer)   20.6%  mean openness 0.892
+    AFTER  (shell ∪ lattice)                    66.1%  mean openness 0.743
+
+R1 pixels moved by more than 4 levels, whole frame:  17.7%
+================================================================================

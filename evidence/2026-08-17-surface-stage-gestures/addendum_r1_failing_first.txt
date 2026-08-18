@@ -1,0 +1,19 @@
+SurfaceStageGesturesTests.swift:225: error: -[TopOptFlowsTests.SurfaceInputDisciplineTests testLatchingEnforcesImmediatelyWithNoPencilEverSeen] : XCTAssertTrue failed - ★ latched IS enforced — no pencil-seen precondition
+SurfaceStageGesturesTests.swift:227: error: -[TopOptFlowsTests.SurfaceInputDisciplineTests testLatchingEnforcesImmediatelyWithNoPencilEverSeen] : XCTAssertFalse failed - ★ THE MIRROR HALF OF §2(c): with the mode latched a finger does NOT edit, from the very first touch of the session
+SurfaceStageGesturesTests.swift:232: error: -[TopOptFlowsTests.SurfaceInputDisciplineTests testLatchingEnforcesImmediatelyWithNoPencilEverSeen] : XCTAssertFalse failed
+Test Case '-[TopOptFlowsTests.SurfaceInputDisciplineTests testLatchingEnforcesImmediatelyWithNoPencilEverSeen]' failed (0.258 seconds).
+Test Case '-[TopOptFlowsTests.SurfaceInputDisciplineTests testOffByDefaultBothContactsDoEverything]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SurfaceInputDisciplineTests testOnSeparatesEditingFromCameraMovement]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.SurfaceInputDisciplineTests testSeeingAPencilDoesNotTurnTheModeOn]' passed (0.000 seconds).
+SurfaceStageGesturesTests.swift:242: error: -[TopOptFlowsTests.SurfaceInputDisciplineTests testSeeingAPencilNoLongerChangesWhatIsEnforced] : XCTAssertEqual failed: ("false") is not equal to ("true") - ★ identical
+SurfaceStageGesturesTests.swift:245: error: -[TopOptFlowsTests.SurfaceInputDisciplineTests testSeeingAPencilNoLongerChangesWhatIsEnforced] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ finger/edit must not depend on pencilSeen
+SurfaceStageGesturesTests.swift:245: error: -[TopOptFlowsTests.SurfaceInputDisciplineTests testSeeingAPencilNoLongerChangesWhatIsEnforced] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ pencil/camera must not depend on pencilSeen
+Test Case '-[TopOptFlowsTests.SurfaceInputDisciplineTests testSeeingAPencilNoLongerChangesWhatIsEnforced]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.SurfaceInputDisciplineTests testUndoAndRedoSurvivePencilModeFromEitherContact]' passed (0.000 seconds).
+	 Executed 6 tests, with 6 failures (0 unexpected) in 0.260 (0.260) seconds
+Test Case '-[TopOptFlowsTests.SurfacePencilToggleExemptionTests testEveryDisciplineConsultationIsInTheGestureLayer]' passed (0.023 seconds).
+Test Case '-[TopOptFlowsTests.SurfacePencilToggleExemptionTests testTheDisciplineIsNeverConsultedInTheToolTray]' passed (0.013 seconds).
+Test Case '-[TopOptFlowsTests.SurfacePencilToggleExemptionTests testTheToggleActionIsUnconditionalAndAsksNothingAboutTheContact]' passed (0.020 seconds).
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.056 (0.056) seconds
+	 Executed 9 tests, with 6 failures (0 unexpected) in 0.316 (0.317) seconds
+	 Executed 9 tests, with 6 failures (0 unexpected) in 0.316 (0.318) seconds
