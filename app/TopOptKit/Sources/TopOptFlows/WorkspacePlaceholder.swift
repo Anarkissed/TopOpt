@@ -135,6 +135,9 @@ public struct WorkspacePlaceholder: View {
     @State private var cadFacesDrawerOpen = false
     // The expand handle currently being dragged (nil = none).
     @State private var draggingExpandPlane: String?
+    /// ★ The expand a 3D-knob drag STARTED from — held across frames because the
+    /// gesture itself is rebuilt every render. See `latticeExpandDrag`.
+    @State private var draggingExpandSeed: Double?
     /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
     @State private var diagnosisPopoverGroup: UUID?
     /// ★ §5 — which DEPTH field has the numeric keypad open. Keyed by the row's
@@ -5331,10 +5334,26 @@ public struct WorkspacePlaceholder: View {
     /// 0.05 mm-per-point scrub the depth chip uses, so the two controls feel the
     /// same in the hand. The number in the drawer and the handle are ONE value —
     /// both write `writeLatticeExpandMM`.
+    /// ★★ THE SEED IS HELD ACROSS FRAMES, AND THAT IS THE BUG HE HIT (maintainer,
+    /// 2026-08-17: "I am unable to use the handle to get a positive expansion").
+    ///
+    /// ★ SwiftUI REBUILDS THIS GESTURE ON EVERY BODY EVALUATION, so a `seed`
+    /// captured at construction time is re-read from the model every frame —
+    /// while `translation.width` keeps measuring from where the finger STARTED.
+    /// The two compound: each frame adds the whole accumulated translation to an
+    /// already-moved value, so the number runs away exponentially and slams into
+    /// whichever bound the first pixel of travel pointed at. That is why his
+    /// drags only ever produced −50 mm and −25.6 mm, and why "positive" was
+    /// unreachable — one pixel of leftward jitter decided the sign.
+    ///
+    /// ★ I HAD ALREADY FIXED THIS CLASS ONCE IN THIS TASK, for the drawer scrub
+    /// (`latticeRowScrubSeed`), and left the 3D knob on the broken pattern. Both
+    /// hold the seed in `@State` now, which is the only place that survives a
+    /// re-render.
     private func latticeExpandDrag(_ plane: ProjectModel.LatticeDepthPlane)
         -> some Gesture {
         let ref = plane.ref
-        let seed = project.latticeExpandMM(ref)
+        let current = project.latticeExpandMM(ref)
         return DragGesture(minimumDistance: 1,
                            coordinateSpace: CoordinateSpace.named(Self.clearanceStageSpace))
             .onChanged { v in
@@ -5342,11 +5361,14 @@ public struct WorkspacePlaceholder: View {
                     draggingExpandPlane = plane.id
                     ClearanceHaptics.grab()
                 }
+                let seed = draggingExpandSeed ?? current
+                if draggingExpandSeed == nil { draggingExpandSeed = current }
                 project.writeLatticeExpandMM(
                     ref, mm: seed + Double(v.translation.width) * 0.05)
             }
             .onEnded { _ in
                 draggingExpandPlane = nil
+                draggingExpandSeed = nil
                 ClearanceHaptics.release()
                 refreshLatticeFaceCards()
                 // The expand moves the region the preview is clipped to, so the

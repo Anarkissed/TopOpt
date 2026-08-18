@@ -437,17 +437,74 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
         }
     }
 
-    /// ★ A SHRINK IS BOUNDED BY THE PATCH'S OWN SIZE. Pulling in further than
-    /// the patch is wide would fold the outline through itself, which is not a
-    /// smaller region — so a runaway negative collapses toward the centre and
-    /// stops, rather than inverting.
-    func testARunawayShrinkCollapsesRatherThanInverting() {
+    /// ★ A SHRINK STOPS AT THE POINT OF INTERSECTION (maintainer, 2026-08-17:
+    /// "The negative expansion should stop at the point of intersection. It
+    /// should never fold into itself"). At scale 0 the patch IS its centroid;
+    /// the floor sits just above, so a runaway negative converges on the centre
+    /// and never passes through it.
+    func testARunawayShrinkConvergesOnTheCentroidAndNeverInverts() {
         let s = square()
         let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
                                           indices: s.idx, byMM: -1e6)
+        let c = SIMD3<Float>(0, 0, 0)          // the square's own centroid
         for k in 0..<4 {
             XCTAssertTrue(out[k].x.isFinite && out[k].y.isFinite)
-            XCTAssertLessThan(simd_length(out[k]), simd_length(s.base[k]))
+            // ★ THE SIGN IS PRESERVED — a corner that was +x is still +x. A
+            // folded outline is one whose corners have crossed the centre.
+            XCTAssertEqual(out[k].x.sign, s.base[k].x.sign, "★ never folded through")
+            XCTAssertEqual(out[k].y.sign, s.base[k].y.sign)
+            XCTAssertLessThan(simd_length(out[k] - c), simd_length(s.base[k] - c))
+        }
+    }
+
+    /// ★★ THE EXPANDED PATCH IS THE FACE'S EXACT SHAPE (maintainer: "It should
+    /// be the exact same as the face and simply expand outward"). A similarity
+    /// transform preserves every ratio, so each corner's distance from the
+    /// centre grows by the SAME factor — which is what "the same shape" means
+    /// as a number.
+    func testTheExpandedPatchIsSimilarToTheFace() {
+        let s = square()
+        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                          indices: s.idx, byMM: 0.7)
+        let ratios = (0..<4).map {
+            Double(simd_length(out[$0]) / simd_length(s.base[$0]))
+        }
+        for r in ratios {
+            XCTAssertEqual(r, ratios[0], accuracy: 1e-5,
+                           "★ every side moved by the same factor — no shear")
+            XCTAssertGreaterThan(r, 1)
+        }
+    }
+
+    /// ★ IT GROWS FROM THE CENTRE, NOT FROM AN EDGE (maintainer: "It looks like
+    /// the expansion is handled from the 'floor' … It should be from the center
+    /// of the face and grow from *every* side equally"). The centroid is the
+    /// fixed point, so it does not move at all.
+    func testTheCentroidIsTheFixedPoint() {
+        // A square centred on the origin: its centroid must stay at the origin.
+        let s = square()
+        for e in [-0.5, 0.9] {
+            let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                              indices: s.idx, byMM: e)
+            var c = SIMD3<Float>.zero
+            for p in out { c += p }
+            c /= Float(out.count)
+            XCTAssertEqual(simd_length(c), 0, accuracy: 1e-5,
+                           "★ the centre is what everything grows away from")
+        }
+    }
+
+    /// ★ NO TWO VERTICES CAN CROSS, at any value — the property the fold
+    /// violated. A similarity transform with a positive scale is monotone in
+    /// every direction at once.
+    func testNoVertexEverCrossesAnother() {
+        let s = square()
+        for e in [-1e6, -1.9, -0.1, 0.1, 5.0, 1e6] {
+            let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                              indices: s.idx, byMM: e)
+            // Opposite corners must stay on opposite sides of the centre.
+            XCTAssertLessThan(out[0].x * out[2].x, 0, "★ corners never swapped")
+            XCTAssertLessThan(out[0].y * out[2].y, 0)
         }
     }
 }

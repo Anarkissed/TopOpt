@@ -187,97 +187,88 @@ public struct FaceOffsetShell: Equatable, Sendable {
 
     // MARK: ★ THE IN-PLANE DILATION
 
-    /// ★★ GROW (OR SHRINK) THE PATCH'S OUTLINE BY `byMM`, IN PLANE.
+    /// ★★ SCALE THE PATCH ABOUT ITS OWN CENTROID, IN PLANE.
     ///
-    /// ★ HIS WORDS: "The expansion still isn't shown with the primitive. Please
-    /// make the primitive expand and contract along with the handle." The number
-    /// already reached the JOB — `LatticeRegionEmission` grows the emitted slab's
-    /// half-extents — but the shaded primitive on screen is this shell, and this
-    /// shell was built from the face's own triangles at their own positions. So
-    /// the run was right and the picture was silent, which is the worse half of
-    /// that pair.
+    /// ★ HIS CORRECTION, AND IT IS THE WHOLE DESIGN (2026-08-17):
+    ///   · "It should be the exact same as the face and simply expand outward.
+    ///      There should be no reason to overlap."
+    ///   · "It looks like the expansion is handled from the 'floor' and growing
+    ///      outward from there. It should be from the center of the face and
+    ///      grow from *every* side equally."
+    ///   · "The negative expansion should stop at the point of intersection. It
+    ///      should never fold into itself."
     ///
-    /// ★ ONLY THE BOUNDARY MOVES, and that is the whole design. Displacing every
-    /// vertex radially would stretch the interior of a curved face and make a
-    /// cylinder bulge; the OUTLINE is what an expansion is about. Interior
-    /// vertices keep their exact positions, boundary vertices move outward along
-    /// the surface, and the triangles between them stretch to cover the gap.
+    /// ★★ WHY THE FIRST CUT PRODUCED ALL THREE OF THOSE AT ONCE. It moved only
+    /// BOUNDARY vertices, each along a direction taken from the one triangle
+    /// that owned its edge (`midpoint(a,b) - thirdCorner`). That direction is a
+    /// property of the TESSELLATION, not of the outline: on a coarse mesh with
+    /// long thin triangles it points somewhere arbitrary, so the outline grew
+    /// lopsidedly — "from the floor" — and adjacent boundary vertices pushed
+    /// past one another and folded. And because interior vertices stayed put,
+    /// the triangles between them sheared, which is why the shape "doesn't look
+    /// anything like the face". Three symptoms, one wrong idea.
     ///
-    /// ★ AND A HOLE SHRINKS WHEN THE PATCH GROWS, for free: "outward" is
-    /// per-boundary-edge, away from the triangle that owns it, so an inner loop's
-    /// outward direction points INTO the hole. That is what dilating a patch with
-    /// a hole means.
+    /// ★ A SIMILARITY TRANSFORM CANNOT DO ANY OF THAT. Scaling every vertex
+    /// about the centroid is self-similar BY CONSTRUCTION: the expanded patch is
+    /// the face's exact shape, every side moves out together, no two vertices
+    /// can cross, and no triangle can shear. It is not an approximation of what
+    /// he asked for — it IS what he asked for.
     ///
-    /// The displacement is IN THE TANGENT PLANE — the component along the inward
-    /// normal is removed — so a dilation never doubles as a depth change. Depth
-    /// has its own control, its own handle and its own detents.
+    /// ★ THE MILLIMETRES ARE PRESERVED ON AVERAGE. The scale is `1 + e/R`, where
+    /// `R` is the patch's mean in-plane radius, so `e` mm moves the average
+    /// boundary point `e` mm. An exact per-side millimetre offset is a different
+    /// (and non-similar) operation — a mitred outline offset — which is what the
+    /// first cut was reaching for and what folded.
+    ///
+    /// ★ AND IT STOPS AT THE INTERSECTION POINT. A shrink reaches self-
+    /// intersection exactly at scale 0, where the patch collapses to its
+    /// centroid. The scale is floored just above that, so pulling in further
+    /// converges on a point and never passes through it.
+    ///
+    /// ★ ONLY THE IN-PLANE COMPONENT SCALES. The part of each vertex's offset
+    /// that lies along its own inward normal is carried through untouched, so a
+    /// cylinder patch grows ALONG the cylinder instead of changing its radius,
+    /// and a dilation can never double as a depth change.
     static func dilated(base: [SIMD3<Float>], inward: [SIMD3<Float>],
                         indices: [UInt32], byMM: Double) -> [SIMD3<Float>] {
-        guard byMM != 0, base.count > 2, indices.count >= 3 else { return base }
+        guard byMM != 0, base.count > 2 else { return base }
 
-        // ── boundary edges: those owned by exactly ONE triangle ────────────────
-        var count: [UInt64: Int] = [:]
-        var owner: [UInt64: Int] = [:]          // edge → its triangle's first index
-        func key(_ a: UInt32, _ b: UInt32) -> UInt64 {
-            let (lo, hi) = a < b ? (a, b) : (b, a)
-            return UInt64(lo) << 32 | UInt64(hi)
-        }
-        var i = 0
-        while i + 2 < indices.count {
-            for (a, b) in [(indices[i], indices[i + 1]),
-                           (indices[i + 1], indices[i + 2]),
-                           (indices[i + 2], indices[i])] {
-                let k = key(a, b)
-                count[k, default: 0] += 1
-                owner[k] = i
-            }
-            i += 3
-        }
+        // ── the centroid: the point everything grows away from ────────────────
+        var centroid = SIMD3<Float>.zero
+        for p in base { centroid += p }
+        centroid /= Float(base.count)
 
-        // ── the outward in-plane direction at each boundary vertex ─────────────
-        var push = [SIMD3<Float>](repeating: .zero, count: base.count)
-        for (k, c) in count where c == 1 {
-            guard let t = owner[k] else { continue }
-            let ia = UInt32(k >> 32), ib = UInt32(k & 0xFFFF_FFFF)
-            // The triangle's third corner — the inside of the patch, locally.
-            let tri = [indices[t], indices[t + 1], indices[t + 2]]
-            guard let ic = tri.first(where: { $0 != ia && $0 != ib }) else { continue }
-            let a = base[Int(ia)], b = base[Int(ib)], c3 = base[Int(ic)]
-            var out = 0.5 * (a + b) - c3            // away from the interior
-            // Project into the tangent plane, so a dilation is never a depth move.
-            let n = 0.5 * (inward[Int(ia)] + inward[Int(ib)])
+        // ── each vertex's offset, split into in-plane and along-normal ────────
+        var perp = [SIMD3<Float>](repeating: .zero, count: base.count)
+        var along = [SIMD3<Float>](repeating: .zero, count: base.count)
+        var radius = 0.0
+        for k in 0..<base.count {
+            let d = base[k] - centroid
+            let n = inward[k]
             let nl = simd_length(n)
-            if nl > 1e-9 {
-                let u = n / nl
-                out -= u * simd_dot(out, u)
-            }
-            let l = simd_length(out)
-            guard l > 1e-9 else { continue }
-            let dir = out / l
-            push[Int(ia)] += dir
-            push[Int(ib)] += dir
+            let a = nl > 1e-9 ? (n / nl) * simd_dot(d, n / nl) : SIMD3<Float>.zero
+            along[k] = a
+            perp[k] = d - a
+            radius += Double(simd_length(perp[k]))
         }
+        radius /= Double(base.count)
+        // A patch with no in-plane extent has nothing to scale.
+        guard radius > 1e-6 else { return base }
 
-        // ── a SHRINK may not eat the patch ─────────────────────────────────────
-        // Bounded by the patch's own size: pulling in further than it is wide
-        // would fold the outline through itself, which is not a smaller region.
-        var lo = base[0], hi = base[0]
-        for p in base { lo = simd_min(lo, p); hi = simd_max(hi, p) }
-        let halfSpan = Double(simd_length(hi - lo)) * 0.5
-        let e = byMM < 0 ? Swift.max(byMM, -halfSpan * shrinkFraction) : byMM
+        // ★ `1 + e/R`, floored just above the collapse point.
+        let scale = Swift.max(minScale, 1 + byMM / radius)
 
         var out = base
         for k in 0..<out.count {
-            let l = simd_length(push[k])
-            guard l > 1e-9 else { continue }       // interior: untouched
-            out[k] = base[k] + (push[k] / l) * Float(e)
+            out[k] = centroid + along[k] + perp[k] * Float(scale)
         }
         return out
     }
 
-    /// How much of a patch's own half-span a shrink may consume. Not a taste
-    /// value: past 1.0 the two sides of the outline cross.
-    static let shrinkFraction: Double = 0.9
+    /// ★ HOW FAR A SHRINK MAY GO. At scale 0 the patch IS its centroid — the
+    /// point of self-intersection he named. The floor sits just above it, so
+    /// pulling in further converges rather than folding through.
+    static let minScale: Double = 0.02
 
     /// ★ HOW FAR THE OFFSET MAY TRAVEL BEFORE THE FRONTS MEET.
     ///
