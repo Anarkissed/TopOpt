@@ -205,6 +205,24 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     // shader shows a strut iff its OWNING cell is active — the worker's whole-cell
     // emission — so the boundary is complete cells, never razor-cut struts.
     private var cellTex: MTLTexture?
+
+    /// ★★ THE SHELL NEEDS TO SEE THIS TOO (maintainer, 2026-08-18: "The full body
+    /// covered the lattice preview").
+    ///
+    /// ★ ONE SOURCE OF TRUTH, NOT TWO. The shell must stand down exactly where
+    /// the raymarcher draws struts — and "exactly where" is this texture, the
+    /// per-cell activation the march itself folds against. Re-deriving the region
+    /// test in the shell shader would be a second answer to the same question,
+    /// free to drift by a voxel and impossible to notice.
+    var shellClipCellTexture: MTLTexture? { cellTex }
+    /// The cell field's grid, so a model-space point can be turned into a texture
+    /// coordinate by the shell exactly as the march does it.
+    var shellClipGrid: (origin: SIMD3<Float>, spacing: SIMD3<Float>,
+                        dims: SIMD3<Float>)? {
+        guard let g = cellGrid else { return nil }
+        return (g.origin, g.spacing,
+                SIMD3(Float(g.nx), Float(g.ny), Float(g.nz)))
+    }
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
     // Face-role tints on the LATTICE (bar A4): an rgba8 volume on the part-SDF grid,

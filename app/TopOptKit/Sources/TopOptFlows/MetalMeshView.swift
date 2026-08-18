@@ -68,6 +68,15 @@ private struct ViewerUniforms {
 /// `ShadeParams` in `viewerShaderSource`. Every strength is a plain 0…1 multiplier
 /// and 0 means OFF, so the BEFORE capture is the same shader with zeros rather than
 /// a second code path that could drift from the shipping one.
+/// ★ THE SHELL'S LATTICE CLIP, Swift side. Mirrors `ShellClip` in the shader.
+/// `origin.w` is the enable flag — one field, so "no lattice this frame" and "a
+/// lattice whose grid we could not read" are the same, safe, drawn-normally case.
+private struct ShellClipUniform {
+    var origin = SIMD4<Float>(0, 0, 0, 0)
+    var spacing = SIMD4<Float>(1, 1, 1, 0)
+    var dims = SIMD4<Float>(1, 1, 1, 0)
+}
+
 private struct ShadeParams {
     /// x = AO strength, y = edge strength, z = 1/aoTexWidth, w = 1/aoTexHeight.
     var ao: SIMD4<Float> = .zero
@@ -234,6 +243,40 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 // modes (handoff 070): the output is PREMULTIPLIED (rgb·a, a), so the opaque draw
 // (a == 1, blending off) is byte-identical to before while a translucent pipeline
 // (a < 1, premultiplied "over" blending) shows the flow through the walls.
+// ★★ THE SHELL STANDS DOWN INSIDE AN ACTIVE LATTICE CELL (maintainer,
+// 2026-08-18: "The full body covered the lattice preview … They need to be
+// combined. Looking like they are part of the same model").
+//
+// ★ WHY A DISCARD AND NOT AN ALPHA. Hiding the whole body showed the struts and
+// lost every millimetre the user did NOT mark; showing the whole body put an
+// opaque skin in front of the struts, because a latticed slab starts AT the
+// face and the shell's outer surface is exactly there. Neither is "one model".
+// The body has to be ABSENT where the lattice is and PRESENT everywhere else,
+// which is a per-fragment question about a point — so it is answered here.
+//
+// ★ AND IT SAMPLES THE RAYMARCHER'S OWN CELL FIELD, not a re-derived region
+// test. `cellTex.r >= 0` is precisely the condition under which the march emits
+// a strut for that cell; asking the same texture the same question is what makes
+// the hole in the shell land exactly where the struts are, at every cell size,
+// for free, forever. A second implementation of "is this point latticed" would
+// be free to drift by a voxel and impossible to notice.
+struct ShellClip {
+    float4 origin;      // xyz = cell-(0,0,0) centre, w = enabled (>0.5)
+    float4 spacing;     // xyz = cell size mm
+    float4 dims;        // xyz = cell counts
+};
+inline bool shell_is_latticed(float3 mpos, constant ShellClip& c,
+                              texture3d<float> cellTex) {
+    if (c.origin.w < 0.5) { return false; }
+    float3 g = (mpos - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
+    // Outside the cell grid there is no lattice — and no clamping, which would
+    // smear the edge cells across the whole part.
+    if (any(g < float3(-0.5)) || any(g > c.dims.xyz - float3(0.5))) { return false; }
+    float3 uvw = (g + 0.5) / max(c.dims.xyz, float3(1.0));
+    constexpr sampler s(coord::normalized, filter::nearest, address::clamp_to_edge);
+    return cellTex.sample(s, uvw).r >= 0.0;
+}
+
 fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
                                 constant float& bodyAlpha [[buffer(1)]],
                                 constant ShadeParams& sp [[buffer(2)]],
@@ -243,7 +286,10 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 // binding beside it, so this is the cheaper move. The
                                 // Swift `setFragmentBytes` index moves with it.
                                 constant CutUniforms& cut [[buffer(3)]],
-                                texture2d<float, access::sample> aoTex [[texture(0)]]) {
+                                texture2d<float, access::sample> aoTex [[texture(0)]],
+                                constant ShellClip& shellClip [[buffer(4)]],
+                                texture3d<float, access::sample> clipCellTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, clipCellTex)) { discard_fragment(); }
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
         if (t > reveal.x) discard_fragment();
@@ -509,7 +555,7 @@ private let depthPrepassShaderSource = """
 using namespace metal;
 
 struct DIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; };
-struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; };
+struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; float3 mpos; };
 struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; float4x4 normalMatrix; };
 struct GBuf { float  eyeZ    [[color(0)]];      // R32Float — unchanged, the contact pass reads this
               float4 enormal [[color(1)]];      // RGBA16Float — eye-space normal (xyz), w unused
@@ -527,10 +573,18 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
     o.position = u.mvp * float4(p, 1.0);
     o.eyeZ = -(u.modelView * float4(p, 1.0)).z;   // eye looks down −Z → positive into the screen
     o.enormal = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
+    o.mpos = p;                                   // for the shell's lattice clip
     return o;
 }
 
-fragment GBuf depth_fragment(DOut in [[stage_in]]) {
+// ★ THE SAME CLIP IN THE G-BUFFER. A wall that is discarded in the visible pass
+// but still written here would occlude the struts behind it in AO — the interior
+// would go dark for a surface nobody can see, which is the exact failure the
+// unified-shading task recorded for `bodyAlpha = 0` walls.
+fragment GBuf depth_fragment(DOut in [[stage_in]],
+                             constant ShellClip& shellClip [[buffer(4)]],
+                             texture3d<float, access::sample> clipCellTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, clipCellTex)) { discard_fragment(); }
     GBuf o;
     o.eyeZ = in.eyeZ;
     // Face the normal toward the eye. The mesh draws with cullMode .none, so a
@@ -2961,6 +3015,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
         enc.setFragmentBytes(&revealParams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
         enc.setFragmentBytes(&bodyAlphaVal, length: MemoryLayout<Float>.stride, index: 1)
+        // ★ THE SHELL'S LATTICE CLIP. `viewer_fragment` DECLARES both, so both are
+        // bound on EVERY path — Metal drops the draw on a missing binding, the same
+        // trap the AO texture above documents. Disabled + a 1×1×1 neutral volume is
+        // an exact identity when there is no lattice in the frame.
+        var shellClip = shellClipUniform
+        enc.setFragmentBytes(&shellClip,
+                             length: MemoryLayout<ShellClipUniform>.stride, index: 4)
+        enc.setFragmentTexture(latticeInFrame
+                               ? (latticeLayer?.shellClipCellTexture
+                                  ?? neutralShellClipTexture())
+                               : neutralShellClipTexture(), index: 4)
         // Render quality: the AO/edge texture and the strengths that scale it.
         // `viewer_fragment` DECLARES both, so both must be bound on every path —
         // Metal drops the draw on a missing binding, the trap `contact_fragment` and
@@ -3427,6 +3492,38 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// The 1×1 "fully open, no edge" texture bound whenever AO is off — see
     /// `aoNeutralTex`. Built once, on first use.
+    /// ★ A 1×1×1 VOLUME MEANING "NOTHING IS LATTICED". Metal requires the texture
+    /// binding to exist whenever the shader declares it; binding nil is undefined.
+    /// Its value is −1, which `shell_is_latticed` reads as inactive — but the
+    /// enable flag is already 0 in that case, so this is belt and braces.
+    private var shellClipNeutralTex: MTLTexture?
+    private func neutralShellClipTexture() -> MTLTexture? {
+        if let t = shellClipNeutralTex { return t }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .r32Float
+        d.width = 1; d.height = 1; d.depth = 1
+        d.usage = .shaderRead
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var v: Float = -1
+        t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
+                  withBytes: &v, bytesPerRow: 4, bytesPerImage: 4)
+        shellClipNeutralTex = t
+        return t
+    }
+
+    /// The clip the shell is drawn with this frame — the lattice layer's own cell
+    /// field, or "disabled" when there is no lattice in the frame.
+    private var shellClipUniform: ShellClipUniform {
+        var u = ShellClipUniform()
+        guard latticeInFrame, let g = latticeLayer?.shellClipGrid,
+              latticeLayer?.shellClipCellTexture != nil else { return u }
+        u.origin = SIMD4(g.origin, 1)          // w = 1 ⇒ enabled
+        u.spacing = SIMD4(g.spacing, 0)
+        u.dims = SIMD4(g.dims, 0)
+        return u
+    }
+
     private func neutralAOTexture() -> MTLTexture? {
         if let t = aoNeutralTex { return t }
         let d = MTLTextureDescriptor.texture2DDescriptor(
@@ -3571,6 +3668,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             penc.setVertexBuffer(vbuf, offset: 0, index: 0)
             penc.setVertexBuffer(fbuf, offset: 0, index: 3)
             penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
+            // ★ THE SAME CLIP HERE, or the G-buffer keeps a wall the visible pass
+            // discarded and AO darkens the interior behind a surface nobody sees.
+            var pClip = shellClipUniform
+            penc.setFragmentBytes(&pClip,
+                                  length: MemoryLayout<ShellClipUniform>.stride, index: 4)
+            penc.setFragmentTexture(lattice?.shellClipCellTexture
+                                    ?? neutralShellClipTexture(), index: 4)
             countedDraw(penc, .triangle, vertexDrawCount)
         }
         if let lattice, let lpipe = latticeGBufferPipeline {
