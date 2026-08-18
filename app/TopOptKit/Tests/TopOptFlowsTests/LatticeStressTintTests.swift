@@ -121,3 +121,52 @@ final class LatticeStressTintTests: XCTestCase {
                                                field: field([])).isEmpty)
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ THE SOLVE TRIGGER REFUSES, AND SAYS SO IN SOURCE
+
+final class LatticeSimSolveTriggerTests: XCTestCase {
+
+    /// ★★ THE THREE REFUSALS ARE THE POINT OF THE TRIGGER, not decoration on it.
+    /// An FEA is a real CG solve; firing one nothing will read is a cost with no
+    /// consumer, and this project has a standing rule against exactly that.
+    ///
+    /// The trigger lives on a SwiftUI view, so its guards are not reachable from
+    /// a value test — but they ARE readable, and the alternative failure (a
+    /// trigger that quietly solves on every save) is invisible to a value test
+    /// and is what a careless edit would produce.
+    func testTheTriggerRefusesOnAllThreeGrounds() throws {
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"),
+            encoding: .utf8)
+        let r = try XCTUnwrap(src.range(of: "private func startStressSolveIfNeeded()"))
+        let body = String(src[r.lowerBound...].prefix(900))
+
+        XCTAssertTrue(body.contains("needsStressSolve"),
+                      "★ nothing asking ⇒ no solve")
+        XCTAssertTrue(body.contains("makeLatticeSimContext()"),
+                      "★ no describable solve ⇒ no solve")
+        XCTAssertTrue(body.contains("isStale(against: ctx.fingerprint)"),
+                      "★ a FRESH field for these exact inputs IS the answer — "
+                      + "re-solving identical inputs produces an identical field")
+        XCTAssertTrue(body.contains("latticeSim.run(ctx)"),
+                      "★ …and otherwise it actually runs")
+    }
+
+    /// ★ IT IS WIRED TO SAVE & EXIT, which is the whole of his "Once you save
+    /// and exit, an FEA should run". A trigger nothing calls is the decorative
+    /// control in its purest form.
+    func testSaveAndExitIsWhatCallsIt() throws {
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"),
+            encoding: .utf8)
+        let r = try XCTUnwrap(src.range(of: "LatticeSetupWizard(project: project)"))
+        let head = String(src[r.lowerBound...].prefix(700))
+        XCTAssertTrue(head.contains("startStressSolveIfNeeded()"),
+                      "★ the wizard's exit is the call site")
+    }
+}
