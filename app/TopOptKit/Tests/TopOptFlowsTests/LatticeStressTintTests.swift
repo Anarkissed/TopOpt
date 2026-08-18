@@ -79,6 +79,63 @@ final class LatticeStressTintTests: XCTestCase {
                           faceIDs: n >= 3 ? [0] : [])
     }
 
+    /// ★★ ONE ENTRY PER *DRAW* VERTEX — PER INDEX, NOT PER UNIQUE POSITION.
+    ///
+    /// ★ THIS IS WHAT MADE IT A PURPLE BLOB. `setVertexTints` checks
+    /// `rgba.count == vertexDrawCount * 8` and, on a mismatch, SILENTLY
+    /// discards the buffer and rebuilds the old one — nothing logged, nothing
+    /// thrown, and a view that looked plausible and was simply not there. My
+    /// first cut sized by unique positions, so on any welded mesh the count was
+    /// wrong and the plot never drew.
+    func testTheBufferIsSizedPerINDEXSoTheRendererAccceptsIt() {
+        // Six indices over four positions — a welded quad, where the two
+        // sizings DIFFER and the old one would have been thrown away.
+        let m = ViewerMesh(vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
+                           indices: [0, 1, 2, 0, 2, 3],
+                           faceIDs: [0, 0])
+        let b = LatticeStressTint.buffer(mesh: m, field: field([0, 1, 0, 0, 0, 0, 0, 0]))
+        XCTAssertEqual(b.count, m.indices.count * LatticeStressTint.floatsPerVertex,
+                       "★ per INDEX — the count the renderer checks")
+        XCTAssertNotEqual(b.count, (m.positions.count / 3)
+                          * LatticeStressTint.floatsPerVertex,
+                          "★ …and NOT per unique position, which is the bug")
+    }
+
+    // MARK: ★ THE LEGEND
+
+    /// ★ A PLOT WITHOUT A SCALE IS A PICTURE. The ticks read in MPa, not 0…1:
+    /// the surface is normalised to its own peak so the SHAPE is legible, but a
+    /// normalised axis cannot answer "is this near yield?".
+    func testTheLegendReadsInAbsoluteMPaAndPeaksAtThePeak() {
+        let t = LatticeStressTint.legendTicks(peakMPa: 42.5, count: 5)
+        XCTAssertEqual(t.count, 5)
+        XCTAssertEqual(Double(t.first!)!, 42.5, accuracy: 0.05,
+                       "★ the top tick IS the peak")
+        XCTAssertEqual(Double(t.last!)!, 0, accuracy: 0.05)
+    }
+
+    /// A degenerate peak yields no ticks rather than a scale of zeros.
+    func testANonPositivePeakHasNoLegend() {
+        XCTAssertTrue(LatticeStressTint.legendTicks(peakMPa: 0).isEmpty)
+        XCTAssertTrue(LatticeStressTint.legendTicks(peakMPa: .nan).isEmpty)
+    }
+
+    /// ★ THE BAR AND THE SURFACE SHARE ONE RAMP, so the key cannot disagree
+    /// with the thing it is a key to.
+    func testTheLegendBarIsTheSameRampHotAtTheTop() {
+        let c = LatticeStressTint.legendColours()
+        XCTAssertEqual(c.count, LatticeStressTint.legendStops)
+        XCTAssertEqual(c.first!, LatticeStressTint.colour(fraction: 1),
+                       "★ hot at the TOP")
+        XCTAssertEqual(c.last!, LatticeStressTint.colour(fraction: 0))
+    }
+
+    /// The peak the legend reports is the field's own maximum.
+    func testThePeakIsTheFieldsMaximum() {
+        XCTAssertEqual(LatticeStressTint.peakMPa(field([0, 3, 1, 0, 0, 0, 0, 2])),
+                       3, accuracy: 1e-6)
+    }
+
     /// ★★ A FLAT FIELD DRAWS NOTHING, AND THAT IS THE POINT. It happens when the
     /// solve found no load path — and normalising it would paint the WHOLE part
     /// peak-red, a picture that looks like a finding and is an artefact of

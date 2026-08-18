@@ -98,9 +98,28 @@ public enum LatticeStressTint {
     /// is the case that matters: it happens when the solve found no load path,
     /// and normalising it would paint the entire part peak-red — a picture that
     /// looks like a finding and is an artefact of dividing by ~0.
+    /// ★★ ONE ENTRY PER *DRAW* VERTEX — PER INDEX, NOT PER UNIQUE POSITION.
+    ///
+    /// ★ THIS IS WHY THE STRESS VIEW WAS A PURPLE BLOB (maintainer, 2026-08-18:
+    /// "The stress view is still this purple blob"). The renderer draws a
+    /// FLATTENED vertex list: `vertexDrawCount == mesh.flat.vertexCount`, one
+    /// vertex per INDEX, so a shared corner appears once per triangle that uses
+    /// it. `setVertexTints` checks `rgba.count == vertexDrawCount * 8` and, on a
+    /// mismatch, SILENTLY discards the buffer and rebuilds the old one.
+    ///
+    /// My first cut sized this by `positions.count / 3` — unique positions — so
+    /// on any welded mesh the count was wrong, the buffer was thrown away
+    /// without a word, and what remained on screen was the ordinary body
+    /// shading. `SurfaceTint.states` carries this exact warning in its own
+    /// comment ("ONE STATE PER *DRAW* VERTEX, NOT PER UNIQUE POSITION") and I
+    /// copied the layout from it without copying the rule.
+    ///
+    /// ★ A SILENT SIZE CHECK IS THE WORST KIND. Nothing logged, nothing threw,
+    /// and the view looked plausible — just wrong. The count is derived from
+    /// `indices` here so it cannot drift again.
     public static func buffer(mesh: ViewerMesh,
                               field: LatticeDemandField) -> [Float] {
-        let n = mesh.positions.count / 3
+        let n = mesh.indices.count            // ★ one per INDEX
         guard n > 0, !field.vonMises.isEmpty else { return [] }
         var peak = 0.0
         for v in field.vonMises { peak = Swift.max(peak, Double(v)) }
@@ -108,14 +127,52 @@ public enum LatticeStressTint {
 
         var out = [Float](repeating: 0, count: n * floatsPerVertex)
         for v in 0..<n {
-            let p = SIMD3<Double>(Double(mesh.positions[v * 3]),
-                                  Double(mesh.positions[v * 3 + 1]),
-                                  Double(mesh.positions[v * 3 + 2]))
+            let src = Int(mesh.indices[v]) * 3
+            guard src + 2 < mesh.positions.count else { continue }
+            let p = SIMD3<Double>(Double(mesh.positions[src]),
+                                  Double(mesh.positions[src + 1]),
+                                  Double(mesh.positions[src + 2]))
             let c = colour(fraction: (sample(field, at: p) ?? 0) / peak)
             let b = v * floatsPerVertex
             out[b] = c.x; out[b + 1] = c.y; out[b + 2] = c.z; out[b + 3] = c.w
             // flags stay zero — this view runs no fragment-side half-space test.
         }
         return out
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // MARK: ★ THE LEGEND
+
+    /// ★ A PLOT WITHOUT A SCALE IS A PICTURE (maintainer, 2026-08-18: "Please
+    /// also add a legend on the right edge"). These are the stops the bar draws
+    /// and the ramp interpolates — ONE source, so the key cannot disagree with
+    /// the surface it is a key to.
+    public static let legendStops = 24
+
+    /// The bar's colours, hot at the top, in the order a vertical legend draws.
+    public static func legendColours() -> [SIMD4<Float>] {
+        (0..<legendStops).map {
+            colour(fraction: 1 - Double($0) / Double(legendStops - 1))
+        }
+    }
+
+    /// ★ THE TICK LABELS, IN MPa. The field is von Mises in MPa, so the scale is
+    /// ABSOLUTE — "where is the load going" is a shape question, but "is this
+    /// near yield" is not, and a normalised 0…1 axis cannot answer the second.
+    public static func legendTicks(peakMPa: Double, count: Int = 5) -> [String] {
+        guard peakMPa.isFinite, peakMPa > 0, count > 1 else { return [] }
+        return (0..<count).map { i in
+            let v = peakMPa * (1 - Double(i) / Double(count - 1))
+            return v >= 100 ? String(format: "%.0f", v)
+                 : v >= 10 ? String(format: "%.1f", v)
+                 : String(format: "%.2f", v)
+        }
+    }
+
+    /// The field's own peak, in MPa — what the legend's top tick reads.
+    public static func peakMPa(_ field: LatticeDemandField) -> Double {
+        var peak = 0.0
+        for v in field.vonMises { peak = Swift.max(peak, Double(v)) }
+        return peak
     }
 }

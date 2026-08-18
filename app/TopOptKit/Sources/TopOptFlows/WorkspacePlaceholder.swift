@@ -891,6 +891,11 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
+                // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,
+                // 2026-08-18: "Please also add a legend on the right edge").
+                // Only while the plot is actually up — a key to nothing is
+                // chrome.
+                if stressViewOn, latticeStressField != nil { stressLegend }
             }
             // ★ AND NEITHER ARE THE LOAD PILLS — the weight readout and its
             // Gravity/Push/Pull switch. The maintainer found the whole load editor
@@ -2773,6 +2778,67 @@ public struct WorkspacePlaceholder: View {
     /// showing three different fields.
     /// Whether this page's own solid-part solve is in flight.
     private var latticeSimIsRunning: Bool { latticeSim.phase == .running }
+
+    /// ★★ THE LEGEND — a plot without a scale is a picture.
+    ///
+    /// ★ IT READS IN MPa, NOT 0…1. The surface is normalised to its own peak
+    /// (that is what makes the shape legible), but a normalised axis cannot
+    /// answer the question that actually matters — "is this near yield?" — so
+    /// the ticks carry the absolute number and the top one IS the peak.
+    ///
+    /// ★ AND IT SAYS WHOSE STRESS IT IS. The field is the SOLID part's, at
+    /// macro scale: it is what the grading law reads, so it explains why the
+    /// lattice is denser here — but it is not a per-strut certification, and a
+    /// legend that let someone believe otherwise would be the most expensive
+    /// kind of wrong on this page.
+    @ViewBuilder private var stressLegend: some View {
+        if let f = latticeStressField {
+            let peak = LatticeStressTint.peakMPa(f)
+            let ticks = LatticeStressTint.legendTicks(peakMPa: peak)
+            HStack(alignment: .center, spacing: DS.Space.xs) {
+                VStack(alignment: .trailing, spacing: 0) {
+                    ForEach(Array(ticks.enumerated()), id: \.offset) { _, t in
+                        Text(t)
+                            .font(.system(size: 9, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                        if t != ticks.last { Spacer(minLength: 0) }
+                    }
+                }
+                .frame(height: 168)
+                VStack(spacing: 0) {
+                    ForEach(Array(LatticeStressTint.legendColours().enumerated()),
+                            id: \.offset) { _, c in
+                        Color(.sRGB, red: Double(c.x), green: Double(c.y),
+                              blue: Double(c.z), opacity: 1)
+                            .frame(width: 12)
+                    }
+                }
+                .frame(height: 168)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: 3)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+                VStack(spacing: 2) {
+                    Text("MPa")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                    Text("von\nMises")
+                        .font(.system(size: 8, weight: .semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                }
+                .fixedSize()
+            }
+            .padding(DS.Space.s)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .fill(DS.Surface.panel.color.opacity(0.85))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .padding(.trailing, PageChrome.edge)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("stress-legend")
+        }
+    }
 
     /// ★ HOW OPAQUE A GROUP'S OWN COLOUR STAYS WHILE THE STRESS VIEW IS UP.
     /// Not a taste value: below about a third the role colours stop being
