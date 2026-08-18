@@ -169,6 +169,9 @@ public struct WorkspacePlaceholder: View {
     /// accessible below the preview button"). Off by default — a view aid is
     /// something you reach for, not the resting state of the page.
     @State private var stressViewOn = false
+    /// ★ Whether the "Simulation running" banner is on screen. Separate from the
+    /// solve's own phase because the user may DISMISS it — see `simRunningBanner`.
+    @State private var simBannerDismissed = false
     /// ★ THE ARMED TOOL. `select` by default — the one tool that edits nothing, so
     /// arriving on the stage cannot make the first exploratory tap destructive.
     @State private var surfaceTool: SurfaceTool = .initial
@@ -557,8 +560,7 @@ public struct WorkspacePlaceholder: View {
                           // It cannot coexist with the Surface stage's tints —
                           // they are different stages — so this is a choice, not
                           // a blend, and the Surface stage keeps priority.
-                          vertexTints: visible.surfaceEditing ? surfaceVertexTints
-                              : (stressViewOn ? stressVertexTints : nil),
+                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : nil,
                           extraLines: surfaceCutLineBuffer,
                           previewLines: surfacePreviewLineBuffer,
                           // ★ A UNION'S INTERNAL EDGES ARE NOT EDGES ANY MORE.
@@ -676,8 +678,23 @@ public struct WorkspacePlaceholder: View {
                           // one entry per WELDED vertex since the brush shipped,
                           // so no stroke the maintainer ever painted could have
                           // tinted anything.
+                          // ★★ THE STRESS VIEW OWNS THIS CHANNEL WHEN IT IS UP
+                          // (maintainer, 2026-08-18). It is the per-flat-vertex
+                          // COLOUR channel, which is where a scalar plot
+                          // belongs — `vertexTints` is the Surface stage's
+                          // eight-float STATE buffer and was never going to
+                          // carry this.
+                          //
+                          // ★ AND IT REPLACES THE DENSITY PROXY RATHER THAN
+                          // BLENDING WITH IT. The violet overlay he called
+                          // "purple physics blobs" IS `latticeProxyTints` — the
+                          // DENSITY ramp, graded by the same sim field. Two
+                          // different quantities in one picture, one of them
+                          // looking like the other, is the confusion; with the
+                          // Stress view on, this channel means von Mises and
+                          // nothing else.
                           stressTints: showSmoothingPage ? smoothBrush.viewerTints()
-                                                         : latticeProxyTints,
+                              : (stressViewOn ? stressSurfaceTints : latticeProxyTints),
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn. L1: a
                           // full-screen page draws NO design-box wireframe.
@@ -949,6 +966,8 @@ public struct WorkspacePlaceholder: View {
                 // Only while the plot is actually up — a key to nothing is
                 // chrome.
                 if stressViewOn, latticeStressField != nil { stressLegend }
+                // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
+                if latticeSimIsRunning, !simBannerDismissed { simRunningBanner }
             }
             // ★ AND NEITHER ARE THE LOAD PILLS — the weight readout and its
             // Gravity/Push/Pull switch. The maintainer found the whole load editor
@@ -2822,6 +2841,7 @@ public struct WorkspacePlaceholder: View {
         if latticeSim.field != nil, !latticeSim.isStale(against: ctx.fingerprint) {
             return
         }
+        simBannerDismissed = false          // a NEW solve gets a fresh banner
         latticeSim.run(ctx)
     }
 
@@ -2831,6 +2851,60 @@ public struct WorkspacePlaceholder: View {
     /// showing three different fields.
     /// Whether this page's own solid-part solve is in flight.
     private var latticeSimIsRunning: Bool { latticeSim.phase == .running }
+
+    /// ★★ "SIMULATION RUNNING" (maintainer, 2026-08-18: "Can you provide some
+    /// sort of notification saying 'Simulation running' after someone saves and
+    /// exits from the lattice setting? … Place it as its own little notification
+    /// at the center of the top edge and ensure there is an 'x' that can exit
+    /// the notification. Make sure the notification closes once the FEA is
+    /// complete").
+    ///
+    /// ★ IT CLOSES TWO WAYS, AND THEY MEAN DIFFERENT THINGS. The X dismisses the
+    /// BANNER; the solve keeps running, because a notification is not a cancel
+    /// button and pretending otherwise would throw away a finished FEA. The
+    /// banner also goes on its own the moment the phase leaves `.running`, which
+    /// is the "closes once the FEA is complete" half.
+    ///
+    /// ★ AND A NEW SOLVE GETS A FRESH BANNER — `startStressSolveIfNeeded` clears
+    /// the dismissal, so dismissing one run's banner does not silence the next.
+    private var simRunningBanner: some View {
+        HStack(spacing: DS.Space.s) {
+            // The animation: a ring that spins for as long as the solve runs.
+            ProgressView()
+                .progressViewStyle(.circular)
+                .controlSize(.small)
+                .tint(DS.Color.accent.color)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Simulation running")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Text("A finite-element solve is grading your lattice.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
+            Button { simBannerDismissed = true } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier("sim-running-dismiss")
+        }
+        .padding(.vertical, DS.Space.s)
+        .padding(.horizontal, DS.Space.m)
+        .background(Capsule().fill(DS.Surface.panel.color)
+            .overlay(Capsule().strokeBorder(
+                DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, PageChrome.edge)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(DS.Motion.emphasized, value: latticeSimIsRunning)
+        .accessibilityIdentifier("sim-running-banner")
+    }
 
     /// ★★ THE LEGEND — a plot without a scale is a picture.
     ///
@@ -2903,10 +2977,9 @@ public struct WorkspacePlaceholder: View {
     /// EMPTY result means "draw the part normally" — see `LatticeStressTint`,
     /// which refuses a flat field rather than normalising it into a part that is
     /// uniformly peak-red.
-    private var stressVertexTints: [Float]? {
-        guard let mesh = viewerMesh, let f = latticeStressField else { return nil }
-        let b = LatticeStressTint.buffer(mesh: mesh, field: f)
-        return b.isEmpty ? nil : b
+    private var stressSurfaceTints: [SIMD4<Float>] {
+        guard let mesh = viewerMesh, let f = latticeStressField else { return [] }
+        return LatticeStressTint.tints(for: mesh, field: f)
     }
 
     private var latticeStressField: LatticeDemandField? {

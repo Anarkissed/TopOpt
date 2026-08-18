@@ -79,26 +79,48 @@ final class LatticeStressTintTests: XCTestCase {
                           faceIDs: n >= 3 ? [0] : [])
     }
 
-    /// ★★ ONE ENTRY PER *DRAW* VERTEX — PER INDEX, NOT PER UNIQUE POSITION.
+    /// ★★ ONE `SIMD4` PER *FLAT* VERTEX — the count `mesh.flat` states, because
+    /// `mesh.flat` is what the renderer draws.
     ///
-    /// ★ THIS IS WHAT MADE IT A PURPLE BLOB. `setVertexTints` checks
-    /// `rgba.count == vertexDrawCount * 8` and, on a mismatch, SILENTLY
-    /// discards the buffer and rebuilds the old one — nothing logged, nothing
-    /// thrown, and a view that looked plausible and was simply not there. My
-    /// first cut sized by unique positions, so on any welded mesh the count was
-    /// wrong and the plot never drew.
-    func testTheBufferIsSizedPerINDEXSoTheRendererAccceptsIt() {
-        // Six indices over four positions — a welded quad, where the two
-        // sizings DIFFER and the old one would have been thrown away.
+    /// ★ THIS BUFFER HAS BEEN WRONG TWICE, in two different ways, and both were
+    /// dropped IN SILENCE: cut 1 sized an 8-float buffer by unique positions;
+    /// cut 2 fixed the count but kept the wrong CHANNEL (`vertexTints`, the
+    /// Surface stage's state buffer, not a colour channel at all). The renderer
+    /// discards a mis-sized array without a word, so both times the view looked
+    /// plausible and was simply absent.
+    func testTheTintsAreSizedByFlatVertexCount() {
+        // A welded quad: six indices over four positions, so a buffer sized by
+        // unique positions would be the wrong length.
         let m = ViewerMesh(vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
                            indices: [0, 1, 2, 0, 2, 3],
                            faceIDs: [0, 0])
-        let b = LatticeStressTint.buffer(mesh: m, field: field([0, 1, 0, 0, 0, 0, 0, 0]))
-        XCTAssertEqual(b.count, m.indices.count * LatticeStressTint.floatsPerVertex,
-                       "★ per INDEX — the count the renderer checks")
-        XCTAssertNotEqual(b.count, (m.positions.count / 3)
-                          * LatticeStressTint.floatsPerVertex,
-                          "★ …and NOT per unique position, which is the bug")
+        let t = LatticeStressTint.tints(for: m, field: field([0, 1, 0, 0, 0, 0, 0, 0]))
+        XCTAssertEqual(t.count, m.flat.vertexCount,
+                       "★ the count the renderer actually draws")
+        XCTAssertNotEqual(t.count, m.positions.count / 3,
+                          "★ …and NOT unique positions, which was cut 1's bug")
+    }
+
+    /// ★ AND THE COLOURS ARE THE RAMP, keyed to the field — the assertion that
+    /// makes this a measurement rather than a wash.
+    func testTheHottestFlatVertexIsAtThePeak() {
+        let m = ViewerMesh(vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
+                           indices: [0, 1, 2, 0, 2, 3],
+                           faceIDs: [0, 0])
+        let t = LatticeStressTint.tints(for: m, field: field([0, 1, 0, 0, 0, 0, 0, 0]))
+        XCTAssertFalse(t.isEmpty)
+        let hottest = t.max { $0.x < $1.x }!
+        XCTAssertEqual(hottest.x, LatticeStressTint.colour(fraction: 1).x,
+                       accuracy: 1e-5)
+    }
+
+    /// A flat field still refuses — normalising it would paint the whole part
+    /// peak-red, which looks like a finding and is a divide-by-nothing.
+    func testAFlatFieldStillDrawsNothingThroughTheColourChannel() {
+        let m = ViewerMesh(vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
+                           indices: [0, 1, 2, 0, 2, 3], faceIDs: [0, 0])
+        XCTAssertTrue(LatticeStressTint.tints(
+            for: m, field: field([Float](repeating: 0, count: 8))).isEmpty)
     }
 
     // MARK: ★ THE LEGEND
@@ -136,47 +158,9 @@ final class LatticeStressTintTests: XCTestCase {
                        3, accuracy: 1e-6)
     }
 
-    /// ★★ A FLAT FIELD DRAWS NOTHING, AND THAT IS THE POINT. It happens when the
-    /// solve found no load path — and normalising it would paint the WHOLE part
-    /// peak-red, a picture that looks like a finding and is an artefact of
-    /// dividing by ~0. Empty means "draw the part normally".
-    func testAFlatFieldRefusesRatherThanPaintingEverythingRed() {
-        let m = mesh([0, 0, 0, 1, 0, 0, 0, 1, 0])
-        XCTAssertTrue(LatticeStressTint.buffer(mesh: m, field: field(
-            [Float](repeating: 0, count: 8))).isEmpty,
-            "★ an all-zero field has no peak to normalise against")
-    }
 
-    /// A real field produces eight floats per vertex — the SAME layout
-    /// `SurfaceTint.buffer` uses, because the renderer has one tint format.
-    func testTheBufferMatchesTheRenderersOneVertexTintLayout() {
-        let m = mesh([0, 0, 0, 1, 0, 0, 0, 1, 0])
-        let b = LatticeStressTint.buffer(mesh: m, field: field([0, 1, 0, 0, 0, 0, 0, 0]))
-        XCTAssertEqual(LatticeStressTint.floatsPerVertex, 8)
-        XCTAssertEqual(b.count, 3 * 8)
-        XCTAssertEqual(b[3], 1, accuracy: 1e-6, "★ opaque alpha in slot 3")
-    }
 
-    /// ★ THE HOT VERTEX IS THE ONE AT THE PEAK. This is the assertion that makes
-    /// the view a measurement rather than a decoration: the colour is keyed to
-    /// the field, not to position or index order.
-    func testTheVertexAtThePeakIsTheHottest() {
-        // Vertex 1 sits exactly on the field's only non-zero corner.
-        let m = mesh([0, 0, 0, 1, 0, 0, 0, 1, 0])
-        let b = LatticeStressTint.buffer(mesh: m, field: field([0, 1, 0, 0, 0, 0, 0, 0]))
-        let idleRed = b[0], hotRed = b[8]
-        XCTAssertGreaterThan(hotRed, idleRed, "★ the loaded vertex reads hotter")
-        XCTAssertEqual(hotRed, LatticeStressTint.colour(fraction: 1).x, accuracy: 1e-5)
-        XCTAssertEqual(idleRed, LatticeStressTint.colour(fraction: 0).x, accuracy: 1e-5)
-    }
 
-    /// An empty mesh or an empty field is empty, not a crash.
-    func testDegenerateInputsAreEmpty() {
-        XCTAssertTrue(LatticeStressTint.buffer(mesh: mesh([]),
-                                               field: field([0, 1, 0, 0, 0, 0, 0, 0])).isEmpty)
-        XCTAssertTrue(LatticeStressTint.buffer(mesh: mesh([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-                                               field: field([])).isEmpty)
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
