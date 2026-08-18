@@ -3078,7 +3078,17 @@ public struct WorkspacePlaceholder: View {
     /// discard. That is a shader change and it is deliberately NOT bundled here —
     /// this value is the cheap, reversible half, and it is worth seeing on the
     /// device before writing the expensive half.
-    private var latticePreviewBodyAlpha: Float { 1 }
+    private var latticePreviewBodyAlpha: Float {
+        // ★★ AND 0 WHEN THERE IS NOTHING TO CUT. With declared regions the shell is
+        // cut to them and the two surfaces are complementary — that is the whole
+        // point. With NO regions the lattice legitimately fills the interior, the
+        // clip has nothing to remove, and an opaque body would hide the preview
+        // completely. That is the settings-page sample, and main's
+        // `testTheStrutPreviewSurvivesTheSharedDepthBuffer` is what caught it: it
+        // asserts the lattice reaches the G-buffer AT ALL, and with a whole shell
+        // in front of it, it does not.
+        project.latticeJobRegions().regions.contains { $0.role == .include } ? 1 : 0
+    }
 
     private var latticeRegionInputsKey: Int {
         var h = Hasher()

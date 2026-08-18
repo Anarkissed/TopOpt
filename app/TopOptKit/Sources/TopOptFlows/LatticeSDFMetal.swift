@@ -90,6 +90,11 @@ public struct LatticeSDFScene {
     /// found nothing to fill, and the overlay says so instead of showing a label over
     /// an empty viewport.
     public let interiorVoxelCount: Int
+    /// ★ THE DECLARATIONS THIS SCENE WAS MASKED BY — kept so the SHELL can be cut
+    /// by the same list, from the same bake. Re-reading the project at draw time
+    /// would let the hole and the struts drift apart for a frame; reading them off
+    /// the scene means they are the same list by construction.
+    public let regions: [LatticeRegionSpec]
     /// ★ The part's OWN interior, before the region mask — so "no inside at all"
     /// and "the regions matched nothing" stay distinguishable.
     public let partInteriorVoxelCount: Int
@@ -135,6 +140,7 @@ public struct LatticeSDFScene {
         for v in solid.values where v > 0.5 { solidInside += 1 }
         self.partInteriorVoxelCount = solidInside
         self.skippedFaces = skippedFaces
+        self.regions = regions
         self.occupancy = LatticeRegionMask.clipped(
             solid, to: regions, whenEmpty: whenEmpty)
         self.partSDF = LatticePreviewOccupancy.signedDistance(
