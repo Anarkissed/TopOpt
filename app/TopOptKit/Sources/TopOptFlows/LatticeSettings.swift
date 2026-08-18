@@ -488,6 +488,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// every existing project's lattice.
     public var simulateStresses: Bool
 
+    /// ★ THE DEMAND⇢DENSITY CURVE'S EXPONENT — core's `grading.demand_exponent`.
+    ///
+    ///     rho = rho_hi · (demand / demand_max) ^ gamma
+    ///
+    /// 1.0 is fully-stressed design on von Mises; 0.5 gives the same grade from
+    /// strain-energy demand (core's own words, `grading.hpp:94-100`). It is
+    /// stored so the PREVIEW can read the same number the job carries — the
+    /// preview hardcoded `1` while this was unsettable, and that was honest then
+    /// and would not be once a control exists.
+    public var demandExponent: Double = 1
+
     /// ★ THE INVARIANT, IN ONE PLACE: no axis may sit on a Sim setting while the
     /// permission is off. Turning the switch off MOVES those axes to their
     /// nearest manual equivalent rather than leaving a mode the job cannot
@@ -1134,7 +1145,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
                                   minRelativeDensity: b.densityLo,
                                   maxRelativeDensity: b.densityHi,
-                                  gamma: 1,
+                                  // ★ CORE'S OWN EXPONENT, NOT A HARDCODED 1
+                                  // (maintainer, 2026-08-17: "use all variables
+                                  // as part of the preview"). `1` was right when
+                                  // nothing could set it; core's grading law is
+                                  //   rho = rho_hi · (demand/demand_max)^gamma
+                                  // with `demand_exponent` defaulting to 1.0, so
+                                  // the preview reads the SAME number the job
+                                  // carries and a future control moves both.
+                                  gamma: demandExponent,
                                   uniformRelativeDensity: 0.5 * (b.densityLo + b.densityHi))
     }
 }

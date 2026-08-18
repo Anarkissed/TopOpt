@@ -157,3 +157,63 @@ final class LatticeSimPermissionTests: XCTestCase {
         XCTAssertTrue(s.simulateStresses)
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ THE PERMISSION REACHES THE WIZARD, AND THE PREVIEW READS THE JOB'S γ
+
+@MainActor
+final class LatticeSimWizardTests: XCTestCase {
+
+    /// ★ THE WIZARD BORROWS THE SETTINGS' OWN MIGRATION RULE rather than writing
+    /// a second one. Two copies of one rule is exactly how this page ended up
+    /// with two depth resolvers and two strut laws.
+    func testTheWizardsSwitchMigratesThroughTheSettingsRule() {
+        var m = LatticeWizardModel()
+        m.cellSizeMode = .swept
+        m.setSimulateStresses(false)
+        XCTAssertFalse(m.simulateStresses)
+        XCTAssertEqual(m.densityMode, .uniform)
+        XCTAssertEqual(m.cellSizeMode, .fixed)
+        XCTAssertFalse(m.needsStressSolve)
+    }
+
+    /// ★ IT ROUND-TRIPS THROUGH THE PROJECT. A switch the sheet shows but never
+    /// saves is the decorative-control defect; `applied(to:)` is what makes it
+    /// a setting.
+    func testItSurvivesTheRoundTripThroughLatticeSettings() {
+        var s = LatticeSettings(enabled: true)
+        s.setSimulateStresses(false)
+        let m = LatticeWizardModel(settings: s)
+        XCTAssertFalse(m.simulateStresses, "★ the sheet opens on what is stored")
+        XCTAssertFalse(m.applied(to: s).simulateStresses,
+                       "★ …and hands it back unchanged")
+
+        var on = LatticeWizardModel(settings: s)
+        on.setSimulateStresses(true)
+        XCTAssertTrue(on.applied(to: s).simulateStresses)
+    }
+
+    /// ★★ THE PREVIEW READS THE JOB'S OWN EXPONENT, not a hardcoded 1
+    /// (maintainer: "Please use all variables as part of the preview to have as
+    /// accurate a preview as possible").
+    ///
+    /// Core's grading law is `rho = rho_hi · (demand/demand_max)^gamma`. The
+    /// preview pinned gamma at 1 — honest while nothing could set it, and wrong
+    /// the moment anything could.
+    func testThePreviewProxyCarriesTheDemandExponent() {
+        var s = LatticeSettings(enabled: true)
+        s.demandExponent = 0.5
+        let p = s.proxyParams(limits: TopOptKit.latticeLimits(topology: s.topologyID))
+        XCTAssertEqual(p.gamma, 0.5, accuracy: 1e-12,
+                       "★ the preview grades by the number the job carries")
+    }
+
+    /// The default is core's own default, so an untouched project's preview is
+    /// bit-identical to what it drew before the field existed.
+    func testTheDefaultExponentIsCoresOwn() {
+        let s = LatticeSettings(enabled: true)
+        XCTAssertEqual(s.demandExponent, 1, accuracy: 1e-12)
+        let p = s.proxyParams(limits: TopOptKit.latticeLimits(topology: s.topologyID))
+        XCTAssertEqual(p.gamma, 1, accuracy: 1e-12)
+    }
+}

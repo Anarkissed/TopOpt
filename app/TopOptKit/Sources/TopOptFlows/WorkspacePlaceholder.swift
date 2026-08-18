@@ -165,6 +165,10 @@ public struct WorkspacePlaceholder: View {
     /// §6 — X-RAY, its own switch. Off by default: seeing every hidden edge at once
     /// is a specific request, not the resting state of a page about surfaces.
     @State private var surfaceXrayOn = false
+    /// ★ THE STRESS VIEW (maintainer, 2026-08-17: "a Stress view should now be
+    /// accessible below the preview button"). Off by default — a view aid is
+    /// something you reach for, not the resting state of the page.
+    @State private var stressViewOn = false
     /// ★ THE ARMED TOOL. `select` by default — the one tool that edits nothing, so
     /// arriving on the stage cannot make the first exploratory tap destructive.
     @State private var surfaceTool: SurfaceTool = .initial
@@ -528,7 +532,12 @@ public struct WorkspacePlaceholder: View {
                           // page would read as two colour systems at once. Here
                           // colour means ONE thing: this face can be modified.
                           faceTints: visible.surfaceEditing ? [:] : roleTints,
-                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : nil,
+                          // ★ THE STRESS VIEW RIDES THE ONE VERTEX-TINT SLOT.
+                          // It cannot coexist with the Surface stage's tints —
+                          // they are different stages — so this is a choice, not
+                          // a blend, and the Surface stage keeps priority.
+                          vertexTints: visible.surfaceEditing ? surfaceVertexTints
+                              : (stressViewOn ? stressVertexTints : nil),
                           extraLines: surfaceCutLineBuffer,
                           previewLines: surfacePreviewLineBuffer,
                           // ★ A UNION'S INTERNAL EDGES ARE NOT EDGES ANY MORE.
@@ -912,6 +921,10 @@ public struct WorkspacePlaceholder: View {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
                     refreshLatticeFaceCards()
+                    // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17:
+                    // "Once you save and exit, an FEA should run and a Stress
+                    // view should now be accessible below the preview button").
+                    startStressSolveIfNeeded()
                 }
                 .transition(.opacity)
             }
@@ -2695,6 +2708,59 @@ public struct WorkspacePlaceholder: View {
     /// carries a von Mises field, the strut radii grade by it — thick struts on the
     /// load path, sparse in quiet regions, the lattice the grading law would build.
     /// Pre-run (or when no field exists) the preview is uniform, like the proxy.
+    // MARK: ★ THE SIM SOLVE
+
+    /// ★★ THE FEA THAT SAVE & EXIT STARTS — ASYNC, deliberately (maintainer,
+    /// 2026-08-17: "async solve on save").
+    ///
+    /// ★ WHY ASYNC AND NOT BLOCKING. This is a real CG solve, not a lookup:
+    /// seconds at Fast 64³ and longer above it. Holding the sheet shut behind it
+    /// would make Save & Exit feel broken on exactly the parts that most need
+    /// the grading. `LatticeSimModel` already publishes `phase`, so the Stress
+    /// view can appear immediately and fill in when the field lands, and the
+    /// preview rebakes off the same signal.
+    ///
+    /// ★ IT REFUSES THREE WAYS, and each refusal is a cost avoided rather than a
+    /// silent skip:
+    ///   · nothing is asking — the permission is off, or every axis is pinned by
+    ///     hand (`needsStressSolve`). A solve nothing reads is pure cost
+    ///   · the project cannot describe one (no imported file, no material)
+    ///   · the field we already hold is still FRESH for these inputs, by
+    ///     `LatticeSimModel`'s own fingerprint — the model, the material, the
+    ///     resolution and the declared load case. Re-solving identical inputs
+    ///     produces an identical field
+    private func startStressSolveIfNeeded() {
+        guard project.lattice.enabled, project.lattice.needsStressSolve,
+              let ctx = model.makeLatticeSimContext()
+        else { return }
+        // A field we already have, for these exact inputs, is the answer.
+        if latticeSim.field != nil, !latticeSim.isStale(against: ctx.fingerprint) {
+            return
+        }
+        latticeSim.run(ctx)
+    }
+
+    /// ★ THE STRESS FIELD THE PAGE MAY GRADE BY, whatever produced it: a finished
+    /// run's own variant field first, else this page's solid-part sim. ONE
+    /// accessor, so the preview, the Stress view and the readouts cannot end up
+    /// showing three different fields.
+    /// Whether this page's own solid-part solve is in flight.
+    private var latticeSimIsRunning: Bool { latticeSim.phase == .running }
+
+    /// ★ THE STRESS BUFFER, or empty when there is nothing honest to paint. An
+    /// EMPTY result means "draw the part normally" — see `LatticeStressTint`,
+    /// which refuses a flat field rather than normalising it into a part that is
+    /// uniformly peak-red.
+    private var stressVertexTints: [Float]? {
+        guard let mesh = viewerMesh, let f = latticeStressField else { return nil }
+        let b = LatticeStressTint.buffer(mesh: mesh, field: f)
+        return b.isEmpty ? nil : b
+    }
+
+    private var latticeStressField: LatticeDemandField? {
+        latticePageVariantField ?? latticeSim.field
+    }
+
     private func buildStrutScene() {
         guard let mesh = viewerMesh else { return }
         let latticeID = latticeProxy.params.latticeID
@@ -2702,9 +2768,21 @@ public struct WorkspacePlaceholder: View {
         // demand field (the variant's field on the variants entry, else the sim's) —
         // provenance the page shows next to the Auto control (bar B6). Otherwise the
         // shipped behaviour: the newest accepted variant's field, uniform pre-run.
+        // ★★ THE PREVIEW GRADES BY THE SIM FIELD ON THE LATTICE *STAGE* TOO
+        // (maintainer, 2026-08-17: "Please use all variables as part of the
+        // preview to have as accurate a preview as possible").
+        //
+        // ★ THE GAP THIS CLOSES. The `showLatticePage` guard meant the sim field
+        // reached the preview only on the full-screen lattice PAGE. On the
+        // lattice STAGE — where the Struts toggle now lives, and where he
+        // actually works — it fell through to `run.outcome`, which is nil until
+        // an optimize run finishes. So the stage's preview drew a UNIFORM
+        // lattice while a perfectly good stress field sat in `latticeSim`, and
+        // the picture disagreed with the job the Lattice button would send.
+        // The mode is what decides now, not which page is up.
         let field: StressField?
-        if showLatticePage, project.lattice.densityMode == .sim,
-           let f = latticePageVariantField ?? latticeSim.field {
+        if project.lattice.densityMode.needsSimulation,
+           let f = latticeStressField {
             field = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
                                 origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
                                 values: f.vonMises)
@@ -4515,6 +4593,22 @@ public struct WorkspacePlaceholder: View {
                         if strutScene == nil { buildStrutScene() }
                     }
                 }
+                // ★★ THE STRESS VIEW, BELOW THE PREVIEW BUTTON (maintainer,
+                // 2026-08-17), and shown ONLY once there is a field to draw.
+                //
+                // ★ A BUTTON THAT WOULD PAINT NOTHING IS NOT OFFERED. Before the
+                // solve lands `latticeStressField` is nil, and a lit control
+                // that produces no change on screen is the affordance this page
+                // has spent the whole task removing. While the solve is running
+                // the button appears DISABLED with the phase as its label, so
+                // the wait is visible rather than mysterious.
+                if latticeSimIsRunning {
+                    viewModeButton("waveform.path.ecg", label: "Simulating…",
+                                   on: false, enabled: false) { }
+                } else if latticeStressField != nil {
+                    viewModeButton("waveform.path.ecg", label: "Stress",
+                                   on: stressViewOn) { stressViewOn.toggle() }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -4528,12 +4622,14 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func viewModeButton(_ icon: String, label: String, on: Bool,
+                                enabled: Bool = true,
                                 action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle((on ? DS.Color.textPrimary
                                      : DS.Color.textTertiary).color)
+                .opacity(enabled ? 1 : 0.45)
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
@@ -4545,7 +4641,9 @@ public struct WorkspacePlaceholder: View {
                 )
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
         .accessibilityLabel(label)
+        .accessibilityIdentifier("view-mode-\(label.lowercased())")
     }
 
     // MARK: ★ §6 — THE SURFACE STAGE'S TOOL PANEL
