@@ -119,6 +119,80 @@ public enum LatticeFaceTintVolume {
     }
 }
 
+/// ★ §5(b) — WHAT THE OVERLAY SAYS, INCLUDING WHEN IT HAS NOTHING TO SAY IT ABOUT
+/// (task 2026-08-18-lattice-preview-confetti).
+///
+/// The banner used to be one string with one condition: `if showStrutPreview, let
+/// scene = strutScene`. Read the other way round, that is a preview which — when
+/// there is no scene to draw — says NOTHING AT ALL. Turn it on with no mesh, or
+/// during the second the bake takes, or on a part with no interior, and the toggle
+/// reads "on", the viewport is unchanged, and the user is left to conclude the
+/// feature is broken. The maintainer lost two sessions to a silent preview, and the
+/// silence is a defect in its own right, independent of what caused the emptiness.
+///
+/// So the banner is a TOTAL function of the state now: every state the preview can
+/// be in has a sentence, and the sentence says WHY.
+public enum LatticePreviewBanner: Equatable, Sendable {
+    /// There is strut geometry and it is being drawn. Carries the honesty label
+    /// (bar P1) unchanged — this is the string that shipped.
+    case drawing(String)
+    /// There is nothing to draw, and this is the reason, in plain words.
+    case empty(String)
+
+    public var text: String {
+        switch self {
+        case .drawing(let t), .empty(let t): return t
+        }
+    }
+
+    public var isEmpty: Bool {
+        if case .empty = self { return true }
+        return false
+    }
+
+    /// The banner for the current state, or nil when the preview is off (then there
+    /// is no banner at all, which is correct — the user has not asked for one).
+    ///
+    /// ★ NO JARGON, AND UNDER ~25 WORDS EACH (§5c). Not "occupancy", not "SDF", not
+    /// "marched": a user who turned a toggle on is owed a sentence they can act on.
+    public static func make(previewOn: Bool,
+                            hasModel: Bool,
+                            scene: LatticeSDFPreviewSummary?) -> LatticePreviewBanner? {
+        guard previewOn else { return nil }
+        guard hasModel else {
+            return .empty("No lattice to show — there is no model open yet.")
+        }
+        guard let scene else {
+            return .empty("Building the strut preview — this takes a moment.")
+        }
+        guard scene.interiorVoxelCount > 0 else {
+            return .empty("No lattice to show — this part has no inside to fill with struts.")
+        }
+        return .drawing(scene.previewLabel)
+    }
+}
+
+/// The little the banner needs to know about a baked scene — so the decision above is
+/// pure and testable without a GPU, a mesh or a Metal device anywhere near it.
+public struct LatticePreviewSummaryValues: Equatable, Sendable {
+    public var interiorVoxelCount: Int
+    public var previewLabel: String
+    public init(interiorVoxelCount: Int, previewLabel: String) {
+        self.interiorVoxelCount = interiorVoxelCount
+        self.previewLabel = previewLabel
+    }
+}
+
+/// What a baked scene can answer for the banner. `LatticeSDFScene` conforms.
+public protocol LatticeSDFPreviewSummary {
+    /// Voxels of the part's own interior in the baked occupancy grid. Zero means the
+    /// solid voxelisation found nothing to fill — there is no lattice, at any setting.
+    var interiorVoxelCount: Int { get }
+    var previewLabel: String { get }
+}
+
+extension LatticePreviewSummaryValues: LatticeSDFPreviewSummary {}
+
 /// The geometry + honesty model for the raymarched preview of one lattice.
 public struct LatticeSDFPreview: Equatable, Sendable {
 

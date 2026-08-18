@@ -1047,7 +1047,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var flowGuideVertexCount = 0
     /// Body opacity for the load-flow body modes: 1 opaque (solid, default), < 1 draws
     /// the mesh translucent so the flow shows through the walls (x-ray / stress).
-    private var bodyAlpha: Float = 1
+    ///
+    /// ★ THE GETTER IS INTERNAL, AND THAT IS THE POINT (task
+    /// 2026-08-18-lattice-preview-confetti). It was fully `private`, so the ONLY way a
+    /// test could see a body alpha was to call `setBodyAlpha` itself — which every
+    /// test that hides the body did, and which is exactly why nothing noticed that the
+    /// SwiftUI path never delivered one. `Coordinator.apply` now reconciles against
+    /// this value directly, so the renderer's own state is the single source of truth
+    /// and there is no cached copy to go stale.
+    private(set) var bodyAlpha: Float = 1
     private var vertexDrawCount = 0
     /// M7.8 reveal scrub params (fraction, minY, maxY, enabled); default shows all.
     private var revealParams = SIMD4<Float>(1, 0, 1, 0)
@@ -2831,6 +2839,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private(set) var lastFrameVertices = 0
     /// Whether the AO pass ran in the most recently ENCODED frame. See `aoBufferDump`.
     private(set) var lastFrameHadAO = false
+    /// Whether the lattice marched into the G-buffer in the most recently ENCODED
+    /// frame. See `latticeMaskDump`.
+    private(set) var lastFrameHadLatticeGBuffer = false
     private var frameDrawCalls = 0
     private var frameVertices = 0
 
@@ -2902,6 +2913,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // and never know — which is exactly how a §3(b) "before" capture comes back
         // showing the "after"'s buffer. `aoBufferDump` refuses when this is false.
         lastFrameHadAO = haveAO
+        // ★ AND WHETHER THE LATTICE'S HALF OF THE G-BUFFER WAS FILLED THIS FRAME
+        // (task 2026-08-18-lattice-preview-confetti). `gbufferAlbedoTex` outlives a
+        // frame exactly as `aoBlurTex` does, so `latticeMaskDump` has to refuse a
+        // stale one for the same reason: a "before" that reports the "after"'s
+        // coverage is worse than no number at all.
+        lastFrameHadLatticeGBuffer = wantsLattice && gbuffer != nil
         var shade = makeShadeParams(mainSize: haveAO ? mainSize : nil)
 
         // ★ §3c: the footprint, in its OWN pass before the main one (a render pass
@@ -3888,6 +3905,118 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return AOBufferDump(width: ao.width, height: ao.height, pixels: px)
     }
 
+    /// ★ THE COUNT §2 OF THE CONFETTI TASK ASKS FOR, MEASURED WHERE IT IS DECIDED
+    /// (task 2026-08-18-lattice-preview-confetti).
+    ///
+    /// The lattice's albedo attachment is cleared to alpha 0 and `lsdf_gbuffer` writes
+    /// alpha 1 only at a pixel where its marched hit SURVIVED the depth test against
+    /// the rasterised shell in the shared prepass. So `covered` is exactly "how many
+    /// pixels of lattice this frame is allowed to show" — and the deferred shade
+    /// discards everywhere else, whatever the march found. A march that hits on every
+    /// pixel and wins on none reads as zero here, which is the whole diagnosis.
+    struct LatticeMaskDump {
+        var width: Int
+        var height: Int
+        /// Pixels with lattice albedo alpha ≥ 0.5 — the lattice's own mask.
+        var covered: Int
+        /// The mask itself, row-major y-down, and the albedo bytes behind it — so a
+        /// caller can ask not just HOW MANY pixels the lattice won but whether they
+        /// form struts or confetti, and what colour they are (§4/R5).
+        var mask: [Bool]
+        var rgb: [UInt8]
+        var total: Int { width * height }
+        var coveredFraction: Double { total > 0 ? Double(covered) / Double(total) : 0 }
+
+        /// ★ THE CONFETTI METRIC. The share of won pixels that are ISOLATED — fewer
+        /// than two of their four neighbours also won. A rendered strut is a run of
+        /// adjacent pixels and scores near zero; a scatter of single-pixel specks
+        /// scores near one. This is what tells a picture of struts from the
+        /// maintainer's confetti without anyone having to squint at it.
+        var isolatedFraction: Double {
+            guard covered > 0 else { return 0 }
+            var isolated = 0
+            for y in 0..<height {
+                for x in 0..<width where mask[y * width + x] {
+                    var n = 0
+                    if x > 0, mask[y * width + x - 1] { n += 1 }
+                    if x + 1 < width, mask[y * width + x + 1] { n += 1 }
+                    if y > 0, mask[(y - 1) * width + x] { n += 1 }
+                    if y + 1 < height, mask[(y + 1) * width + x] { n += 1 }
+                    if n < 2 { isolated += 1 }
+                }
+            }
+            return Double(isolated) / Double(covered)
+        }
+    }
+
+    func latticeMaskDump(size: Int) -> LatticeMaskDump? {
+        guard vertexDrawCount > 0, latticeInFrame else { return nil }
+        let cdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.colorFormat, width: size, height: size, mipmapped: false)
+        cdesc.usage = [.renderTarget]
+        cdesc.storageMode = .private
+        let ddesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.depthFormat, width: size, height: size, mipmapped: false)
+        ddesc.usage = [.renderTarget]
+        ddesc.storageMode = .private
+        if sampleCount > 1 { ddesc.textureType = .type2DMultisample; ddesc.sampleCount = sampleCount }
+        guard let color = device.makeTexture(descriptor: cdesc),
+              let depth = device.makeTexture(descriptor: ddesc),
+              let cmd = queue.makeCommandBuffer() else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        if let msaa = msaaTexture(width: size, height: size) {
+            rpd.colorAttachments[0].texture = msaa
+            rpd.colorAttachments[0].resolveTexture = color
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+        } else {
+            rpd.colorAttachments[0].texture = color
+            rpd.colorAttachments[0].storeAction = .store
+        }
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.depthAttachment.texture = depth
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        rpd.depthAttachment.storeAction = .dontCare
+        encode(into: rpd, aspect: 1, into: cmd, drawStage: false)
+        guard lastFrameHadLatticeGBuffer, let alb = gbufferAlbedoTex else {
+            cmd.commit(); return nil
+        }
+        let sdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: alb.pixelFormat, width: alb.width, height: alb.height, mipmapped: false)
+        sdesc.usage = [.shaderRead]
+        #if os(macOS)
+        sdesc.storageMode = .managed
+        #else
+        sdesc.storageMode = .shared
+        #endif
+        guard let staging = device.makeTexture(descriptor: sdesc),
+              let blit = cmd.makeBlitCommandEncoder() else { cmd.commit(); return nil }
+        blit.copy(from: alb, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: alb.width, height: alb.height, depth: 1),
+                  to: staging, destinationSlice: 0, destinationLevel: 0,
+                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        #if os(macOS)
+        blit.synchronize(resource: staging)
+        #endif
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        var raw = [UInt8](repeating: 0, count: alb.width * alb.height * 4)
+        staging.getBytes(&raw, bytesPerRow: alb.width * 4,
+                         from: MTLRegionMake2D(0, 0, alb.width, alb.height), mipmapLevel: 0)
+        var covered = 0
+        var mask = [Bool](repeating: false, count: alb.width * alb.height)
+        var rgb = [UInt8](repeating: 0, count: alb.width * alb.height * 3)
+        for n in 0..<mask.count {
+            // `gbufferAlbedoFormat` is rgba8Unorm, so the bytes are already r,g,b,a.
+            rgb[n * 3] = raw[n * 4]; rgb[n * 3 + 1] = raw[n * 4 + 1]; rgb[n * 3 + 2] = raw[n * 4 + 2]
+            if raw[n * 4 + 3] >= 128 { mask[n] = true; covered += 1 }
+        }
+        return LatticeMaskDump(width: alb.width, height: alb.height, covered: covered,
+                               mask: mask, rgb: rgb)
+    }
+
     func renderFaceIDOffscreen(width: Int, height: Int) -> [UInt32]? {
         guard vertexDrawCount > 0, let idPipeline, let idbuf = idVertexBuffer,
               width > 0, height > 0 else { return nil }
@@ -4157,7 +4286,12 @@ struct MeshViewInputs {
     /// Load-path FLOW: the faint full-path guide lines (pos+rgba, stride 7). Uploaded
     /// when they change (per selection), not per frame.
     var loadFlowGuides: [Float]? = nil
-    /// Load-path FLOW: body opacity (1 opaque; < 1 = translucent x-ray/stress body).
+    /// Body opacity: 1 opaque; < 1 draws the mesh translucent; 0 hides it entirely.
+    ///
+    /// ★ TWO FEATURES SET THIS, NOT ONE (task 2026-08-18-lattice-preview-confetti).
+    /// The load-path x-ray / stress body modes ask for ~0.35, and the RAYMARCHED
+    /// STRUT PREVIEW asks for 0 (bar A3: while the lattice layer is up there is one
+    /// visible object). `apply` used to honour it only on the first of those.
     var bodyAlpha: Float = 1
     /// Detent face-highlight PULSE (device round 3, item 2): the part face a design-box drag just
     /// snapped to + a monotonic token. The coordinator fires a fresh viewer flash whenever the
@@ -4580,13 +4714,13 @@ extension MetalMeshView {
         private var appliedWireframe = false
         private var appliedLoadPathFlow: Float = 0
         /// Load-path FLOW (handoff 070): whether the comet flow is on, the last comet
-        /// key (re-upload each animation tick), guide signature, and body alpha.
+        /// key (re-upload each animation tick) and the guide signature. Body alpha is
+        /// NOT cached here — see the reconciliation in `apply`.
         private var appliedFlow = false
         private var appliedFlowKey: Double = -1
         private var appliedGuideSig = -1
         /// The detent-pulse token last fired (item 2); a fresh token flashes the matched face.
         private var appliedPulseToken = -1
-        private var appliedBodyAlpha: Float = 1
         /// M7.dom-app: the design box + keep-outs last uploaded, so the gizmo geometry
         /// rebuilds only when the boxes actually change (not every camera tick).
         private var appliedDesignBox: DesignBoxBounds?
@@ -4959,18 +5093,40 @@ extension MetalMeshView {
                     appliedGuideSig = gsig
                     renderer.setFlowGuides(inputs.loadFlowGuides ?? [])
                 }
-                if !appliedFlow || inputs.bodyAlpha != appliedBodyAlpha {
-                    appliedBodyAlpha = inputs.bodyAlpha
-                    renderer.setBodyAlpha(inputs.bodyAlpha)
-                }
                 appliedFlow = true
                 dirty = true
             } else if appliedFlow {
                 appliedFlow = false
                 appliedFlowKey = -1
                 appliedGuideSig = -1
-                appliedBodyAlpha = 1
                 renderer.clearLoadFlow()
+                dirty = true
+            }
+
+            // ★ BODY ALPHA IS NOT A LOAD-FLOW PROPERTY, AND TREATING IT AS ONE IS THE
+            // WHOLE OF task 2026-08-18-lattice-preview-confetti.
+            //
+            // It used to be set inside the block above — `if let flow =
+            // inputs.loadFlowVertices` — because the load-path x-ray was the first
+            // feature to want a see-through body. The RAYMARCHED LATTICE PREVIEW is the
+            // second (2026-07-29, `WorkspacePlaceholder` 720: while the strut layer is
+            // up there is ONE visible object, bar A3), and the lattice stage has no
+            // load flow, so its request was dropped on every frame it was ever made.
+            //
+            // ★ THAT COST NOTHING VISIBLE UNTIL PR 340. Until then the lattice was a
+            // separate, transparent, DEPTH-LESS `MTKView` composited over this one — it
+            // drew over an opaque body regardless. PR 340 put the two objects in ONE
+            // depth buffer, and the opaque shell that should never have been there then
+            // won that test at all but a scatter of pixels where a strut trimmed flush
+            // against a wall landed a hair proud of it. That scatter is the confetti.
+            //
+            // ★ RECONCILED AGAINST THE RENDERER, NOT AGAINST A CACHED COPY. The cached
+            // `appliedBodyAlpha` is gone: `clearLoadFlow()` also resets the renderer's
+            // alpha to 1, so a cache could believe it had already delivered a 0 that the
+            // renderer no longer held. Reading the renderer makes that class of bug
+            // unrepresentable — there is one value and it is the one being drawn with.
+            if renderer.bodyAlpha != inputs.bodyAlpha {
+                renderer.setBodyAlpha(inputs.bodyAlpha)
                 dirty = true
             }
 
