@@ -188,7 +188,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public init(topologyID: String = LatticeType.octet.id,
                 cellMM: Double = 6,
                 relativeDensity: Double = 0.35,
-                densityMode: LatticeDensityMode = .auto,
+                densityMode: LatticeDensityMode = .sim,
                 cellSizeMode: LatticeCellSizeMode = .auto,
                 cellMinMM: Double = LatticeSettings.defaultCellMinMM,
                 cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
@@ -331,7 +331,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // Density is an IN-THE-PART setting now, so showing it means showing the
         // tiled sample — never the lone cell.
         stage = LatticeWizardSetting.density.stage
-        play(m == .auto ? .stressWipeAndDive : .tile)
+        play(m == .sim ? .stressWipeAndDive : .tile)
     }
 
     /// Auto CELL SIZE jumps straight to the sample and shows how it looks (§2 C).
@@ -396,7 +396,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
 /// THE DEFECT, with the two lines that caused it. `LatticeSetupWizard` passed the
 /// renderer
 ///
-///     reveal: Float(model.densityMode == .auto ? wipe : 1)     (line 75)
+///     reveal: Float(model.densityMode == .sim ? wipe : 1)     (line 75)
 ///     @State private var wipe: Double = 0                      (line 42)
 ///
 /// and `MetalMeshView`'s fragment shader discards every fragment above the reveal

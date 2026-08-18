@@ -83,7 +83,7 @@ final class LatticeWizardTests: XCTestCase {
 
     func testAutoDensityPlaysTheStressCinematicAndUniformDoesNot() {
         var m = LatticeWizardModel()
-        m.setDensityMode(.auto)
+        m.setDensityMode(.sim)
         XCTAssertEqual(m.playing, .stressWipeAndDive,
                        "§2C: Auto density wipes the field down and dives in")
         m.finishedPlaying()
@@ -183,10 +183,10 @@ final class LatticeWizardTests: XCTestCase {
 
     func testAutoIsTheDefaultOnANewProject() {
         let s = LatticeSettings()
-        XCTAssertEqual(s.densityMode, .auto, "§4b")
+        XCTAssertEqual(s.densityMode, .sim, "§4b")
         XCTAssertEqual(s.cellSizeMode, .auto, "§4b")
         let m = LatticeWizardModel()
-        XCTAssertEqual(m.densityMode, .auto)
+        XCTAssertEqual(m.densityMode, .sim)
         XCTAssertEqual(m.cellSizeMode, .auto)
     }
 
@@ -208,7 +208,7 @@ final class LatticeWizardTests: XCTestCase {
         let withRegions = LatticeAutoPosture.resolve(includeRegionCount: 8,
                                                      retainSubfloor: false)
         XCTAssertEqual(withRegions.cellMode, .fit, "§4a: per region")
-        XCTAssertEqual(withRegions.densityMode, .auto)
+        XCTAssertEqual(withRegions.densityMode, .sim)
 
         let none = LatticeAutoPosture.resolve(includeRegionCount: 0,
                                               retainSubfloor: false)
@@ -262,7 +262,7 @@ final class LatticeWizardTests: XCTestCase {
         }
 
         var s = LatticeSettings(enabled: true)
-        s.densityMode = .auto
+        s.densityMode = .sim
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5
         let spec = s.runSpec(lineWidthMM: PrintParams.fdmDefault.strutLineWidthMM)
@@ -295,7 +295,7 @@ final class LatticeWizardTests: XCTestCase {
     /// possible. So it is checked here, end to end, at a REAL project's width.
     func testTheNewDefaultPostureEmitsALatticeBlockWithItsRegions() throws {
         var s = LatticeSettings(enabled: true)          // auto density, auto cell
-        XCTAssertEqual(s.densityMode, .auto)
+        XCTAssertEqual(s.densityMode, .sim)
         XCTAssertEqual(s.cellSizeMode, .auto)
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5

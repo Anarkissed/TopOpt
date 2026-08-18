@@ -88,7 +88,7 @@ final class LatticeSeparationEvidenceGen: XCTestCase {
         // The wizard's own entry state: Stage A, one cell, the project defaults.
         let model = LatticeWizardModel(settings: LatticeSettings())
         XCTAssertEqual(model.stage, .cell)
-        XCTAssertEqual(model.densityMode, .auto,
+        XCTAssertEqual(model.densityMode, .sim,
                        "§4b: Auto is the default — the condition that armed the bug")
         let mesh = model.stageMesh()
         XCTAssertFalse(mesh.isEmpty)

@@ -1249,7 +1249,7 @@ public struct WorkspacePlaceholder: View {
         // app HAD graded fields and never handed one over — an app-side bug, not
         // core's. Uniform mode stays deliberately flat (its density IS uniform).
         let field: StressField?
-        if project.lattice.densityMode == .auto,
+        if project.lattice.densityMode == .sim,
            let f = latticePageVariantField ?? latticeSim.field {
             field = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
                                 origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
@@ -2703,7 +2703,7 @@ public struct WorkspacePlaceholder: View {
         // provenance the page shows next to the Auto control (bar B6). Otherwise the
         // shipped behaviour: the newest accepted variant's field, uniform pre-run.
         let field: StressField?
-        if showLatticePage, project.lattice.densityMode == .auto,
+        if showLatticePage, project.lattice.densityMode == .sim,
            let f = latticePageVariantField ?? latticeSim.field {
             field = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
                                 origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
@@ -8159,7 +8159,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeDesignBoxConflict: String? {
         LatticeCoreCapability.liveConflict(latticeEnabled: project.lattice.enabled,
                                            designBoxActive: project.designBox.isActive,
-                                           graded: project.lattice.densityMode == .auto)
+                                           graded: project.lattice.densityMode == .sim)
     }
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.

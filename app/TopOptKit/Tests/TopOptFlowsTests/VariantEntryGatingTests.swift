@@ -396,7 +396,7 @@ final class VariantEntryGatingTests: XCTestCase {
         // density, which is what ships a `grading` block.
         let surface = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
-            latticeEnabled: true, densityMode: .auto,
+            latticeEnabled: true, densityMode: .sim,
             topologyDisplayName: "Octet", cellMM: 5, bounds: nil, running: false,
             lineWidthMM: 0.4, designBoxActive: true)
         XCTAssertFalse(surface.enabled,

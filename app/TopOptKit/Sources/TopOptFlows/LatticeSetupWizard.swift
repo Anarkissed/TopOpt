@@ -92,10 +92,10 @@ public struct LatticeSetupWizard: View {
 
     private var stageView: some View {
         MetalMeshView(mesh: mesh, camera: camera,
-                      stressTints: model.stage != .cell && model.densityMode == .auto
+                      stressTints: model.stage != .cell && model.densityMode == .sim
                           ? sampleTints : nil,
                       // ★ §7 — ONE input, and it is the cinematic's own progress.
-                      // It was `densityMode == .auto ? wipe : 1`, with `wipe`
+                      // It was `densityMode == .sim ? wipe : 1`, with `wipe`
                       // starting at 0 and `.auto` the default: the page opened
                       // with every fragment discarded.
                       reveal: Float(reveal.value))
@@ -338,11 +338,11 @@ public struct LatticeSetupWizard: View {
                 }
             case .density:
                 // ★ §8 — THREE MODES. Auto is the default and must never refuse.
-                segmentRow([LatticeDensityMode.auto.title,
+                segmentRow([LatticeDensityMode.sim.title,
                             LatticeDensityMode.uniform.title,
                             LatticeDensityMode.perRegion.title],
                            selected: densityModeIndex) { i in
-                    model.setDensityMode([.auto, .uniform, .perRegion][i])
+                    model.setDensityMode([.sim, .uniform, .perRegion][i])
                 }
                 if model.densityMode == .perRegion {
                     // ★ §8(e) — THE GAP, SURFACED. PR 331 landed the region layer
@@ -462,7 +462,7 @@ public struct LatticeSetupWizard: View {
     }
     private var densityModeIndex: Int {
         switch model.densityMode {
-        case .auto: return 0
+        case .sim: return 0
         case .uniform: return 1
         case .perRegion: return 2
         }

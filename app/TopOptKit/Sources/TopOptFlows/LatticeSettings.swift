@@ -159,7 +159,20 @@ public struct LatticeRegionSpec: Equatable, Sendable {
 /// in `FrozenRegionAsMaterialTests` and surfaced on the row — never silent.
 public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
     case uniform
-    case auto
+    /// ★★ RENAMED FROM `auto` (maintainer, 2026-08-17: "If Density's 'auto' is
+    /// meant to be 'Sim' I think it should change names. However, if there is a
+    /// way to automate *without* using an FEA sim, then keep the 'Auto'").
+    ///
+    /// ★ THERE IS NO SUCH WAY, WHICH IS WHY THE NAME CHANGED RATHER THAN GAINING
+    /// AN ASTERISK. This mode is the ONLY thing that puts a `grading` block in
+    /// the job (`LatticeSpec.gradingDictionary` returns nil unless `graded`), and
+    /// core's grading law is a map FROM a per-voxel demand field — the von Mises
+    /// field an FEA produces. With no field there is nothing to grade by, so
+    /// "automatic" here has never meant anything except "simulated". The old
+    /// name described the interaction ("I don't have to type a number") and hid
+    /// the mechanism ("a finite-element solve decides it"), which is the half
+    /// that matters when you are deciding whether to trust the result.
+    case sim
     /// ★ §8 — each region states its own density. Reveals PR 334's conditional
     /// drawer row (`LatticeRegionDrawer.make(perRegionDensity:)`), which is the
     /// whole of the wiring that mode was built for and could not reach.
@@ -168,10 +181,31 @@ public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
     /// ★ Two words at most (R14).
     public var title: String {
         switch self {
-        case .auto: return "Auto"
+        case .sim: return "Sim"
         case .uniform: return "Uniform"
         case .perRegion: return "Per region"
         }
+    }
+
+    /// ★ WHETHER THIS MODE NEEDS A STRESS FIELD. One property, so every gate —
+    /// the settings sheet, the solve trigger, the preview — asks the same
+    /// question instead of each testing `== .sim` in its own words.
+    public var needsSimulation: Bool { self == .sim }
+
+    // ★ EVERY PROJECT ON DISK SAYS "auto", AND MUST KEEP OPENING. The rename is
+    // a LABEL change, not a data migration: a stored `"auto"` decodes to `.sim`,
+    // which is the same mode it always was. Encoding writes the new spelling, so
+    // a project re-saved once stops carrying the old word — but nothing forces
+    // that, and a project never re-saved still opens forever.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if raw == "auto" { self = .sim; return }
+        guard let v = LatticeDensityMode(rawValue: raw) else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath,
+                      debugDescription: "unknown density mode \(raw)"))
+        }
+        self = v
     }
 }
 
@@ -616,7 +650,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 // `.uniform` / `.fixed` on purpose: those describe what an OLD
                 // snapshot actually had, and a default must never rewrite
                 // history (the `boundary` precedent).
-                densityMode: LatticeDensityMode = .auto,
+                densityMode: LatticeDensityMode = .sim,
                 paintedIncludeFaces: [Int] = [],
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
@@ -911,7 +945,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // INPUT, not an uncertifiable region: nil here, and the page names the
         // reason. In production the width always exists — PrintParams derives it
         // by rule from the wall beads — which is pinned below.
-        if densityMode == .auto {
+        if densityMode == .sim {
             guard lineWidthMM > 0 else { return nil }
             // ★★ §9(b) — THIS IS WHERE THE SWEEP COLLAPSED, AND IT WAS THE WRONG
             // FLOOR.

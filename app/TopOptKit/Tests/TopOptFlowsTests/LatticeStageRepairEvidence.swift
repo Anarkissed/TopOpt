@@ -455,7 +455,7 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
         p.lattice.groupRoles[gid] = .include
         p.printParams.strutLineWidthMM = Self.w
 
-        p.lattice.densityMode = .auto
+        p.lattice.densityMode = .sim
         XCTAssertNil(p.latticeDeclaredDensity(gid),
                      "★ AUTO states nothing — core derives, and the job carries "
                      + "no relative_density key")
@@ -472,7 +472,7 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
         p.lattice.groupDensities[gid] = 0.42
         XCTAssertEqual(p.latticeDeclaredDensity(gid) ?? 0, 0.42, accuracy: 1e-12,
                        "★ PER-REGION wins over the mode, as it does on the wire")
-        p.lattice.densityMode = .auto
+        p.lattice.densityMode = .sim
         XCTAssertEqual(p.latticeDeclaredDensity(gid) ?? 0, 0.42, accuracy: 1e-12,
                        "…and over Auto too")
     }
@@ -488,7 +488,7 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
         p.lattice.enabled = true
         p.lattice.groupRoles[gid] = .include
         p.printParams.strutLineWidthMM = Self.w
-        p.lattice.densityMode = .auto
+        p.lattice.densityMode = .sim
 
         XCTAssertTrue(p.latticeCardInputs().allSatisfy { $0.declaredDensity == nil },
                       "Auto: nothing stated")

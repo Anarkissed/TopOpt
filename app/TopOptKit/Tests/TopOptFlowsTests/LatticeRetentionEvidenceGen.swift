@@ -26,7 +26,7 @@ final class LatticeRetentionEvidenceGen: XCTestCase {
 
         func job(_ mutate: (inout LatticeSettings) -> Void) throws -> String {
             var s = LatticeSettings(enabled: true)
-            s.densityMode = .auto
+            s.densityMode = .sim
             s.minRelativeDensity = 0.2; s.maxRelativeDensity = 0.5
             mutate(&s)
             let spec = try XCTUnwrap(s.runSpec(lineWidthMM: 0.45, capability: cap))

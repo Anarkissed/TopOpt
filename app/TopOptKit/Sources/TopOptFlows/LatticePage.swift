@@ -1025,12 +1025,12 @@ public struct LatticePage: View {
                 HStack {
                     Text("Density mode").dsStyle(DS.TypeScale.body)
                     Spacer()
-                    segment([LatticeDensityMode.auto.title,
+                    segment([LatticeDensityMode.sim.title,
                              LatticeDensityMode.uniform.title,
                              LatticeDensityMode.perRegion.title],
                             selected: densityModeIndex,
                             enabled: [autoGate.offered, true, true]) { i in
-                        project.lattice.densityMode = [.auto, .uniform, .perRegion][i]
+                        project.lattice.densityMode = [.sim, .uniform, .perRegion][i]
                     }
                 }
                 if project.lattice.densityMode == .perRegion {
@@ -1048,7 +1048,7 @@ public struct LatticePage: View {
                         .foregroundStyle(RGBA(hex: 0xFFCF7A).color)
                 } else if let prov = autoGate.provenanceLabel {
                     HStack(spacing: DS.Space.s) {
-                        Text(project.lattice.densityMode == .auto
+                        Text(project.lattice.densityMode == .sim
                             ? "Auto grades from: \(prov)"
                             : "Field available: \(prov)")
                             .dsStyle(DS.TypeScale.caption)
@@ -1116,7 +1116,7 @@ public struct LatticePage: View {
     private var retentionControl: LatticeRetentionControl {
         LatticeRetentionControl.compute(
             armed: project.lattice.retainSubfloorInUnloadedRegions,
-            graded: project.lattice.densityMode == .auto,
+            graded: project.lattice.densityMode == .sim,
             capability: LatticeRetentionCapability.fromCore,
             belowFloorVoxels: liveForecast?.subfloorVoxelsBelowFloor,
             regionVoxels: liveForecast?.regionVoxels,
@@ -1260,12 +1260,12 @@ public struct LatticePage: View {
     /// Auto and Swept hand the cell choice to CORE, which happens inside the GRADED
     /// pass — so they are offered only when Density mode is Auto. Greyed with the
     /// reason below rather than silently ignored.
-    private var cellModeGraded: Bool { project.lattice.densityMode == .auto }
+    private var cellModeGraded: Bool { project.lattice.densityMode == .sim }
 
     /// ★ §8 — the segment index for the three density modes.
     private var densityModeIndex: Int {
         switch project.lattice.densityMode {
-        case .auto: return 0
+        case .sim: return 0
         case .uniform: return 1
         case .perRegion: return 2
         }
@@ -1733,7 +1733,7 @@ public struct LatticePage: View {
                        "\(cellSummaryText) · \(densityRangeText)",
                        warn: bounds.cellOverCeiling)
             summaryRow("Density mode",
-                       project.lattice.densityMode == .auto ? "Auto (graded from this run's field)" : "Uniform",
+                       project.lattice.densityMode == .sim ? "Auto (graded from this run's field)" : "Uniform",
                        warn: false)
             summaryRow("Regions",
                        "\(roleGroupCount) group role\(roleGroupCount == 1 ? "" : "s") · \(regionCount) region\(regionCount == 1 ? "" : "s") · \(clearanceCount) keep-clear",

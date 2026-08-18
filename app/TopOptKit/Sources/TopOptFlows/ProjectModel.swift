@@ -824,7 +824,7 @@ public final class ProjectModel: ObservableObject {
                 settings: lattice,
                 limits: TopOptKit.latticeLimits(topology: lattice.topologyID),
                 lineWidthMM: printParams.strutLineWidthMM).generateRelativeDensity
-        case .auto:
+        case .sim:
             return nil                       // core derives
         case .perRegion:
             // ★ PER REGION WITH NOTHING STATED FOR THIS ONE IS STILL AUTO, and

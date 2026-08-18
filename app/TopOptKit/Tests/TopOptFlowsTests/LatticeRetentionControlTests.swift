@@ -68,7 +68,7 @@ final class LatticeRetentionControlTests: XCTestCase {
     /// block, which only a graded job carries).
     private static func gradedSettings() -> LatticeSettings {
         var s = LatticeSettings(enabled: true)
-        s.densityMode = .auto
+        s.densityMode = .sim
         // ★ STATED, not inherited (task 2026-08-12 §4b moved the default to
         // `.auto`). These tests are about the SUB-FLOOR controls being untouched;
         // the cell mode is a different control, and a fixture that silently

@@ -186,7 +186,7 @@ final class StrutLineWidthTests: XCTestCase {
         project.printParams.wallLineWidthInnerMM = 0.45
         project.printParams.strutLineWidthMM = 0.62
         project.lattice.enabled = true
-        project.lattice.densityMode = .auto
+        project.lattice.densityMode = .sim
 
         let request = try XCTUnwrap(m.makeRunRequest())
         let lattice = try XCTUnwrap(request.lattice,
@@ -203,7 +203,7 @@ final class StrutLineWidthTests: XCTestCase {
     /// Optimize rather than silently reusing a run derived at the old width.
     func testStrutWidthChangesTheLatticeSpecItProduces() throws {
         var s = LatticeSettings(enabled: true)
-        s.densityMode = .auto
+        s.densityMode = .sim
         let at042 = try XCTUnwrap(s.runSpec(lineWidthMM: 0.42))
         let at045 = try XCTUnwrap(s.runSpec(lineWidthMM: 0.45))
         XCTAssertEqual(at042.minExtrudableWidthMM, 0.42)

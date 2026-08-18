@@ -537,7 +537,9 @@ final class LatticeSeparationTests: XCTestCase {
                        + "not a density mode, it is a running cinematic")
         // And it stays visible for the mode that caused the defect.
         var m = LatticeWizardModel()
-        XCTAssertEqual(m.densityMode, .auto, "§4b: Auto is still the default")
+        XCTAssertEqual(m.densityMode, .sim,
+                       "§4b: the field-graded mode is still the default — "
+                       + "renamed Auto ⇒ Sim, unchanged in meaning")
         m.jump(to: .cell)
         XCTAssertEqual(LatticeWizardReveal().value, 1, accuracy: 1e-12)
     }
