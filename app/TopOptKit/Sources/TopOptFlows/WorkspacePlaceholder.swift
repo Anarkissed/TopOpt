@@ -7542,9 +7542,15 @@ public struct WorkspacePlaceholder: View {
                                        // ★ THE ROW'S OWN UNIT. "DENSITY 35 mm"
                                        // is what the shared-setter bug looked
                                        // like on screen.
+                                       // ★ ONLY THE EXPAND IS SIGNED (maintainer,
+                                       // 2026-08-18). A depth or a density cannot
+                                       // be negative, so they are not offered a
+                                       // key that would only produce a value their
+                                       // own clamp throws away.
                                        config: .init(title: row.label,
                                                      unit: row.unit,
-                                                     allowsDecimal: true),
+                                                     allowsDecimal: true,
+                                                     allowsNegative: row.kind == .expand),
                                        // …and its own seed: the depth reads
                                        // "10.0 mm", the density reads "27%".
                                        seed: Self.latticeRowSeed(row)) { v in

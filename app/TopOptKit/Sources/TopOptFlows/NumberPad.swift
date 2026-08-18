@@ -29,6 +29,13 @@ public struct NumberPadEntry: Equatable, Sendable {
         case digit(Int)
         case dot
         case delete
+        /// ★ FLIP THE SIGN (maintainer, 2026-08-18: "There is no 'negative' option in
+        /// the numeric value selector for the expansion. Please add a button for
+        /// that"). A TOGGLE, not a "minus" key: a leading "−" typed as a character
+        /// would have to be parsed, rejected mid-entry and re-rejected on paste,
+        /// whereas flipping a sign is the same operation whenever it is pressed —
+        /// before the digits, after them, or twice.
+        case negate
     }
 
     /// Whether a decimal point is allowed (mm / weight) or not (counts, %, port).
@@ -43,17 +50,23 @@ public struct NumberPadEntry: Equatable, Sendable {
     /// pathological string (nine digits covers every field in the app).
     public static let maxLength = 9
 
-    public init(seed: String, allowsDecimal: Bool) {
+    /// ★ Whether the sign key is offered. Default FALSE, so every existing field —
+    /// a depth, a weight, a port — is byte-identical and cannot be made negative by
+    /// a control it never had.
+    public var allowsNegative: Bool = false
+
+    public init(seed: String, allowsDecimal: Bool, allowsNegative: Bool = false) {
         self.allowsDecimal = allowsDecimal
+        self.allowsNegative = allowsNegative
         self.text = seed
         self.touched = false
     }
 
     /// Seed from the value the chip shows, formatted the way the chip formats it (so the
     /// pad opens showing exactly the same number).
-    public init(seedValue: Double?, allowsDecimal: Bool) {
+    public init(seedValue: Double?, allowsDecimal: Bool, allowsNegative: Bool = false) {
         self.init(seed: NumberPadEntry.seedString(seedValue, allowsDecimal: allowsDecimal),
-                  allowsDecimal: allowsDecimal)
+                  allowsDecimal: allowsDecimal, allowsNegative: allowsNegative)
     }
 
     public mutating func press(_ key: Key) {
@@ -73,13 +86,19 @@ public struct NumberPadEntry: Equatable, Sendable {
         case .delete:
             touched = true
             if !text.isEmpty { text.removeLast() }
+        case .negate:
+            guard allowsNegative else { return }
+            touched = true
+            // ★ AN EMPTY FIELD BECOMES "-", so the sign can be chosen BEFORE the
+            // digits — which is how people type a negative number.
+            if text.hasPrefix("-") { text.removeFirst() } else { text = "-" + text }
         }
     }
 
     /// The parsed value, or nil when the field is empty / not yet a number. A trailing
     /// "." ("2.") reads as the integer part so a mid-entry value never flickers to nil.
     public var value: Double? {
-        if text.isEmpty || text == "." { return nil }
+        if text.isEmpty || text == "." || text == "-" || text == "-." { return nil }
         let t = text.hasSuffix(".") ? String(text.dropLast()) : text
         return Double(t)
     }
@@ -107,6 +126,10 @@ struct NumberPad: View {
         var unit: String? = nil
         /// Whether the decimal key is offered.
         var allowsDecimal: Bool = true
+        /// ★ Whether the SIGN key is offered. Default false — only a field whose
+        /// value is genuinely signed asks for it (today: the in-plane expand, which
+        /// shrinks below zero).
+        var allowsNegative: Bool = false
     }
 
     let config: Config
@@ -124,7 +147,8 @@ struct NumberPad: View {
         self.seed = seed
         self.onValue = onValue
         _entry = State(initialValue: NumberPadEntry(seedValue: seed,
-                                                    allowsDecimal: config.allowsDecimal))
+                                                    allowsDecimal: config.allowsDecimal,
+                                                    allowsNegative: config.allowsNegative))
     }
 
     var body: some View {
@@ -171,7 +195,7 @@ struct NumberPad: View {
 
     private var keys: some View {
         VStack(spacing: DS.Space.s) {
-            ForEach(Self.rows, id: \.self) { row in
+            ForEach(rows, id: \.self) { row in
                 HStack(spacing: DS.Space.s) {
                     ForEach(row, id: \.self) { key in keyButton(key) }
                 }
@@ -190,17 +214,24 @@ struct NumberPad: View {
 
     /// The 4×3 layout; the bottom-left slot is the decimal key (decimal fields) or a
     /// blank spacer (integer fields), so integer pads never offer a "." that can't parse.
-    private static let rows: [[Cell]] = [
+    private var rows: [[Cell]] { [
         [.digit(1), .digit(2), .digit(3)],
         [.digit(4), .digit(5), .digit(6)],
         [.digit(7), .digit(8), .digit(9)],
-        [.dot, .digit(0), .delete],
-    ]
+        // ★ THE SIGN KEY TAKES THE DOT'S SLOT when the field is signed and has no
+        // decimals, and otherwise joins as a fourth key — the grid never grows a
+        // hole and never gains a row that pushes Done off a small pad.
+        config.allowsNegative
+            ? (config.allowsDecimal ? [.negate, .dot, .digit(0), .delete]
+                                    : [.negate, .digit(0), .delete])
+            : [.dot, .digit(0), .delete],
+    ] }
 
     enum Cell: Hashable {
         case digit(Int)
         case dot
         case delete
+        case negate
     }
 
     @ViewBuilder private func keyButton(_ cell: Cell) -> some View {
@@ -213,6 +244,9 @@ struct NumberPad: View {
             } else {
                 Color.clear.frame(maxWidth: .infinity).frame(height: 46)
             }
+        case .negate:
+            padButton(nil, glyph: "plus.forwardslash.minus",
+                      a11y: "positive or negative") { press(.negate) }
         case .delete:
             padButton(nil, glyph: "delete.left", a11y: "delete") { press(.delete) }
         }

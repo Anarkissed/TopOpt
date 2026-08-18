@@ -618,3 +618,38 @@ final class LatticeSlabExpandDetentTests: XCTestCase {
         XCTAssertEqual(LatticeSlabExpand.Sense.floor.symbolName, "plusminus")
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ THE KEYPAD CAN TYPE A NEGATIVE (maintainer, 2026-08-18)
+
+final class NumberPadNegativeTests: XCTestCase {
+
+    /// ★ A TOGGLE, NOT A "MINUS" KEY. A leading "−" typed as a character has to be
+    /// parsed, rejected mid-entry and re-rejected on paste; flipping a sign is the
+    /// same operation whenever it is pressed.
+    func testTheSignKeyFlipsAndFlipsBack() {
+        var e = NumberPadEntry(seed: "3", allowsDecimal: true, allowsNegative: true)
+        e.press(.negate); XCTAssertEqual(e.value, -3)
+        e.press(.negate); XCTAssertEqual(e.value, 3)
+    }
+
+    /// ★ THE SIGN CAN BE CHOSEN BEFORE THE DIGITS — which is how people type a
+    /// negative number. An empty field becomes "-", which is not yet a value.
+    func testTheSignMayBePressedFirst() {
+        var e = NumberPadEntry(seed: "", allowsDecimal: true, allowsNegative: true)
+        e.press(.negate)
+        XCTAssertNil(e.value, "★ a lone minus is not a number yet")
+        e.press(.digit(2)); e.press(.dot); e.press(.digit(5))
+        XCTAssertEqual(e.value!, -2.5, accuracy: 1e-9)
+    }
+
+    /// ★★ AND EVERY OTHER FIELD IS UNTOUCHED. `allowsNegative` defaults FALSE, so a
+    /// depth, a weight or a port cannot be made negative by a control it never had
+    /// — the key is not drawn and the press is refused even if it arrives.
+    func testAnUnsignedFieldRefusesTheKeyEntirely() {
+        var e = NumberPadEntry(seed: "4", allowsDecimal: true)
+        XCTAssertFalse(e.allowsNegative)
+        e.press(.negate)
+        XCTAssertEqual(e.value, 4, "★ unchanged")
+    }
+}
