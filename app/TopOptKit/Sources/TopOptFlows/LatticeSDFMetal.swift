@@ -86,6 +86,10 @@ public struct LatticeSDFScene {
     /// copy). Kept so face-role tints can be re-baked onto the lattice whenever the
     /// selection changes WITHOUT rebuilding the whole scene (bar A4).
     public var mesh: ViewerMesh
+    /// ★ §5(b): voxels of the part's own interior. Zero means the solid voxelisation
+    /// found nothing to fill, and the overlay says so instead of showing a label over
+    /// an empty viewport.
+    public let interiorVoxelCount: Int
 
     public init(mesh: ViewerMesh, field: StressField?, latticeID: String, maxDim: Int = 128) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
@@ -96,7 +100,16 @@ public struct LatticeSDFScene {
         self.demand = LatticePreviewOccupancy.demand(like: occupancy, field: field)
         self.bounds = mesh.bounds
         self.mesh = mesh
+        // Counted here, where the grid is already in hand, so the banner never has to
+        // walk it (§5b — the check runs on every SwiftUI body pass).
+        var inside = 0
+        for v in occupancy.values where v > 0.5 { inside += 1 }
+        self.interiorVoxelCount = inside
     }
+}
+
+extension LatticeSDFScene: LatticeSDFPreviewSummary {
+    public var previewLabel: String { preview.previewLabel }
 }
 
 public extension LatticeSDFScene {

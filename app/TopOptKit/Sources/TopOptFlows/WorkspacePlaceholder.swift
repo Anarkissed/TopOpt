@@ -2013,10 +2013,21 @@ public struct WorkspacePlaceholder: View {
             // Honesty banner (bar P1): whenever the strut layer is up the user is told
             // in place what they are looking at — the live analytic strut field, not
             // the worker's exported mesh.
-            if showStrutPreview, let scene = strutScene {
-                Text(scene.preview.previewLabel)
+            //
+            // ★ AND WHEN THERE IS NOTHING TO LOOK AT, IT SAYS THAT (§5b of task
+            // 2026-08-18-lattice-preview-confetti). This read `if showStrutPreview,
+            // let scene = strutScene` — so with no scene it rendered NOTHING, and a
+            // preview that is on, empty and silent is indistinguishable from a broken
+            // one. `LatticePreviewBanner` is total over the states, and the empty ones
+            // carry their reason.
+            if let banner = LatticePreviewBanner.make(previewOn: showStrutPreview,
+                                                      hasModel: viewerMesh != nil,
+                                                      scene: strutScene) {
+                Text(banner.text)
                     .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .foregroundStyle(banner.isEmpty
+                                     ? DS.Color.textPrimary.color
+                                     : DS.Color.textSecondary.color)
                     .padding(.vertical, DS.Space.xs).padding(.horizontal, DS.Space.s)
                     .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
             }
