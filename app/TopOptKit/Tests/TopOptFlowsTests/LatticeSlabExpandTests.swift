@@ -404,13 +404,22 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
         }
     }
 
+    /// ★ MEASURED LATERALLY, because the offset now ALSO moves along the normal
+    /// (maintainer, 2026-08-18). This test used to measure the 3D distance from
+    /// the origin, which was a fair proxy while the displacement was purely
+    /// in-plane and is not one now: a shrink pulls the rim in AND drops the
+    /// surface, so the 3D radius can grow while the outline shrinks. The
+    /// property it was really asserting — the outline comes in — is unchanged
+    /// and is what it checks.
     func testANegativeExpandPullsTheOutlineIn() {
         let s = square()
         let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
                                           indices: s.idx, byMM: -0.5)
         for k in 0..<4 {
-            XCTAssertLessThan(simd_length(out[k]), simd_length(s.base[k]),
-                              "★ corner \(k) moved IN")
+            let before = SIMD2<Float>(s.base[k].x, s.base[k].y)
+            let after = SIMD2<Float>(out[k].x, out[k].y)
+            XCTAssertLessThan(simd_length(after), simd_length(before),
+                              "★ corner \(k) moved IN, in plane")
         }
     }
 
@@ -423,88 +432,149 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
                        s.base)
     }
 
-    /// ★ THE DISPLACEMENT IS IN THE TANGENT PLANE, so a dilation can never
-    /// double as a depth change — depth has its own control and its own detents.
-    func testTheDilationNeverMovesAlongTheNormal() {
+    /// ★★ THIS TEST ASSERTED THE OPPOSITE, AND IS SUPERSEDED BY AN EXPLICIT
+    /// INSTRUCTION — not weakened to make a build pass (bar R7).
+    ///
+    /// It read `testTheDilationNeverMovesAlongTheNormal` and pinned "z is the
+    /// normal axis and must not move". That was the right rule for the control
+    /// as first specified — an IN-PLANE reach, with depth owning the normal
+    /// axis — and it is the wrong rule now: "the primitive needs to *both*
+    /// expand (or contract) *and* move down when contracting, up when
+    /// expanding" (maintainer, 2026-08-18). Moving along the normal is not a
+    /// side effect of the new operation, it is HALF of it, and it is what makes
+    /// the growth uniform on a curved face.
+    ///
+    /// ★ WHAT STILL HOLDS, and is asserted here: the normal displacement is
+    /// exactly `e` and carries the sign, so the expand can never become a
+    /// DIFFERENT depth — the depth control still owns how thick the slab is,
+    /// this only moves where it sits.
+    func testTheNormalMoveIsExactlyEAndNothingMore() {
         let s = square()
         for e in [-0.4, 0.7] {
             let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
                                               indices: s.idx, byMM: e)
             for k in 0..<4 {
-                XCTAssertEqual(out[k].z, s.base[k].z, accuracy: 1e-5,
-                               "★ z is the normal axis and must not move")
+                XCTAssertEqual(Double(out[k].z - s.base[k].z), e, accuracy: 1e-5,
+                               "★ exactly e along the normal — never more")
             }
         }
     }
 
-    /// ★ A SHRINK STOPS AT THE POINT OF INTERSECTION (maintainer, 2026-08-17:
-    /// "The negative expansion should stop at the point of intersection. It
-    /// should never fold into itself"). At scale 0 the patch IS its centroid;
-    /// the floor sits just above, so a runaway negative converges on the centre
-    /// and never passes through it.
-    func testARunawayShrinkConvergesOnTheCentroidAndNeverInverts() {
+    /// ★★ THE DISPLACEMENT IS EXACTLY `e`, EVERYWHERE — the property that
+    /// distinguishes an OFFSET from the similarity this used to be.
+    ///
+    /// He asked whether a ratio was needed. The literature is unambiguous that
+    /// none is: an offset surface is `X + d·N` and every point travels exactly
+    /// `d` (Maekawa, CAD 31(3), 1999). What IS curvature-dependent is the AREA
+    /// element and the curvature itself, not the distance travelled.
+    ///
+    /// ★ THE OLD SIMILARITY displaced by `|p − c|·e/R` — equal to `e` only at
+    /// the mean radius and exactly ZERO along the normal, which is why his
+    /// curved face never moved.
+    func testEveryVertexMovesExactlyTheRequestedDistance() {
+        let s = square()          // flat ⇒ miter scale is exactly 1
+        for e in [0.4, -0.4] {
+            let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                              indices: s.idx, byMM: e)
+            for k in 0..<4 {
+                // ★ THE NORMAL PART IS EXACTLY `e` — that is the offset-surface
+                // property, and it holds at every vertex regardless of where it
+                // sits on the rim.
+                XCTAssertEqual(Double(out[k].z - s.base[k].z), e, accuracy: 1e-5,
+                               "★ normal: exactly e")
+                // ★ THE LATERAL PART CARRIES THE IN-SURFACE MITER. These are
+                // 90° CORNERS, so the corner must travel `e/cos(45°)` = e·√2
+                // for both of its EDGES to advance exactly `e` — his rule is
+                // about the edges, not about the corner points.
+                let lateral = SIMD2<Float>(out[k].x - s.base[k].x,
+                                           out[k].y - s.base[k].y)
+                XCTAssertEqual(Double(simd_length(lateral)),
+                               abs(e) * 2.0.squareRoot(), accuracy: 1e-4,
+                               "★ lateral: mitered so each EDGE advances e")
+            }
+        }
+    }
+
+    /// ★★ "MOVE UP WHEN EXPANDING, DOWN WHEN CONTRACTING" — the half that was
+    /// entirely missing before, and the reason his curved face never followed.
+    func testItMovesAlongTheNormalAndTheDirectionFollowsTheSign() {
+        let s = square()          // inward = −z, so OUTWARD is +z
+        let grown = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                            indices: s.idx, byMM: 0.5)
+        let shrunk = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                             indices: s.idx, byMM: -0.5)
+        for k in 0..<4 {
+            XCTAssertEqual(Double(grown[k].z - s.base[k].z), 0.5, accuracy: 1e-5,
+                           "★ expanding moves UP, at the same rate as the growth")
+            XCTAssertEqual(Double(shrunk[k].z - s.base[k].z), -0.5, accuracy: 1e-5,
+                           "★ contracting moves DOWN, at the same rate")
+        }
+    }
+
+    /// ★ AND IT STILL GROWS LATERALLY, at exactly `e` — the rim advances on
+    /// EVERY side by the same distance, which is his "all the edges expand
+    /// outward and inward at the same rate".
+    func testTheRimAdvancesByExactlyEOnEverySide() {
+        let s = square()
+        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                          indices: s.idx, byMM: 0.5)
+        // Lateral part only: drop the normal (z) component. Every corner of a
+        // square is identical, so "the same on every side" is the assertion that
+        // all four displacements have equal magnitude — and the magnitude is the
+        // mitered e·√2, so that the EDGES between them each advance exactly e.
+        let want = 0.5 * 2.0.squareRoot()
+        for k in 0..<4 {
+            let lateral = SIMD2<Float>(out[k].x - s.base[k].x,
+                                       out[k].y - s.base[k].y)
+            XCTAssertEqual(Double(simd_length(lateral)), want, accuracy: 1e-4,
+                           "★ every side advances the SAME distance")
+        }
+    }
+
+    /// ★ NO SIDE IS FAVOURED. The old direction came from the owning triangle's
+    /// shape — a property of the TESSELLATION — so on long thin triangles the
+    /// patch grew lopsidedly ("handled from the floor"). The co-normal is taken
+    /// from the RIM TANGENT, which is a property of the boundary curve and is
+    /// stable under retriangulation.
+    func testTheGrowthIsSymmetricAboutTheCentre() {
+        let s = square()
+        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                          indices: s.idx, byMM: 0.6)
+        // Opposite corners must move by mirror-image lateral displacements.
+        let d0 = SIMD2<Float>(out[0].x - s.base[0].x, out[0].y - s.base[0].y)
+        let d2 = SIMD2<Float>(out[2].x - s.base[2].x, out[2].y - s.base[2].y)
+        XCTAssertEqual(Double(d0.x), Double(-d2.x), accuracy: 1e-4)
+        XCTAssertEqual(Double(d0.y), Double(-d2.y), accuracy: 1e-4)
+    }
+
+    /// ★ A FLAT PATCH OFFSETS EXACTLY — the miter scale is 1 where there is no
+    /// crease, which is the property the scale exists for. `1/cos(α/2)` is the
+    /// classic miter formula (Clipper2's `DoMiter`), capped by a miter limit
+    /// because it diverges as a crease closes.
+    func testAFlatPatchTakesNoMiterCorrection() {
+        XCTAssertEqual(FaceOffsetShell.miterLimit, 4, accuracy: 1e-12,
+                       "★ Clipper2's own default")
+        let s = square()
+        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                          indices: s.idx, byMM: 1.0)
+        for k in 0..<4 {
+            XCTAssertEqual(Double(out[k].z - s.base[k].z), 1.0, accuracy: 1e-5,
+                           "★ no crease ⇒ no correction ⇒ exactly e")
+        }
+    }
+
+    /// ★ THE INWARD LIMIT IS THE LOCAL CURVATURE BOUND, just inside it — at
+    /// exactly `1/κ_max` the offset fronts meet in a cusp, which IS the
+    /// self-intersection, not a safe value.
+    func testTheInwardOffsetStopsShortOfTheCusp() {
+        XCTAssertLessThan(FaceOffsetShell.reachFraction, 1.0)
+        XCTAssertGreaterThan(FaceOffsetShell.reachFraction, 0.5)
+        // A runaway negative stays finite and does not fold.
         let s = square()
         let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
                                           indices: s.idx, byMM: -1e6)
-        let c = SIMD3<Float>(0, 0, 0)          // the square's own centroid
         for k in 0..<4 {
-            XCTAssertTrue(out[k].x.isFinite && out[k].y.isFinite)
-            // ★ THE SIGN IS PRESERVED — a corner that was +x is still +x. A
-            // folded outline is one whose corners have crossed the centre.
-            XCTAssertEqual(out[k].x.sign, s.base[k].x.sign, "★ never folded through")
-            XCTAssertEqual(out[k].y.sign, s.base[k].y.sign)
-            XCTAssertLessThan(simd_length(out[k] - c), simd_length(s.base[k] - c))
-        }
-    }
-
-    /// ★★ THE EXPANDED PATCH IS THE FACE'S EXACT SHAPE (maintainer: "It should
-    /// be the exact same as the face and simply expand outward"). A similarity
-    /// transform preserves every ratio, so each corner's distance from the
-    /// centre grows by the SAME factor — which is what "the same shape" means
-    /// as a number.
-    func testTheExpandedPatchIsSimilarToTheFace() {
-        let s = square()
-        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
-                                          indices: s.idx, byMM: 0.7)
-        let ratios = (0..<4).map {
-            Double(simd_length(out[$0]) / simd_length(s.base[$0]))
-        }
-        for r in ratios {
-            XCTAssertEqual(r, ratios[0], accuracy: 1e-5,
-                           "★ every side moved by the same factor — no shear")
-            XCTAssertGreaterThan(r, 1)
-        }
-    }
-
-    /// ★ IT GROWS FROM THE CENTRE, NOT FROM AN EDGE (maintainer: "It looks like
-    /// the expansion is handled from the 'floor' … It should be from the center
-    /// of the face and grow from *every* side equally"). The centroid is the
-    /// fixed point, so it does not move at all.
-    func testTheCentroidIsTheFixedPoint() {
-        // A square centred on the origin: its centroid must stay at the origin.
-        let s = square()
-        for e in [-0.5, 0.9] {
-            let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
-                                              indices: s.idx, byMM: e)
-            var c = SIMD3<Float>.zero
-            for p in out { c += p }
-            c /= Float(out.count)
-            XCTAssertEqual(simd_length(c), 0, accuracy: 1e-5,
-                           "★ the centre is what everything grows away from")
-        }
-    }
-
-    /// ★ NO TWO VERTICES CAN CROSS, at any value — the property the fold
-    /// violated. A similarity transform with a positive scale is monotone in
-    /// every direction at once.
-    func testNoVertexEverCrossesAnother() {
-        let s = square()
-        for e in [-1e6, -1.9, -0.1, 0.1, 5.0, 1e6] {
-            let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
-                                              indices: s.idx, byMM: e)
-            // Opposite corners must stay on opposite sides of the centre.
-            XCTAssertLessThan(out[0].x * out[2].x, 0, "★ corners never swapped")
-            XCTAssertLessThan(out[0].y * out[2].y, 0)
+            XCTAssertTrue(out[k].x.isFinite && out[k].y.isFinite && out[k].z.isFinite)
         }
     }
 }

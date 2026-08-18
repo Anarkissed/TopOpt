@@ -48,6 +48,12 @@ public final class ProjectModel: ObservableObject {
     /// value types: the workspace mutates them in place (via computed forwarders),
     /// which republishes and re-renders exactly as the old `@State` did.
     @Published public var selection = SelectionModel()
+    /// ★ HIDE / LOCK, PER GROUP (maintainer, 2026-08-18) — an ATTRIBUTE over the
+    /// one `SelectionModel`, never a second group store. The groups themselves
+    /// stay in `selection`; an entry whose group is gone is inert, and
+    /// `removeGroup` calls `forget` so it cannot outlive its group.
+    /// See `GroupViewState` for why hiding is session-scoped and locking is not.
+    @Published public var groupView = GroupViewState()
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
 

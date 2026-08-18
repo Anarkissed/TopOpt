@@ -185,86 +185,198 @@ public struct FaceOffsetShell: Equatable, Sendable {
                                reachedDepthMM: reached, clampedFromMM: clamped)
     }
 
-    // MARK: ★ THE IN-PLANE DILATION
+    // MARK: ★ THE OFFSET — MINKOWSKI DILATION BY A BALL
 
-    /// ★★ SCALE THE PATCH ABOUT ITS OWN CENTROID, IN PLANE.
+    /// ★★ GROW OR SHRINK THE PATCH BY `byMM`, UNIFORMLY IN EVERY DIRECTION.
     ///
-    /// ★ HIS CORRECTION, AND IT IS THE WHOLE DESIGN (2026-08-17):
-    ///   · "It should be the exact same as the face and simply expand outward.
-    ///      There should be no reason to overlap."
-    ///   · "It looks like the expansion is handled from the 'floor' and growing
-    ///      outward from there. It should be from the center of the face and
-    ///      grow from *every* side equally."
-    ///   · "The negative expansion should stop at the point of intersection. It
-    ///      should never fold into itself."
+    /// ★ HIS DESCRIPTION, AND IT NAMES THE OPERATION EXACTLY (2026-08-18): "the
+    /// primitive needs to *both* expand (or contract) *and* move down when
+    /// contracting, up when expanding. It needs to move at the same pace as the
+    /// change in size … Please dig into some research to confirm the *exact*
+    /// mathematical function required. It may not be uniform, it may have some
+    /// sort of ratio."
     ///
-    /// ★★ WHY THE FIRST CUT PRODUCED ALL THREE OF THOSE AT ONCE. It moved only
-    /// BOUNDARY vertices, each along a direction taken from the one triangle
-    /// that owned its edge (`midpoint(a,b) - thirdCorner`). That direction is a
-    /// property of the TESSELLATION, not of the outline: on a coarse mesh with
-    /// long thin triangles it points somewhere arbitrary, so the outline grew
-    /// lopsidedly — "from the floor" — and adjacent boundary vertices pushed
-    /// past one another and folded. And because interior vertices stayed put,
-    /// the triangles between them sheared, which is why the shape "doesn't look
-    /// anything like the face". Three symptoms, one wrong idea.
+    /// ★★ THE RESEARCH ANSWER: IT IS THE **OFFSET (PARALLEL) SURFACE**, which is
+    /// the same thing as **morphological dilation by a ball**:
     ///
-    /// ★ A SIMILARITY TRANSFORM CANNOT DO ANY OF THAT. Scaling every vertex
-    /// about the centroid is self-similar BY CONSTRUCTION: the expanded patch is
-    /// the face's exact shape, every side moves out together, no two vertices
-    /// can cross, and no triangle can shear. It is not an approximation of what
-    /// he asked for — it IS what he asked for.
+    ///     P ⊕ B_d  =  { p + b : p ∈ P, |b| ≤ d }  =  { x : dist(x, P) ≤ d }
+    ///           X_d(u,v)  =  X(u,v) + d · N(u,v)
     ///
-    /// ★ THE MILLIMETRES ARE PRESERVED ON AVERAGE. The scale is `1 + e/R`, where
-    /// `R` is the patch's mean in-plane radius, so `e` mm moves the average
-    /// boundary point `e` mm. An exact per-side millimetre offset is a different
-    /// (and non-similar) operation — a mitred outline offset — which is what the
-    /// first cut was reaching for and what folded.
+    /// (Rossignac & Requicha, *Offsetting operations in solid modelling*, CAGD
+    /// 3(2), 1986; Maekawa, *An overview of offset curves and surfaces*, CAD
+    /// 31(3), 1999.)
     ///
-    /// ★ AND IT STOPS AT THE INTERSECTION POINT. A shrink reaches self-
-    /// intersection exactly at scale 0, where the patch collapses to its
-    /// centroid. The scale is floored just above that, so pulling in further
-    /// converges on a point and never passes through it.
+    /// ★ AND THE DISPLACEMENT IS **EXACTLY UNIFORM — THERE IS NO RATIO**. He
+    /// asked whether one was needed; the answer is no, and it is worth being
+    /// precise about what IS curvature-dependent, because it is not this:
     ///
-    /// ★ ONLY THE IN-PLANE COMPONENT SCALES. The part of each vertex's offset
-    /// that lies along its own inward normal is carried through untouched, so a
-    /// cylinder patch grows ALONG the cylinder instead of changing its radius,
-    /// and a dilation can never double as a depth change.
+    ///   · distance travelled  — exactly `d`, everywhere, convex or concave
+    ///   · the AREA element    — `dA_d = (1 + dκ₁)(1 + dκ₂) dA` (Steiner)
+    ///   · the CURVATURE       — principal radii simply add: `R_i ↦ R_i + d`
+    ///
+    /// ★★ WHY THE PREVIOUS CUT WAS WRONG, in one line. A similarity about the
+    /// centroid, `p ↦ c + (p − c)·(1 + e/R)`, displaces by `|p − c|·e/R` — which
+    /// equals `e` only at the mean radius and is **exactly ZERO along the
+    /// normal**. That is precisely what he saw: the rim grew, the curved surface
+    /// did not move at all, and the growth was uneven with distance from the
+    /// centre. The file's own comment admitted it — "the millimetres are
+    /// preserved on average". An offset preserves them EVERYWHERE.
+    ///
+    /// ★ THE TWO COUPLED PARTS, both at rate `e`:
+    ///
+    ///   1. NORMAL   every vertex moves `e` along its own outward normal —
+    ///      "up when expanding, down when contracting", his words exactly.
+    ///   2. LATERAL  a RIM vertex additionally moves `e` along the outward
+    ///      CO-NORMAL `B = T × N` (T = rim tangent), so the patch also gets
+    ///      wider. This is the square rim join; the true Minkowski rim is a
+    ///      quarter-round of radius `e`, and its two extremes are exactly these
+    ///      (Chen/Wang/Rosen/Rossignac; Peternell & Steiner).
+    ///
+    /// ★ THE MITER SCALE, so a creased patch offsets exactly. Moving a vertex by
+    /// `e·n̄` only moves each incident face plane by `e(n̄·N_f) < e`. The exact
+    /// correction for a ridge is
+    ///
+    ///     v = e (N₁ + N₂) / (1 + N₁·N₂),   ‖v‖ = e / cos(α/2) = e / (n̄·N_f)
+    ///
+    /// (the classic miter formula — Clipper2's `DoMiter` is this verbatim). It
+    /// diverges as the crease closes, so it carries a MITER LIMIT, as every
+    /// offsetting library does.
     static func dilated(base: [SIMD3<Float>], inward: [SIMD3<Float>],
                         indices: [UInt32], byMM: Double) -> [SIMD3<Float>] {
-        guard byMM != 0, base.count > 2 else { return base }
+        guard byMM != 0, base.count > 2, indices.count >= 3 else { return base }
 
-        // ── the centroid: the point everything grows away from ────────────────
-        var centroid = SIMD3<Float>.zero
-        for p in base { centroid += p }
-        centroid /= Float(base.count)
-
-        // ── each vertex's offset, split into in-plane and along-normal ────────
-        var perp = [SIMD3<Float>](repeating: .zero, count: base.count)
-        var along = [SIMD3<Float>](repeating: .zero, count: base.count)
-        var radius = 0.0
-        for k in 0..<base.count {
-            let d = base[k] - centroid
-            let n = inward[k]
-            let nl = simd_length(n)
-            let a = nl > 1e-9 ? (n / nl) * simd_dot(d, n / nl) : SIMD3<Float>.zero
-            along[k] = a
-            perp[k] = d - a
-            radius += Double(simd_length(perp[k]))
+        // ── per-vertex miter scale: mean cos between the vertex normal and its
+        //    incident face normals. 1 on a flat patch ⇒ a planar region offsets
+        //    EXACTLY, which is the property the scale exists for.
+        var cosSum = [Float](repeating: 0, count: base.count)
+        var cosCount = [Float](repeating: 0, count: base.count)
+        var i = 0
+        while i + 2 < indices.count {
+            let ia = Int(indices[i]), ib = Int(indices[i + 1]), ic = Int(indices[i + 2])
+            let fn = simd_cross(base[ib] - base[ia], base[ic] - base[ia])
+            let fl = simd_length(fn)
+            if fl > 1e-12 {
+                let u = fn / fl
+                for k in [ia, ib, ic] {
+                    let nl = simd_length(inward[k])
+                    if nl > 1e-9 {
+                        cosSum[k] += abs(simd_dot(inward[k] / nl, u))
+                        cosCount[k] += 1
+                    }
+                }
+            }
+            i += 3
         }
-        radius /= Double(base.count)
-        // A patch with no in-plane extent has nothing to scale.
-        guard radius > 1e-6 else { return base }
 
-        // ★ `1 + e/R`, floored just above the collapse point.
-        let scale = Swift.max(minScale, 1 + byMM / radius)
+        // ── the rim: edges owned by exactly ONE triangle ───────────────────────
+        var count: [UInt64: Int] = [:]
+        var owner: [UInt64: Int] = [:]
+        func key(_ a: UInt32, _ b: UInt32) -> UInt64 {
+            let (lo, hi) = a < b ? (a, b) : (b, a)
+            return UInt64(lo) << 32 | UInt64(hi)
+        }
+        i = 0
+        while i + 2 < indices.count {
+            for (a, b) in [(indices[i], indices[i + 1]),
+                           (indices[i + 1], indices[i + 2]),
+                           (indices[i + 2], indices[i])] {
+                let k = key(a, b)
+                count[k, default: 0] += 1
+                owner[k] = i
+            }
+            i += 3
+        }
+
+        // ── the outward CO-NORMAL at each rim vertex ──────────────────────────
+        // ★ B = T × N, from the RIM TANGENT — not from the owning triangle's
+        // shape. The previous cut took the direction from `midpoint(a,b) − c`,
+        // which is a property of the TESSELLATION: on long thin triangles it
+        // points somewhere arbitrary, and that is what made the growth lopsided
+        // ("handled from the floor"). The rim tangent is a property of the
+        // BOUNDARY CURVE and is stable under retriangulation.
+        // ★★ THE CO-NORMAL IS COMPUTED **PER EDGE** AND THEN BISECTED — summing
+        // raw edge VECTORS first does not work, and the failure is subtle enough
+        // to be worth recording. `key()` normalises an edge to `lo < hi`, so the
+        // stored direction does not follow the boundary loop; at a square corner
+        // the two incident edges then summed to a DIAGONAL rather than to a
+        // tangent, the co-normal came out rotated 90°, and two of the four
+        // corners grew when they should have shrunk. A unit test caught it.
+        //
+        // Per edge the tangent is unambiguous, so each edge contributes its own
+        // outward co-normal and the vertex takes their bisector.
+        var conormal = [SIMD3<Float>](repeating: .zero, count: base.count)
+        var rimEdges = [Float](repeating: 0, count: base.count)
+        var isRim = [Bool](repeating: false, count: base.count)
+        for (k, c) in count where c == 1 {
+            let ia = Int(k >> 32), ib = Int(k & 0xFFFF_FFFF)
+            isRim[ia] = true; isRim[ib] = true
+            let t = base[ib] - base[ia]
+            let tl = simd_length(t)
+            guard tl > 1e-9, let tri0 = owner[k] else { continue }
+            let tri = [Int(indices[tri0]), Int(indices[tri0 + 1]), Int(indices[tri0 + 2])]
+            guard let ic = tri.first(where: { $0 != ia && $0 != ib }) else { continue }
+            // This edge's own outward reference, only to FIX THE SIGN.
+            let ref = 0.5 * (base[ia] + base[ib]) - base[ic]
+            for v in [ia, ib] {
+                let nl = simd_length(inward[v])
+                guard nl > 1e-9 else { continue }
+                var bdir = simd_cross(t / tl, inward[v] / nl)
+                let bl = simd_length(bdir)
+                guard bl > 1e-9 else { continue }
+                bdir /= bl
+                if simd_dot(bdir, ref) < 0 { bdir = -bdir }
+                conormal[v] += bdir            // unit vectors ⇒ the sum bisects
+                rimEdges[v] += 1
+            }
+        }
+
+        // ── the inward-offset limit (§4 of the research) ──────────────────────
+        // ★ THIS IS THE *LOCAL* TERM ONLY — the smallest principal radius, via
+        // the existing per-edge `len/turn`. The exact bound is Federer's REACH,
+        // `min(1/κ_max, ½·narrowest bottleneck)`, and the bottleneck term needs
+        // a ray march this function has no mesh to do. Stated, not silently
+        // approximated: a thin rib can still pinch before this limit bites.
+        let curvature = curvatureLimitMM(base: base, inward: inward, indices: indices)
+        var e = byMM
+        if e < 0, curvature > 0 { e = Swift.max(e, -curvature * reachFraction) }
 
         var out = base
         for k in 0..<out.count {
-            out[k] = centroid + along[k] + perp[k] * Float(scale)
+            let nl = simd_length(inward[k])
+            guard nl > 1e-9 else { continue }
+            let n = inward[k] / nl                     // INTO the part
+            // 1. NORMAL — outward is −inward, so `+e` moves "up".
+            let cosMean = cosCount[k] > 0 ? cosSum[k] / cosCount[k] : 1
+            let miter = Swift.min(miterLimit, 1 / Swift.max(0.2, Double(cosMean)))
+            var d = -n * Float(e * miter)
+            // 2. LATERAL — rim only, along the bisector of its edges' co-normals,
+            //    with the IN-SURFACE MITER so that every EDGE advances exactly
+            //    `e`. For k unit vectors summing to `bis`, the bisector needs
+            //    `k / |bis|`: two edges at 90° give `2 / 2cos45° = √2`, and two
+            //    collinear edges give `2 / 2 = 1`. His rule — "all the edges
+            //    expand outward and inward at the same rate" — is about the
+            //    EDGES, so a corner has to travel further than a straight run.
+            if isRim[k], rimEdges[k] > 0 {
+                let bl = simd_length(conormal[k])
+                if bl > 1e-9 {
+                    let miterIn = Swift.min(miterLimit, Double(rimEdges[k] / bl))
+                    d += (conormal[k] / bl) * Float(e * miterIn)
+                }
+            }
+            out[k] = base[k] + d
         }
         return out
     }
 
+    /// ★ THE MITER LIMIT. `1/cos(α/2)` diverges as a crease closes; every
+    /// offsetting library caps it (Clipper2 calls it `MiterLimit`) and falls back
+    /// to a square join. 4 is Clipper2's own default.
+    static let miterLimit: Double = 4
+
+    /// ★ HOW MUCH OF THE LOCAL CURVATURE LIMIT AN INWARD OFFSET MAY USE. At
+    /// exactly `1/κ_max` the offset fronts meet in a cusp — that is the
+    /// self-intersection point, not a safe value — so the bound sits just inside.
+    static let reachFraction: Double = 0.95
     /// ★ HOW FAR A SHRINK MAY GO. At scale 0 the patch IS its centroid — the
     /// point of self-intersection he named. The floor sits just above it, so
     /// pulling in further converges rather than folding through.

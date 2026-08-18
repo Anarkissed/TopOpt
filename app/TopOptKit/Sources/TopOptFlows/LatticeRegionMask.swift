@@ -76,9 +76,40 @@ public enum LatticeRegionMask {
     /// Returns the grid unchanged when no INCLUDE region is declared — see the
     /// file note: the settings page's sample block has none, and blanking it
     /// would break a preview whose job is to show the cell.
+    /// ★★ WHAT AN EMPTY REGION LIST MEANS — AND IT IS NOT ONE ANSWER
+    /// (maintainer, 2026-08-18: "Why does the lattice preview show the *entire*
+    /// model as lattice? It should only show the regions that have been set as
+    /// 'Lattice'. Everything else should stay solid").
+    ///
+    /// ★ THE DEFECT WAS AN IMPLICIT DEFAULT. `clipped` returned the grid
+    /// UNCHANGED when no include region existed — correct for the settings
+    /// page's sample block, where there are no regions by construction and the
+    /// whole sample should lattice, and catastrophically wrong on the STAGE,
+    /// where "no include region" means the user has declared nothing and the
+    /// honest picture is a solid part. One function, two callers, opposite
+    /// needs, and no way to tell them apart — so the caller says which.
+    public enum EmptyRegionPolicy: Equatable, Sendable {
+        /// No regions ⇒ the whole grid latticed. The settings-page SAMPLE, whose
+        /// entire subject is the lattice itself.
+        case latticeEverything
+        /// No regions ⇒ nothing latticed. The STAGE: the user has declared no
+        /// lattice, so none is drawn.
+        case latticeNothing
+    }
+
     public static func clipped(_ grid: LatticeVoxelGrid,
-                               to regions: [LatticeRegionSpec]) -> LatticeVoxelGrid {
-        guard regions.contains(where: { $0.role == .include }) else { return grid }
+                               to regions: [LatticeRegionSpec],
+                               whenEmpty: EmptyRegionPolicy = .latticeEverything)
+        -> LatticeVoxelGrid {
+        guard regions.contains(where: { $0.role == .include }) else {
+            switch whenEmpty {
+            case .latticeEverything: return grid
+            case .latticeNothing:
+                var out = grid
+                for i in 0..<out.values.count { out.values[i] = 0 }
+                return out
+            }
+        }
         var out = grid
         var i = 0
         for k in 0..<grid.nz {

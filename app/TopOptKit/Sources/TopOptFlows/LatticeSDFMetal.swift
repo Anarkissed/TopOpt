@@ -91,13 +91,18 @@ public struct LatticeSDFScene {
                 // per-region density can be inverted into the demand value that
                 // comes back out as exactly that density (maintainer,
                 // 2026-08-17). Defaults leave every existing call unchanged.
-                rhoMin: Double = 0, rhoMax: Double = 1, gamma: Double = 1) {
+                rhoMin: Double = 0, rhoMax: Double = 1, gamma: Double = 1,
+                // ★ WHAT AN EMPTY REGION LIST MEANS HERE — see
+                // `LatticeRegionMask.EmptyRegionPolicy`. The default is the
+                // sample block's answer, so every pre-existing call is
+                // unchanged; the STAGE passes `.latticeNothing`.
+                whenEmpty: LatticeRegionMask.EmptyRegionPolicy = .latticeEverything) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
         self.occupancy = LatticeRegionMask.clipped(
             LatticePreviewOccupancy.occupancy(
                 positions: mesh.positions, indices: mesh.indices,
                 bounds: mesh.bounds, maxDim: maxDim),
-            to: regions)
+            to: regions, whenEmpty: whenEmpty)
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
         // ★ A STATED PER-REGION DENSITY OUTRANKS THE STRESS FIELD. It is the

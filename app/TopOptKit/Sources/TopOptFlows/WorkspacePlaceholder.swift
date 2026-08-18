@@ -1208,9 +1208,27 @@ public struct WorkspacePlaceholder: View {
     /// group palette — so the 3D highlight matches the panel (D3/D5).
     private var roleTints: [FaceID: SIMD4<Float>] {
         var tints: [FaceID: SIMD4<Float>] = [:]
-        for g in selection.groups {
+        // ★ A HIDDEN GROUP CONTRIBUTES NO COLOUR (maintainer, 2026-08-18: "view
+        // or hide all the primitives/colours of that group"). Both loops below
+        // skip it, so the protect crosshatch hides with the rest — a face that
+        // kept its mint-teal while its group was hidden would look like a face
+        // belonging to nothing.
+        // ★★ AND THEY GO HALF-OPAQUE UNDER THE STRESS VIEW (maintainer,
+        // 2026-08-18: "it should show *through* the half opacity group faces. I
+        // want to be able to see where the stresses lie and how the lattice in
+        // that area is affected").
+        //
+        // ★ THE GROUP COLOURS ARE NOT THE SUBJECT WHEN STRESS IS. A role tint is
+        // an OPAQUE per-face colour, so with the stress view on it simply
+        // covered the field over exactly the faces the user cares most about —
+        // the anchored and loaded ones. Dropping their alpha keeps the roles
+        // legible (you still see which face is which) while the measurement
+        // underneath reads through, which is the whole point of turning the
+        // view on.
+        let roleAlpha: Float = stressViewOn ? Self.stressUnderlayAlpha : 1
+        for g in selection.groups where !project.groupView.isHidden(g.id) {
             let c = force.tint(for: g)
-            let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1)
+            let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), roleAlpha)
             for f in groupTintedFaces(g) { tints[f] = v }
         }
         // Handoff 124 — a protected face gets the UNIQUE protect mint-teal, applied
@@ -1218,8 +1236,11 @@ public struct WorkspacePlaceholder: View {
         // colour and draws a CROSSHATCH over the face ("preserved", distinct from the
         // red clearance VOLUMES that read "forbidden").
         let p = Self.protectFaceRGB
-        for g in selection.groups where force.isProtected(g.id) {
-            for f in groupTintedFaces(g) { tints[f] = SIMD4<Float>(p.x, p.y, p.z, 1) }
+        for g in selection.groups where force.isProtected(g.id)
+                && !project.groupView.isHidden(g.id) {
+            for f in groupTintedFaces(g) {
+                tints[f] = SIMD4<Float>(p.x, p.y, p.z, roleAlpha)
+            }
         }
         return tints
     }
@@ -1339,10 +1360,16 @@ public struct WorkspacePlaceholder: View {
     /// (§3c) — include mid-violet, exclude deep indigo.
     private var latticeDepthPlaneItems: [ClearanceRenderItem] {
         let active = selection.activeGroupID
-        return project.latticeDepthPlanes().map {
-            ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active,
-                                tint: latticeRegionTint($0.role))
-        }
+        // ★ A HIDDEN GROUP DRAWS NO PRIMITIVE (maintainer, 2026-08-18: "view or
+        // hide all the primitives/colours of that group"). The group is
+        // untouched — still anchored, still latticed, still in the job — it is
+        // simply out of the picture.
+        return project.latticeDepthPlanes()
+            .filter { !project.groupView.isHidden($0.groupID) }
+            .map {
+                ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active,
+                                    tint: latticeRegionTint($0.role))
+            }
     }
 
     /// The ladder page's region volumes — the pre-separation behaviour, kept for
@@ -2747,6 +2774,12 @@ public struct WorkspacePlaceholder: View {
     /// Whether this page's own solid-part solve is in flight.
     private var latticeSimIsRunning: Bool { latticeSim.phase == .running }
 
+    /// ★ HOW OPAQUE A GROUP'S OWN COLOUR STAYS WHILE THE STRESS VIEW IS UP.
+    /// Not a taste value: below about a third the role colours stop being
+    /// identifiable and the stage loses "which face is anchored"; above about a
+    /// half the field underneath stops reading. This is the middle of that band.
+    static let stressUnderlayAlpha: Float = 0.42
+
     /// ★ THE STRESS BUFFER, or empty when there is nothing honest to paint. An
     /// EMPTY result means "draw the part normally" — see `LatticeStressTint`,
     /// which refuses a flat field rather than normalising it into a part that is
@@ -2803,7 +2836,12 @@ public struct WorkspacePlaceholder: View {
             let scene = LatticeSDFScene(mesh: mesh, field: field,
                                         latticeID: latticeID, regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
-                                        gamma: gamma)
+                                        gamma: gamma,
+                                        // ★ ONLY WHAT HE SET TO LATTICE. On the
+                                        // stage an empty list means "nothing is
+                                        // declared", and the honest picture of
+                                        // that is a solid part.
+                                        whenEmpty: .latticeNothing)
             DispatchQueue.main.async {
                 strutScene = scene
                 strutSceneToken += 1
@@ -4559,8 +4597,16 @@ public struct WorkspacePlaceholder: View {
     /// The two toggles, SIDE BY SIDE with padding between them, in the slot
     /// directly under the position gizmo.
     @ViewBuilder private var viewModeToggles: some View {
-        VStack(alignment: .trailing, spacing: DS.Space.s) {
-            HStack(spacing: DS.Space.s) {
+        // ★★ ALL FOUR IN ONE ROW (maintainer, 2026-08-18: "Please place the
+        // stress view and lattice preview button *next* to the other views. I
+        // want all four to be in a row. It looks terrible where it is").
+        //
+        // ★ THEY ARE ONE FAMILY, SO THEY READ AS ONE. Stacking the lattice pair
+        // under the wireframe pair implied a hierarchy that does not exist —
+        // every one of these four answers the same question ("what am I looking
+        // at?") and none is subordinate to another.
+        HStack(spacing: DS.Space.s) {
+            Group {
                 viewModeButton("grid", label: "Wireframe", on: surfaceWireframeOn) {
                     surfaceWireframeOn.toggle()
                 }
@@ -5310,7 +5356,10 @@ public struct WorkspacePlaceholder: View {
         ZStack(alignment: .topLeading) {
             if let proj = projection {
                 ForEach(project.latticeDepthPlanes()) { plane in
-                    if let at = proj.project(settledWorld(plane.handle.anchor)) {
+                    // ★ HIDDEN ⇒ NOT DRAWN; LOCKED ⇒ NOT GRABBABLE.
+                    if !project.groupView.isHidden(plane.groupID),
+                       project.groupView.canEdit(plane.groupID),
+                       let at = proj.project(settledWorld(plane.handle.anchor)) {
                         latticeDepthKnob(active: draggingDepthPlane == plane.id)
                             // ★ A GRABBABLE TARGET. The knob draws at 22 pt, which
                             // is half Apple's 44 pt minimum — "I cannot drag the
@@ -5375,7 +5424,13 @@ public struct WorkspacePlaceholder: View {
     /// of this panel uses (`selection.activeGroupID`) — so the handle appears
     /// exactly where the drawer the user is reading is.
     private func latticeExpandHandleIsVisible(_ plane: ProjectModel.LatticeDepthPlane) -> Bool {
-        guard visible.latticeDepthPlanes else { return false }
+        guard visible.latticeDepthPlanes,
+              // ★ A LOCKED GROUP HAS NO DRAGGABLE HANDLE — "no changes can be
+              // made to this group" (maintainer, 2026-08-18). A knob that is
+              // drawn and refuses the drag is worse than one that is absent.
+              project.groupView.canEdit(plane.groupID),
+              !project.groupView.isHidden(plane.groupID)
+        else { return false }
         // ★ "SELECTED" MEANS EITHER WAY IN (maintainer, 2026-08-17: "I do not see
         // a handle for the expansion of a face"). The first cut required
         // `selection.activeGroupID`, which is set by tapping the group's BODY —
@@ -6592,9 +6647,21 @@ public struct WorkspacePlaceholder: View {
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 6) {
+                // ★★ THE EYE AND THE PADLOCK (maintainer, 2026-08-18: "Please
+                // place two icons on the right side of the Group rectangles").
+                // They ride at the TOP of this column, on EVERY stage: what you
+                // are looking at and what you may change are questions the
+                // lattice and surface stages ask as much as the TO page does.
+                HStack(spacing: DS.Space.s) {
+                    groupHideToggle(g)
+                    groupLockToggle(g)
+                }
                 // Round-2 L23/M2: NO destructive affordance in the lattice context —
                 // groups and faces can be removed only back on the TO page.
-                if !showLatticePage, stage == .topology {
+                // ★ AND A LOCKED GROUP CANNOT BE DELETED — "no changes can be
+                // made to this group" includes the largest change of all.
+                if !showLatticePage, stage == .topology,
+                   project.groupView.canEdit(g.id) {
                     Button { removeGroup(g.id) } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 11, weight: .semibold))
@@ -6606,7 +6673,8 @@ public struct WorkspacePlaceholder: View {
                 // Tapping asks CYLINDER or PLANE (handoff item 1). §2b: group
                 // primitives are a TO-page affordance, so the way to ADD one is a
                 // TO-page affordance too.
-                if active, visible.groupPrimitives {
+                if active, visible.groupPrimitives,
+                   project.groupView.canEdit(g.id) {
                     Button { addingPrimitiveGroup = g.id } label: {
                         Label("primitive", systemImage: "plus")
                             .labelStyle(.titleAndIcon)
@@ -7887,6 +7955,59 @@ public struct WorkspacePlaceholder: View {
         selection.remove(id)
         force.clearKind(id)
         force.sync(groups: selection.groups)
+        // ★ A DELETED GROUP'S hide/lock STATE GOES WITH IT. Left behind, a stale
+        // entry would silently lock or hide whichever group later took the id.
+        project.groupView.forget(id)
+    }
+
+    // MARK: ★ THE EYE AND THE PADLOCK
+
+    /// ★ HIDE — about the PICTURE, and nothing else. It suppresses this group's
+    /// tints and primitives on screen; the run is untouched. A hidden group is
+    /// still anchored, still loaded, still latticed.
+    private func groupHideToggle(_ g: SelectionGroup) -> some View {
+        let hidden = project.groupView.isHidden(g.id)
+        return Button {
+            project.groupView.toggleHidden(g.id)
+        } label: {
+            Image(systemName: GroupViewState.eyeSymbol(hidden: hidden))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle((hidden ? DS.Color.textQuaternary
+                                         : DS.Color.textSecondary).color)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(hidden ? "Show this group's primitives and colour"
+                     : "Hide this group's primitives and colour")
+        .accessibilityLabel(hidden ? "Show group" : "Hide group")
+        .accessibilityIdentifier("group-hide-\(g.id.uuidString)")
+    }
+
+    /// ★ LOCK — about the STATE. It refuses edits, and every mutation path asks
+    /// `canEdit` before it runs. A padlock that does not lock would be the worst
+    /// control on this page.
+    private func groupLockToggle(_ g: SelectionGroup) -> some View {
+        let locked = project.groupView.isLocked(g.id)
+        return Button {
+            project.groupView.toggleLocked(g.id)
+            // Leaving a locked group ACTIVE would keep its editors on screen
+            // with nothing behind them.
+            if project.groupView.isLocked(g.id), selection.activeGroupID == g.id {
+                selection.clearActive()
+            }
+        } label: {
+            Image(systemName: GroupViewState.lockSymbol(locked: locked))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle((locked ? DS.Color.accent
+                                         : DS.Color.textSecondary).color)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(locked ? "Unlock this group" : "Lock this group — no changes")
+        .accessibilityLabel(locked ? "Unlock group" : "Lock group")
+        .accessibilityIdentifier("group-lock-\(g.id.uuidString)")
     }
 
     /// Leave the locked group (handoff item 3): close any open rename and unlock the
