@@ -509,8 +509,30 @@ final class ThreeStageVisibilityTests: XCTestCase {
         XCTAssertFalse(v.groupPrimitives, "★ MUST NOT: the group primitives")
         XCTAssertFalse(v.keepOuts, "★ MUST NOT: the keep-clear volumes")
         XCTAssertFalse(v.surfaceEditing, "★ MUST NOT: the face-editing tools")
+        // ★★ TWO SECTIONS, NOT THREE — AND THIS IS A MERGE COLLISION RESOLVED
+        // IN FAVOUR OF THE LATER INSTRUCTION, not an assertion weakened to make
+        // a build pass (bar R7).
+        //
+        // This test was written on `main` while `rowSections` still returned
+        // `[.latticeSummary, .latticeDrawer, .latticePrimitiveRows]`. In
+        // parallel, the lattice-stage-repair task REMOVED `.latticeDrawer` on
+        // the maintainer's explicit instruction: "There is a 'per Group' set of
+        // notes regarding the lattice that doesn't make sense. It should be per
+        // face *only*. The group does *not* have its own primitive to expand
+        // therefore making it impossible to ever be *IN* regime."
+        //
+        // He was describing a FABRICATED NUMBER and he was right: the group
+        // drawer was derived from `g.faces.first` — one arbitrary face standing
+        // in for the whole group — at the GROUP's depth, so it reported a cell,
+        // a density, a strut and a cells-across for a slab no primitive owns and
+        // no handle can drag. `LatticePageSeparation` carries that reasoning in
+        // full; this is the same rule seen from the test side.
+        //
+        // ★ WHAT THE TEST STILL ASSERTS IS UNCHANGED: a group row on the LATTICE
+        // stage carries the LATTICE sections and not the clearance editor. Only
+        // the membership of that list moved.
         XCTAssertEqual(v.rowSections,
-                       [.latticeSummary, .latticeDrawer, .latticePrimitiveRows],
+                       [.latticeSummary, .latticePrimitiveRows],
                        "★ and a group row here is the lattice sections")
     }
 

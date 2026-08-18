@@ -693,8 +693,7 @@ public struct WorkspacePlaceholder: View {
                           // looking like the other, is the confusion; with the
                           // Stress view on, this channel means von Mises and
                           // nothing else.
-                          stressTints: showSmoothingPage ? smoothBrush.viewerTints()
-                              : (stressViewOn ? stressSurfaceTints : latticeProxyTints),
+                          stressTints: stageSurfaceTints,
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn. L1: a
                           // full-screen page draws NO design-box wireframe.
@@ -2977,9 +2976,40 @@ public struct WorkspacePlaceholder: View {
     /// EMPTY result means "draw the part normally" — see `LatticeStressTint`,
     /// which refuses a flat field rather than normalising it into a part that is
     /// uniformly peak-red.
-    private var stressSurfaceTints: [SIMD4<Float>] {
-        guard let mesh = viewerMesh, let f = latticeStressField else { return [] }
-        return LatticeStressTint.tints(for: mesh, field: f)
+    /// ★★ WHAT WASHES THE PART, BY STAGE — and the default is NOTHING.
+    ///
+    /// ★ HIS INSTRUCTION: "The stress plot works - but the problem is that the
+    /// purple blobs still happen. Please turn them off."
+    ///
+    /// ★ THE PURPLE WAS `latticeProxyTints` — the DENSITY proxy, graded by the
+    /// same sim field and drawn in the density ramp's violet. It shipped as an
+    /// always-on wash for the workspace stage, and once the Stress view existed
+    /// it was actively harmful: a violet field that looks like a measurement,
+    /// sitting on the part whether or not the user asked to see anything, next
+    /// to a real plot of a DIFFERENT quantity. Two fields, one picture, no way
+    /// to tell which is which.
+    ///
+    /// ★ SO THE STAGE NOW WASHES THE PART ONLY WHEN ASKED. A view aid is
+    /// something you reach for — the same rule the wireframe, the x-ray and the
+    /// strut preview already follow on this page.
+    ///
+    /// ★ THE LATTICE PAGE IS UNCHANGED, deliberately. There the density overlay
+    /// IS the subject — the page is about how the lattice grades, its legend is
+    /// a key to exactly this ramp, and removing it would take away the thing
+    /// that page exists to show.
+    private var stageSurfaceTints: [SIMD4<Float>]? {
+        if showSmoothingPage { return smoothBrush.viewerTints() }
+        if stressViewOn { return stressSurfaceTints }
+        if showLatticePage { return latticeProxyTints }
+        // ★ NIL, NOT EMPTY — nil is the renderer's "no wash at all"; an empty
+        // array is a mis-sized buffer it would drop with a warning-free shrug.
+        return nil
+    }
+
+    private var stressSurfaceTints: [SIMD4<Float>]? {
+        guard let mesh = viewerMesh, let f = latticeStressField else { return nil }
+        let t = LatticeStressTint.tints(for: mesh, field: f)
+        return t.isEmpty ? nil : t
     }
 
     private var latticeStressField: LatticeDemandField? {
