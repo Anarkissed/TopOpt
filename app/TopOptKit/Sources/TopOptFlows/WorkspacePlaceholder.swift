@@ -2119,10 +2119,20 @@ public struct WorkspacePlaceholder: View {
             // Honesty banner (bar P1): whenever the strut layer is up the user is told
             // in place what they are looking at — the live analytic strut field, not
             // the worker's exported mesh.
-            // ★ THE NOTICE MOVED UNDER THE SELECTIONS PANEL (maintainer,
-            // 2026-08-17). It was anchored here by a fixed top padding and
-            // landed in the middle of that panel; it is now the row beneath the
-            // panel's card, attached by layout rather than by a guess.
+// ★★ BOTH SIDES OF THIS CONFLICT WERE RIGHT, AND THE MERGE KEEPS BOTH.
+            //
+            //   HEAD  moved the notice OUT of this floating overlay and under the
+            //         Selections panel (maintainer, 2026-08-17) — it was anchored
+            //         here by a fixed top padding and landed in the middle of that
+            //         panel, so it is now attached by LAYOUT rather than by a guess.
+            //   main  replaced the notice's `if let scene` with `LatticePreviewBanner`,
+            //         which is TOTAL over the states — because "on, empty and
+            //         silent" was indistinguishable from broken (task
+            //         2026-08-18-lattice-preview-confetti §5b).
+            //
+            // ★ THE PLACEMENT IS HEAD'S AND THE CONTENT IS MAIN'S: the banner now
+            // renders inside `latticePreviewNotice`, which rides with the panel.
+            // Nothing floats here any more.
             EmptyView()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -2161,6 +2171,11 @@ public struct WorkspacePlaceholder: View {
                     buildStrutScene()
                 }
             }
+        }
+        // ★ THE SELECTION MOVED ⇒ THE MASK MOVED ⇒ REBAKE. See
+        // `latticeRegionInputsKey` for why this is a hash and not the regions.
+        .onChange(of: latticeRegionInputsKey) { _ in
+            if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
         .onChange(of: showLatticePage) { open in if open { syncLatticeProxy() } }
         // Graded follow-up: when a run's accepted variants land (streamed or final),
@@ -3016,6 +3031,31 @@ public struct WorkspacePlaceholder: View {
         latticePageVariantField ?? latticeSim.field
     }
 
+    /// ★★ WHAT `latticeJobRegions()` READS BESIDES `project.lattice` — AND THE
+    /// REASON THE PREVIEW COULD GO STALE WITHOUT IT.
+    ///
+    /// The rebake already fires on `project.lattice`, which carries every
+    /// per-selectable role, depth, density and expand. But the emission ALSO
+    /// walks `project.selection` and `project.faceRegions`: add a face to a
+    /// latticed group, or split a region, and the set of latticed voxels changes
+    /// while `lattice` is byte-identical. The preview would keep drawing the old
+    /// mask, and — now that the mask is the whole point — it would be lying about
+    /// exactly the thing it was just taught to tell the truth about.
+    ///
+    /// ★ A HASH, NOT THE REGIONS THEMSELVES. `latticeJobRegions()` voxel-walks;
+    /// calling it once per SwiftUI body pass to decide whether to rebake would
+    /// cost more than the bake it is guarding (bar P2). This is O(faces) of
+    /// integer hashing.
+    private var latticeRegionInputsKey: Int {
+        var h = Hasher()
+        for g in selection.groups {
+            h.combine(g.id)
+            for f in g.faces { h.combine(f) }
+        }
+        for r in project.faceRegions.regions { h.combine(r.id) }
+        return h.finalize()
+    }
+
     private func buildStrutScene() {
         guard let mesh = viewerMesh else { return }
         let latticeID = latticeProxy.params.latticeID
@@ -3048,7 +3088,12 @@ public struct WorkspacePlaceholder: View {
         // Read on the main actor and captured, because `latticeJobRegions()`
         // walks the selection and the settings. Empty on the settings page's
         // sample block, which is exactly when clipping must NOT happen.
-        let regions = project.latticeJobRegions().regions
+        let emission = project.latticeJobRegions()
+        let regions = emission.regions
+        // ★ AND HOW MANY MARKED FACES PRODUCED NO REGION. Carried into the bake so
+        // the banner can say the preview is drawing LESS than was marked, rather
+        // than under-drawing in silence.
+        let skippedFaces = emission.skippedFaces
         // The SAME band and gamma the raymarcher grades with, so a stated
         // per-region density can be inverted into the demand value that comes
         // back out as exactly that density.
@@ -3063,7 +3108,8 @@ public struct WorkspacePlaceholder: View {
                                         // stage an empty list means "nothing is
                                         // declared", and the honest picture of
                                         // that is a solid part.
-                                        whenEmpty: .latticeNothing)
+                                        whenEmpty: .latticeNothing,
+                                        skippedFaces: skippedFaces)
             DispatchQueue.main.async {
                 strutScene = scene
                 strutSceneToken += 1
@@ -6763,11 +6809,18 @@ public struct WorkspacePlaceholder: View {
     /// The honesty banner for the strut layer — one row, shown only while that
     /// layer is actually up.
     @ViewBuilder private var latticePreviewNotice: some View {
+        // ★ THE BANNER IS `LatticePreviewBanner` (merged from main), TOTAL OVER
+        // THE STATES. It read `if let scene` and therefore rendered NOTHING when
+        // there was no scene — and a preview that is on, empty and silent is
+        // indistinguishable from a broken one.
         VStack(alignment: .leading, spacing: 0) {
-            if showStrutPreview, let scene = strutScene {
-                Text(scene.preview.previewLabel)
+            if let banner = LatticePreviewBanner.make(previewOn: showStrutPreview,
+                                                      hasModel: viewerMesh != nil,
+                                                      scene: strutScene) {
+                Text(banner.text)
                     .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .foregroundStyle((banner.isEmpty ? DS.Color.textPrimary
+                                                     : DS.Color.textSecondary).color)
                     .padding(.vertical, DS.Space.xs)
                     .padding(.horizontal, DS.Space.s)
                     .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9))
