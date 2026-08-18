@@ -373,3 +373,121 @@ final class LatticeSlabExpandTests: XCTestCase {
         return (p, gid, rid)
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ THE PRIMITIVE ITSELF MOVES — "expand and contract along with the handle"
+
+@MainActor
+final class LatticeSlabExpandPrimitiveTests: XCTestCase {
+
+    /// A flat unit-square patch as two triangles, with its inward normals.
+    /// Corners at ±1 in x/y, normal along −z (inward = into the part).
+    private func square() -> (base: [SIMD3<Float>], inward: [SIMD3<Float>],
+                              idx: [UInt32]) {
+        let base: [SIMD3<Float>] = [SIMD3(-1, -1, 0), SIMD3(1, -1, 0),
+                                    SIMD3(1, 1, 0), SIMD3(-1, 1, 0)]
+        let inward = [SIMD3<Float>](repeating: SIMD3(0, 0, -1), count: 4)
+        return (base, inward, [0, 1, 2, 0, 2, 3])
+    }
+
+    /// ★ THE DEFECT HE REPORTED TWICE: the number reached the JOB — the emitted
+    /// slab's half-extents grow — but the shaded primitive was built from the
+    /// face's own triangles at their own positions, so the picture never moved.
+    /// The run was right and the picture was silent, which is the worse half.
+    func testAPositiveExpandPushesTheOutlineOutward() {
+        let s = square()
+        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                          indices: s.idx, byMM: 0.5)
+        for k in 0..<4 {
+            XCTAssertGreaterThan(simd_length(out[k]), simd_length(s.base[k]),
+                                 "★ corner \(k) moved OUT")
+        }
+    }
+
+    func testANegativeExpandPullsTheOutlineIn() {
+        let s = square()
+        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                          indices: s.idx, byMM: -0.5)
+        for k in 0..<4 {
+            XCTAssertLessThan(simd_length(out[k]), simd_length(s.base[k]),
+                              "★ corner \(k) moved IN")
+        }
+    }
+
+    /// ★ ZERO IS A NO-OP, BIT FOR BIT — which is what makes the parameter safe
+    /// to default on every existing call site.
+    func testZeroLeavesEveryVertexExactlyWhereItWas() {
+        let s = square()
+        XCTAssertEqual(FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                               indices: s.idx, byMM: 0),
+                       s.base)
+    }
+
+    /// ★ THE DISPLACEMENT IS IN THE TANGENT PLANE, so a dilation can never
+    /// double as a depth change — depth has its own control and its own detents.
+    func testTheDilationNeverMovesAlongTheNormal() {
+        let s = square()
+        for e in [-0.4, 0.7] {
+            let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                              indices: s.idx, byMM: e)
+            for k in 0..<4 {
+                XCTAssertEqual(out[k].z, s.base[k].z, accuracy: 1e-5,
+                               "★ z is the normal axis and must not move")
+            }
+        }
+    }
+
+    /// ★ A SHRINK IS BOUNDED BY THE PATCH'S OWN SIZE. Pulling in further than
+    /// the patch is wide would fold the outline through itself, which is not a
+    /// smaller region — so a runaway negative collapses toward the centre and
+    /// stops, rather than inverting.
+    func testARunawayShrinkCollapsesRatherThanInverting() {
+        let s = square()
+        let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
+                                          indices: s.idx, byMM: -1e6)
+        for k in 0..<4 {
+            XCTAssertTrue(out[k].x.isFinite && out[k].y.isFinite)
+            XCTAssertLessThan(simd_length(out[k]), simd_length(s.base[k]))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ THE DETENT AT ZERO, AND THE SIGN ON THE KNOB
+
+final class LatticeSlabExpandDetentTests: XCTestCase {
+
+    /// ★ "Please make a magnetic detent at 0 … so it is easier to 'feel' when
+    /// it hits the floor." Inside the band it snaps; outside it passes through
+    /// untouched, so the magnet cannot quietly eat a value the user aimed at.
+    func testItSnapsToZeroInsideTheBandAndNowhereElse() {
+        XCTAssertEqual(LatticeSlabExpand.snapped(0.3), 0, accuracy: 1e-12)
+        XCTAssertEqual(LatticeSlabExpand.snapped(-0.3), 0, accuracy: 1e-12)
+        XCTAssertEqual(LatticeSlabExpand.snapped(4.0), 4.0, accuracy: 1e-12)
+        XCTAssertEqual(LatticeSlabExpand.snapped(-4.0), -4.0, accuracy: 1e-12)
+    }
+
+    /// The band is narrow enough that an aimed value survives it.
+    func testTheBandIsNarrowerThanAnyValueWorthAiming() {
+        XCTAssertLessThan(LatticeSlabExpand.detentBandMM, 1.0)
+        XCTAssertEqual(LatticeSlabExpand.snapped(1.0), 1.0, accuracy: 1e-12)
+    }
+
+    /// ★ "'+/-' when it is pushed up, '+' … '-'" — the knob states what the
+    /// number IS, and the icon flips exactly where the detent catches.
+    func testTheKnobIconReadsTheSign() {
+        XCTAssertEqual(LatticeSlabExpand.sense(5), .grow)
+        XCTAssertEqual(LatticeSlabExpand.sense(-5), .shrink)
+        XCTAssertEqual(LatticeSlabExpand.sense(0), .floor)
+        // ★ INSIDE THE DETENT IT READS AS THE FLOOR — the icon and the magnet
+        // agree by construction, because `sense` snaps before it decides.
+        XCTAssertEqual(LatticeSlabExpand.sense(0.2), .floor)
+        XCTAssertEqual(LatticeSlabExpand.sense(-0.2), .floor)
+    }
+
+    func testEachSenseHasItsOwnSymbol() {
+        XCTAssertEqual(LatticeSlabExpand.Sense.grow.symbolName, "plus")
+        XCTAssertEqual(LatticeSlabExpand.Sense.shrink.symbolName, "minus")
+        XCTAssertEqual(LatticeSlabExpand.Sense.floor.symbolName, "plusminus")
+    }
+}

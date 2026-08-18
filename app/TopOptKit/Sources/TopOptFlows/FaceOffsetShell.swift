@@ -91,8 +91,15 @@ public struct FaceOffsetShell: Equatable, Sendable {
     /// Returns nil ONLY when the faces contribute no triangles at all, which is
     /// the one honest failure: there is no surface to offset. Every other
     /// input — plane, cylinder, torus, spline, a mixed union — produces a shell.
+    ///
+    /// ★ `expandMM` DILATES THE PATCH IN PLANE BEFORE IT IS OFFSET (maintainer,
+    /// 2026-08-17: "The expansion still isn't shown with the primitive. Please
+    /// make the primitive expand and contract along with the handle"). Positive
+    /// grows the outline outward, negative pulls it in; ZERO is byte-identical
+    /// to every call that predates the parameter, which is why it defaults.
     public static func build(faces: [FaceID], in mesh: ViewerMesh,
-                             depthMM: Double) -> FaceOffsetShell? {
+                             depthMM: Double,
+                             expandMM: Double = 0) -> FaceOffsetShell? {
         let want = Swift.max(0, depthMM)
         let wanted = Set(faces.map { Int32($0) })
         guard !wanted.isEmpty, !mesh.indices.isEmpty else { return nil }
@@ -160,17 +167,117 @@ public struct FaceOffsetShell: Equatable, Sendable {
             normal[k] = l > 1e-9 ? -(normal[k] / l) : SIMD3<Float>(0, 0, 0)
         }
 
+        // ── 2b. THE IN-PLANE DILATION (maintainer, 2026-08-17) ──────────────────
+        // Applied to the BASE before anything reads it, so the outline, the
+        // offset and the curvature clamp all describe the same, expanded patch.
+        let grown = dilated(base: base, inward: normal, indices: idx,
+                            byMM: expandMM)
+
         // ── 3. the curvature clamp (§2b — it cannot self-intersect) ─────────────
-        let limit = curvatureLimitMM(base: base, inward: normal, indices: idx)
+        let limit = curvatureLimitMM(base: grown, inward: normal, indices: idx)
         let reached = limit > 0 ? Swift.min(want, limit) : want
         let clamped = reached < want - 1e-9 ? want : nil
 
-        var out = [SIMD3<Float>](repeating: .zero, count: base.count)
-        for k in 0..<base.count { out[k] = base[k] + normal[k] * Float(reached) }
+        var out = [SIMD3<Float>](repeating: .zero, count: grown.count)
+        for k in 0..<grown.count { out[k] = grown[k] + normal[k] * Float(reached) }
 
-        return FaceOffsetShell(base: base, offset: out, indices: idx,
+        return FaceOffsetShell(base: grown, offset: out, indices: idx,
                                reachedDepthMM: reached, clampedFromMM: clamped)
     }
+
+    // MARK: ★ THE IN-PLANE DILATION
+
+    /// ★★ GROW (OR SHRINK) THE PATCH'S OUTLINE BY `byMM`, IN PLANE.
+    ///
+    /// ★ HIS WORDS: "The expansion still isn't shown with the primitive. Please
+    /// make the primitive expand and contract along with the handle." The number
+    /// already reached the JOB — `LatticeRegionEmission` grows the emitted slab's
+    /// half-extents — but the shaded primitive on screen is this shell, and this
+    /// shell was built from the face's own triangles at their own positions. So
+    /// the run was right and the picture was silent, which is the worse half of
+    /// that pair.
+    ///
+    /// ★ ONLY THE BOUNDARY MOVES, and that is the whole design. Displacing every
+    /// vertex radially would stretch the interior of a curved face and make a
+    /// cylinder bulge; the OUTLINE is what an expansion is about. Interior
+    /// vertices keep their exact positions, boundary vertices move outward along
+    /// the surface, and the triangles between them stretch to cover the gap.
+    ///
+    /// ★ AND A HOLE SHRINKS WHEN THE PATCH GROWS, for free: "outward" is
+    /// per-boundary-edge, away from the triangle that owns it, so an inner loop's
+    /// outward direction points INTO the hole. That is what dilating a patch with
+    /// a hole means.
+    ///
+    /// The displacement is IN THE TANGENT PLANE — the component along the inward
+    /// normal is removed — so a dilation never doubles as a depth change. Depth
+    /// has its own control, its own handle and its own detents.
+    static func dilated(base: [SIMD3<Float>], inward: [SIMD3<Float>],
+                        indices: [UInt32], byMM: Double) -> [SIMD3<Float>] {
+        guard byMM != 0, base.count > 2, indices.count >= 3 else { return base }
+
+        // ── boundary edges: those owned by exactly ONE triangle ────────────────
+        var count: [UInt64: Int] = [:]
+        var owner: [UInt64: Int] = [:]          // edge → its triangle's first index
+        func key(_ a: UInt32, _ b: UInt32) -> UInt64 {
+            let (lo, hi) = a < b ? (a, b) : (b, a)
+            return UInt64(lo) << 32 | UInt64(hi)
+        }
+        var i = 0
+        while i + 2 < indices.count {
+            for (a, b) in [(indices[i], indices[i + 1]),
+                           (indices[i + 1], indices[i + 2]),
+                           (indices[i + 2], indices[i])] {
+                let k = key(a, b)
+                count[k, default: 0] += 1
+                owner[k] = i
+            }
+            i += 3
+        }
+
+        // ── the outward in-plane direction at each boundary vertex ─────────────
+        var push = [SIMD3<Float>](repeating: .zero, count: base.count)
+        for (k, c) in count where c == 1 {
+            guard let t = owner[k] else { continue }
+            let ia = UInt32(k >> 32), ib = UInt32(k & 0xFFFF_FFFF)
+            // The triangle's third corner — the inside of the patch, locally.
+            let tri = [indices[t], indices[t + 1], indices[t + 2]]
+            guard let ic = tri.first(where: { $0 != ia && $0 != ib }) else { continue }
+            let a = base[Int(ia)], b = base[Int(ib)], c3 = base[Int(ic)]
+            var out = 0.5 * (a + b) - c3            // away from the interior
+            // Project into the tangent plane, so a dilation is never a depth move.
+            let n = 0.5 * (inward[Int(ia)] + inward[Int(ib)])
+            let nl = simd_length(n)
+            if nl > 1e-9 {
+                let u = n / nl
+                out -= u * simd_dot(out, u)
+            }
+            let l = simd_length(out)
+            guard l > 1e-9 else { continue }
+            let dir = out / l
+            push[Int(ia)] += dir
+            push[Int(ib)] += dir
+        }
+
+        // ── a SHRINK may not eat the patch ─────────────────────────────────────
+        // Bounded by the patch's own size: pulling in further than it is wide
+        // would fold the outline through itself, which is not a smaller region.
+        var lo = base[0], hi = base[0]
+        for p in base { lo = simd_min(lo, p); hi = simd_max(hi, p) }
+        let halfSpan = Double(simd_length(hi - lo)) * 0.5
+        let e = byMM < 0 ? Swift.max(byMM, -halfSpan * shrinkFraction) : byMM
+
+        var out = base
+        for k in 0..<out.count {
+            let l = simd_length(push[k])
+            guard l > 1e-9 else { continue }       // interior: untouched
+            out[k] = base[k] + (push[k] / l) * Float(e)
+        }
+        return out
+    }
+
+    /// How much of a patch's own half-span a shrink may consume. Not a taste
+    /// value: past 1.0 the two sides of the outline cross.
+    static let shrinkFraction: Double = 0.9
 
     /// ★ HOW FAR THE OFFSET MAY TRAVEL BEFORE THE FRONTS MEET.
     ///

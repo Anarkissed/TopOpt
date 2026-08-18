@@ -735,8 +735,15 @@ public final class ProjectModel: ObservableObject {
     /// to make it smaller in the x/y axis as well"). So the clear test is `== 0`
     /// and not `<= 0` — the old spelling would have silently discarded every
     /// shrink and left the drawer reading 0.0 mm after a leftward drag.
+    ///
+    /// ★ AND IT SNAPS TO ZERO (maintainer, 2026-08-17: "Please make a magnetic
+    /// detent at 0 for the expansion so it is easier to 'feel' when it hits the
+    /// floor"). The magnet lives HERE, on the one setter, rather than in each
+    /// gesture — so the 3D knob, the drawer scrub and the keypad cannot develop
+    /// three different feels, which is the defect the depth control already had
+    /// once.
     public func writeLatticeExpandMM(_ ref: LatticeSelectableRef, mm: Double) {
-        let v = LatticeSlabExpand.clamp(mm)
+        let v = LatticeSlabExpand.snapped(mm)
         if v == 0 { lattice.selectableExpandMM.removeValue(forKey: ref.key) }
         else { lattice.selectableExpandMM[ref.key] = v }
     }
@@ -1908,8 +1915,14 @@ public final class ProjectModel: ObservableObject {
                               group: UUID, key: Int, role: LatticeGroupRole,
                               depthMM: Double,
                               in mesh: ViewerMesh) -> LatticeDepthPlane? {
+        // ★ THE PRIMITIVE IS DRAWN AT THE EXPANDED SIZE (maintainer, 2026-08-17:
+        // "Please make the primitive expand and contract along with the handle").
+        // The SAME number `LatticeRegionEmission` grows the emitted slab by, read
+        // through the SAME accessor — so the shape on screen and the region in
+        // the job cannot drift apart.
         guard let shell = FaceOffsetShell.build(faces: faces, in: mesh,
-                                                depthMM: depthMM)
+                                                depthMM: depthMM,
+                                                expandMM: latticeExpandMM(ref))
         else { return nil }
         let volume = ClearanceVolume.shell(faceID: key, shell: shell)
         guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,

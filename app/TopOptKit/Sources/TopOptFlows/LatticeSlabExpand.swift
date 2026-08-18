@@ -59,6 +59,55 @@ public enum LatticeSlabExpand {
         return Swift.min(maxMM, Swift.max(minMM, v))
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // MARK: ★ THE DETENT AT ZERO
+
+    /// ★ HIS WORDS: "Please make a magnetic detent at 0 for the expansion so it
+    /// is easier to 'feel' when it hits the floor."
+    ///
+    /// ★ AND ZERO IS THE ONLY DETENT WORTH HAVING HERE, which is why there is
+    /// one rather than a ladder of them. The depth's magnet sits at the depth a
+    /// region starts to CERTIFY — a number derived from core's law that the user
+    /// could not otherwise find. An expand has no such number: every value is as
+    /// printable as every other. What zero means is "exactly the face I picked",
+    /// the boundary between growing and shrinking, and now the sign flip the
+    /// handle icon reads off. That is a place a finger should be able to land.
+    public static let detentBandMM = 0.6
+
+    /// Snap to zero inside the band; pass everything else through untouched.
+    /// Pure, so the feel is a value rather than a gesture detail.
+    public static func snapped(_ v: Double) -> Double {
+        let c = clamp(v)
+        return abs(c) <= detentBandMM ? 0 : c
+    }
+
+    /// ★ WHICH WAY THE HANDLE IS POINTING, as a value the icon reads.
+    ///
+    /// ★ HIS RULE, VERBATIM: "Please change the expansion handle icon to '+/-'
+    /// when it is pushed up, make it change to '+' when it is below the floor
+    /// make the handle icon '-'." So the knob states what the number IS —
+    /// growing, shrinking, or sitting on the floor between the two — instead of
+    /// wearing one arrow that means "this drags" and nothing else.
+    public enum Sense: Equatable, Sendable {
+        case grow, shrink, floor
+
+        /// The SF Symbol for each sense.
+        public var symbolName: String {
+            switch self {
+            case .grow:   return "plus"
+            case .shrink: return "minus"
+            case .floor:  return "plusminus"
+            }
+        }
+    }
+
+    public static func sense(_ v: Double) -> Sense {
+        let s = snapped(v)
+        if s > 0 { return .grow }
+        if s < 0 { return .shrink }
+        return .floor
+    }
+
     /// The half-extents a slab presents after expanding, in mm. Pure so the
     /// growth is testable without a view — and so "in plane only" is a property
     /// of a function rather than of a comment.

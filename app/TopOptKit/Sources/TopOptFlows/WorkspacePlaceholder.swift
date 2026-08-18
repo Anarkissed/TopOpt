@@ -5241,7 +5241,10 @@ public struct WorkspacePlaceholder: View {
                         let ex = proj.project(settledWorld(plane.handle.anchor))
                             .map { LatticeSlabExpand.separated(knob: raw, from: $0) }
                             ?? raw
-                        latticeExpandKnob(active: draggingExpandPlane == plane.id)
+                        latticeExpandKnob(
+                            active: draggingExpandPlane == plane.id,
+                            sense: LatticeSlabExpand.sense(
+                                project.latticeExpandMM(plane.ref)))
                             .frame(width: 44, height: 44)
                             .contentShape(Circle())
                             .gesture(latticeExpandDrag(plane))
@@ -5306,12 +5309,18 @@ public struct WorkspacePlaceholder: View {
     /// the depth knob.
     static let latticeExpandKnobBaseMM: Float = 8
 
-    private func latticeExpandKnob(active: Bool) -> some View {
+    /// ★ THE KNOB SAYS WHICH WAY IT IS POINTING (maintainer, 2026-08-17: "change
+    /// the expansion handle icon to '+/-' when it is pushed up … '+' … '-'"). It
+    /// wore one double arrow, which said "this drags" and nothing else; it now
+    /// reads the value's own `Sense`, so the sign is legible without opening the
+    /// drawer — and the moment it flips is the moment the detent catches.
+    private func latticeExpandKnob(active: Bool,
+                                   sense: LatticeSlabExpand.Sense) -> some View {
         let tint = LiquidGlass.Tint.frost(
             LatticeDensityProxy.densityColor(fraction: 0.25),
             intensity: active ? 0.85 : 0.55)
         let size: CGFloat = active ? 26 : 22
-        return Image(systemName: "arrow.left.and.right")
+        return Image(systemName: sense.symbolName)
             .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
             .frame(width: size, height: size)
             .liquidGlass(tint, in: Circle(), specular: active ? 1.3 : 1)
