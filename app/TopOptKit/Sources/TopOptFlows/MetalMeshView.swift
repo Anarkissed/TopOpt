@@ -71,7 +71,7 @@ private struct ViewerUniforms {
 /// ★ THE SHELL'S LATTICE CLIP, Swift side. Mirrors `ShellClip` in the shader.
 /// `origin.w` is the enable flag — one field, so "no lattice this frame" and "a
 /// lattice whose grid we could not read" are the same, safe, drawn-normally case.
-private struct ClipRegionUniform {
+struct ClipRegionUniform {
     var a = SIMD4<Float>(0, 0, 0, 0)   // xyz origin/axisPoint, w kind (0 face, 1 bolt)
     var b = SIMD4<Float>(0, 0, 0, 0)   // xyz normal/axisDir
     var c = SIMD4<Float>(0, 0, 0, 0)   // face: depth,halfU,halfW · bolt: radius,halfLen
@@ -80,7 +80,7 @@ private struct ClipRegionUniform {
 /// ★ MIRRORS `ShellClip` IN THE SHADER, field for field. `count.w` is the enable
 /// flag, so "no lattice this frame" and "more regions than the array holds" are
 /// both expressible without a second boolean.
-private struct ShellClipUniform {
+struct ShellClipUniform {
     static let maxRegions = 16
     var count = SIMD4<Float>(0, 0, 0, 0)
     var regions = [ClipRegionUniform](repeating: ClipRegionUniform(),
@@ -190,7 +190,7 @@ private struct ContactUniforms {
 // ★ AND `try?` IS WHY IT WAS SILENT. Every pipeline here is built with `try?`,
 // so a shader that does not compile is indistinguishable from a feature that is
 // switched off. `MeshRendererPipelinesTests` now asserts this one built.
-private let shellClipMSL = """
+let shellClipMSL = """
 // ★★ THE CUT IS THE REGION ITSELF, NOT THE CELL THAT CONTAINS IT (maintainer,
 // 2026-08-18: "The clips are a bit too big … They should be *exactly* the same
 // size as the face that's selected. Because this model *should* have the
@@ -226,30 +226,68 @@ inline void clip_basis(float3 n, thread float3& u, thread float3& v) {
     u = normalize(cross(n, seed));
     v = normalize(cross(n, u));
 }
-inline bool region_contains(float3 p, constant ClipRegion& r) {
+// ★★ A SIGNED DISTANCE, NOT A BOOLEAN — AND THAT IS WHY THE STRUTS STOP WHERE
+// THE HOLE DOES (maintainer, 2026-08-18: "there are a number of artifacts —
+// these are a result of the lattices being made *behind* the 3d model … You
+// need to make *only* the face's area turned into a lattice").
+//
+// ★ THE SHELL WAS CUT EXACTLY AND THE LATTICE WAS NOT. The struts were bounded
+// only by the baked per-CELL activation grid, and a cell goes active when as
+// little as 2% of it overlaps the region (`cellField`'s `insideFraction`). So
+// the lattice was rounded UP to whole cells while the hole stayed exact, and
+// every strut in the overhang was drawn INSIDE still-solid shell — measured at
+// 19.9% of the strut-bearing volume on his own part. Those are the artifacts.
+//
+// ★ WHY A DISTANCE. The raymarcher intersects SDFs (`max()` of 1-Lipschitz
+// fields is a valid SDF, which is what keeps full sphere-trace steps safe). A
+// boolean reject cannot join that CSG; a true distance can, and the region
+// becomes just another cutting solid alongside the part surface and the bbox.
+// `region_contains` is now EXACTLY `region_distance(...) <= 0`, so the hole in
+// the shell and the clip on the struts are one predicate and cannot drift.
+inline float region_distance(float3 p, constant ClipRegion& r) {
     if (r.a.w < 0.5) {                              // FACE slab
         float3 n = r.b.xyz;
-        if (length(n) < 0.5 || r.c.x <= 0.0) { return false; }
+        if (length(n) < 0.5 || r.c.x <= 0.0) { return 1e9; }
         float3 d = p - r.a.xyz;
-        float s = dot(d, n);
-        if (s < 0.0 || s > r.c.x) { return false; }
         float3 u, v; clip_basis(n, u, v);
-        return abs(dot(d, u)) <= r.c.y && abs(dot(d, v)) <= r.c.z;
+        // The same three tests, as a box in the (n,u,v) frame: s ∈ [0, depth]
+        // becomes |s − depth/2| − depth/2, and the two in-plane extents are
+        // already symmetric about the origin.
+        float3 q = float3(abs(dot(d, n) - 0.5 * r.c.x) - 0.5 * r.c.x,
+                          abs(dot(d, u)) - r.c.y,
+                          abs(dot(d, v)) - r.c.z);
+        return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
     }
     float3 ax = r.b.xyz;                            // BOLT cylinder
-    if (length(ax) < 0.5 || r.c.x <= 0.0) { return false; }
+    if (length(ax) < 0.5 || r.c.x <= 0.0) { return 1e9; }
     float3 d = p - r.a.xyz;
     float t = dot(d, ax);
-    if (abs(t) > r.c.y) { return false; }
-    return length(d - ax * t) <= r.c.x;
+    float2 q = float2(length(d - ax * t) - r.c.x, abs(t) - r.c.y);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+inline bool region_contains(float3 p, constant ClipRegion& r) {
+    return region_distance(p, r) <= 0.0;
+}
+// The UNION of the declared regions — min of the distances, which is the same
+// set `region_contains`-any described.
+inline float regions_distance(float3 p, constant ShellClip& c) {
+    int n = min(int(c.count.x), SHELL_CLIP_MAX);
+    float d = 1e9;
+    for (int i = 0; i < n; ++i) { d = min(d, region_distance(p, c.regions[i])); }
+    return d;
 }
 inline bool shell_is_latticed(float3 mpos, constant ShellClip& c) {
     if (c.count.w < 0.5) { return false; }
-    int n = min(int(c.count.x), SHELL_CLIP_MAX);
-    for (int i = 0; i < n; ++i) {
-        if (region_contains(mpos, c.regions[i])) { return true; }
-    }
-    return false;
+    return regions_distance(mpos, c) <= 0.0;
+}
+// ★ THE MARCH'S SIDE OF THE SAME RULE, and the polarity is deliberate. Disabled
+// means "no region list reached this frame", and for BOTH readers that means the
+// clip removes NOTHING: the shell keeps every fragment, the march keeps every
+// strut (the settings page's sample block has no regions by construction and its
+// whole subject is the cell).
+inline float lattice_region_clip(float3 p, constant ShellClip& c) {
+    if (c.count.w < 0.5) { return -1e9; }
+    return regions_distance(p, c);
 }
 """
 
@@ -3793,6 +3831,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             lattice.camera = camera
             lattice.modelRotation = modelRotation
             lattice.modelCenter = modelCenter
+            // ★ THE STRUTS ARE CLIPPED BY THE SAME BYTES THE HOLE IS CUT FROM.
+            // Taken here, from the one computed property, on the frame it is used
+            // — so the shell's hole and the lattice's edge are the same surface by
+            // construction rather than by two code paths agreeing.
+            lattice.shellClip = shellClipUniform
             var lu = lattice.makeUnifiedUniforms(aspect: aspect,
                                                  clipFromModel: uniforms.mvp,
                                                  eyeFromModel: uniforms.modelView,

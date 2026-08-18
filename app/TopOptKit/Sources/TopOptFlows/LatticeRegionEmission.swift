@@ -104,9 +104,25 @@ public enum LatticeRegionEmission {
             s.origin = center
             s.normal = -ManualPrimitive.unit(normal)
             // ★ IN PLANE ONLY. `depthMM` is untouched below.
-            let e = expandMM.isFinite && expandMM > 0 ? expandMM : 0
-            s.halfUMM = halfU + e
-            s.halfWMM = halfW + e
+            // ★★ AND THE SIGN IS THE USER'S (maintainer, 2026-08-18, having typed
+            // one: "I did a test where I did a negative expansion to make the
+            // edges of the model's walls visible and the lattice only in the
+            // centre … the lattice doesn't change and allow for that extra
+            // space. There needs to be this type of fidelity and control").
+            //
+            // ★ THE DEFECT WAS A HAND-ROLLED DUPLICATE. This line read
+            // `expandMM > 0 ? expandMM : 0` — it clamped every SHRINK to zero,
+            // so the one control the user reached for could not reach the slab
+            // at all. `LatticeSlabExpand.expanded` has handled the negative case
+            // correctly since the sign was freed (`testItIsClampedAndNowShrinks-
+            // OnPurpose`, `testANegativeMarginShrinksBothInPlaneAxes`), floors
+            // each axis independently so a shrink past the face collapses to a
+            // sliver instead of inverting — and was simply not called here.
+            // There is now ONE expander, and the emission goes through it.
+            let e = LatticeSlabExpand.expanded(halfUMM: halfU, halfWMM: halfW,
+                                               by: expandMM)
+            s.halfUMM = e.halfUMM
+            s.halfWMM = e.halfWMM
             s.depthMM = depthMM
             return s.isValid ? s : nil
         }

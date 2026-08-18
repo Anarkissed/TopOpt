@@ -129,6 +129,8 @@ static float3 to_edge_fade(float3 color, float edge, float edgeStrength,
 /// lines that shipped. This task changes PIXELS, NOT GEOMETRY (R4), and the field is
 /// the geometry.
 let latticeFieldSource = """
+\(shellClipMSL)
+
 struct LSDFUniforms {
     float4 rayX, rayY, rayDir;   // model-space ray basis (see the Swift struct)
     float4 eye, bboxMin, bboxMax, gridOrigin, gridSpacing, gridDims;
@@ -186,6 +188,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           texture3d<float> cellTex,
                           texture3d<float> sdfTex,
                           sampler samp,
+                          constant ShellClip& RC,
                           float3 ro, float3 rd) {
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
 
@@ -253,7 +256,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         float dPart = sdfTex.sample(samp, stc).r + delta;
         float3 qb = abs(p - bc) - be;
         float dBox = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
-        float dClip = max(dPart, dBox);
+        // ★ AND THE DECLARED REGION, as a third cutting solid. This is what makes
+        // the struts stop exactly where the shell's hole stops, at any cell size
+        // — and what makes a sub-millimetre change to the region MOVE the
+        // lattice instead of being swallowed by the cell grid.
+        float dClip = max(max(dPart, dBox), lattice_region_clip(p, RC));
 
         if (any(baseCell != cachedBase)) {
             cachedBase = baseCell;
@@ -334,6 +341,7 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
                           const device float4* segs,
                           texture3d<float> sdfTex,
                           sampler samp,
+                          constant ShellClip& RC,
                           float3 hitPos, float hitRho) {
     float cell = U.latticeOrigin.w;
     float3 lorigin = U.latticeOrigin.xyz;
@@ -361,7 +369,11 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
         float dP = sdfTex.sample(samp, stc).r + delta;
         float3 qb = abs(pts[k] - bc) - be;
         float dB = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
-        d6[k] = max(dmin * cell, max(dP, dB));
+        // The region is in this gradient too — a strut cut off at the region
+        // boundary must take that plane's normal, exactly as one cut off at the
+        // part surface takes the part's. Otherwise the cut face is shaded as if
+        // it were still a strut and reads as a tear.
+        d6[k] = max(dmin * cell, max(max(dP, dB), lattice_region_clip(pts[k], RC)));
     }
     return normalize(float3(d6[0] - d6[1], d6[2] - d6[3], d6[4] - d6[5]) + 1e-6);
 }
@@ -447,13 +459,18 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                texture3d<float> cellTex [[texture(0)]],
                                texture3d<float> sdfTex [[texture(1)]],
                                texture3d<float> tintTex [[texture(2)]],
-                               sampler samp [[sampler(0)]]) {
+                               sampler samp [[sampler(0)]],
+                               // ★ THE SAME BUFFER INDEX THE SHELL'S CLIP USES (4).
+                               // `LatticeSDFRenderer.bindFragment` binds it on EVERY
+                               // path — a declared-but-unbound buffer makes Metal drop
+                               // the draw, the trap this file records twice already.
+                               constant ShellClip& RC [[buffer(4)]]) {
     float3 ro = U.eye.xyz;
     float3 rd = lsdf_ray(U, in.uv);
-    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, ro, rd);
+    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, RC, ro, rd);
     if (!h.hit) { discard_fragment(); }
 
-    float3 n = lsdf_normal(U, segs, sdfTex, samp, h.pos, h.rho);
+    float3 n = lsdf_normal(U, segs, sdfTex, samp, RC, h.pos, h.rho);
     float4 clip = U.clipFromModel * float4(h.pos, 1.0);
     float3 eyeP = (U.eyeFromModel * float4(h.pos, 1.0)).xyz;
     float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);

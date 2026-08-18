@@ -535,8 +535,22 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// fragment argument indices. ONE definition, used by the standalone pass, the
     /// unified G-buffer write and (for the uniform) the deferred shade — a second copy
     /// of an argument table is exactly how a "missing Buffer binding" abort gets in.
+    /// ★ THE REGIONS THE MARCH IS CLIPPED TO — the SAME uniform, with the same
+    /// bytes, that the shell's hole is cut from. Default is disabled, which the
+    /// shader reads as "clip nothing": the standalone sample block has no regions
+    /// by construction and must still draw its cell.
+    var shellClip = ShellClipUniform()
+
     func bindFragment(_ enc: MTLRenderCommandEncoder, _ u: inout LSDFUniforms) {
         enc.setFragmentBytes(&u, length: MemoryLayout<LSDFUniforms>.stride, index: 0)
+        // ★ BOUND HERE, IN THE ONE BINDER, so the standalone pass and the unified
+        // G-buffer write cannot disagree about it — and so neither can OMIT it.
+        // `lsdf_fragment` and `lsdf_gbuffer` both DECLARE buffer 4, and Metal drops
+        // a draw whose declared buffer is unbound.
+        var clipBytes = shellClip.bytes()
+        enc.setFragmentBytes(&clipBytes,
+                             length: MemoryLayout<SIMD4<Float>>.stride * clipBytes.count,
+                             index: 4)
         enc.setFragmentBuffer(segBuffer, offset: 0, index: 1)
         enc.setFragmentTexture(cellTex, index: 0)
         enc.setFragmentTexture(sdfTex, index: 1)
@@ -636,13 +650,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   texture3d<float> cellTex [[texture(0)]],
                                   texture3d<float> sdfTex [[texture(1)]],
                                   texture3d<float> tintTex [[texture(2)]],
-                                  sampler samp [[sampler(0)]]) {
+                                  sampler samp [[sampler(0)]],
+                                  constant ShellClip& RC [[buffer(4)]]) {
         float3 ro = U.eye.xyz;
         float3 rd = lsdf_ray(U, in.uv);
-        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, ro, rd);
+        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, RC, ro, rd);
         if (!h.hit) return float4(0.0);
         float3 hitPos = h.pos; float hitRho = h.rho;
-        float3 n = lsdf_normal(U, segs, sdfTex, samp, hitPos, hitRho);
+        float3 n = lsdf_normal(U, segs, sdfTex, samp, RC, hitPos, hitRho);
 
         // ★ THE OLD, SEPARATE LIGHTING MODEL — and §1(d)'s whole point. A model-space
         // key at a different direction and a different strength from the body's, a
