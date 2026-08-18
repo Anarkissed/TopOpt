@@ -68,3 +68,92 @@ final class LatticeDensityModeRenameTests: XCTestCase {
         XCTAssertFalse(LatticeDensityMode.perRegion.needsSimulation)
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: ★ THE "SIMULATE STRESSES" PERMISSION
+
+final class LatticeSimPermissionTests: XCTestCase {
+
+    /// ★ IT IS A PERMISSION, NOT A MODE. It does not say "grade everything by
+    /// stress"; it says "a solve may decide the axes I left to it". Each axis
+    /// still chooses for itself — his "set some values yourself and keep them
+    /// hard coded" — and this is what makes Sim available to any of them.
+    func testTheSwitchIsOnByDefaultBecauseTheGradedModeAlwaysWas() {
+        let s = LatticeSettings(enabled: true)
+        XCTAssertTrue(s.simulateStresses,
+                      "★ a false default would silently change every existing "
+                      + "project's lattice — the graded density mode has been "
+                      + "the default since it shipped")
+        XCTAssertEqual(s.densityMode, .sim)
+        XCTAssertTrue(s.needsStressSolve)
+    }
+
+    /// ★ TURNING IT OFF MOVES EVERY SIM AXIS to its nearest manual equivalent,
+    /// rather than leaving a mode the job cannot honestly express.
+    func testTurningItOffMigratesEverySimAxis() {
+        var s = LatticeSettings(enabled: true)
+        s.cellSizeMode = .swept
+        s.setSimulateStresses(false)
+        XCTAssertFalse(s.simulateStresses)
+        XCTAssertEqual(s.densityMode, .uniform,
+                       "★ a field-graded density has no meaning without a field")
+        XCTAssertEqual(s.cellSizeMode, .fixed,
+                       "★ swept IS the stress-graded cell ladder")
+        XCTAssertFalse(s.needsStressSolve)
+    }
+
+    /// ★ AN AXIS THE USER PINNED BY HAND IS LEFT ALONE — the switch only moves
+    /// what it is responsible for.
+    func testItLeavesManualAxesExactlyWhereTheyWere() {
+        var s = LatticeSettings(enabled: true)
+        s.densityMode = .perRegion
+        s.cellSizeMode = .fit
+        s.setSimulateStresses(false)
+        XCTAssertEqual(s.densityMode, .perRegion, "★ untouched")
+        XCTAssertEqual(s.cellSizeMode, .fit, "★ untouched")
+    }
+
+    /// ★★ THE SWITCH ON WITH EVERY AXIS PINNED NEEDS NO SOLVE. That is a
+    /// legitimate state — his "offer any variable for the AI to use, but can set
+    /// some values yourself" taken to its limit — and running an FEA nothing
+    /// would read would be a cost with no consumer.
+    func testPermissionWithoutATakerNeedsNoSolve() {
+        var s = LatticeSettings(enabled: true)
+        s.densityMode = .uniform
+        s.cellSizeMode = .fixed
+        XCTAssertTrue(s.simulateStresses, "★ the permission stands…")
+        XCTAssertFalse(s.needsStressSolve, "★ …but nothing is asking for it")
+    }
+
+    /// Either axis alone is enough to need the solve.
+    func testEitherAxisAloneCallsForTheSolve() {
+        var byDensity = LatticeSettings(enabled: true)
+        byDensity.cellSizeMode = .fixed
+        XCTAssertTrue(byDensity.needsStressSolve)
+
+        var byCell = LatticeSettings(enabled: true)
+        byCell.densityMode = .uniform
+        byCell.cellSizeMode = .swept
+        XCTAssertTrue(byCell.needsStressSolve)
+    }
+
+    /// ★ AN OLDER SNAPSHOT PREDATES THE SWITCH and must keep the solve it has
+    /// always had. Absent ⇒ true.
+    func testASnapshotWithoutTheKeyDecodesAsPermitted() throws {
+        let json = Data("""
+        {"enabled":true,"topologyID":"octet","densityMode":"auto"}
+        """.utf8)
+        let s = try JSONDecoder().decode(LatticeSettings.self, from: json)
+        XCTAssertTrue(s.simulateStresses)
+        XCTAssertEqual(s.densityMode, .sim, "★ and the old mode name still opens")
+    }
+
+    /// A round trip through OFF and back ON leaves a usable state — the reason
+    /// the flag is stored rather than derived from the modes.
+    func testItSurvivesARoundTripThroughOff() {
+        var s = LatticeSettings(enabled: true)
+        s.setSimulateStresses(false)
+        s.setSimulateStresses(true)
+        XCTAssertTrue(s.simulateStresses)
+    }
+}

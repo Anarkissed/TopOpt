@@ -461,6 +461,54 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ★★ THE SIM MASTER SWITCH (maintainer, 2026-08-17)
+
+    /// ★ HIS SPEC: "Add a dark glass on/off check with a 'Simulate Stresses' at
+    /// the top of the 'Lattice Settings' modal (above the 'type') … The idea is
+    /// that if the SIM option is selected, you can offer any variable for the AI
+    /// to use, but can set some values yourself and keep them hard coded."
+    ///
+    /// ★ SO IT IS A PERMISSION, NOT A MODE. It does not say "grade everything by
+    /// stress"; it says "a solve is allowed to decide the axes I left to it".
+    /// Each axis still chooses for itself — that is the "set some values yourself
+    /// and keep them hard coded" half — and this switch is what makes the Sim
+    /// option available to any of them at all.
+    ///
+    /// ★ WHY IT IS STORED AND NOT DERIVED. Deriving it (`densityMode == .sim ||
+    /// cellSizeMode == .swept`) would make the switch un-turn-off-able: flipping
+    /// it off would have to guess which axes to move and back on would have to
+    /// guess where to put them. Stored, with `setSimulateStresses` enforcing the
+    /// invariant, the user's per-axis choices survive a round trip through OFF.
+    ///
+    /// ★ DEFAULT TRUE, and that is not a new behaviour: the field-graded density
+    /// mode has been the default since it shipped, so an untouched project has
+    /// always been asking for a solve. A false default would silently change
+    /// every existing project's lattice.
+    public var simulateStresses: Bool
+
+    /// ★ THE INVARIANT, IN ONE PLACE: no axis may sit on a Sim setting while the
+    /// permission is off. Turning the switch off MOVES those axes to their
+    /// nearest manual equivalent rather than leaving a mode the job cannot
+    /// express — core would receive a `grading` block the user has just said
+    /// they do not want.
+    public mutating func setSimulateStresses(_ on: Bool) {
+        simulateStresses = on
+        guard !on else { return }
+        // Density: the field-graded mode has no meaning without a field.
+        if densityMode.needsSimulation { densityMode = .uniform }
+        // Cell size: `swept` IS the stress-graded cell ladder.
+        if cellSizeMode == .swept { cellSizeMode = .fixed }
+    }
+
+    /// ★ WHETHER A SOLVE IS ACTUALLY NEEDED — the permission AND at least one
+    /// axis taking it up. The switch being on with every axis pinned by hand is
+    /// a legitimate state, and it needs no FEA.
+    public var needsStressSolve: Bool {
+        simulateStresses
+            && (densityMode.needsSimulation || cellSizeMode == .swept)
+    }
     /// Faces painted "Material, latticed" (lattice-include). Preview-scope legacy
     /// store (the unified library's group roles are the carrier now). The EXCLUDE
     /// paint role deliberately does NOT live here: it drives the existing protect
@@ -651,6 +699,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 // snapshot actually had, and a default must never rewrite
                 // history (the `boundary` precedent).
                 densityMode: LatticeDensityMode = .sim,
+                simulateStresses: Bool = true,
                 paintedIncludeFaces: [Int] = [],
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
@@ -686,6 +735,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.includePrimitives = includePrimitives
         self.boundary = boundary
         self.densityMode = densityMode
+        self.simulateStresses = simulateStresses
         self.paintedIncludeFaces = paintedIncludeFaces
         self.paintDepthMM = paintDepthMM
         self.groupRoles = groupRoles
@@ -718,6 +768,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case selectableExpandMM
         case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
+        // ★ The Sim permission (2026-08-17). Absent from every older
+        // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
+        // keeps asking for the solve it has always asked for.
+        case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction
         case subfloorPerRegion, reportRegionCells
@@ -756,6 +810,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // never chose a finish opens on none rather than on rim.
         boundary = try c.decodeIfPresent(LatticeBoundaryTreatment.self, forKey: .boundary) ?? .none
         densityMode = try c.decodeIfPresent(LatticeDensityMode.self, forKey: .densityMode) ?? .uniform
+        // ★ ABSENT ⇒ TRUE. An older snapshot predates the switch, and the
+        // field-graded density mode has been the default since it shipped —
+        // so those projects have always been asking for a solve. Defaulting
+        // false here would silently change every one of their lattices.
+        simulateStresses = try c.decodeIfPresent(Bool.self, forKey: .simulateStresses) ?? true
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
@@ -819,6 +878,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(includePrimitives, forKey: .includePrimitives)
         try c.encode(boundary, forKey: .boundary)
         try c.encode(densityMode, forKey: .densityMode)
+        try c.encode(simulateStresses, forKey: .simulateStresses)
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
@@ -924,6 +984,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                       generatable: generatable,
                                       memberMM: memberMM, lineWidthMM: lineWidthMM)
         guard b.runnableAsCertified else { return nil }
+        // ★★ THE SIM PERMISSION GATES THE `grading` BLOCK (maintainer,
+        // 2026-08-17). `setSimulateStresses(false)` already moves every Sim axis
+        // to its manual equivalent, so this can only fire if some other path
+        // wrote the mode directly. It is here anyway, because the failure it
+        // prevents is the one this project keeps paying for: a job that asks for
+        // something the user's own switch says they turned off. Belt AND braces
+        // is correct when the two live in different files.
+        precondition(!(densityMode.needsSimulation && !simulateStresses),
+                     "the Sim density mode cannot outlive the Sim permission — "
+                     + "see LatticeSettings.setSimulateStresses")
         // AUTO density (task lattice-page-core-hookup stage 4): core's run_job now
         // grades each accepted variant from that variant's OWN final stress field,
         // so the job ships a GRADED spec — a `grading` block, never a uniform
