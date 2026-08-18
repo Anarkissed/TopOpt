@@ -769,25 +769,9 @@ public struct WorkspacePlaceholder: View {
                           // …and the body is hidden ONLY where that layer is drawn
                           // (§1a): the TO page no longer draws it, so the body must
                           // not be made invisible for it either.
-                          // ★★ THE BODY STAYS VISIBLE NOW THAT THE PREVIEW IS
-                          // MASKED (maintainer, 2026-08-18: "the rest of the body
-                          // isn't visible. They need to be combined. Looking like
-                          // they are part of the same model").
-                          //
-                          // ★ THE ASSUMPTION THAT MADE `0` RIGHT IS GONE. Bar A3
-                          // said "while the strut layer is up there is ONE visible
-                          // object" — true when the preview lattices the WHOLE
-                          // interior, false the moment it is clipped to declared
-                          // regions. Hiding the body then hides every millimetre
-                          // the user did NOT mark, which is most of the part.
-                          //
-                          // ★ THE UNIFIED PASS IS WHAT MAKES THIS SAFE: since
-                          // task 2026-08-18-unified-shading the shell and the
-                          // lattice land in ONE G-buffer, depth-tested against
-                          // each other, with the lattice's albedo alpha as its
-                          // mask. Two visible surfaces is a case that pass was
-                          // built for; it is no longer "the body OR the struts".
-                          bodyAlpha: latticePreviewBodyAlpha,
+                          bodyAlpha: (showStrutPreview && strutScene != nil
+                                      && (visible.latticeControls || showLatticePage))
+                              ? 0 : 1,
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
                           detentPulse: detentPulse,
                           // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
@@ -3062,24 +3046,6 @@ public struct WorkspacePlaceholder: View {
     /// calling it once per SwiftUI body pass to decide whether to rebake would
     /// cost more than the bake it is guarding (bar P2). This is O(faces) of
     /// integer hashing.
-    /// ★ HOW OPAQUE THE PART'S OWN BODY IS WHILE THE STRUT PREVIEW IS UP.
-    ///
-    /// ★ 1 — the part reads as one object again. The struts occupy the declared
-    /// regions; the body occupies everything else. Where the two overlap the
-    /// G-buffer's depth test decides, which is exactly what the unified pass is
-    /// for.
-    ///
-    /// ★★ AND IF THE SHELL WINS WHERE IT SHOULD NOT — if a latticed slab reads as
-    /// solid skin because the body's outer surface sits in front of the struts
-    /// inside it — the fix is NOT to hide the body again. It is to make the shell
-    /// stand down inside an active lattice cell: `LatticeSDFRenderer` already
-    /// holds `cellTex`, the per-cell activation the raymarcher itself folds
-    /// against, so the shell fragment can sample the SAME source of truth and
-    /// discard. That is a shader change and it is deliberately NOT bundled here —
-    /// this value is the cheap, reversible half, and it is worth seeing on the
-    /// device before writing the expensive half.
-    private var latticePreviewBodyAlpha: Float { 1 }
-
     private var latticeRegionInputsKey: Int {
         var h = Hasher()
         for g in selection.groups {
