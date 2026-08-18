@@ -152,6 +152,8 @@ private let viewerShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
 
+\(unifiedMaterialSource)
+
 // ★ MERGED, NOT PICKED (2026-08-16). `render-quality` added world-space shading
 // fields to `VOut` and a `ShadeParams`; this task added the cut's per-fragment
 // half-space test, which needs `mpos`/`member` and its own uniforms. Both sides
@@ -197,10 +199,9 @@ struct CutUniforms {
 };
 struct Uniforms { float4x4 mvp; float4x4 normalMatrix; float4 flex;
                   float4x4 worldNormalMatrix; float4x4 model; float4x4 modelView; float4 eye; };
-// Render-quality parameters (task 2026-08-15-render-quality). Every strength is a
-// 0…1 multiplier and ZERO IS OFF — the before/after captures run this one shader
-// with zeros rather than a second, drifting copy of it.
-struct ShadeParams { float4 ao; float4 fade; float4 tint; };
+// `ShadeParams` and the material itself now live in `unifiedMaterialSource`,
+// prepended above — see UnifiedShading.swift for why (§1d: the lattice must respond
+// to light IDENTICALLY, and the only way to be sure is one definition).
 
 
 // buffer(3) carries the per-vertex FEA displacement (mm); `flex.x` scales it
@@ -312,40 +313,17 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
     }
     float3 color;
     if (sp.fade.w > 0.5) {
+        // ★ THE ONE MATERIAL, CALLED — not a copy of it. `to_material` is the rig
+        // that used to be written out here, moved verbatim into
+        // `unifiedMaterialSource` so the lattice's deferred shade calls the SAME
+        // function with the SAME constants (§1d). The normal flip toward the viewer,
+        // the hemisphere ambient, the key, the fill and the Fresnel rim are all in
+        // there, unchanged, with the notes that explain their values.
         float3 Nw = normalize(in.wnormal);
         float3 V  = normalize(in.eyeWS - in.wpos);
-        // The viewer draws with cullMode .none over meshes of mixed winding, so a
-        // face pointing away from the eye is a BACK face, not an unlit one: flip it
-        // toward the viewer rather than letting it go black.
-        if (dot(Nw, V) < 0.0) { Nw = -Nw; }
-        // Hemisphere ambient (a two-colour analytic IBL): cool sky above, warm floor
-        // bounce below. This is §2(a)'s "small studio HDR" reduced to its two dominant
-        // spherical-harmonic terms — the part of an HDR that actually shapes a matte
-        // CAD surface — at one dot product instead of a cubemap fetch.
-        // ★ TUNED ON HIS BRACKET, NOT ON A SPHERE (§2d). The first values here were
-        // ambient 0.150→0.400 with a 0.42 fill, and on a sphere they were fine. On his
-        // bracket, from a camera looking at the side the key does NOT reach, the body
-        // came back at roughly 40% grey — legible, but darker than the flat headlight it
-        // replaced, and a user orbiting a part WILL find that side. A fixed world light
-        // means one side is always the shadow side; the fix is a stronger ambient floor
-        // and a stronger fill, not a light that follows the camera back.
-        float  up = Nw.y * 0.5 + 0.5;
-        float3 ambient = mix(float3(0.225, 0.212, 0.205), float3(0.470, 0.500, 0.550), up);
-        // KEY: high, front-left, in WORLD space.
-        float3 keyDir = normalize(float3(-0.38, 0.82, 0.42));
-        float  keyN   = clamp((dot(Nw, keyDir) + 0.18) / 1.18, 0.0, 1.0);   // wrapped a little
-        float3 keyTerm = float3(0.92, 0.90, 0.86) * keyN * 0.72;
-        // FILL: low, right, cool and weak — it opens the shadow side without flattening.
-        float3 fillDir = normalize(float3(0.72, 0.10, 0.55));
-        float  fillN   = clamp(dot(Nw, fillDir) * 0.5 + 0.5, 0.0, 1.0);
-        float3 fillTerm = float3(0.30, 0.35, 0.44) * fillN * 0.55;
-        float3 shade = ambient * ambientAO + (keyTerm + fillTerm) * directAO;
-        // RIM: a narrow grazing edge from behind — what separates one strut from the
-        // strut behind it. Fresnel-weighted, so it lives only on silhouettes.
-        float3 rimDir = normalize(float3(0.30, 0.30, -0.90));
-        float  fres = pow(1.0 - clamp(dot(Nw, V), 0.0, 1.0), 3.5);
-        float3 rim = float3(0.38, 0.44, 0.56) * fres
-                   * clamp(dot(Nw, rimDir) * 0.5 + 0.5, 0.0, 1.0) * 0.55 * directAO;
+        TOMaterial mat = to_material(Nw, V, ambientAO, directAO);
+        float3 shade = mat.shade;
+        float3 rim = mat.rim;
         // Region/selection tint tints the ALBEDO, not the finished pixel. That one
         // move is what §4 rests on: a tinted region now carries the SAME occlusion,
         // key, fill and rim as bare clay, so it reads as a shaded solid instead of a
@@ -385,18 +363,11 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
             color = mix(color, tint.rgb * (0.55 + 0.45 * lighting), tint.a);
         }
     }
-    // §3a: the dark crease/silhouette line, laid on last so it survives the tint.
-    color *= mix(1.0, 0.30, clamp(aoEdge.g * sp.ao.y, 0.0, 1.0));
-    // §3d DEPTH FADE: on a dense lattice the far side reads THROUGH the near side and
-    // the whole part becomes one texture. Recede the far material toward the stage's
-    // own backdrop colour so the two separate. Strength is capped by the caller
-    // (`Self.depthFadeStrength`) well below opaque — this is a depth CUE, never fog:
-    // at full fade the material is still 55% itself, so no region is ever hidden.
-    if (sp.fade.x > 0.001) {
-        float t = clamp((in.eyeZ - sp.fade.y) / max(sp.fade.z - sp.fade.y, 1e-4), 0.0, 1.0);
-        color = mix(color, float3(0.055, 0.070, 0.110), t * clamp(sp.fade.x, 0.0, 1.0));
-
-    }
+    // §3a's crease/silhouette line and §3d's depth fade — the shared tail (see
+    // `to_edge_fade` in UnifiedShading.swift), so the lattice's far side recedes on the
+    // same curve toward the same backdrop colour and its creases are drawn at the same
+    // strength. Two surfaces that fade differently read as two objects at any distance.
+    color = to_edge_fade(color, aoEdge.g, sp.ao.y, in.eyeZ, sp.fade);
     // Handoff 124 — Face protection crosshatch. A protected face carries the UNIQUE
     // mint-teal PROTECT_RGB (WorkspacePlaceholder.protectFaceRGB); recognise it by
     // colour and lay a screen-space DIAGONAL CROSSHATCH over it — a "preserved" mark,
@@ -541,7 +512,13 @@ struct DIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; 
 struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; };
 struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; float4x4 normalMatrix; };
 struct GBuf { float  eyeZ    [[color(0)]];      // R32Float — unchanged, the contact pass reads this
-              float4 enormal [[color(1)]]; };   // RGBA16Float — eye-space normal (xyz), w unused
+              float4 enormal [[color(1)]];      // RGBA16Float — eye-space normal (xyz), w unused
+              // ★ ATTACHMENT 2 (task 2026-08-18-unified-shading): the LATTICE's albedo,
+              // alpha as its mask. The shell writes ZERO here, which is how the unified
+              // deferred shade knows a pixel belongs to the rasterised body and not to
+              // the marched lattice — a mask in a channel that already had to exist,
+              // rather than a fourth pass to compute one.
+              float4 albedo  [[color(2)]]; };
 
 vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]],
                          constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
@@ -563,6 +540,7 @@ fragment GBuf depth_fragment(DOut in [[stage_in]]) {
     float3 n = normalize(in.enormal);
     if (n.z < 0.0) { n = -n; }
     o.enormal = float4(n, 0.0);
+    o.albedo = float4(0.0);      // "this pixel is the shell, not the lattice"
     return o;
 }
 """
@@ -764,7 +742,12 @@ using namespace metal;
 
 struct CIn  { float3 position [[attribute(0)]]; float4 color [[attribute(1)]]; };
 struct COut { float4 position [[position]]; float4 color; float eyeZ; };
-// params: (x = contact-line feather in PIXELS, y = occlusion falloff in PIXELS; z,w unused).
+// params: (x = contact-line feather in PIXELS, y = occlusion falloff in PIXELS,
+//          zw = G-BUFFER TEXELS PER COLOUR PIXEL — 1,1 unless the G-buffer is
+//          resolution-capped, which it is whenever a lattice is in the frame
+//          (`MeshRenderer.latticeGBufferMaxPixels`). Reading a capped texture with
+//          full-resolution fragment coordinates would sample the wrong texel and run
+//          off the edge, and this pass has always read by integer coordinate.)
 struct CUniforms { float4x4 mvp; float4x4 modelView; float4 params; };
 
 vertex COut contact_vertex(CIn in [[stage_in]], constant CUniforms& u [[buffer(1)]]) {
@@ -781,7 +764,10 @@ fragment float4 contact_fragment(COut in [[stage_in]], constant CUniforms& u [[b
     float featherPx = max(u.params.x, 1e-3);
     float occPx     = max(u.params.y, 1e-3);
     // The opaque part's eye-space depth at THIS pixel (a large sentinel where no part covers it).
-    float sceneEyeZ = sceneDepth.read(uint2(in.position.xy)).x;
+    float2 gscale = max(u.params.zw, float2(1e-6));
+    uint2 gpx = uint2(clamp(in.position.xy * gscale, float2(0.0),
+                            float2(sceneDepth.get_width() - 1, sceneDepth.get_height() - 1)));
+    float sceneEyeZ = sceneDepth.read(gpx).x;
     float d = abs(sceneEyeZ - in.eyeZ);
     // Convert the eye-space gap to a SCREEN-space one: dividing by how fast eye-Z changes per pixel
     // (fwidth) gives the contact's width in pixels, so the feather is a consistent ~1–2 px at any
@@ -1150,6 +1136,51 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// True on a real GPU when both AO pipelines built. A test pins this so a shader
     /// typo fails loudly instead of silently reverting to the flat-grey look.
     var aoPipelinesDidBuild: Bool { aoPipeline != nil && aoBlurPipeline != nil }
+
+    // ── UNIFIED SHADING (task 2026-08-18-unified-shading) ─────────────────────────
+    /// The lattice's G-buffer write and its deferred shade. Optional for the same
+    /// reason every other pipeline here is: a nil means no lattice in the frame, not a
+    /// broken frame.
+    private let latticeGBufferPipeline: MTLRenderPipelineState?
+    private let latticeShadePipeline: MTLRenderPipelineState?
+    /// True on a real GPU when both unified lattice pipelines built. Pinned by a test
+    /// — a typo in that MSL would silently take the lattice out of the frame entirely,
+    /// and "the preview stopped appearing" is a worse failure than a red build.
+    var latticePipelinesDidBuild: Bool {
+        latticeGBufferPipeline != nil && latticeShadePipeline != nil
+    }
+    /// The exact unified-lattice MSL the app ships, exposed so a headless test
+    /// compiles it (the pipelines above are built with `try?`).
+    static var latticeShaderSourceForTesting: String { unifiedLatticeShaderSource }
+
+    /// The lattice layer drawn INSIDE this renderer's passes: a bake-only
+    /// `LatticeSDFRenderer` that owns the per-cell field, the part SDF, the tint volume
+    /// and the segment soup. Nil = no lattice in the frame, and then every pass below is
+    /// byte-for-byte what it was before this task.
+    private var latticeLayer: LatticeSDFRenderer?
+    /// The scene token last uploaded, so a bake happens once per scene change and never
+    /// per frame (the preview's bar P2, carried over unchanged).
+    private var latticeSceneToken: Int = -1
+    private var latticeAppliedTints: [FaceID: SIMD4<Float>]? = nil
+    /// The G-buffer's third attachment (the lattice albedo + mask), sized with the pair.
+    private var gbufferAlbedoTex: MTLTexture?
+
+    /// ★ THE G-BUFFER IS RESOLUTION-CAPPED WHEN A LATTICE IS IN IT, AND THAT IS THE
+    /// WHOLE COST STORY OF THIS TASK.
+    ///
+    /// The raymarch is FILL-BOUND — `LatticeSDFProfileTests` measures 12.5 ms for one
+    /// 1024² frame of his bracket on an M2 Pro — so marching at an iPad's full drawable
+    /// (~5.6 Mpx) would cost tens of milliseconds and no amount of pass unification
+    /// would pay for it. The standalone preview handled this by capping its own drawable
+    /// at 1152 px on the long side and letting the compositor upscale (its bar P3), and
+    /// the unified pass inherits exactly that trade: the G-buffer — hence the march, the
+    /// AO and the edge detector — is capped at the SAME 1152, and the deferred shade
+    /// reads it with a nearest tap. So the march costs what it costs today, while the
+    /// LIGHTING, the occlusion, the creases and the depth fade are the shell's own.
+    ///
+    /// It applies ONLY when a lattice layer is present. Without one the G-buffer is the
+    /// full colour target, exactly as `render-quality` shipped it.
+    static let latticeGBufferMaxPixels = 1152
     /// The GPU this renderer is on. Exposed so a skipped frame-budget assertion can
     /// NAME the device it declined to hold — a skip that does not say which machine it
     /// let off is indistinguishable from a budget nobody checks.
@@ -1388,6 +1419,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     static let sceneDepthFormat: MTLPixelFormat = .r32Float
     /// The G-buffer's second attachment: the eye-space normal (render quality §1/§3a).
     static let gbufferNormalFormat: MTLPixelFormat = .rgba16Float
+    /// The G-buffer's THIRD attachment (unified shading): the lattice's albedo, with
+    /// alpha as the "this pixel is lattice" mask. 8 bits per channel — it is an albedo
+    /// that will be multiplied by a shade, not a value anything measures.
+    static let gbufferAlbedoFormat: MTLPixelFormat = .rgba8Unorm
     /// The SSAO+edge target: R = openness, G = edge. 8 bits each is plenty for a term
     /// that is blurred and then multiplied into a shade — and it is a quarter of the
     /// bandwidth of a float target read once per body fragment.
@@ -1766,6 +1801,46 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             translucentPipe = try? device.makeRenderPipelineState(descriptor: tpd)
         }
 
+        // ★ THE UNIFIED LATTICE PIPELINES (task 2026-08-18-unified-shading). Two
+        // fragment functions over ONE library, both from `unifiedLatticeShaderSource`:
+        //
+        //   `lsdf_gbuffer` writes the marched hit into the SHELL'S OWN G-buffer — same
+        //       three attachments, same depth attachment, so AO and the edge detector
+        //       see one surface set instead of two (§1 i + iii). Depth is written from
+        //       the fragment, which is unavoidable for a raymarch, and DECLARED
+        //       `greater` (§2b) rather than left for the compiler to assume the worst.
+        //
+        //   `lsdf_shade` is the deferred shade in the MAIN colour pass: no march, the
+        //       shell's `to_material`, the shell's AO texture, the shell's depth fade,
+        //       and a depth write into the SHARED depth buffer so interpenetration
+        //       resolves per pixel (§1 ii).
+        //
+        // Both optional. A nil leaves the frame exactly as it is without a lattice —
+        // never a black rectangle over the part, the failure mode that matters here.
+        var latGPipe: MTLRenderPipelineState? = nil
+        var latShadePipe: MTLRenderPipelineState? = nil
+        if let lLib = try? device.makeLibrary(source: unifiedLatticeShaderSource, options: nil),
+           let lvf = lLib.makeFunction(name: "lsdf_vertex"),
+           let lgf = lLib.makeFunction(name: "lsdf_gbuffer"),
+           let lsf = lLib.makeFunction(name: "lsdf_shade") {
+            let gpd = MTLRenderPipelineDescriptor()
+            gpd.vertexFunction = lvf
+            gpd.fragmentFunction = lgf
+            gpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat
+            gpd.colorAttachments[1].pixelFormat = Self.gbufferNormalFormat
+            gpd.colorAttachments[2].pixelFormat = Self.gbufferAlbedoFormat
+            gpd.depthAttachmentPixelFormat = Self.depthFormat
+            latGPipe = try? device.makeRenderPipelineState(descriptor: gpd)
+
+            let spd2 = MTLRenderPipelineDescriptor()
+            spd2.vertexFunction = lvf
+            spd2.fragmentFunction = lsf
+            spd2.colorAttachments[0].pixelFormat = Self.colorFormat
+            spd2.depthAttachmentPixelFormat = Self.depthFormat
+            spd2.rasterSampleCount = raster      // §3b — it lands in the multisampled pass
+            latShadePipe = try? device.makeRenderPipelineState(descriptor: spd2)
+        }
+
         // Translucent body depth: test against the part but write nothing, so back
         // walls show through the front — the x-ray read.
         let tdsd = MTLDepthStencilDescriptor()
@@ -1802,6 +1877,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.aoPipeline = aoPipe
         self.aoBlurPipeline = aoBlurPipe
         self.shadowPipeline = shadowPipe
+        self.latticeGBufferPipeline = latGPipe
+        self.latticeShadePipeline = latShadePipe
         self.sampleCount = raster
         super.init()
     }
@@ -2752,6 +2829,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private(set) var lastFrameDrawCalls = 0
     /// Vertices submitted in the most recently completed frame (all passes).
     private(set) var lastFrameVertices = 0
+    /// Whether the AO pass ran in the most recently ENCODED frame. See `aoBufferDump`.
+    private(set) var lastFrameHadAO = false
     private var frameDrawCalls = 0
     private var frameVertices = 0
 
@@ -2788,23 +2867,42 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // edges — the alternative was three.
         var sceneDepthTex: MTLTexture? = nil
         var aoTex: MTLTexture? = nil
-        var aoSize: (w: Int, h: Int)? = nil
+        var gbuffer: (depth: MTLTexture, normal: MTLTexture, albedo: MTLTexture)? = nil
+        var haveAO = false
         let wantsContact = contactShadingEnabled && (designBoxFaceCount > 0 || clearanceFaceCount > 0)
             && contactPipeline != nil
+        // ★ AND WHENEVER A LATTICE IS IN THE FRAME (unified shading). The lattice's
+        // pixels are PRODUCED by the prepass now — it is not an optional quality
+        // treatment for them, it is where they come from.
+        let wantsLattice = latticeInFrame && latticeGBufferPipeline != nil
+            && latticeShadePipeline != nil
         let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
         // The G-buffer is single-sampled, so it is sized from the RESOLVE target when
         // the colour pass is multisampled (§3b) — `resolveTexture` is the 1× surface.
         let colorTex = rpd.colorAttachments[0].resolveTexture ?? rpd.colorAttachments[0].texture
-        if wantsContact || wantsAO, let ctex = colorTex {
-            let g = encodeDepthPrepass(width: ctex.width, height: ctex.height,
-                                       uniforms: uniforms, into: cmd)
-            sceneDepthTex = g?.depth
-            if wantsAO, let g {
-                aoTex = encodeAO(gbuffer: g, aspect: aspect, into: cmd)
-                if aoTex != nil { aoSize = (g.depth.width, g.depth.height) }
+        // The main colour target's size — what `ShadeParams.ao.zw` is expressed in, so
+        // the G-buffer is free to be smaller (see `latticeGBufferMaxPixels`).
+        var mainSize: (w: Int, h: Int) = (colorTex?.width ?? 1, colorTex?.height ?? 1)
+        gbufferScale = SIMD2<Float>(1, 1)
+        if wantsContact || wantsAO || wantsLattice, let ctex = colorTex {
+            let g = gbufferSize(width: ctex.width, height: ctex.height)
+            mainSize = (ctex.width, ctex.height)
+            gbufferScale = SIMD2<Float>(Float(g.w) / Float(Swift.max(ctex.width, 1)),
+                                        Float(g.h) / Float(Swift.max(ctex.height, 1)))
+            gbuffer = encodeDepthPrepass(width: g.w, height: g.h,
+                                         uniforms: uniforms, aspect: aspect, into: cmd)
+            sceneDepthTex = gbuffer?.depth
+            if wantsAO, let gb = gbuffer {
+                aoTex = encodeAO(gbuffer: gb, aspect: aspect, into: cmd)
+                haveAO = aoTex != nil
             }
         }
-        var shade = makeShadeParams(aoSize: aoSize)
+        // ★ WHETHER THE AO PASS ACTUALLY RAN THIS FRAME. `aoBlurTex` outlives a frame,
+        // so a reader that just grabs it can be handed the PREVIOUS frame's occlusion
+        // and never know — which is exactly how a §3(b) "before" capture comes back
+        // showing the "after"'s buffer. `aoBufferDump` refuses when this is false.
+        lastFrameHadAO = haveAO
+        var shade = makeShadeParams(mainSize: haveAO ? mainSize : nil)
 
         // ★ §3c: the footprint, in its OWN pass before the main one (a render pass
         // cannot sample the texture another encoder in the same pass is writing). The
@@ -2859,6 +2957,51 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var cu = cutUniforms
         enc.setFragmentBytes(&cu, length: MemoryLayout<CutUniformsSwift>.stride, index: 3)
         countedDraw(enc, .triangle, vertexDrawCount)
+
+        // ★ THE LATTICE, IN THIS PASS, IMMEDIATELY AFTER THE SHELL (task
+        // 2026-08-18-unified-shading). A DEFERRED shade of what the prepass marched:
+        // one full-screen triangle, no second march, the shell's `to_material`, the
+        // shell's AO/edge texture and the shell's depth fade — and a fragment depth
+        // write into the SHARED depth buffer, so every overlay drawn below (the ground
+        // grid, the design box, the clearance volumes, the wireframe) is occluded by
+        // the struts exactly as it is by the body. Under the old arrangement the
+        // lattice was a separate transparent MTKView with no depth attachment at all,
+        // composited OVER this frame: it could not be occluded by anything, could not
+        // receive this frame's occlusion, and was lit by its own key light. That is
+        // what "pasted on" was.
+        if wantsLattice, let lpipe = latticeShadePipeline, let gb = gbuffer {
+            var lu = LatShadeUniforms()
+            let proj = camera.projectionMatrix(aspect: aspect)
+            // The depth curve, read straight off the matrix the frame is drawn with:
+            // ndcDepth = −P[2][2] + P[3][2]/eyeZ. Deriving it here rather than
+            // re-deriving near/far means it cannot drift from the projection.
+            lu.depth = SIMD4<Float>(-proj.columns.2.z, proj.columns.3.z,
+                                    Float(mainSize.w), Float(mainSize.h))
+            lu.proj = SIMD4<Float>(1 / Swift.max(proj.columns.0.x, 1e-6),
+                                   1 / Swift.max(proj.columns.1.y, 1e-6),
+                                   Float(gb.depth.width), Float(gb.depth.height))
+            // World from eye, rotation only: the material's light directions are
+            // WORLD-space constants, and the eye-space normal in the G-buffer has to
+            // arrive in their frame or the highlight follows the camera — the exact
+            // defect `render-quality` §2 fixed for the shell.
+            let v = camera.viewMatrix()
+            lu.worldFromEyeRot = simd_float4x4(columns: (
+                SIMD4<Float>(v.columns.0.x, v.columns.1.x, v.columns.2.x, 0),
+                SIMD4<Float>(v.columns.0.y, v.columns.1.y, v.columns.2.y, 0),
+                SIMD4<Float>(v.columns.0.z, v.columns.1.z, v.columns.2.z, 0),
+                SIMD4<Float>(0, 0, 0, 1)))
+            lu.misc = SIMD4<Float>(Self.sceneDepthFar,
+                                   quality.contains(.edges) ? Self.edgeStrength : 0, 0, 0)
+            enc.setRenderPipelineState(lpipe)
+            enc.setDepthStencilState(depthState)     // .less, write on — the shared buffer
+            enc.setFragmentBytes(&lu, length: MemoryLayout<LatShadeUniforms>.stride, index: 0)
+            enc.setFragmentBytes(&shade, length: MemoryLayout<ShadeParams>.stride, index: 2)
+            enc.setFragmentTexture(aoTex ?? neutralAOTexture(), index: 0)
+            enc.setFragmentTexture(gb.depth, index: 1)
+            enc.setFragmentTexture(gb.normal, index: 2)
+            enc.setFragmentTexture(gb.albedo, index: 3)
+            countedDraw(enc, .triangle, 3)
+        }
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
         // blends, depth-tested so the part occludes it, depth-write off.
@@ -3085,10 +3228,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// (GPU-only): the prepass writes them and the contact pass reads them within one command
     /// buffer, so they never touch the CPU. Nil if the device can't allocate them.
     private func sceneDepthTextures(width: Int, height: Int)
-        -> (color: MTLTexture, depth: MTLTexture, normal: MTLTexture)? {
+        -> (color: MTLTexture, depth: MTLTexture, normal: MTLTexture, albedo: MTLTexture)? {
         if let c = sceneDepthColorTex, let z = sceneDepthZTex, let n = sceneNormalTex,
-           c.width == width, c.height == height {
-            return (c, z, n)
+           let a = gbufferAlbedoTex, c.width == width, c.height == height {
+            return (c, z, n, a)
         }
         let cd = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.sceneDepthFormat, width: width, height: height, mipmapped: false)
@@ -3102,12 +3245,94 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             pixelFormat: Self.gbufferNormalFormat, width: width, height: height, mipmapped: false)
         nd.usage = [.renderTarget, .shaderRead]
         nd.storageMode = .private
+        let ad = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.gbufferAlbedoFormat, width: width, height: height, mipmapped: false)
+        ad.usage = [.renderTarget, .shaderRead]
+        ad.storageMode = .private
         guard let c = device.makeTexture(descriptor: cd), let z = device.makeTexture(descriptor: zd),
-              let n = device.makeTexture(descriptor: nd) else {
+              let n = device.makeTexture(descriptor: nd), let a = device.makeTexture(descriptor: ad) else {
             return nil
         }
-        sceneDepthColorTex = c; sceneDepthZTex = z; sceneNormalTex = n
-        return (c, z, n)
+        sceneDepthColorTex = c; sceneDepthZTex = z; sceneNormalTex = n; gbufferAlbedoTex = a
+        return (c, z, n, a)
+    }
+
+    // MARK: - the unified lattice layer (task 2026-08-18-unified-shading)
+
+    /// True when there is a baked lattice layer to draw. Everything the unified path
+    /// adds is gated on this, so a frame without a lattice is byte-for-byte the frame
+    /// `render-quality` shipped.
+    private var latticeInFrame: Bool { latticeLayer?.isReady == true }
+
+    /// THE ONE ENTRY POINT for putting the lattice in this renderer's passes. The
+    /// workspace hands the scene it already builds for the preview, plus the token it
+    /// already bumps per bake — so the bake still happens once per data change and never
+    /// per frame (bar P2). Passing nil removes the layer.
+    ///
+    /// ★ THE LAYER IS BAKE-ONLY. It never draws itself; `encodeDepthPrepass` and
+    /// `encode` draw it, into THIS renderer's G-buffer and THIS renderer's colour +
+    /// depth attachments. That sentence is the entire task.
+    func setLatticeScene(_ scene: LatticeSDFScene?, token: Int) {
+        guard let scene else {
+            if latticeLayer != nil { latticeLayer = nil; latticeSceneToken = -1
+                                     latticeAppliedTints = nil }
+            return
+        }
+        if latticeLayer == nil {
+            latticeLayer = LatticeSDFRenderer(device: device, buildPipeline: false)
+            latticeSceneToken = -1
+            latticeAppliedTints = nil
+        }
+        guard let layer = latticeLayer else { return }
+        if latticeSceneToken != token {
+            latticeSceneToken = token
+            layer.setScene(scene)
+            latticeAppliedTints = nil       // new grid/mesh → tints must re-bake
+        }
+    }
+
+    /// The lattice's interactive params (cell size, density span, grading). A cell-size
+    /// change rebakes the per-cell field ONCE inside the layer; everything else is a
+    /// uniform.
+    var latticeParams: LatticeProxyParams {
+        get { latticeLayer?.params ?? LatticeProxyParams() }
+        set { latticeLayer?.params = newValue }
+    }
+
+    /// Face-role tints on the lattice (the preview's bar A4), baked from the SAME
+    /// dictionary the body is tinted with. Re-baked only when the selection changes.
+    func setLatticeFaceTints(_ tints: [FaceID: SIMD4<Float>]) {
+        guard let layer = latticeLayer else { return }
+        if latticeAppliedTints != tints {
+            latticeAppliedTints = tints
+            layer.setFaceTints(tints)
+        }
+    }
+
+    /// The G-buffer's size for a colour target of `width`×`height`. Identical to the
+    /// colour target unless a lattice is in the frame, in which case the long side is
+    /// capped — see `latticeGBufferMaxPixels` for why (the march is fill-bound).
+    private func gbufferSize(width: Int, height: Int) -> (w: Int, h: Int) {
+        guard latticeInFrame else { return (width, height) }
+        let long = Swift.max(width, height)
+        guard long > Self.latticeGBufferMaxPixels else { return (width, height) }
+        let s = Double(Self.latticeGBufferMaxPixels) / Double(long)
+        return (Swift.max(1, Int((Double(width) * s).rounded())),
+                Swift.max(1, Int((Double(height) * s).rounded())))
+    }
+
+    /// G-buffer texels per colour pixel for the frame being encoded — 1 unless the cap
+    /// above bit. Read by the contact pass (which samples the G-buffer by integer
+    /// coordinate) and by the lattice's deferred shade.
+    private var gbufferScale = SIMD2<Float>(1, 1)
+
+    /// The uniform block the deferred lattice shade reads. Mirrors `LatShadeUniforms`
+    /// in `unifiedLatticeShaderSource` — layout must match.
+    private struct LatShadeUniforms {
+        var worldFromEyeRot = matrix_identity_float4x4
+        var proj = SIMD4<Float>(1, 1, 1, 1)     // tanX, tanY, gbufW, gbufH
+        var depth = SIMD4<Float>(1, 0, 1, 1)    // A, B (ndc = A + B/eyeZ), mainW, mainH
+        var misc = SIMD4<Float>.zero            // farSentinel, edgeStrength, 0, 0
     }
 
     /// The SSAO pair (raw + blurred), sized with the G-buffer. Two, because a
@@ -3242,9 +3467,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The body fragment's render-quality block for this frame. `aoSize` is the AO
     /// texture's size (zero when there is none — the neutral 1×1 is bound instead and
     /// both strengths go to zero, which makes the shader an identity).
-    private func makeShadeParams(aoSize: (w: Int, h: Int)?) -> ShadeParams {
+    /// - Parameter mainSize: the MAIN COLOUR TARGET's size (nil when there is no AO
+    ///   texture — the neutral 1×1 is bound instead). ★ NOT the AO texture's size: the
+    ///   fragment scales its own `[[position]]` by these to get a normalized uv, and the
+    ///   AO texture may now be smaller than the colour target (`latticeGBufferMaxPixels`).
+    ///   Sizing them from the AO texture put every uv past 1.
+    private func makeShadeParams(mainSize: (w: Int, h: Int)?) -> ShadeParams {
         var sp = ShadeParams()
-        if let s = aoSize, s.w > 0, s.h > 0 {
+        if let s = mainSize, s.w > 0, s.h > 0 {
             sp.ao = SIMD4<Float>(quality.contains(.ambientOcclusion) ? Self.aoStrength : 0,
                                  quality.contains(.edges) ? Self.edgeStrength : 0,
                                  1 / Float(s.w), 1 / Float(s.h))
@@ -3267,10 +3497,29 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// `color` (its own z-buffer `depth`) so the contact pass can read the part surface per pixel.
     /// Called only when a translucent volume is present (gated by the caller). Returns the colour
     /// texture on success, nil if the prepass could not be encoded (→ the caller keeps the plain draw).
+    /// ★ AND IT IS NOW THE UNION (task 2026-08-18-unified-shading §1i). Two surfaces
+    /// can land in this one G-buffer, depth-tested against each other:
+    ///
+    ///   • the SHELL, rasterised — but only when it is actually VISIBLE. `bodyAlpha`
+    ///     goes to 0 on the lattice stage (the workspace's bar A3: while the strut
+    ///     layer is up there is ONE visible object), and an invisible wall in the
+    ///     G-buffer would occlude the struts behind it in AO — the interior would go
+    ///     dark for a surface nobody can see. The G-buffer must hold what the frame
+    ///     SHOWS. A partially-translucent body (the load-flow x-ray, alpha ≈ 0.35) is
+    ///     still visible and still goes in, so that path is untouched.
+    ///
+    ///   • the LATTICE, sphere-traced, writing its own fragment depth.
+    ///
+    /// Returns nil when NEITHER is present — the caller then binds the neutral 1×1 AO
+    /// texture and the frame is the un-occluded one, never a broken one.
     private func encodeDepthPrepass(width: Int, height: Int, uniforms: ViewerUniforms,
-                                    into cmd: MTLCommandBuffer) -> (depth: MTLTexture, normal: MTLTexture)? {
+                                    aspect: Float, into cmd: MTLCommandBuffer)
+        -> (depth: MTLTexture, normal: MTLTexture, albedo: MTLTexture)? {
+        let shellVisible = bodyAlpha > 0.004
+        let lattice = latticeInFrame ? latticeLayer : nil
         guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
               let vbuf = vertexBuffer, let fbuf = flexBuffer,
+              shellVisible || lattice != nil,
               let tex = sceneDepthTextures(width: width, height: height) else { return nil }
         let pd = MTLRenderPassDescriptor()
         pd.colorAttachments[0].texture = tex.color
@@ -3284,23 +3533,50 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         pd.colorAttachments[1].loadAction = .clear
         pd.colorAttachments[1].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         pd.colorAttachments[1].storeAction = .store
+        // The lattice albedo + mask. Cleared to zero alpha = "no lattice anywhere",
+        // which is what the deferred shade needs when the layer is absent.
+        pd.colorAttachments[2].texture = tex.albedo
+        pd.colorAttachments[2].loadAction = .clear
+        pd.colorAttachments[2].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pd.colorAttachments[2].storeAction = .store
         pd.depthAttachment.texture = tex.depth
         pd.depthAttachment.loadAction = .clear
         pd.depthAttachment.clearDepth = 1.0
         pd.depthAttachment.storeAction = .dontCare
         guard let penc = cmd.makeRenderCommandEncoder(descriptor: pd) else { return nil }
-        var du = DepthPrepassUniforms(mvp: uniforms.mvp, modelView: modelViewMatrix(),
-                                      flex: SIMD4<Float>(flexScale, 0, 0, 0),
-                                      normalMatrix: uniforms.normalMatrix)
-        penc.setRenderPipelineState(dpipe)
-        penc.setDepthStencilState(depthState)   // .less, write on — nearest part surface wins
-        penc.setCullMode(.none)                  // match the main mesh draw
-        penc.setVertexBuffer(vbuf, offset: 0, index: 0)
-        penc.setVertexBuffer(fbuf, offset: 0, index: 3)
-        penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
-        countedDraw(penc, .triangle, vertexDrawCount)
+        if shellVisible {
+            var du = DepthPrepassUniforms(mvp: uniforms.mvp, modelView: modelViewMatrix(),
+                                          flex: SIMD4<Float>(flexScale, 0, 0, 0),
+                                          normalMatrix: uniforms.normalMatrix)
+            penc.setRenderPipelineState(dpipe)
+            penc.setDepthStencilState(depthState)   // .less, write on — nearest part surface wins
+            penc.setCullMode(.none)                  // match the main mesh draw
+            penc.setVertexBuffer(vbuf, offset: 0, index: 0)
+            penc.setVertexBuffer(fbuf, offset: 0, index: 3)
+            penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
+            countedDraw(penc, .triangle, vertexDrawCount)
+        }
+        if let lattice, let lpipe = latticeGBufferPipeline {
+            // The lattice marches in the SAME encoder, against the SAME depth
+            // attachment: where the shell is nearer, the depth test throws the strut
+            // away, and where a strut is nearer it replaces the wall. That per-pixel
+            // resolution is §1(ii), and it is what makes a strut entering a wall
+            // DISAPPEAR into it instead of stopping at a clean silhouette against it.
+            lattice.camera = camera
+            lattice.modelRotation = modelRotation
+            lattice.modelCenter = modelCenter
+            var lu = lattice.makeUnifiedUniforms(aspect: aspect,
+                                                 clipFromModel: uniforms.mvp,
+                                                 eyeFromModel: uniforms.modelView,
+                                                 eyeNormalBasis: uniforms.normalMatrix)
+            penc.setRenderPipelineState(lpipe)
+            penc.setDepthStencilState(depthState)   // .less, write on
+            penc.setCullMode(.none)
+            lattice.bindFragment(penc, &lu)
+            countedDraw(penc, .triangle, 3)
+        }
         penc.endEncoding()
-        return (tex.color, tex.normal)
+        return (tex.color, tex.normal, tex.albedo)
     }
 
     /// ★ §1 + §3a: the SSAO and edge passes. Two full-screen draws over the G-buffer
@@ -3308,7 +3584,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// texture the body fragment multiplies into its ambient term. Returns nil when
     /// the pipelines are unavailable — the body then binds the neutral 1×1 and the
     /// picture is the un-occluded one, never a broken one.
-    private func encodeAO(gbuffer: (depth: MTLTexture, normal: MTLTexture), aspect: Float,
+    private func encodeAO(gbuffer: (depth: MTLTexture, normal: MTLTexture, albedo: MTLTexture),
+                          aspect: Float,
                           into cmd: MTLCommandBuffer) -> MTLTexture? {
         guard let apipe = aoPipeline, let bpipe = aoBlurPipeline,
               let ao = aoTextures(width: gbuffer.depth.width, height: gbuffer.depth.height) else { return nil }
@@ -3362,7 +3639,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             if let cpipe = contactPipeline, let sceneTex = sceneDepthTex {
                 var cu = ContactUniforms(mvp: mvp, modelView: modelViewMatrix(),
                                          params: SIMD4<Float>(Self.contactFeatherPixels,
-                                                              Self.contactOcclusionPixels, 0, 0))
+                                                              Self.contactOcclusionPixels,
+                                                              gbufferScale.x, gbufferScale.y))
                 enc.setRenderPipelineState(cpipe)
                 enc.setVertexBytes(&cu, length: MemoryLayout<ContactUniforms>.stride, index: 1)
                 // `contact_fragment` ALSO declares `CUniforms u [[buffer(1)]]` (it reads the pixel
@@ -3523,6 +3801,93 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// pixel (row-major, `idBackground` where no face is under the pixel). Nil if the
     /// id pipeline is unavailable or there is nothing to draw. This is the on-device
     /// mechanism the M7.5 tap uses (`pickFaceID`); the CPU `FacePicker` mirrors it.
+    /// ★ THE AO BUFFER, READ BACK (task 2026-08-18-unified-shading §3b).
+    ///
+    /// "Show the AO buffer itself in the evidence, before and after — that buffer is
+    /// where the junction darkening either exists or does not, and a screenshot of the
+    /// final frame can hide its absence." So it is readable, and a test asserts on it.
+    ///
+    /// Encodes one full offscreen frame (which is what fills the AO texture — this does
+    /// NOT run a special-case pass, or it would be evidence about a different shader)
+    /// and blits the result into a CPU-visible staging texture. `openness` is the R
+    /// channel the body's ambient term is multiplied by, `edge` the G channel the
+    /// crease line is drawn from. Nil when AO is off or the pipelines are unavailable.
+    ///
+    /// Instrumentation only; nothing in the app calls it.
+    struct AOBufferDump {
+        var width: Int
+        var height: Int
+        /// Row-major, y-down — the same convention the AO pass writes in.
+        var pixels: [(openness: Float, edge: Float)]
+    }
+
+    func aoBufferDump(size: Int) -> AOBufferDump? {
+        guard vertexDrawCount > 0, aoPipeline != nil,
+              !quality.isDisjoint(with: [.ambientOcclusion, .edges]) else { return nil }
+        let cdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.colorFormat, width: size, height: size, mipmapped: false)
+        cdesc.usage = [.renderTarget]
+        cdesc.storageMode = .private
+        let ddesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.depthFormat, width: size, height: size, mipmapped: false)
+        ddesc.usage = [.renderTarget]
+        ddesc.storageMode = .private
+        if sampleCount > 1 { ddesc.textureType = .type2DMultisample; ddesc.sampleCount = sampleCount }
+        guard let color = device.makeTexture(descriptor: cdesc),
+              let depth = device.makeTexture(descriptor: ddesc),
+              let cmd = queue.makeCommandBuffer() else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        if let msaa = msaaTexture(width: size, height: size) {
+            rpd.colorAttachments[0].texture = msaa
+            rpd.colorAttachments[0].resolveTexture = color
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+        } else {
+            rpd.colorAttachments[0].texture = color
+            rpd.colorAttachments[0].storeAction = .store
+        }
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.depthAttachment.texture = depth
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        rpd.depthAttachment.storeAction = .dontCare
+        encode(into: rpd, aspect: 1, into: cmd, drawStage: false)
+        // ★ REFUSE A STALE BUFFER. `aoBlurTex` survives between frames, so if this
+        // frame's AO pass did not run (no visible surface in the G-buffer, or the
+        // pipelines unavailable) the texture still holds whatever the LAST frame left
+        // there. Returning that would be a "before" capture showing the "after".
+        guard lastFrameHadAO, let ao = aoBlurTex else { cmd.commit(); return nil }
+        let sdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.aoFormat, width: ao.width, height: ao.height, mipmapped: false)
+        sdesc.usage = [.shaderRead]
+        #if os(macOS)
+        sdesc.storageMode = .managed
+        #else
+        sdesc.storageMode = .shared
+        #endif
+        guard let staging = device.makeTexture(descriptor: sdesc),
+              let blit = cmd.makeBlitCommandEncoder() else { cmd.commit(); return nil }
+        blit.copy(from: ao, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: ao.width, height: ao.height, depth: 1),
+                  to: staging, destinationSlice: 0, destinationLevel: 0,
+                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        #if os(macOS)
+        blit.synchronize(resource: staging)
+        #endif
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        var raw = [UInt8](repeating: 0, count: ao.width * ao.height * 2)
+        staging.getBytes(&raw, bytesPerRow: ao.width * 2,
+                         from: MTLRegionMake2D(0, 0, ao.width, ao.height), mipmapLevel: 0)
+        var px = [(openness: Float, edge: Float)]()
+        px.reserveCapacity(ao.width * ao.height)
+        for i in stride(from: 0, to: raw.count, by: 2) {
+            px.append((Float(raw[i]) / 255, Float(raw[i + 1]) / 255))
+        }
+        return AOBufferDump(width: ao.width, height: ao.height, pixels: px)
+    }
+
     func renderFaceIDOffscreen(width: Int, height: Int) -> [UInt32]? {
         guard vertexDrawCount > 0, let idPipeline, let idbuf = idVertexBuffer,
               width > 0, height > 0 else { return nil }
@@ -3824,6 +4189,50 @@ struct MeshViewInputs {
     /// so the page learns it here, from the recognizer that only a pencil can
     /// drive. Until it fires, the discipline stays inert however the toggle is set.
     var onPencilSeen: (() -> Void)? = nil
+    /// ★ THE RAYMARCHED LATTICE, AS AN INPUT TO THIS VIEW rather than as a sibling
+    /// view (task 2026-08-18-unified-shading). nil = no lattice, and then this view is
+    /// byte-for-byte what it was.
+    var latticeLayer: LatticeLayerInputs? = nil
+}
+
+/// ★ THE LATTICE AS A LAYER OF THE MESH VIEW, NOT A VIEW BESIDE IT.
+///
+/// It used to be `LatticeSDFPreviewView` — a second, transparent, depth-less MTKView
+/// stacked over the mesh view in the workspace's ZStack. That stacking IS the
+/// "pasted on" the maintainer reported: a separate view cannot share a depth buffer,
+/// a normal buffer, an occlusion pass or a light rig with the view underneath it, so
+/// the struts could never be occluded by the part, never receive the frame's ambient
+/// occlusion or contact darkening, and were lit by their own key. Handing the same
+/// four values to the mesh view instead puts the march inside its passes.
+///
+/// The fields are exactly what that view took, so the workspace's call site is a
+/// re-spelling rather than a re-design: the scene, the interactive params, the bake
+/// token and the face-role tints.
+public struct LatticeLayerInputs: Equatable {
+    public var scene: LatticeSDFScene
+    public var params: LatticeProxyParams
+    /// A monotonically increasing token the workspace bumps when `scene` is rebuilt,
+    /// so the volumes are baked exactly once per bake and never per frame (bar P2).
+    public var sceneToken: Int
+    /// The mesh view's own face-role tint dictionary, verbatim — one source of truth
+    /// for the colours (bar A4).
+    public var faceTints: [FaceID: SIMD4<Float>]
+
+    public init(scene: LatticeSDFScene, params: LatticeProxyParams,
+                sceneToken: Int, faceTints: [FaceID: SIMD4<Float>]) {
+        self.scene = scene
+        self.params = params
+        self.sceneToken = sceneToken
+        self.faceTints = faceTints
+    }
+
+    /// Equality is by TOKEN and by the cheap interactive values — never by the scene's
+    /// voxel grids. Comparing a few megabytes of baked field on every SwiftUI update
+    /// (i.e. on every orbit tick) is exactly the per-frame work bar P2 forbids, and the
+    /// token exists precisely to answer "is this the same bake".
+    public static func == (a: LatticeLayerInputs, b: LatticeLayerInputs) -> Bool {
+        a.sceneToken == b.sceneToken && a.params == b.params && a.faceTints == b.faceTints
+    }
 }
 
 /// The phase of a paint brush sample (handoff 2026-07-25): a stroke runs `.began` → `.moved`* →
@@ -3887,7 +4296,8 @@ public struct MetalMeshView: UIViewRepresentable {
                 brushRequiresPencil: Bool = false,
                 onBrushRefused: ((BrushInput) -> Void)? = nil,
                 inputDiscipline: SurfaceInputDiscipline = .off,
-                onPencilSeen: (() -> Void)? = nil) {
+                onPencilSeen: (() -> Void)? = nil,
+                latticeLayer: LatticeLayerInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -3907,7 +4317,8 @@ public struct MetalMeshView: UIViewRepresentable {
             paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush,
             brushRequiresPencil: brushRequiresPencil,
             onBrushRefused: onBrushRefused,
-            inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen)
+            inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
+            latticeLayer: latticeLayer)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -4042,7 +4453,8 @@ public struct MetalMeshView: NSViewRepresentable {
                 brushRequiresPencil: Bool = false,
                 onBrushRefused: ((BrushInput) -> Void)? = nil,
                 inputDiscipline: SurfaceInputDiscipline = .off,
-                onPencilSeen: (() -> Void)? = nil) {
+                onPencilSeen: (() -> Void)? = nil,
+                latticeLayer: LatticeLayerInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -4062,7 +4474,8 @@ public struct MetalMeshView: NSViewRepresentable {
             paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush,
             brushRequiresPencil: brushRequiresPencil,
             onBrushRefused: onBrushRefused,
-            inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen)
+            inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
+            latticeLayer: latticeLayer)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -4180,6 +4593,11 @@ extension MetalMeshView {
         private var appliedKeepOuts: [DesignBoxBounds] = []
         private var appliedDesignBoxSet = false
         private var appliedClearanceVolumes: [ClearanceRenderItem] = []
+        /// The unified lattice layer's bake token and tint dictionary as last applied,
+        /// so a scene bake and a tint bake each happen once per real change — an orbit
+        /// tick re-evaluates the workspace body and must not rebake anything (bar P2).
+        private var appliedLatticeToken: Int = -1
+        private var appliedLatticeTints: [FaceID: SIMD4<Float>]? = nil
         private var appliedClearanceSet = false
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
@@ -4577,6 +4995,33 @@ extension MetalMeshView {
                 appliedClearanceSet = true
                 appliedClearanceVolumes = inputs.clearanceVolumes
                 renderer.setClearanceVolumes(inputs.clearanceVolumes)
+                dirty = true
+            }
+
+            // ★ THE UNIFIED LATTICE LAYER (task 2026-08-18-unified-shading). The scene's
+            // volumes are baked once per TOKEN — never per SwiftUI update, and an orbit
+            // tick is a SwiftUI update (bar P2). The params and the tints are cheap and
+            // guarded inside the renderer, so this block is three property writes on an
+            // ordinary camera change.
+            if let lat = inputs.latticeLayer {
+                if appliedLatticeToken != lat.sceneToken {
+                    appliedLatticeToken = lat.sceneToken
+                    renderer.setLatticeScene(lat.scene, token: lat.sceneToken)
+                    dirty = true
+                }
+                if renderer.latticeParams != lat.params {
+                    renderer.latticeParams = lat.params
+                    dirty = true
+                }
+                if appliedLatticeTints != lat.faceTints {
+                    appliedLatticeTints = lat.faceTints
+                    renderer.setLatticeFaceTints(lat.faceTints)
+                    dirty = true
+                }
+            } else if appliedLatticeToken != -1 {
+                appliedLatticeTints = nil
+                appliedLatticeToken = -1
+                renderer.setLatticeScene(nil, token: -1)
                 dirty = true
             }
 
@@ -4999,6 +5444,12 @@ public struct MetalMeshView: View {
                 onBrushRefused: ((BrushInput) -> Void)? = nil,
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil) {}
+    // ★ NO `latticeLayer:` HERE, AND IT IS NOT AN OVERSIGHT. `LatticeLayerInputs`
+    // carries a `LatticeSDFScene`, which is itself MetalKit-only, so the parameter
+    // cannot be mirrored into this branch the way `DetentPulse` and `BrushPhase`
+    // below are. Nothing is lost: the one caller that passes it
+    // (`WorkspacePlaceholder`) already holds a `LatticeSDFScene` in its own state
+    // and so is MetalKit-only regardless of this stub.
     public var body: some View { DS.Color.background.color }
 }
 

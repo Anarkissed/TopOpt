@@ -752,7 +752,30 @@ public struct WorkspacePlaceholder: View {
                           // there is: one has touched the glass.
                           onPencilSeen: {
                               if !surfacePencilSeen { surfacePencilSeen = true }
-                          })
+                          },
+                          // ★ THE STRUT PREVIEW, AS A LAYER OF THIS VIEW (task
+                          // 2026-08-18-unified-shading). It used to be a SECOND,
+                          // transparent, depth-less MTKView stacked over this one in the
+                          // ZStack below — and that stacking is what the maintainer was
+                          // seeing: a separate view cannot share this frame's depth
+                          // buffer, normal buffer, occlusion pass or light rig, so the
+                          // struts were never occluded by the part, never received its
+                          // ambient occlusion or contact darkening, and were lit by
+                          // their own key. Handed in here instead, the march happens
+                          // inside this renderer's passes.
+                          //
+                          // The gate is UNCHANGED — the same `showStrutPreview` and the
+                          // same stage conditions the stacked view had, and the same
+                          // `bodyAlpha: 0` beside it (bar A3).
+                          latticeLayer: (showStrutPreview
+                                         && (visible.latticeControls || showLatticePage))
+                              ? strutScene.map {
+                                  LatticeLayerInputs(scene: $0,
+                                                     params: latticeProxy.params,
+                                                     sceneToken: strutSceneToken,
+                                                     faceTints: roleTints)
+                              }
+                              : nil)
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -773,29 +796,17 @@ public struct WorkspacePlaceholder: View {
                     }
                 }
 
-            // Strut preview: the raymarched true-strut layer, riding the SAME shared
-            // orbit camera AND the same settle model transform as the mesh view (one
-            // transform, one camera — the 2026-07-30 alignment fix), with the mesh
-            // view's own face tints so markings read on the lattice (the body is not
-            // drawn while this layer is up, bar A3). Non-interactive — orbit/tap
-            // gestures fall through to the mesh view, whose pick structure is intact.
+            // ★ THE STRUT PREVIEW USED TO BE A SIBLING VIEW HERE, AND IS NOW A LAYER OF
+            // THE MESH VIEW ABOVE (task 2026-08-18-unified-shading — see the
+            // `latticeLayer:` argument and its note). The camera, the settle transform
+            // and the face tints it used to be handed separately are the mesh view's
+            // own, which is the point: ONE camera, ONE model transform, ONE depth
+            // buffer, ONE occlusion pass, ONE material.
             //
-            // ★ AND NOT ON THE TO PAGE (task 2026-08-14 §1a). The toggle left with
-            // the rest of the lattice affordances, but the LAYER is separate state:
-            // turn it on, navigate back, and a raymarched lattice would have been
-            // drawn over the topology page with no control to turn it off. The
-            // ladder page keeps it — that page is about a lattice.
-            if showStrutPreview, visible.latticeControls || showLatticePage,
-               let scene = strutScene {
-                LatticeSDFPreviewView(camera: cameraModel, scene: scene,
-                                      params: latticeProxy.params,
-                                      sceneToken: strutSceneToken,
-                                      modelRotation: settleQuat,
-                                      modelCenter: meshCenter,
-                                      faceTints: roleTints)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-            }
+            // ★ THE GATE DID NOT MOVE (task 2026-08-14 §1a): still `showStrutPreview`
+            // and still the lattice stages only. Turn it on, navigate back to the
+            // topology page, and no lattice is drawn there — the LAYER is separate
+            // state from the toggle, and that stays true now that the layer is an input.
 
             // EVERY in-scene editing affordance below is gated on `!fullScreenPageUp`
             // (bar L1): a page shows the part and its own tool, and nothing the page

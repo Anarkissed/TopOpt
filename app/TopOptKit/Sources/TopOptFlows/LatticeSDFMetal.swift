@@ -61,6 +61,14 @@ struct LSDFUniforms {
     var lightDir: SIMD4<Float>                // xyz key light (model space — world light un-settled)
     var sparseColor: SIMD4<Float>            // rgb (sparse end of the indigo ramp)
     var denseColor: SIMD4<Float>             // rgb (dense end)
+    // ── UNIFIED PASS ONLY (task 2026-08-18-unified-shading). The clip and eye
+    // transforms the BODY is drawn with, so a marched hit can be written into the
+    // SHARED depth buffer and the SHARED G-buffer of `MeshRenderer`'s own passes.
+    // Identity for the standalone preview renderer, which never reads them — its
+    // fragment function has no depth output and no G-buffer to write.
+    var clipFromModel: simd_float4x4 = matrix_identity_float4x4
+    var eyeFromModel: simd_float4x4 = matrix_identity_float4x4
+    var eyeNormalBasis: simd_float4x4 = matrix_identity_float4x4
 }
 
 /// The immutable per-part scene the preview needs. Baking depends ONLY on the mesh
@@ -112,14 +120,22 @@ public extension LatticeSDFScene {
     }
 }
 
-@MainActor
+/// ★ NOT `@MainActor` (task 2026-08-18-unified-shading). It was, and `MeshRenderer` —
+/// which is not, because `MTKViewDelegate` callbacks are not — could not touch it to
+/// draw the lattice inside its own passes. It is the same class it was, driven from the
+/// same main thread by the same callers; `MeshRenderer` next door has carried exactly
+/// this shape (an NSObject MTKViewDelegate holding Metal objects) since M7.
 final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     static var lastInitError: String?
     static let maxDPR: CGFloat = 2.0
 
     private let device: MTLDevice
     private let queue: MTLCommandQueue
-    private let pipeline: MTLRenderPipelineState
+    /// The standalone transparent-layer pipeline. Nil when this instance exists only
+    /// to OWN AND BAKE the lattice's volumes for `MeshRenderer`'s unified pass
+    /// (`init(device:buildPipeline:)`) — that pass has its own pipelines, and
+    /// compiling this one there would pay for a shader nobody in that path runs.
+    private let pipeline: MTLRenderPipelineState?
     private let sampler: MTLSamplerState
 
     // Scene resources (rebuilt only on a data/param change — never per frame).
@@ -173,30 +189,39 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// P2 invariant that no bake happens per frame.
     private(set) var bakeGeneration: Int = 0
 
-    init?(device: MTLDevice) {
+    /// - Parameter buildPipeline: `false` builds a BAKE-ONLY instance — the volumes,
+    ///   the segment soup, the uniforms and nothing that draws. That is what
+    ///   `MeshRenderer` holds for the unified pass (task 2026-08-18-unified-shading):
+    ///   it owns its own colour and G-buffer pipelines, so compiling the standalone
+    ///   transparent-layer one beside them would be a shader nobody there runs.
+    init?(device: MTLDevice, buildPipeline: Bool = true) {
         self.device = device
         guard let queue = device.makeCommandQueue() else { Self.lastInitError = "queue nil"; return nil }
         self.queue = queue
-        let lib: MTLLibrary
-        do { lib = try device.makeLibrary(source: Self.shaderSource, options: nil) }
-        catch { Self.lastInitError = "makeLibrary: \(error)"; return nil }
-        guard let vfn = lib.makeFunction(name: "lsdf_vertex"),
-              let ffn = lib.makeFunction(name: "lsdf_fragment") else {
-            Self.lastInitError = "makeFunction nil"; return nil
+        if buildPipeline {
+            let lib: MTLLibrary
+            do { lib = try device.makeLibrary(source: Self.shaderSource, options: nil) }
+            catch { Self.lastInitError = "makeLibrary: \(error)"; return nil }
+            guard let vfn = lib.makeFunction(name: "lsdf_vertex"),
+                  let ffn = lib.makeFunction(name: "lsdf_fragment") else {
+                Self.lastInitError = "makeFunction nil"; return nil
+            }
+            let pd = MTLRenderPipelineDescriptor()
+            pd.vertexFunction = vfn
+            pd.fragmentFunction = ffn
+            pd.colorAttachments[0].pixelFormat = .bgra8Unorm
+            pd.colorAttachments[0].isBlendingEnabled = true
+            pd.colorAttachments[0].rgbBlendOperation = .add
+            pd.colorAttachments[0].alphaBlendOperation = .add
+            pd.colorAttachments[0].sourceRGBBlendFactor = .one
+            pd.colorAttachments[0].sourceAlphaBlendFactor = .one
+            pd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            pd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            do { pipeline = try device.makeRenderPipelineState(descriptor: pd) }
+            catch { Self.lastInitError = "pipeline: \(error)"; return nil }
+        } else {
+            pipeline = nil
         }
-        let pd = MTLRenderPipelineDescriptor()
-        pd.vertexFunction = vfn
-        pd.fragmentFunction = ffn
-        pd.colorAttachments[0].pixelFormat = .bgra8Unorm
-        pd.colorAttachments[0].isBlendingEnabled = true
-        pd.colorAttachments[0].rgbBlendOperation = .add
-        pd.colorAttachments[0].alphaBlendOperation = .add
-        pd.colorAttachments[0].sourceRGBBlendFactor = .one
-        pd.colorAttachments[0].sourceAlphaBlendFactor = .one
-        pd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        pd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        do { pipeline = try device.makeRenderPipelineState(descriptor: pd) }
-        catch { Self.lastInitError = "pipeline: \(error)"; return nil }
         let sd = MTLSamplerDescriptor()
         sd.minFilter = .linear; sd.magFilter = .linear
         sd.sAddressMode = .clampToEdge; sd.tAddressMode = .clampToEdge; sd.rAddressMode = .clampToEdge
@@ -402,18 +427,50 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     }
 
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, cmd: MTLCommandBuffer) {
-        guard let cellTex, let sdfTex, let segBuffer, segCount > 0,
+        guard let pipeline, isReady,
               let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
         var u = makeUniforms(aspect: aspect)
         enc.setRenderPipelineState(pipeline)
+        bindFragment(enc, &u)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        enc.endEncoding()
+    }
+
+    // MARK: - the UNIFIED pass (task 2026-08-18-unified-shading)
+
+    /// True once a scene is baked and there is something to march. `MeshRenderer` asks
+    /// this before it adds the lattice to its own passes — an unbaked layer must leave
+    /// the frame byte-identical, never draw a black rectangle over it.
+    var isReady: Bool {
+        cellTex != nil && sdfTex != nil && segBuffer != nil && segCount > 0
+    }
+
+    /// Bind the baked volumes + the segment soup + the sampler at the shared shader's
+    /// fragment argument indices. ONE definition, used by the standalone pass, the
+    /// unified G-buffer write and (for the uniform) the deferred shade — a second copy
+    /// of an argument table is exactly how a "missing Buffer binding" abort gets in.
+    func bindFragment(_ enc: MTLRenderCommandEncoder, _ u: inout LSDFUniforms) {
         enc.setFragmentBytes(&u, length: MemoryLayout<LSDFUniforms>.stride, index: 0)
         enc.setFragmentBuffer(segBuffer, offset: 0, index: 1)
         enc.setFragmentTexture(cellTex, index: 0)
         enc.setFragmentTexture(sdfTex, index: 1)
         enc.setFragmentTexture(tintTex ?? dummyTintTex, index: 2)
         enc.setFragmentSamplerState(sampler, index: 0)
-        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-        enc.endEncoding()
+    }
+
+    /// The uniforms for the unified G-buffer write: everything `makeUniforms` builds,
+    /// plus the three transforms that put a marched MODEL-space hit into the body's own
+    /// clip and eye frames. The caller passes the matrices IT is drawing the shell with
+    /// — that is what makes the two surfaces land in the same depth buffer at the same
+    /// place, rather than two views that merely agree to several decimal places.
+    func makeUnifiedUniforms(aspect: Float, clipFromModel: simd_float4x4,
+                             eyeFromModel: simd_float4x4,
+                             eyeNormalBasis: simd_float4x4) -> LSDFUniforms {
+        var u = makeUniforms(aspect: aspect)
+        u.clipFromModel = clipFromModel
+        u.eyeFromModel = eyeFromModel
+        u.eyeNormalBasis = eyeNormalBasis
+        return u
     }
 
     // MARK: live draw
@@ -472,41 +529,20 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
 
     // MARK: shader
 
+    /// ★ THE STANDALONE PREVIEW SHADER — NOW BUILT ON THE SHARED FIELD.
+    ///
+    /// The field, the march, the gradient and the albedo moved to
+    /// `latticeFieldSource` (UnifiedShading.swift) so that this renderer and the
+    /// unified pass inside `MeshRenderer` march THE SAME geometry. Only the entry
+    /// point and the OLD shading model are left here, and they are left VERBATIM on
+    /// purpose: this is the "pasted-on" picture the task's before/after pair is
+    /// measured against, and a before that had drifted would make the pair
+    /// uninterpretable.
     static let shaderSource = """
     #include <metal_stdlib>
     using namespace metal;
 
-    struct LSDFUniforms {
-        float4 rayX, rayY, rayDir;   // model-space ray basis (see the Swift struct)
-        float4 eye, bboxMin, bboxMax, gridOrigin, gridSpacing, gridDims;
-        float4 sdfOrigin, sdfSpacing, sdfDims;   // part signed-distance grid
-        float4 latticeOrigin;   // xyz origin, w cell mm
-        float4 gradeParams;     // rhoMin, rhoMax, gamma, K
-        float4 shadeParams;     // uniformRho, hasDemand, radiusFloorNorm, maxSteps
-        float4 stepParams;      // stepScale, trimErosion(mm), hasTint, segCount
-        float4 lightDir, sparseColor, denseColor;
-    };
-    struct VOut { float4 pos [[position]]; float2 uv; };
-
-    vertex VOut lsdf_vertex(uint vid [[vertex_id]]) {
-        float2 p = float2(float((vid << 1) & 2), float(vid & 2));
-        VOut o; o.pos = float4(p * 2.0 - 1.0, 0.0, 1.0); o.uv = p * 2.0 - 1.0; return o;
-    }
-
-    // Capsule / segment distance (iq).
-    static inline float sdCap(float3 p, float3 a, float3 b, float r) {
-        float3 pa = p - a, ba = b - a;
-        float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-        return length(pa - ba * h) - r;
-    }
-
-    // Ray vs AABB → (tNear, tFar); tFar<tNear ⇒ miss.
-    static float2 hitBox(float3 ro, float3 rd, float3 lo, float3 hi) {
-        float3 inv = 1.0 / rd;
-        float3 t0 = (lo - ro) * inv, t1 = (hi - ro) * inv;
-        float3 a = min(t0, t1), b = max(t0, t1);
-        return float2(max(max(a.x, a.y), a.z), min(min(b.x, b.y), b.z));
-    }
+    \(latticeFieldSource)
 
     fragment float4 lsdf_fragment(VOut in [[stage_in]],
                                   constant LSDFUniforms& U [[buffer(0)]],
@@ -515,197 +551,25 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   texture3d<float> sdfTex [[texture(1)]],
                                   texture3d<float> tintTex [[texture(2)]],
                                   sampler samp [[sampler(0)]]) {
-        // MODEL-space ray — the exact geometric inverse of the ONE shared transform
-        // (P·V·settle), built from the CPU-exact camera basis: no matrix inversion,
-        // no far-plane w cancellation (which used to warp rays by pixels). The march
-        // runs in the mesh's own frame, where every baked grid lives, and lands on
-        // screen exactly where the body pass puts the same point.
         float3 ro = U.eye.xyz;
-        float3 rd = normalize(U.rayDir.xyz + U.rayX.xyz * in.uv.x + U.rayY.xyz * in.uv.y);
+        float3 rd = lsdf_ray(U, in.uv);
+        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, ro, rd);
+        if (!h.hit) return float4(0.0);
+        float3 hitPos = h.pos; float hitRho = h.rho;
+        float3 n = lsdf_normal(U, segs, sdfTex, samp, hitPos, hitRho);
 
-        float cell = U.latticeOrigin.w;
-        float3 lorigin = U.latticeOrigin.xyz;
-        float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
-        // Everything is trimmed flush at the part surface, so a small pad suffices.
-        float3 pad = float3(0.15 * cell);
-        float2 tb = hitBox(ro, rd, bmin - pad, bmax + pad);
-        if (tb.y < max(tb.x, 0.0)) return float4(0.0);
-
-        int segCount = int(U.stepParams.w);
-        float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y, gamma = U.gradeParams.z, K = U.gradeParams.w;
-        float uniformRho = U.shadeParams.x;
-        bool hasDemand = U.shadeParams.y > 0.5;
-        float radiusFloor = U.shadeParams.z;
-        int maxSteps = int(U.shadeParams.w);
-        // The field is a TRUE distance (min of exact capsule SDFs, radii constant per
-        // owning cell), so near-full sphere-trace steps are safe — no Lipschitz-broken
-        // squash like the gizmo's ribbons.
-        float stepScale = U.stepParams.x;
-        float delta = U.stepParams.y;      // trim erosion (mm)
-        float eps = max(0.05, 0.015 * cell);
-        float3 ncells = U.gridDims.xyz;
-
-        // WHOLE-CELL emission (the worker's canonical-midpoint rule, and the fix for
-        // the ragged boundary): a strut renders IFF its OWNING cell is active in the
-        // baked per-cell field. Per marched cell we prefetch the 3×3×3 neighbourhood
-        // once into registers — value < 0 ⇒ inactive; ≥ 0 ⇒ active with demand d —
-        // and precompute each neighbour's graded strut radius. Consecutive steps in
-        // the same cell reuse the cache.
-        float3 cachedBase = float3(1e9);
-        float rnCache[27];
-        float rhoCache[27];
-        bool anyActive = false;
-
-        float t = max(tb.x, 0.0);
-        float tEnd = tb.y;
-        float3 hitPos = ro; float hitRho = uniformRho; bool hit = false;
-        // Previous sample along the ray, for the secant hit refinement (A2): the raw
-        // sphere-trace accepts a hit anywhere in {F < eps}, an eps-thick shell whose
-        // depth along the ray varies with view direction — the surface visibly
-        // "breathes" as the camera orbits. One secant step to the F = 0 root makes
-        // the rendered surface the true iso-surface from every angle, at zero extra
-        // field evaluations. This is the actual fix for the eps-side of the jitter
-        // bar — the constant itself is untouched.
-        float tPrev = t; float FPrev = 1e9;
-
-        // Part signed distance (mm, negative inside): trilinear sample of the exact
-        // narrow-band SDF. Distance-to-a-plane is affine, so the part's flat faces
-        // interpolate EXACTLY → the trimmed edge is straight (round-3 feedback).
-        float3 sdfDims = U.sdfDims.xyz;
-        float3 bc = (bmin + bmax) * 0.5, be = (bmax - bmin) * 0.5;
-
-        for (int i = 0; i < maxSteps; i++) {
-            if (t > tEnd) break;
-            float3 p = ro + rd * t;
-            float3 c = (p - lorigin) / cell;
-            float3 baseCell = round(c);
-            float3 q = c - baseCell;
-
-            // Flush trim field: part SDF eroded by `delta` (kills the crease-bulge
-            // slivers — see stepParams.y) ∨ the exact part bbox (the bbox term stops
-            // the clamp-to-edge sampler extruding faces that touch the bounds).
-            float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
-            float dPart = sdfTex.sample(samp, stc).r + delta;
-            float3 qb = abs(p - bc) - be;
-            float dBox = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
-            float dClip = max(dPart, dBox);
-
-            if (any(baseCell != cachedBase)) {
-                cachedBase = baseCell;
-                anyActive = false;
-                for (int oz = -1; oz <= 1; oz++) {
-                    for (int oy = -1; oy <= 1; oy++) {
-                        for (int ox = -1; ox <= 1; ox++) {
-                            int idx = (ox + 1) * 9 + (oy + 1) * 3 + (oz + 1);
-                            float3 cc = baseCell + float3(ox, oy, oz);
-                            float v = -1.0;
-                            if (all(cc >= -0.5) && all(cc < ncells - 0.5)) {
-                                v = cellTex.read(uint3(cc), 0).r;
-                            }
-                            if (v >= 0.0) {
-                                anyActive = true;
-                                float rho = hasDemand
-                                    ? (rhoMin + (rhoMax - rhoMin) * pow(clamp(v, 0.0, 1.0), gamma))
-                                    : uniformRho;
-                                rhoCache[idx] = rho;
-                                rnCache[idx] = clamp(max(radiusFloor, sqrt(max(rho, 0.0) / K)), 0.0, 0.49);
-                            } else {
-                                rnCache[idx] = -1.0;
-                                rhoCache[idx] = 0.0;
-                            }
-                        }
-                    }
-                }
-            }
-
-            float dn = 1e9;
-            float rhoNear = uniformRho;
-            if (anyActive) {
-                for (int s = 0; s < segCount; s++) {
-                    float4 a = segs[2 * s];
-                    int oi = int(a.w + 0.5);
-                    float rn = rnCache[oi];
-                    if (rn < 0.0) continue;
-                    float d = sdCap(q, a.xyz, segs[2 * s + 1].xyz, rn);
-                    if (d < dn) { dn = d; rhoNear = rhoCache[oi]; }
-                }
-            }
-            // CSG intersection: struts ∩ part. max() of 1-Lipschitz SDFs is a valid
-            // SDF, so full sphere-trace steps stay safe; struts are cut flush at the
-            // part surface, like a machined section — the straight edge.
-            float F = max(dn * cell, dClip);
-            if (F < eps) {
-                // Secant refinement to the F = 0 root (see tPrev above): F is locally
-                // near-linear along the ray, so one step lands within O(eps²) of the
-                // true surface — view-independent, no crawl during orbit.
-                float tHit = t;
-                if (FPrev < 1e8 && FPrev > F) {
-                    float dt = t - tPrev;
-                    tHit = clamp(t + F * dt / (FPrev - F), t - dt, t + dt);
-                }
-                hit = true; hitPos = ro + rd * tHit; hitRho = rhoNear; break;
-            }
-            FPrev = F; tPrev = t;
-
-            // Advance. Near the surface: sphere-trace F (capped at 0.7·cell so the
-            // 3×3×3 strut neighbourhood is never skipped past). Far from the part:
-            // the whole render lies in {dClip ≤ eps}, so dClip is a valid distance
-            // bound independent of the neighbourhood — leap by it.
-            float step = anyActive ? clamp(F * stepScale, 0.05 * cell, 0.7 * cell)
-                                   : 0.7 * cell;
-            step = max(step, dClip - 3.0 * eps);
-            t += step;
-        }
-        if (!hit) return float4(0.0);
-
-        // Normal = gradient of the TRIMMED field (unmasked lattice ∨ part SDF ∨ bbox)
-        // at the hit: strut surfaces get strut normals, flush-cut faces get the part
-        // surface's normal — flat facets, matching a section cut.
-        float rnH = max(radiusFloor, sqrt(max(hitRho, 0.0) / K));
-        rnH = min(rnH, 0.49);
-        float h = 0.002 * cell;
-        float3 ex = float3(h, 0, 0), ey = float3(0, h, 0), ez = float3(0, 0, h);
-        float3 base = hitPos;
-        float dpx, dnx, dpy, dny, dpz, dnz;
-        {
-            float3 pts[6] = { base+ex, base-ex, base+ey, base-ey, base+ez, base-ez };
-            float d6[6];
-            for (int k = 0; k < 6; k++) {
-                float3 c = (pts[k] - lorigin) / cell;
-                float3 q = c - round(c);
-                float dmin = 1e9;
-                for (int s = 0; s < segCount; s++) dmin = min(dmin, sdCap(q, segs[2*s].xyz, segs[2*s+1].xyz, rnH));
-                float3 stc = ((pts[k] - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
-                float dP = sdfTex.sample(samp, stc).r + delta;
-                float3 qb = abs(pts[k] - bc) - be;
-                float dB = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
-                d6[k] = max(dmin * cell, max(dP, dB));
-            }
-            dpx=d6[0]; dnx=d6[1]; dpy=d6[2]; dny=d6[3]; dpz=d6[4]; dnz=d6[5];
-        }
-        float3 n = normalize(float3(dpx - dnx, dpy - dny, dpz - dnz) + 1e-6);
-
-        // Shade: matte lambert + a soft fill + rim, coloured by density on the SAME
-        // indigo ramp the proxy uses (bar consistency). Sparse struts → pale violet,
-        // dense → deep indigo, so a graded lattice reads as light→dark through the part.
+        // ★ THE OLD, SEPARATE LIGHTING MODEL — and §1(d)'s whole point. A model-space
+        // key at a different direction and a different strength from the body's, a
+        // FLAT 0.30 ambient where the body has a two-colour hemisphere, a specular
+        // lobe the body does not have at all, and a gamma lift + 1.08 exposure the
+        // body does not apply. Two substances, and the eye reads two objects.
         float3 vdir = normalize(U.eye.xyz - hitPos);
         float3 key = normalize(U.lightDir.xyz);
         float3 fill = normalize(float3(-0.5, 0.2, 0.7));
         float ndlK = clamp(dot(n, key), 0.0, 1.0);
         float ndlF = clamp(dot(n, fill), 0.0, 1.0);
         float amb = 0.30;
-        float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
-        float3 baseC = mix(U.sparseColor.xyz, U.denseColor.xyz, frac);
-        // Face-role tint (A4): where the body would have been tinted (anchor / load /
-        // keep-clear / protect), the marked face's surface voxels carry that colour in
-        // the tint volume — baked from the mesh view's own tint dictionary. The
-        // trilinear alpha fades off-face; ×2.2 saturates ON the face so the flush-cut
-        // section reads as solidly marked as the body did.
-        if (U.stepParams.z > 0.5) {
-            float3 ttc = ((hitPos - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
-            float4 ft = tintTex.sample(samp, ttc);
-            baseC = mix(baseC, ft.rgb, clamp(ft.a * 2.2, 0.0, 1.0));
-        }
+        float3 baseC = lsdf_albedo(U, tintTex, samp, hitPos, hitRho);
         float3 lit = baseC * (amb + 0.85 * ndlK + 0.30 * ndlF);
         float rim = pow(1.0 - clamp(dot(n, vdir), 0.0, 1.0), 2.5);
         lit += rim * 0.55 * mix(float3(0.72, 0.78, 0.98), float3(1.0), 0.35);
@@ -717,160 +581,27 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     }
     """
 }
-
-// MARK: - SwiftUI host (transparent MTKView riding the SHARED workspace camera)
-
-/// The live strut-preview layer. Sibling of `TransformGizmoMetalView`: a transparent,
-/// non-interactive, `isPaused` MTKView that redraws ONLY when the shared orbit camera
-/// (or the scene/params) changes — nothing per frame (P2). The fragment shader is
-/// fill-bound, so the drawable is CAPPED at `maxRenderPixels` on its long side and
-/// upscaled by the compositor — the documented interactivity trade (bar P3).
-struct LatticeSDFPreviewView {
-    @ObservedObject var camera: OrbitCameraModel
-    var scene: LatticeSDFScene
-    var params: LatticeProxyParams
-    /// A monotonically increasing token the workspace bumps when `scene` is rebuilt,
-    /// so the coordinator re-uploads exactly once per bake (never per frame).
-    var sceneToken: Int
-    /// THE model transform of the scene — the gravity settle rotation about the mesh
-    /// centre, the SAME values the workspace hands `MetalMeshView`. One transform,
-    /// one camera, both layers (the 2026-07-30 alignment fix). Identity = un-settled.
-    var modelRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
-    var modelCenter: SIMD3<Float> = .zero
-    /// The mesh view's face-role tint dictionary (anchor / load / keep-clear /
-    /// protect), verbatim — baked onto the lattice so the marked faces read on the
-    /// preview now that the body is not drawn (bars A3/A4). Re-baked only on change.
-    var faceTints: [FaceID: SIMD4<Float>] = [:]
-
-    /// Internal raymarch resolution cap (long side, pixels). ~1024 keeps the busy
-    /// scene inside the 60 Hz budget on the measured M2 Pro profile.
-    static let maxRenderPixels: CGFloat = 1152
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var renderer: LatticeSDFRenderer?
-        var sceneToken: Int = -1
-        /// The tint dictionary last baked, so the volume re-bakes only when the
-        /// selection actually changes — never on a camera tick (P2).
-        var appliedTints: [FaceID: SIMD4<Float>]? = nil
-        /// The drawable size last SET (macOS): MTKView may round what it stores, so
-        /// compare against what we asked for — re-setting the drawable every SwiftUI
-        /// update (every orbit tick) forces CAMetalLayer churn mid-orbit.
-        var lastDrawableTarget: CGSize = .zero
-        private var cancellable: AnyCancellable?
-
-        func bind(_ camera: OrbitCameraModel, to view: MTKView) {
-            renderer?.camera = camera.camera
-            cancellable = camera.$camera.sink { [weak self, weak view] cam in
-                MainActor.assumeIsolated {
-                    guard let self, let view else { return }
-                    self.renderer?.camera = cam
-                    if view.isPaused {
-                        #if os(iOS)
-                        view.setNeedsDisplay()
-                        #elseif os(macOS)
-                        view.needsDisplay = true
-                        #endif
-                    }
-                }
-            }
-        }
-    }
-
-    @MainActor func makeCoordinator() -> Coordinator { Coordinator() }
-
-    @MainActor
-    fileprivate func configure(_ view: MTKView, _ coordinator: Coordinator) {
-        let device = MTLCreateSystemDefaultDevice()
-        view.device = device
-        view.colorPixelFormat = .bgra8Unorm
-        view.framebufferOnly = false
-        view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        #if os(iOS)
-        view.isOpaque = false
-        view.layer.isOpaque = false
-        view.isUserInteractionEnabled = false     // gestures belong to the mesh view below
-        #elseif os(macOS)
-        view.layer?.isOpaque = false
-        #endif
-        if let device, let renderer = LatticeSDFRenderer(device: device) {
-            coordinator.renderer = renderer
-            view.delegate = renderer
-        }
-        coordinator.bind(camera, to: view)
-        apply(view, coordinator)
-    }
-
-    @MainActor
-    fileprivate func apply(_ view: MTKView, _ coordinator: Coordinator) {
-        guard let renderer = coordinator.renderer else { return }
-        if coordinator.sceneToken != sceneToken {
-            coordinator.sceneToken = sceneToken
-            renderer.setScene(scene)
-            coordinator.appliedTints = nil     // new grid/mesh → tints must re-bake
-        }
-        renderer.params = params
-        renderer.camera = camera.camera
-        // The ONE model transform, straight from the workspace (same values the mesh
-        // view gets). Cheap uniforms — no bake.
-        renderer.modelRotation = modelRotation
-        renderer.modelCenter = modelCenter
-        // Face-role tints: bake ONLY when the selection actually changed (P2).
-        if coordinator.appliedTints != faceTints {
-            coordinator.appliedTints = faceTints
-            renderer.setFaceTints(faceTints)
-        }
-        // Cap the drawable so the per-pixel march stays inside the frame budget —
-        // but only TOUCH the drawable when the target actually changes: re-setting
-        // it every SwiftUI update (every orbit tick re-evaluates the workspace body)
-        // forces CAMetalLayer churn mid-orbit, which reads as frame-to-frame jitter.
-        let side = max(view.bounds.width, view.bounds.height)
-        if side > 0 {
-            // Project at the true viewport ratio, not the rounded drawable's (A1).
-            renderer.viewportAspect = Float(view.bounds.width / max(1, view.bounds.height))
-            #if os(iOS)
-            let capScale = min(view.contentScaleFactor, Self.maxRenderPixels / side)
-            if abs(view.contentScaleFactor - capScale) > 0.001 {
-                view.contentScaleFactor = capScale
-            }
-            #elseif os(macOS)
-            let scale = min(view.window?.backingScaleFactor ?? 2,
-                            Self.maxRenderPixels / side)
-            let target = CGSize(width: view.bounds.width * scale,
-                                height: view.bounds.height * scale)
-            if coordinator.lastDrawableTarget != target {
-                coordinator.lastDrawableTarget = target
-                view.drawableSize = target
-            }
-            #endif
-        }
-        // Static layer — no display link; redraw on demand (camera sink + this apply).
-        view.isPaused = true
-        view.enableSetNeedsDisplay = true
-        view.preferredFramesPerSecond = 60
-        #if os(iOS)
-        view.setNeedsDisplay()
-        #elseif os(macOS)
-        view.needsDisplay = true
-        #endif
-    }
-}
-
-#if os(iOS)
-extension LatticeSDFPreviewView: UIViewRepresentable {
-    func makeUIView(context: Context) -> MTKView {
-        let view = MTKView(); configure(view, context.coordinator); return view
-    }
-    func updateUIView(_ view: MTKView, context: Context) { apply(view, context.coordinator) }
-}
-#elseif os(macOS)
-extension LatticeSDFPreviewView: NSViewRepresentable {
-    func makeNSView(context: Context) -> MTKView {
-        let view = MTKView(); configure(view, context.coordinator); return view
-    }
-    func updateNSView(_ view: MTKView, context: Context) { apply(view, context.coordinator) }
-}
-#endif
+// ★ THE SWIFTUI HOST IS GONE, AND ITS ABSENCE IS THE TASK
+// (task 2026-08-18-unified-shading).
+//
+// `LatticeSDFPreviewView` used to live here: a second, transparent, `isPaused` MTKView
+// that the workspace stacked OVER the mesh view, with `isOpaque = false`, alpha
+// blending, and — the thing that mattered — NO DEPTH ATTACHMENT ANYWHERE. That made the
+// struts a separate image composited on top of the frame. They could not be occluded by
+// the part, could not receive the frame's ambient occlusion, contact darkening or
+// crease lines, and were lit by their own key light with their own ambient, their own
+// specular lobe and their own exposure. The maintainer's "it looks pasted ON the model,
+// not like a PART of it" was a literal description of the architecture.
+//
+// The workspace now hands this scene to `MetalMeshView` as `latticeLayer:`, and
+// `MeshRenderer` marches it inside its OWN depth prepass and its OWN colour pass — see
+// `MeshRenderer.setLatticeScene` and `unifiedLatticeShaderSource`. This renderer stays
+// as the BAKER of the volumes (via `init(device:buildPipeline:)`) and as the standalone
+// BEFORE capture for the evidence; nothing in the app draws through it any more.
+//
+// The view's own resolution cap (1152 px on the long side, its bar P3) did not
+// disappear with it: the march is still fill-bound, so the same number is now
+// `MeshRenderer.latticeGBufferMaxPixels` and caps the G-buffer the march writes into.
 
 // Minimal IEEE-754 float32 → float16 for r16Float upload (no Accelerate dependency).
 private func float32to16(_ f: Float) -> UInt16 {

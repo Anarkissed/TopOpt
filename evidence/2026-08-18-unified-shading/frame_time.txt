@@ -1,0 +1,74 @@
+R2/R3 FRAME TIME — GPU: Apple M2 Pro
+★ macOS, HEADLESS, ON AN M2 PRO — NOT the maintainer's iPad. The existing
+baselines in evidence/2026-08-15-render-quality were measured the same way on the
+same machine, which is the only reason these numbers can be differenced against
+them. No iPad number is quoted here because none was measured.
+
+`measureFrameGPUSeconds`, GPU timestamps — not a wall clock, no pixel readback.
+10 independent interleaved trials × 8 encoded frames each; each row is the
+minimum. Colour target 2048², 4× MSAA. Part framed at zoom 0.8 so it FILLS the
+frame, which is why the march below is dearer than `LatticeSDFProfileTests`'
+12.5 ms at 1024²: that harness frames with a generous margin, so far fewer
+pixels march.
+
+BEFORE — two MTKViews, both redrawing per orbit tick, so the frame cost was the
+SUM of two command buffers:
+    mesh view @2048²  (prepass + SSAO + edges at full resolution — the old
+               path rasterised the shell into the G-buffer regardless of
+               `bodyAlpha`, so this ran on the lattice stage too)  3.006 ms
+  + lattice view @1152²  (its own bar-P3 cap)                    23.315 ms
+  ──────────────────────────────────────────────────────────────
+  = 26.321 ms
+
+AFTER — ONE pass. The march writes the shared G-buffer at the same 1152 cap;
+SSAO + edges now run at that cap instead of 2048² AND cover the lattice; the
+colour pass adds one full-screen deferred shade:
+    29.405 ms      Δ 3.084 ms  ( 11.7%)
+
+★ AND HERE IS THE WHOLE DISTRIBUTION, BECAUSE ONE NUMBER WOULD BE A LIE.
+Per-trial minima, in trial order (ms):
+    trial 1   mesh  3.458   lattice 25.017   unified 32.813   Δ  +4.34
+    trial 2   mesh  3.232   lattice 26.838   unified 36.333   Δ  +6.26
+    trial 3   mesh  3.540   lattice 29.369   unified 34.054   Δ  +1.15
+    trial 4   mesh  3.673   lattice 26.353   unified 35.035   Δ  +5.01
+    trial 5   mesh  3.369   lattice 25.704   unified 35.120   Δ  +6.05
+    trial 6   mesh  3.224   lattice 28.182   unified 31.704   Δ  +0.30
+    trial 7   mesh  3.006   lattice 27.448   unified 35.062   Δ  +4.61
+    trial 8   mesh  3.953   lattice 23.315   unified 37.199   Δ  +9.93
+    trial 9   mesh  3.332   lattice 26.266   unified 29.405   Δ  -0.19
+    trial 10   mesh  3.614   lattice 27.208   unified 36.538   Δ  +5.72
+
+★ READ THE Δ COLUMN, NOT THE ROW ABOVE IT. Every trial's minima are taken from
+an interleaved sweep, so the Δ per trial is the paired comparison; the row totals
+above mix minima from different trials and are therefore the LOOSEST reading.
+Spread -0.192 … 9.931 ms, median 5.009 ms, on a ~26.321 ms frame.
+9 of 10 trials came back SLOWER (1 faster).
+So: the unified pass costs a FEW MILLISECONDS more — median 5.009 ms,  19.0% of the frame — and the sign
+is consistent enough to state, while the MAGNITUDE is only good to a few ms
+because both arrangements are dominated by a ~25 ms march whose own run-to-run
+spread is that size. Do not quote a single Δ from this table as a precise cost.
+
+WHERE IT GOES, and it is not a mystery: SSAO now runs over a frame whose covered
+pixels are almost all LATTICE, and a self-occluding lattice is the expensive case
+for SSAO — `render-quality` measured exactly that (its lattice column went
+1.39 → 7.02 ms at 2048² when AO and the rest came on, against 0.27 → 2.87 for the
+solid bracket). At the 1152 cap that is a couple of milliseconds, plus the
+full-screen deferred shade. Two things pull the other way and are already in the
+number: the occlusion pass moved from 2048² down to the cap, and the shell is no
+longer rasterised into the G-buffer while it is invisible.
+
+NOT TAKEN: `aoQuality = .low` halves the SSAO samples (8 instead of 16) and would
+return most of the delta. That is a QUALITY decision about the feature this task
+exists to add, so it is named here and left to the maintainer rather than made
+silently to flatter this table.
+
+★ THE MARCH IS  88.6% OF THE BASELINE AND THIS TASK DID NOT TOUCH IT.
+Unification is not where this frame's cost lives, and making the lattice cheaper
+is Stage 2's job (drawing it from its SDF instead of a mesh), explicitly not this
+task's. What the Δ above buys is ambient occlusion, contact darkening, creases,
+depth fade and per-pixel occlusion ON the lattice — none of which existed for it
+at any price before.
+
+R7 — the same renderer with NO lattice layer, i.e. the frame `render-quality`
+shipped, unchanged: 3.006 ms
+================================================================================
