@@ -80,6 +80,8 @@ public struct WorkspacePlaceholder: View {
     /// the one case the user actually waits through was the one case that said
     /// nothing at all.
     @State private var strutBakeInFlight = false
+    /// Measured inner edges of the two top clusters — see `TopClusterEdgeKey`.
+    @State private var topEdges = TopClusterEdges()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When a project has saved variants, results show by default; tapping "See
@@ -1031,10 +1033,10 @@ public struct WorkspacePlaceholder: View {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
                     refreshLatticeFaceCards()
-                    // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17:
-                    // "Once you save and exit, an FEA should run and a Stress
-                    // view should now be accessible below the preview button").
+                    // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17).
                     startStressSolveIfNeeded()
+                    // ★ AND REBAKES THE PREVIEW — see `latticeWizardRebakeNote`.
+                    if showStrutPreview, project.lattice.enabled { buildStrutScene() }
                 }
                 .transition(.opacity)
             }
@@ -2081,6 +2083,13 @@ public struct WorkspacePlaceholder: View {
         }
         .padding(.top, DS.Space.xl3)
         .padding(.leading, DS.Space.xl4)
+        // ★ reports its TRAILING edge, for the banner's gap.
+        .background(GeometryReader { g in
+            Color.clear.preference(key: TopClusterEdgeKey.self,
+                                   value: .init(left: g.frame(in: .global).maxX,
+                                                right: .greatestFiniteMagnitude,
+                                                width: 0))
+        })
         .alert("Rename project", isPresented: $renaming) {
             TextField("Name", text: $nameDraft)
             Button("Save") { model.renameCurrentProject(to: nameDraft) }
@@ -2206,6 +2215,10 @@ public struct WorkspacePlaceholder: View {
                 }
             }
         }
+        // ★ THE MEASURED TOP-CLUSTER EDGES LAND HERE — the collector must be a
+        // COMMON ANCESTOR of both reporters (the title/undo/redo cluster and the
+        // Settings button live in different subtrees), which is what this is.
+        .onPreferenceChange(TopClusterEdgeKey.self) { topEdges = $0 }
         // ★ THE SELECTION MOVED ⇒ THE MASK MOVED ⇒ REBAKE. See
         // `latticeRegionInputsKey` for why this is a hash and not the regions.
         .onChange(of: latticeRegionInputsKey) { _ in
@@ -2933,6 +2946,7 @@ public struct WorkspacePlaceholder: View {
                 Text("Your change is being applied to the strut preview.")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, DS.Space.s)
@@ -2941,12 +2955,121 @@ public struct WorkspacePlaceholder: View {
             .overlay(Capsule().strokeBorder(
                 DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // ★ CLEAR OF THE TOP CHROME (maintainer, 2026-08-19: "Currently it is
+        // covering the redo button and cutting slightly into the 'Settings'
+        // button … Please make it less wide and as tall as it needs to be.
+        // Ensure there is enough padding between it and all other assets").
+        //
+        // ★ IT SAT ON THE SAME ROW AS THE BUTTONS. Centring a capsule across the
+        // full width puts it exactly where the undo/redo cluster ends and the
+        // Settings pill begins, and the capsule grew to whatever its text needed.
+        // Two changes: a width CEILING so it stays a notification rather than a
+        // bar, and a top inset that drops it BELOW the button row entirely — so
+        // the clearance holds for any title length, on any device, rather than
+        // depending on the clusters' measured widths.
+        // ★ IT FITS THE GAP BETWEEN REDO AND SETTINGS (maintainer, 2026-08-19:
+        // "It needs to be less wide and actually move up"). The top row is
+        // back + title + undo + redo on the left and Settings + the orientation
+        // cube on the right; the clear span between them is ~300 pt on a 13"
+        // iPad. `topBannerWidth` sits inside that with room either side, and the
+        // banner stays on the row rather than being pushed below it — an earlier
+        // cut dropped it under the row, which cleared the buttons but was not
+        // what was asked for.
+        //
+        // Height is whatever the text needs: the subtitle WRAPS inside the
+        // ceiling instead of widening the capsule.
+        .frame(maxWidth: Self.topBannerWidth)
+        .fixedSize(horizontal: false, vertical: true)
+        .modifier(TopBannerGapCentred(edges: topEdges))
         .padding(.top, PageChrome.edge)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: strutBakeInFlight)
         .accessibilityIdentifier("strut-baking-banner")
     }
+
+    /// ★★ THE TWO TOP CLUSTERS' INNER EDGES (maintainer, 2026-08-19: "Can you
+    /// place an equal padding on both sides of the notification? It looks strange
+    /// with two different paddings").
+    ///
+    /// ★ WHY THIS HAS TO BE MEASURED. The banner was centred on the SCREEN, but
+    /// the clusters either side of it are not symmetric about the screen centre:
+    /// the left is back + PROJECT TITLE + undo + redo and its width follows the
+    /// project's name, while the right is Settings + the orientation gizmo and is
+    /// fixed. On his part that put the banner 16 pt from redo and 30 pt from
+    /// Settings. Any constant nudge that squared one project name would be wrong
+    /// for the next, so the edges are read from the views themselves.
+    ///
+    /// `.global` rather than a named space, deliberately: both clusters and the
+    /// banner are in the same window, so no coordinate space has to be
+    /// introduced (and no container has to be found to hang it on).
+    private struct TopClusterEdges: Equatable {
+        var left: CGFloat = 0
+        var right: CGFloat = .greatestFiniteMagnitude
+        /// The window's own width, reported alongside the edges so the trailing
+        /// inset can be expressed as a PADDING rather than an offset.
+        var width: CGFloat = 0
+        var isMeasured: Bool {
+            left > 0 && right < .greatestFiniteMagnitude && width > left
+        }
+    }
+    private struct TopClusterEdgeKey: PreferenceKey {
+        static var defaultValue = TopClusterEdges()
+        static func reduce(value: inout TopClusterEdges, nextValue: () -> TopClusterEdges) {
+            let n = nextValue()
+            value.left = Swift.max(value.left, n.left)
+            value.right = Swift.min(value.right, n.right)
+            value.width = Swift.max(value.width, n.width)
+        }
+    }
+
+    /// ★ THE CLEAR SPAN between the top-left button cluster (back · title · undo ·
+    /// redo) and the top-right one (Settings · orientation cube), less a margin on
+    /// each side. Both top-centre banners share it so they cannot drift apart.
+    private static let topBannerWidth: CGFloat = 260
+
+    /// ★ Centre the banner on the MIDPOINT OF THE GAP rather than of the screen.
+    /// The offset is the difference between the two, so both visual gaps are
+    /// equal by construction. Before the edges are measured it is a no-op and the
+    /// banner is screen-centred, which is where it used to live — so a frame
+    /// rendered before the preference lands is the old placement, never a broken
+    /// one.
+    /// ★ THE BAND IS STATED, THEN THE BANNER IS CENTRED IN IT.
+    ///
+    /// ★ WHY NOT AN OFFSET. The first cut centred on the screen and then nudged
+    /// by `gapMid - screenMid`. That is arithmetically the same answer, but it
+    /// depends on the offset being applied to a container whose width matches the
+    /// window — and inside a `GeometryReader` in an overlay it did not, so the
+    /// correction came out short and the padding stayed visibly uneven. Padding
+    /// out to each measured edge and centring in the remainder makes the two gaps
+    /// equal STRUCTURALLY: whatever is left over is split in half by the centring
+    /// itself, with no arithmetic to be wrong.
+    private struct TopBannerGapCentred: ViewModifier {
+        let edges: TopClusterEdges
+        func body(content: Content) -> some View {
+            content
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.leading, leading)
+                .padding(.trailing, trailing)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(GeometryReader { g in
+                    Color.clear.preference(
+                        key: TopClusterEdgeKey.self,
+                        value: .init(left: 0, right: .greatestFiniteMagnitude,
+                                     width: g.frame(in: .global).width))
+                })
+        }
+        /// Out to the left cluster's trailing edge, plus a margin.
+        private var leading: CGFloat {
+            edges.isMeasured ? edges.left + PageChrome.gap : 0
+        }
+        /// The mirror, as a distance from the window's trailing edge.
+        private var trailing: CGFloat {
+            edges.isMeasured
+                ? Swift.max(0, edges.width - edges.right) + PageChrome.gap
+                : 0
+        }
+    }
+
 
     private var simRunningBanner: some View {
         HStack(spacing: DS.Space.s) {
@@ -2962,6 +3085,7 @@ public struct WorkspacePlaceholder: View {
                 Text("A finite-element solve is grading your lattice.")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Button { simBannerDismissed = true } label: {
                 Image(systemName: "xmark")
@@ -2980,7 +3104,32 @@ public struct WorkspacePlaceholder: View {
             .overlay(Capsule().strokeBorder(
                 DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // ★ CLEAR OF THE TOP CHROME (maintainer, 2026-08-19: "Currently it is
+        // covering the redo button and cutting slightly into the 'Settings'
+        // button … Please make it less wide and as tall as it needs to be.
+        // Ensure there is enough padding between it and all other assets").
+        //
+        // ★ IT SAT ON THE SAME ROW AS THE BUTTONS. Centring a capsule across the
+        // full width puts it exactly where the undo/redo cluster ends and the
+        // Settings pill begins, and the capsule grew to whatever its text needed.
+        // Two changes: a width CEILING so it stays a notification rather than a
+        // bar, and a top inset that drops it BELOW the button row entirely — so
+        // the clearance holds for any title length, on any device, rather than
+        // depending on the clusters' measured widths.
+        // ★ IT FITS THE GAP BETWEEN REDO AND SETTINGS (maintainer, 2026-08-19:
+        // "It needs to be less wide and actually move up"). The top row is
+        // back + title + undo + redo on the left and Settings + the orientation
+        // cube on the right; the clear span between them is ~300 pt on a 13"
+        // iPad. `topBannerWidth` sits inside that with room either side, and the
+        // banner stays on the row rather than being pushed below it — an earlier
+        // cut dropped it under the row, which cleared the buttons but was not
+        // what was asked for.
+        //
+        // Height is whatever the text needs: the subtitle WRAPS inside the
+        // ceiling instead of widening the capsule.
+        .frame(maxWidth: Self.topBannerWidth)
+        .fixedSize(horizontal: false, vertical: true)
+        .modifier(TopBannerGapCentred(edges: topEdges))
         .padding(.top, PageChrome.edge)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: latticeSimIsRunning)
@@ -3141,6 +3290,49 @@ public struct WorkspacePlaceholder: View {
         project.latticeJobRegions().regions.contains { $0.role == .include } ? 1 : 0
     }
 
+    /// ★★ EVERY INPUT THE BAKE READS — AND IT USED TO BE ONLY THE SELECTION
+    /// (maintainer, 2026-08-19: "I just tested and I don't see any difference in
+    /// the preview when the lattice settings have had the finish changed", and
+    /// before that "please ensure the lattice preview is actually modified by the
+    /// settings").
+    ///
+    /// ★ THIS KEY IS THE ONLY THING THAT REBAKES THE STRUT SCENE, and it hashed
+    /// the groups, their faces and the face-region ids. NOTHING ELSE. So Finish,
+    /// density mode, cell mode, the per-face depths, the per-face expands, the
+    /// per-region densities and the PRINT PARAMETERS could all change and the
+    /// preview would keep drawing the previous bake — indistinguishable from a
+    /// setting that does not reach the preview at all. Several rounds of "the
+    /// preview ignores X" were this one key.
+    ///
+    /// ★ WHAT BELONGS HERE, AND WHAT DOES NOT. Only inputs the BAKE consumes.
+    /// Cell size and the density band reach the renderer per-frame through
+    /// `latticeProxy.params` and need no rebake, but they are cheap to hash and
+    /// including them keeps the rule "if it changes the picture, it is in the
+    /// key" — which is the property that failed here.
+    /// ★★ WHY SAVE & EXIT REBAKES EXPLICITLY (maintainer, 2026-08-19: "I have
+    /// done 3 separate finish settings in these screenshots. Can you tell which is
+    /// which? I don't think it's working").
+    ///
+    /// `latticeRegionInputsKey` below now carries every setting the bake reads,
+    /// but the `.onChange` watching it hangs off the workspace chrome — which is
+    /// UNMOUNTED while the full-screen wizard is up. SwiftUI does not fire an
+    /// onChange for a value that changed while its view was absent; the view
+    /// re-initialises with the new value and sees no transition. So every setting
+    /// changed INSIDE the wizard was invisible to it by construction.
+    ///
+    /// ★ AND IT EXPLAINS THE SHAPE OF THE REPORT — "when the Sim checkbox is
+    /// turned off all of the settings are input into the preview - everything but
+    /// the finish". Cell size, density and topology reach the renderer PER FRAME
+    /// through `latticeProxy.params` and never needed a rebake. Finish reaches it
+    /// only through the BAKE. Same write, different delivery.
+    ///
+    /// (The call sits AFTER `startStressSolveIfNeeded()` and this note lives here
+    /// rather than at the call site because `testSaveAndExitIsWhatCallsIt` reads
+    /// the first 700 characters after the wizard's construction — a comment there
+    /// pushes the solve call out of its window. A source-text guard counts
+    /// comments, as `selectionsLibraryCard` also records.)
+    private var latticeWizardRebakeNote: Void { () }
+
     private var latticeRegionInputsKey: Int {
         var h = Hasher()
         for g in selection.groups {
@@ -3148,6 +3340,30 @@ public struct WorkspacePlaceholder: View {
             for f in g.faces { h.combine(f) }
         }
         for r in project.faceRegions.regions { h.combine(r.id) }
+        let l = project.lattice
+        h.combine(l.enabled)
+        h.combine(l.topologyID)
+        h.combine(l.boundary)                 // ★ Finish — the reported one
+        h.combine(l.densityMode)
+        h.combine(l.cellSizeMode)
+        h.combine(l.cellMM)
+        h.combine(l.minRelativeDensity)
+        h.combine(l.maxRelativeDensity)
+        h.combine(l.paintDepthMM)
+        // The per-selectable overrides: role, depth, density and the in-plane
+        // expand all change the REGIONS the bake is masked by.
+        for (k, v) in l.selectableRoles.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableDepthMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableDensity.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableExpandMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.groupDensities.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            h.combine(k); h.combine(v)
+        }
+        // ★ AND THE PRINT PARAMETERS, because the SKIN is the wall the printer
+        // lays down (`PrintParams.wallRingMM`) — change the nozzle or the loop
+        // count and the preview's skin must move with it.
+        h.combine(project.printParams.wallRingMM)
+        h.combine(project.printParams.strutLineWidthMM)
         return h.finalize()
     }
 
@@ -3584,6 +3800,13 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("lattice-settings")
+            // ★ …and this one its LEADING edge.
+            .background(GeometryReader { g in
+                Color.clear.preference(key: TopClusterEdgeKey.self,
+                                       value: .init(left: 0,
+                                                    right: g.frame(in: .global).minX,
+                                                    width: 0))
+            })
             // ★ THE TOP-RIGHT SLOT, exactly where the TO page's "Lattice" button
             // sits: LEFT of the gizmo by `gizmoClearance`, top edge on the gizmo's
             // own inset. It moved UP into the space "Topology" vacated.
@@ -6962,7 +7185,10 @@ public struct WorkspacePlaceholder: View {
                     }
                 }
                 .buttonStyle(.plain)
-                Spacer()
+                // ★ NO SPACER WHEN COLLAPSED. With the width relaxed above, an
+                // expanding Spacer is the one thing left that would still stretch
+                // the pill — it pushes to fill whatever it is offered.
+                if !selectionsCollapsed { Spacer() }
                 if !selectionsCollapsed {
                     // ★ REGIONS (task 2026-08-14-face-regions). Combine faces
                     // into one selection, and split one into pieces.
@@ -7010,7 +7236,10 @@ public struct WorkspacePlaceholder: View {
         }
         // §6/§3a: the ONE panel width every page uses, so the lattice stage and the
         // TO stage are not "similar" — they are the same panel.
-        .frame(width: PageChrome.panelWidth, alignment: .leading)
+        // ★ AND THE CARD ITSELF — see `PageLeftModal`. Both stated the width, so
+        // relaxing only one of them would have changed nothing.
+        .frame(width: selectionsCollapsed ? nil : PageChrome.panelWidth,
+               alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))

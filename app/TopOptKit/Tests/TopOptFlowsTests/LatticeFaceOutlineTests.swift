@@ -337,13 +337,26 @@ final class LatticeFaceOutlineTests: XCTestCase {
                           + "and re-create the coin-flip discard it exists to stop")
     }
 
-    /// The boundary treatment decides it, and only `fullSkin` leaves a face skin.
-    func testOnlyFullSkinLeavesAFaceSkin() {
+    /// ★ ONLY `covered` HAS A SOLID THICKNESS — corrected from the first cut,
+    /// which gave it to `fullSkin` (maintainer, 2026-08-19: "The skin is
+    /// incorrect. It's adding a FULL skin back onto the lattice … The skin is
+    /// supposed to be like it is in the settings: a covering across all
+    /// edges/corners. Meanwhile, rim is supposed to be around only the outside
+    /// edges"). Rim and Skin are LATTICE geometry — a frame of edge struts, and a
+    /// diagrid woven across the faces — so neither is an offset, and both return
+    /// 0 here until D1 draws them.
+    func testOnlyCoveredLeavesASolidWall() {
         XCTAssertEqual(LatticeBoundaryTreatment.none.faceSkinMM(wallRingMM: 1.26), 0)
         XCTAssertEqual(LatticeBoundaryTreatment.rim.faceSkinMM(wallRingMM: 1.26), 0,
-                       "a rim closes the BORDER — it is not a skin across the face")
-        XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.faceSkinMM(wallRingMM: 1.26), 1.26,
+                       "a rim closes the BORDER — it is not a wall across the face")
+        XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.faceSkinMM(wallRingMM: 1.26), 0,
+                       "★ a diagrid skin is an open LATTICE, not a slab")
+        XCTAssertEqual(LatticeBoundaryTreatment.covered.faceSkinMM(wallRingMM: 1.26), 1.26,
                        accuracy: 1e-12)
+        // And the cover is the only one that carries an outer finish to core.
+        XCTAssertEqual(LatticeBoundaryTreatment.covered.jobOuterFinish, "shell")
+        XCTAssertNil(LatticeBoundaryTreatment.fullSkin.jobOuterFinish)
+        XCTAssertNil(LatticeBoundaryTreatment.rim.jobOuterFinish)
         // And the ring is the slicer's own: outer + (loops-1)·inner.
         var pp = PrintParams.fdmDefault
         pp.wallLineWidthOuterMM = 0.46

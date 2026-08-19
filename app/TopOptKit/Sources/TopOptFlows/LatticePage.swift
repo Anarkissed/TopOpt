@@ -1756,6 +1756,7 @@ public struct LatticePage: View {
         case .none: return "None"
         case .rim: return "Rim only"
         case .fullSkin: return "Full skin · diagrid"
+        case .covered: return "Covered · solid wall"
         }
     }
 

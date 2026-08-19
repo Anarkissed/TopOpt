@@ -27,23 +27,63 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
     case rim
     /// Rim + woven face skin — the anchored diagrid (`skin: "diagrid"`).
     case fullSkin
-
-    /// ★ THE SOLID FACE SKIN THIS TREATMENT LEAVES, in mm, for a given printed
-    /// wall ring. `rim` closes the BORDER only — it leaves no skin across the
-    /// face — and `none` leaves nothing, so both are 0 and the preview is
-    /// unchanged for them.
+    /// ★★ A SOLID OUTER SHELL OVER THE LATTICE (maintainer, 2026-08-19: "It might
+    /// be worth adding a 'Covered' finish? For anyone who doesn't care about
+    /// seeing the lattice?").
     ///
-    /// The number for `fullSkin` is the ring the slicer actually lays down:
-    /// `outer + (wallLoops - 1) · inner`, which is the same expression
-    /// `PrintParams` documents for the wall-ring term. A skin thinner than the
-    /// walls the printer will produce would be a preview promising a part the
-    /// machine cannot make.
+    /// ★ IT IS A DIFFERENT AXIS FROM THE OTHER THREE, AND CORE ALREADY HAS IT.
+    /// `skin` is what happens at the lattice's BOUNDARY (none / rim / diagrid);
+    /// `outer_finish` is what the OUTER SURFACE is (shell / skin / shell+skin) —
+    /// core/src/cli/job.cpp:1433. A solid cover is `outer_finish: "shell"`, and
+    /// the app has never sent that field at all, so this exposes a capability
+    /// rather than inventing one.
+    ///
+    /// ★ AND IT IS WHAT THE WITHDRAWN "SKIN" CUT ACTUALLY BUILT — the lattice
+    /// eroded by the printed wall ring, leaving a solid slab. Right geometry,
+    /// wrong name. It moves here where it is honest.
+    case covered
+
+    /// ★★ THIS IS NOT A SOLID WALL, AND THE FIRST CUT MADE IT ONE (maintainer,
+    /// 2026-08-19: "The skin is incorrect. It's adding a FULL skin back onto the
+    /// lattice. There is no point in doing that. The skin is supposed to be like
+    /// it is in the settings: a covering across all edges/corners. Meanwhile, rim
+    /// is supposed to be around only the outside edges").
+    ///
+    /// ★ WHAT THE TWO TREATMENTS ACTUALLY ARE, as the wizard's own sample block
+    /// draws them and as core builds them:
+    ///
+    ///   rim ....... thickened struts along the region's boundary EDGES only —
+    ///               a frame around the block, faces left open.
+    ///   fullSkin .. that rim PLUS a woven DIAGRID across the faces — a surface
+    ///               LATTICE, still open, not a slab.
+    ///
+    /// ★ THE FIRST CUT READ "skin" AS "solid offset shell" and returned the
+    /// printed wall ring as a thickness to erode the lattice by. That produced a
+    /// solid wall over the struts, which is not what core makes, not what the
+    /// sample block shows, and hides the very thing the preview exists to show.
+    /// It is withdrawn rather than left in as an approximation: a preview that
+    /// draws a slab where the run builds a diagrid is a confident wrong answer.
+    ///
+    /// Returning 0 means the preview does not yet DRAW either treatment — an
+    /// honest absence. The plumbing that carries the choice to the bake stays, so
+    /// the diagrid and the rim have somewhere to land.
+    /// ★ ONLY `covered` HAS A THICKNESS. `rim` and `fullSkin` are LATTICE
+    /// geometry — a frame of edge struts, and a diagrid woven across the faces —
+    /// and neither is an offset the preview can express by eroding, which is what
+    /// made the first cut wrong. They return 0 and are drawn by D1.
+    ///
+    /// The number for `covered` is the ring the slicer lays down,
+    /// `PrintParams.wallRingMM`: a cover thinner than the printer's own walls
+    /// would promise a part the machine cannot make.
     public func faceSkinMM(wallRingMM: Double) -> Double {
-        switch self {
-        case .none, .rim: return 0
-        case .fullSkin: return Swift.max(0, wallRingMM)
-        }
+        self == .covered ? Swift.max(0, wallRingMM) : 0
     }
+
+    /// ★ `job.lattice.outer_finish` — "shell" for a cover, nil otherwise so every
+    /// pre-existing job stays byte-identical. Core refuses "skin"/"shell+skin"
+    /// unless `skin == "diagrid"` (job.cpp:1438), so only the unambiguous value
+    /// is ever emitted here.
+    public var jobOuterFinish: String? { self == .covered ? "shell" : nil }
 
     /// The exact core job-schema value (`job.lattice.skin`).
     public var jobSkinValue: String {
@@ -51,6 +91,10 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
         case .none: return "none"
         case .rim: return "rim"
         case .fullSkin: return "diagrid"
+        // ★ A COVER IS AN OUTER FINISH, NOT A BOUNDARY TREATMENT — the lattice
+        // underneath still runs to the edge, so `skin` stays "none" and
+        // `jobOuterFinish` carries the cover.
+        case .covered: return "none"
         }
     }
 }
@@ -365,6 +409,11 @@ public struct LatticeSpec: Equatable, Sendable {
     /// `RelatticeJobBuilder.build`. That duplication is asserted against in
     /// DefaultArmingTests rather than trusted.
     public let requireVoidReachesExterior: Bool
+
+    /// ★ `job.lattice.outer_finish` — "shell" when the user picked **Covered**,
+    /// nil otherwise so every job that does not use it is BYTE-IDENTICAL to the
+    /// one before the option existed. See `LatticeBoundaryTreatment.covered`.
+    public var outerFinish: String? = nil
 
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
@@ -1119,7 +1168,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // `mode` (not `cellSizeMode`) carries the fit exclusion, so a spec that
             // fell back to fixed can still arm retention.
             let sub = resolvedSubfloor(capability: capability, cellMode: mode)
-            return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
+            var spec = LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
                                generateRelativeDensity: 0,
                                minRelativeDensity: b.densityLo,
                                maxRelativeDensity: b.densityHi,
@@ -1141,11 +1190,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                // keys need the probe because they were added to
                                // `grading` after some cores were built.
                                requireVoidReachesExterior: requireVoidReachesExterior)
+            spec.outerFinish = boundary.jobOuterFinish
+            return spec
         }
         let genRho = b.generateRelativeDensity
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
         guard radius > 0 else { return nil }
-        return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: radius,
+        var spec2 = LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: radius,
                            generateRelativeDensity: genRho,
                            minRelativeDensity: b.densityLo, maxRelativeDensity: b.densityHi,
                            emitSTL: emitSTL, emit3MF: emit3MF,
@@ -1159,6 +1210,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                            // one — carrying it on only one path would make the
                            // rule silently depend on the density mode.
                            requireVoidReachesExterior: requireVoidReachesExterior)
+        // ★ THE SOLID COVER RIDES ON `outer_finish`, NOT `skin` — the two are
+        // independent axes in core's schema. Set on BOTH construction paths, so
+        // a graded job and a uniform one cannot disagree about the cover.
+        spec2.outerFinish = boundary.jobOuterFinish
+        return spec2
     }
 
     /// Convenience: read the certifiable limits AND the generatable set from core

@@ -99,6 +99,34 @@ public enum LatticeSamplePatch {
         switch boundary {
         case .none:
             break
+        // ★★ THE COVER IS DRAWN, AND IT IS A WALL (maintainer, 2026-08-19: "The
+        // preview needs to update when selecting 'Covered'", then "I'd rather
+        // this be a solid wall on 4 sides and the lattice seen from the top and
+        // bottom").
+        //
+        // ★ THE FIRST CUT DREW NOTHING — a setting that renders nothing cannot be
+        // judged, which is the complaint Finish has now drawn twice. The second
+        // drew the walls as a dense run of the strut emitter's CAPSULES, which
+        // reads as stacked ridges, not as a wall. This one emits flat QUADS: four
+        // solid side panels, top and bottom left open so the lattice inside stays
+        // legible. That is the sample's job — the real cover closes every face,
+        // and the caption says so.
+        case .covered:
+            let e = Float(extent)
+            let half = e * unit * 0.5
+            func w(_ x: Float, _ y: Float, _ z: Float) -> SIMD3<Float> {
+                SIMD3<Float>(x, y, z) * unit - SIMD3<Float>(repeating: half)
+            }
+            // The four VERTICAL faces (y is up): the pairs at x = 0/e and z = 0/e.
+            let panels: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] = [
+                (w(0, 0, 0), w(0, 0, e), w(0, e, e), w(0, e, 0)),   // x = 0
+                (w(e, 0, 0), w(e, e, 0), w(e, e, e), w(e, 0, e)),   // x = e
+                (w(0, 0, 0), w(0, e, 0), w(e, e, 0), w(e, 0, 0)),   // z = 0
+                (w(0, 0, e), w(e, 0, e), w(e, e, e), w(0, e, e)),   // z = e
+            ]
+            for (a, b, c, d) in panels {
+                emitPanel(a, b, c, d, pos: &pos, idx: &idx)
+            }
         case .rim:
             // A frame along the twelve edges of the block. Slightly heavier than a
             // strut so it reads as a DRESSING rather than as more lattice — the
@@ -228,6 +256,19 @@ public enum LatticeSamplePatch {
             idx += [cap0, a1, a0]                              // p0 cap fan
             idx += [cap1, b0, b1]                              // p1 cap fan
         }
+    }
+
+    /// ★ A FLAT, DOUBLE-SIDED QUAD — the solid wall panel `covered` is built from.
+    /// Both windings are emitted so the wall is opaque from inside the block as
+    /// well as outside; the sample is orbited freely and a one-sided panel would
+    /// vanish from half the angles.
+    private static func emitPanel(_ a: SIMD3<Float>, _ b: SIMD3<Float>,
+                                  _ c: SIMD3<Float>, _ d: SIMD3<Float>,
+                                  pos: inout [Float], idx: inout [Int32]) {
+        let base = Int32(pos.count / 3)
+        for p in [a, b, c, d] { pos.append(p.x); pos.append(p.y); pos.append(p.z) }
+        idx += [base, base + 1, base + 2,  base, base + 2, base + 3]
+        idx += [base, base + 2, base + 1,  base, base + 3, base + 2]
     }
 
     /// A 20-triangle icosahedron of radius `r` at `c` (the junction blob).

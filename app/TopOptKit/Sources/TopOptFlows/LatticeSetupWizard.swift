@@ -307,18 +307,13 @@ public struct LatticeSetupWizard: View {
     /// solve". The sub-line is not decoration: it is the difference between a
     /// checkbox and an informed choice.
     private var simulateStressesSwitch: some View {
-        Button {
-            model.setSimulateStresses(!model.simulateStresses)
-            rebuild()
-        } label: {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: model.simulateStresses
-                        ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle((model.simulateStresses
-                                      ? DS.Color.accent
-                                      : DS.Color.textTertiary).color)
-                VStack(alignment: .leading, spacing: 1) {
+        // ★ AN ON/OFF SWITCH, NOT A CHECKBOX (maintainer, 2026-08-19). The row is
+        // no longer one big Button: the SWITCH is the control, so the label is
+        // plain text and the tap target is the switch itself — a checkmark that
+        // toggled when you tapped anywhere on a paragraph was the old behaviour
+        // and is not what a switch does.
+        HStack(spacing: DS.Space.s) {
+            VStack(alignment: .leading, spacing: 1) {
                     Text("Simulate Stresses")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(DS.Color.textPrimary.color)
@@ -328,19 +323,24 @@ public struct LatticeSetupWizard: View {
                         .dsStyle(DS.TypeScale.caption2)
                         .foregroundStyle(DS.Color.textTertiary.color)
                 }
-                Spacer(minLength: 0)
+            Spacer(minLength: DS.Space.s)
+            GlassToggle(isOn: model.simulateStresses) {
+                model.setSimulateStresses(!model.simulateStresses)
+                rebuild()
             }
-            .padding(.vertical, DS.Space.s)
-            .padding(.horizontal, DS.Space.sm)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                .fill(DS.Color.background.opacity(0.45).color)
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                    .strokeBorder((model.simulateStresses
-                                   ? DS.Color.accent.opacity(0.5)
-                                   : DS.Color.strokeSubtle).color, lineWidth: 1)))
+            .accessibilityLabel("Simulate Stresses")
+            .accessibilityIdentifier("wizard-simulate-stresses")
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("wizard-simulate-stresses")
+        .padding(.vertical, DS.Space.s)
+        .padding(.horizontal, DS.Space.sm)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+            .fill(.ultraThinMaterial)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .fill(DS.Color.background.opacity(0.35).color))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .strokeBorder((model.simulateStresses
+                               ? DS.Color.accent.opacity(0.5)
+                               : DS.Color.strokeSubtle).color, lineWidth: 1)))
     }
 
     /// ★ WHAT A SIM AXIS SAYS INSTEAD OF OFFERING A FIELD. A number the user
@@ -473,8 +473,18 @@ public struct LatticeSetupWizard: View {
                         .accessibilityIdentifier("wizard-per-region-gap")
                 }
             case .finish:
-                segmentRow(["None", "Rim", "Skin"], selected: boundaryIndex) { i in
-                    model.setBoundary([.none, .rim, .fullSkin][i])
+                // ★ FOUR NOW — "Covered" is the solid outer shell.
+                segmentRow(["None", "Rim", "Skin", "Covered"],
+                           selected: boundaryIndex) { i in
+                    model.setBoundary([.none, .rim, .fullSkin, .covered][i])
+                }
+                if model.boundary == .covered {
+                    Text("A solid outer wall over the lattice, at the printer's "
+                         + "own wall thickness. The lattice is still there — "
+                         + "just not on show.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .accessibilityIdentifier("wizard-covered-fact")
                 }
                 // ★ §10(b) — A STATED FACT, NOT A PICKER. Core implements exactly
                 // ONE skin, and the old "Skin pattern — Diagrid" readout looked
@@ -593,6 +603,7 @@ public struct LatticeSetupWizard: View {
         case .none: return 0
         case .rim: return 1
         case .fullSkin: return 2
+        case .covered: return 3
         }
     }
 

@@ -803,6 +803,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 // LatticeRegionSpec.wireDictionary for why it is not two.
                 block["regions"] = lat.regions.map { $0.wireDictionary }
             }
+            // ★ THE SOLID COVER (maintainer, 2026-08-19). Only when the user picked
+            // **Covered**: an absent key leaves the job BYTE-IDENTICAL to one written
+            // before the option existed. Core validates it against
+            // "shell" / "skin" / "shell+skin" (core/src/cli/job.cpp:1433) and refuses
+            // the latter two unless `skin == "diagrid"`, which is why only the
+            // unambiguous "shell" is ever emitted.
+            if let of = lat.outerFinish { block["outer_finish"] = of }
             job["lattice"] = block
         }
         // The declared load case is emitted for EVERY model source — STEP B-rep
