@@ -494,7 +494,20 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     o.eyeZ = -eyeP.z;                     // eye looks down −Z → positive into the screen
     o.enormal = float4(eyeN, 0.0);
     o.albedo = float4(lsdf_albedo(U, tintTex, samp, h.pos, h.rho), 1.0);
-    o.depth = clip.z / max(clip.w, 1e-6);
+    // ★ CLAMPED SO THE DEPTH-DIRECTION DECLARATION IS TRUE BY CONSTRUCTION.
+    // (The declaration is named without its brackets on purpose:
+    // `testFragmentDepthWritesAreDeclaredConservative` counts that token across
+    // this whole source string, and a source-text guard counts COMMENTS too —
+    // quoting it here made the count read 3 and failed the guard.)
+    // `lsdf_vertex` emits at NDC z = 0, so the declaration promises "never
+    // negative" — and `clip.z / max(clip.w, 1e-6)` can go negative for a hit
+    // nearer than the near plane, because the max() rescues the denominator's
+    // sign and not the numerator's. Breaking a depth-direction contract is
+    // undefined behaviour. The clamp keeps the early-Z the declaration buys and
+    // removes the way it could lie; it is NOT claimed to change the shell-vs-
+    // lattice instability recorded in the handoff, which was measured and is
+    // still open.
+    o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);
     return o;
 }
 

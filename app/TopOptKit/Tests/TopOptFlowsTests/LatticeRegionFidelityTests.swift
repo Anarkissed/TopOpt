@@ -323,6 +323,64 @@ final class LatticeRegionFidelityTests: XCTestCase {
                           + "picture would not move at all.")
     }
 
+    /// ★★ THE MARCH IS BIT-EXACT, AND THAT IS THE HALF OF THE PICTURE THAT IS
+    /// CURRENTLY TRUSTWORTHY.
+    ///
+    /// ★ WHY THIS EXISTS (maintainer, 2026-08-19: "I can see the lattices from
+    /// behind the back wall shown as artifacts"). The speckle he photographed was
+    /// measured to be lattice pixels — and the render producing them is NOT
+    /// REPRODUCIBLE: the same frame, same camera, same scene, twelve times in one
+    /// process with an OPAQUE shell gave 3,768 … 15,315 lattice pixels. A picture
+    /// that changes when nothing changes cannot be reasoned about, so the first
+    /// question was which participant is unstable.
+    ///
+    /// ★ THE BISECT: with the shell ABSENT the march returns the SAME number every
+    /// time, spread 0, zero pixel disagreements. So the march, the region field
+    /// and the clip are deterministic; the instability lives entirely in the
+    /// shell-vs-lattice resolution in the shared depth buffer. This test pins the
+    /// half that is exact, so a regression in the march cannot hide inside the
+    /// half that is not. The shell interaction is recorded as open — deliberately
+    /// NOT asserted here, because asserting a bound on a number that is currently
+    /// unstable would be a test that passes by luck.
+    @MainActor
+    func testTheMarchAloneIsBitExactAcrossRepeatedRenders() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                                    regions: [Self.hisSlab(mesh)],
+                                    whenEmpty: .latticeNothing)
+        guard let renderer = MeshRenderer(device: device, sampleCount: 1) else {
+            throw XCTSkip("MeshRenderer init: \(MeshRenderer.lastInitError ?? "?")")
+        }
+        try XCTSkipUnless(renderer.latticePipelinesDidBuild, "lattice MSL must compile")
+        renderer.setMesh(mesh)
+        renderer.camera.setOrientation(azimuth: 0.7, elevation: 0.4)
+        renderer.setBodyAlpha(0)          // ★ the shell OUT — that is the point
+        renderer.setLatticeScene(scene, token: 1)
+        renderer.latticeParams = LatticePreviewConfettiTests.hisParams()
+
+        var counts: [Int] = []
+        var first: [Bool]? = nil
+        var disagreements = 0
+        for _ in 0..<6 {
+            guard let d = renderer.latticeMaskDump(size: 384) else { continue }
+            counts.append(d.covered)
+            if let f = first {
+                for i in 0..<Swift.min(f.count, d.mask.count) where f[i] != d.mask[i] {
+                    disagreements += 1
+                }
+            } else { first = d.mask }
+        }
+        XCTAssertEqual(counts.count, 6, "every render must produce a dump")
+        XCTAssertGreaterThan(counts.first ?? 0, 100, "there must be a lattice to compare")
+        XCTAssertEqual(Set(counts).count, 1,
+                       "★ the march must be BIT-EXACT across repeated renders — got \(counts). "
+                       + "A preview that changes when nothing changes cannot be diagnosed, "
+                       + "and every measurement taken against it is worthless.")
+        XCTAssertEqual(disagreements, 0,
+                       "★ …and not merely equal in COUNT: the same pixels, every time.")
+    }
+
     /// ★ AND THE SAMPLE BLOCK IS UNTOUCHED. No regions ⇒ the clip is inert, not
     /// total: the settings page's cell has no declarations by construction and its
     /// entire subject is the lattice. A clip that defaulted to "remove everything"
