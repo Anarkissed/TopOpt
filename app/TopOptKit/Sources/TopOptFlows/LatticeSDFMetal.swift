@@ -204,24 +204,6 @@ public struct LatticeSDFScene {
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
 
-        // ★ THE STRESS COLOURS, on the occupancy's own grid, from the demand the
-        // radii already grade by — so the overlay cannot disagree with the
-        // geometry it is painted on.
-        if let d = self.demand {
-            // RGBA8, matching `makeTintTexture` — the same upload path the
-            // face-role tints already use, so there is one volume format here.
-            var rgb = [UInt8](repeating: 0, count: d.values.count * 4)
-            for i in 0..<d.values.count {
-                let c = LatticeStressTint.colour(fraction: Double(d.values[i]))
-                rgb[i * 4] = UInt8(max(0, min(255, c.x * 255)))
-                rgb[i * 4 + 1] = UInt8(max(0, min(255, c.y * 255)))
-                rgb[i * 4 + 2] = UInt8(max(0, min(255, c.z * 255)))
-                rgb[i * 4 + 3] = 255
-            }
-            self.stressRGB = rgb
-        } else {
-            self.stressRGB = nil
-        }
 
         // ★ Baked from the SAME list the occupancy was masked by, on the same
         // grid, in the same pass — so no third description of "the region" can
@@ -300,6 +282,37 @@ public struct LatticeSDFScene {
             like: occupancy, regions: regions,
             rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma)
             ?? LatticePreviewOccupancy.demand(like: occupancy, field: field)
+
+        // ★★ AFTER `demand` IS ASSIGNED, and that is the whole of a bug this very
+        // nearly shipped. `demand` is a `var` with an implicit nil, so baking the
+        // colours ABOVE its assignment read nil every time: `stressRGB` was always
+        // nil, the overlay texture was never built, and the flag that gates it
+        // (`stressTex != nil`) was never set — the stress overlay would have been
+        // a setting that travels the whole way and draws nothing, which is the
+        // exact defect this branch has now hit three times.
+        //
+        // ★ AND THE FRACTION IS ALREADY NORMALISED. `LatticePreviewOccupancy
+        // .demand` divides by the field's own peak and clamps to 0…1, so it maps
+        // straight onto `LatticeStressTint.colour` — the same ramp the shell's
+        // plot and the legend use, on the same scale.
+        // ★ THE STRESS COLOURS, on the occupancy's own grid, from the demand the
+        // radii already grade by — so the overlay cannot disagree with the
+        // geometry it is painted on.
+        if let d = self.demand {
+            // RGBA8, matching `makeTintTexture` — the same upload path the
+            // face-role tints already use, so there is one volume format here.
+            var rgb = [UInt8](repeating: 0, count: d.values.count * 4)
+            for i in 0..<d.values.count {
+                let c = LatticeStressTint.colour(fraction: Double(d.values[i]))
+                rgb[i * 4] = UInt8(max(0, min(255, c.x * 255)))
+                rgb[i * 4 + 1] = UInt8(max(0, min(255, c.y * 255)))
+                rgb[i * 4 + 2] = UInt8(max(0, min(255, c.z * 255)))
+                rgb[i * 4 + 3] = 255
+            }
+            self.stressRGB = rgb
+        } else {
+            self.stressRGB = nil
+        }
         self.bounds = mesh.bounds
         self.mesh = mesh
         // Counted here, where the grid is already in hand, so the banner never has to
