@@ -177,6 +177,100 @@ final class LatticeFaceOutlineTests: XCTestCase {
         }
     }
 
+    /// ★★ THE SHELL'S OWN SURFACE MUST BE DECISIVELY INSIDE THE REGION FIELD.
+    ///
+    /// ★ THE DEFECT THIS PINS (maintainer, 2026-08-19: "it made the face that the
+    /// primitive originated from become solid instead of a lattice … there are
+    /// still an *incredible* amount of artifacts and I don't understand why").
+    /// A face region starts AT the face — `s ∈ [0, depth]` with the origin on the
+    /// surface — so the region's front boundary was COINCIDENT with the shell's
+    /// own triangles. The analytic clip tested `s >= 0` exactly and did not care;
+    /// a SAMPLED field cannot. At the surface the baked field read +0.00, and
+    /// every shell fragment there tested `field <= 0` against interpolation error
+    /// of order the voxel size — a per-pixel coin flip. The face read solid, and
+    /// the fragments that flipped let a strut through as a speckle.
+    ///
+    /// The bake now pushes the slab's FRONT face one and a half voxels out of the
+    /// part, into the empty space the inward normal guarantees is there. Same
+    /// region, no coincidence.
+    func testTheShellSurfaceIsDecisivelyInsideTheRegionField() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let f = FaceID(15)
+        guard let resolved = LatticeRegionEmission.planeFor(face: f, in: mesh)
+        else { throw XCTSkip("face 15 has no planar geometry") }
+
+        func P(_ n: Int) -> SIMD3<Double> {
+            let k = Int(mesh.indices[n]) * 3
+            return SIMD3<Double>(Double(mesh.positions[k]), Double(mesh.positions[k+1]),
+                                 Double(mesh.positions[k+2]))
+        }
+        var seeds: [SIMD3<Double>] = []
+        var i = 0
+        while i + 2 < mesh.indices.count {
+            if i / 3 < mesh.faceIDs.count, mesh.faceIDs[i/3] == Int32(f) {
+                seeds.append((P(i) + P(i+1) + P(i+2)) / 3)
+            }
+            i += 3
+        }
+        XCTAssertGreaterThan(seeds.count, 40)
+
+        var occupancies: [Int] = []
+        for expand in [0.0, -3.0, -5.0] {
+            let spec = try XCTUnwrap(LatticeRegionEmission.spec(
+                for: resolved, role: .include, depthMM: 11.0, faceID: 15, expandMM: expand))
+            let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                                        regions: [spec], whenEmpty: .latticeNothing)
+            let g = try XCTUnwrap(scene.regionSDF)
+            func sample(_ p: SIMD3<Double>) -> Float {
+                let q = (SIMD3<Float>(p) - g.origin) / g.spacing
+                let x = Int(q.x.rounded()), y = Int(q.y.rounded()), z = Int(q.z.rounded())
+                guard x >= 0, x < g.nx, y >= 0, y < g.ny, z >= 0, z < g.nz else { return 9e9 }
+                return g.values[(z * g.ny + y) * g.nx + x]
+            }
+            // Every seed that the region actually covers must read decisively
+            // negative AT THE SURFACE, not ~0. One voxel of margin is the bar.
+            let voxel = Swift.min(g.spacing.x, Swift.min(g.spacing.y, g.spacing.z))
+            // ★ SEEDS WELL CLEAR OF THE RIM ONLY. Near the outline's edge the
+            // field MUST cross zero — that is the in-plane boundary doing its job,
+            // and including those would assert the region has no edge. The defect
+            // being pinned is about the FRONT face, so restrict to points whose
+            // only nearby boundary is that one: more than two voxels inside the
+            // outline in plane.
+            let n3 = simd_normalize(spec.normal)
+            let (bu, bv) = LatticeRegionMask.basis(n3)
+            var covered = 0, decisive = 0
+            for seed in seeds {
+                let d = sample(seed)
+                guard d < 9e8 else { continue }
+                let rel = seed - spec.origin
+                let uv = SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv))
+                let inPlane = LatticeFaceOutline.signedDistance(uv, loops: spec.outlineLoops)
+                    - spec.inPlaneOffsetMM
+                guard inPlane < -2.0 * Double(voxel) else { continue }
+                covered += 1
+                if d <= -voxel { decisive += 1 }
+            }
+            XCTAssertGreaterThan(covered, 10, "expand \(expand): the region must cover the face")
+            XCTAssertEqual(decisive, covered,
+                           "★ expand \(expand): every shell fragment the region covers must "
+                           + "sample the field a full voxel INSIDE. At +0.00 the discard is a "
+                           + "coin flip and the face reads solid with strut speckles through it.")
+            occupancies.append(scene.occupancy.values.filter { $0 > 0.5 }.count)
+        }
+        // ★ AND THE NUDGE MUST NOT HAVE MOVED THE REGION. The expand still bites,
+        // monotonically, and only in plane.
+        XCTAssertTrue(occupancies[0] > occupancies[1] && occupancies[1] > occupancies[2],
+                      "a negative expand must keep shrinking the latticed volume: \(occupancies)")
+        print("""
+
+        ================================================================================
+        THE SHELL SURFACE vs THE REGION FIELD — face 15
+          occupancy at expand 0 / -3 / -5 mm ... \(occupancies)
+        ★ shrinks in plane only; the field at the surface is a full voxel inside.
+        ================================================================================
+        """)
+    }
+
     /// A true rectangle is unchanged — the outline must not "fix" what was right.
     func testARectangularFaceIsStillExactlyItsRectangle() throws {
         let mesh = try LatticePreviewConfettiTests.hisMesh()

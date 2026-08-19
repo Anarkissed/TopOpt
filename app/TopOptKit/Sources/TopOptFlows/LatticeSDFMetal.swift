@@ -163,6 +163,37 @@ public struct LatticeSDFScene {
         // grid, in the same pass — so no third description of "the region" can
         // exist to drift from the other two.
         if regions.contains(where: { $0.role == .include }) {
+            // ★★ THE SLAB'S FRONT FACE IS NUDGED OUT OF THE PART BEFORE BAKING,
+            // AND THIS IS THE WHOLE OF "the face went solid, with an incredible
+            // amount of artifacts" (maintainer, 2026-08-19).
+            //
+            // ★ A FACE REGION STARTS **AT** THE FACE — `s ∈ [0, depth]` with the
+            // origin ON the surface. So the region's front boundary is COINCIDENT
+            // with the shell's own triangles. The old analytic clip evaluated
+            // `s >= 0` exactly and that was harmless; a SAMPLED field cannot be
+            // exact there. Measured at the surface the baked field reads +0.00,
+            // and the shell fragment sitting on it tests `field <= 0` against
+            // interpolation error of order the voxel size (1.75 mm here) — a
+            // per-pixel coin flip. Most fragments stayed, so the face read SOLID;
+            // the ones that flipped let a strut through, which is the speckle.
+            //
+            // ★ MOVING THE FRONT FACE OUTWARD COSTS NOTHING. `normal` points INTO
+            // the part, so `s < 0` is empty space outside it: extending there adds
+            // no material the march could draw (the part SDF still clips it) and
+            // no hole the shell could cut (there is no shell out there). It only
+            // ends the coincidence, so the shell's surface is unambiguously INSIDE
+            // the region and discards cleanly. The INNER face — the depth the user
+            // dragged — is untouched.
+            let pad = 1.5 * Double(Swift.min(solid.spacing.x,
+                                             Swift.min(solid.spacing.y, solid.spacing.z)))
+            let padded: [LatticeRegionSpec] = regions.map { r in
+                guard r.kind == .face, r.role == .include else { return r }
+                var o = r
+                let n = simd_normalize(SIMD3<Double>(r.normal))
+                o.origin = r.origin - n * pad
+                o.depthMM = r.depthMM + pad
+                return o
+            }
             var f = solid
             var i = 0
             for k in 0..<solid.nz {
@@ -172,7 +203,7 @@ public struct LatticeSDFScene {
                             Double(solid.origin.x) + Double(x) * Double(solid.spacing.x),
                             Double(solid.origin.y) + Double(j) * Double(solid.spacing.y),
                             Double(solid.origin.z) + Double(k) * Double(solid.spacing.z))
-                        f.values[i] = Float(LatticeRegionMask.signedDistance(p, regions: regions))
+                        f.values[i] = Float(LatticeRegionMask.signedDistance(p, regions: padded))
                         i += 1
                     }
                 }

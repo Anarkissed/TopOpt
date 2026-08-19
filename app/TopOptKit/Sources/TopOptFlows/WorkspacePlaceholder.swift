@@ -68,6 +68,18 @@ public struct WorkspacePlaceholder: View {
     @State private var showStrutPreview = false
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
+    /// ★★ WHETHER A STRUT BAKE IS IN FLIGHT (maintainer, 2026-08-19: "There is
+    /// also a huge delay between the time there is a change and the actual
+    /// modification being shown. As in 10 seconds or so. If this is unavoidable,
+    /// there needs to be some kind of animation showing it's running").
+    ///
+    /// ★ THE EXISTING BANNER COULD NOT SAY THIS. `LatticePreviewBanner` reports
+    /// "Building the strut preview" only when `strutScene` is nil — true on the
+    /// FIRST bake and never again. Every REBAKE (a depth drag, an expand, a cell
+    /// size) keeps the previous scene on screen while the new one is computed, so
+    /// the one case the user actually waits through was the one case that said
+    /// nothing at all.
+    @State private var strutBakeInFlight = false
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When a project has saved variants, results show by default; tapping "See
@@ -983,6 +995,12 @@ public struct WorkspacePlaceholder: View {
                 if stressViewOn, latticeStressField != nil { stressLegend }
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed { simRunningBanner }
+                // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
+                // both sit top-centre, and two capsules in one place is worse
+                // than the more specific one winning. The solve is the longer
+                // wait and the more surprising, so it takes precedence.
+                if strutBakeInFlight, showStrutPreview,
+                   !(latticeSimIsRunning && !simBannerDismissed) { strutBakingBanner }
             }
             // ★ AND NEITHER ARE THE LOAD PILLS — the weight readout and its
             // Gravity/Push/Pull switch. The maintainer found the whole load editor
@@ -2897,6 +2915,39 @@ public struct WorkspacePlaceholder: View {
     ///
     /// ★ AND A NEW SOLVE GETS A FRESH BANNER — `startStressSolveIfNeeded` clears
     /// the dismissal, so dismissing one run's banner does not silence the next.
+    /// ★ THE REBAKE'S OWN BANNER, deliberately a sibling of `simRunningBanner`
+    /// rather than a variant of it: they report different work (an FEA vs a
+    /// geometry bake) and can be true at once. It carries no dismiss X — the wait
+    /// is seconds, not minutes, and a dismissed banner would leave the user
+    /// staring at stale struts with no way to tell.
+    private var strutBakingBanner: some View {
+        HStack(spacing: DS.Space.s) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .controlSize(.small)
+                .tint(DS.Color.accent.color)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Rebuilding the lattice")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Text("Your change is being applied to the strut preview.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
+        }
+        .padding(.vertical, DS.Space.s)
+        .padding(.horizontal, DS.Space.m)
+        .background(Capsule().fill(DS.Surface.panel.color)
+            .overlay(Capsule().strokeBorder(
+                DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, PageChrome.edge)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(DS.Motion.emphasized, value: strutBakeInFlight)
+        .accessibilityIdentifier("strut-baking-banner")
+    }
+
     private var simRunningBanner: some View {
         HStack(spacing: DS.Space.s) {
             // The animation: a ring that spins for as long as the solve runs.
@@ -3143,6 +3194,7 @@ public struct WorkspacePlaceholder: View {
         // back out as exactly that density.
         let span = latticeProxy.params.densitySpan
         let gamma = max(0.05, latticeProxy.params.gamma)
+        strutBakeInFlight = true
         DispatchQueue.global(qos: .userInitiated).async {
             let scene = LatticeSDFScene(mesh: mesh, field: field,
                                         latticeID: latticeID, regions: regions,
@@ -3157,6 +3209,7 @@ public struct WorkspacePlaceholder: View {
             DispatchQueue.main.async {
                 strutScene = scene
                 strutSceneToken += 1
+                strutBakeInFlight = false
             }
         }
     }
