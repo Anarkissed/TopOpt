@@ -271,6 +271,87 @@ final class LatticeFaceOutlineTests: XCTestCase {
         """)
     }
 
+    /// ★★ THE SKIN LEAVES A SOLID WALL — the maintainer's "make the walls thicker",
+    /// done with the setting he already chose rather than by faking geometry.
+    ///
+    /// ★ THE MEASUREMENT BEHIND IT: the plate under his face 15 is 9.75 mm thick
+    /// and he declared an 11.0 mm slab. The region is DEEPER THAN THE WALL, so the
+    /// lattice ran clean through and out the far side and no solid material was
+    /// left in that plate at all — "the walls of shell are impossibly thin" was
+    /// literally true, because there was no wall, only the mesh's zero-thickness
+    /// surface. His Finish has said `fullSkin` throughout; the preview simply
+    /// never read `boundary`.
+    ///
+    /// The skin is cut out of the region field itself (`max(region, partSDF +
+    /// skin)`), so ONE field still carries the whole rule: the march stops short
+    /// of the surface and the shell — which discards where that field is negative
+    /// — SURVIVES in the band. The surviving band is the wall.
+    func testTheSkinLeavesASolidWallAtTheSurface() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        guard let resolved = LatticeRegionEmission.planeFor(face: FaceID(15), in: mesh),
+              let spec = LatticeRegionEmission.spec(for: resolved, role: .include,
+                                                    depthMM: 11.0, faceID: 15)
+        else { throw XCTSkip("face 15 has no planar geometry") }
+
+        func P(_ n: Int) -> SIMD3<Double> {
+            let k = Int(mesh.indices[n]) * 3
+            return SIMD3<Double>(Double(mesh.positions[k]), Double(mesh.positions[k+1]),
+                                 Double(mesh.positions[k+2]))
+        }
+        var seeds: [SIMD3<Double>] = []
+        var i = 0
+        while i + 2 < mesh.indices.count {
+            if i/3 < mesh.faceIDs.count, mesh.faceIDs[i/3] == 15 {
+                seeds.append((P(i)+P(i+1)+P(i+2))/3)
+            }
+            i += 3
+        }
+        let seed = seeds[seeds.count/2]
+        let n = simd_normalize(spec.normal)
+
+        func fieldAt(_ skin: Double, _ depth: Double) -> Float {
+            let sc = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                                     regions: [spec], whenEmpty: .latticeNothing,
+                                     skinMM: skin)
+            guard let g = sc.regionSDF else { return 9e9 }
+            let p = seed + n * depth
+            let q = (SIMD3<Float>(p) - g.origin) / g.spacing
+            let a = Int(q.x.rounded()), b = Int(q.y.rounded()), c = Int(q.z.rounded())
+            guard a >= 0, a < g.nx, b >= 0, b < g.ny, c >= 0, c < g.nz else { return 9e9 }
+            return g.values[(c * g.ny + b) * g.nx + a]
+        }
+        // With a 2 mm skin the first 2 mm must be OUTSIDE the latticed volume …
+        XCTAssertGreaterThan(fieldAt(2.0, 0.0), 0,
+                             "★ a skin must leave the surface itself SOLID")
+        XCTAssertGreaterThan(fieldAt(2.0, 1.0), 0,
+                             "★ …and the whole band, not just the outermost sample")
+        // … and past it the lattice resumes.
+        XCTAssertLessThan(fieldAt(2.0, 5.0), 0,
+                          "★ past the skin the region must lattice again")
+        // With NO skin the surface is inside the region — and still clear of the
+        // sampling ambiguity, because the front-face pad is not cancelled by a
+        // zero skin.
+        XCTAssertLessThan(fieldAt(0.0, 0.0), -0.5,
+                          "★ skin 0 must keep the front-face pad: `max(region, "
+                          + "partSDF + 0)` would pin the field to ~0 at the surface "
+                          + "and re-create the coin-flip discard it exists to stop")
+    }
+
+    /// The boundary treatment decides it, and only `fullSkin` leaves a face skin.
+    func testOnlyFullSkinLeavesAFaceSkin() {
+        XCTAssertEqual(LatticeBoundaryTreatment.none.faceSkinMM(wallRingMM: 1.26), 0)
+        XCTAssertEqual(LatticeBoundaryTreatment.rim.faceSkinMM(wallRingMM: 1.26), 0,
+                       "a rim closes the BORDER — it is not a skin across the face")
+        XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.faceSkinMM(wallRingMM: 1.26), 1.26,
+                       accuracy: 1e-12)
+        // And the ring is the slicer's own: outer + (loops-1)·inner.
+        var pp = PrintParams.fdmDefault
+        pp.wallLineWidthOuterMM = 0.46
+        pp.wallLineWidthInnerMM = 0.42
+        pp.wallLoops = 3
+        XCTAssertEqual(pp.wallRingMM, 0.46 + 2 * 0.42, accuracy: 1e-12)
+    }
+
     /// A true rectangle is unchanged — the outline must not "fix" what was right.
     func testARectangularFaceIsStillExactlyItsRectangle() throws {
         let mesh = try LatticePreviewConfettiTests.hisMesh()

@@ -28,6 +28,23 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
     /// Rim + woven face skin — the anchored diagrid (`skin: "diagrid"`).
     case fullSkin
 
+    /// ★ THE SOLID FACE SKIN THIS TREATMENT LEAVES, in mm, for a given printed
+    /// wall ring. `rim` closes the BORDER only — it leaves no skin across the
+    /// face — and `none` leaves nothing, so both are 0 and the preview is
+    /// unchanged for them.
+    ///
+    /// The number for `fullSkin` is the ring the slicer actually lays down:
+    /// `outer + (wallLoops - 1) · inner`, which is the same expression
+    /// `PrintParams` documents for the wall-ring term. A skin thinner than the
+    /// walls the printer will produce would be a preview promising a part the
+    /// machine cannot make.
+    public func faceSkinMM(wallRingMM: Double) -> Double {
+        switch self {
+        case .none, .rim: return 0
+        case .fullSkin: return Swift.max(0, wallRingMM)
+        }
+    }
+
     /// The exact core job-schema value (`job.lattice.skin`).
     public var jobSkinValue: String {
         switch self {

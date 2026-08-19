@@ -3194,6 +3194,11 @@ public struct WorkspacePlaceholder: View {
         // back out as exactly that density.
         let span = latticeProxy.params.densitySpan
         let gamma = max(0.05, latticeProxy.params.gamma)
+        // ★ THE FINISH SETTING, WHICH THE PREVIEW HAS NEVER READ. Read on the main
+        // actor with the rest, and from the SAME print parameters the run is
+        // costed with, so the skin drawn is the wall the printer would lay down.
+        let skinMM = project.lattice.boundary.faceSkinMM(
+            wallRingMM: project.printParams.wallRingMM)
         strutBakeInFlight = true
         DispatchQueue.global(qos: .userInitiated).async {
             let scene = LatticeSDFScene(mesh: mesh, field: field,
@@ -3205,6 +3210,7 @@ public struct WorkspacePlaceholder: View {
                                         // declared", and the honest picture of
                                         // that is a solid part.
                                         whenEmpty: .latticeNothing,
+                                        skinMM: skinMM,
                                         skippedFaces: skippedFaces)
             DispatchQueue.main.async {
                 strutScene = scene

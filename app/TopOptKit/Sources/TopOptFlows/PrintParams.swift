@@ -51,6 +51,15 @@ public struct PrintParams: Equatable, Sendable, Codable {
     /// A bead width, not the nozzle diameter. This is the core's historical single
     /// `wall_line_width_mm`.
     public var wallLineWidthInnerMM: Double
+
+    /// ★ THE SOLID WALL RING THE SLICER LAYS DOWN, in mm — `outer + (wallLoops-1)
+    /// · inner`, the expression `wallLineWidthOuterMM` documents just above. Named
+    /// here so the lattice preview's skin and the knockdown's wall term cannot
+    /// drift into two spellings of one number.
+    public var wallRingMM: Double {
+        Swift.max(0, wallLineWidthOuterMM
+                     + Double(Swift.max(0, wallLoops - 1)) * wallLineWidthInnerMM)
+    }
     /// Extrusion line width (mm) assumed for a LATTICE STRUT — the printability
     /// reference the lattice path sends to core as `min_extrudable_width_mm`, which
     /// sets the strut floor and, through it, the derived cell size.

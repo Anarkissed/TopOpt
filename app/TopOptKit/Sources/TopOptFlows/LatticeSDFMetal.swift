@@ -140,6 +140,30 @@ public struct LatticeSDFScene {
                 // task). Once the preview masks to regions, a skipped face means it
                 // draws LESS than the user marked — and doing that silently is the
                 // failure this parameter exists to prevent.
+                // ★★ THE SOLID SKIN THE FINISH SETTING ASKS FOR (maintainer,
+                // 2026-08-19: "why you can't make the *shell* thickness of all 3d
+                // models thicker than the single pixel it seems to be? Thats why
+                // the lattice is peeking through - the walls of shell are
+                // impossibly thin").
+                //
+                // ★ HE WAS RIGHT, AND THE WALL IS NOT THIN — IT IS GONE. Measured
+                // on his own part: the plate under face 15 is 9.75 mm thick and he
+                // declared an 11.0 mm slab. The region is DEEPER THAN THE WALL, so
+                // the lattice runs clean through and out the far side, leaving no
+                // solid material anywhere in that plate. What remains is the
+                // mesh's zero-thickness surface — exactly the "single pixel" he
+                // described. Struts then sit coincident with that surface on BOTH
+                // sides, which is where the speckle and the see-through come from.
+                //
+                // ★ AND HIS FINISH IS ALREADY "SKIN". `LatticeBoundaryTreatment`
+                // has said `fullSkin` the whole time; the preview simply never
+                // read it (`boundary` reached neither `LatticeProxyParams` nor any
+                // shader). So the honest fix is not to fake thicker geometry — it
+                // is to draw the skin he already asked for, at the wall thickness
+                // his print parameters actually produce.
+                //
+                // 0 ⇒ no skin, which is `none`/`rim` and every pre-existing call.
+                skinMM: Double = 0,
                 skippedFaces: Int = 0) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
         // ★★ THE PART'S INTERIOR AND THE LATTICED INTERIOR ARE TWO DIFFERENT
@@ -159,6 +183,9 @@ public struct LatticeSDFScene {
         self.regions = regions
         self.occupancy = LatticeRegionMask.clipped(
             solid, to: regions, whenEmpty: whenEmpty)
+        self.partSDF = LatticePreviewOccupancy.signedDistance(
+            positions: mesh.positions, indices: mesh.indices, like: occupancy)
+
         // ★ Baked from the SAME list the occupancy was masked by, on the same
         // grid, in the same pass — so no third description of "the region" can
         // exist to drift from the other two.
@@ -194,6 +221,7 @@ public struct LatticeSDFScene {
                 o.depthMM = r.depthMM + pad
                 return o
             }
+            let partSDFValues = self.partSDF.values
             var f = solid
             var i = 0
             for k in 0..<solid.nz {
@@ -203,7 +231,22 @@ public struct LatticeSDFScene {
                             Double(solid.origin.x) + Double(x) * Double(solid.spacing.x),
                             Double(solid.origin.y) + Double(j) * Double(solid.spacing.y),
                             Double(solid.origin.z) + Double(k) * Double(solid.spacing.z))
-                        f.values[i] = Float(LatticeRegionMask.signedDistance(p, regions: padded))
+                        // ★ REGION ∩ {deeper than the skin}. `max` of two SDFs is
+                        // the intersection, so ONE field still carries the whole
+                        // rule and BOTH readers get the skin for free: the march
+                        // stops `skinMM` short of the surface, and the shell —
+                        // which discards where this field is negative — SURVIVES
+                        // in that band. That surviving band IS the solid wall.
+                        let region = LatticeRegionMask.signedDistance(p, regions: padded)
+                        // ★ AND ONLY WHEN THERE IS A SKIN. `max(region, partSDF + 0)`
+                        // pins the field to ~0 AT the surface, which is exactly the
+                        // coincidence the front-face pad above exists to break — a
+                        // skin of zero would have quietly undone it. With a skin the
+                        // pad is redundant anyway: the zero crossing moves `skinMM`
+                        // inside the wall, which is a far bigger margin than a voxel.
+                        f.values[i] = skinMM > 0
+                            ? Float(Swift.max(region, Double(partSDFValues[i]) + skinMM))
+                            : Float(region)
                         i += 1
                     }
                 }
@@ -212,8 +255,6 @@ public struct LatticeSDFScene {
         } else {
             self.regionSDF = nil
         }
-        self.partSDF = LatticePreviewOccupancy.signedDistance(
-            positions: mesh.positions, indices: mesh.indices, like: occupancy)
         // ★ A STATED PER-REGION DENSITY OUTRANKS THE STRESS FIELD. It is the
         // user's own number for that region; grading it by stress instead would
         // draw struts at a density they did not ask for and the run will not
