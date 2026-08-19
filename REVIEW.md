@@ -142,6 +142,52 @@ because the log is block-buffered and ends mid-line — the true location only c
 out of a process sample. `app/scripts/build_core.sh` is running now; the app suite
 cannot be trusted until it finishes.
 
+## A SECOND artifact, found by looking — NOT fixed, and characterised
+
+The one you reported is fixed. But you told me to look rather than assert, so I put
+the build on the simulator and rotated your L-bracket around, and there is a
+**second, different** artifact underneath. I am not going to pretend I fixed it.
+
+**What it looks like.** Turn the strut preview on and look at the part from BELOW.
+The underside of the latticed slab carries dark speckle — sparse isolated dots at
+one angle, dense mottling at another. From above, and from either side, it is clean.
+
+**What I established about it:**
+
+- It is **the march, not the mesh**. Toggling the strut preview OFF makes the same
+  surface perfectly clean — no dots at all. So nothing is wrong with his geometry or
+  with the region highlight.
+- It is **deterministic**. Five consecutive frames of the live app are byte-identical
+  (`md5` on `simctl` captures), and three more after a camera nudge. The nudge
+  changed the hash, which proves the capture reflects live rendering rather than a
+  stale buffer — so "identical" means stable, not frozen.
+- It is therefore **NOT the bug I fixed**, which was undefined memory and changed
+  every frame. It is also not caused by that fix: an undeclared attachment can only
+  have put garbage IN, and this survives with the attachment correctly declared.
+
+**My hypothesis, stated as a hypothesis.** The INNER face of a face region is the
+depth you dragged, and the bake deliberately does not pad it (padding it would
+lattice material you never declared — the front face is padded 1.5 voxels precisely
+because it can be). On this part that inner face is coincident with the slab's
+bottom surface, and the shell's discard test is
+`regionTex.sample(...).r <= 0.0` — a linear sample of a field that is ~0 right
+there. That is a per-pixel coin flip, which is what speckle looks like.
+
+**What I tried, and why it is not in the tree.** I biased that test by half a voxel
+(`< -eps`) so the shell is only dropped when clearly inside, erring toward keeping
+the shell. I rebuilt, put it on the simulator, and looked: **the speckle was still
+there.** So I reverted it. It is unverified and it did not work, and I would rather
+hand you a clean tree than a shader edit I cannot stand behind.
+
+**What I would do next, and why not by screenshot.** Two screenshots at different
+camera angles cannot measure this — I could not even tell you whether my attempt
+made it worse, because the framing changed. This needs the same treatment the first
+artifact got: a headless test that renders from the far side at a FIXED camera and
+counts shell/lattice disagreement pixels, so the fix is chosen against a number.
+Then the real question can be decided properly — whether to bias the test, to
+tie-break consistently between the two readers of the field, or to give the inner
+face a pad that the CLIP honours but the EMITTED region does not.
+
 ## The notification's equal padding (D3)
 
 Deferred at your instruction after three failed attempts. The last approach
