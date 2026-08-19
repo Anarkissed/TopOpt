@@ -191,13 +191,33 @@ not the mechanism, and a bias on that test is not the fix.
 the app. The numbers above are from the corrected run, where they move; a sweep whose
 output does not change with its input is measuring nothing.)
 
-**What I would look at next.** The strongest remaining difference between your
-L-bracket and this fixture is the DENSITY SOURCE. Your project runs sim/graded
-density with a design box; every probe above ran `field: nil`, a uniform lattice. A
-graded field drives per-cell strut radii, and radii near the thin end produce
-sub-pixel geometry — which is a far better candidate for sparse specks than a
-plane coincidence that measurably does not speckle. The next attempt should drive a
-graded field on this fixture, and only then choose a fix.
+**The graded-density idea is refuted too.** That was my next-best candidate — your
+project runs sim/graded density and every earlier probe ran `field: nil`. A/B on the
+same scene, four camera angles:
+
+    UNIFORM  az 0.70 el  0.40 ... 4,739 px, 2 comps, 1 small
+    GRADED   az 0.70 el  0.40 ... 4,827 px, 1 comp,  0 small
+    UNIFORM  az 0.70 el -1.15 ... 5,764 px, 2 comps, 1 small
+    GRADED   az 0.70 el -1.15 ... 5,852 px, 1 comp,  0 small
+    UNIFORM  az 2.36 el  0.15 ... 7,776 px, 3 comps, 2 small
+    GRADED   az 2.36 el  0.15 ... 8,060 px, 1 comp,  0 small
+
+Graded produces FEWER specks, not more. And the absolute numbers are the real
+finding: 0-2 small components everywhere, which is nothing — a couple of pixels of
+genuine silhouette detail.
+
+**So: the defect does not reproduce on `M2_verticalStand` under any condition I can
+reach** — any angle, any region depth including exact coincidence with the far
+surface, uniform or graded. It reproduces immediately on `l bracket 3` in the app.
+
+That is now a conclusion rather than an assumption, and it points at the part. The
+remaining difference is the L-bracket's own geometry and its real project settings
+(sim density, a design box, `Minimize plastic`, and the graded/design-box
+combination that its Optimize button currently REFUSES). Reproducing this needs that
+document driven through the same path the app drives, which is the thing I stopped
+at — it is your data, and whether it becomes a checked-in fixture is your call, not
+one I should make at 8am without asking. `hisMesh()` already loads your
+`M2_verticalStand.step`, so there is precedent either way.
 
 **Nothing about this is in the tree.** Three probe files were written and all three
 deleted: two metrics that returned clean numbers on a dirty picture, and this sweep.
