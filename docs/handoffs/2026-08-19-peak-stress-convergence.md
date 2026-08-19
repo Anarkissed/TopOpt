@@ -355,6 +355,15 @@ been a measurement. Reported as a choice, not as a result.
 | R8 cost measured directly, build type verified | §6 | **PASS** |
 | R9 no placeholders, no scratch at the root, separate commit for review response | — | **PASS** |
 
+★ **One thing the R6 script did wrong on its first run, fixed and written down.**
+It was adapted from `evidence/2026-08-08-.../r1_byte_identity.sh`, whose restore
+trap ends with `git checkout HEAD -- core/CMakeLists.txt`. That task's CMake change
+was committed; this one's was not, so the trap **silently discarded the very change
+it had just proved harmless** — the bar passed and then deleted the work. The
+script now snapshots the file and restores the snapshot. Any cleanup that restores
+from a commit rather than from what it found will do this to any uncommitted
+change, and a passing bar is exactly when nobody looks.
+
 ---
 
 ## In plain language
