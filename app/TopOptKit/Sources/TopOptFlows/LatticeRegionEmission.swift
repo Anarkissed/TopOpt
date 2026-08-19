@@ -44,6 +44,22 @@ public enum LatticeRegionEmission {
                    outlineLoops: [[SIMD2<Double>]] = [])
     }
 
+    /// The planar `ResolvedFace` the app builds, in ONE place, so a test cannot
+    /// accidentally construct it in a different frame from production's.
+    public static func planeFor(face: FaceID, in mesh: ViewerMesh) -> ResolvedFace? {
+        guard let geo = mesh.faceGeometry(Int32(face)), geo.isPlane,
+              let o = mesh.facePlaneOutline(face,
+                                            planeNormal: SIMD3<Float>(geo.planeNormal),
+                                            planeOrigin: SIMD3<Float>(geo.planeOrigin))
+        else { return nil }
+        return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
+                      halfUMM: Double(o.halfU), halfWMM: Double(o.halfV),
+                      outlineLoops: LatticeFaceOutline.loops(
+                          face: face, in: mesh,
+                          normal: -ManualPrimitive.unit(geo.planeNormal),
+                          origin: SIMD3<Double>(o.center)))
+    }
+
     public struct Result: Equatable, Sendable {
         public let regions: [LatticeRegionSpec]
         /// Faces that could not be synthesised (no usable B-rep geometry) — counted

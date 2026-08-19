@@ -2150,16 +2150,13 @@ public final class ProjectModel: ObservableObject {
                                      spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
                 }
                 if geo.isPlane {
-                    guard let o = mesh.facePlaneOutline(
-                        f, planeNormal: SIMD3<Float>(geo.planeNormal),
-                        planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
-                    // ★ THE FACE'S OWN BOUNDARY, not the box around it.
-                    let loops = LatticeFaceOutline.loops(
-                        face: f, in: mesh, normal: geo.planeNormal,
-                        origin: SIMD3<Double>(o.center))
-                    return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
-                                  halfUMM: Double(o.halfU), halfWMM: Double(o.halfV),
-                                  outlineLoops: loops)
+                    // ★ THE ONE BUILDER — see `LatticeRegionEmission.planeFor`. It
+                    // owns the frame the outline is expressed in, so production and
+                    // the tests cannot construct it differently. They did: the loops
+                    // were built on the OUTWARD normal while containment is tested
+                    // on the INWARD one, and `basis` flips `u` with the normal, so
+                    // the region landed mirrored.
+                    return LatticeRegionEmission.planeFor(face: f, in: mesh)
                 }
                 return nil
         }

@@ -80,6 +80,23 @@ public enum LatticeRegionMask {
             guard simd_length(n) > 0.5, region.depthMM > 0 else { return big }
             let d = p - region.origin
             let s = simd_dot(d, n)
+            let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
+            // ★ THE OUTLINE DISTANCE IS THE EXPENSIVE TERM — O(outline vertices)
+            // per voxel, and the field is baked over the whole part bbox. Measured
+            // on his face 15 (63 vertices) it took the scene bake from 3.70 s to
+            // 17.45 s, a 4.7x regression on something that rebakes whenever a
+            // setting moves.
+            //
+            // ★ OUTSIDE THE DEPTH SLAB IT IS NOT NEEDED. The extrusion is
+            // `length(max(q,0)) + min(max(q),0)` with q = (inPlane, along), so
+            // whenever `along > 0` the true distance is at least `along`.
+            // Returning `along` there is an UNDER-estimate of a distance, which is
+            // the safe direction for both readers: a sphere trace takes a shorter
+            // step (never overshoots), and the `<= 0` inside-test is unaffected
+            // because `along > 0` already means outside. Most of the bbox is far
+            // from an 11 mm slab, so this skips the polygon for the large majority
+            // of voxels.
+            if along > 0 { return along }
             let (u, v) = basis(n)
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
             let inPlane: Double
@@ -90,7 +107,6 @@ public enum LatticeRegionMask {
                 let q = SIMD2<Double>(abs(uv.x) - region.halfUMM, abs(uv.y) - region.halfWMM)
                 inPlane = simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
             }
-            let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
             let q = SIMD2<Double>(inPlane, along)
             return simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
         case .bolt:

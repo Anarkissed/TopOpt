@@ -123,6 +123,60 @@ final class LatticeFaceOutlineTests: XCTestCase {
                        + "reached the mask; near 0 would mean it emptied the region.")
     }
 
+    /// ★★ THE FACE'S OWN SURFACE MUST BE INSIDE ITS OWN REGION.
+    ///
+    /// ★ THE TEST THAT WAS MISSING, AND THE BUG IT WOULD HAVE CAUGHT. Every
+    /// earlier assertion here compared AREAS — the outline enclosed the right
+    /// amount of face. Area is invariant under a reflection, so all of them
+    /// passed while the region was MIRRORED: `LatticeRegionMask.basis` derives
+    /// `u = unit(cross(n, a))`, and `LatticeRegionEmission.spec` flips the normal
+    /// to reach into the part, so loops built on the OUTWARD normal came out
+    /// reflected about v. On screen the lattice landed beside the face instead of
+    /// on it, overlapping only in a narrow band.
+    ///
+    /// This assertion cannot be satisfied by a mirror: it walks the face's own
+    /// triangle centroids, pushes each one just inside the slab, and requires the
+    /// REGION to contain it. It is expressed in world space, so it is independent
+    /// of whichever in-plane basis anyone chose.
+    func testTheFacesOwnSurfaceIsInsideItsOwnRegion() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        for f in [FaceID(15), FaceID(2)] {
+            guard let resolved = LatticeRegionEmission.planeFor(face: f, in: mesh),
+                  let spec = LatticeRegionEmission.spec(for: resolved, role: .include,
+                                                        depthMM: 11.0, faceID: Int(f))
+            else { continue }
+            XCTAssertFalse(spec.outlineLoops.isEmpty, "face \(f) must carry an outline")
+
+            var tested = 0, inside = 0
+            var i = 0
+            func P(_ n: Int) -> SIMD3<Double> {
+                let k = Int(mesh.indices[n]) * 3
+                return SIMD3<Double>(Double(mesh.positions[k]), Double(mesh.positions[k+1]),
+                                     Double(mesh.positions[k+2]))
+            }
+            while i + 2 < mesh.indices.count {
+                if i / 3 < mesh.faceIDs.count, mesh.faceIDs[i / 3] == Int32(f) {
+                    let c = (P(i) + P(i+1) + P(i+2)) / 3
+                    // 1 mm along the slab's own direction — comfortably inside a
+                    // depth of 11 mm, and off the boundary where a centroid on the
+                    // rim could legitimately read either way.
+                    let p = c + simd_normalize(spec.normal) * 1.0
+                    tested += 1
+                    if LatticeRegionMask.contains(p, region: spec) { inside += 1 }
+                }
+                i += 3
+            }
+            XCTAssertGreaterThan(tested, 40, "face \(f) must have a real tessellation")
+            let frac = Double(inside) / Double(tested)
+            print(String(format: "  face %3d: %d of %d face centroids inside its own region (%.1f%%)",
+                         Int(f), inside, tested, 100 * frac))
+            XCTAssertGreaterThan(frac, 0.97,
+                                 "★ face \(f): the face's OWN surface must lie inside the "
+                                 + "region that face declares. A mirrored outline scores "
+                                 + "near chance here while every AREA assertion still passes.")
+        }
+    }
+
     /// A true rectangle is unchanged — the outline must not "fix" what was right.
     func testARectangularFaceIsStillExactlyItsRectangle() throws {
         let mesh = try LatticePreviewConfettiTests.hisMesh()
