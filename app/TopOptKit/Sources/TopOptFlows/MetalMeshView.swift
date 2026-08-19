@@ -3434,6 +3434,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         set { latticeLayer?.stressOverlay = newValue }
     }
 
+    /// ★ THE BOUNDARY DRESSING (rim / diagrid) the Finish setting asks for.
+    var latticeDressingLevel: Float {
+        get { latticeLayer?.dressingLevel ?? 0 }
+        set { latticeLayer?.dressingLevel = newValue }
+    }
+
     var latticeParams: LatticeProxyParams {
         get { latticeLayer?.params ?? LatticeProxyParams() }
         set { latticeLayer?.params = newValue }
@@ -4517,15 +4523,18 @@ public struct LatticeLayerInputs: Equatable {
     /// only while BOTH the strut preview and the stress view are up. Defaulted so
     /// every existing construction is unchanged.
     public var stressOverlay: Bool = false
+    /// 0 none · 1 rim · 2 diagrid — see `LatticeBoundaryTreatment.previewDressingLevel`.
+    public var dressingLevel: Float = 0
 
     public init(scene: LatticeSDFScene, params: LatticeProxyParams,
                 sceneToken: Int, faceTints: [FaceID: SIMD4<Float>],
-                stressOverlay: Bool = false) {
+                stressOverlay: Bool = false, dressingLevel: Float = 0) {
         self.scene = scene
         self.params = params
         self.sceneToken = sceneToken
         self.faceTints = faceTints
         self.stressOverlay = stressOverlay
+        self.dressingLevel = dressingLevel
     }
 
     /// Equality is by TOKEN and by the cheap interactive values — never by the scene's
@@ -5335,6 +5344,10 @@ extension MetalMeshView {
                 }
                 if renderer.latticeParams != lat.params {
                     renderer.latticeParams = lat.params
+                    dirty = true
+                }
+                if renderer.latticeDressingLevel != lat.dressingLevel {
+                    renderer.latticeDressingLevel = lat.dressingLevel
                     dirty = true
                 }
                 if renderer.latticeStressOverlay != lat.stressOverlay {

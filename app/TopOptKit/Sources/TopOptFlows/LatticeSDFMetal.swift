@@ -387,6 +387,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// ★ Whether the host wants the stress plot ON the struts this frame. Off ⇒ the
     /// density ramp, which is every frame the stress view is not up.
     var stressOverlay = false
+    /// ★ The boundary dressing the Finish setting asks for — see
+    /// `LatticeBoundaryTreatment.previewDressingLevel`.
+    var dressingLevel: Float = 0
     private var neutralRegionTex: MTLTexture?
     // Face-role tints on the LATTICE (bar A4): an rgba8 volume on the part-SDF grid,
     // baked from the SAME [FaceID: color] dictionary the mesh view tints the body
@@ -671,7 +674,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             denseColor: SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1),
             // ★ …and whether the stress plot is painted onto the struts this frame.
             // Only when the host asks AND a field was actually baked.
-            overlayParams: SIMD4(stressOverlay && stressTex != nil ? 1 : 0, 0, 0, 0))
+            overlayParams: SIMD4(stressOverlay && stressTex != nil ? 1 : 0,
+                                 dressingLevel, 0, 0))
     }
 
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, cmd: MTLCommandBuffer) {

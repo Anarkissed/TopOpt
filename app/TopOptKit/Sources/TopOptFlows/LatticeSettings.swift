@@ -79,6 +79,17 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
         self == .covered ? Swift.max(0, wallRingMM) : 0
     }
 
+    /// ★ THE PREVIEW'S DRESSING LEVEL: 0 none · 1 rim (edges only) · 2 diagrid
+    /// (the whole boundary). `covered` dresses nothing — it is a solid wall over
+    /// the lattice, drawn by the skin field, not a heavier strut.
+    public var previewDressingLevel: Float {
+        switch self {
+        case .none, .covered: return 0
+        case .rim: return 1
+        case .fullSkin: return 2
+        }
+    }
+
     /// ★ `job.lattice.outer_finish` — "shell" for a cover, nil otherwise so every
     /// pre-existing job stays byte-identical. Core refuses "skin"/"shell+skin"
     /// unless `skin == "diagrid"` (job.cpp:1438), so only the unambiguous value

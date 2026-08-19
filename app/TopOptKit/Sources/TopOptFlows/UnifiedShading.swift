@@ -138,9 +138,16 @@ struct LSDFUniforms {
     float4 latticeOrigin;   // xyz origin, w cell mm
     float4 gradeParams;     // rhoMin, rhoMax, gamma, K
     float4 shadeParams;     // uniformRho, hasDemand, radiusFloorNorm, maxSteps
-    float4 stepParams;
-    float4 overlayParams;     // x = stress overlay on (>0.5)      // stepScale, trimErosion(mm), hasTint, segCount
+    float4 stepParams;        // stepScale, trimErosion(mm), hasTint, segCount
     float4 lightDir, sparseColor, denseColor;
+    // ★★ APPENDED LAST, AND THAT IS LOAD-BEARING. A uniform struct is matched to
+    // its Swift twin BY BYTE OFFSET, not by name: the first cut of this field sat
+    // after `stepParams` in the MSL while Swift appended it after `denseColor`, so
+    // the shader read `lightDir` as the overlay flags — the stress overlay never
+    // armed, the dressings never armed, and the key light was being fed a boolean.
+    // It cost nothing to find because `LatticeFinishRendersTests` asserts the
+    // PIXELS move; it would have cost a great deal to find by eye.
+    float4 overlayParams;     // x = stress overlay (>0.5), y = dressing level
     // ── UNIFIED PASS ONLY (zero-filled for the standalone preview, which never
     // reads them). The clip and eye transforms the BODY is drawn with, so a marched
     // hit can be written into the SHARED depth buffer and the SHARED G-buffer in
@@ -270,6 +277,39 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         float dRegion = regionTex.sample(samp, stc).r;
         float dClip = max(max(dPart, dBox), dRegion);
 
+        // ★★ THE BOUNDARY DRESSINGS — RIM AND DIAGRID (task D1; maintainer,
+        // 2026-08-19: "rim is supposed to be around only the outside edges" and
+        // the skin "a covering across all edges/corners").
+        //
+        // ★ THE SAMPLE BLOCK CAN NAME ITS FACES; A PART CANNOT. On the wizard's
+        // cube the twelve edges and six faces are literal, which is how
+        // `LatticeSamplePatch` draws them. A declared region on a real part is an
+        // arbitrary solid, so the dressings have to be defined by the FIELDS that
+        // bound it:
+        //
+        //   the latticed volume's BOUNDARY  is  dClip ≈ 0
+        //   its EDGES are where two of those bounding surfaces MEET — the part's
+        //   own surface and the region's — i.e. |dPart| ≈ 0 AND |dRegion| ≈ 0.
+        //
+        // ★ AND A DRESSING IS A THICKENING, which is what core builds: the
+        // diagrid links neighbouring landings ON the face, the rim rides the
+        // pairs of boundary faces that meet at an edge. Both are heavier struts
+        // where the lattice meets its own boundary, not a separate surface
+        // floating over it — so they are applied as a radius multiplier on the
+        // struts already there, exactly as the sample uses `radius * 1.6`.
+        float dressing = 0.0;
+        if (U.overlayParams.y > 0.5) {
+            float band = max(0.12 * cell, 1e-4);
+            // The EDGE: both bounding surfaces close at once.
+            float edge = max(0.0, 1.0 - abs(dPart) / band)
+                       * max(0.0, 1.0 - abs(dRegion) / band);
+            dressing = edge;
+            // The SKIN adds the whole boundary, not just its edges.
+            if (U.overlayParams.y > 1.5) {
+                dressing = max(dressing, max(0.0, 1.0 - abs(dClip) / band));
+            }
+        }
+
         if (any(baseCell != cachedBase)) {
             cachedBase = baseCell;
             anyActive = false;
@@ -301,12 +341,17 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         float dn = 1e9;
         float rhoNear = uniformRho;
         if (anyActive) {
+            // ★ The dressing fattens the struts HERE — one multiplier on the
+            // radius the cell already grades to, so a dressed strut is the same
+            // strut, heavier, and cannot drift away from the lattice it dresses.
+            // 1.6x at full strength is the sample's own weight.
+            float fat = 1.0 + 0.6 * clamp(dressing, 0.0, 1.0);
             for (int s = 0; s < segCount; s++) {
                 float4 a = segs[2 * s];
                 int oi = int(a.w + 0.5);
                 float rn = rnCache[oi];
                 if (rn < 0.0) continue;
-                float d = sdCap(q, a.xyz, segs[2 * s + 1].xyz, rn);
+                float d = sdCap(q, a.xyz, segs[2 * s + 1].xyz, min(rn * fat, 0.49));
                 if (d < dn) { dn = d; rhoNear = rhoCache[oi]; }
             }
         }

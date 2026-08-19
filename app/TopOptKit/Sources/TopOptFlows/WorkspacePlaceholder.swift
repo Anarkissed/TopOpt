@@ -864,7 +864,11 @@ public struct WorkspacePlaceholder: View {
                                                      // ONTO the lattice instead of
                                                      // replacing it").
                                                      stressOverlay: stressViewOn
-                                                        && latticeStressField != nil)
+                                                        && latticeStressField != nil,
+                                                     // ★ D1 — the Finish setting's
+                                                     // own dressing.
+                                                     dressingLevel: project.lattice
+                                                        .boundary.previewDressingLevel)
                               }
                               : nil)
                 .ignoresSafeArea()
