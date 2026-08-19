@@ -3426,6 +3426,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The lattice's interactive params (cell size, density span, grading). A cell-size
     /// change rebakes the per-cell field ONCE inside the layer; everything else is a
     /// uniform.
+    /// ★ THE STRESS PLOT, PAINTED ONTO THE STRUTS — see `lsdf_albedo`. Set by the
+    /// workspace when BOTH views are up; the lattice keeps its density ramp
+    /// otherwise.
+    var latticeStressOverlay: Bool {
+        get { latticeLayer?.stressOverlay ?? false }
+        set { latticeLayer?.stressOverlay = newValue }
+    }
+
     var latticeParams: LatticeProxyParams {
         get { latticeLayer?.params ?? LatticeProxyParams() }
         set { latticeLayer?.params = newValue }
@@ -4505,13 +4513,19 @@ public struct LatticeLayerInputs: Equatable {
     /// The mesh view's own face-role tint dictionary, verbatim — one source of truth
     /// for the colours (bar A4).
     public var faceTints: [FaceID: SIMD4<Float>]
+    /// ★ Paint the stress plot onto the struts instead of the density ramp — true
+    /// only while BOTH the strut preview and the stress view are up. Defaulted so
+    /// every existing construction is unchanged.
+    public var stressOverlay: Bool = false
 
     public init(scene: LatticeSDFScene, params: LatticeProxyParams,
-                sceneToken: Int, faceTints: [FaceID: SIMD4<Float>]) {
+                sceneToken: Int, faceTints: [FaceID: SIMD4<Float>],
+                stressOverlay: Bool = false) {
         self.scene = scene
         self.params = params
         self.sceneToken = sceneToken
         self.faceTints = faceTints
+        self.stressOverlay = stressOverlay
     }
 
     /// Equality is by TOKEN and by the cheap interactive values — never by the scene's
@@ -5321,6 +5335,10 @@ extension MetalMeshView {
                 }
                 if renderer.latticeParams != lat.params {
                     renderer.latticeParams = lat.params
+                    dirty = true
+                }
+                if renderer.latticeStressOverlay != lat.stressOverlay {
+                    renderer.latticeStressOverlay = lat.stressOverlay
                     dirty = true
                 }
                 if appliedLatticeTints != lat.faceTints {

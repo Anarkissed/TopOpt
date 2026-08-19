@@ -138,7 +138,8 @@ struct LSDFUniforms {
     float4 latticeOrigin;   // xyz origin, w cell mm
     float4 gradeParams;     // rhoMin, rhoMax, gamma, K
     float4 shadeParams;     // uniformRho, hasDemand, radiusFloorNorm, maxSteps
-    float4 stepParams;      // stepScale, trimErosion(mm), hasTint, segCount
+    float4 stepParams;
+    float4 overlayParams;     // x = stress overlay on (>0.5)      // stepScale, trimErosion(mm), hasTint, segCount
     float4 lightDir, sparseColor, denseColor;
     // ── UNIFIED PASS ONLY (zero-filled for the standalone preview, which never
     // reads them). The clip and eye transforms the BODY is drawn with, so a marched
@@ -396,8 +397,25 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
 /// shaded solid rather than as a flat colour laid over one.
 static float3 lsdf_albedo(constant LSDFUniforms& U,
                           texture3d<float> tintTex,
+                          texture3d<float> stressTex,
                           sampler samp,
                           float3 hitPos, float hitRho) {
+    // ★★ THE STRESS PLOT, PAINTED ONTO THE STRUTS (maintainer, 2026-08-18:
+    // "Allow the stress map to *overlay* on the lattice if it is turned on
+    // simultaneously. I want to be able to see the stress map and compare the
+    // changes in the lattices themselves").
+    //
+    // ★ IT REPLACES THE COLOUR, NOT THE GEOMETRY — which is the difference
+    // between an overlay and the old behaviour, where turning the stress view on
+    // simply hid the lattice. The struts keep their graded radii; only what they
+    // are painted with changes, so the two readings can be held against each
+    // other. Sampled from a volume baked through `LatticeStressTint.colour`, the
+    // same ramp the shell's plot and the legend use, so a strut and the wall
+    // behind it report one stress in one colour.
+    if (U.overlayParams.x > 0.5) {
+        float3 stc = ((hitPos - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / U.sdfDims.xyz;
+        return stressTex.sample(samp, stc).rgb;
+    }
     float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y;
     float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
     float3 baseC = mix(U.sparseColor.xyz, U.denseColor.xyz, frac);
@@ -469,6 +487,7 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                texture3d<float> sdfTex [[texture(1)]],
                                texture3d<float> tintTex [[texture(2)]],
                                texture3d<float> regionTex [[texture(3)]],
+                               texture3d<float> stressTex [[texture(4)]],
                                sampler samp [[sampler(0)]],
                                // ★ THE SAME BUFFER INDEX THE SHELL'S CLIP USES (4).
                                // `LatticeSDFRenderer.bindFragment` binds it on EVERY
@@ -493,7 +512,7 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     LSDFGBuf o;
     o.eyeZ = -eyeP.z;                     // eye looks down −Z → positive into the screen
     o.enormal = float4(eyeN, 0.0);
-    o.albedo = float4(lsdf_albedo(U, tintTex, samp, h.pos, h.rho), 1.0);
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho), 1.0);
     // ★ CLAMPED SO THE DEPTH-DIRECTION DECLARATION IS TRUE BY CONSTRUCTION.
     // (The declaration is named without its brackets on purpose:
     // `testFragmentDepthWritesAreDeclaredConservative` counts that token across

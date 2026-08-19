@@ -855,7 +855,16 @@ public struct WorkspacePlaceholder: View {
                                   LatticeLayerInputs(scene: $0,
                                                      params: latticeProxy.params,
                                                      sceneToken: strutSceneToken,
-                                                     faceTints: roleTints)
+                                                     faceTints: roleTints,
+                                                     // ★ BOTH VIEWS UP ⇒ OVERLAY
+                                                     // (maintainer, 2026-08-18:
+                                                     // "when the Stress view is
+                                                     // not the ONLY view on,
+                                                     // project the stress colours
+                                                     // ONTO the lattice instead of
+                                                     // replacing it").
+                                                     stressOverlay: stressViewOn
+                                                        && latticeStressField != nil)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -995,6 +1004,14 @@ public struct WorkspacePlaceholder: View {
                 // Only while the plot is actually up — a key to nothing is
                 // chrome.
                 if stressViewOn, latticeStressField != nil { stressLegend }
+                // ★ THE LATTICE'S KEY — only while the strut preview is actually
+                // up, and never beside the stress legend: two colour bars on one
+                // edge is a puzzle, not a key. The stress plot wins that slot
+                // because it is the more specific view.
+                if showStrutPreview, strutScene != nil,
+                   !(stressViewOn && latticeStressField != nil) {
+                    latticeDensityLegend
+                }
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed { simRunningBanner }
                 // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
@@ -3158,6 +3175,87 @@ public struct WorkspacePlaceholder: View {
     /// lattice is denser here — but it is not a per-strut certification, and a
     /// legend that let someone believe otherwise would be the most expensive
     /// kind of wrong on this page.
+    /// ★★ THE LATTICE'S OWN KEY (maintainer, 2026-08-18: "Create a legend for the
+    /// lattices. The colours mean something, but no one can tell what. Make it
+    /// small on the right hand side - exactly like the legend of the stress map").
+    ///
+    /// ★ SAME TREATMENT AS `stressLegend`, DELIBERATELY — same 168 pt bar, same
+    /// tick column, same panel, same right-edge placement — because he asked for
+    /// "exactly like" it and because two legends that differ in chrome read as two
+    /// different KINDS of thing. What differs is what they key: the stress plot is
+    /// a rainbow over MPa, this is the single-hue indigo ramp over RELATIVE
+    /// DENSITY, and `LatticeDensityProxy.densityColor` says why they must not look
+    /// alike.
+    ///
+    /// ★ AND IT KEYS THE NUMBERS THE PREVIEW IS ACTUALLY DRAWING — the band the
+    /// renderer grades between (`latticeProxy.params.densitySpan`), not the
+    /// settings' typed range, so a floor raised by printability shows up here.
+    /// Both ends are labelled as a density AND as the strut thickness it produces,
+    /// which is the quantity a person can measure on the print.
+    @ViewBuilder private var latticeDensityLegend: some View {
+        let span = latticeProxy.params.densitySpan
+        let cell = latticeProxy.params.cellMM
+        let topo = latticeProxy.params.lattice
+        HStack(alignment: .center, spacing: DS.Space.xs) {
+            VStack(alignment: .trailing, spacing: 0) {
+                ForEach(Array(latticeLegendTicks(span: span, cell: cell, topo: topo)
+                                .enumerated()), id: \.offset) { i, t in
+                    Text(t)
+                        .font(.system(size: 9, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                    if i < 4 { Spacer(minLength: 0) }
+                }
+            }
+            .frame(height: 168)
+            VStack(spacing: 0) {
+                // Dense at the TOP, matching the stress legend's high-at-top rule.
+                ForEach(0..<24, id: \.self) { i in
+                    let f = 1.0 - Double(i) / 23.0
+                    let c = LatticeDensityProxy.densityColor(fraction: f)
+                    Color(.sRGB, red: c.r / 255, green: c.g / 255, blue: c.b / 255,
+                          opacity: 1)
+                        .frame(width: 12)
+                }
+            }
+            .frame(height: 168)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: 3)
+                .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+            VStack(spacing: 2) {
+                Text("density")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                Text("thin\nthick")
+                    .font(.system(size: 8, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            .fixedSize()
+        }
+        .padding(DS.Space.s)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+            .fill(DS.Surface.panel.color.opacity(0.85))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .padding(.trailing, PageChrome.edge)
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("lattice-density-legend")
+    }
+
+    /// Five ticks, dense end first, each "NN% · X.XX mm" — the density and the strut
+    /// thickness it produces at the current cell, because a percentage alone is not
+    /// something anyone can hold against a nozzle.
+    private func latticeLegendTicks(span: (lo: Double, hi: Double),
+                                    cell: Double, topo: LatticeType) -> [String] {
+        (0..<5).map { i in
+            let f = 1.0 - Double(i) / 4.0
+            let rho = span.lo + (span.hi - span.lo) * f
+            let mm = 2 * topo.strutRadiusMM(relativeDensity: rho, cellMM: cell)
+            return String(format: "%.0f%% · %.2f", rho * 100, mm)
+        }
+    }
+
     @ViewBuilder private var stressLegend: some View {
         if let f = latticeStressField {
             let peak = LatticeStressTint.peakMPa(f)

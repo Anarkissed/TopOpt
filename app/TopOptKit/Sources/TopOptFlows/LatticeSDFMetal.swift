@@ -61,6 +61,9 @@ struct LSDFUniforms {
     var lightDir: SIMD4<Float>                // xyz key light (model space — world light un-settled)
     var sparseColor: SIMD4<Float>            // rgb (sparse end of the indigo ramp)
     var denseColor: SIMD4<Float>             // rgb (dense end)
+    /// x = stress overlay on (>0.5). Appended AFTER every field the shipping
+    /// shaders read, so their byte layout is untouched.
+    var overlayParams: SIMD4<Float> = .zero
     // ── UNIFIED PASS ONLY (task 2026-08-18-unified-shading). The clip and eye
     // transforms the BODY is drawn with, so a marched hit can be written into the
     // SHARED depth buffer and the SHARED G-buffer of `MeshRenderer`'s own passes.
@@ -111,6 +114,21 @@ public struct LatticeSDFScene {
     /// EMPTY (`nil`) when no include region is declared: the clip is then inert,
     /// which is the settings page's sample block.
     public let regionSDF: LatticeVoxelGrid?
+
+    /// ★★ THE STRESS COLOURS, AS A VOLUME (maintainer, 2026-08-18: "Allow the
+    /// stress map to *overlay* on the lattice if it is turned on simultaneously. I
+    /// want to be able to see the stress map and compare the changes in the
+    /// lattices themselves").
+    ///
+    /// ★ AN OVERLAY, NOT A REPLACEMENT. With both views up the struts keep their
+    /// geometry and take the stress plot's colour, so the two can be read against
+    /// each other — which is the whole request. Baked from the SAME demand field
+    /// the radii are graded from and through `LatticeStressTint.colour`, the same
+    /// ramp the shell's plot and the legend use, so a strut and the wall behind it
+    /// report the same stress in the same colour.
+    ///
+    /// nil when there is no field — the preview then keeps the density ramp.
+    public let stressRGB: [UInt8]?
     /// ★ The part's OWN interior, before the region mask — so "no inside at all"
     /// and "the regions matched nothing" stay distinguishable.
     public let partInteriorVoxelCount: Int
@@ -185,6 +203,25 @@ public struct LatticeSDFScene {
             solid, to: regions, whenEmpty: whenEmpty)
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
+
+        // ★ THE STRESS COLOURS, on the occupancy's own grid, from the demand the
+        // radii already grade by — so the overlay cannot disagree with the
+        // geometry it is painted on.
+        if let d = self.demand {
+            // RGBA8, matching `makeTintTexture` — the same upload path the
+            // face-role tints already use, so there is one volume format here.
+            var rgb = [UInt8](repeating: 0, count: d.values.count * 4)
+            for i in 0..<d.values.count {
+                let c = LatticeStressTint.colour(fraction: Double(d.values[i]))
+                rgb[i * 4] = UInt8(max(0, min(255, c.x * 255)))
+                rgb[i * 4 + 1] = UInt8(max(0, min(255, c.y * 255)))
+                rgb[i * 4 + 2] = UInt8(max(0, min(255, c.z * 255)))
+                rgb[i * 4 + 3] = 255
+            }
+            self.stressRGB = rgb
+        } else {
+            self.stressRGB = nil
+        }
 
         // ★ Baked from the SAME list the occupancy was masked by, on the same
         // grid, in the same pass — so no third description of "the region" can
@@ -345,6 +382,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// when nothing is declared — bound ALWAYS, because the shader declares it and
     /// Metal drops a draw whose declared texture is unbound.
     private var regionTex: MTLTexture?
+    /// The stress-plot colours, for the overlay — see `LatticeSDFScene.stressRGB`.
+    private var stressTex: MTLTexture?
+    /// ★ Whether the host wants the stress plot ON the struts this frame. Off ⇒ the
+    /// density ramp, which is every frame the stress view is not up.
+    var stressOverlay = false
     private var neutralRegionTex: MTLTexture?
     // Face-role tints on the LATTICE (bar A4): an rgba8 volume on the part-SDF grid,
     // baked from the SAME [FaceID: color] dictionary the mesh view tints the body
@@ -443,6 +485,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
         regionTex = scene.regionSDF.flatMap { makeVolumeTexture($0) }
+        stressTex = scene.stressRGB.flatMap { makeTintTexture($0, like: scene.partSDF) }
         tintTex = nil          // stale mesh/grid — the host re-applies tints after setScene
         rebakeCellField()
     }
@@ -625,7 +668,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             stepParams: SIMD4(0.95, 0.35 * minSDFSpacing, tintTex != nil ? 1 : 0, Float(segCount)),
             lightDir: SIMD4(lightModel, 0),
             sparseColor: SIMD4(Float(sparse.r), Float(sparse.g), Float(sparse.b), 1),
-            denseColor: SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1))
+            denseColor: SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1),
+            // ★ …and whether the stress plot is painted onto the struts this frame.
+            // Only when the host asks AND a field was actually baked.
+            overlayParams: SIMD4(stressOverlay && stressTex != nil ? 1 : 0, 0, 0, 0))
     }
 
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, cmd: MTLCommandBuffer) {
@@ -697,6 +743,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // means "no regions" clips nothing for the march exactly as it cuts
         // nothing for the shell.
         enc.setFragmentTexture(regionTex ?? neutralRegion(), index: 3)
+        // ★ index 4 — the stress overlay. `dummyTintTex` when absent, and the
+        // uniform's flag decides whether it is read at all, so a frame with no
+        // field is byte-identical to one before the overlay existed.
+        enc.setFragmentTexture(stressTex ?? dummyTintTex, index: 4)
         enc.setFragmentTexture(tintTex ?? dummyTintTex, index: 2)
         enc.setFragmentSamplerState(sampler, index: 0)
     }
@@ -794,6 +844,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   texture3d<float> sdfTex [[texture(1)]],
                                   texture3d<float> tintTex [[texture(2)]],
                                   texture3d<float> regionTex [[texture(3)]],
+                                  texture3d<float> stressTex [[texture(4)]],
                                   sampler samp [[sampler(0)]],
                                   constant ShellClip& RC [[buffer(4)]]) {
         float3 ro = U.eye.xyz;
@@ -814,7 +865,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         float ndlK = clamp(dot(n, key), 0.0, 1.0);
         float ndlF = clamp(dot(n, fill), 0.0, 1.0);
         float amb = 0.30;
-        float3 baseC = lsdf_albedo(U, tintTex, samp, hitPos, hitRho);
+        float3 baseC = lsdf_albedo(U, tintTex, stressTex, samp, hitPos, hitRho);
         float3 lit = baseC * (amb + 0.85 * ndlK + 0.30 * ndlF);
         float rim = pow(1.0 - clamp(dot(n, vdir), 0.0, 1.0), 2.5);
         lit += rim * 0.55 * mix(float3(0.72, 0.78, 0.98), float3(1.0), 0.35);
