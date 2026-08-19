@@ -271,10 +271,23 @@ final class StrutLineWidthTests: XCTestCase {
         // lattice questions about a lone unsupported extrusion. A wall bead here
         // would put the card's density on the wrong printability floor and make
         // it disagree with the run. `strutLineWidthMM` is correct.
-        XCTAssertEqual(strutSites, 6,
-                       "the six audited lattice sites (AppModel 1, LatticePage 2, "
-                       + "WorkspacePlaceholder 2, ProjectModel 1). If this number "
-                       + "moved, audit the new site and update the count.")
+        // ★ SEVEN SINCE 2026-08-19 (the manual strut-thickness control), and the
+        // seventh was AUDITED, not bumped.
+        //
+        // NEW SITE: `LatticeSetupWizard.thicknessRangeMM` (LatticeSetupWizard.swift).
+        // It bounds the MANUAL THICKNESS SLIDER the maintainer asked for ("there
+        // should also be a way to manually override the sim's thickness control"),
+        // by calling `LatticeSettings.manualThicknessRangeMM`. That range's floor is
+        // the STRUT printability floor — the thinnest strut this nozzle can lay as a
+        // lone unsupported extrusion — and its ceiling is core's certified band for
+        // the topology. Both ends are questions about a strut, not about a wall
+        // loop: the slider sets strut thickness and nothing else. A wall bead here
+        // would let the slider offer a thickness the printer cannot lay as a strut,
+        // which is the exact failure `offenders` exists to catch.
+        XCTAssertEqual(strutSites, 7,
+                       "the seven audited lattice sites (AppModel 1, LatticePage 2, "
+                       + "WorkspacePlaceholder 2, ProjectModel 1, LatticeSetupWizard 1). "
+                       + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"
                       + offenders.joined(separator: "\n"))

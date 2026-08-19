@@ -241,8 +241,16 @@ final class LatticePageRound2Tests: XCTestCase {
                 XCTAssertGreaterThan(try XCTUnwrap(geom["half_length_mm"] as? Double), 0)
             } else {
                 XCTAssertEqual(kind, "face")
+                // ★ REPLACED, NOT RELAXED (2026-08-19). `outline_uv` joined this set
+                // when the face region stopped being a BOUNDING BOX and started
+                // carrying the face's real boundary loops — on his own part the
+                // rectangle overstated the face by 59% and 70%, and the struts in
+                // the difference were the artifact. Core's strict parser accepts the
+                // key (`job.cpp`), so the assertion stays exact set-equality against
+                // what core allows; it is the allowed set that grew by one.
                 XCTAssertEqual(Set(geom.keys),
-                               ["origin", "normal", "half_u_mm", "half_w_mm", "depth_mm"])
+                               ["origin", "normal", "half_u_mm", "half_w_mm", "depth_mm",
+                                "outline_uv"])
                 XCTAssertGreaterThan(try XCTUnwrap(geom["depth_mm"] as? Double), 0)
             }
         }
