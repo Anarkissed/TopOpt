@@ -272,9 +272,24 @@ public enum LatticeRegionMask {
     }
 
     /// Any orthonormal pair perpendicular to `n`.
+    /// ★★ CORE'S CONVENTION, EXACTLY — `u = cross(ref, n)`, not `cross(n, ref)`.
+    ///
+    /// ★ WHY THE ORDER IS LOAD-BEARING NOW. It never was: every quantity measured
+    /// on this basis used to be a SYMMETRIC half-extent, and `±u` gives the same
+    /// answer for `|u| <= halfU`. A face OUTLINE is not symmetric. Core resolves
+    /// its own in-plane basis in `plane_basis` (core/src/voxel/clearance.cpp:24)
+    /// as `u = normalize(cross(ref, normal))`, `w = cross(normal, u)`, and this
+    /// was the mirror of it — so a polygon expressed here and tested there would
+    /// arrive rotated 180° about the origin, latticing the wrong half of the
+    /// face while every rectangle-based test stayed green.
+    ///
+    /// ★ SO THE APP MOVED TO CORE'S ORDER rather than negating at the wire. One
+    /// convention, asserted against core's own formula in
+    /// `LatticeOutlineWireTests` — a conversion at the boundary would have been a
+    /// second place for the sign to be wrong.
     static func basis(_ n: SIMD3<Double>) -> (SIMD3<Double>, SIMD3<Double>) {
         let a = abs(n.x) < 0.9 ? SIMD3<Double>(1, 0, 0) : SIMD3<Double>(0, 1, 0)
-        let u = unit(simd_cross(n, a))
+        let u = unit(simd_cross(a, n))
         return (u, unit(simd_cross(n, u)))
     }
 }

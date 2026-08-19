@@ -304,6 +304,64 @@ void a_thicker_region_measures_thicker() {
               e_thin, e_thick);
 }
 
+// ★★ THE FACE OUTLINE — the region is the FACE, not its bounding box.
+//
+// The app derives a face region's in-plane extent from the face's bounding box.
+// On any face that is not a rectangle that box is much larger than the face:
+// measured on the maintainer's own part, 41.2% and 29.8% of the emitted region
+// actually WAS the face. Everything else was solid material the run would have
+// latticed. `ClearanceGeometry::outline_uw` carries the real boundary, and this
+// pins that `region_contains` honours it — and that the rectangle alone still
+// behaves exactly as it always did when no outline is supplied.
+void the_outline_bounds_the_region() {
+  ClearanceGeometry g;
+  g.kind = ClearanceKind::Face;
+  g.valid = true;
+  g.origin = Vec3{0.0, 0.0, 0.0};
+  g.normal = Vec3{0.0, 0.0, 1.0};
+  g.u = Vec3{1.0, 0.0, 0.0};
+  g.w = Vec3{0.0, 1.0, 0.0};
+  g.u_lo = -10.0; g.u_hi = 10.0;
+  g.w_lo = -10.0; g.w_hi = 10.0;
+  g.depth = 5.0;
+
+  // ★ NOT (0,0): the L-shape's notch has a VERTEX there, and a crossing count is
+  // ambiguous exactly on a vertex. A test that stands on one is testing the
+  // tie-break, not the region.
+  const Vec3 mid{-5.0, -5.0, 1.0};    // solidly inside both shapes below
+  const Vec3 corner{9.0, 9.0, 1.0};   // inside the BOX, outside the L-shape
+
+  // No outline: the rectangle alone, exactly as before.
+  CHECK(point_in_clearance_region(g, mid, 0.0), "the box contains its centre");
+  CHECK(point_in_clearance_region(g, corner, 0.0),
+        "★ and its corner — this is the behaviour that over-latticed");
+
+  // An L-shaped outline that excludes the +u/+w quadrant.
+  g.outline_loop_start = {0};
+  g.outline_uw = {-10, -10,  10, -10,  10, 0,  0, 0,  0, 10,  -10, 10};
+  CHECK(point_in_clearance_region(g, mid, 0.0),
+        "★ the outline still contains the centre");
+  CHECK(!point_in_clearance_region(g, corner, 0.0),
+        "★★ and REJECTS the corner the bounding box accepted — the whole point");
+
+  // Depth is unaffected by the outline.
+  CHECK(!point_in_clearance_region(g, Vec3{0.0, 0.0, -1.0}, 0.0),
+        "outside the slab in depth is still outside");
+  CHECK(!point_in_clearance_region(g, Vec3{0.0, 0.0, 9.0}, 0.0),
+        "past the depth is still outside");
+
+  // A HOLE: a second loop is subtracted by the crossing count.
+  // ★ VERTEX indices, not double indices: the outer loop is 4 POINTS, so the
+  // hole starts at 4. (Getting this wrong is why the first run failed.)
+  g.outline_loop_start = {0, 4};
+  g.outline_uw = {-10, -10,  10, -10,  10, 10,  -10, 10,
+                  -2, -2,  2, -2,  2, 2,  -2, 2};
+  CHECK(point_in_clearance_region(g, Vec3{7.0, 0.0, 1.0}, 0.0),
+        "★ outside the hole is inside the face");
+  CHECK(!point_in_clearance_region(g, Vec3{0.0, 0.0, 1.0}, 0.0),
+        "★ and a point in the HOLE is outside the face");
+}
+
 }  // namespace
 
 int main() {
@@ -313,6 +371,7 @@ int main() {
   the_cell_box_tests_are_exact();
   a_sector_is_its_own_region();
   a_thicker_region_measures_thicker();
+  the_outline_bounds_the_region();
   std::printf("test_lattice_region_mask: %d checks, %d failures\n", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;

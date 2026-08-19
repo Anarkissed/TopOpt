@@ -828,7 +828,14 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
       mg.half_u_mm = r.half_u_mm;
       mg.half_w_mm = r.half_w_mm;
     }
-    const ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    // ★ THE OUTLINE RIDES ALONG — `resolve_clearance_manual` builds the analytic
+    // slab (and its in-plane basis); the outline is expressed in that SAME basis,
+    // so it is attached after rather than threaded through the resolver.
+    if (r.kind != "bolt" && !r.outline_uw.empty()) {
+      g.outline_uw = r.outline_uw;
+      g.outline_loop_start = r.outline_loop_start;
+    }
     if (!g.valid) continue;  // degenerate → the rasterizer's safe no-op
                              // (parse_job already refused zero extents)
     (r.role == "include" ? rr.includes : rr.excludes).push_back(g);

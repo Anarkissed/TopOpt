@@ -300,6 +300,25 @@ struct ClearanceGeometry {
   double w_lo = 0.0;
   double w_hi = 0.0;
   double depth = 0.0;
+
+  // ★★ THE FACE'S REAL OUTLINE, in the SAME (u, w) millimetres the rectangle
+  // above is measured in, relative to `origin`. Empty => the rectangle alone,
+  // byte-identical to every run before this field existed.
+  //
+  // ★ WHY IT EXISTS. The app derives a face region's in-plane extent from the
+  // face's bounding box, and on any face that is not a rectangle that box is
+  // much larger than the face: measured on the maintainer's own part, the box
+  // was 2.4x and 3.4x the face (41.2% and 29.8% of the emitted region actually
+  // WAS the face). Everything outside it is solid material the run would have
+  // latticed. The app's preview already clips to the outline; without this the
+  // JOB could not, and the picture and the run described different volumes.
+  //
+  // Stored flat as [u0,w0, u1,w1, …] per loop, with `outline_loop_start` giving
+  // each loop's first vertex index — one allocation, and a face with a HOLE is
+  // expressible (an even crossing count puts the hole outside, which is what
+  // `region_contains` relies on).
+  std::vector<double> outline_uw;
+  std::vector<std::size_t> outline_loop_start;
 };
 
 // Resolve the predicate from B-rep face `face_id` of `model` (the AUTO path): the

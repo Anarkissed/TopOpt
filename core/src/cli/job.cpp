@@ -1355,7 +1355,8 @@ JobDescription parse_job(const std::string& json_text) {
                         "zero-depth region marks nothing)");
         } else {  // face
           reject_unknown_keys(
-              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm"},
+              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm",
+                   "outline_uv"},
               "a face lattice region geometry");
           reg.origin = parse_vec3(
               require_key(gv, "origin", "a face lattice region geometry"),
@@ -1376,6 +1377,32 @@ JobDescription parse_job(const std::string& json_text) {
               !(reg.depth_mm > 0.0))
             schema_fail("a face lattice region half_u_mm/half_w_mm/depth_mm "
                         "must be > 0 (a zero-extent region marks nothing)");
+          // ★★ THE OUTLINE, OPTIONAL. [[u,w],…] per loop; the half-extents stay
+          // REQUIRED because they are the outline's bounding box and the cheap
+          // reject in `region_contains`. A face that is genuinely rectangular
+          // simply omits this and behaves exactly as before.
+          if (const JsonValue* ov = find_key(gv, "outline_uv")) {
+            if (ov->type != JsonValue::Type::Array)
+              schema_fail("a face lattice region \"outline_uv\" must be an array "
+                          "of loops");
+            for (const JsonValue& loop : ov->arr) {
+              if (loop.type != JsonValue::Type::Array)
+                schema_fail("each \"outline_uv\" entry must be a loop (an array "
+                            "of [u, w] pairs)");
+              if (loop.arr.size() < 3)
+                schema_fail("an \"outline_uv\" loop needs at least 3 points (got " +
+                            std::to_string(loop.arr.size()) + ")");
+              reg.outline_loop_start.push_back(reg.outline_uw.size() / 2);
+              for (const JsonValue& pt : loop.arr) {
+                if (pt.type != JsonValue::Type::Array || pt.arr.size() != 2)
+                  schema_fail("each \"outline_uv\" point must be [u, w]");
+                reg.outline_uw.push_back(
+                    require_number(pt.arr[0], "outline_uv u"));
+                reg.outline_uw.push_back(
+                    require_number(pt.arr[1], "outline_uv w"));
+              }
+            }
+          }
           const Vec3& nn = reg.normal;
           if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
             schema_fail("a face lattice region \"normal\" must be non-zero");

@@ -179,29 +179,34 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// from manual primitives and never sets `faceID`, so the key was nil there
     /// and stays absent. Its bytes do not move.
     public var wireDictionary: [String: Any] {
-        // ★★ THE OUTLINE DOES **NOT** GO ON THE WIRE YET, AND THAT IS MEASURED,
-        // NOT CAUTIOUS. `LatticePageRound2Tests.testCoreCLIParsesTheEmittedRegions`
-        // runs the real `topopt-cli` against the emitted job, and core's schema is
-        // STRICT — it rejected the added keys outright:
+        // ★★ THE OUTLINE GOES ON THE WIRE, and core now reads it. The first
+        // attempt was withdrawn because `topopt-cli` rejected the key outright
+        // ("unknown key \"in_plane_offset_mm\""); core's schema accepts
+        // `outline_uv` as of this change, and `region_contains` tests it.
         //
-        //     topopt-cli: job.json: unknown key "in_plane_offset_mm"
-        //                 in a face lattice region geometry
+        // ★ THE HALF-EXTENTS STAY, and are still required: they are the outline's
+        // BOUNDING BOX, which core uses as the cheap reject before the polygon
+        // test. A genuinely rectangular face omits the outline and behaves exactly
+        // as it always did.
         //
-        // So emitting them would not degrade gracefully to today's rectangle, it
-        // would fail the run. The preview now uses the face's real outline
-        // (`LatticeFaceOutline`); the JOB still carries the bounding rectangle,
-        // which means core is still asked to lattice 2.4x and 3.4x the face on
-        // his two walls. Closing that needs `outline_uv` in core's own schema AND
-        // in its generator — accepting the key while still building the rectangle
-        // would be the same lie with better paperwork.
+        // ★ AND THE (u, w) FRAME IS CORE'S — see `LatticeRegionMask.basis`. The
+        // app moved onto core's `plane_basis` order rather than negating here,
+        // because a conversion at the boundary is a second place for the sign to
+        // be wrong.
+        var faceGeometry: [String: Any] = [
+            "origin": [origin.x, origin.y, origin.z],
+            "normal": [normal.x, normal.y, normal.z],
+            "half_u_mm": halfUMM,
+            "half_w_mm": halfWMM,
+            "depth_mm": depthMM,
+        ]
+        if !outlineLoops.isEmpty {
+            faceGeometry["outline_uv"] = outlineLoops.map { loop in
+                loop.map { [$0.x, $0.y] }
+            }
+        }
         let geometry: [String: Any] = kind == .face
-            ? [
-                "origin": [origin.x, origin.y, origin.z],
-                "normal": [normal.x, normal.y, normal.z],
-                "half_u_mm": halfUMM,
-                "half_w_mm": halfWMM,
-                "depth_mm": depthMM,
-            ]
+            ? faceGeometry
             : [
                 "axis_point": [axisPoint.x, axisPoint.y, axisPoint.z],
                 "axis_dir": [axisDir.x, axisDir.y, axisDir.z],

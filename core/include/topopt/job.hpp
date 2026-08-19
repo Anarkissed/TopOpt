@@ -168,6 +168,14 @@ struct JobLatticeRegion {
   double half_length_mm = 0.0;
   // Face: a bounded slab — origin + s·normal for s in [0, depth_mm], clipped to
   // the centred in-plane rectangle 2·half_u_mm × 2·half_w_mm.
+  // ★★ …AND, WHEN SUPPLIED, TO THE FACE'S REAL OUTLINE. Flat [u0,w0,u1,w1,…] in
+  // the same millimetres as the half-extents and in the same (u, w) basis
+  // `plane_basis` builds, with `outline_loop_start` giving each loop's first
+  // VERTEX index. Empty => the rectangle alone, byte-identical to every job
+  // written before the key existed. The rectangle is kept alongside because it
+  // is the outline's bounding box and the cheap reject in `region_contains`.
+  std::vector<double> outline_uw;
+  std::vector<std::size_t> outline_loop_start;
   Vec3 origin{0.0, 0.0, 0.0};
   Vec3 normal{0.0, 0.0, 0.0};
   double half_u_mm = 0.0;

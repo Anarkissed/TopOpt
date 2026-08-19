@@ -124,8 +124,39 @@ bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
   const double s = dot(rel, geom.normal);
   if (s < -tol || s > geom.depth + tol) return false;
   const double du = dot(rel, geom.u), dw = dot(rel, geom.w);
-  return du >= geom.u_lo - tol && du <= geom.u_hi + tol &&
-         dw >= geom.w_lo - tol && dw <= geom.w_hi + tol;
+  if (!(du >= geom.u_lo - tol && du <= geom.u_hi + tol &&
+        dw >= geom.w_lo - tol && dw <= geom.w_hi + tol))
+    return false;
+  // ★★ AND THE FACE'S REAL OUTLINE, when one was supplied. The rectangle above
+  // is the outline's BOUNDING BOX, so it is a necessary condition and a cheap
+  // reject; this is the sufficient one. See `ClearanceGeometry::outline_uw`.
+  //
+  // ★ `tol` IS NOT APPLIED TO THE POLYGON, for the same reason a mask ignores it
+  // (see the note at the top of this function): a polygon has no closed-form
+  // offset, so inflating it would mean a 2-D dilation per query. The consequence
+  // is the same and is one-directional — a positive tol asks for a region at
+  // least this big and gets exactly the outline, never MORE than it covers. The
+  // lattice-role membership calls all pass tol == 0.
+  if (geom.outline_uw.empty()) return true;
+  bool inside = false;
+  const std::size_t nloops = geom.outline_loop_start.size();
+  for (std::size_t L = 0; L < nloops; ++L) {
+    const std::size_t begin = geom.outline_loop_start[L];
+    const std::size_t end =
+        (L + 1 < nloops) ? geom.outline_loop_start[L + 1] : geom.outline_uw.size() / 2;
+    if (end <= begin + 2) continue;  // fewer than 3 vertices is not a loop
+    // Crossing count, the same rule the app's `LatticeFaceOutline.contains` uses.
+    for (std::size_t i = begin, j = end - 1; i < end; j = i++) {
+      const double xi = geom.outline_uw[2 * i], yi = geom.outline_uw[2 * i + 1];
+      const double xj = geom.outline_uw[2 * j], yj = geom.outline_uw[2 * j + 1];
+      if ((yi > dw) != (yj > dw)) {
+        const double dy = yj - yi;
+        if (std::fabs(dy) > 1e-12 && du < xi + (dw - yi) / dy * (xj - xi))
+          inside = !inside;
+      }
+    }
+  }
+  return inside;
 }
 
 }  // namespace
