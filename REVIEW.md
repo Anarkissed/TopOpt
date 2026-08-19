@@ -179,14 +179,31 @@ the shell. I rebuilt, put it on the simulator, and looked: **the speckle was sti
 there.** So I reverted it. It is unverified and it did not work, and I would rather
 hand you a clean tree than a shader edit I cannot stand behind.
 
-**What I would do next, and why not by screenshot.** Two screenshots at different
-camera angles cannot measure this — I could not even tell you whether my attempt
-made it worse, because the framing changed. This needs the same treatment the first
-artifact got: a headless test that renders from the far side at a FIXED camera and
-counts shell/lattice disagreement pixels, so the fix is chosen against a number.
-Then the real question can be decided properly — whether to bias the test, to
-tie-break consistently between the two readers of the field, or to give the inner
-face a pad that the CLIP honours but the EMITTED region does not.
+**I then tried to build that instrument, and it does not reproduce the defect.**
+I wrote a headless test that renders at a FIXED camera from below and measures the
+mask, twice, and I am reporting both failures because a green test here would be a
+lie:
+
+1. First metric — ISOLATED pixels (all four neighbours disagree). Reported **1**, on
+   a view the eye plainly reads as speckled, because the specks are 2-4 pixel clumps
+   rather than single pixels.
+2. Second metric — CONNECTED COMPONENTS (speckle = many small ones). Reported a
+   **single** component of 677 px from below and 663 from above, with zero small
+   components either way.
+
+The tell is in those numbers: `LatticeGBufferMaskTests` gets **6,040** lattice pixels
+at elevation 0.4, and this fixture yields ~670 at elevation ±1.15. The synthetic
+40 mm slab is nearly edge-on there — the defect is never on screen, so the test was
+green for the same reason a photograph of the wrong wall is clean.
+
+**So the instrument needs the REAL document, not the fixture.** On the simulator the
+speckle covers a face that fills the screen, because your region spans the whole top
+face of the L-bracket; the test's `hisSlab` is a 40 mm patch. I have deleted the test
+rather than leave a passing file that implies coverage it does not have. The next
+attempt should drive the same project document the app opens, at the camera the
+screenshot was taken from, and only then choose between biasing the discard test,
+tie-breaking consistently between the field's two readers, or giving the inner face
+a pad the CLIP honours but the EMITTED region does not.
 
 ## The notification's equal padding (D3)
 
