@@ -1724,6 +1724,33 @@ if(OpenCASCADE_FOUND)
   target_link_libraries(boundary_cell_probe PRIVATE topopt)
   target_compile_definitions(boundary_cell_probe PRIVATE
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+  # Task 2026-08-19-peak-stress-convergence. PR 320's convergence question, asked
+  # again on the SMOOTH boundary: it re-evaluates ONE analytic phi
+  # (`<variant>_alpha.f64` + `.meta`) on each certification grid under the
+  # production exact-volume-fraction ersatz, rather than replicating a stored
+  # density field, and carries a `--arm stair_base` negative control that freezes
+  # the same phi's staircase at the base grid — PR 320's own construction.
+  # OCCT-gated: it imports his STEP.
+  #   cmake --build build --target smooth_convergence_probe
+  #   ./build/smooth_convergence_probe <job_dir> <alpha_stem> <resolution> <csv>
+  add_executable(smooth_convergence_probe EXCLUDE_FROM_ALL
+    tests/harness/smooth_convergence_probe.cpp)
+  target_link_libraries(smooth_convergence_probe PRIVATE topopt)
+  target_compile_definitions(smooth_convergence_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+  # ★ THE POSITIVE CONTROL for the same task: a spherical cavity in a bar under
+  # uniform uniaxial tension, whose stress concentration is classical and FINITE
+  # (Southwell & Gough, (27-15nu)/(2(7-5nu))). Same two arms, same ersatz, same
+  # analyze_fixed_design — so a fitted exponent of zero there and here mean the
+  # same thing. It builds no CAD, but it sits in this block because it links the
+  # same `topopt` target the OCCT gate configures.
+  #   cmake --build build --target cavity_convergence_probe
+  #   ./build/cavity_convergence_probe <resolution> <csv> [--arm ...]
+  add_executable(cavity_convergence_probe EXCLUDE_FROM_ALL
+    tests/harness/cavity_convergence_probe.cpp)
+  target_link_libraries(cavity_convergence_probe PRIVATE topopt)
+  target_compile_definitions(cavity_convergence_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
   # S1 (task 2026-08-08-closing-flow-and-the-field): the CLOSING FLOW of Sellán,
   # Kesten, Ang Yan Sheng & Jacobson (SIGGRAPH Asia 2020) on the cut population of
   # his own four rungs. Not a fourth filter — it ADDS material, under a

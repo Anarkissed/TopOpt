@@ -1,0 +1,146 @@
+##############################################################################
+# S1 — REPLICATE MODE. The load case, the pads and the mask are ONE
+#      physical solid at every rung; only the element size changes.
+#      THIS IS THE CONVERGENCE MEASUREMENT.
+##############################################################################
+
+==============================================================================
+ARM: frac    (3 rungs, mode replicate)
+==============================================================================
+  res      h mm        dofs         ALL      FROZEN      ACTIVE         CUT      CUT>10      margin   wall s
+   96   2.27371      647475    0.031852    0.031852    0.019032    0.019032   0.0016878    1726.747     13.1
+  192   1.13685     5021667    0.044596    0.044596    0.024326    0.024326   0.0055969    1233.293    170.8
+  288   0.75790    16772115    0.058853    0.058853    0.032776    0.032776   0.0083355     934.526    799.0
+
+-- q in sigma_peak ~ h^-q   (PR 320: 0.4945 -> 0.4391; corner 0.4555)
+  ALL         what the gate reads         global q = +0.5510  (R^2 0.9911)
+                                          pairwise  +0.4855 +0.6842
+  FROZEN      mask-stamped pads           global q = +0.5510  (R^2 0.9911)
+                                          pairwise  +0.4855 +0.6842
+  ACTIVE      the level set's cells       global q = +0.4796  (R^2 0.9581)
+                                          pairwise  +0.3540 +0.7354
+  CUT         * THE SMOOTH BOUNDARY       global q = +0.4796  (R^2 0.9581)
+                                          pairwise  +0.3540 +0.7354
+  CUT >5mm    from pads/tags              global q = -0.0331  (R^2 0.2190)
+                                          pairwise  -0.1115 +0.1265
+  CUT >10mm   from pads/tags              global q = +1.4834  (R^2 0.9828)
+                                          pairwise  +1.7295 +0.9824
+  CUT >20mm   from pads/tags              global q = +0.0058  (R^2 0.0195)
+                                          pairwise  -0.0455 +0.1102
+  compliance  (the CONTROL: it must be tame)  global q = +0.0089  (R^2 0.9671)
+                                          pairwise  +0.0110 +0.0047
+
+-- R1: THE GEOMETRY INVARIANT ------------------------------------
+  res   {phi<0} in part mm^3    ACTIVE mm^3   frozen mm^3  certified mm^3  cut cells  >10mm cut
+   96            384979.6661      192913.16     235629.95       428543.11       2460         63
+  192            385009.9892      192933.80     235629.95       428563.76       9986        220
+  288            385018.4200      192939.62     235629.95       428569.57      22433        455
+  spread of {phi<0} volume : 0.010 %   spread of CERTIFIED volume : 0.006 %
+
+-- R4: THE MARGIN, AND THE NOISE FLOOR IT SETS -------------------
+  margin_worst_case  min    934.5256  max   1726.7472  mean   1298.1886  SPREAD   61.03 %
+  margin_effective   min    193.5055  max    357.5451                     SPREAD   61.03 %
+  accepted at every rung: True
+
+-- WHERE THE PEAK SAT --------------------------------------------
+  res   96: (20,2,43) tag=Surface  mask=FrozenSolid  load voxels   1932, fixture   1974
+  res  192: (29,37,172) tag=Load     mask=FrozenSolid  load voxels  15456, fixture  15792
+  res  288: (44,56,258) tag=Load     mask=FrozenSolid  load voxels  52164, fixture  53298
+
+
+==============================================================================
+ARM: stair_base    (3 rungs, mode replicate)
+==============================================================================
+  res      h mm        dofs         ALL      FROZEN      ACTIVE         CUT      CUT>10      margin   wall s
+   96   2.27371      647475    0.031688    0.031688    0.018912    0.011628   0.0016104    1735.688     13.7
+  192   1.13685     5021667    0.044994    0.044994    0.020339    0.014141   0.0028393    1222.375    166.5
+  288   0.75790    16772115    0.059348    0.059348    0.020891    0.016218   0.0037072     926.743    770.2
+
+-- q in sigma_peak ~ h^-q   (PR 320: 0.4945 -> 0.4391; corner 0.4555)
+  ALL         what the gate reads         global q = +0.5641  (R^2 0.9932)
+                                          pairwise  +0.5058 +0.6829
+  FROZEN      mask-stamped pads           global q = +0.5641  (R^2 0.9932)
+                                          pairwise  +0.5058 +0.6829
+  ACTIVE      the level set's cells       global q = +0.0921  (R^2 0.9878)
+                                          pairwise  +0.1049 +0.0660
+  CUT         * THE SMOOTH BOUNDARY       global q = +0.3006  (R^2 0.9976)
+                                          pairwise  +0.2822 +0.3381
+  CUT >5mm    from pads/tags              global q = +0.3007  (R^2 0.8289)
+                                          pairwise  +0.4718 -0.0478
+  CUT >10mm   from pads/tags              global q = +0.7653  (R^2 0.9970)
+                                          pairwise  +0.8181 +0.6579
+  CUT >20mm   from pads/tags              global q = +0.0959  (R^2 0.8961)
+                                          pairwise  +0.0550 +0.1793
+  compliance  (the CONTROL: it must be tame)  global q = +0.0183  (R^2 0.9771)
+                                          pairwise  +0.0218 +0.0111
+
+-- R1: THE GEOMETRY INVARIANT ------------------------------------
+  res   {phi<0} in part mm^3    ACTIVE mm^3   frozen mm^3  certified mm^3  cut cells  >10mm cut
+   96            384979.6661      193196.34     235629.95       428826.30       2460         63
+  192            385009.9892      193196.34     235629.95       428826.30       9986        254
+  288            385018.4200      193196.34     235629.95       428826.30      22433        547
+  spread of {phi<0} volume : 0.010 %   spread of CERTIFIED volume : 0.000 %
+
+-- R4: THE MARGIN, AND THE NOISE FLOOR IT SETS -------------------
+  margin_worst_case  min    926.7429  max   1735.6877  mean   1294.9351  SPREAD   62.47 %
+  margin_effective   min    191.8940  max    359.3963                     SPREAD   62.47 %
+  accepted at every rung: True
+
+-- WHERE THE PEAK SAT --------------------------------------------
+  res   96: (20,2,43) tag=Surface  mask=FrozenSolid  load voxels   1932, fixture   1974
+  res  192: (29,37,172) tag=Load     mask=FrozenSolid  load voxels  15456, fixture  15792
+  res  288: (44,56,258) tag=Load     mask=FrozenSolid  load voxels  52164, fixture  53298
+
+
+==============================================================================
+ARM: stair_fine    (3 rungs, mode replicate)
+==============================================================================
+  res      h mm        dofs         ALL      FROZEN      ACTIVE         CUT      CUT>10      margin   wall s
+   96   2.27371      647475    0.031688    0.031688    0.018912    0.011628   0.0016104    1735.688     13.4
+  192   1.13685     5021667    0.044747    0.044747    0.020297    0.016949   0.0044947    1229.136    187.3
+  288   0.75790    16772115    0.058915    0.058915    0.020871    0.020871   0.0061219     933.547    776.9
+
+-- q in sigma_peak ~ h^-q   (PR 320: 0.4945 -> 0.4391; corner 0.4555)
+  ALL         what the gate reads         global q = +0.5573  (R^2 0.9928)
+                                          pairwise  +0.4979 +0.6784
+  FROZEN      mask-stamped pads           global q = +0.5573  (R^2 0.9928)
+                                          pairwise  +0.4979 +0.6784
+  ACTIVE      the level set's cells       global q = +0.0911  (R^2 0.9909)
+                                          pairwise  +0.1020 +0.0688
+  CUT         * THE SMOOTH BOUNDARY       global q = +0.5336  (R^2 0.9998)
+                                          pairwise  +0.5436 +0.5134
+  CUT >5mm    from pads/tags              global q = +0.3525  (R^2 0.9999)
+                                          pairwise  +0.3576 +0.3420
+  CUT >10mm   from pads/tags              global q = +1.2441  (R^2 0.9775)
+                                          pairwise  +1.4808 +0.7620
+  CUT >20mm   from pads/tags              global q = +0.1674  (R^2 0.9267)
+                                          pairwise  +0.2264 +0.0473
+  compliance  (the CONTROL: it must be tame)  global q = +0.0161  (R^2 0.9799)
+                                          pairwise  +0.0190 +0.0102
+
+-- R1: THE GEOMETRY INVARIANT ------------------------------------
+  res   {phi<0} in part mm^3    ACTIVE mm^3   frozen mm^3  certified mm^3  cut cells  >10mm cut
+   96            384979.6661      193196.34     235629.95       428826.30       2460         63
+  192            385009.9892      192984.76     235629.95       428614.72       9986        219
+  288            385018.4200      192940.36     235629.95       428570.31      22433        453
+  spread of {phi<0} volume : 0.010 %   spread of CERTIFIED volume : 0.060 %
+
+-- R4: THE MARGIN, AND THE NOISE FLOOR IT SETS -------------------
+  margin_worst_case  min    933.5470  max   1735.6877  mean   1299.4568  SPREAD   61.73 %
+  margin_effective   min    193.3029  max    359.3963                     SPREAD   61.73 %
+  accepted at every rung: True
+
+-- WHERE THE PEAK SAT --------------------------------------------
+  res   96: (20,2,43) tag=Surface  mask=FrozenSolid  load voxels   1932, fixture   1974
+  res  192: (29,37,172) tag=Load     mask=FrozenSolid  load voxels  15456, fixture  15792
+  res  288: (44,56,258) tag=Load     mask=FrozenSolid  load voxels  52164, fixture  53298
+
+==============================================================================
+A/B/C at each rung (replicate): same phi, same mask, same cells — only
+the ACTIVE density differs.
+==============================================================================
+  res         frac ALL         frac CUT   stair_base ALL   stair_base CUT   stair_fine ALL   stair_fine CUT
+   96        0.0318518        0.0190323        0.0316877        0.0116284        0.0316877        0.0116284
+  192         0.044596        0.0243256        0.0449944        0.0141408        0.0447469        0.0169491
+  288        0.0588534        0.0327758        0.0593476        0.0162183        0.0589151        0.0208715
+

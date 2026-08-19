@@ -1,0 +1,20 @@
+== cavity_convergence_probe (POSITIVE CONTROL) ==
+arm        : smooth  (samples 4^3)
+bar        : 60 mm cube, cavity R = 0 mm (R/L = 0)
+grid       : 80x80x80 @ 0.75 mm  (512000 voxels, 1594323 dofs)
+R/h        : 0 voxels across the cavity radius
+cut cells  : 0
+volume     : 215999.9995267303 mm^3   exact 216000.0000000000   error -2.19106e-07%
+supports   : 6564 dirichlet dofs (a roller plane + 3 scalar constraints; NO clamp)
+traction   : 6561 nodal loads, resultant Fz = 3600 N (sigma0 * L^2 = 3600)
+
+-- THE PEAK ------------------------------------------------
+  peak von Mises          : 1.0001389085606007 MPa
+  sigma0                  : 1 MPa
+  K = peak / sigma0       : 1.0001389085606007
+  Southwell K (infinite)  : 2.0607476635514019  (nu = 0.33)
+  peak voxel (40,40,40) rho=0.9998599122, |x-c| = 0.649519 mm (R = 0, 0.866 voxels off the surface)
+  printed voxels          : 512000
+  occupancy wall 0.014 s, analyze wall 23.940 s, applies 0
+
+wrote CSV row -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-08-19-peak-stress-convergence/s3_cavity.csv
