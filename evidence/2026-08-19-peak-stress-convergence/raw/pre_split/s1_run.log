@@ -1,0 +1,29 @@
+=== smooth res 64 -> smooth_res64.txt
+    exit=0    peak von Mises        : 0.045244606068778045 MPa    analyze wall    : 3.258 s
+=== smooth res 80 -> smooth_res80.txt
+    exit=0    peak von Mises        : 0.035996010416020824 MPa    analyze wall    : 6.965 s
+=== smooth res 96 -> smooth_res96.txt
+    exit=0    peak von Mises        : 0.031851797147376369 MPa    analyze wall    : 12.872 s
+=== smooth res 112 -> smooth_res112.txt
+    exit=0    peak von Mises        : 0.072997409730715515 MPa    analyze wall    : 19.232 s
+=== smooth res 128 -> smooth_res128.txt
+    exit=0    peak von Mises        : 0.022897571857904628 MPa    analyze wall    : 32.547 s
+=== smooth res 144 -> smooth_res144.txt
+    exit=0    peak von Mises        : 0.035978351298476548 MPa    analyze wall    : 48.915 s
+=== smooth res 160 -> smooth_res160.txt
+    exit=0    peak von Mises        : 0.049708812113452135 MPa    analyze wall    : 70.838 s
+=== staircase res 64 -> staircase_res64.txt
+    exit=0    peak von Mises        : 0.045042318121511479 MPa    analyze wall    : 2.983 s
+=== staircase res 80 -> staircase_res80.txt
+    exit=0    peak von Mises        : 0.03587939595789847 MPa    analyze wall    : 6.652 s
+=== staircase res 96 -> staircase_res96.txt
+    exit=0    peak von Mises        : 0.031687727502446437 MPa    analyze wall    : 14.551 s
+=== staircase res 112 -> staircase_res112.txt
+    exit=0    peak von Mises        : 0.072684342954321135 MPa    analyze wall    : 21.287 s
+=== staircase res 128 -> staircase_res128.txt
+    exit=0    peak von Mises        : 0.023074950986518027 MPa    analyze wall    : 34.695 s
+=== staircase res 144 -> staircase_res144.txt
+    exit=0    peak von Mises        : 0.036095726321192269 MPa    analyze wall    : 52.861 s
+=== staircase res 160 -> staircase_res160.txt
+    exit=0    peak von Mises        : 0.049545247068078162 MPa    analyze wall    : 64.909 s
+done -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-08-19-peak-stress-convergence/s1_sweep.csv

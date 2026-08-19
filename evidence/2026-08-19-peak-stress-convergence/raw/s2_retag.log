@@ -1,0 +1,33 @@
+=== retag frac res 64 -> retag_frac_res64.txt
+    exit=0    peak von Mises        : 0.045244606068778045 MPa    analyze wall    : 2.867 s
+=== retag frac res 80 -> retag_frac_res80.txt
+    exit=0    peak von Mises        : 0.035996010416020824 MPa    analyze wall    : 6.274 s
+=== retag frac res 96 -> retag_frac_res96.txt
+    exit=0    peak von Mises        : 0.031851797147376369 MPa    analyze wall    : 10.274 s
+=== retag frac res 112 -> retag_frac_res112.txt
+    exit=0    peak von Mises        : 0.072997409730715515 MPa    analyze wall    : 16.329 s
+=== retag frac res 128 -> retag_frac_res128.txt
+    exit=0    peak von Mises        : 0.022897571857904628 MPa    analyze wall    : 27.926 s
+=== retag frac res 144 -> retag_frac_res144.txt
+    exit=0    peak von Mises        : 0.035978351298476548 MPa    analyze wall    : 41.336 s
+=== retag frac res 160 -> retag_frac_res160.txt
+    exit=0    peak von Mises        : 0.049708812113452135 MPa    analyze wall    : 59.536 s
+=== retag frac res 192 -> retag_frac_res192.txt
+    exit=0    peak von Mises        : 0.070114880858580794 MPa    analyze wall    : 126.792 s
+=== retag stair_fine res 64 -> retag_stair_fine_res64.txt
+    exit=0    peak von Mises        : 0.045042318121511479 MPa    analyze wall    : 2.943 s
+=== retag stair_fine res 80 -> retag_stair_fine_res80.txt
+    exit=0    peak von Mises        : 0.03587939595789847 MPa    analyze wall    : 6.133 s
+=== retag stair_fine res 96 -> retag_stair_fine_res96.txt
+    exit=0    peak von Mises        : 0.031687727502446437 MPa    analyze wall    : 10.840 s
+=== retag stair_fine res 112 -> retag_stair_fine_res112.txt
+    exit=0    peak von Mises        : 0.072684342954321135 MPa    analyze wall    : 17.368 s
+=== retag stair_fine res 128 -> retag_stair_fine_res128.txt
+    exit=0    peak von Mises        : 0.023074950986518027 MPa    analyze wall    : 27.751 s
+=== retag stair_fine res 144 -> retag_stair_fine_res144.txt
+    exit=0    peak von Mises        : 0.036095726321192269 MPa    analyze wall    : 41.726 s
+=== retag stair_fine res 160 -> retag_stair_fine_res160.txt
+    exit=0    peak von Mises        : 0.049545247068078162 MPa    analyze wall    : 61.047 s
+=== retag stair_fine res 192 -> retag_stair_fine_res192.txt
+    exit=0    peak von Mises        : 0.070673133171681848 MPa    analyze wall    : 129.052 s
+done -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-08-19-peak-stress-convergence/s2_retag.csv
