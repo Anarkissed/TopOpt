@@ -2712,7 +2712,12 @@ public struct WorkspacePlaceholder: View {
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
             lineWidthMM: project.printParams.strutLineWidthMM,
-            regions: emission.regions)
+            regions: emission.regions,
+            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
+            // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
+            // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
+            minimizePlastic: project.minimizePlastic,
+        )
         // THE VARIANT'S OWN IDENTITY AND ITS OWN NUMBER (task
         // 2026-08-04-variant-volume-fraction-mismatch). This passed
         // `ctx.requestedVolumeFraction` — the LADDER RUNG — into a job key core
@@ -2802,7 +2807,12 @@ public struct WorkspacePlaceholder: View {
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
             lineWidthMM: project.printParams.strutLineWidthMM,
-            regions: project.variantLatticeJobRegions().regions)
+            regions: project.variantLatticeJobRegions().regions,
+            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
+            // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
+            // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
+            minimizePlastic: project.minimizePlastic,
+        )
         run.runner = { _, _, _ in
             let result = try RelatticeRun.run(inputs)
             guard let spec = echo else { return result.outcome }
@@ -4184,10 +4194,18 @@ public struct WorkspacePlaceholder: View {
                 Text("Restore CAD surfaces")
                     .dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
                 Spacer(minLength: DS.Space.s)
-                Toggle("", isOn: $project.projectCADFaces)
-                    .labelsHidden()
-                    .tint(DS.Color.accent.color)
-                    .accessibilityIdentifier("cad-faces-toggle")
+                // ★ THE SAME DARK LIQUID-GLASS SWITCH THE WIZARD USES (maintainer,
+                // 2026-08-19: "Can you also fix the 'CAD surfaces' selection
+                // button into the same dark-mode apple liquid glass?"). It was a
+                // stock `Toggle` in system blue — a different control, a different
+                // surface and a different accent from every other switch in the
+                // app, which is exactly the divergence `GlassToggle` exists to
+                // stop.
+                GlassToggle(isOn: project.projectCADFaces) {
+                    project.projectCADFaces.toggle()
+                }
+                .accessibilityLabel("Restore CAD surfaces")
+                .accessibilityIdentifier("cad-faces-toggle")
             }
             // ★ WHAT IT DOES — the same sentence either way, because the
             // mechanism does not change with the switch.

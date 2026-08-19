@@ -395,12 +395,35 @@ public struct LatticeSetupWizard: View {
                                    + "To pin it, pin Density and Cell size.")
                         .accessibilityIdentifier("wizard-thickness-derived")
                 } else {
-                    scrubRow("thickness", value: model.relativeDensity * 100, unit: "%",
-                             step: 0.4, range: 5...90) {
-                        model.relativeDensity = $0 / 100
+                    // ★★ A THICKNESS IN MILLIMETRES (maintainer, 2026-08-19: "Off
+                    // makes a sliding number value visible; controlling the
+                    // thickness of the cell on screen").
+                    //
+                    // ★ IT USED TO SCRUB A PERCENTAGE. The row was labelled
+                    // "thickness" and moved `relativeDensity` in %, so the number
+                    // on screen was not the quantity the label named and could not
+                    // be compared with a nozzle or a wall. It now moves the strut
+                    // DIAMETER, and the density the renderer needs is derived from
+                    // it (`LatticeSettings.manualThicknessDensity`) — one
+                    // mechanism, entered the way the user thinks about it.
+                    //
+                    // ★ AND THE RANGE IS THE PRINTABLE ONE, not 5…90 of something.
+                    // The bottom is one extruded bead; the top is the thickness at
+                    // core's certifiable density ceiling. A slider that could ask
+                    // for a strut the machine cannot lay is the decorative-control
+                    // defect wearing a different hat.
+                    let range = thicknessRangeMM
+                    scrubRow("thickness", value: currentThicknessMM, unit: "mm",
+                             step: 0.02, range: range) {
+                        model.manualStrutThicknessMM = $0
                         model.touched(.thickness)
                         rebuild()
                     }
+                    Text("One extrusion is \(mmText(range.lowerBound)) — the thinnest "
+                         + "strut this printer can lay at a \(mmText(model.cellMM)) cell.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .accessibilityIdentifier("wizard-thickness-floor-note")
                 }
             case .cellSize:
                 // ★ "cell size could be auto or swept or manually input"
@@ -409,11 +432,30 @@ public struct LatticeSetupWizard: View {
                 // stress-graded one: core builds a dyadic ladder and picks the
                 // level per block from the demand field. So it is offered ONLY
                 // under the Sim permission, and labelled so.
+                // ★★ AUTO IS THE GRADED ONE NOW, AND "FIXED" IS CALLED MANUAL
+                // (maintainer, 2026-08-19: "Cell size = Auto should absolutely be
+                // *any* number - as needed based on the stress map … and only
+                // *manual* should force a single number through the entire
+                // lattice").
+                //
+                // ★ AUTO NEEDS THE SIM, because it grades from the stress field —
+                // so with the permission off it is not offered, exactly as the
+                // sweep is not. Manual and Fit stand alone. See
+                // `LatticeSettings.resolvedCellPlan` for what each one emits.
                 segmentRow(model.simulateStresses
-                           ? ["Auto", "Fixed", "Swept · Sim"]
-                           : ["Auto", "Fixed"],
+                           ? ["Auto · Sim", "Swept · Sim", "Manual", "Fit"]
+                           : ["Manual", "Fit"],
                            selected: cellModeIndex) { i in
-                    model.setCellSizeMode([.auto, .fixed, .swept][i])
+                    let modes: [LatticeCellSizeMode] = model.simulateStresses
+                        ? [.auto, .swept, .fixed, .fit]
+                        : [.fixed, .fit]
+                    model.setCellSizeMode(modes[i])
+                }
+                if model.simulateStresses, model.cellSizeMode == .auto {
+                    Text(autoCellNote)
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .accessibilityIdentifier("wizard-auto-cell-note")
                 }
                 // ★ THE CELL DIMENSION LIVES HERE AND NOWHERE ELSE (maintainer,
                 // 2026-08-14): *"Auto needs no cell size, fixed needs one, and
@@ -577,12 +619,25 @@ public struct LatticeSetupWizard: View {
         }
     }
 
+    /// What Auto will actually do, in the objective the project is set to — split
+    /// out because inlining it in the view body defeated the type-checker.
+    private var autoCellNote: String {
+        let head = "The solve picks the cell everywhere — coarse where there is no "
+            + "stress, fine where there is. "
+        let tail = project.minimizePlastic
+            ? "Minimising plastic, so it coarsens as far as the certification allows."
+            : "Strength first, so it holds the finest printable cell and grades the "
+                + "density instead."
+        return head + tail
+    }
+
     private var cellModeIndex: Int {
-        switch model.cellSizeMode {
-        case .auto: return 0
-        case .fixed: return 1
-        default: return 2
-        }
+        // ★ The order the row is BUILT in — two shapes, because Auto and Swept
+        // both need the sim permission.
+        let modes: [LatticeCellSizeMode] = model.simulateStresses
+            ? [.auto, .swept, .fixed, .fit]
+            : [.fixed, .fit]
+        return modes.firstIndex(of: model.cellSizeMode) ?? 0
     }
     private var densityModeIndex: Int {
         // ★ THE INDEX FOLLOWS THE LIST THE SEGMENT ACTUALLY SHOWS. With the Sim
@@ -598,6 +653,34 @@ public struct LatticeSetupWizard: View {
         case .perRegion: return 2
         }
     }
+    /// The printable thickness range for the CURRENT topology and cell — see
+    /// `LatticeSettings.manualThicknessRangeMM`.
+    private var thicknessRangeMM: ClosedRange<Double> {
+        var probe = LatticeSettings(enabled: true)
+        probe.topologyID = model.topologyID
+        probe.cellMM = model.cellMM
+        // Core's own band for this topology — the same accessor the page and the
+        // run spec use, so the slider's ceiling is core's ceiling.
+        return probe.manualThicknessRangeMM(
+            limits: TopOptKit.latticeLimits(topology: model.topologyID),
+            lineWidthMM: project.printParams.strutLineWidthMM)
+    }
+
+    /// The thickness the slider should show: the hand-set one, or — the first time
+    /// the sim is switched off — the thickness the CURRENT density already
+    /// produces, so the control opens on the lattice that is on screen rather than
+    /// jumping to an arbitrary default.
+    private var currentThicknessMM: Double {
+        if let mm = model.manualStrutThicknessMM { return mm }
+        let topo = LatticeType.named(model.topologyID)
+        let derived = 2 * topo.strutRadiusMM(relativeDensity: model.relativeDensity,
+                                             cellMM: model.cellMM)
+        let r = thicknessRangeMM
+        return Swift.min(r.upperBound, Swift.max(r.lowerBound, derived))
+    }
+
+    private func mmText(_ v: Double) -> String { String(format: "%.2f mm", v) }
+
     private var boundaryIndex: Int {
         switch model.boundary {
         case .none: return 0

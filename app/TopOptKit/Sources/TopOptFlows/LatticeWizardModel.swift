@@ -179,6 +179,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// and `applied(to:)` handed the project back whatever it already had.
     public var cellMinMM: Double
     public var cellMaxMM: Double
+    /// The hand-set strut thickness (mm), or nil for derived — see
+    /// `LatticeSettings.manualStrutThicknessMM`.
+    public var manualStrutThicknessMM: Double?
     public var boundary: LatticeBoundaryTreatment
 
     /// ★★ THE SIM PERMISSION (maintainer, 2026-08-17) — "a dark glass on/off
@@ -206,6 +209,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
                 // default to 'none'". A bare lattice is what the page
                 // should open on; a dressing is something you add.
                 boundary: LatticeBoundaryTreatment = .none,
+                manualStrutThicknessMM: Double? = nil,
                 simulateStresses: Bool = true) {
         self.topologyID = topologyID
         self.cellMM = cellMM
@@ -215,6 +219,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.cellMinMM = cellMinMM
         self.cellMaxMM = cellMaxMM
         self.boundary = boundary
+        self.manualStrutThicknessMM = manualStrutThicknessMM
         self.simulateStresses = simulateStresses
     }
 
@@ -250,7 +255,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   relativeDensity: max(0.05, s.maxRelativeDensity),
                   densityMode: s.densityMode, cellSizeMode: s.cellSizeMode,
                   cellMinMM: s.cellMinMM, cellMaxMM: s.cellMaxMM,
-                  boundary: s.boundary, simulateStresses: s.simulateStresses)
+                  boundary: s.boundary,
+                  manualStrutThicknessMM: s.manualStrutThicknessMM,
+                  simulateStresses: s.simulateStresses)
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -266,6 +273,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.cellMinMM = cellMinMM
         out.cellMaxMM = cellMaxMM
         out.boundary = boundary
+        out.manualStrutThicknessMM = manualStrutThicknessMM
         out.simulateStresses = simulateStresses
         out.enabled = true
         return out

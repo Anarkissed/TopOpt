@@ -293,7 +293,12 @@ public final class AppModel: ObservableObject {
             lineWidthMM: project.printParams.strutLineWidthMM,
             // Round-2 (M3): the include/exclude regions — role groups' primitives +
             // faces and the legacy include primitives — ride `lattice.regions`.
-            regions: emitted.regions)
+            regions: emitted.regions,
+            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
+            // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
+            // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
+            minimizePlastic: project.minimizePlastic,
+        )
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,

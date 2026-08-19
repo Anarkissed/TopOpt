@@ -66,6 +66,30 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
 
     /// The relative density a given strut radius produces at this cell size — the
     /// forward map ρ = K·(r/L)², for reporting a patch's true density back.
+    /// ★★ THE PRINTABILITY FLOOR (maintainer, 2026-08-19: "It should be based on
+    /// the printing parameters. I have mine set at a 0.42 line width, so 0.5-0.95
+    /// makes sense. But if I change to a 0.2 nozzle that can change, so I would
+    /// expect the floor to change with it: to 0.25. Does that make sense?").
+    ///
+    /// ★ IT DOES, AND THE NUMBER FALLS OUT OF THE LAW RATHER THAN BEING TYPED.
+    /// The thinnest strut a printer can lay is ONE BEAD WIDE, so its radius is
+    /// `lineWidth / 2`; the density that produces is `ρ = K·(r/L)²`. Measured for
+    /// octet (K = 48):
+    ///
+    ///     line 0.42 mm · cell 2.20 mm → 43.7%     ← his settings
+    ///     line 0.42 mm · cell 8.00 mm →  3.3%
+    ///     line 0.20 mm · cell 2.20 mm →  9.9%
+    ///
+    /// ★ SO HIS 0.5 WAS ALMOST EXACTLY RIGHT AT HIS OWN CELL, and the one
+    /// correction worth stating is that the law is QUADRATIC in the width, not
+    /// linear: a 0.2 mm nozzle gives 9.9%, not the ~0.25 a linear scaling
+    /// suggests. It also moves with the CELL — a coarser cell can print a much
+    /// lower density, which is why the unloaded wall wants a coarse cell.
+    public func printabilityDensityFloor(lineWidthMM: Double, cellMM: Double) -> Double {
+        guard lineWidthMM > 0, cellMM > 0 else { return 0 }
+        return min(1, relativeDensity(strutRadiusMM: lineWidthMM / 2, cellMM: cellMM))
+    }
+
     public func relativeDensity(strutRadiusMM radius: Double, cellMM: Double) -> Double {
         guard cellMM > 0 else { return 0 }
         let rl = radius / cellMM

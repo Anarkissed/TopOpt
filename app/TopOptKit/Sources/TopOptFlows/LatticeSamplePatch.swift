@@ -114,8 +114,33 @@ public enum LatticeSamplePatch {
         case .covered:
             let e = Float(extent)
             let half = e * unit * 0.5
+            // ★★ THE WALL SITS OUTSIDE THE STRUTS, NOT THROUGH THEM (maintainer,
+            // 2026-08-19: "the 'walls' you added to the 'covered' finish are
+            // *inside* the lattice. Had you taken the time to check, you could
+            // have found that out yourself").
+            //
+            // ★ THE BOX IS NOT THE SILHOUETTE. `inside()` clips strut ENDPOINTS
+            // to [0, extent], but `emitStrut` sweeps a capsule of `radius` about
+            // that segment and `emitNode` puts a blob of the same radius on each
+            // junction — so the drawn lattice reaches `radius` PAST the box on
+            // every face. Panels placed at the box therefore cut through the
+            // outermost struts. `pad` is that radius, with a hair of clearance so
+            // the wall reads as a surface over the lattice rather than as a plane
+            // coincident with it.
+            let pad = radius * 1.05
             func w(_ x: Float, _ y: Float, _ z: Float) -> SIMD3<Float> {
-                SIMD3<Float>(x, y, z) * unit - SIMD3<Float>(repeating: half)
+                let p = SIMD3<Float>(x, y, z) * unit - SIMD3<Float>(repeating: half)
+                // ★ X AND Z ONLY. The pad exists so a wall clears the strut
+                // capsules it covers — which is a question about the wall's own
+                // normal and about the CORNERS it has to close, both in plan.
+                // Padding Y as well made the block taller than its lattice, so
+                // the open top and bottom stopped being flush with it and the
+                // "seen from the top and bottom" rule quietly broke. Y is left
+                // exactly at the box: the lattice's own bulge then stands proud
+                // of the open ends, which is the point.
+                return SIMD3<Float>(p.x + (x <= 0 ? -pad : (x >= e ? pad : 0)),
+                                    p.y,
+                                    p.z + (z <= 0 ? -pad : (z >= e ? pad : 0)))
             }
             // The four VERTICAL faces (y is up): the pairs at x = 0/e and z = 0/e.
             let panels: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)] = [

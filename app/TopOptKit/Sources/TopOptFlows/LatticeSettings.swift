@@ -581,6 +581,56 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// every existing project's lattice.
     public var simulateStresses: Bool
 
+    /// ★★ THE MANUAL STRUT THICKNESS, in mm (maintainer, 2026-08-19: "there should
+    /// also be a way to manually override the sim's thickness control to whatever
+    /// the user sets. Please make it so there is an on/off switch that turns on
+    /// the Sim control. Off makes a sliding number value visible; controlling the
+    /// thickness of the cell on screen").
+    ///
+    /// `nil` ⇒ derived, which is every project written before this and every
+    /// project with `simulateStresses` on.
+    ///
+    /// ★ IT IS A THICKNESS, STORED AS A THICKNESS, BUT IT DOES NOT BECOME A
+    /// SECOND SOURCE OF TRUTH. The renderer grades from relative DENSITY and
+    /// nothing else; a strut radius is `L·√(ρ/K)` and that map is invertible
+    /// (`LatticeType.relativeDensity(strutRadiusMM:cellMM:)`). So the slider's
+    /// millimetres are converted to the density that produces them and the band
+    /// is pinned there. One mechanism, two ways of typing into it — rather than a
+    /// thickness path and a density path that can disagree.
+    public var manualStrutThicknessMM: Double? = nil
+
+    /// ★ THE RANGE THE THICKNESS SLIDER MAY OFFER, in mm of strut DIAMETER.
+    ///
+    /// The bottom is one extruded bead — thinner cannot be printed. The top is the
+    /// thickness at the certifiable density ceiling, `2·L·√(ρmax/K)`: past it the
+    /// struts have merged into something core will not certify as this lattice.
+    /// Both ends therefore come from the same two laws the rest of this file uses,
+    /// so the slider cannot offer a value the run would refuse.
+    public func manualThicknessRangeMM(limits: TopOptKit.LatticeLimits,
+                                       lineWidthMM: Double) -> ClosedRange<Double> {
+        let lo = Swift.max(0.05, lineWidthMM > 0 ? lineWidthMM : 0.4)
+        let rhoMax = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 0.9
+        let hi = Swift.max(lo + 0.05, 2 * lattice.strutRadiusMM(relativeDensity: rhoMax,
+                                                                cellMM: cellMM))
+        return lo...hi
+    }
+
+    /// The relative density a hand-set strut thickness produces at this cell —
+    /// or nil when the thickness is not in play (the sim is on, or none is set).
+    ///
+    /// ★ CLAMPED TO THE PRINTABLE FLOOR AND THE CERTIFIABLE CEILING, because a
+    /// slider that can ask for a strut the printer cannot lay is a slider that
+    /// produces a refused run. The floor is `lineWidth/2` expressed as a density
+    /// (see `LatticeType.printabilityDensityFloor`), which is exactly where the
+    /// slider's own minimum sits, so the clamp only ever bites on a stale value.
+    public func manualThicknessDensity(limits: TopOptKit.LatticeLimits) -> Double? {
+        guard !simulateStresses, let mm = manualStrutThicknessMM, mm > 0 else { return nil }
+        let rho = lattice.relativeDensity(strutRadiusMM: mm / 2, cellMM: cellMM)
+        let floor = lattice.printabilityDensityFloor(lineWidthMM: 0, cellMM: cellMM)
+        let hi = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 1
+        return Swift.max(Swift.max(0.0001, floor), Swift.min(hi, rho))
+    }
+
     /// ★ THE DEMAND⇢DENSITY CURVE'S EXPONENT — core's `grading.demand_exponent`.
     ///
     ///     rho = rho_hi · (demand / demand_max) ^ gamma
@@ -859,6 +909,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     // guards the older layer of the same rule).
     private enum CodingKeys: String, CodingKey {
         case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
+        case manualStrutThicknessMM      // the hand-set thickness (nil ⇒ derived)
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
@@ -919,6 +970,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // so those projects have always been asking for a solve. Defaulting
         // false here would silently change every one of their lattices.
         simulateStresses = try c.decodeIfPresent(Bool.self, forKey: .simulateStresses) ?? true
+        // ★ ABSENT ⇒ DERIVED, so every project written before the control existed
+        // decodes to exactly the behaviour it had.
+        manualStrutThicknessMM = try c.decodeIfPresent(Double.self,
+                                                       forKey: .manualStrutThicknessMM)
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
@@ -983,6 +1038,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(boundary, forKey: .boundary)
         try c.encode(densityMode, forKey: .densityMode)
         try c.encode(simulateStresses, forKey: .simulateStresses)
+        // Encoded only when set — an untouched project's bytes do not move.
+        try c.encodeIfPresent(manualStrutThicknessMM, forKey: .manualStrutThicknessMM)
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
@@ -1014,6 +1071,67 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// floor, applied by `LatticeBounds.compute` (`cellFloorMM`).
     public static let defaultCellMinMM: Double = 4
     public static let defaultCellMaxMM: Double = 8
+
+    /// ★★ WHAT "AUTO" ACTUALLY MEANS NOW (maintainer, 2026-08-19: "Cell size =
+    /// Auto should absolutely be *any* number - as needed based on the stress map,
+    /// not just a single cell size. Swept should limit it to a smaller range but
+    /// still automatically selected based on the sim, and only *manual* should
+    /// force a single number through the entire lattice").
+    ///
+    /// ★ CORE'S OWN `auto` IS ONE UNIFORM CELL, and says so in a throw:
+    /// `plan_cell_sizes` refuses any mode but `Swept` — "the Fixed and Auto paths
+    /// are one uniform cell and stay in grade_lattice" (core/src/simp/
+    /// cell_plan.cpp:114). So the app's Auto cannot be core's auto and mean what
+    /// he asked for.
+    ///
+    /// ★ BUT CORE ALREADY GRADES, under `swept`: a dyadic ladder `S0·2^L`, and a
+    /// block takes the COARSEST level printability asks for, bounded by the
+    /// cells-per-member ceiling. That is precisely "coarse where there is no
+    /// stress" — low stress ⇒ low density ⇒ thin strut ⇒ unprintable at a fine
+    /// cell ⇒ the plan coarsens until it prints. Auto therefore maps onto SWEPT
+    /// with a window the app derives, and no new grading law is invented.
+    ///
+    /// ★ AND THE OBJECTIVE PICKS THE WINDOW (maintainer: "If 'minimize_plastic'
+    /// is on, then the goal of the lattice should be to minimize the amount of
+    /// plastic used, meaning cells as large as possible and as least dense as
+    /// possible … If minimize_plastic is off then the goal is to make it as strong
+    /// as possible"):
+    ///
+    ///   minimize plastic ON  → the full ladder, floor … the coarsest cell that
+    ///                          still certifies. The plan then coarsens wherever
+    ///                          the stress permits, which is where the material is
+    ///                          saved.
+    ///   minimize plastic OFF → a degenerate window at the FLOOR: the finest
+    ///                          printable cell everywhere, with density still
+    ///                          graded from the stress.
+    public struct ResolvedCellPlan: Equatable, Sendable {
+        public let mode: LatticeCellSizeMode
+        public let loMM: Double
+        public let hiMM: Double
+    }
+
+    public func resolvedCellPlan(bounds b: LatticeBounds,
+                                 minimizePlastic: Bool) -> ResolvedCellPlan {
+        let floor = LatticeCellEntry.entryFloorMM(b)
+        switch cellSizeMode {
+        case .fixed, .fit:
+            return .init(mode: cellSizeMode, loMM: 0, hiMM: 0)
+        case .swept:
+            let lo = Swift.max(cellMinMM, floor)
+            return .init(mode: .swept, loMM: lo, hiMM: Swift.max(cellMaxMM, lo))
+        case .auto:
+            // ★ THE COARSE END. The cells-per-member ceiling is the honest cap when
+            // core has certified one; without it, three dyadic levels (8×) is the
+            // ladder a sweep can actually use before the cell outgrows any real
+            // member. Never below the floor.
+            let lo = floor
+            guard minimizePlastic else {
+                return .init(mode: .swept, loMM: lo, hiMM: lo)
+            }
+            let ceiling = b.cellCeilingMM ?? (lo * 8)
+            return .init(mode: .swept, loMM: lo, hiMM: Swift.max(lo, ceiling))
+        }
+    }
 
     /// The resolved topology (never nil — an unknown id falls back to octet, matching
     /// `LatticeType.named`).
@@ -1081,7 +1199,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         emit3MF: Bool = false,
                         regions: [LatticeRegionSpec] = [],
                         capability: LatticeRetentionCapability = .fromCore,
-                        cellModes: LatticeCellModeCapability = .fromCore)
+                        cellModes: LatticeCellModeCapability = .fromCore,
+                        // ★ THE OBJECTIVE SHAPES "AUTO" — see `resolvedCellPlan`.
+                        // Defaults to the app's own default so every existing call
+                        // site keeps the minimise-plastic behaviour it had.
+                        minimizePlastic: Bool = true)
         -> LatticeSpec? {
         guard enabled else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
@@ -1141,17 +1263,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // since. So the control accepted 2.0 mm and the emission threw it
             // away: two floors, two answers, one silent overwrite. There is one
             // floor now, and it is the one the control is bounded by.
-            let floor = LatticeCellEntry.entryFloorMM(b)
-            let lo = Swift.max(cellMinMM, floor)
-            let hi = Swift.max(cellMaxMM, lo)
+            // ★ THE ONE PLAN — see `resolvedCellPlan`. Auto is core's SWEPT with a
+            // window this app derives from the objective, because core's own
+            // `auto` is a single uniform cell and cannot grade.
+            let plan = resolvedCellPlan(bounds: b, minimizePlastic: minimizePlastic)
+            let lo = plan.loMM
+            let hi = plan.hiMM
             // Core refuses a non-positive ladder end, so a snapshot carrying one falls
             // back to the fixed cell rather than shipping a job the schema rejects.
             // FIT falls back the same way when the LINKED core does not carry the
             // value: an unknown cell_mode kills the whole job at validation, exactly
             // as an unknown grading key does, so a project snapshot saved against a
             // newer core degrades to the fixed cell instead of dying at the worker.
-            var mode: LatticeCellSizeMode = (cellSizeMode == .swept && !(lo > 0))
-                ? .fixed : cellSizeMode
+            var mode: LatticeCellSizeMode = (plan.mode == .swept && !(lo > 0))
+                ? .fixed : plan.mode
             if mode == .fit && !cellModes.fit { mode = .fixed }
             // ★ FIT DERIVES FROM A DECLARED REGION, so core REFUSES the mode on a job
             // that declares none (job.cpp: "a job that declares none states no
@@ -1226,7 +1351,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         emit3MF: Bool = false,
                         regions: [LatticeRegionSpec] = [],
                         capability: LatticeRetentionCapability = .fromCore,
-                        cellModes: LatticeCellModeCapability = .fromCore)
+                        cellModes: LatticeCellModeCapability = .fromCore,
+                        // ★ LAST, matching the other `runSpec` — see
+                        // `resolvedCellPlan`.
+                        minimizePlastic: Bool = true)
         -> LatticeSpec? {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
@@ -1234,7 +1362,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
                        regions: regions, capability: capability,
-                       cellModes: cellModes)
+                       cellModes: cellModes, minimizePlastic: minimizePlastic)
     }
 
     /// The proxy grading parameters for the current settings, with the density range
@@ -1242,6 +1370,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// SAME numbers the run would use. `limits` is read from core.
     public func proxyParams(limits: TopOptKit.LatticeLimits) -> LatticeProxyParams {
         let b = LatticeBounds.compute(settings: self, limits: limits)
+        // ★★ A HAND-SET THICKNESS PINS THE BAND (maintainer, 2026-08-19). With the
+        // sim off there is no field to grade by, so a graded band would be a ramp
+        // between two numbers nothing chooses between — the preview must show the
+        // ONE lattice the user asked for. Converted through the same law the
+        // renderer uses, then clamped to what the machine can actually print.
+        if let t = manualThicknessDensity(limits: limits) {
+            return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
+                                      minRelativeDensity: t, maxRelativeDensity: t,
+                                      gamma: demandExponent,
+                                      uniformRelativeDensity: t)
+        }
         return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
                                   minRelativeDensity: b.densityLo,
                                   maxRelativeDensity: b.densityHi,
@@ -1468,6 +1607,22 @@ public struct LatticeBounds: Equatable, Sendable {
         if limits.certifiable && bandHi > bandLo {
             if lo < bandLo { lo = bandLo; loReason = "below the certifiable density range (≥ \(pct(bandLo)))" }
             if hi > bandHi { hi = bandHi; hiReason = "above the certifiable density range (≤ \(pct(bandHi)))" }
+            if hi < lo { hi = lo }
+        }
+        // ★★ AND THE PRINTABILITY FLOOR, WHICH MOVES WITH THE NOZZLE (maintainer,
+        // 2026-08-19). Below it the strut is thinner than one extruded bead, so it
+        // is not a lattice the machine can make at all — a stricter bound than
+        // core's certifiable band and, at a fine cell, a much higher one.
+        //
+        // ★ IT DEPENDS ON THE CELL TOO, quadratically: see
+        // `LatticeType.printabilityDensityFloor`. Both bounds apply, so the floor
+        // is whichever is higher, and the reason says which one bit.
+        let printFloor = topo.printabilityDensityFloor(lineWidthMM: lineWidthMM,
+                                                       cellMM: settings.cellMM)
+        if printFloor > lo {
+            lo = min(1, printFloor)
+            loReason = "thinner than one \(mm(lineWidthMM)) extrusion at a \(mm(settings.cellMM)) cell "
+                + "— the printer cannot lay a strut that thin (≥ \(pct(printFloor)))"
             if hi < lo { hi = lo }
         }
 
