@@ -210,14 +210,36 @@ genuine silhouette detail.
 reach** — any angle, any region depth including exact coincidence with the far
 surface, uniform or graded. It reproduces immediately on `l bracket 3` in the app.
 
-That is now a conclusion rather than an assumption, and it points at the part. The
-remaining difference is the L-bracket's own geometry and its real project settings
-(sim density, a design box, `Minimize plastic`, and the graded/design-box
-combination that its Optimize button currently REFUSES). Reproducing this needs that
-document driven through the same path the app drives, which is the thing I stopped
-at — it is your data, and whether it becomes a checked-in fixture is your call, not
-one I should make at 8am without asking. `hisMesh()` already loads your
-`M2_verticalStand.step`, so there is precedent either way.
+That is now a conclusion rather than an assumption, and it points at the part.
+
+**So I read `l bracket 3`'s real settings out of the simulator** (read-only — I did
+not copy your project anywhere), and there is a strong candidate I could not have
+guessed from the fixture:
+
+    densityMode ............ "sim"        simulateStresses ... true
+    minRelativeDensity ..... 0            maxRelativeDensity . 1
+    cellSizeMode / cellMM .. auto, 8mm    (min 4, max 8)
+    region depth ........... 8mm          paintDepthMM ....... 4
+    boundary ............... "none"       designBox .......... true
+    topology ............... octet        minimizePlastic .... true
+
+**`minRelativeDensity: 0`.** With a sim-driven field and a floor of ZERO, cells in
+unstressed material drive the strut radius toward zero — sub-pixel geometry, which a
+sphere-tracer hits or misses inconsistently from one pixel to the next. That is a
+much better fit for sparse specks than either mechanism I refuted, and it explains
+why the fixture stayed clean: my graded probe ran the fixture's own params, with the
+thin end of the field largely outside the region.
+
+It also matches something already known here — see the note on lattice zero-density
+having produced defects before.
+
+**The recipe to reproduce, with no data of yours checked in:** drive the EXISTING
+`M2_verticalStand` fixture with these settings — sim density, `minRelativeDensity`
+0, cell 8mm auto, region depth 8mm, boundary none — and a field whose thin end lands
+INSIDE the region. If the specks appear, the fix is a floor on the rendered strut
+radius (never thinner than a pixel or a printable extrusion, whichever is larger),
+not anything to do with the region plane. If they do not, the next difference to
+chase is the L-bracket's geometry itself.
 
 **Nothing about this is in the tree.** Three probe files were written and all three
 deleted: two metrics that returned clean numbers on a dirty picture, and this sweep.
