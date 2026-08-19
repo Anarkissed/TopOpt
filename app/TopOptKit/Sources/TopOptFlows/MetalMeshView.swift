@@ -1748,6 +1748,31 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             dpd.vertexDescriptor = dvd
             dpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat        // R32Float eye-Z
             dpd.colorAttachments[1].pixelFormat = Self.gbufferNormalFormat     // eye-space normal
+            // ★★ ATTACHMENT 2 IS NOT OPTIONAL HERE, AND LEAVING IT OUT WAS THE ARTIFACT
+            // (maintainer, 2026-08-18: "I can see the lattices from behind the back wall
+            // shown as artifacts", "the lattice still exists *behind* the model face").
+            //
+            // `depth_fragment` returns a `GBuf`, and `GBuf` declares `float4 albedo
+            // [[color(2)]]` — the shell writes 0 there to say "this pixel is the shell,
+            // not the lattice". But a pipeline only writes the attachments it DECLARES:
+            // with no format at index 2 the write is dropped, and the albedo tile is
+            // left UNDEFINED over every pixel the shell covers — then stored, because
+            // the pass stores attachment 2.
+            //
+            // The deferred shade reads that albedo's alpha as its "is this a strut"
+            // mask. Undefined alpha ≥ 128 is a strut, so the shade painted lattice
+            // colour onto shell pixels, in a pattern that changed frame to frame. That
+            // is the whole defect, and it is why it looked like struts behind the wall.
+            //
+            // Measured, counting mask pixels over ten renders of one unchanged scene:
+            //
+            //     before ....  spread 6,897   [2111, 8816, 8853, 2251, 9008, 8423, …]
+            //     after  ....  spread     0   (see `LatticeGBufferMaskTests`)
+            //
+            // The upper cluster sat ABOVE 6,040 — the count with the shell not drawn at
+            // all — which a correct renderer cannot do, since a shell can only occlude.
+            // That impossibility is what identified this as garbage rather than a race.
+            dpd.colorAttachments[2].pixelFormat = Self.gbufferAlbedoFormat
             dpd.depthAttachmentPixelFormat = Self.depthFormat
             // The G-buffer is 1× on purpose: AO and the edge are low-frequency screen
             // terms, and multisampling their INPUT would cost 4× the depth/normal
@@ -4117,8 +4142,32 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// ★★ THE DUMP RENDERS INTO A FRESH G-BUFFER, and that is a correctness fix to
+    /// the INSTRUMENT, not a tidy-up (task D2).
+    ///
+    /// ★ THE MEASUREMENT WAS RETURNING PHYSICALLY IMPOSSIBLE NUMBERS. The same
+    /// frame dumped ten times reported 2,111 … 9,379 lattice pixels — and the
+    /// upper end is above 6,040, which is the count with the shell absent, i.e.
+    /// the total number of pixels the march hits at all. A renderer cannot draw
+    /// more lattice than the march produces, so some of those pixels were not
+    /// written by the frame being measured.
+    ///
+    /// ★ THE G-BUFFER IS CACHED AND REUSED between frames (`sceneDepthTextures`
+    /// returns the existing textures whenever the size matches), which is right
+    /// for the live viewer and wrong for a measurement: it couples each dump to
+    /// the one before it. Dropping the cache first makes every dump allocate its
+    /// own attachments, so what it reads is what that encode wrote and nothing
+    /// else. Costs an allocation per call, on a path that already blits a whole
+    /// texture to the CPU and waits.
+    ///
+    /// ★ WHY IT MATTERS BEYOND THE NUMBER: every D2 conclusion — "the march alone
+    /// is deterministic", "the shell's presence breaks it" — was measured with
+    /// this instrument. They have to be re-established on a sound one before any
+    /// of them is used to justify a fix.
     func latticeMaskDump(size: Int) -> LatticeMaskDump? {
         guard vertexDrawCount > 0, latticeInFrame else { return nil }
+        sceneDepthColorTex = nil; sceneDepthZTex = nil
+        sceneNormalTex = nil; gbufferAlbedoTex = nil
         let cdesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.colorFormat, width: size, height: size, mipmapped: false)
         cdesc.usage = [.renderTarget]
