@@ -2153,8 +2153,13 @@ public final class ProjectModel: ObservableObject {
                     guard let o = mesh.facePlaneOutline(
                         f, planeNormal: SIMD3<Float>(geo.planeNormal),
                         planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
+                    // ★ THE FACE'S OWN BOUNDARY, not the box around it.
+                    let loops = LatticeFaceOutline.loops(
+                        face: f, in: mesh, normal: geo.planeNormal,
+                        origin: SIMD3<Double>(o.center))
                     return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
-                                  halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
+                                  halfUMM: Double(o.halfU), halfWMM: Double(o.halfV),
+                                  outlineLoops: loops)
                 }
                 return nil
         }

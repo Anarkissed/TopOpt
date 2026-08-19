@@ -187,6 +187,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           const device float4* segs,
                           texture3d<float> cellTex,
                           texture3d<float> sdfTex,
+                          texture3d<float> regionTex,
                           sampler samp,
                           constant ShellClip& RC,
                           float3 ro, float3 rd) {
@@ -260,7 +261,13 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // the struts stop exactly where the shell's hole stops, at any cell size
         // — and what makes a sub-millimetre change to the region MOVE the
         // lattice instead of being swallowed by the cell grid.
-        float dClip = max(max(dPart, dBox), lattice_region_clip(p, RC));
+        // ★★ AND THE DECLARED REGION, SAMPLED — not evaluated. A face region is
+        // the face's real OUTLINE extruded to depth (`LatticeFaceOutline`), which
+        // has no closed form a fragment can afford; it is baked to a distance
+        // field on the CPU and read here. The SAME field the shell's hole is cut
+        // from, so the two cannot describe different volumes.
+        float dRegion = regionTex.sample(samp, stc).r;
+        float dClip = max(max(dPart, dBox), dRegion);
 
         if (any(baseCell != cachedBase)) {
             cachedBase = baseCell;
@@ -340,6 +347,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
 static float3 lsdf_normal(constant LSDFUniforms& U,
                           const device float4* segs,
                           texture3d<float> sdfTex,
+                          texture3d<float> regionTex,
                           sampler samp,
                           constant ShellClip& RC,
                           float3 hitPos, float hitRho) {
@@ -373,7 +381,8 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
         // boundary must take that plane's normal, exactly as one cut off at the
         // part surface takes the part's. Otherwise the cut face is shaded as if
         // it were still a strut and reads as a tear.
-        d6[k] = max(dmin * cell, max(max(dP, dB), lattice_region_clip(pts[k], RC)));
+        float dR = regionTex.sample(samp, stc).r;
+        d6[k] = max(dmin * cell, max(max(dP, dB), dR));
     }
     return normalize(float3(d6[0] - d6[1], d6[2] - d6[3], d6[4] - d6[5]) + 1e-6);
 }
@@ -459,6 +468,7 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                texture3d<float> cellTex [[texture(0)]],
                                texture3d<float> sdfTex [[texture(1)]],
                                texture3d<float> tintTex [[texture(2)]],
+                               texture3d<float> regionTex [[texture(3)]],
                                sampler samp [[sampler(0)]],
                                // ★ THE SAME BUFFER INDEX THE SHELL'S CLIP USES (4).
                                // `LatticeSDFRenderer.bindFragment` binds it on EVERY
@@ -467,10 +477,10 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                constant ShellClip& RC [[buffer(4)]]) {
     float3 ro = U.eye.xyz;
     float3 rd = lsdf_ray(U, in.uv);
-    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, RC, ro, rd);
+    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, ro, rd);
     if (!h.hit) { discard_fragment(); }
 
-    float3 n = lsdf_normal(U, segs, sdfTex, samp, RC, h.pos, h.rho);
+    float3 n = lsdf_normal(U, segs, sdfTex, regionTex, samp, RC, h.pos, h.rho);
     float4 clip = U.clipFromModel * float4(h.pos, 1.0);
     float3 eyeP = (U.eyeFromModel * float4(h.pos, 1.0)).xyz;
     float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);

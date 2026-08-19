@@ -204,10 +204,24 @@ final class LatticeRegionFidelityTests: XCTestCase {
 
     // MARK: - (2) THE PIXELS: the march is clipped to the exact region
 
+    /// ★ THE CLIP IS NOW A PROPERTY OF THE BAKE, NOT A PER-FRAME LEVER — and that
+    /// is why this helper takes a SCENE rather than a region list.
+    ///
+    /// These two tests used to bake once and vary `renderer.shellClipRegions`
+    /// between arms, because the region was a rectangle the shader evaluated in
+    /// closed form. It no longer is: a face region is its real OUTLINE
+    /// (`LatticeFaceOutline`), which has no closed form a fragment can afford, so
+    /// `LatticeSDFScene` bakes the union to a distance field and both the march
+    /// and the shell sample THAT. A per-frame region list would be a second
+    /// description of the region — exactly the drift the field exists to prevent
+    /// — so the lever was removed rather than kept working.
+    ///
+    /// The assertions below are unchanged in what they claim. Only how the two
+    /// arms are produced moved: one bake per region, which is also how the app
+    /// produces them.
     @MainActor
     private func renderedLatticePixels(_ mesh: ViewerMesh,
                                        scene: LatticeSDFScene,
-                                       clipTo regions: [LatticeRegionSpec],
                                        device: MTLDevice) throws -> Int {
         guard let renderer = MeshRenderer(device: device, sampleCount: 1) else {
             throw XCTSkip("MeshRenderer init: \(MeshRenderer.lastInitError ?? "?")")
@@ -222,9 +236,6 @@ final class LatticeRegionFidelityTests: XCTestCase {
         renderer.setBodyAlpha(0)
         renderer.setLatticeScene(scene, token: 1)
         renderer.latticeParams = LatticePreviewConfettiTests.hisParams()
-        // `setLatticeScene` takes the scene's own list; override it so the two arms
-        // differ in the CLIP alone and share one bake.
-        renderer.shellClipRegions = regions
         let dump = try XCTUnwrap(renderer.latticeMaskDump(size: 512),
                                  "the lattice must reach the G-buffer at all")
         return dump.covered
@@ -241,15 +252,14 @@ final class LatticeRegionFidelityTests: XCTestCase {
     func testASubCellShrinkMovesTheRenderedLattice() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
         let mesh = try LatticePreviewConfettiTests.hisMesh()
-        // ONE bake, so nothing but the clip can differ.
-        let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
-                                    regions: [Self.hisSlab(mesh)],
-                                    whenEmpty: .latticeNothing)
-        let full = try renderedLatticePixels(mesh, scene: scene,
-                                             clipTo: [Self.hisSlab(mesh)], device: device)
+        func bake(_ r: LatticeRegionSpec) -> LatticeSDFScene {
+            LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                            regions: [r], whenEmpty: .latticeNothing)
+        }
+        let full = try renderedLatticePixels(mesh, scene: bake(Self.hisSlab(mesh)),
+                                             device: device)
         let shrunk = try renderedLatticePixels(
-            mesh, scene: scene,
-            clipTo: [Self.hisSlab(mesh, halfU: 37, halfW: 37)], device: device)
+            mesh, scene: bake(Self.hisSlab(mesh, halfU: 37, halfW: 37)), device: device)
         print("""
 
         ================================================================================
@@ -283,16 +293,19 @@ final class LatticeRegionFidelityTests: XCTestCase {
     func testTheStrutsAreBoundedByTheRegionAndNotByTheCellGrid() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
         let mesh = try LatticePreviewConfettiTests.hisMesh()
-        let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
-                                    regions: [Self.hisSlab(mesh)],
-                                    whenEmpty: .latticeNothing)
-        // The cell-grid behaviour: no region reaches the march at all.
-        let cellBound = try renderedLatticePixels(mesh, scene: scene,
-                                                  clipTo: [], device: device)
-        // The same bake, clipped to a sliver of the declared slab.
+        // No region declared at all: the march is bounded only by the part and the
+        // cell grid, which is the behaviour that produced the artifacts.
+        let cellBound = try renderedLatticePixels(
+            mesh,
+            scene: LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet"),
+            device: device)
+        // A region cut to a sliver.
         let sliver = try renderedLatticePixels(
-            mesh, scene: scene,
-            clipTo: [Self.hisSlab(mesh, halfU: 2, halfW: 2)], device: device)
+            mesh,
+            scene: LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                                   regions: [Self.hisSlab(mesh, halfU: 2, halfW: 2)],
+                                   whenEmpty: .latticeNothing),
+            device: device)
         print("""
 
         ================================================================================
@@ -320,7 +333,7 @@ final class LatticeRegionFidelityTests: XCTestCase {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
         let mesh = try LatticePreviewConfettiTests.hisMesh()
         let sample = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet")
-        let px = try renderedLatticePixels(mesh, scene: sample, clipTo: [], device: device)
+        let px = try renderedLatticePixels(mesh, scene: sample, device: device)
         XCTAssertGreaterThan(px, 0,
                              "★ a scene with NO declared regions must still draw its "
                              + "lattice — 'no regions' means the clip removes nothing, "

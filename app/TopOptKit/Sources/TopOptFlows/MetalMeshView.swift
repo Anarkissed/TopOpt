@@ -68,32 +68,14 @@ private struct ViewerUniforms {
 /// `ShadeParams` in `viewerShaderSource`. Every strength is a plain 0…1 multiplier
 /// and 0 means OFF, so the BEFORE capture is the same shader with zeros rather than
 /// a second code path that could drift from the shipping one.
-/// ★ THE SHELL'S LATTICE CLIP, Swift side. Mirrors `ShellClip` in the shader.
-/// `origin.w` is the enable flag — one field, so "no lattice this frame" and "a
-/// lattice whose grid we could not read" are the same, safe, drawn-normally case.
-struct ClipRegionUniform {
-    var a = SIMD4<Float>(0, 0, 0, 0)   // xyz origin/axisPoint, w kind (0 face, 1 bolt)
-    var b = SIMD4<Float>(0, 0, 0, 0)   // xyz normal/axisDir
-    var c = SIMD4<Float>(0, 0, 0, 0)   // face: depth,halfU,halfW · bolt: radius,halfLen
-}
-
-/// ★ MIRRORS `ShellClip` IN THE SHADER, field for field. `count.w` is the enable
-/// flag, so "no lattice this frame" and "more regions than the array holds" are
-/// both expressible without a second boolean.
+/// ★ MIRRORS `ShellClip` IN THE SHADER, field for field: where the region field
+/// lives in model space, and whether there is one. The region's SHAPE is in the
+/// field itself (`LatticeSDFScene.regionSDF`) — see `shellClipMSL` for why it is
+/// no longer expressible here.
 struct ShellClipUniform {
-    static let maxRegions = 16
-    var count = SIMD4<Float>(0, 0, 0, 0)
-    var regions = [ClipRegionUniform](repeating: ClipRegionUniform(),
-                                      count: ShellClipUniform.maxRegions)
-
-    /// Flatten to the exact byte layout Metal expects — a Swift array is a
-    /// reference, not inline storage, so it cannot be handed to `setFragmentBytes`
-    /// as-is. This is why the buffer is built rather than passed.
-    func bytes() -> [SIMD4<Float>] {
-        var out: [SIMD4<Float>] = [count]
-        for r in regions { out.append(r.a); out.append(r.b); out.append(r.c) }
-        return out
-    }
+    var grid = SIMD4<Float>(0, 0, 0, 0)      // xyz origin, w = enabled
+    var spacing = SIMD4<Float>(1, 1, 1, 0)
+    var dims = SIMD4<Float>(1, 1, 1, 0)
 }
 
 private struct ShadeParams {
@@ -191,103 +173,49 @@ private struct ContactUniforms {
 // so a shader that does not compile is indistinguishable from a feature that is
 // switched off. `MeshRendererPipelinesTests` now asserts this one built.
 let shellClipMSL = """
-// ★★ THE CUT IS THE REGION ITSELF, NOT THE CELL THAT CONTAINS IT (maintainer,
-// 2026-08-18: "The clips are a bit too big … They should be *exactly* the same
-// size as the face that's selected. Because this model *should* have the
-// chamfers around the lattice walls").
+// ★★★ THE SHELL'S LATTICE CLIP — A SAMPLE OF THE REGION FIELD, NOT A SECOND
+// DESCRIPTION OF IT.
 //
-// ★ THE FIRST CUT SAMPLED THE PER-CELL ACTIVATION GRID. A cell is active if it
-// overlaps the region AT ALL, so the hole was rounded UP to whole lattice cells —
-// over-cut by up to one cell in every direction, which on his part is exactly
-// enough to eat the chamfers around the walls. Worse, it coupled two things that
-// must not be coupled: changing the CELL SIZE silently changed how much of his
-// body disappeared.
+// ★ WHY THERE IS NO GEOMETRY IN HERE ANY MORE. This used to evaluate the region
+// in closed form: a slab test, `origin + s·normal` clipped to half_u × half_w.
+// That was only ever right for a RECTANGULAR face. `resolvedLatticeFace` builds
+// those half-extents from `PlaneOutline.fit` — a bounding BOX — and on the
+// maintainer's two lattice walls, which have a curved scoop cut out of them, the
+// box is 2.4x and 3.4x the face:
 //
-// ★ THE REGIONS ARE CLOSED-FORM AND IN MODEL-SPACE MM — the same frame as
-// `mpos` — so the exact test is a handful of dot products per fragment and needs
-// no texture at all. `region_contains` below is `LatticeRegionMask.contains`
-// transliterated: the SAME predicate the occupancy mask, the job document and
-// the core run all use, so the hole and the struts cannot describe different
-// volumes.
-#define SHELL_CLIP_MAX 16
-struct ClipRegion {
-    float4 a;   // face: xyz origin,    w kind (0 face, 1 bolt)
-    float4 b;   // face: xyz normal,    bolt: xyz axisDir
-    float4 c;   // face: x depth, y halfU, z halfW · bolt: x radius, y halfLength
-};
+//     face 15 ..... 41.2% of the emitted region was actually the face
+//     face  2 ..... 29.8%
+//
+// So the hole was cut through material that is not the face, and the struts were
+// drawn into it — "the lattice still exists *behind* the model face".
+//
+// ★ A FACE'S REAL OUTLINE HAS NO CLOSED FORM A FRAGMENT CAN AFFORD (it is a
+// polygon of arbitrarily many edges, and the march evaluates this per step). So
+// `LatticeSDFScene` bakes the union of the declared regions to a DISTANCE FIELD
+// on the occupancy's own grid, and both readers sample it: the march intersects
+// it, this discards inside it. One field, one bake, two readers — the hole and
+// the struts cannot describe different volumes because there is only one volume.
+//
+// ★ AND THE POLARITY IS UNCHANGED. Disabled means "no region list reached this
+// frame", and the clip then removes NOTHING — the shell keeps every fragment.
+// The march's neutral is the mirror of it (a 1x1x1 volume of large NEGATIVE
+// distance: inside everywhere), so a preview with nothing declared still draws
+// its sample cell.
 struct ShellClip {
-    float4 count;                       // x = region count, w = enabled (>0.5)
-    ClipRegion regions[SHELL_CLIP_MAX];
+    float4 grid;        // xyz = field origin (model mm), w = enabled (>0.5)
+    float4 spacing;     // xyz = voxel size (mm)
+    float4 dims;        // xyz = voxel counts
 };
-// The same perpendicular basis `LatticeRegionMask.basis` builds, so the slab's
-// half-extents are measured along the same two axes the CPU measured them on.
-inline void clip_basis(float3 n, thread float3& u, thread float3& v) {
-    float3 seed = (abs(n.x) < 0.9) ? float3(1, 0, 0) : float3(0, 1, 0);
-    u = normalize(cross(n, seed));
-    v = normalize(cross(n, u));
-}
-// ★★ A SIGNED DISTANCE, NOT A BOOLEAN — AND THAT IS WHY THE STRUTS STOP WHERE
-// THE HOLE DOES (maintainer, 2026-08-18: "there are a number of artifacts —
-// these are a result of the lattices being made *behind* the 3d model … You
-// need to make *only* the face's area turned into a lattice").
-//
-// ★ THE SHELL WAS CUT EXACTLY AND THE LATTICE WAS NOT. The struts were bounded
-// only by the baked per-CELL activation grid, and a cell goes active when as
-// little as 2% of it overlaps the region (`cellField`'s `insideFraction`). So
-// the lattice was rounded UP to whole cells while the hole stayed exact, and
-// every strut in the overhang was drawn INSIDE still-solid shell — measured at
-// 19.9% of the strut-bearing volume on his own part. Those are the artifacts.
-//
-// ★ WHY A DISTANCE. The raymarcher intersects SDFs (`max()` of 1-Lipschitz
-// fields is a valid SDF, which is what keeps full sphere-trace steps safe). A
-// boolean reject cannot join that CSG; a true distance can, and the region
-// becomes just another cutting solid alongside the part surface and the bbox.
-// `region_contains` is now EXACTLY `region_distance(...) <= 0`, so the hole in
-// the shell and the clip on the struts are one predicate and cannot drift.
-inline float region_distance(float3 p, constant ClipRegion& r) {
-    if (r.a.w < 0.5) {                              // FACE slab
-        float3 n = r.b.xyz;
-        if (length(n) < 0.5 || r.c.x <= 0.0) { return 1e9; }
-        float3 d = p - r.a.xyz;
-        float3 u, v; clip_basis(n, u, v);
-        // The same three tests, as a box in the (n,u,v) frame: s ∈ [0, depth]
-        // becomes |s − depth/2| − depth/2, and the two in-plane extents are
-        // already symmetric about the origin.
-        float3 q = float3(abs(dot(d, n) - 0.5 * r.c.x) - 0.5 * r.c.x,
-                          abs(dot(d, u)) - r.c.y,
-                          abs(dot(d, v)) - r.c.z);
-        return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
-    }
-    float3 ax = r.b.xyz;                            // BOLT cylinder
-    if (length(ax) < 0.5 || r.c.x <= 0.0) { return 1e9; }
-    float3 d = p - r.a.xyz;
-    float t = dot(d, ax);
-    float2 q = float2(length(d - ax * t) - r.c.x, abs(t) - r.c.y);
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
-}
-inline bool region_contains(float3 p, constant ClipRegion& r) {
-    return region_distance(p, r) <= 0.0;
-}
-// The UNION of the declared regions — min of the distances, which is the same
-// set `region_contains`-any described.
-inline float regions_distance(float3 p, constant ShellClip& c) {
-    int n = min(int(c.count.x), SHELL_CLIP_MAX);
-    float d = 1e9;
-    for (int i = 0; i < n; ++i) { d = min(d, region_distance(p, c.regions[i])); }
-    return d;
-}
-inline bool shell_is_latticed(float3 mpos, constant ShellClip& c) {
-    if (c.count.w < 0.5) { return false; }
-    return regions_distance(mpos, c) <= 0.0;
-}
-// ★ THE MARCH'S SIDE OF THE SAME RULE, and the polarity is deliberate. Disabled
-// means "no region list reached this frame", and for BOTH readers that means the
-// clip removes NOTHING: the shell keeps every fragment, the march keeps every
-// strut (the settings page's sample block has no regions by construction and its
-// whole subject is the cell).
-inline float lattice_region_clip(float3 p, constant ShellClip& c) {
-    if (c.count.w < 0.5) { return -1e9; }
-    return regions_distance(p, c);
+inline bool shell_is_latticed(float3 mpos, constant ShellClip& c,
+                              texture3d<float> regionTex) {
+    if (c.grid.w < 0.5) { return false; }
+    float3 g = (mpos - c.grid.xyz) / max(c.spacing.xyz, float3(1e-6));
+    float3 stc = (g + 0.5) / max(c.dims.xyz, float3(1.0));
+    // Outside the baked volume there is no region — and no clamping, which would
+    // smear the boundary voxels across the rest of the part.
+    if (any(stc < float3(0.0)) || any(stc > float3(1.0))) { return false; }
+    constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+    return regionTex.sample(smp, stc).r <= 0.0;
 }
 """
 
@@ -408,8 +336,9 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 // Swift `setFragmentBytes` index moves with it.
                                 constant CutUniforms& cut [[buffer(3)]],
                                 texture2d<float, access::sample> aoTex [[texture(0)]],
-                                constant ShellClip& shellClip [[buffer(4)]]) {
-    if (shell_is_latticed(in.mpos, shellClip)) { discard_fragment(); }
+                                constant ShellClip& shellClip [[buffer(4)]],
+                                texture3d<float, access::sample> regionTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, regionTex)) { discard_fragment(); }
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
         if (t > reveal.x) discard_fragment();
@@ -704,8 +633,9 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
 // would go dark for a surface nobody can see, which is the exact failure the
 // unified-shading task recorded for `bodyAlpha = 0` walls.
 fragment GBuf depth_fragment(DOut in [[stage_in]],
-                             constant ShellClip& shellClip [[buffer(4)]]) {
-    if (shell_is_latticed(in.mpos, shellClip)) { discard_fragment(); }
+                             constant ShellClip& shellClip [[buffer(4)]],
+                             texture3d<float, access::sample> regionTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, regionTex)) { discard_fragment(); }
     GBuf o;
     o.eyeZ = in.eyeZ;
     // Face the normal toward the eye. The mesh draws with cullMode .none, so a
@@ -3140,10 +3070,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // bound on EVERY path — Metal drops the draw on a missing binding, the same
         // trap the AO texture above documents. Disabled + a 1×1×1 neutral volume is
         // an exact identity when there is no lattice in the frame.
-        var shellClipBytes = shellClipUniform.bytes()
-        enc.setFragmentBytes(&shellClipBytes,
-                             length: MemoryLayout<SIMD4<Float>>.stride * shellClipBytes.count,
-                             index: 4)
+        var shellClip = shellClipUniform
+        enc.setFragmentBytes(&shellClip,
+                             length: MemoryLayout<ShellClipUniform>.stride, index: 4)
+        enc.setFragmentTexture(latticeLayer?.regionTexture ?? neutralShellClipTexture(),
+                               index: 4)
         // Render quality: the AO/edge texture and the strengths that scale it.
         // `viewer_fragment` DECLARES both, so both must be bound on every path —
         // Metal drops the draw on a missing binding, the trap `contact_fragment` and
@@ -3476,14 +3407,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     func setLatticeScene(_ scene: LatticeSDFScene?, token: Int) {
         guard let scene else {
             if latticeLayer != nil { latticeLayer = nil; latticeSceneToken = -1
-                                     latticeAppliedTints = nil
-                                     shellClipRegions = [] }
+                                     latticeAppliedTints = nil }
             return
         }
-        // ★ THE SHELL IS CUT BY THE SCENE'S OWN REGION LIST — see
-        // `LatticeSDFScene.regions`. Taken here, where the scene arrives, so the
-        // hole and the struts always come from one bake.
-        shellClipRegions = scene.regions
         if latticeLayer == nil {
             latticeLayer = LatticeSDFRenderer(device: device, buildPipeline: false)
             latticeSceneToken = -1
@@ -3636,37 +3562,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return t
     }
 
-    /// The regions the shell is cut by — the EXACT declarations, taken from the
-    /// scene that was baked with them, so the hole and the struts cannot describe
-    /// different volumes.
-    var shellClipRegions: [LatticeRegionSpec] = []
 
     /// ★ Only INCLUDE regions cut. An `exclude` is frozen SOLID and carries no
     /// lattice, so cutting there would be the same lie in the other direction.
     private var shellClipUniform: ShellClipUniform {
         var u = ShellClipUniform()
-        guard latticeInFrame else { return u }
-        let include = shellClipRegions.filter { $0.role == .include }
-        guard !include.isEmpty else { return u }
-        var n = 0
-        for r in include where n < ShellClipUniform.maxRegions {
-            var e = ClipRegionUniform()
-            switch r.kind {
-            case .face:
-                let nrm = simd_normalize(SIMD3<Float>(r.normal))
-                e.a = SIMD4(SIMD3<Float>(r.origin), 0)
-                e.b = SIMD4(nrm, 0)
-                e.c = SIMD4(Float(r.depthMM), Float(r.halfUMM), Float(r.halfWMM), 0)
-            case .bolt:
-                let ax = simd_normalize(SIMD3<Float>(r.axisDir))
-                e.a = SIMD4(SIMD3<Float>(r.axisPoint), 1)
-                e.b = SIMD4(ax, 0)
-                e.c = SIMD4(Float(r.radiusMM), Float(r.halfLengthMM), 0, 0)
-            }
-            u.regions[n] = e
-            n += 1
-        }
-        u.count = SIMD4(Float(n), 0, 0, 1)     // w = 1 ⇒ enabled
+        guard latticeInFrame, let g = latticeLayer?.regionGrid else { return u }
+        u.grid = SIMD4(g.origin, 1)            // w = 1 ⇒ enabled
+        u.spacing = SIMD4(g.spacing, 0)
+        u.dims = SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0)
         return u
     }
 
@@ -3816,10 +3720,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
             // ★ THE SAME CLIP HERE, or the G-buffer keeps a wall the visible pass
             // discarded and AO darkens the interior behind a surface nobody sees.
-            var pClipBytes = shellClipUniform.bytes()
-            penc.setFragmentBytes(&pClipBytes,
-                                  length: MemoryLayout<SIMD4<Float>>.stride * pClipBytes.count,
-                                  index: 4)
+            var pClip = shellClipUniform
+            penc.setFragmentBytes(&pClip,
+                                  length: MemoryLayout<ShellClipUniform>.stride, index: 4)
+            penc.setFragmentTexture(lattice?.regionTexture ?? neutralShellClipTexture(),
+                                    index: 4)
             countedDraw(penc, .triangle, vertexDrawCount)
         }
         if let lattice, let lpipe = latticeGBufferPipeline {
@@ -3831,11 +3736,6 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             lattice.camera = camera
             lattice.modelRotation = modelRotation
             lattice.modelCenter = modelCenter
-            // ★ THE STRUTS ARE CLIPPED BY THE SAME BYTES THE HOLE IS CUT FROM.
-            // Taken here, from the one computed property, on the frame it is used
-            // — so the shell's hole and the lattice's edge are the same surface by
-            // construction rather than by two code paths agreeing.
-            lattice.shellClip = shellClipUniform
             var lu = lattice.makeUnifiedUniforms(aspect: aspect,
                                                  clipFromModel: uniforms.mvp,
                                                  eyeFromModel: uniforms.modelView,

@@ -47,8 +47,16 @@ public enum LatticeRegionMask {
             let s = simd_dot(d, n)
             guard s >= 0, s <= region.depthMM else { return false }
             let (u, v) = basis(n)
-            let du = abs(simd_dot(d, u)), dv = abs(simd_dot(d, v))
-            return du <= region.halfUMM && dv <= region.halfWMM
+            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            // ★★ THE OUTLINE WINS WHEN THERE IS ONE. The rectangle was the face's
+            // BOUNDING BOX — 41.2% and 29.8% of the emitted region was actually
+            // the face on his two lattice walls, and the rest was solid material
+            // the struts were drawn into. See `LatticeFaceOutline`.
+            if !region.outlineLoops.isEmpty {
+                return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+                    <= region.inPlaneOffsetMM
+            }
+            return abs(uv.x) <= region.halfUMM && abs(uv.y) <= region.halfWMM
         case .bolt:
             let a = unit(region.axisDir)
             guard simd_length(a) > 0.5, region.radiusMM > 0 else { return false }
@@ -57,6 +65,55 @@ public enum LatticeRegionMask {
             guard abs(t) <= region.halfLengthMM else { return false }
             return simd_length(d - a * t) <= region.radiusMM
         }
+    }
+
+    /// ★ SIGNED DISTANCE (mm, negative inside) to ONE region — the same set
+    /// `contains` describes, as a distance so it can be baked into a field and
+    /// sphere-traced. Extrusion of the in-plane shape along the depth axis:
+    /// `length(max(q,0)) + min(max(q),0)` with q = (in-plane, along-depth).
+    public static func signedDistance(_ p: SIMD3<Double>,
+                                      region: LatticeRegionSpec) -> Double {
+        let big = 1e9
+        switch region.kind {
+        case .face:
+            let n = unit(region.normal)
+            guard simd_length(n) > 0.5, region.depthMM > 0 else { return big }
+            let d = p - region.origin
+            let s = simd_dot(d, n)
+            let (u, v) = basis(n)
+            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            let inPlane: Double
+            if !region.outlineLoops.isEmpty {
+                inPlane = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+                    - region.inPlaneOffsetMM
+            } else {
+                let q = SIMD2<Double>(abs(uv.x) - region.halfUMM, abs(uv.y) - region.halfWMM)
+                inPlane = simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
+            }
+            let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
+            let q = SIMD2<Double>(inPlane, along)
+            return simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
+        case .bolt:
+            let a = unit(region.axisDir)
+            guard simd_length(a) > 0.5, region.radiusMM > 0 else { return big }
+            let d = p - region.axisPoint
+            let t = simd_dot(d, a)
+            let q = SIMD2<Double>(simd_length(d - a * t) - region.radiusMM,
+                                  abs(t) - region.halfLengthMM)
+            return simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
+        }
+    }
+
+    /// The UNION of the include regions, as a distance. `+big` when nothing is
+    /// declared — the caller decides what "no regions" means (see
+    /// `EmptyRegionPolicy`), this function only reports the geometry.
+    public static func signedDistance(_ p: SIMD3<Double>,
+                                      regions: [LatticeRegionSpec]) -> Double {
+        var best = 1e9
+        for r in regions where r.role == .include {
+            best = Swift.min(best, signedDistance(p, region: r))
+        }
+        return best
     }
 
     /// True when `p` is inside ANY of the regions that will actually be latticed.

@@ -33,8 +33,15 @@ public enum LatticeRegionEmission {
         case cylinder(axisPoint: SIMD3<Double>, axisDir: SIMD3<Double>,
                       radiusMM: Double, spanLoMM: Double, spanHiMM: Double)
         /// A planar face: its fitted outline centre, outward normal, half-extents.
+        /// ★ `outlineLoops` IS THE FACE ITSELF, in the plane's (u, v) mm relative
+        /// to `center` — see `LatticeFaceOutline`. The half-extents are its
+        /// BOUNDING BOX and are kept because core still reads them; on a face with
+        /// anything cut out of it they overstate the region badly (41.2% and 29.8%
+        /// correct on his two lattice walls), which is why the loops now ride
+        /// along. Empty ⇒ the rectangle, exactly as before.
         case plane(center: SIMD3<Double>, normal: SIMD3<Double>,
-                   halfUMM: Double, halfWMM: Double)
+                   halfUMM: Double, halfWMM: Double,
+                   outlineLoops: [[SIMD2<Double>]] = [])
     }
 
     public struct Result: Equatable, Sendable {
@@ -95,7 +102,7 @@ public enum LatticeRegionEmission {
             s.radiusMM = radius
             s.halfLengthMM = 0.5 * (hi - lo)
             return s.isValid ? s : nil
-        case .plane(let center, let normal, let halfU, let halfW):
+        case .plane(let center, let normal, let halfU, let halfW, let loops):
             var s = LatticeRegionSpec(role: role, kind: .face)
             s.faceID = faceID
             // Core's slab runs origin + s·normal, s ∈ [0, depth]. The part's
@@ -123,6 +130,14 @@ public enum LatticeRegionEmission {
                                                by: expandMM)
             s.halfUMM = e.halfUMM
             s.halfWMM = e.halfWMM
+            // ★★ AND THE REAL OUTLINE, WITH THE REACH AS ITS OWN NUMBER. Against
+            // an outline the expand is Minkowski dilation by a ball — the same
+            // operation `FaceOffsetShell.dilated` applies to the primitive on
+            // screen — so the shape the user drags and the region the run
+            // latticed are one shape, not two that happen to agree on a
+            // rectangle. The half-extents above still ship for core's reader.
+            s.outlineLoops = loops
+            s.inPlaneOffsetMM = loops.isEmpty ? 0 : LatticeSlabExpand.clamp(expandMM)
             s.depthMM = depthMM
             return s.isValid ? s : nil
         }

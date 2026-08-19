@@ -66,6 +66,18 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var halfUMM: Double = 0
     public var halfWMM: Double = 0
     public var depthMM: Double = 0
+    /// ★★ THE FACE'S REAL OUTLINE, in the plane's (u, v) mm relative to `origin`
+    /// — see `LatticeFaceOutline` for the measurement that made this necessary.
+    /// EMPTY means "no outline was available", and then the region is the
+    /// rectangle `halfUMM`×`halfWMM` exactly as it always was, which is what a
+    /// bolt, a hand-placed primitive and every pre-outline project get.
+    public var outlineLoops: [[SIMD2<Double>]] = []
+    /// ★ THE IN-PLANE REACH, kept as its own number instead of being folded into
+    /// the half-extents. Against an OUTLINE the expand is Minkowski dilation by a
+    /// ball — `signedDistance <= inPlaneOffsetMM` — which is precisely what
+    /// `FaceOffsetShell.dilated` does to the primitive on screen. Folding it into
+    /// halfU/halfW could only ever grow a rectangle.
+    public var inPlaneOffsetMM: Double = 0
     /// ★ The B-rep face this region was spawned from (task 2026-08-12 §0a), or
     /// nil for a hand-placed primitive. Emitted as the job's `face_id` so CORE
     /// can check the depth tie: a face that is both protected and latticed must
@@ -95,6 +107,21 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// from manual primitives and never sets `faceID`, so the key was nil there
     /// and stays absent. Its bytes do not move.
     public var wireDictionary: [String: Any] {
+        // ★★ THE OUTLINE DOES **NOT** GO ON THE WIRE YET, AND THAT IS MEASURED,
+        // NOT CAUTIOUS. `LatticePageRound2Tests.testCoreCLIParsesTheEmittedRegions`
+        // runs the real `topopt-cli` against the emitted job, and core's schema is
+        // STRICT — it rejected the added keys outright:
+        //
+        //     topopt-cli: job.json: unknown key "in_plane_offset_mm"
+        //                 in a face lattice region geometry
+        //
+        // So emitting them would not degrade gracefully to today's rectangle, it
+        // would fail the run. The preview now uses the face's real outline
+        // (`LatticeFaceOutline`); the JOB still carries the bounding rectangle,
+        // which means core is still asked to lattice 2.4x and 3.4x the face on
+        // his two walls. Closing that needs `outline_uv` in core's own schema AND
+        // in its generator — accepting the key while still building the rectangle
+        // would be the same lie with better paperwork.
         let geometry: [String: Any] = kind == .face
             ? [
                 "origin": [origin.x, origin.y, origin.z],

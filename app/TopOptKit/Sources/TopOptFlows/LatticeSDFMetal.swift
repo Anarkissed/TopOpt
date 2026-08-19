@@ -95,6 +95,22 @@ public struct LatticeSDFScene {
     /// would let the hole and the struts drift apart for a frame; reading them off
     /// the scene means they are the same list by construction.
     public let regions: [LatticeRegionSpec]
+    /// ★★ THE DECLARED REGIONS AS A DISTANCE FIELD (mm, negative inside), on the
+    /// occupancy's own grid. This is what makes "only the face's area" true for a
+    /// face of ANY shape: the region is no longer a rectangle the shader can
+    /// evaluate in closed form, it is the face's real outline extruded to depth,
+    /// so it is baked once here and sampled by everything that needs it.
+    ///
+    /// ★ ONE FIELD, TWO READERS. The march intersects it (struts stop at the
+    /// region) and the shell's fragment discards inside it (the hole). Sampling
+    /// the SAME texture is what stops the hole and the struts describing
+    /// different volumes — a distance field interpolates, so the boundary is
+    /// smooth between voxels rather than stepped, exactly as `partSDF` already
+    /// relies on for the part's own flat faces.
+    ///
+    /// EMPTY (`nil`) when no include region is declared: the clip is then inert,
+    /// which is the settings page's sample block.
+    public let regionSDF: LatticeVoxelGrid?
     /// ★ The part's OWN interior, before the region mask — so "no inside at all"
     /// and "the regions matched nothing" stay distinguishable.
     public let partInteriorVoxelCount: Int
@@ -143,6 +159,28 @@ public struct LatticeSDFScene {
         self.regions = regions
         self.occupancy = LatticeRegionMask.clipped(
             solid, to: regions, whenEmpty: whenEmpty)
+        // ★ Baked from the SAME list the occupancy was masked by, on the same
+        // grid, in the same pass — so no third description of "the region" can
+        // exist to drift from the other two.
+        if regions.contains(where: { $0.role == .include }) {
+            var f = solid
+            var i = 0
+            for k in 0..<solid.nz {
+                for j in 0..<solid.ny {
+                    for x in 0..<solid.nx {
+                        let p = SIMD3<Double>(
+                            Double(solid.origin.x) + Double(x) * Double(solid.spacing.x),
+                            Double(solid.origin.y) + Double(j) * Double(solid.spacing.y),
+                            Double(solid.origin.z) + Double(k) * Double(solid.spacing.z))
+                        f.values[i] = Float(LatticeRegionMask.signedDistance(p, regions: regions))
+                        i += 1
+                    }
+                }
+            }
+            self.regionSDF = f
+        } else {
+            self.regionSDF = nil
+        }
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
         // ★ A STATED PER-REGION DENSITY OUTRANKS THE STRESS FIELD. It is the
@@ -231,6 +269,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     }
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
+    /// The region field's texture, or a neutral 1×1×1 "everywhere inside" volume
+    /// when nothing is declared — bound ALWAYS, because the shader declares it and
+    /// Metal drops a draw whose declared texture is unbound.
+    private var regionTex: MTLTexture?
+    private var neutralRegionTex: MTLTexture?
     // Face-role tints on the LATTICE (bar A4): an rgba8 volume on the part-SDF grid,
     // baked from the SAME [FaceID: color] dictionary the mesh view tints the body
     // with — one source of truth, no second colour table. nil = no marked faces
@@ -327,6 +370,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // local camera explicitly.)
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
+        regionTex = scene.regionSDF.flatMap { makeVolumeTexture($0) }
         tintTex = nil          // stale mesh/grid — the host re-applies tints after setScene
         rebakeCellField()
     }
@@ -541,19 +585,46 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// by construction and must still draw its cell.
     var shellClip = ShellClipUniform()
 
+    /// The baked region field, for the SHELL's own fragments — the same texture
+    /// this renderer's march samples, so the hole and the struts are one volume.
+    var regionTexture: MTLTexture? { regionTex }
+    /// Where that field lives in model space, for the shell's uniform.
+    var regionGrid: LatticeVoxelGrid? { scene?.regionSDF }
+
+    /// A 1×1×1 volume reading −1e9: inside everywhere, so an unclipped march is
+    /// an exact identity rather than a special case in the shader.
+    private func neutralRegion() -> MTLTexture? {
+        if let t = neutralRegionTex { return t }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .r32Float
+        d.width = 1; d.height = 1; d.depth = 1
+        d.usage = [.shaderRead]
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var v: Float = -1e9
+        t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
+                  withBytes: &v, bytesPerRow: 4, bytesPerImage: 4)
+        neutralRegionTex = t
+        return t
+    }
+
     func bindFragment(_ enc: MTLRenderCommandEncoder, _ u: inout LSDFUniforms) {
         enc.setFragmentBytes(&u, length: MemoryLayout<LSDFUniforms>.stride, index: 0)
         // ★ BOUND HERE, IN THE ONE BINDER, so the standalone pass and the unified
         // G-buffer write cannot disagree about it — and so neither can OMIT it.
         // `lsdf_fragment` and `lsdf_gbuffer` both DECLARE buffer 4, and Metal drops
         // a draw whose declared buffer is unbound.
-        var clipBytes = shellClip.bytes()
-        enc.setFragmentBytes(&clipBytes,
-                             length: MemoryLayout<SIMD4<Float>>.stride * clipBytes.count,
-                             index: 4)
+        var clip = shellClip
+        enc.setFragmentBytes(&clip, length: MemoryLayout<ShellClipUniform>.stride, index: 4)
         enc.setFragmentBuffer(segBuffer, offset: 0, index: 1)
         enc.setFragmentTexture(cellTex, index: 0)
         enc.setFragmentTexture(sdfTex, index: 1)
+        // ★ index 3 is the REGION field. `neutralRegion()` is a 1×1×1 volume of a
+        // large NEGATIVE distance — "inside everywhere" — which is the exact
+        // identity for a preview with nothing declared (the sample block), and it
+        // means "no regions" clips nothing for the march exactly as it cuts
+        // nothing for the shell.
+        enc.setFragmentTexture(regionTex ?? neutralRegion(), index: 3)
         enc.setFragmentTexture(tintTex ?? dummyTintTex, index: 2)
         enc.setFragmentSamplerState(sampler, index: 0)
     }
@@ -650,14 +721,15 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   texture3d<float> cellTex [[texture(0)]],
                                   texture3d<float> sdfTex [[texture(1)]],
                                   texture3d<float> tintTex [[texture(2)]],
+                                  texture3d<float> regionTex [[texture(3)]],
                                   sampler samp [[sampler(0)]],
                                   constant ShellClip& RC [[buffer(4)]]) {
         float3 ro = U.eye.xyz;
         float3 rd = lsdf_ray(U, in.uv);
-        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, RC, ro, rd);
+        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, ro, rd);
         if (!h.hit) return float4(0.0);
         float3 hitPos = h.pos; float hitRho = h.rho;
-        float3 n = lsdf_normal(U, segs, sdfTex, samp, RC, hitPos, hitRho);
+        float3 n = lsdf_normal(U, segs, sdfTex, regionTex, samp, RC, hitPos, hitRho);
 
         // ★ THE OLD, SEPARATE LIGHTING MODEL — and §1(d)'s whole point. A model-space
         // key at a different direction and a different strength from the body's, a

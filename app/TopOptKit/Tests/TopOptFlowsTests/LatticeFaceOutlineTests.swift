@@ -67,6 +67,62 @@ final class LatticeFaceOutlineTests: XCTestCase {
         """)
     }
 
+    /// ★★ THE OUTLINE REACHES THE LATTICE — the artifact fix, as a number.
+    ///
+    /// Two regions for the SAME face 15, identical in every field except one: the
+    /// outline. The rectangle latticed 2.4x the face; the outline latticed the
+    /// face. The occupied-voxel ratio has to track the AREA ratio, because the
+    /// slab depth is the same for both.
+    func testTheOutlineRegionLatticesOnlyTheFace() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let f = FaceID(15)
+        guard let geo = mesh.faceGeometry(f), geo.isPlane,
+              let o = mesh.facePlaneOutline(f, planeNormal: SIMD3<Float>(geo.planeNormal),
+                                            planeOrigin: SIMD3<Float>(geo.planeOrigin))
+        else { throw XCTSkip("face 15 has no planar geometry") }
+
+        func spec(withOutline: Bool) -> LatticeRegionSpec {
+            var s = LatticeRegionSpec(role: .include, kind: .face)
+            s.origin = SIMD3<Double>(o.center)
+            s.normal = -simd_normalize(geo.planeNormal)   // the emission's own flip
+            s.halfUMM = Double(o.halfU); s.halfWMM = Double(o.halfV)
+            s.depthMM = 11.0
+            if withOutline {
+                s.outlineLoops = LatticeFaceOutline.loops(
+                    face: f, in: mesh, normal: geo.planeNormal,
+                    origin: SIMD3<Double>(o.center))
+            }
+            return s
+        }
+        func occupied(_ r: LatticeRegionSpec) -> Int {
+            LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                            regions: [r], whenEmpty: .latticeNothing)
+                .occupancy.values.filter { $0 > 0.5 }.count
+        }
+        let rect = occupied(spec(withOutline: false))
+        let outline = occupied(spec(withOutline: true))
+        print("""
+
+        ================================================================================
+        WHAT THE REGION ACTUALLY LATTICES — face 15, same depth, same everything else
+          bounding RECTANGLE (until now) .... \(rect) voxels
+          the face's real OUTLINE ........... \(outline) voxels
+          the rectangle latticed \(rect > 0 ? Double(outline) / Double(rect) : 0) of what it should
+        ★ the difference is struts inside solid shell — the artifacts.
+        ================================================================================
+        """)
+        XCTAssertGreaterThan(rect, 0, "the rectangle arm must lattice something to compare")
+        XCTAssertLessThan(outline, rect,
+                          "★ the outline must lattice STRICTLY LESS than the bounding box")
+        // Face 15's outline is 41.2% of its rectangle by area, and both share a
+        // depth, so the volume ratio must land near that rather than merely below 1.
+        let ratio = Double(outline) / Double(rect)
+        XCTAssertEqual(ratio, 0.412, accuracy: 0.10,
+                       "★ the latticed VOLUME must track the AREA the face actually "
+                       + "covers (41.2%). A ratio near 1 would mean the outline never "
+                       + "reached the mask; near 0 would mean it emptied the region.")
+    }
+
     /// A true rectangle is unchanged — the outline must not "fix" what was right.
     func testARectangularFaceIsStillExactlyItsRectangle() throws {
         let mesh = try LatticePreviewConfettiTests.hisMesh()
