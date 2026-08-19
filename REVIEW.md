@@ -165,45 +165,43 @@ one angle, dense mottling at another. From above, and from either side, it is cl
   every frame. It is also not caused by that fix: an undeclared attachment can only
   have put garbage IN, and this survives with the attachment correctly declared.
 
-**My hypothesis, stated as a hypothesis.** The INNER face of a face region is the
-depth you dragged, and the bake deliberately does not pad it (padding it would
-lattice material you never declared — the front face is padded 1.5 voxels precisely
-because it can be). On this part that inner face is coincident with the slab's
-bottom surface, and the shell's discard test is
-`regionTex.sample(...).r <= 0.0` — a linear sample of a field that is ~0 right
-there. That is a per-pixel coin flip, which is what speckle looks like.
+**My hypothesis was WRONG, and I tested it rather than leaving it standing.** I
+guessed the cause was the region's INNER face: it is deliberately unpadded (padding
+it would lattice material you never declared), and on the L-bracket it is
+coincident with the slab's bottom surface, where the shell's discard test
+`regionTex.sample(...) <= 0.0` reads a ~0 field and could flip per pixel.
 
-**What I tried, and why it is not in the tree.** I biased that test by half a voxel
-(`< -eps`) so the shell is only dropped when clearly inside, erring toward keeping
-the shell. I rebuilt, put it on the simulator, and looked: **the speckle was still
-there.** So I reverted it. It is unverified and it did not work, and I would rather
-hand you a clean tree than a shader edit I cannot stand behind.
+Two experiments say no:
 
-**I then tried to build that instrument, and it does not reproduce the defect.**
-I wrote a headless test that renders at a FIXED camera from below and measures the
-mask, twice, and I am reporting both failures because a green test here would be a
-lie:
+    azimuth sweep, far side of the region .... 0-29 lattice px, no small components
+    depth sweep, region punched through ...... one clean component at every depth
 
-1. First metric — ISOLATED pixels (all four neighbours disagree). Reported **1**, on
-   a view the eye plainly reads as speckled, because the specks are 2-4 pixel clumps
-   rather than single pixels.
-2. Second metric — CONNECTED COMPONENTS (speckle = many small ones). Reported a
-   **single** component of 677 px from below and 663 from above, with zero small
-   components either way.
+            depth 11.0 mm .... 882 px, 1 component, 0 small
+            depth 109.1 mm ... 10,183 px, 1 component, 0 small
+            depth 218.275 mm . 20,668 px, 1 component, 0 small   <- EXACT coincidence
+            depth 223.3 mm ... 20,668 px, 1 component, 0 small
 
-The tell is in those numbers: `LatticeGBufferMaskTests` gets **6,040** lattice pixels
-at elevation 0.4, and this fixture yields ~670 at elevation ±1.15. The synthetic
-40 mm slab is nearly edge-on there — the defect is never on screen, so the test was
-green for the same reason a photograph of the wrong wall is clean.
+At exactly the part's own thickness the inner face lies ON the far surface — the
+coincidence I predicted — and the render is still clean. I also tried the half-voxel
+bias on the live app and the speckle survived it. So the inner-face coincidence is
+not the mechanism, and a bias on that test is not the fix.
 
-**So the instrument needs the REAL document, not the fixture.** On the simulator the
-speckle covers a face that fills the screen, because your region spans the whole top
-face of the L-bracket; the test's `hisSlab` is a 40 mm patch. I have deleted the test
-rather than leave a passing file that implies coverage it does not have. The next
-attempt should drive the same project document the app opens, at the camera the
-screenshot was taken from, and only then choose between biasing the discard test,
-tie-breaking consistently between the field's two readers, or giving the inner face
-a pad the CLIP honours but the EMITTED region does not.
+(That depth sweep first reported IDENTICAL numbers at every depth, because I reused
+`token: 1` and the rebake was skipped — the same stale-key trap as the one fixed in
+the app. The numbers above are from the corrected run, where they move; a sweep whose
+output does not change with its input is measuring nothing.)
+
+**What I would look at next.** The strongest remaining difference between your
+L-bracket and this fixture is the DENSITY SOURCE. Your project runs sim/graded
+density with a design box; every probe above ran `field: nil`, a uniform lattice. A
+graded field drives per-cell strut radii, and radii near the thin end produce
+sub-pixel geometry — which is a far better candidate for sparse specks than a
+plane coincidence that measurably does not speckle. The next attempt should drive a
+graded field on this fixture, and only then choose a fix.
+
+**Nothing about this is in the tree.** Three probe files were written and all three
+deleted: two metrics that returned clean numbers on a dirty picture, and this sweep.
+The one change I made to production code for it — the half-voxel bias — is reverted.
 
 ## The notification's equal padding (D3)
 
