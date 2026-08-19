@@ -233,13 +233,52 @@ thin end of the field largely outside the region.
 It also matches something already known here — see the note on lattice zero-density
 having produced defects before.
 
-**The recipe to reproduce, with no data of yours checked in:** drive the EXISTING
-`M2_verticalStand` fixture with these settings — sim density, `minRelativeDensity`
-0, cell 8mm auto, region depth 8mm, boundary none — and a field whose thin end lands
-INSIDE the region. If the specks appear, the fix is a floor on the rendered strut
-radius (never thinner than a pixel or a printable extrusion, whichever is larger),
-not anything to do with the region plane. If they do not, the next difference to
-chase is the L-bracket's geometry itself.
+**AND IT REPRODUCES.** I ran exactly that on the existing fixture — one variable,
+where the near-zero end of the field lands:
+
+    thin end OUTSIDE the region      thin end INSIDE the region
+    az 0.70  1 comp,  0 specks       az 0.70   4 comps,  3 specks
+    az 1.57  1 comp,  0 specks       az 1.57  55 comps, 54 specks
+    az 2.36  1 comp,  0 specks       az 2.36   3 comps,  2 specks
+
+Same part, same camera, same region, same everything else. Moving the zero-density
+end inside the region takes the speck count from 0 to 54. **That is the underside
+speckle**, and the cause is `minRelativeDensity: 0`: unstressed cells drive the
+strut radius toward zero, and a strut thinner than a pixel is hit or missed from one
+pixel to the next.
+
+It is not the region plane, it is not the unified pass, and it is not the attachment
+bug I fixed. It is sub-pixel geometry, which is why it looked like dust rather than
+like structure.
+
+---
+
+## ★ THE ONE DECISION I NEED FROM YOU (it is a one-branch change)
+
+A strut at density ~0 is not printable and not really there. Two honest ways to
+draw it, and this is a taste call about what the preview should SAY:
+
+**(a) Draw nothing below the printable floor.** Cells whose strut is thinner than
+the nozzle can lay simply do not render. The preview then shows only lattice that
+will actually exist, and the speckle is gone because the geometry is gone. The risk
+is that a region can look EMPTY where the sim asked for almost nothing — which is
+arguably the truth, but it is a strong visual claim.
+
+**(b) Clamp the rendered radius to the printable floor.** Every cell keeps a visible
+strut, never thinner than one extrusion. Nothing vanishes, the speckle is gone
+because nothing is sub-pixel any more — but the preview then draws struts slightly
+FATTER than the density asks for at the thin end, so the picture flatters the part.
+
+I lean to (a), because you have said repeatedly that the preview must not show
+material the run will not produce, and because `minRelativeDensity: 0` on your
+project is what asked for nothing in the first place. But (b) is the safer-looking
+one and I am not going to pick between "shows nothing" and "shows a white lie" on
+your behalf.
+
+Either is one branch at the point the radius is computed. Tell me which and it is
+done, with the A/B above as the guard (0 specks required, and the guard fails today
+at 54).
+
 
 **Nothing about this is in the tree.** Three probe files were written and all three
 deleted: two metrics that returned clean numbers on a dirty picture, and this sweep.
