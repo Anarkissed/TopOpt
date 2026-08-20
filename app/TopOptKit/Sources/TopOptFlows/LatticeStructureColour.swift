@@ -27,29 +27,29 @@ public enum LatticeStructureColour {
     /// ORDINARY interior fill.
     public static let interior = RGBAColor(r: 0.49, g: 0.42, b: 0.86)
 
-    /// LOAD-CARRYING cells — those the grading drove past `loadCut` of the band.
-    public static let load = RGBAColor(r: 0.24, g: 0.78, b: 0.44)
-
-    /// ★ THE CUT, STATED ONCE. A cell reads as load-carrying above this fraction of
-    /// the density band the preview is grading between — not an absolute density,
-    /// because the band itself moves with the printer and the topology.
-    ///
-    /// 0.6 is a judgement: high enough that ordinary fill does not flash green, low
-    /// enough that a genuinely thickened run of cells does. It is one constant, and
-    /// it is the sort of number worth arguing with once it can be seen.
-    public static let loadCut: Double = 0.6
+    // ★★ THERE WAS A THIRD CLASS, AND IT WAS REMOVED (maintainer, 2026-08-19: "Yes,
+    // I agree. Remove the green load carrying lattice type").
+    //
+    // "Load-carrying" was any cell whose density passed 0.6 of the band. That is
+    // redundant twice over: lightness ALREADY encodes density continuously, so green
+    // drew a hard threshold across smooth data; and with the stress map on the struts,
+    // "where is the load going" is answered properly, in MPa, without inventing a cut
+    // that would need defending every time someone asked "why 0.6?".
+    //
+    // What is left is a real structural distinction — boundary work versus fill —
+    // which is NOT derivable from density. Hue = what it is, lightness = how much
+    // material, stress = where the load goes. Three channels, no overlap.
 }
 
 /// The three things a strut can be. Stable ids so the key can drill into one.
 public enum LatticeStructureClass: String, CaseIterable, Sendable {
-    case rim, interior, load
+    case rim, interior
 
     public var id: UUID {
         switch self {
         case .rim:      return UUID(uuidString: "5747ICE0-0000-0000-0000-000000000001")
                             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         case .interior: return UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
-        case .load:     return UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         }
     }
 
@@ -57,7 +57,6 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
         switch self {
         case .rim:      return "Rim & skin"
         case .interior: return "Interior fill"
-        case .load:     return "Load-carrying"
         }
     }
 
@@ -65,7 +64,6 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
         switch self {
         case .rim:      return LatticeStructureColour.rim
         case .interior: return LatticeStructureColour.interior
-        case .load:     return LatticeStructureColour.load
         }
     }
 
@@ -77,11 +75,8 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
             return "Struts on the lattice's own edge, run heavier so the boundary "
                  + "holds. This is the rim, diagrid or skin you picked as the finish."
         case .interior:
-            return "Ordinary fill everywhere else. Thickness follows the density "
-                 + "you set — nothing has asked it to be stronger."
-        case .load:
-            return "Cells the stress pushed past 60% of the band. Material went "
-                 + "here because the solve said the part needs it."
+            return "Ordinary fill. Thickness follows the density — pale is thin, "
+                 + "deep is thick. Turn the stress view on to see where the load goes."
         }
     }
 }

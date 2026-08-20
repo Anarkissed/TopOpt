@@ -147,14 +147,11 @@ struct LSDFUniforms {
     // armed, the dressings never armed, and the key light was being fed a boolean.
     // It cost nothing to find because `LatticeFinishRendersTests` asserts the
     // PIXELS move; it would have cost a great deal to find by eye.
-    float4 overlayParams;   // x = stress overlay (>0.5), y = dressing level,
-                            // z = the density fraction above which a cell reads
-                            //     as LOAD-CARRYING
-    // ★ THE STRUCTURE HUES (2026-08-19). Appended AFTER `overlayParams` in BOTH
-    // this struct and the Swift one — these match by BYTE OFFSET, never by name,
-    // so a field added to one side alone silently reads a neighbour's bytes.
+    float4 overlayParams;   // x = stress overlay (>0.5), y = dressing level
+    // ★ THE BOUNDARY HUE (2026-08-19). Appended AFTER `overlayParams` in BOTH this
+    // struct and the Swift one — these match by BYTE OFFSET, never by name, so a
+    // field added to (or removed from) one side alone reads a neighbour's bytes.
     float4 rimColor;
-    float4 loadColor;
     // ── UNIFIED PASS ONLY (zero-filled for the standalone preview, which never
     // reads them). The clip and eye transforms the BODY is drawn with, so a marched
     // hit can be written into the SHARED depth buffer and the SHARED G-buffer in
@@ -487,16 +484,16 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     //
     //   BOUNDARY  `dressing > 0`  — rim / diagrid / skin work, the heavier struts
     //                               where the lattice meets its own edge.
-    //   LOADED    high density    — cells the grading drove past `loadCut` of the
-    //                               band, i.e. where the stress asked for material.
     //   INTERIOR  everything else — ordinary fill.
+    //
+    // ★ A THIRD "load-carrying" hue was removed (2026-08-19): it thresholded DENSITY,
+    // which lightness already shows continuously, and the stress overlay answers
+    // "where is the load" far better. See `LatticeStructureColour`.
     //
     // Lightness still runs pale→saturated with density INSIDE each hue, so the two
     // readings never collide.
-    float loadCut = U.overlayParams.z;
     float3 hue = U.denseColor.xyz;                       // interior fill
-    if (frac >= loadCut && loadCut > 0.0) { hue = U.loadColor.xyz; }
-    if (hitDressing > 0.05) { hue = U.rimColor.xyz; }
+    if (hitDressing > 0.05) { hue = U.rimColor.xyz; }    // boundary work
     float3 baseC = mix(U.sparseColor.xyz, hue, clamp(0.25 + 0.75 * frac, 0.0, 1.0));
     // Face-role tint (A4): where the body would have been tinted (anchor / load /
     // keep-clear / protect), the marked face's surface voxels carry that colour in
