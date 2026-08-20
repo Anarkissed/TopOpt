@@ -147,7 +147,14 @@ struct LSDFUniforms {
     // armed, the dressings never armed, and the key light was being fed a boolean.
     // It cost nothing to find because `LatticeFinishRendersTests` asserts the
     // PIXELS move; it would have cost a great deal to find by eye.
-    float4 overlayParams;     // x = stress overlay (>0.5), y = dressing level
+    float4 overlayParams;   // x = stress overlay (>0.5), y = dressing level,
+                            // z = the density fraction above which a cell reads
+                            //     as LOAD-CARRYING
+    // ★ THE STRUCTURE HUES (2026-08-19). Appended AFTER `overlayParams` in BOTH
+    // this struct and the Swift one — these match by BYTE OFFSET, never by name,
+    // so a field added to one side alone silently reads a neighbour's bytes.
+    float4 rimColor;
+    float4 loadColor;
     // ── UNIFIED PASS ONLY (zero-filled for the standalone preview, which never
     // reads them). The clip and eye transforms the BODY is drawn with, so a marched
     // hit can be written into the SHARED depth buffer and the SHARED G-buffer in
@@ -186,7 +193,7 @@ static inline float3 lsdf_ray(constant LSDFUniforms& U, float2 uv) {
     return normalize(U.rayDir.xyz + U.rayX.xyz * uv.x + U.rayY.xyz * uv.y);
 }
 
-struct LSDFHit { bool hit; float3 pos; float rho; };
+struct LSDFHit { bool hit; float3 pos; float rho; float dressing; };
 
 /// Sphere-trace the strut ∩ part field. The march runs in the mesh's own frame,
 /// where every baked grid lives, and lands on screen exactly where the body pass
@@ -200,6 +207,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           constant ShellClip& RC,
                           float3 ro, float3 rd) {
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
+    out.dressing = 0.0;
 
     float cell = U.latticeOrigin.w;
     float3 lorigin = U.latticeOrigin.xyz;
@@ -369,6 +377,10 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                 tHit = clamp(t + F * dt / (FPrev - F), t - dt, t + dt);
             }
             out.hit = true; out.pos = ro + rd * tHit; out.rho = rhoNear;
+            // ★ WHAT KIND OF STRUT IT IS, carried out with it: the dressing is
+            // already known here (it is what fattened the radius), and the albedo
+            // needs it to tell BOUNDARY work from interior fill.
+            out.dressing = clamp(dressing, 0.0, 1.0);
             return out;
         }
         FPrev = F; tPrev = t;
@@ -444,7 +456,7 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
                           texture3d<float> tintTex,
                           texture3d<float> stressTex,
                           sampler samp,
-                          float3 hitPos, float hitRho) {
+                          float3 hitPos, float hitRho, float hitDressing) {
     // ★★ THE STRESS PLOT, PAINTED ONTO THE STRUTS (maintainer, 2026-08-18:
     // "Allow the stress map to *overlay* on the lattice if it is turned on
     // simultaneously. I want to be able to see the stress map and compare the
@@ -463,17 +475,38 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     }
     float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y;
     float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
-    float3 baseC = mix(U.sparseColor.xyz, U.denseColor.xyz, frac);
+    // ★★ HUE = WHAT THE STRUT IS; LIGHTNESS = HOW MUCH MATERIAL IS IN IT
+    // (maintainer, 2026-08-19: "I thought they were tinted for different *types* of
+    // lattice structures. Something like the Rim was blue, the regular cells were
+    // purple, the weight taking cells were green").
+    //
+    // It used to be the owning GROUP's colour, which said which faces he had
+    // selected and nothing whatever about the lattice — so on a lattice page the
+    // channel was spent on the one thing the page is not about. Three classes now,
+    // in the order they take precedence:
+    //
+    //   BOUNDARY  `dressing > 0`  — rim / diagrid / skin work, the heavier struts
+    //                               where the lattice meets its own edge.
+    //   LOADED    high density    — cells the grading drove past `loadCut` of the
+    //                               band, i.e. where the stress asked for material.
+    //   INTERIOR  everything else — ordinary fill.
+    //
+    // Lightness still runs pale→saturated with density INSIDE each hue, so the two
+    // readings never collide.
+    float loadCut = U.overlayParams.z;
+    float3 hue = U.denseColor.xyz;                       // interior fill
+    if (frac >= loadCut && loadCut > 0.0) { hue = U.loadColor.xyz; }
+    if (hitDressing > 0.05) { hue = U.rimColor.xyz; }
+    float3 baseC = mix(U.sparseColor.xyz, hue, clamp(0.25 + 0.75 * frac, 0.0, 1.0));
     // Face-role tint (A4): where the body would have been tinted (anchor / load /
     // keep-clear / protect), the marked face's surface voxels carry that colour in
     // the tint volume — baked from the mesh view's own tint dictionary. The
     // trilinear alpha fades off-face; ×2.2 saturates ON the face so the flush-cut
     // section reads as solidly marked as the body did.
-    if (U.stepParams.z > 0.5) {
-        float3 ttc = ((hitPos - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / U.sdfDims.xyz;
-        float4 ft = tintTex.sample(samp, ttc);
-        baseC = mix(baseC, ft.rgb, clamp(ft.a * 2.2, 0.0, 1.0));
-    }
+    // ★ THE FACE-ROLE TINT NO LONGER PAINTS THE STRUTS. It is what made every
+    // strut carry its group's colour, which is precisely the confusion above. The
+    // volume is still bound (the shell uses it); the lattice simply stops reading
+    // it, so hue is free to mean structure.
     return baseC;
 }
 """
@@ -557,7 +590,7 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     LSDFGBuf o;
     o.eyeZ = -eyeP.z;                     // eye looks down −Z → positive into the screen
     o.enormal = float4(eyeN, 0.0);
-    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho), 1.0);
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho, h.dressing), 1.0);
     // ★ CLAMPED SO THE DEPTH-DIRECTION DECLARATION IS TRUE BY CONSTRUCTION.
     // (The declaration is named without its brackets on purpose:
     // `testFragmentDepthWritesAreDeclaredConservative` counts that token across

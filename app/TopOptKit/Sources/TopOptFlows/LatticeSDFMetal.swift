@@ -61,9 +61,17 @@ struct LSDFUniforms {
     var lightDir: SIMD4<Float>                // xyz key light (model space — world light un-settled)
     var sparseColor: SIMD4<Float>            // rgb (sparse end of the indigo ramp)
     var denseColor: SIMD4<Float>             // rgb (dense end)
-    /// x = stress overlay on (>0.5). Appended AFTER every field the shipping
-    /// shaders read, so their byte layout is untouched.
+    /// x = stress overlay on (>0.5), y = dressing level, z = the density fraction
+    /// above which a cell reads as LOAD-CARRYING. Appended AFTER every field the
+    /// shipping shaders read, so their byte layout is untouched.
     var overlayParams: SIMD4<Float> = .zero
+    /// ★★ THE STRUCTURE HUES — and their POSITION here is load-bearing. This struct
+    /// is matched to its MSL twin by BYTE OFFSET, so these sit immediately after
+    /// `overlayParams` on BOTH sides. The last field added to one side alone made
+    /// the shader read `lightDir` as the overlay flags; `LatticeFinishRendersTests`
+    /// is what caught it, by asserting pixels move.
+    var rimColor: SIMD4<Float> = .zero        // boundary work: rim / diagrid / skin
+    var loadColor: SIMD4<Float> = .zero       // cells the grading drove past the cut
     // ── UNIFIED PASS ONLY (task 2026-08-18-unified-shading). The clip and eye
     // transforms the BODY is drawn with, so a marched hit can be written into the
     // SHARED depth buffer and the SHARED G-buffer of `MeshRenderer`'s own passes.
@@ -683,12 +691,27 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // stepParams.z = whether a face-tint volume is bound (A4).
             stepParams: SIMD4(0.95, 0.35 * minSDFSpacing, tintTex != nil ? 1 : 0, Float(segCount)),
             lightDir: SIMD4(lightModel, 0),
-            sparseColor: SIMD4(Float(sparse.r), Float(sparse.g), Float(sparse.b), 1),
-            denseColor: SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1),
+            // ★ `denseColor` is now the INTERIOR hue and `sparseColor` the pale end
+            // every hue washes out to, so all three classes share one lightness
+            // language. Read from `LatticeStructureColour` — the same constants the
+            // legend keys — so the part and its key cannot drift apart.
+            sparseColor: SIMD4(Float(LatticeStructureColour.pale.r),
+                               Float(LatticeStructureColour.pale.g),
+                               Float(LatticeStructureColour.pale.b), 1),
+            denseColor: SIMD4(Float(LatticeStructureColour.interior.r),
+                              Float(LatticeStructureColour.interior.g),
+                              Float(LatticeStructureColour.interior.b), 1),
             // ★ …and whether the stress plot is painted onto the struts this frame.
             // Only when the host asks AND a field was actually baked.
             overlayParams: SIMD4(stressOverlay && stressTex != nil ? 1 : 0,
-                                 dressingLevel, 0, 0))
+                                 dressingLevel,
+                                 Float(LatticeStructureColour.loadCut), 0),
+            rimColor: SIMD4(Float(LatticeStructureColour.rim.r),
+                            Float(LatticeStructureColour.rim.g),
+                            Float(LatticeStructureColour.rim.b), 1),
+            loadColor: SIMD4(Float(LatticeStructureColour.load.r),
+                             Float(LatticeStructureColour.load.g),
+                             Float(LatticeStructureColour.load.b), 1))
     }
 
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, cmd: MTLCommandBuffer) {
@@ -882,7 +905,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         float ndlK = clamp(dot(n, key), 0.0, 1.0);
         float ndlF = clamp(dot(n, fill), 0.0, 1.0);
         float amb = 0.30;
-        float3 baseC = lsdf_albedo(U, tintTex, stressTex, samp, hitPos, hitRho);
+        // ★ THE DRESSING TRAVELS HERE TOO. `lsdf_albedo` classifies a strut as
+        // boundary work from it, and this standalone preview shares that function —
+        // so a call short of an argument does not merely lose the rim hue, it fails
+        // to COMPILE, and a shader built with `try?` then fails silently.
+        float3 baseC = lsdf_albedo(U, tintTex, stressTex, samp, hitPos, hitRho, h.dressing);
         float3 lit = baseC * (amb + 0.85 * ndlK + 0.30 * ndlF);
         float rim = pow(1.0 - clamp(dot(n, vdir), 0.0, 1.0), 2.5);
         lit += rim * 0.55 * mix(float3(0.72, 0.78, 0.98), float3(1.0), 0.35);
