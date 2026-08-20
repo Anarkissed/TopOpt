@@ -86,6 +86,23 @@ GradedField grade_lattice(const VoxelGrid& grid,
         "grade_lattice: min_extrudable_width_mm must be > 0");
   if (!(params.demand_exponent > 0.0))
     throw std::invalid_argument("grade_lattice: demand_exponent must be > 0");
+  // ★ ABSOLUTE UTILISATION (§0). Validated only when armed, so the peak-relative
+  // path cannot start throwing on values it never reads.
+  if (params.demand_allowable_mpa < 0.0 ||
+      !std::isfinite(params.demand_allowable_mpa))
+    throw std::invalid_argument(
+        "grade_lattice: demand_allowable_mpa must be finite and >= 0 (0 = the "
+        "peak-relative law)");
+  if (params.demand_allowable_mpa > 0.0) {
+    if (!(params.utilisation_target > 0.0 && params.utilisation_target <= 1.0))
+      throw std::invalid_argument(
+          "grade_lattice: utilisation_target must be in (0, 1] — it is the "
+          "utilisation at which the lattice reaches rho_max");
+    if (!(params.unloaded_utilisation_max >= 0.0 &&
+          params.unloaded_utilisation_max <= 1.0))
+      throw std::invalid_argument(
+          "grade_lattice: unloaded_utilisation_max must be in [0, 1] (0 disarms)");
+  }
   if (params.thickness_cap_voxels < 1)
     throw std::invalid_argument("grade_lattice: thickness_cap_voxels must be >= 1");
   // SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions). The
@@ -116,6 +133,11 @@ GradedField grade_lattice(const VoxelGrid& grid,
     throw std::invalid_argument(
         "grade_lattice: subfloor_aggregate_cap_fraction must be 0 (no cap) or in "
         "(0, 1]");
+
+  // ★ §0 / §3 — resolved once, up here, because the sub-floor qualification (§2)
+  // below reads `allowable` and it runs before the density map.
+  const double allowable = params.demand_allowable_mpa;
+  const double u_target = params.utilisation_target;
 
   const LatticeTopology topo = params.topology;
 
@@ -256,6 +278,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         r.stress_fraction = demand[e];   // holds the raw PEAK until normalised below
     }
     for (GradedField::SubfloorRegion& r : out.subfloor_regions) {
+      const double region_peak = r.stress_fraction;   // still the raw peak, in MPa
       r.stress_fraction =
           part_demand_max > 0.0 ? std::min(1.0, r.stress_fraction / part_demand_max)
                                 : 0.0;
@@ -263,6 +286,37 @@ GradedField grade_lattice(const VoxelGrid& grid,
       // region: an all-zero demand makes every fraction 0.0, which READS as "carries
       // nothing" and MEANS "nothing was measured".
       r.qualified = part_demand_max > 0.0 && r.stress_fraction <= subfloor_frac_max;
+
+      // ── ★ §1(c) CHECKED DELIBERATELY, AND §2 ADDED HERE ────────────────────────
+      // ★ WHAT §0 DID **NOT** CHANGE. This predicate is a ratio of TWO PEAKS OF THE
+      // SAME FIELD (region peak / part peak). It never read the density
+      // normalisation, so moving that normalisation from `demand_max` to the
+      // allowable leaves it BIT-IDENTICAL. That is the answer to bar R5, and it is
+      // checked here rather than assumed: `demand_max` is still computed, still the
+      // candidate-set peak, and still what `region_stress_fraction` divides by.
+      //
+      // ★ WHAT IS WRONG WITH IT ANYWAY, and why §2 needs a second test. Being a
+      // ratio, it is SCALE-FREE: a region at 5 % of the part's peak is at 5 %
+      // whether the part carries 22 N or 48 kN. It therefore inherits exactly the
+      // defect §0 removed from the density grade — it cannot tell "quiet" from
+      // "the whole part is quiet". On the maintainer's part EVERY region is
+      // unloaded in absolute terms (peak utilisation 0.000463), and this predicate
+      // cannot say so, because relative to the part's own peak something is always
+      // at 100 %.
+      //
+      // ★ SO §2 IS AN ABSOLUTE TEST, ADDED, NOT A REPLACEMENT. When an allowable is
+      // supplied and a threshold is armed, a region ALSO qualifies as unloaded when
+      // its own peak sits below `unloaded_utilisation_max` of the allowable — a
+      // statement about the MATERIAL, which is what "this wall need only hold itself
+      // up" actually means. The relative test is kept because it is the shipped
+      // behaviour and it is the conservative one; qualifying under EITHER is a
+      // widening, and every retained voxel is still counted, flagged and reported
+      // out of regime exactly as before.
+      r.utilisation = allowable > 0.0 ? region_peak / allowable : 0.0;
+      r.qualified_unloaded_absolute =
+          allowable > 0.0 && params.unloaded_utilisation_max > 0.0 &&
+          r.utilisation <= params.unloaded_utilisation_max;
+      if (r.qualified_unloaded_absolute) r.qualified = true;
     }
   }
   auto region_qualified = [&](std::size_t e) -> bool {
@@ -287,6 +341,18 @@ GradedField grade_lattice(const VoxelGrid& grid,
   double min_width = kInf, min_cpm = kInf;
   double min_d = kInf, max_d = 0.0;
   const double gamma = params.demand_exponent;
+  out.demand_allowable_mpa_used = allowable;
+  out.utilisation_target_used = allowable > 0.0 ? u_target : 0.0;
+  if (allowable > 0.0) {
+    out.max_utilisation = demand_max / allowable;
+    // §0(b): count every CANDIDATE the field puts over the allowable, before any
+    // clamp — an over-allowable region must never read as "dense and fine".
+    for (std::size_t e = 0; e < n; ++e) {
+      const bool candidate = density[e] > iso && (!region || (*region)[e] != 0);
+      if (candidate && std::isfinite(demand[e]) && demand[e] > allowable)
+        ++out.over_allowable_voxels;
+    }
+  }
 
   // The demand -> density map (requirement 1 / L2), identical in every cell mode:
   // density depends on DEMAND alone, never on cell size. That is exactly what lets
@@ -306,9 +372,29 @@ GradedField grade_lattice(const VoxelGrid& grid,
     if (params.region_relative_density != nullptr &&
         (*params.region_relative_density)[e] > 0.0)
       return (*params.region_relative_density)[e];
-    const double frac =
-        demand_max > 0.0 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
-                         : 0.0;
+    // ★ THE LAW (task 2026-08-20-lattice-only-grading, §0). Two normalisations,
+    // one arithmetic. The DENOMINATOR is the whole difference:
+    //   * ABSOLUTE  — the material allowable. `frac` is UTILISATION, a real
+    //     statement about the material, comparable between parts and between runs,
+    //     and it RESPONDS TO LOAD MAGNITUDE.
+    //   * PEAK      — the candidate set's own peak. `frac` is a ratio to whatever
+    //     the loudest voxel happens to be, so scaling the load changes NOTHING
+    //     (measured: 2161.5x, byte-identical) and a stress concentration compresses
+    //     the whole part toward the floor.
+    // `utilisation_target` (§3) is the utilisation at which the lattice reaches
+    // rho_max: 1.0 works the material to its whole allowable, below 1.0 keeps a
+    // stated margin and therefore spends more plastic.
+    double frac;
+    if (allowable > 0.0) {
+      const double u = demand[e] / allowable;
+      frac = u / u_target;
+      if (!(frac >= 0.0)) frac = 0.0;
+      if (frac > 1.0) frac = 1.0;   // §0(b): clamp, and it is COUNTED below
+    } else {
+      frac = demand_max > 0.0
+                 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
+                 : 0.0;
+    }
     return rho_hi * std::pow(frac, gamma);
   };
   // Band-clamp accounting (H4b): count voxels the demand placed outside the
@@ -899,6 +985,59 @@ GradedField grade_lattice(const VoxelGrid& grid,
     throw std::logic_error(
         "grade_lattice: thinnest latticed member is below the floor with no "
         "retention in force");
+  }
+
+  // ── ★ THE DENSITY DISTRIBUTION (bar R1) ─────────────────────────────────────
+  // One pass in voxel order over the LATTICED set, into fixed bins spanning the
+  // band. Deterministic by construction (bar §1b): no sampling, no RNG, and the
+  // bin edges depend only on the band, which is read from core.
+  //
+  // WHY THIS EXISTS. `rho_min_used` / `rho_max_used` are the ENDS, and on the
+  // maintainer's part they spanned the whole band while 19.07 % of the voxels sat on
+  // the floor — the aggregate said "the full band is in use" and the distribution
+  // said "a fifth of it is pinned". R1 asks for the fraction at the floor, so the
+  // law reports the shape, not just the extremes.
+  {
+    const double span = rho_hi - rho_lo;
+    const double eps = 1e-9;
+    std::vector<double> util;                 // for the median, if armed
+    if (allowable > 0.0) util.reserve(out.latticed_voxels);
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!post.mask[e]) continue;
+      const double r = post.relative_density[e];
+      if (r <= rho_lo + eps) ++out.density_at_floor_voxels;
+      if (r >= rho_hi - eps) ++out.density_at_ceiling_voxels;
+      int b = span > 0.0
+                  ? static_cast<int>((r - rho_lo) / span * GradedField::kDensityBins)
+                  : 0;
+      if (b < 0) b = 0;
+      if (b >= GradedField::kDensityBins) b = GradedField::kDensityBins - 1;
+      ++out.density_histogram[b];
+      if (allowable > 0.0 && std::isfinite(demand[e]))
+        util.push_back(demand[e] / allowable);
+    }
+    // ── ★ §2: WHICH LATTICED MATERIAL IS CERTIFIED ON SELF-WEIGHT ALONE ───────
+    // A region below `unloaded_utilisation_max` of the allowable need not certify
+    // against the LOAD — only hold itself up. Counted here so the claim is visible:
+    // material in this set carries a WEAKER claim than the rest, and §2(d) requires
+    // that to be said in plain words on the card rather than buried.
+    //
+    // Evaluated over the CANDIDATE SET as one group when the caller supplied no
+    // region ids — which is the union reading, and is exactly what the lattice-only
+    // path passes (analyze grades the whole printed design). With ids, a region
+    // qualifies on its own peak, which is the per-region reading the sub-floor
+    // breakdown already uses.
+    if (allowable > 0.0 && params.unloaded_utilisation_max > 0.0 &&
+        out.max_utilisation <= params.unloaded_utilisation_max)
+      out.unloaded_voxels = out.latticed_voxels;
+
+    // A FULL SORT, never a sampled estimate (bar §1b). The median utilisation is
+    // what makes "most of this part sits at 4 % of allowable" a reportable fact
+    // rather than an impression from tapping the preview.
+    if (!util.empty()) {
+      std::sort(util.begin(), util.end());
+      out.median_utilisation = util[util.size() / 2];
+    }
   }
 
   return out;

@@ -1,0 +1,18 @@
+IS OUR OCTET CELL SELF-SUPPORTING?  (exact geometry, no sampling, no FEA)
+Reference cell from core/src/mesh/lattice_gen.cpp ref_nodes()/ref_struts().
+Struts: 36  (24 tetra legs + 12 octahedron edges)
+
+angle from vertical, build direction +Z:
+   45.00 deg : 24 struts   66.7%
+   90.00 deg : 12 struts   33.3%
+
+  HORIZONTAL (90 deg): 12/36 = 33.3%   -> NOT self-supporting
+  the other 24 sit EXACTLY ON the 45 deg limit, i.e. zero margin.
+
+CAN A ROTATION FIX IT?
+  the 36 struts reduce to 6 distinct unsigned directions (FCC face-diagonals).
+  best over 200000 sampled build directions: worst strut = 71.627 deg
+  at (-0.0013, 0.4482, 0.8939);  the limit is 45.000 deg
+  at that best orientation, 5 of 6 direction classes STILL exceed 45 deg.
+
+  => ROTATION CANNOT MAKE THE OCTET SELF-SUPPORTING. It needs a DIFFERENT CELL.

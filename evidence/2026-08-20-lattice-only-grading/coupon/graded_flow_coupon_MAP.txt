@@ -1,0 +1,33 @@
+GRADED (FLOWING) LATTICE COUPON — traced from the maintainer's own stress field
+================================================================================
+job              : /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/solver-speed-accelerators-diagnose-436a6d/evidence/2026-08-20-lattice-only-grading/jobs/lattice_only_before.json
+  peak von Mises : 0.01696337555 MPa (reproduces the production analyze run)
+sub-box          : 40.0 mm cube at part centroid (76.9, -20.7, 45.7)
+spacing d_sep    : 3.00 mm   (Jobard & Lefer 1997 streamline placement)
+strut diameter   : 0.80 mm
+curves placed    : 342  (all three principal families)
+  connectors      : 1298
+  base anchors    : 342
+  repair legs     : 0
+  FLOATING VOXELS : 0  (rasterised check, 0 = one connected body)
+  segments        : 4062
+  triangles       : 185276
+
+TRACED ARC LENGTH
+  total            : 2065.1 mm
+  beyond 45 deg    : 1444.4 mm  (69.9 %)
+
+UNSUPPORTED HORIZONTAL RUNS  (contiguous arc beyond 45 deg)
+  ★ UPPER BOUND: ignores support a crossing curve may give from below.
+  count            : 314
+  median run       : 3.41 mm
+  p90 run          : 7.67 mm
+  p99 run          : 22.17 mm
+  LONGEST run      : 41.78 mm
+
+WHAT TO LOOK FOR ON THE PLATE
+  Print with SUPPORTS OFF. The question is whether the flowing curves bridge.
+  The longest unsupported run above is the worst case the geometry contains;
+  compare it against the span the octet coupon shows is safe at this diameter.
+  Score: did every curve complete, where did any sag, and does the part hold
+  together as one body.
