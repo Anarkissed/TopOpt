@@ -92,10 +92,10 @@ public struct LatticeSetupWizard: View {
 
     private var stageView: some View {
         MetalMeshView(mesh: mesh, camera: camera,
-                      stressTints: model.stage != .cell && model.densityMode == .auto
+                      stressTints: model.stage != .cell && model.densityMode == .sim
                           ? sampleTints : nil,
                       // ★ §7 — ONE input, and it is the cinematic's own progress.
-                      // It was `densityMode == .auto ? wipe : 1`, with `wipe`
+                      // It was `densityMode == .sim ? wipe : 1`, with `wipe`
                       // starting at 0 and `.auto` the default: the page opened
                       // with every fragment discarded.
                       reveal: Float(reveal.value))
@@ -236,6 +236,12 @@ public struct LatticeSetupWizard: View {
     /// is the fix he actually asked for.
     private var selectionsModal: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
+            // ★ ABOVE THE TYPE, ON EVERY VIEW (maintainer, 2026-08-17: "a dark
+            // glass on/off check with a 'Simulate Stresses' at the top of the
+            // 'Lattice Settings' modal (above the 'type')"). It is not one
+            // stage's setting — it decides what the OTHER settings may offer —
+            // so it sits outside the stage list rather than inside it.
+            simulateStressesSwitch
             ForEach(model.stage.settings.filter { !$0.isRenderedByCellSize },
                     id: \.rawValue) { s in
                 settingControl(s, titled: true)
@@ -287,6 +293,69 @@ public struct LatticeSetupWizard: View {
 
     // MARK: ONE control per setting, rendered by the card AND the modal
 
+    // MARK: ★ THE SIM PERMISSION
+
+    /// ★★ "SIMULATE STRESSES" — a dark-glass on/off at the top of the modal.
+    ///
+    /// ★ IT IS A PERMISSION, NOT A MODE (his: "if the SIM option is selected,
+    /// you can offer any variable for the AI to use, but can set some values
+    /// yourself and keep them hard coded"). Turning it on does not grade
+    /// anything by itself; it makes the Sim option AVAILABLE to the axes below,
+    /// each of which still chooses for itself.
+    ///
+    /// ★ IT SAYS WHAT IT WILL COST, because the answer is "a finite-element
+    /// solve". The sub-line is not decoration: it is the difference between a
+    /// checkbox and an informed choice.
+    private var simulateStressesSwitch: some View {
+        Button {
+            model.setSimulateStresses(!model.simulateStresses)
+            rebuild()
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: model.simulateStresses
+                        ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle((model.simulateStresses
+                                      ? DS.Color.accent
+                                      : DS.Color.textTertiary).color)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Simulate Stresses")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    Text(model.simulateStresses
+                         ? "An FEA decides every setting left on Sim."
+                         : "Every setting is yours to enter.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, DS.Space.s)
+            .padding(.horizontal, DS.Space.sm)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .fill(DS.Color.background.opacity(0.45).color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder((model.simulateStresses
+                                   ? DS.Color.accent.opacity(0.5)
+                                   : DS.Color.strokeSubtle).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("wizard-simulate-stresses")
+    }
+
+    /// ★ WHAT A SIM AXIS SAYS INSTEAD OF OFFERING A FIELD. A number the user
+    /// cannot set must not look like one they can — the readout-that-looks-like-
+    /// a-picker defect this page has already paid for twice.
+    private func simDerivedNote(_ what: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 9, weight: .bold))
+            Text(what)
+                .dsStyle(DS.TypeScale.caption2)
+        }
+        .foregroundStyle(DS.Color.accent.opacity(0.85).color)
+    }
+
     /// The SAME control in both places — the card and the modal are two views of
     /// one state, so they cannot offer two different editors for one number.
     @ViewBuilder private func settingControl(_ s: LatticeWizardSetting,
@@ -306,14 +375,44 @@ public struct LatticeSetupWizard: View {
                 // the maintainer removed.
                 EmptyView()
             case .thickness:
-                scrubRow("thickness", value: model.relativeDensity * 100, unit: "%",
-                         step: 0.4, range: 5...90) {
-                    model.relativeDensity = $0 / 100
-                    model.touched(.thickness)
-                    rebuild()
+                // ★★ THICKNESS IS NOT AN INDEPENDENT AXIS UNDER SIM, and this is
+                // core's rule, not a UI choice (maintainer asked: "Is there any
+                // way that thickness could be *manually* enforced?").
+                //
+                // `job.cpp` REJECTS `strut_radius_mm` outright alongside a
+                // `grading` block, and the graded run derives the radius per
+                // position from the graded density:
+                //   0.5 · octet_strut_diameter_mm(rho, cell)
+                // So a thickness box offered here under Sim would be a control
+                // core would refuse — the decorative-control defect, again.
+                //
+                // ★ BUT IT *CAN* BE PINNED, INDIRECTLY, and the note says how:
+                // thickness is f(density, cell). Pin BOTH and the thickness is
+                // determined. That is the honest mechanism, and it is the one
+                // the Density and Cell size rows below already offer.
+                if model.densityMode.needsSimulation, model.simulateStresses {
+                    simDerivedNote("Derived from the simulated density. "
+                                   + "To pin it, pin Density and Cell size.")
+                        .accessibilityIdentifier("wizard-thickness-derived")
+                } else {
+                    scrubRow("thickness", value: model.relativeDensity * 100, unit: "%",
+                             step: 0.4, range: 5...90) {
+                        model.relativeDensity = $0 / 100
+                        model.touched(.thickness)
+                        rebuild()
+                    }
                 }
             case .cellSize:
-                segmentRow(["Auto", "Fixed", "Swept"], selected: cellModeIndex) { i in
+                // ★ "cell size could be auto or swept or manually input"
+                // (maintainer, 2026-08-17) — all three already exist in core
+                // (`cell_mode` = auto / swept / absent-means-fixed). SWEPT is the
+                // stress-graded one: core builds a dyadic ladder and picks the
+                // level per block from the demand field. So it is offered ONLY
+                // under the Sim permission, and labelled so.
+                segmentRow(model.simulateStresses
+                           ? ["Auto", "Fixed", "Swept · Sim"]
+                           : ["Auto", "Fixed"],
+                           selected: cellModeIndex) { i in
                     model.setCellSizeMode([.auto, .fixed, .swept][i])
                 }
                 // ★ THE CELL DIMENSION LIVES HERE AND NOWHERE ELSE (maintainer,
@@ -338,11 +437,26 @@ public struct LatticeSetupWizard: View {
                 }
             case .density:
                 // ★ §8 — THREE MODES. Auto is the default and must never refuse.
-                segmentRow([LatticeDensityMode.auto.title,
-                            LatticeDensityMode.uniform.title,
-                            LatticeDensityMode.perRegion.title],
+                // ★ SIM IS OFFERED ONLY UNDER THE PERMISSION. With the switch
+                // off there is no field, and a mode that grades by a field that
+                // does not exist is not a mode — `setSimulateStresses` has
+                // already moved this axis to Uniform, so the segment cannot show
+                // a selection it no longer holds.
+                segmentRow(model.simulateStresses
+                           ? [LatticeDensityMode.sim.title,
+                              LatticeDensityMode.uniform.title,
+                              LatticeDensityMode.perRegion.title]
+                           : [LatticeDensityMode.uniform.title,
+                              LatticeDensityMode.perRegion.title],
                            selected: densityModeIndex) { i in
-                    model.setDensityMode([.auto, .uniform, .perRegion][i])
+                    let modes: [LatticeDensityMode] = model.simulateStresses
+                        ? [.sim, .uniform, .perRegion] : [.uniform, .perRegion]
+                    model.setDensityMode(modes[i])
+                }
+                if model.densityMode.needsSimulation {
+                    simDerivedNote("A finite-element solve grades every region "
+                                   + "from its own stress.")
+                        .accessibilityIdentifier("wizard-density-sim-note")
                 }
                 if model.densityMode == .perRegion {
                     // ★ §8(e) — THE GAP, SURFACED. PR 331 landed the region layer
@@ -461,8 +575,15 @@ public struct LatticeSetupWizard: View {
         }
     }
     private var densityModeIndex: Int {
+        // ★ THE INDEX FOLLOWS THE LIST THE SEGMENT ACTUALLY SHOWS. With the Sim
+        // permission off, Sim is not in it and everything shifts down one — an
+        // index into a list that is not on screen is how a segment lights the
+        // wrong cell.
+        guard model.simulateStresses else {
+            return model.densityMode == .perRegion ? 1 : 0
+        }
         switch model.densityMode {
-        case .auto: return 0
+        case .sim: return 0
         case .uniform: return 1
         case .perRegion: return 2
         }

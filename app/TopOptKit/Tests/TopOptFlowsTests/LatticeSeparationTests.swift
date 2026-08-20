@@ -537,7 +537,9 @@ final class LatticeSeparationTests: XCTestCase {
                        + "not a density mode, it is a running cinematic")
         // And it stays visible for the mode that caused the defect.
         var m = LatticeWizardModel()
-        XCTAssertEqual(m.densityMode, .auto, "§4b: Auto is still the default")
+        XCTAssertEqual(m.densityMode, .sim,
+                       "§4b: the field-graded mode is still the default — "
+                       + "renamed Auto ⇒ Sim, unchanged in meaning")
         m.jump(to: .cell)
         XCTAssertEqual(LatticeWizardReveal().value, 1, accuracy: 1e-12)
     }
@@ -578,7 +580,6 @@ final class LatticeSeparationTests: XCTestCase {
             faceID: 16, depthMM: verdict == .outOfRegime ? 4.0 : 40.0,
             heldVoxels: verdict == .noMaterial ? 0 : 12_000,
             spacingMM: 1.70527, densityGCM3: 1.24, topology: .octet,
-            bounds: bounds, limits: limits,
             minExtrudableWidthMM: profileWidthMM)
     }
 
@@ -621,8 +622,11 @@ final class LatticeSeparationTests: XCTestCase {
     func testOnlyTheDepthIsAControl() {
         let d = LatticeRegionDrawer.make(card: card(verdict: .certified),
                                          depthMM: 40, held: false)
-        XCTAssertEqual(d.modifiableRows.count, 1)
-        XCTAssertEqual(d.modifiableRows.first?.label, "Depth")
+        // ★ TWO CONTROLS SINCE 2026-08-17: the depth and the in-plane EXPAND
+        // ("I'd like a way to expand them with a handle ... x and y"). Still an
+        // EXACT list, never relaxed to "one or more" — that exactness is what
+        // stops a readout being mistaken for a control.
+        XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth", "Expand"])
     }
 
     // ─────────────────────────────────────────────────────────────────────

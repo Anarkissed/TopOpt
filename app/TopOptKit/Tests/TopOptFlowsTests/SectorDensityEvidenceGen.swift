@@ -78,7 +78,7 @@ final class SectorDensityEvidenceGen: XCTestCase {
         lines.append("--- and the Optimize button, with a refusable density present ---")
         let blocked = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "PLA · 128", latticeEnabled: true,
-            densityMode: .auto, topologyDisplayName: "Octet", cellMM: 2.728,
+            densityMode: .sim, topologyDisplayName: "Octet", cellMM: 2.728,
             bounds: nil, running: false, lineWidthMM: width,
             densityRefusals: [("Sector 1",
                                "0.27 mm strut, under the profile's extrusion width")])

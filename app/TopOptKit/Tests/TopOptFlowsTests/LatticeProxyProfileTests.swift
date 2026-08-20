@@ -168,18 +168,56 @@ final class LatticeProxyProfileTests: XCTestCase {
             renderer.setStressTints(tints)                                // leave it ON for the budget
             print(String(format: "V2  busy scene @%d²: proxy OFF %@ ms | proxy ON %@ ms  (handoff 134 body @1024²: 0.436 ms)",
                          size, fmt(off), fmt(on)))
-            // ★ THE CLAIM THIS TEST IS NAMED FOR, and it runs EVERYWHERE — including
-            // the runner where the absolute budget below is not evaluated. Shading is a
-            // per-vertex colour on the SAME draw, so ON must not cost materially more
-            // than OFF. That is a property of the CODE, not of the machine, and both
-            // machines agree on it: M2 Pro 0.97× and Paravirtual 1.00× at 1024². A bound
-            // of 1.35× is loose enough not to flake once the measurement is interleaved,
-            // and tight enough to catch the thing that would actually be wrong — the
-            // proxy becoming a pass of its own.
-            if let on, let off, off > 0 {
+            // ★ THE CLAIM THIS TEST IS NAMED FOR. Shading is a per-vertex colour on
+            // the SAME draw, so ON must not cost materially more than OFF. That is a
+            // property of the CODE, not of the machine. A bound of 1.35× is tight
+            // enough to catch the thing that would actually be wrong — the proxy
+            // becoming a pass of its own — and the bound is UNCHANGED.
+            //
+            // ★★ ASSERTED AT 2048² ONLY, AND THE 1024² NUMBER IS MEASURED AND
+            // PRINTED BUT NOT ASSERTED (reviewer decision, 2026-08-18).
+            //
+            // ★ WHY, IN THE NUMBERS THAT DECIDED IT. At 1024² this scene draws in
+            // 0.5–0.8 ms, where scheduler noise is comparable to the quantity being
+            // measured. Three consecutive runs on ONE commit, UNCHANGED code:
+            //
+            //     1024²   OFF 0.497 → ON 0.612 ms   = 1.23×
+            //     1024²   OFF 0.665 → ON 0.783 ms   = 1.18×
+            //     1024²   OFF 0.760 → ON 0.556 ms   = 0.73×
+            //
+            // …and two further runs of that same unchanged commit produced 1.46×
+            // and 1.49×, both of which FAILED the bound.
+            //
+            // So the observed spread on identical code is 0.73×–1.49×: wider than
+            // the 1.35× bound itself. A result that swings further than the
+            // threshold it is judged against is not measuring this property; it is
+            // measuring the scheduler.
+            //
+            // ★ AT 2048² THOSE RUNS GAVE 0.99×, 1.02×, 0.92×, 1.04× — seven times
+            // the signal (~3.6 ms), noise proportionally smaller, and the ratio
+            // pinned at ~1.0 every time. That is the property, holding.
+            //
+            // ★★ AND THE GUARD IS NOT WEAKENED BY MOVING IT. An extra render pass
+            // scales with PIXELS, so 2048² is where it would show SOONEST and
+            // largest. The 1024² assertion could only ever have caught something
+            // 2048² had already caught, and in exchange it fired on nothing.
+            //
+            // ★ THE BOUND WAS NOT RAISED. Loosening 1.35× until the test passed
+            // would disarm the guard for every future regression; the bound was
+            // never what was wrong.
+            //
+            // ★ THE PREVIOUS EXPECTATION RECORDED HERE — "M2 Pro 0.97× and
+            // Paravirtual 1.00× at 1024²" — IS REMOVED, not just superseded: that
+            // is precisely the 1024² figure now known to swing, and leaving it
+            // would tell the next reader the number is stable when it is not.
+            if size == 2048, let on, let off, off > 0 {
                 XCTAssertLessThan(on / off, 1.35,
                                   "the density proxy must be a per-vertex colour on the same "
                                   + "draw, not a pass of its own — ON/OFF was \(on / off)× at \(size)²")
+            } else if let on, let off, off > 0 {
+                print(String(format: "    ratio %.2f× at %d² — MEASURED, NOT ASSERTED "
+                             + "(0.73×–1.49× observed on unchanged code; see comment)",
+                             on / off, size))
             }
             // The absolute 60 Hz budget. Same hard numbers as before; evaluated only
             // where a frame time describes the shader rather than a hypervisor's

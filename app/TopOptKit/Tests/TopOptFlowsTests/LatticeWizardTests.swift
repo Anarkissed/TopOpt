@@ -83,7 +83,7 @@ final class LatticeWizardTests: XCTestCase {
 
     func testAutoDensityPlaysTheStressCinematicAndUniformDoesNot() {
         var m = LatticeWizardModel()
-        m.setDensityMode(.auto)
+        m.setDensityMode(.sim)
         XCTAssertEqual(m.playing, .stressWipeAndDive,
                        "§2C: Auto density wipes the field down and dives in")
         m.finishedPlaying()
@@ -183,10 +183,10 @@ final class LatticeWizardTests: XCTestCase {
 
     func testAutoIsTheDefaultOnANewProject() {
         let s = LatticeSettings()
-        XCTAssertEqual(s.densityMode, .auto, "§4b")
+        XCTAssertEqual(s.densityMode, .sim, "§4b")
         XCTAssertEqual(s.cellSizeMode, .auto, "§4b")
         let m = LatticeWizardModel()
-        XCTAssertEqual(m.densityMode, .auto)
+        XCTAssertEqual(m.densityMode, .sim)
         XCTAssertEqual(m.cellSizeMode, .auto)
     }
 
@@ -208,7 +208,7 @@ final class LatticeWizardTests: XCTestCase {
         let withRegions = LatticeAutoPosture.resolve(includeRegionCount: 8,
                                                      retainSubfloor: false)
         XCTAssertEqual(withRegions.cellMode, .fit, "§4a: per region")
-        XCTAssertEqual(withRegions.densityMode, .auto)
+        XCTAssertEqual(withRegions.densityMode, .sim)
 
         let none = LatticeAutoPosture.resolve(includeRegionCount: 0,
                                               retainSubfloor: false)
@@ -262,7 +262,7 @@ final class LatticeWizardTests: XCTestCase {
         }
 
         var s = LatticeSettings(enabled: true)
-        s.densityMode = .auto
+        s.densityMode = .sim
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5
         let spec = s.runSpec(lineWidthMM: PrintParams.fdmDefault.strutLineWidthMM)
@@ -295,7 +295,7 @@ final class LatticeWizardTests: XCTestCase {
     /// possible. So it is checked here, end to end, at a REAL project's width.
     func testTheNewDefaultPostureEmitsALatticeBlockWithItsRegions() throws {
         var s = LatticeSettings(enabled: true)          // auto density, auto cell
-        XCTAssertEqual(s.densityMode, .auto)
+        XCTAssertEqual(s.densityMode, .sim)
         XCTAssertEqual(s.cellSizeMode, .auto)
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5
@@ -338,29 +338,43 @@ final class LatticeWizardTests: XCTestCase {
                                                  certifiable: true,
                                                  minCellsPerMember: 5)
 
+    /// ★★ RE-TUNED AGAINST CORE'S REAL LAW (task 2026-08-17-lattice-stage-repair
+    /// §1). This test used to inject `bounds(floor: 4.6026, cpm: 5)` — numbers
+    /// that describe no real topology — and assert the card's own arithmetic over
+    /// them. `LatticeFaceCardDerivation.card` no longer accepts injected bounds
+    /// at all: it asks core, so a test that wants a thin slab must use a
+    /// genuinely thin one.
+    ///
+    /// At the 0.45 mm profile below, core's certifiable member floor is
+    /// N* x (w / phi(rho_max)) = 5 x 1.173 = 5.87 mm. 40 mm clears it by 7x; 4 mm
+    /// does not clear it at all. The PROPERTY — thick certifies, thin is out of
+    /// regime, and Auto still names a buildable cell rather than refusing — is
+    /// asserted unchanged.
     func testAThickSlabCertifiesAndAThinOneIsOutOfRegime() {
-        // 40 mm slab, 5 cells per member floor, 1.2 mm printability floor:
-        // coarsest = 8 mm, well above the floor → certified.
         let thick = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 40, heldVoxels: 5_000, spacingMM: 1.705,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
             minExtrudableWidthMM: profileWidthMM)
         XCTAssertEqual(thick.verdict, .certified)
-        XCTAssertEqual(thick.cellMM, 8, accuracy: 1e-9)
+        XCTAssertEqual(thick.cellMM, 8, accuracy: 1e-9,
+                       "40 mm / N* = 8 mm, well above core's 1.17 mm floor")
         XCTAssertGreaterThan(thick.strutDiameterMM, 0)
+        XCTAssertGreaterThanOrEqual(thick.cellsPerMember, 5.0 - 1e-9)
 
-        // ★ The maintainer's own case: a 7 mm slab at a 4.6 mm printability
-        // floor. coarsest = 1.4 mm < 4.6 → the two bounds CROSS.
+        // ★ HIS OWN CASE, at the depth his card actually showed: 4 mm. Core's
+        // floor forces the cell UP to 1.173 mm, which fits only 3.41 cells across
+        // — under N*, so out of regime.
         let thin = LatticeFaceCardDerivation.card(
-            faceID: 16, depthMM: 7, heldVoxels: 10_554, spacingMM: 1.705,
+            faceID: 16, depthMM: 4, heldVoxels: 10_554, spacingMM: 1.705,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 4.6026, cpm: 5), limits: limits,
             minExtrudableWidthMM: profileWidthMM)
         XCTAssertEqual(thin.verdict, .outOfRegime)
-        XCTAssertEqual(thin.cellMM, 4.6026, accuracy: 1e-9,
+        XCTAssertEqual(thin.cellMM, 1.173173434139347, accuracy: 1e-9,
                        "§4c: Auto still picks the BUILDABLE cell — it does not "
                        + "refuse")
+        XCTAssertLessThan(thin.cellsPerMember, 5.0, "…and says why: under N*")
+        XCTAssertGreaterThanOrEqual(thin.strutDiameterMM, profileWidthMM - 1e-9,
+                                    "…while the strut it names still PRINTS")
     }
 
     func testTheCardStatesWhatTheBarrierHandsTheLattice() {
@@ -368,7 +382,6 @@ final class LatticeWizardTests: XCTestCase {
         let c = LatticeFaceCardDerivation.card(
             faceID: 16, depthMM: 5, heldVoxels: 10_554, spacingMM: 1.70527,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
             minExtrudableWidthMM: profileWidthMM)
         let expectVolume = 10_554.0 * pow(1.70527, 3)
         XCTAssertEqual(c.heldVolumeMM3, expectVolume, accuracy: 1e-6)
@@ -380,7 +393,6 @@ final class LatticeWizardTests: XCTestCase {
         let c = LatticeFaceCardDerivation.card(
             faceID: 9, depthMM: 7, heldVoxels: 0, spacingMM: 1.7,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
             minExtrudableWidthMM: profileWidthMM)
         XCTAssertEqual(c.verdict, .noMaterial)
         XCTAssertEqual(c.cellText, "—")
@@ -391,13 +403,16 @@ final class LatticeWizardTests: XCTestCase {
         let ok = LatticeFaceCardDerivation.card(
             faceID: 1, depthMM: 40, heldVoxels: 100, spacingMM: 1.7,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 1.2, cpm: 5), limits: limits,
             minExtrudableWidthMM: profileWidthMM)
+        // 4 mm, not 7: at the 0.45 mm profile core's certifiable member floor is
+        // 5.87 mm, so 7 mm now CERTIFIES and would have made this test's "one bad
+        // region" arm vacuous. Same property, a genuinely out-of-regime member.
         let bad = LatticeFaceCardDerivation.card(
-            faceID: 2, depthMM: 7, heldVoxels: 100, spacingMM: 1.7,
+            faceID: 2, depthMM: 4, heldVoxels: 100, spacingMM: 1.7,
             densityGCM3: 1.24, topology: .octet,
-            bounds: bounds(floor: 4.6, cpm: 5), limits: limits,
             minExtrudableWidthMM: profileWidthMM)
+        XCTAssertEqual(bad.verdict, .outOfRegime,
+                       "the 'bad' arm really is bad — not a vacuous pass")
         let s = LatticeFaceCardDerivation.partSummary([ok, bad, ok])
         XCTAssertEqual(s.verdict, .outOfRegime, "§5b: the part verdict is stated")
         XCTAssertEqual(s.certified, 2, "§5b: AND the breakdown that produced it")

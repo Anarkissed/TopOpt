@@ -90,14 +90,63 @@ public struct LatticeSDFScene {
     /// found nothing to fill, and the overlay says so instead of showing a label over
     /// an empty viewport.
     public let interiorVoxelCount: Int
+    /// ★ The part's OWN interior, before the region mask — so "no inside at all"
+    /// and "the regions matched nothing" stay distinguishable.
+    public let partInteriorVoxelCount: Int
+    /// ★ Faces the emission could not turn into a region (no usable B-rep
+    /// geometry). Non-zero means the preview draws LESS than the user marked.
+    public let skippedFaces: Int
 
-    public init(mesh: ViewerMesh, field: StressField?, latticeID: String, maxDim: Int = 128) {
+    /// ★ `regions` CLIPS THE PREVIEW TO WHAT IS ACTUALLY SET TO LATTICE
+    /// (maintainer, 2026-08-17: "Can you confirm that the preview will only show
+    /// what is *actually* set to lattice"). It was NOT: occupancy came from the
+    /// whole part mesh and no region reached this path at all, so the struts
+    /// filled the entire interior regardless of the declarations. Empty ⇒ no
+    /// clipping, which is what the settings page's sample block needs.
+    public init(mesh: ViewerMesh, field: StressField?, latticeID: String,
+                maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
+                // ★ The band and gamma the raymarcher grades with, so a stated
+                // per-region density can be inverted into the demand value that
+                // comes back out as exactly that density (maintainer,
+                // 2026-08-17). Defaults leave every existing call unchanged.
+                rhoMin: Double = 0, rhoMax: Double = 1, gamma: Double = 1,
+                // ★ WHAT AN EMPTY REGION LIST MEANS HERE — see
+                // `LatticeRegionMask.EmptyRegionPolicy`. The default is the
+                // sample block's answer, so every pre-existing call is
+                // unchanged; the STAGE passes `.latticeNothing`.
+                whenEmpty: LatticeRegionMask.EmptyRegionPolicy = .latticeEverything,
+                // ★ FACES THE EMISSION COULD NOT USE (bar 4 of the preview-regions
+                // task). Once the preview masks to regions, a skipped face means it
+                // draws LESS than the user marked — and doing that silently is the
+                // failure this parameter exists to prevent.
+                skippedFaces: Int = 0) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
-        self.occupancy = LatticePreviewOccupancy.occupancy(
-            positions: mesh.positions, indices: mesh.indices, bounds: mesh.bounds, maxDim: maxDim)
+        // ★★ THE PART'S INTERIOR AND THE LATTICED INTERIOR ARE TWO DIFFERENT
+        // NUMBERS, and the banner needs both to tell the truth.
+        //
+        // ★ "No inside to fill" and "your regions matched nothing" are different
+        // findings with different fixes — one is a broken import, the other is a
+        // depth set too shallow. Counting only the MASKED grid would report the
+        // first for both, which is a confident wrong answer.
+        let solid = LatticePreviewOccupancy.occupancy(
+            positions: mesh.positions, indices: mesh.indices,
+            bounds: mesh.bounds, maxDim: maxDim)
+        var solidInside = 0
+        for v in solid.values where v > 0.5 { solidInside += 1 }
+        self.partInteriorVoxelCount = solidInside
+        self.skippedFaces = skippedFaces
+        self.occupancy = LatticeRegionMask.clipped(
+            solid, to: regions, whenEmpty: whenEmpty)
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
-        self.demand = LatticePreviewOccupancy.demand(like: occupancy, field: field)
+        // ★ A STATED PER-REGION DENSITY OUTRANKS THE STRESS FIELD. It is the
+        // user's own number for that region; grading it by stress instead would
+        // draw struts at a density they did not ask for and the run will not
+        // build. With nothing stated this falls through to exactly what it was.
+        self.demand = LatticeRegionMask.densityDemand(
+            like: occupancy, regions: regions,
+            rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma)
+            ?? LatticePreviewOccupancy.demand(like: occupancy, field: field)
         self.bounds = mesh.bounds
         self.mesh = mesh
         // Counted here, where the grid is already in hand, so the banner never has to
@@ -156,6 +205,24 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     // shader shows a strut iff its OWNING cell is active — the worker's whole-cell
     // emission — so the boundary is complete cells, never razor-cut struts.
     private var cellTex: MTLTexture?
+
+    /// ★★ THE SHELL NEEDS TO SEE THIS TOO (maintainer, 2026-08-18: "The full body
+    /// covered the lattice preview").
+    ///
+    /// ★ ONE SOURCE OF TRUTH, NOT TWO. The shell must stand down exactly where
+    /// the raymarcher draws struts — and "exactly where" is this texture, the
+    /// per-cell activation the march itself folds against. Re-deriving the region
+    /// test in the shell shader would be a second answer to the same question,
+    /// free to drift by a voxel and impossible to notice.
+    var shellClipCellTexture: MTLTexture? { cellTex }
+    /// The cell field's grid, so a model-space point can be turned into a texture
+    /// coordinate by the shell exactly as the march does it.
+    var shellClipGrid: (origin: SIMD3<Float>, spacing: SIMD3<Float>,
+                        dims: SIMD3<Float>)? {
+        guard let g = cellGrid else { return nil }
+        return (g.origin, g.spacing,
+                SIMD3(Float(g.nx), Float(g.ny), Float(g.nz)))
+    }
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
     // Face-role tints on the LATTICE (bar A4): an rgba8 volume on the part-SDF grid,

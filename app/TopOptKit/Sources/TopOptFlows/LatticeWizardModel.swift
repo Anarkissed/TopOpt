@@ -181,6 +181,16 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var cellMaxMM: Double
     public var boundary: LatticeBoundaryTreatment
 
+    /// ★★ THE SIM PERMISSION (maintainer, 2026-08-17) — "a dark glass on/off
+    /// check with a 'Simulate Stresses' at the top of the 'Lattice Settings'
+    /// modal (above the 'type')".
+    ///
+    /// It is the page's copy of `LatticeSettings.simulateStresses`, and it moves
+    /// through `setSimulateStresses` so the per-axis migration rule is the SAME
+    /// one the stored settings enforce — not a second, similar rule written in
+    /// the view.
+    public var simulateStresses: Bool = true
+
     /// The top-centre disclaimer (§3b) — one line, an X, dismissible, and it
     /// stays dismissed for the session.
     public var showDisclaimer: Bool = true
@@ -188,14 +198,15 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public init(topologyID: String = LatticeType.octet.id,
                 cellMM: Double = 6,
                 relativeDensity: Double = 0.35,
-                densityMode: LatticeDensityMode = .auto,
+                densityMode: LatticeDensityMode = .sim,
                 cellSizeMode: LatticeCellSizeMode = .auto,
                 cellMinMM: Double = LatticeSettings.defaultCellMinMM,
                 cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
                 // ★ DEFAULT NONE (maintainer, 2026-08-14): "it should
                 // default to 'none'". A bare lattice is what the page
                 // should open on; a dressing is something you add.
-                boundary: LatticeBoundaryTreatment = .none) {
+                boundary: LatticeBoundaryTreatment = .none,
+                simulateStresses: Bool = true) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.relativeDensity = relativeDensity
@@ -204,6 +215,32 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.cellMinMM = cellMinMM
         self.cellMaxMM = cellMaxMM
         self.boundary = boundary
+        self.simulateStresses = simulateStresses
+    }
+
+    /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
+    /// `.sim ⇒ .uniform`, cell `.swept ⇒ .fixed`) lives in `LatticeSettings`
+    /// and is applied by borrowing it, so the wizard cannot drift into a second
+    /// version of the same rule — the failure this page has already had with two
+    /// depth resolvers and two strut laws.
+    public mutating func setSimulateStresses(_ on: Bool) {
+        var probe = LatticeSettings(enabled: true)
+        probe.densityMode = densityMode
+        probe.cellSizeMode = cellSizeMode
+        probe.setSimulateStresses(on)
+        simulateStresses = probe.simulateStresses
+        densityMode = probe.densityMode
+        cellSizeMode = probe.cellSizeMode
+    }
+
+    /// ★ WHETHER THE SAVE SHOULD KICK OFF AN FEA. Same question, same answer as
+    /// the stored settings — asked through them rather than re-derived.
+    public var needsStressSolve: Bool {
+        var probe = LatticeSettings(enabled: true)
+        probe.densityMode = densityMode
+        probe.cellSizeMode = cellSizeMode
+        probe.simulateStresses = simulateStresses
+        return probe.needsStressSolve
     }
 
     /// Seed from a project's stored settings, so opening the page shows what the
@@ -213,7 +250,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   relativeDensity: max(0.05, s.maxRelativeDensity),
                   densityMode: s.densityMode, cellSizeMode: s.cellSizeMode,
                   cellMinMM: s.cellMinMM, cellMaxMM: s.cellMaxMM,
-                  boundary: s.boundary)
+                  boundary: s.boundary, simulateStresses: s.simulateStresses)
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -229,6 +266,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.cellMinMM = cellMinMM
         out.cellMaxMM = cellMaxMM
         out.boundary = boundary
+        out.simulateStresses = simulateStresses
         out.enabled = true
         return out
     }
@@ -331,7 +369,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // Density is an IN-THE-PART setting now, so showing it means showing the
         // tiled sample — never the lone cell.
         stage = LatticeWizardSetting.density.stage
-        play(m == .auto ? .stressWipeAndDive : .tile)
+        play(m == .sim ? .stressWipeAndDive : .tile)
     }
 
     /// Auto CELL SIZE jumps straight to the sample and shows how it looks (§2 C).
@@ -396,7 +434,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
 /// THE DEFECT, with the two lines that caused it. `LatticeSetupWizard` passed the
 /// renderer
 ///
-///     reveal: Float(model.densityMode == .auto ? wipe : 1)     (line 75)
+///     reveal: Float(model.densityMode == .sim ? wipe : 1)     (line 75)
 ///     @State private var wipe: Double = 0                      (line 42)
 ///
 /// and `MetalMeshView`'s fragment shader discards every fragment above the reveal

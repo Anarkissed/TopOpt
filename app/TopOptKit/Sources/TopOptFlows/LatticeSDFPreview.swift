@@ -165,8 +165,33 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         guard let scene else {
             return .empty("Building the strut preview — this takes a moment.")
         }
-        guard scene.interiorVoxelCount > 0 else {
+        // ★ THE PART ITSELF HAS NOTHING TO FILL — a broken import or a shell with
+        // no interior. No setting the user can reach will change this.
+        guard scene.partInteriorVoxelCount > 0 else {
             return .empty("No lattice to show — this part has no inside to fill with struts.")
+        }
+        // ★★ THE REGIONS MATCHED NOTHING (bar 4 of the preview-regions task: "If
+        // the mask yields ZERO active cells, it must say so, not render an empty
+        // part").
+        //
+        // ★ THIS IS A DIFFERENT FINDING FROM THE ONE ABOVE and has a different
+        // fix: the part is fine, the declaration is not reaching any material —
+        // a depth set too shallow, or a face whose slab sits outside the solid.
+        // Reporting "this part has no inside" for it would be a confident wrong
+        // answer, and it is the one the user would act on.
+        guard scene.interiorVoxelCount > 0 else {
+            return .empty("Nothing to lattice — the faces you marked do not reach "
+                          + "any material. Try a deeper slab.")
+        }
+        // ★ DRAWING, BUT NOT ALL OF IT. A skipped face means the preview shows
+        // LESS than was marked, and the whole point of masking the preview is
+        // that it stops over-promising — under-promising in silence is the same
+        // defect wearing the other sign.
+        if scene.skippedFaces > 0 {
+            return .drawing(scene.previewLabel + " · "
+                            + "\(scene.skippedFaces) marked "
+                            + (scene.skippedFaces == 1 ? "face has" : "faces have")
+                            + " no shape to lattice and are not shown")
         }
         return .drawing(scene.previewLabel)
     }
@@ -177,9 +202,16 @@ public enum LatticePreviewBanner: Equatable, Sendable {
 public struct LatticePreviewSummaryValues: Equatable, Sendable {
     public var interiorVoxelCount: Int
     public var previewLabel: String
-    public init(interiorVoxelCount: Int, previewLabel: String) {
+    /// ★ Defaults keep every existing construction meaning what it did: a part
+    /// with an interior, and no skipped faces.
+    public var partInteriorVoxelCount: Int
+    public var skippedFaces: Int
+    public init(interiorVoxelCount: Int, previewLabel: String,
+                partInteriorVoxelCount: Int? = nil, skippedFaces: Int = 0) {
         self.interiorVoxelCount = interiorVoxelCount
         self.previewLabel = previewLabel
+        self.partInteriorVoxelCount = partInteriorVoxelCount ?? interiorVoxelCount
+        self.skippedFaces = skippedFaces
     }
 }
 
@@ -188,6 +220,10 @@ public protocol LatticeSDFPreviewSummary {
     /// Voxels of the part's own interior in the baked occupancy grid. Zero means the
     /// solid voxelisation found nothing to fill — there is no lattice, at any setting.
     var interiorVoxelCount: Int { get }
+    /// The part's own interior BEFORE the region mask.
+    var partInteriorVoxelCount: Int { get }
+    /// Faces marked by the user that the emission could not use.
+    var skippedFaces: Int { get }
     var previewLabel: String { get }
 }
 

@@ -257,7 +257,7 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
             latticeEnabled: true, designBoxActive: designBoxActive,
             // Core refuses GRADING with a design box, not the box itself; auto
             // density is what ships a `grading` block (LatticeSettings.runSpec).
-            graded: densityMode == .auto) {
+            graded: densityMode == .sim) {
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
         }
         // AUTO density rides the optimize job now (task lattice-page-core-hookup
@@ -285,7 +285,7 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                 enabled: false, label: "Optimize",
                 sub: "\(first.name): \(first.why)\(more)")
         }
-        if densityMode == .auto && lineWidthMM <= 0 {
+        if densityMode == .sim && lineWidthMM <= 0 {
             return LatticeOptimizeSurface(
                 enabled: false, label: "Optimize",
                 sub: "auto density needs a strut line width (the grading printability floor) — set your wall line widths in print settings")
@@ -299,7 +299,7 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         // button re-runs the whole ladder from the ORIGINAL part, which will not use
         // that design at all. Putting the forecast on this button would state a
         // prediction about a job it does not start.
-        if densityMode == .auto {
+        if densityMode == .sim {
             return LatticeOptimizeSurface(
                 enabled: baseCanOptimize, label: "Optimize",
                 sub: "topology + graded \(topologyDisplayName.lowercased()) lattice (from this run's own field) · target \(cellText)")

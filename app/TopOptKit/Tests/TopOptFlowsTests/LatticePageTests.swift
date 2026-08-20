@@ -384,11 +384,11 @@ final class LatticePageTests: XCTestCase {
         // requires the stated line width, so WITHOUT one the spec stays nil and
         // Optimize is gated with exactly that reason.
         var s = LatticeSettings(enabled: true)
-        s.densityMode = .auto
+        s.densityMode = .sim
         XCTAssertNil(s.runSpec(), "auto without a line width has no grading floor — no spec")
         let gated = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
-            latticeEnabled: true, densityMode: .auto,
+            latticeEnabled: true, densityMode: .sim,
             topologyDisplayName: "Octet", cellMM: 6, bounds: nil, running: false,
             lineWidthMM: 0)
         XCTAssertFalse(gated.enabled)
@@ -402,7 +402,7 @@ final class LatticePageTests: XCTestCase {
         XCTAssertEqual(spec?.minExtrudableWidthMM, 0.42)
         let open = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
-            latticeEnabled: true, densityMode: .auto,
+            latticeEnabled: true, densityMode: .sim,
             topologyDisplayName: "Octet", cellMM: 6, bounds: nil, running: false,
             lineWidthMM: 0.42)
         XCTAssertTrue(open.enabled, "H4d: the auto gate OPENS")

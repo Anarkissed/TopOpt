@@ -74,8 +74,15 @@ public enum LatticeRegionEmission {
     /// bolt region over its exact axial span; a plane becomes a face slab reaching
     /// `depthMM` into the part (the depth the user dragged that face's primitive
     /// to). `faceID` rides along so core can check the depth tie (§0a).
+    /// ★ `expandMM` GROWS THE SLAB IN PLANE ONLY (maintainer, 2026-08-17) — the
+    /// two half-extents perpendicular to the depth, never the depth itself. A
+    /// face's slab is exactly that face's outline, so a chamfer just off its edge
+    /// is outside it; this reaches past the outline to take the surrounding wall
+    /// in. A BOLT region has no in-plane extents to grow — its radius is its
+    /// shape — so it ignores the value rather than pretending to widen.
     public static func spec(for face: ResolvedFace, role: LatticeGroupRole,
-                            depthMM: Double, faceID: Int? = nil)
+                            depthMM: Double, faceID: Int? = nil,
+                            expandMM: Double = 0)
         -> LatticeRegionSpec? {
         switch face {
         case .cylinder(let axisPoint, let axisDir, let radius, let lo, let hi):
@@ -96,8 +103,10 @@ public enum LatticeRegionEmission {
             // slab must reach INTO the part, not out of it.
             s.origin = center
             s.normal = -ManualPrimitive.unit(normal)
-            s.halfUMM = halfU
-            s.halfWMM = halfW
+            // ★ IN PLANE ONLY. `depthMM` is untouched below.
+            let e = expandMM.isFinite && expandMM > 0 ? expandMM : 0
+            s.halfUMM = halfU + e
+            s.halfWMM = halfW + e
             s.depthMM = depthMM
             return s.isValid ? s : nil
         }
@@ -132,6 +141,17 @@ public enum LatticeRegionEmission {
                                selectableRoles: [String: LatticeSelectableRole] = [:],
                                selectableDepthMM: [String: Double] = [:],
                                groupDensities: [UUID: Double] = [:],
+                               // ★ THE PER-SELECTABLE DENSITY (maintainer,
+                               // 2026-08-17). The note below used to say a
+                               // per-selectable density "needs its own store AND
+                               // its own control"; both exist now, and this is
+                               // where the store reaches the wire. Empty ⇒ the
+                               // group's, so an untouched project is unchanged.
+                               selectableDensity: [String: Double] = [:],
+                               // ★ THE IN-PLANE EXPAND, per selectable
+                               // (maintainer, 2026-08-17). Empty ⇒ 0 ⇒ the slab
+                               // is exactly the face, byte-identical to before.
+                               selectableExpandMM: [String: Double] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -166,8 +186,9 @@ public enum LatticeRegionEmission {
                     // selectable's own, so a primitive switched to exclude
                     // inside an included group carries no density even though
                     // its group states one.
-                    s.relativeDensity =
-                        density(for: g.id, role: role, densities: groupDensities)
+                    s.relativeDensity = density(
+                        for: g.id, role: role, densities: groupDensities,
+                        stated: selectableDensity[LatticeSelectableRef.primitive(p.id).key])
                     out.append(s)
                 }
             }
@@ -178,11 +199,13 @@ public enum LatticeRegionEmission {
                 let depth = selectableDepthMM[ref.key] ?? groupDepth
                 if let r = resolve(f),
                    var s = spec(for: r, role: role, depthMM: depth,
-                                faceID: runFaceID(f)) {
+                                faceID: runFaceID(f),
+                                expandMM: selectableExpandMM[ref.key] ?? 0) {
                     // The face's own resolved role, same gate as the primitives
                     // above — see the note there on group- vs selectable-keying.
-                    s.relativeDensity =
-                        density(for: g.id, role: role, densities: groupDensities)
+                    s.relativeDensity = density(
+                        for: g.id, role: role, densities: groupDensities,
+                        stated: selectableDensity[ref.key])
                     out.append(s)
                 } else {
                     skipped += 1
@@ -201,10 +224,16 @@ public enum LatticeRegionEmission {
     /// path passes. A non-positive or non-finite value is also dropped: core's
     /// sentinel for "derive" is exactly `<= 0`, so those two spellings of
     /// "nothing stated" must not become a key.
+    /// ★ `stated` is the SELECTABLE's own density and WINS over its group's
+    /// (maintainer, 2026-08-17) — the same precedence the role and the depth
+    /// already use. The include-only gate and the "non-positive means derive"
+    /// rule apply to both, because core refuses the same pairings either way.
     static func density(for id: UUID, role: LatticeGroupRole,
-                        densities: [UUID: Double]) -> Double? {
-        guard role == .include, let d = densities[id], d.isFinite, d > 0
-        else { return nil }
+                        densities: [UUID: Double],
+                        stated: Double? = nil) -> Double? {
+        guard role == .include else { return nil }
+        if let d = stated, d.isFinite, d > 0 { return d }
+        guard let d = densities[id], d.isFinite, d > 0 else { return nil }
         return d
     }
 }

@@ -254,13 +254,13 @@ final class SectorDensityTests: XCTestCase {
     func testARefusableDensityDisablesTheOptimizeButtonAndNamesTheRegion() {
         let ok = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "s", latticeEnabled: true,
-            densityMode: .auto, topologyDisplayName: "Octet", cellMM: 2,
+            densityMode: .sim, topologyDisplayName: "Octet", cellMM: 2,
             bounds: nil, running: false, lineWidthMM: 0.42)
         XCTAssertTrue(ok.enabled, "no refusal ⇒ the button is exactly as before")
 
         let blocked = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "s", latticeEnabled: true,
-            densityMode: .auto, topologyDisplayName: "Octet", cellMM: 2,
+            densityMode: .sim, topologyDisplayName: "Octet", cellMM: 2,
             bounds: nil, running: false, lineWidthMM: 0.42,
             densityRefusals: [("Sector A", "0.27 mm strut, under the profile's width")])
         XCTAssertFalse(blocked.enabled)
@@ -270,7 +270,7 @@ final class SectorDensityTests: XCTestCase {
 
         let two = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "s", latticeEnabled: true,
-            densityMode: .auto, topologyDisplayName: "Octet", cellMM: 2,
+            densityMode: .sim, topologyDisplayName: "Octet", cellMM: 2,
             bounds: nil, running: false, lineWidthMM: 0.42,
             densityRefusals: [("A", "too light"), ("B", "too light")])
         XCTAssertTrue(two.sub.contains("and 1 more"),

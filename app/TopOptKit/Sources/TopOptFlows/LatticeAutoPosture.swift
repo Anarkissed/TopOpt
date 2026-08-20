@@ -62,10 +62,10 @@ public enum LatticeAutoPosture {
     public static func resolve(includeRegionCount: Int,
                                retainSubfloor: Bool) -> Posture {
         guard includeRegionCount > 0 else {
-            return Posture(cellMode: .swept, densityMode: .auto,
+            return Posture(cellMode: .swept, densityMode: .sim,
                            droppedSubfloorRetention: false)
         }
-        return Posture(cellMode: .fit, densityMode: .auto,
+        return Posture(cellMode: .fit, densityMode: .sim,
                        droppedSubfloorRetention: retainSubfloor)
     }
 
@@ -75,7 +75,7 @@ public enum LatticeAutoPosture {
     /// available and must not be removed").
     public static func applied(to s: LatticeSettings,
                                includeRegionCount: Int) -> LatticeSettings {
-        guard s.cellSizeMode == .auto || s.densityMode == .auto else { return s }
+        guard s.cellSizeMode == .auto || s.densityMode == .sim else { return s }
         let posture = resolve(includeRegionCount: includeRegionCount,
                               retainSubfloor: s.retainSubfloorInUnloadedRegions)
         var out = s

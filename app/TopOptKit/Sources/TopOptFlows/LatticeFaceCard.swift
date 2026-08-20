@@ -171,11 +171,20 @@ public enum LatticeFaceCardDerivation {
     /// to `outOfRegime` and the strut figure on the card says why. Silently
     /// raising the density to make it print would print a heavier lattice than
     /// the user asked for and report the lighter one.
+    /// ★★ `bounds` AND `limits` ARE GONE FROM THIS SIGNATURE, DELIBERATELY (task
+    /// 2026-08-17-lattice-stage-repair §1). They were INJECTED numbers — tests
+    /// passed `bounds(floor: 4.6026)` and `limits(rhoMin: 0.2, rhoMax: 0.8)`,
+    /// which describe no real topology — and this function derived the card from
+    /// them. That injectability IS how the card came to disagree with the run by
+    /// 4.2x on the cell and 12x on the density.
+    ///
+    /// Now there is ONE source: core, keyed by `topology.id` and the user's own
+    /// extrusion width. Leaving the parameters in place while ignoring them would
+    /// have been the exact defect this task exists to remove — an input that
+    /// looks like it decides something and does not.
     public static func card(faceID: Int, depthMM: Double, heldVoxels: Int,
                             spacingMM: Double, densityGCM3: Double,
                             topology: LatticeType,
-                            bounds: TopOptKit.LatticeCellBounds,
-                            limits: TopOptKit.LatticeLimits,
                             declaredDensity: Double? = nil,
                             // ★ PRINTABILITY IS ENTIRELY USER INPUT, and this is
                             // it: the minimum extrudable strut width from the
@@ -199,66 +208,96 @@ public enum LatticeFaceCardDerivation {
                                    strutDiameterMM: 0, cellsPerMember: 0,
                                    verdict: .noMaterial)
         }
-        guard bounds.valid, bounds.cellsPerMemberFloor > 0,
-              bounds.printabilityFloorMM > 0 else {
-            // Core carries no numbers for this topology — say so, invent nothing.
-            return LatticeFaceCard(faceID: faceID, depthMM: depthMM,
-                                   heldVoxels: heldVoxels,
-                                   heldVolumeMM3: volume, heldMassG: mass,
-                                   cellMM: 0, relativeDensity: 0,
-                                   strutDiameterMM: 0, cellsPerMember: 0,
-                                   verdict: .outOfRegime)
-        }
+        // The certifiable band, read from CORE for THIS topology — the only use
+        // left for it is clamping a DECLARED density, since there is no
+        // certificate outside the band. Auto never touches it.
+        let limits = TopOptKit.latticeLimits(topology: topology.id)
 
-        // ★ THIS IS ALREADY "FIT": the cell is derived from THIS FACE'S OWN
-        // depth (`depth / N*`), which is exactly what
-        // `lattice_derive_cell_for_member` does in core and exactly what
-        // `LatticeRegionCellMode::Fit` now does in the optimiser. The card and
-        // the run therefore agree about which cell a region gets, instead of the
-        // card previewing one cell and the run refusing at another.
-        let coarsest = depthMM / bounds.cellsPerMemberFloor
-        let crosses = coarsest < bounds.printabilityFloorMM
-        let cell = crosses ? bounds.printabilityFloorMM : coarsest
-        // Auto's density is the LIGHTEST the band allows — "low stress → the
-        // lowest density that region can take" (§4a). Grading moves it up where
-        // the stress is; this is the floor the card states.
-        let auto = limits.rhoMin > 0 ? limits.rhoMin : 0.1
-        // A DECLARED density is clamped into the band; AUTO is the band floor.
         // 1.0 declared means SOLID — no lattice, nothing saved — which is core's
         // own C0 rule (`kLatticeSolidAt`) and the reason bar R1 can be exact.
-        var rho = auto
-        var solidByDeclaration = false
-        if let d = declaredDensity {
-            if d >= 1.0 { solidByDeclaration = true }
-            rho = min(max(d, limits.rhoMin), limits.rhoMax)
-        }
-        if solidByDeclaration {
+        // Checked BEFORE core is asked, because "fill it solid" is not a lattice
+        // question and core has no answer shaped like one.
+        if let d = declaredDensity, d >= 1.0 {
             return LatticeFaceCard(faceID: faceID, depthMM: depthMM,
                                    heldVoxels: heldVoxels, heldVolumeMM3: volume,
                                    heldMassG: mass, cellMM: 0,
                                    relativeDensity: 0, strutDiameterMM: 0,
                                    cellsPerMember: 0, verdict: .noMaterial)
         }
-        let diameter = 2 * topology.strutRadiusMM(relativeDensity: rho, cellMM: cell)
-        let cells = cell > 0 ? depthMM / cell : 0
-        // The strut must be at least one bead wide. AUTO cannot fail this — the
-        // cell was chosen at or above core's printability floor, which is defined
-        // at the band's LIGHTEST density — but a DECLARED density can, and when it
-        // does the card says out-of-regime rather than quietly raising it.
+
+        // ★★★ CORE DERIVES THIS, NOT SWIFT (task 2026-08-17-lattice-stage-repair
+        // §1). Everything below — the cell, the density, the strut, the
+        // cells-across — is ONE call to the bridge onto the same core functions
+        // the RUN calls (`lattice_derive_cell_for_member`,
+        // `lattice_min_density_for_strut`, `octet_strut_diameter_mm`). The app
+        // authors none of it.
         //
-        // ★ AND AN UNKNOWN WIDTH IS NOT A PASS. An earlier cut read
-        // `minExtrudableWidthMM <= 0` as "skip the test", so a project whose print
-        // profile had not reached this call certified every density as printable.
-        // Unknown printability is `outOfRegime`: the card says it cannot tell,
-        // which is the honest verdict and the one a user can act on.
-        let printable = minExtrudableWidthMM > 0 && diameter >= minExtrudableWidthMM
+        // ★ WHAT THIS FILE USED TO DO, AND WHY EVERY NUMBER WAS WRONG. It picked
+        // `max(depth/N*, printabilityFloorMM)` — and `printabilityFloorMM` is
+        // core's floor at the band's LIGHTEST density, the COARSEST floor there
+        // is. Core picks `max(depth/N*, min_printable_cell)` where the floor is
+        // taken at the band's DENSEST density. On his part at a 0.45 mm bead
+        // those are 4.93 mm and 1.17 mm — 4.2x apart. It then took
+        // `limits.rhoMin` as "Auto's density", unconditionally, so the readout
+        // was the BAND FLOOR reported as a choice: the same 5% at 4 mm depth and
+        // at 40 mm. And it sized the strut with `LatticeType.strutRadiusMM`,
+        // the app's own octet law, which is 1.4x off core's — so at a cell core
+        // had chosen to give EXACTLY one bead, the card read 0.32 mm against a
+        // 0.45 mm nozzle and refused it. That refusal was an artefact.
+        //
+        // ★ AUTO IS NOW A REAL DERIVED VALUE: `derivedRelativeDensity` is the
+        // LIGHTEST density whose strut still prints at THIS region's own cell —
+        // core's minimum-mass certified lattice for this member. It is a
+        // different number at every depth, which is what makes it a derivation
+        // rather than a floor. It CANNOT silently fall back: when core has no
+        // answer the verdict says so (bar R2).
+        //
+        // The MEMBER WIDTH is the slab depth: that is the dimension the lattice
+        // must span and the one the user drags. It is the same quantity
+        // `LatticeSectorDensity` passes (`thinnestExtentMM`), for a face slab
+        // whose in-plane extents exceed its depth.
+        let d = TopOptKit.latticeRegionDerivation(
+            topology: topology.id, memberWidthMM: depthMM,
+            minExtrudableWidthMM: minExtrudableWidthMM,
+            // <= 0 means AUTO to the bridge. A declared density is clamped into
+            // the band first — there is no certificate outside it — but its
+            // PRINTABILITY is never clamped: core reports the strut it really
+            // makes and `prints` says whether it comes out of the nozzle.
+            statedRelativeDensity: declaredDensity.map {
+                min(max($0, limits.rhoMin), limits.rhoMax)
+            } ?? 0)
+
+        // ★ NO CORE NUMBER IS NOT A PASS (bar R2). An unknown extrusion width, a
+        // topology core carries no law for, or a member no (cell, density) pair
+        // in the band can span at all — each says so with the numbers it does
+        // have, and never certifies by omission.
+        guard d.valid, d.feasible else {
+            // ★ A DECLARATION IS STILL REPORTED AS MADE. The refusal is carried by
+            // the VERDICT and by the absent cell/strut — blanking the user's own
+            // number as well would erase the input instead of answering it, which
+            // is the same silence this task exists to remove. An AUTO card has no
+            // number to keep here, so it shows none rather than inventing one.
+            return LatticeFaceCard(faceID: faceID, depthMM: depthMM,
+                                   heldVoxels: heldVoxels,
+                                   heldVolumeMM3: volume, heldMassG: mass,
+                                   cellMM: 0,
+                                   relativeDensity: declaredDensity.map {
+                                       min(max($0, limits.rhoMin), limits.rhoMax)
+                                   } ?? 0,
+                                   strutDiameterMM: 0, cellsPerMember: 0,
+                                   verdict: .outOfRegime)
+        }
         return LatticeFaceCard(faceID: faceID, depthMM: depthMM,
                                heldVoxels: heldVoxels, heldVolumeMM3: volume,
-                               heldMassG: mass, cellMM: cell,
-                               relativeDensity: rho, strutDiameterMM: diameter,
-                               cellsPerMember: cells,
-                               verdict: (crosses || !printable) ? .outOfRegime
-                                                                : .certified)
+                               heldMassG: mass, cellMM: d.cellMM,
+                               relativeDensity: d.relativeDensity,
+                               strutDiameterMM: d.strutMM,
+                               cellsPerMember: d.cellsPerMember,
+                               // Core's own two conditions, neither re-derived:
+                               // `outOfRegime` is cells-across < N*, `prints` is
+                               // exactly what core refuses the job on.
+                               verdict: (d.outOfRegime || !d.prints)
+                                   ? .outOfRegime : .certified)
     }
 
     /// The PART verdict and the per-region breakdown that produced it (§5b). A

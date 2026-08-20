@@ -1,0 +1,27 @@
+R1 — THE READOUT ON HIS PART, AFTER FIX 1 AND FIX 2
+part      M2_verticalStand.step
+face      2   (596 held voxels at 4 mm, 69.5 g)
+profile   strut line width 0.45 mm, PLA
+preview   48³ (the card's own grid, not the run's)
+
+4.0 mm (the default)    depth 4.00 mm   | density 60%   | cells across 3.4   | cell 1.17 mm   | strut 0.45 mm  | Out of regime
+6.00 mm (dragged)       depth 6.00 mm   | density 58%   | cells across 5.0   | cell 1.20 mm   | strut 0.45 mm  | Certified
+8.00 mm (dragged)       depth 8.00 mm   | density 37%   | cells across 5.0   | cell 1.60 mm   | strut 0.45 mm  | Certified
+12.00 mm (dragged)      depth 12.00 mm  | density 20%   | cells across 5.0   | cell 2.40 mm   | strut 0.45 mm  | Certified
+24.65 mm (dragged)      depth 24.65 mm  | density 5%    | cells across 5.0   | cell 4.93 mm   | strut 0.45 mm  | Certified
+
+HIS SCREENSHOT, FOR COMPARISON (all four wrong, all four app-side)
+  depth 4.0 mm | density 5% | cells across 0.8 | cell 4.93 mm | strut 0.32 mm
+
+VERDICT
+  DEPTH        the SELECTABLE's own number — a handle drag reaches the
+               derivation (fix 1; the card was built per GROUP before)
+  DENSITY      DERIVED by core: 60% at 4 mm, 5% at 24.65 mm. Deeper region -> coarser cell ->
+               LIGHTER lattice. It was 5% at every depth before (fix 2).
+  CELLS ACROSS 3.41 at 4 mm -> 5.00 at 6 mm -> 5.00 at 24.65 mm
+  STRUT        0.45 mm — one bead exactly, from CORE's law. The
+               badge's 2nd problem ("0.32 mm, under your nozzle") is GONE:
+               it was the app's own octet law, 1.4x off.
+  in regime?   NO at 4 mm (3.4 < 5) — honestly, and for ONE reason now.
+               ★ YES at 6.00 mm: Certified, 5.00 cells across, 58%, 0.45 mm strut.
+               The old card implied 24.65 mm was needed. It is 5.87 mm.

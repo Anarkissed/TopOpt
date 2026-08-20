@@ -29,26 +29,106 @@ public struct PageLeftModal: ViewModifier {
     /// How many rows the page's bottom-right action cluster has, so a modal in a
     /// short canvas still clears them.
     public let actionRows: Int
+    /// ★ MINIMIZED ⇒ OUT OF THE WAY, BOTTOM-LEFT (maintainer, 2026-08-17: "make
+    /// the 'selections' modal minimize and *move to the bottom left* to be out of
+    /// the way").
+    ///
+    /// ★ THIS REFINES §6 RATHER THAN REVERSING IT. His earlier standard — "EVERY
+    /// page should always look the same with the modal that is in the center of
+    /// the left side and doesn't reach the top or bottom" — is what an OPEN modal
+    /// still does, unchanged, on every page. The new instruction is about the
+    /// minimized state, which §6 never described: a collapsed header has no body
+    /// to centre, and centring it leaves a stub floating in the middle of the
+    /// canvas with nothing under it. Tucked to the bottom edge it is where a
+    /// minimized thing belongs and stops covering the model.
+    public let minimized: Bool
+    /// The canvas WIDTH, so the minimized rest position can tell portrait from
+    /// landscape. See `minimizedBottomInset`.
+    public let canvasWidth: CGFloat
 
-    public init(canvasHeight: CGFloat, actionRows: Int = 1) {
+    public init(canvasHeight: CGFloat, actionRows: Int = 1,
+                minimized: Bool = false, canvasWidth: CGFloat = 0) {
         self.canvasHeight = canvasHeight
         self.actionRows = actionRows
+        self.minimized = minimized
+        self.canvasWidth = canvasWidth
     }
 
+    /// ★ HOW FAR ABOVE THE BOTTOM A MINIMIZED PANEL RESTS (maintainer,
+    /// 2026-08-17).
+    ///
+    /// ★ HIS RULE, AND THE REASON FOR IT: "with these all moving to the left,
+    /// there won't be any room for the Selections minimize to fit at the bottom
+    /// left corner, exactly. So, please put it just above the bottom left corner,
+    /// giving enough padding below it to not feel too cluttered. This is only
+    /// when it is in portrait. In Landscape mode, there should be more than
+    /// enough room for it to be at the bottom-left corner."
+    ///
+    /// So this is not a taste value — it is clearance for the action row that
+    /// now holds BOTH `Lattice` and `Optimize`. In landscape that row does not
+    /// reach the leading edge and the corner is free.
+    public static let minimizedPortraitLift: CGFloat = 76
+
+    var isLandscape: Bool { canvasWidth > canvasHeight }
+
+    var minimizedBottomInset: CGFloat {
+        PageChrome.edge + (minimized && !isLandscape ? Self.minimizedPortraitLift : 0)
+    }
+
+    // ★★ WHICH SPACERS EXIST IS THE WHOLE PLACEMENT — and it is a VALUE, so it can
+    // be asserted (maintainer, 2026-08-17, reporting the minimize a THIRD time).
+    //
+    // ★ THE DEFECT THE THIRD CUT SHIPPED: a `Spacer(minLength: 0)` is still a
+    // FLEXIBLE spacer. With one above and one below, the two split the free height
+    // evenly and the panel CENTRES — which is exactly what "does not seem to
+    // function" looked like on device, twice over, with the intent stated
+    // correctly in the source both times. A spacer that must not push has to be
+    // ABSENT, not zero-minimum.
+    //
+    // So the rule is stated once, here, as two booleans:
+    //   OPEN       spacer above AND below  ⇒ centred in the band (his §6)
+    //   MINIMIZED  spacer above ONLY       ⇒ hard against the bottom inset
+    var hasSpacerAbove: Bool { true }
+    var hasSpacerBelow: Bool { !minimized }
+
     public func body(content: Content) -> some View {
-        content
-            .frame(width: PageChrome.panelWidth)
-            .frame(maxHeight: PageChrome.sidePanelBand(canvasHeight: canvasHeight))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .padding(.top, PageChrome.noteTop)
-            .padding(.bottom, PageChrome.edge)
-            .padding(.leading, PageChrome.edge)
+        // ★★ EXPLICIT SIZE + A SPACER, NOT ALIGNMENT-ON-AN-EXPANDING-FRAME
+        // (maintainer, 2026-08-17, reporting it a SECOND time: "The minimize does
+        // not seem to function still").
+        //
+        // The previous cut set `alignment: .bottomLeading` on a
+        // `.frame(maxHeight: .infinity)` and re-ordered the paddings to stop the
+        // overflow. It STILL centred on device. Rather than reason about which
+        // modifier is proposing what a third time, this pushes the panel with a
+        // SPACER inside a frame whose height is stated OUTRIGHT by the caller's
+        // geometry. A spacer cannot be defeated by an overflow or by a parent's
+        // alignment: whatever height the container has, the spacer eats the
+        // remainder and the content lands against the edge.
+        //
+        // ★ THE OPEN PANEL IS UNCHANGED IN INTENT — his §6 standard ("centre of
+        // the left side, doesn't reach the top or bottom") is now a spacer on
+        // BOTH sides, which is the same picture by a mechanism that is not
+        // sensitive to sizing.
+        VStack(spacing: 0) {
+            Spacer(minLength: minimized ? 0 : PageChrome.noteTop)
+            content.frame(width: PageChrome.panelWidth, alignment: .leading)
+            // ★ ABSENT when minimized — see `hasSpacerBelow`. A zero-minimum
+            // spacer here is what centred it the last two times.
+            if hasSpacerBelow { Spacer(minLength: PageChrome.edge) }
+        }
+        .padding(.leading, PageChrome.edge)
+        .padding(.bottom, minimizedBottomInset)
+        .padding(.top, minimized ? 0 : PageChrome.noteTop)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 extension View {
     /// ★ §6 — centre-left, vertically centred, never touching top or bottom.
-    public func pageLeftModal(canvasHeight: CGFloat, actionRows: Int = 1) -> some View {
-        modifier(PageLeftModal(canvasHeight: canvasHeight, actionRows: actionRows))
+    public func pageLeftModal(canvasHeight: CGFloat, actionRows: Int = 1,
+                              minimized: Bool = false,
+                              canvasWidth: CGFloat = 0) -> some View {
+        modifier(PageLeftModal(canvasHeight: canvasHeight, actionRows: actionRows,
+                               minimized: minimized, canvasWidth: canvasWidth))
     }
 }

@@ -176,8 +176,61 @@ public struct LatticeFaceDiagnosis: Equatable, Sendable {
         } else {
             lead = "Won't print"
         }
+        // ★ THE REAL COUNT, NOT A LITERAL "2" (task
+        // 2026-08-17-lattice-stage-repair). This read `"2 problems"` for ANY
+        // count above one — correct for the two-fault card it was written
+        // against, and a lie the moment a third appeared. It could not appear
+        // while the badge described ONE card (there are only two fault kinds);
+        // it can now, because the badge describes a GROUP of faces. Fixing it
+        // here rather than letting the merge expose it.
         return problems.count > 1
-            ? "\(lead) — 2 problems, tap for the fix"
+            ? "\(lead) — \(problems.count) problems, tap for the fix"
             : "\(lead) — tap for the fix"
+    }
+
+    // MARK: - ★ THE GROUP'S BADGE IS THE UNION OF ITS FACES'
+
+    /// ★ WHY THIS EXISTS (maintainer, 2026-08-17): "There is a 'per Group' set of
+    /// notes regarding the lattice that doesn't make sense. It should be per face
+    /// *only*. The group does *not* have its own primitive to expand therefore
+    /// making it impossible to ever be *IN* regime."
+    ///
+    /// He is right, and the badge was standing on exactly that fabrication: it
+    /// was built from a card derived at `g.faces.first` — ONE arbitrary face
+    /// speaking for the whole group, at a depth no handle drags. The group's
+    /// per-lattice numbers are gone; the badge is not, because "see the problem
+    /// without expanding the drawer" is a separate requirement (§3a of the
+    /// 2026-08-15 task) and still stands.
+    ///
+    /// So the group badge is now the UNION of its faces' diagnoses:
+    ///
+    ///   * problems are merged BY KIND (`what`), because three faces that are all
+    ///     too thin are ONE thing to fix, not three lines of the same sentence.
+    ///     The first face's numbers are kept — they are a real face's real
+    ///     measurement, which is the whole point.
+    ///   * severity is the WORST present: any face out of regime makes the group
+    ///     out of regime. A group is clean only when every face is.
+    ///   * an EMPTY list is clean, not broken — a group whose faces are all
+    ///     certified has no badge, exactly as before.
+    public static func merged(_ each: [LatticeFaceDiagnosis]) -> LatticeFaceDiagnosis {
+        var problems: [Problem] = []
+        var seen = Set<String>()
+        for d in each {
+            for p in d.problems where !seen.contains(p.what) {
+                seen.insert(p.what)
+                problems.append(p)
+            }
+        }
+        guard !problems.isEmpty else {
+            return LatticeFaceDiagnosis(badge: nil, severity: .certified,
+                                        problems: [])
+        }
+        // `noMaterial` only when EVERY diagnosis said so — one face holding
+        // nothing beside a face that is merely out of regime is the latter.
+        let allEmpty = !each.isEmpty
+            && each.allSatisfy { $0.severity == .noMaterial }
+        return LatticeFaceDiagnosis(badge: badgeText(problems),
+                                    severity: allEmpty ? .noMaterial : .outOfRegime,
+                                    problems: problems)
     }
 }

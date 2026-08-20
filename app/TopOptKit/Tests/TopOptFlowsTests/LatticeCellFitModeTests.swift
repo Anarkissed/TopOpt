@@ -72,7 +72,7 @@ final class LatticeCellFitModeTests: XCTestCase {
     /// other than fixed, because core chooses the cell inside the grading pass.
     private static func gradedSettings() -> LatticeSettings {
         var s = LatticeSettings(enabled: true)
-        s.densityMode = .auto
+        s.densityMode = .sim
         s.minRelativeDensity = 0.2
         s.maxRelativeDensity = 0.5
         return s
@@ -248,7 +248,7 @@ final class LatticeCellFitModeTests: XCTestCase {
     func testDefaultCellModeIsAutoForANewProject() throws {
         XCTAssertEqual(LatticeSettings(enabled: true).cellSizeMode, .auto,
                        "§4b: Auto is the default on a NEW project")
-        XCTAssertEqual(LatticeSettings(enabled: true).densityMode, .auto,
+        XCTAssertEqual(LatticeSettings(enabled: true).densityMode, .sim,
                        "§4b: on EVERY control, not just the cell")
     }
 

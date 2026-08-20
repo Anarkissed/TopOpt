@@ -834,6 +834,53 @@ struct BridgeLoadCase {
 // NO anchor faces the minimum-x boundary is auto-clamped (mirroring
 // run_minimize_plastic). `build_dir_*` (0,0,0) defaults to +Z. Needs OCCT (STEP
 // face selection); on a platform without it, sets `err`.
+// ---------------------------------------------------------------------------
+// ★ LATTICE THE PART, ON DEVICE (maintainer, 2026-08-17: "Can you please make it
+// run on the iPad as well. I imagine that the lattice work is much less
+// intensive than optimization").
+//
+// ★ HE IS RIGHT ABOUT THE COST: a lattice run has NO LADDER. It runs a small
+// fixed number of certification solves — minutes, not hours — which is exactly
+// why `RelatticeRunner` polls instead of streaming. There was never a
+// performance reason for it to be LAN-only; there was a PLUMBING reason, and
+// this is it.
+//
+// ★ IT TAKES A JOB DOCUMENT, NOT A PARAMETER LIST, AND THAT IS THE POINT. Every
+// other on-device entry point (`run_minimize_plastic_loadcase` above) re-authors
+// the load case from a flat `BridgeLoadCase`, which is how a front-end drifts
+// from the CLI. This one runs THE SAME job.json the LAN path already builds
+// (`RemoteRunner.buildJobJSON`), through core's OWN parser and core's OWN
+// `lattice_variant_job`. One document, two executors — so an on-device lattice
+// and a worker lattice cannot produce different parts, by construction rather
+// than by keeping two mappings in step.
+//
+// `job_path` is the job.json; `job_dir` is what its relative `model` resolves
+// against; `out_dir` receives the meshes and receipts. Accepts modes
+// "lattice_part" (lattice the imported part, no optimization) and
+// "lattice_variant" (lattice a finished design) — it is the same core entry
+// point for both. On failure returns an empty result and sets `err`.
+struct LatticeJobResult {
+  std::vector<std::string> mesh_paths;   // the latticed file(s)
+  std::string report_path;
+  std::string lattice_receipt_path;
+  long long latticed_voxels = 0;
+  double achieved_volume_fraction = 0.0;
+  double reproduced_margin_worst_case = 0.0;
+  bool graded = false;
+  double cell_size_mm = 0.0;
+  double rho_min_used = 0.0;
+  double rho_max_used = 0.0;
+  int analysis_solves = 0;
+  double wall_seconds = 0.0;
+};
+
+LatticeJobResult run_lattice_job(const std::string& job_path,
+                                 const std::string& job_dir,
+                                 const std::string& out_dir,
+                                 const std::string& materials_path,
+                                 const std::string& rules_path,
+                                 BridgeError& err);
+
 OptimizeResult run_minimize_plastic_loadcase(
     const std::string& step_path, const std::string& material_name,
     const std::string& materials_path, const std::string& rules_path,

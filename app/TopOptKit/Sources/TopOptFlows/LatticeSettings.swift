@@ -159,7 +159,20 @@ public struct LatticeRegionSpec: Equatable, Sendable {
 /// in `FrozenRegionAsMaterialTests` and surfaced on the row — never silent.
 public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
     case uniform
-    case auto
+    /// ★★ RENAMED FROM `auto` (maintainer, 2026-08-17: "If Density's 'auto' is
+    /// meant to be 'Sim' I think it should change names. However, if there is a
+    /// way to automate *without* using an FEA sim, then keep the 'Auto'").
+    ///
+    /// ★ THERE IS NO SUCH WAY, WHICH IS WHY THE NAME CHANGED RATHER THAN GAINING
+    /// AN ASTERISK. This mode is the ONLY thing that puts a `grading` block in
+    /// the job (`LatticeSpec.gradingDictionary` returns nil unless `graded`), and
+    /// core's grading law is a map FROM a per-voxel demand field — the von Mises
+    /// field an FEA produces. With no field there is nothing to grade by, so
+    /// "automatic" here has never meant anything except "simulated". The old
+    /// name described the interaction ("I don't have to type a number") and hid
+    /// the mechanism ("a finite-element solve decides it"), which is the half
+    /// that matters when you are deciding whether to trust the result.
+    case sim
     /// ★ §8 — each region states its own density. Reveals PR 334's conditional
     /// drawer row (`LatticeRegionDrawer.make(perRegionDensity:)`), which is the
     /// whole of the wiring that mode was built for and could not reach.
@@ -168,10 +181,31 @@ public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
     /// ★ Two words at most (R14).
     public var title: String {
         switch self {
-        case .auto: return "Auto"
+        case .sim: return "Sim"
         case .uniform: return "Uniform"
         case .perRegion: return "Per region"
         }
+    }
+
+    /// ★ WHETHER THIS MODE NEEDS A STRESS FIELD. One property, so every gate —
+    /// the settings sheet, the solve trigger, the preview — asks the same
+    /// question instead of each testing `== .sim` in its own words.
+    public var needsSimulation: Bool { self == .sim }
+
+    // ★ EVERY PROJECT ON DISK SAYS "auto", AND MUST KEEP OPENING. The rename is
+    // a LABEL change, not a data migration: a stored `"auto"` decodes to `.sim`,
+    // which is the same mode it always was. Encoding writes the new spelling, so
+    // a project re-saved once stops carrying the old word — but nothing forces
+    // that, and a project never re-saved still opens forever.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if raw == "auto" { self = .sim; return }
+        guard let v = LatticeDensityMode(rawValue: raw) else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath,
+                      debugDescription: "unknown density mode \(raw)"))
+        }
+        self = v
     }
 }
 
@@ -427,6 +461,65 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ★★ THE SIM MASTER SWITCH (maintainer, 2026-08-17)
+
+    /// ★ HIS SPEC: "Add a dark glass on/off check with a 'Simulate Stresses' at
+    /// the top of the 'Lattice Settings' modal (above the 'type') … The idea is
+    /// that if the SIM option is selected, you can offer any variable for the AI
+    /// to use, but can set some values yourself and keep them hard coded."
+    ///
+    /// ★ SO IT IS A PERMISSION, NOT A MODE. It does not say "grade everything by
+    /// stress"; it says "a solve is allowed to decide the axes I left to it".
+    /// Each axis still chooses for itself — that is the "set some values yourself
+    /// and keep them hard coded" half — and this switch is what makes the Sim
+    /// option available to any of them at all.
+    ///
+    /// ★ WHY IT IS STORED AND NOT DERIVED. Deriving it (`densityMode == .sim ||
+    /// cellSizeMode == .swept`) would make the switch un-turn-off-able: flipping
+    /// it off would have to guess which axes to move and back on would have to
+    /// guess where to put them. Stored, with `setSimulateStresses` enforcing the
+    /// invariant, the user's per-axis choices survive a round trip through OFF.
+    ///
+    /// ★ DEFAULT TRUE, and that is not a new behaviour: the field-graded density
+    /// mode has been the default since it shipped, so an untouched project has
+    /// always been asking for a solve. A false default would silently change
+    /// every existing project's lattice.
+    public var simulateStresses: Bool
+
+    /// ★ THE DEMAND⇢DENSITY CURVE'S EXPONENT — core's `grading.demand_exponent`.
+    ///
+    ///     rho = rho_hi · (demand / demand_max) ^ gamma
+    ///
+    /// 1.0 is fully-stressed design on von Mises; 0.5 gives the same grade from
+    /// strain-energy demand (core's own words, `grading.hpp:94-100`). It is
+    /// stored so the PREVIEW can read the same number the job carries — the
+    /// preview hardcoded `1` while this was unsettable, and that was honest then
+    /// and would not be once a control exists.
+    public var demandExponent: Double = 1
+
+    /// ★ THE INVARIANT, IN ONE PLACE: no axis may sit on a Sim setting while the
+    /// permission is off. Turning the switch off MOVES those axes to their
+    /// nearest manual equivalent rather than leaving a mode the job cannot
+    /// express — core would receive a `grading` block the user has just said
+    /// they do not want.
+    public mutating func setSimulateStresses(_ on: Bool) {
+        simulateStresses = on
+        guard !on else { return }
+        // Density: the field-graded mode has no meaning without a field.
+        if densityMode.needsSimulation { densityMode = .uniform }
+        // Cell size: `swept` IS the stress-graded cell ladder.
+        if cellSizeMode == .swept { cellSizeMode = .fixed }
+    }
+
+    /// ★ WHETHER A SOLVE IS ACTUALLY NEEDED — the permission AND at least one
+    /// axis taking it up. The switch being on with every axis pinned by hand is
+    /// a legitimate state, and it needs no FEA.
+    public var needsStressSolve: Bool {
+        simulateStresses
+            && (densityMode.needsSimulation || cellSizeMode == .swept)
+    }
     /// Faces painted "Material, latticed" (lattice-include). Preview-scope legacy
     /// store (the unified library's group roles are the carrier now). The EXCLUDE
     /// paint role deliberately does NOT live here: it drives the existing protect
@@ -482,6 +575,38 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// `latticeJobRegions()` both resolve through `LatticeSlabDepth`, per face
     /// (bar R4).
     public var selectableDepthMM: [String: Double]
+
+    /// ★ THE PER-SELECTABLE DENSITY — the store `LatticeRegionEmission` recorded
+    /// as missing (maintainer, 2026-08-17: "There is no *actual* way to modify
+    /// the density value when the lattice density setting is set to per-region").
+    ///
+    /// ★ THE EMISSION SAID SO IN SO MANY WORDS and shipped the gap deliberately:
+    /// "a per-selectable density needs its own store AND its own control, and
+    /// inventing one here would ship a field with no surface." Both arrive
+    /// together now — this is the store, and the drawer's Density row is the
+    /// surface. Until now the only density on the wire was keyed by GROUP, so a
+    /// per-region field could only have edited every face of the group at once.
+    ///
+    /// Keyed by `LatticeSelectableRef.key`, exactly like the role and the depth.
+    /// Absent ⇒ the group's `groupDensities` ⇒ the mode's own answer ⇒ AUTO, so
+    /// every snapshot written before this task emits precisely what it did.
+    public var selectableDensity: [String: Double]
+
+    /// ★ THE IN-PLANE EXPAND (maintainer, 2026-08-17: "the primitives are the
+    /// same shape as the face that they are derived from. I'd like a way to
+    /// expand them with a handle to be able to get the outside walls that might
+    /// be otherwise impossible to get latticed (i.e. the chamfer)").
+    ///
+    /// An OUTWARD margin in mm added to the slab's two in-plane half-extents —
+    /// ★ X AND Y ONLY, never the depth, which is its own control and its own
+    /// handle ("all the other axis *except* the depth that was set"). A face's
+    /// lattice slab is built from that face's own outline, so a chamfer just off
+    /// its edge falls outside it; this grows the slab past the outline to take
+    /// the surrounding wall in.
+    ///
+    /// Keyed by `LatticeSelectableRef.key`. Absent ⇒ 0 ⇒ the slab is exactly the
+    /// face, which is what every snapshot before this task emitted.
+    public var selectableExpandMM: [String: Double]
 
     // ── SUB-FLOOR RETENTION, the user's raw choices (task
     // 2026-08-05-lattice-retention-app-control). All OFF / absent by default, so
@@ -584,7 +709,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 // `.uniform` / `.fixed` on purpose: those describe what an OLD
                 // snapshot actually had, and a default must never rewrite
                 // history (the `boundary` precedent).
-                densityMode: LatticeDensityMode = .auto,
+                densityMode: LatticeDensityMode = .sim,
+                simulateStresses: Bool = true,
                 paintedIncludeFaces: [Int] = [],
                 paintDepthMM: Double = 4,
                 groupRoles: [UUID: LatticeGroupRole] = [:],
@@ -592,6 +718,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 groupDepthMM: [UUID: Double] = [:],
                 selectableRoles: [String: LatticeSelectableRole] = [:],
                 selectableDepthMM: [String: Double] = [:],
+                selectableDensity: [String: Double] = [:],
+                selectableExpandMM: [String: Double] = [:],
                 retainSubfloorInUnloadedRegions: Bool = false,
                 subfloorStressFraction: Double? = nil,
                 subfloorPerRegion: Bool = false,
@@ -618,6 +746,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.includePrimitives = includePrimitives
         self.boundary = boundary
         self.densityMode = densityMode
+        self.simulateStresses = simulateStresses
         self.paintedIncludeFaces = paintedIncludeFaces
         self.paintDepthMM = paintDepthMM
         self.groupRoles = groupRoles
@@ -625,6 +754,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.groupDepthMM = groupDepthMM
         self.selectableRoles = selectableRoles
         self.selectableDepthMM = selectableDepthMM
+        self.selectableDensity = selectableDensity
+        self.selectableExpandMM = selectableExpandMM
         if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
     }
 
@@ -644,9 +775,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // §3c/§3d). Named `primitive*` before PR 331 landed and made the unit
         // bigger than a primitive; the legacy keys below decode so a snapshot
         // written against the earlier name still opens with its choices intact.
-        case selectableRoles, selectableDepthMM
+        case selectableRoles, selectableDepthMM, selectableDensity
+        case selectableExpandMM
         case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
+        // ★ The Sim permission (2026-08-17). Absent from every older
+        // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
+        // keeps asking for the solve it has always asked for.
+        case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction
         case subfloorPerRegion, reportRegionCells
@@ -685,6 +821,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // never chose a finish opens on none rather than on rim.
         boundary = try c.decodeIfPresent(LatticeBoundaryTreatment.self, forKey: .boundary) ?? .none
         densityMode = try c.decodeIfPresent(LatticeDensityMode.self, forKey: .densityMode) ?? .uniform
+        // ★ ABSENT ⇒ TRUE. An older snapshot predates the switch, and the
+        // field-graded density mode has been the default since it shipped —
+        // so those projects have always been asking for a solve. Defaulting
+        // false here would silently change every one of their lattices.
+        simulateStresses = try c.decodeIfPresent(Bool.self, forKey: .simulateStresses) ?? true
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
@@ -711,6 +852,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                                   forKey: .selectableDepthMM)
             ?? c.decodeIfPresent([String: Double].self,
                                  forKey: .primitiveDepthMM) ?? [:]
+        // Absent from every snapshot before 2026-08-17 ⇒ empty ⇒ the group's
+        // density ⇒ the mode's answer, which is exactly what those emitted.
+        selectableDensity = try c.decodeIfPresent([String: Double].self,
+                                                  forKey: .selectableDensity) ?? [:]
+        // Absent ⇒ 0 ⇒ the slab is exactly the face, as every older snapshot.
+        selectableExpandMM = try c.decodeIfPresent([String: Double].self,
+                                                   forKey: .selectableExpandMM) ?? [:]
         // Absent from every snapshot written before this task ⇒ off / core's own
         // number ⇒ those projects keep emitting exactly the job they emitted.
         retainSubfloorInUnloadedRegions = try c.decodeIfPresent(
@@ -741,6 +889,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(includePrimitives, forKey: .includePrimitives)
         try c.encode(boundary, forKey: .boundary)
         try c.encode(densityMode, forKey: .densityMode)
+        try c.encode(simulateStresses, forKey: .simulateStresses)
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
@@ -749,6 +898,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(frozenRegionDensity, forKey: .frozenRegionDensity)
         try c.encode(selectableRoles, forKey: .selectableRoles)
         try c.encode(selectableDepthMM, forKey: .selectableDepthMM)
+        try c.encode(selectableDensity, forKey: .selectableDensity)
+        try c.encode(selectableExpandMM, forKey: .selectableExpandMM)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
@@ -844,6 +995,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                       generatable: generatable,
                                       memberMM: memberMM, lineWidthMM: lineWidthMM)
         guard b.runnableAsCertified else { return nil }
+        // ★★ THE SIM PERMISSION GATES THE `grading` BLOCK (maintainer,
+        // 2026-08-17). `setSimulateStresses(false)` already moves every Sim axis
+        // to its manual equivalent, so this can only fire if some other path
+        // wrote the mode directly. It is here anyway, because the failure it
+        // prevents is the one this project keeps paying for: a job that asks for
+        // something the user's own switch says they turned off. Belt AND braces
+        // is correct when the two live in different files.
+        precondition(!(densityMode.needsSimulation && !simulateStresses),
+                     "the Sim density mode cannot outlive the Sim permission — "
+                     + "see LatticeSettings.setSimulateStresses")
         // AUTO density (task lattice-page-core-hookup stage 4): core's run_job now
         // grades each accepted variant from that variant's OWN final stress field,
         // so the job ships a GRADED spec — a `grading` block, never a uniform
@@ -865,7 +1026,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // INPUT, not an uncertifiable region: nil here, and the page names the
         // reason. In production the width always exists — PrintParams derives it
         // by rule from the wall beads — which is pinned below.
-        if densityMode == .auto {
+        if densityMode == .sim {
             guard lineWidthMM > 0 else { return nil }
             // ★★ §9(b) — THIS IS WHERE THE SWEEP COLLAPSED, AND IT WAS THE WRONG
             // FLOOR.
@@ -984,7 +1145,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
                                   minRelativeDensity: b.densityLo,
                                   maxRelativeDensity: b.densityHi,
-                                  gamma: 1,
+                                  // ★ CORE'S OWN EXPONENT, NOT A HARDCODED 1
+                                  // (maintainer, 2026-08-17: "use all variables
+                                  // as part of the preview"). `1` was right when
+                                  // nothing could set it; core's grading law is
+                                  //   rho = rho_hi · (demand/demand_max)^gamma
+                                  // with `demand_exponent` defaulting to 1.0, so
+                                  // the preview reads the SAME number the job
+                                  // carries and a future control moves both.
+                                  gamma: demandExponent,
                                   uniformRelativeDensity: 0.5 * (b.densityLo + b.densityHi))
     }
 }

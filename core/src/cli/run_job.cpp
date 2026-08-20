@@ -6128,11 +6128,20 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
                                             const MaterialLibrary& materials,
                                             const SettingsRules& rules) {
   const double t_start = wall_seconds();
-  if (job.mode != "lattice_variant")
+  // ★ TWO MODES, ONE PIPELINE (task 2026-08-17-lattice-stage-repair).
+  // "lattice_variant" lattices a FINISHED design read from a design.bin;
+  // "lattice_part" lattices the IMPORTED PART with no optimization at all
+  // (maintainer: "a 'Lattice This' button ... which only lattices the selection
+  // and does not optimize"). Everything below is shared — the load case, the
+  // certification solves, the grading law, the mesh emission. The ONLY
+  // difference is where the density field comes from, and it is one branch.
+  const bool lattice_the_part = (job.mode == "lattice_part");
+  if (job.mode != "lattice_variant" && !lattice_the_part)
     throw JobError(
-        "lattice_variant_job: mode must be \"lattice_variant\" (got \"" +
+        "lattice_variant_job: mode must be \"lattice_variant\" or "
+        "\"lattice_part\" (got \"" +
         job.mode + "\")");
-  if (!job.variant.present)
+  if (!lattice_the_part && !job.variant.present)
     throw JobError("lattice_variant_job: the job carries no \"variant\" block");
   if (!job.lattice.present)
     throw JobError("lattice_variant_job: the job carries no \"lattice\" block");
@@ -6272,18 +6281,55 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
 
   // ── the STORED DESIGN. Read before any solve, so a bad reference costs
   // nothing.
-  const std::string design_path = join_path(job_dir, job.variant.design);
   DesignStore store;
-  try {
-    store = read_design_file(design_path);
-  } catch (const std::exception& e) {
-    throw JobError(std::string("lattice_variant: cannot read the stored design "
-                               "\"") +
-                   job.variant.design + "\": " + e.what());
+  if (lattice_the_part) {
+    // ★ THE PART IS THE DESIGN. Every voxel the part occupies is solid; nothing
+    // was optimized away because nothing was optimized. Built on `cert_grid`, so
+    // the grid check below is satisfied BY CONSTRUCTION rather than by luck —
+    // and every voxel-indexed thing after it (the BCs, the tags, the mask, the
+    // field) refers to the same geometry it would on a real design.
+    //
+    // ★ THE VOLUME FRACTION IS MEASURED, NOT ASSUMED: it is the part's own
+    // occupancy of its grid. Reporting 1.0 would claim the bounding box is
+    // solid, and every downstream mass and saving would be wrong by that ratio.
+    store.nx = cert_grid.nx;
+    store.ny = cert_grid.ny;
+    store.nz = cert_grid.nz;
+    store.spacing = cert_grid.spacing;
+    store.origin = cert_grid.origin;
+    StoredDesign d;
+    d.density.assign(cert_grid.voxel_count(), 0.0);
+    std::size_t solid = 0;
+    for (int k = 0; k < cert_grid.nz; ++k)
+      for (int j = 0; j < cert_grid.ny; ++j)
+        for (int i = 0; i < cert_grid.nx; ++i)
+          if (cert_grid.solid(i, j, k)) {
+            d.density[cert_grid.index(i, j, k)] = 1.0;
+            ++solid;
+          }
+    if (solid == 0)
+      throw JobError(
+          "lattice_part: the part occupies no voxels at this resolution — there "
+          "is nothing to lattice");
+    d.achieved_volume_fraction =
+        static_cast<double>(solid) / static_cast<double>(cert_grid.voxel_count());
+    d.requested_volume_fraction = d.achieved_volume_fraction;
+    d.accepted = true;
+    d.fingerprint = design_fingerprint(d.density);
+    store.variants.push_back(std::move(d));
+  } else {
+    const std::string design_path = join_path(job_dir, job.variant.design);
+    try {
+      store = read_design_file(design_path);
+    } catch (const std::exception& e) {
+      throw JobError(std::string("lattice_variant: cannot read the stored design "
+                                 "\"") +
+                     job.variant.design + "\": " + e.what());
+    }
+    if (store.variants.empty())
+      throw JobError("lattice_variant: \"" + job.variant.design +
+                     "\" contains no variant designs");
   }
-  if (store.variants.empty())
-    throw JobError("lattice_variant: \"" + job.variant.design +
-                   "\" contains no variant designs");
   // The stored design must index to THIS job's SOLVED grid, or every
   // voxel-indexed thing below (the BCs, the tags, the mask, the field) refers to
   // a different geometry. Compared exactly — a grid that is merely close is a
@@ -6314,8 +6360,19 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
 
   // Select the variant. NO nearest-rung matching: latticing a rung the user did
   // not name is exactly the silent surprise this whole job exists to remove.
+  //
+  // ★ `lattice_part` SELECTS NOTHING — the store it built holds exactly one
+  // design, the part itself, and there is no rung to name. The selection below
+  // (and the achieved-fraction cross-check after it, which compares against a
+  // number the front-end read from a report that does not exist here) applies
+  // only to the variant path.
+  // -1 is the NOT-FOUND sentinel the fingerprint and fraction branches below
+  // test against; it must stay -1 here or a non-match would silently lattice
+  // variant 0 instead of refusing.
   int pick = -1;
-  if (job.variant.has_index) {
+  if (lattice_the_part) {
+    pick = 0;                       // the single synthesised design
+  } else if (job.variant.has_index) {
     if (job.variant.index >= static_cast<int>(store.variants.size()))
       throw JobError("lattice_variant: variant index " +
                      std::to_string(job.variant.index) + " but \"" +
@@ -6382,7 +6439,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // tighter than the gap between two adjacent ladder rungs, so it cannot confuse
   // one variant with another — which is the whole thing it exists to catch.
   const double kAchievedWireTolerance = 1e-9;   // relative; report.json is 10 s.f.
-  if (job.variant.has_achieved_volume_fraction &&
+  if (!lattice_the_part && job.variant.has_achieved_volume_fraction &&
       std::abs(job.variant.achieved_volume_fraction -
                sd.achieved_volume_fraction) >
           kAchievedWireTolerance * std::abs(sd.achieved_volume_fraction))
@@ -6516,7 +6573,15 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         json_num(result.solid.non_convergent_residual) +
         "). A design whose certification solve the CG cannot resolve is never "
         "certified, and so is never latticed.");
-  if (!result.reproduction_within_band)
+  // ★ THE REPRODUCTION CHECK IS A VARIANT-PATH GUARD, AND ONLY THAT (task
+  // 2026-08-17-lattice-stage-repair). It asks "does the design I read back still
+  // produce the margin its run RECORDED" — a question about a stored record. A
+  // `lattice_part` design was synthesised from the part a moment ago and has no
+  // recorded margin to disagree with, so the comparison would be against 0 and
+  // would refuse every honest job. The certification solve above still RUNS and
+  // its non-convergence refusal above still applies: what is skipped is the
+  // comparison to a record that does not exist, not the certification.
+  if (!lattice_the_part && !result.reproduction_within_band)
     throw JobError(
         "lattice_variant: the restored design does NOT reproduce the margin the "
         "run recorded for this variant (recorded " +

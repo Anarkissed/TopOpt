@@ -98,6 +98,11 @@ public enum LatticeGroupRowSection: String, Equatable, Sendable, CaseIterable {
     /// COLOUR. One thing, and nothing else.
     case latticeSummary
     /// ★ THE DRAWER (§4a), beneath the group squircle, collapsed by default.
+    ///
+    /// ★★ NO LONGER BUILT ON THE LATTICE STAGE — see `rowSections`. The case is
+    /// kept so the enum stays exhaustive for the TO stage's row builder and for
+    /// the tests that assert the lattice stage does NOT offer it; nothing
+    /// currently lists it.
     case latticeDrawer
     /// ★ ONE ROW PER PRIMITIVE, each with its own lattice / no-lattice (§3c).
     case latticePrimitiveRows
@@ -137,6 +142,17 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
     /// control, the similar-faces double tap.
     public let surfaceEditing: Bool
 
+    /// ★ WHETHER THE BOTTOM BAR CARRIES THE SELECTION HINT (maintainer,
+    /// 2026-08-17: "remove the 'tap more faces to grow the selection...' chip
+    /// ... from both the lattice and the Surfaces stage. This should give enough
+    /// room for both Optimize and Lattice buttons").
+    ///
+    /// TRUE on Topology only. There the sentence is the one thing telling a new
+    /// user how to make a selection at all; on the other two stages a selection
+    /// already exists — that is the precondition for being there — so it is noise
+    /// occupying the width the second action button needs.
+    public var showsSelectionHint: Bool { !latticeControls && !surfaceEditing }
+
     public init(designBox: Bool, groupPrimitives: Bool, keepOuts: Bool,
                 latticeDepthPlanes: Bool, latticeControls: Bool,
                 wireframe: Bool = false, surfaceEditing: Bool = false) {
@@ -155,9 +171,27 @@ public struct WorkspaceStageVisibility: Equatable, Sendable {
     /// in it is not BUILT — which is how "no lattice control, chip, readout or
     /// state text survives on the TO page" (R2) becomes a property the tests can
     /// read rather than a claim about a view.
+    /// ★★ THE GROUP DRAWER IS GONE (maintainer, 2026-08-17): "There is a 'per
+    /// Group' set of notes regarding the lattice that doesn't make sense. It
+    /// should be per face *only*. The group does *not* have its own primitive to
+    /// expand therefore making it impossible to ever be *IN* regime."
+    ///
+    /// ★ HE IS DESCRIBING A FABRICATED NUMBER, and he is right. The group drawer
+    /// was derived from `g.faces.first` — ONE arbitrary face standing in for the
+    /// whole group — at the GROUP's depth. So it reported a cell, a density, a
+    /// strut and a cells-across for a slab no primitive owns and no handle can
+    /// drag. Every one of those numbers was a real derivation of a thing that
+    /// does not exist, which is the same defect class as the 5 % band floor: a
+    /// readout that looks like a measurement and is not.
+    ///
+    /// ★ THE SUMMARY ROW STAYS, and it is not a lattice verdict. It carries the
+    /// ALL/SOME/NONE coverage and the disclosure that opens the per-face rows —
+    /// navigation and a count, not a claim about a regime. What each FACE hands
+    /// over, and whether that face certifies, is stated on that face's own row,
+    /// where there is a primitive to drag and a depth that means something.
     public var rowSections: [LatticeGroupRowSection] {
         latticeControls
-            ? [.latticeSummary, .latticeDrawer, .latticePrimitiveRows]
+            ? [.latticeSummary, .latticePrimitiveRows]
             : [.clearanceEditor]
     }
 

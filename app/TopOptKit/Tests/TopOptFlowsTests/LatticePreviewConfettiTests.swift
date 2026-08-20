@@ -73,7 +73,13 @@ final class LatticePreviewConfettiTests: XCTestCase {
         var s = LatticeSettings()
         s.enabled = true
         s.cellSizeMode = .auto
-        s.densityMode = .auto
+        // ★ `.sim` IS THE MODE FORMERLY SPELLED `.auto` — renamed on the
+        // lattice-stage-repair branch because it is the ONLY mode that emits a
+        // `grading` block, and core's grading law is a map from an FEA's von
+        // Mises field. Same mode, same behaviour, and a stored "auto" still
+        // decodes to it (`LatticeDensityModeRenameTests`). This is a merge
+        // leftover, not a change of fixture.
+        s.densityMode = .sim
         s.boundary = .fullSkin
         return s
     }
@@ -378,4 +384,161 @@ final class LatticePreviewConfettiTests: XCTestCase {
     private func f2(_ v: Float) -> String { String(format: "%.2f", v) }
     private func f3(_ v: Double) -> String { String(format: "%.3f", v) }
     private func pct(_ v: Double) -> String { String(format: "%.2f%%", v * 100) }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MARK: ★★ THE PREVIEW MASKED TO HIS DECLARED REGIONS
+//
+// ★ THE FINDING THIS FILE'S §3a RECORDED AND DELIBERATELY DID NOT FIX: the
+// raymarched preview lattices the ENTIRE interior and ignores every face
+// declaration, so it shows MORE lattice than the job would build. On his part
+// that was 1,689 active cells of 6,032 — the whole solid, not two ~11 mm skins.
+//
+// ★ THE NUMBER IS THE WHOLE POINT (bar 5). A mask that silently lights
+// everything, or silently lights nothing, is the failure mode — and only the
+// count catches either.
+
+@MainActor
+final class LatticePreviewRegionMaskTests: XCTestCase {
+
+    /// His two declared faces, at the depths on his screen.
+    private static let hisFaceDepths: [(face: FaceID, depthMM: Double)] =
+        [(15, 11.0), (2, 10.6)]
+
+    /// ★ THE EMISSION THE JOB ITSELF USES — `LatticeRegionEmission.regions`, the
+    /// same call `ProjectModel.latticeJobRegions()` makes, resolving faces the
+    /// same way. Deliberately NOT a hand-built slab: re-deriving the geometry in
+    /// the test would let the test agree with itself while disagreeing with the
+    /// run, which is the exact class of defect this project keeps finding.
+    private static func hisRegions(_ mesh: ViewerMesh)
+        -> LatticeRegionEmission.Result {
+        let gid = UUID()
+        let group = SelectionGroup(id: gid, name: "A", colorIndex: 0,
+                                   faces: hisFaceDepths.map(\.face))
+        let resolve: (FaceID) -> LatticeRegionEmission.ResolvedFace? = { f in
+            guard let geo = mesh.faceGeometry(f) else { return nil }
+            if geo.isCylinder {
+                guard let span = mesh.faceAxialSpan(
+                    f, axisPoint: SIMD3<Float>(geo.axisPoint),
+                    axisDir: SIMD3<Float>(geo.axisDir)) else { return nil }
+                return .cylinder(axisPoint: geo.axisPoint, axisDir: geo.axisDir,
+                                 radiusMM: geo.cylinderRadiusMM,
+                                 spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
+            }
+            if geo.isPlane {
+                guard let o = mesh.facePlaneOutline(
+                    f, planeNormal: SIMD3<Float>(geo.planeNormal),
+                    planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
+                return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
+                              halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
+            }
+            return nil
+        }
+        var depths: [String: Double] = [:]
+        for d in hisFaceDepths {
+            depths[LatticeSelectableRef.face(group: gid, face: d.face).key] = d.depthMM
+        }
+        return LatticeRegionEmission.regions(
+            groups: [group], roles: [gid: .include],
+            primitives: { _ in [] }, includePrimitives: [],
+            faceDepthMM: 4.0,
+            selectableDepthMM: depths,
+            resolve: resolve)
+    }
+
+    private static func activeCells(_ scene: LatticeSDFScene,
+                                    cellMM: Double) -> Int {
+        LatticePreviewOccupancy.cellField(occupancy: scene.occupancy,
+                                          demand: scene.demand, cellMM: cellMM)
+            .values.filter { $0 >= 0 }.count
+    }
+
+    /// ★★ THE FINDING, AS A NUMBER, BEFORE AND AFTER — on his own part, at his
+    /// own settings, through the job's own emission.
+    func testTheMaskCutsThePreviewToHisDeclaredRegions() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let params = LatticePreviewConfettiTests.hisParams()
+        let field = LatticePreviewConfettiTests.gradedField(mesh.bounds)
+        let emission = Self.hisRegions(mesh)
+
+        let before = LatticeSDFScene(mesh: mesh, field: field,
+                                     latticeID: params.latticeID)
+        let after = LatticeSDFScene(mesh: mesh, field: field,
+                                    latticeID: params.latticeID,
+                                    regions: emission.regions,
+                                    whenEmpty: .latticeNothing,
+                                    skippedFaces: emission.skippedFaces)
+
+        let cellsBefore = Self.activeCells(before, cellMM: params.cellMM)
+        let cellsAfter = Self.activeCells(after, cellMM: params.cellMM)
+        let voxBefore = before.interiorVoxelCount
+        let voxAfter = after.interiorVoxelCount
+
+        print("""
+
+        ================================================================================
+        THE PREVIEW, MASKED TO HIS DECLARED REGIONS
+        part            Fixtures/M2_verticalStand.step
+        declared        Face 15 @ 11.0 mm · Face 2 @ 10.6 mm  (role: lattice)
+        regions emitted \(emission.regions.count)   skipped faces \(emission.skippedFaces)
+        cell size       \(params.cellMM) mm
+        --------------------------------------------------------------------------------
+                              interior voxels     active lattice cells
+        BEFORE (no mask)      \(voxBefore)                \(cellsBefore)
+        AFTER  (masked)       \(voxAfter)                \(cellsAfter)
+        --------------------------------------------------------------------------------
+        part interior (unmasked, both)  \(after.partInteriorVoxelCount)
+        ================================================================================
+
+        """)
+
+        // ★ THE EMISSION PRODUCED SOMETHING. If it did not, every number below is
+        // vacuous and the test would "pass" while measuring nothing.
+        XCTAssertFalse(emission.regions.isEmpty,
+                       "★ his two faces must emit regions, or this test is vacuous")
+
+        // ★ THE MASK CUT IT DOWN — the finding.
+        XCTAssertLessThan(cellsAfter, cellsBefore,
+                          "★ the preview must show LESS than the whole solid")
+        XCTAssertLessThan(voxAfter, voxBefore)
+
+        // ★★ AND IT DID NOT CUT IT TO NOTHING. "Lights everything" and "lights
+        // nothing" are the two failure modes, and only a two-sided bound catches
+        // both — a mask that emptied the part would satisfy the assertion above.
+        XCTAssertGreaterThan(cellsAfter, 0,
+                             "★ a mask that lights NOTHING is the other failure mode")
+
+        // ★ THE PART'S OWN INTERIOR IS UNTOUCHED BY THE MASK, so the banner can
+        // still tell "no inside at all" from "the regions matched nothing".
+        XCTAssertEqual(after.partInteriorVoxelCount, voxBefore,
+                       "★ the unmasked interior is the same part either way")
+    }
+
+    /// ★ NO DECLARATIONS ⇒ TODAY'S BEHAVIOUR, EXACTLY. The settings page's sample
+    /// block has no regions by construction and must keep lattices everywhere.
+    func testAnEmptyRegionListStillLatticesEverythingUnderTheSamplePolicy() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let params = LatticePreviewConfettiTests.hisParams()
+        let plain = LatticeSDFScene(mesh: mesh, field: nil,
+                                    latticeID: params.latticeID)
+        let sample = LatticeSDFScene(mesh: mesh, field: nil,
+                                     latticeID: params.latticeID,
+                                     regions: [], whenEmpty: .latticeEverything)
+        XCTAssertEqual(sample.interiorVoxelCount, plain.interiorVoxelCount,
+                       "★ byte-identical to the pre-mask behaviour")
+    }
+
+    /// ★ AND ON THE STAGE, NO DECLARATIONS ⇒ NOTHING LATTICED. The user has
+    /// marked nothing; the honest picture is a solid part, not a full one.
+    func testAnEmptyRegionListLatticesNothingUnderTheStagePolicy() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let params = LatticePreviewConfettiTests.hisParams()
+        let stage = LatticeSDFScene(mesh: mesh, field: nil,
+                                    latticeID: params.latticeID,
+                                    regions: [], whenEmpty: .latticeNothing)
+        XCTAssertEqual(stage.interiorVoxelCount, 0)
+        XCTAssertGreaterThan(stage.partInteriorVoxelCount, 0,
+                             "★ …and the PART still has an interior, which is what "
+                             + "lets the banner say why it is empty")
+    }
 }

@@ -159,6 +159,23 @@ public struct RunRequest: Equatable, Sendable {
     /// screen that was produced the other way.
     public let projectCADFaces: Bool
 
+    /// ★ WHICH QUESTION THIS RUN ASKS CORE (maintainer, 2026-08-17: "a 'Lattice
+    /// This' button ... which only lattices the selection and does not
+    /// optimize").
+    ///
+    /// `"minimize_plastic"` is the optimize run and the DEFAULT, so every
+    /// existing call site and every stored request means exactly what it did.
+    /// `"lattice_part"` lattices the imported part with no optimization at all —
+    /// core's own mode, added in this task, sharing the whole downstream
+    /// pipeline (load case, certification solves, grading law, mesh emission).
+    /// ★ A `var` DELIBERATELY, and the only one on this type. `withJobMode`
+    /// copies the struct and changes this one field — a hand-written copy
+    /// initializer over ~30 fields is exactly where a dropped key hides, and
+    /// this codebase has already paid for one of those (the mesh-job-params
+    /// skeleton). Still part of the synthesized `==`, so switching modes
+    /// invalidates a stale result rather than reusing it.
+    public var jobMode: String
+
     /// True for a STEP/STP part (B-rep source). NOT a proxy for "has a load case":
     /// an STL/3MF part also carries selectable faces (segmentation pseudo-faces,
     /// handoff 134) and runs the load-case path when one is declared. Kept only to
@@ -192,7 +209,8 @@ public struct RunRequest: Equatable, Sendable {
                 lattice: LatticeSpec? = nil,
                 // Defaults to core's own default. A caller that says nothing gets
                 // the armed posture, which is the whole point of arming it.
-                projectCADFaces: Bool = true) {
+                projectCADFaces: Bool = true,
+                jobMode: String = "minimize_plastic") {
         self.modelPath = modelPath
         self.sourceFormat = sourceFormat
         self.material = material
@@ -223,6 +241,16 @@ public struct RunRequest: Equatable, Sendable {
         self.projectID = projectID
         self.lattice = lattice
         self.projectCADFaces = projectCADFaces
+        self.jobMode = jobMode
+    }
+
+    /// The same request, asking a different question of core. A COPY rather than
+    /// an in-place edit, so a request already handed to a runner cannot change
+    /// mode underneath it.
+    public func withJobMode(_ mode: String) -> RunRequest {
+        var copy = self
+        copy.jobMode = mode
+        return copy
     }
 }
 
@@ -1070,9 +1098,68 @@ public final class RunModel: ObservableObject {
     /// The default runner: drive `minimize_plastic` with the M7.0a progress
     /// callback (which doubles as the cancellation signal — returning `false`
     /// stops the run).
+    /// ★ LATTICE ON DEVICE (maintainer, 2026-08-17: "Can you please make it run
+    /// on the iPad as well. I imagine that the lattice work is much less
+    /// intensive than optimization").
+    ///
+    /// ★ HE IS RIGHT ABOUT THE COST, AND THAT IS WHY THIS IS VIABLE. A lattice
+    /// run has NO LADDER — a small fixed number of certification solves, minutes
+    /// rather than hours, which is exactly why `RelatticeRunner` polls instead of
+    /// streaming. There was never a performance reason for it to be LAN-only;
+    /// there was a PLUMBING one: `jobMode` reached core through the job document,
+    /// and only the LAN path wrote a job document. Now both do.
+    ///
+    /// ★ THE SAME DOCUMENT, NOT A SECOND MAPPING. This writes
+    /// `RemoteRun.buildJobJSON(request)` — the very bytes the worker would have
+    /// been sent — into a temp directory and hands it to core's own parser. An
+    /// on-device lattice and a worker lattice are therefore the same run by
+    /// construction. Every other on-device entry point re-authors the load case
+    /// from a flat parameter list, which is how the two front-ends drifted before.
+    static func latticeBridgeRunner(_ request: RunRequest,
+                                    _ progress: @escaping (Int, Int, Int) -> Bool,
+                                    _ onVariant: @escaping (OptimizeOutcome) -> Void)
+        throws -> OptimizeOutcome {
+        let fm = FileManager.default
+        let modelURL = URL(fileURLWithPath: request.modelPath)
+        // `job.model` is resolved against `job_dir`, and the emitted document
+        // names the model by its LAST COMPONENT — so the job must live beside the
+        // part. The imported part is inside the app's own container, which is
+        // writable; the OUTPUT goes to a temp directory so a run never writes
+        // into the project.
+        let jobDir = modelURL.deletingLastPathComponent()
+        let jobURL = jobDir.appendingPathComponent("lattice_job.json")
+        let outDir = fm.temporaryDirectory
+            .appendingPathComponent("lattice-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: jobURL) }
+
+        try RemoteRun.buildJobJSON(request).write(to: jobURL)
+        // One coarse tick: this path has no per-iteration callback to relay — a
+        // lattice job runs certification solves, not optimizer iterations — and
+        // reporting fake progress would be worse than reporting none.
+        _ = progress(0, 1, 0)
+
+        let r = try TopOptKit.runLatticeJob(
+            jobPath: jobURL.path, jobDir: jobDir.path, outDir: outDir.path,
+            materialsPath: request.materialsPath, rulesPath: request.rulesPath)
+        guard let mesh = r.meshPaths.first else {
+            throw RemoteRunError(
+                "the lattice run produced no mesh — see the run's report for why")
+        }
+        return try TopOptKit.latticeOutcome(meshPath: mesh, result: r)
+    }
+
     public static func bridgeRunner(_ request: RunRequest,
                                     _ progress: @escaping (Int, Int, Int) -> Bool,
                                     _ onVariant: @escaping (OptimizeOutcome) -> Void) throws -> OptimizeOutcome {
+        // ★ THE MODE DECIDES WHICH RUN THIS IS (maintainer, 2026-08-17). Routed
+        // HERE, at the one on-device entry point every caller already goes
+        // through, so a lattice request cannot reach the optimizer by taking a
+        // different path in. Before this the field existed and nothing local read
+        // it — an on-device "Lattice" would have silently optimized.
+        if request.jobMode == "lattice_part" || request.jobMode == "lattice_variant" {
+            return try latticeBridgeRunner(request, progress, onVariant)
+        }
         // Optimize under the user's declared load case (anchors/loads → clamps +
         // tractions) whenever the request carries one. This is a STEP part OR an
         // STL/3MF part with a selected load case: handoff 134 made the bridge's

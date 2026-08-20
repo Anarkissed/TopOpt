@@ -806,11 +806,123 @@ static void section_schema() {
         "part");
 }
 
+// ---------------------------------------------------------------------------
+// ★ "LATTICE THIS" — lattice_part: THE IMPORTED PART, NO OPTIMIZATION
+// (task 2026-08-17-lattice-stage-repair; maintainer: "implement a 'Lattice This'
+// button just above the 'Optimize' button ... which only lattices the selection
+// and does not optimize").
+//
+// ★ WHY A NEW MODE WAS NEEDED AT ALL. Core took exactly three modes, and the
+// only latticing one — `lattice_variant` — is DEFINED by the finished design it
+// selects: it refuses without a `variant` block naming a design.bin and a rung.
+// There is no design when nothing has been optimized. `lattice_part` asks the
+// other question: lattice the part AS IMPORTED. Everything downstream is shared
+// verbatim — same load case, same certification solves, same grading law, same
+// mesh emission — so this is one branch, not a second pipeline.
+static void section_lattice_part() {
+  const std::string fixture_dir = std::string(MESH_FIXTURE_DIR);
+  const MaterialLibrary materials = load_materials_file(MATERIALS_JSON_PATH);
+  const SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
+  const std::string tmp = std::string(CLI_TMP_DIR);
+  const std::string out = tmp + "/lattice_part";
+  std::filesystem::remove_all(out);
+  std::filesystem::create_directories(out);
+
+  // The SAME plate the variant flow uses, so the only thing that differs from
+  // the shipping path is that NOTHING WAS OPTIMIZED first.
+  JobDescription job = plate_job();
+  job.mode = "lattice_part";
+  job.lattice.present = true;
+  job.lattice.topology = "octet";
+  job.lattice.cell_mm = 3.0;
+  job.lattice.strut_radius_mm = 0.45;   // rho ~0.41, inside the band
+  job.lattice.emit_stl = true;
+
+  LatticeVariantJobResult r;
+  bool threw = false;
+  std::string why;
+  try {
+    r = lattice_variant_job(job, fixture_dir, out, materials, rules);
+  } catch (const std::exception& e) {
+    threw = true;
+    why = e.what();
+  }
+  CHECK(!threw, ("lattice_part runs with NO variant block and NO design.bin: " +
+                 why).c_str());
+  if (threw) return;
+
+  // ★ THE PART IS THE DESIGN, and its fraction is MEASURED — the part's own
+  // occupancy of its grid. Reporting 1.0 would claim the bounding BOX is solid
+  // and every mass and saving downstream would be wrong by that ratio.
+  CHECK(r.requested_volume_fraction > 0.0 &&
+            r.requested_volume_fraction <= 1.0,
+        "lattice_part: the volume fraction is the part's own occupancy");
+  CHECK(r.design_fingerprint != 0,
+        "lattice_part: the synthesised design still has an identity");
+
+  // ★★ AND IT ACTUALLY LATTICED SOMETHING. A job that runs clean and emits an
+  // empty lattice is the failure this whole area was bitten by for weeks.
+  CHECK(r.latticed_voxels > 0, "lattice_part: the run latticed real voxels");
+}
+
+// ★ THE SCHEMA HALF: the two modes are distinguished, and each refuses what
+// belongs to the other.
+static void section_lattice_part_schema() {
+  auto parse_fails = [](const std::string& json, const std::string& needle) {
+    try {
+      parse_job(json);
+    } catch (const JobError& e) {
+      return contains(std::string(e.what()), needle);
+    }
+    return false;
+  };
+  const std::string base =
+      R"({"model":"m.step","material":"PLA","resolution":16,)"
+      R"("fixture_faces":[{"kind":"cylindrical","radius_mm":1}],)"
+      R"("gravity":{"direction":[0,0,-1],"magnitude_mm_s2":9810},)"
+      R"("ladder":[0.5],"margin_stop":1.5,)"
+      R"("output":{"report":"r.json","mesh_format":"stl","mesh_prefix":"v"},)";
+
+  // ★ `lattice_part` NEEDS A LATTICE BLOCK — it exists to lattice, and a job
+  // with no lattice work is a mistake rather than a no-op.
+  CHECK(parse_fails(base + R"("mode":"lattice_part"})", "lattice_part"),
+        "lattice_part with no lattice block is refused");
+
+  // ★ AND IT TAKES NO VARIANT — there is no design to select.
+  CHECK(parse_fails(base +
+                        R"("mode":"lattice_part",)"
+                        R"("variant":{"design":"d.bin","index":0},)"
+                        R"("lattice":{"topology":"octet","cell_mm":3,)"
+                        R"("strut_radius_mm":0.45,"emit_stl":true}})",
+                    "variant"),
+        "lattice_part refuses a variant block");
+
+  // …and the refusal for a bare lattice_variant now POINTS AT the new mode, so
+  // the message names the thing the user actually wanted.
+  CHECK(parse_fails(base + R"("mode":"lattice_variant"})", "lattice_part"),
+        "the lattice_variant refusal names lattice_part as the alternative");
+
+  // The accepting case parses and keeps its mode.
+  {
+    const std::string ok_json =
+        base +
+        R"("mode":"lattice_part",)"
+        R"("lattice":{"topology":"octet","cell_mm":3,"strut_radius_mm":0.45,)"
+        R"("emit_stl":true}})";
+    JobDescription ok = parse_job(ok_json);
+    CHECK(ok.mode == "lattice_part" && !ok.variant.present &&
+              ok.lattice.present,
+          "lattice_part parses, carries a lattice block and no variant");
+  }
+}
+
 int main() {
   section_schema();
   section_flow();
   section_graded();
   section_identity_and_zero_density();
+  section_lattice_part_schema();
+  section_lattice_part();
   std::printf("test_lattice_variant: %d checks, %d failures\n", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;

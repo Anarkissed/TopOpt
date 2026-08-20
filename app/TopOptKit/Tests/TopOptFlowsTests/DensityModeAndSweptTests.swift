@@ -17,17 +17,23 @@ final class DensityModeAndSweptTests: XCTestCase {
     /// ★ §8 — THREE, NOT FOUR. And "SWEPT" IS NOT ONE OF THEM: it belongs to
     /// CELL SIZE and only to cell size.
     func testThereAreExactlyThreeDensityModes() {
-        XCTAssertEqual(Set(["uniform", "auto", "perRegion"]),
-                       Set([LatticeDensityMode.uniform, .auto, .perRegion]
+        // ★ THE WIRE NAME OF THE FIELD-GRADED MODE IS NOW "sim" (maintainer,
+        // 2026-08-17). §8 is unchanged — still THREE modes, still no swept
+        // density — only the spelling of one of them moved, and
+        // `LatticeDensityModeRenameTests` pins that a stored "auto" still
+        // decodes to it, so no project on disk is affected.
+        XCTAssertEqual(Set(["uniform", "sim", "perRegion"]),
+                       Set([LatticeDensityMode.uniform, .sim, .perRegion]
                             .map(\.rawValue)))
         XCTAssertNil(LatticeDensityMode(rawValue: "swept"),
                      "§8(a): there is no swept DENSITY mode — swept is a cell-size "
                    + "mode and nothing else")
     }
 
-    /// ★ §8(b) — AUTO REMAINS THE DEFAULT and must never produce a refusal.
-    func testAutoIsTheDefaultOnTheWizard() {
-        XCTAssertEqual(LatticeWizardModel().densityMode, .auto)
+    /// ★ §8(b) — THE FIELD-GRADED MODE REMAINS THE DEFAULT (renamed Auto ⇒ Sim)
+    /// and must never produce a refusal.
+    func testSimIsTheDefaultOnTheWizard() {
+        XCTAssertEqual(LatticeWizardModel().densityMode, .sim)
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -43,17 +49,17 @@ final class DensityModeAndSweptTests: XCTestCase {
     /// ★ §8(c) — SELECTING "PER REGION" IS WHAT MAKES PR 334's DRAWER ROW APPEAR.
     /// Two EXACT cases, never relaxed to "one or more" — PR 334's invariant, kept.
     func testPerRegionRevealsTheDensityRowAndNothingElseDoes() {
-        for mode in [LatticeDensityMode.auto, .uniform] {
+        for mode in [LatticeDensityMode.sim, .uniform] {
             let d = LatticeRegionDrawer.make(card: card(), depthMM: 6, held: false,
                                              perRegionDensity: mode == .perRegion)
-            XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth"],
+            XCTAssertEqual(d.modifiableRows.map(\.label), ["Depth", "Expand"],
                            "§8(d): \(mode.rawValue) leaves the drawer as PR 331 "
                          + "shipped it — exactly one control")
         }
         let perRegion = LatticeRegionDrawer.make(card: card(), depthMM: 6,
                                                  held: false,
                                                  perRegionDensity: true)
-        XCTAssertEqual(perRegion.modifiableRows.map(\.label), ["Depth", "Density"],
+        XCTAssertEqual(perRegion.modifiableRows.map(\.label), ["Depth", "Density", "Expand"],
                        "§8(c): per-region adds the Density control, and only it")
     }
 
@@ -127,7 +133,7 @@ final class DensityModeAndSweptTests: XCTestCase {
     func testTheSweptWindowReachesTheJobDocument() throws {
         var s = LatticeSettings()
         s.enabled = true
-        s.densityMode = .auto
+        s.densityMode = .sim
         s.cellSizeMode = .swept
         s.cellMinMM = 1.5
         s.cellMaxMM = 6.0
@@ -159,7 +165,7 @@ final class DensityModeAndSweptTests: XCTestCase {
     func testASweptWindowIsNotFlattenedByTheWrongFloor() throws {
         var s = LatticeSettings()
         s.enabled = true
-        s.densityMode = .auto
+        s.densityMode = .sim
         s.cellSizeMode = .swept
         s.cellMinMM = 2.0      // ★ his own window
         s.cellMaxMM = 4.0

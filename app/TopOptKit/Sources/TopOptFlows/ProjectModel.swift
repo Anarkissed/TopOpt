@@ -48,6 +48,12 @@ public final class ProjectModel: ObservableObject {
     /// value types: the workspace mutates them in place (via computed forwarders),
     /// which republishes and re-renders exactly as the old `@State` did.
     @Published public var selection = SelectionModel()
+    /// ★ HIDE / LOCK, PER GROUP (maintainer, 2026-08-18) — an ATTRIBUTE over the
+    /// one `SelectionModel`, never a second group store. The groups themselves
+    /// stay in `selection`; an entry whose group is gone is inert, and
+    /// `removeGroup` calls `forget` so it cannot outlive its group.
+    /// See `GroupViewState` for why hiding is session-scoped and locking is not.
+    @Published public var groupView = GroupViewState()
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
 
@@ -689,6 +695,171 @@ public final class ProjectModel: ObservableObject {
                                  perSelectable: lattice.selectableDepthMM,
                                  perGroup: lattice.groupDepthMM,
                                  fallbackMM: lattice.paintDepthMM)
+    }
+
+    /// ★ THE DENSITY IN FORCE FOR ONE SELECTABLE (maintainer, 2026-08-17: "There
+    /// is no *actual* way to modify the density value when the lattice density
+    /// setting is set to per-region").
+    ///
+    /// The same precedence shape the role and the depth use: the selectable's own
+    /// stated number, else its group's, else the MODE's answer (Uniform states
+    /// one; Auto and Per-region-with-nothing-stated state none and core derives).
+    /// nil ⇒ AUTO ⇒ no `relative_density` key on the wire.
+    public func latticeSelectableDensity(_ ref: LatticeSelectableRef,
+                                         in group: UUID) -> Double? {
+        if let d = lattice.selectableDensity[ref.key], d.isFinite, d > 0 { return d }
+        return latticeDeclaredDensity(group)
+    }
+
+    /// Write one selectable's density. `nil` (or a non-positive value) CLEARS it
+    /// back to the group's/mode's answer — "no number stated" must be spellable,
+    /// because core's own sentinel for "derive it" is exactly the absence of a key.
+    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?) {
+        guard let f = fraction, f.isFinite, f > 0 else {
+            lattice.selectableDensity.removeValue(forKey: ref.key)
+            return
+        }
+        let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
+        // Clamped into core's certifiable band — there is no certificate outside
+        // it, and a value core would refuse must not be storable from a keypad.
+        lattice.selectableDensity[ref.key] =
+            Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+    }
+
+    /// ★ THE IN-PLANE EXPAND IN FORCE FOR ONE SELECTABLE (maintainer,
+    /// 2026-08-17). 0 ⇒ the slab is exactly the face it came from.
+    public func latticeExpandMM(_ ref: LatticeSelectableRef) -> Double {
+        LatticeSlabExpand.clamp(lattice.selectableExpandMM[ref.key] ?? 0)
+    }
+
+    /// Write one selectable's in-plane expand, clamped. ZERO CLEARS it —
+    /// "exactly the face" must be spellable, and it is the default every older
+    /// project has.
+    ///
+    /// ★ AND IT MAY BE NEGATIVE (maintainer, 2026-08-17: "Can we make the
+    /// expansion *also* take a negative value? I'd like to see us also be able
+    /// to make it smaller in the x/y axis as well"). So the clear test is `== 0`
+    /// and not `<= 0` — the old spelling would have silently discarded every
+    /// shrink and left the drawer reading 0.0 mm after a leftward drag.
+    ///
+    /// ★ AND IT SNAPS TO ZERO (maintainer, 2026-08-17: "Please make a magnetic
+    /// detent at 0 for the expansion so it is easier to 'feel' when it hits the
+    /// floor"). The magnet lives HERE, on the one setter, rather than in each
+    /// gesture — so the 3D knob, the drawer scrub and the keypad cannot develop
+    /// three different feels, which is the defect the depth control already had
+    /// once.
+    public func writeLatticeExpandMM(_ ref: LatticeSelectableRef, mm: Double) {
+        let v = LatticeSlabExpand.snapped(mm)
+        if v == 0 { lattice.selectableExpandMM.removeValue(forKey: ref.key) }
+        else { lattice.selectableExpandMM[ref.key] = v }
+    }
+
+    /// ★ WHAT THE FACE CARDS MUST BE DERIVED FROM (task
+    /// 2026-08-17-lattice-stage-repair §2). One entry per thing the lattice panel
+    /// shows a drawer for: the group itself, and every selectable inside it that
+    /// carries a lattice role — each paired with the B-rep face its slab is built
+    /// on and ★ THE DEPTH IN FORCE FOR IT, resolved through the same
+    /// `latticeSlabDepthMM` the 3D handle and the protection spec go through.
+    ///
+    /// ★ THE DEFECT THIS FUNCTION EXISTS TO REMOVE. `refreshLatticeFaceCards`
+    /// previously previewed ONE face per group at the GROUP's depth, and the
+    /// drawer beneath a face or region row was then handed that group card while
+    /// being labelled with the selectable's own number. So the card's cell,
+    /// cells-across, strut and mass were all arithmetic at a depth the row was
+    /// not showing — and dragging one face's handle moved the label and nothing
+    /// else. Deriving from THIS list makes the two the same number by
+    /// construction.
+    ///
+    /// A selectable with no B-rep face behind it (a hand-placed primitive, or a
+    /// region whose members have gone) contributes nothing rather than a card
+    /// about a face it does not own.
+    public func latticeCardInputs()
+        -> [(key: String, faceID: Int, depthMM: Double, declaredDensity: Double?)] {
+        var out: [(key: String, faceID: Int, depthMM: Double,
+                   declaredDensity: Double?)] = []
+        for g in selection.groups where lattice.groupRoles[g.id] != nil {
+            // ★ NO GROUP CARD (maintainer, 2026-08-17). There used to be one more
+            // entry here, keyed by the group's UUID and built from
+            // `g.faces.first` at the GROUP's depth — one arbitrary face standing
+            // for the whole group. It fed a drawer of cell/density/strut/
+            // cells-across numbers for a slab NO PRIMITIVE OWNS and no handle can
+            // drag, which is why he could never bring it into regime. It is not
+            // computed at all now: the group's badge and its grams total are
+            // aggregated from the SELECTABLE cards below, so there is no
+            // fabricated card left for anything to read.
+            for ref in latticeSelectableRefs(g) {
+                guard let f = latticeCardFace(ref, in: g) else { continue }
+                // ★ EACH SELECTABLE'S OWN DENSITY, not the group's — the card
+                // must be derived at the number that selectable's drawer shows
+                // and its region emits (maintainer, 2026-08-17).
+                out.append((ref.key, Int(runFaceID(f)),
+                            latticeSlabDepthMM(ref, in: g.id),
+                            latticeSelectableDensity(ref, in: g.id)))
+            }
+        }
+        return out
+    }
+
+    /// ★ THE DENSITY THIS GROUP'S CARD MUST BE DERIVED AT, or nil for AUTO
+    /// (task 2026-08-17-lattice-stage-repair §1d).
+    ///
+    /// ★ THE DEFECT THIS REMOVES. `refreshLatticeFaceCards` never passed
+    /// `declaredDensity` at all — the parameter existed on
+    /// `LatticeFaceCardDerivation.card` and no shipping call site used it. So a
+    /// user who set Uniform and typed a number, or dialled ONE sector on the
+    /// lattice page, still read the same figure Auto showed. That is what made
+    /// "the density is stuck at 5%" true in EVERY mode and narrowed the break to
+    /// the app: PR 336 had already proved the per-region override reaches core's
+    /// grading law (0.25 and 0.60 on two sectors at one depth, measured).
+    ///
+    /// The precedence is the SAME one the emitted job uses: a per-group stated
+    /// density wins (`LatticeRegionEmission.density(for:role:densities:)` puts it
+    /// on the wire as `relative_density`); otherwise UNIFORM mode states the
+    /// single density the run generates at, which is the range's dense end
+    /// (`LatticeBounds.generateRelativeDensity`, the shipped generator's own
+    /// rule); otherwise AUTO, where nil means "core derives it".
+    public func latticeDeclaredDensity(_ group: UUID) -> Double? {
+        // A stated per-group density wins in EVERY mode — it is the number the
+        // job carries as `relative_density`.
+        if let stated = lattice.groupDensities[group] { return stated }
+        switch lattice.densityMode {
+        case .uniform:
+            // The single density the run generates at — the range's dense end,
+            // the shipped generator's own rule.
+            return LatticeBounds.compute(
+                settings: lattice,
+                limits: TopOptKit.latticeLimits(topology: lattice.topologyID),
+                lineWidthMM: printParams.strutLineWidthMM).generateRelativeDensity
+        case .sim:
+            return nil                       // core derives
+        case .perRegion:
+            // ★ PER REGION WITH NOTHING STATED FOR THIS ONE IS STILL AUTO, and
+            // that is the honest reading: the mode says "I will state it myself",
+            // not "assume a number for me". A region the user has not dialled
+            // shows what core WILL derive, exactly as the sector-density rows on
+            // the lattice page do, and the emitted job carries no key for it.
+            return nil
+        }
+    }
+
+    /// The B-rep face one selectable's slab preview is built on, or nil.
+    ///
+    /// A REGION is a set of faces (PR 331), and the preview walks ONE face — the
+    /// region's first member, which is the face its frame is built from. That
+    /// over-states a sector's held material exactly as the group card did before
+    /// this task, so the mass rows are no worse; the four numbers this task is
+    /// about (depth, cell, density, cells across) do not read the voxel count at
+    /// all, so they are exact.
+    func latticeCardFace(_ ref: LatticeSelectableRef, in g: SelectionGroup) -> FaceID? {
+        switch ref {
+        case let .face(_, f): return f
+        case .primitive: return nil            // no B-rep face to preview
+        case let .region(_, rid):
+            guard let mesh = viewerMesh, let region = faceRegions.region(rid) else {
+                return nil
+            }
+            return FaceRegionGeometry.members(of: region, in: mesh).first
+        }
     }
 
     /// The role in force for ONE selectable (§3c) — its own override, else its
@@ -1750,8 +1921,14 @@ public final class ProjectModel: ObservableObject {
                               group: UUID, key: Int, role: LatticeGroupRole,
                               depthMM: Double,
                               in mesh: ViewerMesh) -> LatticeDepthPlane? {
+        // ★ THE PRIMITIVE IS DRAWN AT THE EXPANDED SIZE (maintainer, 2026-08-17:
+        // "Please make the primitive expand and contract along with the handle").
+        // The SAME number `LatticeRegionEmission` grows the emitted slab by, read
+        // through the SAME accessor — so the shape on screen and the region in
+        // the job cannot drift apart.
         guard let shell = FaceOffsetShell.build(faces: faces, in: mesh,
-                                                depthMM: depthMM)
+                                                depthMM: depthMM,
+                                                expandMM: latticeExpandMM(ref))
         else { return nil }
         let volume = ClearanceVolume.shell(faceID: key, shell: shell)
         guard let h = ClearanceHandles.handles(for: volume, boreRadiusMM: 0,
@@ -1948,6 +2125,12 @@ public final class ProjectModel: ObservableObject {
             selectableRoles: lattice.selectableRoles,
             selectableDepthMM: lattice.selectableDepthMM,
             groupDensities: lattice.groupDensities,
+            // ★ THE PER-REGION DENSITY AND THE IN-PLANE EXPAND REACH THE JOB
+            // (maintainer, 2026-08-17). A control whose value no run consumes is
+            // the decorative-primitive defect — these two lines are what stop it,
+            // and `LatticeSlabExpandTests` caught this one missing.
+            selectableDensity: lattice.selectableDensity,
+            selectableExpandMM: lattice.selectableExpandMM,
             resolve: resolvedLatticeFace)
     }
 
@@ -2007,6 +2190,8 @@ public final class ProjectModel: ObservableObject {
                     groupDepthMM: { [weak self] id in self?.latticeSlabDepthMM(id) ?? .nan },
                     runFaceID: { [weak self] f in Int(self?.resolvedRunFaceID(f) ?? f) },
                     groupDensities: self.lattice.groupDensities,
+                    selectableDensity: self.lattice.selectableDensity,
+                    selectableExpandMM: self.lattice.selectableExpandMM,
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,

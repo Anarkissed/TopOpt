@@ -31,17 +31,66 @@ import Foundation
 
 /// One line in the drawer.
 public struct LatticeDrawerRow: Equatable, Sendable {
+
+    /// ★ WHICH NUMBER THIS ROW EDITS — and therefore WHICH SETTER AND WHICH UNIT
+    /// (maintainer, 2026-08-17: "each time I tried, it instead filled the depth
+    /// value no matter which region I attempted to change").
+    ///
+    /// ★ THE BUG THIS TYPE MAKES UNREPRESENTABLE. `latticeDrawerBody` took ONE
+    /// `writeDepth` closure and gave it to EVERY modifiable row, with the unit
+    /// hardcoded to `"mm"`. The gesture had already been split off correctly (only
+    /// Depth got the drag) — but the KEYPAD had not, so tapping Density opened a
+    /// pad titled "DENSITY", labelled mm, that wrote the depth. A control that
+    /// silently edits a different number is the worst kind on this page, and the
+    /// file's own comment warned about exactly this class while the pad still did
+    /// it. A row now CARRIES its kind, and the view switches the setter and the
+    /// unit on it rather than assuming.
+    public enum Kind: String, Equatable, Sendable {
+        /// A derived fact — no gesture, no keypad, no control chrome.
+        case fact
+        /// The slab depth, in mm. Draggable AND typeable.
+        case depth
+        /// The relative density, as a PERCENT in the UI and a fraction in the
+        /// model. Typeable only, and only under the per-region mode.
+        case density
+        /// ★ THE IN-PLANE EXPAND, in mm (maintainer, 2026-08-17) — how far the
+        /// slab reaches PAST the face it came from, in x and y, never in depth.
+        case expand
+    }
+
     /// One or two words.
     public let label: String
     /// The value, already formatted.
     public let value: String
-    /// ★ §4b — TRUE only for the depth. Everything else is a FACT, not a control.
-    public let modifiable: Bool
+    /// ★ §4b — anything but `.fact` is a control. Everything else is a FACT.
+    public let kind: Kind
 
-    public init(label: String, value: String, modifiable: Bool = false) {
+    /// The unit the keypad shows for this row — and the unit is part of the
+    /// CORRECTNESS, not the styling: "DENSITY 35 mm" is how the wrong-setter bug
+    /// looked on screen.
+    public var unit: String {
+        switch kind {
+        case .depth, .expand: return "mm"
+        case .density: return "%"
+        case .fact: return ""
+        }
+    }
+
+    /// ★ §4b, unchanged in meaning: a row that is not modifiable is not given a
+    /// gesture. Kept as a derived property so every existing call site and test
+    /// reads the same thing it always did.
+    public var modifiable: Bool { kind != .fact }
+
+    public init(label: String, value: String, kind: Kind = .fact) {
         self.label = label
         self.value = value
-        self.modifiable = modifiable
+        self.kind = kind
+    }
+
+    /// Back-compatible spelling for the call sites that predate `Kind`.
+    public init(label: String, value: String, modifiable: Bool) {
+        self.init(label: label, value: value,
+                  kind: modifiable ? .depth : .fact)
     }
 }
 
@@ -108,7 +157,8 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
     public static func make(card: LatticeFaceCard?, depthMM: Double,
                             held: Bool,
                             latticeReachesTheRun: Bool = true,
-                            perRegionDensity: Bool = false) -> LatticeRegionDrawer {
+                            perRegionDensity: Bool = false,
+                            expandMM: Double = 0) -> LatticeRegionDrawer {
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
                 headline: Headline(text: "Frozen, not latticed", verdict: .outOfRegime),
@@ -143,8 +193,17 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             head = nil
         }
         let rows = [
-            LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", c.depthMM),
-                             modifiable: true),
+            // ★ THE DEPTH ROW PRINTS THE DEPTH IT WAS HANDED, NOT THE CARD'S
+            // (task 2026-08-17-lattice-stage-repair §2). `depthMM` is the value
+            // `ProjectModel.latticeSlabDepthMM(ref:in:)` resolves for the thing
+            // this drawer is about — the SAME number the 3D handle drags and the
+            // row chip shows. The card carries a depth too, and until this task
+            // the row printed THAT one: the cards were derived per GROUP, so a
+            // face or region dragged to its own depth kept showing its group's.
+            // One value, one source; the card's copy is checked against it by
+            // `depthDivergence` rather than trusted.
+            LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", depthMM),
+                             kind: .depth),
             LatticeDrawerRow(label: "Hands over", value: c.heldText),
             // ★ WHAT IT WILL WEIGH, AND THE DIFFERENCE (task 2026-08-13-lattice-
             // as-a-material §7b). "Hands over" alone is half a sentence: the
@@ -154,20 +213,51 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             LatticeDrawerRow(label: "Saved", value: c.savedText),
             LatticeDrawerRow(label: "Cell", value: c.cellText),
             // ★ A FACT in every mode but one. Under per-region the user states
-            // this number, so there it is the second control — and ONLY there.
+            // this number, so there it is the second control — and ONLY there
+            // (maintainer, 2026-08-17: "ensure this can be editable — only when
+            // the per-region setting has been selected"). `.density` carries its
+            // own setter and its own unit; before this task it inherited the
+            // DEPTH's, which is why typing here wrote millimetres of depth.
             LatticeDrawerRow(label: "Density", value: c.densityText,
-                             modifiable: perRegionDensity),
+                             kind: perRegionDensity ? .density : .fact),
             LatticeDrawerRow(label: "Strut", value: c.strutText),
             LatticeDrawerRow(label: "Cells across", value: c.cellsText),
+            // ★ HOW FAR THIS SLAB REACHES PAST ITS FACE (maintainer,
+            // 2026-08-17). A second CONTROL, in mm like the depth, and the only
+            // other one — it grows x and y, never the depth. 0 mm is "exactly the
+            // face", which is what every project had before it existed.
+            LatticeDrawerRow(label: "Expand",
+                             value: String(format: "%.1f mm", expandMM),
+                             kind: .expand),
         ]
         return LatticeRegionDrawer(headline: head, collapsedValue: c.heldText,
                                    verdict: c.verdict, rows: rows, held: held)
     }
 
+    /// ★ THE "THEY CANNOT DIVERGE" CHECK, AS A FUNCTION RATHER THAN A COMMENT
+    /// (task 2026-08-17-lattice-stage-repair §2 / bar R3) — the same shape
+    /// `LatticeSlabDepth.mismatches` already uses for the protection/region pair.
+    ///
+    /// A card is DERIVED at some depth: its cell, its cells-across, its strut and
+    /// its mass are all functions of that depth. The drawer is LABELLED with the
+    /// depth in force for the thing it is about. If those two are not the same
+    /// number the drawer is showing arithmetic from one depth under a label from
+    /// another — which is exactly what it did before this task, and what made a
+    /// dragged handle look like it had done nothing.
+    ///
+    /// Returns nil when they agree. Non-nil is a programming error at the CALL
+    /// SITE, never something a user can cause, so it is asserted in tests rather
+    /// than rendered.
+    public static func depthDivergence(card: LatticeFaceCard?, depthMM: Double)
+        -> (cardMM: Double, shownMM: Double)? {
+        guard let c = card else { return nil }
+        return abs(c.depthMM - depthMM) > 1e-9 ? (c.depthMM, depthMM) : nil
+    }
+
     /// ★ §4b, as a property rather than a convention. TWO EXACT CASES, never
     /// relaxed to "one or more" — the invariant's job is to stop a readout being
     /// mistaken for a control, and a loose bound does not do that job:
-    ///   * not per-region → EXACTLY ["Depth"]
-    ///   * per-region     → EXACTLY ["Depth", "Density"]
+    ///   * not per-region → EXACTLY ["Depth", "Expand"]
+    ///   * per-region     → EXACTLY ["Depth", "Density", "Expand"]
     public var modifiableRows: [LatticeDrawerRow] { rows.filter(\.modifiable) }
 }

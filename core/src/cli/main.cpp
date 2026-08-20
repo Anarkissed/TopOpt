@@ -269,9 +269,19 @@ int run_lattice_variant(int argc, char** argv,
     const topopt::LatticeVariantJobResult r = topopt::lattice_variant_job(
         job, dirname_of(job_path), out_dir, materials, rules);
 
-    std::printf(
-        "lattice-variant: rung vf=%.4g (index %d of %s) — NO ladder ran\n",
-        r.requested_volume_fraction, r.variant_index, job.variant.design.c_str());
+    // ★ TWO MODES THROUGH ONE ENTRY POINT (task
+    // 2026-08-17-lattice-stage-repair). `lattice_part` names no design and no
+    // rung, so it must not print `job.variant.design` — which is empty there.
+    if (job.mode == "lattice_part")
+      std::printf(
+          "lattice-part: the imported part, solid vf=%.4g — NO ladder ran, "
+          "NO optimization\n",
+          r.requested_volume_fraction);
+    else
+      std::printf(
+          "lattice-variant: rung vf=%.4g (index %d of %s) — NO ladder ran\n",
+          r.requested_volume_fraction, r.variant_index,
+          job.variant.design.c_str());
     std::printf("  design: fingerprint %llu, %d optimizer iterations originally\n",
                 static_cast<unsigned long long>(r.design_fingerprint),
                 r.optimizer_iterations);
