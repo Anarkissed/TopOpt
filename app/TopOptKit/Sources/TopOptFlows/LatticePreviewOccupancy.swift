@@ -21,6 +21,7 @@
 // arrays to 3D textures.
 
 import Foundation
+import Dispatch
 import simd
 
 /// A dense scalar field on a regular grid over an axis-aligned box. `values` is
@@ -224,23 +225,45 @@ public enum LatticePreviewOccupancy {
         var dist2 = [Float](repeating: .greatestFiniteMagnitude, count: occ.count)
         let triCount = indices.count / 3
         let padF = SIMD3<Float>(repeating: Float(bandVoxels)) * (SIMD3<Float>(repeating: minSp) / occ.spacing)
-        for t in 0..<triCount {
-            let a = pos(indices[t * 3]), b = pos(indices[t * 3 + 1]), c = pos(indices[t * 3 + 2])
-            let lo = (simd_min(a, simd_min(b, c)) - occ.origin) / occ.spacing - padF
-            let hi = (simd_max(a, simd_max(b, c)) - occ.origin) / occ.spacing + padF
-            let i0 = Swift.max(0, Int(lo.x.rounded(.down))), i1 = Swift.min(occ.nx - 1, Int(hi.x.rounded(.up)))
-            let j0 = Swift.max(0, Int(lo.y.rounded(.down))), j1 = Swift.min(occ.ny - 1, Int(hi.y.rounded(.up)))
-            let k0 = Swift.max(0, Int(lo.z.rounded(.down))), k1 = Swift.min(occ.nz - 1, Int(hi.z.rounded(.up)))
-            guard i0 <= i1, j0 <= j1, k0 <= k1 else { continue }
-            for k in k0...k1 {
-                let pz = occ.origin.z + Float(k) * occ.spacing.z
-                for j in j0...j1 {
-                    let py = occ.origin.y + Float(j) * occ.spacing.y
-                    let rowBase = (k * occ.ny + j) * occ.nx
-                    for i in i0...i1 {
-                        let p = SIMD3<Float>(occ.origin.x + Float(i) * occ.spacing.x, py, pz)
-                        let d2 = Self.pointTriangleDistSq(p, a, b, c)
-                        if d2 < dist2[rowBase + i] { dist2[rowBase + i] = d2 }
+        // ★★ PARALLEL BY Z-SLAB (maintainer, 2026-08-20: "I'm counting about 10
+        // seconds for the lattice to turn on. Is there any way to shorten that
+        // time?"). Measured on this fixture, the base scene bake was 2.74s of a 3.38s
+        // total — this scatter is the bulk of it, and it is the same exact
+        // point-to-triangle work either way.
+        //
+        // ★ WHY SLABS AND NOT TRIANGLES. The loop MIN-COMBINES into shared voxels, so
+        // splitting the triangles would race on `dist2`. Splitting the VOXELS by k
+        // gives every worker a disjoint write range — no locks, no atomics, identical
+        // output — at the cost of each worker AABB-rejecting the triangles that miss
+        // its slab, which is a handful of compares against work measured in voxels.
+        let slabCount = Swift.max(1, Swift.min(occ.nz,
+                                               ProcessInfo.processInfo.activeProcessorCount))
+        dist2.withUnsafeMutableBufferPointer { buf in
+            DispatchQueue.concurrentPerform(iterations: slabCount) { slab in
+                let kStart = occ.nz * slab / slabCount
+                let kEnd = occ.nz * (slab + 1) / slabCount        // exclusive
+                guard kStart < kEnd else { return }
+                for t in 0..<triCount {
+                    let a = pos(indices[t * 3]), b = pos(indices[t * 3 + 1]), c = pos(indices[t * 3 + 2])
+                    let lo = (simd_min(a, simd_min(b, c)) - occ.origin) / occ.spacing - padF
+                    let hi = (simd_max(a, simd_max(b, c)) - occ.origin) / occ.spacing + padF
+                    let k0 = Swift.max(kStart, Int(lo.z.rounded(.down)))
+                    let k1 = Swift.min(kEnd - 1, Int(hi.z.rounded(.up)))
+                    guard k0 <= k1 else { continue }
+                    let i0 = Swift.max(0, Int(lo.x.rounded(.down))), i1 = Swift.min(occ.nx - 1, Int(hi.x.rounded(.up)))
+                    let j0 = Swift.max(0, Int(lo.y.rounded(.down))), j1 = Swift.min(occ.ny - 1, Int(hi.y.rounded(.up)))
+                    guard i0 <= i1, j0 <= j1 else { continue }
+                    for k in k0...k1 {
+                        let pz = occ.origin.z + Float(k) * occ.spacing.z
+                        for j in j0...j1 {
+                            let py = occ.origin.y + Float(j) * occ.spacing.y
+                            let rowBase = (k * occ.ny + j) * occ.nx
+                            for i in i0...i1 {
+                                let p = SIMD3<Float>(occ.origin.x + Float(i) * occ.spacing.x, py, pz)
+                                let d2 = Self.pointTriangleDistSq(p, a, b, c)
+                                if d2 < buf[rowBase + i] { buf[rowBase + i] = d2 }
+                            }
+                        }
                     }
                 }
             }
