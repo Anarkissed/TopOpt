@@ -86,16 +86,46 @@ final class LatticeThicknessAndFloorTests: XCTestCase {
 
     // MARK: - B3 · the density floor follows the printer
 
-    /// ★ THE NUMBERS, ON HIS OWN SETTINGS. His guess of ~0.5 for a 0.42 mm line at
-    /// a 2.20 mm cell lands at 43.7%; the one correction is that the law is
-    /// QUADRATIC in the width, so a 0.2 mm nozzle gives 9.9%, not the ~0.25 a
-    /// linear scaling suggests.
+    /// ★ THE NUMBERS, ON HIS OWN SETTINGS.
+    ///
+    /// ★★ RE-MEASURED AGAINST CORE (2026-08-20), and the number MOVED A LOT. This
+    /// floor is `relativeDensity(strutRadiusMM:)` at one bead, and that inverse now
+    /// goes through core's measured octet diameter instead of the app's closed form
+    /// `ρ = K·(r/L)²`. Core lays a FATTER strut at a given density, so the density
+    /// needed to reach one bead is correspondingly LOWER:
+    ///
+    ///     0.42 mm line · 2.20 mm cell ....  43.7%  ->  20.2%
+    ///     0.20 mm line · 2.20 mm cell ....   9.9%  ->   5.0%
+    ///
+    /// The old figures were the app's own law and are the same 1.4x-in-radius
+    /// divergence, squared. His guess of ~0.5 was close to the app's answer and is
+    /// nowhere near core's — which matters, because this floor is what the run
+    /// actually enforces.
+    ///
+    /// ★ AND THE EXPONENT IS NO LONGER EXACTLY 2, which is worth saying plainly
+    /// rather than hiding in a tolerance. The closed form was quadratic BY
+    /// CONSTRUCTION; core's is a measured table and owes nobody an exponent. Fitted
+    /// across this pair, 0.2021 / 0.0501 = 4.03 over a 2.1x width ratio, so
+    ///
+    ///     floor  ∝  w^1.88        (quadratic would be 4.41, linear 2.10)
+    ///
+    /// The advice to give him is unchanged and is the point of the test: a 0.2 mm
+    /// nozzle does NOT halve the floor, it quarters it. What changed is that "the
+    /// law is quadratic" was a property of the app's own arithmetic, not of the
+    /// lattice.
     func testTheFloorFollowsTheLineWidthQuadratically() {
         let o = LatticeType.octet
-        XCTAssertEqual(o.printabilityDensityFloor(lineWidthMM: 0.42, cellMM: 2.20),
-                       0.4374, accuracy: 0.001, "★ his settings")
-        XCTAssertEqual(o.printabilityDensityFloor(lineWidthMM: 0.20, cellMM: 2.20),
-                       0.0992, accuracy: 0.001, "★ a 0.2 mm nozzle — quadratic, not linear")
+        let his = o.printabilityDensityFloor(lineWidthMM: 0.42, cellMM: 2.20)
+        let fine = o.printabilityDensityFloor(lineWidthMM: 0.20, cellMM: 2.20)
+        XCTAssertEqual(his, 0.2021, accuracy: 0.001, "★ his settings, core's law")
+        XCTAssertEqual(fine, 0.0501, accuracy: 0.001, "★ a 0.2 mm nozzle")
+        let exponent = log(his / fine) / log(0.42 / 0.20)
+        XCTAssertEqual(exponent, 1.88, accuracy: 0.03,
+                       "★ core's floor goes as w^1.88 — near-quadratic, and measured "
+                       + "rather than assumed")
+        XCTAssertGreaterThan(his / fine, 3.0,
+                             "★ the correction his ~0.25 guess needed: a finer nozzle "
+                             + "does not scale the floor LINEARLY (that would be 2.1x)")
         // A coarser cell prints a much LOWER density — which is why an unloaded
         // wall wants a coarse cell.
         XCTAssertLessThan(o.printabilityDensityFloor(lineWidthMM: 0.42, cellMM: 8.0),
@@ -114,7 +144,8 @@ final class LatticeThicknessAndFloorTests: XCTestCase {
         let fine = LatticeBounds.compute(settings: s, limits: limits, lineWidthMM: 0.42)
         XCTAssertGreaterThan(fine.densityLo, coarse.densityLo,
                              "★ stating a line width must RAISE the floor")
-        XCTAssertEqual(fine.densityLo, 0.4374, accuracy: 0.001)
+        // Core's floor, not the app's old 0.4374 — see the note above.
+        XCTAssertEqual(fine.densityLo, 0.2021, accuracy: 0.001)
         XCTAssertNotNil(fine.densityLoReason, "★ …and say why it moved")
         XCTAssertTrue(fine.densityLoReason?.contains("extrusion") == true,
                       "the reason must name the printer, not the certification: "

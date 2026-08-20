@@ -1098,6 +1098,66 @@ struct LatticeLimits {
 // with a zero band (the UI greys that topology and says why). Never throws.
 LatticeLimits lattice_limits(const std::string& topology);
 
+// ★★ THE STRUT DIAMETER, FROM CORE'S MEASURED LAW (task 2026-08-20).
+//
+// The app had its own closed form — `r = cell * sqrt(rho / K)`, K = 48 — while core
+// interpolates `kOctetDia`, a table MEASURED at vpc48 (see
+// evidence/2026-07-28-graded-cell-size-phase0/b3_printability.csv). They are not the
+// same function, and the gap is not a constant:
+//
+//     rho    core d(4mm)   app d(4mm)   app/core
+//     0.05     0.3632        0.2582       0.71
+//     0.20     0.7592        0.5164       0.68
+//     0.60     1.5343        0.8944       0.58
+//
+// So the preview drew every strut 1.4-1.7x thinner than the run builds, and quoted
+// those thin numbers in millimetres. This forwards the real law.
+//
+// Returns 0 for a topology core carries no diameter law for (only octet today), for
+// a non-positive cell, or for a non-finite / negative rho — the caller then says it
+// has no core number rather than substituting one.
+/// Core's dyadic cell-size plan (`plan_cell_sizes`, Swept), flattened.
+/// Header then payload: [ok, nx, ny, nz, ox, oy, oz, base_cell_mm, max_level,
+/// level per base cell (x fastest, -1 = not latticed)]. Empty ⇒ core refused.
+/// The base-cell grid it reports is the ONLY grid the levels are aligned to.
+std::vector<double> lattice_cell_size_plan(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* rho, std::size_t rho_count,
+    const double* width, std::size_t width_count,
+    double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
+    int cap_radius_voxels, const std::string& topology);
+
+/// Core's sub-floor retention stress-fraction ceiling (see grading.hpp).
+double lattice_subfloor_retention_fraction();
+
+double lattice_strut_diameter_mm(const std::string& topology, double rho,
+                                 double cell_size_mm);
+
+// ★★ CORE'S LOCAL MEMBER THICKNESS, for the preview (task 2026-08-20).
+//
+// Core refuses to lattice a member too thin to hold `lattice_cells_per_member_min`
+// cells — it stays SOLID (grading.hpp bar L4). The preview had no notion of member
+// width at all, so it drew lattice on thin ribs the run leaves solid.
+//
+// Rather than re-implement the granulometric opening app-side (which is how the app
+// ended up with a second strut law), this forwards `topopt::local_member_thickness_mm`
+// over a grid built from the caller's own occupancy.
+//
+// `solid` is one byte per voxel, non-zero = solid, in x-fastest order matching
+// nx/ny/nz. Returns one thickness in mm per voxel; +inf means "thicker than the cap
+// measured", which callers must treat as clearing any ceiling. Returns EMPTY on a
+// size mismatch, a non-positive spacing or cap, or if core throws — the caller then
+// says it has no core answer rather than inventing one.
+//
+// NOTE the grid core takes is CUBIC (one `spacing`). The preview's occupancy is built
+// with dims proportional to the extents, so its per-axis spacings agree to rounding;
+// the Swift wrapper checks that before calling and refuses otherwise.
+std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double spacing,
+                                                const std::uint8_t* solid,
+                                                std::size_t solid_count,
+                                                int cap_radius_voxels);
+
 // The topology names the core certification library covers (can be RUN and
 // certified), in the core's own order — the seven cubic topologies today. The UI
 // reads this to know which picker entries are certifiable rather than assuming a

@@ -70,6 +70,19 @@ struct LSDFUniforms {
     /// the shader read `lightDir` as the overlay flags; `LatticeFinishRendersTests`
     /// is what caught it, by asserting pixels move.
     var rimColor: SIMD4<Float> = .zero        // boundary work: rim / diagrid / skin
+    /// ★★ CORE'S MEASURED STRUT LAW, SAMPLED — 32 normalised radii across the band,
+    /// as 8 float4s. MUST stay immediately after `rimColor` and in this order: the
+    /// MSL twin declares `float4 strutCurve[8]` in the same slot, and these match by
+    /// BYTE OFFSET. All zero means "no core law", and the shader falls back to the
+    /// analytic form.
+    var strutCurve0: SIMD4<Float> = .zero
+    var strutCurve1: SIMD4<Float> = .zero
+    var strutCurve2: SIMD4<Float> = .zero
+    var strutCurve3: SIMD4<Float> = .zero
+    var strutCurve4: SIMD4<Float> = .zero
+    var strutCurve5: SIMD4<Float> = .zero
+    var strutCurve6: SIMD4<Float> = .zero
+    var strutCurve7: SIMD4<Float> = .zero
     // ── UNIFIED PASS ONLY (task 2026-08-18-unified-shading). The clip and eye
     // transforms the BODY is drawn with, so a marched hit can be written into the
     // SHARED depth buffer and the SHARED G-buffer of `MeshRenderer`'s own passes.
@@ -90,6 +103,16 @@ public struct LatticeSDFScene {
     /// boundary trim (round 3). Exact near the surface, so flat faces render straight.
     public var partSDF: LatticeVoxelGrid
     public var demand: LatticeVoxelGrid?
+    /// True only when `demand` is an FEA field rather than a stated per-region
+    /// density inverted back into demand. Sub-floor retention requires it.
+    public var demandIsMeasuredStress: Bool = false
+    /// ★ CORE'S LOCAL MEMBER THICKNESS (mm) per occupancy voxel, and core's N*.
+    /// Empty / 0 when core had no answer, which disables the floor rather than
+    /// guessing at one. See `LatticeMemberFloorTests` for why the preview needs it:
+    /// the run leaves a member too thin to hold N* cells SOLID, and the preview used
+    /// to draw lattice there regardless.
+    public var memberThicknessMM: [Double] = []
+    public var minCellsPerMember: Double = 0
     public var bounds: MeshBounds
     /// The part mesh the scene was baked from (COW — shares storage with the viewer's
     /// copy). Kept so face-role tints can be re-baked onto the lattice whenever the
@@ -284,10 +307,19 @@ public struct LatticeSDFScene {
         // user's own number for that region; grading it by stress instead would
         // draw struts at a density they did not ask for and the run will not
         // build. With nothing stated this falls through to exactly what it was.
-        self.demand = LatticeRegionMask.densityDemand(
+        let statedDemand = LatticeRegionMask.densityDemand(
             like: occupancy, regions: regions,
             rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma)
+        self.demand = statedDemand
             ?? LatticePreviewOccupancy.demand(like: occupancy, field: field)
+        // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has
+        // TWO sources and they are not interchangeable: an FEA field, or a per-region
+        // density the user STATED, inverted back into demand so the shader draws the
+        // density they asked for. Sub-floor retention may only ever key on the first.
+        // Core's rule is that an unmeasured region is not an unloaded one, and a
+        // stated 17% is not a stress reading — arming retention off it would decide
+        // "this wall carries nothing" from a number that never described load at all.
+        self.demandIsMeasuredStress = statedDemand == nil && self.demand != nil
 
         // ★★ AFTER `demand` IS ASSIGNED, and that is the whole of a bug this very
         // nearly shipped. `demand` is a `var` with an implicit nil, so baking the
@@ -318,6 +350,19 @@ public struct LatticeSDFScene {
             self.stressRGB = rgb
         } else {
             self.stressRGB = nil
+        }
+        // ★★ CORE'S MEMBER FLOOR, MEASURED ONCE PER SCENE. `cap` is chosen from the
+        // question being asked rather than copied: the floor only needs to know
+        // whether a member is at least N* cells across, so a radius sweep past that
+        // is wasted — anything beyond reads core's +inf "thicker than measured"
+        // sentinel, which clears the floor anyway.
+        let lim = TopOptKit.latticeLimits(topology: latticeID)
+        self.minCellsPerMember = lim.certifiable ? lim.minCellsPerMember : 0
+        if self.minCellsPerMember > 0 {
+            let solid = occupancy.values.map { $0 > 0.5 }
+            self.memberThicknessMM = TopOptKit.latticeMemberThicknessMM(
+                nx: occupancy.nx, ny: occupancy.ny, nz: occupancy.nz,
+                spacing: occupancy.spacing, solid: solid, capRadiusVoxels: 16)
         }
         self.bounds = mesh.bounds
         self.mesh = mesh
@@ -395,6 +440,25 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         return (g.origin, g.spacing,
                 SIMD3(Float(g.nx), Float(g.ny), Float(g.nz)))
     }
+    /// ★ THE SWEPT WINDOW THE USER ASKED FOR, or nil for a Fixed/Auto job — one
+    /// cell everywhere. Set by the host from the project's own lattice settings, so
+    /// the preview grades exactly when the RUN would grade and never otherwise.
+    var cellSweep: LatticeCellSweep? {
+        didSet { if cellSweep != oldValue, scene != nil { rebakeCellField() } }
+    }
+    /// ★ SUB-FLOOR RETENTION, as the job carries it. Armed ⇒ the cells-per-member
+    /// floor stands down where the declared set MEASURES as unloaded, exactly as
+    /// `retain_subfloor_in_unloaded_regions` does in the run.
+    var subfloorRetention: LatticeSubfloorRetention? {
+        didSet { if subfloorRetention != oldValue, scene != nil { rebakeCellField() } }
+    }
+    /// Whether the last bake actually retained anything — so the UI can say "kept,
+    /// out of regime" rather than leaving the user to infer it from the picture.
+    private(set) var subfloorRetained = false
+
+    /// The last bake — kept so a caller can ask whether the cells on screen came
+    /// from core's plan or from the uniform fallback.
+    private(set) var cellField: LatticeCellField?
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
     /// The region field's texture, or a neutral 1×1×1 "everywhere inside" volume
@@ -534,11 +598,126 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// from `setScene` and from a cell-size param change — never from `draw`.
     private func rebakeCellField() {
         guard let scene else { return }
-        let grid = LatticePreviewOccupancy.cellField(
-            occupancy: scene.occupancy, demand: scene.demand, cellMM: params.cellMM)
-        cellGrid = grid
-        cellTex = makeVolumeTexture(grid)
+        // ★ DOES THE DECLARED SET QUALIFY FOR RETENTION? Core's own arithmetic, on
+        // core's own ceiling — and its guard that no demand field means no retention,
+        // because an unmeasured region is not an unloaded one.
+        let retains = subfloorQualifiesNow(scene)
+        subfloorRetained = retains
+        var baked: LatticeCellField?
+        if let sweep = cellSweep {
+            baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
+        }
+        if baked == nil {
+            // The uniform path — what a Fixed or Auto job actually builds. Retention
+            // drops the cells-per-member ceiling and NOTHING else; the printability
+            // floor and the density band are untouched, as in core.
+            let grid = LatticePreviewOccupancy.cellField(
+                occupancy: scene.occupancy, demand: scene.demand, cellMM: params.cellMM,
+                memberThickness: scene.memberThicknessMM,
+                minCellsPerMember: retains ? 0 : scene.minCellsPerMember)
+            baked = LatticePreviewOccupancy.uniformCellField(grid, cellMM: params.cellMM)
+        }
+        guard let field = baked else { return }
+        cellField = field
+        cellGrid = field.field
+        cellTex = makeCellTexture(field)
         bakeGeneration &+= 1
+    }
+
+    /// ★★ CORE'S PLAN, ASKED FOR AT THE PREVIEW'S OWN DENSITIES.
+    ///
+    /// The cell size a swept run picks depends on the DENSITY it grades to — a thin
+    /// strut has to be carried by a coarser cell to stay printable — so the plan is
+    /// asked with the rho the preview is about to render, voxel for voxel, not with
+    /// some other number. Ask it with anything else and the picture stops being the
+    /// plan's picture, which is the whole point of reading the plan.
+    ///
+    /// Returns nil when core has no plan (a non-cubic grid, no member widths, a
+    /// refused bound). The caller then draws the uniform cell — and `fromCorePlan`
+    /// says which happened, because a uniform picture is what BOTH look like.
+    /// Core's union reading: the candidate set's measured peak against the part's,
+    /// under core's ceiling. Disarmed, or with no demand field, the answer is no.
+    private func subfloorQualifiesNow(_ scene: LatticeSDFScene) -> Bool {
+        guard let r = subfloorRetention, r.armed,
+              // ★ MEASURED STRESS ONLY — a stated per-region density is not a load
+              // reading, and retention is a decision about load.
+              scene.demandIsMeasuredStress else { return false }
+        let ceiling = r.stressFractionMax
+            ?? TopOptKit.latticeSubfloorRetentionStressFraction()
+        let peaks = LatticePreviewOccupancy.subfloorPeaks(
+            demand: scene.demand, partSDF: scene.partSDF, occupancy: scene.occupancy)
+        return LatticePreviewOccupancy.subfloorQualifies(
+            regionPeak: peaks.region, partPeak: peaks.part, ceiling: ceiling)
+    }
+
+    private func gradedCellField(scene: LatticeSDFScene,
+                                 sweep: LatticeCellSweep,
+                                 retains: Bool) -> LatticeCellField? {
+        guard !scene.memberThicknessMM.isEmpty else { return nil }
+        let occ = scene.occupancy
+        let n = occ.count
+        guard scene.memberThicknessMM.count == n else { return nil }
+
+        let (lo, hi) = params.densitySpan
+        let gamma = max(0.05, params.gamma)
+        var candidate = [Bool](repeating: false, count: n)
+        var rho = [Double](repeating: 0, count: n)
+        let dem = scene.demand
+        for i in 0..<n where occ.values[i] > 0.5 {
+            candidate[i] = true
+            if let d = dem, d.count == n {
+                let t = Double(max(0, min(1, d.values[i])))
+                rho[i] = lo + (hi - lo) * pow(t, gamma)
+            } else {
+                rho[i] = params.uniformRelativeDensity
+            }
+        }
+
+        guard let plan = TopOptKit.latticeCellSizePlan(
+            nx: occ.nx, ny: occ.ny, nz: occ.nz, spacing: occ.spacing,
+            origin: occ.origin, candidate: candidate, relativeDensity: rho,
+            memberWidthMM: scene.memberThicknessMM,
+            minCellMM: sweep.minMM, maxCellMM: sweep.maxMM,
+            minExtrudableWidthMM: sweep.minExtrudableWidthMM,
+            capRadiusVoxels: 16, topology: params.latticeID) else { return nil }
+
+        let field = LatticePreviewOccupancy.gradedCellField(
+            occupancy: occ, demand: scene.demand, plan: plan)
+        guard retains else { return field }
+        return LatticePreviewOccupancy.retainSubfloorCells(
+            field, plan: plan, demand: scene.demand,
+            densityLo: lo, densityHi: hi, gamma: gamma,
+            minExtrudableWidthMM: sweep.minExtrudableWidthMM,
+            topology: params.latticeID)
+    }
+
+    /// The per-cell volume the march reads: R = the octree cell's demand (−1 where
+    /// the run leaves it solid), G = that cell's dyadic LEVEL. Two channels because
+    /// the shader has to know how big the cell it is standing in is, and a second
+    /// texture is a second grid that could disagree with the first.
+    private func makeCellTexture(_ f: LatticeCellField) -> MTLTexture? {
+        let grid = f.field
+        guard f.level.count == grid.values.count else { return nil }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rg16Float
+        d.width = grid.nx; d.height = grid.ny; d.depth = grid.nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        var halfs = [UInt16](repeating: 0, count: grid.values.count * 2)
+        for n in 0..<grid.values.count {
+            halfs[2 * n] = float32to16(grid.values[n])
+            halfs[2 * n + 1] = float32to16(f.level[n])
+        }
+        halfs.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, grid.nx, grid.ny, grid.nz),
+                        mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!,
+                        bytesPerRow: grid.nx * 4,
+                        bytesPerImage: grid.nx * grid.ny * 4)
+        }
+        return tex
     }
 
     private func makeVolumeTexture(_ grid: LatticeVoxelGrid) -> MTLTexture? {
@@ -651,7 +830,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let bmin = scene?.bounds.min ?? .zero
         let bmax = scene?.bounds.max ?? .zero
         // Cell origin = part min corner, so cells tile from a stable anchor.
-        let cell = Float(max(0.1, params.cellMM))
+        let cell = Float(max(0.1, cellField?.baseCellMM ?? params.cellMM))
+        let cellOrigin = cellGrid?.origin ?? bmin
         let (lo, hi) = params.densitySpan
         let K = Float(max(1e-3, params.lattice.densityCoefficient))
         let hasDemand: Float = scene?.demand != nil ? 1 : 0
@@ -663,6 +843,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // stress blue→red rainbow.
         let sparse = RGBA(158, 176, 236)
         let dense = RGBA(96, 52, 176)
+        let curve = strutCurveUniforms
         return LSDFUniforms(
             rayX: SIMD4(rayX, 0),
             rayY: SIMD4(rayY, 0),
@@ -672,11 +853,20 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             bboxMax: SIMD4(bmax, 0),
             gridOrigin: SIMD4(cellGrid?.origin ?? .zero, 0),
             gridSpacing: SIMD4(cellGrid?.spacing ?? SIMD3(repeating: 1), 0),
-            gridDims: SIMD4(Float(cellGrid?.nx ?? 1), Float(cellGrid?.ny ?? 1), Float(cellGrid?.nz ?? 1), 0),
+            // ★ w = 2^maxLevel — the COARSEST cell in the plan, in base cells. The
+            // march needs it before it knows which cell it is in, to pad the ray box
+            // by the widest a cell can reach.
+            gridDims: SIMD4(Float(cellGrid?.nx ?? 1), Float(cellGrid?.ny ?? 1),
+                            Float(cellGrid?.nz ?? 1),
+                            Float(1 << (cellField?.maxLevel ?? 0))),
             sdfOrigin: SIMD4(scene?.partSDF.origin ?? .zero, 0),
             sdfSpacing: SIMD4(scene?.partSDF.spacing ?? SIMD3(repeating: 1), 0),
             sdfDims: SIMD4(Float(scene?.partSDF.nx ?? 1), Float(scene?.partSDF.ny ?? 1), Float(scene?.partSDF.nz ?? 1), 0),
-            latticeOrigin: SIMD4(bmin.x, bmin.y, bmin.z, cell),
+            // ★ THE MARCH'S CELL ANCHOR IS THE CELL FIELD'S OWN GRID, not the part
+            // bbox. On the graded path the grid is CORE's base grid, and a half-cell
+            // disagreement between the lattice the shader builds and the texture it
+            // reads would shift every octree block — so both come from one place.
+            latticeOrigin: SIMD4(cellOrigin.x, cellOrigin.y, cellOrigin.z, cell),
             gradeParams: SIMD4(Float(lo), Float(hi), Float(max(0.05, params.gamma)), K),
             shadeParams: SIMD4(Float(params.uniformRelativeDensity), hasDemand, 0.03, 512),
             // stepParams.y = the trim's inward EROSION (mm). Near creases the trilinear
@@ -705,7 +895,44 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                  dressingLevel, 0, 0),
             rimColor: SIMD4(Float(LatticeStructureColour.rim.r),
                             Float(LatticeStructureColour.rim.g),
-                            Float(LatticeStructureColour.rim.b), 1))
+                            Float(LatticeStructureColour.rim.b), 1),
+            strutCurve0: curve.0, strutCurve1: curve.1,
+            strutCurve2: curve.2, strutCurve3: curve.3,
+            strutCurve4: curve.4, strutCurve5: curve.5,
+            strutCurve6: curve.6, strutCurve7: curve.7)
+    }
+
+    /// ★★ CORE'S STRUT LAW, SAMPLED ONCE PER BAND (task 2026-08-20). 32 normalised
+    /// radii — `octet_strut_diameter_mm(rho, 1) / 2` — across [rhoMin, rhoMax], for
+    /// the shader to interpolate. All-zero when core carries no law for the topology,
+    /// which the shader reads as "use the analytic form".
+    ///
+    /// ★ CACHED ON THE BAND AND THE TOPOLOGY, because it is 32 bridge calls and the
+    /// uniforms are rebuilt every frame. Nothing here may run per-frame: that mistake
+    /// (a full-field scan in a computed property) stalled this page once already.
+    private var strutCurveCache: (key: String, rows: [SIMD4<Float>])?
+
+    private var strutCurveUniforms: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
+                                     SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) {
+        let lo = params.densitySpan.lo, hi = params.densitySpan.hi
+        let key = "\(params.latticeID)|\(lo)|\(hi)"
+        let rows: [SIMD4<Float>]
+        if let c = strutCurveCache, c.key == key {
+            rows = c.rows
+        } else {
+            // Diameter at a UNIT cell, halved: the shader works in cell-normalised
+            // units and multiplies by the cell at the end.
+            let d = TopOptKit.latticeStrutDiameterCurve(topology: params.latticeID,
+                                                        lo: lo, hi: hi,
+                                                        cellMM: 1.0, count: 32)
+            var packed = [SIMD4<Float>](repeating: .zero, count: 8)
+            if d.count == 32 {
+                for i in 0..<32 { packed[i >> 2][i & 3] = Float(d[i] / 2) }
+            }
+            rows = packed
+            strutCurveCache = (key, packed)
+        }
+        return (rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7])
     }
 
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, cmd: MTLCommandBuffer) {
@@ -886,7 +1113,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, ro, rd);
         if (!h.hit) return float4(0.0);
         float3 hitPos = h.pos; float hitRho = h.rho;
-        float3 n = lsdf_normal(U, segs, sdfTex, regionTex, samp, RC, hitPos, hitRho);
+        float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, hitPos, hitRho);
 
         // ★ THE OLD, SEPARATE LIGHTING MODEL — and §1(d)'s whole point. A model-space
         // key at a different direction and a different strength from the body's, a

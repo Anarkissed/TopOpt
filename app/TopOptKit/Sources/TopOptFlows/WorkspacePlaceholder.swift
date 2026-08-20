@@ -924,7 +924,17 @@ public struct WorkspacePlaceholder: View {
                                                      // ★ D1 — the Finish setting's
                                                      // own dressing.
                                                      dressingLevel: project.lattice
-                                                        .boundary.previewDressingLevel)
+                                                        .boundary.previewDressingLevel,
+                                                     // ★ AND THE SWEPT CELL WINDOW —
+                                                     // the preview grades the CELL
+                                                     // exactly when the run does.
+                                                     cellSweep: latticePreviewCellSweep,
+                                                     // ★ …and the retention switch,
+                                                     // so the floor stands down in
+                                                     // the preview exactly where the
+                                                     // run stands it down.
+                                                     subfloorRetention:
+                                                        latticePreviewRetention)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -1504,6 +1514,41 @@ public struct WorkspacePlaceholder: View {
         return LatticeDensityProxy.tints(for: mesh, demand: field, params: params,
                                          selectionTints: roleTints,
                                          effectiveFaceIDs: project.effectivePaintFaceIDs())
+    }
+
+    /// ★★ THE SWEPT CELL WINDOW THE PREVIEW SHOULD GRADE OVER, or nil for one cell.
+    ///
+    /// ★ IT IS THE PROJECT'S OWN SETTING, NOT A PREVIEW OPTION. A Fixed or Auto job
+    /// builds ONE cell size for the whole part; only a swept job puts each region on
+    /// its own dyadic cell. Turning grading on in the preview regardless would make
+    /// the picture wrong for three of the four modes — the divergence this closes,
+    /// not a new one.
+    ///
+    /// ★ AND IT NEEDS THE BEAD. The cell a swept run picks is bounded BELOW by
+    /// printability — the finest cell whose thinnest strut still reaches one
+    /// extrusion width — so without the user's line width there is no floor and no
+    /// grading. `minExtrudableWidthMM` is that number; absent, there is nothing
+    /// honest to grade against and the preview stays uniform.
+    private var latticePreviewCellSweep: LatticeCellSweep? {
+        let lat = project.lattice
+        guard lat.cellSizeMode == .swept, lat.cellMinMM > 0,
+              lat.cellMaxMM >= lat.cellMinMM,
+              project.printParams.strutLineWidthMM > 0 else { return nil }
+        let bead = project.printParams.strutLineWidthMM
+        return LatticeCellSweep(minMM: lat.cellMinMM, maxMM: lat.cellMaxMM,
+                                minExtrudableWidthMM: bead)
+    }
+
+    /// ★★ SUB-FLOOR RETENTION, STRAIGHT OFF THE PROJECT. Nil when the user has not
+    /// armed it, which is the default and is the shipped behaviour: the floor applies
+    /// everywhere. The ceiling is passed on only when the user MOVED it — otherwise
+    /// the bake reads core's own constant, so the app never becomes the author of a
+    /// number it merely echoed.
+    private var latticePreviewRetention: LatticeSubfloorRetention? {
+        let lat = project.lattice
+        guard lat.retainSubfloorInUnloadedRegions else { return nil }
+        return LatticeSubfloorRetention(armed: true,
+                                        stressFractionMax: lat.subfloorStressFraction)
     }
 
     /// The certifiable limits for the current topology, READ FROM CORE at runtime (the

@@ -3477,6 +3477,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         set { latticeLayer?.params = newValue }
     }
 
+    /// The swept cell window — nil for a Fixed/Auto job, which is ONE cell size.
+    /// Assigning rebakes the per-cell field once inside the layer, exactly as a cell
+    /// size change does; it is never touched per frame.
+    var latticeCellSweep: LatticeCellSweep? {
+        get { latticeLayer?.cellSweep }
+        set { latticeLayer?.cellSweep = newValue }
+    }
+
+    /// Sub-floor retention, as the job carries it. Assigning rebakes once.
+    var latticeSubfloorRetention: LatticeSubfloorRetention? {
+        get { latticeLayer?.subfloorRetention }
+        set { latticeLayer?.subfloorRetention = newValue }
+    }
+
     /// Face-role tints on the lattice (the preview's bar A4), baked from the SAME
     /// dictionary the body is tinted with. Re-baked only when the selection changes.
     func setLatticeFaceTints(_ tints: [FaceID: SIMD4<Float>]) {
@@ -4742,16 +4756,27 @@ public struct LatticeLayerInputs: Equatable {
     public var stressOverlay: Bool = false
     /// 0 none · 1 rim · 2 diagrid — see `LatticeBoundaryTreatment.previewDressingLevel`.
     public var dressingLevel: Float = 0
+    /// ★ THE SWEPT CELL WINDOW, or nil for one cell everywhere. Set only when the
+    /// project's own cell mode is swept, so the preview grades the cell size exactly
+    /// when the RUN would — see `LatticePreviewOccupancy.gradedCellField`.
+    public var cellSweep: LatticeCellSweep?
+    /// ★ Sub-floor retention as the JOB carries it — armed ⇒ the cells-per-member
+    /// floor stands down where the declared set measures as unloaded.
+    public var subfloorRetention: LatticeSubfloorRetention?
 
     public init(scene: LatticeSDFScene, params: LatticeProxyParams,
                 sceneToken: Int, faceTints: [FaceID: SIMD4<Float>],
-                stressOverlay: Bool = false, dressingLevel: Float = 0) {
+                stressOverlay: Bool = false, dressingLevel: Float = 0,
+                cellSweep: LatticeCellSweep? = nil,
+                subfloorRetention: LatticeSubfloorRetention? = nil) {
         self.scene = scene
         self.params = params
         self.sceneToken = sceneToken
         self.faceTints = faceTints
         self.stressOverlay = stressOverlay
         self.dressingLevel = dressingLevel
+        self.cellSweep = cellSweep
+        self.subfloorRetention = subfloorRetention
     }
 
     /// Equality is by TOKEN and by the cheap interactive values — never by the scene's
@@ -4760,6 +4785,9 @@ public struct LatticeLayerInputs: Equatable {
     /// token exists precisely to answer "is this the same bake".
     public static func == (a: LatticeLayerInputs, b: LatticeLayerInputs) -> Bool {
         a.sceneToken == b.sceneToken && a.params == b.params && a.faceTints == b.faceTints
+            && a.cellSweep == b.cellSweep && a.stressOverlay == b.stressOverlay
+            && a.subfloorRetention == b.subfloorRetention
+            && a.dressingLevel == b.dressingLevel
     }
 }
 
@@ -5586,6 +5614,14 @@ extension MetalMeshView {
                 }
                 if renderer.latticeParams != lat.params {
                     renderer.latticeParams = lat.params
+                    dirty = true
+                }
+                if renderer.latticeCellSweep != lat.cellSweep {
+                    renderer.latticeCellSweep = lat.cellSweep
+                    dirty = true
+                }
+                if renderer.latticeSubfloorRetention != lat.subfloorRetention {
+                    renderer.latticeSubfloorRetention = lat.subfloorRetention
                     dirty = true
                 }
                 if renderer.latticeDressingLevel != lat.dressingLevel {

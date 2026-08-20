@@ -210,7 +210,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
                 // should open on; a dressing is something you add.
                 boundary: LatticeBoundaryTreatment = .none,
                 manualStrutThicknessMM: Double? = nil,
-                simulateStresses: Bool = true) {
+                simulateStresses: Bool = true,
+                retainSubfloor: Bool = false) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.relativeDensity = relativeDensity
@@ -221,7 +222,16 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.boundary = boundary
         self.manualStrutThicknessMM = manualStrutThicknessMM
         self.simulateStresses = simulateStresses
+        self.retainSubfloor = retainSubfloor
     }
+
+    /// ★★ KEEP THE LATTICE WHERE THE PART IS TOO THIN TO CERTIFY IT.
+    ///
+    /// The switch existed, on the results page, behind a completed run — so the
+    /// setting that decides whether half a part is lattice or solid could not be
+    /// reached from the page where the lattice is set up. It is a lattice SETTING and
+    /// it belongs with the others.
+    public var retainSubfloor: Bool = false
 
     /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
     /// `.sim ⇒ .uniform`, cell `.swept ⇒ .fixed`) lives in `LatticeSettings`
@@ -257,7 +267,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   cellMinMM: s.cellMinMM, cellMaxMM: s.cellMaxMM,
                   boundary: s.boundary,
                   manualStrutThicknessMM: s.manualStrutThicknessMM,
-                  simulateStresses: s.simulateStresses)
+                  simulateStresses: s.simulateStresses,
+                  retainSubfloor: s.retainSubfloorInUnloadedRegions)
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -275,6 +286,22 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.boundary = boundary
         out.manualStrutThicknessMM = manualStrutThicknessMM
         out.simulateStresses = simulateStresses
+        // ★★ SUB-FLOOR RETENTION, SET HERE (maintainer, 2026-08-20: "If you're
+        // saying I need to actually first optimize a part THEN go to a lattice page,
+        // you're out of your fucking mind. That's untenable. Add it to the settings
+        // of the lattice stage").
+        //
+        // ★ AND IT CANNOT RIDE ALONGSIDE "fit". Core THROWS on the pair
+        // (grading.cpp:66-70) — two mechanisms deciding the same material, two
+        // receipts — so the wizard drops it exactly as `LatticeAutoPosture` does
+        // rather than letting the page author a job core will refuse.
+        out.retainSubfloorInUnloadedRegions =
+            (cellSizeMode == .fit) ? false : retainSubfloor
+        if !out.retainSubfloorInUnloadedRegions {
+            // Core's schema refuses the dependents without the switch.
+            out.subfloorPerRegion = false
+            out.subfloorStressFraction = nil
+        }
         out.enabled = true
         return out
     }

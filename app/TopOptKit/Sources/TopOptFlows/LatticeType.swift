@@ -24,6 +24,7 @@
 
 import Foundation
 import simd
+import TopOptKit
 
 /// One strut lattice, defined exactly as the worker defines it: an integer
 /// denominator `S` (node coordinates are integers in units of `L/S`, so the cell is
@@ -55,12 +56,33 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
 
     // MARK: relative-density ↔ strut-radius grading (the map the proxy shades by)
 
-    /// The strut radius (mm) that gives relative density `rho` at cell size `cellMM`,
-    /// inverting ρ ≈ K·(r/L)²: r = L·√(ρ/K). This is the exact worker grading law in
-    /// the low-density limit (density.txt: mesh matches analytic to ≤1.5e-15). `rho`
-    /// is clamped to [0, 1]; K > 0 for every table entry.
+    /// The strut radius (mm) that gives relative density `rho` at cell size `cellMM`.
+    ///
+    /// ★★ THIS ASKS CORE, AND ONLY FALLS BACK TO THE CLOSED FORM WHEN CORE HAS NO LAW
+    /// (task 2026-08-20). It used to invert ρ ≈ K·(r/L)² unconditionally — exact in
+    /// the low-density limit, and increasingly wrong outside it. Core interpolates a
+    /// table MEASURED at vpc48, and the two disagree by 1.4-1.7x, WIDENING with
+    /// density:
+    ///
+    ///     rho    core d(4mm)   closed form   ratio
+    ///     0.05     0.3632        0.2582      0.71
+    ///     0.20     0.7592        0.5164      0.68
+    ///     0.60     1.5343        0.8944      0.58
+    ///
+    /// The preview therefore drew every strut far thinner than the run builds, and
+    /// printed those thin numbers in millimetres beside it. Core is the authority on
+    /// what the printer lays; the app is not entitled to a second opinion.
+    ///
+    /// ★ THE FALLBACK IS NOT A SILENT ONE. Core carries a diameter law for OCTET
+    /// only; for any other topology `latticeStrutDiameterMM` returns 0 and this
+    /// returns the analytic estimate — which is the honest thing to do for a
+    /// topology nothing has measured, and is exactly what `densityCoefficient`
+    /// documents itself as.
     public func strutRadiusMM(relativeDensity rho: Double, cellMM: Double) -> Double {
         let r = max(0, min(1, rho))
+        let d = TopOptKit.latticeStrutDiameterMM(topology: id, relativeDensity: r,
+                                                 cellMM: cellMM)
+        if d > 0 { return d / 2 }
         return cellMM * (r / densityCoefficient).squareRoot()
     }
 
@@ -90,8 +112,31 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
         return min(1, relativeDensity(strutRadiusMM: lineWidthMM / 2, cellMM: cellMM))
     }
 
+    /// ★★ AND THE INVERSE IS CORE'S CURVE INVERTED, not the closed form (2026-08-20).
+    ///
+    /// `strutRadiusMM` was moved onto core's measured law; this was left on
+    /// `ρ = K·(r/L)²`, so the two stopped being a pair — a radius round-tripped
+    /// through them came back 1.4x wrong, and `printabilityDensityFloor` (which is
+    /// nothing but this function at one bead) reported a floor the run does not use.
+    /// A monotone law has exactly one inverse, so it is found by bisection on core's
+    /// own answer rather than by writing a second law down.
     public func relativeDensity(strutRadiusMM radius: Double, cellMM: Double) -> Double {
-        guard cellMM > 0 else { return 0 }
+        guard cellMM > 0, radius > 0 else { return 0 }
+        let want = 2 * radius
+        // Does core carry a law for this topology at all? The top of the band is the
+        // cheapest question that says so — 0 means "no core law", not "no strut".
+        if TopOptKit.latticeStrutDiameterMM(topology: id, relativeDensity: 1,
+                                            cellMM: cellMM) > 0 {
+            var lo = 0.0, hi = 1.0
+            for _ in 0..<24 {          // 1 / 2^24 ≈ 6e-8 in ρ — far below any display
+                let mid = 0.5 * (lo + hi)
+                let d = TopOptKit.latticeStrutDiameterMM(topology: id,
+                                                         relativeDensity: mid,
+                                                         cellMM: cellMM)
+                if d < want { lo = mid } else { hi = mid }
+            }
+            return min(1, 0.5 * (lo + hi))
+        }
         let rl = radius / cellMM
         return densityCoefficient * rl * rl
     }

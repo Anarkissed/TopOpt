@@ -246,6 +246,12 @@ public struct LatticeSetupWizard: View {
                     id: \.rawValue) { s in
                 settingControl(s, titled: true)
             }
+            // ★★ SUB-FLOOR RETENTION, HERE AND NOT ONLY ON THE RESULTS PAGE
+            // (maintainer, 2026-08-20: "Add it to the settings of the lattice
+            // stage"). It decides whether thin members are lattice or solid, which
+            // is a lattice SETTING; requiring a completed run and a variant to
+            // reach it was untenable and is fixed.
+            subfloorRetentionSwitch
             latencyReadout
             // ★ THE CARD, MOVED HERE: "place the one on the right at the very
             // bottom of the one on the left."
@@ -339,6 +345,71 @@ public struct LatticeSetupWizard: View {
                 .fill(DS.Color.background.opacity(0.35).color))
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
                 .strokeBorder((model.simulateStresses
+                               ? DS.Color.accent.opacity(0.5)
+                               : DS.Color.strokeSubtle).color, lineWidth: 1)))
+    }
+
+    /// ★★ "KEEP THE LATTICE WHERE THE PART IS TOO THIN TO CERTIFY IT."
+    ///
+    /// ★ THE COPY AND THE GATE ARE SHARED WITH THE RESULTS PAGE, through
+    /// `LatticeRetentionControl` — one switch in two places must not grow two
+    /// explanations or two sets of rules about when it may be operated. The
+    /// exposure figures are the page's alone: they come from core's pre-flight
+    /// forecast, which does not exist until there is a job to forecast.
+    ///
+    /// ★ AND IT REFUSES ALONGSIDE "fit", because core does (grading.cpp:66-70).
+    /// Two mechanisms deciding the same material would produce two receipts, so
+    /// the disabled copy says WHICH TO USE WHEN rather than only that they clash.
+    private var retentionControl: LatticeRetentionControl {
+        LatticeRetentionControl.compute(
+            armed: model.retainSubfloor,
+            graded: model.densityMode == .sim,
+            capability: LatticeRetentionCapability.fromCore,
+            belowFloorVoxels: nil,          // no forecast on the settings page
+            regionVoxels: nil,
+            ceilingFraction: nil,           // core's own number
+            coreCeilingFraction: LatticeRetentionCapability.coreStressFractionDefault,
+            cellMode: model.cellSizeMode)
+    }
+
+    private var subfloorRetentionSwitch: some View {
+        let c = retentionControl
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: DS.Space.s) {
+                Text(c.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle((c.enabled ? DS.Color.textPrimary
+                                               : DS.Color.textTertiary).color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: DS.Space.s)
+                GlassToggle(isOn: model.retainSubfloor && c.enabled) {
+                    guard c.enabled else { return }
+                    model.retainSubfloor.toggle()
+                    rebuild()
+                }
+                .opacity(c.enabled ? 1 : 0.4)
+                .allowsHitTesting(c.enabled)
+                .accessibilityLabel(LatticeRetentionControl.titleText)
+                .accessibilityIdentifier("wizard-subfloor-retention")
+            }
+            // ★ WHY IT CANNOT BE OPERATED, said as the fact it is. Greying a row in
+            // silence is the defect this page has already paid for.
+            Text(c.disabledReason ?? c.body)
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle((c.disabledReason == nil
+                                  ? DS.Color.textTertiary
+                                  : DS.Color.warning).color)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("wizard-subfloor-retention-note")
+        }
+        .padding(.vertical, DS.Space.s)
+        .padding(.horizontal, DS.Space.sm)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+            .fill(.ultraThinMaterial)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .fill(DS.Color.background.opacity(0.35).color))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .strokeBorder(((model.retainSubfloor && c.enabled)
                                ? DS.Color.accent.opacity(0.5)
                                : DS.Color.strokeSubtle).color, lineWidth: 1)))
     }

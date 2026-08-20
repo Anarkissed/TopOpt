@@ -23,6 +23,7 @@
 import Foundation
 import Dispatch
 import simd
+import TopOptKit
 
 /// A dense scalar field on a regular grid over an axis-aligned box. `values` is
 /// row-major with x fastest, then y, then z. Uploaded to a Metal 3D texture.
@@ -143,8 +144,17 @@ public enum LatticePreviewOccupancy {
     /// size, and the trim (not a threshold) decides where they stop. No thin region
     /// can lose cells to a knife-edge test. Rebaked only when the mesh, field, or
     /// cell size changes — never per frame (P2).
+    /// - Parameters:
+    ///   - memberThickness: core's local member thickness (mm) per OCCUPANCY voxel,
+    ///     or empty when core had no answer. See `minCellsPerMember`.
+    ///   - minCellsPerMember: core's N*. A cell whose member cannot hold this many
+    ///     cells is NOT latticed — the run leaves it SOLID (grading.hpp bar L4), and
+    ///     a preview that draws lattice there is showing a part that will not be
+    ///     built. 0 (or no thickness) disables the gate, which is the old behaviour.
     public static func cellField(occupancy occ: LatticeVoxelGrid, demand: LatticeVoxelGrid?,
-                                 cellMM: Double, insideFraction: Double = 0.02) -> LatticeVoxelGrid {
+                                 cellMM: Double, insideFraction: Double = 0.02,
+                                 memberThickness: [Double] = [],
+                                 minCellsPerMember: Double = 0) -> LatticeVoxelGrid {
         let cell = Float(max(0.1, cellMM))
         let extent = SIMD3<Float>(Float(occ.nx - 1) * occ.spacing.x,
                                   Float(occ.ny - 1) * occ.spacing.y,
@@ -187,7 +197,26 @@ public enum LatticePreviewOccupancy {
                         }
                     } } }
                     let frac = Double(insideCount) / Double(S * S * S)
-                    if frac >= insideFraction {
+                    // ★★ CORE'S L4 FLOOR, APPLIED HERE TOO (task 2026-08-20). A member
+                    // too thin to hold N* cells is left SOLID by the run; drawing
+                    // lattice in it was the preview showing geometry that never gets
+                    // built. `+inf` is core's "thicker than measured" sentinel and
+                    // clears the floor, which is the conservative direction.
+                    var memberHoldsTheCell = true
+                    if minCellsPerMember > 0, !memberThickness.isEmpty {
+                        let g = (center - occ.origin) / occ.spacing
+                        let vi = Swift.min(Swift.max(Int(g.x.rounded()), 0), occ.nx - 1)
+                        let vj = Swift.min(Swift.max(Int(g.y.rounded()), 0), occ.ny - 1)
+                        let vk = Swift.min(Swift.max(Int(g.z.rounded()), 0), occ.nz - 1)
+                        let n = (vk * occ.ny + vj) * occ.nx + vi
+                        if n >= 0, n < memberThickness.count {
+                            let t = memberThickness[n]
+                            if t.isFinite, t > 0, t / Double(cell) < minCellsPerMember {
+                                memberHoldsTheCell = false
+                            }
+                        }
+                    }
+                    if frac >= insideFraction, memberHoldsTheCell {
                         vals[(ck * ncy + cj) * ncx + ci] =
                             insideCount > 0 ? Swift.max(0, demandSum / Float(insideCount)) : 0
                     }
@@ -334,5 +363,302 @@ public enum LatticePreviewOccupancy {
         }
         return LatticeVoxelGrid(nx: occ.nx, ny: occ.ny, nz: occ.nz,
                                 origin: occ.origin, spacing: occ.spacing, values: vals)
+    }
+}
+
+// ★★ THE GRADED CELL FIELD — CORE'S DYADIC PLAN, BAKED FOR THE MARCH
+// (maintainer, 2026-08-19: "I was talking about the PREVIEW when I asked about the
+// cell size being able to grade. Is there *NO* way to make the *PREVIEW* lattice
+// grade cell size?").
+//
+// ★ THE PREVIEW DREW ONE CELL FOR THE WHOLE PART. A swept run does not: core's
+// `plan_cell_sizes` puts every region on the FINEST dyadic cell whose thinnest strut
+// still prints, so a lightly loaded region — thin struts — is forced onto a coarser
+// cell, and a loaded one stays fine. That plan is read here, never re-derived: the
+// app deciding cell sizes for itself is the divergence this whole pass exists to
+// close.
+//
+// ★ WHY THE FIELD STAYS ON THE BASE GRID. A level-L cell occupies an ALIGNED 2^L
+// block of the base grid, so every base cell in a block carries that block's level
+// and that block's demand. One texture, one lookup, and the shader recovers the
+// octree by integer division — no second grid, and no way for the two to disagree
+// about where a cell starts, which is what would put a strut end in the middle of a
+// neighbour's face.
+public struct LatticeCellField: Sendable {
+    /// Per BASE cell: the demand (≥ 0) of the octree cell covering it, −1 where the
+    /// run leaves the material SOLID.
+    public let field: LatticeVoxelGrid
+    /// Per base cell, same layout: the dyadic level of the covering octree cell.
+    /// All zero on the ungraded path, which is exactly what "one cell size" means.
+    public let level: [Float]
+    public let baseCellMM: Double
+    public let maxLevel: Int
+    /// True when this came from core's plan rather than the uniform fallback — the
+    /// preview says which, because "core had no plan" and "core planned one level"
+    /// look identical in the picture and are not the same fact.
+    public let fromCorePlan: Bool
+}
+
+extension LatticePreviewOccupancy {
+
+    /// The uniform field, wrapped — one level, everywhere, which is what a Fixed or
+    /// Auto job actually builds.
+    public static func uniformCellField(_ grid: LatticeVoxelGrid,
+                                        cellMM: Double) -> LatticeCellField {
+        LatticeCellField(field: grid,
+                         level: [Float](repeating: 0, count: grid.count),
+                         baseCellMM: cellMM, maxLevel: 0, fromCorePlan: false)
+    }
+
+    /// Bake core's plan onto its OWN base grid.
+    ///
+    /// Activation comes from the plan (`level < 0` ⇒ the run leaves it solid), so the
+    /// cells-per-member floor and the printability floor are core's here, not a
+    /// second copy of them — `plan_cell_sizes` enforces both per cell before it
+    /// returns. Demand is averaged over each octree cell, because a level-L cell is
+    /// ONE cell and grades to ONE density; sampling its centre would let an 8 mm cell
+    /// take the density of whichever 1.7 mm voxel happened to sit in the middle.
+    public static func gradedCellField(occupancy occ: LatticeVoxelGrid,
+                                       demand: LatticeVoxelGrid?,
+                                       plan: LatticeCellSizePlan) -> LatticeCellField {
+        let n = plan.count
+        let S0 = Float(plan.baseCellMM)
+        // Core's base grid is CORNER-based: base cell i spans [origin + i·S0,
+        // origin + (i+1)·S0). The march's grid is CENTRE-based, so the centre of
+        // base cell i is origin + (i + ½)·S0 — half a cell apart, and getting that
+        // wrong shifts every block by half a cell and unpicks the whole ladder.
+        let originCorner = SIMD3<Float>(Float(plan.origin.x), Float(plan.origin.y),
+                                        Float(plan.origin.z))
+
+        func demandAt(_ w: SIMD3<Float>) -> Float {
+            guard let dem = demand else { return 0 }
+            let g = (w - dem.origin) / dem.spacing
+            let i = Swift.min(Swift.max(Int(g.x.rounded()), 0), dem.nx - 1)
+            let j = Swift.min(Swift.max(Int(g.y.rounded()), 0), dem.ny - 1)
+            let k = Swift.min(Swift.max(Int(g.z.rounded()), 0), dem.nz - 1)
+            return dem.values[(k * dem.ny + j) * dem.nx + i]
+        }
+
+        // Pass 1 — each base cell's own demand, sampled at its centre.
+        var own = [Float](repeating: 0, count: n)
+        for k in 0..<plan.nz {
+            for j in 0..<plan.ny {
+                for i in 0..<plan.nx {
+                    let idx = plan.index(i, j, k)
+                    guard plan.level[idx] >= 0 else { continue }
+                    let c = originCorner + (SIMD3<Float>(Float(i), Float(j), Float(k))
+                                            + SIMD3<Float>(repeating: 0.5)) * S0
+                    own[idx] = demandAt(c)
+                }
+            }
+        }
+
+        // Pass 2 — average over each octree cell, keyed by its min-corner base cell.
+        var sum = [Float](repeating: 0, count: n)
+        var cnt = [Float](repeating: 0, count: n)
+        func corner(_ i: Int, _ j: Int, _ k: Int, _ m: Int) -> Int {
+            plan.index((i / m) * m, (j / m) * m, (k / m) * m)
+        }
+        for k in 0..<plan.nz {
+            for j in 0..<plan.ny {
+                for i in 0..<plan.nx {
+                    let idx = plan.index(i, j, k)
+                    let L = plan.level[idx]
+                    guard L >= 0 else { continue }
+                    let c = corner(i, j, k, 1 << Int(L))
+                    sum[c] += own[idx]; cnt[c] += 1
+                }
+            }
+        }
+
+        // Pass 3 — write the octree cell's value back to every base cell it covers.
+        var vals = [Float](repeating: -1, count: n)
+        var lvl = [Float](repeating: 0, count: n)
+        for k in 0..<plan.nz {
+            for j in 0..<plan.ny {
+                for i in 0..<plan.nx {
+                    let idx = plan.index(i, j, k)
+                    let L = plan.level[idx]
+                    guard L >= 0 else { continue }
+                    let c = corner(i, j, k, 1 << Int(L))
+                    vals[idx] = cnt[c] > 0 ? Swift.max(0, sum[c] / cnt[c]) : 0
+                    lvl[idx] = Float(L)
+                }
+            }
+        }
+
+        let grid = LatticeVoxelGrid(
+            nx: plan.nx, ny: plan.ny, nz: plan.nz,
+            origin: originCorner + SIMD3<Float>(repeating: 0.5 * S0),
+            spacing: SIMD3<Float>(repeating: S0), values: vals)
+        return LatticeCellField(field: grid, level: lvl, baseCellMM: plan.baseCellMM,
+                                maxLevel: plan.maxLevel, fromCorePlan: true)
+    }
+}
+
+/// The swept cell window a job carries, as the preview needs to ask for it: the
+/// ladder's ends plus the bead the printability floor is measured against. All three
+/// are the user's own numbers — the preview states none of them itself.
+public struct LatticeCellSweep: Equatable, Sendable {
+    public var minMM: Double
+    public var maxMM: Double
+    public var minExtrudableWidthMM: Double
+    public init(minMM: Double, maxMM: Double, minExtrudableWidthMM: Double) {
+        self.minMM = minMM; self.maxMM = maxMM
+        self.minExtrudableWidthMM = minExtrudableWidthMM
+    }
+}
+
+// ★★ SUB-FLOOR RETENTION IN THE PREVIEW (maintainer, 2026-08-20: "Why does that rule
+// exist for a wall that does not need to certify?").
+//
+// ★ HE IS RIGHT, AND CORE ALREADY AGREED. `retain_subfloor_in_unloaded_regions` keeps
+// lattice in material too thin to hold N* cells, PROVIDED the region's measured peak
+// stress is at or under core's ceiling as a fraction of the part's peak. The app has
+// carried that switch since the retention task; the preview had never heard of it, so
+// the member floor added yesterday removed cells a run with retention armed keeps.
+// One divergence closed and its mirror image left open.
+//
+// ★ WHAT RETENTION NEVER DOES, and this preview does not either: it never rescues an
+// UNPRINTABLE strut. That is a fact about the nozzle, not about load — core rejects
+// those cells with reason 2 and retention has nothing to say about them.
+//
+// ★ THE UNION READING, DELIBERATELY. Core evaluates the fraction per declared region
+// only when the caller hands it region ids; its DEFAULT — and every job this app
+// currently emits — measures the whole candidate set as one. Union is the
+// conservative end: one loud region vetoes the rest. The preview matches the job it
+// is previewing, not the job core could be asked for.
+public struct LatticeSubfloorRetention: Equatable, Sendable {
+    /// Off ⇒ the floor applies everywhere, which is the shipped behaviour.
+    public var armed: Bool
+    /// The ceiling, ONLY when the user moved it off core's own number. nil ⇒ read
+    /// core's constant at bake time, so the app never authors it.
+    public var stressFractionMax: Double?
+    public init(armed: Bool, stressFractionMax: Double? = nil) {
+        self.armed = armed; self.stressFractionMax = stressFractionMax
+    }
+}
+
+extension LatticePreviewOccupancy {
+
+    /// Does the declared set qualify? `regionPeak / partPeak <= ceiling`, exactly
+    /// core's arithmetic — including its guard that NO DEMAND FIELD MEANS NO
+    /// RETENTION. An all-zero demand reads as "carries nothing" and means "nothing
+    /// was measured", and the difference is the whole safety of the feature.
+    public static func subfloorQualifies(regionPeak: Double, partPeak: Double,
+                                         ceiling: Double) -> Bool {
+        guard partPeak > 0, ceiling > 0, ceiling <= 1 else { return false }
+        return min(1, regionPeak / partPeak) <= ceiling
+    }
+
+    /// The peaks core measures: over the part's PRINTED voxels, and over the
+    /// candidate set. `inside` is negative-inside part distance.
+    public static func subfloorPeaks(demand: LatticeVoxelGrid?,
+                                     partSDF: LatticeVoxelGrid,
+                                     occupancy: LatticeVoxelGrid) -> (part: Double, region: Double) {
+        guard let d = demand, d.count == partSDF.count,
+              occupancy.count == partSDF.count else { return (0, 0) }
+        var part = 0.0, region = 0.0
+        for i in 0..<d.count {
+            let v = Double(d.values[i])
+            guard v.isFinite else { continue }
+            if partSDF.values[i] <= 0 { part = Swift.max(part, v) }
+            if occupancy.values[i] > 0.5 { region = Swift.max(region, v) }
+        }
+        return (part, region)
+    }
+
+    /// ★ RETAIN, ON THE GRADED PATH. Core's swept form gives a retained voxel the
+    /// FINEST level of the plan's own ladder at which its own density still prints.
+    ///
+    /// ★ CAPPED AT ONE LEVEL ABOVE THE BASE, deliberately. A retained block is not
+    /// part of the octree the planner balanced, so nothing guarantees it differs from
+    /// its neighbours by at most one level — and the march's step cap is built on
+    /// exactly that 2:1 guarantee (it halves the step for a level-L cell because the
+    /// finest thing that can touch it is S/2). A two-level jump would let the ray
+    /// march over a fine neighbour and punch holes in it. One level is safe, it is
+    /// the coarsening his own part needs (2 mm → 4 mm), and where it is not enough
+    /// the cell stays SOLID — the preview showing less than the run, never more.
+    public static func retainSubfloorCells(_ field: LatticeCellField,
+                                           plan: LatticeCellSizePlan,
+                                           demand: LatticeVoxelGrid?,
+                                           densityLo: Double, densityHi: Double,
+                                           gamma: Double,
+                                           minExtrudableWidthMM: Double,
+                                           topology: String) -> LatticeCellField {
+        guard minExtrudableWidthMM > 0, plan.count == field.field.count else { return field }
+        var vals = field.field.values
+        var lvl = field.level
+        let S0 = Float(plan.baseCellMM)
+        let originCorner = SIMD3<Float>(Float(plan.origin.x), Float(plan.origin.y),
+                                        Float(plan.origin.z))
+
+        func demandAt(_ w: SIMD3<Float>) -> Double {
+            guard let dem = demand else { return 0 }
+            let g = (w - dem.origin) / dem.spacing
+            let i = Swift.min(Swift.max(Int(g.x.rounded()), 0), dem.nx - 1)
+            let j = Swift.min(Swift.max(Int(g.y.rounded()), 0), dem.ny - 1)
+            let k = Swift.min(Swift.max(Int(g.z.rounded()), 0), dem.nz - 1)
+            return Double(dem.values[(k * dem.ny + j) * dem.nx + i])
+        }
+
+        // Finest level whose strut prints, per cell, then placed block-by-block from
+        // fine to coarse so a coarse block never lands on a cell the plan already owns.
+        let ceilingLevel = Swift.min(1, Swift.max(0, plan.maxLevel))
+        var retained = 0
+        for L in 0...ceilingLevel {
+            let m = 1 << L
+            let cellMM = plan.baseCellMM * pow(2, Double(L))
+            for k in 0..<plan.nz {
+                for j in 0..<plan.ny {
+                    for i in 0..<plan.nx {
+                        let idx = plan.index(i, j, k)
+                        // Only cells core rejected for a THIN MEMBER, and only ones
+                        // still unclaimed after the finer passes.
+                        guard plan.level[idx] < 0, plan.rejectReason[idx] == 1,
+                              vals[idx] < 0 else { continue }
+                        let centre = originCorner
+                            + (SIMD3<Float>(Float(i), Float(j), Float(k))
+                               + SIMD3<Float>(repeating: 0.5)) * S0
+                        let t = Swift.max(0, Swift.min(1, demandAt(centre)))
+                        let rho = densityLo + (densityHi - densityLo) * pow(t, gamma)
+                        let dia = TopOptKit.latticeStrutDiameterMM(
+                            topology: topology, relativeDensity: rho, cellMM: cellMM)
+                        guard dia > 0, dia >= minExtrudableWidthMM else { continue }
+                        // The whole aligned block must be free, or the shader's
+                        // block reconstruction disagrees with what is stored.
+                        let bi = (i / m) * m, bj = (j / m) * m, bk = (k / m) * m
+                        guard bi + m <= plan.nx, bj + m <= plan.ny, bk + m <= plan.nz
+                        else { continue }
+                        var free = true
+                        for kk in bk..<(bk + m) where free {
+                            for jj in bj..<(bj + m) where free {
+                                for ii in bi..<(bi + m) where free {
+                                    if vals[plan.index(ii, jj, kk)] >= 0 { free = false }
+                                }
+                            }
+                        }
+                        guard free else { continue }
+                        for kk in bk..<(bk + m) {
+                            for jj in bj..<(bj + m) {
+                                for ii in bi..<(bi + m) {
+                                    let n = plan.index(ii, jj, kk)
+                                    vals[n] = Float(t)
+                                    lvl[n] = Float(L)
+                                }
+                            }
+                        }
+                        retained += m * m * m
+                    }
+                }
+            }
+        }
+        guard retained > 0 else { return field }
+        let g = field.field
+        return LatticeCellField(
+            field: LatticeVoxelGrid(nx: g.nx, ny: g.ny, nz: g.nz, origin: g.origin,
+                                    spacing: g.spacing, values: vals),
+            level: lvl, baseCellMM: field.baseCellMM,
+            maxLevel: Swift.max(field.maxLevel, ceilingLevel), fromCorePlan: true)
     }
 }

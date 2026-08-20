@@ -1050,6 +1050,149 @@ public enum TopOptKit {
 
     /// The core's certifiable limits for a lattice topology named as the job schema
     /// names it (`"octet"`). Forwards `topoptbridge::lattice_limits`; never throws.
+    /// ★★ CORE'S MEASURED STRUT DIAMETER (mm) at a relative density and cell size.
+    /// 0 when core carries no law for the topology (only octet today), the cell is
+    /// non-positive, or rho is not finite and >= 0 — the caller then says it has no
+    /// core number rather than substituting its own.
+    ///
+    /// ★ WHY THIS EXISTS. The app carried `r = cell * sqrt(rho / K)`, K = 48. Core
+    /// interpolates a table measured at vpc48. They disagree by 1.4-1.7x, widening
+    /// with density, so the preview drew every strut far thinner than the run builds
+    /// and printed those numbers in millimetres beside it.
+    public static func latticeStrutDiameterMM(topology: String, relativeDensity rho: Double,
+                                              cellMM: Double) -> Double {
+        topoptbridge.lattice_strut_diameter_mm(std.string(topology), rho, cellMM)
+    }
+
+    /// ★★ CORE'S LOCAL MEMBER THICKNESS (mm per voxel), for the preview.
+    ///
+    /// Core leaves a member too thin to hold `minCellsPerMember` cells SOLID rather
+    /// than latticing it (grading.hpp bar L4). The preview had no notion of member
+    /// width, so it drew lattice on ribs the run leaves solid. This forwards core's
+    /// granulometric opening rather than re-implementing it — the app already grew a
+    /// second strut law that way once.
+    ///
+    /// `solid` is one flag per voxel in x-fastest order. `+infinity` means "thicker
+    /// than the cap measured" and clears any ceiling. Returns EMPTY when core has no
+    /// answer — including when the grid is NOT cubic, which core requires: the caller
+    /// must then say so rather than pretend.
+    public static func latticeMemberThicknessMM(nx: Int, ny: Int, nz: Int,
+                                                spacing: SIMD3<Float>,
+                                                solid: [Bool],
+                                                capRadiusVoxels: Int = 32) -> [Double] {
+        guard nx > 0, ny > 0, nz > 0, solid.count == nx * ny * nz else { return [] }
+        let sx = Double(spacing.x), sy = Double(spacing.y), sz = Double(spacing.z)
+        guard sx > 0, sy > 0, sz > 0 else { return [] }
+        // ★ CORE TAKES ONE CUBIC SPACING. The preview's occupancy is built with dims
+        // proportional to the extents, so its axes agree to rounding — but "agree to
+        // rounding" is a claim worth checking, not assuming. 2% is far tighter than
+        // any real distortion and far looser than float rounding.
+        let mean = (sx + sy + sz) / 3
+        let worst = max(abs(sx - mean), max(abs(sy - mean), abs(sz - mean))) / mean
+        guard worst <= 0.02 else { return [] }
+        var flags = [UInt8](repeating: 0, count: solid.count)
+        for i in 0..<solid.count where solid[i] { flags[i] = 1 }
+        let out = flags.withUnsafeBufferPointer { buf in
+            topoptbridge.lattice_member_thickness_mm(
+                Int32(nx), Int32(ny), Int32(nz), mean,
+                buf.baseAddress, buf.count, Int32(capRadiusVoxels))
+        }
+        return out.map { Double($0) }
+    }
+
+    /// ★★ CORE'S DYADIC CELL-SIZE PLAN — the levels, on core's own base grid.
+    ///
+    /// The preview drew one cell size for the whole part; a swept run gives every
+    /// region the coarsest dyadic cell its own member can hold. This is that plan,
+    /// read from `plan_cell_sizes` — the app chooses nothing here.
+    ///
+    /// `candidate` marks the lattice set, `rho` is the density the preview will
+    /// actually render at, `width` is the local member width from
+    /// `latticeMemberThicknessMM` (the SAME field the cells-per-member floor reads,
+    /// measured once and shared, exactly as core shares it between its two laws).
+    ///
+    /// Returns nil when core has no plan — a non-cubic grid, a refused parameter,
+    /// or nothing latticed. The caller must then draw the uniform cell and say so.
+    public static func latticeCellSizePlan(nx: Int, ny: Int, nz: Int,
+                                           spacing: SIMD3<Float>,
+                                           origin: SIMD3<Float>,
+                                           candidate: [Bool],
+                                           relativeDensity: [Double],
+                                           memberWidthMM: [Double],
+                                           minCellMM: Double, maxCellMM: Double,
+                                           minExtrudableWidthMM: Double,
+                                           capRadiusVoxels: Int = 32,
+                                           topology: String = "octet") -> LatticeCellSizePlan? {
+        let n = nx * ny * nz
+        guard nx > 0, ny > 0, nz > 0, candidate.count == n,
+              relativeDensity.count == n, memberWidthMM.count == n else { return nil }
+        let sx = Double(spacing.x), sy = Double(spacing.y), sz = Double(spacing.z)
+        guard sx > 0, sy > 0, sz > 0 else { return nil }
+        // Core takes ONE cubic spacing — the same 2% check the width law makes, and
+        // for the same reason: the preview's grid agrees to rounding, and "agrees to
+        // rounding" is a claim to check rather than assume.
+        let mean = (sx + sy + sz) / 3
+        let worst = max(abs(sx - mean), max(abs(sy - mean), abs(sz - mean))) / mean
+        guard worst <= 0.02 else { return nil }
+
+        var flags = [UInt8](repeating: 0, count: n)
+        for i in 0..<n where candidate[i] { flags[i] = 1 }
+        let flat: [Double] = flags.withUnsafeBufferPointer { cb in
+            relativeDensity.withUnsafeBufferPointer { rb in
+                memberWidthMM.withUnsafeBufferPointer { wb in
+                    topoptbridge.lattice_cell_size_plan(
+                        Int32(nx), Int32(ny), Int32(nz), mean,
+                        Double(origin.x), Double(origin.y), Double(origin.z),
+                        cb.baseAddress, cb.count,
+                        rb.baseAddress, rb.count,
+                        wb.baseAddress, wb.count,
+                        minCellMM, maxCellMM, minExtrudableWidthMM,
+                        Int32(capRadiusVoxels), std.string(topology))
+                }
+            }
+        }.map { Double($0) }
+
+        // Header: ok, nx, ny, nz, ox, oy, oz, base_cell_mm, max_level.
+        guard flat.count > 9, flat[0] == 1 else { return nil }
+        let cx = Int(flat[1]), cy = Int(flat[2]), cz = Int(flat[3])
+        let cells = cx * cy * cz
+        guard cx > 0, cy > 0, cz > 0, flat.count == 9 + 2 * cells else { return nil }
+        let base = flat[7]
+        guard base > 0 else { return nil }
+        var levels = [Int8](repeating: -1, count: cells)
+        var reasons = [Int8](repeating: 0, count: cells)
+        for i in 0..<cells {
+            let v = flat[9 + i]
+            levels[i] = (v >= 0 && v < 127) ? Int8(v) : -1
+            let r = flat[9 + cells + i]
+            reasons[i] = (r >= 0 && r < 127) ? Int8(r) : 0
+        }
+        return LatticeCellSizePlan(
+            nx: cx, ny: cy, nz: cz,
+            origin: SIMD3<Double>(flat[4], flat[5], flat[6]),
+            baseCellMM: base, maxLevel: Int(flat[8]), level: levels,
+            rejectReason: reasons)
+    }
+
+    /// The same law SAMPLED across a density band — one call, so a caller that needs
+    /// the curve many times (a legend, a shader upload) pays for it once.
+    /// Returns `count` diameters at evenly spaced densities from `lo` to `hi`
+    /// inclusive; empty when core has no law for the topology.
+    public static func latticeStrutDiameterCurve(topology: String, lo: Double, hi: Double,
+                                                 cellMM: Double, count: Int) -> [Double] {
+        guard count > 1, hi >= lo, cellMM > 0 else { return [] }
+        var out: [Double] = []
+        out.reserveCapacity(count)
+        for i in 0..<count {
+            let rho = lo + (hi - lo) * Double(i) / Double(count - 1)
+            let d = latticeStrutDiameterMM(topology: topology, relativeDensity: rho,
+                                           cellMM: cellMM)
+            if d <= 0 { return [] }     // no core law — say so, do not half-fill
+            out.append(d)
+        }
+        return out
+    }
+
     public static func latticeLimits(topology: String) -> LatticeLimits {
         let lim = topoptbridge.lattice_limits(std.string(topology))
         return LatticeLimits(rhoMin: lim.rho_min, rhoMax: lim.rho_max,
@@ -2084,5 +2227,44 @@ public enum TopOptKit {
 
     private static func throwIfFailed(_ err: topoptbridge.BridgeError) throws {
         if !err.ok { throw TopOptError(message: String(err.message)) }
+    }
+}
+
+/// ★ CORE'S DYADIC CELL PLAN, as the preview needs it: a level per BASE CELL on
+/// core's own base grid. `cell(L) = baseCellMM * 2^L`, and every level-L cell sits
+/// on an ALIGNED 2^L block of this grid — which is the whole reason coarse and fine
+/// cells meet at shared nodes instead of leaving floating strut ends. A caller that
+/// re-derives the grid instead of taking `origin`/`baseCellMM` from here breaks that
+/// alignment and the ladder stops meaning anything.
+public struct LatticeCellSizePlan: Equatable, Sendable {
+    public let nx: Int, ny: Int, nz: Int
+    public let origin: SIMD3<Double>
+    public let baseCellMM: Double
+    public let maxLevel: Int
+    /// Base-cell indexed, x fastest. -1 ⇒ not latticed (the per-cell L4 fallback:
+    /// nothing on the ladder is both printable and homogenizable there, so the run
+    /// leaves it SOLID).
+    public let level: [Int8]
+    /// Why a base cell got no level, base-cell indexed: 0 latticed or not a
+    /// candidate · 1 MEMBER TOO THIN · 2 STRUT UNPRINTABLE. The two have opposite
+    /// remedies, and only the first is one sub-floor retention may overrule —
+    /// printability is a fact about the printer, not about load.
+    public let rejectReason: [Int8]
+
+    public var count: Int { nx * ny * nz }
+    public func index(_ i: Int, _ j: Int, _ k: Int) -> Int { (k * ny + j) * nx + i }
+    /// The cell size (mm) at a level; 0 for "not latticed".
+    public func cellMM(atLevel L: Int8) -> Double {
+        L < 0 ? 0 : baseCellMM * pow(2, Double(L))
+    }
+}
+
+
+extension TopOptKit {
+    /// ★ CORE'S SUB-FLOOR RETENTION CEILING. A region may keep lattice below the
+    /// cells-per-member floor only if its MEASURED peak stress is at or under this
+    /// fraction of the part's peak. Read from core; the app never states it.
+    public static func latticeSubfloorRetentionStressFraction() -> Double {
+        topoptbridge.lattice_subfloor_retention_fraction()
     }
 }

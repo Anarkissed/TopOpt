@@ -152,6 +152,14 @@ struct LSDFUniforms {
     // struct and the Swift one — these match by BYTE OFFSET, never by name, so a
     // field added to (or removed from) one side alone reads a neighbour's bytes.
     float4 rimColor;
+    // ★★ CORE'S MEASURED STRUT LAW, SAMPLED (2026-08-20). 32 normalised radii
+    // (diameter at a UNIT cell, halved) across [rhoMin, rhoMax]. The app used to
+    // invert rho = K(r/L)^2 here, which disagrees with core's measured table by
+    // 1.4-1.7x, WIDENING with density — so the preview drew every strut far thinner
+    // than the run builds. The samples come from `octet_strut_diameter_mm` through
+    // the bridge; this shader interpolates them and invents nothing.
+    // All zero => core had no law for the topology, and the closed form is used.
+    float4 strutCurve[8];
     // ── UNIFIED PASS ONLY (zero-filled for the standalone preview, which never
     // reads them). The clip and eye transforms the BODY is drawn with, so a marched
     // hit can be written into the SHARED depth buffer and the SHARED G-buffer in
@@ -192,9 +200,72 @@ static inline float3 lsdf_ray(constant LSDFUniforms& U, float2 uv) {
 
 struct LSDFHit { bool hit; float3 pos; float rho; float dressing; };
 
+/// Core's measured strut radius (in CELL-NORMALISED units) for a relative density,
+/// read from the 32 samples the host uploaded. Falls back to the analytic form when
+/// no curve was supplied — that is the honest answer for a topology core has not
+/// measured, and it is exactly what the app did everywhere before.
+static float lsdf_strut_radius_norm(constant LSDFUniforms& U, float rho) {
+    float lastSample = U.strutCurve[7].w;
+    if (!(lastSample > 0.0)) {                       // no core law — analytic
+        return sqrt(max(rho, 0.0) / max(U.gradeParams.w, 1e-6));
+    }
+    float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y;
+    float t = clamp((rho - rhoMin) / max(1e-6, rhoMax - rhoMin), 0.0, 1.0) * 31.0;
+    int i0 = int(floor(t));
+    int i1 = min(i0 + 1, 31);
+    float f = t - float(i0);
+    float a = U.strutCurve[i0 >> 2][i0 & 3];
+    float b = U.strutCurve[i1 >> 2][i1 & 3];
+    return mix(a, b, f);
+}
+
 /// Sphere-trace the strut ∩ part field. The march runs in the mesh's own frame,
 /// where every baked grid lives, and lands on screen exactly where the body pass
 /// puts the same point.
+// ★★ WHICH CELL IS THIS POINT IN, AND HOW BIG IS IT (task item 3: grade the cell
+// SIZE, not only the density).
+//
+// The cell field is baked on core's BASE grid (S0) and every base cell carries the
+// dyadic LEVEL of the octree cell covering it, in G. A level-L cell occupies an
+// ALIGNED 2^L block of that grid — that alignment is the entire transition rule, the
+// reason a coarse cell's corners land on fine-cell nodes instead of in the middle of
+// a face — so the block is recovered here by integer division and everything
+// downstream works in the block's own normalised coordinates.
+//
+// ★ THE STRUT RADIUS THEN GRADES FOR FREE. `lsdf_strut_radius_norm` is a fraction of
+// the cell, so the same rho in a 2x cell is a 2x thicker strut in mm — which is
+// precisely why a coarser cell is what keeps a sparse region printable, and the
+// reason core coarsens it in the first place.
+struct LCell {
+    float3 q;      // position within the covering cell, [-0.5, 0.5]
+    float3 blk;    // that cell's index in level-L units
+    float  S;      // its size (mm)
+    float  m;      // 2^L, in BASE cells
+    int    L;
+};
+
+static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
+                             float3 p) {
+    float S0 = U.latticeOrigin.w;
+    float3 dims = U.gridDims.xyz;
+    float3 cb = (p - U.latticeOrigin.xyz) / S0;
+    float3 bi = round(cb);
+    float lvl = 0.0;
+    if (all(bi >= -0.5) && all(bi < dims - 0.5)) {
+        // G is the level; it is 0 on the ungraded path, so this reduces EXACTLY to
+        // the uniform cell the preview drew before — m = 1, blk = bi, q = cb - bi.
+        lvl = max(0.0, cellTex.read(uint3(bi), 0).g);
+    }
+    LCell o;
+    o.L = int(lvl + 0.5);
+    o.m = exp2(float(o.L));
+    o.blk = floor(max(bi, float3(0.0)) / o.m);
+    float3 ctr = o.blk * o.m + (o.m - 1.0) * 0.5;   // block centre, in base cells
+    o.q = (cb - ctr) / o.m;
+    o.S = S0 * o.m;
+    return o;
+}
+
 static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           const device float4* segs,
                           texture3d<float> cellTex,
@@ -206,10 +277,12 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
     out.dressing = 0.0;
 
-    float cell = U.latticeOrigin.w;
-    float3 lorigin = U.latticeOrigin.xyz;
+    float S0 = U.latticeOrigin.w;
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
-    // Everything is trimmed flush at the part surface, so a small pad suffices.
+    // Everything is trimmed flush at the part surface, so a small pad suffices —
+    // measured on the COARSEST cell in the plan (gridDims.w = 2^maxLevel), because
+    // that is the one whose struts reach furthest out of their own base cell.
+    float cell = S0 * max(1.0, U.gridDims.w);
     float3 pad = float3(0.15 * cell);
     float2 tb = hitBox(ro, rd, bmin - pad, bmax + pad);
     if (tb.y < max(tb.x, 0.0)) return out;
@@ -226,7 +299,6 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     // squash like the gizmo's ribbons.
     float stepScale = U.stepParams.x;
     float delta = U.stepParams.y;      // trim erosion (mm)
-    float eps = max(0.05, 0.015 * cell);
     float3 ncells = U.gridDims.xyz;
 
     // WHOLE-CELL emission (the worker's canonical-midpoint rule, and the fix for
@@ -236,6 +308,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     // and precompute each neighbour's graded strut radius. Consecutive steps in
     // the same cell reuse the cache.
     float3 cachedBase = float3(1e9);
+    float cachedM = -1.0;
     float rnCache[27];
     float rhoCache[27];
     bool anyActive = false;
@@ -259,9 +332,12 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     for (int i = 0; i < maxSteps; i++) {
         if (t > tEnd) break;
         float3 p = ro + rd * t;
-        float3 c = (p - lorigin) / cell;
-        float3 baseCell = round(c);
-        float3 q = c - baseCell;
+        // ★ THE LOCAL CELL, which under a swept plan is not the same size two steps
+        // from here. Everything below is in THIS cell's normalised coordinates.
+        LCell LC = lsdf_cell_frame(U, cellTex, p);
+        float cellHere = LC.S;
+        float3 baseCell = LC.blk;
+        float3 q = LC.q;
 
         // Flush trim field: part SDF eroded by `delta` (kills the crease-bulge
         // slivers — see stepParams.y) ∨ the exact part bbox (the bbox term stops
@@ -302,9 +378,10 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // where the lattice meets its own boundary, not a separate surface
         // floating over it — so they are applied as a radius multiplier on the
         // struts already there, exactly as the sample uses `radius * 1.6`.
+        float eps = max(0.05, 0.015 * cellHere);
         float dressing = 0.0;
         if (U.overlayParams.y > 0.5) {
-            float band = max(0.12 * cell, 1e-4);
+            float band = max(0.12 * cellHere, 1e-4);
             // The EDGE: both bounding surfaces close at once.
             float edge = max(0.0, 1.0 - abs(dPart) / band)
                        * max(0.0, 1.0 - abs(dRegion) / band);
@@ -315,17 +392,32 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             }
         }
 
-        if (any(baseCell != cachedBase)) {
+        if (any(baseCell != cachedBase) || LC.m != cachedM) {
             cachedBase = baseCell;
+            cachedM = LC.m;
             anyActive = false;
             for (int oz = -1; oz <= 1; oz++) {
                 for (int oy = -1; oy <= 1; oy++) {
                     for (int ox = -1; ox <= 1; ox++) {
                         int idx = (ox + 1) * 9 + (oy + 1) * 3 + (oz + 1);
-                        float3 cc = baseCell + float3(ox, oy, oz);
+                        // A neighbour at THIS level occupies the aligned block one
+                        // step over; its min-corner base cell speaks for all of it,
+                        // because every base cell in a block carries the block's
+                        // level and the block's demand.
+                        float3 cc = (baseCell + float3(ox, oy, oz)) * LC.m;
                         float v = -1.0;
                         if (all(cc >= -0.5) && all(cc < ncells - 0.5)) {
-                            v = cellTex.read(uint3(cc), 0).r;
+                            float2 rg = cellTex.read(uint3(cc), 0).rg;
+                            // ★ ONLY SAME-LEVEL NEIGHBOURS CONTRIBUTE. A finer or
+                            // coarser neighbour is a different lattice on a different
+                            // grid; its struts are marched when the ray is inside IT.
+                            // The two still meet, because the dyadic ladder puts the
+                            // coarse cell's nodes on fine-cell nodes — what is lost is
+                            // only the cap that would bulge across the seam, so a
+                            // strut crossing a level change is cut flush there, the
+                            // same way every strut is already cut flush at the part
+                            // surface and at the region boundary.
+                            if (int(max(0.0, rg.y) + 0.5) == LC.L) { v = rg.x; }
                         }
                         if (v >= 0.0) {
                             anyActive = true;
@@ -333,7 +425,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                                 ? (rhoMin + (rhoMax - rhoMin) * pow(clamp(v, 0.0, 1.0), gamma))
                                 : uniformRho;
                             rhoCache[idx] = rho;
-                            rnCache[idx] = clamp(max(radiusFloor, sqrt(max(rho, 0.0) / K)), 0.0, 0.49);
+                            rnCache[idx] = clamp(max(radiusFloor, lsdf_strut_radius_norm(U, rho)), 0.0, 0.49);
                         } else {
                             rnCache[idx] = -1.0;
                             rhoCache[idx] = 0.0;
@@ -363,7 +455,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // CSG intersection: struts ∩ part. max() of 1-Lipschitz SDFs is a valid
         // SDF, so full sphere-trace steps stay safe; struts are cut flush at the
         // part surface, like a machined section — the straight edge.
-        float F = max(dn * cell, dClip);
+        float F = max(dn * cellHere, dClip);
         if (F < eps) {
             // Secant refinement to the F = 0 root (see tPrev above): F is locally
             // near-linear along the ray, so one step lands within O(eps²) of the
@@ -386,8 +478,14 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // 3×3×3 strut neighbourhood is never skipped past). Far from the part:
         // the whole render lies in {dClip ≤ eps}, so dClip is a valid distance
         // bound independent of the neighbourhood — leap by it.
-        float step = anyActive ? clamp(F * stepScale, 0.05 * cell, 0.7 * cell)
-                               : 0.7 * cell;
+        // ★ THE STEP IS CAPPED BY THE FINEST CELL THAT CAN BE ADJACENT, not by the
+        // one we are standing in. The plan is 2:1 BALANCED — a face neighbour differs
+        // by at most one level — so the smallest thing near a level-L cell is S/2,
+        // and a 0.7·S step from inside a coarse cell would march straight over a fine
+        // neighbour's struts and punch holes in it.
+        float safeCell = LC.L > 0 ? cellHere * 0.5 : cellHere;
+        float step = anyActive ? clamp(F * stepScale, 0.05 * safeCell, 0.7 * safeCell)
+                               : 0.7 * safeCell;
         step = max(step, dClip - 3.0 * eps);
         t += step;
     }
@@ -401,13 +499,12 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
 /// exactly where §3's contact term has to appear.
 static float3 lsdf_normal(constant LSDFUniforms& U,
                           const device float4* segs,
+                          texture3d<float> cellTex,
                           texture3d<float> sdfTex,
                           texture3d<float> regionTex,
                           sampler samp,
                           constant ShellClip& RC,
                           float3 hitPos, float hitRho) {
-    float cell = U.latticeOrigin.w;
-    float3 lorigin = U.latticeOrigin.xyz;
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
     float3 bc = (bmin + bmax) * 0.5, be = (bmax - bmin) * 0.5;
     float3 sdfDims = U.sdfDims.xyz;
@@ -416,16 +513,16 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
     float K = U.gradeParams.w;
     float delta = U.stepParams.y;
 
-    float rnH = max(radiusFloor, sqrt(max(hitRho, 0.0) / K));
+    float rnH = max(radiusFloor, lsdf_strut_radius_norm(U, hitRho));
     rnH = min(rnH, 0.49);
-    float h = 0.002 * cell;
+    float h = 0.002 * lsdf_cell_frame(U, cellTex, hitPos).S;
     float3 ex = float3(h, 0, 0), ey = float3(0, h, 0), ez = float3(0, 0, h);
     float3 base = hitPos;
     float3 pts[6] = { base+ex, base-ex, base+ey, base-ey, base+ez, base-ez };
     float d6[6];
     for (int k = 0; k < 6; k++) {
-        float3 c = (pts[k] - lorigin) / cell;
-        float3 q = c - round(c);
+        LCell LCk = lsdf_cell_frame(U, cellTex, pts[k]);
+        float3 q = LCk.q;
         float dmin = 1e9;
         for (int s = 0; s < segCount; s++) dmin = min(dmin, sdCap(q, segs[2*s].xyz, segs[2*s+1].xyz, rnH));
         float3 stc = ((pts[k] - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
@@ -437,7 +534,7 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
         // part surface takes the part's. Otherwise the cut face is shaded as if
         // it were still a strut and reads as a tear.
         float dR = regionTex.sample(samp, stc).r;
-        d6[k] = max(dmin * cell, max(max(dP, dB), dR));
+        d6[k] = max(dmin * LCk.S, max(max(dP, dB), dR));
     }
     return normalize(float3(d6[0] - d6[1], d6[2] - d6[3], d6[4] - d6[5]) + 1e-6);
 }
@@ -574,7 +671,7 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, ro, rd);
     if (!h.hit) { discard_fragment(); }
 
-    float3 n = lsdf_normal(U, segs, sdfTex, regionTex, samp, RC, h.pos, h.rho);
+    float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, h.pos, h.rho);
     float4 clip = U.clipFromModel * float4(h.pos, 1.0);
     float3 eyeP = (U.eyeFromModel * float4(h.pos, 1.0)).xyz;
     float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);

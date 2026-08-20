@@ -22,6 +22,7 @@
 
 #include "topopt/analyze.hpp"
 #include "topopt/build_orientation.hpp"
+#include "topopt/cell_plan.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
@@ -2138,6 +2139,164 @@ bool lattice_topology_from_name(const std::string& name,
   return false;
 }
 }  // namespace
+
+std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double spacing,
+                                                const std::uint8_t* solid,
+                                                std::size_t solid_count,
+                                                int cap_radius_voxels) {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0) || cap_radius_voxels <= 0) return {};
+  if (solid == nullptr || solid_count != want) return {};
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{0.0, 0.0, 0.0};   // thickness is translation-invariant
+  grid.tags.resize(want, topopt::VoxelTag::Empty);
+  // The opening is driven by a DENSITY field thresholded at `iso`, not by the tags —
+  // so the occupancy is handed over as 1/0 and cut at 0.5.
+  std::vector<double> density(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool s = solid[i] != 0;
+    grid.tags[i] = s ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    density[i] = s ? 1.0 : 0.0;
+  }
+
+  try {
+    return topopt::local_member_thickness_mm(grid, density, 0.5, cap_radius_voxels);
+  } catch (...) {
+    return {};   // core refused; the caller says it has no number
+  }
+}
+
+// ★★ CORE'S OWN DYADIC CELL PLAN, READ BY THE PREVIEW (task item 3: "Is there *NO*
+// way to make the *PREVIEW* lattice grade cell size?").
+//
+// The preview drew ONE cell size for the whole part while a swept run gives every
+// region the coarsest dyadic cell its own member can hold. This forwards
+// `plan_cell_sizes` verbatim — the app decides nothing about which cell goes where,
+// exactly as `lattice_member_thickness_mm` above forwards the width law.
+//
+// ★ THE RETURN IS ONE FLAT ARRAY, header then payload, because the alternative is a
+// POD struct across the Swift/C++ boundary and this file already learned what that
+// costs (`std::vector` INPUTS do not survive it). Layout:
+//
+//     [0] ok            1, or the array is empty
+//     [1..3] nx ny nz   BASE-CELL grid dims (NOT the voxel grid)
+//     [4..6] ox oy oz   base-cell grid origin, model mm
+//     [7] base_cell_mm  S0
+//     [8] max_level     levels run 0..max_level; cell(L) = S0 * 2^L
+//     [9 ..]            one level per base cell, x fastest, -1 = not latticed
+//     [9+N ..]          one reject reason per base cell: 0 latticed / not a
+//                       candidate, 1 MEMBER TOO THIN, 2 STRUT UNPRINTABLE
+//
+// The caller MUST take the origin, dims and S0 from here rather than deriving its
+// own: the whole reason coarse and fine cells meet at shared nodes is that every
+// level-L cell sits on an ALIGNED 2^L block of THIS grid. A base grid half a cell
+// off would put a strut end in the middle of a neighbour's face — a floating end,
+// which is the one thing the dyadic ladder exists to prevent.
+std::vector<double> lattice_cell_size_plan(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* rho, std::size_t rho_count,
+    const double* width, std::size_t width_count,
+    double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
+    int cap_radius_voxels, const std::string& topology) {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0)) return {};
+  if (candidate == nullptr || rho == nullptr || width == nullptr) return {};
+  if (candidate_count != want || rho_count != want || width_count != want) return {};
+  if (!(min_cell_mm > 0.0) || !(max_cell_mm >= min_cell_mm)) return {};
+  if (!(min_extrudable_width_mm > 0.0) || cap_radius_voxels <= 0) return {};
+
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return {};
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(want, topopt::VoxelTag::Empty);
+
+  std::vector<char> cand(want, 0);
+  std::vector<double> rho_v(want, 0.0), width_v(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool c = candidate[i] != 0;
+    cand[i] = c ? 1 : 0;
+    grid.tags[i] = c ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    rho_v[i] = rho[i];
+    width_v[i] = width[i];
+  }
+
+  topopt::CellPlanParams pp;
+  pp.topology = topo;
+  pp.mode = topopt::CellSizeMode::Swept;
+  pp.min_cell_size_mm = min_cell_mm;
+  pp.max_cell_size_mm = max_cell_mm;
+  pp.min_extrudable_width_mm = min_extrudable_width_mm;
+  pp.thickness_cap_voxels = cap_radius_voxels;
+
+  topopt::CellSizePlan plan;
+  try {
+    plan = topopt::plan_cell_sizes(grid, rho_v, cand, width_v, pp);
+  } catch (...) {
+    return {};   // core refused the inputs; the caller says it has no plan
+  }
+
+  const std::size_t cells =
+      static_cast<std::size_t>(plan.nx) * static_cast<std::size_t>(plan.ny) *
+      static_cast<std::size_t>(plan.nz);
+  if (cells == 0 || plan.level.size() != cells) return {};
+
+  std::vector<double> out;
+  out.reserve(9 + 2 * cells);
+  out.push_back(1.0);
+  out.push_back(static_cast<double>(plan.nx));
+  out.push_back(static_cast<double>(plan.ny));
+  out.push_back(static_cast<double>(plan.nz));
+  out.push_back(plan.origin.x);
+  out.push_back(plan.origin.y);
+  out.push_back(plan.origin.z);
+  out.push_back(plan.base_cell_mm);
+  out.push_back(static_cast<double>(plan.max_level));
+  for (std::size_t i = 0; i < cells; ++i) {
+    out.push_back(static_cast<double>(plan.level[i]));
+  }
+  // …then WHY each rejected cell was rejected, which sub-floor retention needs:
+  // reason 1 (member too thin) is the only one retention may overrule; reason 2
+  // (strut unprintable) is a fact about the printer and is never rescued.
+  for (std::size_t i = 0; i < cells; ++i) {
+    out.push_back(i < plan.reject_reason.size()
+                      ? static_cast<double>(plan.reject_reason[i]) : 0.0);
+  }
+  return out;
+}
+
+// Core's own sub-floor retention ceiling — the fraction of the part's peak stress a
+// region must stay under before lattice may be kept below the cells-per-member floor.
+// Read, never hardcoded: it is a measured constant and it is core's to move.
+double lattice_subfloor_retention_fraction() {
+  return topopt::lattice_subfloor_retention_stress_fraction();
+}
+
+double lattice_strut_diameter_mm(const std::string& topology, double rho,
+                                 double cell_size_mm) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  // Core carries a measured diameter law for OCTET only. Anything else gets 0 and
+  // the caller reports "no core number" — inventing one here is exactly how the app
+  // ended up with a second law in the first place.
+  if (topo != topopt::LatticeTopology::Octet) return 0.0;
+  if (!(cell_size_mm > 0.0)) return 0.0;
+  if (!std::isfinite(rho) || rho < 0.0) return 0.0;
+  return topopt::octet_strut_diameter_mm(rho, cell_size_mm);
+}
 
 LatticeLimits lattice_limits(const std::string& topology) {
   LatticeLimits lim;
