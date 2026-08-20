@@ -63,12 +63,16 @@ final class LatticeLegendColourTests: XCTestCase {
     /// differences are"). Now that hue means STRUCTURE, this is a plain unit test on
     /// the table rather than a scan of a view body.
     func testEachStructureColourHasItsOwnExplanation() {
+        // ★ TWO, not three. The density-thresholded "load-carrying" hue was removed
+        // (2026-08-19) — lightness already shows density continuously and the stress
+        // map answers the load question properly, so a third hue was two encodings of
+        // one thing. What remains is a structural fact that density cannot express.
         let all = LatticeStructureClass.allCases
-        XCTAssertEqual(all.count, 3, "rim, interior, load")
-        XCTAssertEqual(Set(all.map(\.title)).count, 3, "distinct titles")
-        XCTAssertEqual(Set(all.map(\.detail)).count, 3,
+        XCTAssertEqual(all.count, 2, "rim and interior")
+        XCTAssertEqual(Set(all.map(\.title)).count, 2, "distinct titles")
+        XCTAssertEqual(Set(all.map(\.detail)).count, 2,
                        "★ each colour needs its OWN sentence, not one caption reused")
-        XCTAssertEqual(Set(all.map(\.id)).count, 3, "distinct ids, so drilling in works")
+        XCTAssertEqual(Set(all.map(\.id)).count, 2, "distinct ids, so drilling in works")
         for c in all {
             XCTAssertGreaterThan(c.detail.count, 40,
                                  "★ \(c.title)'s sentence must EXPLAIN the difference, "
@@ -76,8 +80,7 @@ final class LatticeLegendColourTests: XCTestCase {
         }
         // The three hues must be visibly different, or the key explains a
         // distinction the eye cannot make.
-        for (a, b) in [(LatticeStructureClass.rim, LatticeStructureClass.interior),
-                       (.interior, .load), (.rim, .load)] {
+        for (a, b) in [(LatticeStructureClass.rim, LatticeStructureClass.interior)] {
             let d = abs(a.colour.r - b.colour.r) + abs(a.colour.g - b.colour.g)
                   + abs(a.colour.b - b.colour.b)
             XCTAssertGreaterThan(d, 0.35,
@@ -91,16 +94,14 @@ final class LatticeLegendColourTests: XCTestCase {
     /// the renderer stopped drawing.
     func testTheMarchIsFedTheSamePaletteTheKeyShows() throws {
         let sdf = try source("LatticeSDFMetal.swift")
-        for field in ["rimColor", "loadColor", "denseColor"] {
+        for field in ["rimColor", "denseColor"] {
             XCTAssertTrue(sdf.contains(field),
                           "the uniform must carry \(field) to the shader")
         }
         XCTAssertTrue(sdf.contains("LatticeStructureColour.rim"),
                       "★ the rim hue must come from the shared table")
-        XCTAssertTrue(sdf.contains("LatticeStructureColour.load"),
-                      "★ …and so must the load hue")
-        XCTAssertTrue(sdf.contains("LatticeStructureColour.loadCut"),
-                      "★ …and the cut that decides which cells are load-carrying")
+        XCTAssertTrue(sdf.contains("LatticeStructureColour.interior"),
+                      "★ …and so must the interior hue")
     }
 
     /// ★ THE STRUT'S HUE IS NO LONGER THE GROUP TINT. That was the whole confusion
@@ -115,8 +116,8 @@ final class LatticeLegendColourTests: XCTestCase {
         XCTAssertFalse(body.contains("ft.a * 2.2"),
                        "★ the group tint must no longer be mixed into a strut — hue "
                        + "belongs to the lattice's structure now")
-        XCTAssertTrue(body.contains("U.rimColor") && body.contains("U.loadColor"),
-                      "★ …and the three structure hues must be what it picks between")
+        XCTAssertTrue(body.contains("U.rimColor") && body.contains("U.denseColor"),
+                      "★ …and the structure hues must be what it picks between")
     }
 
     /// ★ THE TWO LEVELS, and the way back out.
@@ -228,8 +229,13 @@ final class LatticeLegendColourTests: XCTestCase {
             return XCTFail("the key must be able to carry the stress scale")
         }
         let body = String(ws[r.lowerBound...].prefix(900))
-        XCTAssertTrue(body.contains("guard stressViewOn, let f = latticeStressField"),
+        // (The gate reads `latticeStressField != nil` rather than binding it: the peak
+        // now comes from a cached value, because computing it here walked the whole
+        // von Mises array on every body pass and stalled the page.)
+        XCTAssertTrue(body.contains("guard stressViewOn, latticeStressField != nil"),
                       "★ gated on the same condition that arms the overlay")
+        XCTAssertTrue(body.contains("latticeStressPeakMPa"),
+                      "★ …and the peak must come from the cache, not a per-frame scan")
         XCTAssertTrue(body.contains("LatticeStressTint.legendTicks")
                       && body.contains("LatticeStressTint.legendColours"),
                       "★ …and built from the SAME table the plot is painted from, so "
@@ -260,7 +266,10 @@ final class LatticeLegendColourTests: XCTestCase {
                        "★ the stress scale must NOT replace the structure rows")
         XCTAssertTrue(panel.contains("func stressArrow("),
                       "★ the stress bar needs its OWN arrow at the tapped value")
-        XCTAssertTrue(panel.contains("private var probeArrow"),
+        // The density arrow is a PARAMETER of the ramp now (`arrowAt:`) rather than a
+        // separate view, because Explore draws several ramps in a row and only the
+        // tapped one carries a marker. Pin the mechanism, not the helper's name.
+        XCTAssertTrue(panel.contains("arrowAt t: Double?"),
                       "★ …beside the density one, so one tap marks both scales")
         XCTAssertTrue(panel.contains("public let stressMPa: Double?"),
                       "★ and the reading must carry both numbers from one tap")
@@ -309,6 +318,79 @@ final class LatticeLegendColourTests: XCTestCase {
             XCTAssertTrue(e.lowerBound < g.lowerBound,
                           "★ …and BEFORE anything that needs geometry under the tap, "
                           + "or a double tap on air still does nothing")
+        }
+    }
+
+    /// ★★ A `Divider()` IN AN HSTACK IS A HEIGHT BOMB (2026-08-20). It becomes a
+    /// VERTICAL rule and expands to the available height — and this panel is laid out
+    /// inside a `maxHeight: .infinity` frame, so one stretched the key to the full
+    /// screen and pushed it up over the Settings button and the orientation cube.
+    /// The side-by-side overview must separate its columns with a SIZED rule.
+    func testTheOverviewColumnsAreSeparatedByASizedRule() throws {
+        let panel = try source("LatticeLegendPanel.swift")
+        guard let r = panel.range(of: "HStack(alignment: .top, spacing: DS.Space.m)") else {
+            return XCTFail("the overview must lay its two columns side by side")
+        }
+        // Bound the slice to the HStack ITSELF — a horizontal `Divider()` inside the
+        // drilled-in VStack below is perfectly fine, and a fixed-size window either
+        // misses the end of this block or runs into that one.
+        let rest = panel[r.lowerBound...]
+        guard let stop = rest.range(of: ".fixedSize(horizontal: false, vertical: true)") else {
+            return XCTFail("the side-by-side row must size to its content")
+        }
+        let body = String(rest[..<stop.upperBound])
+        XCTAssertFalse(body.contains("Divider()"),
+                       "★ no Divider() between the columns — in an HStack it expands "
+                       + "to the full available height and takes the panel with it")
+        XCTAssertTrue(body.contains("height: Self.barH"),
+                      "★ the separating rule must carry an explicit height")
+        XCTAssertTrue(body.contains(".fixedSize(horizontal: false, vertical: true)"),
+                      "★ …and the row must size to its content, not to the frame")
+    }
+
+    /// ★★ THE PANEL MUST BE AT LEAST AS WIDE AS WHAT GOES IN IT (maintainer,
+    /// 2026-08-20: "The modal is still being cut off ... This is the third time I've
+    /// been asking for the same fix").
+    ///
+    /// Every earlier attempt set the width by eye. SwiftUI does not shrink content to
+    /// fit a frame — it OVERFLOWS it, so a panel one point too narrow spills past its
+    /// own background and, pinned to the trailing edge, off the screen. Nothing in the
+    /// build failed; it just looked broken.
+    ///
+    /// This re-does the addition from the same constants the rows lay out with, so the
+    /// two cannot drift. If a column grows and the width is not updated, this fails
+    /// instead of the panel silently clipping.
+    func testEveryPanelWidthHoldsItsOwnContent() {
+        let pad = DS.Space.m, gap = DS.Space.xs
+        let lead: CGFloat = 44, bar: CGFloat = 26, trail: CGFloat = 58
+        let unit: CGFloat = 52, reading: CGFloat = 110, rows: CGFloat = 140
+
+        // Explore, a strut tapped: ticks | bar | ticks | reading.
+        let exploreContent = lead + gap + bar + trail + gap + reading + 2 * pad
+        XCTAssertGreaterThanOrEqual(LatticeLegendPanel.exploreWidth, exploreContent,
+            "★ Explore is \(LatticeLegendPanel.exploreWidth) but needs \(exploreContent)")
+
+        // The stress block, as `stressScale` lays it out.
+        let stressContent = lead + gap + bar + unit + DS.Space.s
+        XCTAssertGreaterThanOrEqual(LatticeLegendPanel.stressBlockWidth, stressContent,
+            "★ the stress block is short of its own columns")
+
+        // The overview, side by side, with the 1 pt rule and a gap either side of it.
+        let overviewContent = rows + pad + 1 + pad + LatticeLegendPanel.stressBlockWidth + 2 * pad
+        XCTAssertGreaterThanOrEqual(LatticeLegendPanel.overviewWithStressWidth, overviewContent,
+            "★ the side-by-side overview is \(LatticeLegendPanel.overviewWithStressWidth) "
+            + "but needs \(overviewContent) — this is the cut-off he reported three times")
+
+        XCTAssertGreaterThanOrEqual(LatticeLegendPanel.overviewWidth, rows + 2 * pad,
+            "★ the rows-only overview must hold its own column")
+
+        // And every width must fit an iPad's short side with the page inset, or the
+        // key is off-screen the moment the device is portrait.
+        for (name, w) in [("explore", LatticeLegendPanel.exploreWidth),
+                          ("explore-untapped", LatticeLegendPanel.exploreUntappedWidth),
+                          ("overview", LatticeLegendPanel.overviewWidth),
+                          ("overview+stress", LatticeLegendPanel.overviewWithStressWidth)] {
+            XCTAssertLessThan(w, 620, "★ \(name) at \(w) is too wide for the edge it sits on")
         }
     }
 }
