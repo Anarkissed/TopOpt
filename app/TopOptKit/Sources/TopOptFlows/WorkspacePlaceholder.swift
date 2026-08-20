@@ -72,6 +72,13 @@ public struct WorkspacePlaceholder: View {
     /// gizmo sitting over the struts is the thing being read.
     @State private var latticeLegendMode: LatticeLegendMode = .groups
     @State private var latticeLegendProbe: LatticeLegendProbe?
+    /// ★ Collapsed to a single column, out of the way ("There should also be a way to
+    /// minimize the legends ... like the lone stress map legend").
+    @State private var latticeLegendMinimized = false
+    /// ★ Whether the lattice settings have been confirmed (Save & Exit) THIS session.
+    /// The gate for popping them open — not `lattice.enabled`, which is true for any
+    /// project configured on a previous run and so never opened them again.
+    @State private var latticeSettingsSavedThisSession = false
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
     /// ★★ WHETHER A STRUT BAKE IS IN FLIGHT (maintainer, 2026-08-19: "There is
@@ -1119,6 +1126,7 @@ public struct WorkspacePlaceholder: View {
             if showLatticeWizard {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
+                    latticeSettingsSavedThisSession = true
                     refreshLatticeFaceCards()
                     // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17).
                     startStressSolveIfNeeded()
@@ -2309,9 +2317,26 @@ public struct WorkspacePlaceholder: View {
         // ★ THE SELECTION MOVED ⇒ THE MASK MOVED ⇒ REBAKE. See
         // `latticeRegionInputsKey` for why this is a hash and not the regions.
         .onChange(of: latticeRegionInputsKey) { _ in
+            // ★ The same inputs feed the solve's fingerprint, so a change here can
+            // make the field STALE as well as the bake. Idempotent when it is not.
+            if showStrutPreview, project.lattice.enabled { startStressSolveIfNeeded() }
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
-        .onChange(of: showLatticePage) { open in if open { syncLatticeProxy() } }
+        .onChange(of: showLatticePage) { open in
+            if open { syncLatticeProxy() }
+            // ★★ NOTHING SAVED ⇒ SETTINGS FIRST (maintainer, 2026-08-19: "Settings
+            // didn't automatically open up when I pressed lattice. Please make it so
+            // if there are no settings saved, it opens the settings up before showing
+            // the preview").
+            //
+            // ★ AND IT LISTENS ON THE RIGHT SIGNAL THIS TIME. The first cut watched
+            // `stage`, but the Lattice button opens the lattice PAGE — `stage` never
+            // moved, so the trigger never fired. Both doors are covered below.
+            if open { openLatticeSettingsIfUnconfigured() }
+        }
+        .onChange(of: stage) { s in
+            if s == .lattice { openLatticeSettingsIfUnconfigured() }
+        }
         // Graded follow-up: when a run's accepted variants land (streamed or final),
         // rebake the strut scene so its radii grade by the fresh von Mises field.
         // Keyed on acceptedCount (cheap, Equatable); no-op while the preview is off.
@@ -2324,6 +2349,7 @@ public struct WorkspacePlaceholder: View {
         // keeps a scene baked before the solve existed — uniform struts, every tap
         // reading the floor, and a stress overlay that can never arm.
         .onChange(of: latticeStressFieldKey) { _ in
+            refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
         // BAR 4, the other half: when a run produced nothing and the previous run's
@@ -2936,6 +2962,37 @@ public struct WorkspacePlaceholder: View {
                         get: { showStrutPreview },
                         set: { on in
                             showStrutPreview = on
+                            // ★★ THE PREVIEW NEEDS THE FEA, AND NOBODY WAS ASKING FOR
+                            // IT (maintainer, 2026-08-19: "The lattice tapping went
+                            // back to saying 5% everywhere again" / "only works with
+                            // the stress map overlay only").
+                            //
+                            // `startStressSolveIfNeeded()` had exactly ONE caller: the
+                            // wizard's Save & Exit. So a preview turned on without
+                            // going through the wizard graded against `latticeSim.field
+                            // == nil` — no demand, `uniformRho` struts, and every tap
+                            // reading the floor of the band. It looked like it "only
+                            // worked with the stress view" because that is the other
+                            // path that happens to leave a field behind.
+                            //
+                            // The call is idempotent — it returns early unless
+                            // `needsStressSolve` and the existing field is stale — so
+                            // asking here costs nothing when the answer is already in
+                            // hand.
+                            // ★★ THIS IS THE BUTTON HE MEANS (maintainer, 2026-08-19:
+                            // "The setting still has not come up!", third time).
+                            //
+                            // I had it on `stage` and then on `showLatticePage`. But
+                            // he is ALREADY on the lattice stage, and the bottom
+                            // "Lattice" button RUNS a job — neither ever fires. The
+                            // "lattice view" he means is this one: the strut-preview
+                            // toggle. Settings open as it comes on, unless they have
+                            // been confirmed this session.
+                            if on {
+                                openLatticeSettingsIfUnconfigured()
+                                startStressSolveIfNeeded()
+                                refreshLatticeStressPeak()
+                            }
                             if on, strutScene == nil { buildStrutScene() }
                         }),
                     baseCanOptimize: canOptimize,
@@ -2999,6 +3056,23 @@ public struct WorkspacePlaceholder: View {
     ///     `LatticeSimModel`'s own fingerprint — the model, the material, the
     ///     resolution and the declared load case. Re-solving identical inputs
     ///     produces an identical field
+    /// ★ Open the lattice settings when the project has none — and ONLY then. Once a
+    /// lattice is configured, popping a sheet over the preview every time he arrives
+    /// would be in the way rather than helpful, which is why this is gated on
+    /// `enabled` rather than firing unconditionally.
+    private func openLatticeSettingsIfUnconfigured() {
+        // ★★ ONCE PER SESSION (maintainer, 2026-08-19: "Make it open up as soon as
+        // you click the button if it hasn't already saved this session").
+        //
+        // Gating on `project.lattice.enabled` was wrong twice over: his project was
+        // already enabled from a previous run, so the sheet never opened; and it
+        // asked about the SAVED state when what matters is whether the settings have
+        // been confirmed in front of him now — Save & Exit is what re-fingerprints
+        // the solve.
+        guard !latticeSettingsSavedThisSession, !showLatticeWizard else { return }
+        showLatticeWizard = true
+    }
+
     private func startStressSolveIfNeeded() {
         guard project.lattice.enabled, project.lattice.needsStressSolve,
               let ctx = model.makeLatticeSimContext()
@@ -3279,13 +3353,17 @@ public struct WorkspacePlaceholder: View {
             span: span,
             mmAt: { 2 * topo.strutRadiusMM(relativeDensity: $0, cellMM: cell) },
             mode: $latticeLegendMode,
+            minimized: $latticeLegendMinimized,
             probe: latticeLegendProbe,
             // ★ ONLY WITH BOTH VIEWS UP — the same condition that arms the overlay on
             // the struts (`stressOverlay:` on the lattice layer). A scale for colours
             // the renderer is not painting would be worse than no scale.
             stress: latticeLegendStress())
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-            .padding(.trailing, PageChrome.edge)
+            // ★ MINIMISED, IT SITS ON THE EDGE (maintainer: "attach the legend modal
+            // to the very far right side of the screen") — the point of collapsing it
+            // is to give the part the width back, so the inset goes too.
+            .padding(.trailing, latticeLegendMinimized ? 0 : PageChrome.edge)
             .accessibilityIdentifier("lattice-density-legend")
     }
 
@@ -3317,9 +3395,9 @@ public struct WorkspacePlaceholder: View {
         // `dPart` and `dRegion`; repeating that here (rather than guessing from
         // density alone) is what lets the arrow land on the right row — a rim strut
         // is often dense, so density alone would call it load-carrying.
-        let frac = (rho - span.lo) / Swift.max(1e-6, span.hi - span.lo)
-        var klass: LatticeStructureClass = frac >= LatticeStructureColour.loadCut
-            ? .load : .interior
+        // ★ TWO CLASSES NOW: boundary work, or fill. The density-threshold class was
+        // removed — lightness already carries density, and stress carries the load.
+        var klass: LatticeStructureClass = .interior
         let level = project.lattice.boundary.previewDressingLevel
         if level > 0 {
             let band = Swift.max(0.12 * cellMM, 1e-4)
@@ -3424,8 +3502,8 @@ public struct WorkspacePlaceholder: View {
     /// standalone plot legend uses — so the two can never disagree about what a
     /// colour is worth.
     private func latticeLegendStress() -> LatticeLegendStress? {
-        guard stressViewOn, let f = latticeStressField else { return nil }
-        let peak = LatticeStressTint.peakMPa(f)
+        guard stressViewOn, latticeStressField != nil else { return nil }
+        let peak = latticeStressPeakMPa
         guard peak > 0 else { return nil }
         return LatticeLegendStress(
             ticks: LatticeStressTint.legendTicks(peakMPa: peak),
@@ -3466,8 +3544,8 @@ public struct WorkspacePlaceholder: View {
     }
 
     @ViewBuilder private var stressLegend: some View {
-        if let f = latticeStressField {
-            let peak = LatticeStressTint.peakMPa(f)
+        if latticeStressField != nil {
+            let peak = latticeStressPeakMPa
             let ticks = LatticeStressTint.legendTicks(peakMPa: peak)
             HStack(alignment: .center, spacing: DS.Space.xs) {
                 VStack(alignment: .trailing, spacing: 0) {
@@ -3590,8 +3668,31 @@ public struct WorkspacePlaceholder: View {
         h.combine(f.nx); h.combine(f.ny); h.combine(f.nz)
         h.combine(f.vonMises.count)
         h.combine(f.spacingMM)
-        h.combine(LatticeStressTint.peakMPa(f))
+        // ★★ NO FULL-FIELD SCAN HERE (maintainer, 2026-08-19: "Lattice is taking
+        // forever - something is delaying it"). This key is read by `.onChange`, so
+        // SwiftUI evaluates it on EVERY body pass — every orbit tick, every frame of
+        // a drag. The first cut folded in `peakMPa`, which walks the whole von Mises
+        // array: a 64³ field is 262,144 floats, scanned per frame, for a value that
+        // only changes when the solve does.
+        //
+        // 32 strided samples identify a re-solve just as well for this purpose (the
+        // dims and count already catch a different mesh) and cost a fixed 32 reads.
+        let n = f.vonMises.count
+        if n > 0 {
+            let step = Swift.max(1, n / 32)
+            var i = 0
+            while i < n { h.combine(f.vonMises[i]); i += step }
+        }
         return h.finalize()
+    }
+
+    /// ★ THE PEAK, COMPUTED ONCE PER FIELD — not once per frame. Both legends and the
+    /// tick labels need it; walking the array for each of them, on every body pass,
+    /// was the other half of the stall.
+    @State private var latticeStressPeakMPa: Double = 0
+
+    private func refreshLatticeStressPeak() {
+        latticeStressPeakMPa = latticeStressField.map { LatticeStressTint.peakMPa($0) } ?? 0
     }
 
     /// ★★ WHAT `latticeJobRegions()` READS BESIDES `project.lattice` — AND THE
@@ -5628,7 +5729,25 @@ public struct WorkspacePlaceholder: View {
                     if showStrutPreview {
                         showStrutPreview = false
                     } else {
+                        // ★★ THE ACTUAL LATTICE-VIEW BUTTON (maintainer, 2026-08-19:
+                        // "lattice View button still didn't open up settings", after
+                        // three misses). There are TWO places `showStrutPreview` is
+                        // turned on — the `previewOn` binding in the lattice overlay,
+                        // which I kept editing, and THIS `viewModeButton`, which is
+                        // the cube in the round cluster he actually presses.
+                        //
+                        // ★ AND SETTINGS COME FIRST, BEFORE ANY BAKE ("It should do
+                        // so *immediately* without giving a chance for the lattice to
+                        // load if the setting hasn't been saved yet"). The preview is
+                        // armed but NOT built here; the wizard's Save & Exit is what
+                        // bakes it, so nothing expensive starts behind the sheet.
                         showStrutPreview = true
+                        if !latticeSettingsSavedThisSession {
+                            openLatticeSettingsIfUnconfigured()
+                            return
+                        }
+                        startStressSolveIfNeeded()
+                        refreshLatticeStressPeak()
                         if strutScene == nil { buildStrutScene() }
                     }
                 }
