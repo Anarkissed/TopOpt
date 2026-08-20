@@ -86,6 +86,45 @@ final class UnifiedShadingTests: XCTestCase {
         return r
     }
 
+    // MARK: - the shaders must COMPILE, not merely read correctly
+
+    /// ★★ THE ONE TEST THAT WOULD HAVE CAUGHT IT (2026-08-19). A parameter was added
+    /// to the wrong MSL function — `lsdf_normal` got it, `lsdf_albedo` used it
+    /// undeclared — and the lattice DISAPPEARED from the app. Nothing went red:
+    ///
+    ///   * the pipelines are built with `try?`, so a compile error is a nil pipeline
+    ///     and never an exception;
+    ///   * every lattice GPU test opens with
+    ///     `XCTSkipUnless(renderer.latticePipelinesDidBuild)`, so the moment the
+    ///     shader stops compiling they all SKIP — and a skip reads as green;
+    ///   * every other shader test scans the source as TEXT, which a syntax error
+    ///     passes happily.
+    ///
+    /// So the suite could be entirely green while the app drew no struts at all.
+    /// This compiles the real source and FAILS on a diagnostic.
+    func testTheShaderSourcesActuallyCompile() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("no Metal device")
+        }
+        // ★★ ALL FOUR, INCLUDING THE STANDALONE PREVIEW. Leaving it out is exactly
+        // how a broken `lsdf_albedo` signature reached the full suite as two SKIPS
+        // (LatticeSDFEvidenceGen, LatticeSDFProfileTests both open with
+        // `XCTSkipUnless`/skip-on-init) instead of a red test.
+        for (name, src) in [("lattice", MeshRenderer.latticeShaderSourceForTesting),
+                            ("standalone lattice",
+                             MeshRenderer.standaloneLatticeShaderSourceForTesting),
+                            ("viewer", MeshRenderer.viewerShaderSourceForTesting),
+                            ("stage", MeshRenderer.stageShaderSourceForTesting)] {
+            do {
+                _ = try device.makeLibrary(source: src, options: nil)
+            } catch {
+                XCTFail("★ the \(name) MSL does not compile, and NOTHING else in this "
+                        + "suite will tell you: the pipeline is built with `try?` and "
+                        + "the GPU tests SKIP when it is nil. \(error)")
+            }
+        }
+    }
+
     // MARK: - §1(d): ONE material, not two
 
     /// ★ THE MATERIAL IS DEFINED ONCE, AND BOTH SHADERS ARE BUILT OUT OF THAT ONE

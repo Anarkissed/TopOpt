@@ -1265,6 +1265,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The exact unified-lattice MSL the app ships, exposed so a headless test
     /// compiles it (the pipelines above are built with `try?`).
     static var latticeShaderSourceForTesting: String { unifiedLatticeShaderSource }
+    /// ★ THE STANDALONE PREVIEW'S OWN SHADER. A FOURTH source, sharing
+    /// `lsdf_albedo` with the unified one — so a signature change breaks it too, and
+    /// it is built with `try?` in a renderer whose tests SKIP when init fails. Exposed
+    /// so the compile guard can cover it rather than letting it hide as a skip.
+    static var standaloneLatticeShaderSourceForTesting: String {
+        LatticeSDFRenderer.shaderSource
+    }
 
     /// The lattice layer drawn INSIDE this renderer's passes: a bake-only
     /// `LatticeSDFRenderer` that owns the per-cell field, the part SDF, the tint volume
@@ -4311,6 +4318,161 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// Resolve the face id at a normalized tap point (x,y ∈ [0,1], y down) via the
     /// id pass, keeping "empty space" and "no pass" apart.
+    /// One reading of the lattice under a tap, in the two spaces the caller needs:
+    /// `model` to sample the baked grids, `world` to put a label back on screen.
+    struct LatticeProbeHit { let model: SIMD3<Float>; let world: SIMD3<Float> }
+
+    /// ★★ THE TAP PROBE — THE STRUT UNDER THE FINGER, NOT THE FACE BEHIND IT
+    /// (maintainer, 2026-08-19: "I attempted to touch the green 'Load bearing' area.
+    /// But it didn't work. The tap isn't registering well enough").
+    ///
+    /// The first cut routed the reading through `onPickPoint`, i.e. the FACE picker:
+    /// it answers with a point on the nearest CAD face, so a tap on a strut standing
+    /// proud of that face reported the wall behind it — and a tap where the id pass
+    /// says "background" reported nothing at all, which is why the green cells would
+    /// not take a touch.
+    ///
+    /// This reads the G-buffer the march already wrote: `gbufferAlbedoTex`'s alpha is
+    /// the "this pixel is a strut" mask, and `sceneDepthColorTex` holds eye-Z, so one
+    /// encode answers both "is this lattice" and "how far away". Only a 1x1 region is
+    /// copied back. Returns the MODEL-space point of the strut surface, or nil when
+    /// the pixel is not lattice — the caller then falls through to ordinary picking.
+    func latticeProbe(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> LatticeProbeHit? {
+        guard vertexDrawCount > 0, latticeInFrame, width > 0, height > 0 else { return nil }
+        sceneDepthColorTex = nil; sceneDepthZTex = nil
+        sceneNormalTex = nil; gbufferAlbedoTex = nil
+        let cdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.colorFormat, width: width, height: height, mipmapped: false)
+        cdesc.usage = [.renderTarget]; cdesc.storageMode = .private
+        let ddesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.depthFormat, width: width, height: height, mipmapped: false)
+        ddesc.usage = [.renderTarget]; ddesc.storageMode = .private
+        if sampleCount > 1 { ddesc.textureType = .type2DMultisample; ddesc.sampleCount = sampleCount }
+        guard let color = device.makeTexture(descriptor: cdesc),
+              let depth = device.makeTexture(descriptor: ddesc),
+              let cmd = queue.makeCommandBuffer() else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        if let msaa = msaaTexture(width: width, height: height) {
+            rpd.colorAttachments[0].texture = msaa
+            rpd.colorAttachments[0].resolveTexture = color
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+        } else {
+            rpd.colorAttachments[0].texture = color
+            rpd.colorAttachments[0].storeAction = .store
+        }
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.depthAttachment.texture = depth
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        rpd.depthAttachment.storeAction = .dontCare
+        let aspect = Float(width) / Float(Swift.max(1, height))
+        encode(into: rpd, aspect: aspect, into: cmd, drawStage: false)
+        guard lastFrameHadLatticeGBuffer,
+              let alb = gbufferAlbedoTex, let eyeZTex = sceneDepthColorTex,
+              let blit = cmd.makeBlitCommandEncoder() else { cmd.commit(); return nil }
+
+        // The G-buffer has its own size (the 1152 cap), so the tap maps through ITS
+        // dimensions, never the view's.
+        let gx = Swift.min(Swift.max(Int(p.x * CGFloat(alb.width)), 0), alb.width - 1)
+        let gy = Swift.min(Swift.max(Int(p.y * CGFloat(alb.height)), 0), alb.height - 1)
+
+        // ★★ A FINGERTIP IS NOT A PIXEL (maintainer, 2026-08-19: "I attempted to
+        // touch the green 'Load bearing' area. But it didn't work. The tap isn't
+        // registering well enough").
+        //
+        // Struts are THIN, and between them the ray passes straight through to the
+        // shell — so asking whether the single tapped texel is a strut fails most of
+        // the time even when the finger is squarely on the lattice. This reads a
+        // WINDOW around the tap and takes the NEAREST strut texel in it, which turns
+        // a one-pixel target into a touch-sized one. `r` is ~2% of the G-buffer's
+        // long side: big enough to catch a finger, small enough that the answer is
+        // still the strut he was pointing at.
+        let r = Swift.max(6, Swift.min(alb.width, alb.height) / 48)
+        let x0 = Swift.max(0, gx - r), y0 = Swift.max(0, gy - r)
+        let x1 = Swift.min(alb.width - 1, gx + r), y1 = Swift.min(alb.height - 1, gy + r)
+        let ww = x1 - x0 + 1, hh = y1 - y0 + 1
+        let origin = MTLOrigin(x: x0, y: y0, z: 0)
+        let one = MTLSize(width: ww, height: hh, depth: 1)
+        let adesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: alb.pixelFormat, width: ww, height: hh, mipmapped: false)
+        adesc.usage = [.shaderRead]
+        let zdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: eyeZTex.pixelFormat, width: ww, height: hh, mipmapped: false)
+        zdesc.usage = [.shaderRead]
+        #if os(macOS)
+        adesc.storageMode = .managed; zdesc.storageMode = .managed
+        #else
+        adesc.storageMode = .shared; zdesc.storageMode = .shared
+        #endif
+        guard let aStage = device.makeTexture(descriptor: adesc),
+              let zStage = device.makeTexture(descriptor: zdesc) else {
+            blit.endEncoding(); cmd.commit(); return nil
+        }
+        blit.copy(from: alb, sourceSlice: 0, sourceLevel: 0, sourceOrigin: origin,
+                  sourceSize: one, to: aStage, destinationSlice: 0,
+                  destinationLevel: 0, destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        blit.copy(from: eyeZTex, sourceSlice: 0, sourceLevel: 0, sourceOrigin: origin,
+                  sourceSize: one, to: zStage, destinationSlice: 0,
+                  destinationLevel: 0, destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        #if os(macOS)
+        blit.synchronize(resource: aStage); blit.synchronize(resource: zStage)
+        #endif
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+
+        var rgba = [UInt8](repeating: 0, count: ww * hh * 4)
+        aStage.getBytes(&rgba, bytesPerRow: ww * 4,
+                        from: MTLRegionMake2D(0, 0, ww, hh), mipmapLevel: 0)
+        var zbuf = [Float](repeating: 0, count: ww * hh)
+        zStage.getBytes(&zbuf, bytesPerRow: ww * 4,
+                        from: MTLRegionMake2D(0, 0, ww, hh), mipmapLevel: 0)
+
+        // Nearest strut texel to the tap, by squared distance.
+        var bestI = -1, bestD = Int.max
+        for j in 0..<hh {
+            for i in 0..<ww {
+                let n = j * ww + i
+                guard rgba[n * 4 + 3] >= 128 else { continue }
+                let z = zbuf[n]
+                guard z > 0, z < Self.sceneDepthFar * 0.99 else { continue }
+                let dx = (x0 + i) - gx, dy = (y0 + j) - gy
+                let d = dx * dx + dy * dy
+                if d < bestD { bestD = d; bestI = n }
+            }
+        }
+        guard bestI >= 0 else { return nil }          // no lattice under the finger
+        let hitX = x0 + (bestI % ww), hitY = y0 + (bestI / ww)
+        let eyeZ = zbuf[bestI]
+
+        // Eye-space from the pixel — the same reconstruction the AO pass does on the
+        // GPU — then back through the model-view the frame was drawn with.
+        let proj = camera.projectionMatrix(aspect: aspect)
+        let tanY = 1 / Swift.max(proj.columns.1.y, 1e-6)
+        let tanX = 1 / Swift.max(proj.columns.0.x, 1e-6)
+        let ndcX = (Float(hitX) + 0.5) / Float(alb.width) * 2 - 1
+        let ndcY = 1 - (Float(hitY) + 0.5) / Float(alb.height) * 2
+        let eye = SIMD4<Float>(ndcX * tanX * eyeZ, ndcY * tanY * eyeZ, -eyeZ, 1)
+        // ★★ BOTH SPACES, AND THE DIFFERENCE MATTERS (maintainer, 2026-08-19: "The
+        // arrow is no where near where I tapped"). `modelViewMatrix()` is
+        // `view · model`, and `model` is the SETTLE rotation that drops the part onto
+        // the floor — so the two answers are genuinely different points:
+        //
+        //   MODEL space (inverse of view·model) is where the baked grids live, and is
+        //     the only space in which sampling the density means anything.
+        //   WORLD space (inverse of view alone) is what `CameraProjection.project`
+        //     takes, and is the only space that puts a label back on the strut.
+        //
+        // Returning only the model point made the caller project a model-space
+        // coordinate through a world-space projector: the callout landed far from the
+        // finger AND the density was sampled somewhere else entirely, which is why
+        // every reading came back at the floor of the band.
+        let model = simd_inverse(modelViewMatrix()) * eye
+        let world = simd_inverse(camera.viewMatrix()) * eye
+        return LatticeProbeHit(model: SIMD3<Float>(model.x, model.y, model.z),
+                               world: SIMD3<Float>(world.x, world.y, world.z))
+    }
+
     func pickFacePass(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> FaceIDPass {
         guard let ids = renderFaceIDOffscreen(width: width, height: height)
         else { return .unavailable }
@@ -4440,6 +4602,12 @@ struct MeshViewInputs {
     /// point-aware handler has to get first refusal — otherwise the face-id route
     /// has already acted on the whole face by the time the point arrives.
     var onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)?
+    /// ★ Non-nil only while the lattice key is drilled into a colour: a tap then
+    /// READS the strut under the finger (via the march's G-buffer) instead of
+    /// selecting a face.
+    var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
+    /// Non-nil while the lattice key is drilled in: a double tap ANYWHERE leaves it.
+    var onLatticeProbeExit: (() -> Void)?
     /// ★ §1(b) — THE SECOND TAP. A DOUBLE tap with the same one contact, carrying
     /// the same face and point the single tap does.
     ///
@@ -4638,6 +4806,8 @@ public struct MetalMeshView: UIViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
+                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)? = nil,
+                onLatticeProbeExit: (() -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
@@ -4664,7 +4834,9 @@ public struct MetalMeshView: UIViewRepresentable {
                                 weldedFaces: weldedFaces, previewLines: previewLines, cutPlane: cutPlane, pickChains: pickChains, xray: xray,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace,
-            onPickPoint: onPickPoint, onPickDouble: onPickDouble, onMiss: onMiss,
+            onPickPoint: onPickPoint, onLatticeProbe: onLatticeProbe,
+            onLatticeProbeExit: onLatticeProbeExit,
+            onPickDouble: onPickDouble, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
@@ -4795,6 +4967,8 @@ public struct MetalMeshView: NSViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
+                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)? = nil,
+                onLatticeProbeExit: (() -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
@@ -4821,7 +4995,9 @@ public struct MetalMeshView: NSViewRepresentable {
                                 weldedFaces: weldedFaces, previewLines: previewLines, cutPlane: cutPlane, pickChains: pickChains, xray: xray,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace,
-            onPickPoint: onPickPoint, onPickDouble: onPickDouble, onMiss: onMiss,
+            onPickPoint: onPickPoint, onLatticeProbe: onLatticeProbe,
+            onLatticeProbeExit: onLatticeProbeExit,
+            onPickDouble: onPickDouble, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
@@ -4963,6 +5139,13 @@ extension MetalMeshView {
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
         private var onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)?
+        /// ★ Set only while the lattice key is drilled in; when it is, a tap READS a
+        /// strut instead of selecting, and it is answered by the march's own
+        /// G-buffer rather than by the face picker.
+        private var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
+        /// ★ The way OUT of the drilled-in key. Separate from `onPickDouble` because
+        /// that one needs a face, and leaving a key is not a thing you do TO a face.
+        private var onLatticeProbeExit: (() -> Void)?
         private var onMiss: (() -> Void)?
         private var onProjection: ((CameraProjection) -> Void)?
         private var onUndo: (() -> Void)?
@@ -5005,6 +5188,8 @@ extension MetalMeshView {
             faceToolActive = inputs.faceToolActive
             onPickFace = inputs.onPickFace
             onPickPoint = inputs.onPickPoint
+            onLatticeProbe = inputs.onLatticeProbe
+            onLatticeProbeExit = inputs.onLatticeProbeExit
             onMiss = inputs.onMiss
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo
@@ -5019,7 +5204,15 @@ extension MetalMeshView {
             #if os(iOS) || os(macOS)
             // ★ THE LATENCY GATE (§1b). Off ⇒ the single tap's `require(toFail:)`
             // is satisfied instantly and a pick is as immediate as it ever was.
-            let wantsDouble = inputs.onPickDouble != nil
+            //
+            // ★★ …AND THE LATTICE KEY'S EXIT COUNTS AS WANTING ONE (maintainer,
+            // 2026-08-19: "The double-tap to exit isn't working again"). It was not a
+            // handler bug: moving the exit onto `onLatticeProbeExit` — so it would no
+            // longer need a face under the finger — left this gate still asking only
+            // about `onPickDouble`, which the lattice page passes as nil. The
+            // recognizer was therefore DISABLED and the second tap never arrived at
+            // all. Both reasons to want a double tap have to be asked about here.
+            let wantsDouble = inputs.onPickDouble != nil || inputs.onLatticeProbeExit != nil
             for r in doubleTapRecognizers where r.isEnabled != wantsDouble {
                 r.isEnabled = wantsDouble
             }
@@ -5484,11 +5677,31 @@ extension MetalMeshView {
         /// hit-test that could disagree with the first about what was under them.
         private func pick(at location: CGPoint, in view: MTKView,
                           deliver: ((FaceID?, SIMD3<Float>?) -> Void)? = nil) {
-            guard faceToolActive, !paintActive, let renderer else { return }
+            guard !paintActive, let renderer else { return }
             let size = view.bounds.size
             guard size.width > 0, size.height > 0 else { return }
             let normalized = CGPoint(x: location.x / size.width, y: location.y / size.height)
             let w = Int(view.drawableSize.width), h = Int(view.drawableSize.height)
+
+            // ★★ THE KEY'S READING COMES FIRST, and does not need `faceToolActive`:
+            // reading a strut is not selecting, so it must work on a page where the
+            // face tool is parked. A miss falls through to ordinary picking.
+            //
+            // ★ …BUT ONLY FOR A SINGLE TAP (maintainer, 2026-08-19: "the double tap
+            // is no longer working - which is strange. It was working before"). It
+            // was: `pickDouble` resolves the SECOND tap through this same function,
+            // handing in a `deliver` closure — so the probe was intercepting the
+            // double tap and returning before `onPickDouble` could fire, which is
+            // the one gesture that gets him back OUT of the drilled-in key.
+            // `deliver == nil` is exactly "this is the single-tap path".
+            if deliver == nil, let probe = onLatticeProbe {
+                if let hit = renderer.latticeProbe(atNormalizedPoint: normalized,
+                                                   width: w, height: h) {
+                    probe(hit.model, hit.world)
+                    return
+                }
+            }
+            guard faceToolActive else { return }
 
             // ★ ONE RAY, IN *MODEL* SPACE, FOR EVERYTHING BELOW.
             //
@@ -5704,6 +5917,17 @@ extension MetalMeshView {
         /// Resolve a double tap to a face + point and hand it over. Shares
         /// `pick`'s ray so the two taps cannot disagree about what was under them.
         private func pickDouble(_ g: UITapGestureRecognizer) {
+            // ★★ LEAVING THE KEY WORKS ANYWHERE (maintainer, 2026-08-19: "the double
+            // tap works, but only on the model. I would prefer the double tap work
+            // *anywhere*"). It only worked over geometry because the resolve below
+            // drops a miss on the floor — `guard let face else { return }` — which is
+            // right for "double tap selects the ones like it" and wrong for a gesture
+            // that means "go back". So the exit is answered FIRST, and never needs a
+            // face under the finger.
+            if let onLatticeProbeExit {
+                onLatticeProbeExit()
+                return
+            }
             guard let view = g.view as? MTKView, let onPickDouble else { return }
             guard !gesture.armed else { return }   // a brush is not a face picker
             pick(at: g.location(in: view), in: view) { face, point in

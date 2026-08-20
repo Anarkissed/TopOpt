@@ -66,6 +66,12 @@ public struct WorkspacePlaceholder: View {
     /// state lives on the project, so closing it never discards a choice.
     @State private var showBuildOrientation = false
     @State private var showStrutPreview = false
+    /// ★ WHICH LEVEL THE LATTICE KEY IS ON, and the reading taken by tapping a
+    /// strut (maintainer, 2026-08-19). Drilling in also HIDES the primitives and
+    /// handles — he asked for the part unobstructed while reading the scale, and a
+    /// gizmo sitting over the struts is the thing being read.
+    @State private var latticeLegendMode: LatticeLegendMode = .groups
+    @State private var latticeLegendProbe: LatticeLegendProbe?
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
     /// ★★ WHETHER A STRUT BAKE IS IN FLIGHT (maintainer, 2026-08-19: "There is
@@ -618,6 +624,24 @@ public struct WorkspacePlaceholder: View {
                           // ★ §6 — the same tap, with its 3D point. Only the point
                           // distinguishes the two halves of a cut face.
                           onPickPoint: { fid, pt in
+                              // ★★ WHILE THE KEY IS DRILLED INTO A COLOUR, A TAP
+                              // READS THE LATTICE INSTEAD OF SELECTING (maintainer,
+                              // 2026-08-19: "touching any part of the lattice
+                              // *single tap* leads to an arrow pointing to the exact
+                              // hue/density of the area. Single tap elsewhere does
+                              // the same - switching colours if needed").
+                              //
+                              // Returning TRUE consumes it, which is the point: he is
+                              // reading the part, and a tap that silently regrouped a
+                              // face while he read it would be the worst kind of
+                              // side effect.
+                              // ★ The KEY's reading no longer rides this callback —
+                              // it is answered by `onLatticeProbe` from the march's
+                              // own G-buffer, because the face picker reported the
+                              // wall BEHIND a strut and missed entirely where the id
+                              // pass said "background". This only has to make sure a
+                              // tap cannot also change the selection while reading.
+                              if latticeLegendMode.drilledIn { return true }
                               guard let m = viewerMesh else { return false }
                               if visible.surfaceEditing {
                                   handleSurfacePick(fid, at: pt, mesh: m)
@@ -629,6 +653,18 @@ public struct WorkspacePlaceholder: View {
                               // and only the hit POINT can tell them apart.
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
                           },
+                          // ★ Only while drilled in — the PRESENCE of this closure is
+                          // what makes a tap read a strut instead of selecting a face.
+                          onLatticeProbe: latticeLegendMode.drilledIn
+                              ? { model, world in
+                                  setLatticeProbe(at: model, world: world)
+                              } : nil,
+                          // ★ …and the way back out, from anywhere on the viewport.
+                          onLatticeProbeExit: latticeLegendMode.drilledIn
+                              ? {
+                                  latticeLegendMode = .groups
+                                  latticeLegendProbe = nil
+                              } : nil,
                           // ★ §1(b) — DOUBLE TAP = THE ONES LIKE IT.
                           //
                           // ★ §1(e) — AND ONLY WITH THE SELECT TOOL. Handing this
@@ -640,6 +676,12 @@ public struct WorkspacePlaceholder: View {
                           // re-checks the tool anyway, because a value that gates
                           // a gesture should not be the only thing that gates its
                           // effect.
+                          // ★ AND A DOUBLE TAP COMES BACK OUT ("A double tap
+                          // brings back out to the main legend view"). Mounted
+                          // whenever the key is drilled in, so the way back does not
+                          // depend on which surface tool happens to be armed.
+                          // ★ The drilled-in exit moved to `onLatticeProbeExit`, which
+                          // does not need a face under the finger.
                           onPickDouble: surfaceDoubleTapSelectsSimilar
                               ? { fid, _ in handleSurfaceDoubleTap(fid) }
                               : nil,
@@ -737,10 +779,12 @@ public struct WorkspacePlaceholder: View {
                           showWireframe: (visible.wireframe && surfaceWireframeOn)
                               || !surfacePreviewLineBuffer.isEmpty,
                           designBox: (showDesignGizmo && !showSmoothingPage
-                                      && visible.designBox)
+                                      && visible.designBox
+                                      && !latticeLegendMode.drilledIn)
                               ? project.designBox.box : nil,
                           keepOutBoxes: (showDesignGizmo && !showSmoothingPage
-                                         && visible.keepOuts)
+                                         && visible.keepOuts
+                                         && !latticeLegendMode.drilledIn)
                               ? project.designBox.keepOuts : [],
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
@@ -771,9 +815,14 @@ public struct WorkspacePlaceholder: View {
                           // stage draws the keep-outs and the group primitives; the
                           // LATTICE stage draws the depth planes and nothing else.
                           // `stageVolumeItems` is the one place that decides.
+                          // ★ …and NONE of them while the key is drilled in: the
+                          // depth planes and keep-out volumes are exactly the
+                          // "primitives" he wants out of the way while reading a
+                          // strut.
                           clearanceVolumes:
                               (showLatticePage
                                || (force.phase == .edit && !fullScreenPageUp))
+                              && !latticeLegendMode.drilledIn
                               ? stageVolumeItems : [],
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
@@ -914,7 +963,12 @@ public struct WorkspacePlaceholder: View {
                 // affordance: they answer "what is pushing on this part", which is
                 // not a question this stage asks. `visible.groupPrimitives` is the
                 // stage table's own word for "the TO page's in-scene editors".
-                if visible.groupPrimitives {
+                // ★ INCLUDING THE FORCE ARROWS (maintainer, 2026-08-19: "the
+                // primitives and handles are not hidden when we touch into the
+                // legend!"). The first cut gated only the three GIZMO overlays; the
+                // ⬇ load/anchor markers are drawn here and were still sitting over
+                // the struts he was trying to read.
+                if visible.groupPrimitives, !latticeLegendMode.drilledIn {
                     arrowsOverlay.ignoresSafeArea()             // D6: force arrow shafts
                 }
                 // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
@@ -924,7 +978,11 @@ public struct WorkspacePlaceholder: View {
                 // §2a/§2b: the design box is a TO-PAGE primitive. Its handles go
                 // with it — hidden on the lattice stage, and NOT disabled: the box
                 // is still armed and still bounds the run.
-                if showDesignGizmo, visible.designBox {
+                // ★ …AND NOT WHILE THE LATTICE KEY IS DRILLED IN (maintainer,
+                // 2026-08-19: "hide any primitives and handles when someone taps
+                // into the legend"). He is reading struts against a scale; a gizmo
+                // box sitting over them hides the thing being read.
+                if showDesignGizmo, visible.designBox, !latticeLegendMode.drilledIn {
                     designGizmoOverlay.ignoresSafeArea()            // dom-app resize/move handles
                 }
                 // DEFECT 2: the manual-primitive transform gizmo (translate on one axis / plane /
@@ -932,24 +990,28 @@ public struct WorkspacePlaceholder: View {
                 // grabbed. Rendered BENEATH the clearance chips below, so the 330 pt gizmo box can
                 // never occlude a value chip (the chip/knob hit areas are small and the rest of that
                 // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
-                if force.phase == .edit, visible.groupPrimitives {
+                if force.phase == .edit, visible.groupPrimitives, !latticeLegendMode.drilledIn {
                     primitiveGizmoOverlay.ignoresSafeArea()
                 }
                 // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
                 // axial, face → depth) and the floating glass value pill near the selection — ON TOP
                 // of the gizmo so the values stay readable while transforming.
-                if force.phase == .edit, visible.groupPrimitives {
+                if force.phase == .edit, visible.groupPrimitives, !latticeLegendMode.drilledIn {
                     clearanceHandlesOverlay.ignoresSafeArea()
                 }
                 // ★ §3d — THE 3D DEPTH-PLANE HANDLES, the lattice stage's own tool.
-                if visible.latticeDepthPlanes { latticeDepthHandlesOverlay.ignoresSafeArea() }
+                if visible.latticeDepthPlanes, !latticeLegendMode.drilledIn {
+                    latticeDepthHandlesOverlay.ignoresSafeArea()
+                }
                 // ★ §6(g) — THE HOVERED CUT LINE, the surface stage's own tool.
                 if visible.surfaceEditing { surfaceCutOverlay.ignoresSafeArea() }
             }
             // The lattice region's transform gizmo — only while the lattice panel is open
             // and a region exists, so it never coincides with the force gizmo (U5). It is
             // the LATTICE page's own tool, so it is not gated with the workspace's.
-            if !showSmoothingPage { latticeRegionGizmoOverlay.ignoresSafeArea() }
+            if !showSmoothingPage, !latticeLegendMode.drilledIn {
+                latticeRegionGizmoOverlay.ignoresSafeArea()
+            }
 
             if !fullScreenPageUp { chrome }
             if force.phase == .setup, !fullScreenPageUp {
@@ -1007,14 +1069,18 @@ public struct WorkspacePlaceholder: View {
                 // 2026-08-18: "Please also add a legend on the right edge").
                 // Only while the plot is actually up — a key to nothing is
                 // chrome.
-                if stressViewOn, latticeStressField != nil { stressLegend }
-                // ★ THE LATTICE'S KEY — only while the strut preview is actually
-                // up, and never beside the stress legend: two colour bars on one
-                // edge is a puzzle, not a key. The stress plot wins that slot
-                // because it is the more specific view.
-                if showStrutPreview, strutScene != nil,
-                   !(stressViewOn && latticeStressField != nil) {
+                // ★★ ONE KEY, NOT TWO (maintainer, 2026-08-19: "add the stress map
+                // *into* the lattice view. Adding the stress colours into the lattice
+                // legend as well"). With the strut preview up the LATTICE key carries
+                // the stress scale itself, so the standalone plot legend stands down
+                // rather than putting a second colour bar on the same edge.
+                if stressViewOn, latticeStressField != nil,
+                   !(showStrutPreview && strutScene != nil) {
+                    stressLegend
+                }
+                if showStrutPreview, strutScene != nil {
                     latticeDensityLegend
+                    latticeProbeCallout
                 }
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed { simRunningBanner }
@@ -2252,6 +2318,14 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: run.outcome?.acceptedCount ?? -1) { _ in
             if showStrutPreview { buildStrutScene() }
         }
+        // ★★ AND WHEN THE ON-DEVICE FEA LANDS. The sibling above covers a RUN's
+        // variants; this covers `latticeSim` finishing, which is the field a
+        // `densityMode == .sim` preview actually grades by. Without it the preview
+        // keeps a scene baked before the solve existed — uniform struts, every tap
+        // reading the floor, and a stress overlay that can never arm.
+        .onChange(of: latticeStressFieldKey) { _ in
+            if showStrutPreview, project.lattice.enabled { buildStrutScene() }
+        }
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
@@ -3200,51 +3274,182 @@ public struct WorkspacePlaceholder: View {
         let span = latticeProxy.params.densitySpan
         let cell = latticeProxy.params.cellMM
         let topo = latticeProxy.params.lattice
-        HStack(alignment: .center, spacing: DS.Space.xs) {
-            VStack(alignment: .trailing, spacing: 0) {
-                ForEach(Array(latticeLegendTicks(span: span, cell: cell, topo: topo)
-                                .enumerated()), id: \.offset) { i, t in
-                    Text(t)
-                        .font(.system(size: 9, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(DS.Color.textSecondary.color)
-                    if i < 4 { Spacer(minLength: 0) }
-                }
+        LatticeLegendPanel(
+            groups: latticeLegendGroups(),
+            span: span,
+            mmAt: { 2 * topo.strutRadiusMM(relativeDensity: $0, cellMM: cell) },
+            mode: $latticeLegendMode,
+            probe: latticeLegendProbe,
+            // ★ ONLY WITH BOTH VIEWS UP — the same condition that arms the overlay on
+            // the struts (`stressOverlay:` on the lattice layer). A scale for colours
+            // the renderer is not painting would be worse than no scale.
+            stress: latticeLegendStress())
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .padding(.trailing, PageChrome.edge)
+            .accessibilityIdentifier("lattice-density-legend")
+    }
+
+    /// ★ THE READING ITSELF. Takes the density from the SAME per-cell field the
+    /// march grades with (`cellField`, then the shader's own
+    /// `rhoMin + (rhoMax-rhoMin) * v^gamma`), so the number on screen is the number
+    /// being drawn rather than a second estimate that can drift from it.
+    private func setLatticeProbe(at point: SIMD3<Float>, world: SIMD3<Float>) {
+        guard let scene = strutScene else { return }
+        let cellMM = latticeProxy.params.cellMM
+        let grid = LatticePreviewOccupancy.cellField(
+            occupancy: scene.occupancy, demand: scene.demand, cellMM: cellMM)
+        let g = (point - grid.origin) / grid.spacing
+        let i = Swift.min(Swift.max(Int(g.x.rounded()), 0), grid.nx - 1)
+        let j = Swift.min(Swift.max(Int(g.y.rounded()), 0), grid.ny - 1)
+        let k = Swift.min(Swift.max(Int(g.z.rounded()), 0), grid.nz - 1)
+        let v = grid.values[(k * grid.ny + j) * grid.nx + i]
+        // A negative cell is an INACTIVE one — no lattice there, and reporting a
+        // density for it would invent a strut he cannot see.
+        guard v >= 0 else { latticeLegendProbe = nil; return }
+        let span = latticeProxy.params.densitySpan
+        let gamma = Swift.max(0.05, latticeProxy.params.gamma)
+        let rho = span.lo + (span.hi - span.lo)
+            * pow(Double(Swift.min(Swift.max(v, 0), 1)), gamma)
+        let mm = 2 * latticeProxy.params.lattice.strutRadiusMM(
+            relativeDensity: rho, cellMM: cellMM)
+        // ★★ WHICH CLASS THE TAPPED STRUT IS, by the SAME test the shader makes.
+        // The march classifies BOUNDARY work from the dressing it computes out of
+        // `dPart` and `dRegion`; repeating that here (rather than guessing from
+        // density alone) is what lets the arrow land on the right row — a rim strut
+        // is often dense, so density alone would call it load-carrying.
+        let frac = (rho - span.lo) / Swift.max(1e-6, span.hi - span.lo)
+        var klass: LatticeStructureClass = frac >= LatticeStructureColour.loadCut
+            ? .load : .interior
+        let level = project.lattice.boundary.previewDressingLevel
+        if level > 0 {
+            let band = Swift.max(0.12 * cellMM, 1e-4)
+            let sdf = scene.partSDF
+            let sg = (point - sdf.origin) / sdf.spacing
+            let si = Swift.min(Swift.max(Int(sg.x.rounded()), 0), sdf.nx - 1)
+            let sj = Swift.min(Swift.max(Int(sg.y.rounded()), 0), sdf.ny - 1)
+            let sk = Swift.min(Swift.max(Int(sg.z.rounded()), 0), sdf.nz - 1)
+            let dPart = Double(sdf.values[(sk * sdf.ny + sj) * sdf.nx + si])
+            let dRegion = scene.regions.isEmpty ? -band
+                : LatticeRegionMask.signedDistance(SIMD3<Double>(point),
+                                                   regions: scene.regions)
+            var dressing = Swift.max(0, 1 - abs(dPart) / band)
+                * Swift.max(0, 1 - abs(dRegion) / band)
+            if level > 1 {
+                let dClip = Swift.max(dPart, dRegion)
+                dressing = Swift.max(dressing, Swift.max(0, 1 - abs(dClip) / band))
             }
-            .frame(height: 168)
-            VStack(spacing: 0) {
-                // Dense at the TOP, matching the stress legend's high-at-top rule.
-                ForEach(0..<24, id: \.self) { i in
-                    let f = 1.0 - Double(i) / 23.0
-                    let c = LatticeDensityProxy.densityColor(fraction: f)
-                    Color(.sRGB, red: c.r / 255, green: c.g / 255, blue: c.b / 255,
-                          opacity: 1)
-                        .frame(width: 12)
-                }
-            }
-            .frame(height: 168)
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-            .overlay(RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
-            VStack(spacing: 2) {
-                Text("density")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                Text("thin\nthick")
-                    .font(.system(size: 8, weight: .semibold))
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-            }
-            .fixedSize()
+            if dressing > 0.05 { klass = .rim }
         }
-        .padding(DS.Space.s)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-            .fill(DS.Surface.panel.color.opacity(0.85))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-        .padding(.trailing, PageChrome.edge)
-        .allowsHitTesting(false)
-        .accessibilityIdentifier("lattice-density-legend")
+        // ★★ THE SECOND READING, AT THE SAME POINT (maintainer: "I want to be able to
+        // click on any place and find both the lattice type and stress level.
+        // Simultaneously"). Sampled from the FEA field the plot is drawn from, in the
+        // MODEL space it is baked in — the same space the density above was read in,
+        // so the two numbers describe one strut and not two places.
+        var mpa: Double?
+        if stressViewOn, let f = latticeStressField {
+            let sp = Float(f.spacingMM)
+            let o = SIMD3<Float>(f.origin)
+            let gi = (point - o) / SIMD3<Float>(repeating: Swift.max(sp, 1e-6))
+            let si = Swift.min(Swift.max(Int(gi.x.rounded()), 0), f.nx - 1)
+            let sj = Swift.min(Swift.max(Int(gi.y.rounded()), 0), f.ny - 1)
+            let sk = Swift.min(Swift.max(Int(gi.z.rounded()), 0), f.nz - 1)
+            let n = (sk * f.ny + sj) * f.nx + si
+            if n >= 0, n < f.vonMises.count { mpa = Double(f.vonMises[n]) }
+        }
+        latticeLegendProbe = LatticeLegendProbe(
+            groupID: klass.id, density: rho, mm: mm, worldPoint: world, stressMPa: mpa)
+        // "switching colours if needed" — tapping a strut of another KIND moves the
+        // key to that kind rather than reading it against the wrong scale.
+        if latticeLegendMode.groupID != klass.id {
+            latticeLegendMode = .colour(klass.id)
+        }
+    }
+
+    /// ★ THE CALLOUT AT THE TAP, the other half of "Both": an arrow at the point he
+    /// touched, labelled with the same two numbers the key's arrow is pointing at.
+    @ViewBuilder private var latticeProbeCallout: some View {
+        // ★ RE-PROJECTED EVERY RENDER, so the callout rides the geometry through an
+        // orbit instead of sitting where the finger used to be. `projection` is
+        // republished by the coordinator on every camera change, so this recomputes
+        // exactly when the part moves.
+        if latticeLegendMode.drilledIn, let p = latticeLegendProbe,
+           let screen = projection?.project(p.worldPoint) {
+            let klass = LatticeStructureClass.allCases.first { $0.id == p.groupID }
+            HStack(spacing: 5) {
+                Image(systemName: "arrowtriangle.left.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text(p.stressMPa.map {
+                        "\(Int((p.density * 100).rounded()))% · "
+                        + "\(String(format: "%.2f", p.mm)) mm · \(String(format: "%.3f", $0)) MPa"
+                     } ?? "\(Int((p.density * 100).rounded()))% · \(String(format: "%.2f", p.mm)) mm")
+                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                if let k = klass {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color(.sRGB, red: k.colour.r, green: k.colour.g,
+                                    blue: k.colour.b, opacity: 1))
+                        .frame(width: 12, height: 12)
+                    Text(k.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                }
+            }
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95))
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            // ★★ ANCHORED TO THE TAP, IN THE TAP'S OWN COORDINATE SPACE
+            // (maintainer, 2026-08-19: "the arrows pointing to the place I tapped
+            // is completely off"). It was, for two reasons, and both are here:
+            //
+            //  1. `.position(x: p.point.x + 74, …)` shoved it 74 pt sideways for no
+            //     reason but to make room for the pill — so it never pointed AT
+            //     anything. The pill now hangs off the arrow instead, and the
+            //     arrow's tip sits on the point.
+            //  2. `projection` measures the MTKView, which takes
+            //     `.ignoresSafeArea()`. This overlay did not, so every reading was
+            //     additionally offset by the safe-area inset — a constant error
+            //     that looks like "completely off" rather than "slightly out".
+            .fixedSize()
+            .offset(x: screen.x + 8, y: screen.y - 15)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+
+    /// ★ THE STRESS SCALE THE KEY SHOWS, or nil when the plot is not on the struts.
+    /// Built from `LatticeStressTint` — the same ramp and the same MPa ticks the
+    /// standalone plot legend uses — so the two can never disagree about what a
+    /// colour is worth.
+    private func latticeLegendStress() -> LatticeLegendStress? {
+        guard stressViewOn, let f = latticeStressField else { return nil }
+        let peak = LatticeStressTint.peakMPa(f)
+        guard peak > 0 else { return nil }
+        return LatticeLegendStress(
+            ticks: LatticeStressTint.legendTicks(peakMPa: peak),
+            colours: LatticeStressTint.legendColours().map {
+                RGBAColor(r: Double($0.x), g: Double($0.y), b: Double($0.z))
+            },
+            peakMPa: peak)
+    }
+
+    /// ★★ ONE ROW PER STRUCTURE CLASS, NOT PER GROUP (maintainer, 2026-08-19:
+    /// "I definitely prefer more information than just 'Group A'"). The hue now says
+    /// what a strut IS — boundary work, ordinary fill, or a cell the stress asked
+    /// for — so the key lists those three and each carries its own sentence.
+    ///
+    /// ★ ROWS ARE OMITTED WHEN THE PART CANNOT CONTAIN THEM: with no boundary
+    /// finish there is no rim to explain, and a key listing a colour that is not on
+    /// screen is the same lie as a colour on screen with no key.
+    private func latticeLegendGroups() -> [LatticeLegendGroup] {
+        let hasDressing = project.lattice.boundary.previewDressingLevel > 0
+        return LatticeStructureClass.allCases.compactMap { c in
+            if c == .rim, !hasDressing { return nil }
+            return LatticeLegendGroup(id: c.id, name: c.title, colour: c.colour,
+                                      detail: c.detail, latticed: true)
+        }
     }
 
     /// Five ticks, dense end first, each "NN% · X.XX mm" — the density and the strut
@@ -3357,6 +3562,36 @@ public struct WorkspacePlaceholder: View {
 
     private var latticeStressField: LatticeDemandField? {
         latticePageVariantField ?? latticeSim.field
+    }
+
+    /// ★★ THE FIELD'S OWN IDENTITY — AND THE REBAKE NOBODY WAS FIRING
+    /// (maintainer, 2026-08-19: "I still see 5% no matter where I click" and "The
+    /// stress map is still not on the actual lattice").
+    ///
+    /// Those are ONE defect. The strut scene rebakes when the selection moves
+    /// (`latticeRegionInputsKey`) and when an optimize run's variants land
+    /// (`acceptedCount`) — but NOT when the on-device FEA finishes. The solve is
+    /// async, so the ordinary sequence is: turn the preview on, bake a scene while
+    /// `latticeStressField` is still nil, the sim lands a moment later… and nothing
+    /// asks for a new bake. The preview then keeps a scene whose `demand` is nil,
+    /// and everything downstream follows from that one nil:
+    ///
+    ///   * `cellField(demand: nil)` gives every active cell 0, so a tap reads
+    ///     `rhoMin` — the FLOOR — wherever he touches. That is the "always 5%".
+    ///   * `stressRGB` is only baked `if let d = self.demand`, so it is nil, so
+    ///     `stressTex` is nil, so `stressOverlay && stressTex != nil` is FALSE and
+    ///     the plot never reaches a strut however loudly the toggle is on.
+    ///
+    /// Hashing the field's shape and peak is enough to notice it arriving or being
+    /// replaced, and costs one pass over the values rather than a copy.
+    private var latticeStressFieldKey: Int {
+        guard let f = latticeStressField else { return 0 }
+        var h = Hasher()
+        h.combine(f.nx); h.combine(f.ny); h.combine(f.nz)
+        h.combine(f.vonMises.count)
+        h.combine(f.spacingMM)
+        h.combine(LatticeStressTint.peakMPa(f))
+        return h.finalize()
     }
 
     /// ★★ WHAT `latticeJobRegions()` READS BESIDES `project.lattice` — AND THE
