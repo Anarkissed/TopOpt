@@ -934,7 +934,11 @@ public struct WorkspacePlaceholder: View {
                                                      // the preview exactly where the
                                                      // run stands it down.
                                                      subfloorRetention:
-                                                        latticePreviewRetention)
+                                                        latticePreviewRetention,
+                                                     // ★ …and the bead, so the
+                                                     // preview refuses what the
+                                                     // nozzle cannot lay.
+                                                     lineWidthMM: project.printParams.strutLineWidthMM)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -1491,7 +1495,9 @@ public struct WorkspacePlaceholder: View {
         // Derive the proxy params FRESH from the lattice settings (density range clamped
         // to the core band), so the surface shading always reflects the current controls
         // with no stateful sync.
-        let params = project.lattice.proxyParams(limits: latticeLimits)
+        let params = project.lattice.proxyParams(
+            limits: latticeLimits,
+            lineWidthMM: project.printParams.strutLineWidthMM)
         // Round-2 L11: in AUTO density the overlay grades from the page's own
         // demand field (the variant's field on the variants entry, else the
         // sim's) — the same source the strut preview grades from. Before this,
@@ -1566,7 +1572,9 @@ public struct WorkspacePlaceholder: View {
     /// is always current here. The surface tints derive their own params, so this only
     /// keeps the LEGEND in step.
     private func syncLatticeProxy() {
-        latticeProxy.params = project.lattice.proxyParams(limits: latticeLimits)
+        latticeProxy.params = project.lattice.proxyParams(
+            limits: latticeLimits,
+            lineWidthMM: project.printParams.strutLineWidthMM)
         latticeProxy.isActive = project.lattice.enabled
     }
 

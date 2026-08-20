@@ -3491,6 +3491,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         set { latticeLayer?.subfloorRetention = newValue }
     }
 
+    /// The printer's bead (mm) — see `LatticeSDFRenderer.lineWidthMM`.
+    var latticeLineWidthMM: Double {
+        get { latticeLayer?.lineWidthMM ?? 0 }
+        set { latticeLayer?.lineWidthMM = newValue }
+    }
+
     /// Face-role tints on the lattice (the preview's bar A4), baked from the SAME
     /// dictionary the body is tinted with. Re-baked only when the selection changes.
     func setLatticeFaceTints(_ tints: [FaceID: SIMD4<Float>]) {
@@ -4763,12 +4769,15 @@ public struct LatticeLayerInputs: Equatable {
     /// ★ Sub-floor retention as the JOB carries it — armed ⇒ the cells-per-member
     /// floor stands down where the declared set measures as unloaded.
     public var subfloorRetention: LatticeSubfloorRetention?
+    /// The printer's bead (mm) — the printability law's second half.
+    public var lineWidthMM: Double = 0
 
     public init(scene: LatticeSDFScene, params: LatticeProxyParams,
                 sceneToken: Int, faceTints: [FaceID: SIMD4<Float>],
                 stressOverlay: Bool = false, dressingLevel: Float = 0,
                 cellSweep: LatticeCellSweep? = nil,
-                subfloorRetention: LatticeSubfloorRetention? = nil) {
+                subfloorRetention: LatticeSubfloorRetention? = nil,
+                lineWidthMM: Double = 0) {
         self.scene = scene
         self.params = params
         self.sceneToken = sceneToken
@@ -4777,6 +4786,7 @@ public struct LatticeLayerInputs: Equatable {
         self.dressingLevel = dressingLevel
         self.cellSweep = cellSweep
         self.subfloorRetention = subfloorRetention
+        self.lineWidthMM = lineWidthMM
     }
 
     /// Equality is by TOKEN and by the cheap interactive values — never by the scene's
@@ -4787,6 +4797,7 @@ public struct LatticeLayerInputs: Equatable {
         a.sceneToken == b.sceneToken && a.params == b.params && a.faceTints == b.faceTints
             && a.cellSweep == b.cellSweep && a.stressOverlay == b.stressOverlay
             && a.subfloorRetention == b.subfloorRetention
+            && a.lineWidthMM == b.lineWidthMM
             && a.dressingLevel == b.dressingLevel
     }
 }
@@ -5622,6 +5633,10 @@ extension MetalMeshView {
                 }
                 if renderer.latticeSubfloorRetention != lat.subfloorRetention {
                     renderer.latticeSubfloorRetention = lat.subfloorRetention
+                    dirty = true
+                }
+                if renderer.latticeLineWidthMM != lat.lineWidthMM {
+                    renderer.latticeLineWidthMM = lat.lineWidthMM
                     dirty = true
                 }
                 if renderer.latticeDressingLevel != lat.dressingLevel {

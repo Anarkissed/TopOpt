@@ -284,9 +284,32 @@ final class StrutLineWidthTests: XCTestCase {
         // loop: the slider sets strut thickness and nothing else. A wall bead here
         // would let the slider offer a thickness the printer cannot lay as a strut,
         // which is the exact failure `offenders` exists to catch.
-        XCTAssertEqual(strutSites, 7,
-                       "the seven audited lattice sites (AppModel 1, LatticePage 2, "
-                       + "WorkspacePlaceholder 2, ProjectModel 1, LatticeSetupWizard 1). "
+        // ★ TEN SINCE 2026-08-20 (the printability floor reaching the preview), and
+        // the three new sites were AUDITED, not bumped. All three are in
+        // WorkspacePlaceholder and all three ask a question about a STRUT:
+        //
+        // NEW SITE: `latticeProxyTints` -> `proxyParams(limits:lineWidthMM:)`. This
+        // is the call that actually feeds the preview, and it passed NO width at all
+        // — which was the underside-speckle defect. `LatticeBounds` raises the
+        // band's floor to the STRUT printability floor from it, so the thinnest
+        // strut drawn is one bead. A wall bead here would put the whole preview band
+        // on the wrong floor.
+        //
+        // NEW SITE: `syncLatticeProxy` -> the same call for the LEGEND's params. It
+        // must be the same number as the line above or the key and the part disagree
+        // about the sparsest lattice on screen.
+        //
+        // NEW SITE: `LatticeLayerInputs(lineWidthMM:)`. The renderer refuses a cell
+        // no certifiable density can print at (core's `fallback_strut_unprintable`),
+        // which is `printabilityDensityFloor` against the strut radius — a lone
+        // unsupported extrusion, never a wall loop.
+        //
+        // ★ AND KEEP THEM ON ONE LINE. This walk reads line by line, so a wrapped
+        // site names no bead and lands in `offenders` — it fails CLOSED, which is
+        // correct, and cost one full-suite cycle to learn.
+        XCTAssertEqual(strutSites, 10,
+                       "the ten audited lattice sites (AppModel 1, LatticePage 2, "
+                       + "WorkspacePlaceholder 5, ProjectModel 1, LatticeSetupWizard 1). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

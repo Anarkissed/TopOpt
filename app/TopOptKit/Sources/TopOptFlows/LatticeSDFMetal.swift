@@ -452,6 +452,18 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var subfloorRetention: LatticeSubfloorRetention? {
         didSet { if subfloorRetention != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★ THE PRINTER'S BEAD (mm), for the second half of the printability law:
+    /// the band floor rises to meet it (`proxyParams`), and a cell that cannot
+    /// print at ANY certifiable density is left SOLID — core's
+    /// `fallback_strut_unprintable`. 0 ⇒ no printer stated, and nothing is refused
+    /// on a nozzle nobody named.
+    var lineWidthMM: Double = 0 {
+        didSet { if lineWidthMM != oldValue, scene != nil { rebakeCellField() } }
+    }
+    /// True when the last bake drew NOTHING because no certifiable density prints
+    /// at this cell — so the viewport can say why it is empty.
+    private(set) var cellUnprintable = false
+
     /// Whether the last bake actually retained anything — so the UI can say "kept,
     /// out of regime" rather than leaving the user to infer it from the picture.
     private(set) var subfloorRetained = false
@@ -606,6 +618,42 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         var baked: LatticeCellField?
         if let sweep = cellSweep {
             baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
+        }
+        // ★★ CAN ANYTHING PRINT AT THIS CELL AT ALL? The band floor has already
+        // risen to the printability floor, so the usual answer is yes and every
+        // strut clears a bead. When even core's DENSEST certifiable density cannot
+        // reach one bead at this cell, no density in the band prints and the run
+        // leaves the whole thing solid — so the preview draws nothing rather than
+        // a lattice that cannot be built. This is the half of the printability law
+        // that densifying cannot cover.
+        cellUnprintable = false
+        if lineWidthMM > 0, params.cellMM > 0 {
+            let rhoStar = params.lattice.printabilityDensityFloor(
+                lineWidthMM: lineWidthMM, cellMM: params.cellMM)
+            if rhoStar > params.densitySpan.hi + 1e-9 { cellUnprintable = true }
+        }
+        if cellUnprintable {
+            // ★★ AND IT COSTS NOTHING TO SAY SO. Baking an EMPTY field at the
+            // rejected cell still sizes the grid by that cell — at 0.35 mm over his
+            // 221 mm part that is 631³ ≈ 251 M cells, and the first version of this
+            // guard spent TWENTY MINUTES building a volume whose every entry it had
+            // already decided was −1. The whole point is that nothing is drawn, so
+            // there is nothing to size: one texel, inactive, and the march's bounds
+            // check rejects every sample against it.
+            //
+            // ★ THIS IS ALSO THE USER-FACING BUG. A fine cell with a coarse nozzle
+            // is a setting anyone can type, and before this it hung the app rather
+            // than answering "nothing here can be printed".
+            let occ = scene.occupancy
+            let empty = LatticeVoxelGrid(nx: 1, ny: 1, nz: 1,
+                                         origin: occ.origin,
+                                         spacing: SIMD3<Float>(repeating: Float(params.cellMM)),
+                                         values: [-1])
+            cellField = LatticePreviewOccupancy.uniformCellField(empty, cellMM: params.cellMM)
+            cellGrid = empty
+            cellTex = makeCellTexture(cellField!)
+            bakeGeneration &+= 1
+            return
         }
         if baked == nil {
             // The uniform path — what a Fixed or Auto job actually builds. Retention

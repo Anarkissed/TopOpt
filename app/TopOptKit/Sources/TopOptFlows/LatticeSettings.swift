@@ -1384,8 +1384,31 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// The proxy grading parameters for the current settings, with the density range
     /// already clamped to the core band, so the viewer proxy (requirement 5) shows the
     /// SAME numbers the run would use. `limits` is read from core.
-    public func proxyParams(limits: TopOptKit.LatticeLimits) -> LatticeProxyParams {
-        let b = LatticeBounds.compute(settings: self, limits: limits)
+    /// ★★ `lineWidthMM` IS THE PRINTER'S BEAD, AND LEAVING IT AT 0 WAS THE
+    /// UNDERSIDE SPECKLE (task 2026-08-20, item 2; maintainer's original report of
+    /// specks on the underside of his part).
+    ///
+    /// ★ THE PREVIEW WAS GRADING BELOW WHAT THE MACHINE CAN LAY. `LatticeBounds`
+    /// has always raised the band's floor to the printability floor when given a
+    /// line width — "stating a line width must RAISE the floor" — and this call
+    /// never gave it one. So the band's bottom fell to core's certifiable minimum
+    /// (5.0%), the thin end of the ramp landed inside a declared region, and the
+    /// struts there came out THINNER THAN ONE BEAD: sub-pixel geometry that
+    /// rendered as speckle and that the run does not build at all. Measured on his
+    /// part, 0 -> 54 specks as the thin end moved into the region.
+    ///
+    /// ★ THE REMEDY IS DENSIFICATION, NOT DELETION, and that is core's order too:
+    /// the band floor rises so those cells print, and only a cell that cannot print
+    /// at ANY certifiable density is left solid (`fallback_strut_unprintable`).
+    /// Deleting first would have shown him less lattice than the run builds.
+    ///
+    /// Callers with print parameters MUST pass it. The default is 0 so a caller
+    /// that genuinely has no printer — the settings page's sample block — still
+    /// gets the raw band rather than a floor invented from a guessed nozzle.
+    public func proxyParams(limits: TopOptKit.LatticeLimits,
+                            lineWidthMM: Double = 0) -> LatticeProxyParams {
+        let b = LatticeBounds.compute(settings: self, limits: limits,
+                                      lineWidthMM: lineWidthMM)
         // ★★ A HAND-SET THICKNESS PINS THE BAND (maintainer, 2026-08-19). With the
         // sim off there is no field to grade by, so a graded band would be a ramp
         // between two numbers nothing chooses between — the preview must show the
