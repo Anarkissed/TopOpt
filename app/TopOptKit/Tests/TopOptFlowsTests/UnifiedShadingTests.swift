@@ -166,6 +166,36 @@ final class UnifiedShadingTests: XCTestCase {
                        "the shell is a normal rasterised early-Z pass (§2a) and must stay one")
     }
 
+    /// ★ EVERY `*ShaderSource` IS ITS OWN `makeLibrary` CALL — a type declared in one
+    /// is not visible in the next. `ShellClip` was declared in the viewer source and
+    /// used in the depth-prepass source; that compiles in nobody's head and fails on
+    /// every GPU (`unknown type name 'ShellClip'`), taking the prepass and contact
+    /// pipelines with it. This runs without a device, so it fails on a laptop too.
+    func testEveryShaderSourceDeclaresTheShellClipItUses() throws {
+        let sources = [
+            ("viewer", MeshRenderer.viewerShaderSourceForTesting),
+            ("depthPrepass", MeshRenderer.depthPrepassShaderSourceForTesting),
+            ("contact", MeshRenderer.contactShaderSourceForTesting),
+            ("shadow", MeshRenderer.shadowShaderSourceForTesting),
+            ("ao", MeshRenderer.aoShaderSourceForTesting),
+            ("stage", MeshRenderer.stageShaderSourceForTesting),
+            ("lattice", MeshRenderer.latticeShaderSourceForTesting),
+        ]
+        var used = 0
+        for (name, src) in sources where src.contains("ShellClip") {
+            used += 1
+            XCTAssertTrue(src.contains("struct ShellClip {"),
+                          "\(name) uses ShellClip but does not declare it — its library "
+                          + "will not compile")
+            XCTAssertTrue(src.contains("inline bool shell_is_latticed("),
+                          "\(name) must carry the clip helper alongside the type")
+        }
+        XCTAssertGreaterThanOrEqual(used, 2,
+                                    "positive control: the shell clip is shared by the "
+                                    + "visible pass and the G-buffer prepass, so at "
+                                    + "least two sources must mention it")
+    }
+
     /// The lattice is drawn INSIDE the mesh renderer's pass, so it must be occluded by
     /// what the shell's depth buffer says is in front of it — and it must occlude the
     /// overlays drawn after it. Both directions in one frame: with the body OPAQUE the
@@ -193,10 +223,37 @@ final class UnifiedShadingTests: XCTestCase {
         let indigoBefore = indigoCount(shown, size: size)
         XCTAssertGreaterThan(indigoBefore, size * size / 100,
                              "the body-hidden frame must be visibly the indigo lattice")
-        XCTAssertLessThan(Double(indigo), Double(indigoBefore) * 0.10,
-                          "§1(ii): an opaque shell must OCCLUDE the struts inside it. "
-                          + "A separately composited layer cannot be occluded at all, "
-                          + "which is what 'pasted on' meant.")
+        // ★★ REPLACED, NOT WEAKENED (2026-08-20, fixing red CI on PR 343).
+        //
+        // This assertion used to read `indigo < indigoBefore * 0.10` — "an opaque
+        // shell OCCLUDES the struts inside it". `lattice-preview: the shell stands
+        // down inside a lattice cell` deliberately made that false: `viewer_fragment`
+        // and `depth_fragment` now `discard_fragment()` wherever the cell texture says
+        // a strut is emitted, so the shell has HOLES exactly over the latticed region
+        // and the struts behind them are meant to be seen. That commit changed only
+        // `MetalMeshView.swift` and never ran this file, which is why CI went red.
+        //
+        // ★ WHAT THE ORIGINAL TEST WAS ACTUALLY FOR, and what is kept: the "pasted on"
+        // failure mode is a lattice composited as a SEPARATE layer, which cannot be
+        // occluded by anything — turning the body opaque would leave `indigo` exactly
+        // unchanged. So the shared depth buffer is still proved, by a bracket:
+        //
+        //   lower ... the shell must still hide the struts it does NOT stand down for
+        //   upper ... the stand-down must still open it, or we are back to the opaque
+        //             skin in front of the preview that this whole task began with
+        //
+        // Measured on this fixture: 13,150 indigo px body-hidden -> 5,333 opaque, a
+        // 59% drop. Both bounds are far from that, so neither is a hair trigger.
+        XCTAssertLessThan(Double(indigo), Double(indigoBefore) * 0.75,
+                          "§1(ii): the shell and the lattice share ONE depth buffer — "
+                          + "an opaque shell must still occlude every strut outside a "
+                          + "latticed cell. A separately composited layer cannot be "
+                          + "occluded at all, which is what 'pasted on' meant.")
+        XCTAssertGreaterThan(Double(indigo), Double(indigoBefore) * 0.10,
+                             "the shell must STAND DOWN inside an active lattice cell "
+                             + "(\"The full body covered the lattice preview … They "
+                             + "need to be combined\"). Occluding the struts entirely "
+                             + "is the defect that discard was added to fix.")
     }
 
     // MARK: - §1(i) + §3: occlusion over the UNION, shown in the AO buffer

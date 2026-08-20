@@ -157,6 +157,39 @@ private struct ContactUniforms {
 
 // The neutral-clay shader (M7.4) + a selection tint (M7.5), compiled at runtime so
 // the SwiftPM target needs no .metal resource bundling (identical on iOS/macOS).
+// ★★ SHARED MSL — ONE DECLARATION, TWO LIBRARIES (fixes the red CI on PR 343:
+// `program_source:32:39: error: unknown type name 'ShellClip'`).
+//
+// ★ EVERY `*ShaderSource` IN THIS FILE IS ITS OWN `makeLibrary` CALL, so a type
+// declared in one is invisible to the others. `ShellClip` and `shell_is_latticed`
+// were declared in `viewerShaderSource` and USED in `depthPrepassShaderSource`,
+// which reads perfectly in the editor and does not compile on a GPU. The prepass
+// library failed, so the depth-prepass and contact pipelines never built, and ten
+// GPU tests went red behind one line of MSL.
+//
+// ★ INTERPOLATED, NOT COPIED. A second copy in the prepass would have fixed today
+// and left the clip free to drift between the visible pass and the G-buffer — the
+// exact divergence the comment below promises cannot happen. Both libraries now
+// get the same text from the same place.
+private let shellClipMSL = """
+struct ShellClip {
+    float4 origin;      // xyz = cell-(0,0,0) centre, w = enabled (>0.5)
+    float4 spacing;     // xyz = cell size mm
+    float4 dims;        // xyz = cell counts
+};
+inline bool shell_is_latticed(float3 mpos, constant ShellClip& c,
+                              texture3d<float> cellTex) {
+    if (c.origin.w < 0.5) { return false; }
+    float3 g = (mpos - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
+    // Outside the cell grid there is no lattice — and no clamping, which would
+    // smear the edge cells across the whole part.
+    if (any(g < float3(-0.5)) || any(g > c.dims.xyz - float3(0.5))) { return false; }
+    float3 uvw = (g + 0.5) / max(c.dims.xyz, float3(1.0));
+    constexpr sampler s(coord::normalized, filter::nearest, address::clamp_to_edge);
+    return cellTex.sample(s, uvw).r >= 0.0;
+}
+"""
+
 private let viewerShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
@@ -260,22 +293,7 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 // the hole in the shell land exactly where the struts are, at every cell size,
 // for free, forever. A second implementation of "is this point latticed" would
 // be free to drift by a voxel and impossible to notice.
-struct ShellClip {
-    float4 origin;      // xyz = cell-(0,0,0) centre, w = enabled (>0.5)
-    float4 spacing;     // xyz = cell size mm
-    float4 dims;        // xyz = cell counts
-};
-inline bool shell_is_latticed(float3 mpos, constant ShellClip& c,
-                              texture3d<float> cellTex) {
-    if (c.origin.w < 0.5) { return false; }
-    float3 g = (mpos - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
-    // Outside the cell grid there is no lattice — and no clamping, which would
-    // smear the edge cells across the whole part.
-    if (any(g < float3(-0.5)) || any(g > c.dims.xyz - float3(0.5))) { return false; }
-    float3 uvw = (g + 0.5) / max(c.dims.xyz, float3(1.0));
-    constexpr sampler s(coord::normalized, filter::nearest, address::clamp_to_edge);
-    return cellTex.sample(s, uvw).r >= 0.0;
-}
+\(shellClipMSL)
 
 fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
                                 constant float& bodyAlpha [[buffer(1)]],
@@ -553,6 +571,8 @@ fragment float4 wideline_fragment(WOut in [[stage_in]]) {
 private let depthPrepassShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
+
+\(shellClipMSL)
 
 struct DIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; };
 struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; float3 mpos; };
