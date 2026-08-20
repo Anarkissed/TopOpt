@@ -85,6 +85,82 @@ inline constexpr double kSturdyUtilisationTarget = 0.5;
 // floor does, and it is untouched by this threshold.
 inline constexpr double kUnloadedUtilisationMax = 0.01;
 
+// ── ★ THE GRADING INTENT (amendment to task 2026-08-20-lattice-only-grading) ────
+// ★ TWO QUESTIONS, NOT TWO COMPETING ANSWERS.
+//   STRUCTURAL asks "IS THIS STRONG ENOUGH?" — demand against the material
+//     allowable. PR 344's law, unchanged. On a part that is 2000x over-strength the
+//     honest answer is "yes, everywhere", which is why his lattice went 100 % to the
+//     floor. Correct, and irrelevant to a part latticed for looks.
+//   AESTHETIC asks "WHERE IS THIS PART WORKING HARDEST?" — a RELATIVE grade, which
+//     is what a decorative lattice wants: a visible pattern that follows the stress
+//     even when nothing structurally needs the material.
+//
+// ★ THE OLD PEAK LAW WAS NOT WRONG FOR BEING RELATIVE. It was wrong for dividing by
+// ONE OUTLIER VOXEL: a re-entrant corner or a point load runs several times the bulk
+// field, so the maximum compressed everything else onto the floor. Dividing by a HIGH
+// PERCENTILE instead — and clamping the tail above it — is the same relative law with
+// the outlier removed, and for this intent it is not a compromise but the right
+// answer.
+enum class GradingIntent {
+  Structural,  // demand / allowable — "is it strong enough"
+  Aesthetic,   // demand / percentile — "where is it working hardest"
+};
+const char* grading_intent_name(GradingIntent i);   // "structural" | "aesthetic"
+bool grading_intent_from_name(const char* name, GradingIntent& out);
+
+// The percentile the AESTHETIC grade normalises by. 0.95 = the 95th percentile of
+// demand over the candidate set.
+// ★ WHY 95 AND NOT THE MAX: the max IS the outlier the old law tripped on. 95
+// discards the top 5 % of voxels — comfortably more than a stress concentration
+// occupies on a real part — while still being driven by genuinely loaded material
+// rather than the bulk. Everything above it clamps to the top of the range and is
+// COUNTED (`above_percentile_voxels`), so the discarded tail is visible rather than
+// silently absorbed.
+inline constexpr double kAestheticPercentile = 0.95;
+
+// ★ §3 — `minimize_plastic` IN AESTHETIC MODE IS A BAND POSITION, not a target.
+// "Wanting the least amount of plastic used in a print is an aesthetic choice too."
+// The pattern is the same either way; what changes is how much plastic expresses it.
+// Applied as an exponent on the normalised field, so BOTH ENDS OF THE RANGE ARE
+// PRESERVED EXACTLY (frac 0 -> lo, frac 1 -> hi) and only the mass in between moves:
+//   ON  (least plastic) -> exponent > 1 pushes the bulk toward the OPEN end: sparser.
+//   OFF (sturdy/solid)  -> exponent < 1 pushes the bulk toward the TIGHT end: denser.
+inline constexpr double kAestheticOpenExponent = 2.0;   // minimize_plastic ON
+inline constexpr double kAestheticTightExponent = 0.5;  // minimize_plastic OFF
+
+// ★ §5(a) — what an aesthetic density MEANS, in one line the app can show. Under 25
+// words by construction (bar R19); the law REPORTS it and does not place it.
+// ── ★ THE ONE DEFINITION OF THE NORMALISED DEMAND FRACTION ─────────────────────
+// Shared by `grade_lattice` and by the APP BRIDGE, so the preview cannot drift from
+// what core builds (amendment §6b / bar R15). The strut-diameter law has already
+// drifted 1.4-1.7x by being re-derived in Swift; this exists so the demand mirror
+// cannot repeat it.
+//
+//   `reference` is the DENOMINATOR the intent selects:
+//     STRUCTURAL -> the material allowable (yield / margin_stop)
+//     AESTHETIC  -> the demand value at the chosen percentile
+//   `utilisation_target` is §3's goal and applies to STRUCTURAL only; in AESTHETIC
+//   mode the checkbox is a band POSITION and is applied as an exponent instead, by
+//   the caller, so it must not be folded in here.
+//
+// Returns 0..1. A non-positive reference yields 0 — "nothing was measured" — rather
+// than dividing by it.
+inline double grading_demand_fraction(GradingIntent intent, double demand,
+                                      double reference,
+                                      double utilisation_target) {
+  if (!(reference > 0.0)) return 0.0;
+  double f = demand / reference;
+  if (intent == GradingIntent::Structural && utilisation_target > 0.0)
+    f /= utilisation_target;
+  if (!(f >= 0.0)) f = 0.0;
+  if (f > 1.0) f = 1.0;
+  return f;
+}
+
+inline constexpr const char* kAestheticDensityMeaning =
+    "This lattice follows the stress pattern for appearance. Its density is not a "
+    "strength requirement; the certificate is what checks strength.";
+
 // How the law maps demand to (density, cell size). All fields must be positive where
 // noted; grade_lattice throws std::invalid_argument otherwise.
 struct GradingLawParams {
@@ -246,6 +322,38 @@ struct GradingLawParams {
   // requirement, never the MANUFACTURING one.
   // (evidence/2026-08-20-lattice-only-grading/r7_selfweight_his_part.txt)
   double unloaded_utilisation_max = 0.0;
+
+  // ── ★ THE INTENT (amendment §1) ──────────────────────────────────────────────
+  // ★ DEFAULT IS **Structural**, WHICH IS DELIBERATE AND IS NOT THE JOB DEFAULT.
+  // A caller that sets nothing gets PR 344's law exactly — and with
+  // `demand_allowable_mpa` also unset, that is the pre-344 peak-relative law
+  // byte-for-byte. THAT is what keeps the TO+lattice path and multiscale untouched
+  // (amendment §6c/§6d): they never mention the intent, so they cannot acquire one.
+  // The AESTHETIC default belongs to the lattice-only JOB (§1d) and is applied in
+  // run_job where the job is resolved, not here where every caller would inherit it.
+  GradingIntent intent = GradingIntent::Structural;
+
+  // AESTHETIC only. The percentile of demand to normalise by (0, 1]; 0 takes
+  // kAestheticPercentile.
+  double aesthetic_percentile = 0.0;
+
+  // ── ★ AESTHETIC IS GRADED ONTO A GIVEN RANGE (amendment §2) ──────────────────
+  // In STRUCTURAL mode the band is a CERTIFICATION LIMIT — the density means a
+  // strength claim and the band is what makes it certifiable. In AESTHETIC mode the
+  // band is an INPUT: the percentile normalisation maps the field onto whatever
+  // range it is handed, and the stress decides WHERE within it, never HOW MUCH.
+  //
+  // Both 0 (the DEFAULT) means "the certifiable band", which is the sensible default
+  // that makes the mechanism work unconfigured. A default is not a design decision;
+  // a control would be, and the control is the maintainer's to build.
+  //
+  // ★ WHAT THIS DOES NOT RELAX (§2d/§2e): the printability floor still binds, so a
+  // range that would thin a strut below `min_extrudable_width_mm` is still refused
+  // by the same rule; the band clamp still runs and is still COUNTED; and the
+  // certificate still runs over whatever is emitted. Aesthetic changes what the
+  // density MEANS, never whether it is checked.
+  double aesthetic_rho_min = 0.0;
+  double aesthetic_rho_max = 0.0;
 
   // HOW THESE TWO COMPOSE (multiscale x sub-floor retention). A multiscale run
   // prescribes rho and stops using `demand` FOR THE DENSITY — but it still hands
@@ -533,6 +641,19 @@ struct GradedField {
   // over these is SELF-WEIGHT ONLY, which is a different claim from the load-bearing
   // one and must be shown as such on the card.
   std::size_t unloaded_voxels = 0;
+
+  // ── ★ THE INTENT, AS APPLIED (amendment §5c) ─────────────────────────────────
+  // So a run can be read months later without guessing which question it answered.
+  GradingIntent intent_used = GradingIntent::Structural;
+  double aesthetic_percentile_used = 0.0;      // the quantile, e.g. 0.95
+  double aesthetic_percentile_mpa = 0.0;       // the DEMAND VALUE at that quantile
+  double aesthetic_rho_min_used = 0.0;         // the range actually graded onto
+  double aesthetic_rho_max_used = 0.0;
+  double aesthetic_weight_exponent_used = 0.0; // §3's band position, as applied
+  // ★ §1(c): demand ABOVE the percentile clamps to the top of the range. Counted
+  // here so the discarded tail is visible beside `clamped_hi_voxels` rather than
+  // silently absorbed.
+  std::size_t above_percentile_voxels = 0;
 
   // ── ★ THE DENSITY DISTRIBUTION (bar R1) ──────────────────────────────────────
   // "The fraction of voxels at rho_min is the number that was wrong, so it is the

@@ -4,6 +4,8 @@
 // to BridgeError so nothing throws across the language boundary.
 #include "TopOptBridge.hpp"
 
+#include "topopt/grading.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -2369,6 +2371,54 @@ std::vector<std::string> lattice_generatable_topologies() {
   // changes, and core's enum-probe test (test_lattice_gen) fails if the core list
   // itself ever drifts from the enum.
   return topopt::lattice_gen_topology_names();
+}
+
+}  // namespace topoptbridge
+
+namespace topoptbridge {
+
+namespace {
+
+// The denominator the intent selects. AESTHETIC uses a FULL SORT — deterministic by
+// construction (amendment §1b / bar R16), never a sampled estimate — of the same
+// samples core sorts.
+double demand_reference_impl(const float* vm, std::size_t n, int intent,
+                             double allowable_mpa, double percentile) {
+  if (intent == 0) return allowable_mpa;          // structural
+  if (vm == nullptr || n == 0) return 0.0;
+  std::vector<double> d;
+  d.reserve(n);
+  for (std::size_t i = 0; i < n; ++i)
+    if (std::isfinite(vm[i]) && vm[i] > 0.0f) d.push_back(static_cast<double>(vm[i]));
+  if (d.empty()) return 0.0;
+  std::sort(d.begin(), d.end());
+  const double q = percentile > 0.0 ? percentile : topopt::kAestheticPercentile;
+  std::size_t k = static_cast<std::size_t>(q * (d.size() - 1));
+  if (k >= d.size()) k = d.size() - 1;
+  return d[k];
+}
+
+}  // namespace
+
+double grading_demand_reference(const float* von_mises, std::size_t n, int intent,
+                                double allowable_mpa, double percentile) {
+  return demand_reference_impl(von_mises, n, intent, allowable_mpa, percentile);
+}
+
+void grading_demand_fraction_into(const float* von_mises, std::size_t n, int intent,
+                                  double allowable_mpa, double percentile,
+                                  double utilisation_target, float* out) {
+  if (von_mises == nullptr || out == nullptr) return;
+  const double ref =
+      demand_reference_impl(von_mises, n, intent, allowable_mpa, percentile);
+  const topopt::GradingIntent gi = intent == 0 ? topopt::GradingIntent::Structural
+                                               : topopt::GradingIntent::Aesthetic;
+  for (std::size_t i = 0; i < n; ++i) {
+    const double v = std::isfinite(von_mises[i]) ? von_mises[i] : 0.0;
+    // ★ CORE'S OWN FUNCTION. Not a Swift or bridge restatement of it.
+    out[i] = static_cast<float>(
+        topopt::grading_demand_fraction(gi, v, ref, utilisation_target));
+  }
 }
 
 }  // namespace topoptbridge

@@ -22,6 +22,7 @@
 
 import Foundation
 import simd
+import TopOptBridge
 
 /// A dense scalar field on a regular grid over an axis-aligned box. `values` is
 /// row-major with x fastest, then y, then z. Uploaded to a Metal 3D texture.
@@ -290,23 +291,48 @@ public enum LatticePreviewOccupancy {
         return simd_length_squared(p - (a + ab * v + ac * w))
     }
 
-    /// A normalised demand grid (0…1 = von Mises / peak) sampled onto the SAME grid as
-    /// `occupancy`, for the shader's grading. Returns nil when there is no field — the
-    /// caller then previews a uniform lattice (bar 4 honest no-field case). Sampling is
+    /// A normalised demand grid (0…1) sampled onto the SAME grid as `occupancy`, for
+    /// the shader's grading. Returns nil when there is no field — the caller then
+    /// previews a uniform lattice (bar 4 honest no-field case). Sampling is
     /// nearest-cell from the field (the shader trilerps between grid voxels).
-    public static func demand(like occ: LatticeVoxelGrid, field: StressField?) -> LatticeVoxelGrid? {
-        guard let field = field, !field.isEmpty, let peak = field.peak()?.valueMPa, peak > 0 else { return nil }
-        let inv = 1.0 / Float(peak)
-        var vals = [Float](repeating: 0, count: occ.count)
+    ///
+    /// ★ THE NORMALISATION COMES FROM CORE, NOT FROM HERE (amendment bar R15).
+    /// This used to be `vonMises / field.peak()` — the PEAK-RELATIVE law, which core
+    /// stopped using: STRUCTURAL divides by the material allowable, AESTHETIC by a
+    /// percentile of the field. Left as it was, the preview would shade one lattice
+    /// while core built another. The strut-diameter law has ALREADY drifted 1.4–1.7×
+    /// by being re-derived in Swift, so the denominator and the clamp are both taken
+    /// from `topoptbridge.grading_demand_fraction_field`, which calls core's own
+    /// `grading_demand_fraction`. Nothing about the law is restated here.
+    ///
+    /// `intent` 0 = structural, 1 = aesthetic (core's default for a lattice-only job).
+    /// `allowableMPa` is yield / margin_stop — `SimAnalysisResult.marginRequired`
+    /// carries the divisor the run actually used.
+    public static func demand(like occ: LatticeVoxelGrid, field: StressField?,
+                              intent: Int = 1, allowableMPa: Double = 0,
+                              percentile: Double = 0,
+                              utilisationTarget: Double = 1) -> LatticeVoxelGrid? {
+        guard let field = field, !field.isEmpty else { return nil }
+        // Sample the field onto the occupancy grid FIRST, then let core normalise the
+        // samples — so the percentile is taken over exactly the values that will be
+        // shaded, which is what makes the app's number comparable to core's receipt.
+        var raw = [Float](repeating: 0, count: occ.count)
         for k in 0..<occ.nz {
             for j in 0..<occ.ny {
                 for i in 0..<occ.nx {
                     let p = occ.origin + SIMD3<Float>(Float(i) * occ.spacing.x,
                                                       Float(j) * occ.spacing.y,
                                                       Float(k) * occ.spacing.z)
-                    let d = Swift.max(0, Swift.min(1, field.value(at: p) * inv))
-                    vals[(k * occ.ny + j) * occ.nx + i] = d
+                    raw[(k * occ.ny + j) * occ.nx + i] = field.value(at: p)
                 }
+            }
+        }
+        var vals = [Float](repeating: 0, count: occ.count)
+        raw.withUnsafeBufferPointer { src in
+            vals.withUnsafeMutableBufferPointer { dst in
+                topoptbridge.grading_demand_fraction_into(
+                    src.baseAddress, src.count, Int32(intent), allowableMPa,
+                    percentile, utilisationTarget, dst.baseAddress)
             }
         }
         return LatticeVoxelGrid(nx: occ.nx, ny: occ.ny, nz: occ.nz,

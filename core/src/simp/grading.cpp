@@ -12,6 +12,23 @@
 
 namespace topopt {
 
+const char* grading_intent_name(GradingIntent i) {
+  switch (i) {
+    case GradingIntent::Structural: return "structural";
+    case GradingIntent::Aesthetic: return "aesthetic";
+  }
+  // A new case must be NAMED here before anything can serialize it — never a silent
+  // fallback, the same posture cell_size_mode_name takes.
+  throw std::logic_error("grading_intent_name: unnamed GradingIntent");
+}
+
+bool grading_intent_from_name(const char* name, GradingIntent& out) {
+  const std::string n = name ? name : "";
+  if (n == "structural") { out = GradingIntent::Structural; return true; }
+  if (n == "aesthetic") { out = GradingIntent::Aesthetic; return true; }
+  return false;   // a job schema never silently falls back to an intent nobody asked for
+}
+
 namespace {
 
 // BAR F1 — record ONE voxel rejected because its member cannot hold N* cells
@@ -138,6 +155,22 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // below reads `allowable` and it runs before the density map.
   const double allowable = params.demand_allowable_mpa;
   const double u_target = params.utilisation_target;
+  // ── ★ AESTHETIC (amendment §1/§2/§3), resolved once ──────────────────────────
+  const bool aesthetic = params.intent == GradingIntent::Aesthetic;
+  const double aes_q = params.aesthetic_percentile > 0.0
+                           ? params.aesthetic_percentile
+                           : kAestheticPercentile;
+  if (aesthetic && !(aes_q > 0.0 && aes_q <= 1.0))
+    throw std::invalid_argument(
+        "grade_lattice: aesthetic_percentile must be in (0, 1]");
+  if ((params.aesthetic_rho_min > 0.0) != (params.aesthetic_rho_max > 0.0))
+    throw std::invalid_argument(
+        "grade_lattice: aesthetic_rho_min and aesthetic_rho_max must be given "
+        "together (both 0 = the certifiable band)");
+  if (params.aesthetic_rho_min > 0.0 &&
+      !(params.aesthetic_rho_max > params.aesthetic_rho_min))
+    throw std::invalid_argument(
+        "grade_lattice: aesthetic_rho_max must exceed aesthetic_rho_min");
 
   const LatticeTopology topo = params.topology;
 
@@ -341,6 +374,56 @@ GradedField grade_lattice(const VoxelGrid& grid,
   double min_width = kInf, min_cpm = kInf;
   double min_d = kInf, max_d = 0.0;
   const double gamma = params.demand_exponent;
+  // ── ★ THE AESTHETIC RANGE AND THE PERCENTILE (amendment §1b, §2) ────────────
+  // The range defaults to the certifiable band, so the mechanism works unconfigured.
+  // ★ IT IS STILL CLAMPED INTO THE CERTIFIABLE BAND: an aesthetic run may choose
+  // WHERE within the band to grade, never to leave it — the band is what makes every
+  // emitted density certifiable by construction (bar L2), and §2(e) keeps the
+  // certificate running over whatever is emitted.
+  const double aes_lo = aesthetic ? std::max(rho_lo, params.aesthetic_rho_min > 0.0
+                                                         ? params.aesthetic_rho_min
+                                                         : rho_lo)
+                                  : rho_lo;
+  const double aes_hi = aesthetic ? std::min(rho_hi, params.aesthetic_rho_max > 0.0
+                                                         ? params.aesthetic_rho_max
+                                                         : rho_hi)
+                                  : rho_hi;
+  if (aesthetic && !(aes_hi > aes_lo))
+    throw std::invalid_argument(
+        "grade_lattice: the aesthetic range does not intersect the certifiable band");
+
+  // ★ DETERMINISTIC PERCENTILE (bar R16 / PR 344 §1b): a FULL SORT of the candidate
+  // demands in voxel order, never a sampled estimate. The same discipline the density
+  // histogram already keeps.
+  double aes_ref = 0.0;
+  if (aesthetic) {
+    std::vector<double> d;
+    d.reserve(out.region_voxels ? out.region_voxels : 1024);
+    for (std::size_t e = 0; e < n; ++e) {
+      const bool candidate = density[e] > iso && (!region || (*region)[e] != 0);
+      if (candidate && std::isfinite(demand[e])) d.push_back(demand[e]);
+    }
+    if (!d.empty()) {
+      std::sort(d.begin(), d.end());
+      std::size_t k = static_cast<std::size_t>(aes_q * (d.size() - 1));
+      if (k >= d.size()) k = d.size() - 1;
+      aes_ref = d[k];
+      for (double v : d)
+        if (v > aes_ref) ++out.above_percentile_voxels;
+    }
+  }
+  out.intent_used = params.intent;
+  out.aesthetic_percentile_used = aesthetic ? aes_q : 0.0;
+  out.aesthetic_percentile_mpa = aes_ref;
+  out.aesthetic_rho_min_used = aesthetic ? aes_lo : 0.0;
+  out.aesthetic_rho_max_used = aesthetic ? aes_hi : 0.0;
+  // §3 — the band POSITION. `utilisation_target` doubles as the carrier of the
+  // maintainer's existing checkbox: 1.0 is minimize_plastic ON, below 1.0 is OFF.
+  const double aes_w = aesthetic ? (u_target >= 1.0 ? kAestheticOpenExponent
+                                                    : kAestheticTightExponent)
+                                 : 0.0;
+  out.aesthetic_weight_exponent_used = aes_w;
+
   out.demand_allowable_mpa_used = allowable;
   out.utilisation_target_used = allowable > 0.0 ? u_target : 0.0;
   if (allowable > 0.0) {
@@ -384,12 +467,21 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // `utilisation_target` (§3) is the utilisation at which the lattice reaches
     // rho_max: 1.0 works the material to its whole allowable, below 1.0 keeps a
     // stated margin and therefore spends more plastic.
+    // ★ AESTHETIC (amendment §1): relative, but against a HIGH PERCENTILE rather
+    // than the max, and graded onto the GIVEN RANGE. The stress decides WHERE in
+    // the range, not how much of it.
+    if (aesthetic) {
+      // ONE definition, shared with the app bridge (grading.hpp).
+      const double f = grading_demand_fraction(GradingIntent::Aesthetic, demand[e],
+                                               aes_ref, 1.0);
+      return aes_lo + (aes_hi - aes_lo) * std::pow(f, gamma * aes_w);
+    }
     double frac;
     if (allowable > 0.0) {
-      const double u = demand[e] / allowable;
-      frac = u / u_target;
-      if (!(frac >= 0.0)) frac = 0.0;
-      if (frac > 1.0) frac = 1.0;   // §0(b): clamp, and it is COUNTED below
+      // ONE definition, shared with the app bridge (grading.hpp). §0(b)'s clamp at
+      // 1.0 lives inside it, and the over-allowable count is taken separately above.
+      frac = grading_demand_fraction(GradingIntent::Structural, demand[e],
+                                     allowable, u_target);
     } else {
       frac = demand_max > 0.0
                  ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
