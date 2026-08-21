@@ -3553,6 +3553,24 @@ public struct WorkspacePlaceholder: View {
             * pow(Double(Swift.min(Swift.max(v, 0), 1)), gamma)
         let mm = 2 * latticeProxy.params.lattice.strutRadiusMM(
             relativeDensity: rho, cellMM: cellMM)
+        // ★★ THE CELL AT THIS POINT, not the stored uniform one. Under Auto the march
+        // draws a cell per LOCAL member, so quoting `params.cellMM` described geometry
+        // that is not on screen — and its millimetres were read as a cell size.
+        var probeCellMM = 0.0
+        if let sweep = latticePreviewCellSweep, sweep.perLocalMember,
+           scene.minCellsPerMember > 0, !scene.memberThicknessMM.isEmpty {
+            let og = (point - scene.occupancy.origin) / scene.occupancy.spacing
+            let oi = Swift.min(Swift.max(Int(og.x.rounded()), 0), scene.occupancy.nx - 1)
+            let oj = Swift.min(Swift.max(Int(og.y.rounded()), 0), scene.occupancy.ny - 1)
+            let ok = Swift.min(Swift.max(Int(og.z.rounded()), 0), scene.occupancy.nz - 1)
+            let n = (ok * scene.occupancy.ny + oj) * scene.occupancy.nx + oi
+            if n >= 0, n < scene.memberThicknessMM.count {
+                probeCellMM = LatticeMeasuredRegionWidth.rungForWidthMM(
+                    scene.memberThicknessMM[n],
+                    minCellsPerMember: scene.minCellsPerMember,
+                    baseCellMM: sweep.minMM, maxCellMM: sweep.maxMM)
+            }
+        }
         // ★★ WHICH CLASS THE TAPPED STRUT IS, by the SAME test the shader makes.
         // The march classifies BOUNDARY work from the dressing it computes out of
         // `dPart` and `dRegion`; repeating that here (rather than guessing from
@@ -3598,7 +3616,8 @@ public struct WorkspacePlaceholder: View {
             if n >= 0, n < f.vonMises.count { mpa = Double(f.vonMises[n]) }
         }
         latticeLegendProbe = LatticeLegendProbe(
-            groupID: klass.id, density: rho, mm: mm, worldPoint: world, stressMPa: mpa)
+            groupID: klass.id, density: rho, mm: mm, worldPoint: world, stressMPa: mpa,
+            cellMM: probeCellMM)
         // "switching colours if needed" — tapping a strut of another KIND moves the
         // key to that kind rather than reading it against the wrong scale.
         if latticeLegendMode.groupID != klass.id {

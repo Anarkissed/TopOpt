@@ -152,6 +152,32 @@ public enum LatticeMeasuredRegionWidth {
         return out
     }
 
+    /// ★★★ THE RUNG A MEMBER OF THIS WIDTH GETS — core's own rule, in one place.
+    ///
+    /// `plan_cell_sizes_fit` computes it as "the coarsest ladder rung at or below its own
+    /// derived cell. Never above", by climbing from the base:
+    ///
+    ///     while (L + 1 <= Lmax && cell_mm_at_level(L + 1) <= want_min[c]) ++L;
+    ///
+    /// This is that loop. It exists as a function because the READOUT needs the same
+    /// answer the BAKE gets: the tapped-strut callout was quoting a strut diameter
+    /// computed at `params.cellMM` — the stored uniform 8.00 mm — while the march was
+    /// drawing 2.25/4.50/9.00 mm cells. The number on screen did not describe the
+    /// geometry on screen, and it read as a 0.83 mm CELL to the one person looking at it.
+    ///
+    /// - Note: core decides per BASE CELL from the thinnest member under it, so a point
+    ///   near a thickness change can sit in a block that took one rung finer than this
+    ///   returns. It is the same law on a slightly different domain, not a second law.
+    public static func rungForWidthMM(_ widthMM: Double, minCellsPerMember nStar: Double,
+                                      baseCellMM: Double, maxCellMM: Double) -> Double {
+        guard nStar > 0, baseCellMM > 0, maxCellMM >= baseCellMM else { return 0 }
+        let want = widthMM.isFinite ? widthMM / nStar : maxCellMM
+        guard want >= baseCellMM * (1 - 1e-9) else { return 0 }   // too thin ⇒ solid
+        var cell = baseCellMM
+        while cell * 2 <= Swift.min(want, maxCellMM) * (1 + 1e-9) { cell *= 2 }
+        return cell
+    }
+
     /// ★★★ WHERE THE LADDER IS ANCHORED — and it is the difference between a lattice and
     /// a haze of tiny struts.
     ///

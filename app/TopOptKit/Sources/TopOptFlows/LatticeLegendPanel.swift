@@ -79,6 +79,15 @@ public struct LatticeLegendProbe: Equatable, Sendable {
     public let density: Double
     /// The strut thickness that density produces, in mm.
     public let mm: Double
+    /// ★★ THE CELL AT THE TAPPED POINT, in mm. 0 ⇒ not known.
+    ///
+    /// Added because the callout read "6% · 0.83 mm" and the maintainer read the
+    /// 0.83 as a CELL SIZE — reasonably, since nothing said which millimetres they
+    /// were. It is the strut DIAMETER, and it was being computed at the stored
+    /// uniform 8.00 mm cell while the march drew 2.25/4.50/9.00 mm cells, so it did
+    /// not describe the geometry it was pointing at either. Both are now shown, both
+    /// are named, and the cell comes from the same rule the bake uses.
+    public let cellMM: Double
     /// ★ THE SECOND READING AT THE SAME POINT (maintainer, 2026-08-19: "I want to be
     /// able to click on any place and find both the lattice type and stress level.
     /// Simultaneously"). Nil when the stress view is not on.
@@ -92,8 +101,10 @@ public struct LatticeLegendProbe: Equatable, Sendable {
     public let worldPoint: SIMD3<Float>
 
     public init(groupID: UUID?, density: Double, mm: Double,
-                worldPoint: SIMD3<Float>, stressMPa: Double? = nil) {
+                worldPoint: SIMD3<Float>, stressMPa: Double? = nil,
+                cellMM: Double = 0) {
         self.groupID = groupID; self.density = density; self.mm = mm
+        self.cellMM = cellMM
         self.worldPoint = worldPoint; self.stressMPa = stressMPa
     }
 }
@@ -523,9 +534,14 @@ public struct LatticeLegendPanel: View {
                 ramp(for: g, arrowAt: probe.map { densityFraction($0.density) })
                 tickColumn(densityTicks().map(\.1), align: .leading)
                 if let p = probe {
+                    // ★★ NAME BOTH LENGTHS. "6% · 0.83 mm" was read as a 0.83 mm CELL;
+                    // it is the strut DIAMETER. A callout that shows a millimetre
+                    // without saying which millimetre invites exactly that.
                     LatticeLegendReading(
                         value: "\(Int((p.density * 100).rounded()))%",
-                        unit: String(format: "%.2f mm", p.mm),
+                        unit: p.cellMM > 0
+                            ? String(format: "%.2f mm strut\n%.2f mm cell", p.mm, p.cellMM)
+                            : String(format: "%.2f mm strut", p.mm),
                         caption: "at the tapped strut")
                         .frame(width: Self.readingCol)
                 }

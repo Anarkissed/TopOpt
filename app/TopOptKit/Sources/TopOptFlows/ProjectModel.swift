@@ -2652,7 +2652,27 @@ public final class ProjectModel: ObservableObject {
                                minimizePlastic: minimizePlastic, quality: quality,
                                optimized: hasResults, printParams: printParams,
                                designBox: designBox,
-                               lattice: lattice.enabled ? lattice : nil,
+                               // ★★★ PERSIST WHAT HE CONFIGURED, NOT ONLY WHAT HE ARMED
+                               // (maintainer, 2026-08-21). This was
+                               // `lattice.enabled ? lattice : nil`, so a project with
+                               // the lattice page fully set up — cell mode, density
+                               // mode, per-face depths, roles, retention — but
+                               // `enabled` still false wrote NO lattice block at all
+                               // and lost every one of those on the next load.
+                               //
+                               // ★ MEASURED ON HIS OWN DEVICE. `M2 verticalStand THICK`
+                               // had two declared regions on screen and NO `lattice` key
+                               // in its project.json, while his two older projects had
+                               // full blocks. Everything he set there was being answered
+                               // from defaults, which is why changing a setting could
+                               // look like it did nothing.
+                               //
+                               // ★ AND THE INVARIANT THAT LINE EXISTED FOR IS KEPT. The
+                               // point of the nil was that a project which never touched
+                               // the lattice writes a file byte-identical to a
+                               // pre-lattice one. "Never touched" is `== the default`,
+                               // which is what is asked here — not "not armed".
+                               lattice: lattice == LatticeSettings() ? nil : lattice,
                                // Written ALWAYS, including when it is at the
                                // default — this is a setting the user can turn
                                // off, and "absent" already means ON, so an
