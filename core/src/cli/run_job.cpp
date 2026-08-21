@@ -3435,6 +3435,11 @@ struct SteppedOutcome {
   std::vector<SteppedRegionCell> cells;
   std::vector<double> cell_field;   // grid-indexed, 0 off the lattice
   std::size_t regions_with_no_voxels = 0;
+  // ★ WHY a refusal happened, so the message can say it. A refusal that cannot name
+  // its own cause sent me chasing the region resolution when the fault was here.
+  std::size_t masked_voxels = 0;
+  std::size_t distinct_ids = 0;
+  std::size_t voxels_with_id_zero = 0;
   double min_cell_mm = 0.0, max_cell_mm = 0.0;
   long long adjacent_region_pairs = 0;
   long long adjacent_pairs_joined = 0;
@@ -3482,6 +3487,11 @@ SteppedOutcome run_stepped_step(const VoxelGrid& grid,
     const double w = std::isfinite(width[e]) ? width[e] : width_cap_mm;
     if (w > 0.0) widths[r].push_back(w);
   }
+  for (const auto& kv : rhos) {
+    so.masked_voxels += kv.second.size();
+    if (kv.first == 0) so.voxels_with_id_zero = kv.second.size();
+  }
+  so.distinct_ids = rhos.size();
   so.cell_field.assign(n, 0.0);
   std::map<int, double> cell_of;
   for (auto& kv : rhos) {
@@ -4503,10 +4513,17 @@ LatticeVariantOutcome lattice_one_variant(
     if (!R.stepped.ran || R.stepped.cells.empty()) {
       R.ungradeable = true;
       R.ungradeable_reason =
-          "the stepped algorithm derived no region cell: every declared include "
-          "region either holds no latticed voxel or has no measurable member width. "
-          "Stepped steps BETWEEN declared regions, so a job with none has nothing "
-          "for it to do — use \"algorithm\": \"doubled\".";
+          "the stepped algorithm derived no region cell. Measured: " +
+          std::to_string(R.stepped.masked_voxels) +
+          " latticed voxels carrying " + std::to_string(R.stepped.distinct_ids) +
+          " distinct region ids (" +
+          std::to_string(R.stepped.voxels_with_id_zero) +
+          " of them with NO id), and " +
+          std::to_string(R.stepped.regions_with_no_voxels) +
+          " region(s) had no measurable member width. Stepped derives ONE CELL PER "
+          "DECLARED REGION from that region's own FEA density and member width, so a "
+          "job whose latticed voxels carry no region id has nothing for it to key "
+          "on — use \"algorithm\": \"doubled\".";
       R.gf = gf;
       return R;
     }
