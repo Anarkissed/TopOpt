@@ -241,38 +241,132 @@ final class LatticeRegionFidelityTests: XCTestCase {
         return dump.covered
     }
 
+    /// A solid axis-aligned block, `mm` on a side, as a `ViewerMesh`.
+    ///
+    /// ★★ WHY THIS FIXTURE EXISTS AT ALL — and it is the only synthetic mesh in this
+    /// file, added reluctantly (task 2026-08-21). See
+    /// `testASubCellShrinkMovesTheRenderedLattice` for the full argument. In short:
+    /// the sub-cell claim needs a cell MUCH coarser than a pixel, a coarse cell needs
+    /// N* × cell of material, and his part does not have 40 mm of material anywhere a
+    /// declared region's in-plane edge still cuts. Measured, on his own mesh:
+    ///
+    ///     region                    widest member    core's ceiling W / N*
+    ///     halfU  40, depth 11 ....       10.39 mm            2.08 mm
+    ///     halfU  40, depth 60 ....       13.86 mm            2.77 mm
+    ///     halfU 100, depth 60 ....       45.03 mm            9.01 mm  ← edge is a
+    ///                                                                   knife edge:
+    ///                                                                   a 1 mm shrink
+    ///                                                                   takes ALL 72
+    ///                                                                   cells to zero
+    ///
+    /// At every cell his part CAN hold (≤ 2.77 mm) the cell is about four pixels wide
+    /// at this dump size, so the quantiser and the picture move together and there is
+    /// no window in which one is blind and the other is not — measured at 512, 1024 and
+    /// 1536 px, where a grid-blind 0.3 mm shrink moved 1, 5 and 8 pixels out of 6,654.
+    static func block(_ mm: Float) -> ViewerMesh {
+        let h = mm * 0.5
+        let c: [SIMD3<Float>] = [
+            [-h, -h, -h], [h, -h, -h], [h, h, -h], [-h, h, -h],
+            [-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h]]
+        let quads: [[Int]] = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+                              [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]
+        var v: [Float] = [], idx: [Int32] = [], fids: [Int32] = []
+        for (f, q) in quads.enumerated() {
+            let b = Int32(v.count / 3)
+            for i in q { v.append(contentsOf: [c[i].x, c[i].y, c[i].z]) }
+            idx.append(contentsOf: [b, b + 1, b + 2, b, b + 2, b + 3])
+            fids.append(contentsOf: [Int32(f), Int32(f)])
+        }
+        return ViewerMesh(vertices: v, indices: idx, faceIDs: fids, faceGeometry: [])
+    }
+
     /// ★★ THE ONE THAT ANSWERS HIS WORDS. Two frames from ONE bake, differing only
     /// in the declared region: the full slab, and the same slab pulled in 3 mm —
     /// well under the 8 mm cell. The rendered lattice MUST shrink.
     ///
     /// Before the march was clipped this was impossible: the struts were bounded by
-    /// the cell grid, which `testTheCellGridAloneCannotSeeASubCellShrink` shows is
-    /// byte-identical across this change. Both arms drew the same pixels.
+    /// the cell grid, which the in-test control below shows is byte-identical across
+    /// this change. Both arms drew the same pixels.
+    ///
+    /// ★★ THE FIXTURE MOVED TO A BLOCK, AND THE CLAIM DID NOT (task 2026-08-21).
+    /// It ran on his part. Once the cells-per-member floor began asking every voxel
+    /// under the cell, his part rendered NOTHING at 8 mm and both arms became 0 — so
+    /// `shrunk < full` was 0 < 0. That is not a fixture that can be nudged back: core
+    /// leaves his material solid at 8 mm too (N* = 5 wants a 40 mm member; his widest
+    /// is 10.39 mm under this region), which
+    /// `LatticePreviewFloorVsCoreTests.testCoreLeavesThisFixturesMaterialSolidToo`
+    /// establishes from core's own two laws. The preview was right and the fixture was
+    /// wrong.
+    ///
+    /// Every attempt to keep his mesh was measured and rejected, and the numbers are
+    /// recorded on `block(_:)` above. What is asserted here is IDENTICAL to what was
+    /// asserted before — same 8 mm cell, same 3 mm sub-cell shrink, same direction,
+    /// plus the quantiser control now inlined on the SAME fixture so the pair cannot
+    /// drift onto different geometry. Only the mesh under it is one that can hold an
+    /// 8 mm cell: a 120 mm block, whose material is thicker than core's EDT cap and so
+    /// clears the floor by core's own `+inf` sentinel.
+    ///
+    /// ★ AND HIS PART STILL COVERS THE NEIGHBOURING CLAIM.
+    /// `testTheStrutsAreBoundedByTheRegionAndNotByTheCellGrid` and
+    /// `testTheCellGridAloneCannotSeeASubCellShrink` both still run on his own mesh, so
+    /// this block buys the sub-cell RESOLUTION claim without taking real geometry out
+    /// of the file.
     @MainActor
     func testASubCellShrinkMovesTheRenderedLattice() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
-        let mesh = try LatticePreviewConfettiTests.hisMesh()
-        func bake(_ r: LatticeRegionSpec) -> LatticeSDFScene {
-            LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
-                            regions: [r], whenEmpty: .latticeNothing)
+        let mesh = Self.block(120)
+        let cell = LatticePreviewConfettiTests.hisParams().cellMM      // 8.0 mm
+        let shrink = 3.0
+        XCTAssertLessThan(shrink, cell,
+                          "★ the shrink must be SMALLER than one cell, or this stops "
+                          + "being a sub-cell test")
+        let b = mesh.bounds
+        let mid = (b.min + b.max) * 0.5
+        func bake(_ half: Double) -> LatticeSDFScene {
+            LatticeSDFScene(
+                mesh: mesh, field: nil, latticeID: "octet",
+                regions: [Self.slab(halfU: half, halfW: half, depth: 40,
+                                    origin: SIMD3<Double>(Double(b.max.x),
+                                                          Double(mid.y), Double(mid.z)),
+                                    normal: SIMD3<Double>(-1, 0, 0))],
+                whenEmpty: .latticeNothing)
         }
-        let full = try renderedLatticePixels(mesh, scene: bake(Self.hisSlab(mesh)),
-                                             device: device)
-        let shrunk = try renderedLatticePixels(
-            mesh, scene: bake(Self.hisSlab(mesh, halfU: 37, halfW: 37)), device: device)
+        // ★ THE CONTROL, ON THIS FIXTURE. The baked per-cell grid must be BLIND to the
+        // shrink, or the pixel change below could be explained by the grid alone and
+        // proves nothing about the march.
+        func activeCells(_ s: LatticeSDFScene) -> Int {
+            LatticePreviewOccupancy.cellField(occupancy: s.occupancy, demand: s.demand,
+                                              cellMM: cell).values.filter { $0 >= 0 }.count
+        }
+        let cellsFull = activeCells(bake(40)), cellsShrunk = activeCells(bake(40 - shrink))
+        let full = try renderedLatticePixels(mesh, scene: bake(40), device: device)
+        let shrunkPixels = try renderedLatticePixels(mesh, scene: bake(40 - shrink),
+                                                     device: device)
         print("""
 
         ================================================================================
-        A SUB-CELL SHRINK, IN PIXELS (cell 8.0 mm, shrink 3.0 mm)
-          region as declared ....... \(full) lattice pixels
-          region pulled in 3 mm .... \(shrunk) lattice pixels
+        A SUB-CELL SHRINK, IN PIXELS (cell \(cell) mm, shrink \(shrink) mm, 120 mm block)
+          CONTROL — active CELLS
+            region as declared ....... \(cellsFull)
+            region pulled in \(shrink) mm .. \(cellsShrunk)   (must be identical)
+          THE PICTURE — lattice pixels
+            region as declared ....... \(full)
+            region pulled in \(shrink) mm .. \(shrunkPixels)
         ================================================================================
         """)
+        XCTAssertGreaterThan(cellsFull, 0,
+                             "positive control: the cell grid must have cells, or the "
+                             + "equality below holds between two empty sets")
+        XCTAssertEqual(cellsShrunk, cellsFull,
+                       "★ THE CONTROL: the cell grid cannot express a \(shrink) mm "
+                       + "change against a \(cell) mm cell. If this ever differs, the "
+                       + "pixel bound below stops being evidence about the MARCH.")
         XCTAssertGreaterThan(full, 0, "the unshrunk arm must draw a lattice at all")
-        XCTAssertLessThan(shrunk, full,
+        XCTAssertLessThan(shrunkPixels, full,
                           "★ HIS REPORT: pulling the region in must pull the LATTICE in. "
-                          + "The struts were bounded by the 8 mm cell grid, which cannot "
-                          + "express a 3 mm change, so the picture did not move.")
+                          + "The struts were bounded by the \(cell) mm cell grid, which "
+                          + "cannot express a \(shrink) mm change, so the picture did "
+                          + "not move.")
     }
 
     /// ★ AND THE LATTICE LIVES OR DIES BY THE REGION, not by the cell grid.
@@ -357,7 +451,14 @@ final class LatticeRegionFidelityTests: XCTestCase {
         renderer.camera.setOrientation(azimuth: 0.7, elevation: 0.4)
         renderer.setBodyAlpha(0)          // ★ the shell OUT — that is the point
         renderer.setLatticeScene(scene, token: 1)
-        renderer.latticeParams = LatticePreviewConfettiTests.hisParams()
+        // ★★ A CELL HIS PART CAN HOLD (task 2026-08-21). This read `hisParams()`, whose
+        // cell is the shipped 8.00 mm default — and core builds NO lattice over this
+        // slab at 8 mm (N* = 5 wants 40 mm of member; the widest material here measures
+        // 10.39 mm, measured in `LatticePreviewFloorVsCoreTests`). All six renders
+        // agreed on ZERO: a bit-exactness bar passing because there was nothing to be
+        // exact about. The determinism claim has not moved — it is now asked of a
+        // lattice the run would actually build.
+        renderer.latticeParams = LatticePreviewConfettiTests.hisParamsAtACellHisPartCanHold()
 
         var counts: [Int] = []
         var first: [Bool]? = nil

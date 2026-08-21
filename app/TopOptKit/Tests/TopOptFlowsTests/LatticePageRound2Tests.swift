@@ -273,8 +273,29 @@ final class LatticePageRound2Tests: XCTestCase {
     /// (core/build/topopt-cli); schema validation happens BEFORE model import,
     /// so a missing model file is the expected (non-schema) failure — exactly
     /// the real_cli_smoke.py discipline.
+    ///
+    /// ★★ macOS ONLY, AND SAID SO IN THE TYPE SYSTEM (task 2026-08-21). This test
+    /// shells out with `Process`, which does not exist on iOS — and because Swift
+    /// compiles a whole target at once, that ONE call made every test in
+    /// `TopOptFlowsTests` fail to build for an iphonesimulator destination:
+    ///
+    ///     LatticePageRound2Tests.swift:311: error: cannot find 'Process' in scope
+    ///
+    /// So `xcodebuild test -destination 'platform=iOS Simulator,…'` could not run ANY
+    /// test in this package, including the ones whose entire purpose is to answer
+    /// "does this behave the same on the device?" — `TopOptKitTests
+    /// .testStepImportProducesMeshOnThisPlatform` is exactly that test, and it was
+    /// unreachable on the only platform it was written to interrogate.
+    ///
+    /// Found while diagnosing his blank STEP viewport, where running the import on the
+    /// simulator was the next measurement to take. The guard costs this test nothing:
+    /// it needs a locally-built macOS CLI binary and already skips without one.
     @MainActor
     func testCoreCLIParsesTheEmittedRegions() throws {
+        #if !os(macOS)
+        throw XCTSkip("this test drives the locally-built topopt-cli through `Process`, "
+                      + "which is macOS-only")
+        #else
         // #filePath = <repo>/app/TopOptKit/Tests/TopOptFlowsTests/…swift → the
         // repo root is 5 components up (file, TopOptFlowsTests, Tests, TopOptKit, app).
         var repo = URL(fileURLWithPath: #filePath)
@@ -328,6 +349,7 @@ final class LatticePageRound2Tests: XCTestCase {
         }
         XCTAssertNotEqual(proc.terminationStatus, 0,
                           "the probe model does not exist — the failure must be import, not schema silence")
+        #endif
     }
 
     // MARK: - M3 guardrails: absent roles ⇒ byte-identical, clearances unchanged

@@ -905,8 +905,7 @@ public struct WorkspacePlaceholder: View {
                           // The gate is UNCHANGED — the same `showStrutPreview` and the
                           // same stage conditions the stacked view had, and the same
                           // `bodyAlpha: 0` beside it (bar A3).
-                          latticeLayer: (showStrutPreview
-                                         && (visible.latticeControls || showLatticePage))
+                          latticeLayer: latticeLayerIsDrawn
                               ? strutScene.map {
                                   LatticeLayerInputs(scene: $0,
                                                      params: latticeProxy.params,
@@ -1548,7 +1547,7 @@ public struct WorkspacePlaceholder: View {
         let lat = LatticeAutoPosture.applied(
             to: project.lattice,
             includeRegionCount: emitted.count,
-            regionWidthsMM: emitted.map { $0.depthMM },
+            regionWidthsMM: latticeAutoWidthsMM(includes: emitted),
             lineWidthMM: bead)
         // ★ FIT RIDES THE SAME PLANNER PATH. Core's fit planner needs the ladder's
         // ends too: the finest and coarsest cell any region asked for.
@@ -1578,6 +1577,32 @@ public struct WorkspacePlaceholder: View {
     /// ★★ FIT'S CELL PER DECLARED REGION, `W / N*`, from core — the mode that makes a
     /// thin wall latticeable AT ALL, because the cell is chosen so exactly N* fit
     /// across the member. Empty unless the resolved cell mode is Fit.
+    /// ★★★ THE MEMBER WIDTH AUTO SIZES ITS CELL FROM — MEASURED, NOT DECLARED
+    /// (maintainer, 2026-08-20: "I made sure the walls here are *exactly* 20mm wide.
+    /// That's 4mm cells 5x wide. Yet … much smaller sized cells than what should be
+    /// expected when I put 'auto' on everything").
+    ///
+    /// This used to be `includes.map { $0.depthMM }` — the region's declared DEPTH, how
+    /// far the lattice reaches in from the face. That is not the member's thickness, and
+    /// the ceiling W / N* is about the material. Declaring a lattice half way into a
+    /// 20 mm wall halved the cell on a wall whose material never changed; the error runs
+    /// one way only (a depth cannot exceed the material it is declared into), so the
+    /// cell was always too FINE. See `LatticeMeasuredRegionWidth` for the numbers.
+    ///
+    /// The widths come from `scene.memberThicknessMM` — core's own
+    /// `local_member_thickness_mm`, the SAME field the cells-per-member floor tests
+    /// against, so the ceiling Auto reaches for is by construction one the floor
+    /// accepts. Before the first bake there is no measurement, and the declared depth is
+    /// the only number available; that fallback is stated rather than silent.
+    private func latticeAutoWidthsMM(includes: [LatticeRegionSpec]) -> [Double] {
+        if let s = strutScene, !s.memberThicknessMM.isEmpty {
+            let measured = LatticeMeasuredRegionWidth.boundsMM(
+                occupancy: s.occupancy, memberThicknessMM: s.memberThicknessMM)
+            if !measured.isEmpty { return measured }
+        }
+        return includes.map { $0.depthMM }
+    }
+
     private var latticePreviewFitCells: [Double] {
         let bead = project.printParams.strutLineWidthMM
         guard bead > 0 else { return [] }
@@ -1585,14 +1610,24 @@ public struct WorkspacePlaceholder: View {
         let includes = emitted.filter { $0.role == .include }
         let lat = LatticeAutoPosture.applied(
             to: project.lattice, includeRegionCount: includes.count,
-            regionWidthsMM: includes.map { $0.depthMM }, lineWidthMM: bead)
+            regionWidthsMM: latticeAutoWidthsMM(includes: includes), lineWidthMM: bead)
         guard lat.cellSizeMode == .fit else { return [] }
         // One entry per region in the SCENE's order (all roles), because the bake
         // walks `scene.regions` — an include-only list would mis-index an exclude.
         return emitted.map { r in
             guard r.role == .include, r.depthMM > 0 else { return 0 }
+            // ★ FIT CARRIES THE SAME CORRECTION. Its cell is W / N* for THIS region, so
+            // it wants that region's own measured material — not the depth the user
+            // typed. Falls back to the declared depth only when nothing is measured.
+            var w = r.depthMM
+            if let s = strutScene, !s.memberThicknessMM.isEmpty {
+                let m = LatticeMeasuredRegionWidth.widthMM(
+                    region: r, occupancy: s.occupancy,
+                    memberThicknessMM: s.memberThicknessMM)
+                if m > 0 { w = m }
+            }
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
-                                                      memberWidthMM: r.depthMM,
+                                                      memberWidthMM: w,
                                                       minExtrudableWidthMM: bead)
             return d.valid ? d.cellMM : 0
         }
@@ -3821,6 +3856,33 @@ public struct WorkspacePlaceholder: View {
     /// this value is the cheap, reversible half, and it is worth seeing on the
     /// device before writing the expensive half.
     private var latticePreviewBodyAlpha: Float {
+        // ★★★ THE BODY MAY ONLY BE HIDDEN WHERE A LATTICE IS ACTUALLY DRAWN
+        // (maintainer, 2026-08-20: his new `M2 verticalStand THICK` opened to a shadow
+        // on the stage floor and NOTHING drawn — "rotating doesn't help, so it isn't
+        // framing").
+        //
+        // ★ IT WAS NEVER ABOUT THAT FILE. The import is clean on macOS AND on the iPad
+        // simulator — 3,324 triangles, watertight, wound outward, 978,349 mm³, MORE
+        // pixels than the fixture that renders correctly (9,590 vs 7,989 at 256²). The
+        // renderer draws it. What blanked it was this property, on a condition his file
+        // met only by being NEW: he had declared an anchor and a load and no lattice
+        // role, so `latticeJobRegions()` emitted ZERO include regions and this returned
+        // 0. Measured at the renderer: bodyAlpha 1 -> 9,590 lit pixels, bodyAlpha 0 -> 0.
+        // The contact shadow survives because the shadow pass does not read this value,
+        // which is exactly the "shadow but no body" he photographed.
+        //
+        // ★ WHY IT ONLY BIT NOW. This value is handed to the mesh view unconditionally,
+        // but until PR 341's confetti fix (dc0cb620, "The preview was drawing struts
+        // behind an opaque part") the coordinator only ever DELIVERED a body alpha
+        // inside the load-flow block, so the 0 was silently dropped on every stage that
+        // has no load flow. Making the delivery honest made this reachable — the fix was
+        // right, and it uncovered a caller that was wrong.
+        //
+        // ★ THE RULE, STATED. Hiding the shell is a concession to ONE picture: the
+        // lattice layer standing alone with nothing to cut it against. If that layer is
+        // not being drawn, there is nothing to concede to and the body must be opaque.
+        // So the gate here is the SAME expression that gates `latticeLayer` at the call
+        // site — not a second rule that can drift from it.
         // ★★ AND 0 WHEN THERE IS NOTHING TO CUT. With declared regions the shell is
         // cut to them and the two surfaces are complementary — that is the whole
         // point. With NO regions the lattice legitimately fills the interior, the
@@ -3829,7 +3891,21 @@ public struct WorkspacePlaceholder: View {
         // `testTheStrutPreviewSurvivesTheSharedDepthBuffer` is what caught it: it
         // asserts the lattice reaches the G-buffer AT ALL, and with a whole shell
         // in front of it, it does not.
-        project.latticeJobRegions().regions.contains { $0.role == .include } ? 1 : 0
+        //
+        // The rule itself lives in `LatticePreviewBodyAlpha` so it can be tested; this
+        // property is now only the two inputs it is asked for.
+        LatticePreviewBodyAlpha.value(
+            latticeLayerDrawn: latticeLayerIsDrawn,
+            hasIncludeRegion: project.latticeJobRegions().regions
+                .contains { $0.role == .include })
+    }
+
+    /// ★ THE ONE EXPRESSION that decides whether the raymarched lattice layer is drawn.
+    /// Read BOTH by the `latticeLayer:` input and by `latticePreviewBodyAlpha`, because
+    /// "hide the shell" and "draw the lattice" must never be able to disagree — the
+    /// frame where they did is the one that drew neither.
+    private var latticeLayerIsDrawn: Bool {
+        showStrutPreview && (visible.latticeControls || showLatticePage)
     }
 
     /// ★★ EVERY INPUT THE BAKE READS — AND IT USED TO BE ONLY THE SELECTION

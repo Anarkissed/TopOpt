@@ -49,7 +49,17 @@ final class LatticeGBufferMaskTests: XCTestCase {
         renderer.camera.setOrientation(azimuth: 0.7, elevation: 0.4)
         renderer.setBodyAlpha(bodyAlpha)
         renderer.setLatticeScene(scene, token: 1)
-        renderer.latticeParams = LatticePreviewConfettiTests.hisParams()
+        // ★★ A CELL HIS PART CAN HOLD (task 2026-08-21). This read `hisParams()`, whose
+        // cell is the shipped 8.00 mm DEFAULT — at which core latticeS NOTHING over this
+        // slab (N* = 5 wants 40 mm of member; the widest material measures 10.39 mm), so
+        // both arms of the occlusion bound below were comparing 0 against 0. An
+        // inequality between two empty things passes vacuously, and on this project one
+        // already has: the positive controls here are what caught it.
+        //
+        // Neither claim moved — the mask must still be bit-exact, and the shell must
+        // still only ever REMOVE strut pixels. They are now asked of a lattice that the
+        // run would actually build. See `LatticePreviewFloorVsCoreTests`.
+        renderer.latticeParams = LatticePreviewConfettiTests.hisParamsAtACellHisPartCanHold()
 
         var counts: [Int] = []
         var first: [Bool]? = nil
