@@ -182,6 +182,38 @@ GradedField grade_lattice(const VoxelGrid& grid,
   out.band_rho_min = rho_lo;
   out.band_rho_max = rho_hi;
   out.cells_per_member_floor = n_star;
+  // ── ★ THE ADAPTIVE FLOOR (aesthetic only) ────────────────────────────────────
+  // Disarms itself without an allowable: utilisation is what it is a function of.
+  const bool adaptive_cpm = aesthetic &&
+                            params.aesthetic_adaptive_cells_per_member &&
+                            params.demand_allowable_mpa > 0.0;
+  const double err_budget = params.aesthetic_error_budget > 0.0
+                                ? params.aesthetic_error_budget
+                                : kAestheticHomogenisationErrorBudget;
+  out.aesthetic_adaptive_cells_armed = adaptive_cpm;
+  out.aesthetic_error_budget_used = adaptive_cpm ? err_budget : 0.0;
+  out.aesthetic_min_cells_per_member_allowed = adaptive_cpm ? n_star : 0.0;
+  // The floor THIS voxel must clear. Constant everywhere unless the adaptive rule is
+  // armed, so every other path is bit-identical.
+  // The loosest floor the adaptive rule permits over the candidate set — what the
+  // per-CELL planner is allowed to consider. Computed in a fixed voxel order.
+  double adaptive_plan_floor = n_star;
+  if (adaptive_cpm) {
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
+      const double f = aesthetic_cells_per_member_floor(
+          topo, demand[e] / params.demand_allowable_mpa, err_budget);
+      if (f < adaptive_plan_floor) adaptive_plan_floor = f;
+    }
+  }
+  auto n_req = [&](std::size_t e) -> double {
+    if (!adaptive_cpm) return n_star;
+    const double u = demand[e] / params.demand_allowable_mpa;
+    const double f = aesthetic_cells_per_member_floor(topo, u, err_budget);
+    if (f < out.aesthetic_min_cells_per_member_allowed)
+      out.aesthetic_min_cells_per_member_allowed = f;
+    return f;
+  };
 
   // ── the printability floor (requirement 3) ──────────────────────────────────────
   // The thinnest strut at any cell occurs at rho_lo (diameter is monotone in rho), so
@@ -598,7 +630,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       // Cells-per-member ceiling (requirement 2): a +inf width (thicker than the EDT
       // cap) yields +inf cells-across and always clears the floor.
       const double cpm = width[e] / cell;
-      if (cpm < n_star) {
+      if (cpm < n_req(e)) {
         // THE VOXELS SUB-FLOOR RETENTION IS ABOUT. Counted whether or not retention
         // is armed, so a forecast can say how much is at stake before anyone opts in.
         ++out.subfloor_candidate_voxels;
@@ -728,6 +760,11 @@ GradedField grade_lattice(const VoxelGrid& grid,
 
     if (s_max > 0.0) {
       CellPlanParams pp;
+    // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
+    // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
+    // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
+    // by `n_req` below, so this widens what may be CONSIDERED, never what is emitted.
+    if (adaptive_cpm) pp.cells_per_member_floor_override = adaptive_plan_floor;
       pp.topology = topo;
       pp.mode = CellSizeMode::Fit;
       // The ladder's base is the FINEST cell any region asked for — never finer, so
@@ -822,6 +859,11 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
 
     CellPlanParams pp;
+    // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
+    // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
+    // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
+    // by `n_req` below, so this widens what may be CONSIDERED, never what is emitted.
+    if (adaptive_cpm) pp.cells_per_member_floor_override = adaptive_plan_floor;
     pp.topology = topo;
     pp.mode = CellSizeMode::Swept;
     pp.min_cell_size_mm = params.min_cell_size_mm;
@@ -1008,7 +1050,16 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // is the whole point of a swept posture (bar R3/R5). On the uniform paths
     // voxel_cell is empty and this is the scalar test, unchanged.
     const double ce = voxel_cell.empty() ? cell : voxel_cell[e];
-    if (!(width[e] / ce >= n_star)) {
+    // ★ THE FLOOR THIS VOXEL HAD TO CLEAR. Constant unless the adaptive rule is
+    // armed; the assertion is NOT weakened — a voxel below its OWN required floor
+    // still throws, and the admissible set is stated exactly rather than widened.
+    const double need = n_req(e);
+    // ★ NAME THE RELAXATION. A voxel the adaptive rule let through below the ACCURACY
+    // floor is buildable and NOT describable by the homogenised tensor. Counted here
+    // so a certificate over it is reported out of regime rather than quietly trusted.
+    if (adaptive_cpm && width[e] / ce < n_star)
+      ++out.aesthetic_below_accuracy_floor_voxels;
+    if (!(width[e] / ce >= need)) {
       // THE ONE ADMISSIBLE EXCEPTION, and it is a NARROWING of what may pass here, not
       // a widening: a sub-floor voxel is legal ONLY if retention was armed, ONLY if the
       // region's MEASURED stress fraction cleared the ceiling, and ONLY if this exact
@@ -1073,11 +1124,25 @@ GradedField grade_lattice(const VoxelGrid& grid,
       throw std::logic_error(
           "grade_lattice: fit's out-of-regime count disagrees with the posture");
   } else if (out.subfloor_retained_voxels == 0 && out.latticed_voxels > 0 &&
-             !(out.min_cells_per_member >= n_star)) {
+             !(out.min_cells_per_member >= (adaptive_cpm ? adaptive_plan_floor
+                                                         : n_star))) {
+    // ★ NOT A WEAKENING — the bound is the floor that GOVERNED. Without the adaptive
+    // rule this is the accuracy floor, exactly as before. With it, the admissible
+    // bound is the floor the rule computed from the measured error curve and what the
+    // material carries, and anything under it still throws.
     throw std::logic_error(
         "grade_lattice: thinnest latticed member is below the floor with no "
         "retention in force");
   }
+  // ★ AND THE RELAXATION MUST BE NAMED. If the adaptive rule let material through
+  // below the ACCURACY floor, that material has to be counted — a silent relaxation
+  // would leave a certificate trusting a tensor that no longer describes the member.
+  if (adaptive_cpm && out.latticed_voxels > 0 &&
+      out.min_cells_per_member < n_star &&
+      out.aesthetic_below_accuracy_floor_voxels == 0)
+    throw std::logic_error(
+        "grade_lattice: material sits below the accuracy floor but none was counted "
+        "as out of regime");
 
   // ── ★ THE DENSITY DISTRIBUTION (bar R1) ─────────────────────────────────────
   // One pass in voxel order over the LATTICED set, into fixed bins spanning the

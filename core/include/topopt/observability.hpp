@@ -888,6 +888,13 @@ struct RunInfo {
   // §5(a): one line the app can show. Empty in structural mode, which KEEPS its
   // strength claim (utilisation against the in-plane allowable).
   std::string grading_density_meaning;
+  // ── ★ the ADAPTIVE cells-per-member floor (aesthetic only) ───────────────────
+  bool grading_adaptive_cells_armed = false;
+  double grading_adaptive_error_budget = 0.0;
+  double grading_adaptive_min_cells_allowed = 0.0;
+  // Material the relaxation let through below the ACCURACY floor: buildable, and NOT
+  // describable by the homogenised tensor. A certificate over it is out of regime.
+  long long grading_below_accuracy_floor_voxels = 0;
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
   double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT

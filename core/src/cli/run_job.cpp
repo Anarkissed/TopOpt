@@ -5891,6 +5891,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gp.aesthetic_percentile = job.grading.aesthetic_percentile;
     gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
     gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+    gp.aesthetic_adaptive_cells_per_member =
+        job.grading.aesthetic_adaptive_cells_per_member;
+    gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
     // FIT needs the per-region derivation here too, or the analyze receipt would
     // describe a cell law the run never used. `nullptr` region below means the
     // candidate set is the whole printed design, so voxels outside every declared
@@ -5952,6 +5955,12 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gi.grading_aesthetic_weight_exponent = gf.aesthetic_weight_exponent_used;
     gi.grading_above_percentile_voxels =
         static_cast<long long>(gf.above_percentile_voxels);
+    gi.grading_adaptive_cells_armed = gf.aesthetic_adaptive_cells_armed;
+    gi.grading_adaptive_error_budget = gf.aesthetic_error_budget_used;
+    gi.grading_adaptive_min_cells_allowed =
+        gf.aesthetic_min_cells_per_member_allowed;
+    gi.grading_below_accuracy_floor_voxels =
+        static_cast<long long>(gf.aesthetic_below_accuracy_floor_voxels);
     if (gf.intent_used == GradingIntent::Aesthetic)
       gi.grading_density_meaning = kAestheticDensityMeaning;
     gi.grading_density_histogram.assign(

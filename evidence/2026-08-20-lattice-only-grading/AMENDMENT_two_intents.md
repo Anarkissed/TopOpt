@@ -153,3 +153,62 @@ comparison that cries drift is exactly as useless as one that hides it.
 
 Swift package: `xcodebuild build -scheme TopOptKit-Package -destination platform=macOS`
 — **BUILD SUCCEEDED** against the rebuilt xcframework (fingerprint `22c173b05c6b`).
+
+---
+
+## ★ THE ADAPTIVE CELLS-PER-MEMBER FLOOR (aesthetic only)
+
+**The 5 is an ACCURACY threshold, not a buildability one.** `lattice.hpp` says so:
+it "protects the CERTIFICATE… but the part still prints". The buildability floor is
+`lattice_percolation_cells_per_member_min` = **1**.
+
+The error curve behind the 5 is already measured (handoff
+2026-07-28-graded-cell-size-phase0, C2b — bending, as deployed):
+
+| cells | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| stiffness error | +48.5 % | +8.5 % | +4.1 % | +2.59 % | +1.78 % |
+
+5 is where it crosses a 2.4 % band. **That band is a choice, not physics.**
+
+So in AESTHETIC intent the floor becomes a function of what the material actually
+carries: the smallest measured cell count whose `error x utilisation` stays inside a
+stated budget (1 % of allowable, `kAestheticHomogenisationErrorBudget`).
+
+**Hard-floored at 2, not 1.** The percolation figure of 1.0 was measured at rho ~= 0.199,
+AXIAL, octet only, and its own declaration says it "must not be quoted
+unconditionally". 2 is the lowest point measured under the BENDING case the accuracy
+floor itself uses.
+
+### Measured on his part — [0.20, 0.60], aesthetic
+
+| | adaptive OFF | adaptive ON | delta |
+|---|---|---|---|
+| latticed voxels | 91,575 | **96,891** | **+5,316 (+5.8 %)** |
+| solid fallback | 19,329 | 14,013 | −5,316 |
+| cells dropped unprintable | 11,350 | 9,312 | −2,038 |
+| min cells/member | 5.116 | 2.558 | −2.558 |
+| floor in force | 5.000 | **2** | |
+| below accuracy floor | — | **4,113 voxels** | counted, out of regime |
+
+★ **WHY IT LATTICES MORE, WHICH IS COUNTER-INTUITIVE.** The floor is an UPPER BOUND on
+cell size (`S <= W / N*`). LOWERING it permits COARSER cells, which makes struts FATTER
+and therefore MORE printable — 2,038 fewer cells dropped as unprintable. The binding
+constraint on his part was never the accuracy floor; it was printability, and relaxing
+the accuracy floor is what let the planner reach a printable cell.
+
+### ★ TWO MISTAKES ON THE WAY, BOTH WORTH RECORDING
+
+1. **The first wiring was a NO-OP.** I relaxed the floor in `grade_lattice`'s own
+   checks but not in `plan_cell_sizes`, which is what actually CHOOSES the cell.
+   Measured +0 voxels. A feature that changes nothing reads exactly like a feature
+   that works until you diff the numbers — and the second run's output was STALE
+   (the run had failed), which made "+0" look like a real comparison. Both caught by
+   checking the completion marker, not the file.
+2. **The tail assertion then fired**, correctly: the thinnest member was below the
+   fixed floor. It now checks against the floor that GOVERNED — the accuracy floor
+   without the rule, the computed floor with it — which is a restatement, not a
+   weakening. A NEW assertion was added beside it: if material sits below the accuracy
+   floor and none was counted out of regime, that throws.
+
+Regression: 5/5 targeted core tests. Assertion census vs the merge base: **0 removed.**

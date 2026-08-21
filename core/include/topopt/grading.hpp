@@ -355,6 +355,26 @@ struct GradingLawParams {
   double aesthetic_rho_min = 0.0;
   double aesthetic_rho_max = 0.0;
 
+  // ── ★ AN ADAPTIVE CELLS-PER-MEMBER FLOOR, AESTHETIC ONLY ─────────────────────
+  // The fixed floor of 5 is an ACCURACY threshold: below it the homogenised tensor
+  // stops describing the member, so a certified margin over it is not trustworthy.
+  // It is NOT a buildability threshold — that one is
+  // `lattice_percolation_cells_per_member_min`, and it is 1.
+  //
+  // A lattice graded for LOOKS makes no strength claim, and the accuracy that floor
+  // buys is worth exactly as much as the load the material carries. So when this is
+  // armed the floor becomes a FUNCTION of the voxel's own utilisation, computed from
+  // the measured error curve (lattice.hpp). Material that lands below the accuracy
+  // floor is COUNTED and reported out of regime — the relaxation is named, never
+  // silent.
+  //
+  // ★ REQUIRES an allowable, because utilisation is what it is a function of. With
+  // `demand_allowable_mpa` unset it disarms itself rather than relaxing on a number
+  // nobody measured. OFF by default; structural intent ignores it entirely.
+  bool aesthetic_adaptive_cells_per_member = false;
+  // 0 => kAestheticHomogenisationErrorBudget.
+  double aesthetic_error_budget = 0.0;
+
   // HOW THESE TWO COMPOSE (multiscale x sub-floor retention). A multiscale run
   // prescribes rho and stops using `demand` FOR THE DENSITY — but it still hands
   // in the variant's real von Mises field, and that is what the retention
@@ -654,6 +674,15 @@ struct GradedField {
   // here so the discarded tail is visible beside `clamped_hi_voxels` rather than
   // silently absorbed.
   std::size_t above_percentile_voxels = 0;
+  // ── ★ the adaptive floor, as applied ────────────────────────────────────────
+  bool aesthetic_adaptive_cells_armed = false;
+  double aesthetic_error_budget_used = 0.0;
+  double aesthetic_min_cells_per_member_allowed = 0.0;  // the loosest floor reached
+  // Latticed voxels emitted BELOW the accuracy floor because the adaptive rule
+  // permitted it. The homogenised tensor does not describe these: a certificate over
+  // them is out of regime, exactly as for sub-floor retention, and this count is what
+  // says so.
+  std::size_t aesthetic_below_accuracy_floor_voxels = 0;
 
   // ── ★ THE DENSITY DISTRIBUTION (bar R1) ──────────────────────────────────────
   // "The fraction of voxels at rho_min is the number that was wrong, so it is the

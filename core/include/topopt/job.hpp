@@ -355,6 +355,10 @@ struct JobGrading {
   // where within the band to grade, never to leave it.
   double aesthetic_rho_min = 0.0;
   double aesthetic_rho_max = 0.0;
+  // AESTHETIC only: let the cells-per-member floor be COMPUTED from what the material
+  // actually carries, instead of the fixed accuracy floor of 5. Off by default.
+  bool aesthetic_adaptive_cells_per_member = false;
+  double aesthetic_error_budget = 0.0;   // 0 => the core constant (1 %)
 
   double demand_exponent = 1.0;         // rho = rho_max*(demand/max)^exp; 1.0 = fully-
                                         // stressed on von Mises. finite > 0

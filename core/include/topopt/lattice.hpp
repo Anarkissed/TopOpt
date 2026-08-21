@@ -134,6 +134,47 @@ double lattice_cells_per_member_min(LatticeTopology topo);
 // unconditionally.
 double lattice_percolation_cells_per_member_min(LatticeTopology topo);
 
+// ── ★ THE MEASURED HOMOGENISATION-ERROR CURVE, AND A FLOOR COMPUTED FROM IT ─────
+// (amendment to 2026-08-20-lattice-only-grading: an adaptive cells-per-member floor
+// for AESTHETIC intent only.)
+//
+// ★ THE 5 IS AN ACCURACY THRESHOLD, NOT A BUILDABILITY ONE. It is where the
+// homogenised macro model's transverse-stiffness error crosses a 2.4 % band. That
+// band is a CHOICE. The curve behind it is measured (handoff
+// 2026-07-28-graded-cell-size-phase0, C2b — bending, "as deployed"):
+//
+//     1 cell  +48.5 %      4 cells  +2.59 %
+//     2 cells  +8.5 %      5 cells  +1.78 %
+//     3 cells  +4.1 %
+//
+// ★ WHY IT CAN MOVE FOR AN AESTHETIC LATTICE. The error only matters in proportion
+// to how much the member matters. A 4.1 % stiffness error on material carrying 0.05 %
+// of the allowable perturbs the part by essentially nothing. So the requirement is
+// not "5 cells" but "enough cells that the error this introduces stays inside a
+// stated budget, given what this material actually carries".
+//
+// Returns the smallest MEASURED cell count whose (stiffness error x utilisation)
+// stays within `error_budget`, never below `aesthetic_cells_per_member_hard_floor`
+// and never above the accuracy floor. A non-finite or non-positive utilisation
+// returns the accuracy floor — absence of measurement is not permission.
+double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
+                                        double error_budget);
+
+// ★ THE HARD FLOOR FOR THE ADAPTIVE RULE, AND WHY IT IS NOT THE PERCOLATION 1.0.
+// `lattice_percolation_cells_per_member_min` is 1.0, but its own declaration warns
+// that it was measured at rho ~= 0.199, AXIAL, octet only, and "must not be quoted
+// unconditionally" — it does not cover bending or the top of the band, which is
+// exactly where an aesthetic lattice may sit. 2 cells is the lowest point that IS
+// measured under the bending case the accuracy floor itself uses (+8.5 %), so the
+// adaptive rule stops there rather than extrapolating onto a number measured under
+// conditions it does not satisfy.
+double aesthetic_cells_per_member_hard_floor(LatticeTopology topo);
+
+// The default error budget: the fraction of the allowable by which the homogenisation
+// error is permitted to perturb this material's contribution. 1 % — the same scale as
+// `kUnloadedUtilisationMax`, and stated as a POLICY so it can be argued with.
+inline constexpr double kAestheticHomogenisationErrorBudget = 0.01;
+
 // ★ THE SUB-FLOOR RETENTION STRESS FRACTION — the ceiling on a REGION's macro stress,
 // as a fraction of the PART's peak von Mises, under which the grading law is permitted
 // to keep a below-the-floor voxel as lattice instead of falling back to solid

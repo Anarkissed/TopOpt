@@ -1469,7 +1469,8 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
              "intent", "aesthetic_percentile", "aesthetic_rho_min",
-             "aesthetic_rho_max",
+             "aesthetic_rho_max", "aesthetic_adaptive_cells_per_member",
+             "aesthetic_error_budget",
              "cell_mode", "cell_min_mm", "cell_max_mm",
              "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction",
              "subfloor_aggregate_cap", "report_region_cells",
@@ -1559,6 +1560,17 @@ JobDescription parse_job(const std::string& json_text) {
     if (const JsonValue* v = find_key(gr, "aesthetic_rho_min"))
       job.grading.aesthetic_rho_min =
           require_number(*v, "grading.aesthetic_rho_min");
+    if (const JsonValue* v = find_key(gr, "aesthetic_adaptive_cells_per_member")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("grading \"aesthetic_adaptive_cells_per_member\" must be a boolean");
+      job.grading.aesthetic_adaptive_cells_per_member = (v->num != 0.0);
+    }
+    if (const JsonValue* v = find_key(gr, "aesthetic_error_budget")) {
+      job.grading.aesthetic_error_budget =
+          require_number(*v, "grading.aesthetic_error_budget");
+      if (!(job.grading.aesthetic_error_budget > 0.0))
+        schema_fail("grading \"aesthetic_error_budget\" must be > 0");
+    }
     if (const JsonValue* v = find_key(gr, "aesthetic_rho_max"))
       job.grading.aesthetic_rho_max =
           require_number(*v, "grading.aesthetic_rho_max");
