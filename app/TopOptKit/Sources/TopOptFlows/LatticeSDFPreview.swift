@@ -187,13 +187,36 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         // LESS than was marked, and the whole point of masking the preview is
         // that it stops over-promising — under-promising in silence is the same
         // defect wearing the other sign.
+        var label = scene.previewLabel
+        // ★★★ AND WHICH ALGORITHM THIS PICTURE IS OF (maintainer, 2026-08-21: "connect
+        // the different algorithms"; and 2026-08-19: "the preview needs to work and show
+        // exactly like the algorithm would create the lattice").
+        //
+        // ★ THE MARCHER CAN DRAW EXACTLY ONE OF THE THREE, AND THE REASON IS THE CELL
+        // TEXTURE'S SHAPE, not an oversight. It carries a BASE CELL and an integer
+        // DYADIC LEVEL per cell, and the shader recovers which cell it stands in by
+        // integer division — that encoding is what makes coarse and fine cells share
+        // nodes, and it is exactly what DOUBLED is. STEPPED takes each region's derived
+        // cell verbatim with no dyadic snap, so its cells are arbitrary reals that no
+        // (base, level) pair can express; ORGANIC has no cells at all, only traced
+        // curves. Neither is representable without a second renderer.
+        //
+        // ★ SO IT SAYS SO. Drawing the doubled ladder under another algorithm's name is
+        // precisely the preview/run divergence this branch has spent a week closing —
+        // but drawing NOTHING would take away the only picture he has of the regions,
+        // the depths and the densities, all of which are algorithm-independent. The
+        // honest middle is to draw it and label it, in one sentence, every frame.
+        if !scene.algorithmDrawnFaithfully, !scene.algorithmName.isEmpty {
+            label += " · shown as the doubled ladder; the run builds the "
+                   + "\(scene.algorithmName) lattice"
+        }
         if scene.skippedFaces > 0 {
-            return .drawing(scene.previewLabel + " · "
+            return .drawing(label + " · "
                             + "\(scene.skippedFaces) marked "
                             + (scene.skippedFaces == 1 ? "face has" : "faces have")
                             + " no shape to lattice and are not shown")
         }
-        return .drawing(scene.previewLabel)
+        return .drawing(label)
     }
 }
 
@@ -206,12 +229,23 @@ public struct LatticePreviewSummaryValues: Equatable, Sendable {
     /// with an interior, and no skipped faces.
     public var partInteriorVoxelCount: Int
     public var skippedFaces: Int
+    /// The algorithm the RUN will use, in core's own words ("doubled" / "stepped" /
+    /// "organic"). Empty means "not stated", which core resolves to doubled — and a
+    /// preview of doubled under a job that says doubled needs no caveat.
+    public var algorithmName: String
+    /// Whether the picture on screen IS that algorithm. False adds one sentence to the
+    /// banner; it never suppresses the preview. See `LatticePreviewBanner.make`.
+    public var algorithmDrawnFaithfully: Bool
     public init(interiorVoxelCount: Int, previewLabel: String,
-                partInteriorVoxelCount: Int? = nil, skippedFaces: Int = 0) {
+                partInteriorVoxelCount: Int? = nil, skippedFaces: Int = 0,
+                algorithmName: String = "",
+                algorithmDrawnFaithfully: Bool = true) {
         self.interiorVoxelCount = interiorVoxelCount
         self.previewLabel = previewLabel
         self.partInteriorVoxelCount = partInteriorVoxelCount ?? interiorVoxelCount
         self.skippedFaces = skippedFaces
+        self.algorithmName = algorithmName
+        self.algorithmDrawnFaithfully = algorithmDrawnFaithfully
     }
 }
 
@@ -225,6 +259,15 @@ public protocol LatticeSDFPreviewSummary {
     /// Faces marked by the user that the emission could not use.
     var skippedFaces: Int { get }
     var previewLabel: String { get }
+    /// The algorithm the RUN will use, in core's own words. Defaulted so every
+    /// existing conformer is unchanged and keeps meaning "doubled, faithfully".
+    var algorithmName: String { get }
+    var algorithmDrawnFaithfully: Bool { get }
+}
+
+public extension LatticeSDFPreviewSummary {
+    var algorithmName: String { "" }
+    var algorithmDrawnFaithfully: Bool { true }
 }
 
 extension LatticePreviewSummaryValues: LatticeSDFPreviewSummary {}

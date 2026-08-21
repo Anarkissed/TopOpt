@@ -187,47 +187,74 @@ final class LatticeShellAndMarchAgreeTests: XCTestCase {
                        + "no strut) or a see-through (shell gone, march clipped).")
     }
 
-    /// ★★★ WITH NOTHING DECLARED THE CLIP IS OFF ENTIRELY — the other half of the
-    /// see-through, guarded where it lives.
+    /// ★★★ WITH NOTHING LATTICED THE SHELL IS UNTOUCHED — the other half of the
+    /// see-through, guarded at the level that can actually catch it.
     ///
-    /// `shellClipUniform` keys its enable on `regionGrid`, which is nil when no region
-    /// list reached the frame. I moved that onto the CELL grid, which exists for every
-    /// baked scene, so a whole-part sample had its shell cut everywhere and stopped
-    /// occluding the march at all — 5,284 strut pixels against a 1,344 bound. The enable
-    /// must come from the REGIONS.
-    func testTheClipIsDisabledWithNothingDeclared() throws {
+    /// ★ WHAT THIS USED TO ASSERT, AND WHY IT WAS REPLACED. It grepped
+    /// `shellClipUniform` for `regionGrid`, because MY version keyed the clip's enable
+    /// on a declared region. Main's keys it on the cell grid plus a non-nil cell
+    /// texture. Asserting the source SHAPE made this a test of my implementation
+    /// choice rather than of the property, and it failed on a version that is correct —
+    /// the behavioural guard,
+    /// `UnifiedShadingTests.testSharedDepthBufferHidesTheLatticeBehindAnOpaqueShell`,
+    /// passes on main's enable. That is the test that caught my see-through, and it is
+    /// where this property belongs.
+    ///
+    /// What remains here is the half that is a fact about the CODE rather than a
+    /// choice: the neutral binding Metal requires when nothing is latticed must read as
+    /// INACTIVE. A neutral that read >= 0 would discard the shell over the whole part
+    /// the moment the enable was ever wrong — which is exactly how one mistake became
+    /// "I can see through the front wall".
+    func testTheNeutralBindingReadsAsNothingLatticed() throws {
         var url = URL(fileURLWithPath: #filePath)
         url.deleteLastPathComponent(); url.deleteLastPathComponent()
         url.deleteLastPathComponent()
         let src = try String(
             contentsOf: url.appendingPathComponent(
                 "Sources/TopOptFlows/MetalMeshView.swift"), encoding: .utf8)
-        let start = try XCTUnwrap(src.range(of: "private var shellClipUniform"))
-        let body = String(src[start.lowerBound...].prefix(600))
-        XCTAssertTrue(body.contains("regionGrid"),
-                      "★ the ENABLE must key on a declared region. Keying it on the cell "
-                      + "grid — which every baked scene has — cut the shell on parts "
-                      + "with nothing declared and produced the see-through.")
+        let start = try XCTUnwrap(src.range(of: "func neutralShellClipTexture"))
+        let body = String(src[start.lowerBound...].prefix(900))
+        XCTAssertTrue(body.contains("var v: Float = -1"),
+                      "★ the neutral clip texture must read NEGATIVE — inactive. A "
+                      + "non-negative neutral discards the shell over the whole part.")
     }
 
-    /// ★★ AND THE SHADER IMPLEMENTS THE CONJUNCTION. The field-level bar above proves the
-    /// RULE; this proves the MSL asks for both halves, which is the exact thing I got
-    /// wrong — I replaced the region test instead of adding to it.
-    func testTheShellShaderTestsBothRegionAndCell() throws {
+
+    /// ★★ AND THE SHADER ASKS THE CELL FIELD, WITH NO INTERPOLATION.
+    ///
+    /// ★ WHY THIS NO LONGER DEMANDS THE REGION TEST TOO. I wrote a version that tested
+    /// BOTH fields, on the reasoning that the march's predicate is a conjunction. Main
+    /// arrived independently at a cell-only clip (`002d78ef`'s neighbourhood — one
+    /// `shellClipMSL` shared by every library, so the visible pass and the G-buffer
+    /// cannot drift). The measurement above says main is right and my extra half was
+    /// redundant: with regions declared the occupancy is ALREADY region-masked, so
+    /// `cellTex >= 0` implies in-region and the two rules disagree in ZERO voxels.
+    ///
+    /// The see-through I shipped was never the missing region test — it was the ENABLE,
+    /// which I had keyed to the cell grid (present for every baked scene) instead of to
+    /// a declared region. Main's enable is guarded by
+    /// `UnifiedShadingTests.testSharedDepthBufferHidesTheLatticeBehindAnOpaqueShell`,
+    /// which is the test that caught me, and it passes on main's version.
+    ///
+    /// So this asserts what is actually load-bearing: ONE shared definition, sampling
+    /// the CELL field, NEAREST.
+    func testTheShellShaderAsksTheCellFieldWithoutInterpolating() throws {
         var url = URL(fileURLWithPath: #filePath)
         url.deleteLastPathComponent(); url.deleteLastPathComponent()
         url.deleteLastPathComponent()
         let src = try String(
             contentsOf: url.appendingPathComponent(
                 "Sources/TopOptFlows/MetalMeshView.swift"), encoding: .utf8)
+        XCTAssertEqual(src.components(separatedBy: "let shellClipMSL = \"\"\"").count - 1, 1,
+                       "★ ONE definition. Two copies is how the visible pass and the "
+                       + "G-buffer drift apart, which is the defect main's shared "
+                       + "constant exists to prevent — and which my duplicate reopened "
+                       + "for one build during the merge.")
         let start = try XCTUnwrap(src.range(of: "inline bool shell_is_latticed"))
-        let body = String(src[start.lowerBound...].prefix(1600))
-        XCTAssertTrue(body.contains("regionTex"),
-                      "★ the region half — dropping it is what let the shell vanish "
-                      + "outside the declared regions")
+        let body = String(src[start.lowerBound...].prefix(1200))
         XCTAssertTrue(body.contains("cellTex"),
-                      "★ the cell half — dropping it is what left holes where the run "
-                      + "builds solid")
+                      "★ the shell must ask the CELL field — a region is a declaration, "
+                      + "not a verdict about whether the run latticed it")
         XCTAssertTrue(body.contains("filter::nearest"),
                       "★ cell activation is a FLAG: interpolating it fringes every solid "
                       + "island with a half-transparent border one cell wide")

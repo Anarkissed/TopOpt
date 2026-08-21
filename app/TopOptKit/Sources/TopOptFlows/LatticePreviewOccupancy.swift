@@ -155,7 +155,15 @@ public enum LatticePreviewOccupancy {
     public static func cellField(occupancy occ: LatticeVoxelGrid, demand: LatticeVoxelGrid?,
                                  cellMM: Double, insideFraction: Double = 0.02,
                                  memberThickness: [Double] = [],
-                                 minCellsPerMember: Double = 0) -> LatticeVoxelGrid {
+                                 minCellsPerMember: Double = 0,
+                                 // ★★ THE AESTHETIC FLOOR, PER OCCUPANCY VOXEL. Core's
+                                 // aesthetic rule derives the floor from the measured
+                                 // error curve and each voxel's OWN utilisation, so it
+                                 // cannot be one scalar. Empty (or a non-positive
+                                 // entry) falls back to `minCellsPerMember`, which is
+                                 // the structural path bit-for-bit — see the
+                                 // equivalence noted at the test below.
+                                 cellsPerMemberFloor: [Double] = []) -> LatticeVoxelGrid {
         let cell = Float(max(0.1, cellMM))
         let extent = SIMD3<Float>(Float(occ.nx - 1) * occ.spacing.x,
                                   Float(occ.ny - 1) * occ.spacing.y,
@@ -196,7 +204,13 @@ public enum LatticePreviewOccupancy {
         // thickness under the cell decides. `+inf` is core's "thicker than measured"
         // sentinel and clears it, the conservative direction; free space measures
         // nothing and gets no vote.
-        func thicknessAt(_ w: SIMD3<Float>) -> Double? {
+        // Returns the voxel's member thickness AND the floor that voxel is held to —
+        // together, because the aesthetic floor varies per voxel and the two must be
+        // read at the same place or a thin voxel gets paired with a loaded voxel's
+        // floor.
+        let perVoxelFloor = cellsPerMemberFloor.count == occ.values.count
+                          ? cellsPerMemberFloor : []
+        func memberAt(_ w: SIMD3<Float>) -> (thickness: Double, floor: Double)? {
             guard minCellsPerMember > 0, !memberThickness.isEmpty else { return nil }
             let g = (w - occ.origin) / occ.spacing
             let vi = Swift.min(Swift.max(Int(g.x.rounded()), 0), occ.nx - 1)
@@ -204,7 +218,11 @@ public enum LatticePreviewOccupancy {
             let vk = Swift.min(Swift.max(Int(g.z.rounded()), 0), occ.nz - 1)
             let n = (vk * occ.ny + vj) * occ.nx + vi
             guard n >= 0, n < memberThickness.count else { return nil }
-            return memberThickness[n]
+            // A non-positive per-voxel floor means core had no answer THERE; the
+            // scene-wide floor stands rather than the voxel going unfloored.
+            let f = !perVoxelFloor.isEmpty && perVoxelFloor[n] > 0
+                  ? perVoxelFloor[n] : minCellsPerMember
+            return (memberThickness[n], f)
         }
 
         let S = 4   // 4³ subsamples per cell
@@ -214,7 +232,15 @@ public enum LatticePreviewOccupancy {
                     let center = occ.origin + SIMD3<Float>(Float(ci), Float(cj), Float(ck)) * cell
                     var insideCount = 0
                     var demandSum: Float = 0
-                    var worstThickness = Double.infinity
+                    // ★ THE FLOOR IS DECIDED PER VOXEL, exactly as core decides it
+                    // (`cpm = width[e] / cell; if (cpm < n_star) -> solid`): ANY voxel
+                    // under the cell that cannot hold its OWN floor fails the cell.
+                    // With a constant floor this is identical to the previous
+                    // worst-thickness test — `min(t)/cell < N*` iff some `t/cell < N*`
+                    // — so the structural path does not move. With a per-voxel floor it
+                    // is the only formulation that pairs each thickness with the floor
+                    // that actually applies to it.
+                    var memberHoldsTheCell = true
                     for sz in 0..<S { for sy in 0..<S { for sx in 0..<S {
                         let off = SIMD3<Float>((Float(sx) + 0.5) / Float(S) - 0.5,
                                                (Float(sy) + 0.5) / Float(S) - 0.5,
@@ -225,23 +251,20 @@ public enum LatticePreviewOccupancy {
                             demandSum += demandAt(w)
                             // Only material INSIDE the cell gets a say — a sample in
                             // free space measures nothing and must not vote either way.
-                            if let t = thicknessAt(w), t > 0, t < worstThickness {
-                                worstThickness = t
+                            // `+inf` is core's "thicker than measured" sentinel: it
+                            // clears any floor, which is the conservative direction.
+                            if let m = memberAt(w), m.thickness > 0, m.floor > 0,
+                               m.thickness.isFinite,
+                               m.thickness / Double(cell) < m.floor {
+                                memberHoldsTheCell = false
                             }
                         }
                     } } }
                     let frac = Double(insideCount) / Double(S * S * S)
                     // ★★ CORE'S L4 FLOOR, APPLIED HERE TOO (task 2026-08-20). A member
-                    // too thin to hold N* cells is left SOLID by the run; drawing
-                    // lattice in it was the preview showing geometry that never gets
-                    // built. `+inf` is core's "thicker than measured" sentinel and
-                    // clears the floor, which is the conservative direction.
-                    var memberHoldsTheCell = true
-                    if minCellsPerMember > 0, !memberThickness.isEmpty,
-                       worstThickness.isFinite,
-                       worstThickness / Double(cell) < minCellsPerMember {
-                        memberHoldsTheCell = false
-                    }
+                    // too thin to hold its floor in cells is left SOLID by the run;
+                    // drawing lattice in it was the preview showing geometry that never
+                    // gets built. Decided per voxel in the sample loop above.
                     if frac >= insideFraction, memberHoldsTheCell {
                         vals[(ck * ncy + cj) * ncx + ci] =
                             insideCount > 0 ? Swift.max(0, demandSum / Float(insideCount)) : 0

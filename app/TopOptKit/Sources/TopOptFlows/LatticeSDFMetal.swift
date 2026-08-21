@@ -116,6 +116,20 @@ public struct LatticeSDFScene {
     /// to draw lattice there regardless.
     public var memberThicknessMM: [Double] = []
     public var minCellsPerMember: Double = 0
+    /// ★★★ THE MODE HE CHOSE ON ENTERING THE STAGE, and it is not decoration: it picks
+    /// the denominator core grades by AND the floor below. See `LatticeStageMode`.
+    public var stageMode: LatticeStageMode = .structural
+    /// ★★ THE ALGORITHM THE RUN WILL USE, in core's own name. "" is "not stated",
+    /// which core resolves to doubled — the one the marcher can actually draw.
+    public var algorithm: String = ""
+    /// ★★ CORE'S AESTHETIC FLOOR PER OCCUPANCY VOXEL — empty on the structural path,
+    /// which is every existing caller. Non-empty only when the mode is aesthetic AND a
+    /// measured field and a positive allowable both reached the bake, because the floor
+    /// is a function of the voxel's utilisation and there is no utilisation without
+    /// both. Absence of measurement is not permission to relax: with no field the array
+    /// stays empty and every voxel falls back to `minCellsPerMember`, the accuracy
+    /// floor.
+    public var cellsPerMemberFloorPerVoxel: [Double] = []
     public var bounds: MeshBounds
     /// The part mesh the scene was baked from (COW — shares storage with the viewer's
     /// copy). Kept so face-role tints can be re-baked onto the lattice whenever the
@@ -194,6 +208,19 @@ public struct LatticeSDFScene {
                 // solve governs; the stated-density path is for the modes where he
                 // actually states one.
                 statedDensityGoverns: Bool = true,
+                // ★★★ STRUCTURAL OR AESTHETIC (maintainer, 2026-08-21). Defaults to
+                // structural so every pre-existing call — and every test — keeps the
+                // certified floor it was written against.
+                stageMode: LatticeStageMode = .structural,
+                // ★ Core's `LatticeAlgorithm` name. Defaults to "" so every existing
+                // call — and every test — still describes a doubled ladder, which is
+                // the picture the marcher draws.
+                algorithm: String = "",
+                // ★ The material's allowable (MPa), needed ONLY to turn the measured
+                // field into a utilisation for the aesthetic floor. 0 means "not
+                // supplied", and then the aesthetic floor is not computed at all rather
+                // than computed from a guess.
+                allowableMPa: Double = 0,
                 maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
                 // ★ The band and gamma the raymarcher grades with, so a stated
                 // per-region density can be inverted into the demand value that
@@ -402,6 +429,48 @@ public struct LatticeSDFScene {
                 nx: occupancy.nx, ny: occupancy.ny, nz: occupancy.nz,
                 spacing: occupancy.spacing, solid: solid, capRadiusVoxels: 16)
         }
+
+        // ★★★ THE AESTHETIC FLOOR, ONE VOXEL AT A TIME (maintainer, 2026-08-21: "If
+        // aesthetic is selected then the floor number of cells can go down to 2").
+        //
+        // ★ THE UTILISATION IS CORE'S, NOT A RATIO OF THE FIELD'S OWN PEAK.
+        // `stressDemand` above is normalised to the field's PERCENTILE — it answers
+        // "where is this part working hardest", which is the right question for the
+        // colour ramp and the wrong one here. The floor asks "what fraction of the
+        // ALLOWABLE does this member carry", a physical quantity, so it is taken from
+        // core's STRUCTURAL demand fraction (intent 0, demand / allowable). Reading the
+        // aesthetic fraction here would have put the relaxed floor wherever the part is
+        // quiet RELATIVE TO ITSELF, including on a part that is uniformly at yield.
+        //
+        // ★ AND IT IS NOT COMPUTED WITHOUT A MEASUREMENT. No field or no allowable
+        // leaves the array empty, and every voxel then takes the accuracy floor.
+        self.stageMode = stageMode
+        self.algorithm = algorithm
+        if stageMode == .aesthetic, self.minCellsPerMember > 0, allowableMPa > 0,
+           let measured = stressField ?? field,
+           let util = LatticePreviewOccupancy.demand(like: occupancy, field: measured,
+                                                     intent: 0,
+                                                     allowableMPa: allowableMPa) {
+            let topo = latticeID
+            // Core is asked once per DISTINCT utilisation, quantised to 1 %, because
+            // the call crosses the bridge and a 128³ grid is two million voxels. The
+            // quantisation rounds the utilisation UP (`ceil`), so every voxel is priced
+            // as if it were working slightly harder than measured and its floor is at
+            // least as strict as core's own — the error is spent on the safe side, not
+            // on a coarser cell than core would allow.
+            var cache = [Int: Double]()
+            var floors = [Double](repeating: 0, count: occupancy.values.count)
+            for i in 0..<occupancy.values.count where occupancy.values[i] > 0.5 {
+                let u = Double(util.values[i])
+                let bucket = u.isFinite ? Swift.min(100, Swift.max(0, Int(ceil(u * 100)))) : -1
+                if let hit = cache[bucket] { floors[i] = hit; continue }
+                let f = LatticeStageMode.aesthetic.cellsPerMemberFloor(
+                    topology: topo, utilisation: bucket < 0 ? .nan : Double(bucket) / 100)
+                cache[bucket] = f
+                floors[i] = f
+            }
+            self.cellsPerMemberFloorPerVoxel = floors
+        }
         self.bounds = mesh.bounds
         self.mesh = mesh
         // Counted here, where the grid is already in hand, so the banner never has to
@@ -414,6 +483,20 @@ public struct LatticeSDFScene {
 
 extension LatticeSDFScene: LatticeSDFPreviewSummary {
     public var previewLabel: String { preview.previewLabel }
+
+    /// ★ WHAT THE BANNER SAYS THE RUN WILL BUILD. Empty when the job states nothing,
+    /// because then the job IS doubled and there is nothing to caveat.
+    public var algorithmName: String { algorithm }
+
+    /// ★★ WHETHER THE PICTURE IS THAT ALGORITHM. Only DOUBLED is drawn faithfully:
+    /// the cell texture encodes a base cell plus an integer dyadic level, which is
+    /// what doubled means and what neither of the others can be written as. See
+    /// `LatticePreviewBanner.make` for the full reasoning and for why the preview is
+    /// labelled rather than suppressed.
+    public var algorithmDrawnFaithfully: Bool {
+        algorithm.isEmpty
+            || algorithm == (TopOptKit.latticeAlgorithmNames.first ?? "doubled")
+    }
 }
 
 public extension LatticeSDFScene {
@@ -730,7 +813,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             let grid = LatticePreviewOccupancy.cellField(
                 occupancy: scene.occupancy, demand: scene.demand, cellMM: params.cellMM,
                 memberThickness: scene.memberThicknessMM,
-                minCellsPerMember: retains ? 0 : scene.minCellsPerMember)
+                minCellsPerMember: retains ? 0 : scene.minCellsPerMember,
+                cellsPerMemberFloor: retains ? [] : scene.cellsPerMemberFloorPerVoxel)
             baked = LatticePreviewOccupancy.uniformCellField(grid, cellMM: params.cellMM)
         }
         guard let field = baked else { return }
@@ -835,7 +919,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 // The ladder's finest rung: below it there is no cell to give, so those
                 // voxels ask for none and are left SOLID rather than killing the plan.
                 baseCellMM: sweep.minMM,
-                capMM: 16 * Double(occ.spacing.x))
+                capMM: 16 * Double(occ.spacing.x),
+                perVoxelFloor: scene.cellsPerMemberFloorPerVoxel)
         }
         if desired.isEmpty, !fitCellMM.isEmpty, fitCellMM.count == scene.regions.count {
             desired = [Double](repeating: 0, count: n)

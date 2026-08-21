@@ -491,6 +491,10 @@ public struct LatticeSpec: Equatable, Sendable {
     /// nil otherwise so every job that does not use it is BYTE-IDENTICAL to the
     /// one before the option existed. See `LatticeBoundaryTreatment.covered`.
     public var outerFinish: String? = nil
+    /// ★★ CORE'S `LatticeAlgorithm`, as its own name — "" means NOT STATED, so no key
+    /// is written and core resolves it to doubled. A `var` with an empty default so
+    /// every existing `LatticeSpec(...)` call is unchanged and produces the same job.
+    public var algorithm: String = ""
 
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
@@ -586,6 +590,14 @@ public struct LatticeSpec: Equatable, Sendable {
         // Decision-free and independent of retention: it feeds no mask, cell,
         // density or verdict — it only adds the per-region rows to the receipt.
         if reportRegionCells { grading["report_region_cells"] = true }
+        // ★★ THE ALGORITHM, ONLY WHEN STATED. An absent key is core's "not stated" and
+        // resolves to doubled, so an untouched project's job is byte-identical to one
+        // built before the selector existed. A name core does not know is never
+        // written: `reject_unknown_keys` would kill the whole job over it, and a
+        // job that dies after the solve is the worst place to learn about a typo.
+        if TopOptKit.latticeAlgorithmIsKnown(algorithm) {
+            grading["algorithm"] = algorithm
+        }
         return grading
     }
 }
@@ -603,6 +615,54 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (`TopOptKit.latticeCertifiableTopologies`) reaches a run — the rest are
     /// preview-only, and the UI says so.
     public var topologyID: String
+    /// ★★★ WHICH QUESTION THIS LATTICE ANSWERS — asked ONCE, on entering the stage,
+    /// and never editable afterwards (`LatticeStageMode`). nil ⇒ not yet chosen, which
+    /// is what makes the modal appear; it is deliberately NOT defaulted, because a
+    /// default would silently pick which claim the receipt makes.
+    public var stageMode: LatticeStageMode?
+
+    /// ★★★ WHICH KIND OF LATTICE IS LAID DOWN — core's `LatticeAlgorithm`, as its own
+    /// name string. ORTHOGONAL to `cellSizeMode`: that says how the cell is CHOSEN,
+    /// this says what is built.
+    ///
+    ///   "doubled" — the dyadic ladder. Cells of different size meet at SHARED NODES.
+    ///   "stepped" — one cell per declared region, verbatim, NO transition handling;
+    ///               abutting regions do not share nodes and core COUNTS the floating
+    ///               strut ends rather than pretending otherwise.
+    ///   "organic" — struts traced along the stress field.
+    ///
+    /// ★ EMPTY IS THE DEFAULT AND IT IS NOT "doubled". An empty string means NOT
+    /// STATED: no `algorithm` key is written, so a job from untouched controls stays
+    /// byte-identical to one built before the selector existed (bar U1). Core resolves
+    /// an absent key to doubled itself.
+    public var algorithm: String = ""
+
+    /// ★★ THE ALGORITHM THE RUN WILL ACTUALLY USE, with "not stated" resolved — for
+    /// display and for the preview, never for the job (which must keep the key absent).
+    /// Falls back to core's first name rather than a Swift literal "doubled".
+    public var resolvedAlgorithm: String {
+        TopOptKit.latticeAlgorithmIsKnown(algorithm)
+            ? algorithm : (TopOptKit.latticeAlgorithmNames.first ?? "doubled")
+    }
+
+    /// ★★★ WHY A CHOICE MAY BE REFUSED, in core's terms — nil when the pair is fine.
+    ///
+    /// `run_job` REFUSES organic under a structural claim: a traced lattice is
+    /// anisotropic by construction and the certification library carries exactly one
+    /// CUBIC tensor per topology, so there is nothing for the claim to be checked
+    /// against. Surfacing it HERE means the user is told at the picker instead of by a
+    /// job that dies after the solve — and the permission is core's answer, not a Swift
+    /// `== "organic"`.
+    public var algorithmRefusalReason: String? {
+        guard TopOptKit.latticeAlgorithmIsKnown(algorithm) else { return nil }
+        guard stageMode == .structural else { return nil }
+        guard !TopOptKit.latticeAlgorithmAllowsStructural(algorithm) else { return nil }
+        return "\(algorithm.capitalized) traces struts along the stress field, so the "
+             + "lattice is anisotropic by construction — the certification library "
+             + "holds one cubic stiffness per topology and there is nothing for a "
+             + "strength claim to be checked against. It needs the Aesthetic mode."
+    }
+
     /// Cell size (mm). Freely edited by the user; its certifiable CEILING (cells per
     /// member) is read from core at use, never stored here. The starting value is the
     /// print-tested octet cell reused from the proxy default — a start, not a limit.
@@ -990,6 +1050,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     // guards the older layer of the same rule).
     private enum CodingKeys: String, CodingKey {
         case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
+        case stageMode                  // Structural / Aesthetic — chosen once (nil ⇒ unasked)
+        case algorithm                  // core's LatticeAlgorithm name ("" ⇒ not stated)
         case manualStrutThicknessMM      // the hand-set thickness (nil ⇒ derived)
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
@@ -1023,6 +1085,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         topologyID = try c.decodeIfPresent(String.self, forKey: .topologyID) ?? LatticeType.octet.id
         cellMM = try c.decodeIfPresent(Double.self, forKey: .cellMM) ?? LatticeSettings.defaultCellMM
+        // ★ ABSENT ⇒ NOT YET ASKED. A pre-mode snapshot must reopen the modal rather
+        // than inherit a mode nobody chose — the choice decides what the receipt claims.
+        stageMode = try c.decodeIfPresent(LatticeStageMode.self, forKey: .stageMode)
+        // Absent in every project saved before the selector existed, and "" is exactly
+        // what those projects mean: not stated, so core takes doubled.
+        algorithm = try c.decodeIfPresent(String.self, forKey: .algorithm) ?? ""
         // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
         // exactly the job they emitted before (bar R1).
         cellSizeMode = try c.decodeIfPresent(LatticeCellSizeMode.self, forKey: .cellSizeMode) ?? .fixed
@@ -1110,6 +1178,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(enabled, forKey: .enabled)
         try c.encode(topologyID, forKey: .topologyID)
         try c.encode(cellMM, forKey: .cellMM)
+        try c.encodeIfPresent(stageMode, forKey: .stageMode)
+        // Written only when stated, so an untouched project's file is byte-identical
+        // to one saved before the selector existed (bar U1).
+        if !algorithm.isEmpty { try c.encode(algorithm, forKey: .algorithm) }
         try c.encode(cellSizeMode, forKey: .cellSizeMode)
         try c.encode(cellMinMM, forKey: .cellMinMM)
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
@@ -1397,6 +1469,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                // `grading` after some cores were built.
                                requireVoidReachesExterior: requireVoidReachesExterior)
             spec.outerFinish = boundary.jobOuterFinish
+            // ★ THE ALGORITHM RIDES THE GRADED SPEC. Carried as the raw string,
+            // including "" — `gradingDictionary` is the single place that decides
+            // whether a key is written, so "not stated" cannot become "doubled" here.
+            spec.algorithm = algorithm
             return spec
         }
         let genRho = b.generateRelativeDensity

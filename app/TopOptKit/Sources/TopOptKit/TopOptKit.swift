@@ -1204,6 +1204,73 @@ public enum TopOptKit {
         return out
     }
 
+    /// ★★ THE AESTHETIC CELLS-PER-MEMBER FLOOR, READ FROM CORE.
+    ///
+    /// The fixed floor of 5 is an ACCURACY threshold — where the homogenised model's
+    /// transverse-stiffness error crosses a 2.4 % band — and NOT a buildability one.
+    /// For a lattice graded for looks, that accuracy is worth exactly as much as the
+    /// load the material carries, so core computes the floor from its measured error
+    /// curve and the voxel's own utilisation:
+    ///
+    ///     1 cell +48.5 %   2 cells +8.5 %   3 cells +4.1 %   4 +2.59 %   5 +1.78 %
+    ///
+    /// - Parameter utilisation: the voxel's demand as a fraction of the allowable. A
+    ///   non-finite or non-positive value returns the ACCURACY floor — absence of
+    ///   measurement is not permission to relax.
+    /// - Parameter errorBudget: 0 takes core's own policy (1 %).
+    /// - Returns: 0 when core has no answer for the topology, which the caller must
+    ///   report rather than substitute a guess for.
+    public static func latticeAestheticCellsPerMemberFloor(
+        topology: String, utilisation: Double, errorBudget: Double = 0) -> Double {
+        topoptbridge.lattice_aesthetic_cells_per_member_floor(
+            std.string(topology), utilisation, errorBudget)
+    }
+
+    /// The lowest the adaptive rule may ever go — 2, because that is the lowest cell
+    /// count MEASURED under the same bending case the accuracy floor uses (+8.5 %).
+    /// Deliberately NOT the percolation floor of 1.0, which core's own declaration
+    /// warns was measured axially at rho ≈ 0.199 and "must not be quoted
+    /// unconditionally".
+    public static func latticeAestheticCellsPerMemberHardFloor(topology: String) -> Double {
+        topoptbridge.lattice_aesthetic_cells_per_member_hard_floor(std.string(topology))
+    }
+
+    /// Core's default error budget for the adaptive floor, so the app can SHOW it
+    /// without authoring it.
+    public static var latticeAestheticErrorBudgetDefault: Double {
+        topoptbridge.lattice_aesthetic_error_budget_default()
+    }
+
+    /// ★ What an aesthetic density MEANS, in core's own words. Shown verbatim wherever
+    /// the app offers the mode, so the chooser's promise and the receipt's promise are
+    /// literally the same sentence.
+    public static var latticeAestheticDensityMeaning: String {
+        String(topoptbridge.lattice_aesthetic_density_meaning())
+    }
+
+    /// ★★ THE THREE LATTICE ALGORITHMS, in core's own enum order: `["doubled",
+    /// "stepped", "organic"]`. The picker reads THIS — a Swift enum listing them would
+    /// drift the moment core gains a fourth.
+    public static var latticeAlgorithmNames: [String] {
+        topoptbridge.lattice_algorithm_names().map { String($0) }
+    }
+
+    /// True iff core would accept `name`. `""` is FALSE here: the job schema reads an
+    /// empty string as "not stated" (and resolves it to doubled), but a picker must
+    /// never offer it as a choice.
+    public static func latticeAlgorithmIsKnown(_ name: String) -> Bool {
+        topoptbridge.lattice_algorithm_is_known(std.string(name))
+    }
+
+    /// ★★★ Whether this algorithm may run under a STRUCTURAL claim. Core refuses
+    /// organic + structural — a traced lattice is anisotropic by construction and the
+    /// certification library carries one CUBIC tensor per topology, so there is nothing
+    /// for the claim to be checked against. Asked of core so a future algorithm with
+    /// the same property needs no app change.
+    public static func latticeAlgorithmAllowsStructural(_ name: String) -> Bool {
+        topoptbridge.lattice_algorithm_allows_structural(std.string(name))
+    }
+
     public static func latticeLimits(topology: String) -> LatticeLimits {
         let lim = topoptbridge.lattice_limits(std.string(topology))
         return LatticeLimits(rhoMin: lim.rho_min, rhoMax: lim.rho_max,

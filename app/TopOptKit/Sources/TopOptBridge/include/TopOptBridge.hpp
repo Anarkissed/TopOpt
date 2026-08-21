@@ -1339,4 +1339,61 @@ void grading_demand_fraction_into(const float* von_mises, std::size_t n, int int
 double grading_demand_reference(const float* von_mises, std::size_t n, int intent,
                                 double allowable_mpa, double percentile);
 
+// ── ★ THE AESTHETIC CELLS-PER-MEMBER FLOOR, FORWARDED (never restated) ─────────
+// The fixed floor of 5 is an ACCURACY threshold — where the homogenised model's
+// transverse-stiffness error crosses a 2.4 % band — not a buildability one. For a
+// lattice graded for LOOKS the accuracy it buys is worth exactly as much as the load
+// the material carries, so core computes the floor from the measured error curve and
+// the voxel's own utilisation (`aesthetic_cells_per_member_floor`, lattice.hpp).
+//
+// ★ THE APP MUST NOT DERIVE THIS. The strut-diameter law was re-derived in Swift once
+// and came out 1.4-1.7x adrift; the same discipline applies here. These forward core's
+// own functions so the preview's floor and the run's floor are one number.
+//
+// `utilisation` is the voxel's demand as a fraction of the allowable. A non-finite or
+// non-positive utilisation returns the ACCURACY floor — absence of measurement is not
+// permission to relax. `error_budget <= 0` takes core's own default policy.
+// Never throws; returns 0 when the topology is unknown.
+double lattice_aesthetic_cells_per_member_floor(const std::string& topology,
+                                                double utilisation,
+                                                double error_budget);
+
+// The lowest the adaptive rule may ever go: 2, because that is the lowest cell count
+// MEASURED under the same bending case the accuracy floor uses (+8.5 %). Notably NOT
+// the percolation floor of 1.0, whose own declaration warns it was measured axially at
+// rho ~= 0.199 and "must not be quoted unconditionally".
+double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology);
+
+// Core's default error budget for the rule above, so the app can SHOW it without
+// authoring it.
+double lattice_aesthetic_error_budget_default();
+
+// ★ WHAT AN AESTHETIC DENSITY MEANS, IN CORE'S OWN WORDS (`kAestheticDensityMeaning`).
+// The app shows this sentence verbatim wherever it offers the aesthetic mode, so what
+// the chooser promises and what the receipt promises cannot drift apart. Paraphrasing
+// it in Swift would be the same class of duplication as re-deriving the strut law.
+std::string lattice_aesthetic_density_meaning();
+
+// ── ★ THE THREE LATTICE ALGORITHMS, FORWARDED (never restated) ─────────────────
+// `lattice_algorithm.hpp`'s own enum order: "doubled" (the dyadic ladder, and the
+// DEFAULT), "stepped" (one cell per declared region, verbatim, no transition
+// handling), "organic" (struts traced along the stress field).
+//
+// ★ THE APP MUST NOT HOLD ITS OWN LIST. A picker built from a Swift enum drifts the
+// moment core gains a fourth; this is core's `lattice_algorithm_names()` verbatim.
+std::vector<std::string> lattice_algorithm_names();
+
+// True iff `name` is one core will accept. False for anything else — including "",
+// which the JOB treats as "not stated" but a PICKER must never present as a choice.
+bool lattice_algorithm_is_known(const std::string& name);
+
+// ★★ WHETHER THE ALGORITHM MAY BE RUN UNDER A STRUCTURAL CLAIM.
+//
+// `run_job` REFUSES organic + structural: a traced lattice is anisotropic by
+// construction and the certification library carries exactly one CUBIC tensor per
+// topology, so there is nothing for a structural claim to certify against. The app
+// asks core rather than encoding "organic is special" in Swift, so a future
+// algorithm with the same property is handled without an app change.
+bool lattice_algorithm_allows_structural(const std::string& name);
+
 }  // namespace topoptbridge

@@ -28,6 +28,7 @@
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
+#include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
@@ -2600,6 +2601,61 @@ void grading_demand_fraction_into(const float* von_mises, std::size_t n, int int
     out[i] = static_cast<float>(
         topopt::grading_demand_fraction(gi, v, ref, utilisation_target));
   }
+}
+
+// ── ★ THE AESTHETIC CELLS-PER-MEMBER FLOOR — CORE'S, FORWARDED ────────────────
+// See the header. The app must never derive this: the strut-diameter law was
+// re-derived in Swift once and came out 1.4-1.7x adrift, and this floor decides
+// whether material is latticed at all.
+double lattice_aesthetic_cells_per_member_floor(const std::string& topology,
+                                                double utilisation,
+                                                double error_budget) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  const double budget = error_budget > 0.0
+                            ? error_budget
+                            : topopt::kAestheticHomogenisationErrorBudget;
+  try {
+    return topopt::aesthetic_cells_per_member_floor(topo, utilisation, budget);
+  } catch (...) {
+    return 0.0;   // core refused; the caller says it has no number
+  }
+}
+
+double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  try {
+    return topopt::aesthetic_cells_per_member_hard_floor(topo);
+  } catch (...) {
+    return 0.0;
+  }
+}
+
+double lattice_aesthetic_error_budget_default() {
+  return topopt::kAestheticHomogenisationErrorBudget;
+}
+
+std::string lattice_aesthetic_density_meaning() {
+  return std::string(topopt::kAestheticDensityMeaning);
+}
+
+std::vector<std::string> lattice_algorithm_names() {
+  return topopt::lattice_algorithm_names();
+}
+
+bool lattice_algorithm_is_known(const std::string& name) {
+  topopt::LatticeAlgorithm a{};
+  return topopt::lattice_algorithm_from_name(name.c_str(), a);
+}
+
+bool lattice_algorithm_allows_structural(const std::string& name) {
+  topopt::LatticeAlgorithm a{};
+  // An unknown name gets no permission — the caller must resolve it first.
+  if (!topopt::lattice_algorithm_from_name(name.c_str(), a)) return false;
+  // ★ ORGANIC IS THE ONE core refuses under a structural claim, and the reason is
+  // the certification library's cubic tensor rather than anything about tracing.
+  return a != topopt::LatticeAlgorithm::Organic;
 }
 
 }  // namespace topoptbridge

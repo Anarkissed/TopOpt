@@ -156,108 +156,6 @@ private struct ContactUniforms {
     var params: SIMD4<Float>
 }
 
-// ★★★ THE SHELL'S LATTICE CLIP, IN MSL — ONE DEFINITION, SHARED BY EVERY LIBRARY
-// THAT NEEDS IT (task: the struts were missing from the holes, 2026-08-18).
-//
-// ★ WHY THIS IS A CONSTANT AND NOT JUST TEXT INSIDE `viewerShaderSource`. Each
-// `ShaderSource` here is compiled by its OWN `device.makeLibrary` call, so they
-// share no scope whatsoever. When the clip was added it was written into the
-// viewer source and merely REFERENCED from `depthPrepassShaderSource` — which
-// made that library fail to compile ("unknown type name 'ShellClip'"),
-// `depthPrepassPipeline` nil, and `encodeDepthPrepass` return at its FIRST
-// guard. The G-buffer then never existed, and the lattice — which marches into
-// it — never reached a pixel. The holes were cut (the viewer library compiled
-// fine) and nothing was drawn in them: exactly what the maintainer saw.
-//
-// ★ AND `try?` IS WHY IT WAS SILENT. Every pipeline here is built with `try?`,
-// so a shader that does not compile is indistinguishable from a feature that is
-// switched off. `MeshRendererPipelinesTests` now asserts this one built.
-let shellClipMSL = """
-// ★★★ THE SHELL'S LATTICE CLIP — A SAMPLE OF THE REGION FIELD, NOT A SECOND
-// DESCRIPTION OF IT.
-//
-// ★ WHY THERE IS NO GEOMETRY IN HERE ANY MORE. This used to evaluate the region
-// in closed form: a slab test, `origin + s·normal` clipped to half_u × half_w.
-// That was only ever right for a RECTANGULAR face. `resolvedLatticeFace` builds
-// those half-extents from `PlaneOutline.fit` — a bounding BOX — and on the
-// maintainer's two lattice walls, which have a curved scoop cut out of them, the
-// box is 2.4x and 3.4x the face:
-//
-//     face 15 ..... 41.2% of the emitted region was actually the face
-//     face  2 ..... 29.8%
-//
-// So the hole was cut through material that is not the face, and the struts were
-// drawn into it — "the lattice still exists *behind* the model face".
-//
-// ★ A FACE'S REAL OUTLINE HAS NO CLOSED FORM A FRAGMENT CAN AFFORD (it is a
-// polygon of arbitrarily many edges, and the march evaluates this per step). So
-// `LatticeSDFScene` bakes the union of the declared regions to a DISTANCE FIELD
-// on the occupancy's own grid, and both readers sample it: the march intersects
-// it, this discards inside it. One field, one bake, two readers — the hole and
-// the struts cannot describe different volumes because there is only one volume.
-//
-// ★ AND THE POLARITY IS UNCHANGED. Disabled means "no region list reached this
-// frame", and the clip then removes NOTHING — the shell keeps every fragment.
-// The march's neutral is the mirror of it (a 1x1x1 volume of large NEGATIVE
-// distance: inside everywhere), so a preview with nothing declared still draws
-// its sample cell.
-struct ShellClip {
-    float4 grid;        // xyz = field origin (model mm), w = enabled (>0.5)
-    float4 spacing;     // xyz = voxel size (mm)
-    float4 dims;        // xyz = voxel counts
-};
-// ★★★ THE SHELL STANDS DOWN IN EXACTLY THE VOXELS THE MARCH DRAWS STRUTS IN — and
-// that is a CONJUNCTION of two tests, not either one of them.
-//
-// `lsdf_march` accepts a sample iff `max(dPart, dBox, dRegion) <= 0` AND the owning
-// cell is ACTIVE. On the part's own surface dPart is ~0, so the shell's rule is
-// IN-REGION ∧ CELL-ACTIVE. Getting that wrong in either direction is a defect the
-// maintainer has now seen on his iPad, twice:
-//
-//   REGION ALONE  ⇒ HOLES. The run leaves a voxel solid when its member is too thin
-//                   to hold N* cells (grading.cpp's L4) or its strut cannot clear one
-//                   bead (`fallback_strut_unprintable`). The shell was cut there
-//                   anyway and no strut replaced it: a void where the algorithm puts
-//                   plastic. Measured on his own part: WRONG FOR 31,523 OF 60,732
-//                   INTERIOR VOXELS — 51.9%, over half the part.
-//
-//   CELL ALONE    ⇒ SEE-THROUGH. Dropping the region test cut the shell wherever a
-//                   cell was active, including where the march is region-clipped and
-//                   draws nothing. He was looking through the front wall at the green
-//                   anchor face inside.
-//
-// ★ AND THE ENABLE STILL KEYS ON A DECLARED REGION. `c.grid.w < 0.5` means no region
-// list reached this frame, and the clip must then remove NOTHING — a whole-part sample
-// keeps its shell, and the shell occludes the march, which is what
-// `UnifiedShadingTests.testSharedDepthBufferHidesTheLatticeBehindAnOpaqueShell` proves.
-// Keying the enable off the cell grid instead — which exists for every baked scene —
-// is what turned the clip on everywhere and produced the see-through.
-//
-// ★ THE CELL SAMPLE IS NEAREST. Activation is a FLAG, not a distance: interpolating
-// across the −1 boundary blends "latticed" into "solid" and fringes every solid island
-// with a half-transparent border one cell wide. The region field IS a distance and
-// keeps its linear filter.
-inline bool shell_is_latticed(float3 mpos,
-                              constant ShellClip& c, texture3d<float> regionTex,
-                              constant ShellClip& cc, texture3d<float> cellTex) {
-    if (c.grid.w < 0.5) { return false; }
-    float3 g = (mpos - c.grid.xyz) / max(c.spacing.xyz, float3(1e-6));
-    float3 stc = (g + 0.5) / max(c.dims.xyz, float3(1.0));
-    // Outside the baked volume there is no region — and no clamping, which would
-    // smear the boundary voxels across the rest of the part.
-    if (any(stc < float3(0.0)) || any(stc > float3(1.0))) { return false; }
-    constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
-    if (regionTex.sample(smp, stc).r > 0.0) { return false; }      // outside the region
-
-    // ── and the cell that owns this point must actually be latticed ────────────────
-    if (cc.grid.w < 0.5) { return true; }   // no cell field ⇒ region alone, as before
-    float3 cg = (mpos - cc.grid.xyz) / max(cc.spacing.xyz, float3(1e-6));
-    float3 cstc = (cg + 0.5) / max(cc.dims.xyz, float3(1.0));
-    if (any(cstc < float3(0.0)) || any(cstc > float3(1.0))) { return false; }
-    constexpr sampler nsmp(coord::normalized, filter::nearest, address::clamp_to_edge);
-    return cellTex.sample(nsmp, cstc).r >= 0.0;                    // active ⇒ latticed
-}
-"""
 
 // The neutral-clay shader (M7.4) + a selection tint (M7.5), compiled at runtime so
 // the SwiftPM target needs no .metal resource bundling (identical on iOS/macOS).
@@ -275,7 +173,7 @@ inline bool shell_is_latticed(float3 mpos,
 // and left the clip free to drift between the visible pass and the G-buffer — the
 // exact divergence the comment below promises cannot happen. Both libraries now
 // get the same text from the same place.
-private let shellClipMSL = """
+let shellClipMSL = """
 struct ShellClip {
     float4 origin;      // xyz = cell-(0,0,0) centre, w = enabled (>0.5)
     float4 spacing;     // xyz = cell size mm
@@ -410,10 +308,8 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 constant CutUniforms& cut [[buffer(3)]],
                                 texture2d<float, access::sample> aoTex [[texture(0)]],
                                 constant ShellClip& shellClip [[buffer(4)]],
-                                texture3d<float, access::sample> regionTex [[texture(4)]],
-                                constant ShellClip& cellClip [[buffer(5)]],
-                                texture3d<float, access::sample> cellTex [[texture(5)]]) {
-    if (shell_is_latticed(in.mpos, shellClip, regionTex, cellClip, cellTex)) { discard_fragment(); }
+                                texture3d<float, access::sample> clipCellTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, clipCellTex)) { discard_fragment(); }
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
         if (t > reveal.x) discard_fragment();
@@ -703,7 +599,13 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
     return o;
 }
 
-\(shellClipMSL)
+// ★ THE CLIP IS ALREADY INTERPOLATED AT THE TOP OF THIS SOURCE. It was included
+// TWICE by the merge — main added it at the head of the library and this branch
+// had its own copy here — which is a duplicate `struct ShellClip` and
+// `shell_is_latticed` in ONE MSL source. That does not compile, the pipeline is
+// built with `try?`, and every GPU test then SKIPS or reports an empty picture:
+// 24 failures across contact, prepass, AO, edges and the lattice, from one
+// duplicated line.
 
 // ★ THE SAME CLIP IN THE G-BUFFER. A wall that is discarded in the visible pass
 // but still written here would occlude the struts behind it in AO — the interior
@@ -711,10 +613,8 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
 // unified-shading task recorded for `bodyAlpha = 0` walls.
 fragment GBuf depth_fragment(DOut in [[stage_in]],
                              constant ShellClip& shellClip [[buffer(4)]],
-                             texture3d<float, access::sample> regionTex [[texture(4)]],
-                             constant ShellClip& cellClip [[buffer(5)]],
-                             texture3d<float, access::sample> cellTex [[texture(5)]]) {
-    if (shell_is_latticed(in.mpos, shellClip, regionTex, cellClip, cellTex)) { discard_fragment(); }
+                             texture3d<float, access::sample> clipCellTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, clipCellTex)) { discard_fragment(); }
     GBuf o;
     o.eyeZ = in.eyeZ;
     // Face the normal toward the eye. The mesh draws with cullMode .none, so a
@@ -3184,13 +3084,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var shellClip = shellClipUniform
         enc.setFragmentBytes(&shellClip,
                              length: MemoryLayout<ShellClipUniform>.stride, index: 4)
-        var cellClip = shellClipCellUniform
-        enc.setFragmentBytes(&cellClip,
-                             length: MemoryLayout<ShellClipUniform>.stride, index: 5)
-        enc.setFragmentTexture(latticeLayer?.shellClipCellTexture ?? neutralShellClipTexture(),
-                               index: 5)
-        enc.setFragmentTexture(latticeLayer?.regionTexture ?? neutralShellClipTexture(),
-                               index: 4)
+        enc.setFragmentTexture(latticeInFrame
+                               ? (latticeLayer?.shellClipCellTexture
+                                  ?? neutralShellClipTexture())
+                               : neutralShellClipTexture(), index: 4)
         // Render quality: the AO/edge texture and the strengths that scale it.
         // `viewer_fragment` DECLARES both, so both must be bound on every path —
         // Metal drops the draw on a missing binding, the trap `contact_fragment` and
@@ -3721,26 +3618,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// ★ Only INCLUDE regions cut. An `exclude` is frozen SOLID and carries no
     /// lattice, so cutting there would be the same lie in the other direction.
-    /// ★★ THE CELL GRID, as its own ShellClip. The shell's clip is a CONJUNCTION —
-    /// in-region AND cell-active — and the two fields live on DIFFERENT grids (the
-    /// region SDF on the occupancy grid, the activation on the base-cell grid), so each
-    /// needs its own origin/spacing/dims. Disabled (w = 0) when no cell field is baked,
-    /// which the shader reads as "region alone", i.e. exactly the old behaviour.
-    private var shellClipCellUniform: ShellClipUniform {
-        var u = ShellClipUniform()
-        guard latticeInFrame, let g = latticeLayer?.shellClipGrid else { return u }
-        u.grid = SIMD4(g.origin, 1)
-        u.spacing = SIMD4(g.spacing, 0)
-        u.dims = SIMD4(g.dims, 0)
-        return u
-    }
 
     private var shellClipUniform: ShellClipUniform {
         var u = ShellClipUniform()
-        guard latticeInFrame, let g = latticeLayer?.regionGrid else { return u }
+        // ★ THE CELL GRID AND THE CELL TEXTURE — main's `shellClipMSL` samples the
+        // per-cell ACTIVATION, so the transform must describe that volume. Binding the
+        // region SDF here read a distance field through a cell-grid transform.
+        guard latticeInFrame, let g = latticeLayer?.shellClipGrid,
+              latticeLayer?.shellClipCellTexture != nil else { return u }
         u.grid = SIMD4(g.origin, 1)            // w = 1 ⇒ enabled
         u.spacing = SIMD4(g.spacing, 0)
-        u.dims = SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0)
+        u.dims = SIMD4(g.dims, 0)
         return u
     }
 
@@ -3890,15 +3778,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
             // ★ THE SAME CLIP HERE, or the G-buffer keeps a wall the visible pass
             // discarded and AO darkens the interior behind a surface nobody sees.
-            var pCellClip = shellClipCellUniform
-            penc.setFragmentBytes(&pCellClip,
-                                  length: MemoryLayout<ShellClipUniform>.stride, index: 5)
-            penc.setFragmentTexture(
-                latticeLayer?.shellClipCellTexture ?? neutralShellClipTexture(), index: 5)
             var pClip = shellClipUniform
             penc.setFragmentBytes(&pClip,
                                   length: MemoryLayout<ShellClipUniform>.stride, index: 4)
-            penc.setFragmentTexture(lattice?.regionTexture ?? neutralShellClipTexture(),
+            penc.setFragmentTexture(lattice?.shellClipCellTexture ?? neutralShellClipTexture(),
                                     index: 4)
             countedDraw(penc, .triangle, vertexDrawCount)
         }

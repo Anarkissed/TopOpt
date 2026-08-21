@@ -133,17 +133,29 @@ public enum LatticeMeasuredRegionWidth {
                                      memberThicknessMM: [Double],
                                      minCellsPerMember nStar: Double,
                                      baseCellMM: Double = 0,
-                                     capMM: Double = 0) -> [Double] {
+                                     capMM: Double = 0,
+                                     // ★★ THE AESTHETIC FLOOR IS PER VOXEL, because the
+                                     // rule it comes from is: core derives it from the
+                                     // measured error curve and THIS voxel's own
+                                     // utilisation, so a member carrying nothing may
+                                     // hold a coarser cell than one carrying its
+                                     // allowable. Empty ⇒ every voxel uses `nStar`,
+                                     // which is the structural path unchanged.
+                                     perVoxelFloor: [Double] = []) -> [Double] {
         guard memberThicknessMM.count == occupancy.values.count, nStar > 0 else { return [] }
+        let usePerVoxel = perVoxelFloor.count == occupancy.values.count
         var out = [Double](repeating: 0, count: occupancy.values.count)
         for i in 0..<occupancy.values.count where occupancy.values[i] > 0.5 {
             let w = memberThicknessMM[i]
+            // A non-positive per-voxel floor is not a licence to lattice anything: it
+            // means core had no answer for that voxel, so the scene-wide floor stands.
+            let n = usePerVoxel && perVoxelFloor[i] > 0 ? perVoxelFloor[i] : nStar
             var want = 0.0
             if w.isFinite, w > 0 {
-                want = w / nStar
+                want = w / n
             } else if !w.isFinite, capMM > 0 {
                 // At least the cap — the most this measurement can honestly claim.
-                want = capMM / nStar
+                want = capMM / n
             }
             // Below the finest rung there is no cell to give, so ask for none.
             if baseCellMM > 0, want < baseCellMM * (1 - 1e-9) { want = 0 }

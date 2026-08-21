@@ -546,6 +546,13 @@ public struct WorkspacePlaceholder: View {
     /// gating every site, is what makes a fourth page correct by default.
     private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard }
 
+    /// ★ THE STAGE IS ON AND THE QUESTION IS UNANSWERED. `nil` is "not yet asked" —
+    /// deliberately not a default, so a project made before the modes existed reopens
+    /// the choice rather than inheriting one nobody made.
+    private var latticeStageModeNeeded: Bool {
+        (stage == .lattice || showLatticePage) && project.lattice.stageMode == nil
+    }
+
     /// THE BRUSH GESTURE, AS ONE VALUE (task 2026-08-05, bar D1). The SMOOTHING
     /// PAGE OWNS IT while it is up: its brush is the page's whole point, so it
     /// cannot depend on the TO page's Paint toggle — which L1 hides.
@@ -1137,6 +1144,20 @@ public struct WorkspacePlaceholder: View {
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
+            // ★★★ THE MODE IS ASKED BEFORE THE STAGE IS USABLE (2026-08-21). It covers
+            // everything and blurs it, it has no cancel, and answering it is the only
+            // way out — because the two modes make DIFFERENT CLAIMS about the same
+            // object and a default would pick one silently. See `LatticeStageMode`.
+            if latticeStageModeNeeded {
+                LatticeStageModeModal { mode in
+                    project.lattice.stageMode = mode
+                    // Written straight away: the choice is permanent, so it must not
+                    // depend on some later save to survive a relaunch.
+                    model.persistCurrentProject()
+                }
+                .transition(.opacity)
+                .zIndex(50)
+            }
             if showLatticeWizard {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
@@ -2339,7 +2360,12 @@ public struct WorkspacePlaceholder: View {
                                enabled: project.canRedoNow) { project.performRedo() }
             }
         }
-        .padding(.top, DS.Space.xl3)
+        // ★ ON THE LATTICE / SURFACE STAGES THIS IS THE SECOND ROW. See
+        // `StageNavPlacement`: the stage (and its mode) took the top row, so the name
+        // and undo/redo drop by exactly the stage row's height plus the standard gap.
+        .padding(.top, stage.back == nil
+                 ? DS.Space.xl3
+                 : DS.Space.xl3 + StageNavPlacement.identityRowHeight + PageChrome.gap)
         .padding(.leading, DS.Space.xl4)
         // ★ reports its TRAILING edge, for the banner's gap.
         .background(GeometryReader { g in
@@ -4013,6 +4039,13 @@ public struct WorkspacePlaceholder: View {
         for r in project.faceRegions.regions { h.combine(r.id) }
         let l = project.lattice
         h.combine(l.enabled)
+        // ★★★ THE STAGE MODE. It changes the cells-per-member FLOOR the bake applies,
+        // so a scene baked before the modal was answered describes the wrong law. It is
+        // answered once, on entering the stage — which is exactly when a stale scene
+        // would otherwise survive.
+        h.combine(l.stageMode)
+        // ★ AND THE ALGORITHM — it changes the banner the bake carries.
+        h.combine(l.algorithm)
         h.combine(l.topologyID)
         h.combine(l.boundary)                 // ★ Finish — the reported one
         h.combine(l.densityMode)
@@ -4096,6 +4129,16 @@ public struct WorkspacePlaceholder: View {
                         values: $0.vonMises)
         }
         let gradesFromSim = project.lattice.densityMode.needsSimulation
+        // ★★★ THE MODE HE CHOSE ON ENTERING THE STAGE, and the allowable it needs to be
+        // applied. Read on the main actor with everything else. An UNANSWERED mode falls
+        // back to structural: the modal makes that unreachable in the app, but a bake
+        // must never quietly relax a floor because a field was missing.
+        let stageMode = project.lattice.stageMode ?? .structural
+        let allowableMPa = model.yieldStrengthMPa(for: project.material)
+        // ★ THE RAW STATED NAME, not `resolvedAlgorithm`: an unstated algorithm must
+        // reach the banner as "" so it adds no sentence, and only a name the user
+        // actually chose can differ from the picture.
+        let algorithmForBake = project.lattice.algorithm
         strutBakeInFlight = true
         DispatchQueue.global(qos: .userInitiated).async {
             let scene = LatticeSDFScene(mesh: mesh, field: field,
@@ -4108,6 +4151,16 @@ public struct WorkspacePlaceholder: View {
                                         // a DERIVED per-region density must not stand
                                         // in for it ("I never typed it").
                                         statedDensityGoverns: !gradesFromSim,
+                                        // ★ Structural or aesthetic — it decides the
+                                        // cells-per-member floor the preview draws to,
+                                        // so the picture and the run agree about which
+                                        // question was asked.
+                                        stageMode: stageMode,
+                                        // ★ Carried so the BANNER can say which
+                                        // algorithm the run will build — the marcher
+                                        // draws only the doubled ladder.
+                                        algorithm: algorithmForBake,
+                                        allowableMPa: allowableMPa,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,
@@ -4169,8 +4222,18 @@ public struct WorkspacePlaceholder: View {
         // ★ THE WAY BACK — top-left, under the project name. Topology is the root
         // and carries none.
         if let back = stage.back {
-            stageNavButton(to: back, icon: "chevron.left")
-                .modifier(StageNavPlacement(stage: stage))
+            // ★★ THE WAY BACK AND THE MODE SHARE THE TOP ROW (maintainer, 2026-08-21:
+            // "I want the < Topology button at the very top. Next to it is the
+            // 'Structural' or 'Aesthetic' large mode text"). One HStack, so the title
+            // cannot collide with the button the way a separately-placed overlay did.
+            HStack(spacing: DS.Space.m) {
+                stageNavButton(to: back, icon: "chevron.left")
+                if stage == .lattice, let mode = project.lattice.stageMode {
+                    LatticeStageModeChip(mode: mode)
+                        .allowsHitTesting(false)
+                }
+            }
+            .modifier(StageNavPlacement(stage: stage))
         }
         // ★ THE WAY FORWARD — the top-right column, LEFT of the gizmo.
         //
@@ -4389,11 +4452,15 @@ public struct WorkspacePlaceholder: View {
                     // `PageChrome.gizmoAlignedTop`.
                     .padding(.top, PageChrome.gizmoAlignedTop)
             case .lattice, .surface:
+                // ★★ THE STAGE ROW IS NOW THE FIRST ROW. It used to sit UNDER the
+                // identity row; the maintainer's ruling puts "where am I" above "which
+                // file is this", because on these stages the stage — and on the lattice
+                // stage its MODE — is the thing that changes what every control below
+                // means. `latticeIdentityRowDrop` moves the name/undo row down to match.
                 content
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, DS.Space.xl4)
-                    .padding(.top, DS.Space.xl3 + Self.identityRowHeight
-                             + PageChrome.gap)
+                    .padding(.top, DS.Space.xl3)
             }
         }
     }

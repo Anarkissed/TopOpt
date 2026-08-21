@@ -918,6 +918,76 @@ public struct LatticePage: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: the algorithm card
+
+    /// Core's algorithm names, in core's own order. Read once per body pass — it is a
+    /// three-element vector over the bridge, not a computation.
+    private var algorithmNames: [String] { TopOptKit.latticeAlgorithmNames }
+
+    /// One line each, saying what CHANGES rather than what it is called. All three are
+    /// core's own descriptions from `lattice_algorithm.hpp`, compressed — the app does
+    /// not get to characterise an algorithm it did not write.
+    private func algorithmBlurb(_ name: String) -> String {
+        switch name {
+        case "stepped":
+            return "One cell per region, taken exactly as derived. Regions meet at "
+                 + "cells that do not line up, and the receipt counts the strut ends "
+                 + "left floating."
+        case "organic":
+            return "Struts traced along the stress lines instead of a repeating cell. "
+                 + "Spacing is the input; the strut width stays constant."
+        default:
+            return "The doubled ladder. Cell sizes step by halves, so a coarse cell's "
+                 + "corners land on the fine grid and neighbouring cells share nodes."
+        }
+    }
+
+    private var algorithmCard: some View {
+        card {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Lattice algorithm").dsStyle(DS.TypeScale.body)
+                Spacer()
+            }
+            segment(algorithmNames.map { $0.capitalized },
+                    selected: algorithmNames.firstIndex(
+                        of: project.lattice.resolvedAlgorithm) ?? 0,
+                    // All three are always selectable: core's refusal is about the
+                    // MODE it is paired with, and a control that greys out without
+                    // saying why is the failure `algorithmRefusalReason` exists to
+                    // avoid. The reason is shown instead, in core's own words.
+                    enabled: [Bool](repeating: true, count: algorithmNames.count)) { i in
+                guard i >= 0, i < algorithmNames.count else { return }
+                project.lattice.algorithm = algorithmNames[i]
+            }
+            Text(algorithmBlurb(project.lattice.resolvedAlgorithm))
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            // ★★★ THE REFUSAL, AT THE PICKER RATHER THAN AFTER THE SOLVE. Core will
+            // not run organic under a structural claim; learning that from a job that
+            // dies after the FEA is the worst possible place to learn it. The sentence
+            // and the permission both come from core — see
+            // `LatticeSettings.algorithmRefusalReason`.
+            if let refusal = project.lattice.algorithmRefusalReason {
+                Text(refusal)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("lattice-algorithm-refusal")
+            }
+            // ★ AND WHAT THE PREVIEW CAN ACTUALLY SHOW. The marcher draws the doubled
+            // ladder only; saying so here means the picture on the stage is never taken
+            // for a picture of stepped or organic.
+            if project.lattice.resolvedAlgorithm != (algorithmNames.first ?? "doubled") {
+                Text("The preview draws the doubled ladder — the regions, depths and "
+                     + "densities it shows are the same, the strut pattern is not.")
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     // MARK: cell + density pane (B0b — the band is core's; L8 — tappable numbers)
 
     @State private var numberPadTarget: String? = nil
@@ -964,6 +1034,12 @@ public struct LatticePage: View {
                         .foregroundStyle(DS.Color.okGreen.color)
                 }
             }
+            // ★★★ THE ALGORITHM CARD (maintainer, 2026-08-21: "connect the different
+            // algorithms"). ORTHOGONAL to the card above: that one says how the cell is
+            // CHOSEN, this one says what is LAID DOWN. The names come from core
+            // (`lattice_algorithm_names`), never from a Swift list, so a fourth
+            // algorithm appears here without an app change.
+            algorithmCard
             // Density range card — the BAND IS CORE'S for the selected topology.
             card {
                 HStack(alignment: .firstTextBaseline) {
