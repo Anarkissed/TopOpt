@@ -1,10 +1,60 @@
 # The third lattice algorithm, and a selector for all three
 
-**Base commit: `d28527cc`** — PR 345's HEAD, which carries PR 344. Both unmerged; this
-branch is rebased on 345's HEAD, not cherry-picked. **PR 346 appeared mid-task and is
-NOT pulled** — §0 says why.
+**Base commit: `2e718ad1`** — PR **347**'s HEAD, which carries 344 + 345 + 346.
+Rebased, not cherry-picked. (The earlier base was `d28527cc`; §0 explained why 346 was
+deliberately not pulled mid-task, and that decision is now spent — 347 is in.)
 
 Scope: **core/**. No UI, no settings row (§6a). Schema + CLI only.
+
+## ★ THE REBASE ONTO 347 — ADDED AFTER REVIEW
+
+**New base: `2e718ad1`.** One conflict, in `observability.hpp`, purely additive — 347
+added its re-certification and layer-height fields where this task adds the algorithm
+and organic blocks. Both kept. Core suite **122/122** on the rebased tree.
+
+**Which of my reported numbers moved: none.** Every figure in R3, R5, R6 and R10 re-run
+and identical — spacing 1.5020 / 5.9606 / median 3.0854, connectivity 99.9875 % with
+2.032 mm stranded, 584 curves, soup volumes to the last digit. Full table in
+`r15_r21_rebase_remeasure.txt`, **including why** each of 347's three changes is inert
+here: the second solve is structural-only and organic refuses structural; layer height
+is derived **from** the emitted strut, not an input **to** the tracer; and the default
+aesthetic range only moves the *default*, which every job here overrides explicitly.
+
+**The latticed margin (R17), his part, his nine regions, his 0.42 mm bead:**
+
+| | lattice solid vol | margin solid → latticed | spent | strut peak vM |
+|---|---|---|---|---|
+| doubled | 1004.46 mm³ | 3242.279 → 2272.907 | 29.9 % | 0.00406431 MPa |
+| stepped | 1004.46 mm³ | 3242.279 → 2272.907 | 29.9 % | 0.00406431 MPa |
+| **organic** | **797.56 mm³** | 3242.279 → **2053.597** | **36.7 %** | **0.00145738 MPa** |
+
+★ **Organic spends materially more margin — 6.8 points.** Per §4(c) that is a finding
+about the method, and here it is. **The confound is stated with it:** organic put in
+**20.6 % less material**, and less material is a softer load path, which raises stress
+in the solid region — and that margin *is* the solid region's. So part of the 6.8 points
+is less mass, not worse mass.
+
+★ **And the number pointing the other way is the Daynes effect showing up:** organic's
+own struts carry **2.8× less stress** (0.00145738 vs 0.00406431 MPa) while carrying 20.6 %
+less material. That is precisely the claim that aligning struts with the principal
+directions makes each one work less hard.
+
+★ **What this does not settle.** It is **not** a matched-density comparison, so it does
+not establish organic as more or less efficient than the octet cell. §4(d)'s question —
+is organic worth its complexity structurally — needs a **matched-mass** run that nobody
+has done.
+
+★ **Doubled and stepped certify identically, to the last digit, by construction.** The
+homogenised tensor is a function of relative density alone and both take their density
+from the same law; only the cell differs, and the cell does not enter the tensor. Their
+difference is purely geometric (soup 2168.76 vs 3084.84 mm³ for the same certified
+object).
+
+**The welded body after the rebase (R18):** all three **watertight and 2-manifold** —
+0 boundary edges, 0 non-manifold edges, measured by an independent edge-use census on
+the written file rather than read off the generator's own report.
+
+---
 
 > ★ **READ `x1_geometry_path_defects.txt` FIRST IF YOU READ NOTHING ELSE.** The first
 > version of this task passed every bar it set and produced files with no lattice in
