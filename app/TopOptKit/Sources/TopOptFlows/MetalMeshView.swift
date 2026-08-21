@@ -206,39 +206,56 @@ struct ShellClip {
     float4 spacing;     // xyz = voxel size (mm)
     float4 dims;        // xyz = voxel counts
 };
-// ★★★ THE SHELL STANDS DOWN ONLY WHERE A CELL IS ACTUALLY LATTICED — not merely
-// where a region was declared (maintainer, 2026-08-21: "I want to be able to view
-// the solid parts of the piece instead of holes").
+// ★★★ THE SHELL STANDS DOWN IN EXACTLY THE VOXELS THE MARCH DRAWS STRUTS IN — and
+// that is a CONJUNCTION of two tests, not either one of them.
 //
-// ★ WHAT A "HOLE" ACTUALLY WAS. This sampled the REGION field and discarded the
-// shell everywhere inside a declared region. But the run does not lattice every
-// voxel of a region: a member too thin to hold N* cells, or a strut that cannot
-// clear one bead, FALLS BACK TO SOLID (grading.cpp's L4 and
-// `fallback_strut_unprintable`). The shell was cut there anyway and no strut was
-// drawn to replace it, so the preview showed a void where the algorithm puts solid
-// plastic. Every hole he has reported was that: the picture disagreeing with the
-// job about the one thing the preview exists to show.
+// `lsdf_march` accepts a sample iff `max(dPart, dBox, dRegion) <= 0` AND the owning
+// cell is ACTIVE. On the part's own surface dPart is ~0, so the shell's rule is
+// IN-REGION ∧ CELL-ACTIVE. Getting that wrong in either direction is a defect the
+// maintainer has now seen on his iPad, twice:
 //
-// ★ THE FIELD TO ASK IS THE CELL FIELD, and it was already exposed for exactly this
-// (`shellClipCellTexture`, "ONE SOURCE OF TRUTH, NOT TWO") and never connected. Its
-// R channel is the cell's demand, or NEGATIVE where the cell is inactive — which is
-// precisely "the run leaves this solid". So the shell keeps its fragment there and
-// the part reads as solid material, which is what will be built.
+//   REGION ALONE  ⇒ HOLES. The run leaves a voxel solid when its member is too thin
+//                   to hold N* cells (grading.cpp's L4) or its strut cannot clear one
+//                   bead (`fallback_strut_unprintable`). The shell was cut there
+//                   anyway and no strut replaced it: a void where the algorithm puts
+//                   plastic. Measured on his own part: WRONG FOR 31,523 OF 60,732
+//                   INTERIOR VOXELS — 51.9%, over half the part.
 //
-// ★ AND THE SAMPLE IS NEAREST, NOT LINEAR. This is an ACTIVATION test, not a
-// distance: interpolating across the −1 boundary would blend "latticed" into
-// "solid" and produce a half-transparent fringe one cell wide around every solid
-// island. A filter that is right for a signed distance is wrong for a flag.
-inline bool shell_is_latticed(float3 mpos, constant ShellClip& c,
-                              texture3d<float> cellTex) {
+//   CELL ALONE    ⇒ SEE-THROUGH. Dropping the region test cut the shell wherever a
+//                   cell was active, including where the march is region-clipped and
+//                   draws nothing. He was looking through the front wall at the green
+//                   anchor face inside.
+//
+// ★ AND THE ENABLE STILL KEYS ON A DECLARED REGION. `c.grid.w < 0.5` means no region
+// list reached this frame, and the clip must then remove NOTHING — a whole-part sample
+// keeps its shell, and the shell occludes the march, which is what
+// `UnifiedShadingTests.testSharedDepthBufferHidesTheLatticeBehindAnOpaqueShell` proves.
+// Keying the enable off the cell grid instead — which exists for every baked scene —
+// is what turned the clip on everywhere and produced the see-through.
+//
+// ★ THE CELL SAMPLE IS NEAREST. Activation is a FLAG, not a distance: interpolating
+// across the −1 boundary blends "latticed" into "solid" and fringes every solid island
+// with a half-transparent border one cell wide. The region field IS a distance and
+// keeps its linear filter.
+inline bool shell_is_latticed(float3 mpos,
+                              constant ShellClip& c, texture3d<float> regionTex,
+                              constant ShellClip& cc, texture3d<float> cellTex) {
     if (c.grid.w < 0.5) { return false; }
     float3 g = (mpos - c.grid.xyz) / max(c.spacing.xyz, float3(1e-6));
     float3 stc = (g + 0.5) / max(c.dims.xyz, float3(1.0));
-    // Outside the baked volume there is no lattice — and no clamping, which would
-    // smear the boundary cells across the rest of the part.
+    // Outside the baked volume there is no region — and no clamping, which would
+    // smear the boundary voxels across the rest of the part.
     if (any(stc < float3(0.0)) || any(stc > float3(1.0))) { return false; }
-    constexpr sampler smp(coord::normalized, filter::nearest, address::clamp_to_edge);
-    return cellTex.sample(smp, stc).r >= 0.0;
+    constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+    if (regionTex.sample(smp, stc).r > 0.0) { return false; }      // outside the region
+
+    // ── and the cell that owns this point must actually be latticed ────────────────
+    if (cc.grid.w < 0.5) { return true; }   // no cell field ⇒ region alone, as before
+    float3 cg = (mpos - cc.grid.xyz) / max(cc.spacing.xyz, float3(1e-6));
+    float3 cstc = (cg + 0.5) / max(cc.dims.xyz, float3(1.0));
+    if (any(cstc < float3(0.0)) || any(cstc > float3(1.0))) { return false; }
+    constexpr sampler nsmp(coord::normalized, filter::nearest, address::clamp_to_edge);
+    return cellTex.sample(nsmp, cstc).r >= 0.0;                    // active ⇒ latticed
 }
 """
 
@@ -360,8 +377,10 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 constant CutUniforms& cut [[buffer(3)]],
                                 texture2d<float, access::sample> aoTex [[texture(0)]],
                                 constant ShellClip& shellClip [[buffer(4)]],
-                                texture3d<float, access::sample> regionTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, shellClip, regionTex)) { discard_fragment(); }
+                                texture3d<float, access::sample> regionTex [[texture(4)]],
+                                constant ShellClip& cellClip [[buffer(5)]],
+                                texture3d<float, access::sample> cellTex [[texture(5)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, regionTex, cellClip, cellTex)) { discard_fragment(); }
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
         if (t > reveal.x) discard_fragment();
@@ -657,8 +676,10 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
 // unified-shading task recorded for `bodyAlpha = 0` walls.
 fragment GBuf depth_fragment(DOut in [[stage_in]],
                              constant ShellClip& shellClip [[buffer(4)]],
-                             texture3d<float, access::sample> regionTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, shellClip, regionTex)) { discard_fragment(); }
+                             texture3d<float, access::sample> regionTex [[texture(4)]],
+                             constant ShellClip& cellClip [[buffer(5)]],
+                             texture3d<float, access::sample> cellTex [[texture(5)]]) {
+    if (shell_is_latticed(in.mpos, shellClip, regionTex, cellClip, cellTex)) { discard_fragment(); }
     GBuf o;
     o.eyeZ = in.eyeZ;
     // Face the normal toward the eye. The mesh draws with cullMode .none, so a
@@ -3128,7 +3149,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var shellClip = shellClipUniform
         enc.setFragmentBytes(&shellClip,
                              length: MemoryLayout<ShellClipUniform>.stride, index: 4)
+        var cellClip = shellClipCellUniform
+        enc.setFragmentBytes(&cellClip,
+                             length: MemoryLayout<ShellClipUniform>.stride, index: 5)
         enc.setFragmentTexture(latticeLayer?.shellClipCellTexture ?? neutralShellClipTexture(),
+                               index: 5)
+        enc.setFragmentTexture(latticeLayer?.regionTexture ?? neutralShellClipTexture(),
                                index: 4)
         // Render quality: the AO/edge texture and the strengths that scale it.
         // `viewer_fragment` DECLARES both, so both must be bound on every path —
@@ -3660,30 +3686,26 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// ★ Only INCLUDE regions cut. An `exclude` is frozen SOLID and carries no
     /// lattice, so cutting there would be the same lie in the other direction.
-    private var shellClipUniform: ShellClipUniform {
+    /// ★★ THE CELL GRID, as its own ShellClip. The shell's clip is a CONJUNCTION —
+    /// in-region AND cell-active — and the two fields live on DIFFERENT grids (the
+    /// region SDF on the occupancy grid, the activation on the base-cell grid), so each
+    /// needs its own origin/spacing/dims. Disabled (w = 0) when no cell field is baked,
+    /// which the shader reads as "region alone", i.e. exactly the old behaviour.
+    private var shellClipCellUniform: ShellClipUniform {
         var u = ShellClipUniform()
-        // ★★ THE CELL GRID, NOT THE REGION GRID. `shell_is_latticed` now asks the
-        // per-cell activation field — the only field that knows which voxels the run
-        // actually latticeS — so the uniform must describe THAT volume.
-        //
-        // ★★★ BUT THE ENABLE STILL KEYS ON A DECLARED REGION, and getting that wrong
-        // broke two tests before this comment existed. `regionGrid` is nil when nothing
-        // is declared, which DISABLED the clip — a whole-part sample keeps its shell and
-        // the shell occludes the march, which is what
-        // `UnifiedShadingTests.testSharedDepthBufferHidesTheLatticeBehindAnOpaqueShell`
-        // exists to prove ("a separately composited layer cannot be occluded at all,
-        // which is what 'pasted on' meant"). Keying the enable off the CELL grid instead
-        // turned the clip on for every baked scene, so the shell stood down everywhere
-        // and stopped occluding anything: 5,284 strut pixels where the bound is 1,344.
-        //
-        // The cell field is region-masked already (occupancy is), so `cellTex >= 0`
-        // implies "inside a declared region" on its own — the region check is needed for
-        // the ENABLE, not for the test.
-        guard latticeInFrame, latticeLayer?.regionGrid != nil,
-              let g = latticeLayer?.shellClipGrid else { return u }
-        u.grid = SIMD4(g.origin, 1)            // w = 1 ⇒ enabled
+        guard latticeInFrame, let g = latticeLayer?.shellClipGrid else { return u }
+        u.grid = SIMD4(g.origin, 1)
         u.spacing = SIMD4(g.spacing, 0)
         u.dims = SIMD4(g.dims, 0)
+        return u
+    }
+
+    private var shellClipUniform: ShellClipUniform {
+        var u = ShellClipUniform()
+        guard latticeInFrame, let g = latticeLayer?.regionGrid else { return u }
+        u.grid = SIMD4(g.origin, 1)            // w = 1 ⇒ enabled
+        u.spacing = SIMD4(g.spacing, 0)
+        u.dims = SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0)
         return u
     }
 
@@ -3833,10 +3855,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
             // ★ THE SAME CLIP HERE, or the G-buffer keeps a wall the visible pass
             // discarded and AO darkens the interior behind a surface nobody sees.
+            var pCellClip = shellClipCellUniform
+            penc.setFragmentBytes(&pCellClip,
+                                  length: MemoryLayout<ShellClipUniform>.stride, index: 5)
+            penc.setFragmentTexture(
+                latticeLayer?.shellClipCellTexture ?? neutralShellClipTexture(), index: 5)
             var pClip = shellClipUniform
             penc.setFragmentBytes(&pClip,
                                   length: MemoryLayout<ShellClipUniform>.stride, index: 4)
-            penc.setFragmentTexture(latticeLayer?.shellClipCellTexture ?? neutralShellClipTexture(),
+            penc.setFragmentTexture(lattice?.regionTexture ?? neutralShellClipTexture(),
                                     index: 4)
             countedDraw(penc, .triangle, vertexDrawCount)
         }

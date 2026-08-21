@@ -47,13 +47,14 @@ final class LatticeStressOnStrutsTests: XCTestCase {
         r.setLatticeScene(scene, token: 1)
         // ★★ A CELL HIS PART CAN HOLD (task 2026-08-21). This read `hisParams()`, whose
         // cell is the shipped 8.00 mm default — at which core leaves this material SOLID
-        // (N* = 5 wants 40 mm of member). That cost nothing while the shell was cut to
-        // the declared REGION, because the hole was there whether or not a strut filled
-        // it. Now that the shell only stands down where a cell is actually LATTICED, the
-        // opaque shell correctly covers material the run builds solid — and this
-        // fixture's positive control ("struts must be on screen") fell to 48.
+        // (N* = 5 wants 40 mm of member; the widest here measures 10.39 mm). That cost
+        // nothing while the shell was cut to the declared REGION, because the hole was
+        // there whether or not a strut filled it. Now that the shell stands down only
+        // where a cell is actually LATTICED, the opaque shell correctly covers material
+        // the run builds solid — and this fixture's own positive control ("struts must
+        // be on screen") fell to 48. That is the fix working, not a regression.
         //
-        // The overlay claim is untouched; it is asked of a lattice that exists.
+        // The overlay claim is unchanged; it is asked of a lattice that exists.
         r.latticeParams = LatticePreviewConfettiTests.hisParamsAtACellHisPartCanHold()
         r.camera.setOrientation(azimuth: 0.7, elevation: 0.4)
 
