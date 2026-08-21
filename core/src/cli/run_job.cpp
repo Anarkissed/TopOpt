@@ -4557,9 +4557,16 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                j_face_protection_face_ids, j_face_protection_depth_mm,
                j_face_protection_depths_mm, j_face_protection_region_ids,
                j_face_protection_region_depths_mm,
-               j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
-               j_wall_line_width_mm, j_wall_line_width_outer_mm,
-               j_layer_height_mm] = job.loads;
+               // ★ ORDER IS THE DECLARATION ORDER OF JobLoadCase, NOT a list you
+               // may append to. `layer_height_mm` sits between `infill_percent` and
+               // `minimize_plastic` in the struct, so it binds THERE. Appending it at
+               // the end instead shifted every following name by one — and because
+               // each mismatched pair is implicitly convertible (double->bool,
+               // bool->int, int->double) it COMPILED and silently carried wrong
+               // values. test_job_loadcase_copy caught it; that is what it is for.
+               j_build_dir, j_infill_percent, j_layer_height_mm,
+               j_minimize_plastic, j_wall_loops,
+               j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
   // before asking for a load case). ProductionLoadCase has no counterpart and
