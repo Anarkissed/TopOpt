@@ -131,6 +131,11 @@ inline constexpr double kOrganicTextbookOverhangDeg = 45.0;
 // Material below it is COUNTED and reported OUT OF REGIME, never hidden (§3b).
 inline constexpr double kOrganicCurvesPerMemberFloor = 2.0;
 
+// How many times the ground-tie repair may re-flood before giving up. The coupon uses
+// 12; a leg can itself land on another floating component, so one round is not enough,
+// and a bound is needed because a component wholly outside the region can never tie.
+inline constexpr int kOrganicRepairRounds = 12;
+
 // ★ THE DENSITY OF THREE ORTHOGONAL FAMILIES AT SEPARATION d, STRUT DIAMETER t.
 // A box of edge d carries one strut of each family through it, so the solid fraction
 // is 3 * pi * (t/2)^2 * d / d^3 = 3*pi*t^2 / (4 d^2). Overlaps at the crossings are
@@ -517,6 +522,28 @@ struct OrganicGenStats {
   // finish that emitted no geometry, and before this organic emitted none.
   std::uint64_t anchor_nodes = 0;
   std::uint64_t skin_triangles = 0;
+  // ── ★★ THE GROUND-TIE REPAIR (the maintainer's own coupon method) ──────────
+  // ★ WHY CONNECTEDNESS IS NOT PRINTABILITY, AND THIS IS THE DIFFERENCE.
+  // `emitted_components` says the solids touch each other. It does NOT say the
+  // material can be BUILT: a piece can be welded to the lattice and still begin in
+  // mid-air, and a printer lays material bottom-up. The maintainer printed a cube
+  // whose emitted geometry was 99.99 % one component and still had struts starting
+  // above the plate.
+  //
+  // So the emitted solids are rasterised, flooded from the LOWEST OCCUPIED LAYER, and
+  // every component the flood does not reach is tied down with a VERTICAL LEG dropped
+  // from its own lowest voxel — then re-flooded, up to `kOrganicRepairRounds` times.
+  // That is exactly the repair `graded_coupon.cpp` runs, and the coupon it produced
+  // printed clean with supports off.
+  //
+  // ★ FLOODING FROM THE LATTICE'S OWN BASE IS CONSERVATIVE. In a real part the lattice
+  // also meets the solid shell, which is ground too but is not in this span list — so
+  // this may add a leg that the shell would have made unnecessary. It never omits one.
+  long long floating_voxels_before = 0;
+  long long floating_voxels_after = 0;   // ★ NON-ZERO IS A REFUSAL AT THE CALLER
+  long long repair_legs_added = 0;
+  int repair_rounds = 0;
+
   // ★★ PHYSICAL CONNECTEDNESS OF WHAT WAS ACTUALLY WRITTEN — i.e. AFTER the boundary
   // clip has trimmed and dropped spans. The tracer's own report measures the lattice
   // it TRACED; this measures the lattice in the file. The two can differ, because

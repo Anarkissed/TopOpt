@@ -644,6 +644,10 @@ struct LatticeExportOutcome {
   long long organic_emitted_components = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_mm = 0.0;
+  long long organic_floating_before = 0;
+  long long organic_floating_after = 0;
+  long long organic_repair_legs = 0;
+  long long organic_repair_rounds = 0;
   // The welded single-body file, when one was asked for.
   bool welded = false;
   OrganicWeldStats weld;
@@ -1896,6 +1900,10 @@ LatticeExportOutcome export_latticed_variant(
     st.skin_triangles = g.skin_triangles;
     st.landings = g.anchor_nodes;
     oc.organic_emitted_components = static_cast<long long>(g.emitted_components);
+    oc.organic_floating_before = g.floating_voxels_before;
+    oc.organic_floating_after = g.floating_voxels_after;
+    oc.organic_repair_legs = g.repair_legs_added;
+    oc.organic_repair_rounds = g.repair_rounds;
     oc.organic_emitted_largest_fraction = g.emitted_largest_length_fraction;
     oc.organic_emitted_stranded_mm = g.emitted_stranded_length_mm;
     st.interior_volume_mm3 = g.volume_mm3;
@@ -7796,6 +7804,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;
         gi.organic_emitted_stranded_length_mm = R.oc.organic_emitted_stranded_mm;
+        gi.organic_floating_voxels_before = R.oc.organic_floating_before;
+        gi.organic_floating_voxels_after = R.oc.organic_floating_after;
+        gi.organic_repair_legs = R.oc.organic_repair_legs;
+        gi.organic_repair_rounds = R.oc.organic_repair_rounds;
       }
       if (R.stepped_ran) fill_stepped_run_info(gi, R.stepped);
     }

@@ -1428,6 +1428,136 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     span(cn.a, cn.b, cn.radius_mm);
   }
 
+  // ── ★★ THE GROUND-TIE REPAIR (OrganicGenStats states why) ──────────────────
+  // Rasterise the emitted solids, flood from the lowest occupied layer, and tie every
+  // unreached component down with a vertical leg from its own lowest voxel. Repeat.
+  // This is graded_coupon.cpp's repair, on the POST-CLIP spans.
+  if (!emitted.empty()) {
+    double rmin = emitted.front().r;
+    Vec3 lo = emitted.front().a, hi = emitted.front().a;
+    for (const EmittedSeg& e : emitted) {
+      rmin = std::min(rmin, e.r);
+      for (const Vec3& p : {e.a, e.b}) {
+        lo.x = std::min(lo.x, p.x - e.r); lo.y = std::min(lo.y, p.y - e.r);
+        lo.z = std::min(lo.z, p.z - e.r);
+        hi.x = std::max(hi.x, p.x + e.r); hi.y = std::max(hi.y, p.y + e.r);
+        hi.z = std::max(hi.z, p.z + e.r);
+      }
+    }
+    // One voxel per strut RADIUS: fine enough that a strut is never severed by the
+    // raster (which would invent a floating piece), coarse enough to stay affordable.
+    const double vx = std::max(rmin, 1e-6);
+    const int RX = static_cast<int>(std::ceil((hi.x - lo.x) / vx)) + 2;
+    const int RY = static_cast<int>(std::ceil((hi.y - lo.y) / vx)) + 2;
+    const int RZ = static_cast<int>(std::ceil((hi.z - lo.z) / vx)) + 2;
+    if (static_cast<long long>(RX) * RY * RZ <= 60000000LL) {
+      std::vector<unsigned char> occ(static_cast<std::size_t>(RX) * RY * RZ, 0);
+      auto ridx = [RX, RY](int i, int j, int k) {
+        return (static_cast<std::size_t>(k) * RY + j) * RX + i;
+      };
+      auto stamp = [&](const EmittedSeg& e) {
+        const Vec3 ab = vsub(e.b, e.a);
+        const double abab = vdot(ab, ab);
+        const double r2 = e.r * e.r;
+        const int i0 = std::max(0, int((std::min(e.a.x, e.b.x) - e.r - lo.x) / vx));
+        const int i1 = std::min(RX - 1, int((std::max(e.a.x, e.b.x) + e.r - lo.x) / vx) + 1);
+        const int j0 = std::max(0, int((std::min(e.a.y, e.b.y) - e.r - lo.y) / vx));
+        const int j1 = std::min(RY - 1, int((std::max(e.a.y, e.b.y) + e.r - lo.y) / vx) + 1);
+        const int k0 = std::max(0, int((std::min(e.a.z, e.b.z) - e.r - lo.z) / vx));
+        const int k1 = std::min(RZ - 1, int((std::max(e.a.z, e.b.z) + e.r - lo.z) / vx) + 1);
+        for (int k = k0; k <= k1; ++k)
+          for (int j = j0; j <= j1; ++j)
+            for (int i = i0; i <= i1; ++i) {
+              const Vec3 c{lo.x + (i + 0.5) * vx, lo.y + (j + 0.5) * vx,
+                           lo.z + (k + 0.5) * vx};
+              const Vec3 ac = vsub(c, e.a);
+              double t = abab > 0.0 ? vdot(ac, ab) / abab : 0.0;
+              t = std::min(1.0, std::max(0.0, t));
+              const Vec3 d = vsub(ac, vmul(ab, t));
+              if (vdot(d, d) <= r2) occ[ridx(i, j, k)] = 1;
+            }
+      };
+      for (const EmittedSeg& e : emitted) stamp(e);
+      // The GROUND: the lowest layer that holds any material.
+      int ground = -1;
+      for (int k = 0; k < RZ && ground < 0; ++k)
+        for (int j = 0; j < RY && ground < 0; ++j)
+          for (int i = 0; i < RX; ++i)
+            if (occ[ridx(i, j, k)]) { ground = k; break; }
+      std::vector<unsigned char> seen;
+      auto flood = [&]() {
+        seen.assign(occ.size(), 0);
+        std::vector<int> st;
+        if (ground < 0) return;
+        for (int j = 0; j < RY; ++j)
+          for (int i = 0; i < RX; ++i) {
+            const std::size_t s0 = ridx(i, j, ground);
+            if (occ[s0] && !seen[s0]) { seen[s0] = 1; st.push_back(int(s0)); }
+          }
+        const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0},
+                  dk[6] = {0, 0, 0, 0, 1, -1};
+        while (!st.empty()) {
+          const int nn = st.back(); st.pop_back();
+          const int i0 = nn % RX, j0 = (nn / RX) % RY, k0 = nn / (RX * RY);
+          for (int d = 0; d < 6; ++d) {
+            const int i = i0 + di[d], j = j0 + dj[d], k = k0 + dk[d];
+            if (i < 0 || j < 0 || k < 0 || i >= RX || j >= RY || k >= RZ) continue;
+            const std::size_t m = ridx(i, j, k);
+            if (occ[m] && !seen[m]) { seen[m] = 1; st.push_back(int(m)); }
+          }
+        }
+      };
+      flood();
+      for (std::size_t m = 0; m < occ.size(); ++m)
+        if (occ[m] && !seen[m]) ++st.floating_voxels_before;
+
+      for (; st.repair_rounds < kOrganicRepairRounds; ++st.repair_rounds) {
+        long long fl = 0;
+        for (std::size_t m = 0; m < occ.size(); ++m) if (occ[m] && !seen[m]) ++fl;
+        if (fl == 0) break;
+        std::vector<unsigned char> lab(occ.size(), 0);
+        std::vector<EmittedSeg> legs;
+        for (int k = 0; k < RZ; ++k)
+          for (int j = 0; j < RY; ++j)
+            for (int i = 0; i < RX; ++i) {
+              const std::size_t s0 = ridx(i, j, k);
+              if (!occ[s0] || seen[s0] || lab[s0]) continue;
+              std::vector<int> stk{int(s0)}; lab[s0] = 1;
+              int lk = k, li = i, lj = j;
+              while (!stk.empty()) {
+                const int nn = stk.back(); stk.pop_back();
+                const int i0 = nn % RX, j0 = (nn / RX) % RY, k0 = nn / (RX * RY);
+                if (k0 < lk) { lk = k0; li = i0; lj = j0; }
+                const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0},
+                          dk[6] = {0, 0, 0, 0, 1, -1};
+                for (int d = 0; d < 6; ++d) {
+                  const int a = i0 + di[d], b = j0 + dj[d], c = k0 + dk[d];
+                  if (a < 0 || b < 0 || c < 0 || a >= RX || b >= RY || c >= RZ) continue;
+                  const std::size_t m = ridx(a, b, c);
+                  if (occ[m] && !seen[m] && !lab[m]) { lab[m] = 1; stk.push_back(int(m)); }
+                }
+              }
+              // The leg: straight down from this component's lowest voxel to the
+              // ground layer. Radius is the component's own strut radius (rmin is the
+              // conservative choice — a leg is never fatter than the lattice it ties).
+              const Vec3 top{lo.x + (li + 0.5) * vx, lo.y + (lj + 0.5) * vx,
+                             lo.z + (lk + 0.5) * vx};
+              const Vec3 bot{top.x, top.y, lo.z + (ground + 0.5) * vx};
+              if (vlen(vsub(top, bot)) > 1e-9)
+                legs.push_back({top, bot, rmin, vlen(vsub(top, bot))});
+            }
+        if (legs.empty()) break;
+        for (const EmittedSeg& L : legs) { stamp(L); ++st.repair_legs_added; }
+        // The legs are GEOMETRY and must reach the file, not just the raster.
+        have_last = false;
+        for (const EmittedSeg& L : legs) span(L.a, L.b, L.r);
+        flood();
+      }
+      for (std::size_t m = 0; m < occ.size(); ++m)
+        if (occ[m] && !seen[m]) ++st.floating_voxels_after;
+    }
+  }
+
   // ── ★★ CONNECTEDNESS OF WHAT WAS WRITTEN (see OrganicGenStats). Same union-find
   // and the same exact segment-to-segment distance the tracer uses, run over the
   // POST-CLIP spans, so the number describes the file rather than the intent.

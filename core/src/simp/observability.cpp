@@ -1371,6 +1371,12 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"solid_segments\": " + fmt_ll(info.organic_solid_segments);
       gr += ", \"emitted_components\": " +
             fmt_ll(info.organic_emitted_components);
+      gr += ", \"floating_voxels_before_repair\": " +
+            fmt_ll(info.organic_floating_voxels_before);
+      gr += ", \"floating_voxels_after_repair\": " +
+            fmt_ll(info.organic_floating_voxels_after);
+      gr += ", \"ground_tie_legs_added\": " + fmt_ll(info.organic_repair_legs);
+      gr += ", \"ground_tie_rounds\": " + fmt_ll(info.organic_repair_rounds);
       gr += ", \"emitted_largest_length_fraction\": " +
             fmt(info.organic_emitted_largest_fraction);
       gr += ", \"emitted_stranded_length_mm\": " +

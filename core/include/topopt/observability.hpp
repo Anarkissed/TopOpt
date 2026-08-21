@@ -966,6 +966,12 @@ struct RunInfo {
   long long organic_solid_segments = 0;
   // ★★ AND THE SAME TEST ON WHAT WAS WRITTEN — after the boundary clip.
   long long organic_emitted_components = 0;
+  // ★★ THE GROUND-TIE REPAIR. floating_after != 0 means material the printer cannot
+  // build — it starts in mid-air — and the caller REFUSES on it.
+  long long organic_floating_voxels_before = 0;
+  long long organic_floating_voxels_after = 0;
+  long long organic_repair_legs = 0;
+  long long organic_repair_rounds = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_length_mm = 0.0;
   double organic_largest_component_fraction = 0.0;
