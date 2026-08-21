@@ -819,6 +819,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // differ). No `else` skeleton.
         var loads: [String: Any] = [
             "minimize_plastic": request.minimizePlastic,
+            // ★ THE LAYER HEIGHT NOW REACHES CORE. It was captured on the print-params
+            // sheet and persisted since M7.params, but never sent — `PrintParams.swift`
+            // said so outright ("CAPTURED BUT NOT WIRED"), and core had no field for it.
+            // Without it the grading law cannot compare the lattice it produced against
+            // the profile it will be printed with, because the overhang limit is
+            // c*W/h and h was invisible.
+            "layer_height_mm": request.layerHeightMM,
             "build_dir": [request.buildDirection.x, request.buildDirection.y,
                           request.buildDirection.z],
         ]

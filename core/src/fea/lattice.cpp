@@ -701,4 +701,21 @@ double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation
   return accuracy;
 }
 
+
+double recommended_layer_height_mm(double min_strut_diameter_mm,
+                                   double steepest_stacking_angle_deg,
+                                   double line_width_mm) {
+  if (!(min_strut_diameter_mm > 0.0) || !std::isfinite(min_strut_diameter_mm))
+    return 0.0;
+  // 1. resolve the THINNEST strut
+  double h = min_strut_diameter_mm / kLayersAcrossStrut;
+  // 2. the overhang step, when a stacking angle is known
+  if (steepest_stacking_angle_deg > 0.0 && steepest_stacking_angle_deg < 90.0 &&
+      line_width_mm > 0.0) {
+    const double t = std::tan(steepest_stacking_angle_deg * M_PI / 180.0);
+    if (t > 1e-9) h = std::min(h, kOverhangStepFraction * line_width_mm / t);
+  }
+  return h;
+}
+
 }  // namespace topopt

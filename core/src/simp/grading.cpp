@@ -1214,6 +1214,21 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
   }
 
+  // ── ★ THE RECOMMENDED LAYER HEIGHT ──────────────────────────────────────────
+  // Reported, never applied: the grading law does not own the print profile. The
+  // octet's steepest STACKING strut is 45 deg — its horizontal members are bridges,
+  // governed by span rather than by layer stacking, so they do not set this.
+  if (out.latticed_voxels > 0 && std::isfinite(out.min_strut_diameter_mm) &&
+      out.min_strut_diameter_mm > 0.0) {
+    out.layer_height_bound_strut_mm =
+        out.min_strut_diameter_mm / kLayersAcrossStrut;
+    const double t = std::tan(45.0 * M_PI / 180.0);
+    out.layer_height_bound_overhang_mm =
+        kOverhangStepFraction * params.min_extrudable_width_mm / t;
+    out.recommended_layer_height_mm = recommended_layer_height_mm(
+        out.min_strut_diameter_mm, 45.0, params.min_extrudable_width_mm);
+  }
+
   return out;
 }
 

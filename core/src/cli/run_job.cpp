@@ -4558,12 +4558,20 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                j_face_protection_depths_mm, j_face_protection_region_ids,
                j_face_protection_region_depths_mm,
                j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
-               j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
+               j_wall_line_width_mm, j_wall_line_width_outer_mm,
+               j_layer_height_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
   // before asking for a load case). ProductionLoadCase has no counterpart and
   // should not grow one. Named here so the ledger stays complete.
   (void)j_present;
+  // NOT CARRIED, on purpose: `layer_height_mm` is a PRINTER profile value, not a
+  // load case. Nothing in build_production_loadcase, the solve or the ladder reads
+  // it — the layer height never enters the optimizer (the same reason infill does
+  // not, ARCHITECTURE §2). It is read directly from `job.loads` where the grading
+  // law compares it against the layer height the lattice it produced actually
+  // wants. Named here so the ledger stays complete.
+  (void)j_layer_height_mm;
 
   ProductionLoadCase lc;
   // ★ THE REGION LAYER travels verbatim (task 2026-08-14-face-regions §1): the
@@ -5980,6 +5988,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       // not be something a reader has to derive by comparing two numbers.
       gi.grading_recertify_changed_verdict = (a.accepted != relat.accepted);
     }
+    gi.grading_recommended_layer_height_mm = gf.recommended_layer_height_mm;
+    gi.grading_layer_height_bound_strut_mm = gf.layer_height_bound_strut_mm;
+    gi.grading_layer_height_bound_overhang_mm = gf.layer_height_bound_overhang_mm;
+    gi.grading_declared_layer_height_mm = job.loads.layer_height_mm;
     gi.grading_intent = grading_intent_name(gf.intent_used);
     gi.grading_aesthetic_percentile = gf.aesthetic_percentile_used;
     gi.grading_aesthetic_percentile_mpa = gf.aesthetic_percentile_mpa;

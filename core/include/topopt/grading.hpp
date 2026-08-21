@@ -689,6 +689,13 @@ struct GradedField {
   // says so.
   std::size_t aesthetic_below_accuracy_floor_voxels = 0;
 
+  // ── ★ THE LAYER HEIGHT THIS LATTICE WANTS ────────────────────────────────────
+  // A RECOMMENDATION, reported and never applied here: the law does not own the
+  // print profile. 0 when nothing was latticed.
+  double recommended_layer_height_mm = 0.0;
+  double layer_height_bound_strut_mm = 0.0;    // bound 1 — resolving the strut
+  double layer_height_bound_overhang_mm = 0.0; // bound 2 — the overhang step
+
   // ── ★ THE DENSITY DISTRIBUTION (bar R1) ──────────────────────────────────────
   // "The fraction of voxels at rho_min is the number that was wrong, so it is the
   // number that must move." An aggregate min/max cannot show it: on the maintainer's

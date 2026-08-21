@@ -26,8 +26,12 @@ import Foundation
 /// The user's print parameters for a project — the M7.params capture, and the
 /// USER OVERRIDE of the M5.1 recommended slicer settings.
 public struct PrintParams: Equatable, Sendable, Codable {
-    /// Nozzle layer height (mm). Captured for the future slicer/report surface;
-    /// not wired into the current settings engine (it has no layer-height field).
+    /// Nozzle layer height (mm).
+    /// ★ NOW WIRED TO CORE (task: lattice re-cert + layer height). It travels in the
+    /// job's `loads` block, and the grading law reports the layer height the lattice
+    /// it produced actually wants (`recommended_layer_height_mm`) plus whether the
+    /// declared one is too coarse for it. Apply a recommendation with
+    /// `applyingRecommendedLayerHeight(_:)` below.
     public var layerHeightMM: Double
     /// Perimeter wall loops (the M5.1 `walls` override).
     public var wallLoops: Int
@@ -321,5 +325,38 @@ public struct SlicerOverride: Equatable, Sendable, Codable {
         self.bottomLayers = bottomLayers
         self.infillPercent = infillPercent
         self.infillPattern = infillPattern
+    }
+}
+
+public extension PrintParams {
+    /// ★ ADOPT A LATTICE'S RECOMMENDED LAYER HEIGHT.
+    ///
+    /// The grading law reports the layer height the lattice it emitted wants — set by
+    /// the THINNEST strut it produced (a strut needs enough layers across it to come
+    /// out round) and by the overhang step. This returns a copy with that value
+    /// adopted, so approving a recommendation updates the project's real print
+    /// parameters rather than leaving the receipt disagreeing with the profile.
+    ///
+    /// ★ IT ONLY EVER GOES FINER. A recommendation COARSER than what the user already
+    /// chose is ignored: they may have picked a fine layer for surface quality, and
+    /// silently coarsening their print to match a lattice would be this function
+    /// overriding a decision it was not asked to make. Returns self unchanged when
+    /// the recommendation is absent, non-positive, or not finer.
+    ///
+    /// This is the MECHANISM only. Where the approval happens, and what it looks
+    /// like, is the app's to decide — nothing here places a control.
+    func applyingRecommendedLayerHeight(_ recommendedMM: Double) -> PrintParams {
+        guard recommendedMM.isFinite, recommendedMM > 0,
+              recommendedMM < layerHeightMM else { return self }
+        var out = self
+        out.layerHeightMM = recommendedMM
+        return out
+    }
+
+    /// Whether the profile is too coarse for a lattice wanting `recommendedMM`.
+    /// The same comparison core reports as `declared_layer_height_too_coarse`, so the
+    /// app and the receipt cannot disagree about it.
+    func layerHeightTooCoarse(for recommendedMM: Double) -> Bool {
+        recommendedMM.isFinite && recommendedMM > 0 && layerHeightMM > recommendedMM
     }
 }

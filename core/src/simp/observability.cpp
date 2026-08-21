@@ -1213,6 +1213,24 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"above_percentile_voxels\": " +
             fmt_ll(info.grading_above_percentile_voxels);
     }
+    if (info.grading_recommended_layer_height_mm > 0.0) {
+      gr += ", \"recommended_layer_height_mm\": " +
+            fmt(info.grading_recommended_layer_height_mm);
+      gr += ", \"layer_height_bound_strut_mm\": " +
+            fmt(info.grading_layer_height_bound_strut_mm);
+      gr += ", \"layer_height_bound_overhang_mm\": " +
+            fmt(info.grading_layer_height_bound_overhang_mm);
+      if (info.grading_declared_layer_height_mm > 0.0) {
+        gr += ", \"declared_layer_height_mm\": " +
+              fmt(info.grading_declared_layer_height_mm);
+        // The one thing a reader needs without doing arithmetic: is the profile
+        // this job is going to be printed with too coarse for the lattice it just
+        // produced?
+        gr += ", \"declared_layer_height_too_coarse\": " +
+              bool_json(info.grading_declared_layer_height_mm >
+                        info.grading_recommended_layer_height_mm);
+      }
+    }
     if (info.grading_recertified) {
       gr += ", \"recertified_latticed\": true";
       gr += ", \"recertified_margin\": " + fmt(info.grading_recertified_margin);
