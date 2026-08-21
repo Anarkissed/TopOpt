@@ -1,0 +1,84 @@
+★★ THE GEOMETRY PATH HAS FOUR DEFECTS THE ANALYZE-PATH BARS COULD NOT CATCH.
+Found only because the maintainer sliced the files I sent and said "I don't see any
+lattice". He was right, and the checks I had run could not have told me.
+
+────────────────────────────────────────────────────────────────────────────────────
+0. WHAT I SENT, AND WHY IT LOOKED SOLID
+The three l-bracket STLs contain a lattice of 63 voxels out of 12,703 candidates
+(0.5 %); the other 12,640 stayed SOLID. So each file is the solid part plus a handful of
+struts rattling inside it, and a slicer — which unions the soup — sees a solid block.
+All three files measure 51,231 / 51,275 / 51,293 mm^3: a 0.12 % spread, i.e. the same
+object three times.
+
+★ THE CHECKS I RAN COULD NOT SEE THIS. protruding_vertices = 0, file size, triangle
+count and watertightness are all satisfied by a solid block. THE CHECK THAT WOULD HAVE
+CAUGHT IT IS ONE DIVISION: latticed_voxels / region_voxels. I never ran it on the
+geometry path, only on the analyze path, where it reads 76 %.
+
+Cause on that fixture: `strut_unprintable_at_every_cell = 12640` at the synthetic
+0.12 mm bead I chose to reach the code path. Not a lattice defect — but I presented the
+files as a demonstration of three algorithms and they demonstrate nothing.
+
+────────────────────────────────────────────────────────────────────────────────────
+1. ★ THE R10 CANDIDATE SET IS NOT HIS DECLARED REGIONS
+The analyze receipt grades with `region = nullptr` (run_job.cpp), so EVERY printed voxel
+is a candidate and his declared include/exclude regions are ignored. That is PR 344's
+behaviour, not this task's — but it means R10's "76.3 % latticed" describes latticing the
+WHOLE PART, not the regions he selected.
+
+Through the geometry path, WITH his regions, on his real part at his real 0.42 mm bead:
+    region 11,002   LATTICED 1,180 (10.7 %)   fallback 9,822
+    strut volume 4,716 mm^3 against a 544,112 mm^3 solid companion
+The comparison BETWEEN the three algorithms still stands — they all ran on the identical
+candidate set — but it is not "his job as he would run it".
+
+────────────────────────────────────────────────────────────────────────────────────
+2. ★ STEPPED REFUSES ON A SOLID BLOCK: THE WIDTH FILTER DROPS +inf
+`run_stepped_step` keeps a voxel's member width only when `std::isfinite(width[e])`. But
+`local_member_thickness_mm` returns +inf where the member exceeds the EDT cap
+(thickness_cap_voxels = 32), and the centre of a 40 mm cube at h = 0.625 mm is EXACTLY
+32 voxels from the surface. So every interior voxel is dropped, the region has "no
+measurable member width", and stepped refuses a part it should lattice trivially.
+
+The fix is the one grading.cpp already uses: treat the cap as a LOWER BOUND on the width
+rather than as no measurement. NOT DONE.
+
+────────────────────────────────────────────────────────────────────────────────────
+3. ★ ORGANIC ON A DENSE PART: 2.76 GB, AND 27x THE PART'S OWN VOLUME
+40 mm cube, fully latticed, aesthetic band [0.1, 0.35]:
+    emitted STL          2,764,064,684 bytes  (~55 million triangles)
+    interior_volume_mm3  1,752,994  in a 64,000 mm^3 cube  = 27x the cube
+    wall                 487.70 s   against doubled's 50.03 s on the same job
+The struts overlap so heavily the result is solid, emitted as tens of millions of
+interpenetrating cylinders. `organic_strut_width_mm: 1.2` was stated in the job and the
+separation still collapsed — and I CANNOT CONFIRM what bead the law used, because of
+defect 4.
+
+Contributing cause, measured by sampling the running process: the tracer spends its time
+in the proximity query (`nearest_dist`). Bucket cell = the largest separation, so as the
+separation shrinks relative to the part the points per bucket grow as 1/d^3 and every RK4
+step tests all 27 buckets. `max_curves` and `max_steps_per_curve` bound the curve count;
+NOTHING bounds the query cost. On his part (3,056 curves, 2.7-5.1 mm separation) the
+tracer is 0.22 s. On this cube it is minutes.
+
+────────────────────────────────────────────────────────────────────────────────────
+4. ★ THE GEOMETRY PATH'S RECEIPT DOES NOT NAME THE ALGORITHM
+`run_info.grading.algorithm` is absent on `lattice_variant` / `lattice_part` runs, and so
+are the whole `organic` and `stepped` blocks. `fill_organic_run_info` and
+`fill_stepped_run_info` were wired into `analyze_job`'s RunInfo only. So the one path that
+actually writes geometry is the one path whose receipt cannot say which algorithm wrote
+it — which is exactly what defeated diagnosis of defect 3. NOT DONE.
+
+────────────────────────────────────────────────────────────────────────────────────
+WHAT DOES WORK, MEASURED
+DOUBLED on the 40 mm cube, swept 5-10 mm, his 0.42 mm bead, band [0.1, 0.35]:
+    region 262,144   LATTICED 262,144   fallback 0
+    cell 5 mm, strut diameter 0.4563 .. 1.9179 mm
+    strut volume 51,890.7 mm^3 (soup basis) in a 64,000 mm^3 cube, solid companion 0
+    22,576,484 bytes, 50.03 s
+That file is a real graded lattice and is the one attached.
+
+AND A SECOND SIGHTING OF THE PR 346 OCTREE THROW: the cube at swept 2-16 mm on band
+[0.1, 0.35] throws `plan_cell_sizes: level assignment is not an aligned octree`. PR 346
+characterises [0.0505, 0.35] as FINE, so the failure is broader than a band that reaches
+rho_min. A 5-10 mm ladder survives.

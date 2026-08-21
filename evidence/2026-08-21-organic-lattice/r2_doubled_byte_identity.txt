@@ -1,0 +1,78 @@
+★ R2 — DOUBLED (and the law STEPPED shares) BYTE-IDENTICAL TO PR 345's HEAD.
+
+THE GUARD FIRST: the two binaries must actually DIFFER, or this compares one binary
+with itself and 'identical' means nothing.
+  base (d28527cc, no task code)  7b827beed8b93c0bce92c4b66982d98d495dc4e3f4658d71877bd50d7758c9cb
+  branch (FINAL)                 10a0794a3bbc74d75b2270eb5ac06fe1a4f65ddcad9a8d5edde0d2911c7d2998
+  DIFFER -> the comparison is real.
+
+THE JOB: jobs/nokey_bandC.json — PR 344's aes_bandC_on VERBATIM, with NO "algorithm"
+key at all. That is the byte-identity case that matters (§4d): every existing job
+states nothing, and must be unchanged.
+
+--- sha256, base binary vs FINAL branch binary, same job ---
+  fields.bin             IDENTICAL
+  analysis_report.json   IDENTICAL
+  analysis.json          IDENTICAL
+
+--- EVERY difference in run_info.json, shown in full ---
+169c169
+<     "created_wall_ms": 1787278696013,
+---
+>     "created_wall_ms": 1787282271621,
+228a229,231
+>         "algorithm": "doubled",
+>         "algorithm_latticed_voxels": 84660,
+>         "lattice_solid_volume_mm3": 62555.03318,
+
+READ HONESTLY:
+  * fields.bin is IDENTICAL. That is the per-voxel container — the design, the graded
+    density, the whole field. THE LATTICE ITSELF IS BYTE-IDENTICAL.
+  * analysis.json and analysis_report.json are IDENTICAL: same verdict, same margin,
+    same mass, same min-feature, same everything the gate produces.
+  * run_info.json gains THREE ADDITIVE FIELDS and a timestamp. Nothing was changed or
+    removed; the receipt is a strict SUPERSET. "algorithm": "doubled" is the name of
+    the law that always ran, now said out loud, and the two numbers beside it are the
+    R10 comparison basis.
+
+So the claim is not 'the receipt is byte-identical' — it is not, and saying so would be
+false. The claim is that the LATTICE and the VERDICT are byte-identical and the receipt
+grew by three fields, which is what §4(d) is actually about.
+
+AND THE REFUSAL THAT PROVES THE KEY IS NEW: the base binary, given doubled.json (the
+same job WITH the key), answers
+    topopt-cli: job.json: unknown key "algorithm" in grading
+which is why this comparison had to be run on the key-less job in the first place.
+
+
+════════════════════════════════════════════════════════════════════════════════════
+★★ RE-RUN AFTER THE INTENT CHANGE — AND THIS IS THE ARM THAT ACTUALLY COVERS IT.
+
+Passing the grading INTENT and the aesthetic range into `lattice_one_variant` is a real
+behaviour change to the path that WRITES GEOMETRY, and `lattice_one_variant` is shared
+with the TO+lattice path. The `analyze` arm above CANNOT cover it: analyze never calls
+that function. So a second arm was run on the path that does.
+
+JOB   evidence/2026-08-21-organic-lattice/geom/r2_nointent.json
+      `lattice-variant` on the l-bracket design store, stating NO intent, NO aesthetic
+      range and NONE of this task's new keys — i.e. exactly what every pre-existing
+      lattice_variant job looks like. The BASE binary accepts it, which is the point.
+
+  fields.bin                             IDENTICAL
+  lattice_variant.json                   IDENTICAL
+  lattice_variant_report.json            IDENTICAL
+  loadcase.json                          IDENTICAL
+  variant_070_lattice.report.json        IDENTICAL
+  ★ variant_070_lattice.stl              IDENTICAL   <- THE EMITTED LATTICE
+  run_info.json                          differs, in full:
+        created_wall_ms  (timestamp)
+      + "algorithm": "doubled"
+      + "algorithm_latticed_voxels": 63
+      + "lattice_solid_volume_mm3": 55.96853489
+
+THE CLAIM, STATED EXACTLY: the emitted geometry and every certification artefact are
+BYTE-IDENTICAL; run_info gains three additive fields and nothing is changed or removed.
+A job that states no intent cannot acquire one — the guard is `if
+(!job.grading.intent.empty())`, and with it empty `GradingLawParams::intent` keeps its
+Structural default and the aesthetic range stays two zeros, which grading.hpp documents
+as "the certifiable band". Only a job that ASKS gets anything different.
