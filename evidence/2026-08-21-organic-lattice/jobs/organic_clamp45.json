@@ -1,0 +1,253 @@
+{
+ "material": "PLA",
+ "mode": "analyze",
+ "resolution": 128,
+ "model": "M2_verticalStand.step",
+ "output": {
+  "mesh_format": "stl",
+  "report": "report.json",
+  "mesh_prefix": "variant",
+  "smooth_factor": 2
+ },
+ "lattice": {
+  "regions": [
+   {
+    "kind": "face",
+    "geometry": {
+     "depth_mm": 4,
+     "origin": [
+      90.86190795898438,
+      -22.613723754882812,
+      0
+     ],
+     "half_u_mm": 106.13809204101562,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "half_w_mm": 23.296249389648438
+    },
+    "role": "exclude"
+   },
+   {
+    "role": "include",
+    "kind": "face",
+    "geometry": {
+     "half_w_mm": 15.256097793579102,
+     "half_u_mm": 68.5,
+     "origin": [
+      112.26918029785156,
+      -21.573572158813477,
+      21.765409469604492
+     ],
+     "normal": [
+      0,
+      0,
+      -1
+     ],
+     "depth_mm": 4
+    }
+   },
+   {
+    "role": "include",
+    "kind": "bolt",
+    "geometry": {
+     "half_length_mm": 3.6926956176757812,
+     "axis_point": [
+      112.269175536,
+      -43.21727752685547,
+      120.265408896
+     ],
+     "radius_mm": 84.5,
+     "axis_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   },
+   {
+    "kind": "bolt",
+    "geometry": {
+     "axis_point": [
+      180.769175536,
+      -21.568149440578857,
+      51.765408896
+     ],
+     "radius_mm": 30,
+     "axis_dir": [
+      0,
+      -1,
+      0
+     ],
+     "half_length_mm": 15.631584644317627
+    },
+    "role": "include"
+   },
+   {
+    "kind": "bolt",
+    "geometry": {
+     "axis_point": [
+      43.769175536,
+      -21.568832748226562,
+      51.765408896
+     ],
+     "radius_mm": 30,
+     "half_length_mm": 15.251358032226562,
+     "axis_dir": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "role": "include"
+   },
+   {
+    "geometry": {
+     "radius_mm": 30,
+     "axis_point": [
+      43.769175536,
+      -21.56826292782251,
+      188.765408896
+     ],
+     "axis_dir": [
+      0,
+      -1,
+      0
+     ],
+     "half_length_mm": 15.369428157806396
+    },
+    "kind": "bolt",
+    "role": "include"
+   },
+   {
+    "geometry": {
+     "normal": [
+      -1,
+      0,
+      0
+     ],
+     "half_u_mm": 15.256097793579102,
+     "depth_mm": 4,
+     "half_w_mm": 68.5,
+     "origin": [
+      13.76917552947998,
+      -21.573572158813477,
+      120.26541137695312
+     ]
+    },
+    "role": "include",
+    "kind": "face"
+   },
+   {
+    "geometry": {
+     "origin": [
+      27.769176483154297,
+      -42.30763244628906,
+      158.6337890625
+     ],
+     "half_w_mm": 38.368377685546875,
+     "depth_mm": 4,
+     "normal": [
+      -1,
+      0,
+      0
+     ],
+     "half_u_mm": 4.6023406982421875
+    },
+    "role": "include",
+    "kind": "face"
+   },
+   {
+    "geometry": {
+     "depth_mm": 4,
+     "origin": [
+      105.88458251953125,
+      -6.317474842071533,
+      109.38270568847656
+     ],
+     "half_u_mm": 92.11540985107422,
+     "half_w_mm": 87.61729431152344,
+     "normal": [
+      0,
+      1,
+      0
+     ]
+    },
+    "role": "include",
+    "kind": "face"
+   }
+  ],
+  "emit_stl": true,
+  "topology": "octet",
+  "emit_3mf": false,
+  "skin": "none",
+  "min_extrudable_width_mm": 0.42
+ },
+ "loads": {
+  "wall_line_width_outer_mm": 0.42,
+  "anchor_face_ids": [
+   18
+  ],
+  "face_protections": [
+   16
+  ],
+  "minimize_plastic": true,
+  "groups": [
+   {
+    "face_ids": [
+     20,
+     1,
+     4,
+     19,
+     21,
+     22,
+     25,
+     26,
+     27,
+     32,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     49,
+     75,
+     76,
+     24,
+     31
+    ],
+    "force": [
+     0,
+     0,
+     -22.241134643554688
+    ]
+   }
+  ],
+  "infill_percent": 35,
+  "wall_line_width_mm": 0.45,
+  "face_protection_depth_mm": 5,
+  "wall_loops": 5,
+  "build_dir": [
+   0,
+   0,
+   1
+  ]
+ },
+ "grading": {
+  "cell_mode": "swept",
+  "min_extrudable_width_mm": 0.42,
+  "cell_max_mm": 16,
+  "topology": "octet",
+  "cell_min_mm": 2.0,
+  "intent": "aesthetic",
+  "aesthetic_rho_min": 0.1,
+  "aesthetic_rho_max": 0.35,
+  "algorithm": "organic",
+  "organic_overhang_angle_deg": 45
+ },
+ "bake_build_orientation": "off"
+}

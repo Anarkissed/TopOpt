@@ -1,0 +1,37 @@
+=== cavity smooth R/L=0 res 24
+    exit=0    K = peak / sigma0       : 1.0001393325743246
+=== cavity smooth R/L=0 res 32
+    exit=0    K = peak / sigma0       : 1.000139080150485
+=== cavity smooth R/L=0 res 48
+    exit=0    K = peak / sigma0       : 1.000138952066606
+=== cavity smooth R/L=0 res 64
+    exit=0    K = peak / sigma0       : 1.0001389198914969
+=== cavity smooth R/L=0 res 80
+    exit=0    K = peak / sigma0       : 1.0001389085606007
+=== cavity smooth R/L=0 res 96
+    exit=0    K = peak / sigma0       : 1.0001389040211688
+=== cavity smooth R/L=0.16666666666666666 res 24
+    exit=0    K = peak / sigma0       : 1.8290619085450357
+=== cavity smooth R/L=0.16666666666666666 res 32
+    exit=0    K = peak / sigma0       : 2.0077829336567476
+=== cavity smooth R/L=0.16666666666666666 res 48
+    exit=0    K = peak / sigma0       : 2.1056148600068396
+=== cavity smooth R/L=0.16666666666666666 res 64
+    exit=0    K = peak / sigma0       : 2.1985709764138637
+=== cavity smooth R/L=0.16666666666666666 res 80
+    exit=0    K = peak / sigma0       : 2.1769327742625868
+=== cavity smooth R/L=0.16666666666666666 res 96
+    exit=0    K = peak / sigma0       : 2.1623669444151519
+=== cavity staircase R/L=0.16666666666666666 res 24
+    exit=0    K = peak / sigma0       : 1.7319923056255826
+=== cavity staircase R/L=0.16666666666666666 res 32
+    exit=0    K = peak / sigma0       : 1.8305286073460867
+=== cavity staircase R/L=0.16666666666666666 res 48
+    exit=0    K = peak / sigma0       : 2.06765565841873
+=== cavity staircase R/L=0.16666666666666666 res 64
+    exit=0    K = peak / sigma0       : 2.0407959171197119
+=== cavity staircase R/L=0.16666666666666666 res 80
+    exit=0    K = peak / sigma0       : 2.1359716567332181
+=== cavity staircase R/L=0.16666666666666666 res 96
+    exit=0    K = peak / sigma0       : 2.1816758228696829
+done -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-08-19-peak-stress-convergence/s3_cavity.csv

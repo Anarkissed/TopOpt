@@ -1,0 +1,80 @@
+[loadcase] load-group 0: faces=23 |F|=31N voxels_tagged=1930 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=23 voxels_frozen=23077 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=8095 depth=3 requested=5mm effective=5.847mm status=ok
+== smooth_convergence_probe ==
+job        : /Users/nadim/.topopt-worker/4f8a5fc335a44253 (model M2_verticalStand.step, material PLA)
+design     : /Users/nadim/.topopt-worker/4f8a5fc335a44253/out/variant_068_alpha  (85680 coefficients, basis gaussian, requested vf 0.68, achieved 0.68)
+mode       : retag   (refine 1x  ->  effective resolution 112)
+arm        : frac   (exact volume fraction, mollified; census always 4^3 sub-cell samples, eps_mult 1)
+design grid: 128x31x118 @ 1.7052793026343613 mm  origin (-18.275750737198241,-48.909974716000001,0)
+base  grid : 112x27x103 @ 1.9488906315821273 mm  (the load case is built here)
+solve grid : 112x27x103 @ 1.9488906315821273 mm  (311472 voxels, 987168 dofs)  h/h0 = 1.1428571428571428
+mask       : 43726 ACTIVE, 28843 FrozenSolid, 0 FrozenVoid (non-Empty 72569 of 311472)
+fraction   : 3756 CUT cells, 27710 full, 12260 empty (of 43726 active) — the census of phi, identical in every arm
+R1 volume  : ★ {phi<0} in part 382817.6378245943 mm^3 (mask ignored — THE INVARIANT)
+             certified: ACTIVE 220310.1204151852 + frozen-stamped 213502.4356104546 = 433812.5560256399 mm^3
+bcs        : 15696 dirichlet dofs
+loads      : 3667 nodal loads, resultant (0, 0, -30.9665546417) N
+load path  : connected=true   Load voxels 1930 (0 NOT printed)   Fixture voxels 2484 (0 NOT printed)
+posture    : recycling OFF, geneo OFF, solver=2, cg_tol=1e-08, cg_max=0, margin_stop=1.5
+field wall : phi 0.100 s, occupancy 0.680 s
+
+-- WHAT THE GATE READS ------------------------------------
+  peak von Mises        : 0.072997409730715515 MPa
+  max interlayer tension: 0.010291833001910802 MPa
+  margin in_plane       : 753.45139235615034
+  margin interlayer     : 2939.2237509473512
+  margin worst_case     : 753.45139235615034
+  margin effective      : 156.01174924532671
+  ACCEPTED              : true   (load_path_ok=true, margin_effective >= margin_stop 1.5)
+  printed mass          : 538.60972932140533 g
+  compliance f.u        : 0.011326694388304991 N.mm
+  peak |displacement|   : 0.0062227773908127516 mm
+  printed voxels        : 58680 (fraction 0.8086097369)
+  recorded (design.bin) : margin 2406.8229961986381, peak vM 0.022851701220599766  [at res 128, H_eta ersatz — NOT this reading]
+
+-- ★ THE PEAK BY WHO OWNS THE CELL (printed cells only) ----
+  ALL     (what the gate reads) : 0.072997409730715515   (58680 cells)
+  FROZEN  (mask-stamped pads)   : 0.072997409730715515   (28843 cells)
+  gated by distance from {Load tag, Fixture tag, FrozenSolid},
+  measured on the solve grid so the band edge does not move:
+    gate mm   ACTIVE (cells)                 CUT — THE SMOOTH BOUNDARY (cells)
+    0         0.047439649826123309 ( 29837)  0.032424976514954587 (  2127)
+    5         0.032424976514954587 ( 13733)  0.032424976514954587 (   855)
+    10        0.017904118917506935 (  4012)  0.017904118917506935 (   104)
+    20        0.011625075866107351 (   276)  0.0029755756346278362 (    35)
+
+-- SURFACE vs INTERIOR (this grid's own classification) ----
+  peak vM on BOUNDARY cells : 0.072997409730715515   (24032 cells)
+  peak vM on INTERIOR cells : 0.058756219988930589   (34648 cells)
+
+-- WHERE THE PEAK SITS ------------------------------------
+  voxel (23,4,53) tag=Load mask=FrozenSolid rho=1 occ=1
+  centre (model frame) : (27.523179, -40.139967, 104.265649) mm
+  distance to nearest clamped node : 102.326038 mm (52.5048 voxels)
+
+-- COST (R4/R8: measured directly, Release) ----------------
+  analyze wall    : 16.329 s
+  operator applies: 5670
+
+wrote CSV row -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-08-19-peak-stress-convergence/s2_retag.csv
+       26.58 real        48.13 user         1.99 sys
+           282509312  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               17897  page reclaims
+                  50  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+              326223  involuntary context switches
+        667980057140  instructions retired
+        160575585380  cycles elapsed
+           257803008  peak memory footprint

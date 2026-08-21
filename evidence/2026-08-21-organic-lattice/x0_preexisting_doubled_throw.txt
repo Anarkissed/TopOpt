@@ -1,0 +1,46 @@
+★ A PRE-EXISTING THROW IN **DOUBLED**, ON HIS OWN PART, AT THE DEFAULT SETTINGS.
+Found while establishing this task's baseline. NOT introduced here — proved against
+the BASE binary before a single line of this task's code was written.
+
+JOB      evidence/2026-08-20-lattice-only-grading/jobs/aes_bandA_on.json
+         (PR 344's own job: mode "analyze", cell_mode "swept" 2.0..16 mm,
+          intent "aesthetic", and NO aesthetic_rho_min/max — i.e. THE DEFAULT
+          BAND, which is what an unconfigured aesthetic run gets.)
+MODEL    M2_verticalStand.step, resolution 128.
+
+RESULT   topopt-cli: plan_cell_sizes: level assignment is not an aligned octree
+         (a std::logic_error out of the DOUBLED planner's own internal invariant,
+          after ~96 s of solve; nothing is written.)
+
+PROOF IT IS NOT THIS TASK'S:
+  base binary   sha256 7b827beed8b93c0bce92c4b66982d98d495dc4e3f4658d71877bd50d7758c9cb
+                built from d28527cc (PR 345 HEAD) with NO change from this task
+  same message, same job, same model.
+
+WHY IT WAS NOT SEEN BEFORE: PR 344's evidence directory carries run outputs for
+amend_aes_bandB_on, amend_aes_bandC_on and amend_structural_on — but NOT for
+aes_bandA_on, whose job file it nevertheless ships. The band-A arm is the one that
+throws, and its absence from the results is the tell.
+
+CONSEQUENCE FOR THIS TASK: the three-way comparison (R10) is run on the band-C job
+instead, which is a band PR 344 did run to completion. All three algorithms get the
+IDENTICAL job apart from "grading.algorithm", so the comparison is unaffected. The
+throw above is reported, not worked around silently, and it is not fixed here — §6(b)
+of this task forbids changing DOUBLED.
+
+★ ALREADY OWNED — PR 346 (open, stacked on 345). The maintainer pointed at it while this
+task was running. Its §1 reports the same defect from the other end and NARROWS IT
+usefully: `plan_cell_sizes` refuses a field that BOTH reaches `rho_min` AND spans nearly
+the whole band. Measured there: [0.10, 0.90] fine, [0.0505, 0.35] fine,
+[0.0505, 0.8999] FAILS. That is exactly the arm above — band A is the full band.
+
+PR 346's remedy is a WORKAROUND and says so in its own code: the DEFAULT aesthetic range
+now starts at 2 x rho_min ([0.1009, 0.8999] on his part). The real fix — teaching the
+planner to insert intermediate levels — is explicitly NOT done there, and it is shared
+with the TO+lattice path.
+
+NOT PULLED HERE. PR 346 is unmerged and this task's base is pinned to PR 345's HEAD
+(d28527cc), with the standing instruction to rebase when they land rather than cherry-pick.
+Nothing in this task needs it: band C ([0.1, 0.35]) is one of the ranges PR 346 measures as
+fine, and all three algorithms are given the IDENTICAL job apart from "grading.algorithm",
+so the three-way comparison is unaffected by which band it runs in.

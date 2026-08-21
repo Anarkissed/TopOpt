@@ -1,0 +1,28 @@
+★ R9 — DETERMINISM: THE SAME JOB TWICE, BYTE-IDENTICAL.
+
+Two runs of the identical organic job, SAME BINARY, same machine.
+
+  cube_100_lattice.stl          IDENTICAL
+  cube_100_lattice_WELDED.stl   IDENTICAL   <- including the marched body
+  cube_100_lattice.report.json  IDENTICAL
+  fields.bin                    IDENTICAL
+  run_info.json                 differs in exactly TWO fields, both clocks:
+        created_wall_ms   1787293484758 -> 1787293517415
+        trace_seconds     0.4984212499  -> 0.504334833
+
+Every other byte is identical: all 584 curves, every connector, the whole organic block,
+the welded mesh's every triangle.
+
+★ AN EARLIER ATTEMPT AT THIS BAR WAS INVALID AND IS RECORDED AS SUCH: the two arms had
+been run on DIFFERENT binaries, so the diff showed a missing key and proved nothing.
+Both arms were re-run on one binary. A byte-identity bar that does not first check what
+it is comparing is the same error as an A/B where neither arm rebuilt.
+
+WHY IT HOLDS (§5a): every order fixed and documented in organic_lattice.hpp — first seed
+by largest |eigenvalue| with ties on ascending voxel index; later seeds off a FIFO queue
+in a stated offset order; a voxel-order SWEEP re-primes when the queue empties; families
+0,1,2; thinning by descending length with ties on ascending index; connectors in curve
+index order, refined over a fixed window for a fixed iteration count; the bead
+calibration is a fixed-count Newton solve; the weld raster is an exact capsule test in a
+fixed traversal. No RNG, no thread, no atomic. Every statistic is a full sort or a
+fixed-bin count.

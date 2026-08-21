@@ -1,0 +1,84 @@
+{
+ "material": "PLA",
+ "mode": "lattice_part",
+ "resolution": 128,
+ "model": "M2_verticalStand.step",
+ "output": {
+  "mesh_format": "stl",
+  "report": "report.json",
+  "mesh_prefix": "variant",
+  "smooth_factor": 2
+ },
+ "lattice": {
+  "regions": [],
+  "emit_stl": true,
+  "topology": "octet",
+  "emit_3mf": false,
+  "skin": "none",
+  "min_extrudable_width_mm": 0.15
+ },
+ "loads": {
+  "wall_line_width_outer_mm": 0.42,
+  "anchor_face_ids": [
+   18
+  ],
+  "face_protections": [
+   16
+  ],
+  "minimize_plastic": true,
+  "groups": [
+   {
+    "face_ids": [
+     20,
+     1,
+     4,
+     19,
+     21,
+     22,
+     25,
+     26,
+     27,
+     32,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     49,
+     75,
+     76,
+     24,
+     31
+    ],
+    "force": [
+     0,
+     0,
+     -22.241134643554688
+    ]
+   }
+  ],
+  "infill_percent": 35,
+  "wall_line_width_mm": 0.45,
+  "face_protection_depth_mm": 5,
+  "wall_loops": 5,
+  "build_dir": [
+   0,
+   0,
+   1
+  ]
+ },
+ "grading": {
+  "cell_mode": "swept",
+  "min_extrudable_width_mm": 0.15,
+  "cell_max_mm": 13.6,
+  "topology": "octet",
+  "cell_min_mm": 1.7,
+  "intent": "aesthetic",
+  "aesthetic_rho_min": 0.1,
+  "aesthetic_rho_max": 0.35,
+  "algorithm": "organic"
+ },
+ "bake_build_orientation": "off"
+}

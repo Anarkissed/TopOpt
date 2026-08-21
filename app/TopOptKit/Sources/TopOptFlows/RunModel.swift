@@ -76,6 +76,13 @@ public struct RunRequest: Equatable, Sendable {
     /// identity (it feeds the accept gate once armed, like `infillPercent`). A pre-
     /// PrintParams project decodes its params to `.fdmDefault` (3 walls) upstream, so
     /// this is never the buggy 0 that made run_info read `wall_loops: 0`.
+    /// ★ THE PRINTER'S LAYER HEIGHT (mm), now carried to core. Captured on the
+    /// print-params sheet since M7.params and persisted, but never SENT — so the
+    /// grading law could not compare the lattice it produced against the profile it
+    /// would be printed with (the overhang limit is c*W/h, and h was invisible).
+    /// Defaulted so every existing call site is unchanged.
+    public let layerHeightMM: Double
+
     public let wallLoops: Int
     /// The user's OUTER / INNER wall extrusion LINE WIDTHS (mm) from the Print Parameters
     /// sheet (handoff line-width-plumbing). Bead widths — a slicer setting, NOT the
@@ -193,6 +200,7 @@ public struct RunRequest: Equatable, Sendable {
                 plateDirection: SIMD3<Double> = SIMD3(0, 0, 0),
                 wantsOrientationRanking: Bool = false,
                 infillPercent: Int = -1,
+                layerHeightMM: Double = PrintParams.fdmDefault.layerHeightMM,
                 wallLoops: Int = PrintParams.fdmDefault.wallLoops,
                 wallLineWidthOuterMM: Double = PrintParams.fdmDefault.wallLineWidthOuterMM,
                 wallLineWidthInnerMM: Double = PrintParams.fdmDefault.wallLineWidthInnerMM,
@@ -225,6 +233,7 @@ public struct RunRequest: Equatable, Sendable {
         self.plateDirection = plateDirection
         self.wantsOrientationRanking = wantsOrientationRanking
         self.infillPercent = infillPercent
+        self.layerHeightMM = layerHeightMM
         self.wallLoops = wallLoops
         self.wallLineWidthOuterMM = wallLineWidthOuterMM
         self.wallLineWidthInnerMM = wallLineWidthInnerMM

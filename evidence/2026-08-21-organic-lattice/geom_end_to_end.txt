@@ -1,0 +1,56 @@
+★ THE GEOMETRY PATH, END TO END, ALL THREE ALGORITHMS — AND A REAL BUG IT CAUGHT.
+
+`analyze` grades and reports but writes no lattice geometry; only lattice_one_variant
+does, and reaching it needs a STORED DESIGN. There is no optimize run of
+M2_verticalStand.step here, so this uses the design.bin the core suite's own cli_demo
+test produces from the l-bracket fixture (copied to geom/store/), driven through
+`topopt-cli lattice-variant`.
+
+  ./core/build/topopt-cli lattice-variant evidence/.../geom/doubled_variant.json --out .../out_doubled
+  ./core/build/topopt-cli lattice-variant evidence/.../geom/stepped_variant.json --out .../out_stepped
+  ./core/build/topopt-cli lattice-variant evidence/.../geom/organic_variant.json --out .../out_organic
+
+★ THE BEAD IS 0.12 mm HERE AND THAT IS NOT A PRINT RECOMMENDATION. The l-bracket's
+widest member is 7.5 mm, and at the maintainer's 0.45 mm bead the cells-per-member
+floor needs 5.87 mm of member at the smallest printable cell — so all three algorithms
+REFUSE the job identically, with the same message and the same counts. That refusal is
+correct and is itself worth recording. 0.12 mm is a synthetic bead chosen only to reach
+the geometry code path on a small fixture.
+
+--- what each wrote ---
+  doubled: variant_070_lattice.stl  6780884 bytes
+      cell_mm 0.5          clipped_struts 130    interior_volume 14.5917 mm^3
+      ★ protruding_vertices 0   (the no-protrusion invariant, allowance 1e-4 mm)
+  stepped: variant_070_lattice.stl  5513084 bytes
+      cell_mm 1            clipped_struts 471    interior_volume 58.3112 mm^3
+      ★ protruding_vertices 0   (the no-protrusion invariant, allowance 1e-4 mm)
+  organic: variant_070_lattice.stl  2821884 bytes
+      cell_mm 1.64335506   clipped_struts 39     interior_volume 67.7314 mm^3
+      ★ protruding_vertices 0   (the no-protrusion invariant, allowance 1e-4 mm)
+
+★★ THE BUG THE INVARIANT CAUGHT, AND IT WAS MINE.
+
+The first three attempts at the organic export were REFUSED outright:
+  190 of 34,776 vertices outside the shell, worst 0.1802 mm  (unattributed)
+   70 of 32,916 vertices outside the shell, worst 0.0622 mm  (interior strut pass)
+
+Two separate defects, and the second is the interesting one.
+
+1. NODE BALLS WERE NOT GUARDED. The octet generator drops any node ball whose SOLID
+   would breach the eroded region (lattice_gen.cpp's interior-node loop): the clip
+   certificate covers the swept STRUT, not a sphere about its cut end. Organic emitted
+   them unconditionally. Same guard added, drops counted in `dropped_nodes`.
+
+2. ★ I READ `LatticeClipSpan::t0/t1` AS FRACTIONS. They are ARC-LENGTH IN MILLIMETRES
+   — lattice_boundary.hpp says so in the struct's own comment, "0 at a, |b-a| at b".
+   So `a + (b-a)*t1` placed a whole span's far end |b-a| TIMES too far along, and the
+   strut ran straight out through the shell. Scaling by the UNIT direction fixes it.
+
+   ★ WHAT ACTUALLY FOUND IT was not reading the code — I had reasoned twice, wrongly,
+   that the certified Lipschitz clip made this impossible. It was the ATTRIBUTION:
+   feeding organic the same LatticeGenObserver the octet path uses turned
+   "emitted by the unattributed pass" into "emitted by the interior strut pass",
+   which ruled out the node balls and left exactly one candidate. The observer is now
+   wired permanently for that reason.
+
+All three now write a file with ZERO protruding vertices.

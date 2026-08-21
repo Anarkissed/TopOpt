@@ -1,0 +1,44 @@
+{
+  "provenance": "latticed a finished variant",
+  "optimization": false,
+  "design_iterations": 0,
+  "optimizer_iterations_run": 0,
+  "variant_meshes_written": 0,
+  "analysis_solves": 3,
+  "analysis_solves_note": "certification solves only, no design loop: (1) the null-posture solve that reproduces this variant's RECORDED margin — the proof the load case and design are the originals; (2) the lattice pipeline's own null-posture reproduction; (3) the COMPOSITE certification; plus (4) the band-clamp counterfactual when any voxel was clamped",
+  "source": {
+    "design": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/geom/store/design.bin",
+    "variant_index": 0,
+    "requested_volume_fraction": 0.7,
+    "achieved_volume_fraction": 0.7000006562,
+    "optimizer_iterations_originally": 6,
+    "design_fingerprint": "7717917192877782658",
+    "field_provenance": "the demand field this lattice is graded from is THIS variant's own certification von Mises field, recovered by the reproduction solve below from the stored design — not a simulation of the solid part, and not another run's field"
+  },
+  "reproduction": {
+    "recorded_margin_worst_case": 964.7809043,
+    "reproduced_margin_worst_case": 964.7809043,
+    "exact": false,
+    "relative_delta": 9.9111479e-12,
+    "band": 1e-06,
+    "note": "ENFORCED, not reported: a reproduction outside `band` throws and nothing is written. `band` is a multiple of the certification solve's own relative-residual tolerance, because the recorded margin came from a solve carrying a warm Krylov recycle subspace and this one is denied it by ScopedLadderSolverIsolation — two Krylov paths on one operator, so `exact` is false on any run whose solves fall back to Jacobi-CG"
+  },
+  "model": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/core/tests/fixtures/demo/l-bracket.step",
+  "resolution": 48,
+  "load_source": "self_weight",
+  "loadcase_receipt": "loadcase.json",
+  "lattice": {
+    "topology": "octet",
+    "graded": true,
+    "cell_mm": 1.64335506,
+    "rho_min_used": 0.1663897231,
+    "rho_max_used": 0.6324390405,
+    "latticed_voxels": 59,
+    "solid_margin_worst_case": 964.7809043,
+    "lattice_margin_worst_case": 1341.234884,
+    "lattice_margin_effective": 1341.234884,
+    "lattice_accepted": true,
+    "receipt": "variant_070_lattice.report.json"
+  },
+  "meshes": ["variant_070_lattice.stl"]
+}

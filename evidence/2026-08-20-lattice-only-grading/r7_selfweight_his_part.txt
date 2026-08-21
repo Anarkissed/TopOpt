@@ -1,0 +1,16 @@
+part: 128 x 31 x 118  spacing 1.705279 mm   solid voxels 110904   mass 682.0 g
+self-weight load: applied Fz -6.689975 N   expected -6.689975 N   rel err 1.267e-12
+fixture: node layer k=0, 12384 constrained DOF
+
+=== SELF-WEIGHT ONLY, solid part (MPa) ===
+  median   0.000464939
+  p90      0.00107001
+  p99      0.00164521
+  PEAK     0.00230797
+  margin (yield/peak) 23830.5   required 1.5
+  peak utilisation vs allowable 36.6667 MPa : 6.29446e-05  (0.0063 %)
+
+=== the same wall LATTICED at the band floor rho_min = 0.05047 ===
+  rho 0.05047 : strut stress 0.203554 MPa   utilisation 0.00555148  (0.555 %)
+  rho 0.10000 : strut stress 0.0729844 MPa   utilisation 0.00199048  (0.199 %)
+  rho 0.20000 : strut stress 0.0258039 MPa   utilisation 0.000703742  (0.070 %)

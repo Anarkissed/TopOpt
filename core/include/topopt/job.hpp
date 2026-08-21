@@ -269,6 +269,24 @@ struct JobLattice {
   //                closed); certification unchanged from "shell".
   // A non-"shell" finish requires skin == "diagrid" (the skin IS the finish).
   std::string outer_finish = "shell";
+  // ── ★ THE WELDED, SINGLE-BODY LATTICE (task 2026-08-21-organic-lattice) ──────
+  // false (the DEFAULT) writes nothing extra and every existing job is unchanged.
+  // true additionally writes <prefix>_lattice_WELDED.stl: the emitted spans
+  // rasterised and marched into ONE watertight body.
+  //
+  // ★ WHY IT MATTERS AND IT IS NOT COSMETIC. The strut soup is thousands of separate
+  // closed shells. A slicer that unions the solid prints it correctly; a slicer that
+  // analyses the MESH reports every shell not touching the plate as a FLOATING BODY.
+  // The maintainer hit exactly that. The material is connected; the MESH is not one
+  // object, and this is the file that is.
+  bool emit_welded_stl = false;
+  // The weld raster pitch (mm). 0 (the DEFAULT) = half the thinnest emitted strut's
+  // RADIUS, which resolves the strut properly and is what the volume measurement
+  // wants. A coarser pitch trades surface fidelity for triangle count: the count
+  // scales as pitch^-2, so 0.28 mm on a 40 mm cube gives ~1.5 M triangles against
+  // ~4.2 M at the default — the fidelity the maintainer's own printed coupon used.
+  // The pitch actually used is reported, so a coarsened raster is never silent.
+  double welded_pitch_mm = 0.0;
 
   // THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix, bar F3).
   // true => `lattice_variant_job` runs the grading law and the role accounting on
@@ -346,6 +364,54 @@ struct JobGrading {
   double cell_mm = 0.0;                 // TARGET uniform cell edge (mm), finite > 0;
                                         // raised to the printability floor if too small
   double min_extrudable_width_mm = 0.0; // stated minimum strut width (mm), finite > 0
+  // ── ★ THE LATTICE ALGORITHM (task 2026-08-21-organic-lattice, §4) ───────────
+  // "doubled" — the DYADIC LADDER (cell_plan.hpp). ★ THE DEFAULT, and an empty
+  //   string means "not stated" and resolves to it, so every existing job is
+  //   byte-identical and no caller can acquire a different algorithm by accident.
+  // "stepped" — one cell per DECLARED REGION, taken verbatim, no transition
+  //   handling.
+  // "organic" — struts TRACED along the stress field; spacing is the input and cell
+  //   size is derived from it (topopt/organic_lattice.hpp). ★ AESTHETIC INTENT ONLY:
+  //   a traced lattice is anisotropic by construction and the certification library
+  //   carries exactly one CUBIC tensor per topology, so there is nothing for a
+  //   structural claim to certify against. run_job REFUSES organic + structural
+  //   rather than certifying against a tensor that does not describe the geometry.
+  std::string algorithm;                // "" | "doubled" | "stepped" | "organic"
+  // ORGANIC only. The strut diameter the whole traced lattice is laid at (mm); the
+  // grade is expressed through SPACING at a constant bead, not by thinning struts.
+  // 0 => `min_extrudable_width_mm`, the thinnest bead the user says the machine lays.
+  double organic_strut_width_mm = 0.0;
+  // ORGANIC only. The printable cone half-angle, in DEGREES FROM THE BUILD
+  // DIRECTION, applied INSIDE the tracing loop (§2a). ★ 0 (the DEFAULT) DISARMS it,
+  // and that default is measured, not assumed: the maintainer printed a traced coupon
+  // with a 41.78 mm unsupported run, supports off, clean
+  // (evidence/2026-08-20-lattice-only-grading/r4b_PRINT_RESULT.md), so the 45-degree
+  // rule is not the binding limit on this machine. Set 45 to impose the textbook gate.
+  // Either way the receipt reports what fraction of segments sit outside 45 degrees.
+  double organic_overhang_angle_deg = 0.0;
+
+  // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────
+  // "structural" — density is a STRENGTH statement: demand against the material
+  //   allowable. Use when the lattice is carrying the load.
+  // "aesthetic"  — density follows the stress PATTERN, normalised against a high
+  //   percentile rather than the peak, graded onto `aesthetic_rho_min/max`. Use when
+  //   the lattice is there to be seen. ★ THIS IS THE DEFAULT on the lattice-only
+  //   path: it is the common case, and it is the one that produces a visible result
+  //   on a lightly-loaded part. An empty string means "not stated" and lets run_job
+  //   apply that default.
+  std::string intent;                   // "" | "structural" | "aesthetic"
+  // AESTHETIC only. 0 => the core constant (the 95th percentile).
+  double aesthetic_percentile = 0.0;
+  // AESTHETIC only: the density RANGE the pattern is graded onto. Both 0 => the
+  // certifiable band. Clamped INTO that band regardless — an aesthetic run chooses
+  // where within the band to grade, never to leave it.
+  double aesthetic_rho_min = 0.0;
+  double aesthetic_rho_max = 0.0;
+  // AESTHETIC only: let the cells-per-member floor be COMPUTED from what the material
+  // actually carries, instead of the fixed accuracy floor of 5. Off by default.
+  bool aesthetic_adaptive_cells_per_member = false;
+  double aesthetic_error_budget = 0.0;   // 0 => the core constant (1 %)
+
   double demand_exponent = 1.0;         // rho = rho_max*(demand/max)^exp; 1.0 = fully-
                                         // stressed on von Mises. finite > 0
 
@@ -613,6 +679,14 @@ struct JobLoadCase {
   std::vector<double> face_protection_region_depths_mm;
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
+  // ★ THE PRINTER'S LAYER HEIGHT (mm). Captured in the app since M7.params but
+  // never wired to core — `PrintParams.swift` said so outright ("CAPTURED BUT NOT
+  // WIRED"), and core had no field at all. Without it the grading law cannot check
+  // its own output against the profile it will be printed with: the overhang limit
+  // is c*W/h, and h was invisible. 0 = not stated, and nothing is inferred from
+  // silence — printability is a USER INPUT, never a default.
+  double layer_height_mm = 0.0;
+
   bool minimize_plastic = true;             // true = reduction ladder + pad
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and

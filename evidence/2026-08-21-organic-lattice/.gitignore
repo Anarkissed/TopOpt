@@ -1,0 +1,16 @@
+# ★ REGENERABLE AND FAR TOO LARGE TO VERSION — 3.7 GB of them at one point, which is
+# how this task briefly tried to push a 253 MB file to GitHub.
+#
+# Every NUMBER measured from these meshes IS committed: each run's run_info.json,
+# analysis.json / lattice_variant_report.json and <prefix>_lattice.report.json carry the
+# grading block, the whole grading.organic / grading.stepped report, the strut counts,
+# the volumes and the protrusion measurement. Regenerate the meshes with the invocations
+# in r1_cli_invocations.txt and geom_end_to_end.txt.
+#
+# The ONE mesh that IS committed is cube/cube40.stl — the 12-triangle fixture model, 684
+# bytes, without which none of the cube runs can be reproduced.
+*/*/*.stl
+*/*/*.3mf
+*/fields.bin
+*/*/fields.bin
+geom/store/

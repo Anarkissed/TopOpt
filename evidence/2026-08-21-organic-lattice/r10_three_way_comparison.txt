@@ -1,0 +1,42 @@
+★ R10 — THE SAME PART THROUGH ALL THREE ALGORITHMS, PLUS THE MAINTAINER'S OWN PRINT.
+
+40 mm cube, resolution 64 (h = 0.625 mm), his 0.42 mm bead, aesthetic band
+[0.0505, 0.12], swept window 3-6 mm, minimize_plastic ON. The three job files differ in
+EXACTLY ONE LINE — grading.algorithm — and all three write a WELDED single body at the
+same 0.28 mm raster pitch, so the volumes are on one basis.
+
+                latticed    soup basis      WELDED (union)   solid    welded tris
+  doubled        262,144     13,565.6        14,649.9        22.89 %   2,210,060
+  stepped        262,144     13,311.5        13,051.2        20.39 %   3,264,692
+  organic        262,137      5,764.8         3,713.6         5.80 %     867,584
+  ─────────────────────────────────────────────────────────────────────────────
+  HIS COUPON           —            —         4,110.3         6.05 %   1,451,500
+
+★ ORGANIC AT THE DEFAULT (STRUT-RESOLVING) PITCH: 4,031.9 mm^3 = 6.30 %, 4,152,700 tris.
+  Against his coupon's 4,110.3 that is 1.9 %. THAT is the like-for-like number; the
+  0.28 mm row above is the same lattice rasterised coarser to keep the file sliceable.
+
+★★ TWO CAVEATS, BOTH REAL, NEITHER SWEPT UNDER:
+
+(1) THE 0.28 mm WELD PITCH IS NOT ACCURATE FOR THESE STRUT SIZES, AND IT ERRS IN BOTH
+    DIRECTIONS. Struts here are 0.42-0.86 mm, i.e. 1.5-3 raster voxels. Marching cubes
+    cannot represent that faithfully: doubled's welded volume (14,649.9) comes out ABOVE
+    its own soup figure (13,565.6), which is impossible for a true union and is the
+    raster rounding thin struts UP; organic's comes out BELOW (3,713.6 vs 5,764.8), part
+    real overlap-deduction and part rounding DOWN. Only the DEFAULT pitch (half the
+    thinnest strut's radius) is trustworthy for a volume, and that is the row starred
+    above. Reported rather than quietly using whichever number flattered.
+
+(2) THE MASS COLUMN IS NOT A LIKE-FOR-LIKE COMPARISON BETWEEN ALGORITHMS, and the 4x gap
+    between organic and the other two is NOT a claim that organic is four times lighter
+    for the same lattice. The band means different things to each law: the octet path
+    takes its strut diameter from the MEASURED octet table at the chosen cell, while
+    organic derives its bead from the mass coupling and then calibrates it to the length
+    actually traced. Both honour the same intent and the same band; they do not produce
+    the same solid fraction from it. Comparing them properly needs a matched-density
+    experiment nobody has run.
+
+WHAT THE TABLE DOES ESTABLISH: all three algorithms run from the CLI on one job that
+differs in one key, all three lattice the same 262,144 candidate voxels, all three emit a
+per-voxel density, and all three now write a welded single body. And ORGANIC, measured
+against a real printed part at the pitch that can resolve it, lands within 2 %.

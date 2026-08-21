@@ -1,0 +1,53 @@
+ORGANIC  curves 195 connectors 1392  struts 5682 nodes 7269  vol 1403.7 mm^3
+organic soup               tris   327204  verts   101155  watertight NO  boundary_edges 0  non_manifold_edges 127080
+                           signed volume 1403.7347 mm^3 (>0 = outward-wound)
+DOUBLED  struts 13056 nodes 2457  vol 6680.6 mm^3
+octet soup (reference)     tris   466932  verts   139825  watertight NO  boundary_edges 0  non_manifold_edges 164456
+                           signed volume 6680.5787 mm^3 (>0 = outward-wound)
+STEPPED  two passes at 5.0 and 3.0 mm: struts 36452 nodes 6769 vol 12615.7 mm^3
+stepped soup               tris  1301844  verts   382003  watertight NO  boundary_edges 0  non_manifold_edges 470478
+                           signed volume 12615.6802 mm^3 (>0 = outward-wound)
+stepped emission determinism (exact doubles): PASS
+emission determinism (same lattice twice, exact doubles): PASS
+
+--- R4, READ HONESTLY ---
+CLOSED: boundary_edges = 0 on BOTH. Every primitive is a closed solid and there is no
+hole anywhere in either mesh. That is the half of R4 that a downstream slicer needs.
+
+OUTWARD-WOUND, and this is the positive control: the mesh's SIGNED VOLUME (divergence
+theorem over the welded triangles) equals the generator's own ANALYTIC per-primitive sum
+to the last digit printed — organic 1403.7347 vs 1403.7, octet 6680.5787 vs 6680.6. Two
+independent computations of the same quantity agreeing is what says the winding is
+outward and nothing was emitted inside-out. (A mixed soup is exactly the defect task
+2026-08-09-fix-inward-wound-normals found and lattice_gen.cpp's icosahedron table warns
+about; this is that test, run against organic.)
+
+NOT EDGE-2-MANIFOLD, AND NEITHER IS THE SHIPPED PATH. Both meshes report non-manifold
+edges after welding, because a strut lattice is an INTERPENETRATING UNION OF CLOSED
+SOLIDS — lattice_gen.hpp says so in its first paragraph, and PR 201 closed a real print
+on exactly that union. Coincident vertices between two primitives weld into an edge used
+by more than two triangles. The octet reference carries 164,456 of them on this fixture;
+organic carries 127,080. So "non-manifold" here is a property of the SOUP CONTRACT this
+codebase already ships and prints, not a defect introduced by tracing.
+
+★ THE ONE THING THAT WAS A DEFECT, AND IT WAS FOUND BY THIS CHECK: the first version
+emitted a node ball at BOTH ends of every span, so every interior polyline vertex carried
+two identical icosahedra — 11,364 balls for 5,682 spans. Deduplicating them removed
+81,900 triangles (20 % of the mesh) and 81,990 non-manifold edges that existed for
+nothing. The measurement above is after that fix.
+
+--- ALL THREE GENERATORS, EXERCISED DIRECTLY ---
+The `analyze` route grades and reports; it does not write lattice geometry (only
+`lattice_one_variant` does, and that needs a stored design). So the generator half of
+STEPPED and ORGANIC is exercised HERE, against the same check, rather than left compiled
+and unrun. All three: zero boundary edges, signed volume equal to the analytic sum, and
+byte-identical emission on a second call.
+
+  organic  struts   5,682  nodes  7,269  vol   1403.7  == signed 1403.7347
+  octet    struts  13,056  nodes  2,457  vol   6680.6  == signed 6680.5787
+  stepped  struts  36,452  nodes  6,769  vol  12615.7  == signed 12615.6802
+
+The STEPPED case is two abutting passes at 5.0 mm and 3.0 mm with ONE seam between them —
+the configuration the algorithm is defined by. It emits cleanly and it is closed; what it
+does NOT do is join across that seam, which is measured on the real part instead
+(r10_three_way_comparison.txt: 4 of 5 abutting region pairs disconnected).

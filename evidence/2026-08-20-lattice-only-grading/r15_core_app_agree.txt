@@ -1,0 +1,7 @@
+samples: 468224
+STRUCTURAL  min_plastic ON  ref 36.66666667   max |core-app| = 0.000e+00  (voxel 0)  BIT-IDENTICAL
+STRUCTURAL  min_plastic OFF ref 36.66666667   max |core-app| = 0.000e+00  (voxel 0)  BIT-IDENTICAL
+AESTHETIC   p95             ref 0.008367483504   max |core-app| = 0.000e+00  (voxel 0)  BIT-IDENTICAL
+AESTHETIC   p80             ref 0.004898220766   max |core-app| = 0.000e+00  (voxel 0)  BIT-IDENTICAL
+
+R15: core and the app agree EXACTLY on both intents, every sample.

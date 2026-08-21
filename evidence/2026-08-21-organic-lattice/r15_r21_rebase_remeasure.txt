@@ -1,0 +1,119 @@
+★ R15–R21 — REBASED ONTO PR 347's HEAD, AND EVERY NUMBER RE-RUN.
+
+────────────────────────────────────────────────────────────────────────────────────
+R15 — THE NEW BASE. REBASED, NOT CHERRY-PICKED.
+
+    2e718ad1  "Merge pull request #346 from Anarkissed/claude/lattice-recert-and-
+               layer-height-a7cb04"   =  PR 347's HEAD (claude/lattice-aesthetic-
+               intent-a7cb04), which carries 344 + 345 + 346.
+
+`git rebase origin/claude/lattice-aesthetic-intent-a7cb04`, six commits replayed. ONE
+conflict, in observability.hpp, and it was purely ADDITIVE — 347 added its
+re-certification and layer-height fields at the same point this task adds the algorithm
+and organic blocks. Both sides kept; nothing chosen over anything.
+
+Core suite on the rebased tree: 122/122 (three slow tests excluded for time).
+
+────────────────────────────────────────────────────────────────────────────────────
+R16 — WHICH NUMBERS MOVED: ★★ NONE. ALL OF THEM RE-RUN, ALL IDENTICAL.
+
+Cube, 40 mm, resolution 64, 0.42 mm bead, band [0.0505, 0.12], window 3–6 mm.
+
+  quantity                     PRE-rebase     POST-rebase    moved
+  latticed voxels (doubled)       262,144        262,144      no
+  latticed voxels (organic)       262,137        262,137      no
+  lattice_solid_volume (dbl)     6724.493       6724.493      no
+  lattice_solid_volume (org)     5256.636       5256.636      no
+  soup volume, doubled          13565.566      13565.566      no
+  soup volume, stepped           13311.48       13311.48      no
+  soup volume, organic           5764.804       5764.804      no
+  rho_min / rho_max used     0.0505 / 0.12  0.0505 / 0.12     no
+  ★ achieved spacing min           1.5020         1.5020      no
+  ★ achieved spacing max           5.9606         5.9606      no
+  ★ achieved spacing median        3.0854         3.0854      no
+  curves kept                         584            584      no
+  TRACED components / largest      1 / 1.0        1 / 1.0      no
+  EMITTED components                   10             10      no
+  EMITTED largest fraction       0.999875       0.999875      no
+  EMITTED stranded mm               2.032          2.032      no
+  segments outside 45 (curves)   0.665931       0.665931      no
+
+★ A NUMBER THAT DID NOT MOVE IS STILL A REPORTED NUMBER — and the REASON it did not
+move is the part worth reading, because all three of 347's changes are genuinely inert
+for THIS configuration and it is worth saying why rather than shrugging:
+
+  (i)  THE SECOND FEA SOLVE is STRUCTURAL-INTENT ONLY. Organic REFUSES structural
+       intent by §3(c), and these runs are aesthetic, so the re-certification never
+       fires on them. It is NOT that the solve does nothing — see R17, where it is the
+       whole measurement.
+  (ii) LAYER HEIGHT is a RECOMMENDATION derived FROM the emitted strut, not an input
+       TO the tracer. It cannot move a spacing or a bead. (This is the one that most
+       looked like it should move something, and it does not.)
+  (iii) THE DEFAULT AESTHETIC RANGE moving off the band floor changes THE DEFAULT.
+       Every job here states an explicit range, and 347's own code says an explicit
+       range is honoured as given.
+
+────────────────────────────────────────────────────────────────────────────────────
+R17 — ★★ WHAT EACH ALGORITHM SPENDS OF THE MARGIN. His part, lattice_part, his nine
+declared regions, his 0.42 mm bead.
+
+  alg       lattice solid vol   margin: solid -> latticed    spent    strut peak vM
+  doubled       1004.46 mm^3      3242.279 -> 2272.907       29.9 %    0.00406431 MPa
+  stepped       1004.46 mm^3      3242.279 -> 2272.907       29.9 %    0.00406431 MPa
+  organic        797.56 mm^3      3242.279 -> 2053.597    ★  36.7 %  ★ 0.00145738 MPa
+
+★ ORGANIC SPENDS MATERIALLY MORE MARGIN — 36.7 % against 29.9 %, 6.8 points worse.
+Per §4(c) that is a finding about the method and it is in §0 of the handoff.
+
+★ AND THE CONFOUND IS STATED, BECAUSE WITHOUT IT THE NUMBER IS MISLEADING: organic put
+in 20.6 % LESS MATERIAL (797.56 vs 1004.46 mm^3). Less material is a softer load path,
+which raises stress in the SOLID region, and `lattice_margin_worst_case` is the SOLID
+region's margin. So part of that 6.8 points is simply less mass, not worse mass.
+
+★ THE NUMBER THAT POINTS THE OTHER WAY, AND IT IS THE DAYNES EFFECT: organic's own
+STRUTS carry 2.8x LESS STRESS — 0.00145738 against 0.00406431 MPa — while carrying
+20.6 % less material. Aligning struts with the principal directions is exactly the
+claim that each strut then works less hard for the same job, and that is what this
+measures.
+
+★ WHAT IT DOES NOT SETTLE, AND MUST NOT BE READ AS SETTLING: this is NOT a
+matched-density comparison, so it does not establish that organic is more or less
+efficient than the octet cell. §4(d) asks whether organic is worth its complexity
+structurally; answering that needs a MATCHED-MASS run, which nobody has done. What is
+established: at 20 % less material organic's struts are 2.8x less stressed, and the
+composite's solid-region margin is 6.8 points worse.
+
+★ AND ONE STRUCTURAL FACT WORTH KEEPING: DOUBLED AND STEPPED CERTIFY IDENTICALLY, to
+the last digit, and that is BY CONSTRUCTION rather than by coincidence. The homogenised
+tensor is a function of RELATIVE DENSITY ALONE and both take their density from the same
+law; only the CELL differs, and the cell does not enter the tensor. Their difference is
+purely geometric — soup volume 2168.76 vs 3084.84 mm^3 for the same certified object.
+
+────────────────────────────────────────────────────────────────────────────────────
+R18 — THE WELDED BODY, AFTER THE REBASE. Measured with an independent edge-use census
+on the written file, not read off the generator's own report.
+
+  organic  867,584 tris  430,178 verts   boundary edges 0   non-manifold edges 0  ✓
+  doubled  2,210,060     1,093,260       boundary edges 0   non-manifold edges 0  ✓
+  stepped  3,264,692     1,591,378       boundary edges 0   non-manifold edges 0  ✓
+
+★ ALL THREE WATERTIGHT AND 2-MANIFOLD. Organic's signed volume 3713.626 mm^3, identical
+to pre-rebase.
+
+★ AND THE FINDING THIS EXISTS BECAUSE OF STANDS, AND IT IS ABOUT THE EXISTING EXPORT AS
+MUCH AS THE NEW ONE: the SOUP is closed and correctly wound but is thousands of
+interpenetrating closed shells — exactly as the shipped octet export has always been.
+A slicer that analyses the MESH rather than the union calls every shell that misses the
+plate a FLOATING BODY. The welded file is the one that is a single object.
+
+────────────────────────────────────────────────────────────────────────────────────
+R19 — ASSERTION CENSUS vs THE NEW MERGE BASE 2e718ad1 (not a moving head):
+  removed lines in core/: 18    of which throw / assert / refusal: 0
+  assertion sites added: 28     test files touched: 0
+
+R20 — CMAKE_BUILD_TYPE=Release, verified in the cache. No wall-clock difference is used
+for any cost claim; the tracer is timed directly around trace_organic_lattice.
+
+R21 — no placeholders, no scratch at the repository root, and the rebase and the
+re-measurement are separate commits. The meshes stay out: the evidence directory is
+1.0 MB and the re-run did not reintroduce them.

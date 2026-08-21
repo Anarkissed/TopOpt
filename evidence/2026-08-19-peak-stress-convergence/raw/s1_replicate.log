@@ -1,0 +1,13 @@
+=== replicate frac refine 1x (effective 96) -> rep_frac_r1.txt
+    exit=0    peak von Mises        : 0.031851797147376369 MPa    analyze wall    : 10.952 s
+=== replicate stair_base refine 1x (effective 96) -> rep_stair_base_r1.txt
+    exit=0    peak von Mises        : 0.031687727502446437 MPa    analyze wall    : 10.699 s
+=== replicate frac refine 2x (effective 192) -> rep_frac_r2.txt
+    exit=0    peak von Mises        : 0.044596045951939285 MPa    analyze wall    : 143.859 s
+=== replicate stair_base refine 2x (effective 192) -> rep_stair_base_r2.txt
+    exit=0    peak von Mises        : 0.044994383013564732 MPa    analyze wall    : 142.157 s
+=== replicate frac refine 3x (effective 288) -> rep_frac_r3.txt
+    exit=0    peak von Mises        : 0.058853392476102107 MPa    analyze wall    : 753.951 s
+=== replicate stair_base refine 3x (effective 288) -> rep_stair_base_r3.txt
+    exit=0    peak von Mises        : 0.05934763677765887 MPa    analyze wall    : 737.876 s
+done -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/evidence/2026-08-19-peak-stress-convergence/s1_replicate.csv

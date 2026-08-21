@@ -1,0 +1,33 @@
+R6 byte identity
+  branch     : claude/peak-stress-convergence-dd008c @ 93202ea6
+  merge-base : 93202ea607290586a94449ef70cd16af2bedd958   (against origin/main, NOT a moving head)
+  build dir  : /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-separation-wizard-ced44e/core/build-r6 (ONE folder, every arm)
+
+--- the whole tracked diff against the merge base, in core/ and app/ ---
+ core/CMakeLists.txt | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+--- R6's own statement: git diff <merge-base> -- core/src core/include app/TopOptKit/Sources ---
+  (empty — this task touched no production source)
+
+--- arm A: this branch, as it stands
+  topopt-cli  df52f5ab598bc7180201cebbdf4af2abe3df8d8bec9251770a15b51c07f6471e
+
+--- arm B: the merge base's core/CMakeLists.txt, both harnesses parked aside
+  topopt-cli  df52f5ab598bc7180201cebbdf4af2abe3df8d8bec9251770a15b51c07f6471e
+
+--- arm C: NEGATIVE CONTROL — one production string changed
+  topopt-cli  46ba10038eb9391ef2d91e6f4de8cd6eb79554c5583f572ebcd8f8919ba0063d
+
+--- arm A2: back to the branch, rebuilt (reproducibility)
+  topopt-cli  df52f5ab598bc7180201cebbdf4af2abe3df8d8bec9251770a15b51c07f6471e
+
+== VERDICT ==
+  A  (branch)           df52f5ab598bc7180201cebbdf4af2abe3df8d8bec9251770a15b51c07f6471e
+  B  (merge base)       df52f5ab598bc7180201cebbdf4af2abe3df8d8bec9251770a15b51c07f6471e
+  C  (negative control) 46ba10038eb9391ef2d91e6f4de8cd6eb79554c5583f572ebcd8f8919ba0063d
+  A2 (branch, rebuilt)  df52f5ab598bc7180201cebbdf4af2abe3df8d8bec9251770a15b51c07f6471e
+
+  negative control DIFFERS from A: the comparison can see a change.
+  A == A2: the build is reproducible in this folder.
+  R6 PASS — topopt-cli is BYTE-IDENTICAL to the merge base.

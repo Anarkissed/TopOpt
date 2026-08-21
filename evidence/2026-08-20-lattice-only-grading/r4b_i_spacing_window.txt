@@ -1,0 +1,26 @@
+nozzle / min extrudable width : 0.450 mm
+octet band                    : rho [0.05047, 0.89988]   N* = 5.000
+phi(rho) = strut diameter per unit cell: phi(rho_min)=0.091252  phi(rho_max)=0.383575
+
+PRINTABLE CELL/SPACING WINDOW (the two numbers):
+  finest  spacing that prints (at rho_max) : 1.1732 mm
+  coarsest spacing forced   (at rho_min)   : 4.9314 mm
+  => ratio 4.203x
+
+At each end, the member width needed to hold N* cells across:
+  at 1.1732 mm spacing : member >= 5.866 mm
+  at 4.9314 mm spacing : member >= 24.657 mm
+
+--- his job's stated width, 0.42 mm, for comparison ---
+nozzle / min extrudable width : 0.420 mm
+octet band                    : rho [0.05047, 0.89988]   N* = 5.000
+phi(rho) = strut diameter per unit cell: phi(rho_min)=0.091252  phi(rho_max)=0.383575
+
+PRINTABLE CELL/SPACING WINDOW (the two numbers):
+  finest  spacing that prints (at rho_max) : 1.0950 mm
+  coarsest spacing forced   (at rho_min)   : 4.6026 mm
+  => ratio 4.203x
+
+At each end, the member width needed to hold N* cells across:
+  at 1.0950 mm spacing : member >= 5.475 mm
+  at 4.6026 mm spacing : member >= 23.013 mm

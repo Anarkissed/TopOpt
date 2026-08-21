@@ -1,0 +1,6 @@
+# Regenerable from the committed sources; too large to version.
+#   *_WELDED*.stl  — marching-cubes welds (166 MB + 69 MB); regenerate with
+#                    bridge_coupon.cpp / graded_coupon.cpp
+#   fields.bin     — the per-run von Mises container (7.7 MB per run)
+*_WELDED*.stl
+*/fields.bin

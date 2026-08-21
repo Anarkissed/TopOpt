@@ -1,0 +1,36 @@
+BRIDGE-SPAN TEST COUPON — layout map
+Every strut is emitted by core's shipped generate_lattice (octet).
+The octet carries struts at 45 deg and at 90 deg (horizontal);
+the horizontal span is 0.7071 x cell, so cell size IS the span sweep.
+Base slabs are fixtures that anchor the bottom nodes; they are not
+under test.
+
+stated extrusion width: 0.420 mm   thinnest strut radius: 0.210 mm
+rows A/B/C sweep DIAMETER; within each row, cell size sweeps SPAN.
+row D is the positive control: geometry already printed successfully.
+THE BRIDGES UNDER TEST are the cell top-face horizontals and the four
+mid-height octahedron edges. The bottom-face horizontals rest ON the
+base slab and are not bridges - ignore them when scoring.
+
+specimen                             cell_mm   span_mm    diam_mm     org_x     org_y
+A d0.42 cell2 span1.41                   2.0      1.41      0.420       0.0       0.0  (36 struts)
+A d0.42 cell4 span2.83                   4.0      2.83      0.420      16.0       0.0  (36 struts)
+A d0.42 cell8 span5.66                   8.0      5.66      0.420      34.0       0.0  (36 struts)
+A d0.42 cell16 span11.31                16.0     11.31      0.420      56.0       0.0  (36 struts)
+A d0.42 cell24 span16.97                24.0     16.97      0.420      86.0       0.0  (36 struts)
+A d0.42 cell32 span22.63                32.0     22.63      0.420     124.0       0.0  (36 struts)
+B d0.84 cell2 span1.41                   2.0      1.41      0.840       0.0      46.0  (36 struts)
+B d0.84 cell4 span2.83                   4.0      2.83      0.840      16.0      46.0  (36 struts)
+B d0.84 cell8 span5.66                   8.0      5.66      0.840      34.0      46.0  (36 struts)
+B d0.84 cell16 span11.31                16.0     11.31      0.840      56.0      46.0  (36 struts)
+B d0.84 cell24 span16.97                24.0     16.97      0.840      86.0      46.0  (36 struts)
+B d0.84 cell32 span22.63                32.0     22.63      0.840     124.0      46.0  (36 struts)
+C d1.68 cell2 span1.41                   2.0      1.41      1.680       0.0      92.0  (36 struts)
+C d1.68 cell4 span2.83                   4.0      2.83      1.680      16.0      92.0  (36 struts)
+C d1.68 cell8 span5.66                   8.0      5.66      1.680      34.0      92.0  (36 struts)
+C d1.68 cell16 span11.31                16.0     11.31      1.680      56.0      92.0  (36 struts)
+C d1.68 cell24 span16.97                24.0     16.97      1.680      86.0      92.0  (36 struts)
+C d1.68 cell32 span22.63                32.0     22.63      1.680     124.0      92.0  (36 struts)
+D HIS-RUN cell2 span1.41 d0.420          2.0      1.41      0.420       0.0     138.0  (240 struts)
+D HIS-RUN cell4 span2.83 d0.421          4.0      2.83      0.421      18.0     138.0  (240 struts)
+D HIS-RUN cell8 span5.66 d0.730          8.0      5.66      0.730      40.0     138.0  (240 struts)
