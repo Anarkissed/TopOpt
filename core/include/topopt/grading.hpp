@@ -157,6 +157,11 @@ inline double grading_demand_fraction(GradingIntent intent, double demand,
   return f;
 }
 
+// ★ How far the DEFAULT aesthetic range sits above the band floor. 2x rho_min.
+// A workaround for a `plan_cell_sizes` limitation (see grade_lattice), not a
+// meaningful number. An explicitly stated range is honoured as given.
+inline constexpr double kAestheticDefaultFloorMultiple = 2.0;
+
 inline constexpr const char* kAestheticDensityMeaning =
     "This lattice follows the stress pattern for appearance. Its density is not a "
     "strength requirement; the certificate is what checks strength.";
