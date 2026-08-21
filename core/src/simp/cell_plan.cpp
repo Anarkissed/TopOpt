@@ -125,7 +125,9 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         "plan_cell_sizes: min_extrudable_width_mm must be > 0");
 
   const LatticeTopology topo = params.topology;
-  const double n_star = lattice_cells_per_member_min(topo);
+  const double n_star = params.cells_per_member_floor_override > 0.0
+                            ? params.cells_per_member_floor_override
+                            : lattice_cells_per_member_min(topo);
 
   CellSizePlan P;
   P.mode = CellSizeMode::Swept;
@@ -468,7 +470,9 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
         "plan_cell_sizes_fit: min_extrudable_width_mm must be > 0");
 
   const LatticeTopology topo = params.topology;
-  const double n_star = lattice_cells_per_member_min(topo);
+  const double n_star = params.cells_per_member_floor_override > 0.0
+                            ? params.cells_per_member_floor_override
+                            : lattice_cells_per_member_min(topo);
 
   CellSizePlan P;
   P.mode = CellSizeMode::Fit;

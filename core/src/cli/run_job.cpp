@@ -5877,6 +5877,23 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                                 ? kSturdyUtilisationTarget
                                 : 1.0;
     gp.unloaded_utilisation_max = kUnloadedUtilisationMax;
+    // ── ★ THE INTENT (amendment §1d) ─────────────────────────────────────────
+    // ★ AESTHETIC IS THE DEFAULT **HERE**, on the lattice-only job — not in
+    // GradingLawParams, where every caller would inherit it and the TO+lattice and
+    // multiscale paths would silently change. An absent "intent" key means the
+    // common case: a lattice the user wants to SEE, on a part that usually does not
+    // need one structurally.
+    if (job.grading.intent.empty()) {
+      gp.intent = GradingIntent::Aesthetic;
+    } else if (!grading_intent_from_name(job.grading.intent.c_str(), gp.intent)) {
+      throw JobError("analyze: unknown grading intent \"" + job.grading.intent + "\"");
+    }
+    gp.aesthetic_percentile = job.grading.aesthetic_percentile;
+    gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
+    gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+    gp.aesthetic_adaptive_cells_per_member =
+        job.grading.aesthetic_adaptive_cells_per_member;
+    gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
     // FIT needs the per-region derivation here too, or the analyze receipt would
     // describe a cell law the run never used. `nullptr` region below means the
     // candidate set is the whole printed design, so voxels outside every declared
@@ -5930,6 +5947,22 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         static_cast<long long>(gf.density_at_floor_voxels);
     gi.grading_density_at_ceiling_voxels =
         static_cast<long long>(gf.density_at_ceiling_voxels);
+    gi.grading_intent = grading_intent_name(gf.intent_used);
+    gi.grading_aesthetic_percentile = gf.aesthetic_percentile_used;
+    gi.grading_aesthetic_percentile_mpa = gf.aesthetic_percentile_mpa;
+    gi.grading_aesthetic_rho_min = gf.aesthetic_rho_min_used;
+    gi.grading_aesthetic_rho_max = gf.aesthetic_rho_max_used;
+    gi.grading_aesthetic_weight_exponent = gf.aesthetic_weight_exponent_used;
+    gi.grading_above_percentile_voxels =
+        static_cast<long long>(gf.above_percentile_voxels);
+    gi.grading_adaptive_cells_armed = gf.aesthetic_adaptive_cells_armed;
+    gi.grading_adaptive_error_budget = gf.aesthetic_error_budget_used;
+    gi.grading_adaptive_min_cells_allowed =
+        gf.aesthetic_min_cells_per_member_allowed;
+    gi.grading_below_accuracy_floor_voxels =
+        static_cast<long long>(gf.aesthetic_below_accuracy_floor_voxels);
+    if (gf.intent_used == GradingIntent::Aesthetic)
+      gi.grading_density_meaning = kAestheticDensityMeaning;
     gi.grading_density_histogram.assign(
         gf.density_histogram, gf.density_histogram + GradedField::kDensityBins);
     gi.grading_solid_fallback_voxels =

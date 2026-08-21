@@ -1197,6 +1197,33 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.grading_over_allowable_voxels);
       gr += ", \"unloaded_voxels\": " + fmt_ll(info.grading_unloaded_voxels);
     }
+    // ── ★ the INTENT, and what an aesthetic density MEANS (amendment §5) ──────
+    if (!info.grading_intent.empty())
+      gr += ", \"intent\": \"" + info.grading_intent + "\"";
+    if (info.grading_aesthetic_percentile > 0.0) {
+      gr += ", \"aesthetic_percentile\": " +
+            fmt(info.grading_aesthetic_percentile);
+      gr += ", \"aesthetic_percentile_mpa\": " +
+            fmt(info.grading_aesthetic_percentile_mpa);
+      gr += ", \"aesthetic_rho_min\": " + fmt(info.grading_aesthetic_rho_min);
+      gr += ", \"aesthetic_rho_max\": " + fmt(info.grading_aesthetic_rho_max);
+      gr += ", \"aesthetic_weight_exponent\": " +
+            fmt(info.grading_aesthetic_weight_exponent);
+      // §1(c): the tail above the percentile, clamped to the top of the range.
+      gr += ", \"above_percentile_voxels\": " +
+            fmt_ll(info.grading_above_percentile_voxels);
+    }
+    if (info.grading_adaptive_cells_armed) {
+      gr += ", \"adaptive_cells_per_member\": true";
+      gr += ", \"adaptive_error_budget\": " +
+            fmt(info.grading_adaptive_error_budget);
+      gr += ", \"adaptive_min_cells_allowed\": " +
+            fmt(info.grading_adaptive_min_cells_allowed);
+      gr += ", \"below_accuracy_floor_voxels\": " +
+            fmt_ll(info.grading_below_accuracy_floor_voxels);
+    }
+    if (!info.grading_density_meaning.empty())
+      gr += ", \"density_meaning\": \"" + info.grading_density_meaning + "\"";
     // R4 — the clamp counts. Present on EVERY graded receipt: the analyze path did
     // not carry them before this task, so a clamp could decide the posture with
     // nothing in the record saying so.

@@ -338,6 +338,28 @@ struct JobGrading {
   double cell_mm = 0.0;                 // TARGET uniform cell edge (mm), finite > 0;
                                         // raised to the printability floor if too small
   double min_extrudable_width_mm = 0.0; // stated minimum strut width (mm), finite > 0
+  // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────
+  // "structural" — density is a STRENGTH statement: demand against the material
+  //   allowable. Use when the lattice is carrying the load.
+  // "aesthetic"  — density follows the stress PATTERN, normalised against a high
+  //   percentile rather than the peak, graded onto `aesthetic_rho_min/max`. Use when
+  //   the lattice is there to be seen. ★ THIS IS THE DEFAULT on the lattice-only
+  //   path: it is the common case, and it is the one that produces a visible result
+  //   on a lightly-loaded part. An empty string means "not stated" and lets run_job
+  //   apply that default.
+  std::string intent;                   // "" | "structural" | "aesthetic"
+  // AESTHETIC only. 0 => the core constant (the 95th percentile).
+  double aesthetic_percentile = 0.0;
+  // AESTHETIC only: the density RANGE the pattern is graded onto. Both 0 => the
+  // certifiable band. Clamped INTO that band regardless — an aesthetic run chooses
+  // where within the band to grade, never to leave it.
+  double aesthetic_rho_min = 0.0;
+  double aesthetic_rho_max = 0.0;
+  // AESTHETIC only: let the cells-per-member floor be COMPUTED from what the material
+  // actually carries, instead of the fixed accuracy floor of 5. Off by default.
+  bool aesthetic_adaptive_cells_per_member = false;
+  double aesthetic_error_budget = 0.0;   // 0 => the core constant (1 %)
+
   double demand_exponent = 1.0;         // rho = rho_max*(demand/max)^exp; 1.0 = fully-
                                         // stressed on von Mises. finite > 0
 
