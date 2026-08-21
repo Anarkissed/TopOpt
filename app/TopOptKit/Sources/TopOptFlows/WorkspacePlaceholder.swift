@@ -1558,6 +1558,40 @@ public struct WorkspacePlaceholder: View {
         }
         guard lat.cellSizeMode == .swept, lat.cellMinMM > 0,
               lat.cellMaxMM >= lat.cellMinMM else { return nil }
+        // ★★★ AUTO IS PER-LOCAL-MEMBER; SWEPT IS THE WINDOW HE TYPED (2026-08-20).
+        //
+        // "The difference between Auto and Swept is that Auto defines the cell sizes
+        // that can be swept FOR you. It is meant to make life easy."
+        //
+        // So the two modes part company here, and only here. Under Auto the ladder spans
+        // the whole part — the finest cell that prints at its floor, the coarsest any
+        // member can hold at its ceiling — and `perLocalMember` tells the bake to derive
+        // each voxel's own rung inside it. Under Swept the user typed the ends and gets
+        // them verbatim, because that is what typing them means.
+        if project.lattice.cellSizeMode == .auto,
+           let s = strutScene, !s.memberThicknessMM.isEmpty, s.minCellsPerMember > 0 {
+            let widest = LatticeMeasuredRegionWidth.boundsMM(
+                occupancy: s.occupancy, memberThicknessMM: s.memberThicknessMM).first ?? 0
+            if widest > 0 {
+                let ceiling = widest / s.minCellsPerMember
+                // The finest cell that prints at all — the ladder never goes below it.
+                let printable = LatticeAutoPosture.autoWindowMM(
+                    regionWidthsMM: [], lineWidthMM: bead,
+                    topology: lat.topologyID)?.min ?? lat.cellMinMM
+                // ★ AND THE RUNGS LAND ON THE THICKNESS THE PART IS MADE OF. See
+                // `ladderBaseCellMM`: the ladder is dyadic, so where it is anchored
+                // decides whether his 22 mm walls get a 4.60 mm cell or a 2.77 mm one.
+                let base = LatticeMeasuredRegionWidth.ladderBaseCellMM(
+                    occupancy: s.occupancy, memberThicknessMM: s.memberThicknessMM,
+                    minCellsPerMember: s.minCellsPerMember,
+                    finestPrintableMM: printable)
+                if base > 0, ceiling >= base {
+                    return LatticeCellSweep(minMM: base, maxMM: ceiling,
+                                            minExtrudableWidthMM: bead,
+                                            perLocalMember: true)
+                }
+            }
+        }
         return LatticeCellSweep(minMM: lat.cellMinMM, maxMM: lat.cellMaxMM,
                                 minExtrudableWidthMM: bead)
     }

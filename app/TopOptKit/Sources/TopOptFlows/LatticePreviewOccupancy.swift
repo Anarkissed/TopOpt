@@ -528,9 +528,48 @@ public struct LatticeCellSweep: Equatable, Sendable {
     public var minMM: Double
     public var maxMM: Double
     public var minExtrudableWidthMM: Double
-    public init(minMM: Double, maxMM: Double, minExtrudableWidthMM: Double) {
+    /// ★★★ AUTO: EVERY VOXEL GETS THE COARSEST CELL ITS OWN MEMBER CAN HOLD
+    /// (his ruling, 2026-08-20 — "per local member. That will also help with grading").
+    ///
+    /// ★ WHY A FLAG AND NOT A WINDOW. A window cannot express this, and two attempts to
+    /// make it proved that on his own part. ONE cell size cannot serve a part whose
+    /// walls run 3.69 mm to 55.38 mm — measured on `M2_verticalStand_THICK`:
+    ///
+    ///     wall        biggest cell it can hold (W / N*)
+    ///      3.69 mm ....  0.74 mm
+    ///     22–24 mm .... ~4.6 mm     <- 34% of the part, his "20 mm walls"
+    ///     44–46 mm .... ~9.0 mm     <- 29% of the part
+    ///     55.38 mm .... 11.08 mm
+    ///
+    /// Take the widest and one rung at 11.08 mm needs 55 mm of member, so ~99% of the
+    /// part is culled — sparse clumps in an empty wall. Take a swept window instead and
+    /// core's `plan_cell_sizes` descends to the FINEST rung that prints (`need_max == L`),
+    /// which on his older part planned every one of 5,556 cells at 3.00 mm and refused
+    /// 8,906 base cells as "member too thin", because 3.00 mm needs 15 mm and his median
+    /// wall is 10.39 mm. Both failures are the same failure: a cell imposed on material
+    /// that was never asked what it could hold.
+    ///
+    /// ★ SO THE CELL IS DERIVED PER VOXEL AND CORE ALREADY KNOWS HOW TO USE IT.
+    /// `plan_cell_sizes_fit` takes a per-voxel `desired_cell_mm` and picks, per base
+    /// cell, "the coarsest ladder rung at or below its own derived cell. Never above
+    /// (that would put fewer cells across the member than the derivation asked for)."
+    /// That IS his rule, in core's own words, already implemented. All the app has to do
+    /// is hand it `width / N*` per voxel instead of one number for the whole part.
+    ///
+    /// ★ AND IT ROUNDS DOWN, WHICH MATTERS MORE THAN IT LOOKS. The preview's occupancy
+    /// grid is 1.84 mm on his part, so the granulometric opening reads his 20 mm walls
+    /// as 22–24 mm — about +10%. A rule that rounded UP would turn that over-read into a
+    /// cell the wall cannot hold, and the floor would then cull it. Rounding down to a
+    /// rung absorbs the quantisation instead of amplifying it.
+    ///
+    /// nil / false ⇒ the swept window is used verbatim, which is what Swept means and
+    /// what a user who typed the ends is owed.
+    public var perLocalMember: Bool
+    public init(minMM: Double, maxMM: Double, minExtrudableWidthMM: Double,
+                perLocalMember: Bool = false) {
         self.minMM = minMM; self.maxMM = maxMM
         self.minExtrudableWidthMM = minExtrudableWidthMM
+        self.perLocalMember = perLocalMember
     }
 }
 

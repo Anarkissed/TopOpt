@@ -94,6 +94,123 @@ public enum LatticeMeasuredRegionWidth {
         return hi > 0 ? [hi] : []
     }
 
+    /// ★★★ THE CELL EACH VOXEL'S OWN MEMBER CAN HOLD — `width / N*`, per voxel.
+    ///
+    /// This is what `plan_cell_sizes_fit` calls `desired_cell_mm`, and handing it this
+    /// array is the whole of "per local member". Core does the rest: per base cell it
+    /// takes the CONSERVATIVE end (`want_min`, the thinnest member under that cell) and
+    /// then "the coarsest ladder rung at or below its own derived cell. Never above."
+    ///
+    /// 0 marks a voxel with no derivation — outside the candidate set, or a width core
+    /// did not measure. Core reads 0 as "not fitted" and skips it, which is why this
+    /// returns 0 rather than guessing a cell there.
+    ///
+    /// `+infinity` is core's "thicker than the EDT cap" sentinel. It means the member is
+    /// at least as wide as the cap, not that it is unbounded, so it is clamped to the
+    /// cap's own width rather than producing an infinite cell. `capMM` is that cap in
+    /// millimetres (`capRadiusVoxels * spacing`); pass 0 to skip those voxels entirely.
+    /// ★★ AND A WALL TOO THIN FOR A PRINTABLE CELL ASKS FOR NOTHING — which is how it
+    /// ends up SOLID rather than a hole (his rule, 2026-08-20: "Go solid").
+    ///
+    /// `baseCellMM` is the ladder's finest rung. Core's fit planner computes each base
+    /// cell's level by climbing UP from 0 and then asserts what it emitted:
+    ///
+    ///     if (!(S <= want_min[c] * (1.0 + 1e-9)))
+    ///         throw "plan_cell_sizes_fit: emitted a cell coarser than the derivation
+    ///                asked for"
+    ///
+    /// so a voxel wanting a cell FINER than the base rung has no level to be given and
+    /// core throws — which the bridge catches and returns as "no plan at all", taking
+    /// the whole part's lattice with it. Measured on his `M2_verticalStand_THICK`: the
+    /// thinnest member wants 0.738 mm against a finest-printable rung of 1.17 mm, and
+    /// every fit call for the entire part failed on that one voxel class.
+    ///
+    /// Zero is core's own "no derivation ⇒ not fitted" marker (`if
+    /// (!(desired_cell_mm[e] > 0.0)) continue;`), so those voxels are simply not
+    /// latticed — left SOLID, which is what the run builds there anyway. Pass 0 to skip
+    /// the clamp (every voxel asks, and the caller guarantees the ladder reaches).
+    public static func desiredCellMM(occupancy: LatticeVoxelGrid,
+                                     memberThicknessMM: [Double],
+                                     minCellsPerMember nStar: Double,
+                                     baseCellMM: Double = 0,
+                                     capMM: Double = 0) -> [Double] {
+        guard memberThicknessMM.count == occupancy.values.count, nStar > 0 else { return [] }
+        var out = [Double](repeating: 0, count: occupancy.values.count)
+        for i in 0..<occupancy.values.count where occupancy.values[i] > 0.5 {
+            let w = memberThicknessMM[i]
+            var want = 0.0
+            if w.isFinite, w > 0 {
+                want = w / nStar
+            } else if !w.isFinite, capMM > 0 {
+                // At least the cap — the most this measurement can honestly claim.
+                want = capMM / nStar
+            }
+            // Below the finest rung there is no cell to give, so ask for none.
+            if baseCellMM > 0, want < baseCellMM * (1 - 1e-9) { want = 0 }
+            out[i] = want
+        }
+        return out
+    }
+
+    /// ★★★ WHERE THE LADDER IS ANCHORED — and it is the difference between a lattice and
+    /// a haze of tiny struts.
+    ///
+    /// Core's ladder is DYADIC: every rung is a doubling, because that is what lets a
+    /// coarse cell meet a fine one at shared nodes. So there is no rung between 2.77 and
+    /// 5.54 mm, and a wall that can hold 4.43 mm falls all the way to 2.77 — about 2.5x
+    /// more struts than it needs. WHERE the rungs land is therefore not a detail; it
+    /// decides how much plastic the part uses.
+    ///
+    /// Anchoring on the part's DOMINANT member puts a rung exactly on the cell that the
+    /// thickness the part is mostly made of can hold. Measured on his
+    /// `M2_verticalStand_THICK` — walls at 22–24 mm (34% of it) and 44–46 mm (29%),
+    /// against core's N* = 5 and his 0.45 mm bead:
+    ///
+    ///     anchor                       planned   culled   cells produced
+    ///     his typed swept 3–8 mm ....     92%     3,302    all 3.00 mm
+    ///     finest printable ..........    100%         0    1.17 mm mostly
+    ///     the coarsest wall .........    100%         0    1.38 / 2.77 mm
+    ///     THE DOMINANT WALL .........    100%         0    2.30 / 4.60 / 9.20 mm
+    ///
+    /// The last row is the one he asked for: 4.60 mm over the walls he built to 20 mm
+    /// (the 0.6 is the +10% the 1.84 mm occupancy grid over-reads them by), 9.20 mm
+    /// through the thick zones, 2.30 mm at the thin edges, and nothing refused.
+    ///
+    /// - Parameters:
+    ///   - finestPrintableMM: the finest cell that prints at all. The ladder never goes
+    ///     below it — a rung nothing can be printed at is not a rung.
+    ///   - bucketMM: histogram bucket for finding the mode. Coarse enough that one wall
+    ///     lands in one bucket despite the grid's own quantisation.
+    /// - Returns: the base cell S0. 0 when nothing was measured.
+    public static func ladderBaseCellMM(occupancy: LatticeVoxelGrid,
+                                        memberThicknessMM: [Double],
+                                        minCellsPerMember nStar: Double,
+                                        finestPrintableMM: Double,
+                                        bucketMM: Double = 2) -> Double {
+        guard memberThicknessMM.count == occupancy.values.count, nStar > 0,
+              finestPrintableMM > 0, bucketMM > 0 else { return 0 }
+        var hist: [Int: Int] = [:]
+        for i in 0..<occupancy.values.count where occupancy.values[i] > 0.5 {
+            let w = memberThicknessMM[i]
+            guard w.isFinite, w > 0 else { continue }
+            hist[Int(w / bucketMM), default: 0] += 1
+        }
+        // The most common bucket, ties broken toward the THICKER one — a coarser anchor
+        // uses less plastic, and the finer walls are still served by the rungs below it.
+        var mode = -1, best = 0
+        for (b, n) in hist where n > best || (n == best && b > mode) { best = n; mode = b }
+        guard mode >= 0 else { return 0 }
+        let dominantWidth = (Double(mode) + 0.5) * bucketMM
+        let dominantCell = dominantWidth / nStar
+        guard dominantCell > 0 else { return 0 }
+        // Halve from that cell while the rung still prints; the last one that does is S0.
+        var s0 = dominantCell
+        while s0 / 2 >= finestPrintableMM { s0 /= 2 }
+        // A dominant wall too thin to print even one cell leaves nothing to anchor to;
+        // the printable floor is then the only honest base.
+        return Swift.max(s0, finestPrintableMM)
+    }
+
     /// The measured member width under ONE declared region, in mm — Fit's own question,
     /// asked of the material instead of the declaration.
     ///

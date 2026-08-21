@@ -823,8 +823,21 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // ★ FIT'S PER-VOXEL WANT: the cell of the region that owns this voxel, by
         // the SAME first-match rule the emission uses, so the picture and the job
         // agree about an overlap instead of averaging it into a third answer.
+        // ★★★ AUTO'S PER-LOCAL-MEMBER CELL. Every voxel asks for the coarsest cell its
+        // OWN member can hold; core's fit planner rounds each base cell DOWN to a rung.
+        // See `LatticeCellSweep.perLocalMember` for why a window cannot express this and
+        // for the measurements on his part that killed both window-shaped attempts.
         var desired: [Double] = []
-        if !fitCellMM.isEmpty, fitCellMM.count == scene.regions.count {
+        if sweep.perLocalMember, scene.minCellsPerMember > 0 {
+            desired = LatticeMeasuredRegionWidth.desiredCellMM(
+                occupancy: occ, memberThicknessMM: scene.memberThicknessMM,
+                minCellsPerMember: scene.minCellsPerMember,
+                // The ladder's finest rung: below it there is no cell to give, so those
+                // voxels ask for none and are left SOLID rather than killing the plan.
+                baseCellMM: sweep.minMM,
+                capMM: 16 * Double(occ.spacing.x))
+        }
+        if desired.isEmpty, !fitCellMM.isEmpty, fitCellMM.count == scene.regions.count {
             desired = [Double](repeating: 0, count: n)
             for i in 0..<n where candidate[i] {
                 let ix = i % occ.nx, iy = (i / occ.nx) % occ.ny, iz = i / (occ.nx * occ.ny)
