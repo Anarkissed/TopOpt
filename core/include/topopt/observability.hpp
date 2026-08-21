@@ -861,6 +861,22 @@ struct RunInfo {
   double grading_rho_max_used = 0.0;
   long long grading_region_voxels = 0;      // printed candidates
   long long grading_latticed_voxels = 0;    // graded to lattice
+  // ── ★ task 2026-08-20-lattice-only-grading: the utilisation law + R1/R4/R9 ────
+  // All zero / empty on the peak-relative path, so a TO+lattice receipt is
+  // byte-identical.
+  double grading_demand_allowable_mpa = 0.0;   // R9: WHICH allowable governed
+  double grading_utilisation_target = 0.0;     // §3's stated goal number
+  double grading_max_utilisation = 0.0;
+  double grading_median_utilisation = 0.0;
+  long long grading_over_allowable_voxels = 0; // §0(b), clamped at 1.0 and COUNTED
+  long long grading_unloaded_voxels = 0;       // §2: certified on self-weight alone
+  // R4: the clamp counts, which the analyze receipt did NOT carry before this task.
+  long long grading_clamped_lo_voxels = 0;
+  long long grading_clamped_hi_voxels = 0;
+  // R1: the DISTRIBUTION, not just its ends.
+  long long grading_density_at_floor_voxels = 0;
+  long long grading_density_at_ceiling_voxels = 0;
+  std::vector<long long> grading_density_histogram;
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
   double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT

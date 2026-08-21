@@ -5852,6 +5852,31 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                      job.grading.cell_mode + "\"");
     gp.min_cell_size_mm = job.grading.cell_min_mm;
     gp.max_cell_size_mm = job.grading.cell_max_mm;
+    // ── ★ ABSOLUTE UTILISATION, ARMED ON THE LATTICE-ONLY PATH (task
+    //    2026-08-20-lattice-only-grading, §0 / §2 / §3) ──────────────────────────
+    // ★ THIS BLOCK IS WHY §5(a) HOLDS STRUCTURALLY. `analyze` is the LATTICE-ONLY
+    // path — a part latticed with NO topology optimisation, which is what RUN SIM
+    // drives. The TO+lattice path is `minimize_plastic`, a different function, and
+    // it never reaches this code: `demand_allowable_mpa` is left at its 0.0 default
+    // there, which is the peak-relative law byte-for-byte. The scoping is therefore
+    // a property of WHERE the field is set, not a promise in a comment.
+    //
+    // ★ WHICH ALLOWABLE (bar R9): the IN-PLANE one, yield / margin_stop, with the
+    // z knockdown NOT in it. The demand field is von Mises — an in-plane measure —
+    // and the gate's in-plane margin is yield / von Mises, so utilisation 1.0 means
+    // exactly "in-plane margin == margin_stop". The knockdown belongs to the
+    // interlayer mode, priced from a different field, and folding an unsourced
+    // constant into every density would be worse than leaving it where the gate
+    // already applies it. The interlayer check is untouched.
+    gp.demand_allowable_mpa = material.yield_strength_mpa / options.margin_stop;
+    // ★ THE GOAL IS THE USER'S EXISTING CHECKBOX (§3c) — no second control.
+    // ON  = "use as little plastic as possible" -> work the whole allowable.
+    // OFF = "make a sturdy model regardless of extra plastic" -> stop at a stated
+    //       fraction of it, so the same field buys more material.
+    gp.utilisation_target = job.loads.present && !job.loads.minimize_plastic
+                                ? kSturdyUtilisationTarget
+                                : 1.0;
+    gp.unloaded_utilisation_max = kUnloadedUtilisationMax;
     // FIT needs the per-region derivation here too, or the analyze receipt would
     // describe a cell law the run never used. `nullptr` region below means the
     // candidate set is the whole printed design, so voxels outside every declared
@@ -5892,6 +5917,21 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gi.grading_rho_max_used = gf.rho_max_used;
     gi.grading_region_voxels = static_cast<long long>(gf.region_voxels);
     gi.grading_latticed_voxels = static_cast<long long>(gf.latticed_voxels);
+    gi.grading_demand_allowable_mpa = gf.demand_allowable_mpa_used;
+    gi.grading_utilisation_target = gf.utilisation_target_used;
+    gi.grading_max_utilisation = gf.max_utilisation;
+    gi.grading_median_utilisation = gf.median_utilisation;
+    gi.grading_over_allowable_voxels =
+        static_cast<long long>(gf.over_allowable_voxels);
+    gi.grading_unloaded_voxels = static_cast<long long>(gf.unloaded_voxels);
+    gi.grading_clamped_lo_voxels = static_cast<long long>(gf.clamped_lo_voxels);
+    gi.grading_clamped_hi_voxels = static_cast<long long>(gf.clamped_hi_voxels);
+    gi.grading_density_at_floor_voxels =
+        static_cast<long long>(gf.density_at_floor_voxels);
+    gi.grading_density_at_ceiling_voxels =
+        static_cast<long long>(gf.density_at_ceiling_voxels);
+    gi.grading_density_histogram.assign(
+        gf.density_histogram, gf.density_histogram + GradedField::kDensityBins);
     gi.grading_solid_fallback_voxels =
         static_cast<long long>(gf.solid_fallback_voxels);
     gi.grading_min_member_width_mm = gf.min_member_width_mm;

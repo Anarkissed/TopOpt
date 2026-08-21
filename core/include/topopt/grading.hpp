@@ -63,6 +63,28 @@
 
 namespace topopt {
 
+// ── ★ THE TWO STATED NUMBERS (task 2026-08-20-lattice-only-grading) ─────────────
+// §3(b) asks for the "sturdy" goal as a NUMBER someone can argue with rather than a
+// mood, and §2(a) asks for the unloaded threshold to be stated and justified. Both
+// live here so a receipt can cite them and a reviewer can move them in one place.
+
+// §3 — `minimize_plastic` OFF. The lattice reaches rho_max when the part is at HALF
+// the allowable, so for the same field it carries about twice the material of the
+// fully-stressed grade. Chosen as the round number that doubles the margin; it is a
+// POLICY, not a measurement, and it is named so it can be argued with.
+inline constexpr double kSturdyUtilisationTarget = 0.5;
+
+// §2 — a region whose peak sits below 1 % of the allowable is UNLOADED: it need not
+// certify against the load, only hold itself up.
+// ★ MEASURED, NOT PICKED (evidence/2026-08-20-lattice-only-grading/r7_selfweight_his_part.txt):
+// self-weight on the maintainer's part peaks at 0.00231 MPa on the solid — 0.0063 %
+// of allowable — and a wall latticed at the BAND FLOOR carries it in the struts at
+// 0.204 MPa, which is 0.555 % of allowable. So 1 % clears the measured self-weight
+// demand with ~2x headroom at the very lightest lattice the band permits, and with
+// ~180x headroom against the solid figure. Self-weight never binds; the printability
+// floor does, and it is untouched by this threshold.
+inline constexpr double kUnloadedUtilisationMax = 0.01;
+
 // How the law maps demand to (density, cell size). All fields must be positive where
 // noted; grade_lattice throws std::invalid_argument otherwise.
 struct GradingLawParams {
@@ -168,6 +190,62 @@ struct GradingLawParams {
   // handoff §1(c) for why, and for what re-deriving the cell would have done
   // instead.
   const std::vector<double>* region_relative_density = nullptr;
+
+  // ── ★ ABSOLUTE UTILISATION (task 2026-08-20-lattice-only-grading, §0) ──────────
+  // THE MATERIAL ALLOWABLE, in the demand field's own units (MPa). When > 0 the law
+  // normalises demand by THIS instead of by the candidate set's PEAK, so `demand`
+  // becomes UTILISATION: "this region is at 30 % of what the material can take."
+  // 0.0 (the DEFAULT) is the peak-relative law, byte-for-byte.
+  //
+  // ★ WHY THE PEAK-RELATIVE LAW IS WRONG, MEASURED. Dividing by the part's own peak
+  // makes the grade INVARIANT TO LOAD MAGNITUDE: measured on the maintainer's part,
+  // scaling his declared load by 2161.5x (peak von Mises 0.017 -> 36.67 MPa) produced
+  // a BYTE-IDENTICAL lattice — all twenty density bins identical. The two laws
+  // coincide EXACTLY when peak utilisation is 1.0, which is the same statement: the
+  // old law is the new one under the assumption that every part is loaded to exactly
+  // its allowable. Stress concentrations then compress the rest of the part toward
+  // the floor; 19.07 % of his latticed voxels sat at rho_min, every one of them put
+  // there by the band clamp.
+  // (evidence/2026-08-20-lattice-only-grading/r1_distribution_*.txt)
+  //
+  // ★ WHICH ALLOWABLE, AND THE KNOCKDOWN (bar R9). The caller supplies it; run_job
+  // passes yield / margin_stop — the IN-PLANE allowable, with the z knockdown NOT in
+  // it. The demand field is von Mises, an IN-PLANE measure, and the gate's in-plane
+  // margin is yield / von Mises, so utilisation 1.0 means exactly "in-plane margin ==
+  // margin_stop". The z knockdown belongs to the INTERLAYER mode, which the gate
+  // prices from `max_interlayer` — a different field — so folding it in here would
+  // mix two failure modes and import an unsourced constant (lattice.hpp's ★) into
+  // every density. Excluding it does NOT weaken certification: the interlayer check
+  // still runs, unchanged, in analyze_fixed_design.
+  double demand_allowable_mpa = 0.0;
+
+  // ── ★ THE GOAL (task 2026-08-20-lattice-only-grading, §3) ─────────────────────
+  // The utilisation at which the lattice reaches rho_max — i.e. HOW MUCH OF THE
+  // ALLOWABLE the design is willing to use. Read ONLY when demand_allowable_mpa > 0.
+  //   1.0  — FULLY STRESSED. `minimize_plastic` ON: "use as little plastic as
+  //          possible", so the material is worked to the whole allowable and the
+  //          density is the lowest that clears it.
+  //   <1.0 — a MARGIN. `minimize_plastic` OFF: "make a sturdy model regardless of
+  //          extra plastic". At 0.5 the lattice reaches full density when the part
+  //          is at half the allowable, i.e. it carries ~2x the material for the same
+  //          field. That is a NUMBER someone can argue with, which is what §3(b)
+  //          asks for instead of a mood.
+  // Must be > 0 and <= 1.
+  double utilisation_target = 1.0;
+
+  // ── ★ UNLOADED WALLS (task 2026-08-20-lattice-only-grading, §2) ───────────────
+  // A region below this UTILISATION is "unloaded": it need not certify against the
+  // load, only hold itself up. Read ONLY when demand_allowable_mpa > 0; 0 disarms.
+  //
+  // ★ THE THRESHOLD IS MEASURED, NOT PICKED. Self-weight on the maintainer's part
+  // peaks at 0.00231 MPa on the solid (0.0063 % of allowable); latticed at the band
+  // floor the STRUTS carry 0.204 MPa = 0.555 % of allowable, a ~180x margin. So any
+  // threshold at or above ~1 % of allowable is a region self-weight alone can hold,
+  // with two orders of magnitude to spare. See §2 of the handoff for why the
+  // printability floor still binds regardless — self-weight relaxes the STRUCTURAL
+  // requirement, never the MANUFACTURING one.
+  // (evidence/2026-08-20-lattice-only-grading/r7_selfweight_his_part.txt)
+  double unloaded_utilisation_max = 0.0;
 
   // HOW THESE TWO COMPOSE (multiscale x sub-floor retention). A multiscale run
   // prescribes rho and stops using `demand` FOR THE DENSITY — but it still hands
@@ -356,8 +434,17 @@ struct GradedField {
     std::size_t candidate_voxels = 0;   // printed candidates carrying this id
     std::size_t below_floor_voxels = 0; // ...that the cells-per-member ceiling rejects
     double stress_fraction = 0.0;       // MEASURED: this region's peak / PART's peak
-    bool qualified = false;             // stress_fraction <= the ceiling
+    bool qualified = false;             // stress_fraction <= the ceiling, OR the
+                                        //   absolute §2 test below
     std::size_t retained_voxels = 0;    // ...and actually kept (0 if over budget)
+    // ── ★ §2, the ABSOLUTE reading (task 2026-08-20-lattice-only-grading) ───────
+    // This region's OWN peak as a fraction of the material allowable. 0 when no
+    // allowable was supplied. Unlike `stress_fraction` above — which is a ratio to
+    // the PART's peak and therefore scale-free — this is a statement about the
+    // material, and it is the only one that can say "this wall is unloaded" when the
+    // WHOLE part is lightly loaded.
+    double utilisation = 0.0;
+    bool qualified_unloaded_absolute = false;
   };
   std::vector<SubfloorRegion> subfloor_regions;
 
@@ -428,6 +515,37 @@ struct GradedField {
   // clamp-counterfactual certification (run_job) uses to know WHICH voxels to
   // keep solid in the comparison solve.
   std::vector<char> clamp_flags;
+
+  // ── ★ UTILISATION ACCOUNTING (task 2026-08-20-lattice-only-grading, §0) ───────
+  // All zero on the peak-relative path, which is what keeps a legacy run identical.
+  double demand_allowable_mpa_used = 0.0;  // the allowable that governed (0 = none)
+  double utilisation_target_used = 0.0;    // §3's goal number, as applied
+  double max_utilisation = 0.0;            // peak candidate demand / allowable
+  double median_utilisation = 0.0;         // over LATTICED voxels; deterministic
+                                           //   (a full sort, never a sample)
+  // ★ §0(b): WHAT HAPPENS ABOVE THE ALLOWABLE. The law CLAMPS utilisation at 1.0 and
+  // COUNTS it here. It does not refuse: refusing would make the grading law the gate,
+  // and the gate is analyze_fixed_design, which already prices an over-allowable part
+  // and rejects it on margin. But an over-allowable region must never read as "maximum
+  // density and fine", so it is named, counted, and reported beside the verdict.
+  std::size_t over_allowable_voxels = 0;
+  // Latticed voxels whose region cleared `unloaded_utilisation_max` (§2). The claim
+  // over these is SELF-WEIGHT ONLY, which is a different claim from the load-bearing
+  // one and must be shown as such on the card.
+  std::size_t unloaded_voxels = 0;
+
+  // ── ★ THE DENSITY DISTRIBUTION (bar R1) ──────────────────────────────────────
+  // "The fraction of voxels at rho_min is the number that was wrong, so it is the
+  // number that must move." An aggregate min/max cannot show it: on the maintainer's
+  // part `rho_min_used` and `rho_max_used` spanned the FULL band while 19.07 % of the
+  // voxels sat on the floor. So the distribution is reported, not just its ends.
+  //
+  // DETERMINISTIC BY CONSTRUCTION (bar §1b): a FIXED-BIN histogram filled by one pass
+  // in voxel order. Never a sampled estimate.
+  static constexpr int kDensityBins = 20;
+  std::size_t density_histogram[kDensityBins] = {};  // equal bins across the band
+  std::size_t density_at_floor_voxels = 0;    // at rho_min (within 1e-9)
+  std::size_t density_at_ceiling_voxels = 0;  // at rho_max (within 1e-9)
 };
 
 // Grade `density`'s printed set (optionally restricted to `region`) from the per-voxel

@@ -1,0 +1,55 @@
+[loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=22 voxels_frozen=32648 (structural pad, NOT a face protection)
+[loadcase] face-protection face=16 voxels_frozen=10554 depth=3 requested=5mm effective=5.116mm status=ok
+grid 128x31x118  spacing 1.705279  solid 110904
+peak von Mises 0.01696337555 MPa   expected 0.0169633757   rel err 8.959e-09
+
+=== TRACED PRINCIPAL-DIRECTION CURVES - family MAJOR  (largest |sigma|) ===
+  seeds 1770   traced steps 509508   step length 0.8526 mm
+  OVERHANG VIOLATIONS (> 45 deg from vertical): 202688 / 509508 = 39.78 %
+
+  angle from vertical, by traced arc-length:
+     0-10 deg :     143673   28.20 %
+    10-20 deg :     103027   20.22 %
+    20-30 deg :      41447    8.13 %
+    30-40 deg :      13398    2.63 %
+    40-50 deg :       9500    1.86 %
+    50-60 deg :       5609    1.10 %   <- unbuildable
+    60-70 deg :       5246    1.03 %   <- unbuildable
+    70-80 deg :       5452    1.07 %   <- unbuildable
+    80-90 deg :     182156   35.75 %   <- unbuildable
+
+=== TRACED PRINCIPAL-DIRECTION CURVES - family MIDDLE ===
+  seeds 1770   traced steps 345393   step length 0.8526 mm
+  OVERHANG VIOLATIONS (> 45 deg from vertical): 327287 / 345393 = 94.76 %
+
+  angle from vertical, by traced arc-length:
+     0-10 deg :       1350    0.39 %
+    10-20 deg :       4413    1.28 %
+    20-30 deg :       4444    1.29 %
+    30-40 deg :       4668    1.35 %
+    40-50 deg :       7736    2.24 %
+    50-60 deg :      12451    3.60 %   <- unbuildable
+    60-70 deg :      18066    5.23 %   <- unbuildable
+    70-80 deg :      53110   15.38 %   <- unbuildable
+    80-90 deg :     239155   69.24 %   <- unbuildable
+
+=== TRACED PRINCIPAL-DIRECTION CURVES - family MINOR  (smallest |sigma|) ===
+  seeds 1770   traced steps 81250   step length 0.8526 mm
+  OVERHANG VIOLATIONS (> 45 deg from vertical): 79699 / 81250 = 98.09 %
+
+  angle from vertical, by traced arc-length:
+     0-10 deg :        760    0.94 %
+    10-20 deg :        295    0.36 %
+    20-30 deg :        147    0.18 %
+    30-40 deg :        221    0.27 %
+    40-50 deg :        294    0.36 %
+    50-60 deg :        818    1.01 %   <- unbuildable
+    60-70 deg :       3248    4.00 %   <- unbuildable
+    70-80 deg :      12632   15.55 %   <- unbuildable
+    80-90 deg :      62835   77.34 %   <- unbuildable
+
+=== ALL THREE FAMILIES TOGETHER ===
+  OVERHANG VIOLATIONS: 609674 / 936151 = 65.13 % of traced arc-length

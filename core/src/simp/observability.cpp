@@ -1182,6 +1182,37 @@ std::string run_info_json(const RunInfo& info) {
     gr += ", \"rho_max_used\": " + fmt(info.grading_rho_max_used);
     gr += ", \"region_voxels\": " + fmt_ll(info.grading_region_voxels);
     gr += ", \"latticed_voxels\": " + fmt_ll(info.grading_latticed_voxels);
+    // ── ★ the utilisation law (task 2026-08-20-lattice-only-grading) ───────────
+    // Emitted ONLY when an allowable governed, so a peak-relative receipt keeps the
+    // exact key set it had (bar §5a / R8).
+    if (info.grading_demand_allowable_mpa > 0.0) {
+      gr += ", \"demand_allowable_mpa\": " +
+            fmt(info.grading_demand_allowable_mpa);
+      gr += ", \"allowable_basis\": \"in_plane_yield_over_margin_stop\"";
+      gr += ", \"z_knockdown_in_allowable\": false";
+      gr += ", \"utilisation_target\": " + fmt(info.grading_utilisation_target);
+      gr += ", \"max_utilisation\": " + fmt(info.grading_max_utilisation);
+      gr += ", \"median_utilisation\": " + fmt(info.grading_median_utilisation);
+      gr += ", \"over_allowable_voxels\": " +
+            fmt_ll(info.grading_over_allowable_voxels);
+      gr += ", \"unloaded_voxels\": " + fmt_ll(info.grading_unloaded_voxels);
+    }
+    // R4 — the clamp counts. Present on EVERY graded receipt: the analyze path did
+    // not carry them before this task, so a clamp could decide the posture with
+    // nothing in the record saying so.
+    gr += ", \"clamped_lo_voxels\": " + fmt_ll(info.grading_clamped_lo_voxels);
+    gr += ", \"clamped_hi_voxels\": " + fmt_ll(info.grading_clamped_hi_voxels);
+    // R1 — the density DISTRIBUTION over latticed voxels.
+    gr += ", \"density_at_floor_voxels\": " +
+          fmt_ll(info.grading_density_at_floor_voxels);
+    gr += ", \"density_at_ceiling_voxels\": " +
+          fmt_ll(info.grading_density_at_ceiling_voxels);
+    if (!info.grading_density_histogram.empty()) {
+      gr += ", \"density_histogram\": [";
+      for (std::size_t i = 0; i < info.grading_density_histogram.size(); ++i)
+        gr += (i ? ", " : "") + fmt_ll(info.grading_density_histogram[i]);
+      gr += "]";
+    }
     gr += ", \"solid_fallback_voxels\": " +
           fmt_ll(info.grading_solid_fallback_voxels);
     // Both can be the +inf "thicker than the EDT cap" sentinel (every latticed member
