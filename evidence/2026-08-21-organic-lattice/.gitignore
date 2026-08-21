@@ -1,0 +1,8 @@
+# Regenerable from the committed sources; too large to version.
+#   fields.bin — the per-run von Mises container (7.7 MB per run, 7 runs here).
+#   Every run's run_info.json, analysis.json and analysis_report.json ARE committed:
+#   those carry every number the bars are measured from, including the whole
+#   grading.organic and grading.stepped blocks. Regenerate the containers with the
+#   invocations in r1_cli_invocations.txt.
+*/fields.bin
+*/*/fields.bin

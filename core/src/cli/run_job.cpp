@@ -10,8 +10,10 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -29,9 +31,11 @@
 #include "topopt/fields.hpp"
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
+#include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/lattice_void.hpp"
+#include "topopt/organic_lattice.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -1629,7 +1633,19 @@ LatticeExportOutcome export_latticed_variant(
     // the ladder is dyadic and aligned (cell_plan.hpp states why), so no bridging
     // geometry exists to get wrong.
     const std::vector<LatticeLevelSpec>* levels = nullptr,
-    double base_cell_mm = 0.0, double printed_iso = 0.5) {
+    double base_cell_mm = 0.0, double printed_iso = 0.5,
+    // ★ ORGANIC (task 2026-08-21-organic-lattice). Null on every other run, and
+    // then not one line below changes. Non-null => the traced curves and
+    // connectors REPLACE the octet passes entirely: there is no cell grid to
+    // sweep, so `levels`, `radius` and `R.latticed` play no part. Everything
+    // else — the shell, the solid companion, the boundary clip, the baked
+    // frame, the no-protrusion measurement and the writers — is the same code
+    // on the same terms, which is what §4(a)'s one-density contract buys.
+    const OrganicLattice* organic = nullptr,
+    // ★ STEPPED (§4). Null on every other run. Non-null => one ORDINARY generator
+    // pass per declared region at that region's OWN cell, no ladder and no stitching
+    // (lattice_gen.hpp's generate_lattice_stepped states what that gives up).
+    const std::vector<LatticeSteppedPass>* stepped = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -1848,12 +1864,37 @@ LatticeExportOutcome export_latticed_variant(
       inner->add_triangle(a, b, c);
     }
   };
+  // ★ ORGANIC's stats, mapped onto the SAME LatticeGenStats every consumer already
+  // reads (§4a: the selector is cheap because nothing downstream branches). The
+  // fields that have no organic meaning stay 0 and are NOT invented: an organic run
+  // has no cells, so `latticed_cells` is 0 and the receipt says which algorithm ran.
+  auto organic_stats = [&](const OrganicGenStats& g) {
+    LatticeGenStats st;
+    st.triangles = g.triangles;
+    st.strut_triangles = g.triangles - 20 * g.nodes;
+    st.node_triangles = 20 * g.nodes;
+    st.struts = g.struts;
+    st.nodes = g.nodes;
+    st.min_strut_diameter_mm = g.min_strut_diameter_mm;
+    st.max_strut_diameter_mm = g.max_strut_diameter_mm;
+    st.clipped_struts = g.clipped_segments;
+    st.dropped_struts = g.dropped_segments;
+    st.uncertified_spans_dropped = g.uncertified_spans_dropped;
+    st.interior_volume_mm3 = g.volume_mm3;
+    return st;
+  };
   auto emit_lattice = [&](TriangleSink& w) {
-    if (!measure_protrusion)
+    if (!measure_protrusion) {
+      if (organic)
+        return organic_stats(generate_organic_lattice(*organic, w, &boundary));
+      if (stepped)
+        return generate_lattice_stepped(LatticeGenTopology::Octet, *stepped, w,
+                                        skin);
       return swept ? generate_lattice_multilevel(LatticeGenTopology::Octet,
                                                  Rbase, *levels, w, skin)
                    : generate_lattice(LatticeGenTopology::Octet, R, radius, w,
                                       skin);
+    }
     MeasuringSink m;
     m.inner = &w;
     m.dist = &shell_dist;
@@ -1879,11 +1920,20 @@ LatticeExportOutcome export_latticed_variant(
       }
       pass_marks.emplace_back(m.n_seen, name);
     };
+    // ORGANIC emits no LatticeGenElement, so the per-pass attribution above has
+    // nothing to key on and `worst_pass` stays "unattributed" — stated rather than
+    // faked, because every organic primitive is a traced strut or a node ball and
+    // naming one of the two would add nothing a reader could act on.
     const LatticeGenStats st =
-        swept ? generate_lattice_multilevel(LatticeGenTopology::Octet, Rbase,
-                                            *levels, m, skin, &obs)
-              : generate_lattice(LatticeGenTopology::Octet, R, radius, m, skin,
-                                 &obs);
+        organic
+            ? organic_stats(generate_organic_lattice(*organic, m, &boundary))
+            : (stepped ? generate_lattice_stepped(LatticeGenTopology::Octet,
+                                                  *stepped, m, skin, &obs)
+                       : (swept ? generate_lattice_multilevel(
+                                      LatticeGenTopology::Octet, Rbase, *levels, m,
+                                      skin, &obs)
+                                : generate_lattice(LatticeGenTopology::Octet, R,
+                                                   radius, m, skin, &obs)));
     const char* worst_pass = "unattributed";
     if (m.worst_vertex >= 0)
       for (const auto& pm : pass_marks)
@@ -3266,6 +3316,170 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
 // silently diverging. The extraction is mechanical — the body is unchanged and
 // the caller's aggregation is unchanged, which is what the byte-identity bar
 // (Z6) checks.
+// ── ★ STEPPED — ONE CELL PER DECLARED REGION, NO TRANSITION HANDLING (§4) ──────
+//
+// ★ FIRST, WHAT PR 344 DID AND DID NOT LEAVE BEHIND. Its handoff says, under "WHAT IS
+// NOT DONE, PLAINLY":
+//     "§4(a) — STEPPED is not shipped. The dyadic ladder exists and is FEA-driven,
+//      but no user-facing Lattice Settings option was added."
+// (docs/handoffs/2026-08-20-lattice-only-grading.md.) Read exactly: the MECHANISM it
+// had in mind is the ladder already in `cell_mode: "swept"`, which does vary the cell
+// from the FEA; what was missing there was only the option. No algorithm code was
+// written, and none is missing on that reading.
+//
+// ★ BUT THIS TASK'S TWO ALGORITHMS DIFFER ON EXACTLY THE THING THE LADDER IS. It
+// defines DOUBLED as "the dyadic ladder" and STEPPED as "per-region cell from the FEA,
+// NO TRANSITION HANDLING" — and the ladder IS the transition handling. So the two
+// cannot both be `swept`, and the no-transition variant was genuinely not in the tree:
+// `CellSizeMode` on PR 345's HEAD is {Fixed, Auto, Swept, Fit}, and grep for a lattice
+// algorithm named "stepped" across PR 344's, 345's and 346's branches finds only
+// `stair-stepped`, `steppedWidth` and a LoadFlow comment. A selector value that
+// silently ran DOUBLED would be the worst of the three options, so it is built here.
+//
+// ★ WHAT IT IS. Each declared include region gets ONE cell, derived from the FEA:
+//
+//     rho_r  = the MEDIAN graded relative density over the region's own voxels
+//              (the grading law's answer, so it carries the intent and the demand)
+//     W_r    = the MEDIAN local member width over the same voxels
+//     S_r    = max( W_r / N* ,  w / phi(rho_r) )          [VERBATIM — no dyadic snap]
+//
+// the same two bounds `Fit` balances — N* cells across where the member can hold them,
+// the finest cell that still prints where it cannot — but evaluated at the region's own
+// FEA-driven density, and TAKEN AS IT COMES OUT. That last part is the whole difference
+// from DOUBLED: no snapping to S0 * 2^L, no aligned octree, no 2:1 balance.
+//
+// ★ AND THAT IS EXACTLY WHY IT HAS A COST NOBODY SHOULD PAY BLIND. PR 235 measured and
+// REJECTED banded regions for this reason: two abutting cells of unrelated size share
+// no nodes, so a strut ending on the seam ends in mid-air. DOUBLED's dyadic ladder
+// exists precisely to make coarse nodes nest in the fine grid. STEPPED gives that up.
+// It does not pretend otherwise — `stepped_adjacent_region_pairs` /
+// `stepped_pairs_joined` MEASURE how many abutting region pairs actually have touching
+// solids, and a pair that does not touch is a mechanical disconnection reported as one.
+struct SteppedRegionCell {
+  int region_id = 0;          // 1-based, the job's own include-region order
+  std::size_t voxels = 0;
+  double median_rho = 0.0;    // FEA-driven: the grading law's own answer here
+  double median_width_mm = 0.0;
+  double cell_mm = 0.0;       // VERBATIM, never snapped
+  double strut_mm = 0.0;
+  double cells_per_member = 0.0;
+  bool out_of_regime = false; // below the ACCURACY floor: buildable, uncertified
+};
+
+struct SteppedOutcome {
+  bool ran = false;
+  std::vector<SteppedRegionCell> cells;
+  std::vector<double> cell_field;   // grid-indexed, 0 off the lattice
+  std::size_t regions_with_no_voxels = 0;
+  double min_cell_mm = 0.0, max_cell_mm = 0.0;
+  long long adjacent_region_pairs = 0;
+  long long adjacent_pairs_joined = 0;
+};
+
+SteppedOutcome run_stepped_step(const VoxelGrid& grid,
+                                const std::vector<double>& density,
+                                const std::vector<char>& lattice_mask,
+                                const std::vector<double>& relative_density,
+                                const std::vector<int>& region_ids,
+                                const JobGrading& jg, double printed_iso,
+                                int thickness_cap_voxels) {
+  SteppedOutcome so;
+  const std::size_t n = grid.voxel_count();
+  if (lattice_mask.size() != n || relative_density.size() != n ||
+      region_ids.size() != n)
+    throw JobError("stepped: the graded posture does not cover this grid");
+  const LatticeTopology topo = LatticeTopology::Octet;
+  const double n_star = lattice_cells_per_member_min(topo);
+  const double w = jg.min_extrudable_width_mm;
+  if (!(w > 0.0))
+    throw JobError(
+        "stepped: min_extrudable_width_mm is 0, which means UNSET — the minimum "
+        "extrudable width is user input and this law will not default it");
+  const std::vector<double> width =
+      local_member_thickness_mm(grid, density, printed_iso, thickness_cap_voxels);
+
+  // Gather per region, in ASCENDING region id — a fixed order (§5a). FULL SORTS for
+  // both medians, never a sampled estimate (§5b).
+  std::map<int, std::vector<double>> rhos, widths;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!lattice_mask[e]) continue;
+    const int r = region_ids[e];
+    rhos[r].push_back(relative_density[e]);
+    if (std::isfinite(width[e]) && width[e] > 0.0) widths[r].push_back(width[e]);
+  }
+  so.cell_field.assign(n, 0.0);
+  std::map<int, double> cell_of;
+  for (auto& kv : rhos) {
+    SteppedRegionCell rc;
+    rc.region_id = kv.first;
+    rc.voxels = kv.second.size();
+    std::sort(kv.second.begin(), kv.second.end());
+    rc.median_rho = kv.second[kv.second.size() / 2];
+    std::vector<double>& wv = widths[kv.first];
+    if (wv.empty()) { ++so.regions_with_no_voxels; continue; }
+    std::sort(wv.begin(), wv.end());
+    rc.median_width_mm = wv[wv.size() / 2];
+    // ★ BOTH BOUNDS COME FROM CORE, never from arithmetic spelled out here. phi(rho)
+    // is the measured octet diameter per unit cell, so w / phi(rho) is the finest cell
+    // whose strut at THIS region's density still prints.
+    const double phi = octet_strut_diameter_mm(rc.median_rho, 1.0);
+    const double printable_min = phi > 0.0 ? w / phi : 0.0;
+    const double homogenizable_max = rc.median_width_mm / n_star;
+    rc.cell_mm = std::max(homogenizable_max, printable_min);
+    if (!(rc.cell_mm > 0.0)) { ++so.regions_with_no_voxels; continue; }
+    rc.strut_mm = octet_strut_diameter_mm(rc.median_rho, rc.cell_mm);
+    rc.cells_per_member = rc.median_width_mm / rc.cell_mm;
+    // Below the ACCURACY floor is COUNTED and reported out of regime, never hidden —
+    // the same discipline sub-floor retention and the adaptive floor already hold.
+    rc.out_of_regime = rc.cells_per_member < n_star;
+    cell_of[rc.region_id] = rc.cell_mm;
+    so.cells.push_back(rc);
+  }
+  if (so.cells.empty()) return so;
+  so.min_cell_mm = so.max_cell_mm = so.cells.front().cell_mm;
+  for (const SteppedRegionCell& rc : so.cells) {
+    so.min_cell_mm = std::min(so.min_cell_mm, rc.cell_mm);
+    so.max_cell_mm = std::max(so.max_cell_mm, rc.cell_mm);
+  }
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!lattice_mask[e]) continue;
+    auto it = cell_of.find(region_ids[e]);
+    if (it != cell_of.end()) so.cell_field[e] = it->second;
+  }
+
+  // ★ THE SEAM MEASUREMENT (the cost of "no transition handling", measured rather
+  // than argued). Two regions are ADJACENT when a latticed voxel of one is 6-adjacent
+  // to a latticed voxel of the other. Their lattices are JOINED only if the two cells
+  // are equal — cells of unrelated size share no node positions, so their struts pass
+  // each other without meeting. A pair that is adjacent and not joined is a mechanical
+  // disconnection, and it is reported as one.
+  std::set<std::pair<int, int>> adj;
+  const int off[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!lattice_mask[e]) continue;
+        for (const auto& d : off) {
+          const int a = i + d[0], b = j + d[1], c = k + d[2];
+          if (a >= grid.nx || b >= grid.ny || c >= grid.nz) continue;
+          const std::size_t f = grid.index(a, b, c);
+          if (!lattice_mask[f]) continue;
+          const int ra = region_ids[e], rb = region_ids[f];
+          if (ra == rb) continue;
+          adj.emplace(std::min(ra, rb), std::max(ra, rb));
+        }
+      }
+  so.adjacent_region_pairs = static_cast<long long>(adj.size());
+  for (const auto& pr : adj) {
+    auto ia = cell_of.find(pr.first), ib = cell_of.find(pr.second);
+    if (ia == cell_of.end() || ib == cell_of.end()) continue;
+    if (ia->second == ib->second) ++so.adjacent_pairs_joined;
+  }
+  so.ran = true;
+  return so;
+}
+
 struct LatticeVariantOutcome {
   LatticeExportOutcome oc;
   LatticeCertOutcome cc;
@@ -3277,6 +3491,13 @@ struct LatticeVariantOutcome {
   GradedField gf;                 // meaningful iff `graded`
   LatticeRoleReceipt role_rcpt;
   LatticeGradedReceipt grad_rcpt;  // `gf` pointer NOT retained (see below)
+  // ★ WHICH ALGORITHM LAID THIS LATTICE DOWN (task 2026-08-21-organic-lattice, §4).
+  // Doubled on every job that does not state one, so a legacy outcome is unchanged.
+  LatticeAlgorithm algorithm = LatticeAlgorithm::Doubled;
+  bool organic_ran = false;
+  OrganicReport organic;  // meaningful iff `organic_ran`
+  bool stepped_ran = false;
+  SteppedOutcome stepped;  // meaningful iff `stepped_ran`
   LatticeAddedMaterialReceipt added_rcpt;  // design-box runs only
   LatticeFrozenReceipt frozen_rcpt;        // runs with frozen material only
 
@@ -3381,6 +3602,262 @@ class ScopedLadderSolverIsolation {
   const bool geneo_;
 };
 
+// ── ★ THE ORGANIC STEP, IN ONE PLACE (task 2026-08-21-organic-lattice, §4) ──────
+//
+// Both the analyze RECEIPT and the emitted GEOMETRY go through this function, so the
+// two cannot describe different lattices. It is deliberately thin: the grading law
+// still decides the DENSITY (all three algorithms honour the same intent, §4b), and
+// this only turns that density into a SPACING FIELD and hands it to the tracer.
+//
+// ★ WHY THE DENSITY IS THE GRADING LAW'S AND NOT THE TRACER'S. Daynes' comparison —
+// the one that measured +101 % stiffness — is against a uniform-cell core OF THE SAME
+// DENSITY. Taking the density from the shared law is what makes the three-way
+// comparison (R10) that same comparison rather than three unrelated parts.
+//
+// ★ THE SPACING LAW, AND IT IS THE ONE IN organic_lattice.hpp. Constant bead, spacing
+// varies: d = organic_spacing_for(rho, t). That is CURVY's posture — "controls the
+// spacing between adjacent streamlines LOCALLY USING THE DENSITY FIELD rather than a
+// global density parameter" — and it is why the grade never has to thin a strut below
+// what the nozzle lays.
+struct OrganicOutcome {
+  bool ran = false;
+  OrganicLattice lat;
+  double strut_diameter_mm = 0.0;
+  // ★ R13: timed around the TRACER ALONE, so the number is a measurement of this
+  // algorithm rather than of the solve it happens to sit beside.
+  double trace_seconds = 0.0;
+};
+
+OrganicOutcome run_organic_step(const VoxelGrid& grid,
+                                const std::vector<double>& density,
+                                const std::vector<double>& stress_tensor,
+                                // The candidate set and the density the GRADING LAW
+                                // chose, passed explicitly rather than read off a
+                                // GradedField, because the geometry path hands in the
+                                // mask AFTER the shared boundary's cell-overlap proof
+                                // has narrowed it — and tracing a voxel the export
+                                // will not emit is exactly the certificate/file
+                                // disagreement bar B7 exists to prevent.
+                                const std::vector<char>& lattice_mask,
+                                const std::vector<double>& relative_density,
+                                double band_rho_min, double band_rho_max,
+                                const JobGrading& jg,
+                                const Vec3& build_dir, double printed_iso,
+                                int thickness_cap_voxels) {
+  OrganicOutcome oo;
+  const std::size_t n = grid.voxel_count();
+  // NO STRESS TENSOR, NO ORGANIC LATTICE. The whole method is the eigen-decomposition
+  // of that field; without it there is nothing to trace along, and inventing an axis
+  // would be worse than refusing. This is a REFUSAL rather than a fallback for the
+  // same reason the printability floor is: a silent substitute is how a part gets
+  // built to a rule nobody stated.
+  if (stress_tensor.size() != 6 * n)
+    throw JobError(
+        "organic: this run carries no per-voxel stress tensor field, and the organic "
+        "algorithm is the eigen-decomposition of exactly that field — refusing rather "
+        "than tracing along an invented direction");
+  if (lattice_mask.size() != n || relative_density.size() != n)
+    throw JobError("organic: the graded posture does not cover this grid");
+
+  // ★ THE BEAD, AND WHY THE DEFAULT IS NOT THE NOZZLE. See
+  // organic_default_strut_diameter_mm: at the stated 0.42 mm the dense half of the
+  // band asks for curves closer together than this grid samples the direction field,
+  // every one of them is raised to the resolution floor, and the grade vanishes. The
+  // default instead puts the DENSEST lattice in the band exactly on that floor, which
+  // is the widest window the grid can express — and never below the user's stated
+  // minimum extrudable width. A job that states `organic_strut_width_mm` overrides it.
+  const double t =
+      jg.organic_strut_width_mm > 0.0
+          ? jg.organic_strut_width_mm
+          : organic_default_strut_diameter_mm(grid.spacing, 1.0, band_rho_max,
+                                              jg.min_extrudable_width_mm);
+  oo.strut_diameter_mm = t;
+  std::vector<char> cand(n, 0);
+  std::vector<double> spacing(n, 0.0);
+  std::size_t candidates = 0;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (!lattice_mask[e]) continue;
+    const double d = organic_spacing_for(relative_density[e], t);
+    if (!(d > 0.0)) continue;  // a zero density has no spacing; it is not lattice
+    cand[e] = 1;
+    spacing[e] = d;
+    ++candidates;
+  }
+  if (candidates == 0) return oo;  // nothing graded — the caller reports it as such
+
+  // The SAME member-width field the grading law reads, at the law's own cap, so a
+  // curves-per-member figure in the receipt and a cells-per-member figure beside it
+  // are measured against the identical widths.
+  const std::vector<double> width =
+      local_member_thickness_mm(grid, density, printed_iso, thickness_cap_voxels);
+
+  OrganicParams op;
+  op.build_dir = build_dir;
+  op.overhang_angle_deg = jg.organic_overhang_angle_deg;
+  op.min_extrudable_width_mm = jg.min_extrudable_width_mm;
+  op.strut_diameter_mm = t;
+  op.rho_min = band_rho_min;
+  op.rho_max = band_rho_max;
+  const double t0 = wall_seconds();
+  oo.lat = trace_organic_lattice(grid, cand, stress_tensor, spacing, &width, op);
+  oo.trace_seconds = wall_seconds() - t0;
+  oo.ran = true;
+  return oo;
+}
+
+// Copy the tracer's report onto the receipt. ONE place, so the analyze receipt and
+// the geometry receipt cannot disagree about what was traced.
+void fill_stepped_run_info(RunInfo& gi, const SteppedOutcome& so) {
+  gi.stepped_present = true;
+  gi.stepped_regions = static_cast<long long>(so.cells.size());
+  gi.stepped_min_cell_mm = so.min_cell_mm;
+  gi.stepped_max_cell_mm = so.max_cell_mm;
+  gi.stepped_regions_no_cell = static_cast<long long>(so.regions_with_no_voxels);
+  gi.stepped_adjacent_region_pairs = so.adjacent_region_pairs;
+  gi.stepped_adjacent_pairs_joined = so.adjacent_pairs_joined;
+  for (const SteppedRegionCell& rc : so.cells) {
+    gi.stepped_region_cell_mm.push_back(rc.cell_mm);
+    gi.stepped_region_rho.push_back(rc.median_rho);
+    gi.stepped_region_width_mm.push_back(rc.median_width_mm);
+    gi.stepped_region_cells_per_member.push_back(rc.cells_per_member);
+    gi.stepped_region_voxels.push_back(static_cast<long long>(rc.voxels));
+    if (rc.out_of_regime) ++gi.stepped_regions_out_of_regime;
+  }
+}
+
+void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
+  const OrganicReport& r = oo.lat.report;
+  gi.organic_present = true;
+  gi.organic_strut_diameter_mm = r.strut_diameter_mm;
+  gi.organic_trace_seconds = oo.trace_seconds;
+  gi.organic_candidate_voxels = static_cast<long long>(r.candidate_voxels);
+  gi.organic_degenerate_voxels = static_cast<long long>(r.degenerate_voxels);
+  gi.organic_degenerate_fraction = r.degenerate_fraction;
+  gi.organic_max_frame_swap_fraction = r.max_frame_swap_fraction;
+  gi.organic_curves_traced = static_cast<long long>(r.curves_traced);
+  gi.organic_curves_kept = static_cast<long long>(r.curves_kept);
+  gi.organic_curves_thinned = static_cast<long long>(r.curves_thinned);
+  gi.organic_curves_too_short = static_cast<long long>(r.curves_too_short);
+  gi.organic_total_curve_length_mm = r.total_curve_length_mm;
+  gi.organic_curves_per_family.assign(r.curves_per_family, r.curves_per_family + 3);
+  gi.organic_curve_length_per_family_mm.assign(
+      r.curve_length_per_family_mm, r.curve_length_per_family_mm + 3);
+  gi.organic_stop_left_region = r.stop_left_region;
+  gi.organic_stop_hit_d_test = r.stop_hit_d_test;
+  gi.organic_stop_no_direction = r.stop_no_direction;
+  gi.organic_stop_step_budget = r.stop_step_budget;
+  gi.organic_seeds_offered = r.seeds_offered;
+  gi.organic_seeds_outside_region = r.seeds_outside_region;
+  gi.organic_seeds_too_close = r.seeds_too_close;
+  gi.organic_seeds_traced = r.seeds_traced;
+  gi.organic_connectors = static_cast<long long>(r.connectors);
+  gi.organic_curves_under_two_connections =
+      static_cast<long long>(r.curves_with_fewer_than_two_connections);
+  gi.organic_curves_no_connection =
+      static_cast<long long>(r.curves_with_no_connection);
+  gi.organic_connected_components = static_cast<long long>(r.connected_components);
+  gi.organic_largest_component_fraction = r.largest_component_fraction;
+  gi.organic_connector_median_length_mm = r.connector_median_length_mm;
+  gi.organic_connector_max_cross_deviation_deg =
+      r.max_connector_cross_deviation_deg;
+  gi.organic_connector_mean_cross_deviation_deg =
+      r.mean_connector_cross_deviation_deg;
+  gi.organic_connectors_cross_measured =
+      static_cast<long long>(r.connectors_cross_measured);
+  gi.organic_connectors_below_resolution =
+      static_cast<long long>(r.connectors_shorter_than_strut);
+  gi.organic_overhang_clamp_armed = r.overhang_clamp_armed;
+  gi.organic_overhang_angle_deg = r.overhang_angle_deg_used;
+  gi.organic_clamped_step_fraction = r.clamped_step_fraction;
+  gi.organic_curves_touched_fraction = r.curves_touched_fraction;
+  gi.organic_segments_outside_45_fraction = r.segments_outside_45_fraction;
+  gi.organic_curve_segments_outside_45_fraction =
+      r.curve_segments_outside_45_fraction;
+  gi.organic_connectors_outside_45_fraction = r.connectors_outside_45_fraction;
+  gi.organic_requested_spacing_min_mm = r.requested_spacing_min_mm;
+  gi.organic_requested_spacing_max_mm = r.requested_spacing_max_mm;
+  gi.organic_achieved_spacing_min_mm = r.achieved_spacing_min_mm;
+  gi.organic_achieved_spacing_max_mm = r.achieved_spacing_max_mm;
+  gi.organic_achieved_spacing_median_mm = r.achieved_spacing_median_mm;
+  gi.organic_spacing_print_floor_mm = r.spacing_print_floor_mm;
+  gi.organic_spacing_resolution_floor_mm = r.spacing_resolution_floor_mm;
+  gi.organic_spacing_raised_for_print_voxels =
+      static_cast<long long>(r.spacing_raised_for_print_voxels);
+  gi.organic_spacing_raised_for_resolution_voxels =
+      static_cast<long long>(r.spacing_raised_for_resolution_voxels);
+  gi.organic_min_curves_per_member = r.min_curves_per_member;
+  gi.organic_median_curves_per_member = r.median_curves_per_member;
+  gi.organic_curves_per_member_floor = r.curves_per_member_floor;
+  gi.organic_below_curves_per_member_floor_voxels =
+      static_cast<long long>(r.below_curves_per_member_floor_voxels);
+  gi.organic_curves_per_member_measured = r.curves_per_member_measured;
+  gi.organic_latticed_voxels = static_cast<long long>(r.latticed_voxels);
+  gi.organic_rho_min = r.rho_min_emitted;
+  gi.organic_rho_max = r.rho_max_emitted;
+  gi.organic_rho_median = r.rho_median_emitted;
+  gi.organic_rho_clamped_lo_voxels =
+      static_cast<long long>(r.rho_clamped_lo_voxels);
+  gi.organic_rho_clamped_hi_voxels =
+      static_cast<long long>(r.rho_clamped_hi_voxels);
+  gi.organic_emitted_volume_mm3 = r.emitted_volume_mm3;
+  gi.organic_tensor_out_of_regime = r.tensor_out_of_regime;
+}
+
+// ★ ORGANIC IS AESTHETIC-ONLY, AND THIS IS THE REFUSAL (§3c).
+//
+// A traced lattice is ANISOTROPIC BY CONSTRUCTION — aligning struts with the principal
+// directions is the entire mechanism, and it is where Daynes' +101 % stiffness comes
+// from. The certification library carries exactly ONE CUBIC tensor per topology,
+// measured on the octet cell as a function of relative density alone (lattice.hpp).
+// Nothing in this codebase has measured a tensor for traced geometry, so there is
+// nothing for a STRUCTURAL density — one that means "this region is at N % of what the
+// material can take" — to be certified against.
+//
+// §3(c) says organic "may be offered in structural intent only if you can state what it
+// certifies against. If you cannot, restrict it to aesthetic intent and SAY SO." It
+// cannot be stated, so this refuses.
+//
+// ★ IT REQUIRES THE INTENT TO BE STATED **EXPLICITLY**, and that is deliberate rather
+// than fussy. The DEFAULT intent is not the same on both paths that reach the organic
+// step: `analyze` applies the lattice-only job's aesthetic default (amendment §1d),
+// while `lattice_one_variant` is shared with the TO+lattice path and therefore leaves
+// `GradingLawParams::intent` at its Structural default so that path stays untouched. A
+// refusal keyed on the RESOLVED intent would therefore mean different things on the two
+// paths, and organic would be silently allowed on one of them. Keyed on the JOB's own
+// stated string it means one thing everywhere.
+//
+// ★ THE CERTIFICATE STILL RUNS EITHER WAY (§3d). Organic changes what the density
+// MEANS, never whether it is checked: an aesthetic organic run goes through the same
+// analyze_fixed_design as every other lattice, and the receipt carries
+// `tensor_out_of_regime` beside the verdict so the reading is never left to inference.
+void refuse_organic_structural(LatticeAlgorithm alg, const JobGrading& jg) {
+  if (alg != LatticeAlgorithm::Organic) return;
+  if (jg.intent == "aesthetic") return;
+  throw JobError(
+      "organic requires \"intent\": \"aesthetic\", stated explicitly (this job "
+      "says " +
+      (jg.intent.empty() ? std::string("nothing") : ("\"" + jg.intent + "\"")) +
+      "). The organic algorithm traces struts ALONG the principal stress directions, "
+      "so the lattice it builds is anisotropic by construction — and the certification "
+      "library carries exactly one CUBIC tensor per topology, measured on the octet "
+      "cell as a function of relative density alone. Nothing here has measured a "
+      "tensor for traced geometry, so a structural density (one that means \"this "
+      "region is at N % of what the material can take\") would be certified against a "
+      "material this lattice is not. The certificate still runs under aesthetic "
+      "intent, and the receipt reports the lattice as out of regime for the "
+      "homogenised tensor.");
+}
+
+// Resolve the job's algorithm; an ABSENT key is "doubled", which is what keeps every
+// existing job byte-identical (§4d). An unknown one is refused, never defaulted.
+LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
+  if (jg.algorithm.empty()) return LatticeAlgorithm::Doubled;
+  LatticeAlgorithm a = LatticeAlgorithm::Doubled;
+  if (!lattice_algorithm_from_name(jg.algorithm.c_str(), a))
+    throw JobError("run_job: unknown grading algorithm \"" + jg.algorithm + "\"");
+  return a;
+}
+
 // `part_grid` is the ORIGINAL imported part's grid and `domain` is the domain the
 // run SOLVED on (resolve_design_domain). Without a design box they are the same
 // grid and domain.bcs are the caller's BCs verbatim, so every existing caller is
@@ -3410,6 +3887,11 @@ LatticeVariantOutcome lattice_one_variant(
   R.design_fingerprint = design_fingerprint(dens);
   const bool graded = job.grading.present;
   R.graded = graded;
+  // ★ THE ALGORITHM (task 2026-08-21-organic-lattice, §4). Resolved FIRST, so an
+  // organic + structural job is refused before it spends a solve on a density it is
+  // not allowed to certify. An absent key is "doubled" — §4(d)'s byte-identity.
+  R.algorithm = resolve_lattice_algorithm(job.grading);
+  refuse_organic_structural(R.algorithm, job.grading);
   const bool roles_present = !job.lattice.regions.empty();
 
   // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
@@ -3422,6 +3904,10 @@ LatticeVariantOutcome lattice_one_variant(
   // chooses, plays no part in membership).
   GradedField& gf = R.gf;
   double cell = job.lattice.cell_mm;
+  // Which DECLARED include region owns each candidate voxel — built inside the graded
+  // block below and kept here because STEPPED derives one cell PER REGION and so needs
+  // the same membership the law used, not a second reconstruction of it.
+  std::vector<int> region_ids_for_stepped;
   if (graded) {
     LatticeBoundary members;
     for (const ClearanceGeometry& g : lattice_kos)
@@ -3568,7 +4054,7 @@ LatticeVariantOutcome lattice_one_variant(
     // The ids are still built unconditionally so the path stays compiled and
     // exercised on every graded run, which is what the `(void)` was preserving.
     if (job.grading.subfloor_per_region) gp.region_ids = &region_ids;
-    (void)region_ids;
+    region_ids_for_stepped = region_ids;
     gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
     gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
                        printed_iso);
@@ -3765,6 +4251,98 @@ LatticeVariantOutcome lattice_one_variant(
         ++dropped_by_overlap;
       }
     }
+  }
+
+  // ── ★ ORGANIC (task 2026-08-21-organic-lattice) ────────────────────────────
+  // The grading law above chose the DENSITY and the shared boundary narrowed the
+  // MASK; this replaces the lattice GEOMETRY with curves traced along the principal
+  // stress directions, and replaces the posture's per-voxel density with the one
+  // MEASURED from what was actually traced.
+  //
+  // ★ THE DENSITY IS STILL THE GRADING LAW'S, WHICH IS THE POINT. Daynes' +101 %
+  // is measured against a uniform-cell core OF THE SAME DENSITY, so taking the
+  // target density from the shared law is what makes the three-way comparison that
+  // same comparison rather than three unrelated parts.
+  //
+  // ★ EVERY CONSUMER STILL READS A PER-VOXEL DENSITY (§4a). Nothing below this point
+  // branches on the algorithm: the certification posture, the solid companion, the
+  // min-feature pass, the boundary clip, the void check and the exporters all take
+  // `gf.posture` exactly as they did, which is what makes the selector cheap.
+  OrganicOutcome organic;
+  if (graded && R.algorithm == LatticeAlgorithm::Organic) {
+    organic = run_organic_step(solved_grid, dens, v.stress_tensor_field, mask,
+                               gf.posture.relative_density, gf.band_rho_min,
+                               gf.band_rho_max, job.grading, v.applied_build_dir,
+                               printed_iso, 32);
+    if (!organic.ran || organic.lat.report.latticed_voxels == 0) {
+      // Same posture as the law's own L4 refusal: no object was produced, nothing
+      // was written, and the caller decides whether that kills the run or skips a
+      // rung. Never a file with no struts in it reported as a successful build.
+      R.ungradeable = true;
+      R.ungradeable_reason =
+          "the organic tracer placed no material: " +
+          std::to_string(organic.lat.report.candidate_voxels) +
+          " candidate voxels, " +
+          std::to_string(organic.lat.report.curves_traced) +
+          " curves traced and " +
+          std::to_string(organic.lat.report.curves_kept) +
+          " kept after thinning. The usual cause is a spacing field the grid cannot "
+          "resolve (separation floor " +
+          json_num(organic.lat.report.spacing_resolution_floor_mm) +
+          " mm against a requested " +
+          json_num(organic.lat.report.requested_spacing_min_mm) + " mm).";
+      R.gf = gf;
+      return R;
+    }
+    R.organic_ran = true;
+    R.organic = organic.lat.report;
+    // The posture the certification consumes is now the TRACED one.
+    gf.posture.mask = organic.lat.mask;
+    gf.posture.relative_density = organic.lat.relative_density;
+    // ★ `cell_size_field` IS LEFT EMPTY ON PURPOSE (§3a). An organic lattice has no
+    // cells, and filling this with the SEPARATION would silently re-point the
+    // certification's cells-per-member guard at the curve-crossing count — the exact
+    // overloading §3(a) forbids. The scalar below is a PROVENANCE record (see
+    // LatticePosture: "not used in the math"), and the curve-crossing count is
+    // reported under its own name in the receipt.
+    gf.posture.cell_size_field.clear();
+    gf.posture.cell_size_mm = organic.lat.report.achieved_spacing_median_mm;
+    cell = gf.posture.cell_size_mm;
+    R.cell_mm = cell;
+    mask = organic.lat.mask;
+    // The law's own aggregate fields are re-pointed at what was TRACED, so the
+    // receipt never reports the doubled lattice's counts beside organic geometry.
+    gf.latticed_voxels = organic.lat.report.latticed_voxels;
+    gf.rho_min_used = organic.lat.report.rho_min_emitted;
+    gf.rho_max_used = organic.lat.report.rho_max_emitted;
+  }
+
+  // ── ★ STEPPED (task 2026-08-21-organic-lattice, §4) ────────────────────────
+  // One cell per DECLARED region, derived from that region's own FEA-driven density
+  // and its own member width, taken VERBATIM. The per-voxel cell field it produces is
+  // a real cell — stepped HAS cells — so it goes into the posture and the
+  // certification's cells-per-member guard reads it correctly, unlike organic where
+  // that field is deliberately left empty (§3a).
+  std::vector<LatticeSteppedPass> stepped_passes;
+  if (graded && R.algorithm == LatticeAlgorithm::Stepped) {
+    R.stepped = run_stepped_step(solved_grid, dens, mask,
+                                 gf.posture.relative_density, region_ids_for_stepped,
+                                 job.grading, printed_iso, 32);
+    if (!R.stepped.ran || R.stepped.cells.empty()) {
+      R.ungradeable = true;
+      R.ungradeable_reason =
+          "the stepped algorithm derived no region cell: every declared include "
+          "region either holds no latticed voxel or has no measurable member width. "
+          "Stepped steps BETWEEN declared regions, so a job with none has nothing "
+          "for it to do — use \"algorithm\": \"doubled\".";
+      R.gf = gf;
+      return R;
+    }
+    R.stepped_ran = true;
+    gf.posture.cell_size_field = R.stepped.cell_field;
+    cell = R.stepped.max_cell_mm;   // the COARSEST, the conservative single scalar
+    gf.posture.cell_size_mm = cell;
+    R.cell_mm = cell;
   }
 
   // The lattice REGION's cell dimensions — pure geometry, derived here (rather
@@ -4182,6 +4760,79 @@ LatticeVariantOutcome lattice_one_variant(
     }
   }
 
+  // ── ★ STEPPED: one generator pass per DISTINCT region cell ─────────────────
+  // Built here, beside the dyadic `levels`, because it answers the same question in
+  // the opposite way: `levels` snaps every region onto the shared ladder so the passes
+  // meet at nodes, and this one does not snap at all so they do not. Each pass gets its
+  // own cell grid over the WHOLE part (so cell indices are its own), an occupancy
+  // predicate restricted to the regions carrying that cell, and its own radius field —
+  // the printed diameter is d(rho, cell), so a region at a coarser cell prints a
+  // proportionally fatter strut at the same relative density.
+  std::vector<std::vector<char>> stepped_cell_active;  // backing store, per pass
+  if (R.stepped_ran) {
+    // Distinct cells in ASCENDING order — a fixed emission order (§5a).
+    std::vector<double> distinct;
+    for (const SteppedRegionCell& rc : R.stepped.cells) distinct.push_back(rc.cell_mm);
+    std::sort(distinct.begin(), distinct.end());
+    distinct.erase(std::unique(distinct.begin(), distinct.end()), distinct.end());
+    stepped_cell_active.resize(distinct.size());
+    for (std::size_t pi = 0; pi < distinct.size(); ++pi) {
+      const double pcell = distinct[pi];
+      LatticeRegion PR = lattice_region_for(solved_grid, pcell, &boundary);
+      const int pnx = PR.nx, pny = PR.ny, pnz = PR.nz;
+      std::vector<char>& active = stepped_cell_active[pi];
+      active.assign(static_cast<std::size_t>(pnx) * pny * pnz, 0);
+      // A pass cell is active iff it holds a masked voxel whose region carries THIS
+      // pass's cell — derived from the SAME mask the posture certifies, so the file
+      // and the certificate cannot disagree about where lattice is (bar B7).
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!mask[e]) continue;
+            if (R.stepped.cell_field[e] != pcell) continue;
+            const int ci = static_cast<int>(
+                std::floor((solved_grid.origin.x + (i + 0.5) * solved_grid.spacing -
+                            PR.origin.x) / pcell));
+            const int cj = static_cast<int>(
+                std::floor((solved_grid.origin.y + (j + 0.5) * solved_grid.spacing -
+                            PR.origin.y) / pcell));
+            const int ck = static_cast<int>(
+                std::floor((solved_grid.origin.z + (k + 0.5) * solved_grid.spacing -
+                            PR.origin.z) / pcell));
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= pnx || cj >= pny || ck >= pnz)
+              continue;
+            active[(static_cast<std::size_t>(ck) * pny + cj) * pnx + ci] = 1;
+          }
+      const std::vector<char>* ap = &active;
+      PR.latticed = [ap, pnx, pny, pnz](int ci, int cj, int ck) {
+        if (ci < 0 || cj < 0 || ck < 0 || ci >= pnx || cj >= pny || ck >= pnz)
+          return false;
+        return (*ap)[(static_cast<std::size_t>(ck) * pny + cj) * pnx + ci] != 0;
+      };
+      LatticeSteppedPass sp;
+      sp.region = PR;
+      sp.radius.nseg = 8;
+      sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(gf.band_rho_min, pcell);
+      const VoxelGrid& sgr = solved_grid;
+      const std::vector<char>& mref = mask;
+      const std::vector<double>& rref = gf.posture.relative_density;
+      const double rlo = gf.band_rho_min;
+      sp.radius.field = [&sgr, &mref, &rref, pcell, rlo](Vec3 pt) {
+        auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+        const int i = cl(static_cast<int>(
+            std::floor((pt.x - sgr.origin.x) / sgr.spacing)), sgr.nx - 1);
+        const int j = cl(static_cast<int>(
+            std::floor((pt.y - sgr.origin.y) / sgr.spacing)), sgr.ny - 1);
+        const int k = cl(static_cast<int>(
+            std::floor((pt.z - sgr.origin.z) / sgr.spacing)), sgr.nz - 1);
+        const std::size_t e = sgr.index(i, j, k);
+        return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, pcell);
+      };
+      stepped_passes.push_back(std::move(sp));
+    }
+  }
+
   // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
   const double tg0 = wall_seconds();
   R.oc = export_latticed_variant(
@@ -4193,7 +4844,9 @@ LatticeVariantOutcome lattice_one_variant(
       /*emit_solid_companion=*/graded || roles_present ||
           added_rcpt.kept_solid_voxels > 0,
       levels.empty() ? nullptr : &levels,
-      levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso);
+      levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso,
+      organic.ran ? &organic.lat : nullptr,
+      stepped_passes.empty() ? nullptr : &stepped_passes);
   R.gen_seconds = wall_seconds() - tg0;
 
   // ── ★ THE NO-PROTRUSION INVARIANT, ASSERTED (task 2026-08-08-strut-clip-
@@ -5932,11 +6585,72 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       an_rho_field = region_density_field(design_grid, an_roles.includes, fit_cells);
       gp.region_relative_density = &an_rho_field;
     }
+    // ★ THE ALGORITHM (task 2026-08-21-organic-lattice, §4). Resolved BEFORE the law
+    // runs, so an organic + structural job is refused before it spends a solve on a
+    // density it is not allowed to certify.
+    const LatticeAlgorithm an_alg = resolve_lattice_algorithm(job.grading);
+    refuse_organic_structural(an_alg, job.grading);
     const GradedField gf =
         grade_lattice(design_grid, density, a.von_mises_field, nullptr, gp);
 
+    // ★ ORGANIC. The grading law above chose the DENSITY (all three algorithms honour
+    // the same intent, §4b); this turns that density into a spacing field and traces.
+    // Doubled and stepped skip it entirely, so their receipts are unchanged.
+    // STEPPED needs the per-voxel region membership; on the analyze path the
+    // candidate set is the whole printed design (region == nullptr above), so the ids
+    // are built here from the same declared regions the geometry path uses.
+    SteppedOutcome an_step;
+    if (an_alg == LatticeAlgorithm::Stepped) {
+      const LatticeRoleRegions sr =
+          lattice_role_regions_from_job(job, &result.model, &model_grid);
+      std::vector<int> ids(design_grid.voxel_count(), 0);
+      for (int k = 0; k < design_grid.nz; ++k)
+        for (int j = 0; j < design_grid.ny; ++j)
+          for (int i = 0; i < design_grid.nx; ++i) {
+            const std::size_t e = design_grid.index(i, j, k);
+            if (!gf.posture.mask[e]) continue;
+            const Vec3 c{design_grid.origin.x + (i + 0.5) * design_grid.spacing,
+                         design_grid.origin.y + (j + 0.5) * design_grid.spacing,
+                         design_grid.origin.z + (k + 0.5) * design_grid.spacing};
+            for (std::size_t ri = 0; ri < sr.includes.size(); ++ri)
+              if (point_in_clearance_region(sr.includes[ri], c, 0.0)) {
+                ids[e] = static_cast<int>(ri) + 1;
+                break;
+              }
+          }
+      an_step = run_stepped_step(design_grid, density, gf.posture.mask,
+                                 gf.posture.relative_density, ids, job.grading, 0.5,
+                                 gp.thickness_cap_voxels);
+    }
+    OrganicOutcome an_org;
+    if (an_alg == LatticeAlgorithm::Organic)
+      an_org = run_organic_step(design_grid, density, a.stress_tensor_field,
+                                gf.posture.mask, gf.posture.relative_density,
+                                gf.band_rho_min, gf.band_rho_max, job.grading,
+                                applied_build_dir, 0.5, gp.thickness_cap_voxels);
+
     RunInfo gi = build_run_info(job, options, RunObservability{});
     gi.grading_present = true;
+    gi.grading_algorithm = lattice_algorithm_name(an_alg);
+    // ★ THE COMPARABLE NUMBER (bar R10): the solid volume THIS algorithm's own
+    // per-voxel density implies. Read from the algorithm's own field, never from
+    // another's, so the three-way table compares one quantity three times.
+    {
+      const std::vector<double>& rho_used =
+          an_org.ran ? an_org.lat.relative_density : gf.posture.relative_density;
+      const std::vector<char>& msk_used =
+          an_org.ran ? an_org.lat.mask : gf.posture.mask;
+      const double vox = design_grid.spacing * design_grid.spacing *
+                         design_grid.spacing;
+      double sum = 0.0;
+      long long cnt = 0;
+      for (std::size_t e = 0; e < msk_used.size(); ++e)
+        if (msk_used[e]) { sum += rho_used[e]; ++cnt; }
+      gi.grading_lattice_solid_volume_mm3 = sum * vox;
+      gi.grading_algorithm_latticed_voxels = cnt;
+    }
+    if (an_org.ran) fill_organic_run_info(gi, an_org);
+    if (an_step.ran) fill_stepped_run_info(gi, an_step);
     gi.grading_topology = lattice_topology_name(gf.posture.topology);
     gi.grading_band_rho_min = gf.band_rho_min;
     gi.grading_band_rho_max = gf.band_rho_max;

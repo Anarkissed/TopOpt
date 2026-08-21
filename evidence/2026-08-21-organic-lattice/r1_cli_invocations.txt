@@ -1,0 +1,43 @@
+★ R1 — ALL THREE ALGORITHMS, RUN FROM THE CLI ON HIS PART. THE EXACT INVOCATIONS.
+
+All three from evidence/2026-08-21-organic-lattice/jobs/, against M2_verticalStand.step
+at resolution 128, mode "analyze" (the LATTICE-ONLY path — a part latticed with no
+topology optimisation, which is what RUN SIM drives).
+
+  cd evidence/2026-08-21-organic-lattice/jobs
+
+  DOUBLED   core/build/topopt-cli analyze doubled.json  --out ../runs/doubled
+  STEPPED   core/build/topopt-cli analyze stepped.json  --out ../runs/stepped
+  ORGANIC   core/build/topopt-cli analyze organic.json  --out ../runs/organic
+
+The three job files differ in EXACTLY ONE line:
+
+  "grading": { ..., "algorithm": "doubled" | "stepped" | "organic" }
+
+and nothing else. `doubled.json` states the key explicitly; `nokey_bandC.json` is the
+SAME job with the key absent, which is the byte-identity control (§4d) — an absent key
+resolves to "doubled" and produces the identical lattice (r2_doubled_byte_identity.txt).
+
+WALL TIME, whole run, on a CMAKE_BUILD_TYPE=Release build (R13):
+  doubled 101.74 s   stepped 99.81 s   organic 104.69 s   (nokey control 92.26 s)
+★ NO COST CLAIM ABOUT THE TRACER IS DERIVED FROM THOSE NUMBERS. The FEA solve dominates
+every arm and its own run-to-run spread is larger than the tracer. The tracer was timed
+DIRECTLY instead, around trace_organic_lattice and nothing else:
+
+  ORGANIC TRACE: 0.2200 s   (3,056 curves, 65,461.8 mm of curve, 17,153 connectors,
+                             84,660 candidate voxels, 2,097,152-voxel grid)
+
+which is 0.21 % of that run's wall time. §1(a) predicted the eigensolves would be
+milliseconds and they are: the whole tracer — eigen-decomposition, RK4, spacing queries,
+thinning, connection, rasterisation — is a fifth of a second.
+
+TWO MORE ARMS, same job apart from the one key stated:
+  organic_clamp45.json  adds "organic_overhang_angle_deg": 45   (R6's armed arm)
+  organic.json run twice -> runs/organic and runs/organic_det2  (R9's determinism pair)
+
+REFUSALS PROVED, not asserted:
+  * the BASE binary (d28527cc) on doubled.json:
+      topopt-cli: job.json: unknown key "algorithm" in grading
+    — the key is genuinely new, so the R2 comparison had to be run on the key-less job.
+  * "algorithm": "organic" without "intent": "aesthetic" is REFUSED by run_job with the
+    tensor reason (§3c). Organic cannot be run structurally.

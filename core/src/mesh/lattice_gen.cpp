@@ -175,6 +175,20 @@ Vec3 node_pos(const LatticeRegion& R, int gx, int gy, int gz) {
 // what makes it so, so the caps match the wall winding.
 void emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1, double r,
                 int nseg) {
+  lattice_emit_strut(sink, p0, p1, r, nseg);
+}
+
+void emit_node(TriangleSink& sink, const Vec3& c, double r) {
+  lattice_emit_node(sink, c, r);
+}
+
+}  // namespace
+
+// ★ THE TWO SWEPT SOLIDS, PUBLIC (lattice_gen.hpp states why). Bodies unchanged
+// from the anonymous-namespace originals; only the linkage moved, so the octet
+// output stays byte-identical (bar R2).
+void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
+                        double r, int nseg) {
   const Vec3 axis = unit(sub(p1, p0));
   const Vec3 ref = std::fabs(axis.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
   const Vec3 u = unit(cross(axis, ref));
@@ -203,7 +217,7 @@ void emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1, double r,
 
 // An icosahedron of radius r at centre c (20 tris) — the node joint that makes
 // the strut union a solid body at each vertex.
-void emit_node(TriangleSink& sink, const Vec3& c, double r) {
+void lattice_emit_node(TriangleSink& sink, const Vec3& c, double r) {
   const double t = (1.0 + std::sqrt(5.0)) / 2.0;
   const double s = r / std::sqrt(1.0 + t * t);
   std::array<Vec3, 12> p = {{{-1, t, 0}, {1, t, 0}, {-1, -t, 0}, {1, -t, 0},
@@ -228,6 +242,17 @@ void emit_node(TriangleSink& sink, const Vec3& c, double r) {
   for (const auto& tr : f) sink.add_triangle(p[tr[0]], p[tr[1]], p[tr[2]]);
 }
 
+double lattice_prism_volume_mm3(double r, double length_mm, int nseg) {
+  return 0.5 * nseg * r * r * std::sin(2.0 * M_PI / nseg) * length_mm;
+}
+
+double lattice_node_volume_mm3(double r) {
+  const double a = 4.0 * r / std::sqrt(10.0 + 2.0 * std::sqrt(5.0));
+  return (5.0 / 12.0) * (3.0 + std::sqrt(5.0)) * a * a * a;
+}
+
+namespace {
+
 double checked_radius(const LatticeRadiusField& G, const Vec3& mid) {
   const double r = G.radius_at(mid);
   if (!(r > 0.0))
@@ -239,11 +264,10 @@ double checked_radius(const LatticeRadiusField& G, const Vec3& mid) {
 // Per-primitive solid volumes for the B9 accounting (soup basis: overlaps are
 // not deducted, matching how the triangle counts are reported).
 double ngon_prism_volume(double r, double len, int nseg) {
-  return 0.5 * nseg * r * r * std::sin(2.0 * M_PI / nseg) * len;
+  return lattice_prism_volume_mm3(r, len, nseg);
 }
 double icosahedron_volume(double circumradius) {
-  const double a = 4.0 * circumradius / std::sqrt(10.0 + 2.0 * std::sqrt(5.0));
-  return (5.0 / 12.0) * (3.0 + std::sqrt(5.0)) * a * a * a;
+  return lattice_node_volume_mm3(circumradius);
 }
 
 // ------------------------------------------------------------ boundary finish
@@ -1113,6 +1137,62 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
 }
 
 // ── swept cell size: one ordinary pass per dyadic level ─────────────────────
+// ★ STEPPED (lattice_gen.hpp states what it gives up). N ordinary passes, one per
+// region, into one sink, in the order given.
+LatticeGenStats generate_lattice_stepped(
+    LatticeGenTopology topo, const std::vector<LatticeSteppedPass>& passes,
+    TriangleSink& sink, const LatticeSkinSpec& skin,
+    const LatticeGenObserver* observer) {
+  if (passes.empty())
+    throw std::invalid_argument("generate_lattice_stepped: no passes");
+  LatticeGenStats total;
+  bool any = false;
+  for (const LatticeSteppedPass& p : passes) {
+    if (!(p.region.cell_mm > 0.0))
+      throw std::invalid_argument(
+          "generate_lattice_stepped: every pass needs cell_mm > 0");
+    if (p.region.nx < 1 || p.region.ny < 1 || p.region.nz < 1) continue;
+    const LatticeGenStats st =
+        generate_lattice(topo, p.region, p.radius, sink, skin, observer);
+    total.triangles += st.triangles;
+    total.strut_triangles += st.strut_triangles;
+    total.node_triangles += st.node_triangles;
+    total.struts += st.struts;
+    total.nodes += st.nodes;
+    total.latticed_cells += st.latticed_cells;
+    total.clipped_struts += st.clipped_struts;
+    total.dropped_struts += st.dropped_struts;
+    total.strut_fragments += st.strut_fragments;
+    total.landings += st.landings;
+    total.anchor_nodes += st.anchor_nodes;
+    total.skin_struts += st.skin_struts;
+    total.rim_elements += st.rim_elements;
+    total.skin_triangles += st.skin_triangles;
+    total.rim_triangles += st.rim_triangles;
+    total.uncertified_spans_dropped += st.uncertified_spans_dropped;
+    total.skipped_nonorthogonal_rims += st.skipped_nonorthogonal_rims;
+    total.skin_chords += st.skin_chords;
+    total.skin_chords_rejected_band += st.skin_chords_rejected_band;
+    total.skin_chords_rejected_projection += st.skin_chords_rejected_projection;
+    total.skin_chords_clipped_away += st.skin_chords_clipped_away;
+    total.interior_volume_mm3 += st.interior_volume_mm3;
+    total.skin_volume_mm3 += st.skin_volume_mm3;
+    total.rim_volume_mm3 += st.rim_volume_mm3;
+    if (st.struts == 0 && st.nodes == 0) continue;
+    if (!any) {
+      total.min_strut_diameter_mm = st.min_strut_diameter_mm;
+      total.max_strut_diameter_mm = st.max_strut_diameter_mm;
+      any = true;
+    } else {
+      total.min_strut_diameter_mm =
+          std::min(total.min_strut_diameter_mm, st.min_strut_diameter_mm);
+      total.max_strut_diameter_mm =
+          std::max(total.max_strut_diameter_mm, st.max_strut_diameter_mm);
+    }
+  }
+  return total;
+}
+
 LatticeGenStats generate_lattice_multilevel(
     LatticeGenTopology topo, const LatticeRegion& base,
     const std::vector<LatticeLevelSpec>& levels, TriangleSink& sink,

@@ -1,0 +1,28 @@
+★ R2 — DOUBLED (and STEPPED's shared law) BYTE-IDENTICAL TO PR 345's HEAD.
+
+THE GUARD FIRST: the two binaries must actually DIFFER, or this compares one binary
+with itself and 'identical' means nothing.
+  base (d28527cc, no task code)  7b827beed8b93c0bce92c4b66982d98d495dc4e3f4658d71877bd50d7758c9cb
+  branch                          12c7706b625cf557cf397bd532f2f4a61df1319b5d6f4a5ab8699c1b0e22ac6c
+  DIFFER -> the comparison is real.
+
+THE JOB: evidence/.../jobs/nokey_bandC.json — PR 344's aes_bandC_on verbatim, with
+NO "algorithm" key at all. That is the byte-identity case that matters (§4d): every
+existing job states nothing and must be unchanged.
+
+--- sha256, base binary vs branch binary, same job ---
+  run_info.json          DIFFER
+  analysis_report.json   IDENTICAL
+  analysis.json          IDENTICAL
+  fields.bin             IDENTICAL
+
+--- run_info differs only where a timestamp does (shown in full) ---
+169c169
+<     "created_wall_ms": 1787278696013,
+---
+>     "created_wall_ms": 1787278493599,
+228a229,231
+>         "algorithm": "doubled",
+>         "algorithm_latticed_voxels": 84660,
+>         "lattice_solid_volume_mm3": 62555.03318,
+(nothing above = identical)

@@ -338,6 +338,32 @@ struct JobGrading {
   double cell_mm = 0.0;                 // TARGET uniform cell edge (mm), finite > 0;
                                         // raised to the printability floor if too small
   double min_extrudable_width_mm = 0.0; // stated minimum strut width (mm), finite > 0
+  // ── ★ THE LATTICE ALGORITHM (task 2026-08-21-organic-lattice, §4) ───────────
+  // "doubled" — the DYADIC LADDER (cell_plan.hpp). ★ THE DEFAULT, and an empty
+  //   string means "not stated" and resolves to it, so every existing job is
+  //   byte-identical and no caller can acquire a different algorithm by accident.
+  // "stepped" — one cell per DECLARED REGION, taken verbatim, no transition
+  //   handling.
+  // "organic" — struts TRACED along the stress field; spacing is the input and cell
+  //   size is derived from it (topopt/organic_lattice.hpp). ★ AESTHETIC INTENT ONLY:
+  //   a traced lattice is anisotropic by construction and the certification library
+  //   carries exactly one CUBIC tensor per topology, so there is nothing for a
+  //   structural claim to certify against. run_job REFUSES organic + structural
+  //   rather than certifying against a tensor that does not describe the geometry.
+  std::string algorithm;                // "" | "doubled" | "stepped" | "organic"
+  // ORGANIC only. The strut diameter the whole traced lattice is laid at (mm); the
+  // grade is expressed through SPACING at a constant bead, not by thinning struts.
+  // 0 => `min_extrudable_width_mm`, the thinnest bead the user says the machine lays.
+  double organic_strut_width_mm = 0.0;
+  // ORGANIC only. The printable cone half-angle, in DEGREES FROM THE BUILD
+  // DIRECTION, applied INSIDE the tracing loop (§2a). ★ 0 (the DEFAULT) DISARMS it,
+  // and that default is measured, not assumed: the maintainer printed a traced coupon
+  // with a 41.78 mm unsupported run, supports off, clean
+  // (evidence/2026-08-20-lattice-only-grading/r4b_PRINT_RESULT.md), so the 45-degree
+  // rule is not the binding limit on this machine. Set 45 to impose the textbook gate.
+  // Either way the receipt reports what fraction of segments sit outside 45 degrees.
+  double organic_overhang_angle_deg = 0.0;
+
   // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────
   // "structural" — density is a STRENGTH statement: demand against the material
   //   allowable. Use when the lattice is carrying the load.

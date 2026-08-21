@@ -98,6 +98,7 @@ add_library(topopt
   src/mesh/cad_project.cpp
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
+  src/mesh/organic_lattice.cpp
   src/mesh/lattice_boundary.cpp
   src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
@@ -117,6 +118,7 @@ add_library(topopt
   src/simp/mma_joint.cpp
   src/simp/grading.cpp
   src/simp/cell_plan.cpp
+  src/simp/lattice_algorithm.cpp
   src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/fea/lattice.cpp

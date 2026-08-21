@@ -1,0 +1,77 @@
+★ R10 — THE SAME PART THROUGH ALL THREE ALGORITHMS. ONE TABLE.
+
+Model M2_verticalStand.step, resolution 128 (grid spacing 1.70528 mm), mode analyze,
+lattice-only. The three jobs are BYTE-IDENTICAL apart from grading.algorithm — same
+part, same load case, same intent (aesthetic), same band [0.1, 0.35], same 0.42 mm
+stated minimum extrudable width. Band C rather than the default band because the
+default throws on DOUBLED at PR 345's HEAD (see x0_preexisting_doubled_throw.txt;
+PR 346 owns it).
+
+=== BLOCK A — THE SHARED GRADING LAW. These rows MUST be identical: all three
+=== algorithms take the density from the same law (§4b), and Daynes' comparison is
+=== against a uniform core OF THE SAME DENSITY. Identical here is the POSITIVE
+=== CONTROL that the three jobs differ only in grading.algorithm. A difference in
+=== this block would mean the comparison was never apples-to-apples.
+                                                  DOUBLED            STEPPED            ORGANIC
+-----------------------------------------------------------------------------------------------
+candidate (region) voxels                          110904             110904             110904
+solid fallback voxels                               26244              26244              26244
+rho min / max used                        0.1000 / 0.3500    0.1000 / 0.3500    0.1000 / 0.3500
+cell mm (scalar reported)                               4                  4                  4
+min cells-per-member                               5.1158             5.1158             5.1158
+strut diameter min / max mm               0.4201 / 1.0784    0.4201 / 1.0784    0.4201 / 1.0784
+density at band floor (voxels)                          0                  0                  0
+clamped lo / hi                                     0 / 0              0 / 0              0 / 0
+
+DENSITY HISTOGRAM of THE GRADING LAW (20 equal bins across the band) — also part
+of the control, and identical for the same reason.
+  doubled  [0, 56015, 10018, 5481, 3442, 3064, 2512, 4128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  stepped  [0, 56015, 10018, 5481, 3442, 3064, 2512, 4128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  organic  [0, 56015, 10018, 5481, 3442, 3064, 2512, 4128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+=== BLOCK B — WHAT THE ALGORITHM ACTUALLY LAID DOWN. These rows are read from
+=== EACH algorithm's OWN per-voxel density (§4a), which is why they diverge.
+                                                  DOUBLED            STEPPED            ORGANIC
+-----------------------------------------------------------------------------------------------
+LATTICED voxels (this algorithm)                    84660              84660              84593
+LATTICE SOLID VOLUME mm^3                        62555.03           62555.03           73014.66
+  as mass, PLA 1.24 g/cm^3                       77.568 g           77.568 g           90.538 g
+
+★ ORGANIC IS 16.7 % HEAVIER AT THE SAME TARGET DENSITY (73014.66 vs 62555.03 mm^3),
+  and the cause is measured, not guessed. Two contributions, both named:
+   (a) the SOUP BASIS. Organic's volume is deposited strut volume with crossings
+       NOT deducted, and a traced lattice crosses more often than an octet cell
+       does per unit volume. The same basis is used for the octet stats, but the
+       octet's crossings are at shared nodes it emits once.
+   (b) the ACHIEVED separation runs BELOW the requested one where Jobard-Lefer's
+       d_test permits it: 1.3689 mm achieved against 2.7343 mm requested, and
+       d_test = 0.5 x d_sep = 1.3672 mm exactly. Curves are allowed to approach to
+       half a separation before tracing stops, so locally the lattice is denser
+       than the field asked for. That is the algorithm behaving as specified, and
+       it is the number to move if the mass matters (params.test_ratio).
+
+--- what only ONE of them has ---
+STEPPED  regions 5, cells 2.7284 .. 8.8675 mm (VERBATIM, no dyadic snap)
+         per-region cell mm      [8.867452374, 8.867452374, 2.728446884, 2.728446884, 4.092670326]
+         per-region rho (FEA)    [0.1136, 0.1034, 0.2483, 0.35, 0.1008]
+         per-region cells/member [5, 5, 5, 5, 5]
+         regions out of regime   0
+         ★ SEAM COST: 5 abutting region pairs, 1 joined.
+           4 of 5 pairs are mechanically DISCONNECTED — cells of unrelated
+           size share no node positions. That is what DOUBLED's dyadic ladder buys
+           and what STEPPED gives up, measured rather than argued.
+
+ORGANIC  curves 3056 kept (of 3056 traced; 996 stubs, 0 thinned), 65461.8 mm total length
+         per family              [637, 904, 1515]
+         connectors              17153 (median length 0.9224 mm)
+         ★ R3 curves with <2 connections   34 of 3056 (1.113 %)
+           curves with NO connection       1
+           connected components            3, largest holds 0.9846 of curves
+         ★ R5 spacing requested  2.7343 .. 5.1155 mm
+               ACHIEVED          1.3689 .. 7.7948 mm (median 3.0690)
+               floors: print 1.6177 mm, resolution 1.7053 mm; raised 0 / 0 voxels
+         ★ R7 curves-per-member  min 3.0830, median 8.6808, floor 2.0, below floor 0 voxels
+         ★ R6 clamp DISARMED (default): 0.6467 of traced segments outside a 45 deg cone
+         swirl (§6d) degenerate frame 0.0404 of candidates; worst per-curve swap 1.0000
+         tensor_out_of_regime    True  (aesthetic intent only — §3c)
+         ★ R13 tracer cost, TIMED DIRECTLY around trace_organic_lattice: 0.2200 s

@@ -911,6 +911,113 @@ struct RunInfo {
   double grading_layer_height_bound_strut_mm = 0.0;
   double grading_layer_height_bound_overhang_mm = 0.0;
   double grading_declared_layer_height_mm = 0.0;   // 0 = the job did not state one
+  // ── ★ THE LATTICE ALGORITHM (task 2026-08-21-organic-lattice, §4) ────────────
+  // "doubled" on every pre-task run and on every job that does not state one, so a
+  // legacy receipt gains exactly one string and nothing else.
+  std::string grading_algorithm;
+  // ★ THE ONE NUMBER ALL THREE ALGORITHMS CAN BE COMPARED ON (§4a / bar R10), and it
+  // exists BECAUSE all three emit a per-voxel relative density: the solid volume that
+  // density implies, sum(rho[e]) * voxel_volume over the latticed set. It is computed
+  // from whichever algorithm's density the run actually produced, so a three-way table
+  // is reading the same quantity three times rather than three different quantities.
+  double grading_lattice_solid_volume_mm3 = 0.0;
+  long long grading_algorithm_latticed_voxels = 0;  // that algorithm's own count
+  // ── ★ ORGANIC's own report. ALL ZERO unless the organic algorithm ran, which is
+  // what keeps a doubled receipt byte-identical apart from the name above.
+  bool organic_present = false;
+  double organic_strut_diameter_mm = 0.0;
+  // ★ R13 — THE TRACER'S COST, TIMED DIRECTLY around trace_organic_lattice and nothing
+  // else. Never inferred by differencing two runs' wall clocks: the FEA solve dominates
+  // both arms and its own run-to-run spread is larger than the quantity being claimed.
+  double organic_trace_seconds = 0.0;
+  long long organic_candidate_voxels = 0;
+  long long organic_degenerate_voxels = 0;   // §6(d): the swirl, NAMED and COUNTED
+  double organic_degenerate_fraction = 0.0;
+  double organic_max_frame_swap_fraction = 0.0;
+  long long organic_curves_traced = 0;
+  long long organic_curves_kept = 0;
+  long long organic_curves_thinned = 0;
+  long long organic_curves_too_short = 0;
+  std::vector<long long> organic_curves_per_family;
+  std::vector<double> organic_curve_length_per_family_mm;
+  // WHY each half-trace stopped, and why each offered seed was refused. Two ledgers
+  // that each sum to their own total, so a thin lattice is attributable.
+  long long organic_stop_left_region = 0;
+  long long organic_stop_hit_d_test = 0;
+  long long organic_stop_no_direction = 0;
+  long long organic_stop_step_budget = 0;
+  long long organic_seeds_offered = 0;
+  long long organic_seeds_outside_region = 0;
+  long long organic_seeds_too_close = 0;
+  long long organic_seeds_traced = 0;
+  double organic_total_curve_length_mm = 0.0;
+  // R3 — "the count of struts with fewer than two connections; the target is zero,
+  // and a NON-ZERO COUNT IS THE FINDING".
+  long long organic_connectors = 0;
+  long long organic_curves_under_two_connections = 0;
+  long long organic_curves_no_connection = 0;
+  long long organic_connected_components = 0;
+  double organic_largest_component_fraction = 0.0;
+  double organic_connector_median_length_mm = 0.0;
+  double organic_connector_max_cross_deviation_deg = 0.0;
+  double organic_connector_mean_cross_deviation_deg = 0.0;
+  long long organic_connectors_cross_measured = 0;
+  long long organic_connectors_below_resolution = 0;
+  // R6 — the overhang clamp, and the 45-degree counterfactual measured beside it.
+  bool organic_overhang_clamp_armed = false;
+  double organic_overhang_angle_deg = 0.0;
+  double organic_clamped_step_fraction = 0.0;
+  double organic_curves_touched_fraction = 0.0;
+  double organic_segments_outside_45_fraction = 0.0;
+  double organic_curve_segments_outside_45_fraction = 0.0;
+  double organic_connectors_outside_45_fraction = 0.0;
+  // R5 — the ACHIEVED spacing window, against the requested one and against BOTH
+  // floors, so the receipt says WHICH bound bit rather than only how wide it is.
+  double organic_requested_spacing_min_mm = 0.0;
+  double organic_requested_spacing_max_mm = 0.0;
+  double organic_achieved_spacing_min_mm = 0.0;
+  double organic_achieved_spacing_max_mm = 0.0;
+  double organic_achieved_spacing_median_mm = 0.0;
+  double organic_spacing_print_floor_mm = 0.0;
+  double organic_spacing_resolution_floor_mm = 0.0;
+  long long organic_spacing_raised_for_print_voxels = 0;
+  long long organic_spacing_raised_for_resolution_voxels = 0;
+  // R7 — the CURVE-CROSSING COUNT, under its OWN name. `cells_per_member` counts
+  // cells across a wall and an organic lattice has no cells; this counts CURVES.
+  double organic_min_curves_per_member = 0.0;
+  double organic_median_curves_per_member = 0.0;
+  double organic_curves_per_member_floor = 0.0;
+  long long organic_below_curves_per_member_floor_voxels = 0;
+  bool organic_curves_per_member_measured = false;
+  // the emitted density
+  long long organic_latticed_voxels = 0;
+  double organic_rho_min = 0.0;
+  double organic_rho_max = 0.0;
+  double organic_rho_median = 0.0;
+  long long organic_rho_clamped_lo_voxels = 0;
+  long long organic_rho_clamped_hi_voxels = 0;
+  double organic_emitted_volume_mm3 = 0.0;  // soup basis: crossings NOT deducted
+  // ★ §3(c) — ALWAYS TRUE ON AN ORGANIC RUN, and it is the honest reading of the
+  // certificate rather than a defect: the homogenised tensor is CUBIC and measured on
+  // the octet cell, and traced geometry is anisotropic by construction.
+  bool organic_tensor_out_of_regime = false;
+  // ── ★ STEPPED's own report. All zero unless the stepped algorithm ran.
+  bool stepped_present = false;
+  long long stepped_regions = 0;
+  std::vector<double> stepped_region_cell_mm;      // one per region, in id order
+  std::vector<double> stepped_region_rho;          // its FEA-driven median density
+  std::vector<double> stepped_region_width_mm;
+  std::vector<double> stepped_region_cells_per_member;
+  std::vector<long long> stepped_region_voxels;
+  double stepped_min_cell_mm = 0.0;
+  double stepped_max_cell_mm = 0.0;
+  long long stepped_regions_out_of_regime = 0;     // below the ACCURACY floor
+  long long stepped_regions_no_cell = 0;
+  // ★ THE COST OF "NO TRANSITION HANDLING", MEASURED. Two regions are ADJACENT when
+  // their latticed voxels touch; they are JOINED only when their cells are equal, and
+  // an adjacent-but-not-joined pair is a mechanical disconnection at that seam.
+  long long stepped_adjacent_region_pairs = 0;
+  long long stepped_adjacent_pairs_joined = 0;
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
   double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT
