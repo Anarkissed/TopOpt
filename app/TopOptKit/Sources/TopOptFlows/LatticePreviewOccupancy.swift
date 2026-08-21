@@ -179,6 +179,33 @@ public enum LatticePreviewOccupancy {
             return dem.values[(k * dem.ny + j) * dem.nx + i]
         }
 
+        // ★★ THE FLOOR IS EVALUATED OVER THE CELL'S OWN MATERIAL, NOT ITS CENTRE
+        // (measured on his part, 2026-08-20).
+        //
+        // ★ THE CENTRE SAMPLE LET THROUGH CELLS NOTHING SUPPORTS. It read ONE voxel
+        // and the gate said `if t > 0` — so where a cell's centre landed OUTSIDE the
+        // solid, thickness came back 0 and "no measurement here" was taken as "no
+        // objection". On his 13.9 mm wall at a 4 mm cell that is most of them: ZERO
+        // voxels in the region clear N* = 5 (a 4 mm cell needs 20 mm of member) and
+        // 374 cells survived anyway. Manual 4 mm looked the most complete of every
+        // mode BECAUSE it was the most wrong — the preview drawing lattice the run
+        // will not build, which is the whole defect this floor exists to end.
+        //
+        // ★ CORE'S RULE IS EVERY VOXEL, and it is asked that way here: the WORST
+        // thickness under the cell decides. `+inf` is core's "thicker than measured"
+        // sentinel and clears it, the conservative direction; free space measures
+        // nothing and gets no vote.
+        func thicknessAt(_ w: SIMD3<Float>) -> Double? {
+            guard minCellsPerMember > 0, !memberThickness.isEmpty else { return nil }
+            let g = (w - occ.origin) / occ.spacing
+            let vi = Swift.min(Swift.max(Int(g.x.rounded()), 0), occ.nx - 1)
+            let vj = Swift.min(Swift.max(Int(g.y.rounded()), 0), occ.ny - 1)
+            let vk = Swift.min(Swift.max(Int(g.z.rounded()), 0), occ.nz - 1)
+            let n = (vk * occ.ny + vj) * occ.nx + vi
+            guard n >= 0, n < memberThickness.count else { return nil }
+            return memberThickness[n]
+        }
+
         let S = 4   // 4³ subsamples per cell
         for ck in 0..<ncz {
             for cj in 0..<ncy {
@@ -186,6 +213,7 @@ public enum LatticePreviewOccupancy {
                     let center = occ.origin + SIMD3<Float>(Float(ci), Float(cj), Float(ck)) * cell
                     var insideCount = 0
                     var demandSum: Float = 0
+                    var worstThickness = Double.infinity
                     for sz in 0..<S { for sy in 0..<S { for sx in 0..<S {
                         let off = SIMD3<Float>((Float(sx) + 0.5) / Float(S) - 0.5,
                                                (Float(sy) + 0.5) / Float(S) - 0.5,
@@ -194,6 +222,11 @@ public enum LatticePreviewOccupancy {
                         if occAt(w) {
                             insideCount += 1
                             demandSum += demandAt(w)
+                            // Only material INSIDE the cell gets a say — a sample in
+                            // free space measures nothing and must not vote either way.
+                            if let t = thicknessAt(w), t > 0, t < worstThickness {
+                                worstThickness = t
+                            }
                         }
                     } } }
                     let frac = Double(insideCount) / Double(S * S * S)
@@ -203,18 +236,10 @@ public enum LatticePreviewOccupancy {
                     // built. `+inf` is core's "thicker than measured" sentinel and
                     // clears the floor, which is the conservative direction.
                     var memberHoldsTheCell = true
-                    if minCellsPerMember > 0, !memberThickness.isEmpty {
-                        let g = (center - occ.origin) / occ.spacing
-                        let vi = Swift.min(Swift.max(Int(g.x.rounded()), 0), occ.nx - 1)
-                        let vj = Swift.min(Swift.max(Int(g.y.rounded()), 0), occ.ny - 1)
-                        let vk = Swift.min(Swift.max(Int(g.z.rounded()), 0), occ.nz - 1)
-                        let n = (vk * occ.ny + vj) * occ.nx + vi
-                        if n >= 0, n < memberThickness.count {
-                            let t = memberThickness[n]
-                            if t.isFinite, t > 0, t / Double(cell) < minCellsPerMember {
-                                memberHoldsTheCell = false
-                            }
-                        }
+                    if minCellsPerMember > 0, !memberThickness.isEmpty,
+                       worstThickness.isFinite,
+                       worstThickness / Double(cell) < minCellsPerMember {
+                        memberHoldsTheCell = false
                     }
                     if frac >= insideFraction, memberHoldsTheCell {
                         vals[(ck * ncy + cj) * ncx + ci] =

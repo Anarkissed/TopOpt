@@ -2204,7 +2204,8 @@ std::vector<double> lattice_cell_size_plan(
     const double* rho, std::size_t rho_count,
     const double* width, std::size_t width_count,
     double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
-    int cap_radius_voxels, const std::string& topology) {
+    int cap_radius_voxels, const std::string& topology,
+    const double* desired_cell_mm, std::size_t desired_count) {
   const std::size_t want =
       static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
       static_cast<std::size_t>(nz);
@@ -2242,11 +2243,32 @@ std::vector<double> lattice_cell_size_plan(
   pp.min_extrudable_width_mm = min_extrudable_width_mm;
   pp.thickness_cap_voxels = cap_radius_voxels;
 
+  // ★★ FIT IS THE OTHER PLANNER, AND FOR A THIN WALL IT IS THE RIGHT ONE
+  // (maintainer, 2026-08-20: "I set the cell size to Fit and it still looks like
+  // shit"). Fit picks S = W / N* per declared region — the cell is CHOSEN so exactly
+  // N* fit across the member, so the cells-per-member floor is satisfied BY
+  // CONSTRUCTION and nothing is culled. That is why core is content to refuse Fit
+  // alongside sub-floor retention: Fit does not need it.
+  //
+  // `desired_cell_mm` is grid-indexed — the S_want of the region owning each
+  // candidate voxel, which the caller gets from `lattice_derive_cell_for_member`.
+  // Absent ⇒ the swept planner, exactly as before.
   topopt::CellSizePlan plan;
-  try {
-    plan = topopt::plan_cell_sizes(grid, rho_v, cand, width_v, pp);
-  } catch (...) {
-    return {};   // core refused the inputs; the caller says it has no plan
+  const bool fit = desired_cell_mm != nullptr && desired_count == want;
+  if (fit) {
+    pp.mode = topopt::CellSizeMode::Fit;
+    std::vector<double> want_v(desired_cell_mm, desired_cell_mm + want);
+    try {
+      plan = topopt::plan_cell_sizes_fit(grid, rho_v, cand, width_v, want_v, pp);
+    } catch (...) {
+      return {};
+    }
+  } else {
+    try {
+      plan = topopt::plan_cell_sizes(grid, rho_v, cand, width_v, pp);
+    } catch (...) {
+      return {};   // core refused the inputs; the caller says it has no plan
+    }
   }
 
   const std::size_t cells =

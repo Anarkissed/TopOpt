@@ -307,8 +307,17 @@ final class StrutLineWidthTests: XCTestCase {
         // ★ AND KEEP THEM ON ONE LINE. This walk reads line by line, so a wrapped
         // site names no bead and lands in `offenders` — it fails CLOSED, which is
         // correct, and cost one full-suite cycle to learn.
-        XCTAssertEqual(strutSites, 10,
-                       "the ten audited lattice sites (AppModel 1, LatticePage 2, "
+        // ★ ELEVEN SINCE 2026-08-20 (Auto's derived swept window), AUDITED:
+        //
+        // NEW SITE: `AppModel` -> `LatticeAutoPosture.applied(lineWidthMM:)`. Auto is
+        // swept-without-typing, and both ends of the window it derives are STRUT
+        // questions: the fine end is `bead / phi(rho_max)` — the finest cell whose
+        // strut prints as a lone unsupported extrusion — and the coarse end is
+        // `lattice_derive_cell_for_member`, which is the same printability frontier
+        // against a member width. A wall bead here would hand every region a cell it
+        // cannot hold and grade the part back to solid.
+        XCTAssertEqual(strutSites, 11,
+                       "the eleven audited lattice sites (AppModel 2, LatticePage 2, "
                        + "WorkspacePlaceholder 5, ProjectModel 1, LatticeSetupWizard 1). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,

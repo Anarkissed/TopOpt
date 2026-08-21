@@ -285,8 +285,14 @@ public final class AppModel: ObservableObject {
         // usable B-rep geometry cannot select a mode with nothing to fit into.
         let emitted = project.latticeJobRegions()
         let includeCount = emitted.regions.filter { $0.role == .include }.count
-        let resolvedLattice = LatticeAutoPosture.applied(to: project.lattice,
-                                                         includeRegionCount: includeCount)
+        // ★ Auto's swept window is DERIVED, so the posture needs the two things it is
+        // derived from: what each declared region has to fit into, and the bead.
+        let resolvedLattice = LatticeAutoPosture.applied(
+            to: project.lattice,
+            includeRegionCount: includeCount,
+            regionWidthsMM: emitted.regions.filter { $0.role == .include }
+                .map { $0.depthMM },
+            lineWidthMM: project.printParams.strutLineWidthMM)
         let latticeSpec = resolvedLattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,

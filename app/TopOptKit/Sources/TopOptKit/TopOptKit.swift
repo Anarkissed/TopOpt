@@ -1122,7 +1122,14 @@ public enum TopOptKit {
                                            minCellMM: Double, maxCellMM: Double,
                                            minExtrudableWidthMM: Double,
                                            capRadiusVoxels: Int = 32,
-                                           topology: String = "octet") -> LatticeCellSizePlan? {
+                                           topology: String = "octet",
+                                           /// ★ FIT: the S_want of the region owning
+                                           /// each candidate voxel. Empty ⇒ the swept
+                                           /// planner. See `plan_cell_sizes_fit` —
+                                           /// the cell is chosen so exactly N* fit
+                                           /// across the member, which satisfies the
+                                           /// cells-per-member floor by construction.
+                                           desiredCellMM: [Double] = []) -> LatticeCellSizePlan? {
         let n = nx * ny * nz
         guard nx > 0, ny > 0, nz > 0, candidate.count == n,
               relativeDensity.count == n, memberWidthMM.count == n else { return nil }
@@ -1137,17 +1144,21 @@ public enum TopOptKit {
 
         var flags = [UInt8](repeating: 0, count: n)
         for i in 0..<n where candidate[i] { flags[i] = 1 }
+        let desired = (desiredCellMM.count == n) ? desiredCellMM : []
         let flat: [Double] = flags.withUnsafeBufferPointer { cb in
             relativeDensity.withUnsafeBufferPointer { rb in
                 memberWidthMM.withUnsafeBufferPointer { wb in
-                    topoptbridge.lattice_cell_size_plan(
-                        Int32(nx), Int32(ny), Int32(nz), mean,
-                        Double(origin.x), Double(origin.y), Double(origin.z),
-                        cb.baseAddress, cb.count,
-                        rb.baseAddress, rb.count,
-                        wb.baseAddress, wb.count,
-                        minCellMM, maxCellMM, minExtrudableWidthMM,
-                        Int32(capRadiusVoxels), std.string(topology))
+                    desired.withUnsafeBufferPointer { db in
+                        topoptbridge.lattice_cell_size_plan(
+                            Int32(nx), Int32(ny), Int32(nz), mean,
+                            Double(origin.x), Double(origin.y), Double(origin.z),
+                            cb.baseAddress, cb.count,
+                            rb.baseAddress, rb.count,
+                            wb.baseAddress, wb.count,
+                            minCellMM, maxCellMM, minExtrudableWidthMM,
+                            Int32(capRadiusVoxels), std.string(topology),
+                            desired.isEmpty ? nil : db.baseAddress, desired.count)
+                    }
                 }
             }
         }.map { Double($0) }

@@ -233,6 +233,10 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// it belongs with the others.
     public var retainSubfloor: Bool = false
 
+    /// ★ HOW AUTO VARIES THE CELL — the secondary question that appears only when the
+    /// cell size is Auto. Only `defaultGrade` is wired; see `LatticeCellTransition`.
+    public var cellTransition: LatticeCellTransition = .defaultGrade
+
     /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
     /// `.sim ⇒ .uniform`, cell `.swept ⇒ .fixed`) lives in `LatticeSettings`
     /// and is applied by borrowing it, so the wizard cannot drift into a second
@@ -269,6 +273,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   manualStrutThicknessMM: s.manualStrutThicknessMM,
                   simulateStresses: s.simulateStresses,
                   retainSubfloor: s.retainSubfloorInUnloadedRegions)
+        self.cellTransition = s.cellTransition
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -295,6 +300,10 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // (grading.cpp:66-70) — two mechanisms deciding the same material, two
         // receipts — so the wizard drops it exactly as `LatticeAutoPosture` does
         // rather than letting the page author a job core will refuse.
+        // ★ AND ONLY A WIRED TRANSITION REACHES THE JOB. An unavailable one would
+        // otherwise ride along as `defaultGrade`'s behaviour under another name.
+        out.cellTransition = cellTransition.unavailableReason == nil
+            ? cellTransition : .defaultGrade
         out.retainSubfloorInUnloadedRegions =
             (cellSizeMode == .fit) ? false : retainSubfloor
         if !out.retainSubfloorInUnloadedRegions {

@@ -56,7 +56,7 @@ final class LatticeWizardRetentionTests: XCTestCase {
     /// ★ AND THE GATE THE ROW DRAWS IS THE SAME GATE THE RESULTS PAGE DRAWS — one
     /// switch in two places must not grow two sets of rules about when it may be
     /// operated, nor two explanations of what it does.
-    func testTheWizardsGateIsTheSharedOne() {
+    func testTheWizardsGateIsTheSharedOne() throws {
         func control(graded: Bool, cell: LatticeCellSizeMode) -> LatticeRetentionControl {
             LatticeRetentionControl.compute(
                 armed: false, graded: graded,
@@ -72,8 +72,23 @@ final class LatticeWizardRetentionTests: XCTestCase {
 
         let fit = control(graded: true, cell: .fit)
         XCTAssertFalse(fit.enabled)
-        XCTAssertTrue(fit.disabledReason?.contains("Per region") == true,
-                      "the copy must name WHICH to use when: \(fit.disabledReason ?? "nil")")
+        // ★★ THE COPY MUST NAME CHIPS THAT EXIST (2026-08-20). This used to require
+        // the word "Per region" — the cell-size chip says "Fit", and the density copy
+        // told him to set a mode called "Auto" that is not in that row at all. Both
+        // sent him looking for controls the app does not have. The bar is now the one
+        // that matters: every mode named in a disabled reason must be a real chip.
+        let chips = ["Auto", "Swept", "Manual", "Fit",        // Cell size
+                     "Sim", "Uniform", "Per region"]          // Density
+        for c in [control(graded: true, cell: .fit), control(graded: false, cell: .swept)] {
+            let why = try XCTUnwrap(c.disabledReason)
+            let named = chips.filter { why.contains($0) }
+            XCTAssertFalse(named.isEmpty,
+                           "a disabled reason must say which control to use: \(why)")
+            XCTAssertLessThan(why.count, 160,
+                              "★ two sentences, not a paragraph he cannot parse: \(why)")
+        }
+        XCTAssertTrue(fit.disabledReason?.contains("Fit") == true,
+                      "★ call it what the chip calls it: \(fit.disabledReason ?? "nil")")
 
         // His own configuration from the screenshot: Density Sim, Cell size Swept.
         let his = control(graded: true, cell: .swept)

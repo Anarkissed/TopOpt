@@ -938,7 +938,8 @@ public struct WorkspacePlaceholder: View {
                                                      // ★ …and the bead, so the
                                                      // preview refuses what the
                                                      // nozzle cannot lay.
-                                                     lineWidthMM: project.printParams.strutLineWidthMM)
+                                                     lineWidthMM: project.printParams.strutLineWidthMM,
+                                                     fitCellMM: latticePreviewFitCells)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -1536,11 +1537,28 @@ public struct WorkspacePlaceholder: View {
     /// grading. `minExtrudableWidthMM` is that number; absent, there is nothing
     /// honest to grade against and the preview stays uniform.
     private var latticePreviewCellSweep: LatticeCellSweep? {
-        let lat = project.lattice
-        guard lat.cellSizeMode == .swept, lat.cellMinMM > 0,
-              lat.cellMaxMM >= lat.cellMinMM,
-              project.printParams.strutLineWidthMM > 0 else { return nil }
         let bead = project.printParams.strutLineWidthMM
+        guard bead > 0 else { return nil }
+        // ★★ RESOLVE AUTO THE SAME WAY THE JOB DOES. Auto is swept-without-typing
+        // (LatticeAutoPosture), and the preview must ask the SAME resolver rather
+        // than reading the stored mode — otherwise Auto previews one uniform cell
+        // while the run grades, which is the divergence this whole pass exists to
+        // close.
+        let emitted = project.latticeJobRegions().regions.filter { $0.role == .include }
+        let lat = LatticeAutoPosture.applied(
+            to: project.lattice,
+            includeRegionCount: emitted.count,
+            regionWidthsMM: emitted.map { $0.depthMM },
+            lineWidthMM: bead)
+        // ★ FIT RIDES THE SAME PLANNER PATH. Core's fit planner needs the ladder's
+        // ends too: the finest and coarsest cell any region asked for.
+        if lat.cellSizeMode == .fit {
+            let cells = latticePreviewFitCells.filter { $0 > 0 }
+            guard let lo = cells.min(), let hi = cells.max(), lo > 0 else { return nil }
+            return LatticeCellSweep(minMM: lo, maxMM: hi, minExtrudableWidthMM: bead)
+        }
+        guard lat.cellSizeMode == .swept, lat.cellMinMM > 0,
+              lat.cellMaxMM >= lat.cellMinMM else { return nil }
         return LatticeCellSweep(minMM: lat.cellMinMM, maxMM: lat.cellMaxMM,
                                 minExtrudableWidthMM: bead)
     }
@@ -1555,6 +1573,29 @@ public struct WorkspacePlaceholder: View {
         guard lat.retainSubfloorInUnloadedRegions else { return nil }
         return LatticeSubfloorRetention(armed: true,
                                         stressFractionMax: lat.subfloorStressFraction)
+    }
+
+    /// ★★ FIT'S CELL PER DECLARED REGION, `W / N*`, from core — the mode that makes a
+    /// thin wall latticeable AT ALL, because the cell is chosen so exactly N* fit
+    /// across the member. Empty unless the resolved cell mode is Fit.
+    private var latticePreviewFitCells: [Double] {
+        let bead = project.printParams.strutLineWidthMM
+        guard bead > 0 else { return [] }
+        let emitted = project.latticeJobRegions().regions
+        let includes = emitted.filter { $0.role == .include }
+        let lat = LatticeAutoPosture.applied(
+            to: project.lattice, includeRegionCount: includes.count,
+            regionWidthsMM: includes.map { $0.depthMM }, lineWidthMM: bead)
+        guard lat.cellSizeMode == .fit else { return [] }
+        // One entry per region in the SCENE's order (all roles), because the bake
+        // walks `scene.regions` — an include-only list would mis-index an exclude.
+        return emitted.map { r in
+            guard r.role == .include, r.depthMM > 0 else { return 0 }
+            let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
+                                                      memberWidthMM: r.depthMM,
+                                                      minExtrudableWidthMM: bead)
+            return d.valid ? d.cellMM : 0
+        }
     }
 
     /// The certifiable limits for the current topology, READ FROM CORE at runtime (the
@@ -3916,10 +3957,29 @@ public struct WorkspacePlaceholder: View {
         // costed with, so the skin drawn is the wall the printer would lay down.
         let skinMM = project.lattice.boundary.faceSkinMM(
             wallRingMM: project.printParams.wallRingMM)
+        // ★ THE MEASURED FIELD, CAPTURED ON THE MAIN ACTOR with the rest. It rides
+        // beside `field` rather than replacing it: `field` is what the preview GRADES
+        // from (the density mode may withhold it), this is what the preview MEASURES
+        // with, and sub-floor retention reads only this one.
+        let stressFieldForRetention = latticeStressField.map {
+            StressField(nx: $0.nx, ny: $0.ny, nz: $0.nz,
+                        origin: SIMD3<Float>($0.origin), spacing: Float($0.spacingMM),
+                        values: $0.vonMises)
+        }
+        let gradesFromSim = project.lattice.densityMode.needsSimulation
         strutBakeInFlight = true
         DispatchQueue.global(qos: .userInitiated).async {
             let scene = LatticeSDFScene(mesh: mesh, field: field,
-                                        latticeID: latticeID, regions: regions,
+                                        latticeID: latticeID,
+                                        // ★ The stage's OWN solve, present whether or
+                                        // not the density mode grades from it — the
+                                        // load question is not the density question.
+                                        stressField: stressFieldForRetention,
+                                        // ★ In Sim mode the solve governs the grading;
+                                        // a DERIVED per-region density must not stand
+                                        // in for it ("I never typed it").
+                                        statedDensityGoverns: !gradesFromSim,
+                                        regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,
                                         // ★ ONLY WHAT HE SET TO LATTICE. On the

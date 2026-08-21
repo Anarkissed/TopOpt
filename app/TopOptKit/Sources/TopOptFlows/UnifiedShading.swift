@@ -244,12 +244,15 @@ struct LCell {
     int    L;
 };
 
-static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
-                             float3 p) {
+// ★ THE READ IS PER BASE CELL, NOT PER STEP. The march samples the same base cell
+// many times over; re-reading its level every step cost 6% of the frame budget on the
+// bracket (17.6 ms against a 16.6 ms bound) and bought nothing — the level cannot
+// change without the base cell changing. The march caches this and recomputes only
+// `q`, which is arithmetic.
+static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellTex,
+                                float3 bi) {
     float S0 = U.latticeOrigin.w;
     float3 dims = U.gridDims.xyz;
-    float3 cb = (p - U.latticeOrigin.xyz) / S0;
-    float3 bi = round(cb);
     float lvl = 0.0;
     if (all(bi >= -0.5) && all(bi < dims - 0.5)) {
         // G is the level; it is 0 on the ungraded path, so this reduces EXACTLY to
@@ -260,9 +263,19 @@ static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
     o.L = int(lvl + 0.5);
     o.m = exp2(float(o.L));
     o.blk = floor(max(bi, float3(0.0)) / o.m);
-    float3 ctr = o.blk * o.m + (o.m - 1.0) * 0.5;   // block centre, in base cells
-    o.q = (cb - ctr) / o.m;
+    o.q = float3(0.0);          // filled by the caller, from its own point
     o.S = S0 * o.m;
+    return o;
+}
+
+/// The whole frame for a point — used where the cost of a read does not repeat
+/// (the normal's six taps), never inside the march's inner loop.
+static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
+                             float3 p) {
+    float S0 = U.latticeOrigin.w;
+    float3 cb = (p - U.latticeOrigin.xyz) / S0;
+    LCell o = lsdf_cell_frame_at(U, cellTex, round(cb));
+    o.q = (cb - (o.blk * o.m + (o.m - 1.0) * 0.5)) / o.m;
     return o;
 }
 
@@ -309,6 +322,8 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     // the same cell reuse the cache.
     float3 cachedBase = float3(1e9);
     float cachedM = -1.0;
+    float3 cachedBI = float3(1e9);
+    LCell LC; LC.q = float3(0.0); LC.blk = float3(0.0); LC.S = S0; LC.m = 1.0; LC.L = 0;
     float rnCache[27];
     float rhoCache[27];
     bool anyActive = false;
@@ -333,11 +348,18 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         if (t > tEnd) break;
         float3 p = ro + rd * t;
         // ★ THE LOCAL CELL, which under a swept plan is not the same size two steps
-        // from here. Everything below is in THIS cell's normalised coordinates.
-        LCell LC = lsdf_cell_frame(U, cellTex, p);
+        // from here. Everything below is in THIS cell's normalised coordinates —
+        // and the LEVEL is re-read only when the base cell changes, because it
+        // cannot change without it.
+        float3 cb = (p - U.latticeOrigin.xyz) / S0;
+        float3 bi = round(cb);
+        if (any(bi != cachedBI)) {
+            cachedBI = bi;
+            LC = lsdf_cell_frame_at(U, cellTex, bi);
+        }
         float cellHere = LC.S;
         float3 baseCell = LC.blk;
-        float3 q = LC.q;
+        float3 q = (cb - (LC.blk * LC.m + (LC.m - 1.0) * 0.5)) / LC.m;
 
         // Flush trim field: part SDF eroded by `delta` (kills the crease-bulge
         // slivers — see stepParams.y) ∨ the exact part bbox (the bbox term stops
@@ -425,7 +447,23 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                                 ? (rhoMin + (rhoMax - rhoMin) * pow(clamp(v, 0.0, 1.0), gamma))
                                 : uniformRho;
                             rhoCache[idx] = rho;
-                            rnCache[idx] = clamp(max(radiusFloor, lsdf_strut_radius_norm(U, rho)), 0.0, 0.49);
+                            // ★★ THE PRINTABLE FLOOR IS PER CELL, NOT PER PART
+                            // (maintainer, 2026-08-20: "That lattice preview barely
+                            // shows anything").
+                            //
+                            // ★ THE BAND'S FLOOR IS COMPUTED ONCE, at one cell size.
+                            // With a GRADED cell that is wrong everywhere else: strut
+                            // diameter scales with the cell, so a density that prints
+                            // at 2.6 mm is far under a bead at 1.1 mm. Auto's window
+                            // put the base cell at 1.095 mm and every fine cell drew
+                            // sub-bead struts — the speckle defect, re-entered through
+                            // the grading. The floor has to be asked per cell, and in
+                            // normalised terms that is just (bead/2) / S.
+                            float rnPrint = U.overlayParams.z > 0.0
+                                          ? U.overlayParams.z / max(LC.S, 1e-4) : 0.0;
+                            rnCache[idx] = clamp(max(max(radiusFloor, rnPrint),
+                                                     lsdf_strut_radius_norm(U, rho)),
+                                                 0.0, 0.49);
                         } else {
                             rnCache[idx] = -1.0;
                             rhoCache[idx] = 0.0;

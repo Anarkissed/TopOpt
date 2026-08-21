@@ -322,6 +322,67 @@ public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
 /// `fit` (task 2026-08-07-cell-mode-fit-and-swept-floor) derives the cell PER
 /// DECLARED REGION from that region's own thickness — core has carried it since
 /// PR 302 and the device had no way to select it.
+/// ★★ HOW AUTO CHANGES THE CELL FROM PLACE TO PLACE (maintainer, 2026-08-20: "If
+/// 'Auto' is selected for cell size, a secondary question needs to become visible:
+/// 1. Stepped 2. Default Grade 3. Organic Grade").
+///
+/// ★ ONLY `defaultGrade` IS WIRED, on his instruction ("For now, only Default Grade
+/// should be wired to the regular algorithm"). It is core's dyadic ladder: cell sizes
+/// are S0·2^L on an ALIGNED octree, which is the only transition rule that makes
+/// coarse and fine cells meet at SHARED NODES. The other two are shown so the shape
+/// of the choice is visible, and are refused rather than silently run as this one —
+/// a control that quietly does something else is the decorative-control defect this
+/// page has paid for twice.
+///
+/// ★ WHY THE OTHER TWO ARE NOT MERELY UNIMPLEMENTED. `stepped` needs a rule for what
+/// happens AT a step that core does not have (a hard change between arbitrary sizes
+/// leaves strut ends on nothing — PR 250's floating-end reject). `organicGrade` needs
+/// cells that are not on the ladder at all, and PR 235's C5 measured what that costs:
+/// an ~8% per-cell stretch drives Ez/Ex to 1.15, the cell stops being cubic, and the
+/// certification library carries exactly one cubic tensor per topology. Neither is a
+/// UI task.
+public enum LatticeCellTransition: String, Codable, Hashable, Sendable, CaseIterable {
+    case stepped
+    case defaultGrade
+    case organicGrade
+
+    public var title: String {
+        switch self {
+        case .stepped: return "Stepped"
+        case .defaultGrade: return "Default Grade"
+        case .organicGrade: return "Organic Grade"
+        }
+    }
+
+    /// nil ⇒ available. Anything else is the reason it cannot be chosen yet, said as
+    /// a fact about the geometry rather than as "coming soon".
+    public var unavailableReason: String? {
+        switch self {
+        case .defaultGrade: return nil
+        case .stepped:
+            return "Not wired yet. A hard change between two cell sizes needs a rule "
+                 + "for what happens at the seam — struts that end on a neighbour's "
+                 + "face instead of on a shared node are a reject."
+        case .organicGrade:
+            return "Not wired yet. Cells off the dyadic ladder stop being cubic, and "
+                 + "the certification library carries one cubic tensor per topology — "
+                 + "an 8% stretch already drives Ez/Ex to 1.15."
+        }
+    }
+
+    public var body: String {
+        switch self {
+        case .stepped:
+            return "One cell size per region, changing abruptly at the boundary."
+        case .defaultGrade:
+            return "Cell sizes double and halve on core's ladder, so coarse and fine "
+                 + "cells meet at shared nodes."
+        case .organicGrade:
+            return "Cell size varies continuously with the stress."
+        }
+    }
+}
+
 public enum LatticeCellSizeMode: String, Codable, Equatable, Sendable {
     case auto
     case fixed
@@ -548,6 +609,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var cellMM: Double
     /// How the cell size is chosen (bar R6). `.fixed` is the DEFAULT — the shipped
     /// legacy path, so an untouched project emits exactly today's job.
+    /// How Auto varies the cell across the part — see `LatticeCellTransition`.
+    /// Meaningful only when `cellSizeMode == .auto`; the other modes carry their own
+    /// answer (Fit is per region, Swept is the ladder over the user's window).
+    public var cellTransition: LatticeCellTransition = .defaultGrade
     public var cellSizeMode: LatticeCellSizeMode
     /// The sweep window's ends (mm), used only in `.swept`. Stored as the user's raw
     /// pick; the lower end is clamped to CORE's printability floor at use

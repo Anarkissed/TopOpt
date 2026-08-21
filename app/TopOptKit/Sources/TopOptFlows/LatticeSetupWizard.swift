@@ -251,7 +251,20 @@ public struct LatticeSetupWizard: View {
             // stage"). It decides whether thin members are lattice or solid, which
             // is a lattice SETTING; requiring a completed run and a variant to
             // reach it was untenable and is fixed.
-            subfloorRetentionSwitch
+            //
+            // ★ AND ONLY ON THE PART (maintainer, same day: "you have put the
+            // 'unloaded wall' checkbox in both sections … Please remove them from
+            // the 'One cell' sub-menu"). It is a question about the PART's members —
+            // whether this region's material is too thin to certify — and a single
+            // cell has no members to be thin. On the cell view it was a control
+            // about something not on screen.
+            // ★★ THE SECONDARY QUESTION AUTO RAISES (maintainer, 2026-08-20). Only
+            // under Auto: Fit and Swept each carry their own answer already, and
+            // Manual has no transition to make.
+            if model.stage == .lattice, model.cellSizeMode == .auto {
+                cellTransitionRow
+            }
+            if model.stage == .lattice { subfloorRetentionSwitch }
             latencyReadout
             // ★ THE CARD, MOVED HERE: "place the one on the right at the very
             // bottom of the one on the left."
@@ -347,6 +360,54 @@ public struct LatticeSetupWizard: View {
                 .strokeBorder((model.simulateStresses
                                ? DS.Color.accent.opacity(0.5)
                                : DS.Color.strokeSubtle).color, lineWidth: 1)))
+    }
+
+    /// ★★ STEPPED · DEFAULT GRADE · ORGANIC GRADE — how Auto changes the cell from
+    /// place to place.
+    ///
+    /// ★ TWO OF THE THREE ARE REFUSED, VISIBLY, and refused with the geometric
+    /// reason rather than "coming soon" — because the reason is the interesting part
+    /// and because a user told "advanced" learns nothing about their part. Selecting
+    /// one leaves the setting where it was; nothing silently runs `defaultGrade`
+    /// under another name.
+    private static let cellTransitions: [LatticeCellTransition] =
+        [.stepped, .defaultGrade, .organicGrade]
+
+    @ViewBuilder private var cellTransitionRow: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Cell transition")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+            HStack(spacing: DS.Space.xs) {
+                ForEach(Self.cellTransitions, id: \.rawValue) { t in
+                    let off = t.unavailableReason != nil
+                    Button {
+                        guard !off else { return }
+                        model.cellTransition = t
+                        rebuild()
+                    } label: {
+                        Text(t.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                            .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                            .frame(maxWidth: .infinity)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                                .fill((model.cellTransition == t
+                                       ? DS.Color.accent.opacity(0.85)
+                                       : DS.Color.background.opacity(0.35)).color))
+                            .foregroundStyle((off ? DS.Color.textTertiary
+                                             : DS.Color.textPrimary).color)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(off)
+                    .accessibilityIdentifier("wizard-cell-transition-\(t.rawValue)")
+                }
+            }
+            Text(model.cellTransition.unavailableReason ?? model.cellTransition.body)
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// ★★ "KEEP THE LATTICE WHERE THE PART IS TOO THIN TO CERTIFY IT."

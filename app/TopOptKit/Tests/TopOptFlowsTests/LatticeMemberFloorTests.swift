@@ -108,4 +108,61 @@ final class LatticeMemberFloorTests: XCTestCase {
                           + "members cannot hold an 8 mm cell — otherwise the preview "
                           + "is still drawing lattice the run leaves solid")
     }
+
+    /// ★★ AND IT ASKS EVERY VOXEL UNDER THE CELL, NOT THE CENTRE (measured on his
+    /// part, 2026-08-20 — the defect his own testing surfaced).
+    ///
+    /// The gate read one voxel at the cell centre and said `if t > 0`, so a centre
+    /// landing in free space returned 0 and "nothing measured here" passed as
+    /// "nothing objects". Measured on his 13 mm region:
+    ///
+    ///     voxels clearing N* at a 4 mm cell ....  0 of 6,276   (0%)
+    ///     cells surviving the floor ............  374
+    ///
+    /// Zero qualifying voxels and 374 cells drawn. Manual 4 mm looked the most
+    /// complete of every mode because it was the most wrong.
+    func testTheFloorAsksTheWholeCellNotItsCentre() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        var region = LatticeRegionFidelityTests.hisSlab(mesh, halfU: 200, halfW: 200)
+        region.depthMM = 13
+        let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                                    regions: [region], whenEmpty: .latticeNothing)
+        try XCTSkipIf(scene.memberThicknessMM.isEmpty, "core gave no widths")
+        let occ = scene.occupancy
+
+        // The material: nothing in this region can hold a 4 mm cell (needs 20 mm).
+        let inside = (0..<occ.count).filter { occ.values[$0] > 0.5 }
+        let finite = inside.compactMap {
+            scene.memberThicknessMM[$0].isFinite ? scene.memberThicknessMM[$0] : nil
+        }
+        XCTAssertFalse(finite.isEmpty, "positive control: the region has measured material")
+        let qualifying = finite.filter { $0 / 4.0 >= scene.minCellsPerMember }.count
+        XCTAssertEqual(qualifying, 0,
+                       "★ fixture check: a 4 mm cell needs 20 mm and this region "
+                       + "measures at most ~13.9 mm")
+
+        let with = LatticePreviewOccupancy.cellField(
+            occupancy: occ, demand: scene.demand, cellMM: 4.0,
+            memberThickness: scene.memberThicknessMM,
+            minCellsPerMember: scene.minCellsPerMember)
+        let drawn = with.values.filter { $0 >= 0 }.count
+        let without = LatticePreviewOccupancy.cellField(
+            occupancy: occ, demand: scene.demand, cellMM: 4.0)
+        XCTAssertGreaterThan(without.values.filter { $0 >= 0 }.count, 0,
+                             "positive control: there are cells to cull")
+        XCTAssertEqual(drawn, 0,
+                       "★ if NO voxel can hold a 4 mm cell, no 4 mm cell may be "
+                       + "drawn. 374 were, because a centre in free space read as "
+                       + "consent.")
+
+        // ★ AND THE FLOOR STILL LETS THE HONEST CASE THROUGH — 2 mm needs 10 mm and
+        // 96% of this region clears it, so this must NOT become a blanket refusal.
+        let fine = LatticePreviewOccupancy.cellField(
+            occupancy: occ, demand: scene.demand, cellMM: 2.0,
+            memberThickness: scene.memberThicknessMM,
+            minCellsPerMember: scene.minCellsPerMember)
+        XCTAssertGreaterThan(fine.values.filter { $0 >= 0 }.count, 1000,
+                             "★ negative control: a cell the material CAN hold must "
+                             + "still be drawn")
+    }
 }

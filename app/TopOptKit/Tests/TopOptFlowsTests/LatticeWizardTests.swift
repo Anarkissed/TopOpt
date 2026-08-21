@@ -201,38 +201,82 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertEqual(m.densityMode, .uniform)
     }
 
-    func testAutoResolvesToThePerRegionModeWhenRegionsAreDeclared() {
-        // ★ Core's OWN pre-flight names this: at the whole-part Auto cell the
-        // maintainer's 7 mm regions come back SOLID, and core says "set
-        // cell_mode: fit and core derives exactly that, per region".
+    /// ★★ REPLACED, NOT DROPPED (2026-08-20). This asserted §4a — Auto resolves to
+    /// FIT when regions are declared — and the maintainer changed that requirement:
+    /// "Auto should also mean *GRADED*".
+    ///
+    /// ★ WHY HE WAS RIGHT, in one measurement. Fit gives each region ONE cell, and
+    /// core REFUSES fit alongside sub-floor retention — so Auto silently switched
+    /// retention off before the job was built. On his part that is the difference
+    /// between 417 cells of lattice on a quiet wall and 228. Nothing on screen said
+    /// so, and it defeated every other fix in this pass.
+    ///
+    /// ★ WHAT §4a WAS ACTUALLY FOR SURVIVES: core's pre-flight said his 7 mm regions
+    /// came back SOLID at the whole-part Auto cell, and the remedy was a cell each
+    /// region can hold. Auto still delivers that — it is now the CEILING of a swept
+    /// window (`W / N*`, which is Fit's own answer) rather than the single cell, so
+    /// the grading fills in below it. The property is asserted below and it is
+    /// STRONGER than the old one: not merely "a mode was chosen" but "every declared
+    /// region can hold the finest cell that mode sweeps to".
+    func testAutoIsGradedAndEveryRegionCanHoldItsFinestCell() {
         let withRegions = LatticeAutoPosture.resolve(includeRegionCount: 8,
                                                      retainSubfloor: false)
-        XCTAssertEqual(withRegions.cellMode, .fit, "§4a: per region")
+        XCTAssertEqual(withRegions.cellMode, .swept, "★ Auto means graded")
         XCTAssertEqual(withRegions.densityMode, .sim)
+        XCTAssertFalse(withRegions.droppedSubfloorRetention,
+                       "★ and it no longer has to drop retention to be legal")
 
         let none = LatticeAutoPosture.resolve(includeRegionCount: 0,
                                               retainSubfloor: false)
         XCTAssertEqual(none.cellMode, .swept,
                        "§4a: with no region declared, graded across the part")
+
+        // ★ THE 7 mm REGION §4a WAS WRITTEN FOR. Auto's window must reach fine
+        // enough for it, or we are back to the whole-part cell that returned solid.
+        let w = LatticeAutoPosture.autoWindowMM(regionWidthsMM: [7, 13, 20],
+                                                lineWidthMM: 0.42, topology: "octet")
+        let n = TopOptKit.latticeLimits(topology: "octet").minCellsPerMember
+        XCTAssertNotNil(w)
+        if let w {
+            XCTAssertLessThanOrEqual(w.min, 7.0 / n,
+                                     "★ a 7 mm region must be able to hold Auto's "
+                                     + "finest cell — the whole point of §4a")
+            XCTAssertLessThanOrEqual(w.max, 20.0 / n + 1e-9,
+                                     "★ and the ceiling is what the WIDEST region can "
+                                     + "hold, never coarser")
+        }
     }
 
     func testAutoNeverEmitsACombinationCoreRefuses() {
         // §4c — "fit" with no include region, and "fit" alongside sub-floor
         // retention, are both hard core refusals. Auto cannot produce either.
+        // ★ THE BAR IS UNCHANGED; only the way Auto satisfies it has moved. It used
+        // to resolve to fit and then DROP retention; it now never resolves to fit at
+        // all, so the refusable pair cannot arise. The assertion below is written
+        // against the REFUSAL, not against the mode, so it holds either way.
         var s = LatticeSettings()
         s.cellSizeMode = .auto
         s.retainSubfloorInUnloadedRegions = true
 
-        let noRegions = LatticeAutoPosture.applied(to: s, includeRegionCount: 0)
-        XCTAssertNotEqual(noRegions.cellSizeMode, .fit,
-                          "§4c: fit needs a region; Auto does not ask for one "
-                          + "that is not there")
+        for regions in [0, 3, 8] {
+            let out = LatticeAutoPosture.applied(to: s, includeRegionCount: regions,
+                                                 regionWidthsMM: [13, 20],
+                                                 lineWidthMM: 0.42)
+            XCTAssertFalse(out.cellSizeMode == .fit
+                           && out.retainSubfloorInUnloadedRegions,
+                           "§4c: fit alongside retention is a core refusal and Auto "
+                           + "must never author it (\(regions) regions)")
+            XCTAssertFalse(out.cellSizeMode == .fit && regions == 0,
+                           "§4c: fit needs a region")
+        }
 
-        let withRegions = LatticeAutoPosture.applied(to: s, includeRegionCount: 3)
-        XCTAssertEqual(withRegions.cellSizeMode, .fit)
-        XCTAssertFalse(withRegions.retainSubfloorInUnloadedRegions,
-                       "§4c: and it drops the mutually-exclusive one rather than "
-                       + "emitting a job core will reject")
+        // ★ AND THE ONE THAT USED TO BE LOST: retention SURVIVES Auto now.
+        let withRegions = LatticeAutoPosture.applied(to: s, includeRegionCount: 3,
+                                                     regionWidthsMM: [13, 20],
+                                                     lineWidthMM: 0.42)
+        XCTAssertTrue(withRegions.retainSubfloorInUnloadedRegions,
+                      "★ Auto no longer takes the switch away — the defect that made "
+                      + "his quiet wall solid")
         XCTAssertTrue(withRegions.reportRegionCells,
                       "§5: Auto asks for the per-region breakdown")
     }

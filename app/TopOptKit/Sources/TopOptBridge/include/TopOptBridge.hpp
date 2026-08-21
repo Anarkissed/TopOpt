@@ -1126,7 +1126,8 @@ std::vector<double> lattice_cell_size_plan(
     const double* rho, std::size_t rho_count,
     const double* width, std::size_t width_count,
     double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
-    int cap_radius_voxels, const std::string& topology);
+    int cap_radius_voxels, const std::string& topology,
+    const double* desired_cell_mm = nullptr, std::size_t desired_count = 0);
 
 /// Core's sub-floor retention stress-fraction ceiling (see grading.hpp).
 double lattice_subfloor_retention_fraction();

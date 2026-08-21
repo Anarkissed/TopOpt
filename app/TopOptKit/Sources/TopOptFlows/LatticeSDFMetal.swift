@@ -103,8 +103,11 @@ public struct LatticeSDFScene {
     /// boundary trim (round 3). Exact near the surface, so flat faces render straight.
     public var partSDF: LatticeVoxelGrid
     public var demand: LatticeVoxelGrid?
-    /// True only when `demand` is an FEA field rather than a stated per-region
-    /// density inverted back into demand. Sub-floor retention requires it.
+    /// ★ THE MEASURED STRESS, NORMALISED — the FEA field the stage ran, kept apart
+    /// from `demand` because a stated per-region density may overwrite `demand` and
+    /// must never be mistaken for a load reading. nil ⇒ no solve to read.
+    public var stressDemand: LatticeVoxelGrid?
+    /// True iff a measured field reached this scene. Sub-floor retention requires it.
     public var demandIsMeasuredStress: Bool = false
     /// ★ CORE'S LOCAL MEMBER THICKNESS (mm) per occupancy voxel, and core's N*.
     /// Empty / 0 when core had no answer, which disables the floor rather than
@@ -172,6 +175,25 @@ public struct LatticeSDFScene {
     /// filled the entire interior regardless of the declarations. Empty ⇒ no
     /// clipping, which is what the settings page's sample block needs.
     public init(mesh: ViewerMesh, field: StressField?, latticeID: String,
+                // ★★ THE MEASURED FIELD, SEPARATELY FROM THE GRADING ONE (maintainer,
+                // 2026-08-20: "the FEA we run to get the stress map needs to be enough
+                // to say 'This is an unloaded wall'"). `field` may be withheld by the
+                // density mode; this one is present whenever a solve exists, because
+                // "is this wall loaded" is not a question the density mode gets to
+                // answer. Defaults to `field` so every existing call is unchanged.
+                stressField: StressField? = nil,
+                // ★★ WHETHER A PER-REGION DENSITY MAY OUTRANK THE FIELD, and it must
+                // NOT in Sim mode (maintainer, 2026-08-20: "That 17% and 25% was
+                // automatically input, I never typed it").
+                //
+                // ★ THE OVERRIDE WAS WRITTEN FOR A NUMBER THE USER STATED — "it is
+                // the user's own number for that region". But nothing distinguishes a
+                // density HE typed from one the app DERIVED and wrote back onto the
+                // region, and on his part the derived 17% and 25% were silently
+                // replacing the sim field for the whole preview. In Sim mode the
+                // solve governs; the stated-density path is for the modes where he
+                // actually states one.
+                statedDensityGoverns: Bool = true,
                 maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
                 // ★ The band and gamma the raymarcher grades with, so a stated
                 // per-region density can be inverted into the demand value that
@@ -307,9 +329,11 @@ public struct LatticeSDFScene {
         // user's own number for that region; grading it by stress instead would
         // draw struts at a density they did not ask for and the run will not
         // build. With nothing stated this falls through to exactly what it was.
-        let statedDemand = LatticeRegionMask.densityDemand(
-            like: occupancy, regions: regions,
-            rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma)
+        let statedDemand = statedDensityGoverns
+            ? LatticeRegionMask.densityDemand(
+                like: occupancy, regions: regions,
+                rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma)
+            : nil
         self.demand = statedDemand
             ?? LatticePreviewOccupancy.demand(like: occupancy, field: field)
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has
@@ -319,7 +343,21 @@ public struct LatticeSDFScene {
         // Core's rule is that an unmeasured region is not an unloaded one, and a
         // stated 17% is not a stress reading — arming retention off it would decide
         // "this wall carries nothing" from a number that never described load at all.
-        self.demandIsMeasuredStress = statedDemand == nil && self.demand != nil
+        // ★★ AND THE MEASURED FIELD IS KEPT SEPARATELY, ALWAYS (maintainer,
+        // 2026-08-20: "I don't understand why we can't have the FEA that is already
+        // run to hold the values required to say 'this is an unloaded wall' … We are
+        // working on the Lattice *STAGE* meaning everything has to work in here").
+        //
+        // ★ HE IS RIGHT, AND `demand` WAS THE WRONG PLACE TO ASK. `demand` answers
+        // "what density do I draw here", and a stated per-region density is allowed
+        // to outrank the field for that — it is the user's own number. But "is this
+        // wall loaded" is a different question and only the solve can answer it, so
+        // it must not be routed through a value the user can overwrite. The stage
+        // already ran the FEA; keeping it here is what makes the stage sufficient on
+        // its own, with no variant and no results page.
+        self.stressDemand = LatticePreviewOccupancy.demand(like: occupancy,
+                                                           field: stressField ?? field)
+        self.demandIsMeasuredStress = self.stressDemand != nil
 
         // ★★ AFTER `demand` IS ASSIGNED, and that is the whole of a bug this very
         // nearly shipped. `demand` is a `var` with an implicit nil, so baking the
@@ -446,6 +484,16 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var cellSweep: LatticeCellSweep? {
         didSet { if cellSweep != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★★ FIT: the cell each declared region has to fit into, `W / N*`, one entry per
+    /// region in the scene's own order (maintainer, 2026-08-20: "I set the cell size
+    /// to Fit and it still looks like shit" — it did nothing, because only the SWEPT
+    /// planner was wired). Fit chooses the cell so exactly N* fit across the member,
+    /// so the cells-per-member floor is satisfied BY CONSTRUCTION and nothing is
+    /// culled — which is why core is content to refuse Fit alongside retention.
+    /// Empty ⇒ not a Fit job.
+    var fitCellMM: [Double] = [] {
+        didSet { if fitCellMM != oldValue, scene != nil { rebakeCellField() } }
+    }
     /// ★ SUB-FLOOR RETENTION, as the job carries it. Armed ⇒ the cells-per-member
     /// floor stands down where the declared set MEASURES as unloaded, exactly as
     /// `retain_subfloor_in_unloaded_regions` does in the run.
@@ -460,6 +508,19 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var lineWidthMM: Double = 0 {
         didSet { if lineWidthMM != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★★ WHY THE PREVIEW DREW NOTHING, WHEN IT DREW NOTHING (maintainer,
+    /// 2026-08-20: "instead of showing an empty fucking wall we should have a way to
+    /// recognize that it will happen and create a pop-up").
+    ///
+    /// ★ AN EMPTY REGION IS A RESULT, NOT AN ABSENCE. Measured on his part, a swept
+    /// 2–4 mm window returns ZERO cells: at 2 mm his density's strut falls under the
+    /// bead so core must coarsen it, and 4 mm needs a 20 mm member he does not have.
+    /// Caught between "too fine to print" and "too coarse to certify", every cell
+    /// falls back to solid — which is core behaving correctly and the preview showing
+    /// a blank wall as though it had failed. The two causes have OPPOSITE remedies
+    /// (a coarser cell, a thicker member), so naming which one is the whole value.
+    private(set) var emptyReason: String?
+
     /// True when the last bake drew NOTHING because no certifiable density prints
     /// at this cell — so the viewport can say why it is empty.
     private(set) var cellUnprintable = false
@@ -650,6 +711,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                          spacing: SIMD3<Float>(repeating: Float(params.cellMM)),
                                          values: [-1])
             cellField = LatticePreviewOccupancy.uniformCellField(empty, cellMM: params.cellMM)
+            // ★ AND SAY WHY, ON THIS PATH TOO. This branch returns EARLY, so the
+            // diagnosis below never ran and `emptyReason` kept whatever the PREVIOUS
+            // bake had said — a 0.35 mm cell reported "members too thin at 8.00 mm",
+            // which is the wrong cause, the wrong number and the opposite remedy.
+            // A stale explanation is worse than none: it sends him to thicken a wall
+            // when the nozzle is the problem.
+            emptyReason = diagnoseEmpty(scene: scene, field: cellField!)
             cellGrid = empty
             cellTex = makeCellTexture(cellField!)
             bakeGeneration &+= 1
@@ -666,11 +734,40 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             baked = LatticePreviewOccupancy.uniformCellField(grid, cellMM: params.cellMM)
         }
         guard let field = baked else { return }
+        emptyReason = diagnoseEmpty(scene: scene, field: field)
         cellField = field
         cellGrid = field.field
         cellTex = makeCellTexture(field)
         bakeGeneration &+= 1
     }
+
+    /// Nothing drawn, and why. nil when the bake produced cells, or when the region
+    /// itself is empty (nothing was asked for, so nothing is missing).
+    private func diagnoseEmpty(scene: LatticeSDFScene,
+                               field: LatticeCellField) -> String? {
+        guard field.field.values.contains(where: { $0 >= 0 }) == false else { return nil }
+        let candidates = scene.occupancy.values.contains { $0 > 0.5 }
+        guard candidates else { return nil }
+        if cellUnprintable {
+            return "No lattice here: at \(mm(params.cellMM)) even the densest "
+                 + "certifiable lattice has struts thinner than one \(mm(lineWidthMM)) "
+                 + "extrusion. Use a coarser cell."
+        }
+        // Would it have drawn WITHOUT the member floor? Then the members are the
+        // reason, and a finer cell (or retention) is the remedy — not a coarser one.
+        let unfloored = LatticePreviewOccupancy.cellField(
+            occupancy: scene.occupancy, demand: scene.demand, cellMM: field.baseCellMM)
+        if unfloored.values.contains(where: { $0 >= 0 }) {
+            return "No lattice here: these members are too thin to hold "
+                 + "\(Int(scene.minCellsPerMember.rounded())) cells at "
+                 + "\(mm(field.baseCellMM)). Use a finer cell, or keep the lattice "
+                 + "anyway where the part measures unloaded."
+        }
+        return "No lattice here: nothing in this region is both printable at one "
+             + "\(mm(lineWidthMM)) extrusion and thick enough to certify."
+    }
+
+    private func mm(_ v: Double) -> String { String(format: "%.2f mm", v) }
 
     /// ★★ CORE'S PLAN, ASKED FOR AT THE PREVIEW'S OWN DENSITIES.
     ///
@@ -692,8 +789,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
               scene.demandIsMeasuredStress else { return false }
         let ceiling = r.stressFractionMax
             ?? TopOptKit.latticeSubfloorRetentionStressFraction()
+        // ★ THE MEASURED FIELD, never `demand` — see `stressDemand`.
         let peaks = LatticePreviewOccupancy.subfloorPeaks(
-            demand: scene.demand, partSDF: scene.partSDF, occupancy: scene.occupancy)
+            demand: scene.stressDemand, partSDF: scene.partSDF,
+            occupancy: scene.occupancy)
         return LatticePreviewOccupancy.subfloorQualifies(
             regionPeak: peaks.region, partPeak: peaks.part, ceiling: ceiling)
     }
@@ -721,13 +820,34 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             }
         }
 
+        // ★ FIT'S PER-VOXEL WANT: the cell of the region that owns this voxel, by
+        // the SAME first-match rule the emission uses, so the picture and the job
+        // agree about an overlap instead of averaging it into a third answer.
+        var desired: [Double] = []
+        if !fitCellMM.isEmpty, fitCellMM.count == scene.regions.count {
+            desired = [Double](repeating: 0, count: n)
+            for i in 0..<n where candidate[i] {
+                let ix = i % occ.nx, iy = (i / occ.nx) % occ.ny, iz = i / (occ.nx * occ.ny)
+                let p = SIMD3<Double>(
+                    Double(occ.origin.x) + Double(ix) * Double(occ.spacing.x),
+                    Double(occ.origin.y) + Double(iy) * Double(occ.spacing.y),
+                    Double(occ.origin.z) + Double(iz) * Double(occ.spacing.z))
+                for (r, region) in scene.regions.enumerated()
+                where region.role == .include && LatticeRegionMask.contains(p, region: region) {
+                    desired[i] = fitCellMM[r]
+                    break
+                }
+            }
+        }
+
         guard let plan = TopOptKit.latticeCellSizePlan(
             nx: occ.nx, ny: occ.ny, nz: occ.nz, spacing: occ.spacing,
             origin: occ.origin, candidate: candidate, relativeDensity: rho,
             memberWidthMM: scene.memberThicknessMM,
             minCellMM: sweep.minMM, maxCellMM: sweep.maxMM,
             minExtrudableWidthMM: sweep.minExtrudableWidthMM,
-            capRadiusVoxels: 16, topology: params.latticeID) else { return nil }
+            capRadiusVoxels: 16, topology: params.latticeID,
+            desiredCellMM: desired) else { return nil }
 
         let field = LatticePreviewOccupancy.gradedCellField(
             occupancy: occ, demand: scene.demand, plan: plan)
@@ -940,7 +1060,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // ★ …and whether the stress plot is painted onto the struts this frame.
             // Only when the host asks AND a field was actually baked.
             overlayParams: SIMD4(stressOverlay && stressTex != nil ? 1 : 0,
-                                 dressingLevel, 0, 0),
+                                 dressingLevel,
+                                 // ★ z = the minimum strut RADIUS in mm (half the
+                                 // bead). The march turns it into a per-cell
+                                 // normalised floor — the density that prints is a
+                                 // function of the cell, and under a graded plan the
+                                 // cell is not one number. 0 ⇒ no printer stated.
+                                 Float(0.5 * max(0, lineWidthMM)), 0),
             rimColor: SIMD4(Float(LatticeStructureColour.rim.r),
                             Float(LatticeStructureColour.rim.g),
                             Float(LatticeStructureColour.rim.b), 1),

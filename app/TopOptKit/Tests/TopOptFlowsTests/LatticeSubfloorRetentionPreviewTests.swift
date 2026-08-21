@@ -158,4 +158,48 @@ final class LatticeSubfloorRetentionPreviewTests: XCTestCase {
                        "★ retention must stay disarmed on a job with no measured "
                        + "stress, however the switch is set")
     }
+
+    /// ★★ A DERIVED PER-REGION DENSITY MUST NOT SPEAK FOR THE SOLVE (maintainer,
+    /// 2026-08-20: "That 17% and 25% was automatically input, I never typed it").
+    ///
+    /// The stated-density override was written for a number the USER states — "it is
+    /// the user's own number for that region". Nothing distinguished one he typed
+    /// from one the app derived and wrote back onto the region, so on his part a
+    /// derived 17% was silently standing in for the FEA: it replaced the field in the
+    /// grading AND it made retention report "no measurement" on a stage that had just
+    /// run one.
+    ///
+    /// The two questions are now separate. `demand` is what to DRAW and a stated
+    /// density may still govern it; `stressDemand` is what was MEASURED and only the
+    /// solve writes it.
+    func testADerivedDensityDoesNotHideTheSolveFromRetention() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        var region = LatticeRegionFidelityTests.hisSlab(mesh, halfU: 200, halfW: 200)
+        region.depthMM = 60
+        region.relativeDensity = 0.17          // derived onto the region, not typed
+
+        let b = mesh.bounds
+        let n = 16
+        let sp = Swift.max(1e-3, (b.max.x - b.min.x) / Float(n - 1))
+        let field = StressField(nx: n, ny: n, nz: n, origin: b.min, spacing: sp,
+                                values: (0..<(n * n * n)).map { Float($0 % n) })
+
+        // Sim mode: the solve governs the grading, and the derived density stands aside.
+        let sim = LatticeSDFScene(mesh: mesh, field: field, latticeID: "octet",
+                                  stressField: field, statedDensityGoverns: false,
+                                  regions: [region], whenEmpty: .latticeNothing)
+        XCTAssertTrue(sim.demandIsMeasuredStress,
+                      "★ the stage ran an FEA — retention must be able to read it")
+        XCTAssertNotNil(sim.stressDemand)
+
+        // Per-region mode: the stated density governs what is DRAWN, and the solve is
+        // still there to be measured against. Both, at once, without conflict.
+        let stated = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                                     stressField: field, statedDensityGoverns: true,
+                                     regions: [region], whenEmpty: .latticeNothing)
+        XCTAssertNotNil(stated.demand, "the drawn density is still the stated one")
+        XCTAssertTrue(stated.demandIsMeasuredStress,
+                      "★ and the measurement survives beside it — that is the whole "
+                      + "point of keeping them apart")
+    }
 }
