@@ -95,6 +95,26 @@ inline constexpr double kOrganicStepRatio = 0.35;
 // with no connection at all.
 inline constexpr double kOrganicMinLengthRatio = 1.0;
 
+// ★ LOOP AND SPIRAL DETECTION — THE PART OF THE PUBLISHED ALGORITHM I OMITTED.
+// vtkEvenlySpacedStreamlines2D carries `LoopAngle` (20 degrees) and a
+// `ClosedLoopMaximumDistance`, and stops a streamline that closes on itself. Without
+// them a curve in a swirling field integrates round and round: measured on a 40 mm
+// cube, the kept curves averaged 181 mm each — longer than the cube's 69 mm body
+// diagonal — and the result was a tangle of noodles rather than a lattice.
+//
+// Two independent stops, both cheap and both local to the curve being traced:
+//   TURNING  — accumulate the unsigned turn angle between consecutive steps. Past a
+//              FULL REVOLUTION the curve is orbiting, not following a load path.
+//   RE-VISIT — the curve comes back within `d_test` of one of its OWN earlier points,
+//              far enough back that it is not just the previous step. That is
+//              Jobard-Lefer's separation test turned on the curve itself, which is
+//              what "closed loop" means here.
+inline constexpr double kOrganicMaxTurnRevolutions = 1.0;
+// How far back along its own trail a point must be before a re-visit counts, as a
+// multiple of the local separation. Below this the "loop" is just the integrator's
+// own footprint.
+inline constexpr double kOrganicSelfRevisitLag = 2.0;
+
 // ★ THE TEXTBOOK OVERHANG GATE, KEPT ONLY AS THE COUNTERFACTUAL. It is NOT the
 // default and it is NOT applied unless a caller asks for it: the maintainer's coupon
 // printed a 41.78 mm unsupported run clean with supports off, so on this machine the
@@ -133,6 +153,19 @@ inline double organic_spacing_for(double rho, double strut_diameter_mm) {
   if (!(rho > 0.0) || !(strut_diameter_mm > 0.0)) return 0.0;
   return 0.5 * strut_diameter_mm *
          std::sqrt(3.0 * 3.14159265358979323846 / rho);
+}
+// ★ AND THE THIRD ARRANGEMENT OF THE SAME COUPLING — THE ONE PRODUCTION USES.
+// Given the SPACING (the user's swept window) and the density the grading law chose,
+// what bead carries that mass?  t = 2 d sqrt(rho / (3 pi)).
+//
+// ★ THE WINDOW IS THE CONTROL. rho says how much material there is, d says how far
+// apart to put it, and the bead is then not a free choice at all. Reading the coupling
+// in THIS direction is what lets `cell_min_mm` / `cell_max_mm` mean the same thing for
+// organic that they mean for doubled — a range of spacings the user asked for —
+// instead of being silently ignored while the bead sets the spacing behind their back.
+inline double organic_strut_diameter_for(double spacing_mm, double rho) {
+  if (!(spacing_mm > 0.0) || !(rho > 0.0)) return 0.0;
+  return 2.0 * spacing_mm * std::sqrt(rho / (3.0 * 3.14159265358979323846));
 }
 
 // ★ THE STRUT DIAMETER A GIVEN GRID CAN ACTUALLY EXPRESS A GRADE AT.
@@ -183,9 +216,23 @@ struct OrganicParams {
   double min_extrudable_width_mm = 0.0;
 
   // The strut diameter the whole lattice is traced at (mm). 0 => the floor above,
-  // i.e. the thinnest bead the user says the machine lays. Constant by design: the
-  // grade is expressed through SPACING (CURVY), so the bead never has to thin.
+  // i.e. the thinnest bead the user says the machine lays. Used only when
+  // `strut_diameter_field` is null.
   double strut_diameter_mm = 0.0;
+
+  // ★ PER-VOXEL BEAD (task 2026-08-21, follow-up). Grid-indexed, mm; null => the
+  // scalar above everywhere.
+  //
+  // ★ WHY THIS EXISTS. The first version held the bead CONSTANT and let the spacing
+  // fall out of the mass coupling — CURVY's posture, and defensible on its own terms.
+  // But it meant the JOB'S OWN SWEPT WINDOW (`cell_min_mm`/`cell_max_mm`) never
+  // reached the tracer at all: a job asking for 5-10 mm cells got 0.6-2 mm spacing,
+  // which on a 40 mm cube emitted a 2.76 GB mesh carrying 27x the part's own volume
+  // in overlapping struts. The user had asked for a spacing range and been given a
+  // different one. So the window is now the SPACING control (the caller maps demand
+  // onto it) and the BEAD is what falls out of the mass coupling instead — floored,
+  // always, at the stated minimum extrudable width.
+  const std::vector<double>* strut_diameter_field = nullptr;
 
   // The Jobard-Lefer ratios and the integrator step. See the constants above.
   double test_ratio = kOrganicTestRatio;
@@ -269,6 +316,8 @@ struct OrganicReport {
   long long stop_hit_d_test = 0;     // came within d_test of a same-family curve
   long long stop_no_direction = 0;   // the field had no direction there
   long long stop_step_budget = 0;
+  long long stop_turned_too_far = 0; // orbiting: past a full revolution of turning
+  long long stop_self_revisit = 0;   // came back onto its own trail (a closed loop)
   long long seeds_offered = 0;
   long long seeds_outside_region = 0;
   long long seeds_too_close = 0;     // within d_sep of an existing same-family curve
@@ -300,13 +349,32 @@ struct OrganicReport {
   std::size_t connectors_cross_measured = 0;
   double max_connector_cross_deviation_deg = 0.0;
   double mean_connector_cross_deviation_deg = 0.0;
-  // ★ R3 — "the count of struts with fewer than two connections; the target is zero,
-  // and a non-zero count is the finding". A kept curve IS a strut here.
+  // ── ★ R3, AND THE FIRST VERSION OF IT MEASURED THE WRONG OBJECT ────────────
+  // These four count components of the CURVE GRAPH — curves as nodes, connectors as
+  // edges. That graph is an abstraction I built, and it agreed with itself: on a
+  // 40 mm cube it reported ONE component holding 100 % of the curves while the
+  // EMITTED SOLIDS were 5,414 separate pieces with 90 % of the material floating
+  // free. A connector being recorded as an edge does not make two strut solids
+  // touch. Kept because they still say something about the connection PASS, but they
+  // are NOT the connectivity bar and must never again be reported as if they were.
   std::size_t curves_with_fewer_than_two_connections = 0;
   std::size_t curves_with_no_connection = 0;
-  std::size_t connected_components = 0;      // over the curve/connector graph
+  std::size_t connected_components = 0;      // over the curve/connector GRAPH
   std::size_t largest_component_curves = 0;
   double largest_component_fraction = 0.0;
+
+  // ── ★★ THE REAL ONE: PHYSICAL CONNECTEDNESS OF THE EMITTED SOLIDS ──────────
+  // Union-find over every emitted segment (curve spans AND connectors), joined when
+  // their swept solids actually OVERLAP — segment-to-segment distance < r_a + r_b.
+  // That is the question a slicer asks and the question a printed part answers, and
+  // it is the only connectivity number this header is willing to call R3.
+  //
+  // Weighted by LENGTH, not by count: one 40 mm curve adrift matters more than a
+  // 2 mm stub, and a count would hide that.
+  std::size_t solid_components = 0;
+  double solid_largest_component_length_fraction = 0.0;
+  double solid_stranded_length_mm = 0.0;   // everything outside the largest component
+  std::size_t solid_segments = 0;
 
   // §2(b) the overhang clamp — R6
   double overhang_angle_deg_used = 0.0;      // 0 => the clamp was DISARMED
@@ -336,6 +404,11 @@ struct OrganicReport {
   double achieved_spacing_max_mm = 0.0;
   double achieved_spacing_median_mm = 0.0;  // full sort, never a sample
   double strut_diameter_mm = 0.0;
+  // ★ The factor the bead was scaled by to match the density the grading law asked
+  // for, once the ACTUAL traced length was known (the idealised three-orthogonal-
+  // families model over-estimates the bead). 1.0 = the model was right.
+  double bead_calibration = 1.0;
+  bool bead_calibration_floored = false;  // the minimum extrudable width won
   double min_extrudable_width_mm = 0.0;
   std::size_t spacing_raised_for_print_voxels = 0;       // d below the printable floor
   std::size_t spacing_raised_for_resolution_voxels = 0;  // d below one voxel
@@ -438,6 +511,27 @@ struct OrganicGenStats {
   double volume_mm3 = 0.0;              // soup basis; overlaps NOT deducted
   double min_strut_diameter_mm = 0.0;
   double max_strut_diameter_mm = 0.0;
+  // ★ ANCHOR BALLS at clipped ends — the octet generator's own discipline (bar B6:
+  // "no clipped end is left floating"), and organic had none. They are also what
+  // makes `outer_finish: "skin"` legal for organic at all: the M4 guard refuses a
+  // finish that emitted no geometry, and before this organic emitted none.
+  std::uint64_t anchor_nodes = 0;
+  std::uint64_t skin_triangles = 0;
+  // ★★ PHYSICAL CONNECTEDNESS OF WHAT WAS ACTUALLY WRITTEN — i.e. AFTER the boundary
+  // clip has trimmed and dropped spans. The tracer's own report measures the lattice
+  // it TRACED; this measures the lattice in the file. The two can differ, because
+  // clipping cuts spans away from the shared polyline vertex on both sides and leaves
+  // a gap there, and that gap is invisible to every graph-level check.
+  std::size_t emitted_components = 0;
+  double emitted_largest_length_fraction = 0.0;
+  double emitted_stranded_length_mm = 0.0;
+};
+
+// One span as it was ACTUALLY EMITTED — after the boundary clip. This is what the
+// welded body is built from, so the weld describes the file rather than the intent.
+struct OrganicSpan {
+  Vec3 a{0, 0, 0}, b{0, 0, 0};
+  double r = 0.0;
 };
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp
@@ -453,7 +547,50 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          // ATTRIBUTE a bad vertex to a pass instead of
                                          // reporting it "unattributed". Observing never
                                          // changes the emitted bytes.
-                                         const LatticeGenObserver* observer = nullptr);
+                                         const LatticeGenObserver* observer = nullptr,
+                                         // Optional: the POST-CLIP spans, in emission
+                                         // order. Non-null to weld them below.
+                                         std::vector<OrganicSpan>* emitted_out = nullptr);
+
+// ── ★ THE WELDED, SINGLE-BODY VERSION ──────────────────────────────────────────
+//
+// ★ WHY THIS IS NOT COSMETIC. The soup the generator emits is exactly how the shipped
+// octet generator emits a lattice: every strut its own closed prism, every node its own
+// icosahedron, interpenetrating. That is fine for a slicer that unions the solid — and
+// it is NOT fine for one that analyses the MESH, which sees thousands of separate
+// closed shells and flags every one that does not touch the plate as a FLOATING BODY.
+// That is precisely what the maintainer saw. The material is connected (the emitted-
+// span connectivity report says 99.99 % in one component); the MESH is not one object.
+//
+// So: rasterise the emitted spans into an occupancy grid, march it, and keep the
+// largest component. ONE watertight body, same strut layout, same diameters, same
+// spacing — only the surface tessellation differs, and it is faceted at the raster
+// pitch. This is the identical recipe the maintainer's own printed coupon was built
+// with (evidence/2026-08-20-lattice-only-grading/coupon/graded_coupon.cpp), so the two
+// are measurable against each other on the same basis.
+//
+// ★ THE DROPPED COMPONENTS ARE SEALED CAVITIES, and dropping them FILLS them solid:
+// air pockets fully enclosed where struts cross, which marching cubes closes with its
+// own inner surface. They are not floating material. They ARE a drainability question
+// this codebase already tracks, so the count is reported rather than swallowed.
+struct OrganicWeldStats {
+  double pitch_mm = 0.0;
+  int nx = 0, ny = 0, nz = 0;
+  long long occupied_voxels = 0;
+  int components_before = 0;      // sealed cavities = this minus 1
+  int components_after = 0;
+  int sealed_cavities_filled = 0;
+  bool watertight = false;
+  double volume_mm3 = 0.0;        // ★ the TRUE UNION volume — overlaps deducted
+  std::size_t triangles = 0;
+};
+
+// `pitch_mm` 0 => derived from the thinnest emitted strut (a quarter of its diameter),
+// which is what resolves a strut rather than aliasing it. `max_voxels` caps the raster
+// so a fine lattice in a big part cannot allocate without bound; the pitch is coarsened
+// to fit and the pitch actually used is reported.
+TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm,
+                          long long max_voxels, OrganicWeldStats& stats);
 
 }  // namespace topopt
 

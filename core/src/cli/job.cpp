@@ -1214,7 +1214,7 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish", "regions", "multiscale",
+                         "outer_finish", "emit_welded_stl", "welded_pitch_mm", "regions", "multiscale",
                          "forecast_only",
                          "require_lattice_void_reaches_exterior"},
                         "lattice");
@@ -1435,6 +1435,18 @@ JobDescription parse_job(const std::string& json_text) {
     }
     // Outer finish (task 2026-07-30-lattice-skin-freeform). Absent => "shell",
     // byte-identical to the boundary-finish behaviour.
+    if (const JsonValue* w = find_key(lat, "emit_welded_stl")) {
+      if (w->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_welded_stl\" must be a boolean");
+      job.lattice.emit_welded_stl = (w->num != 0.0);
+    }
+    if (const JsonValue* wp = find_key(lat, "welded_pitch_mm")) {
+      job.lattice.welded_pitch_mm =
+          require_number(*wp, "lattice.welded_pitch_mm");
+      if (!(job.lattice.welded_pitch_mm > 0.0))
+        schema_fail("lattice \"welded_pitch_mm\" must be > 0 (omit it for the "
+                    "strut-resolving default)");
+    }
     if (const JsonValue* f = find_key(lat, "outer_finish")) {
       job.lattice.outer_finish =
           require_nonempty_string(*f, "lattice.outer_finish");

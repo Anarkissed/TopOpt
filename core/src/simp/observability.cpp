@@ -1345,6 +1345,9 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"stop_hit_d_test\": " + fmt_ll(info.organic_stop_hit_d_test);
       gr += ", \"stop_no_direction\": " + fmt_ll(info.organic_stop_no_direction);
       gr += ", \"stop_step_budget\": " + fmt_ll(info.organic_stop_step_budget);
+      gr += ", \"stop_turned_too_far\": " +
+            fmt_ll(info.organic_stop_turned_too_far);
+      gr += ", \"stop_self_revisit\": " + fmt_ll(info.organic_stop_self_revisit);
       gr += ", \"seeds_offered\": " + fmt_ll(info.organic_seeds_offered);
       gr += ", \"seeds_outside_region\": " +
             fmt_ll(info.organic_seeds_outside_region);
@@ -1358,6 +1361,20 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.organic_curves_no_connection);
       gr += ", \"connected_components\": " +
             fmt_ll(info.organic_connected_components);
+      // ★★ THE REAL R3 — the graph numbers above describe an abstraction; these
+      // describe the solids that get written and printed.
+      gr += ", \"solid_components\": " + fmt_ll(info.organic_solid_components);
+      gr += ", \"solid_largest_length_fraction\": " +
+            fmt(info.organic_solid_largest_fraction);
+      gr += ", \"solid_stranded_length_mm\": " +
+            fmt(info.organic_solid_stranded_length_mm);
+      gr += ", \"solid_segments\": " + fmt_ll(info.organic_solid_segments);
+      gr += ", \"emitted_components\": " +
+            fmt_ll(info.organic_emitted_components);
+      gr += ", \"emitted_largest_length_fraction\": " +
+            fmt(info.organic_emitted_largest_fraction);
+      gr += ", \"emitted_stranded_length_mm\": " +
+            fmt(info.organic_emitted_stranded_length_mm);
       gr += ", \"largest_component_fraction\": " +
             fmt(info.organic_largest_component_fraction);
       gr += ", \"connector_median_length_mm\": " +

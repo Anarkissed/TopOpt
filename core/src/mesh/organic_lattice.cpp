@@ -141,6 +141,30 @@ struct SampleHash {
   }
 };
 
+// Squared distance between two segments — the standard clamped-parameter solve.
+// ONE implementation, shared by the tracer's connectivity report and the generator's,
+// so the two can never disagree about what "touching" means.
+double organic_segment_distance2(const Vec3& p1, const Vec3& q1, const Vec3& p2,
+                                 const Vec3& q2) {
+  const Vec3 d1 = vsub(q1, p1), d2 = vsub(q2, p2), r = vsub(p1, p2);
+  const double a = vdot(d1, d1), e = vdot(d2, d2), f = vdot(d2, r);
+  const double c = vdot(d1, r);
+  double s, t;
+  if (a <= 1e-18 && e <= 1e-18) return vdot(r, r);
+  if (a <= 1e-18) { s = 0.0; t = std::min(1.0, std::max(0.0, f / e)); }
+  else if (e <= 1e-18) { t = 0.0; s = std::min(1.0, std::max(0.0, -c / a)); }
+  else {
+    const double b = vdot(d1, d2);
+    const double den = a * e - b * b;
+    s = den > 1e-18 ? std::min(1.0, std::max(0.0, (b * f - c * e) / den)) : 0.0;
+    t = (b * s + f) / e;
+    if (t < 0.0) { t = 0.0; s = std::min(1.0, std::max(0.0, -c / a)); }
+    else if (t > 1.0) { t = 1.0; s = std::min(1.0, std::max(0.0, (b - c) / a)); }
+  }
+  const Vec3 c1 = vadd(p1, vmul(d1, s)), c2 = vadd(p2, vmul(d2, t));
+  return vdot(vsub(c1, c2), vsub(c1, c2));
+}
+
 }  // namespace
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -163,6 +187,9 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   if (width_mm && width_mm->size() != n)
     throw std::invalid_argument(
         "trace_organic_lattice: width field size does not match the grid");
+  if (params.strut_diameter_field && params.strut_diameter_field->size() != n)
+    throw std::invalid_argument(
+        "trace_organic_lattice: strut_diameter_field size does not match the grid");
   // ★ §2(c) — 0 MEANS UNSET AND MUST REFUSE. Printability is USER INPUT; defaulting
   // it here would put a number nobody stated into a printed part.
   if (!(params.min_extrudable_width_mm > 0.0))
@@ -179,6 +206,15 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
 
   OrganicLattice out;
   OrganicReport& rep = out.report;
+  // The relative density the CALLER asked for at voxel e, recovered from the (spacing,
+  // bead) pair it handed in — the same coupling, read back. Used only by the bead
+  // calibration below.
+  auto spacing_mm_target_rho = [&](std::size_t e) {
+    const double d = spacing_mm[e];
+    const double t = params.strut_diameter_field ? (*params.strut_diameter_field)[e]
+                                                 : params.strut_diameter_mm;
+    return (d > 0.0 && t > 0.0) ? organic_density_at(d, t) : 0.0;
+  };
   const double h = grid.spacing;
   const double t_strut = params.strut_diameter_mm > 0.0
                              ? params.strut_diameter_mm
@@ -188,6 +224,14 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
         "trace_organic_lattice: strut_diameter_mm is below the stated minimum "
         "extrudable width");
   const double r_strut = 0.5 * t_strut;
+  // The bead at a point: the per-voxel field where one was supplied, else the scalar.
+  // ALWAYS floored at the stated minimum extrudable width — the mass coupling may ask
+  // for a thinner strut than the machine can lay, and printability is user input.
+  const std::vector<double>* tfield = params.strut_diameter_field;
+  auto bead_at_voxel = [&](std::size_t e) {
+    const double t = tfield ? (*tfield)[e] : t_strut;
+    return t > params.min_extrudable_width_mm ? t : params.min_extrudable_width_mm;
+  };
   rep.strut_diameter_mm = t_strut;
   rep.min_extrudable_width_mm = params.min_extrudable_width_mm;
 
@@ -202,6 +246,7 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   // rho(d, t) = 3*pi*t^2 / (4 d^2) <= 1  =>  d >= t * sqrt(3 pi) / 2. Tighter than
   // that and the three families put more solid through the box than there is box.
   const double d_print_floor_mm = 0.5 * t_strut * std::sqrt(3.0 * M_PI);
+  (void)d_print_floor_mm;
   // ★ AND THE ONE THAT ACTUALLY BINDS ON A REAL PART: the tracer integrates a field
   // sampled at the VOXEL GRID, so it cannot resolve a separation finer than the grid.
   // Asking it to is not conservative, it is meaningless — the curves would all follow
@@ -218,8 +263,12 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
       throw std::invalid_argument(
           "trace_organic_lattice: spacing_mm must be finite and > 0 on every "
           "candidate voxel");
-    if (sp < d_print_floor_mm) {
-      sp = d_print_floor_mm;
+    // The printable floor on the separation is evaluated at THIS voxel's own bead:
+    // d >= t*sqrt(3 pi)/2, below which three families put more solid through the box
+    // than there is box.
+    const double d_pf = 0.5 * bead_at_voxel(e) * std::sqrt(3.0 * M_PI);
+    if (sp < d_pf) {
+      sp = d_pf;
       ++rep.spacing_raised_for_print_voxels;
     }
     if (sp < d_res_floor_mm) {
@@ -386,7 +435,8 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   };
 
   // ── §1(b): the trace ────────────────────────────────────────────────────────
-  enum class StopReason { LeftRegion, HitDTest, NoDirection, StepBudget };
+  enum class StopReason { LeftRegion, HitDTest, NoDirection, StepBudget,
+                          TurnedTooFar, SelfRevisit };
   struct HalfTrace {
     std::vector<Vec3> pts;
     long long steps = 0;
@@ -404,6 +454,8 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
     Vec3 ref = vmul(dirf[3 * static_cast<std::size_t>(se) + family], sign);
     if (!(vlen(ref) > 0.0)) return HT;
     HT.pts.push_back(p);
+    double turned = 0.0;          // accumulated unsigned turn angle (radians)
+    Vec3 prev_dir = ref;
     int step = 0;
     for (; step < params.max_steps_per_curve; ++step) {
       const double ds = dsep_at(p);
@@ -422,10 +474,38 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
       bool moved = false;
       dir = clamp_to_cone(dir, &moved);
       if (moved) ++HT.clamped;
+      // ★ ORBIT STOP. Past a full revolution of accumulated turning the curve is
+      // going round rather than anywhere; the published algorithm stops it and so
+      // does this one.
+      {
+        double cosang = vdot(prev_dir, dir);
+        cosang = std::min(1.0, std::max(-1.0, cosang));
+        turned += std::acos(cosang);
+        prev_dir = dir;
+        if (turned > kOrganicMaxTurnRevolutions * 2.0 * M_PI) {
+          HT.stop = StopReason::TurnedTooFar;
+          break;
+        }
+      }
       const Vec3 q = vadd(p, vmul(dir, dt));
       if (inside(q) < 0) {  // left the candidate set — §1(b)'s stop
         HT.stop = StopReason::LeftRegion;
         break;
+      }
+      // ★ CLOSED-LOOP STOP: within d_test of this curve's OWN trail, far enough back
+      // that it is not the integrator's own footprint.
+      {
+        const std::size_t lag = static_cast<std::size_t>(std::max(
+            2.0, kOrganicSelfRevisitLag / std::max(1e-9, params.step_ratio)));
+        bool looped = false;
+        if (HT.pts.size() > lag) {
+          const double d2 = params.test_ratio * ds * params.test_ratio * ds;
+          for (std::size_t t = 0; t + lag < HT.pts.size(); ++t) {
+            const Vec3 w = vsub(q, HT.pts[t]);
+            if (vdot(w, w) < d2) { looped = true; break; }
+          }
+        }
+        if (looped) { HT.stop = StopReason::SelfRevisit; break; }
       }
       // ★ JOBARD-LEFER'S STOP RULE: within d_test of another curve of this family.
       if (nearest_dist(family, q, self_index) < params.test_ratio * ds) {
@@ -532,10 +612,12 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
         case StopReason::HitDTest:    ++rep.stop_hit_d_test;   break;
         case StopReason::NoDirection: ++rep.stop_no_direction; break;
         case StopReason::StepBudget:  ++rep.stop_step_budget;  break;
+        case StopReason::TurnedTooFar: ++rep.stop_turned_too_far; break;
+        case StopReason::SelfRevisit:  ++rep.stop_self_revisit;   break;
       }
       OrganicCurve cv;
       cv.family = family;
-      cv.radius_mm = r_strut;
+      cv.radius_mm = 0.5 * bead_at_voxel(static_cast<std::size_t>(se));
       // The BACKWARD half reversed and joined in front of the seed; the seed is the
       // first point of both halves, so it is dropped from one of them.
       for (std::size_t t = bwd.pts.size(); t-- > 1;) cv.points.push_back(bwd.pts[t]);
@@ -760,7 +842,11 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
         cn.curve_b = std::max(u, v);
         cn.a = (u < v) ? pu : pv;
         cn.b = (u < v) ? pv : pu;
-        cn.radius_mm = r_strut;
+        {
+        const long long ce = inside(cn.a);
+        cn.radius_mm = ce >= 0 ? 0.5 * bead_at_voxel(static_cast<std::size_t>(ce))
+                               : 0.5 * bead_at_voxel(0);
+      }
         cn.length_mm = vlen(vsub(cn.b, cn.a));
         if (!(cn.length_mm > 1e-9)) continue;  // coincident: nothing to sweep
         const Vec3 ta = tangent(A, ai);
@@ -775,7 +861,8 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
         // The deviation is only MEANINGFUL where the two curves are further apart
         // than the polyline sampling can resolve — see the header's note on the
         // degenerate near-intersection case.
-        const double resolve_mm = std::max(t_strut, params.step_ratio * ds);
+        const double resolve_mm =
+            std::max(2.0 * cn.radius_mm, params.step_ratio * ds);
         if (cn.length_mm > resolve_mm) {
           dev_sum += cn.cross_deviation_deg;
           ++rep.connectors_cross_measured;
@@ -804,6 +891,80 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
       rep.connector_min_length_mm = lens.front();
       rep.connector_max_length_mm = lens.back();
       rep.connector_median_length_mm = lens[lens.size() / 2];
+    }
+  }
+
+  // ── ★★ R3, MEASURED ON THE SOLIDS (see the header) ─────────────────────────
+  // Union-find over every emitted segment, joined when the swept solids OVERLAP.
+  // Bucketed by midpoint so the pair test is local; the bucket edge is the longest
+  // segment plus twice the fattest radius, so any overlapping pair shares or
+  // neighbours a bucket and none is missed.
+  {
+    struct Seg { Vec3 a, b; double r; double len; };
+    std::vector<Seg> segs;
+    for (const OrganicCurve& cv : out.curves)
+      for (std::size_t t = 1; t < cv.points.size(); ++t)
+        segs.push_back({cv.points[t - 1], cv.points[t], cv.radius_mm,
+                        vlen(vsub(cv.points[t], cv.points[t - 1]))});
+    for (const OrganicConnector& cn : out.connectors)
+      segs.push_back({cn.a, cn.b, cn.radius_mm, cn.length_mm});
+    rep.solid_segments = segs.size();
+    if (!segs.empty()) {
+      double reach = 0.0;
+      for (const Seg& sg : segs) reach = std::max(reach, sg.len + 2.0 * sg.r);
+      const double cell = std::max(reach, 1e-6);
+      std::map<std::array<long long, 3>, std::vector<int>> grid_of;
+      auto key = [cell](const Vec3& p) {
+        return std::array<long long, 3>{
+            static_cast<long long>(std::floor(p.x / cell)),
+            static_cast<long long>(std::floor(p.y / cell)),
+            static_cast<long long>(std::floor(p.z / cell))};
+      };
+      for (std::size_t i = 0; i < segs.size(); ++i) {
+        const Vec3 mid = vmul(vadd(segs[i].a, segs[i].b), 0.5);
+        grid_of[key(mid)].push_back(static_cast<int>(i));
+      }
+      std::vector<int> par(segs.size());
+      for (std::size_t i = 0; i < par.size(); ++i) par[i] = static_cast<int>(i);
+      std::function<int(int)> find = [&par](int a) {
+        while (par[a] != a) { par[a] = par[par[a]]; a = par[a]; }
+        return a;
+      };
+      // Squared distance between two segments — the standard clamped-parameter
+      // solve, exact for the non-parallel case and correct at the clamps otherwise.
+      auto seg_dist2 = organic_segment_distance2;
+      for (const auto& kv : grid_of) {
+        for (long long dz = -1; dz <= 1; ++dz)
+          for (long long dy = -1; dy <= 1; ++dy)
+            for (long long dx = -1; dx <= 1; ++dx) {
+              const std::array<long long, 3> nk{kv.first[0] + dx, kv.first[1] + dy,
+                                                kv.first[2] + dz};
+              auto it = grid_of.find(nk);
+              if (it == grid_of.end()) continue;
+              for (int i : kv.second)
+                for (int j : it->second) {
+                  if (j <= i) continue;
+                  const double touch = segs[i].r + segs[j].r;
+                  if (seg_dist2(segs[i].a, segs[i].b, segs[j].a, segs[j].b) >
+                      touch * touch)
+                    continue;
+                  const int ra = find(i), rb = find(j);
+                  if (ra != rb) par[std::max(ra, rb)] = std::min(ra, rb);
+                }
+            }
+      }
+      std::map<int, double> comp_len;
+      double total_len = 0.0;
+      for (std::size_t i = 0; i < segs.size(); ++i) {
+        comp_len[find(static_cast<int>(i))] += segs[i].len;
+        total_len += segs[i].len;
+      }
+      rep.solid_components = comp_len.size();
+      double biggest = 0.0;
+      for (const auto& kv : comp_len) biggest = std::max(biggest, kv.second);
+      rep.solid_largest_component_length_fraction =
+          total_len > 0.0 ? biggest / total_len : 0.0;
+      rep.solid_stranded_length_mm = total_len - biggest;
     }
   }
 
@@ -933,6 +1094,73 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
     }
   }
 
+  // ── ★★ CALIBRATE THE BEAD TO THE LENGTH ACTUALLY TRACED ────────────────────
+  //
+  // The mass coupling (organic_strut_diameter_for) assumes THREE PERFECTLY ORTHOGONAL
+  // FAMILIES ON A BOX: one strut of each family through a d-cube, so
+  // rho = 3 pi t^2 / (4 d^2). The traced lattice is not that. Curves bend, families
+  // are not exactly orthogonal, thinning removes some and the connectors add length
+  // the model never counted — so the REAL length per unit volume is higher than the
+  // model's 3/d^2, and a bead sized from the model carries too much material.
+  //
+  // ★ MEASURED, ON A 40 mm CUBE AGAINST THE MAINTAINER'S OWN PRINTED COUPON: the
+  // traced length came out 14,423 mm against the coupon's ~14,500 — the LAYOUT was
+  // right — while the emitted solid was 16.0 % against the coupon's 6.05 %, because
+  // the bead was ~0.8 mm where the coupon's is ~0.6 mm. Length right, thickness wrong.
+  //
+  // So the bead is re-derived from what was traced instead of from the model:
+  //     rho = pi r^2 * L / V   =>   r = sqrt(rho * V / (pi * L))
+  // with L the total emitted centreline length and V the candidate volume. One global
+  // factor, applied to every radius, so the GRADE is untouched (all radii scale
+  // together and their ratios are preserved) and only the mass moves. Reported, never
+  // silent, and floored at the stated minimum extrudable width like everything else.
+  {
+    double traced_len = 0.0;
+    for (const OrganicCurve& cv : out.curves) traced_len += cv.length_mm;
+    for (const OrganicConnector& cn : out.connectors) traced_len += cn.length_mm;
+    double target_vol = 0.0;   // the volume the grading law asked for
+    double model_vol = 0.0;    // the volume the un-calibrated beads would emit
+    const double vox = h * h * h;
+    for (std::size_t e = 0; e < n; ++e)
+      if (candidate[e]) target_vol += spacing_mm_target_rho(e) * vox;
+    for (const OrganicCurve& cv : out.curves)
+      model_vol += M_PI * cv.radius_mm * cv.radius_mm * cv.length_mm;
+    for (const OrganicConnector& cn : out.connectors)
+      model_vol += M_PI * cn.radius_mm * cn.radius_mm * cn.length_mm;
+    // ★ THE NODE BALLS ARE A QUARTER OF THE EMITTED SOLID AND THE FIRST VERSION OF
+    // THIS LEFT THEM OUT. One icosahedron per polyline vertex and two per connector,
+    // measured at 1,816 mm^3 against 5,500 mm^3 of prism on the cube. They scale as
+    // k^3 where the prisms scale as k^2, so the calibration is not a square root but
+    // the root of k^2*P + k^3*N = target — solved by a few fixed-point steps, which
+    // is deterministic and converges in three for any k near 1.
+    double node_vol = 0.0;
+    for (const OrganicCurve& cv : out.curves)
+      node_vol += static_cast<double>(cv.points.size()) *
+                  lattice_node_volume_mm3(cv.radius_mm);
+    for (const OrganicConnector& cn : out.connectors)
+      node_vol += 2.0 * lattice_node_volume_mm3(cn.radius_mm);
+    rep.bead_calibration = 1.0;
+    if (traced_len > 0.0 && model_vol > 0.0 && target_vol > 0.0) {
+      double k = std::sqrt(target_vol / model_vol);
+      for (int it = 0; it < 8; ++it) {
+        const double f = k * k * model_vol + k * k * k * node_vol - target_vol;
+        const double df = 2.0 * k * model_vol + 3.0 * k * k * node_vol;
+        if (!(std::fabs(df) > 0.0)) break;
+        const double kn = k - f / df;
+        if (!(kn > 0.0) || !std::isfinite(kn)) break;
+        k = kn;
+      }
+      // Never below the machine: the floor is user input and outranks the calibration.
+      double kmin = 0.0;
+      for (const OrganicCurve& cv : out.curves)
+        kmin = std::max(kmin, params.min_extrudable_width_mm / (2.0 * cv.radius_mm));
+      if (k < kmin) { k = kmin; rep.bead_calibration_floored = true; }
+      rep.bead_calibration = k;
+      for (OrganicCurve& cv : out.curves) cv.radius_mm *= k;
+      for (OrganicConnector& cn : out.connectors) cn.radius_mm *= k;
+    }
+  }
+
   // ── §4(a): THE PER-VOXEL DENSITY. ALL THREE ALGORITHMS EMIT ONE. ───────────
   // ★ IT IS A HOMOGENISED DENSITY, NOT A PER-VOXEL OCCUPANCY, AND THE DIFFERENCE IS
   // THE WHOLE POINT. The first version of this measured the strut volume deposited in
@@ -952,8 +1180,8 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   // exact, O(1) per query at any window size, no sampling anywhere (§5b).
   {
     std::vector<double> vol(n, 0.0);
-    const double area = M_PI * r_strut * r_strut;
-    auto deposit = [&](const Vec3& a, const Vec3& b) {
+    auto deposit = [&](const Vec3& a, const Vec3& b, double r) {
+      const double area = M_PI * r * r;
       const double L = vlen(vsub(b, a));
       if (!(L > 0.0)) return;
       const int m = std::max(1, static_cast<int>(std::ceil(L / (0.25 * h))));
@@ -972,8 +1200,9 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
     };
     for (const OrganicCurve& cv : out.curves)
       for (std::size_t t = 1; t < cv.points.size(); ++t)
-        deposit(cv.points[t - 1], cv.points[t]);
-    for (const OrganicConnector& cn : out.connectors) deposit(cn.a, cn.b);
+        deposit(cv.points[t - 1], cv.points[t], cv.radius_mm);
+    for (const OrganicConnector& cn : out.connectors)
+      deposit(cn.a, cn.b, cn.radius_mm);
 
     // Summed-area tables over (nx+1)(ny+1)(nz+1), inclusive prefix sums.
     const std::size_t sx = static_cast<std::size_t>(grid.nx) + 1;
@@ -1076,7 +1305,8 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          TriangleSink& sink,
                                          const LatticeBoundary* boundary,
                                          int nseg,
-                                         const LatticeGenObserver* obs) {
+                                         const LatticeGenObserver* obs,
+                                         std::vector<OrganicSpan>* emitted_out) {
   if (nseg < 3)
     throw std::invalid_argument("generate_organic_lattice: nseg must be >= 3");
   OrganicGenStats st;
@@ -1103,6 +1333,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   auto same_point = [](const Vec3& a, const Vec3& b) {
     return a.x == b.x && a.y == b.y && a.z == b.z;
   };
+  // Every span that reaches the sink, for the post-clip connectivity measurement.
+  struct EmittedSeg { Vec3 a, b; double r, len; };
+  std::vector<EmittedSeg> emitted;
   auto emit_node_once = [&](const Vec3& p, double r) {
     // ★ THE SAME GUARD THE OCTET GENERATOR HOLDS, AND FOR THE SAME REASON
     // (lattice_gen.cpp, the interior-node loop): a node ball whose SOLID would breach
@@ -1135,6 +1368,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     lattice_emit_strut(sink, p0, p1, r, nseg);
     if (obs && obs->on_element)
       obs->on_element(LatticeGenElement::InteriorStrut, p0, p1, r);
+    emitted.push_back({p0, p1, r, vlen(vsub(p1, p0))});
     st.triangles += static_cast<std::uint64_t>(4 * nseg);
     ++st.struts;
     st.volume_mm3 += lattice_prism_volume_mm3(r, vlen(vsub(p1, p0)), nseg);
@@ -1173,6 +1407,15 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       const Vec3 p0 = vadd(a, vmul(seg_dir, s.t0));
       const Vec3 p1 = vadd(a, vmul(seg_dir, s.t1));
       emit_span(p0, p1, r);
+      // ★ ANCHOR BALLS AT THE CUT ENDS (bar B6's discipline, applied to organic).
+      // A clipped end is where the strut meets the surface; the octet generator
+      // dresses every one of them and organic dressed none. `emit_span` already
+      // placed a node at p0/p1 unless the guard dropped it, so this counts the end as
+      // a LANDING and as skin geometry — which is also what makes `outer_finish:
+      // "skin"` legal for organic, since the M4 guard refuses a finish that emitted
+      // nothing at all.
+      if (s.t0 > 0.0) { ++st.anchor_nodes; st.skin_triangles += 20; }
+      if (s.t1 < seg_len) { ++st.anchor_nodes; st.skin_triangles += 20; }
     }
   };
   for (const OrganicCurve& cv : lat.curves) {
@@ -1184,7 +1427,156 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     have_last = false;  // each connector is its own two-ended run
     span(cn.a, cn.b, cn.radius_mm);
   }
+
+  // ── ★★ CONNECTEDNESS OF WHAT WAS WRITTEN (see OrganicGenStats). Same union-find
+  // and the same exact segment-to-segment distance the tracer uses, run over the
+  // POST-CLIP spans, so the number describes the file rather than the intent.
+  if (!emitted.empty()) {
+    double reach = 0.0;
+    for (const EmittedSeg& e : emitted) reach = std::max(reach, e.len + 2.0 * e.r);
+    const double cell = std::max(reach, 1e-6);
+    std::map<std::array<long long, 3>, std::vector<int>> bucket;
+    auto key = [cell](const Vec3& p) {
+      return std::array<long long, 3>{
+          static_cast<long long>(std::floor(p.x / cell)),
+          static_cast<long long>(std::floor(p.y / cell)),
+          static_cast<long long>(std::floor(p.z / cell))};
+    };
+    for (std::size_t i = 0; i < emitted.size(); ++i)
+      bucket[key(vmul(vadd(emitted[i].a, emitted[i].b), 0.5))]
+          .push_back(static_cast<int>(i));
+    std::vector<int> par(emitted.size());
+    for (std::size_t i = 0; i < par.size(); ++i) par[i] = static_cast<int>(i);
+    std::function<int(int)> find = [&par](int a) {
+      while (par[a] != a) { par[a] = par[par[a]]; a = par[a]; }
+      return a;
+    };
+    for (const auto& kv : bucket)
+      for (long long dz = -1; dz <= 1; ++dz)
+        for (long long dy = -1; dy <= 1; ++dy)
+          for (long long dx = -1; dx <= 1; ++dx) {
+            auto it = bucket.find({kv.first[0] + dx, kv.first[1] + dy,
+                                   kv.first[2] + dz});
+            if (it == bucket.end()) continue;
+            for (int i : kv.second)
+              for (int j : it->second) {
+                if (j <= i) continue;
+                const double touch = emitted[i].r + emitted[j].r;
+                if (organic_segment_distance2(emitted[i].a, emitted[i].b,
+                                              emitted[j].a, emitted[j].b) >
+                    touch * touch)
+                  continue;
+                const int ra = find(i), rb = find(j);
+                if (ra != rb) par[std::max(ra, rb)] = std::min(ra, rb);
+              }
+          }
+    std::map<int, double> comp;
+    double total = 0.0;
+    for (std::size_t i = 0; i < emitted.size(); ++i) {
+      comp[find(static_cast<int>(i))] += emitted[i].len;
+      total += emitted[i].len;
+    }
+    st.emitted_components = comp.size();
+    double biggest = 0.0;
+    for (const auto& kv : comp) biggest = std::max(biggest, kv.second);
+    st.emitted_largest_length_fraction = total > 0.0 ? biggest / total : 0.0;
+    st.emitted_stranded_length_mm = total - biggest;
+  }
+  if (emitted_out) {
+    emitted_out->clear();
+    emitted_out->reserve(emitted.size());
+    for (const EmittedSeg& e : emitted) emitted_out->push_back({e.a, e.b, e.r});
+  }
   return st;
+}
+
+
+// ────────────────────────────────────────────────────────────────────────────────
+TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm,
+                          long long max_voxels, OrganicWeldStats& stats) {
+  stats = OrganicWeldStats{};
+  if (spans.empty()) return TriangleMesh{};
+  Vec3 lo = spans.front().a, hi = spans.front().a;
+  double rmin = spans.front().r, rmax = spans.front().r;
+  for (const OrganicSpan& sp : spans) {
+    for (const Vec3& p : {sp.a, sp.b}) {
+      lo.x = std::min(lo.x, p.x - sp.r); lo.y = std::min(lo.y, p.y - sp.r);
+      lo.z = std::min(lo.z, p.z - sp.r);
+      hi.x = std::max(hi.x, p.x + sp.r); hi.y = std::max(hi.y, p.y + sp.r);
+      hi.z = std::max(hi.z, p.z + sp.r);
+    }
+    rmin = std::min(rmin, sp.r);
+    rmax = std::max(rmax, sp.r);
+  }
+  // A quarter of the THINNEST strut's diameter resolves it; anything coarser aliases
+  // the very struts the grade is expressed in.
+  double pitch = pitch_mm > 0.0 ? pitch_mm : 0.5 * rmin;
+  if (!(pitch > 0.0)) return TriangleMesh{};
+  // One voxel of margin all round so marching cubes can close the surface.
+  auto dims = [&](double p, int& nx, int& ny, int& nz) {
+    nx = static_cast<int>(std::ceil((hi.x - lo.x) / p)) + 3;
+    ny = static_cast<int>(std::ceil((hi.y - lo.y) / p)) + 3;
+    nz = static_cast<int>(std::ceil((hi.z - lo.z) / p)) + 3;
+  };
+  int nx = 0, ny = 0, nz = 0;
+  dims(pitch, nx, ny, nz);
+  while (max_voxels > 0 &&
+         static_cast<long long>(nx) * ny * nz > max_voxels) {
+    pitch *= 1.25;   // fixed ratio, so the coarsening is reproducible
+    dims(pitch, nx, ny, nz);
+  }
+  const Vec3 origin{lo.x - pitch, lo.y - pitch, lo.z - pitch};
+  std::vector<double> field(static_cast<std::size_t>(nx) * ny * nz, 0.0);
+  auto idx = [nx, ny](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * ny + j) * nx + i;
+  };
+  // Rasterise each capsule exactly: over its bounding box, mark every voxel whose
+  // CENTRE is within r of the segment. Exact test, fixed traversal, no sampling.
+  for (const OrganicSpan& sp : spans) {
+    const int i0 = std::max(0, static_cast<int>(std::floor(
+        (std::min(sp.a.x, sp.b.x) - sp.r - origin.x) / pitch)));
+    const int i1 = std::min(nx - 1, static_cast<int>(std::ceil(
+        (std::max(sp.a.x, sp.b.x) + sp.r - origin.x) / pitch)));
+    const int j0 = std::max(0, static_cast<int>(std::floor(
+        (std::min(sp.a.y, sp.b.y) - sp.r - origin.y) / pitch)));
+    const int j1 = std::min(ny - 1, static_cast<int>(std::ceil(
+        (std::max(sp.a.y, sp.b.y) + sp.r - origin.y) / pitch)));
+    const int k0 = std::max(0, static_cast<int>(std::floor(
+        (std::min(sp.a.z, sp.b.z) - sp.r - origin.z) / pitch)));
+    const int k1 = std::min(nz - 1, static_cast<int>(std::ceil(
+        (std::max(sp.a.z, sp.b.z) + sp.r - origin.z) / pitch)));
+    const double r2 = sp.r * sp.r;
+    const Vec3 ab = vsub(sp.b, sp.a);
+    const double abab = vdot(ab, ab);
+    for (int k = k0; k <= k1; ++k)
+      for (int j = j0; j <= j1; ++j)
+        for (int i = i0; i <= i1; ++i) {
+          const Vec3 c{origin.x + (i + 0.5) * pitch, origin.y + (j + 0.5) * pitch,
+                       origin.z + (k + 0.5) * pitch};
+          const Vec3 ac = vsub(c, sp.a);
+          double t = abab > 0.0 ? vdot(ac, ab) / abab : 0.0;
+          t = std::min(1.0, std::max(0.0, t));
+          const Vec3 d = vsub(ac, vmul(ab, t));
+          if (vdot(d, d) <= r2) field[idx(i, j, k)] = 1.0;
+        }
+  }
+  long long occ = 0;
+  for (double v : field) if (v > 0.5) ++occ;
+  TriangleMesh welded = marching_cubes(nx, ny, nz, pitch, origin, field, 0.5);
+  stats.components_before = count_components(welded);
+  welded = keep_largest_component(welded);
+  stats.components_after = count_components(welded);
+  stats.sealed_cavities_filled = stats.components_before - stats.components_after;
+  const WatertightReport wt = check_watertight(welded);
+  stats.watertight = wt.watertight;
+  stats.pitch_mm = pitch;
+  stats.nx = nx; stats.ny = ny; stats.nz = nz;
+  stats.occupied_voxels = occ;
+  stats.triangles = welded.triangles.size();
+  // ★ THE TRUE UNION VOLUME — overlaps DEDUCTED, unlike every soup-basis figure this
+  // codebase reports. This is the number that is comparable to a welded coupon's.
+  stats.volume_mm3 = std::fabs(signed_volume(welded));
+  return welded;
 }
 
 }  // namespace topopt

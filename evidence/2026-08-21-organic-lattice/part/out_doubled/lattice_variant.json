@@ -1,0 +1,44 @@
+{
+  "provenance": "latticed a finished variant",
+  "optimization": false,
+  "design_iterations": 0,
+  "optimizer_iterations_run": 0,
+  "variant_meshes_written": 0,
+  "analysis_solves": 3,
+  "analysis_solves_note": "certification solves only, no design loop: (1) the null-posture solve that reproduces this variant's RECORDED margin — the proof the load case and design are the originals; (2) the lattice pipeline's own null-posture reproduction; (3) the COMPOSITE certification; plus (4) the band-clamp counterfactual when any voxel was clamped",
+  "source": {
+    "design": "",
+    "variant_index": 0,
+    "requested_volume_fraction": 0.2368609896,
+    "achieved_volume_fraction": 0.2368609896,
+    "optimizer_iterations_originally": 0,
+    "design_fingerprint": "10054733104879063491",
+    "field_provenance": "the demand field this lattice is graded from is THIS variant's own certification von Mises field, recovered by the reproduction solve below from the stored design — not a simulation of the solid part, and not another run's field"
+  },
+  "reproduction": {
+    "recorded_margin_worst_case": 0,
+    "reproduced_margin_worst_case": 3242.27923,
+    "exact": false,
+    "relative_delta": null,
+    "band": 1e-06,
+    "note": "ENFORCED, not reported: a reproduction outside `band` throws and nothing is written. `band` is a multiple of the certification solve's own relative-residual tolerance, because the recorded margin came from a solve carrying a warm Krylov recycle subspace and this one is denied it by ScopedLadderSolverIsolation — two Krylov paths on one operator, so `exact` is false on any run whose solves fall back to Jacobi-CG"
+  },
+  "model": "M2_verticalStand.step",
+  "resolution": 128,
+  "load_source": "loadcase",
+  "loadcase_receipt": "loadcase.json",
+  "lattice": {
+    "topology": "octet",
+    "graded": true,
+    "cell_mm": 4,
+    "rho_min_used": 0.06484938077,
+    "rho_max_used": 0.8898354548,
+    "latticed_voxels": 1180,
+    "solid_margin_worst_case": 3242.27923,
+    "lattice_margin_worst_case": 3136.818568,
+    "lattice_margin_effective": 649.518412,
+    "lattice_accepted": true,
+    "receipt": "variant_024_lattice.report.json"
+  },
+  "meshes": ["variant_024_lattice.stl"]
+}

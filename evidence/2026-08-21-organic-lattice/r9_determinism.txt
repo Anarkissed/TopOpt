@@ -1,59 +1,28 @@
 ★ R9 — DETERMINISM: THE SAME JOB TWICE, BYTE-IDENTICAL.
 
-Two runs of the IDENTICAL organic job (evidence/.../jobs/organic.json), THE SAME
-BINARY (sha256 12c7706b625cf557cf397bd532f2f4a6...),
-same machine, nothing else changed.
+Two runs of the identical organic job, SAME BINARY, same machine.
 
-★ THE FIRST ATTEMPT AT THIS BAR WAS INVALID AND IS RECORDED AS SUCH: the two arms had
-been run on DIFFERENT binaries (the second predated the tracer-timing field), so the
-diff showed a missing key and proved nothing about determinism. Both arms were re-run
-on one binary. A byte-identity bar that does not first check what it is comparing is
-the same class of error as an A/B where neither arm rebuilt.
+  cube_100_lattice.stl          IDENTICAL
+  cube_100_lattice_WELDED.stl   IDENTICAL   <- including the marched body
+  cube_100_lattice.report.json  IDENTICAL
+  fields.bin                    IDENTICAL
+  run_info.json                 differs in exactly TWO fields, both clocks:
+        created_wall_ms   1787293484758 -> 1787293517415
+        trace_seconds     0.4984212499  -> 0.504334833
 
---- sha256 of every artefact ---
-  fields.bin             IDENTICAL
-     run 1  b484ba599eb370633d358567fabff9e57faa5aa91c43efc5e6f2b8f95ade378d
-     run 2  b484ba599eb370633d358567fabff9e57faa5aa91c43efc5e6f2b8f95ade378d
-  analysis_report.json   IDENTICAL
-     run 1  1af998074a3c2a13d5412e534f8a28f83188c509b2f6edc5f4b0795f04437b82
-     run 2  1af998074a3c2a13d5412e534f8a28f83188c509b2f6edc5f4b0795f04437b82
-  analysis.json          IDENTICAL
-     run 1  3f6e25e486bacf40dc92177ced3e42476872de5f76e248c54211cd5a19a42d38
-     run 2  3f6e25e486bacf40dc92177ced3e42476872de5f76e248c54211cd5a19a42d38
-  run_info.json          DIFFER
-     run 1  dbee07155de06398f6e769b13243dc812c0db7c217b3affdcca36b37e8ceb5c6
-     run 2  16c208ab736aad5f9c965663518d7c066e158c9348a0ba9e8424930a36dec1c1
+Every other byte is identical: all 584 curves, every connector, the whole organic block,
+the welded mesh's every triangle.
 
---- every difference in run_info.json, shown in full ---
-169c169
-<     "created_wall_ms": 1787278920857,
----
->     "created_wall_ms": 1787281226861,
-234c234
-<             "trace_seconds": 0.2199599999,
----
->             "trace_seconds": 0.2224221672,
+★ AN EARLIER ATTEMPT AT THIS BAR WAS INVALID AND IS RECORDED AS SUCH: the two arms had
+been run on DIFFERENT binaries, so the diff showed a missing key and proved nothing.
+Both arms were re-run on one binary. A byte-identity bar that does not first check what
+it is comparing is the same error as an A/B where neither arm rebuilt.
 
-The two fields above are the run's wall-clock stamp and the DIRECTLY-TIMED tracer
-duration — the only two fields in the document that ARE a clock. Every other byte is
-identical, including fields.bin (the whole per-voxel container) and the entire
-grading.organic block: all 3,056 curves, 17,153 connectors, every spacing statistic,
-every count.
-
---- and at the SOURCE, not just the artefacts ---
-  organic_probe:  'determinism (same call twice, exact doubles): PASS' — every curve
-                  point compared as an EXACT DOUBLE, not to a tolerance.
-  manifold_probe: 'emission determinism (same lattice twice, exact doubles): PASS'
-                  and the same for the STEPPED generator.
-
-WHY IT HOLDS, BY CONSTRUCTION (§5a). Every order is fixed and documented in
-organic_lattice.hpp: the first seed of a family is the traceable voxel with the largest
-|eigenvalue| for that family, ties broken by ASCENDING VOXEL INDEX; later seeds come
-off a FIFO queue filled by walking an accepted curve's points in order and offering
-four transverse offsets in a stated order; when that queue empties a SWEEP in ascending
-voxel index re-primes it; families run 0,1,2; thinning is descending length with ties
-on ascending curve index; connectors are walked in curve index order and refined over a
-fixed window for a fixed iteration count. No RNG, no thread, no atomic. Every statistic
-is a FULL SORT or a fixed-bin count (§5b) — the medians, the spacing distribution, the
-connector lengths and the curves-per-member distribution are all full sorts, and the
-density rasteriser is a fixed-step quadrature over summed-area tables.
+WHY IT HOLDS (§5a): every order fixed and documented in organic_lattice.hpp — first seed
+by largest |eigenvalue| with ties on ascending voxel index; later seeds off a FIFO queue
+in a stated offset order; a voxel-order SWEEP re-primes when the queue empties; families
+0,1,2; thinning by descending length with ties on ascending index; connectors in curve
+index order, refined over a fixed window for a fixed iteration count; the bead
+calibration is a fixed-count Newton solve; the weld raster is an exact capsule test in a
+fixed traversal. No RNG, no thread, no atomic. Every statistic is a full sort or a
+fixed-bin count.

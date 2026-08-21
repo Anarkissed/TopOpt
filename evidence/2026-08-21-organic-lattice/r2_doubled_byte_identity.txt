@@ -43,3 +43,36 @@ AND THE REFUSAL THAT PROVES THE KEY IS NEW: the base binary, given doubled.json 
 same job WITH the key), answers
     topopt-cli: job.json: unknown key "algorithm" in grading
 which is why this comparison had to be run on the key-less job in the first place.
+
+
+════════════════════════════════════════════════════════════════════════════════════
+★★ RE-RUN AFTER THE INTENT CHANGE — AND THIS IS THE ARM THAT ACTUALLY COVERS IT.
+
+Passing the grading INTENT and the aesthetic range into `lattice_one_variant` is a real
+behaviour change to the path that WRITES GEOMETRY, and `lattice_one_variant` is shared
+with the TO+lattice path. The `analyze` arm above CANNOT cover it: analyze never calls
+that function. So a second arm was run on the path that does.
+
+JOB   evidence/2026-08-21-organic-lattice/geom/r2_nointent.json
+      `lattice-variant` on the l-bracket design store, stating NO intent, NO aesthetic
+      range and NONE of this task's new keys — i.e. exactly what every pre-existing
+      lattice_variant job looks like. The BASE binary accepts it, which is the point.
+
+  fields.bin                             IDENTICAL
+  lattice_variant.json                   IDENTICAL
+  lattice_variant_report.json            IDENTICAL
+  loadcase.json                          IDENTICAL
+  variant_070_lattice.report.json        IDENTICAL
+  ★ variant_070_lattice.stl              IDENTICAL   <- THE EMITTED LATTICE
+  run_info.json                          differs, in full:
+        created_wall_ms  (timestamp)
+      + "algorithm": "doubled"
+      + "algorithm_latticed_voxels": 63
+      + "lattice_solid_volume_mm3": 55.96853489
+
+THE CLAIM, STATED EXACTLY: the emitted geometry and every certification artefact are
+BYTE-IDENTICAL; run_info gains three additive fields and nothing is changed or removed.
+A job that states no intent cannot acquire one — the guard is `if
+(!job.grading.intent.empty())`, and with it empty `GradingLawParams::intent` keeps its
+Structural default and the aesthetic range stays two zeros, which grading.hpp documents
+as "the certifiable band". Only a job that ASKS gets anything different.

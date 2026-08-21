@@ -946,6 +946,8 @@ struct RunInfo {
   long long organic_stop_hit_d_test = 0;
   long long organic_stop_no_direction = 0;
   long long organic_stop_step_budget = 0;
+  long long organic_stop_turned_too_far = 0;
+  long long organic_stop_self_revisit = 0;
   long long organic_seeds_offered = 0;
   long long organic_seeds_outside_region = 0;
   long long organic_seeds_too_close = 0;
@@ -957,6 +959,15 @@ struct RunInfo {
   long long organic_curves_under_two_connections = 0;
   long long organic_curves_no_connection = 0;
   long long organic_connected_components = 0;
+  // ★★ THE REAL R3: physical connectedness of the EMITTED SOLIDS, length-weighted.
+  long long organic_solid_components = 0;
+  double organic_solid_largest_fraction = 0.0;
+  double organic_solid_stranded_length_mm = 0.0;
+  long long organic_solid_segments = 0;
+  // ★★ AND THE SAME TEST ON WHAT WAS WRITTEN — after the boundary clip.
+  long long organic_emitted_components = 0;
+  double organic_emitted_largest_fraction = 0.0;
+  double organic_emitted_stranded_length_mm = 0.0;
   double organic_largest_component_fraction = 0.0;
   double organic_connector_median_length_mm = 0.0;
   double organic_connector_max_cross_deviation_deg = 0.0;

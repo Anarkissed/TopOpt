@@ -261,6 +261,24 @@ struct JobLattice {
   //                closed); certification unchanged from "shell".
   // A non-"shell" finish requires skin == "diagrid" (the skin IS the finish).
   std::string outer_finish = "shell";
+  // ── ★ THE WELDED, SINGLE-BODY LATTICE (task 2026-08-21-organic-lattice) ──────
+  // false (the DEFAULT) writes nothing extra and every existing job is unchanged.
+  // true additionally writes <prefix>_lattice_WELDED.stl: the emitted spans
+  // rasterised and marched into ONE watertight body.
+  //
+  // ★ WHY IT MATTERS AND IT IS NOT COSMETIC. The strut soup is thousands of separate
+  // closed shells. A slicer that unions the solid prints it correctly; a slicer that
+  // analyses the MESH reports every shell not touching the plate as a FLOATING BODY.
+  // The maintainer hit exactly that. The material is connected; the MESH is not one
+  // object, and this is the file that is.
+  bool emit_welded_stl = false;
+  // The weld raster pitch (mm). 0 (the DEFAULT) = half the thinnest emitted strut's
+  // RADIUS, which resolves the strut properly and is what the volume measurement
+  // wants. A coarser pitch trades surface fidelity for triangle count: the count
+  // scales as pitch^-2, so 0.28 mm on a 40 mm cube gives ~1.5 M triangles against
+  // ~4.2 M at the default — the fidelity the maintainer's own printed coupon used.
+  // The pitch actually used is reported, so a coarsened raster is never silent.
+  double welded_pitch_mm = 0.0;
 
   // THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix, bar F3).
   // true => `lattice_variant_job` runs the grading law and the role accounting on
