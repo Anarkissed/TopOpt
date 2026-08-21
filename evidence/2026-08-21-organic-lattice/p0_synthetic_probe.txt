@@ -1,0 +1,42 @@
+--- axis-aligned uniform field, d_sep = 5.0 mm on a 40 mm cube ---
+candidates            64000
+degenerate            0 (0.0000)
+curves traced/kept    192 / 192 (thinned 0, stubs 0)
+per family            64 / 64 / 64
+connectors            1608   len 0.250/0.750/5.000 mm (min/med/max)
+  cross-dev (non-deg)  max 0.000 deg  mean 0.000 deg over 168; degenerate 1440
+R3 <2 connections     0   (zero connections 0)
+components            1   largest 192 (1.0000)
+requested spacing     5.0000 .. 5.0000 mm
+ACHIEVED spacing      5.0000 .. 5.0000 mm (median 5.0000)
+curves/member         min 8.0000 median 8.0000  below floor 0
+latticed voxels       63934   rho 0.00000 .. 0.07828 (median 0.01872)
+emitted volume        1456.172 mm^3 (soup basis)
+segments outside 45   0.6502  (curves 0.6667, connectors 0.6070)
+analytic rho at d=5   0.019085  (organic_density_at)
+frame-swap worst      0.0455
+family-0 worst deviation from +/-x: 0.000000 deg  PASS
+determinism (same call twice, exact doubles): PASS
+--- clamp armed at 45 deg ---
+clamped steps         528 / 1904 (0.2773)
+curves touched        16 / 80 (0.2000)
+segments outside 45   0.038257  (curves 0.000000  connectors 0.490683)
+
+--- WHAT THIS FIXTURE PROVES, AND WHAT IT CANNOT ---
+POSITIVE CONTROLS (all measured above, none asserted):
+  * family-0 curves deviate from +/-x by 0.000000 deg — the tracer follows the frame.
+  * the ACHIEVED separation is 5.0000 mm against a requested 5.0000 mm.
+  * the emitted per-voxel density median is 0.01872 against the ANALYTIC
+    organic_density_at(5.0, 0.45) = 0.019085 — 1.9 %. That is the check that caught the
+    first implementation, which reported 0.159 (a per-VOXEL occupancy, 8x high).
+  * the connector direction is the CROSS PRODUCT of the two tangents to 0.000 deg over
+    every connector the polyline sampling can resolve (168 of 1608). The other 1440 are
+    shorter than one integration step: those two curves are closer together than the
+    tracer samples, and they are already welded by their own strut solids.
+  * with the clamp armed at 45 deg, 0.000000 of the traced curve segments sit outside
+    the cone. The 0.49 residual is CONNECTORS, which are never clamped by design (§2a
+    is about the traced direction; re-angling a connector breaks the join R3 protects).
+  * the same call twice is byte-identical in every curve point (exact doubles).
+
+WHAT IT CANNOT PROVE: this field is uniform and axis-aligned, so it exercises neither
+the swirl (§6d) nor a varying spacing field. Both are measured on the real part.

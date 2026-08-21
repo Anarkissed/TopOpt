@@ -1,0 +1,47 @@
+★ IS STEPPED ACTUALLY WORKING? — the maintainer asked, and the answer needed three runs.
+
+WHAT HAD BEEN SHOWN, AND WHY IT WAS NOT ENOUGH.
+The cube run reported `regions 1, cells 4.000..4.000, adjacent_region_pairs 0`. Stepped
+RAN and emitted — but with ONE region it derives ONE cell, which is a uniform-cell
+lattice. Nothing was stepped. Its distinguishing behaviour was UNCONFIRMED, and I had
+also worked around a refusal by deleting the region from the job rather than finding out
+why it refused. Both of those are exactly what a reviewer should not have to discover.
+
+RUN 1 — STEPPED ON HIS OWN PART, GEOMETRY PATH, HIS FIVE DECLARED REGIONS.
+  topopt-cli lattice-variant jobs/part_stepped.json --out part/stepped_real   (300.6 s)
+
+    regions               2
+    cells                 8.867 mm and 2.728 mm      <- GENUINELY DIFFERENT, verbatim
+    rho per region (FEA)  0.102  and 0.350           <- FEA-driven, per region
+    cells/member          5 and 5
+    voxels per region     960 and 321
+    adjacent pairs        0, joined 0
+
+★ STEPPED WORKS. Two declared regions, two distinct cells derived from each region's own
+FEA density and member width, taken VERBATIM with no dyadic snap. That is the algorithm
+doing what it is for.
+
+★ AND ITS SEAM COST IS 0 HERE, WHICH IS NOT THE SAME CLAIM AS "NO SEAM COST". The two
+latticed regions (960 and 321 voxels at his 0.42 mm bead) do not touch on this part, so
+there is no seam to be disconnected. The "4 of 5 abutting pairs disconnected" figure in
+r10 comes from the ANALYZE path, where the candidate set is the whole printed part
+(region = nullptr) and far more regions abut. Both numbers are real; they are measured
+over different candidate sets and must not be quoted as one.
+
+RUN 2 + 3 — THE REFUSAL I HAD WORKED AROUND.
+Adding a declared face region to the cube made stepped refuse:
+  "the stepped algorithm derived no region cell..."
+The message named stepped, so I had assumed stepped. Running DOUBLED on the identical
+job settles it:
+
+    DOUBLED with the same declared region: region_voxels 0  LATTICED 0  fallback 0
+
+★ THE REGION MATCHES ZERO VOXELS, FOR EVERY ALGORITHM. It is a malformed test fixture of
+mine (a face slab at z = 40 with normal +z), not a code defect, and stepped was reporting
+someone else's empty candidate set under its own name.
+
+WHAT WAS FIXED AS A RESULT: the refusal now reports what it MEASURED —
+    "Measured: 0 latticed voxels carrying 0 distinct region ids (0 of them with NO id),
+     and 0 region(s) had no measurable member width."
+A refusal that cannot name its own cause sent me chasing the region resolution when the
+fault was upstream of both. With the counts in the message it took two minutes.

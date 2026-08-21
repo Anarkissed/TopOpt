@@ -1,0 +1,33 @@
+★ R1 — ALL THREE ALGORITHMS, RUN FROM THE CLI. THE EXACT INVOCATIONS.
+
+  cd evidence/2026-08-21-organic-lattice/cube
+
+  DOUBLED  ../../../core/build/topopt-cli lattice-variant final_doubled.json --out ship_doubled
+  STEPPED  ../../../core/build/topopt-cli lattice-variant final_stepped.json --out ship_stepped
+  ORGANIC  ../../../core/build/topopt-cli lattice-variant final_organic.json --out ship_organic
+
+The three job files differ in EXACTLY ONE LINE:
+
+    "grading": { ..., "algorithm": "doubled" | "stepped" | "organic" }
+
+40 mm cube (cube40.stl), resolution 64, his 0.42 mm bead, aesthetic band
+[0.0505, 0.12], swept window 3-6 mm, minimize_plastic ON, welded output at 0.28 mm.
+
+WALL TIME, whole run, CMAKE_BUILD_TYPE=Release (R13):
+  doubled 40.63 s    stepped 62.59 s    organic 32.07 s
+★ NO COST CLAIM ABOUT THE TRACER IS DERIVED FROM THOSE. The FEA solve dominates every
+arm. The tracer was timed DIRECTLY instead, around trace_organic_lattice and nothing
+else: 0.4984 s and 0.5043 s across the two determinism arms.
+
+ON HIS OWN PART, the same three algorithms run through `analyze` on
+M2_verticalStand.step at resolution 128 — see runs/ and r10 for those numbers. The cube
+is the fixture the GEOMETRY comparison uses because it is the same 40 mm envelope as the
+coupon he printed, which is the only external reference this task has.
+
+REFUSALS PROVED, NOT ASSERTED:
+  * the BASE binary on a job carrying "algorithm":
+        topopt-cli: job.json: unknown key "algorithm" in grading
+    — the key is genuinely new, which is why R2 runs on a key-less job.
+  * "algorithm": "organic" without "intent": "aesthetic" is REFUSED, with the tensor
+    reason (§3c). Organic cannot be run structurally.
+  * `lattice.outer_finish: "skin"` without `skin: "diagrid"` is refused by the schema.

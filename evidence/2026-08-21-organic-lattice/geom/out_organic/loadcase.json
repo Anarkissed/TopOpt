@@ -1,0 +1,11 @@
+{
+  "resolution": 48,
+  "model": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/core/tests/fixtures/demo/l-bracket.step",
+  "material": "PLA",
+  "anchor_bc_dofs": 588,
+  "load_source": "self_weight",
+  "fixture_face_ids": [8, 9],
+  "fixture_voxels_tagged": 48,
+  "gravity_direction": [0, 0, -1],
+  "gravity_magnitude_mm_s2": 9810
+}

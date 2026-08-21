@@ -1,0 +1,81 @@
+★ R8 — EVERY CONSUMER OF THE PER-VOXEL LATTICE DENSITY, AND WHAT EACH ONE SEES
+UNDER EACH OF THE THREE ALGORITHMS.
+
+THE CONTRACT (§4a): all three algorithms fill `LatticePosture::relative_density` and
+`LatticePosture::mask`, both grid-indexed over grid.voxel_count(). NOTHING downstream
+branches on the algorithm — that is what makes the selector cheap, and it is why this
+census is short rather than three censuses.
+
+WHERE EACH ALGORITHM'S DENSITY COMES FROM
+  doubled  gf.posture.relative_density        — grading.cpp's own law, unchanged.
+  stepped  gf.posture.relative_density        — the SAME law; stepped changes the CELL
+                                                (posture.cell_size_field), not rho.
+  organic  organic.lat.relative_density       — MEASURED from the traced geometry:
+                                                deposited strut volume box-filtered
+                                                over one local separation, normalised
+                                                by the candidate volume in the window.
+                                                It REPLACES the field in the posture
+                                                (run_job.cpp, lattice_one_variant).
+
+THE CONSUMERS, each verified by reading the call site
+--------------------------------------------------------------------------------------
+1  analyze_fixed_design (core/src/simp/analyze.cpp)
+   THE CERTIFICATION SOLVE. Reads posture.mask + posture.relative_density per element
+   and substitutes the homogenised cubic tensor at that density.
+   ALL THREE: reads one. ★ ORGANIC additionally reports `tensor_out_of_regime`, because
+   the tensor is CUBIC and traced geometry is anisotropic (§3c/§3d) — the certificate
+   still RUNS, and the receipt says what it is a certificate of.
+
+2  the cells-per-member REGIME GUARD (analyze.cpp:473-495)
+   Reads posture.cell_size_field when it is grid-sized, else the scalar cell_size_mm.
+   doubled  per-voxel dyadic cell.        stepped  per-voxel REGION cell (a real cell).
+   organic  field LEFT EMPTY ON PURPOSE — an organic lattice has no cells, and filling
+            it with the separation would silently re-point this guard at the
+            curve-crossing count. §3(a) forbids that overloading. The curve-crossing
+            count is reported under its own name instead.
+
+3  lattice_effective_tensor / lattice_material_at (core/src/fea/lattice.cpp)
+   The homogenised tensor as a function of relative density alone. Reads one number.
+   ALL THREE: reads one.
+
+4  strut_strength (core/src/fea/strut_strength.cpp)
+   The de-homogenised strut bound. Reads the per-voxel density + the cell.
+   ALL THREE: reads one.
+
+5  the STRUT RADIUS FIELD in the exporter (run_job.cpp, LatticeRadiusField::field)
+   doubled/stepped: 0.5 * octet_strut_diameter_mm(rho[e], cell) — the owning voxel's
+   graded rho. organic: the radius is CONSTANT by construction (the grade is expressed
+   through spacing, not thickness — CURVY), and the tracer carries it per curve.
+
+6  the SOLID COMPANION + certification mask (run_job.cpp)
+   Reads posture.mask to decide which printed voxels stay solid. ALL THREE: reads one.
+   Organic's mask is a subset of the graded mask (a voxel with no traced material near
+   it is not latticed), so the companion picks it up and it is exported as solid.
+
+7  min-feature / V3 (run_job.cpp -> v3 report)     reads the DESIGN density, not the
+   lattice posture. Unchanged by the algorithm.
+
+8  the enclosed-void check (core/src/mesh/lattice_void.cpp)   reads the mask.
+   ALL THREE: reads one.
+
+9  the no-protrusion invariant (run_job.cpp)   reads the EMITTED VERTICES, not a
+   density. It wraps the sink, so it measures organic's stream exactly as it measures
+   the octet stream. ALL THREE: measured identically.
+
+10 fields.bin / run_info / the lattice receipt (observability.cpp)
+   Reads the aggregate counts off GradedField. ALL THREE fill them; organic re-points
+   latticed_voxels / rho_min_used / rho_max_used at what it actually traced, so the
+   receipt never reports the doubled lattice's counts beside organic geometry.
+
+11 THE APP (app/TopOptKit/Sources/TopOptFlows/LatticeRegionEmission.swift,
+   LatticeSettings.swift, ProjectModel.swift, TopOptBridge/bridge.cpp)
+   ★ NOT TOUCHED BY THIS TASK, and deliberately (§6a: no UI). The bridge already
+   carries a per-voxel density; nothing in Swift needs to know which algorithm ran, and
+   §4(e) says that if the preview ever must know, it BRIDGES core's answer rather than
+   re-deriving it. `run_info.grading.algorithm` is that answer, already on the receipt.
+
+THE ONE COMPARABLE NUMBER (bar R10). Because all three emit a density, one quantity
+can be read three times: `grading.lattice_solid_volume_mm3` = sum(rho[e]) * voxel
+volume over the latticed set, computed from WHICHEVER algorithm's own field the run
+produced. That is the mass column of the three-way table, and it exists only because
+the contract above holds.

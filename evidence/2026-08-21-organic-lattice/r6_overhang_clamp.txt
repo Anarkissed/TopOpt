@@ -1,0 +1,53 @@
+                                               DEFAULT (disarmed)    ARMED at 45 deg
+------------------------------------------------------------------------------------
+overhang clamp armed                                        False               True
+angle deg                                                       0                 45
+RK4 steps clamped (fraction of kept steps)                      0       0.7414828419
+curves the clamp touched (fraction)                             0       0.8162298705
+TRACED CURVE SEGMENTS outside 45 deg                 0.6466853991                  0
+connectors outside 45 deg                            0.7189412931       0.8216285297
+all segments outside 45 deg                          0.6656952667       0.2080501749
+curves kept                                                  3056               3167
+total curve length mm                                 65461.77417        65650.12303
+curves with <2 connections                                     34                 31
+connected components                                            3                  3
+achieved spacing median mm                            3.069049584        3.020071673
+
+★ R6 — THE OVERHANG CLAMP'S EFFECT, AT THE DEFAULT AND AT 45. READ THIS WITH §0(i).
+
+THE DEFAULT IS DISARMED, AND THAT IS A MEASURED CHOICE, NOT AN OMISSION.
+The maintainer printed a traced coupon with a 41.78 mm LONGEST UNSUPPORTED RUN, supports
+off, and it came out clean (evidence/2026-08-20-lattice-only-grading/r4b_PRINT_RESULT.md).
+That is a direct experimental refutation of the 45-degree rule as a hard blocker on this
+machine. Re-imposing it by default would discard the stress alignment that is the entire
+justification for tracing, in the name of a constraint this printer demonstrably does not
+have. §2(b) asks for a parameter with a REPORTED default, and this is it: 0 disarms, the
+angle is `grading.organic_overhang_angle_deg`, and the counterfactual is reported on
+every run whether the clamp is armed or not.
+
+WHAT THE COUNTERFACTUAL SAYS. With the clamp OFF, 64.67 % of traced curve segments sit
+outside a 45-degree cone about the build direction. That is the fraction a textbook
+overhang gate would have re-angled — nearly two thirds of the lattice. It is large
+because it is the correct answer: the principal stress directions on this part are
+mostly NOT aligned with +Z, and following them is the point.
+
+WHAT THE CLAMP DOES WHEN ARMED. 74.15 % of RK4 steps are projected onto the cone and
+81.62 % of curves are touched — and afterwards EXACTLY 0.000000 of the traced curve
+segments lie outside 45 degrees. The clamp is exact, not approximate, because it runs
+IN THE TRACING LOOP (§2a): each step's direction is projected onto the nearest in-cone
+direction before the step is taken, so the emitted segment is in-cone by construction.
+There is no repair pass and there is nothing left over to repair.
+
+THE RESIDUAL IS CONNECTORS, AND IT IS STRUCTURAL. With the clamp armed, 20.81 % of ALL
+segments are still outside the cone, and every one of them is a CONNECTOR (82.16 % of
+connectors). Connectors are never clamped, deliberately: a connector is the shortest
+join between two curves, and re-angling it breaks the join — which is the one thing R3
+exists to protect. A connector is also at most one separation long (about 3 mm here),
+so it is a short bridge, not a long unsupported run. The 41.78 mm coupon is evidence
+about exactly that: long unsupported runs printed clean.
+
+THE CLAMP IS ALSO NOT FREE, AND THE TABLE SHOWS THE PRICE. Armed, the layout changes:
+3,167 curves instead of 3,056 and a slightly tighter median separation (3.020 vs 3.069
+mm), because a clamped curve turns toward the build axis and therefore leaves the region
+sooner and gets re-seeded. Connectivity is unharmed (31 curves under two connections
+against 34; 3 components either way).

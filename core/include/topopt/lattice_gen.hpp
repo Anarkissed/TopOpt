@@ -140,6 +140,27 @@ inline double lattice_skin_min_radius_mm(double min_extrudable_width_mm) {
   return kLatticeSkinWidthFactor * 0.5 * min_extrudable_width_mm;
 }
 
+// ── ★ THE SWEPT-SOLID PRIMITIVES, MADE PUBLIC (task 2026-08-21-organic-lattice) ──
+// The octet generator has always built its geometry from exactly two solids: an
+// n-gon prism swept along a strut, and an icosahedron at a node. The ORGANIC
+// generator (topopt/organic_lattice.hpp) builds the same lattice out of traced
+// polylines instead of cell edges, and it must emit the SAME solids at the same
+// radius — otherwise a second strut geometry is born beside this one, which is
+// exactly how the app's strut-diameter law drifted 1.4-1.7x from core's.
+//
+// These are the generator's own functions, exposed rather than copied. The bodies
+// did not change: the winding of both is load-bearing (see lattice_gen.cpp's ★ note
+// on the icosahedron face table) and the octet output is byte-identical either way,
+// which the R2 checksum proves.
+void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
+                        double r, int nseg);
+void lattice_emit_node(TriangleSink& sink, const Vec3& centre, double r);
+// Their analytic volumes, on the SOUP basis the stats already use: overlaps between
+// interpenetrating primitives are NOT deducted. State that wherever a total from
+// these is reported.
+double lattice_prism_volume_mm3(double r, double length_mm, int nseg);
+double lattice_node_volume_mm3(double r);
+
 // The strut RADIUS field (mm). `field`, when set, is called at each strut/node
 // MIDPOINT (model mm) and its return is used as the radius; otherwise `uniform_mm`
 // is used everywhere. `nseg` is the strut cross-section polygon segment count
@@ -283,6 +304,33 @@ struct LatticeLevelSpec {
   // a proportionally fatter strut, which is exactly the printability payoff.
   LatticeRadiusField radius;
 };
+
+// ── ★ STEPPED: ONE INDEPENDENT PASS PER REGION, NO TRANSITION HANDLING ─────────
+// (task 2026-08-21-organic-lattice, §4.)
+//
+// Each entry is a COMPLETE region — its own origin, its own cell grid, its own cell
+// edge and its own radius field — and they are generated in the order given, into one
+// sink. That is the whole algorithm: there is no ladder, no alignment, and no
+// stitching, because STEPPED is defined by NOT doing those things.
+//
+// ★ WHAT THIS GIVES UP, SAID PLAINLY. `generate_lattice_multilevel` above can promise
+// zero bridge struts because the DYADIC ladder makes a coarse cell's nodes nest in the
+// fine grid. Two regions here carry unrelated cell edges, so their nodes do not line
+// up and their struts pass each other without meeting. PR 235 measured that and
+// rejected banded regions for it. This function does not repair it and must not
+// pretend to: the caller MEASURES which region pairs actually meet and reports the
+// ones that do not (run_job's `stepped_adjacent_region_pairs` / `pairs_joined`).
+//
+// Deterministic for the same reason every pass is: a fixed order over fixed regions.
+struct LatticeSteppedPass {
+  LatticeRegion region;
+  LatticeRadiusField radius;
+};
+
+LatticeGenStats generate_lattice_stepped(
+    LatticeGenTopology topo, const std::vector<LatticeSteppedPass>& passes,
+    TriangleSink& sink, const LatticeSkinSpec& skin = LatticeSkinSpec{},
+    const LatticeGenObserver* observer = nullptr);
 
 // Generate every level of a dyadic plan into `sink`, in ASCENDING level order (fine
 // first) — a fixed order, so the file stays byte-identical for identical inputs.

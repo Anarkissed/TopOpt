@@ -1271,6 +1271,191 @@ std::string run_info_json(const RunInfo& info) {
         gr += (i ? ", " : "") + fmt_ll(info.grading_density_histogram[i]);
       gr += "]";
     }
+    // ── ★ THE ALGORITHM (task 2026-08-21-organic-lattice, §4). Present on every
+    // graded receipt so a run can be read months later without guessing which of the
+    // three laid the lattice down. "doubled" on every pre-task run.
+    if (!info.grading_algorithm.empty()) {
+      gr += ", \"algorithm\": \"" + info.grading_algorithm + "\"";
+      gr += ", \"algorithm_latticed_voxels\": " +
+            fmt_ll(info.grading_algorithm_latticed_voxels);
+      gr += ", \"lattice_solid_volume_mm3\": " +
+            fmt(info.grading_lattice_solid_volume_mm3);
+    }
+    // ── ★ STEPPED's report. Absent entirely unless the stepped algorithm ran.
+    if (info.stepped_present) {
+      gr += ", \"stepped\": {";
+      gr += "\"regions\": " + fmt_ll(info.stepped_regions);
+      gr += ", \"min_cell_mm\": " + fmt(info.stepped_min_cell_mm);
+      gr += ", \"max_cell_mm\": " + fmt(info.stepped_max_cell_mm);
+      gr += ", \"regions_out_of_regime\": " +
+            fmt_ll(info.stepped_regions_out_of_regime);
+      gr += ", \"regions_no_cell\": " + fmt_ll(info.stepped_regions_no_cell);
+      auto darr = [&](const char* name, const std::vector<double>& v) {
+        gr += ", \"" + std::string(name) + "\": [";
+        for (std::size_t i = 0; i < v.size(); ++i) gr += (i ? ", " : "") + fmt(v[i]);
+        gr += "]";
+      };
+      darr("region_cell_mm", info.stepped_region_cell_mm);
+      darr("region_rho", info.stepped_region_rho);
+      darr("region_member_width_mm", info.stepped_region_width_mm);
+      darr("region_cells_per_member", info.stepped_region_cells_per_member);
+      gr += ", \"region_voxels\": [";
+      for (std::size_t i = 0; i < info.stepped_region_voxels.size(); ++i)
+        gr += (i ? ", " : "") + fmt_ll(info.stepped_region_voxels[i]);
+      gr += "]";
+      // ★ The seam cost, measured. adjacent - joined is the number of places where
+      // two region lattices abut and do NOT meet.
+      gr += ", \"adjacent_region_pairs\": " +
+            fmt_ll(info.stepped_adjacent_region_pairs);
+      gr += ", \"adjacent_pairs_joined\": " +
+            fmt_ll(info.stepped_adjacent_pairs_joined);
+      gr += ", \"seam_note\": \"regions carry unrelated cell edges, so their nodes "
+            "do not line up; an adjacent pair that is not joined is a mechanical "
+            "disconnection at that seam. DOUBLED's dyadic ladder exists to prevent "
+            "exactly this.\"";
+      gr += "}";
+    }
+    // ── ★ ORGANIC's report. Absent entirely unless the organic algorithm ran.
+    if (info.organic_present) {
+      gr += ", \"organic\": {";
+      gr += "\"strut_diameter_mm\": " + fmt(info.organic_strut_diameter_mm);
+      gr += ", \"trace_seconds\": " + fmt(info.organic_trace_seconds);
+      gr += ", \"candidate_voxels\": " + fmt_ll(info.organic_candidate_voxels);
+      gr += ", \"latticed_voxels\": " + fmt_ll(info.organic_latticed_voxels);
+      gr += ", \"curves_traced\": " + fmt_ll(info.organic_curves_traced);
+      gr += ", \"curves_kept\": " + fmt_ll(info.organic_curves_kept);
+      gr += ", \"curves_thinned\": " + fmt_ll(info.organic_curves_thinned);
+      gr += ", \"curves_too_short\": " + fmt_ll(info.organic_curves_too_short);
+      gr += ", \"total_curve_length_mm\": " +
+            fmt(info.organic_total_curve_length_mm);
+      if (!info.organic_curves_per_family.empty()) {
+        gr += ", \"curves_per_family\": [";
+        for (std::size_t i = 0; i < info.organic_curves_per_family.size(); ++i)
+          gr += (i ? ", " : "") + fmt_ll(info.organic_curves_per_family[i]);
+        gr += "]";
+      }
+      if (!info.organic_curve_length_per_family_mm.empty()) {
+        gr += ", \"curve_length_per_family_mm\": [";
+        for (std::size_t i = 0;
+             i < info.organic_curve_length_per_family_mm.size(); ++i)
+          gr += (i ? ", " : "") + fmt(info.organic_curve_length_per_family_mm[i]);
+        gr += "]";
+      }
+      gr += ", \"stop_left_region\": " + fmt_ll(info.organic_stop_left_region);
+      gr += ", \"stop_hit_d_test\": " + fmt_ll(info.organic_stop_hit_d_test);
+      gr += ", \"stop_no_direction\": " + fmt_ll(info.organic_stop_no_direction);
+      gr += ", \"stop_step_budget\": " + fmt_ll(info.organic_stop_step_budget);
+      gr += ", \"stop_turned_too_far\": " +
+            fmt_ll(info.organic_stop_turned_too_far);
+      gr += ", \"stop_self_revisit\": " + fmt_ll(info.organic_stop_self_revisit);
+      gr += ", \"seeds_offered\": " + fmt_ll(info.organic_seeds_offered);
+      gr += ", \"seeds_outside_region\": " +
+            fmt_ll(info.organic_seeds_outside_region);
+      gr += ", \"seeds_too_close\": " + fmt_ll(info.organic_seeds_too_close);
+      gr += ", \"seeds_traced\": " + fmt_ll(info.organic_seeds_traced);
+      // R3 — connectivity. A non-zero `curves_under_two_connections` IS the finding.
+      gr += ", \"connectors\": " + fmt_ll(info.organic_connectors);
+      gr += ", \"curves_under_two_connections\": " +
+            fmt_ll(info.organic_curves_under_two_connections);
+      gr += ", \"curves_no_connection\": " +
+            fmt_ll(info.organic_curves_no_connection);
+      gr += ", \"connected_components\": " +
+            fmt_ll(info.organic_connected_components);
+      // ★★ THE REAL R3 — the graph numbers above describe an abstraction; these
+      // describe the solids that get written and printed.
+      gr += ", \"solid_components\": " + fmt_ll(info.organic_solid_components);
+      gr += ", \"solid_largest_length_fraction\": " +
+            fmt(info.organic_solid_largest_fraction);
+      gr += ", \"solid_stranded_length_mm\": " +
+            fmt(info.organic_solid_stranded_length_mm);
+      gr += ", \"solid_segments\": " + fmt_ll(info.organic_solid_segments);
+      gr += ", \"emitted_components\": " +
+            fmt_ll(info.organic_emitted_components);
+      gr += ", \"emitted_largest_length_fraction\": " +
+            fmt(info.organic_emitted_largest_fraction);
+      gr += ", \"emitted_stranded_length_mm\": " +
+            fmt(info.organic_emitted_stranded_length_mm);
+      gr += ", \"largest_component_fraction\": " +
+            fmt(info.organic_largest_component_fraction);
+      gr += ", \"connector_median_length_mm\": " +
+            fmt(info.organic_connector_median_length_mm);
+      gr += ", \"connector_cross_deviation_max_deg\": " +
+            fmt(info.organic_connector_max_cross_deviation_deg);
+      gr += ", \"connector_cross_deviation_mean_deg\": " +
+            fmt(info.organic_connector_mean_cross_deviation_deg);
+      gr += ", \"connectors_cross_measured\": " +
+            fmt_ll(info.organic_connectors_cross_measured);
+      gr += ", \"connectors_below_resolution\": " +
+            fmt_ll(info.organic_connectors_below_resolution);
+      // R6 — the clamp, and the 45-degree counterfactual measured beside it.
+      gr += ", \"overhang_clamp_armed\": ";
+      gr += info.organic_overhang_clamp_armed ? "true" : "false";
+      gr += ", \"overhang_angle_deg\": " + fmt(info.organic_overhang_angle_deg);
+      gr += ", \"clamped_step_fraction\": " +
+            fmt(info.organic_clamped_step_fraction);
+      gr += ", \"curves_touched_by_clamp_fraction\": " +
+            fmt(info.organic_curves_touched_fraction);
+      gr += ", \"segments_outside_45_fraction\": " +
+            fmt(info.organic_segments_outside_45_fraction);
+      gr += ", \"curve_segments_outside_45_fraction\": " +
+            fmt(info.organic_curve_segments_outside_45_fraction);
+      gr += ", \"connectors_outside_45_fraction\": " +
+            fmt(info.organic_connectors_outside_45_fraction);
+      // R5 — the ACHIEVED window, and WHICH floor bit.
+      gr += ", \"requested_spacing_min_mm\": " +
+            fmt(info.organic_requested_spacing_min_mm);
+      gr += ", \"requested_spacing_max_mm\": " +
+            fmt(info.organic_requested_spacing_max_mm);
+      gr += ", \"achieved_spacing_min_mm\": " +
+            fmt(info.organic_achieved_spacing_min_mm);
+      gr += ", \"achieved_spacing_max_mm\": " +
+            fmt(info.organic_achieved_spacing_max_mm);
+      gr += ", \"achieved_spacing_median_mm\": " +
+            fmt(info.organic_achieved_spacing_median_mm);
+      gr += ", \"spacing_print_floor_mm\": " +
+            fmt(info.organic_spacing_print_floor_mm);
+      gr += ", \"spacing_resolution_floor_mm\": " +
+            fmt(info.organic_spacing_resolution_floor_mm);
+      gr += ", \"spacing_raised_for_print_voxels\": " +
+            fmt_ll(info.organic_spacing_raised_for_print_voxels);
+      gr += ", \"spacing_raised_for_resolution_voxels\": " +
+            fmt_ll(info.organic_spacing_raised_for_resolution_voxels);
+      // R7 — the curve-crossing count, under its OWN name.
+      gr += ", \"curves_per_member_measured\": ";
+      gr += info.organic_curves_per_member_measured ? "true" : "false";
+      gr += ", \"min_curves_per_member\": " +
+            fmt(info.organic_min_curves_per_member);
+      gr += ", \"median_curves_per_member\": " +
+            fmt(info.organic_median_curves_per_member);
+      gr += ", \"curves_per_member_floor\": " +
+            fmt(info.organic_curves_per_member_floor);
+      gr += ", \"below_curves_per_member_floor_voxels\": " +
+            fmt_ll(info.organic_below_curves_per_member_floor_voxels);
+      // §6(d) — the swirl, named and counted; no combing pass was built.
+      gr += ", \"degenerate_frame_voxels\": " +
+            fmt_ll(info.organic_degenerate_voxels);
+      gr += ", \"degenerate_frame_fraction\": " +
+            fmt(info.organic_degenerate_fraction);
+      gr += ", \"max_frame_swap_fraction\": " +
+            fmt(info.organic_max_frame_swap_fraction);
+      // the emitted density
+      gr += ", \"rho_min\": " + fmt(info.organic_rho_min);
+      gr += ", \"rho_max\": " + fmt(info.organic_rho_max);
+      gr += ", \"rho_median\": " + fmt(info.organic_rho_median);
+      gr += ", \"rho_clamped_lo_voxels\": " +
+            fmt_ll(info.organic_rho_clamped_lo_voxels);
+      gr += ", \"rho_clamped_hi_voxels\": " +
+            fmt_ll(info.organic_rho_clamped_hi_voxels);
+      gr += ", \"emitted_volume_mm3\": " + fmt(info.organic_emitted_volume_mm3);
+      gr += ", \"volume_basis\": \"soup_overlaps_not_deducted\"";
+      // ★ §3(c) — the reading of the certificate, on the receipt, every time.
+      gr += ", \"tensor_out_of_regime\": ";
+      gr += info.organic_tensor_out_of_regime ? "true" : "false";
+      gr += ", \"tensor_note\": \"traced struts are anisotropic by construction; "
+            "the certified tensor is the CUBIC octet tensor at the emitted density, "
+            "which does not describe this geometry\"";
+      gr += "}";
+    }
     gr += ", \"solid_fallback_voxels\": " +
           fmt_ll(info.grading_solid_fallback_voxels);
     // Both can be the +inf "thicker than the EDT cap" sentinel (every latticed member

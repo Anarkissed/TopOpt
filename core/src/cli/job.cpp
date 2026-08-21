@@ -5,6 +5,7 @@
 #include "topopt/lattice.hpp"
 
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
+#include "topopt/lattice_algorithm.hpp"  // the ONE algorithm vocabulary (§4)
 
 #include <cctype>
 #include <cmath>
@@ -1213,7 +1214,7 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish", "regions", "multiscale",
+                         "outer_finish", "emit_welded_stl", "welded_pitch_mm", "regions", "multiscale",
                          "forecast_only",
                          "require_lattice_void_reaches_exterior"},
                         "lattice");
@@ -1434,6 +1435,18 @@ JobDescription parse_job(const std::string& json_text) {
     }
     // Outer finish (task 2026-07-30-lattice-skin-freeform). Absent => "shell",
     // byte-identical to the boundary-finish behaviour.
+    if (const JsonValue* w = find_key(lat, "emit_welded_stl")) {
+      if (w->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_welded_stl\" must be a boolean");
+      job.lattice.emit_welded_stl = (w->num != 0.0);
+    }
+    if (const JsonValue* wp = find_key(lat, "welded_pitch_mm")) {
+      job.lattice.welded_pitch_mm =
+          require_number(*wp, "lattice.welded_pitch_mm");
+      if (!(job.lattice.welded_pitch_mm > 0.0))
+        schema_fail("lattice \"welded_pitch_mm\" must be > 0 (omit it for the "
+                    "strut-resolving default)");
+    }
     if (const JsonValue* f = find_key(lat, "outer_finish")) {
       job.lattice.outer_finish =
           require_nonempty_string(*f, "lattice.outer_finish");
@@ -1479,7 +1492,9 @@ JobDescription parse_job(const std::string& json_text) {
              "cell_mode", "cell_min_mm", "cell_max_mm",
              "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction",
              "subfloor_aggregate_cap", "report_region_cells",
-             "subfloor_per_region"},
+             "subfloor_per_region",
+             "algorithm", "organic_strut_width_mm",
+             "organic_overhang_angle_deg"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1546,6 +1561,41 @@ JobDescription parse_job(const std::string& json_text) {
         "grading.min_extrudable_width_mm");
     if (!(job.grading.min_extrudable_width_mm > 0.0))
       schema_fail("grading \"min_extrudable_width_mm\" must be > 0");
+    // ★ THE LATTICE ALGORITHM (task 2026-08-21-organic-lattice, §4). Refused rather
+    // than defaulted when unknown, exactly as the intent is: an absent key means
+    // "doubled" and a MISSPELLED one means nothing at all.
+    if (const JsonValue* av = find_key(gr, "algorithm")) {
+      job.grading.algorithm = require_nonempty_string(*av, "grading.algorithm");
+      LatticeAlgorithm parsed;
+      if (!lattice_algorithm_from_name(job.grading.algorithm.c_str(), parsed))
+        schema_fail(
+            "grading \"algorithm\" must be \"doubled\", \"stepped\" or "
+            "\"organic\" (got \"" + job.grading.algorithm + "\")");
+    }
+    const bool organic_alg = job.grading.algorithm == "organic";
+    if (const JsonValue* v = find_key(gr, "organic_strut_width_mm")) {
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_strut_width_mm\" is only allowed with "
+            "\"algorithm\": \"organic\"");
+      job.grading.organic_strut_width_mm =
+          require_number(*v, "grading.organic_strut_width_mm");
+      if (!(job.grading.organic_strut_width_mm > 0.0))
+        schema_fail("grading \"organic_strut_width_mm\" must be > 0");
+    }
+    if (const JsonValue* v = find_key(gr, "organic_overhang_angle_deg")) {
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_overhang_angle_deg\" is only allowed with "
+            "\"algorithm\": \"organic\"");
+      job.grading.organic_overhang_angle_deg =
+          require_number(*v, "grading.organic_overhang_angle_deg");
+      if (!(job.grading.organic_overhang_angle_deg >= 0.0 &&
+            job.grading.organic_overhang_angle_deg <= 90.0))
+        schema_fail(
+            "grading \"organic_overhang_angle_deg\" must be in [0, 90] "
+            "(0 disarms the clamp)");
+    }
     // ★ THE INTENT (amendment §1). Refused rather than defaulted when unknown: a
     // job schema never silently falls back to an intent nobody asked for.
     if (const JsonValue* iv = find_key(gr, "intent")) {

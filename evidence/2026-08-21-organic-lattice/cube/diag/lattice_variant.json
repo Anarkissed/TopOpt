@@ -1,0 +1,44 @@
+{
+  "provenance": "latticed a finished variant",
+  "optimization": false,
+  "design_iterations": 0,
+  "optimizer_iterations_run": 0,
+  "variant_meshes_written": 0,
+  "analysis_solves": 4,
+  "analysis_solves_note": "certification solves only, no design loop: (1) the null-posture solve that reproduces this variant's RECORDED margin — the proof the load case and design are the originals; (2) the lattice pipeline's own null-posture reproduction; (3) the COMPOSITE certification; plus (4) the band-clamp counterfactual when any voxel was clamped",
+  "source": {
+    "design": "",
+    "variant_index": 0,
+    "requested_volume_fraction": 1,
+    "achieved_volume_fraction": 1,
+    "optimizer_iterations_originally": 0,
+    "design_fingerprint": "15703007687620756355",
+    "field_provenance": "the demand field this lattice is graded from is THIS variant's own certification von Mises field, recovered by the reproduction solve below from the stored design — not a simulation of the solid part, and not another run's field"
+  },
+  "reproduction": {
+    "recorded_margin_worst_case": 0,
+    "reproduced_margin_worst_case": 184.342882,
+    "exact": false,
+    "relative_delta": null,
+    "band": 1e-06,
+    "note": "ENFORCED, not reported: a reproduction outside `band` throws and nothing is written. `band` is a multiple of the certification solve's own relative-residual tolerance, because the recorded margin came from a solve carrying a warm Krylov recycle subspace and this one is denied it by ScopedLadderSolverIsolation — two Krylov paths on one operator, so `exact` is false on any run whose solves fall back to Jacobi-CG"
+  },
+  "model": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/cube/cube40.stl",
+  "resolution": 64,
+  "load_source": "loadcase",
+  "loadcase_receipt": "loadcase.json",
+  "lattice": {
+    "topology": "octet",
+    "graded": true,
+    "cell_mm": 5.916384207,
+    "rho_min_used": 0.05047,
+    "rho_max_used": 0.89988,
+    "latticed_voxels": 261899,
+    "solid_margin_worst_case": 184.342882,
+    "lattice_margin_worst_case": 58.70489218,
+    "lattice_margin_effective": 12.1555989,
+    "lattice_accepted": true,
+    "receipt": "cube_100_lattice.report.json"
+  },
+  "meshes": ["cube_100_lattice.stl"]
+}
