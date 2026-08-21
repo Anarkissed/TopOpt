@@ -430,6 +430,10 @@ struct OrganicGenStats {
   std::uint64_t nodes = 0;
   std::uint64_t clipped_segments = 0;
   std::uint64_t dropped_segments = 0;   // entirely outside the eroded region
+  // Node balls whose SOLID would have breached the eroded region. The octet generator
+  // drops these too, for the same reason: the clip certificate covers the swept strut,
+  // not a sphere about its cut end. Counted, never silent.
+  std::uint64_t dropped_nodes = 0;
   long long uncertified_spans_dropped = 0;  // clip slivers conservatively dropped
   double volume_mm3 = 0.0;              // soup basis; overlaps NOT deducted
   double min_strut_diameter_mm = 0.0;
@@ -438,10 +442,18 @@ struct OrganicGenStats {
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp
 
+struct LatticeGenObserver;  // topopt/lattice_gen.hpp — the SAME read-only tap
+
 OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          TriangleSink& sink,
                                          const LatticeBoundary* boundary = nullptr,
-                                         int nseg = 8);
+                                         int nseg = 8,
+                                         // The same tap the octet generator offers, so
+                                         // the export's no-protrusion measurement can
+                                         // ATTRIBUTE a bad vertex to a pass instead of
+                                         // reporting it "unattributed". Observing never
+                                         // changes the emitted bytes.
+                                         const LatticeGenObserver* observer = nullptr);
 
 }  // namespace topopt
 

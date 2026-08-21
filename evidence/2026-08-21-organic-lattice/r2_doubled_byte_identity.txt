@@ -1,28 +1,45 @@
-★ R2 — DOUBLED (and STEPPED's shared law) BYTE-IDENTICAL TO PR 345's HEAD.
+★ R2 — DOUBLED (and the law STEPPED shares) BYTE-IDENTICAL TO PR 345's HEAD.
 
 THE GUARD FIRST: the two binaries must actually DIFFER, or this compares one binary
 with itself and 'identical' means nothing.
   base (d28527cc, no task code)  7b827beed8b93c0bce92c4b66982d98d495dc4e3f4658d71877bd50d7758c9cb
-  branch                          12c7706b625cf557cf397bd532f2f4a61df1319b5d6f4a5ab8699c1b0e22ac6c
+  branch (FINAL)                 10a0794a3bbc74d75b2270eb5ac06fe1a4f65ddcad9a8d5edde0d2911c7d2998
   DIFFER -> the comparison is real.
 
-THE JOB: evidence/.../jobs/nokey_bandC.json — PR 344's aes_bandC_on verbatim, with
-NO "algorithm" key at all. That is the byte-identity case that matters (§4d): every
-existing job states nothing and must be unchanged.
+THE JOB: jobs/nokey_bandC.json — PR 344's aes_bandC_on VERBATIM, with NO "algorithm"
+key at all. That is the byte-identity case that matters (§4d): every existing job
+states nothing, and must be unchanged.
 
---- sha256, base binary vs branch binary, same job ---
-  run_info.json          DIFFER
+--- sha256, base binary vs FINAL branch binary, same job ---
+  fields.bin             IDENTICAL
   analysis_report.json   IDENTICAL
   analysis.json          IDENTICAL
-  fields.bin             IDENTICAL
 
---- run_info differs only where a timestamp does (shown in full) ---
+--- EVERY difference in run_info.json, shown in full ---
 169c169
 <     "created_wall_ms": 1787278696013,
 ---
->     "created_wall_ms": 1787278493599,
+>     "created_wall_ms": 1787282271621,
 228a229,231
 >         "algorithm": "doubled",
 >         "algorithm_latticed_voxels": 84660,
 >         "lattice_solid_volume_mm3": 62555.03318,
-(nothing above = identical)
+
+READ HONESTLY:
+  * fields.bin is IDENTICAL. That is the per-voxel container — the design, the graded
+    density, the whole field. THE LATTICE ITSELF IS BYTE-IDENTICAL.
+  * analysis.json and analysis_report.json are IDENTICAL: same verdict, same margin,
+    same mass, same min-feature, same everything the gate produces.
+  * run_info.json gains THREE ADDITIVE FIELDS and a timestamp. Nothing was changed or
+    removed; the receipt is a strict SUPERSET. "algorithm": "doubled" is the name of
+    the law that always ran, now said out loud, and the two numbers beside it are the
+    R10 comparison basis.
+
+So the claim is not 'the receipt is byte-identical' — it is not, and saying so would be
+false. The claim is that the LATTICE and the VERDICT are byte-identical and the receipt
+grew by three fields, which is what §4(d) is actually about.
+
+AND THE REFUSAL THAT PROVES THE KEY IS NEW: the base binary, given doubled.json (the
+same job WITH the key), answers
+    topopt-cli: job.json: unknown key "algorithm" in grading
+which is why this comparison had to be run on the key-less job in the first place.

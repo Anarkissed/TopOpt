@@ -1075,7 +1075,8 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
 OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          TriangleSink& sink,
                                          const LatticeBoundary* boundary,
-                                         int nseg) {
+                                         int nseg,
+                                         const LatticeGenObserver* obs) {
   if (nseg < 3)
     throw std::invalid_argument("generate_organic_lattice: nseg must be >= 3");
   OrganicGenStats st;
@@ -1103,7 +1104,28 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     return a.x == b.x && a.y == b.y && a.z == b.z;
   };
   auto emit_node_once = [&](const Vec3& p, double r) {
+    // ★ THE SAME GUARD THE OCTET GENERATOR HOLDS, AND FOR THE SAME REASON
+    // (lattice_gen.cpp, the interior-node loop): a node ball whose SOLID would breach
+    // the eroded region is DROPPED. The clip certificate covers the strut — the swept
+    // prism is inside by construction because the centreline was eroded by its own
+    // radius — but a BALL at a clipped endpoint is a sphere of radius r about a point
+    // the clip only guarantees is r from the surface along the segment, and near a
+    // concave feature that is not the same thing.
+    //
+    // ★ THIS WAS A REAL DEFECT, CAUGHT BY THE CODEBASE'S OWN INVARIANT AND NOT BY ME.
+    // Without it, `lattice-variant` refused the organic export outright: "190 of 34,776
+    // lattice vertices lie OUTSIDE the solid shell written into the same file, the
+    // worst by 0.1802 mm". That refusal is the no-protrusion bar (task
+    // 2026-08-08-strut-clip-matches-shell) doing exactly what it exists for — the file
+    // would have printed strut ends standing proud of the surface while the certificate
+    // described the composite inside it.
+    if (boundary && boundary->signed_distance(p) < r) {
+      ++st.dropped_nodes;
+      return;
+    }
     lattice_emit_node(sink, p, r);
+    if (obs && obs->on_element)
+      obs->on_element(LatticeGenElement::Node, p, p, r);
     st.triangles += 20;  // an icosahedron is exactly 20 triangles
     ++st.nodes;
     st.volume_mm3 += lattice_node_volume_mm3(r);
@@ -1111,6 +1133,8 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   auto emit_span = [&](const Vec3& p0, const Vec3& p1, double r) {
     if (!(vlen(vsub(p1, p0)) > 0.0)) return;
     lattice_emit_strut(sink, p0, p1, r, nseg);
+    if (obs && obs->on_element)
+      obs->on_element(LatticeGenElement::InteriorStrut, p0, p1, r);
     st.triangles += static_cast<std::uint64_t>(4 * nseg);
     ++st.struts;
     st.volume_mm3 += lattice_prism_volume_mm3(r, vlen(vsub(p1, p0)), nseg);
@@ -1130,14 +1154,24 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         boundary->clip_segment(a, b, r, -1, -1, &uncertified);
     st.uncertified_spans_dropped += uncertified;
     if (keep.empty()) { ++st.dropped_segments; return; }
+    // ★ `LatticeClipSpan::t0/t1` ARE ARC-LENGTH IN MILLIMETRES, not fractions — the
+    // header says so ("0 at a, |b-a| at b"), and reading them as fractions is a real
+    // bug I shipped and the codebase's own no-protrusion invariant caught: a whole
+    // span comes back as t1 == |b-a|, so `a + (b-a)*t1` placed the far end |b-a| times
+    // too far along and the strut ran straight out through the shell. It refused with
+    // "70 of 32,916 lattice vertices lie OUTSIDE the solid shell ... emitted by the
+    // interior strut pass". Scale by the UNIT direction, not by the segment vector.
+    const double seg_len = vlen(vsub(b, a));
+    if (!(seg_len > 0.0)) return;
+    const Vec3 seg_dir = vmul(vsub(b, a), 1.0 / seg_len);
     const bool whole =
-        keep.size() == 1 && keep[0].t0 <= 0.0 && keep[0].t1 >= 1.0;
+        keep.size() == 1 && keep[0].t0 <= 0.0 && keep[0].t1 >= seg_len;
     if (!whole) ++st.clipped_segments;
     for (const LatticeClipSpan& s : keep) {
       // A clip GAP is a genuine end on both sides, so the run restarts.
       if (s.t0 > 0.0) have_last = false;
-      const Vec3 p0 = vadd(a, vmul(vsub(b, a), s.t0));
-      const Vec3 p1 = vadd(a, vmul(vsub(b, a), s.t1));
+      const Vec3 p0 = vadd(a, vmul(seg_dir, s.t0));
+      const Vec3 p1 = vadd(a, vmul(seg_dir, s.t1));
       emit_span(p0, p1, r);
     }
   };

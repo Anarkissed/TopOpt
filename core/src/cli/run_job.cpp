@@ -1920,13 +1920,13 @@ LatticeExportOutcome export_latticed_variant(
       }
       pass_marks.emplace_back(m.n_seen, name);
     };
-    // ORGANIC emits no LatticeGenElement, so the per-pass attribution above has
-    // nothing to key on and `worst_pass` stays "unattributed" — stated rather than
-    // faked, because every organic primitive is a traced strut or a node ball and
-    // naming one of the two would add nothing a reader could act on.
+    // ORGANIC feeds the SAME observer, so a protruding vertex is attributed to
+    // "interior strut" or "node ball" exactly as it is on the octet path. It was
+    // "unattributed" once, and that cost a round of guessing about which primitive was
+    // escaping the shell.
     const LatticeGenStats st =
         organic
-            ? organic_stats(generate_organic_lattice(*organic, m, &boundary))
+            ? organic_stats(generate_organic_lattice(*organic, m, &boundary, 8, &obs))
             : (stepped ? generate_lattice_stepped(LatticeGenTopology::Octet,
                                                   *stepped, m, skin, &obs)
                        : (swept ? generate_lattice_multilevel(

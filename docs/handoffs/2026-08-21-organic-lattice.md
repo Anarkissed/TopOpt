@@ -38,7 +38,9 @@ outward-wound, and its signed volume equals the generator's own analytic sum to 
 digit** (1403.7347 vs 1403.7 mm³). **Not edge-2-manifold — and neither is the shipped
 octet export**, which carries *more* non-manifold edges on the same fixture (164,456 vs
 127,080). A strut lattice is an interpenetrating union of closed solids by design;
-`lattice_gen.hpp` says so and PR 201 closed a real print on it.
+`lattice_gen.hpp` says so and PR 201 closed a real print on it. **And all three now
+write a real file through the real exporter with `protruding_vertices: 0`** — see
+"the geometry path" below, and the bug that got there.
 
 **The achieved spacing window (R5).** Requested **2.734–5.116 mm**; **achieved
 1.369–7.795 mm, median 3.069 mm**. Neither floor bit — the printability floor is 1.618
@@ -264,6 +266,24 @@ cross-product direction — the station search alone reads 78° off it).
 After all three: `[637, 904, 1515]` curves, 17,153 connectors, **34 curves under two
 connections instead of 469 with none.**
 
+**4. And one the codebase caught, not me: I read `LatticeClipSpan::t0/t1` as fractions.**
+They are **arc-length in millimetres** — `lattice_boundary.hpp` says so in the struct's
+own comment, *"0 at a, |b-a| at b"*. So `a + (b-a)·t1` put a whole span's far end |b-a|
+times too far along and the strut ran out through the shell. The **no-protrusion
+invariant** refused the export outright: *"70 of 32,916 lattice vertices lie OUTSIDE the
+solid shell written into the same file … emitted by the interior strut pass."*
+
+★ What actually found it was not reading the code — I reasoned twice, wrongly, that the
+certified Lipschitz clip made this impossible. It was the **attribution**: feeding organic
+the same `LatticeGenObserver` the octet path uses turned *"emitted by the unattributed
+pass"* into *"emitted by the interior strut pass"*, which ruled out the node balls and
+left exactly one candidate. The observer is now wired permanently for that reason.
+
+(A second, separate defect in the same refusal: **node balls were not guarded.** The
+octet generator drops any ball whose solid would breach the eroded region — the clip
+certificate covers the swept strut, not a sphere about its cut end. Same guard added,
+drops counted.)
+
 ---
 
 ## BARS
@@ -271,9 +291,9 @@ connections instead of 469 with none.**
 | bar | status |
 |---|---|
 | R1 all three run from the CLI on his part | **done** — invocations in `r1_cli_invocations.txt`; one key apart |
-| R2 doubled/stepped byte-identical to PR 345 | **done, with one qualification** — `fields.bin`, `analysis.json`, `analysis_report.json` byte-identical against the BASE binary on the key-less job. `run_info.json` gains three **additive** fields (`algorithm`, `algorithm_latticed_voxels`, `lattice_solid_volume_mm3`) and the timestamp. The lattice itself is identical; the receipt is a superset. Binary-differ guard run first. |
+| R2 doubled/stepped byte-identical to PR 345 | **done, with one qualification, re-run on the FINAL binary** — `fields.bin`, `analysis.json`, `analysis_report.json` byte-identical against the BASE binary on the key-less job. `run_info.json` gains three **additive** fields (`algorithm`, `algorithm_latticed_voxels`, `lattice_solid_volume_mm3`) and the timestamp. The lattice and the verdict are identical; the receipt is a strict superset. Binary-differ guard run first. |
 | R3 organic connected, disconnected count | **done — 34 of 3,056 (1.11 %), 1 with none, 3 components, largest 98.46 %.** Non-zero, and reported as the finding |
-| R4 watertight + manifold, asserted | **done** — closed (0 boundary edges), outward-wound (signed volume == analytic sum), NOT edge-2-manifold — and the octet reference is *less* manifold on the same fixture |
+| R4 watertight + manifold, asserted | **done** — closed (0 boundary edges), outward-wound (signed volume == analytic sum), NOT edge-2-manifold, and the octet reference is *less* manifold on the same fixture. Plus all three through the real exporter at `protruding_vertices: 0` |
 | R5 achieved spacing window | **done** — 1.369–7.795 mm achieved vs 2.734–5.116 requested vs 1.173–4.931 theoretical, with both floors and which bit |
 | R6 overhang clamp at default and at 45 | **done** — 0 % at the default (disarmed, with the coupon as the reason), 64.67 % counterfactual, exactly 0.000000 armed |
 | R7 curve-crossing count defined and reported | **done** — `curves_per_member`, min 3.083 / median 8.681, floor 2.0, 0 below |
@@ -330,14 +350,13 @@ and each is answered:
 * **STEPPED is new here and is measured, not endorsed.** 4 of its 5 abutting region pairs
   are mechanically disconnected. It exists so the UI can be built against three
   algorithms and so that cost is visible; it is not a recommendation.
-* **The geometry path is wired but no end-to-end STL of HIS part was produced.**
-  `analyze` grades and reports; only `lattice_one_variant` writes lattice geometry, and
-  reaching it needs a stored design (`lattice-variant`), which would need an optimize run
-  of his part that does not exist here. Both new generators ARE exercised directly and
-  measured — `generate_organic_lattice` and `generate_lattice_stepped`, the latter on the
-  two-abutting-passes-at-unrelated-cells configuration that defines the algorithm — see
-  `r4_watertight_manifold.txt`. What has not happened is one command producing one file
-  containing shell + organic struts for `M2_verticalStand.step`.
+* **No end-to-end STL of HIS part.** All three DO now run end to end through
+  `lattice-variant` and write real lattice meshes with **zero protruding vertices**
+  (`geom_end_to_end.txt`) — but on the l-bracket fixture, from the design store the core
+  suite's own `cli_demo` test produces, and at a **synthetic 0.12 mm bead**, because at
+  his 0.45 mm bead the bracket's 7.5 mm members cannot hold five cells and all three
+  refuse identically. Producing one for `M2_verticalStand.step` needs an optimize run of
+  it, which does not exist here.
 * **No new unit tests.** Two standalone probes (`organic_probe`, `manifold_probe`) carry
   the positive controls; the existing suite was run as a regression check.
 
@@ -387,11 +406,24 @@ deliberately not cube-shaped — that is the entire point of following the stres
 certificate still runs, and it still tells you the truth about the part, but it now says
 in writing that the lattice inside is not the material it is doing its arithmetic with.
 
-Finally, two things I got wrong and the checks that caught them. The density it reported
-was eight times too high, because it was measuring "is there a strut in this exact
-millimetre" instead of "how solid is this neighbourhood" — a test against hand arithmetic
-on a simple block caught it. And two of the three families of curves were barely being
-drawn at all, because a curve too short to keep also stopped the program looking anywhere
-near it, and your lattice regions are only 4 mm deep so the curves crossing the thickness
-were all too short. That one showed up as the connection count: 469 curves joined to
-nothing. After the fix it is 34.
+Finally, three things I got wrong and the checks that caught them.
+
+The density it reported was **eight times too high**, because it was measuring "is there
+a strut in this exact millimetre" instead of "how solid is this neighbourhood". A test
+against hand arithmetic on a simple block caught that one.
+
+**Two of the three families of curves were barely being drawn at all.** A curve too short
+to keep also stopped the program looking anywhere near it, and your lattice regions are
+only 4 mm deep, so the curves crossing the thickness were all too short and the whole
+family died out. That showed up as the connection count: 469 curves joined to nothing.
+After the fix it is 34.
+
+And the third is the one worth telling. **The struts were poking out through the outside
+of the part** — a routine that trims a strut where it meets the surface hands back a
+distance in millimetres, and I read it as a fraction, so the trimmed end landed far past
+where it should. I did not find this by reading my code; I convinced myself twice it was
+impossible. What found it was your own safety check, the one that refuses to write a file
+whose struts stick out of its own shell — and then, when I gave it the same labelling the
+older lattice code already had, it stopped saying "something escaped" and started saying
+"a strut escaped", which left exactly one thing it could be. All three algorithms now
+write a file with nothing at all poking out.

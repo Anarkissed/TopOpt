@@ -1,8 +1,12 @@
 # Regenerable from the committed sources; too large to version.
-#   fields.bin — the per-run von Mises container (7.7 MB per run, 7 runs here).
-#   Every run's run_info.json, analysis.json and analysis_report.json ARE committed:
-#   those carry every number the bars are measured from, including the whole
-#   grading.organic and grading.stepped blocks. Regenerate the containers with the
-#   invocations in r1_cli_invocations.txt.
+#   fields.bin — the per-run von Mises container (7.7 MB per run).
+#   geom/store, geom/out_*/*.stl — the l-bracket design store and the three emitted
+#     lattice meshes (2.8-6.8 MB each). Every NUMBER measured from them is committed:
+#     each out_*/variant_070_lattice.report.json is kept, and that is where
+#     protruding_vertices, the strut/node counts and the volumes live.
+#   Regenerate with the invocations in r1_cli_invocations.txt and geom_end_to_end.txt.
 */fields.bin
 */*/fields.bin
+geom/store/
+geom/out_*/*.stl
+geom/out_*/fields.bin
