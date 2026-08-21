@@ -1213,6 +1213,19 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"above_percentile_voxels\": " +
             fmt_ll(info.grading_above_percentile_voxels);
     }
+    if (info.grading_recertified) {
+      gr += ", \"recertified_latticed\": true";
+      gr += ", \"recertified_margin\": " + fmt(info.grading_recertified_margin);
+      gr += ", \"recertified_accepted\": " +
+            bool_json(info.grading_recertified_accepted);
+      gr += ", \"recertified_non_convergent\": " +
+            bool_json(info.grading_recertified_non_convergent);
+      gr += ", \"recertified_max_von_mises\": " +
+            fmt(info.grading_recertified_max_von_mises);
+      gr += ", \"solid_margin\": " + fmt(info.grading_solid_margin);
+      gr += ", \"recertify_changed_verdict\": " +
+            bool_json(info.grading_recertify_changed_verdict);
+    }
     if (info.grading_adaptive_cells_armed) {
       gr += ", \"adaptive_cells_per_member\": true";
       gr += ", \"adaptive_error_budget\": " +
