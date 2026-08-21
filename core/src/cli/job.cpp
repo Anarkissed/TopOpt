@@ -1,5 +1,7 @@
 #include "topopt/job.hpp"
 
+#include "topopt/grading.hpp"
+
 #include "topopt/lattice.hpp"
 
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
@@ -484,7 +486,7 @@ JobDescription parse_job(const std::string& json_text) {
         lv, {"anchors", "anchor_face_ids", "face_regions", "anchor_region_ids",
              "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
-             "infill_percent", "minimize_plastic", "wall_loops",
+             "infill_percent", "minimize_plastic", "wall_loops", "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
     job.loads.present = true;
@@ -809,6 +811,11 @@ JobDescription parse_job(const std::string& json_text) {
       job.loads.infill_percent = require_number(*ip, "loads.infill_percent");
       if (job.loads.infill_percent < 0.0 || job.loads.infill_percent > 100.0)
         schema_fail("\"loads.infill_percent\" must be in [0, 100]");
+    }
+    if (const JsonValue* lh = find_key(lv, "layer_height_mm")) {
+      job.loads.layer_height_mm = require_number(*lh, "loads.layer_height_mm");
+      if (!(job.loads.layer_height_mm > 0.0))
+        schema_fail("\"loads.layer_height_mm\" must be > 0");
     }
     if (const JsonValue* mp = find_key(lv, "minimize_plastic")) {
       if (mp->type != JsonValue::Type::Bool)
@@ -1466,6 +1473,9 @@ JobDescription parse_job(const std::string& json_text) {
     const JsonValue& gr = require_object(*gradv, "grading");
     reject_unknown_keys(
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
+             "intent", "aesthetic_percentile", "aesthetic_rho_min",
+             "aesthetic_rho_max", "aesthetic_adaptive_cells_per_member",
+             "aesthetic_error_budget",
              "cell_mode", "cell_min_mm", "cell_max_mm",
              "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction",
              "subfloor_aggregate_cap", "report_region_cells",
@@ -1536,6 +1546,47 @@ JobDescription parse_job(const std::string& json_text) {
         "grading.min_extrudable_width_mm");
     if (!(job.grading.min_extrudable_width_mm > 0.0))
       schema_fail("grading \"min_extrudable_width_mm\" must be > 0");
+    // ★ THE INTENT (amendment §1). Refused rather than defaulted when unknown: a
+    // job schema never silently falls back to an intent nobody asked for.
+    if (const JsonValue* iv = find_key(gr, "intent")) {
+      job.grading.intent = require_nonempty_string(*iv, "grading.intent");
+      GradingIntent parsed;
+      if (!grading_intent_from_name(job.grading.intent.c_str(), parsed))
+        schema_fail("grading \"intent\" must be \"structural\" or \"aesthetic\" (got \"" +
+                    job.grading.intent + "\")");
+    }
+    if (const JsonValue* q = find_key(gr, "aesthetic_percentile")) {
+      job.grading.aesthetic_percentile =
+          require_number(*q, "grading.aesthetic_percentile");
+      if (!(job.grading.aesthetic_percentile > 0.0 &&
+            job.grading.aesthetic_percentile <= 1.0))
+        schema_fail("grading \"aesthetic_percentile\" must be in (0, 1]");
+    }
+    if (const JsonValue* v = find_key(gr, "aesthetic_rho_min"))
+      job.grading.aesthetic_rho_min =
+          require_number(*v, "grading.aesthetic_rho_min");
+    if (const JsonValue* v = find_key(gr, "aesthetic_adaptive_cells_per_member")) {
+      if (v->type != JsonValue::Type::Bool)
+        schema_fail("grading \"aesthetic_adaptive_cells_per_member\" must be a boolean");
+      job.grading.aesthetic_adaptive_cells_per_member = (v->num != 0.0);
+    }
+    if (const JsonValue* v = find_key(gr, "aesthetic_error_budget")) {
+      job.grading.aesthetic_error_budget =
+          require_number(*v, "grading.aesthetic_error_budget");
+      if (!(job.grading.aesthetic_error_budget > 0.0))
+        schema_fail("grading \"aesthetic_error_budget\" must be > 0");
+    }
+    if (const JsonValue* v = find_key(gr, "aesthetic_rho_max"))
+      job.grading.aesthetic_rho_max =
+          require_number(*v, "grading.aesthetic_rho_max");
+    if ((job.grading.aesthetic_rho_min > 0.0) !=
+        (job.grading.aesthetic_rho_max > 0.0))
+      schema_fail(
+          "grading \"aesthetic_rho_min\" and \"aesthetic_rho_max\" must be given "
+          "together (omit both for the certifiable band)");
+    if (job.grading.aesthetic_rho_min > 0.0 &&
+        !(job.grading.aesthetic_rho_max > job.grading.aesthetic_rho_min))
+      schema_fail("grading \"aesthetic_rho_max\" must exceed \"aesthetic_rho_min\"");
     if (const JsonValue* e = find_key(gr, "demand_exponent")) {
       job.grading.demand_exponent = require_number(*e, "grading.demand_exponent");
       if (!(job.grading.demand_exponent > 0.0))

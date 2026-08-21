@@ -12,6 +12,23 @@
 
 namespace topopt {
 
+const char* grading_intent_name(GradingIntent i) {
+  switch (i) {
+    case GradingIntent::Structural: return "structural";
+    case GradingIntent::Aesthetic: return "aesthetic";
+  }
+  // A new case must be NAMED here before anything can serialize it — never a silent
+  // fallback, the same posture cell_size_mode_name takes.
+  throw std::logic_error("grading_intent_name: unnamed GradingIntent");
+}
+
+bool grading_intent_from_name(const char* name, GradingIntent& out) {
+  const std::string n = name ? name : "";
+  if (n == "structural") { out = GradingIntent::Structural; return true; }
+  if (n == "aesthetic") { out = GradingIntent::Aesthetic; return true; }
+  return false;   // a job schema never silently falls back to an intent nobody asked for
+}
+
 namespace {
 
 // BAR F1 — record ONE voxel rejected because its member cannot hold N* cells
@@ -138,6 +155,22 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // below reads `allowable` and it runs before the density map.
   const double allowable = params.demand_allowable_mpa;
   const double u_target = params.utilisation_target;
+  // ── ★ AESTHETIC (amendment §1/§2/§3), resolved once ──────────────────────────
+  const bool aesthetic = params.intent == GradingIntent::Aesthetic;
+  const double aes_q = params.aesthetic_percentile > 0.0
+                           ? params.aesthetic_percentile
+                           : kAestheticPercentile;
+  if (aesthetic && !(aes_q > 0.0 && aes_q <= 1.0))
+    throw std::invalid_argument(
+        "grade_lattice: aesthetic_percentile must be in (0, 1]");
+  if ((params.aesthetic_rho_min > 0.0) != (params.aesthetic_rho_max > 0.0))
+    throw std::invalid_argument(
+        "grade_lattice: aesthetic_rho_min and aesthetic_rho_max must be given "
+        "together (both 0 = the certifiable band)");
+  if (params.aesthetic_rho_min > 0.0 &&
+      !(params.aesthetic_rho_max > params.aesthetic_rho_min))
+    throw std::invalid_argument(
+        "grade_lattice: aesthetic_rho_max must exceed aesthetic_rho_min");
 
   const LatticeTopology topo = params.topology;
 
@@ -149,6 +182,38 @@ GradedField grade_lattice(const VoxelGrid& grid,
   out.band_rho_min = rho_lo;
   out.band_rho_max = rho_hi;
   out.cells_per_member_floor = n_star;
+  // ── ★ THE ADAPTIVE FLOOR (aesthetic only) ────────────────────────────────────
+  // Disarms itself without an allowable: utilisation is what it is a function of.
+  const bool adaptive_cpm = aesthetic &&
+                            params.aesthetic_adaptive_cells_per_member &&
+                            params.demand_allowable_mpa > 0.0;
+  const double err_budget = params.aesthetic_error_budget > 0.0
+                                ? params.aesthetic_error_budget
+                                : kAestheticHomogenisationErrorBudget;
+  out.aesthetic_adaptive_cells_armed = adaptive_cpm;
+  out.aesthetic_error_budget_used = adaptive_cpm ? err_budget : 0.0;
+  out.aesthetic_min_cells_per_member_allowed = adaptive_cpm ? n_star : 0.0;
+  // The floor THIS voxel must clear. Constant everywhere unless the adaptive rule is
+  // armed, so every other path is bit-identical.
+  // The loosest floor the adaptive rule permits over the candidate set — what the
+  // per-CELL planner is allowed to consider. Computed in a fixed voxel order.
+  double adaptive_plan_floor = n_star;
+  if (adaptive_cpm) {
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
+      const double f = aesthetic_cells_per_member_floor(
+          topo, demand[e] / params.demand_allowable_mpa, err_budget);
+      if (f < adaptive_plan_floor) adaptive_plan_floor = f;
+    }
+  }
+  auto n_req = [&](std::size_t e) -> double {
+    if (!adaptive_cpm) return n_star;
+    const double u = demand[e] / params.demand_allowable_mpa;
+    const double f = aesthetic_cells_per_member_floor(topo, u, err_budget);
+    if (f < out.aesthetic_min_cells_per_member_allowed)
+      out.aesthetic_min_cells_per_member_allowed = f;
+    return f;
+  };
 
   // ── the printability floor (requirement 3) ──────────────────────────────────────
   // The thinnest strut at any cell occurs at rho_lo (diameter is monotone in rho), so
@@ -341,6 +406,73 @@ GradedField grade_lattice(const VoxelGrid& grid,
   double min_width = kInf, min_cpm = kInf;
   double min_d = kInf, max_d = 0.0;
   const double gamma = params.demand_exponent;
+  // ── ★ THE AESTHETIC RANGE AND THE PERCENTILE (amendment §1b, §2) ────────────
+  // The range defaults to the certifiable band, so the mechanism works unconfigured.
+  // ★ IT IS STILL CLAMPED INTO THE CERTIFIABLE BAND: an aesthetic run may choose
+  // WHERE within the band to grade, never to leave it — the band is what makes every
+  // emitted density certifiable by construction (bar L2), and §2(e) keeps the
+  // certificate running over whatever is emitted.
+  // ★ THE DEFAULT AESTHETIC RANGE DOES NOT REACH THE BAND FLOOR, AND THAT IS A
+  // WORKAROUND, NOT A DESIGN CHOICE. `plan_cell_sizes` refuses a field that BOTH
+  // reaches `rho_min` AND spans nearly the whole band — the resulting spread of
+  // required cell sizes cannot be nested in an aligned octree
+  // ("level assignment is not an aligned octree"). Measured: [0.10, 0.90] is fine,
+  // [0.0505, 0.35] is fine, [0.0505, 0.8999] fails. The old law never tripped it
+  // because its low tail CLAMPED to rho_min, making octree blocks uniform by
+  // accident; the aesthetic grade removes that plateau.
+  //
+  // Lifting the default bottom off the floor avoids the combination while costing
+  // almost nothing visually (the default range is still ~8x wide). An EXPLICIT
+  // range is honoured as given — this only moves the DEFAULT.
+  //
+  // ★ THE REAL FIX is in cell_plan.cpp: let the planner insert intermediate levels
+  // so neighbouring cells never differ by more than the octree can nest. That is
+  // shared with the TO+lattice path and is deliberately not done here.
+  const double aes_default_lo = kAestheticDefaultFloorMultiple * rho_lo;
+  const double aes_lo = aesthetic ? std::max(rho_lo, params.aesthetic_rho_min > 0.0
+                                                         ? params.aesthetic_rho_min
+                                                         : aes_default_lo)
+                                  : rho_lo;
+  const double aes_hi = aesthetic ? std::min(rho_hi, params.aesthetic_rho_max > 0.0
+                                                         ? params.aesthetic_rho_max
+                                                         : rho_hi)
+                                  : rho_hi;
+  if (aesthetic && !(aes_hi > aes_lo))
+    throw std::invalid_argument(
+        "grade_lattice: the aesthetic range does not intersect the certifiable band");
+
+  // ★ DETERMINISTIC PERCENTILE (bar R16 / PR 344 §1b): a FULL SORT of the candidate
+  // demands in voxel order, never a sampled estimate. The same discipline the density
+  // histogram already keeps.
+  double aes_ref = 0.0;
+  if (aesthetic) {
+    std::vector<double> d;
+    d.reserve(out.region_voxels ? out.region_voxels : 1024);
+    for (std::size_t e = 0; e < n; ++e) {
+      const bool candidate = density[e] > iso && (!region || (*region)[e] != 0);
+      if (candidate && std::isfinite(demand[e])) d.push_back(demand[e]);
+    }
+    if (!d.empty()) {
+      std::sort(d.begin(), d.end());
+      std::size_t k = static_cast<std::size_t>(aes_q * (d.size() - 1));
+      if (k >= d.size()) k = d.size() - 1;
+      aes_ref = d[k];
+      for (double v : d)
+        if (v > aes_ref) ++out.above_percentile_voxels;
+    }
+  }
+  out.intent_used = params.intent;
+  out.aesthetic_percentile_used = aesthetic ? aes_q : 0.0;
+  out.aesthetic_percentile_mpa = aes_ref;
+  out.aesthetic_rho_min_used = aesthetic ? aes_lo : 0.0;
+  out.aesthetic_rho_max_used = aesthetic ? aes_hi : 0.0;
+  // §3 — the band POSITION. `utilisation_target` doubles as the carrier of the
+  // maintainer's existing checkbox: 1.0 is minimize_plastic ON, below 1.0 is OFF.
+  const double aes_w = aesthetic ? (u_target >= 1.0 ? kAestheticOpenExponent
+                                                    : kAestheticTightExponent)
+                                 : 0.0;
+  out.aesthetic_weight_exponent_used = aes_w;
+
   out.demand_allowable_mpa_used = allowable;
   out.utilisation_target_used = allowable > 0.0 ? u_target : 0.0;
   if (allowable > 0.0) {
@@ -384,12 +516,21 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // `utilisation_target` (§3) is the utilisation at which the lattice reaches
     // rho_max: 1.0 works the material to its whole allowable, below 1.0 keeps a
     // stated margin and therefore spends more plastic.
+    // ★ AESTHETIC (amendment §1): relative, but against a HIGH PERCENTILE rather
+    // than the max, and graded onto the GIVEN RANGE. The stress decides WHERE in
+    // the range, not how much of it.
+    if (aesthetic) {
+      // ONE definition, shared with the app bridge (grading.hpp).
+      const double f = grading_demand_fraction(GradingIntent::Aesthetic, demand[e],
+                                               aes_ref, 1.0);
+      return aes_lo + (aes_hi - aes_lo) * std::pow(f, gamma * aes_w);
+    }
     double frac;
     if (allowable > 0.0) {
-      const double u = demand[e] / allowable;
-      frac = u / u_target;
-      if (!(frac >= 0.0)) frac = 0.0;
-      if (frac > 1.0) frac = 1.0;   // §0(b): clamp, and it is COUNTED below
+      // ONE definition, shared with the app bridge (grading.hpp). §0(b)'s clamp at
+      // 1.0 lives inside it, and the over-allowable count is taken separately above.
+      frac = grading_demand_fraction(GradingIntent::Structural, demand[e],
+                                     allowable, u_target);
     } else {
       frac = demand_max > 0.0
                  ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
@@ -506,7 +647,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       // Cells-per-member ceiling (requirement 2): a +inf width (thicker than the EDT
       // cap) yields +inf cells-across and always clears the floor.
       const double cpm = width[e] / cell;
-      if (cpm < n_star) {
+      if (cpm < n_req(e)) {
         // THE VOXELS SUB-FLOOR RETENTION IS ABOUT. Counted whether or not retention
         // is armed, so a forecast can say how much is at stake before anyone opts in.
         ++out.subfloor_candidate_voxels;
@@ -636,6 +777,11 @@ GradedField grade_lattice(const VoxelGrid& grid,
 
     if (s_max > 0.0) {
       CellPlanParams pp;
+    // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
+    // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
+    // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
+    // by `n_req` below, so this widens what may be CONSIDERED, never what is emitted.
+    if (adaptive_cpm) pp.cells_per_member_floor_override = adaptive_plan_floor;
       pp.topology = topo;
       pp.mode = CellSizeMode::Fit;
       // The ladder's base is the FINEST cell any region asked for — never finer, so
@@ -730,6 +876,11 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
 
     CellPlanParams pp;
+    // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
+    // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
+    // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
+    // by `n_req` below, so this widens what may be CONSIDERED, never what is emitted.
+    if (adaptive_cpm) pp.cells_per_member_floor_override = adaptive_plan_floor;
     pp.topology = topo;
     pp.mode = CellSizeMode::Swept;
     pp.min_cell_size_mm = params.min_cell_size_mm;
@@ -916,7 +1067,16 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // is the whole point of a swept posture (bar R3/R5). On the uniform paths
     // voxel_cell is empty and this is the scalar test, unchanged.
     const double ce = voxel_cell.empty() ? cell : voxel_cell[e];
-    if (!(width[e] / ce >= n_star)) {
+    // ★ THE FLOOR THIS VOXEL HAD TO CLEAR. Constant unless the adaptive rule is
+    // armed; the assertion is NOT weakened — a voxel below its OWN required floor
+    // still throws, and the admissible set is stated exactly rather than widened.
+    const double need = n_req(e);
+    // ★ NAME THE RELAXATION. A voxel the adaptive rule let through below the ACCURACY
+    // floor is buildable and NOT describable by the homogenised tensor. Counted here
+    // so a certificate over it is reported out of regime rather than quietly trusted.
+    if (adaptive_cpm && width[e] / ce < n_star)
+      ++out.aesthetic_below_accuracy_floor_voxels;
+    if (!(width[e] / ce >= need)) {
       // THE ONE ADMISSIBLE EXCEPTION, and it is a NARROWING of what may pass here, not
       // a widening: a sub-floor voxel is legal ONLY if retention was armed, ONLY if the
       // region's MEASURED stress fraction cleared the ceiling, and ONLY if this exact
@@ -981,11 +1141,25 @@ GradedField grade_lattice(const VoxelGrid& grid,
       throw std::logic_error(
           "grade_lattice: fit's out-of-regime count disagrees with the posture");
   } else if (out.subfloor_retained_voxels == 0 && out.latticed_voxels > 0 &&
-             !(out.min_cells_per_member >= n_star)) {
+             !(out.min_cells_per_member >= (adaptive_cpm ? adaptive_plan_floor
+                                                         : n_star))) {
+    // ★ NOT A WEAKENING — the bound is the floor that GOVERNED. Without the adaptive
+    // rule this is the accuracy floor, exactly as before. With it, the admissible
+    // bound is the floor the rule computed from the measured error curve and what the
+    // material carries, and anything under it still throws.
     throw std::logic_error(
         "grade_lattice: thinnest latticed member is below the floor with no "
         "retention in force");
   }
+  // ★ AND THE RELAXATION MUST BE NAMED. If the adaptive rule let material through
+  // below the ACCURACY floor, that material has to be counted — a silent relaxation
+  // would leave a certificate trusting a tensor that no longer describes the member.
+  if (adaptive_cpm && out.latticed_voxels > 0 &&
+      out.min_cells_per_member < n_star &&
+      out.aesthetic_below_accuracy_floor_voxels == 0)
+    throw std::logic_error(
+        "grade_lattice: material sits below the accuracy floor but none was counted "
+        "as out of regime");
 
   // ── ★ THE DENSITY DISTRIBUTION (bar R1) ─────────────────────────────────────
   // One pass in voxel order over the LATTICED set, into fixed bins spanning the
@@ -1038,6 +1212,21 @@ GradedField grade_lattice(const VoxelGrid& grid,
       std::sort(util.begin(), util.end());
       out.median_utilisation = util[util.size() / 2];
     }
+  }
+
+  // ── ★ THE RECOMMENDED LAYER HEIGHT ──────────────────────────────────────────
+  // Reported, never applied: the grading law does not own the print profile. The
+  // octet's steepest STACKING strut is 45 deg — its horizontal members are bridges,
+  // governed by span rather than by layer stacking, so they do not set this.
+  if (out.latticed_voxels > 0 && std::isfinite(out.min_strut_diameter_mm) &&
+      out.min_strut_diameter_mm > 0.0) {
+    out.layer_height_bound_strut_mm =
+        out.min_strut_diameter_mm / kLayersAcrossStrut;
+    const double t = std::tan(45.0 * M_PI / 180.0);
+    out.layer_height_bound_overhang_mm =
+        kOverhangStepFraction * params.min_extrudable_width_mm / t;
+    out.recommended_layer_height_mm = recommended_layer_height_mm(
+        out.min_strut_diameter_mm, 45.0, params.min_extrudable_width_mm);
   }
 
   return out;

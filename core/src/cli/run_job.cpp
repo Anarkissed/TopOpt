@@ -4557,13 +4557,28 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                j_face_protection_face_ids, j_face_protection_depth_mm,
                j_face_protection_depths_mm, j_face_protection_region_ids,
                j_face_protection_region_depths_mm,
-               j_build_dir, j_infill_percent, j_minimize_plastic, j_wall_loops,
+               // ★ ORDER IS THE DECLARATION ORDER OF JobLoadCase, NOT a list you
+               // may append to. `layer_height_mm` sits between `infill_percent` and
+               // `minimize_plastic` in the struct, so it binds THERE. Appending it at
+               // the end instead shifted every following name by one — and because
+               // each mismatched pair is implicitly convertible (double->bool,
+               // bool->int, int->double) it COMPILED and silently carried wrong
+               // values. test_job_loadcase_copy caught it; that is what it is for.
+               j_build_dir, j_infill_percent, j_layer_height_mm,
+               j_minimize_plastic, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
   // before asking for a load case). ProductionLoadCase has no counterpart and
   // should not grow one. Named here so the ledger stays complete.
   (void)j_present;
+  // NOT CARRIED, on purpose: `layer_height_mm` is a PRINTER profile value, not a
+  // load case. Nothing in build_production_loadcase, the solve or the ladder reads
+  // it — the layer height never enters the optimizer (the same reason infill does
+  // not, ARCHITECTURE §2). It is read directly from `job.loads` where the grading
+  // law compares it against the layer height the lattice it produced actually
+  // wants. Named here so the ledger stays complete.
+  (void)j_layer_height_mm;
 
   ProductionLoadCase lc;
   // ★ THE REGION LAYER travels verbatim (task 2026-08-14-face-regions §1): the
@@ -5877,6 +5892,23 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                                 ? kSturdyUtilisationTarget
                                 : 1.0;
     gp.unloaded_utilisation_max = kUnloadedUtilisationMax;
+    // ── ★ THE INTENT (amendment §1d) ─────────────────────────────────────────
+    // ★ AESTHETIC IS THE DEFAULT **HERE**, on the lattice-only job — not in
+    // GradingLawParams, where every caller would inherit it and the TO+lattice and
+    // multiscale paths would silently change. An absent "intent" key means the
+    // common case: a lattice the user wants to SEE, on a part that usually does not
+    // need one structurally.
+    if (job.grading.intent.empty()) {
+      gp.intent = GradingIntent::Aesthetic;
+    } else if (!grading_intent_from_name(job.grading.intent.c_str(), gp.intent)) {
+      throw JobError("analyze: unknown grading intent \"" + job.grading.intent + "\"");
+    }
+    gp.aesthetic_percentile = job.grading.aesthetic_percentile;
+    gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
+    gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+    gp.aesthetic_adaptive_cells_per_member =
+        job.grading.aesthetic_adaptive_cells_per_member;
+    gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
     // FIT needs the per-region derivation here too, or the analyze receipt would
     // describe a cell law the run never used. `nullptr` region below means the
     // candidate set is the whole printed design, so voxels outside every declared
@@ -5930,6 +5962,59 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         static_cast<long long>(gf.density_at_floor_voxels);
     gi.grading_density_at_ceiling_voxels =
         static_cast<long long>(gf.density_at_ceiling_voxels);
+    // ── ★ RE-CERTIFY THE LATTICED OBJECT — STRUCTURAL INTENT ONLY ─────────────
+    // ★ THE GAP THIS CLOSES. Until now the lattice-only path solved ONCE, on the
+    // SOLID part, and graded from that field afterwards. Nothing ever certified the
+    // object that would actually be PRINTED: the certificate described the part
+    // BEFORE it was hollowed out. In structural intent the density IS a strength
+    // claim, so that is exactly the claim nobody was checking.
+    //
+    // ★ STRUCTURAL ONLY, as scoped. An aesthetic density is not a strength claim
+    // (`density_meaning` says so on the receipt), so re-solving for it would spend a
+    // second FEA to certify a number that is not making a promise. NOTE THE RESIDUAL
+    // RISK, because it does not disappear: latticing removes material whatever the
+    // intent, so an aesthetic lattice through a load path still weakens the part and
+    // is still not re-certified here. That is a KNOWN, STATED gap, not an oversight.
+    //
+    // Costs a second solve. It runs only when a grading block asked for a structural
+    // lattice, so no existing path pays for it.
+    if (gf.intent_used == GradingIntent::Structural && gf.latticed_voxels > 0) {
+      const FixedDesignAnalysis relat = analyze_fixed_design(
+          design_grid, params, density, cert_bcs, loads, material, build_dir,
+          options.simp.cg_tolerance, options.simp.cg_max_iterations,
+          options.simp.solver, options.margin_stop, knockdown, load_path_ok,
+          part_solid, &gf.posture);
+      gi.grading_recertified = true;
+      gi.grading_recertified_margin = relat.margin_effective;
+      gi.grading_recertified_accepted = relat.accepted;
+      gi.grading_recertified_non_convergent = relat.non_convergent;
+      gi.grading_recertified_max_von_mises = relat.max_von_mises;
+      gi.grading_solid_margin = a.margin_effective;
+      // ★ SAY IT OUT LOUD WHEN THE LATTICE CHANGES THE VERDICT. A part that passed
+      // solid and fails latticed is the entire reason this solve exists, and it must
+      // not be something a reader has to derive by comparing two numbers.
+      gi.grading_recertify_changed_verdict = (a.accepted != relat.accepted);
+    }
+    gi.grading_recommended_layer_height_mm = gf.recommended_layer_height_mm;
+    gi.grading_layer_height_bound_strut_mm = gf.layer_height_bound_strut_mm;
+    gi.grading_layer_height_bound_overhang_mm = gf.layer_height_bound_overhang_mm;
+    gi.grading_declared_layer_height_mm = job.loads.layer_height_mm;
+    gi.grading_intent = grading_intent_name(gf.intent_used);
+    gi.grading_aesthetic_percentile = gf.aesthetic_percentile_used;
+    gi.grading_aesthetic_percentile_mpa = gf.aesthetic_percentile_mpa;
+    gi.grading_aesthetic_rho_min = gf.aesthetic_rho_min_used;
+    gi.grading_aesthetic_rho_max = gf.aesthetic_rho_max_used;
+    gi.grading_aesthetic_weight_exponent = gf.aesthetic_weight_exponent_used;
+    gi.grading_above_percentile_voxels =
+        static_cast<long long>(gf.above_percentile_voxels);
+    gi.grading_adaptive_cells_armed = gf.aesthetic_adaptive_cells_armed;
+    gi.grading_adaptive_error_budget = gf.aesthetic_error_budget_used;
+    gi.grading_adaptive_min_cells_allowed =
+        gf.aesthetic_min_cells_per_member_allowed;
+    gi.grading_below_accuracy_floor_voxels =
+        static_cast<long long>(gf.aesthetic_below_accuracy_floor_voxels);
+    if (gf.intent_used == GradingIntent::Aesthetic)
+      gi.grading_density_meaning = kAestheticDensityMeaning;
     gi.grading_density_histogram.assign(
         gf.density_histogram, gf.density_histogram + GradedField::kDensityBins);
     gi.grading_solid_fallback_voxels =

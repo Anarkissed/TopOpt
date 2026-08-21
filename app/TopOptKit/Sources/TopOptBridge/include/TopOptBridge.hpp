@@ -12,6 +12,7 @@
 // rather than by throwing across the language boundary.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -1248,5 +1249,33 @@ std::string job_schema_error(const std::string& job_json);
 // tell "the user moved it" from "the user left core's number alone" and omit the
 // key in the second case. Never throws.
 double lattice_subfloor_stress_fraction_default();
+
+// ── ★ THE DEMAND MIRROR, BRIDGED FROM CORE (amendment bar R15) ─────────────────
+// The lattice preview shades struts by "demand". It used to compute that itself, as
+// `vonMises / field.peak()` — the PEAK-RELATIVE law, which core no longer uses. The
+// preview would therefore draw one lattice while core built another, which is the
+// exact drift that has already cost this project a 1.4-1.7x disagreement in the
+// strut-diameter law.
+//
+// So the normalisation is taken from CORE: this calls `grading_demand_fraction`,
+// the same inline function `grade_lattice` calls, and derives the denominator the
+// same way — the material allowable for STRUCTURAL, or a full-sort percentile of the
+// field for AESTHETIC. Nothing about the law is restated in Swift.
+//
+//   intent 0 = structural, 1 = aesthetic.
+//   `allowable_mpa` is yield / margin_stop; used by STRUCTURAL only.
+//   `percentile` in (0,1]; used by AESTHETIC only (<= 0 takes core's constant).
+//   `utilisation_target` is §3's goal; STRUCTURAL only.
+// Returns a 0..1 value per input sample, same length and order. Empty in, empty out.
+// POINTER form: Swift passes buffers, not std::vector, so the interop stays trivial.
+// `out` must have room for `n` floats.
+void grading_demand_fraction_into(const float* von_mises, std::size_t n, int intent,
+                                  double allowable_mpa, double percentile,
+                                  double utilisation_target, float* out);
+
+// The denominator that field used, so a caller can SHOW it — and so a test can
+// compare it against core's receipt to the digit (bar R15).
+double grading_demand_reference(const float* von_mises, std::size_t n, int intent,
+                                double allowable_mpa, double percentile);
 
 }  // namespace topoptbridge

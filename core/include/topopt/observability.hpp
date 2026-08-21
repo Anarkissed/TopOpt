@@ -877,6 +877,40 @@ struct RunInfo {
   long long grading_density_at_floor_voxels = 0;
   long long grading_density_at_ceiling_voxels = 0;
   std::vector<long long> grading_density_histogram;
+  // ── ★ the grading INTENT (amendment §5c) ─────────────────────────────────────
+  std::string grading_intent;                    // "structural" | "aesthetic"
+  double grading_aesthetic_percentile = 0.0;
+  double grading_aesthetic_percentile_mpa = 0.0;
+  double grading_aesthetic_rho_min = 0.0;
+  double grading_aesthetic_rho_max = 0.0;
+  double grading_aesthetic_weight_exponent = 0.0;
+  long long grading_above_percentile_voxels = 0;
+  // §5(a): one line the app can show. Empty in structural mode, which KEEPS its
+  // strength claim (utilisation against the in-plane allowable).
+  std::string grading_density_meaning;
+  // ── ★ the ADAPTIVE cells-per-member floor (aesthetic only) ───────────────────
+  bool grading_adaptive_cells_armed = false;
+  double grading_adaptive_error_budget = 0.0;
+  double grading_adaptive_min_cells_allowed = 0.0;
+  // Material the relaxation let through below the ACCURACY floor: buildable, and NOT
+  // describable by the homogenised tensor. A certificate over it is out of regime.
+  long long grading_below_accuracy_floor_voxels = 0;
+  // ── ★ RE-CERTIFICATION OF THE LATTICED OBJECT (structural intent only) ───────
+  // Before this, the lattice-only path certified the SOLID part and never the
+  // hollowed-out one. These describe the second solve, run with the graded posture.
+  bool grading_recertified = false;
+  double grading_recertified_margin = 0.0;
+  bool grading_recertified_accepted = false;
+  bool grading_recertified_non_convergent = false;
+  double grading_recertified_max_von_mises = 0.0;
+  double grading_solid_margin = 0.0;          // the same run's SOLID-part margin
+  // True when latticing flipped the verdict — the case this solve exists for.
+  bool grading_recertify_changed_verdict = false;
+  // ── ★ the layer height this lattice WANTS, and the one the job DECLARED ──────
+  double grading_recommended_layer_height_mm = 0.0;
+  double grading_layer_height_bound_strut_mm = 0.0;
+  double grading_layer_height_bound_overhang_mm = 0.0;
+  double grading_declared_layer_height_mm = 0.0;   // 0 = the job did not state one
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
   double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT

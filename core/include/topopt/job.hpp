@@ -338,6 +338,28 @@ struct JobGrading {
   double cell_mm = 0.0;                 // TARGET uniform cell edge (mm), finite > 0;
                                         // raised to the printability floor if too small
   double min_extrudable_width_mm = 0.0; // stated minimum strut width (mm), finite > 0
+  // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────
+  // "structural" — density is a STRENGTH statement: demand against the material
+  //   allowable. Use when the lattice is carrying the load.
+  // "aesthetic"  — density follows the stress PATTERN, normalised against a high
+  //   percentile rather than the peak, graded onto `aesthetic_rho_min/max`. Use when
+  //   the lattice is there to be seen. ★ THIS IS THE DEFAULT on the lattice-only
+  //   path: it is the common case, and it is the one that produces a visible result
+  //   on a lightly-loaded part. An empty string means "not stated" and lets run_job
+  //   apply that default.
+  std::string intent;                   // "" | "structural" | "aesthetic"
+  // AESTHETIC only. 0 => the core constant (the 95th percentile).
+  double aesthetic_percentile = 0.0;
+  // AESTHETIC only: the density RANGE the pattern is graded onto. Both 0 => the
+  // certifiable band. Clamped INTO that band regardless — an aesthetic run chooses
+  // where within the band to grade, never to leave it.
+  double aesthetic_rho_min = 0.0;
+  double aesthetic_rho_max = 0.0;
+  // AESTHETIC only: let the cells-per-member floor be COMPUTED from what the material
+  // actually carries, instead of the fixed accuracy floor of 5. Off by default.
+  bool aesthetic_adaptive_cells_per_member = false;
+  double aesthetic_error_budget = 0.0;   // 0 => the core constant (1 %)
+
   double demand_exponent = 1.0;         // rho = rho_max*(demand/max)^exp; 1.0 = fully-
                                         // stressed on von Mises. finite > 0
 
@@ -605,6 +627,14 @@ struct JobLoadCase {
   std::vector<double> face_protection_region_depths_mm;
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
+  // ★ THE PRINTER'S LAYER HEIGHT (mm). Captured in the app since M7.params but
+  // never wired to core — `PrintParams.swift` said so outright ("CAPTURED BUT NOT
+  // WIRED"), and core had no field at all. Without it the grading law cannot check
+  // its own output against the profile it will be printed with: the overhang limit
+  // is c*W/h, and h was invisible. 0 = not stated, and nothing is inferred from
+  // silence — printability is a USER INPUT, never a default.
+  double layer_height_mm = 0.0;
+
   bool minimize_plastic = true;             // true = reduction ladder + pad
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and

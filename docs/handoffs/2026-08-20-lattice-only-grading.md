@@ -213,3 +213,70 @@ than his load calls for, and no change to the comparison rule can get around it.
 One honest gap: the on-screen preview still uses the OLD rule, so what the app draws and
 what the core builds now disagree. That needs fixing next, and it is the first item in
 the follow-up list.
+
+---
+
+# AMENDMENT — TWO GRADING INTENTS
+
+PR 344's law is right and stays. It answers "is this strong enough", and on a part that
+needs no lattice the answer is "yes, everywhere" — which is why his went 100 % to the
+floor. The maintainer then stated the actual use case: **the lattice is usually there to
+be SEEN**, and he still wants it to grade with the stresses. That is a different
+question — "where is this part working hardest" — and it wants a RELATIVE grade.
+
+So the intent is now explicit, with two values. One line each, as asked:
+
+* **The density histogram in aesthetic mode on his part, two ranges.** Over
+  [0.20, 0.60]: `0 0 0 47 18 9 6 5 3 2 2 2 6` percent across the band, **0.00 % at the
+  floor**, 91,575 latticed. Over [0.10, 0.35]: confined to the narrower range, mean
+  density 0.1548 against band B's 0.2783 — **1.8x apart, so the range parameter is
+  demonstrably live**. `100 % at floor` does not recur.
+* **Whether `minimize_plastic` ON and OFF differ there, and by how much.** They do:
+  mean density **+42 %** and derived mass **+63 %** over [0.20, 0.60]; **+48 %** and
+  **+60 %** over [0.10, 0.35]. It is a band POSITION in aesthetic mode — an exponent on
+  the normalised field, so both ends of the range are preserved and only the mass
+  between them moves.
+* **Which percentile, and how many clamped above it.** The **95th** — the max IS the
+  outlier the old law tripped on, and 95 discards more than a stress concentration
+  occupies while still being driven by loaded material. On his part p95 = 0.00830279 MPa
+  and **5,546 voxels** sit above it; they clamp to the top of the range and are counted
+  in `above_percentile_voxels`.
+* **The CLI invocation that drives it.**
+  `topopt-cli analyze jobs/aes_bandB_on.json --out amend_aes_bandB_on`, with
+  `grading.intent`, `grading.aesthetic_rho_min/max` and the existing
+  `loads.minimize_plastic`. No new control anywhere; `git diff --stat` on `app/` is the
+  mirror and nothing else.
+* **Structural mode is unchanged.** Every PR-344 receipt field compares equal; the only
+  added key is `"intent"`.
+
+★ **A DEFECT THIS SURFACED, NOT FIXED:** `intent: aesthetic` over the FULL band in
+SWEPT cell mode fails `plan_cell_sizes: level assignment is not an aligned octree`. It
+needs a field that BOTH reaches the density floor AND spans nearly the whole band —
+[0.10, 0.90] and [0.0505, 0.35] both pass, [0.0505, 0.8999] fails. The old law's low
+tail CLAMPED to `rho_min`, making blocks uniform by accident; the aesthetic grade
+removes that plateau. It lives in `cell_plan.cpp`, shared with the TO+lattice path, so
+fixing it here would risk §6(c)'s byte-identity. **The default aesthetic range is the
+full band, so this is reachable by default in swept mode and must be fixed before
+aesthetic reaches the UI.**
+
+## PLAIN LANGUAGE (amendment)
+
+There are two different questions you can ask a stress field, and we were only answering
+one. "Is this strong enough?" compares the part to what the plastic can take — and on a
+part that is two thousand times stronger than it needs to be, the answer is "yes,
+everywhere", so the lattice sensibly drops to its minimum. That is correct, and useless
+if what you wanted was to SEE the stresses.
+
+The other question is "where is this part working hardest?", and that only ever compares
+the part to itself. The old law asked that question badly: it divided by the single
+busiest voxel, which is usually a corner carrying several times what anything else sees,
+so everything else got squashed flat. Divide by the 95th percentile instead — ignore the
+loudest one in twenty — and the same comparison produces a real, visible pattern. On his
+part nothing sits on the floor any more, and the density spreads properly across
+whatever range you hand it.
+
+The "use less plastic" checkbox still works, and now means something in both cases. When
+the lattice is structural it decides how hard to work the material. When it is
+decorative it decides how heavy the same pattern is drawn — the shape does not change,
+just how much plastic expresses it. On his part that is a 42–48 % swing in average
+density.

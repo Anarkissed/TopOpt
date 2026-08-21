@@ -200,6 +200,18 @@ struct CellPlanParams {
   double min_extrudable_width_mm = 0.0;
   // The local-member-thickness EDT radius cap (voxels), mirroring grading.hpp.
   int thickness_cap_voxels = 32;
+
+  // ── ★ AN OVERRIDE FOR THE CELLS-PER-MEMBER CEILING (amendment to
+  //    2026-08-20-lattice-only-grading) ──────────────────────────────────────────
+  // The floor is an UPPER BOUND on cell size (S <= W / N*), so LOWERING it permits
+  // COARSER cells — which makes struts FATTER and therefore MORE printable. That is
+  // why relaxing it can lattice MORE of a part, not less.
+  //
+  // 0.0 (the DEFAULT) takes `lattice_cells_per_member_min(topology)`, so every
+  // existing caller is byte-identical and the TO+lattice path cannot acquire this.
+  // Set >0 ONLY by the aesthetic adaptive rule, which computes it from the measured
+  // error curve and what the material actually carries (lattice.hpp).
+  double cells_per_member_floor_override = 0.0;
 };
 
 // Build the SWEPT plan over `grid`'s candidate set (throws for any other mode — the

@@ -665,4 +665,57 @@ double octet_relative_density(double cell_mm, double strut_radius_mm) {
   return rho;
 }
 
+
+// ── ★ the measured error curve, and the adaptive floor computed from it ─────────
+// (amendment to 2026-08-20-lattice-only-grading — AESTHETIC intent only.)
+namespace {
+struct CpmErrorPoint { double cells; double stiffness_error; };
+// handoff 2026-07-28-graded-cell-size-phase0, C2b. Bending, "as deployed".
+// VERBATIM — this IS the measurement, not a fit to it. If the running
+// re-measurement moves these, they change HERE, in the one place.
+constexpr CpmErrorPoint kCpmErrorCurve[] = {
+    {1.0, 0.485}, {2.0, 0.085}, {3.0, 0.041}, {4.0, 0.0259}, {5.0, 0.0178}};
+}  // namespace
+
+double aesthetic_cells_per_member_hard_floor(LatticeTopology topo) {
+  (void)topo;   // the curve is an octet measurement; stated in the header
+  return 2.0;
+}
+
+double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
+                                        double error_budget) {
+  const double accuracy = lattice_cells_per_member_min(topo);
+  // ★ ABSENCE OF MEASUREMENT IS NOT PERMISSION. An unusable utilisation keeps the
+  // full accuracy floor rather than relaxing on a number nobody measured — the same
+  // posture sub-floor retention takes when handed an all-zero demand field.
+  if (!std::isfinite(utilisation) || utilisation < 0.0) return accuracy;
+  if (!(error_budget > 0.0)) return accuracy;
+  const double hard = aesthetic_cells_per_member_hard_floor(topo);
+  for (const CpmErrorPoint& p : kCpmErrorCurve) {
+    if (p.cells < hard) continue;          // never below the measured bending point
+    if (p.cells >= accuracy) break;        // relaxing to the floor itself is a no-op
+    // The perturbation this cell count introduces, weighted by what the material
+    // ACTUALLY carries. Inside the budget => this many cells across is enough.
+    if (p.stiffness_error * utilisation <= error_budget) return p.cells;
+  }
+  return accuracy;
+}
+
+
+double recommended_layer_height_mm(double min_strut_diameter_mm,
+                                   double steepest_stacking_angle_deg,
+                                   double line_width_mm) {
+  if (!(min_strut_diameter_mm > 0.0) || !std::isfinite(min_strut_diameter_mm))
+    return 0.0;
+  // 1. resolve the THINNEST strut
+  double h = min_strut_diameter_mm / kLayersAcrossStrut;
+  // 2. the overhang step, when a stacking angle is known
+  if (steepest_stacking_angle_deg > 0.0 && steepest_stacking_angle_deg < 90.0 &&
+      line_width_mm > 0.0) {
+    const double t = std::tan(steepest_stacking_angle_deg * M_PI / 180.0);
+    if (t > 1e-9) h = std::min(h, kOverhangStepFraction * line_width_mm / t);
+  }
+  return h;
+}
+
 }  // namespace topopt

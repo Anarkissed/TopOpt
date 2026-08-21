@@ -134,6 +134,79 @@ double lattice_cells_per_member_min(LatticeTopology topo);
 // unconditionally.
 double lattice_percolation_cells_per_member_min(LatticeTopology topo);
 
+// ── ★ THE MEASURED HOMOGENISATION-ERROR CURVE, AND A FLOOR COMPUTED FROM IT ─────
+// (amendment to 2026-08-20-lattice-only-grading: an adaptive cells-per-member floor
+// for AESTHETIC intent only.)
+//
+// ★ THE 5 IS AN ACCURACY THRESHOLD, NOT A BUILDABILITY ONE. It is where the
+// homogenised macro model's transverse-stiffness error crosses a 2.4 % band. That
+// band is a CHOICE. The curve behind it is measured (handoff
+// 2026-07-28-graded-cell-size-phase0, C2b — bending, "as deployed"):
+//
+//     1 cell  +48.5 %      4 cells  +2.59 %
+//     2 cells  +8.5 %      5 cells  +1.78 %
+//     3 cells  +4.1 %
+//
+// ★ WHY IT CAN MOVE FOR AN AESTHETIC LATTICE. The error only matters in proportion
+// to how much the member matters. A 4.1 % stiffness error on material carrying 0.05 %
+// of the allowable perturbs the part by essentially nothing. So the requirement is
+// not "5 cells" but "enough cells that the error this introduces stays inside a
+// stated budget, given what this material actually carries".
+//
+// Returns the smallest MEASURED cell count whose (stiffness error x utilisation)
+// stays within `error_budget`, never below `aesthetic_cells_per_member_hard_floor`
+// and never above the accuracy floor. A non-finite or non-positive utilisation
+// returns the accuracy floor — absence of measurement is not permission.
+double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
+                                        double error_budget);
+
+// ★ THE HARD FLOOR FOR THE ADAPTIVE RULE, AND WHY IT IS NOT THE PERCOLATION 1.0.
+// `lattice_percolation_cells_per_member_min` is 1.0, but its own declaration warns
+// that it was measured at rho ~= 0.199, AXIAL, octet only, and "must not be quoted
+// unconditionally" — it does not cover bending or the top of the band, which is
+// exactly where an aesthetic lattice may sit. 2 cells is the lowest point that IS
+// measured under the bending case the accuracy floor itself uses (+8.5 %), so the
+// adaptive rule stops there rather than extrapolating onto a number measured under
+// conditions it does not satisfy.
+double aesthetic_cells_per_member_hard_floor(LatticeTopology topo);
+
+// The default error budget: the fraction of the allowable by which the homogenisation
+// error is permitted to perturb this material's contribution. 1 % — the same scale as
+// `kUnloadedUtilisationMax`, and stated as a POLICY so it can be argued with.
+inline constexpr double kAestheticHomogenisationErrorBudget = 0.01;
+
+// ── ★ THE RECOMMENDED LAYER HEIGHT (task: wire layer height) ───────────────────
+// A lattice is thin curved struts, and the layer height that suits the PART rarely
+// suits them. Two bounds, and the recommendation is the tighter:
+//
+//   1. RESOLVING THE STRUT. A strut of diameter d needs enough layers across it to
+//      come out round rather than as a stack of slabs: h <= d / kLayersAcrossStrut.
+//      Driven by the THINNEST strut the run emitted, because that is the one that
+//      degrades first.
+//   2. THE OVERHANG LIMIT. A strut at angle th from vertical shifts h*tan(th) per
+//      layer and bonds while that stays within c*W of the layer beneath, so
+//      h <= c * W / tan(th_steepest). For the octet the steepest STACKING strut is
+//      45 deg (the horizontal ones are bridges, governed by span, not by layers).
+//
+// ★ CROSS-CHECKED AGAINST A REAL SLICER. On the maintainer's own graded coupon,
+// Bambu/Orca's adaptive-layer algorithm chose mean 0.100 mm (sd 0.019, min 0.080)
+// above the base. Bound 1 at his 0.42 mm strut and 4 layers gives 0.105 mm —
+// independent agreement, which is why bound 1 leads rather than the overhang rule
+// (which would have said 0.21 mm and been too coarse).
+inline constexpr double kLayersAcrossStrut = 4.0;
+// The share of the line width a layer may step sideways and still bond. 0.5 is the
+// conservative reading — it is what makes the familiar "45 degrees" come out of
+// h = W/2, i.e. the rule is this formula at one operating point, not a constant.
+inline constexpr double kOverhangStepFraction = 0.5;
+
+// The layer height this lattice wants (mm), or 0 when nothing was latticed.
+// `min_strut_diameter_mm` and `steepest_stacking_angle_deg` come from the run;
+// `line_width_mm` is the stated extrusion width.
+double recommended_layer_height_mm(double min_strut_diameter_mm,
+                                   double steepest_stacking_angle_deg,
+                                   double line_width_mm);
+
+
 // ★ THE SUB-FLOOR RETENTION STRESS FRACTION — the ceiling on a REGION's macro stress,
 // as a fraction of the PART's peak von Mises, under which the grading law is permitted
 // to keep a below-the-floor voxel as lattice instead of falling back to solid
