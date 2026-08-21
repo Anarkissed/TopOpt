@@ -486,7 +486,7 @@ JobDescription parse_job(const std::string& json_text) {
         lv, {"anchors", "anchor_face_ids", "face_regions", "anchor_region_ids",
              "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
-             "infill_percent", "minimize_plastic", "wall_loops",
+             "infill_percent", "minimize_plastic", "wall_loops", "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
     job.loads.present = true;
@@ -811,6 +811,11 @@ JobDescription parse_job(const std::string& json_text) {
       job.loads.infill_percent = require_number(*ip, "loads.infill_percent");
       if (job.loads.infill_percent < 0.0 || job.loads.infill_percent > 100.0)
         schema_fail("\"loads.infill_percent\" must be in [0, 100]");
+    }
+    if (const JsonValue* lh = find_key(lv, "layer_height_mm")) {
+      job.loads.layer_height_mm = require_number(*lh, "loads.layer_height_mm");
+      if (!(job.loads.layer_height_mm > 0.0))
+        schema_fail("\"loads.layer_height_mm\" must be > 0");
     }
     if (const JsonValue* mp = find_key(lv, "minimize_plastic")) {
       if (mp->type != JsonValue::Type::Bool)

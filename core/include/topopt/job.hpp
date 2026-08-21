@@ -627,6 +627,14 @@ struct JobLoadCase {
   std::vector<double> face_protection_region_depths_mm;
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
+  // ★ THE PRINTER'S LAYER HEIGHT (mm). Captured in the app since M7.params but
+  // never wired to core — `PrintParams.swift` said so outright ("CAPTURED BUT NOT
+  // WIRED"), and core had no field at all. Without it the grading law cannot check
+  // its own output against the profile it will be printed with: the overhang limit
+  // is c*W/h, and h was invisible. 0 = not stated, and nothing is inferred from
+  // silence — printability is a USER INPUT, never a default.
+  double layer_height_mm = 0.0;
+
   bool minimize_plastic = true;             // true = reduction ladder + pad
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and

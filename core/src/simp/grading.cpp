@@ -412,9 +412,26 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // WHERE within the band to grade, never to leave it — the band is what makes every
   // emitted density certifiable by construction (bar L2), and §2(e) keeps the
   // certificate running over whatever is emitted.
+  // ★ THE DEFAULT AESTHETIC RANGE DOES NOT REACH THE BAND FLOOR, AND THAT IS A
+  // WORKAROUND, NOT A DESIGN CHOICE. `plan_cell_sizes` refuses a field that BOTH
+  // reaches `rho_min` AND spans nearly the whole band — the resulting spread of
+  // required cell sizes cannot be nested in an aligned octree
+  // ("level assignment is not an aligned octree"). Measured: [0.10, 0.90] is fine,
+  // [0.0505, 0.35] is fine, [0.0505, 0.8999] fails. The old law never tripped it
+  // because its low tail CLAMPED to rho_min, making octree blocks uniform by
+  // accident; the aesthetic grade removes that plateau.
+  //
+  // Lifting the default bottom off the floor avoids the combination while costing
+  // almost nothing visually (the default range is still ~8x wide). An EXPLICIT
+  // range is honoured as given — this only moves the DEFAULT.
+  //
+  // ★ THE REAL FIX is in cell_plan.cpp: let the planner insert intermediate levels
+  // so neighbouring cells never differ by more than the octree can nest. That is
+  // shared with the TO+lattice path and is deliberately not done here.
+  const double aes_default_lo = kAestheticDefaultFloorMultiple * rho_lo;
   const double aes_lo = aesthetic ? std::max(rho_lo, params.aesthetic_rho_min > 0.0
                                                          ? params.aesthetic_rho_min
-                                                         : rho_lo)
+                                                         : aes_default_lo)
                                   : rho_lo;
   const double aes_hi = aesthetic ? std::min(rho_hi, params.aesthetic_rho_max > 0.0
                                                          ? params.aesthetic_rho_max
@@ -1195,6 +1212,21 @@ GradedField grade_lattice(const VoxelGrid& grid,
       std::sort(util.begin(), util.end());
       out.median_utilisation = util[util.size() / 2];
     }
+  }
+
+  // ── ★ THE RECOMMENDED LAYER HEIGHT ──────────────────────────────────────────
+  // Reported, never applied: the grading law does not own the print profile. The
+  // octet's steepest STACKING strut is 45 deg — its horizontal members are bridges,
+  // governed by span rather than by layer stacking, so they do not set this.
+  if (out.latticed_voxels > 0 && std::isfinite(out.min_strut_diameter_mm) &&
+      out.min_strut_diameter_mm > 0.0) {
+    out.layer_height_bound_strut_mm =
+        out.min_strut_diameter_mm / kLayersAcrossStrut;
+    const double t = std::tan(45.0 * M_PI / 180.0);
+    out.layer_height_bound_overhang_mm =
+        kOverhangStepFraction * params.min_extrudable_width_mm / t;
+    out.recommended_layer_height_mm = recommended_layer_height_mm(
+        out.min_strut_diameter_mm, 45.0, params.min_extrudable_width_mm);
   }
 
   return out;

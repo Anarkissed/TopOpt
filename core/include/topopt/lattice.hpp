@@ -175,6 +175,38 @@ double aesthetic_cells_per_member_hard_floor(LatticeTopology topo);
 // `kUnloadedUtilisationMax`, and stated as a POLICY so it can be argued with.
 inline constexpr double kAestheticHomogenisationErrorBudget = 0.01;
 
+// ── ★ THE RECOMMENDED LAYER HEIGHT (task: wire layer height) ───────────────────
+// A lattice is thin curved struts, and the layer height that suits the PART rarely
+// suits them. Two bounds, and the recommendation is the tighter:
+//
+//   1. RESOLVING THE STRUT. A strut of diameter d needs enough layers across it to
+//      come out round rather than as a stack of slabs: h <= d / kLayersAcrossStrut.
+//      Driven by the THINNEST strut the run emitted, because that is the one that
+//      degrades first.
+//   2. THE OVERHANG LIMIT. A strut at angle th from vertical shifts h*tan(th) per
+//      layer and bonds while that stays within c*W of the layer beneath, so
+//      h <= c * W / tan(th_steepest). For the octet the steepest STACKING strut is
+//      45 deg (the horizontal ones are bridges, governed by span, not by layers).
+//
+// ★ CROSS-CHECKED AGAINST A REAL SLICER. On the maintainer's own graded coupon,
+// Bambu/Orca's adaptive-layer algorithm chose mean 0.100 mm (sd 0.019, min 0.080)
+// above the base. Bound 1 at his 0.42 mm strut and 4 layers gives 0.105 mm —
+// independent agreement, which is why bound 1 leads rather than the overhang rule
+// (which would have said 0.21 mm and been too coarse).
+inline constexpr double kLayersAcrossStrut = 4.0;
+// The share of the line width a layer may step sideways and still bond. 0.5 is the
+// conservative reading — it is what makes the familiar "45 degrees" come out of
+// h = W/2, i.e. the rule is this formula at one operating point, not a constant.
+inline constexpr double kOverhangStepFraction = 0.5;
+
+// The layer height this lattice wants (mm), or 0 when nothing was latticed.
+// `min_strut_diameter_mm` and `steepest_stacking_angle_deg` come from the run;
+// `line_width_mm` is the stated extrusion width.
+double recommended_layer_height_mm(double min_strut_diameter_mm,
+                                   double steepest_stacking_angle_deg,
+                                   double line_width_mm);
+
+
 // ★ THE SUB-FLOOR RETENTION STRESS FRACTION — the ceiling on a REGION's macro stress,
 // as a fraction of the PART's peak von Mises, under which the grading law is permitted
 // to keep a below-the-floor voxel as lattice instead of falling back to solid

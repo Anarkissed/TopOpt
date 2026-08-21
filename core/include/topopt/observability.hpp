@@ -895,6 +895,22 @@ struct RunInfo {
   // Material the relaxation let through below the ACCURACY floor: buildable, and NOT
   // describable by the homogenised tensor. A certificate over it is out of regime.
   long long grading_below_accuracy_floor_voxels = 0;
+  // ── ★ RE-CERTIFICATION OF THE LATTICED OBJECT (structural intent only) ───────
+  // Before this, the lattice-only path certified the SOLID part and never the
+  // hollowed-out one. These describe the second solve, run with the graded posture.
+  bool grading_recertified = false;
+  double grading_recertified_margin = 0.0;
+  bool grading_recertified_accepted = false;
+  bool grading_recertified_non_convergent = false;
+  double grading_recertified_max_von_mises = 0.0;
+  double grading_solid_margin = 0.0;          // the same run's SOLID-part margin
+  // True when latticing flipped the verdict — the case this solve exists for.
+  bool grading_recertify_changed_verdict = false;
+  // ── ★ the layer height this lattice WANTS, and the one the job DECLARED ──────
+  double grading_recommended_layer_height_mm = 0.0;
+  double grading_layer_height_bound_strut_mm = 0.0;
+  double grading_layer_height_bound_overhang_mm = 0.0;
+  double grading_declared_layer_height_mm = 0.0;   // 0 = the job did not state one
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
   double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT

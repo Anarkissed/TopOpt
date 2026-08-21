@@ -157,6 +157,11 @@ inline double grading_demand_fraction(GradingIntent intent, double demand,
   return f;
 }
 
+// ★ How far the DEFAULT aesthetic range sits above the band floor. 2x rho_min.
+// A workaround for a `plan_cell_sizes` limitation (see grade_lattice), not a
+// meaningful number. An explicitly stated range is honoured as given.
+inline constexpr double kAestheticDefaultFloorMultiple = 2.0;
+
 inline constexpr const char* kAestheticDensityMeaning =
     "This lattice follows the stress pattern for appearance. Its density is not a "
     "strength requirement; the certificate is what checks strength.";
@@ -683,6 +688,13 @@ struct GradedField {
   // them is out of regime, exactly as for sub-floor retention, and this count is what
   // says so.
   std::size_t aesthetic_below_accuracy_floor_voxels = 0;
+
+  // ── ★ THE LAYER HEIGHT THIS LATTICE WANTS ────────────────────────────────────
+  // A RECOMMENDATION, reported and never applied here: the law does not own the
+  // print profile. 0 when nothing was latticed.
+  double recommended_layer_height_mm = 0.0;
+  double layer_height_bound_strut_mm = 0.0;    // bound 1 — resolving the strut
+  double layer_height_bound_overhang_mm = 0.0; // bound 2 — the overhang step
 
   // ── ★ THE DENSITY DISTRIBUTION (bar R1) ──────────────────────────────────────
   // "The fraction of voxels at rho_min is the number that was wrong, so it is the
