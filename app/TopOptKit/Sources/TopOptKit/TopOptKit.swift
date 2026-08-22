@@ -1334,8 +1334,12 @@ public enum TopOptKit {
     /// Deliberately NOT the percolation floor of 1.0, which core's own declaration
     /// warns was measured axially at rho ≈ 0.199 and "must not be quoted
     /// unconditionally".
-    public static func latticeAestheticCellsPerMemberHardFloor(topology: String) -> Double {
-        topoptbridge.lattice_aesthetic_cells_per_member_hard_floor(std.string(topology))
+    /// ★ `boundaryFinishWritten` — core lets the floor reach ONE cell only where a
+    /// finish re-ties the struts a one-cell member severs; without one it stays 2.
+    public static func latticeAestheticCellsPerMemberHardFloor(
+        topology: String, boundaryFinishWritten: Bool = false) -> Double {
+        topoptbridge.lattice_aesthetic_cells_per_member_hard_floor(
+            std.string(topology), boundaryFinishWritten)
     }
 
     /// Core's default error budget for the adaptive floor, so the app can SHOW it

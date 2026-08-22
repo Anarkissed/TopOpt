@@ -199,8 +199,16 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // case: 2 (+8.5 %). Everything else about the mode is unchanged — the printability
   // floor still binds, the band clamp still runs and is still counted, and the
   // certificate still runs over whatever is emitted.
+  // ★★ AND IT TAKES THE FINISH (merge with main, 2026-08-22). Main's new rule lets the
+  // floor reach ONE cell, but only where a boundary finish re-ties the struts a
+  // one-cell-wide member severs; without one the hard floor stays 2. The flat floor
+  // above and that rule are the same statement — "aesthetic latticees wherever it is
+  // asked, at the lowest count core has measured" — so it asks core with the finish
+  // rather than short-circuiting past it with the 1-argument overload.
   const double aesthetic_hard =
-      aesthetic ? aesthetic_cells_per_member_hard_floor(topo) : n_star;
+      aesthetic ? aesthetic_cells_per_member_hard_floor(topo,
+                                                        params.boundary_finish_written)
+                : n_star;
   out.cells_per_member_floor = aesthetic_hard;
   // ── ★ THE ADAPTIVE FLOOR (aesthetic only) ────────────────────────────────────
   // Disarms itself without an allowable: utilisation is what it is a function of.

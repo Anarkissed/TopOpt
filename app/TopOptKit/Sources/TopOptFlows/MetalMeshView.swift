@@ -3865,6 +3865,26 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return (u, decls)
     }
 
+    /// ★ THE SHELL'S CLIP, REACHABLE FROM A TEST. The rule has three modes now
+    /// (disabled, cell-activation, declared-face) and which one is armed is not
+    /// observable from a rendered frame — a black picture is consistent with all three.
+    /// Exposing the uniform turns "why is the shell closed" into a measurement.
+    var shellClipForTests: (grid: SIMD4<Float>, spacing: SIMD4<Float>,
+                            dims: SIMD4<Float>, gate: SIMD4<Float>, declCount: Int) {
+        let (u, d) = shellClipAndDecls
+        return (u.grid, u.spacing, u.dims, u.gate, d.count / 3)
+    }
+    /// Which texture goes with it — nil only when there is no device texture at all.
+    var shellClipTextureIsNeutralForTests: Bool {
+        shellClipTexture === shellClipNeutralTex
+    }
+    /// How many CELLS the bake left active. A frame with none is a frame of solid fill,
+    /// which is pale — so an indigo count of zero says nothing about occlusion.
+    var activeCellsForTests: (active: Int, total: Int) {
+        guard let f = latticeLayer?.cellField else { return (-1, -1) }
+        return (f.field.values.filter { $0 >= 0 }.count, f.field.values.count)
+    }
+
     /// The texture `shellClipAndDecls` describes: the baked region field when there are
     /// declarations, the neutral "inside everywhere" volume otherwise.
     private var shellClipTexture: MTLTexture? {

@@ -2838,11 +2838,12 @@ double lattice_aesthetic_cells_per_member_floor(const std::string& topology,
   }
 }
 
-double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology) {
+double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology,
+                                                     bool boundary_finish_written) {
   topopt::LatticeTopology topo;
   if (!lattice_topology_from_name(topology, topo)) return 0.0;
   try {
-    return topopt::aesthetic_cells_per_member_hard_floor(topo);
+    return topopt::aesthetic_cells_per_member_hard_floor(topo, boundary_finish_written);
   } catch (...) {
     return 0.0;
   }

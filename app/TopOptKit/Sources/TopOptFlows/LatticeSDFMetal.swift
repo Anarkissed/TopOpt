@@ -237,6 +237,11 @@ public struct LatticeSDFScene {
                 // the lattice's density at all. See `demand` below for what it now does
                 // and why it is not `utilisationTarget`.
                 minimizePlastic: Bool = false,
+                // ★★ WHETHER A BOUNDARY FINISH IS WRITTEN. Core's aesthetic floor may
+                // reach ONE cell only with one — a one-cell-wide member severs struts
+                // and the finish is what re-ties them. Defaults false, which is core's
+                // floor of 2, so an untouched caller is unchanged.
+                boundaryFinishWritten: Bool = false,
                 maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
                 // ★ The band and gamma the raymarcher grades with, so a stated
                 // per-region density can be inverted into the demand value that
@@ -508,7 +513,8 @@ public struct LatticeSDFScene {
         // mode's by construction rather than by being individually remembered.
         // Structural is unchanged: its floor IS the accuracy floor.
         self.minCellsPerMember = lim.certifiable
-            ? stageMode.cellsPerMemberFloor(topology: latticeID, utilisation: .nan)
+            ? stageMode.cellsPerMemberFloor(topology: latticeID, utilisation: .nan,
+                                            boundaryFinishWritten: boundaryFinishWritten)
             : 0
         if self.minCellsPerMember > 0 {
             // ★★★ MEASURED ON THE **PART**, NOT ON THE DECLARATION (maintainer,
@@ -566,7 +572,8 @@ public struct LatticeSDFScene {
         // is a constant, so this is now one call and one value.
         if stageMode == .aesthetic, self.minCellsPerMember > 0 {
             let f = LatticeStageMode.aesthetic.cellsPerMemberFloor(
-                topology: latticeID, utilisation: .nan)
+                topology: latticeID, utilisation: .nan,
+                boundaryFinishWritten: boundaryFinishWritten)
             if f > 0 {
                 var floors = [Double](repeating: 0, count: occupancy.values.count)
                 for i in 0..<occupancy.values.count where occupancy.values[i] > 0.5 {

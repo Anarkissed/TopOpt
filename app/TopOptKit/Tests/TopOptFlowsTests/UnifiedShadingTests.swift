@@ -59,8 +59,23 @@ final class UnifiedShadingTests: XCTestCase {
         return StressField(nx: n, ny: n, nz: n, origin: bounds.min, spacing: sp, values: vals)
     }
 
+    /// ★★ AESTHETIC WITH A FINISH, so this fixture actually HAS struts to occlude.
+    ///
+    /// ★ IT USED TO GET A FREE PASS. `lattice_member_thickness_mm` refuses a grid whose
+    /// axes disagree by more than 2% and returns an EMPTY array; the preview's voxels
+    /// were bricks (5.63% deviation at the coarse end), so on this fixture the array was
+    /// empty and the cells-per-member floor never applied at all. Making the voxel a
+    /// cube armed the floor — and at an 8 mm cell under the STRUCTURAL floor of 5 this
+    /// bracket needs 40 mm of member, so every one of its 2,916 cells is now correctly
+    /// refused and the frame contains no struts to occlude.
+    ///
+    /// These tests are about SHADING — occlusion, AO, the shared depth buffer — and all
+    /// of them need struts on screen. Aesthetic with a finish is the mode that puts them
+    /// there honestly (core's floor is then 1), rather than a grid distortion that
+    /// happened to switch the floor off.
     static func latticeScene(_ mesh: ViewerMesh) -> LatticeSDFScene {
-        LatticeSDFScene(mesh: mesh, field: gradedField(mesh.bounds), latticeID: "octet")
+        LatticeSDFScene(mesh: mesh, field: gradedField(mesh.bounds), latticeID: "octet",
+                        stageMode: .aesthetic, boundaryFinishWritten: true)
     }
 
     /// A renderer framed on the bracket with the lattice layer installed, at the

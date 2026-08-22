@@ -1381,7 +1381,8 @@ double lattice_aesthetic_cells_per_member_floor(const std::string& topology,
 // MEASURED under the same bending case the accuracy floor uses (+8.5 %). Notably NOT
 // the percolation floor of 1.0, whose own declaration warns it was measured axially at
 // rho ~= 0.199 and "must not be quoted unconditionally".
-double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology);
+double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology,
+                                                     bool boundary_finish_written = false);
 
 // Core's default error budget for the rule above, so the app can SHOW it without
 // authoring it.

@@ -1788,7 +1788,8 @@ public struct WorkspacePlaceholder: View {
             // Fit and Stepped are built from.
             let floor = (project.lattice.stageMode ?? .structural)
                 .cellsPerMemberFloor(topology: project.lattice.topologyID,
-                                     utilisation: .nan)
+                                     utilisation: .nan,
+                                     boundaryFinishWritten: project.lattice.boundary != .none)
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,
@@ -4402,6 +4403,13 @@ public struct WorkspacePlaceholder: View {
                                         // see the scene's own note for what it does and
                                         // why it is not core's `utilisationTarget`.
                                         minimizePlastic: project.minimizePlastic,
+                                        // ★ A finish is what lets core's aesthetic
+                                        // floor reach ONE cell across a member — it is
+                                        // what re-ties the struts a one-cell member
+                                        // severs. `none` is the only value that is not
+                                        // a finish.
+                                        boundaryFinishWritten:
+                                            project.lattice.boundary != .none,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,

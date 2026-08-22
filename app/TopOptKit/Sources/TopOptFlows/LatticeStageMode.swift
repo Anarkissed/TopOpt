@@ -125,12 +125,18 @@ public enum LatticeStageMode: String, Codable, Hashable, Sendable, CaseIterable 
     ///   signature because callers cannot know which mode they hold.
     /// - Returns: 0 when core has no number for the topology, which the caller must
     ///   surface rather than replace with a guess.
-    public func cellsPerMemberFloor(topology: String, utilisation: Double) -> Double {
+    /// - Parameter boundaryFinishWritten: core lets the aesthetic floor reach ONE cell
+    ///   only where a finish re-ties the struts a one-cell-wide member severs. Without
+    ///   one the floor is 2. The app never decides that — it reports whether a finish is
+    ///   written and core answers.
+    public func cellsPerMemberFloor(topology: String, utilisation: Double,
+                                    boundaryFinishWritten: Bool = false) -> Double {
         switch self {
         case .structural:
             return TopOptKit.latticeLimits(topology: topology).minCellsPerMember
         case .aesthetic:
-            return TopOptKit.latticeAestheticCellsPerMemberHardFloor(topology: topology)
+            return TopOptKit.latticeAestheticCellsPerMemberHardFloor(
+                topology: topology, boundaryFinishWritten: boundaryFinishWritten)
         }
     }
 }
