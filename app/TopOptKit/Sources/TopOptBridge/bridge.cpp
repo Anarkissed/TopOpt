@@ -2189,6 +2189,46 @@ std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double s
 }
 
 
+
+// ★★★ ORGANIC'S OWN (SPACING, DENSITY, STRUT) LAW — FORWARDED, NEVER RE-DERIVED.
+//
+// ★ ORGANIC IS NOT AN OCTET AND ITS STRUT IS NOT AN OCTET'S. `t = 2 d sqrt(rho/3pi)`
+// against the octet's measured table: the two disagree by whatever they disagree by, and
+// the preview was reporting the OCTET diameter for an organic lattice — a number
+// describing geometry that is not on screen. Same class as the strut law the app
+// re-derived once and got 1.4-1.7x wrong.
+//
+// ★ AND PRINTABILITY IS THE FLOOR ON THE SEPARATION, NOT THE CEILING. `t` grows WITH
+// `d` at fixed rho (a wider spacing means more material per curve), so the bead puts a
+// LOWER bound on the separation: below `d_print` the curve is thinner than one
+// extrusion and the run cannot lay it.
+double organic_strut_diameter_mm(double spacing_mm, double rho) {
+  if (!(spacing_mm > 0.0) || !(rho > 0.0)) return 0.0;
+  return topopt::organic_strut_diameter_for(spacing_mm, rho);
+}
+
+double organic_spacing_for_mm(double rho, double strut_diameter_mm) {
+  if (!(rho > 0.0) || !(strut_diameter_mm > 0.0)) return 0.0;
+  return topopt::organic_spacing_for(rho, strut_diameter_mm);
+}
+
+// The smallest separation whose strut still reaches one extrusion at `rho`. Inverting
+// `t = 2 d sqrt(rho/3pi)` at `t = min_extrudable_width_mm`.
+double organic_min_printable_spacing_mm(double rho, double min_extrudable_width_mm) {
+  if (!(rho > 0.0) || !(min_extrudable_width_mm > 0.0)) return 0.0;
+  return topopt::organic_spacing_for(rho, min_extrudable_width_mm);
+}
+
+// Core's own DEFAULT bead for a traced lattice — already max(t, the stated extrusion
+// width), and NOT the nozzle: it puts the densest lattice in the band exactly on the
+// resolution floor, which is the one that actually binds on a real part.
+double organic_default_strut_diameter_mm(double grid_spacing_mm,
+                                         double resolution_floor_voxels, double rho_max,
+                                         double min_extrudable_width_mm) {
+  return topopt::organic_default_strut_diameter_mm(
+      grid_spacing_mm, resolution_floor_voxels, rho_max, min_extrudable_width_mm);
+}
+
 // ★★★ THE ORGANIC LATTICE, AS THE PREVIEW NEEDS IT (task 2026-08-22).
 //
 // ★ WHY THE PREVIEW CAN HAVE THIS AT ALL. The standing note said the strut preview
@@ -2297,6 +2337,9 @@ std::vector<double> organic_preview_field(
                          static_cast<std::size_t>(fnz);
   std::vector<double> field;
   std::size_t span_count = 0;
+  // Function scope: the FIELD is optional (a caller may want only the spans) but the
+  // span list is returned either way.
+  std::vector<topopt::OrganicSpan> emitted;
   if (fnx > 0 && fny > 0 && fnz > 0 && fspacing > 0.0 && band_mm > 0.0 && fn > 0) {
     field.assign(fn, band_mm);
     auto stamp = [&](const topopt::Vec3& a, const topopt::Vec3& b, double r) {
@@ -2330,15 +2373,33 @@ std::vector<double> organic_preview_field(
         }
       }
     };
-    for (const topopt::OrganicCurve& c : lat.curves) {
-      if (!(c.radius_mm > 0.0)) continue;
-      for (std::size_t q = 0; q + 1 < c.points.size(); ++q) {
-        stamp(c.points[q], c.points[q + 1], c.radius_mm);
-      }
+    // ★★★ THE **EMITTED** SPANS, NOT THE TRACED CURVES — and this was the trap.
+    //
+    // ★ FOUR PASSES MUTATE THE SPAN LIST AFTER TRACING and before anything is written:
+    // node merge, free-end tie, support prune (to a fixed point), stranded drop. On a
+    // 40 mm cube they cut ~1,600 spans — 13% of traced length — and merge 8,743 nodes
+    // out of 25,144 endpoints. A preview built from `lat.curves` therefore draws struts
+    // that are NOT in the exported file, which is the "which struts exist at all"
+    // disagreement. `generate_organic_lattice` runs those passes and hands back the
+    // post-clip spans; those are what the welded body is built from, so those are what
+    // the preview shows.
+    //
+    // ★ THE SINK IS DISCARDED ON PURPOSE. We want the span list, not the geometry, so
+    // the triangles go nowhere and `nseg` is the coarsest legal sweep — the passes run
+    // identically either way, and paying for a full 8-segment sweep to throw it away
+    // would make a preview bake cost what an export costs.
+    struct NullSink : topopt::TriangleSink {
+      void add_triangle(const topopt::Vec3&, const topopt::Vec3&,
+                        const topopt::Vec3&) override {}
+    } sink;
+    try {
+      topopt::generate_organic_lattice(lat, sink, nullptr, 3, nullptr, &emitted);
+    } catch (...) {
+      emitted.clear();
     }
-    for (const topopt::OrganicConnector& c : lat.connectors) {
-      if (!(c.radius_mm > 0.0)) continue;
-      stamp(c.a, c.b, c.radius_mm);
+    for (const topopt::OrganicSpan& sp : emitted) {
+      if (!(sp.r > 0.0)) continue;
+      stamp(sp.a, sp.b, sp.r);
     }
   }
 
@@ -2352,7 +2413,7 @@ std::vector<double> organic_preview_field(
   }
 
   out[0] = 1.0;
-  out[1] = static_cast<double>(span_count);
+  out[1] = static_cast<double>(span_count);   // EMITTED spans, post-clip
   out[2] = static_cast<double>(lat.curves.size());
   out[3] = static_cast<double>(lat.connectors.size());
   out[4] = static_cast<double>(field.size());
@@ -2361,11 +2422,30 @@ std::vector<double> organic_preview_field(
   out[7] = lat.report.degenerate_fraction;
   out[8] = band_mm;
   out[9] = static_cast<double>(n);
+  // ★ THE TRACED SEGMENT COUNT, so the gap between what was TRACED and what is
+  // EMITTED is a number on the receipt rather than a claim. The four post-trace passes
+  // (node merge, free-end tie, support prune, stranded drop) live in that gap; a
+  // preview that shows the traced set is showing struts the file does not contain.
+  {
+    std::size_t traced = lat.connectors.size();
+    for (const topopt::OrganicCurve& c : lat.curves) {
+      if (c.points.size() > 1) traced += c.points.size() - 1;
+    }
+    out[10] = static_cast<double>(traced);
+  }
   out.insert(out.end(), field.begin(), field.end());
   if (lat.relative_density.size() == n) {
     out.insert(out.end(), lat.relative_density.begin(), lat.relative_density.end());
   } else {
     out.insert(out.end(), n, 0.0);
+  }
+  // ★ THE EMITTED SPANS THEMSELVES, LAST — 7 doubles each (a, b, r). The FIELD is what
+  // the march samples; these are for a caller that wants the geometry directly, e.g.
+  // the settings sample, which builds capsules rather than sphere-tracing a volume.
+  // Post-clip, same list the field was stamped from, so the two cannot disagree.
+  for (const topopt::OrganicSpan& sp : emitted) {
+    if (!(sp.r > 0.0)) continue;
+    out.insert(out.end(), {sp.a.x, sp.a.y, sp.a.z, sp.b.x, sp.b.y, sp.b.z, sp.r});
   }
   return out;
 }

@@ -195,7 +195,9 @@ public enum LatticeAutoPosture {
                                     cellsPerMemberFloor: (s.stageMode ?? .structural)
                                         .cellsPerMemberFloor(
                                             topology: s.topologyID, utilisation: .nan,
-                                            boundaryFinishWritten: s.boundary != .none)) {
+                                            boundaryFinishWritten:
+                                                s.singleCellMembers
+                                                && s.boundary != .none)) {
                 out.cellMinMM = w.min
                 out.cellMaxMM = w.max
             }

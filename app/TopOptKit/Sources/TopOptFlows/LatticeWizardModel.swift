@@ -236,6 +236,15 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// ★ HOW AUTO VARIES THE CELL — the secondary question that appears only when the
     /// cell size is Auto. Only `defaultGrade` is wired; see `LatticeCellTransition`.
     public var cellTransition: LatticeCellTransition = .defaultGrade
+    /// ★ "Allow single-cell members" — see `LatticeSettings.singleCellMembers`. Setting
+    /// it TRUE also writes the finish, because core's one-cell floor requires one.
+    public var singleCellMembers: Bool = false {
+        didSet {
+            if singleCellMembers, boundary == .none || boundary == .rim {
+                boundary = .fullSkin
+            }
+        }
+    }
 
     /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
     /// `.sim ⇒ .uniform`, cell `.swept ⇒ .fixed`) lives in `LatticeSettings`
@@ -274,6 +283,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   simulateStresses: s.simulateStresses,
                   retainSubfloor: s.retainSubfloorInUnloadedRegions)
         self.cellTransition = s.cellTransition
+        self.singleCellMembers = s.singleCellMembers
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -304,6 +314,14 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // otherwise ride along as `defaultGrade`'s behaviour under another name.
         out.cellTransition = cellTransition.unavailableReason == nil
             ? cellTransition : .defaultGrade
+        // ★ AND THE FINISH IT REQUIRES TRAVELS WITH IT. `singleCellMembers` already
+        // wrote `boundary` when it was switched on; carrying both keeps the pair
+        // consistent on the wire, so a job can never ask for a one-cell floor without
+        // the finish core needs to grant it.
+        out.singleCellMembers = singleCellMembers
+        if out.singleCellMembers, out.boundary == .none || out.boundary == .rim {
+            out.boundary = .fullSkin
+        }
         // ★★★ AND THE CHOICE NOW REACHES THE JOB (maintainer, 2026-08-21: "Please
         // connect the Stepped and Organic algos"). `cellTransition` was a control that
         // set a stored value nothing downstream read — the decorative-control defect
@@ -466,10 +484,15 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // were decoration. The lone cell shows no boundary — a single cell has no
         // block to dress — so the finish appears in the IN THE PART view, which is
         // also the view its control now lives in.
+        // ★ AND THE GRADE REACHES IT TOO. A single cell has no transition to show, so
+        // the cell view stays the one cell; the IN THE PART view is where the three
+        // algorithms differ, which is also where the control lives.
         return LatticeSamplePatch.mesh(lattice: lattice, cellMM: cellMM,
                                        cells: cells,
                                        relativeDensity: relativeDensity,
-                                       boundary: stage == .cell ? .none : boundary)
+                                       boundary: stage == .cell ? .none : boundary,
+                                       transition: stage == .cell
+                                           ? .defaultGrade : cellTransition)
     }
 
     /// The triangle count the current stage will draw — the latency budget, known

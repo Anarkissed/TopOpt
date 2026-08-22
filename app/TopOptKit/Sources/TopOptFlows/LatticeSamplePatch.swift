@@ -210,6 +210,133 @@ public enum LatticeSamplePatch {
         return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
     }
 
+    /// ★★★ THE SAMPLE SHOWS WHICH GRADE IS SELECTED (maintainer, 2026-08-22: "the
+    /// sample part doesn't change when the grade is set to Stepped or Organic. Please
+    /// make it a visible change").
+    ///
+    /// ★ THE ALGORITHM DID NOT REACH THIS FUNCTION AT ALL — the same defect §10 fixed
+    /// for the FINISH one task earlier, in the same builder: a control that renders
+    /// nothing cannot be judged. All three grades produced one uniform block.
+    ///
+    /// What each shows, and why it is the honest picture of that algorithm:
+    ///
+    ///   DEFAULT GRADE  one block. The dyadic ladder's whole point is that coarse and
+    ///                  fine cells meet at SHARED nodes, so a uniform patch is a fair
+    ///                  sample of it — nothing is being hidden.
+    ///   STEPPED        two blocks at cells in a NON-dyadic ratio, abutting. The nodes
+    ///                  do not line up across the seam, and that is not a rendering
+    ///                  compromise: it is the algorithm. Core counts the cost as
+    ///                  `LatticeSteppedStats::floating_ends`.
+    ///   ORGANIC        core's own traced spans, run on this very block — not a cell
+    ///                  lattice at all. Traced, then put through the four passes the
+    ///                  exporter runs (node merge, free-end tie, support prune,
+    ///                  stranded drop), so the sample shows the spans a file would
+    ///                  contain rather than the raw curves.
+    public static func mesh(lattice: LatticeType, cellMM: Double, cells: Int,
+                            relativeDensity: Double,
+                            boundary: LatticeBoundaryTreatment,
+                            transition: LatticeCellTransition,
+                            sides: Int = 8) -> ViewerMesh {
+        switch transition {
+        case .defaultGrade:
+            return mesh(lattice: lattice, cellMM: cellMM, cells: cells,
+                        relativeDensity: relativeDensity, boundary: boundary, sides: sides)
+
+        case .stepped:
+            // Two regions, two cells, meeting abruptly. 1.5x is deliberately NOT a
+            // power of two — a dyadic pair would share nodes and draw the ladder.
+            let n = Swift.max(2, cells)
+            let left = mesh(lattice: lattice, cellMM: cellMM, cells: n / 2,
+                            relativeDensity: relativeDensity, boundary: boundary,
+                            sides: sides)
+            let right = mesh(lattice: lattice, cellMM: cellMM * 1.5,
+                             cells: Swift.max(1, n / 3),
+                             relativeDensity: relativeDensity, boundary: boundary,
+                             sides: sides)
+            let leftWidth = Float(cellMM) * Float(n / 2)
+            let rightWidth = Float(cellMM * 1.5) * Float(Swift.max(1, n / 3))
+            let gap = Float(cellMM) * 0.06     // the seam, visible and not welded
+            return merged(left, shiftedBy: SIMD3<Float>(-(leftWidth + gap) * 0.5, 0, 0),
+                          with: right,
+                          shiftedBy: SIMD3<Float>((rightWidth + gap) * 0.5, 0, 0))
+
+        case .organicGrade:
+            return organicMesh(cellMM: cellMM, cells: cells,
+                               relativeDensity: relativeDensity, sides: sides)
+                ?? mesh(lattice: lattice, cellMM: cellMM, cells: cells,
+                        relativeDensity: relativeDensity, boundary: boundary, sides: sides)
+        }
+    }
+
+    /// Two patches side by side in one mesh. Indices are rebased, so the seam is two
+    /// bodies touching — which is exactly what an unshared node looks like.
+    private static func merged(_ a: ViewerMesh, shiftedBy da: SIMD3<Float>,
+                               with b: ViewerMesh,
+                               shiftedBy db: SIMD3<Float>) -> ViewerMesh {
+        var pos = [Float](); pos.reserveCapacity(a.positions.count + b.positions.count)
+        var idx = [Int32](); idx.reserveCapacity(a.indices.count + b.indices.count)
+        func append(_ m: ViewerMesh, _ d: SIMD3<Float>) {
+            let base = Int32(pos.count / 3)
+            var i = 0
+            while i + 2 < m.positions.count {
+                pos.append(m.positions[i] + d.x)
+                pos.append(m.positions[i + 1] + d.y)
+                pos.append(m.positions[i + 2] + d.z)
+                i += 3
+            }
+            for v in m.indices { idx.append(Int32(v) + base) }
+        }
+        append(a, da); append(b, db)
+        return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
+    }
+
+    /// ★ CORE'S OWN TRACER, ON THE SAMPLE BLOCK. Uniaxial tension so the principal
+    /// frame is determined — on a degenerate field the eigenvector order swaps between
+    /// neighbouring voxels and the curves comb. Returns nil when core declines (no
+    /// bead, no candidates), and the caller then draws the cell sample rather than
+    /// inventing curves.
+    private static func organicMesh(cellMM: Double, cells: Int,
+                                    relativeDensity: Double, sides: Int) -> ViewerMesh? {
+        let n = 28
+        let extentMM = cellMM * Double(Swift.max(1, cells))
+        let h = extentMM / Double(n)
+        guard h > 0 else { return nil }
+        let count = n * n * n
+        var tensor = [Double](repeating: 0, count: 6 * count)
+        var cand = [Bool](repeating: false, count: count)
+        var sep = [Double](repeating: 0, count: count)
+        for k in 0..<n { for j in 0..<n { for i in 0..<n {
+            let e = (k * n + j) * n + i
+            // A one-voxel rind is not a candidate, so tracing has a boundary to stop at.
+            let inside = i > 0 && j > 0 && k > 0 && i < n - 1 && j < n - 1 && k < n - 1
+            cand[e] = inside
+            sep[e] = inside ? cellMM : 0
+            tensor[6 * e] = 10; tensor[6 * e + 1] = 3; tensor[6 * e + 2] = 1
+        } } }
+        guard let t = TopOptKit.organicTrace(
+            nx: n, ny: n, nz: n, spacingMM: h,
+            origin: SIMD3<Double>(repeating: -extentMM * 0.5),
+            candidate: cand, stressTensor: tensor, separationMM: sep,
+            minExtrudableWidthMM: 0.42, buildDirection: SIMD3(0, 0, 1),
+            // A 2×2×2 field is enough: only the SPANS are wanted here, and the field
+            // is what makes the call expensive.
+            fieldDims: (2, 2, 2),
+            fieldOrigin: SIMD3<Double>(repeating: -extentMM * 0.5),
+            fieldSpacingMM: extentMM, bandMM: 1,
+            rhoMin: Swift.max(0.01, relativeDensity * 0.5),
+            rhoMax: Swift.min(0.95, Swift.max(0.05, relativeDensity)))
+        else { return nil }
+        guard !t.spans.isEmpty else { return nil }
+        var pos: [Float] = []
+        var idx: [Int32] = []
+        for s in t.spans {
+            emitStrut(SIMD3<Float>(s.a), SIMD3<Float>(s.b), radius: Float(s.r),
+                      sides: sides, pos: &pos, idx: &idx)
+        }
+        guard !idx.isEmpty else { return nil }
+        return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
+    }
+
     /// The triangle count of a patch WITHOUT allocating its full mesh — for the cost
     /// table (V1) and to size the inset. tris = struts·(sides·4) + nodes·20.
     public static func triangleCount(lattice: LatticeType, cells: Int, sides: Int = 8) -> Int {

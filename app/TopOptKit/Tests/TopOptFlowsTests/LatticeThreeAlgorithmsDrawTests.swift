@@ -130,6 +130,34 @@ final class LatticeThreeAlgorithmsDrawTests: XCTestCase {
                        "★ the trace reported nothing about itself")
     }
 
+    /// ★★★ STEPPED AT A UNIFORM CELL MUST LOOK LIKE DOUBLED AT THAT CELL.
+    ///
+    /// (maintainer, 2026-08-22: "The lattice looks weird. They aren't connected. They're
+    /// like blocks floating on top of one another.")
+    ///
+    /// ★ THIS IS THE TEST THAT SEPARATES THE TWO EXPLANATIONS. Stepped's cells do not
+    /// share nodes ACROSS A REGION BOUNDARY — that is the algorithm. Inside ONE region
+    /// it is a plain uniform lattice and must join up exactly as doubled does. If the
+    /// per-cell neighbour lookup were wrong for a real (non-dyadic) cell multiplier,
+    /// every cell would draw in isolation and the block would come apart everywhere,
+    /// not just at a seam — which is what "blocks floating on top of one another"
+    /// describes. Same cell, same topology, so the two frames must agree closely.
+    func testSteppedAtAUniformCellMatchesDoubled() throws {
+        let (doubled, mesh) = try blockScene(algorithm: "doubled", organic: false)
+        let dPix = try render(doubled, mesh: mesh, stepped: [])
+        let (steppedScene, m2) = try blockScene(algorithm: "stepped", organic: false)
+        // BOTH regions at the renderer's own cell — stepped, but uniform.
+        let sPix = try render(steppedScene, mesh: m2, stepped: [5.5, 5.5])
+        let delta = abs(Double(dPix - sPix)) / Double(max(dPix, 1))
+        print(String(format: "\n── stepped(uniform 5.5) %d px vs doubled %d px — %.1f%% apart\n",
+                     sPix, dPix, 100 * delta))
+        XCTAssertLessThan(delta, 0.15,
+            "★ stepped at a uniform cell renders \(Int(100 * delta))% away from doubled "
+          + "at the same cell. Inside one region there is no seam, so the two are the "
+          + "same lattice — a gap this size means the per-cell neighbour lookup is "
+          + "failing and every cell is drawing in isolation.")
+    }
+
     /// ★ AND THEY ARE NOT THE SAME PICTURE. Three algorithms that render identically
     /// would pass the bar above while proving only that SOMETHING is on screen — the
     /// exact shape of the defect being closed (the ladder drawn under another name).

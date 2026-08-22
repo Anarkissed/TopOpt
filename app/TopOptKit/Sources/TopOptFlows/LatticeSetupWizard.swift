@@ -264,6 +264,7 @@ public struct LatticeSetupWizard: View {
             if model.stage == .lattice, model.cellSizeMode == .auto {
                 cellTransitionRow
             }
+            if model.stage == .lattice { singleCellSwitch }
             if model.stage == .lattice { subfloorRetentionSwitch }
             latencyReadout
             // ★ THE CARD, MOVED HERE: "place the one on the right at the very
@@ -404,6 +405,36 @@ public struct LatticeSetupWizard: View {
                 }
             }
             Text(model.cellTransition.unavailableReason ?? model.cellTransition.body)
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// ★★★ "ALLOW SINGLE-CELL MEMBERS" — the one-cell floor, asked for explicitly.
+    ///
+    /// ★ IT WRITES THE FINISH RATHER THAN REFUSING. Core lets the aesthetic floor reach
+    /// ONE cell only where a boundary finish re-ties the struts a one-cell-wide member
+    /// severs, so the dependency is real and one-way. Greying the finish out and making
+    /// the user go and find it teaches them nothing; the switch simply satisfies its own
+    /// requirement and SAYS it has, which is the same posture the rest of this panel
+    /// takes. Turning it off leaves the finish alone — he may want the skin for its own
+    /// sake.
+    @ViewBuilder private var singleCellSwitch: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(get: { model.singleCellMembers },
+                                 set: { model.singleCellMembers = $0; rebuild() })) {
+                Text("Allow single-cell members")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
+            .accessibilityIdentifier("wizard-single-cell-members")
+            Text(model.singleCellMembers
+                 ? "One cell across a member. Needs the Skin finish to re-tie the struts "
+                   + "a single cell severs — it has been set."
+                 : "Two cells across a member. Turn this on for one, which needs the "
+                   + "Skin finish and will set it.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .fixedSize(horizontal: false, vertical: true)

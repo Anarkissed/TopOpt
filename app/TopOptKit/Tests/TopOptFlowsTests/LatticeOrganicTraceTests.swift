@@ -71,6 +71,19 @@ final class LatticeOrganicTraceTests: XCTestCase {
 
         """)
 
+        // ★★★ THE PREVIEW MUST SHOW THE **EMITTED** SPANS, NOT THE TRACED CURVES.
+        // Four passes mutate the span list after tracing — node merge, free-end tie,
+        // support prune to a fixed point, stranded drop — and they are not cosmetic:
+        // a preview of the traced set draws struts that are not in the exported file.
+        print(String(format: "  traced %d segments -> emitted %d (%.1f%% removed)",
+                     t.tracedSegmentCount, t.spanCount,
+                     t.tracedSegmentCount > 0
+                        ? 100.0 * Double(t.tracedSegmentCount - t.spanCount)
+                          / Double(t.tracedSegmentCount) : 0))
+        XCTAssertLessThan(t.spanCount, t.tracedSegmentCount,
+            "★ the emitted set is not smaller than the traced set — the post-trace "
+          + "passes did not run, so the preview is drawing struts the file will not "
+          + "contain (node merge / free-end tie / support prune / stranded drop)")
         XCTAssertGreaterThan(t.curveCount, 0, "★ no curves were traced")
         XCTAssertGreaterThan(t.spanCount, 0, "★ curves traced but no capsules stamped")
         XCTAssertEqual(t.field.count, f * f * f)

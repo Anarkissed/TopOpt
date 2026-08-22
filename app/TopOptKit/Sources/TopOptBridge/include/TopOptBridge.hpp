@@ -1258,6 +1258,15 @@ LatticeRegionDerivation lattice_region_derivation(
 
 // ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES, for the preview. See bridge.cpp for
 // the flat layout and for why the tensor — not a scalar — is the input that gates this.
+// ★ Organic's own (spacing, density, strut) law and its printability floor — see
+// bridge.cpp. Organic's strut is NOT an octet's and must never be reported as one.
+double organic_strut_diameter_mm(double spacing_mm, double rho);
+double organic_spacing_for_mm(double rho, double strut_diameter_mm);
+double organic_min_printable_spacing_mm(double rho, double min_extrudable_width_mm);
+double organic_default_strut_diameter_mm(double grid_spacing_mm,
+                                         double resolution_floor_voxels, double rho_max,
+                                         double min_extrudable_width_mm);
+
 std::vector<double> organic_preview_field(
     int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
     const std::uint8_t* candidate, std::size_t candidate_count,

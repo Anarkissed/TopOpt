@@ -540,6 +540,17 @@ public struct LatticeSDFScene {
                 let idx = (k * tny + j) * tnx + i
                 cand[idx] = true
                 // Dense where it works hardest: demand 1 ⇒ the tight end.
+                // ★★ THE REQUESTED SEPARATION ONLY — CORE RAISES IT.
+                //
+                // ★ A CLAMP HERE WOULD BE A RE-DERIVATION. `trace_organic_lattice`
+                // already applies BOTH floors per voxel and COUNTS each raise on the
+                // receipt (`spacing_raised_for_print_voxels`,
+                // `spacing_raised_for_resolution_voxels`): the printable floor
+                // `d ≥ t·√(3π)/2` at that voxel's own bead, and the RESOLUTION floor
+                // `resolution_floor_voxels · h`, which is the one that actually binds on
+                // a real part (1.705 mm against a 0.645 mm printability floor on his).
+                // Applying either here would put a second copy of core's law in the app
+                // — the mistake that left the octet strut law 1.4-1.7x adrift.
                 sep[idx] = hi - (hi - lo) * Swift.min(Swift.max(d, 0), 1)
                 n += 1
             } } }
@@ -1664,14 +1675,49 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let r = (p - g.origin) / g.spacing
         let i = Int(r.x.rounded()), j = Int(r.y.rounded()), k = Int(r.z.rounded())
         guard i >= 0, j >= 0, k >= 0, i < g.nx, j < g.ny, k < g.nz else { return 0 }
-        let n = (k * g.ny + j) * g.nx + i
-        guard n >= 0, n < g.values.count, g.values[n] >= 0 else { return 0 }  // solid here
-        // STEPPED carries the size outright; the ladder carries a dyadic level.
-        if f.steppedCellMM.count == g.values.count, f.steppedCellMM[n] > 0 {
-            return Double(f.steppedCellMM[n])
+
+        /// The cell size recorded at one index — STEPPED carries it outright, the ladder
+        /// carries a dyadic level.
+        func sizeAt(_ n: Int) -> Double {
+            guard n >= 0, n < g.values.count else { return 0 }
+            if f.steppedCellMM.count == g.values.count, f.steppedCellMM[n] > 0 {
+                return Double(f.steppedCellMM[n])
+            }
+            guard n < f.level.count else { return f.baseCellMM }
+            return f.baseCellMM * pow(2.0, Double(max(0, Int(f.level[n].rounded()))))
         }
-        guard n < f.level.count else { return f.baseCellMM }
-        return f.baseCellMM * pow(2.0, Double(max(0, Int(f.level[n].rounded()))))
+
+        // ★★ THE PROBE LANDS ON A STRUT'S **SURFACE**, WHICH IS NOT ALWAYS INSIDE ITS
+        // OWN CELL (maintainer, 2026-08-22: "The legend no longer says the cell size
+        // below the strut size").
+        //
+        // ★ THIS REQUIRED THE CELL AT THE POINT TO BE ACTIVE and returned 0 otherwise —
+        // and 0 is what the panel reads as "not known", so the line disappeared. A strut
+        // stands proud of the lattice it belongs to: the ray hits its skin, which can sit
+        // a fraction of a voxel into the neighbouring cell, and that neighbour is often
+        // solid. So the OWNING cell is looked for in the 3×3×3 around the hit, nearest
+        // first, and only then does it fall back.
+        //
+        // ★ AND THE FALLBACK IS THE GRID'S OWN SIZE, NOT ZERO. A cell size is a property
+        // of the PLAN, not of whether that particular cell was activated — reporting
+        // nothing because the nearest cell happens to be solid tells the user less than
+        // the truth, not more.
+        for radius in 0...1 {
+            for dk in -radius...radius {
+                for dj in -radius...radius {
+                    for di in -radius...radius where abs(di) == radius || abs(dj) == radius
+                                                     || abs(dk) == radius || radius == 0 {
+                        let a = i + di, b = j + dj, c = k + dk
+                        guard a >= 0, b >= 0, c >= 0, a < g.nx, b < g.ny, c < g.nz else { continue }
+                        let n = (c * g.ny + b) * g.nx + a
+                        guard n < g.values.count, g.values[n] >= 0 else { continue }
+                        let s = sizeAt(n)
+                        if s > 0 { return s }
+                    }
+                }
+            }
+        }
+        return sizeAt((k * g.ny + j) * g.nx + i)
     }
 
     /// The baked region field, for the SHELL's own fragments — the same texture

@@ -1789,7 +1789,9 @@ public struct WorkspacePlaceholder: View {
             let floor = (project.lattice.stageMode ?? .structural)
                 .cellsPerMemberFloor(topology: project.lattice.topologyID,
                                      utilisation: .nan,
-                                     boundaryFinishWritten: project.lattice.boundary != .none)
+                                     boundaryFinishWritten:
+                                        project.lattice.singleCellMembers
+                                        && project.lattice.boundary != .none)
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,
@@ -3806,8 +3808,17 @@ public struct WorkspacePlaceholder: View {
         let gamma = Swift.max(0.05, latticeProxy.params.gamma)
         let rho = span.lo + (span.hi - span.lo)
             * pow(Double(Swift.min(Swift.max(v, 0), 1)), gamma)
-        let mm = 2 * latticeProxy.params.lattice.strutRadiusMM(
-            relativeDensity: rho, cellMM: cellMM)
+        // ★★ ORGANIC'S STRUT IS NOT AN OCTET'S. `t = 2·d·√(rho/3π)` against the
+        // octet's measured table — reporting one for the other puts a number on the card
+        // that describes geometry which is not on screen. The separation the tracer
+        // ACHIEVED is what plays the part of the cell here.
+        let mm: Double
+        if project.lattice.algorithm == "organic", cellMM > 0 {
+            mm = TopOptKit.organicStrutDiameterMM(spacingMM: cellMM, relativeDensity: rho)
+        } else {
+            mm = 2 * latticeProxy.params.lattice.strutRadiusMM(
+                relativeDensity: rho, cellMM: cellMM)
+        }
         // ★ ONE CELL, READ ONCE, USED FOR BOTH LINES. It comes out of the baked field
         // (see above), so the strut millimetres and the cell millimetres are computed
         // at the same cell and cannot contradict each other again. The old re-derivation
@@ -4266,6 +4277,9 @@ public struct WorkspacePlaceholder: View {
         h.combine(l.algorithm)
         h.combine(l.topologyID)
         h.combine(l.boundary)                 // ★ Finish — the reported one
+        // ★ It decides the cells-per-member FLOOR (1 vs 2), so a scene baked before it
+        // moved describes a different law.
+        h.combine(l.singleCellMembers)
         h.combine(l.densityMode)
         h.combine(l.cellSizeMode)
         h.combine(l.cellMM)
@@ -4436,8 +4450,13 @@ public struct WorkspacePlaceholder: View {
                                         // what re-ties the struts a one-cell member
                                         // severs. `none` is the only value that is not
                                         // a finish.
+                                        // ★ THE SWITCH, NOT THE FINISH. A finish is
+                                        // REQUIRED for core's one-cell floor but is not
+                                        // the request for it — see
+                                        // `LatticeSettings.singleCellMembers`.
                                         boundaryFinishWritten:
-                                            project.lattice.boundary != .none,
+                                            project.lattice.singleCellMembers
+                                            && project.lattice.boundary != .none,
                                         organic: organicForBake,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,

@@ -916,6 +916,26 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var subfloorStressFraction: Double?
     /// Decide region by region rather than over the union of them.
     public var subfloorPerRegion: Bool
+
+    /// ★★★ "ALLOW SINGLE-CELL MEMBERS" (maintainer, 2026-08-22: "I'd much rather a
+    /// specific button to set that allows for a singular cell/member which
+    /// automatically requires finish=skin").
+    ///
+    /// ★ WHY IT IS ITS OWN SWITCH AND NOT A CONSEQUENCE OF THE FINISH. Core lets the
+    /// aesthetic floor reach ONE cell only where a boundary finish re-ties the struts a
+    /// one-cell-wide member severs — so a finish is REQUIRED. But it is not SUFFICIENT
+    /// as a signal: a user picks a finish because they want the look, and acquiring a
+    /// structural relaxation as a side effect of a cosmetic choice is the "the picture
+    /// changed and nothing said so" failure this branch keeps paying down. One cell
+    /// across a member is a real reduction in what the lattice claims; it should be
+    /// asked for.
+    ///
+    /// ★ AND TURNING IT ON WRITES THE FINISH. The dependency is real and one-way, so
+    /// the switch satisfies it rather than refusing and making the user go find it —
+    /// `none` and `rim` cannot re-tie a severed strut, and Skin is the pattern core
+    /// builds. Turning it OFF leaves the finish alone: he may well want the skin for
+    /// its own sake.
+    public var singleCellMembers: Bool = false
     /// Ask the run for the per-region breakdown in its receipt.
     public var reportRegionCells: Bool
 
@@ -1083,7 +1103,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // keeps asking for the solve it has always asked for.
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
-        case retainSubfloorInUnloadedRegions, subfloorStressFraction
+        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers
         case subfloorPerRegion, reportRegionCells
         // the enclosed-void rule's OFF control
         // (task 2026-08-06-arm-projection-and-void-check)
@@ -1175,6 +1195,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorStressFraction = try c.decodeIfPresent(
             Double.self, forKey: .subfloorStressFraction)
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
+        // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
+        singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
         // ★ nil → TRUE, and the asymmetry with the four lines above is the point.
         // Those decode to "off" because absent meant off when they were written.
@@ -1217,6 +1239,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(selectableExpandMM, forKey: .selectableExpandMM)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
+        try c.encode(singleCellMembers, forKey: .singleCellMembers)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
         // not as core's number written into the project — the whole point of the
         // nil is that the app never becomes the author of that constant.

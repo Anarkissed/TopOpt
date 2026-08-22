@@ -1098,7 +1098,11 @@ public enum TopOptKit {
         public let fieldOrigin: SIMD3<Float>
         public let fieldSpacingMM: Float
         public let bandMM: Float
+        /// EMITTED spans — post node-merge, free-end tie, support prune and stranded
+        /// drop. These are what the exported body is built from.
         public let spanCount: Int
+        /// What the tracer produced BEFORE those passes. The gap is the trap.
+        public let tracedSegmentCount: Int
         public let curveCount: Int
         public let connectorCount: Int
         /// The separation the tracer ACHIEVED — organic's derived "cell size".
@@ -1111,6 +1115,29 @@ public enum TopOptKit {
         /// Grid-indexed measured relative density, clamped into the band when one was
         /// supplied — what the preview grades its colour ramp by.
         public let relativeDensity: [Double]
+        /// The EMITTED capsules — a, b (model mm) and radius. Post-clip, the same list
+        /// the field was stamped from.
+        public let spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]
+    }
+
+    /// ★ ORGANIC'S OWN STRUT LAW — `t = 2·d·√(rho/3π)`. NOT the octet's measured
+    /// table: reporting one for the other describes geometry that is not on screen.
+    public static func organicStrutDiameterMM(spacingMM: Double, relativeDensity: Double)
+        -> Double {
+        topoptbridge.organic_strut_diameter_mm(spacingMM, relativeDensity)
+    }
+    /// The smallest separation whose strut still reaches one extrusion at `rho`.
+    /// Printability is a FLOOR on the separation: `t` grows with `d`.
+    public static func organicMinPrintableSpacingMM(relativeDensity: Double,
+                                                    minExtrudableWidthMM: Double) -> Double {
+        topoptbridge.organic_min_printable_spacing_mm(relativeDensity, minExtrudableWidthMM)
+    }
+    /// Core's own default traced-strut bead — already `max(t, the stated width)`.
+    public static func organicDefaultStrutDiameterMM(
+        gridSpacingMM: Double, resolutionFloorVoxels: Double, rhoMax: Double,
+        minExtrudableWidthMM: Double) -> Double {
+        topoptbridge.organic_default_strut_diameter_mm(
+            gridSpacingMM, resolutionFloorVoxels, rhoMax, minExtrudableWidthMM)
     }
 
     public static func organicTrace(nx: Int, ny: Int, nz: Int, spacingMM: Double,
@@ -1161,14 +1188,28 @@ public enum TopOptKit {
         let field = (0..<fn).map { Float(raw[head + $0]) }
         let dOff = head + fn
         let density = raw.count >= dOff + n ? Array(raw[dOff..<(dOff + n)]) : []
+        var spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)] = []
+        let sOff = dOff + n
+        if raw.count > sOff {
+            let avail = (raw.count - sOff) / 7
+            spans.reserveCapacity(avail)
+            for i in 0..<avail {
+                let o = sOff + 7 * i
+                spans.append((a: SIMD3(raw[o], raw[o + 1], raw[o + 2]),
+                              b: SIMD3(raw[o + 3], raw[o + 4], raw[o + 5]),
+                              r: raw[o + 6]))
+            }
+        }
         return OrganicTrace(field: field, fieldDims: fieldDims,
                             fieldOrigin: SIMD3<Float>(fieldOrigin),
                             fieldSpacingMM: Float(fieldSpacingMM),
                             bandMM: Float(raw[8]),
                             spanCount: Int(raw[1]),
+                            tracedSegmentCount: Int(raw[10]),
                             curveCount: Int(raw[2]), connectorCount: Int(raw[3]),
                             spacingUsedMinMM: raw[5], spacingUsedMaxMM: raw[6],
-                            degenerateFraction: raw[7], relativeDensity: density)
+                            degenerateFraction: raw[7], relativeDensity: density,
+                            spans: spans)
     }
 
     public static func latticeMemberThicknessMM(nx: Int, ny: Int, nz: Int,
