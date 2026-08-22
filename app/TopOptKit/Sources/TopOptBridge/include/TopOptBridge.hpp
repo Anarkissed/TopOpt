@@ -526,6 +526,9 @@ struct AnalyzeResult {
   // state the analyzed-vs-printed gap rather than assume it away.
   int64_t solid_voxels = 0;
   std::vector<float> von_mises_field;    // grid-indexed, MPa (0 off the printed set)
+  // ★ The per-voxel Cauchy tensor `von_mises_field` is derived from — 6 per voxel,
+  // Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa. The ORGANIC tracer's required input.
+  std::vector<double> stress_tensor_field;
   std::vector<float> displacement_field; // DOF-ordered (3*node), mm
 
   // Constrained-smoothing receipt (handoff 2026-07-26-constrained-smooth-ui).

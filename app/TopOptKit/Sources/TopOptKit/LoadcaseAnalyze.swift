@@ -30,6 +30,9 @@ extension TopOptKit {
         // The per-voxel von Mises field (MPa, 0 off the solid set) + its grid,
         // the exact metadata the SDF preview's demand field needs.
         public let vonMisesField: [Float]
+        /// ★ The per-voxel Cauchy tensor, 6 per voxel, Voigt, TRUE shear, MPa — what
+        /// the ORGANIC tracer eigen-decomposes. Empty when core produced none.
+        public let stressTensorField: [Double]
         public let gridNX: Int, gridNY: Int, gridNZ: Int
         public let gridOrigin: SIMD3<Double>
         public let spacingMM: Double
@@ -37,6 +40,7 @@ extension TopOptKit {
         public init(accepted: Bool, nonConvergent: Bool, maxStressMPa: Double,
                     marginWorstCase: Double, marginRequired: Double,
                     maxDisplacementMM: Double, vonMisesField: [Float],
+                    stressTensorField: [Double] = [],
                     gridNX: Int, gridNY: Int, gridNZ: Int,
                     gridOrigin: SIMD3<Double>, spacingMM: Double) {
             self.accepted = accepted
@@ -46,6 +50,7 @@ extension TopOptKit {
             self.marginRequired = marginRequired
             self.maxDisplacementMM = maxDisplacementMM
             self.vonMisesField = vonMisesField
+            self.stressTensorField = stressTensorField
             self.gridNX = gridNX
             self.gridNY = gridNY
             self.gridNZ = gridNZ
@@ -104,6 +109,7 @@ extension TopOptKit {
             marginRequired: raw.margin_required,
             maxDisplacementMM: maxDisp.squareRoot(),
             vonMisesField: Array(raw.von_mises_field),
+            stressTensorField: Array(raw.stress_tensor_field),
             gridNX: Int(raw.grid_nx), gridNY: Int(raw.grid_ny), gridNZ: Int(raw.grid_nz),
             gridOrigin: SIMD3(raw.grid_origin_x, raw.grid_origin_y, raw.grid_origin_z),
             spacingMM: raw.spacing)

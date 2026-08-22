@@ -179,6 +179,14 @@ struct LSDFUniforms {
     // it is passed rather than assumed, and the layers stack along whatever the user
     // is actually printing along.
     float4 buildDir;
+    // ★★★ ORGANIC — the traced struts as a distance field on the DECLARED REGION's own
+    // grid. APPENDED LAST, which this struct's history says is the only safe place.
+    //   organicOrigin  xyz = voxel-(0,0,0) centre, w = enabled (>0.5)
+    //   organicSpacing xyz = voxel mm,             w = the band the field is clamped at
+    //   organicDims    xyz = voxel counts,         w unused
+    float4 organicOrigin;
+    float4 organicSpacing;
+    float4 organicDims;
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -403,6 +411,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           texture3d<float> cellTex,
                           texture3d<float> sdfTex,
                           texture3d<float> regionTex,
+                          texture3d<float> organicTex,
                           sampler samp,
                           constant ShellClip& RC,
                           constant float4* decls,
@@ -503,6 +512,49 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // everywhere the shell survives they stop one voxel inside it.
         float dClip = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
                                              p, dPart), dBox), dRegion);
+
+        // ★★★ ORGANIC IS A DIFFERENT LATTICE, SO IT IS A DIFFERENT FIELD — AND THAT IS
+        // ALL IT IS. Doubled and stepped fill the part with a CELL, so the march walks a
+        // cell grid and tests that cell's unit topology. Organic has no cell: it is
+        // curves traced along the principal stress directions, and its geometry is
+        // already a union of capsules. Baked to a distance field on the CPU
+        // (`organic_preview_field`) it drops straight into the machinery that was
+        // already sphere-tracing `partSDF` and the region — one more `max()` term.
+        //
+        // The alternative was a second renderer: ~100k centreline segments on the GPU
+        // with a uniform-grid index, marched in world space. That is what "organic has
+        // no cells at all, only traced curves" was taken to imply for months. It does
+        // not: the existing renderer can draw it, because a distance field is a distance
+        // field whatever produced it.
+        if (U.organicOrigin.w > 0.5) {
+            float3 og = (p - U.organicOrigin.xyz) / max(U.organicSpacing.xyz, float3(1e-6));
+            float dOrg = U.organicSpacing.w;   // outside the field, the clamped band
+            if (all(og >= float3(-0.5)) && all(og < U.organicDims.xyz - float3(0.5))) {
+                float3 ouv = (og + 0.5) / max(U.organicDims.xyz, float3(1.0));
+                dOrg = organicTex.sample(samp, ouv).r;
+            }
+            float epsO = max(0.02, 0.25 * U.organicSpacing.x);
+            float F2 = max(dOrg, dClip);
+            if (F2 < epsO) {
+                float tHit2 = t;
+                if (FPrev < 1e8 && FPrev > F2) {
+                    float dt = t - tPrev;
+                    tHit2 = clamp(t + F2 * dt / (FPrev - F2), t - dt, t + dt);
+                }
+                out.hit = true; out.pos = ro + rd * tHit2;
+                // ★ THE SHAPE IS CORE'S; THE SHADE IS FLAT, AND THAT IS STATED RATHER
+                // THAN INVENTED. The tracer measures a per-voxel relative density and
+                // returns it, but it is not uploaded yet — so rather than paint the
+                // ramp from a density this field does not carry, organic renders at the
+                // stated uniform density. A wrong hue on a right geometry is the kind of
+                // quiet lie this preview exists to stop.
+                out.rho = U.shadeParams.x; out.dressing = 0.0; out.solid = 0.0;
+                return out;
+            }
+            FPrev = F2; tPrev = t;
+            t += clamp(F2 * stepScale, 0.05 * U.organicSpacing.x, 0.7 * cellHere);
+            continue;
+        }
 
         // ★★ THE BOUNDARY DRESSINGS — RIM AND DIAGRID (task D1; maintainer,
         // 2026-08-19: "rim is supposed to be around only the outside edges" and
@@ -902,6 +954,11 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                texture3d<float> tintTex [[texture(2)]],
                                texture3d<float> regionTex [[texture(3)]],
                                texture3d<float> stressTex [[texture(4)]],
+                               // ★ ORGANIC's traced-strut field. `neutralOrganic()` (a
+                               // 1×1×1 of +1e9, i.e. "no strut anywhere") is bound when
+                               // the algorithm is not organic, and the uniform's enable
+                               // flag means it is never read then.
+                               texture3d<float> organicTex [[texture(5)]],
                                sampler samp [[sampler(0)]],
                                // ★ THE SAME BUFFER INDEX THE SHELL'S CLIP USES (4).
                                // `LatticeSDFRenderer.bindFragment` binds it on EVERY
@@ -916,7 +973,8 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                constant float4* shellDecls [[buffer(5)]]) {
     float3 ro = U.eye.xyz;
     float3 rd = lsdf_ray(U, in.uv);
-    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls, ro, rd);
+    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, organicTex, samp, RC,
+                           shellDecls, ro, rd);
     if (!h.hit) { discard_fragment(); }
 
     float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,

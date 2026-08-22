@@ -56,15 +56,23 @@ public enum LatticeFieldProvenance: Equatable, Sendable {
 /// grading consumes, decoupled from where it came from.
 public struct LatticeDemandField: Equatable, Sendable {
     public let vonMises: [Float]
+    /// ★★★ THE FULL CAUCHY TENSOR, 6 per voxel in core's Voigt order — the input the
+    /// ORGANIC tracer eigen-decomposes. The stage's own solve has always returned it;
+    /// this field simply never carried it, which is the whole reason organic was called
+    /// unpreviewable. Empty when the solve did not produce one (a remote run does not
+    /// send it over the wire).
+    public let stressTensor: [Double]
     public let nx: Int, ny: Int, nz: Int
     public let origin: SIMD3<Double>
     public let spacingMM: Double
     public let provenance: LatticeFieldProvenance
 
-    public init(vonMises: [Float], nx: Int, ny: Int, nz: Int,
+    public init(vonMises: [Float], stressTensor: [Double] = [],
+                nx: Int, ny: Int, nz: Int,
                 origin: SIMD3<Double>, spacingMM: Double,
                 provenance: LatticeFieldProvenance) {
         self.vonMises = vonMises
+        self.stressTensor = stressTensor
         self.nx = nx
         self.ny = ny
         self.nz = nz
@@ -206,7 +214,8 @@ public final class LatticeSimModel: ObservableObject {
                                           safety: r.marginWorstCase,
                                           date: now, resolution: ctx.resolution)
                     self.field = LatticeDemandField(
-                        vonMises: r.vonMisesField, nx: r.gridNX, ny: r.gridNY,
+                        vonMises: r.vonMisesField, stressTensor: r.stressTensorField,
+                        nx: r.gridNX, ny: r.gridNY,
                         nz: r.gridNZ, origin: r.gridOrigin, spacingMM: r.spacingMM,
                         provenance: .solidSim(date: now, resolution: ctx.resolution))
                     self.fingerprint = ctx.fingerprint

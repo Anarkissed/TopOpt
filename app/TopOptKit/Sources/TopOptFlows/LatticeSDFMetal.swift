@@ -96,6 +96,51 @@ struct LSDFUniforms {
     /// stated", and the printed-layer banding is then skipped rather than drawn along a
     /// guessed axis. See the MSL note for why +Y was wrong.
     var buildDir: SIMD4<Float> = .zero
+    /// ★★★ ORGANIC — the traced-strut field's grid. APPENDED LAST, in this order, and
+    /// the MSL twin declares the same three in the same final slots.
+    /// origin.w = enabled; spacing.w = the band the field is clamped at.
+    var organicOrigin: SIMD4<Float> = .zero
+    var organicSpacing: SIMD4<Float> = SIMD4(1, 1, 1, 0)
+    var organicDims: SIMD4<Float> = SIMD4(1, 1, 1, 0)
+}
+
+/// ★★★ WHAT THE ORGANIC TRACER NEEDS, bundled so the scene's init does not grow four
+/// more arguments for one algorithm.
+///
+/// ★ THE TENSOR IS THE GATE, and it is the reason organic was called unrenderable for
+/// so long. `trace_organic_lattice` eigen-decomposes the per-voxel Cauchy stress —
+/// 6 components, Voigt, TRUE shear, MPa — and the preview only ever held the von Mises
+/// SCALAR. It turned out the tensor already crosses the bridge for the load-flow
+/// overlay (`OptimizeVariant.stressTensorField`), so nothing had to be solved or
+/// exported; it only had to be handed over.
+public struct LatticeOrganicInput: Sendable {
+    /// Grid-indexed, 6 per voxel, in core's Voigt order. Must match `dims`.
+    public let tensor: [Double]
+    public let dims: (Int, Int, Int)
+    public let originMM: SIMD3<Double>
+    public let spacingMM: Double
+    /// The printer's bead. 0 is core's UNSET refusal — printability is user input.
+    public let minExtrudableWidthMM: Double
+    /// Model-space build direction, for the overhang cone (disarmed by default).
+    public let buildDirection: SIMD3<Double>
+    /// The separation window the demand is mapped onto — organic's cell size is an
+    /// OUTPUT read off the achieved spacing, so this is the control that drives it.
+    public let separationMinMM: Double
+    public let separationMaxMM: Double
+    public let rhoMin: Double
+    public let rhoMax: Double
+
+    public init(tensor: [Double], dims: (Int, Int, Int), originMM: SIMD3<Double>,
+                spacingMM: Double, minExtrudableWidthMM: Double,
+                buildDirection: SIMD3<Double>,
+                separationMinMM: Double, separationMaxMM: Double,
+                rhoMin: Double, rhoMax: Double) {
+        self.tensor = tensor; self.dims = dims; self.originMM = originMM
+        self.spacingMM = spacingMM; self.minExtrudableWidthMM = minExtrudableWidthMM
+        self.buildDirection = buildDirection
+        self.separationMinMM = separationMinMM; self.separationMaxMM = separationMaxMM
+        self.rhoMin = rhoMin; self.rhoMax = rhoMax
+    }
 }
 
 /// The immutable per-part scene the preview needs. Baking depends ONLY on the mesh
@@ -165,6 +210,17 @@ public struct LatticeSDFScene {
     /// EMPTY (`nil`) when no include region is declared: the clip is then inert,
     /// which is the settings page's sample block.
     public let regionSDF: LatticeVoxelGrid?
+    /// ★★★ ORGANIC: the traced struts as a distance field (mm, negative inside), on the
+    /// DECLARED REGION's own bbox rather than the part's — which is what makes it
+    /// viable, because the voxel is then a fraction of the design grid's and a 1-3 mm
+    /// strut is several voxels across instead of sub-voxel. nil on every other
+    /// algorithm. Clamped at `organicBandMM`, an UNDER-estimate and therefore safe to
+    /// sphere-trace against.
+    public let organicField: LatticeVoxelGrid?
+    public let organicBandMM: Double
+    /// What the trace reported, for the banner: curves, connectors and the separation it
+    /// actually ACHIEVED (organic's cell size is an output, not an input).
+    public let organicSummary: String
 
     /// ★★ THE STRESS COLOURS, AS A VOLUME (maintainer, 2026-08-18: "Allow the
     /// stress map to *overlay* on the lattice if it is turned on simultaneously. I
@@ -242,6 +298,9 @@ public struct LatticeSDFScene {
                 // and the finish is what re-ties them. Defaults false, which is core's
                 // floor of 2, so an untouched caller is unchanged.
                 boundaryFinishWritten: Bool = false,
+                // ★★★ ORGANIC's inputs. nil ⇒ not an organic job and nothing is traced,
+                // which is every other caller.
+                organic: LatticeOrganicInput? = nil,
                 maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
                 // ★ The band and gamma the raymarcher grades with, so a stated
                 // per-region density can be inverted into the demand value that
@@ -438,6 +497,97 @@ public struct LatticeSDFScene {
             graded = capped
         }
         self.demand = statedDemand ?? graded
+
+        // ── ★★★ ORGANIC: TRACE, THEN BAKE THE CAPSULES TO A FIELD ───────────────────
+        //
+        // ★ THE SEPARATION IS THE INPUT THE WHOLE METHOD TURNS ON. Organic has no cell:
+        // cell size is DERIVED from the achieved spacing. So the user's cell window is
+        // read as a SPACING window and the demand is mapped onto it — tight where the
+        // part is working, open where it is not. That is core's own posture
+        // (`organic_lattice.hpp`: "the window is now the SPACING control").
+        //
+        // ★ AND THE FIELD IS BAKED OVER THE DECLARED REGION, not the part. On his part
+        // the design grid is 1.7-3.4 mm and organic's struts are 1-3 mm across — at the
+        // part's resolution they would be sub-voxel and the preview would be mush. The
+        // region's own bbox is a fraction of the part, so the same budget buys a voxel
+        // several times finer.
+        var organicOut: LatticeVoxelGrid?
+        var organicBand = 0.0
+        var organicSaid = ""
+        if let o = organic, o.minExtrudableWidthMM > 0,
+           o.tensor.count == 6 * o.dims.0 * o.dims.1 * o.dims.2 {
+            let occ = self.occupancy
+            // The candidate set and the separation, both on the TENSOR's grid — that is
+            // the grid core traces on, and resampling the declaration onto it is what
+            // keeps "where he marked" and "where it traced" the same set.
+            let (tnx, tny, tnz) = o.dims
+            var cand = [Bool](repeating: false, count: tnx * tny * tnz)
+            var sep = [Double](repeating: 0, count: tnx * tny * tnz)
+            let lo = Swift.min(o.separationMinMM, o.separationMaxMM)
+            let hi = Swift.max(o.separationMinMM, o.separationMaxMM)
+            var n = 0
+            for k in 0..<tnz { for j in 0..<tny { for i in 0..<tnx {
+                let p = SIMD3<Float>(
+                    Float(o.originMM.x + Double(i) * o.spacingMM),
+                    Float(o.originMM.y + Double(j) * o.spacingMM),
+                    Float(o.originMM.z + Double(k) * o.spacingMM))
+                let g = (p - occ.origin) / occ.spacing
+                let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
+                guard a >= 0, b >= 0, c >= 0, a < occ.nx, b < occ.ny, c < occ.nz else { continue }
+                let oi = (c * occ.ny + b) * occ.nx + a
+                guard occ.values[oi] > 0.5 else { continue }
+                let d = self.demand.map { Double($0.values[oi]) } ?? 0
+                let idx = (k * tny + j) * tnx + i
+                cand[idx] = true
+                // Dense where it works hardest: demand 1 ⇒ the tight end.
+                sep[idx] = hi - (hi - lo) * Swift.min(Swift.max(d, 0), 1)
+                n += 1
+            } } }
+            if n > 0 {
+                // The field's own grid: the declared region's bbox, padded, at a voxel a
+                // few times finer than the design grid — capped so a big part cannot
+                // allocate an unbounded volume.
+                var mn = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+                var mx = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+                for kk in 0..<occ.nz { for jj in 0..<occ.ny { for ii in 0..<occ.nx {
+                    guard occ.values[(kk * occ.ny + jj) * occ.nx + ii] > 0.5 else { continue }
+                    let p = occ.origin + SIMD3<Float>(Float(ii), Float(jj), Float(kk)) * occ.spacing
+                    mn = simd_min(mn, p); mx = simd_max(mx, p)
+                } } }
+                let pad = Float(hi)
+                mn -= pad; mx += pad
+                let ext = mx - mn
+                let longest = Swift.max(ext.x, Swift.max(ext.y, ext.z))
+                // ~0.5 mm where the budget allows, never more than 12 M cells.
+                var fs = Swift.max(0.35, Double(longest) / 384.0)
+                while (Double(ext.x) / fs + 2) * (Double(ext.y) / fs + 2)
+                        * (Double(ext.z) / fs + 2) > 12_000_000 { fs *= 1.25 }
+                let fnx = Swift.max(2, Int(Double(ext.x) / fs) + 2)
+                let fny = Swift.max(2, Int(Double(ext.y) / fs) + 2)
+                let fnz = Swift.max(2, Int(Double(ext.z) / fs) + 2)
+                let band = Swift.max(2.0, hi)
+                if let t = TopOptKit.organicTrace(
+                    nx: tnx, ny: tny, nz: tnz, spacingMM: o.spacingMM,
+                    origin: o.originMM, candidate: cand, stressTensor: o.tensor,
+                    separationMM: sep, minExtrudableWidthMM: o.minExtrudableWidthMM,
+                    buildDirection: o.buildDirection,
+                    fieldDims: (fnx, fny, fnz),
+                    fieldOrigin: SIMD3<Double>(mn), fieldSpacingMM: fs,
+                    bandMM: band, rhoMin: o.rhoMin, rhoMax: o.rhoMax),
+                   t.field.count == fnx * fny * fnz {
+                    organicOut = LatticeVoxelGrid(
+                        nx: fnx, ny: fny, nz: fnz, origin: mn,
+                        spacing: SIMD3<Float>(repeating: Float(fs)), values: t.field)
+                    organicBand = Double(t.bandMM)
+                    organicSaid = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
+                        + String(format: "%.2f–%.2f mm spacing",
+                                 t.spacingUsedMinMM, t.spacingUsedMaxMM)
+                }
+            }
+        }
+        self.organicField = organicOut
+        self.organicBandMM = organicBand
+        self.organicSummary = organicSaid
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has
         // TWO sources and they are not interchangeable: an FEA field, or a per-region
         // density the user STATED, inverted back into demand so the shader draws the
@@ -873,6 +1023,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
         regionTex = scene.regionSDF.flatMap { makeVolumeTexture($0) }
+        organicTex = scene.organicField.flatMap { makeVolumeTexture($0) }
         stressTex = scene.stressRGB.flatMap { makeTintTexture($0, like: scene.partSDF) }
         tintTex = nil          // stale mesh/grid — the host re-applies tints after setScene
         rebakeCellField()
@@ -1405,6 +1556,22 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     buildDirection.y.isFinite ? buildDirection.y : 0,
                     buildDirection.z.isFinite ? buildDirection.z : 1))
                 return simd_length(b) > 0.5 ? SIMD4<Float>(SIMD3<Float>(b), 0) : .zero
+            }(),
+            organicOrigin: {
+                guard let g = scene?.organicField, organicTex != nil else { return .zero }
+                return SIMD4(g.origin, 1)
+            }(),
+            organicSpacing: {
+                guard let g = scene?.organicField, organicTex != nil else {
+                    return SIMD4(1, 1, 1, 0)
+                }
+                return SIMD4(g.spacing, Float(scene?.organicBandMM ?? 0))
+            }(),
+            organicDims: {
+                guard let g = scene?.organicField, organicTex != nil else {
+                    return SIMD4(1, 1, 1, 0)
+                }
+                return SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0)
             }())
     }
 
@@ -1510,6 +1677,24 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// The baked region field, for the SHELL's own fragments — the same texture
     /// this renderer's march samples, so the hole and the struts are one volume.
     var regionTexture: MTLTexture? { regionTex }
+    private var organicTex: MTLTexture?
+    /// A 1×1×1 volume reading +1e9 — "no strut anywhere", so a bound-but-unread
+    /// texture cannot draw geometry. Metal requires the binding to exist.
+    private var neutralOrganicTex: MTLTexture?
+    private func neutralOrganic() -> MTLTexture? {
+        if let t = neutralOrganicTex { return t }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .r32Float
+        d.width = 1; d.height = 1; d.depth = 1
+        d.usage = .shaderRead
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var v: Float = 1e9
+        t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
+                  withBytes: &v, bytesPerRow: 4, bytesPerImage: 4)
+        neutralOrganicTex = t
+        return t
+    }
     /// Where that field lives in model space, for the shell's uniform.
     var regionGrid: LatticeVoxelGrid? { scene?.regionSDF }
 
@@ -1555,6 +1740,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // uniform's flag decides whether it is read at all, so a frame with no
         // field is byte-identical to one before the overlay existed.
         enc.setFragmentTexture(stressTex ?? dummyTintTex, index: 4)
+        enc.setFragmentTexture(organicTex ?? neutralOrganic(), index: 5)
         enc.setFragmentTexture(tintTex ?? dummyTintTex, index: 2)
         enc.setFragmentSamplerState(sampler, index: 0)
     }
@@ -1653,6 +1839,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   texture3d<float> tintTex [[texture(2)]],
                                   texture3d<float> regionTex [[texture(3)]],
                                   texture3d<float> stressTex [[texture(4)]],
+                                  texture3d<float> organicTex [[texture(5)]],
                                   sampler samp [[sampler(0)]],
                                   constant ShellClip& RC [[buffer(4)]],
                                   // ★ See `lsdf_gbuffer`: the same declaration list,
@@ -1660,8 +1847,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   constant float4* shellDecls [[buffer(5)]]) {
         float3 ro = U.eye.xyz;
         float3 rd = lsdf_ray(U, in.uv);
-        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
-                               ro, rd);
+        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, organicTex, samp, RC,
+                               shellDecls, ro, rd);
         if (!h.hit) return float4(0.0);
         float3 hitPos = h.pos; float hitRho = h.rho;
         float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,

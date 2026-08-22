@@ -1221,6 +1221,12 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
     result.voxel_volume_mm3 = design_grid.voxel_volume();
     result.von_mises_field.assign(a.von_mises_field.begin(),
                                   a.von_mises_field.end());
+    // ★★★ AND THE TENSOR — the input the ORGANIC tracer eigen-decomposes. Core has
+    // computed it all along (`FixedDesignAnalysis::stress_tensor_field`); the analyze
+    // path simply never carried it out, which is the last hop that kept organic off the
+    // lattice STAGE. Six per voxel, Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa.
+    result.stress_tensor_field.assign(a.stress_tensor_field.begin(),
+                                      a.stress_tensor_field.end());
     result.displacement_field.assign(a.displacement_field.begin(),
                                      a.displacement_field.end());
     bridge_log("analyze: verdict=" +
@@ -1546,6 +1552,12 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
     result.voxel_volume_mm3 = design_grid.voxel_volume();
     result.von_mises_field.assign(a.von_mises_field.begin(),
                                   a.von_mises_field.end());
+    // ★★★ AND THE TENSOR — the input the ORGANIC tracer eigen-decomposes. Core has
+    // computed it all along (`FixedDesignAnalysis::stress_tensor_field`); the analyze
+    // path simply never carried it out, which is the last hop that kept organic off the
+    // lattice STAGE. Six per voxel, Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa.
+    result.stress_tensor_field.assign(a.stress_tensor_field.begin(),
+                                      a.stress_tensor_field.end());
     result.displacement_field.assign(a.displacement_field.begin(),
                                      a.displacement_field.end());
     bridge_log("analyze_loadcase: verdict=" +

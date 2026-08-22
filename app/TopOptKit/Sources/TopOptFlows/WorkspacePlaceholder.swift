@@ -4371,6 +4371,34 @@ public struct WorkspacePlaceholder: View {
         // reach the banner as "" so it adds no sentence, and only a name the user
         // actually chose can differ from the picture.
         let algorithmForBake = project.lattice.algorithm
+        // ★★★ ORGANIC's INPUTS. Only assembled when he actually chose the algorithm, and
+        // only when the solve produced a TENSOR — organic is traced from the principal
+        // directions and there is no honest way to guess them from a scalar. nil here
+        // means the banner says the algorithm is not being drawn, which is the truth.
+        let organicForBake: LatticeOrganicInput? = {
+            guard project.lattice.algorithm == "organic",
+                  let f = latticeStressField, !f.stressTensor.isEmpty,
+                  f.stressTensor.count == 6 * f.nx * f.ny * f.nz,
+                  project.printParams.strutLineWidthMM > 0 else { return nil }
+            let lat = project.lattice
+            // The cell window is read as the SPACING window — organic derives its cell
+            // from the achieved separation, never the other way round.
+            let lo = lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM
+            let hi = lat.cellMaxMM > 0 ? lat.cellMaxMM : lat.cellMM
+            // The same band the preview grades between — read from the proxy so the
+            // tracer clamps into exactly what the legend shows.
+            let band = latticeProxy.params.densitySpan
+            return LatticeOrganicInput(
+                tensor: f.stressTensor,
+                dims: (f.nx, f.ny, f.nz),
+                originMM: SIMD3<Double>(f.origin),
+                spacingMM: f.spacingMM,
+                minExtrudableWidthMM: project.printParams.strutLineWidthMM,
+                buildDirection: SIMD3<Double>(
+                    project.buildOrientation.resolved(gravity: force.gravity)),
+                separationMinMM: lo, separationMaxMM: hi,
+                rhoMin: band.lo, rhoMax: band.hi)
+        }()
         strutBakeInFlight = true
         DispatchQueue.global(qos: .userInitiated).async {
             let scene = LatticeSDFScene(mesh: mesh, field: field,
@@ -4410,6 +4438,7 @@ public struct WorkspacePlaceholder: View {
                                         // a finish.
                                         boundaryFinishWritten:
                                             project.lattice.boundary != .none,
+                                        organic: organicForBake,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,
