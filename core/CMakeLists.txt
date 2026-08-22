@@ -355,6 +355,10 @@ add_test(NAME lattice_void COMMAND test_lattice_void)
 # generalised to the arbitrary voxel-derived outer surface. Pins freeform-off ==
 # boundary-finish behaviour, and gates overshoot (0.05 mm), keep-out exactness,
 # skin connectivity, closed primitives, and determinism on a curved voxel part.
+add_executable(test_organic_printability tests/unit/test_organic_printability.cpp)
+target_link_libraries(test_organic_printability PRIVATE topopt)
+add_test(NAME organic_printability COMMAND test_organic_printability)
+
 add_executable(test_lattice_skin_freeform tests/unit/test_lattice_skin_freeform.cpp)
 target_link_libraries(test_lattice_skin_freeform PRIVATE topopt)
 target_compile_definitions(test_lattice_skin_freeform PRIVATE

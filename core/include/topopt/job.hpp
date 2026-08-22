@@ -381,6 +381,12 @@ struct JobGrading {
   // rule is not the binding limit on this machine. Set 45 to impose the textbook gate.
   // Either way the receipt reports what fraction of segments sit outside 45 degrees.
   double organic_overhang_angle_deg = 0.0;
+  // ★ THE BOUNDARY FINISH FOR ORGANIC — "clean" | "rim" | "skin".
+  // Only meaningful with `outer_finish: "skin"` (the BARE lattice); with a shell
+  // written, every crossing strut lands on that shell and none of this applies.
+  // Default "skin": Aremu et al.'s net-skin, which is the finish that braces the
+  // hanging struts trimming always creates.
+  std::string organic_boundary_finish = "skin";
 
   // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────
   // "structural" — density is a STRENGTH statement: demand against the material

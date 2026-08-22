@@ -1494,7 +1494,7 @@ JobDescription parse_job(const std::string& json_text) {
              "subfloor_aggregate_cap", "report_region_cells",
              "subfloor_per_region",
              "algorithm", "organic_strut_width_mm",
-             "organic_overhang_angle_deg"},
+             "organic_overhang_angle_deg", "organic_boundary_finish"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1595,6 +1595,19 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail(
             "grading \"organic_overhang_angle_deg\" must be in [0, 90] "
             "(0 disarms the clamp)");
+    }
+    if (const JsonValue* v = find_key(gr, "organic_boundary_finish")) {
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_boundary_finish\" is only allowed with "
+            "\"algorithm\": \"organic\"");
+      job.grading.organic_boundary_finish =
+          require_nonempty_string(*v, "grading.organic_boundary_finish");
+      const std::string& bf = job.grading.organic_boundary_finish;
+      if (bf != "clean" && bf != "rim" && bf != "skin")
+        schema_fail(
+            "grading \"organic_boundary_finish\" must be \"clean\", \"rim\" or "
+            "\"skin\" (got \"" + bf + "\")");
     }
     // ★ THE INTENT (amendment §1). Refused rather than defaulted when unknown: a
     // job schema never silently falls back to an intent nobody asked for.

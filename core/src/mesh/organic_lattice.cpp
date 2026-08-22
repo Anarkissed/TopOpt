@@ -8,8 +8,11 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -624,6 +627,12 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
       for (const Vec3& q : fwd.pts) cv.points.push_back(q);
       cv.steps = fwd.steps + bwd.steps;
       cv.clamped_steps = fwd.clamped + bwd.clamped;
+      // The BACKWARD half is reversed onto the front, so its stop is the curve's START.
+      // Only an anchor when the export writes a shell for it to land on.
+      cv.start_at_boundary =
+          params.anchor_at_region_boundary && (bwd.stop == StopReason::LeftRegion);
+      cv.end_at_boundary =
+          params.anchor_at_region_boundary && (fwd.stop == StopReason::LeftRegion);
       double L = 0.0;
       for (std::size_t t = 1; t < cv.points.size(); ++t)
         L += vlen(vsub(cv.points[t], cv.points[t - 1]));
@@ -840,6 +849,8 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
         const Vec3 pu = A.points[ai], pv = out.curves[best_curve].points[best_pt];
         cn.curve_a = std::min(u, v);
         cn.curve_b = std::max(u, v);
+        cn.pt_a = (u < v) ? ai : best_pt;
+        cn.pt_b = (u < v) ? best_pt : ai;
         cn.a = (u < v) ? pu : pv;
         cn.b = (u < v) ? pv : pu;
         {
@@ -967,6 +978,99 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
       rep.solid_stranded_length_mm = total_len - biggest;
     }
   }
+
+  // ── ★ §1(e2): TRIM DANGLING ENDS (see OrganicReport for why) ───────────────
+  // Cut each curve back to its outermost connector. Ends that LEFT THE REGION are
+  // kept — the boundary clip lands those on the shell, which anchors them. Iterated,
+  // because trimming one curve can orphan its neighbour.
+  for (rep.dangling_rounds = 0; rep.dangling_rounds < kOrganicTrimRounds;
+       ++rep.dangling_rounds) {
+    const std::size_t nc = out.curves.size();
+    if (nc == 0) break;
+    std::vector<int> lo(nc, -1), hi(nc, -1);
+    for (const OrganicConnector& cn : out.connectors) {
+      for (int side = 0; side < 2; ++side) {
+        const int ci = side ? cn.curve_b : cn.curve_a;
+        const int pt = side ? cn.pt_b : cn.pt_a;
+        if (ci < 0 || static_cast<std::size_t>(ci) >= nc) continue;
+        if (lo[ci] < 0 || pt < lo[ci]) lo[ci] = pt;
+        if (hi[ci] < 0 || pt > hi[ci]) hi[ci] = pt;
+      }
+    }
+    bool changed = false;
+    std::vector<int> shift(nc, 0);      // how far each curve's start moved
+    std::vector<char> drop(nc, 0);
+    for (std::size_t ci = 0; ci < nc; ++ci) {
+      OrganicCurve& cv = out.curves[ci];
+      const int last = static_cast<int>(cv.points.size()) - 1;
+      if (last < 1) { drop[ci] = 1; changed = true; continue; }
+      if (lo[ci] < 0) {
+        // No connector at all. It is held by nothing unless BOTH ends reach the
+        // surface, in which case it is a strut spanning the part and is kept.
+        if (!(cv.start_at_boundary && cv.end_at_boundary)) { drop[ci] = 1; changed = true; }
+        continue;
+      }
+      const int keep_lo = cv.start_at_boundary ? 0 : lo[ci];
+      const int keep_hi = cv.end_at_boundary ? last : hi[ci];
+      if (keep_lo <= 0 && keep_hi >= last) continue;   // nothing to cut
+      if (keep_hi - keep_lo < 1) { drop[ci] = 1; changed = true; continue; }
+      double cut = 0.0;
+      for (int t = 1; t <= keep_lo; ++t)
+        cut += vlen(vsub(cv.points[t], cv.points[t - 1]));
+      for (int t = keep_hi + 1; t <= last; ++t)
+        cut += vlen(vsub(cv.points[t], cv.points[t - 1]));
+      if (keep_lo > 0) ++rep.dangling_ends_trimmed;
+      if (keep_hi < last) ++rep.dangling_ends_trimmed;
+      rep.dangling_length_removed_mm += cut;
+      cv.points.assign(cv.points.begin() + keep_lo, cv.points.begin() + keep_hi + 1);
+      cv.length_mm -= cut;
+      shift[ci] = keep_lo;
+      changed = true;
+    }
+    if (!changed) break;
+    // Compact: drop dead curves, remap the survivors, and drop connectors whose curve
+    // went away or whose attachment fell outside what was kept.
+    std::vector<int> remap(nc, -1);
+    std::vector<OrganicCurve> keep;
+    for (std::size_t ci = 0; ci < nc; ++ci) {
+      if (drop[ci]) {
+        rep.dangling_length_removed_mm += out.curves[ci].length_mm;
+        ++rep.curves_dropped_dangling;
+        continue;
+      }
+      remap[ci] = static_cast<int>(keep.size());
+      keep.push_back(std::move(out.curves[ci]));
+    }
+    out.curves.swap(keep);
+    std::vector<OrganicConnector> kc;
+    for (OrganicConnector cn : out.connectors) {
+      if (cn.curve_a < 0 || cn.curve_b < 0) continue;
+      const int na = remap[cn.curve_a], nb = remap[cn.curve_b];
+      if (na < 0 || nb < 0) continue;
+      const int pa = cn.pt_a - shift[cn.curve_a], pb = cn.pt_b - shift[cn.curve_b];
+      if (pa < 0 || pb < 0) continue;
+      if (pa >= static_cast<int>(out.curves[na].points.size())) continue;
+      if (pb >= static_cast<int>(out.curves[nb].points.size())) continue;
+      cn.curve_a = na; cn.curve_b = nb; cn.pt_a = pa; cn.pt_b = pb;
+      cn.a = out.curves[na].points[pa];
+      cn.b = out.curves[nb].points[pb];
+      cn.length_mm = vlen(vsub(cn.b, cn.a));
+      if (!(cn.length_mm > 1e-9)) continue;
+      kc.push_back(cn);
+    }
+    out.connectors.swap(kc);
+  }
+  // The connection counts are re-derived AFTER trimming, or R3 would report the
+  // pre-trim graph.
+  for (OrganicCurve& cv : out.curves) cv.connections = 0;
+  for (const OrganicConnector& cn : out.connectors) {
+    out.curves[cn.curve_a].connections += 1;
+    out.curves[cn.curve_b].connections += 1;
+  }
+  rep.curves_kept = out.curves.size();
+  rep.connectors = out.connectors.size();
+  rep.total_curve_length_mm = 0.0;
+  for (const OrganicCurve& cv : out.curves) rep.total_curve_length_mm += cv.length_mm;
 
   // ── R3: the connectivity measurement ────────────────────────────────────────
   for (const OrganicCurve& cv : out.curves) {
@@ -1328,13 +1432,18 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // the emission is sequential along a curve, so remembering the last point emitted is
   // all it takes. Reset per curve (and after a clip gap) so a genuine end still gets
   // its ball.
-  bool have_last = false;
-  Vec3 last_node{0, 0, 0};
   auto same_point = [](const Vec3& a, const Vec3& b) {
     return a.x == b.x && a.y == b.y && a.z == b.z;
   };
   // Every span that reaches the sink, for the post-clip connectivity measurement.
-  struct EmittedSeg { Vec3 a, b; double r, len; };
+  // ★ WHICH PASS EMITTED THIS SPAN. Attribution, not argument: when a defect shows up
+  // in the file, the answer to "which pass made it" must be readable off the geometry
+  // rather than reasoned about. This is the same discipline that found the clip-span
+  // millimetre bug — the observer named the pass and one candidate was left.
+  enum class Src { Curve, Connector, Tie, Net, Leg };
+  struct EmittedSeg { Vec3 a, b; double r, len; bool anchor0 = false, anchor1 = false;
+                      Src src = Src::Curve; };
+  Src cur_src = Src::Curve;
   std::vector<EmittedSeg> emitted;
   auto emit_node_once = [&](const Vec3& p, double r) {
     // ★ THE SAME GUARD THE OCTET GENERATOR HOLDS, AND FOR THE SAME REASON
@@ -1363,23 +1472,19 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     ++st.nodes;
     st.volume_mm3 += lattice_node_volume_mm3(r);
   };
-  auto emit_span = [&](const Vec3& p0, const Vec3& p1, double r) {
-    if (!(vlen(vsub(p1, p0)) > 0.0)) return;
-    lattice_emit_strut(sink, p0, p1, r, nseg);
-    if (obs && obs->on_element)
-      obs->on_element(LatticeGenElement::InteriorStrut, p0, p1, r);
-    emitted.push_back({p0, p1, r, vlen(vsub(p1, p0))});
-    st.triangles += static_cast<std::uint64_t>(4 * nseg);
-    ++st.struts;
-    st.volume_mm3 += lattice_prism_volume_mm3(r, vlen(vsub(p1, p0)), nseg);
-    if (!have_last || !same_point(last_node, p0)) emit_node_once(p0, r);
-    emit_node_once(p1, r);
-    have_last = true;
-    last_node = p1;
-    note(2.0 * r);
+  // ★★ RECORD, DO NOT EMIT. Nothing reaches the sink until the span list is FINAL.
+  // This is the change that made a zero-free-end bar reachable at all: the previous
+  // shape of this function wrote each strut to the sink the moment it was clipped, so
+  // every later pass could only APPEND (ties, ground legs) and never CUT. A whisker,
+  // once written, was written. Emission now happens once, at the end, over the list
+  // that survived the tie, the prune and the ground tie.
+  auto record_span = [&](const Vec3& p0, const Vec3& p1, double r) -> EmittedSeg* {
+    if (!(vlen(vsub(p1, p0)) > 0.0)) return nullptr;
+    emitted.push_back({p0, p1, r, vlen(vsub(p1, p0)), false, false, cur_src});
+    return &emitted.back();
   };
   auto span = [&](const Vec3& a, const Vec3& b, double r) {
-    if (!boundary) { emit_span(a, b, r); return; }
+    if (!boundary) { record_span(a, b, r); return; }
     // CLIPPED TO THE ALLOWED REGION ERODED BY THIS STRUT'S OWN RADIUS — the swept
     // SOLID stays inside the part, never just the centreline. Exactly the discipline
     // the octet generator holds, using the same predicate.
@@ -1402,11 +1507,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         keep.size() == 1 && keep[0].t0 <= 0.0 && keep[0].t1 >= seg_len;
     if (!whole) ++st.clipped_segments;
     for (const LatticeClipSpan& s : keep) {
-      // A clip GAP is a genuine end on both sides, so the run restarts.
-      if (s.t0 > 0.0) have_last = false;
       const Vec3 p0 = vadd(a, vmul(seg_dir, s.t0));
       const Vec3 p1 = vadd(a, vmul(seg_dir, s.t1));
-      emit_span(p0, p1, r);
+      EmittedSeg* rec = record_span(p0, p1, r);
       // ★ ANCHOR BALLS AT THE CUT ENDS (bar B6's discipline, applied to organic).
       // A clipped end is where the strut meets the surface; the octet generator
       // dresses every one of them and organic dressed none. `emit_span` already
@@ -1414,18 +1517,679 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       // a LANDING and as skin geometry — which is also what makes `outer_finish:
       // "skin"` legal for organic, since the M4 guard refuses a finish that emitted
       // nothing at all.
-      if (s.t0 > 0.0) { ++st.anchor_nodes; st.skin_triangles += 20; }
-      if (s.t1 < seg_len) { ++st.anchor_nodes; st.skin_triangles += 20; }
+      if (rec) {
+        rec->anchor0 = s.t0 > 0.0;
+        rec->anchor1 = s.t1 < seg_len;
+      }
     }
   };
+  cur_src = Src::Curve;
   for (const OrganicCurve& cv : lat.curves) {
-    have_last = false;  // a new curve starts a new run of shared points
     for (std::size_t t = 1; t < cv.points.size(); ++t)
       span(cv.points[t - 1], cv.points[t], cv.radius_mm);
   }
+  cur_src = Src::Connector;
   for (const OrganicConnector& cn : lat.connectors) {
-    have_last = false;  // each connector is its own two-ended run
     span(cn.a, cn.b, cn.radius_mm);
+  }
+
+  // ── ★★ NODE MERGE (kOrganicNodeMergeRatio states the citation) ──────────────
+  // Endpoints within one bead of each other ARE one node. Snap them together before
+  // anything else runs, so the tie pass, the prune and the net-skin all see joints
+  // rather than near-misses. Spans the snap collapses to nothing are dropped.
+  //
+  // ★ THE GUARD: a snapped endpoint MOVES, and the clip certificate covered it where
+  // it was. A cluster whose centroid is not at least its own radius inside the part is
+  // left alone, because moving it there would push the swept solid through the surface
+  // and the export's no-protrusion invariant would refuse the file — which is exactly
+  // how the arc-length bug in this same function announced itself.
+  if (!emitted.empty()) {
+    struct Ep { std::size_t span; int end; };
+    std::vector<Ep> eps;
+    eps.reserve(emitted.size() * 2);
+    double rmin_all = emitted.front().r;
+    for (std::size_t i = 0; i < emitted.size(); ++i) {
+      rmin_all = std::min(rmin_all, emitted[i].r);
+      eps.push_back({i, 0});
+      eps.push_back({i, 1});
+    }
+    auto ep_pos = [&](const Ep& e) { return e.end ? emitted[e.span].b : emitted[e.span].a; };
+    const double mcell = std::max(kOrganicNodeMergeRatio * rmin_all, 1e-6);
+    std::map<std::array<long long, 3>, std::vector<int>> mb;
+    auto mkey = [mcell](const Vec3& p) {
+      return std::array<long long, 3>{
+          static_cast<long long>(std::floor(p.x / mcell)),
+          static_cast<long long>(std::floor(p.y / mcell)),
+          static_cast<long long>(std::floor(p.z / mcell))};
+    };
+    for (std::size_t i = 0; i < eps.size(); ++i) mb[mkey(ep_pos(eps[i]))].push_back(int(i));
+    std::vector<int> mpar(eps.size());
+    for (std::size_t i = 0; i < mpar.size(); ++i) mpar[i] = static_cast<int>(i);
+    std::function<int(int)> mfind = [&mpar](int a) {
+      while (mpar[a] != a) { mpar[a] = mpar[mpar[a]]; a = mpar[a]; }
+      return a;
+    };
+    for (const auto& kv : mb)
+      for (long long dz = -1; dz <= 1; ++dz)
+        for (long long dy = -1; dy <= 1; ++dy)
+          for (long long dx = -1; dx <= 1; ++dx) {
+            auto it = mb.find({kv.first[0] + dx, kv.first[1] + dy, kv.first[2] + dz});
+            if (it == mb.end()) continue;
+            for (int i : kv.second)
+              for (int j : it->second) {
+                if (j <= i) continue;
+                const Vec3 pi = ep_pos(eps[i]), pj = ep_pos(eps[j]);
+                const double rr = kOrganicNodeMergeRatio *
+                                  std::min(emitted[eps[i].span].r, emitted[eps[j].span].r);
+                if (vlen(vsub(pi, pj)) > rr) continue;
+                const int ra = mfind(i), rb = mfind(j);
+                if (ra != rb) mpar[std::max(ra, rb)] = std::min(ra, rb);
+              }
+          }
+    std::map<int, std::vector<int>> cluster;
+    for (std::size_t i = 0; i < eps.size(); ++i) cluster[mfind(int(i))].push_back(int(i));
+    for (const auto& kv : cluster) {
+      if (kv.second.size() < 2) continue;
+      Vec3 c{0, 0, 0};
+      double rmin = emitted[eps[kv.second.front()].span].r;
+      for (int i : kv.second) {
+        const Vec3 p = ep_pos(eps[i]);
+        c = vadd(c, p);
+        rmin = std::min(rmin, emitted[eps[i].span].r);
+      }
+      c = vmul(c, 1.0 / static_cast<double>(kv.second.size()));
+      if (boundary && boundary->signed_distance(c) < rmin) continue;   // would breach
+      ++st.merge_clusters;
+      for (int i : kv.second) {
+        EmittedSeg& e = emitted[eps[i].span];
+        (eps[i].end ? e.b : e.a) = c;
+        ++st.nodes_merged;
+      }
+    }
+    std::vector<EmittedSeg> mkeep;
+    mkeep.reserve(emitted.size());
+    for (EmittedSeg& e : emitted) {
+      e.len = vlen(vsub(e.b, e.a));
+      if (e.len <= 0.5 * e.r) { ++st.merge_degenerate_spans; continue; }
+      mkeep.push_back(e);
+    }
+    emitted.swap(mkeep);
+  }
+
+  // ── ★★ §1(e3)+(e4) TIE, THEN CUT ────────────────────────────────────────────
+  // Both passes run on the FINAL post-clip span list and BEFORE the ground tie, so
+  // the legs the ground tie adds are never themselves pruned and never land on a
+  // whisker that a later pass removes.
+  //
+  // ★ WHY BOTH. Tying GROWS: a tip with material in reach becomes a real joint, which
+  // keeps the member and its stiffness. Pruning CUTS: a tip with nothing in reach, or
+  // whose tie was clipped away by the boundary, is deleted. Tying alone cannot reach
+  // zero — a tie is clipped like any other span, so it can be trimmed back to a stub
+  // that is itself a free end. Pruning alone would throw away members that only needed
+  // a joint. Tie first, cut what is left.
+  //
+  // ★ PRUNING CANNOT DISCONNECT THE LATTICE. A span that BRIDGES two parts of the
+  // network has material at both tips by definition, so it is never a candidate. Only
+  // tips are eroded, and eroding a tip cannot separate what remains.
+  if (!emitted.empty()) {
+    double longest = 0.0;
+    for (const EmittedSeg& e : emitted) longest = std::max(longest, e.len + 2.0 * e.r);
+    const double cell = std::max(longest, 1e-6);   // bucket edge only
+    auto key = [cell](const Vec3& p) {
+      return std::array<long long, 3>{
+          static_cast<long long>(std::floor(p.x / cell)),
+          static_cast<long long>(std::floor(p.y / cell)),
+          static_cast<long long>(std::floor(p.z / cell))};
+    };
+    std::vector<unsigned char> alive(emitted.size(), 1);
+    std::map<std::array<long long, 3>, std::vector<int>> bucket;
+    auto rebuild = [&]() {
+      bucket.clear();
+      for (std::size_t i = 0; i < emitted.size(); ++i)
+        if (alive[i])
+          bucket[key(vmul(vadd(emitted[i].a, emitted[i].b), 0.5))].push_back(int(i));
+    };
+    rebuild();
+    // ── ★★ IS THIS TIP SUPPORTED? ─────────────────────────────────────────────
+    // ★ THE FIRST VERSION OF THIS TEST WAS "does any other span's solid contain the
+    // tip", AND IT HAD A LOOPHOLE THAT SWALLOWED THE WHOLE BAR. Attribution found it:
+    // dumping the final span list and correlating it with the dead ends the shipped
+    // mesh actually shows, every one of the 19 survivors had SIX SPAN TIPS converging
+    // on it. A bundle of near-parallel struts that all END at the same point supports
+    // nothing whatsoever — but each tip sits inside its siblings' capsules, so the
+    // containment test passed on all of them and the prune had nothing to cut.
+    //
+    // So support is about what the neighbouring span DOES at the contact, not merely
+    // that it is there:
+    //   INTERIOR contact — the tip lands on the BODY of another span (a T on a beam).
+    //                      That span carries the load past the joint. Supported.
+    //   TIP contact      — the other span ends here too. Supported only if it leads
+    //                      AWAY (a polyline continuing along its curve, or a tie
+    //                      heading off sideways), never if it folds back along the
+    //                      same line, which is the bundle case above.
+    auto tip_supported = [&](std::size_t i, const Vec3& tip, const Vec3& out) {
+      const auto k0 = key(tip);
+      for (long long dz = -1; dz <= 1; ++dz)
+        for (long long dy = -1; dy <= 1; ++dy)
+          for (long long dx = -1; dx <= 1; ++dx) {
+            auto it = bucket.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+            if (it == bucket.end()) continue;
+            for (int j : it->second) {
+              if (static_cast<std::size_t>(j) == i || !alive[j]) continue;
+              const EmittedSeg& e = emitted[j];
+              const Vec3 ab = vsub(e.b, e.a);
+              const double abab = vdot(ab, ab);
+              double t = abab > 0.0 ? vdot(vsub(tip, e.a), ab) / abab : 0.0;
+              t = std::min(1.0, std::max(0.0, t));
+              const Vec3 q = vadd(e.a, vmul(ab, t));
+              if (vdot(vsub(q, tip), vsub(q, tip)) > e.r * e.r) continue;
+              const double da = vlen(vsub(q, e.a)), db = vlen(vsub(q, e.b));
+              const double edge = 0.5 * e.r;
+              if (da > edge && db > edge) return true;      // lands on the BODY
+              const Vec3 far = (da <= db) ? e.b : e.a;      // this span's other end
+              const Vec3 away = vsub(far, tip);
+              const double an = vlen(away);
+              if (!(an > 1e-9)) continue;
+              if (vdot(vmul(away, 1.0 / an), out) > kOrganicFoldBackCos) return true;
+            }
+          }
+      return false;
+    };
+    // The outward unit direction at a tip: from the span's other end towards it.
+    auto tip_dir = [&](std::size_t i, int e) {
+      const EmittedSeg& s2 = emitted[i];
+      const Vec3 d = e ? vsub(s2.b, s2.a) : vsub(s2.a, s2.b);
+      const double n = vlen(d);
+      return n > 1e-9 ? vmul(d, 1.0 / n) : Vec3{0.0, 0.0, 1.0};
+    };
+    auto tip_covered = [&](std::size_t i, const Vec3& tip) {
+      // kept for the callers that ask "is there anything here at all"
+      const auto k0 = key(tip);
+      for (long long dz = -1; dz <= 1; ++dz)
+        for (long long dy = -1; dy <= 1; ++dy)
+          for (long long dx = -1; dx <= 1; ++dx) {
+            auto it = bucket.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+            if (it == bucket.end()) continue;
+            for (int j : it->second) {
+              if (static_cast<std::size_t>(j) == i || !alive[j]) continue;
+              if (organic_segment_distance2(tip, tip, emitted[j].a, emitted[j].b) <=
+                  emitted[j].r * emitted[j].r)
+                return true;
+            }
+          }
+      return false;
+    };
+    (void)tip_covered;
+    auto nearest_material = [&](std::size_t i, const Vec3& tip, double reach, Vec3& hit) {
+      double best = reach * reach;
+      bool found = false;
+      const auto k0 = key(tip);
+      const long long rings =
+          static_cast<long long>(std::ceil(reach / std::max(cell, 1e-9))) + 1;
+      for (long long dz = -rings; dz <= rings; ++dz)
+        for (long long dy = -rings; dy <= rings; ++dy)
+          for (long long dx = -rings; dx <= rings; ++dx) {
+            auto it = bucket.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+            if (it == bucket.end()) continue;
+            for (int j : it->second) {
+              if (static_cast<std::size_t>(j) == i || !alive[j]) continue;
+              const Vec3 ab = vsub(emitted[j].b, emitted[j].a);
+              const double abab = vdot(ab, ab);
+              double t = abab > 0.0 ? vdot(vsub(tip, emitted[j].a), ab) / abab : 0.0;
+              t = std::min(1.0, std::max(0.0, t));
+              const Vec3 q = vadd(emitted[j].a, vmul(ab, t));
+              const double d2 = vdot(vsub(q, tip), vsub(q, tip));
+              if (d2 < best) { best = d2; hit = q; found = true; }
+            }
+          }
+      return found;
+    };
+    // The build plate supports a tip resting on it, so the lowest layer of the part is
+    // exempt from BOTH passes below. The tolerance is one radius: a tip within its own
+    // radius of the lowest material is touching the plate, not hanging over it.
+    //
+    // ★ THE TIE PASS NEEDS THIS TOO, and not having it was visible in a unit fixture:
+    // six struts fanning up to a common apex were correctly cut, and then the tie pass
+    // joined their six BASE points — every one of them already sitting on the plate —
+    // to each other, leaving four struts of pure decoration behind. A tip the plate
+    // holds up does not need tying to anything.
+    double zmin = emitted.front().a.z;
+    for (const EmittedSeg& e : emitted) zmin = std::min(zmin, std::min(e.a.z, e.b.z));
+    auto on_plate = [&](const Vec3& p, double r) { return p.z - zmin <= r; };
+    // ── the tie pass
+    {
+      struct Tie { Vec3 a, b; double r; };
+      std::vector<Tie> ties;
+      const std::size_t n_before = emitted.size();
+      for (std::size_t i = 0; i < n_before; ++i)
+        for (int e = 0; e < 2; ++e) {
+          const Vec3 tip = e ? emitted[i].b : emitted[i].a;
+          if (on_plate(tip, emitted[i].r) ||
+              tip_supported(i, tip, tip_dir(i, e)))
+            continue;
+          ++st.free_ends_before_tie;
+          // ★ THE REACH IS LOCAL, AND THAT IS THE WHOLE POINT. It was
+          // `reach_hint` — the LONGEST span anywhere in the model — which let a tip
+          // reach right across the lattice for something to hold on to. Every
+          // whisker then found a partner, every whisker counted as "covered", and
+          // the prune below had nothing to cut: 4 spans out of 14,601. Measured on
+          // the shipped mesh the picture did not move at all (629 detected ends
+          // before and after). A tie must never be longer than the member it
+          // rescues, so the scale is that member: its own length plus its two ends.
+          const double reach =
+              kOrganicTieReachRatio * std::max(emitted[i].len + 2.0 * emitted[i].r,
+                                               4.0 * emitted[i].r);
+          Vec3 hit{0, 0, 0};
+          if (!nearest_material(i, tip, reach, hit)) { ++st.free_ends_unresolved; continue; }
+          if (vlen(vsub(hit, tip)) <= 1e-9) continue;   // already touching
+          ties.push_back({tip, hit, emitted[i].r});
+        }
+      cur_src = Src::Tie;
+      for (const Tie& t : ties) {
+        const std::size_t before = emitted.size();
+        span(t.a, t.b, t.r);              // clipped exactly like everything else
+        if (emitted.size() > before) {
+          ++st.ties_added;
+          st.tie_length_mm += vlen(vsub(t.b, t.a));
+        }
+      }
+      alive.resize(emitted.size(), 1);
+      rebuild();
+    }
+      // ── the prune, to a fixed point
+    for (; st.prune_rounds < kOrganicPruneRounds; ++st.prune_rounds) {
+      std::vector<std::size_t> doomed;
+      for (std::size_t i = 0; i < emitted.size(); ++i) {
+        if (!alive[i]) continue;
+        for (int e = 0; e < 2; ++e) {
+          const Vec3 tip = e ? emitted[i].b : emitted[i].a;
+          if (on_plate(tip, emitted[i].r) ||
+              tip_supported(i, tip, tip_dir(i, e)))
+            continue;
+          doomed.push_back(i);
+          break;
+        }
+      }
+      if (doomed.empty()) break;
+      for (std::size_t i : doomed) {
+        alive[i] = 0;
+        ++st.pruned_spans;
+        st.pruned_length_mm += emitted[i].len;
+      }
+      rebuild();
+    }
+    // Compact, so every pass below this point sees only what will be written.
+    {
+      std::vector<EmittedSeg> kept;
+      kept.reserve(emitted.size());
+      for (std::size_t i = 0; i < emitted.size(); ++i)
+        if (alive[i]) kept.push_back(emitted[i]);
+      emitted.swap(kept);
+      alive.assign(emitted.size(), 1);
+      rebuild();
+    }
+    // ── ★★ DROP WHAT IS NOT PART OF THE BODY ────────────────────────────────
+    // The ground-tie repair below props a stranded piece up with a vertical leg down
+    // to the plate. On a lattice that is the wrong answer and it LOOKS wrong: the
+    // maintainer photographed the result — a single 0.42 mm pole standing ~30 mm tall
+    // at a corner with a crumb on top, tied to nothing else. A 0.42 mm pole that tall
+    // is not printable and the crumb it carries is worth nothing, so the piece is
+    // DELETED instead. The leg survives only for a piece big enough to be worth
+    // keeping (kOrganicStrandedKeepFraction of total length).
+    if (!emitted.empty()) {
+      std::vector<int> cp(emitted.size());
+      for (std::size_t i = 0; i < cp.size(); ++i) cp[i] = static_cast<int>(i);
+      std::function<int(int)> cf = [&cp](int a) {
+        while (cp[a] != a) { cp[a] = cp[cp[a]]; a = cp[a]; }
+        return a;
+      };
+      for (const auto& kv : bucket)
+        for (long long dz = -1; dz <= 1; ++dz)
+          for (long long dy = -1; dy <= 1; ++dy)
+            for (long long dx = -1; dx <= 1; ++dx) {
+              auto it = bucket.find({kv.first[0] + dx, kv.first[1] + dy,
+                                     kv.first[2] + dz});
+              if (it == bucket.end()) continue;
+              for (int i : kv.second)
+                for (int j : it->second) {
+                  if (j <= i) continue;
+                  const double touch = emitted[i].r + emitted[j].r;
+                  if (organic_segment_distance2(emitted[i].a, emitted[i].b,
+                                                emitted[j].a, emitted[j].b) >
+                      touch * touch)
+                    continue;
+                  const int ra = cf(i), rb = cf(j);
+                  if (ra != rb) cp[std::max(ra, rb)] = std::min(ra, rb);
+                }
+            }
+      std::map<int, double> len;
+      double total = 0.0;
+      for (std::size_t i = 0; i < emitted.size(); ++i) {
+        len[cf(static_cast<int>(i))] += emitted[i].len;
+        total += emitted[i].len;
+      }
+      int biggest = -1;
+      double biggest_len = -1.0;
+      for (const auto& kv : len)
+        if (kv.second > biggest_len) { biggest_len = kv.second; biggest = kv.first; }
+      std::vector<EmittedSeg> body;
+      body.reserve(emitted.size());
+      for (std::size_t i = 0; i < emitted.size(); ++i) {
+        const int root = cf(static_cast<int>(i));
+        if (root == biggest ||
+            len[root] >= kOrganicStrandedKeepFraction * total) {
+          body.push_back(emitted[i]);
+        } else {
+          ++st.stranded_spans_dropped;
+          st.stranded_length_dropped_mm += emitted[i].len;
+        }
+      }
+      for (const auto& kv : len)
+        if (kv.first != biggest && kv.second < kOrganicStrandedKeepFraction * total)
+          ++st.stranded_components_dropped;
+      emitted.swap(body);
+    }
+    // ── ★★ THE BOUNDARY FINISH RUNS LAST, AND THAT IS THE POINT ────────────────
+    // ★ A FINISH IS A LOOK, NOT A REPAIR. Everything above — the node merge, the tie,
+    // the support prune, the stranded-piece drop — is the ALGORITHM, and it runs
+    // identically whichever finish was asked for. The structural core of `clean`,
+    // `rim` and `skin` is therefore the same lattice, byte for byte, and the three
+    // files differ ONLY by the joins added below. That ordering is deliberate: when
+    // the finish ran BEFORE the prune it changed what got cut (1,588 spans for clean
+    // against 1,210 for skin), which made the finish a structural intervention
+    // wearing an aesthetic name, and made "which finish prints better" a meaningful
+    // question when it must not be one.
+    alive.assign(emitted.size(), 1);
+    rebuild();
+    // ── ★★ THE NET-SKIN (organic's diagrid) ─────────────────────────────────────
+      // Aremu et al. (Additive Manufacturing 13:1-13, 2017) name the defect and the cure:
+      // trimming a lattice to a surface leaves "hanging" struts with a free end each, and
+      // joining those ends into an EXTERNAL TWO-DIMENSIONAL LATTICE — a net-skin — braces
+      // them without the mass of a full skin and without closing the surface.
+      //
+      // ★ IT IS 53 % OF WHAT THE EYE SEES. Measured on the shipped welded cube with a
+      // detector that reads only the file (principal-axis one-sidedness, positive control:
+      // 640 on the untied build, 269 on the coupon that PRINTED): 629 ends, of which 224
+      // sit ON a cube face and another 109 within 1.5 mm of one. The interior remainder is
+      // at the same density as the printed coupon. The octet path already fixes this half
+      // with its diagrid and scores 13 per 100k vertices against organic's 151.
+      //
+      // MUTUAL nearest, exactly the discipline the connector pass uses: an edge exists
+      // only when BOTH landings want it, which is what stops a crowded corner from growing
+      // a hairball. Each join is CLIPPED like every other span, so it cannot leave the part.
+      if (lat.net_skin_reach_mm > 0.0 &&
+          lat.net_skin_finish != OrganicLattice::Finish::Clean) {
+        // ★ IS THIS POINT ON AN EDGE OF THE PART? Read it off the boundary's own field:
+        // step tangentially either side and compare surface normals. Across a flat face
+        // they agree; across an edge they swing by the dihedral angle. No CAD faces, no
+        // mesh topology, no new representation — just the clip the generator already has.
+        auto sdf_normal = [&](const Vec3& q, double h) {
+          const double d = 0.5 * h;
+          Vec3 g{boundary->signed_distance({q.x + d, q.y, q.z}) -
+                     boundary->signed_distance({q.x - d, q.y, q.z}),
+                 boundary->signed_distance({q.x, q.y + d, q.z}) -
+                     boundary->signed_distance({q.x, q.y - d, q.z}),
+                 boundary->signed_distance({q.x, q.y, q.z + d}) -
+                     boundary->signed_distance({q.x, q.y, q.z - d})};
+          const double n = vlen(g);
+          return n > 1e-12 ? vmul(g, 1.0 / n) : Vec3{0.0, 0.0, 0.0};
+        };
+        const double cos_edge =
+            std::cos(kOrganicRimEdgeAngleDeg * 3.14159265358979323846 / 180.0);
+        auto on_edge = [&](const Vec3& p, double r) {
+          if (!boundary) return false;
+          const double h = std::max(2.0 * r, 1e-4);
+          const Vec3 n0 = sdf_normal(p, h);
+          if (vlen(n0) < 0.5) return false;
+          Vec3 t1 = std::fabs(n0.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0};
+          t1 = vsub(t1, vmul(n0, vdot(t1, n0)));
+          const double t1n = vlen(t1);
+          if (!(t1n > 1e-9)) return false;
+          t1 = vmul(t1, 1.0 / t1n);
+          const Vec3 t2 = vcross(n0, t1);
+          for (int k = 0; k < 4; ++k) {
+            const Vec3 t = (k < 2) ? t1 : t2;
+            const double sg = (k % 2) ? -1.0 : 1.0;
+            const Vec3 n = sdf_normal(vadd(p, vmul(t, sg * 2.0 * h)), h);
+            if (vlen(n) < 0.5) continue;
+            if (vdot(n, n0) < cos_edge) return true;
+          }
+          return false;
+        };
+        cur_src = Src::Net;
+        struct Landing { Vec3 p; double r; };
+        std::vector<Landing> all;
+        // ★ THE SURFACE NODES OF THE FINISHED LATTICE, not the clipped ends of the
+        // traced one. The clip erodes by the strut's own radius, so a node sitting on
+        // the surface reads signed_distance == r; anything within one half separation
+        // of that is on the outer shell. Selecting them from the FINAL geometry is
+        // what makes the finish independent of how much the prune took away — keyed
+        // on leftovers it collapsed from 661 candidates to 121 for the same look.
+        {
+          const double band = lat.net_skin_reach_mm * kOrganicFinishBandRatio;
+          for (const EmittedSeg& e : emitted)
+            for (int k = 0; k < 2; ++k) {
+              const Vec3 p = k ? e.b : e.a;
+              if (boundary && boundary->signed_distance(p) > e.r + band) continue;
+              all.push_back({p, e.r});
+            }
+          // the merge made coincident endpoints EQUAL, so exact dedup is enough
+          std::sort(all.begin(), all.end(), [](const Landing& x, const Landing& y) {
+            if (x.p.x != y.p.x) return x.p.x < y.p.x;
+            if (x.p.y != y.p.y) return x.p.y < y.p.y;
+            return x.p.z < y.p.z;
+          });
+          all.erase(std::unique(all.begin(), all.end(),
+                                [](const Landing& x, const Landing& y) {
+                                  return x.p.x == y.p.x && x.p.y == y.p.y &&
+                                         x.p.z == y.p.z;
+                                }),
+                    all.end());
+        }
+        // ★ THE TWO FILTERS THAT MAKE A FINISH VISIBLE. Without them the finish was
+        // joining each surface node to the other end of a strut it was already
+        // attached to: 1,889 of 2,615 joins duplicated an existing member endpoint
+        // for endpoint, 83 % of a sample lay wholly inside existing material, and the
+        // three finishes rendered as the same picture.
+        auto pkey = [](const Vec3& p) { return std::array<double, 3>{p.x, p.y, p.z}; };
+        std::set<std::pair<std::array<double, 3>, std::array<double, 3>>> joined_already;
+        for (const EmittedSeg& e : emitted) {
+          auto ka = pkey(e.a), kb = pkey(e.b);
+          if (kb < ka) std::swap(ka, kb);
+          joined_already.insert({ka, kb});
+        }
+        auto already = [&](const Vec3& a, const Vec3& b) {
+          auto ka = pkey(a), kb = pkey(b);
+          if (kb < ka) std::swap(ka, kb);
+          return joined_already.count({ka, kb}) != 0;
+        };
+        // A join running THROUGH or ALONGSIDE existing struts is invisible either way.
+        auto buried = [&](const Vec3& a, const Vec3& b) {
+          const int N = 6;
+          for (int k = 0; k <= N; ++k) {
+            const Vec3 p = vadd(a, vmul(vsub(b, a), double(k) / N));
+            bool inside = false;
+            const auto k0 = key(p);
+            for (long long dz = -1; dz <= 1 && !inside; ++dz)
+              for (long long dy = -1; dy <= 1 && !inside; ++dy)
+                for (long long dx = -1; dx <= 1 && !inside; ++dx) {
+                  auto it = bucket.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+                  if (it == bucket.end()) continue;
+                  for (int j : it->second)
+                    if (organic_segment_distance2(p, p, emitted[j].a, emitted[j].b) <=
+                        emitted[j].r * emitted[j].r) { inside = true; break; }
+                }
+            if (!inside) return false;
+          }
+          return true;
+        };
+        std::vector<Landing> L;
+        if (lat.net_skin_finish == OrganicLattice::Finish::Rim) {
+          for (const Landing& d : all)
+            if (on_edge(d.p, d.r)) L.push_back(d);
+          st.net_skin_edge_landings = L.size();
+        } else {
+          L = all;
+        }
+        st.net_skin_landings = all.size();
+        const double reach = lat.net_skin_reach_mm;
+        const int deg = std::max(1, lat.net_skin_degree);
+        if (L.size() >= 2) {
+          const double ncell = std::max(reach, 1e-6);
+          std::map<std::array<long long, 3>, std::vector<int>> lb;
+          auto lkey = [ncell](const Vec3& p) {
+            return std::array<long long, 3>{
+                static_cast<long long>(std::floor(p.x / ncell)),
+                static_cast<long long>(std::floor(p.y / ncell)),
+                static_cast<long long>(std::floor(p.z / ncell))};
+          };
+          for (std::size_t i = 0; i < L.size(); ++i) lb[lkey(L[i].p)].push_back(int(i));
+          // each landing's own shortlist, nearest first
+          std::vector<std::vector<int>> want(L.size());
+          for (std::size_t i = 0; i < L.size(); ++i) {
+            std::vector<std::pair<double, int>> cand;
+            const auto k0 = lkey(L[i].p);
+            for (long long dz = -1; dz <= 1; ++dz)
+              for (long long dy = -1; dy <= 1; ++dy)
+                for (long long dx = -1; dx <= 1; ++dx) {
+                  auto it = lb.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+                  if (it == lb.end()) continue;
+                  for (int j : it->second) {
+                    if (static_cast<std::size_t>(j) == i) continue;
+                    const double d = vlen(vsub(L[j].p, L[i].p));
+                    if (d < kOrganicFinishMinSpanRatio * reach || d > reach) continue;
+                    if (already(L[i].p, L[j].p)) continue;
+                    const Vec3 ni = sdf_normal(L[i].p, 2.0 * L[i].r);
+                    const Vec3 nj = sdf_normal(L[j].p, 2.0 * L[j].r);
+                    if (vlen(ni) > 0.5 && vlen(nj) > 0.5 &&
+                        vdot(ni, nj) < kOrganicFinishCoplanarCos)
+                      continue;                       // would cut the corner
+                    if (buried(L[i].p, L[j].p)) continue;
+                    cand.push_back({d, j});
+                  }
+                }
+            std::sort(cand.begin(), cand.end(),
+                      [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+                        return a.first != b.first ? a.first < b.first : a.second < b.second;
+                      });
+            if (static_cast<int>(cand.size()) > deg) cand.resize(deg);
+            for (const auto& c : cand) want[i].push_back(c.second);
+          }
+          std::vector<int> deg(L.size(), 0);
+          for (std::size_t i = 0; i < L.size(); ++i)
+            for (int j : want[i]) {
+              if (static_cast<std::size_t>(j) < i) continue;          // each pair once
+              const std::vector<int>& w = want[j];
+              if (std::find(w.begin(), w.end(), static_cast<int>(i)) == w.end())
+                continue;                                            // not mutual
+              const std::size_t before = emitted.size();
+              span(L[i].p, L[j].p, std::min(L[i].r, L[j].r));
+              if (emitted.size() > before) {
+                ++st.net_skin_members;
+                st.net_skin_length_mm += vlen(vsub(L[j].p, L[i].p));
+                ++deg[i];
+                ++deg[j];
+              }
+            }
+          // ★ THE FALLBACK, AND WHY IT IS NOT OPTIONAL. Mutual-nearest is what keeps a
+          // crowded corner from growing a hairball, but it leaves the LONERS out: a
+          // landing whose nearest neighbour already has closer friends is wanted by
+          // nobody and stays hanging. Measured on the cube, the mutual pass alone joined
+          // 489 of 648 landings and left 41 dead ends in the shipped mesh — every one of
+          // them ON a face. So any landing still unjoined takes its single nearest
+          // partner within twice the reach, mutual or not. One join is all a hanging
+          // strut needs; the degree cap still bounds the crowded end.
+          // ★ EVERY NODE NEEDS TWO. A net node with ONE join is a thread that just
+          // stops — 839 of 2,173 on the cube (38.6 %), 64 % on the rim — and that is
+          // what the surface dead-end count was reading. So the fallback runs while a
+          // node is short of TWO, not merely while it has none.
+          for (int want = 1; want <= 2; ++want)
+           for (std::size_t i = 0; i < L.size(); ++i) {
+            if (deg[i] >= want) continue;
+            int best = -1;
+            double bestd = 1.5 * reach;
+            const auto k0 = lkey(L[i].p);
+            for (long long dz = -2; dz <= 2; ++dz)
+              for (long long dy = -2; dy <= 2; ++dy)
+                for (long long dx = -2; dx <= 2; ++dx) {
+                  auto it = lb.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+                  if (it == lb.end()) continue;
+                  for (int j : it->second) {
+                    if (static_cast<std::size_t>(j) == i) continue;
+                    const double d = vlen(vsub(L[j].p, L[i].p));
+                    if (d < kOrganicFinishMinSpanRatio * reach || d >= bestd) continue;
+                    if (already(L[i].p, L[j].p)) continue;
+                    const Vec3 ni = sdf_normal(L[i].p, 2.0 * L[i].r);
+                    const Vec3 nj = sdf_normal(L[j].p, 2.0 * L[j].r);
+                    if (vlen(ni) > 0.5 && vlen(nj) > 0.5 &&
+                        vdot(ni, nj) < kOrganicFinishCoplanarCos)
+                      continue;
+                    if (buried(L[i].p, L[j].p)) continue;
+                    bestd = d;
+                    best = j;
+                  }
+                }
+            if (best < 0) continue;
+            const std::size_t before = emitted.size();
+            span(L[i].p, L[best].p, std::min(L[i].r, L[best].r));
+            if (emitted.size() > before) {
+              ++st.net_skin_members;
+              ++st.net_skin_fallback_members;
+              st.net_skin_length_mm += bestd;
+              ++deg[i];
+              ++deg[best];
+              joined_already.insert([&]{
+                auto ka = pkey(L[i].p), kb = pkey(L[best].p);
+                if (kb < ka) std::swap(ka, kb);
+                return std::make_pair(ka, kb);
+              }());
+            }
+          }
+          for (std::size_t i = 0; i < L.size(); ++i) {
+            if (deg[i] > 0) ++st.net_skin_landings_joined;
+            if (deg[i] == 1) ++st.net_skin_degree_one;
+          }
+        }
+      }
+
+    // The finish must not introduce what the algorithm just removed. A join the
+    // boundary clipped into a stub is pruned — but ONLY finish spans are eligible, so
+    // this can never reach back into the structure above.
+    {
+      const std::size_t core_n = st.net_skin_members ? 0 : emitted.size();
+      (void)core_n;
+      alive.assign(emitted.size(), 1);
+      rebuild();
+      for (int round = 0; round < kOrganicPruneRounds; ++round) {
+        std::vector<std::size_t> doomed;
+        for (std::size_t i = 0; i < emitted.size(); ++i) {
+          if (!alive[i] || emitted[i].src != Src::Net) continue;
+          for (int e = 0; e < 2; ++e) {
+            const Vec3 tip = e ? emitted[i].b : emitted[i].a;
+            if (on_plate(tip, emitted[i].r) || tip_supported(i, tip, tip_dir(i, e)))
+              continue;
+            doomed.push_back(i);
+            break;
+          }
+        }
+        if (doomed.empty()) break;
+        for (std::size_t i : doomed) {
+          alive[i] = 0;
+          ++st.net_skin_members_pruned;
+        }
+        rebuild();
+      }
+      std::vector<EmittedSeg> fkeep;
+      fkeep.reserve(emitted.size());
+      for (std::size_t i = 0; i < emitted.size(); ++i)
+        if (alive[i]) fkeep.push_back(emitted[i]);
+      emitted.swap(fkeep);
+    }
+
+    // The census is NOT taken here. The ground tie below still APPENDS legs, and a
+    // number taken before the last pass that changes the list is a number about an
+    // intermediate representation — exactly the mistake this file has made before. It
+    // is taken at the very end, over the list that reaches the sink.
   }
 
   // ── ★★ THE GROUND-TIE REPAIR (OrganicGenStats states why) ──────────────────
@@ -1549,7 +2313,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         if (legs.empty()) break;
         for (const EmittedSeg& L : legs) { stamp(L); ++st.repair_legs_added; }
         // The legs are GEOMETRY and must reach the file, not just the raster.
-        have_last = false;
+        cur_src = Src::Leg;
         for (const EmittedSeg& L : legs) span(L.a, L.b, L.r);
         flood();
       }
@@ -1565,6 +2329,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     double reach = 0.0;
     for (const EmittedSeg& e : emitted) reach = std::max(reach, e.len + 2.0 * e.r);
     const double cell = std::max(reach, 1e-6);
+    const double reach_hint = reach;   // longest span + 2 radii: the local strut scale
     std::map<std::array<long long, 3>, std::vector<int>> bucket;
     auto key = [cell](const Vec3& p) {
       return std::array<long long, 3>{
@@ -1575,6 +2340,57 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     for (std::size_t i = 0; i < emitted.size(); ++i)
       bucket[key(vmul(vadd(emitted[i].a, emitted[i].b), 0.5))]
           .push_back(static_cast<int>(i));
+    // ── ★★ THE FREE-END CENSUS, ON THE FINAL LIST ────────────────────────────
+    // Every pass that can add or remove a span has run. A tip is accounted for when it
+    // lies inside another span's solid, or rests on the build plate (which supports
+    // it). Anything else is a FREE END and is reported as one.
+    {
+      double zmin = emitted.front().a.z;
+      for (const EmittedSeg& e : emitted) zmin = std::min(zmin, std::min(e.a.z, e.b.z));
+      // ★ THE SAME TEST THE PRUNE USES, NOT A WEAKER ONE. It reported zero while the
+      // shipped mesh still showed 19 dead ends, because it asked only whether anything
+      // was there — and a bundle of struts co-terminating at one point satisfies that
+      // about each other. A census must not be easier to pass than the pass it audits.
+      auto supported = [&](std::size_t i, const Vec3& tip, const Vec3& out) {
+        const auto k0 = key(tip);
+        for (long long dz = -1; dz <= 1; ++dz)
+          for (long long dy = -1; dy <= 1; ++dy)
+            for (long long dx = -1; dx <= 1; ++dx) {
+              auto it = bucket.find({k0[0] + dx, k0[1] + dy, k0[2] + dz});
+              if (it == bucket.end()) continue;
+              for (int j : it->second) {
+                if (static_cast<std::size_t>(j) == i) continue;
+                const EmittedSeg& e2 = emitted[j];
+                const Vec3 ab = vsub(e2.b, e2.a);
+                const double abab = vdot(ab, ab);
+                double t = abab > 0.0 ? vdot(vsub(tip, e2.a), ab) / abab : 0.0;
+                t = std::min(1.0, std::max(0.0, t));
+                const Vec3 q = vadd(e2.a, vmul(ab, t));
+                if (vdot(vsub(q, tip), vsub(q, tip)) > e2.r * e2.r) continue;
+                const double da = vlen(vsub(q, e2.a)), db = vlen(vsub(q, e2.b));
+                if (da > 0.5 * e2.r && db > 0.5 * e2.r) return true;
+                const Vec3 away = vsub((da <= db) ? e2.b : e2.a, tip);
+                const double an = vlen(away);
+                if (!(an > 1e-9)) continue;
+                if (vdot(vmul(away, 1.0 / an), out) > kOrganicFoldBackCos) return true;
+              }
+            }
+        return false;
+      };
+      for (std::size_t i = 0; i < emitted.size(); ++i)
+        for (int e = 0; e < 2; ++e) {
+          const Vec3 tip = e ? emitted[i].b : emitted[i].a;
+          const Vec3 d = e ? vsub(emitted[i].b, emitted[i].a)
+                           : vsub(emitted[i].a, emitted[i].b);
+          const double dn = vlen(d);
+          const Vec3 out = dn > 1e-9 ? vmul(d, 1.0 / dn) : Vec3{0.0, 0.0, 1.0};
+          if (supported(i, tip, out)) continue;
+          if (tip.z - zmin <= emitted[i].r) { ++st.plate_contacts; continue; }
+          ++st.free_ends;
+          st.free_end_length_mm += emitted[i].len;
+        }
+    }
+
     std::vector<int> par(emitted.size());
     for (std::size_t i = 0; i < par.size(); ++i) par[i] = static_cast<int>(i);
     std::function<int(int)> find = [&par](int a) {
@@ -1611,6 +2427,45 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     for (const auto& kv : comp) biggest = std::max(biggest, kv.second);
     st.emitted_largest_length_fraction = total > 0.0 ? biggest / total : 0.0;
     st.emitted_stranded_length_mm = total - biggest;
+  }
+  // ── ★★ EMISSION, ONCE, OVER THE FINAL LIST ──────────────────────────────────
+  // Node-ball dedup is decided HERE rather than at record time: a polyline's interior
+  // vertex is one span's end and the next span's start, so a ball goes at `a` only
+  // when the previously emitted span did not already end there. Deciding it at
+  // emission is also what keeps it correct after a prune, which can break a run in
+  // the middle and turn an interior vertex back into a genuine end.
+  {
+    Vec3 last_b{0, 0, 0};
+    bool have_last = false;
+    for (const EmittedSeg& e : emitted) {
+      lattice_emit_strut(sink, e.a, e.b, e.r, nseg);
+      if (obs && obs->on_element)
+        obs->on_element(LatticeGenElement::InteriorStrut, e.a, e.b, e.r);
+      st.triangles += static_cast<std::uint64_t>(4 * nseg);
+      ++st.struts;
+      st.volume_mm3 += lattice_prism_volume_mm3(e.r, e.len, nseg);
+      if (!have_last || !same_point(last_b, e.a)) emit_node_once(e.a, e.r);
+      emit_node_once(e.b, e.r);
+      have_last = true;
+      last_b = e.b;
+      note(2.0 * e.r);
+      if (e.anchor0) { ++st.anchor_nodes; st.skin_triangles += 20; }
+      if (e.anchor1) { ++st.anchor_nodes; st.skin_triangles += 20; }
+    }
+  }
+  // ★ THE DUMP. Env-gated, off in production, and it writes the FINAL list — the same
+  // one the emission loop above walked — so a coordinate in this file is a coordinate
+  // in the STL.
+  if (const char* dp = std::getenv("TOPOPT_ORGANIC_SPAN_DUMP")) {
+    if (FILE* f = std::fopen(dp, "w")) {
+      std::fprintf(f, "# src ax ay az bx by bz r anchor0 anchor1\n");
+      const char* nm[5] = {"curve", "connector", "tie", "net", "leg"};
+      for (const EmittedSeg& e : emitted)
+        std::fprintf(f, "%s %.4f %.4f %.4f %.4f %.4f %.4f %.4f %d %d\n",
+                     nm[static_cast<int>(e.src)], e.a.x, e.a.y, e.a.z, e.b.x, e.b.y,
+                     e.b.z, e.r, e.anchor0 ? 1 : 0, e.anchor1 ? 1 : 0);
+      std::fclose(f);
+    }
   }
   if (emitted_out) {
     emitted_out->clear();

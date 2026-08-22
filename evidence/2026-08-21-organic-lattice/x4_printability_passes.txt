@@ -1,0 +1,107 @@
+★ ORGANIC'S PRINTABILITY PASSES — WHAT WAS WRONG, WHAT FIXED IT, MEASURED ON THE
+  SHIPPED MESH AND NOT ON THE GENERATOR'S OWN BOOKKEEPING
+  (task 2026-08-21-organic-lattice; every defect below was found by the MAINTAINER
+   looking at an exported STL, after a measurement of mine had said it was fine)
+
+── 0. THE MEASUREMENT, AND ITS CONTROLS ────────────────────────────────────────
+deadend_probe.cpp reads a WELDED STL and nothing else. Two stages:
+  1. candidates — a surface vertex whose neighbourhood inside R=1.6 mm is one-sided
+     along the local principal axis. A FILTER, deliberately loose.
+  2. verdict    — how many members cross out of a ball of radius Rb=2.0 mm about it.
+     1 limb = DEAD END. 2 = mid-member. 3+ = junction.
+
+★ STAGE 1 ALONE IS NOT A VERDICT. It reports 269 on the coupon the maintainer PRINTED
+  SUCCESSFULLY, and 7 of the 8 deepest "interior" flags have 2-3 limbs. Only stage 2
+  is reportable. An earlier detector of mine returned ZERO on both a defective and a
+  fixed file — a broken instrument, not a pass.
+
+CONTROLS (Rb = 2.0 mm):
+  coupon the maintainer PRINTED      97k verts    31 dead ends   32.0 per 100k
+  octet / doubled, what we ship     1093k verts   50 dead ends    4.6 per 100k
+
+★ THE NUMBER IS SENSITIVE TO Rb and is only meaningful against those controls at a
+  FIXED Rb. Measured sweep, clean / skin:
+     Rb=1.2  188 / 305     Rb=1.6   26 / 144     Rb=2.0    6 / 31
+     Rb=2.6    1 /   5     Rb=3.2    0 /   3
+  The RATIO holds at ~5x throughout, so skin's excess is real; the absolute figure is
+  not a physical constant.
+
+── 1. THE STRUCTURAL BLOCKER (this is the generalisable part) ──────────────────
+generate_organic_lattice wrote each strut to the sink THE MOMENT IT WAS CLIPPED. Every
+later pass could therefore only APPEND — ties, ground legs, anchor balls. A whisker,
+once written, was written, and every fix for weeks was additive.
+FIX: record the whole span list, run the passes, EMIT ONCE at the end.
+Nothing that CUTS is expressible until that is done.
+
+── 2. SUPPORT != CONTAINMENT (the defect six rounds of fixes never touched) ─────
+The free-end test asked "is this tip inside some other span's solid". A BUNDLE of
+near-parallel struts that all END at the same point satisfies that about each other.
+Attribution found it: tagging every span with the pass that emitted it, dumping the
+final list, and correlating against the dead ends the SHIPPED mesh shows —
+★ EVERY ONE of the 19 survivors had ~6 SPAN TIPS CONVERGING ON IT.
+
+The rule that works — support is about what the neighbour DOES at the contact:
+  INTERIOR contact  the tip lands on another span's BODY (a T on a beam).  supported
+  TIP contact       the other span ends here too. Supported only if it LEADS AWAY
+                    (dot(away, out) > cos 105 deg). A sibling folding back is NOT.
+  unsupported tips found  221 -> 663        pruned  9 spans -> ~1,600 over 18 rounds
+
+── 3. NODE MERGE — the other half of the treatment, and it is in the source paper ─
+Daynes et al., Materials & Design 127:215-223: at the core boundary small cells appear
+and "nodes are either MERGED or DELETED". Only deleting was implemented.
+  merged 8,743 shared nodes from 25,144 endpoints; 1,058 spans collapsed
+  dead ends 54 -> 6
+
+── 4. STRANDED PIECES ARE DELETED, NOT PROPPED UP ──────────────────────────────
+The ground-tie repair tied an unreachable crumb down with a vertical leg — on the cube
+that was a 0.42 mm pole standing ~30 mm tall at a corner with a crumb on top,
+photographed by the maintainer. A piece below kOrganicStrandedKeepFraction (2 %) of
+total length is now DELETED. Ground-tie legs on the cube: 0.
+
+── 5. A FINISH IS A LOOK, NOT A REPAIR (the maintainer's ruling) ───────────────
+The finish ran BEFORE the prune and changed what got cut — 1,588 spans for `clean`
+against 1,210 for `skin`. That made a finish a structural intervention wearing an
+aesthetic name. The finish now runs LAST; the only thing it may remove is its own
+joins. PROVEN BY HASH, not asserted:
+
+                       clean        rim       skin
+  core spans           10204      10204      10204
+  core sha256   8f3f7506e616aa8c (identical)
+  finish joins             0        218       2921
+  finish mm              0.0      602.5     7188.1
+  dead ends (Rb 2.0)       6          9         41
+  per 100k verts         1.6        2.4        9.5
+  watertight/manifold    yes        yes        yes
+  surface components       1          1          1
+  off the plate            0          0          0
+
+★ TWO FURTHER TRAPS, BOTH MEASURED:
+  (a) A finish keyed on LEFTOVERS is not a look. Selecting "clipped ends" made the
+      finish's size depend on how much the prune had removed — 661 candidates before
+      the reorder, 121 after, same part, same look asked for. It now selects the
+      SURFACE NODES OF THE FINISHED LATTICE.
+  (b) A finish that REDRAWS the lattice is invisible. Joining each surface node to its
+      nearest neighbour joined it to the other end of a strut it was already attached
+      to: 1,889 of 2,615 joins duplicated an existing member endpoint-for-endpoint,
+      83 % of a sample lay wholly inside existing material, mean join 1.23 mm against
+      a 3.10 mm separation — and all three finishes rendered as the SAME PICTURE
+      through four rounds of the maintainer's renders. Filters: not already joined,
+      >= 0.55 of the local separation, both ends facing within 50 deg, not buried.
+      Result: 0 duplicates, mean join 2.34 mm, and the difference is visible.
+
+── 6. AN HONEST NEGATIVE RESULT ────────────────────────────────────────────────
+38.6 % of net nodes (839 of 2,173) carried exactly ONE join — a net thread that just
+stops. Hypothesis: that is what the surface dead-end count reads. Closing the net
+(the fallback now runs while a node is short of TWO) cut degree-one nodes to 68
+(3.1 %), and rim's from 150 to 30.
+★ IT MADE THE DEAD-END COUNT WORSE: skin 31 -> 41, because closing the net added 717
+  joins and ~2,000 mm of material. THE HYPOTHESIS IS REFUTED. The change is kept
+  because a net with 839 dangling threads is not a net, and the cost is recorded here
+  rather than argued away. 18 of the 41 carry a net tip, 23 are core nodes; 37 of 41
+  are within 1 mm of a face.
+
+── 7. WHAT IS NOT DONE ─────────────────────────────────────────────────────────
+* skin's dead-end cost (9.5 per 100k against clean's 1.6) is UNRESOLVED. It is still
+  below the coupon that printed (32.0) and roughly twice the shipped octet (4.6).
+* the unit bars in core/tests/unit/test_organic_printability.cpp cover the passes on
+  synthetic fixtures; there is no gate on a real part.

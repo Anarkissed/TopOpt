@@ -1,0 +1,62 @@
+{
+ "model": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/cube/cube40.stl",
+ "material": "PLA",
+ "mode": "lattice_part",
+ "resolution": 64,
+ "output": {
+  "mesh_format": "stl",
+  "report": "report.json",
+  "mesh_prefix": "cube"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   0
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     1
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -200.0
+    ]
+   }
+  ],
+  "minimize_plastic": true,
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "infill_percent": 35,
+  "wall_loops": 3,
+  "wall_line_width_mm": 0.42,
+  "wall_line_width_outer_mm": 0.42
+ },
+ "lattice": {
+  "emit_stl": true,
+  "emit_3mf": false,
+  "topology": "octet",
+  "skin": "diagrid",
+  "min_extrudable_width_mm": 0.42,
+  "regions": [],
+  "outer_finish": "skin",
+  "emit_welded_stl": true,
+  "welded_pitch_mm": 0.28
+ },
+ "grading": {
+  "cell_mode": "swept",
+  "topology": "octet",
+  "min_extrudable_width_mm": 0.42,
+  "intent": "aesthetic",
+  "aesthetic_rho_min": 0.0505,
+  "aesthetic_rho_max": 0.12,
+  "algorithm": "organic",
+  "cell_min_mm": 3.0,
+  "cell_max_mm": 6.0,
+  "organic_boundary_finish": "clean"
+ },
+ "bake_build_orientation": "off"
+}

@@ -648,6 +648,30 @@ struct LatticeExportOutcome {
   long long organic_floating_after = 0;
   long long organic_repair_legs = 0;
   long long organic_repair_rounds = 0;
+  long long organic_free_ends = 0;
+  double organic_free_end_len = 0.0;
+  long long organic_free_before = 0;
+  long long organic_ties = 0;
+  double organic_tie_len = 0.0;
+  long long organic_free_unresolved = 0;
+  long long organic_pruned = 0;
+  double organic_pruned_len = 0.0;
+  long long organic_prune_rounds = 0;
+  long long organic_plate_contacts = 0;
+  long long organic_net_landings = 0;
+  long long organic_net_members = 0;
+  double organic_net_length = 0.0;
+  long long organic_net_joined = 0;
+  long long organic_net_fallback = 0;
+  long long organic_net_edge_landings = 0;
+  long long organic_stranded_comps = 0;
+  long long organic_stranded_spans = 0;
+  double organic_stranded_len = 0.0;
+  long long organic_nodes_merged = 0;
+  long long organic_merge_clusters = 0;
+  long long organic_merge_degenerate = 0;
+  long long organic_net_pruned = 0;
+  long long organic_net_deg1 = 0;
   // The welded single-body file, when one was asked for.
   bool welded = false;
   OrganicWeldStats weld;
@@ -1904,6 +1928,30 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_floating_after = g.floating_voxels_after;
     oc.organic_repair_legs = g.repair_legs_added;
     oc.organic_repair_rounds = g.repair_rounds;
+    oc.organic_free_ends = static_cast<long long>(g.free_ends);
+    oc.organic_free_end_len = g.free_end_length_mm;
+    oc.organic_free_before = static_cast<long long>(g.free_ends_before_tie);
+    oc.organic_ties = static_cast<long long>(g.ties_added);
+    oc.organic_tie_len = g.tie_length_mm;
+    oc.organic_free_unresolved = static_cast<long long>(g.free_ends_unresolved);
+    oc.organic_pruned = static_cast<long long>(g.pruned_spans);
+    oc.organic_pruned_len = g.pruned_length_mm;
+    oc.organic_prune_rounds = g.prune_rounds;
+    oc.organic_plate_contacts = static_cast<long long>(g.plate_contacts);
+    oc.organic_net_landings = static_cast<long long>(g.net_skin_landings);
+    oc.organic_net_members = static_cast<long long>(g.net_skin_members);
+    oc.organic_net_length = g.net_skin_length_mm;
+    oc.organic_net_joined = static_cast<long long>(g.net_skin_landings_joined);
+    oc.organic_net_fallback = static_cast<long long>(g.net_skin_fallback_members);
+    oc.organic_net_edge_landings = static_cast<long long>(g.net_skin_edge_landings);
+    oc.organic_stranded_comps = static_cast<long long>(g.stranded_components_dropped);
+    oc.organic_stranded_spans = static_cast<long long>(g.stranded_spans_dropped);
+    oc.organic_stranded_len = g.stranded_length_dropped_mm;
+    oc.organic_nodes_merged = static_cast<long long>(g.nodes_merged);
+    oc.organic_merge_clusters = static_cast<long long>(g.merge_clusters);
+    oc.organic_merge_degenerate = static_cast<long long>(g.merge_degenerate_spans);
+    oc.organic_net_pruned = static_cast<long long>(g.net_skin_members_pruned);
+    oc.organic_net_deg1 = static_cast<long long>(g.net_skin_degree_one);
     oc.organic_emitted_largest_fraction = g.emitted_largest_length_fraction;
     oc.organic_emitted_stranded_mm = g.emitted_stranded_length_mm;
     st.interior_volume_mm3 = g.volume_mm3;
@@ -3714,6 +3762,7 @@ class ScopedLadderSolverIsolation {
 // global density parameter" — and it is why the grade never has to thin a strut below
 // what the nozzle lays.
 struct OrganicOutcome {
+  bool net_skin_wanted = false;   // bare lattice only — see run_organic_step
   bool ran = false;
   OrganicLattice lat;
   double strut_diameter_mm = 0.0;
@@ -3724,7 +3773,8 @@ struct OrganicOutcome {
   double trace_seconds = 0.0;
 };
 
-OrganicOutcome run_organic_step(const VoxelGrid& grid,
+OrganicOutcome run_organic_step(bool shell_is_written,
+                                const VoxelGrid& grid,
                                 const std::vector<double>& density,
                                 const std::vector<double>& stress_tensor,
                                 // The candidate set and the density the GRADING LAW
@@ -3852,6 +3902,17 @@ OrganicOutcome run_organic_step(const VoxelGrid& grid,
   OrganicParams op;
   op.build_dir = build_dir;
   op.overhang_angle_deg = jg.organic_overhang_angle_deg;
+  // ★ A curve end that ran out of region is an ANCHOR only if a shell is written for
+  // it to land on. `outer_finish: "skin"` drops the shell, and then the same end is a
+  // cantilever into air — which is what the maintainer found at the face of a bare
+  // cube. run_job knows which file it is writing; the tracer does not.
+  op.anchor_at_region_boundary = shell_is_written;
+  // ★ THE NET-SKIN IS FOR THE BARE LATTICE, AND ONLY FOR IT. With a shell written,
+  // every clipped end lands ON that shell and is held; with `outer_finish: "skin"`
+  // there is nothing there and the landings are the hanging struts Aremu et al.
+  // describe. The reach is ONE SEPARATION — the surface's own spacing — so a join is
+  // never longer than the gap it is closing.
+  oo.net_skin_wanted = !shell_is_written;
   op.min_extrudable_width_mm = jg.min_extrudable_width_mm;
   op.strut_diameter_mm = t_fixed;
   op.strut_diameter_field = &bead;
@@ -3860,6 +3921,13 @@ OrganicOutcome run_organic_step(const VoxelGrid& grid,
   const double t0 = wall_seconds();
   oo.lat = trace_organic_lattice(grid, cand, stress_tensor, spacing, &width, op);
   oo.trace_seconds = wall_seconds() - t0;
+  if (oo.net_skin_wanted) {
+    oo.lat.net_skin_reach_mm = oo.lat.report.achieved_spacing_median_mm;
+    oo.lat.net_skin_finish =
+        jg.organic_boundary_finish == "clean" ? OrganicLattice::Finish::Clean
+        : jg.organic_boundary_finish == "rim" ? OrganicLattice::Finish::Rim
+                                              : OrganicLattice::Finish::Skin;
+  }
   oo.ran = true;
   return oo;
 }
@@ -3897,6 +3965,11 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   gi.organic_curves_kept = static_cast<long long>(r.curves_kept);
   gi.organic_curves_thinned = static_cast<long long>(r.curves_thinned);
   gi.organic_curves_too_short = static_cast<long long>(r.curves_too_short);
+  gi.organic_dangling_ends_trimmed = static_cast<long long>(r.dangling_ends_trimmed);
+  gi.organic_curves_dropped_dangling =
+      static_cast<long long>(r.curves_dropped_dangling);
+  gi.organic_dangling_length_removed_mm = r.dangling_length_removed_mm;
+  gi.organic_dangling_rounds = r.dangling_rounds;
   gi.organic_total_curve_length_mm = r.total_curve_length_mm;
   gi.organic_curves_per_family.assign(r.curves_per_family, r.curves_per_family + 3);
   gi.organic_curve_length_per_family_mm.assign(
@@ -4458,7 +4531,8 @@ LatticeVariantOutcome lattice_one_variant(
   // `gf.posture` exactly as they did, which is what makes the selector cheap.
   OrganicOutcome organic;
   if (graded && R.algorithm == LatticeAlgorithm::Organic) {
-    organic = run_organic_step(solved_grid, dens, v.stress_tensor_field, mask,
+    organic = run_organic_step(job.lattice.outer_finish != "skin",
+                               solved_grid, dens, v.stress_tensor_field, mask,
                                gf.posture.relative_density, gf.band_rho_min,
                                gf.band_rho_max, job.grading,
                                job.loads.present && job.loads.minimize_plastic,
@@ -6821,7 +6895,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     }
     OrganicOutcome an_org;
     if (an_alg == LatticeAlgorithm::Organic)
-      an_org = run_organic_step(design_grid, density, a.stress_tensor_field,
+      an_org = run_organic_step(job.lattice.outer_finish != "skin",
+                                design_grid, density, a.stress_tensor_field,
                                 gf.posture.mask, gf.posture.relative_density,
                                 gf.band_rho_min, gf.band_rho_max, job.grading,
                                 job.loads.present && job.loads.minimize_plastic,
@@ -7808,6 +7883,30 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_floating_voxels_after = R.oc.organic_floating_after;
         gi.organic_repair_legs = R.oc.organic_repair_legs;
         gi.organic_repair_rounds = R.oc.organic_repair_rounds;
+        gi.organic_free_ends = R.oc.organic_free_ends;
+        gi.organic_free_end_length_mm = R.oc.organic_free_end_len;
+        gi.organic_free_ends_before_tie = R.oc.organic_free_before;
+        gi.organic_ties_added = R.oc.organic_ties;
+        gi.organic_tie_length_mm = R.oc.organic_tie_len;
+        gi.organic_free_ends_unresolved = R.oc.organic_free_unresolved;
+        gi.organic_pruned_spans = R.oc.organic_pruned;
+        gi.organic_pruned_length_mm = R.oc.organic_pruned_len;
+        gi.organic_prune_rounds = R.oc.organic_prune_rounds;
+        gi.organic_plate_contacts = R.oc.organic_plate_contacts;
+        gi.organic_net_skin_landings = R.oc.organic_net_landings;
+        gi.organic_net_skin_members = R.oc.organic_net_members;
+        gi.organic_net_skin_length_mm = R.oc.organic_net_length;
+        gi.organic_net_skin_landings_joined = R.oc.organic_net_joined;
+        gi.organic_net_skin_fallback_members = R.oc.organic_net_fallback;
+        gi.organic_net_skin_edge_landings = R.oc.organic_net_edge_landings;
+        gi.organic_stranded_components_dropped = R.oc.organic_stranded_comps;
+        gi.organic_stranded_spans_dropped = R.oc.organic_stranded_spans;
+        gi.organic_stranded_length_dropped_mm = R.oc.organic_stranded_len;
+        gi.organic_nodes_merged = R.oc.organic_nodes_merged;
+        gi.organic_merge_clusters = R.oc.organic_merge_clusters;
+        gi.organic_merge_degenerate_spans = R.oc.organic_merge_degenerate;
+        gi.organic_net_skin_members_pruned = R.oc.organic_net_pruned;
+        gi.organic_net_skin_degree_one = R.oc.organic_net_deg1;
       }
       if (R.stepped_ran) fill_stepped_run_info(gi, R.stepped);
     }
