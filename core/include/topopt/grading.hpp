@@ -379,6 +379,16 @@ struct GradingLawParams {
   bool aesthetic_adaptive_cells_per_member = false;
   // 0 => kAestheticHomogenisationErrorBudget.
   double aesthetic_error_budget = 0.0;
+  // ── ★★ IS A BOUNDARY FINISH WRITTEN? (see aesthetic_cells_per_member_hard_floor) ──
+  // With one, the adaptive floor may reach ONE cell per member; bare, it stops at two.
+  // The difference is not the cell count: trimming SEVERS struts at the surface, and a
+  // severed strut carries no bending load. Measured at identical density, moving the
+  // lattice phase a quarter cell makes a bare 1-cell member 18x softer (+1917 % error);
+  // with a skin the same sweep spans ~10 points and the model turns CONSERVATIVE.
+  // The caller states it, because run_job is what knows which file is being written.
+  // False by default: a caller that has not thought about the boundary gets the safe
+  // floor rather than the relaxed one.
+  bool boundary_finish_written = false;
 
   // HOW THESE TWO COMPOSE (multiscale x sub-floor retention). A multiscale run
   // prescribes rho and stops using `demand` FOR THE DENSITY — but it still hands

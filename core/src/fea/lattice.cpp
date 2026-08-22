@@ -1,5 +1,11 @@
 #include "topopt/lattice.hpp"
 
+// kUnloadedUtilisationMax — the project's one definition of "this material carries
+// nothing". grading.hpp includes lattice.hpp, never the other way round, so taking it
+// here in the .cpp adds no header cycle and avoids a second copy of the number, which
+// is how the app's strut law drifted 1.4x from core's.
+#include "topopt/grading.hpp"
+
 #include <array>
 #include <cmath>
 #include <stdexcept>
@@ -678,22 +684,54 @@ constexpr CpmErrorPoint kCpmErrorCurve[] = {
 }  // namespace
 
 double aesthetic_cells_per_member_hard_floor(LatticeTopology topo) {
+  // No statement about the finish => the SAFE answer. Relaxing by omission is how a
+  // caller that never thought about the boundary ends up shipping a bare 1-cell
+  // member, which is the +1917 % case.
+  return aesthetic_cells_per_member_hard_floor(topo, false);
+}
+
+double aesthetic_cells_per_member_hard_floor(LatticeTopology topo,
+                                             bool boundary_finish_written) {
   (void)topo;   // the curve is an octet measurement; stated in the header
-  return 2.0;
+  return boundary_finish_written ? 1.0 : 2.0;
 }
 
 double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
                                         double error_budget) {
+  return aesthetic_cells_per_member_floor(topo, utilisation, error_budget, false);
+}
+
+double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
+                                        double error_budget,
+                                        bool boundary_finish_written) {
   const double accuracy = lattice_cells_per_member_min(topo);
   // ★ ABSENCE OF MEASUREMENT IS NOT PERMISSION. An unusable utilisation keeps the
   // full accuracy floor rather than relaxing on a number nobody measured — the same
   // posture sub-floor retention takes when handed an all-zero demand field.
   if (!std::isfinite(utilisation) || utilisation < 0.0) return accuracy;
   if (!(error_budget > 0.0)) return accuracy;
-  const double hard = aesthetic_cells_per_member_hard_floor(topo);
+  const double hard = aesthetic_cells_per_member_hard_floor(topo, boundary_finish_written);
   for (const CpmErrorPoint& p : kCpmErrorCurve) {
     if (p.cells < hard) continue;          // never below the measured bending point
     if (p.cells >= accuracy) break;        // relaxing to the floor itself is a no-op
+    // ★ THE 1-CELL ROW IS ONLY REACHABLE WITH A FINISH, AND IT IS READ FROM THE
+    // SKINNED MEASUREMENT. `kCpmErrorCurve`'s 1-cell entry (+48.5 %) is the BARE
+    // member, and bare is exactly the case a finish removes: skinned, that member
+    // measures -67 to -87 %, i.e. the homogenized model UNDER-predicts its stiffness.
+    // An under-predicting model is a lower bound on the truth, so the utilisation
+    // budget — which exists to cap how far an OPTIMISTIC model may mislead — does not
+    // bind on it. The budget is applied to the over-predicting rows only.
+    if (p.cells < 2.0) {
+      // ★ AND IT IS STILL BOUNDED, by the SAME threshold the rest of the codebase
+      // uses for "this material carries nothing": kUnloadedUtilisationMax. The skinned
+      // measurement is one topology, one density, one bending mode and one skin — the
+      // conservative SIGN is what it establishes, not a licence at any load. A unit bar
+      // caught this: without the bound a fully-utilised voxel reached one cell across
+      // merely because a finish existed somewhere on the part.
+      if (boundary_finish_written && utilisation <= kUnloadedUtilisationMax)
+        return p.cells;
+      continue;
+    }
     // The perturbation this cell count introduces, weighted by what the material
     // ACTUALLY carries. Inside the budget => this many cells across is enough.
     if (p.stiffness_error * utilisation <= error_budget) return p.cells;
