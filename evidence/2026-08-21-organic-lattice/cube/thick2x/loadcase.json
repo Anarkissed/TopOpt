@@ -1,0 +1,20 @@
+{
+  "resolution": 64,
+  "model": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/cube/cube40.stl",
+  "material": "PLA",
+  "anchor_bc_dofs": 25350,
+  "load_source": "loadcase",
+  "anchor_face_ids": [0],
+  "external_load_nodes": 4481,
+  "declared_force_resultant_n": 200,
+  "build_dir": [0, 0, 1],
+  "groups": [
+    {"index": 0, "face_ids": [1], "force_mag_n": 200, "voxels_tagged": 4096, "status": "ok"}
+  ],
+  "clearances": [
+  ],
+  "face_protections": [
+  ],
+  "anchor_pad": {"applied": true, "depth_voxels": 3, "anchor_faces": 1, "load_faces": 1, "voxels_frozen": 24576, "note": "the structural pad the boundary conditions sit on; NOT a user face protection"},
+  "ladder_mode": "reduction"
+}

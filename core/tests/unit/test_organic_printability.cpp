@@ -21,6 +21,8 @@
 
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/grading.hpp"
+#include "topopt/lattice.hpp"
 #include "topopt/organic_lattice.hpp"
 
 #include <cmath>
@@ -215,6 +217,39 @@ void test_deterministic() {
         "B5: the pass counters must be identical too");
 }
 
+// ── B6: ONE CELL PER MEMBER IS REACHABLE ONLY WITH A BOUNDARY FINISH ───────────
+// The maintainer's call, and the measurement behind it is in
+// evidence/2026-08-21-organic-lattice/cpm/README.md: a BARE 1-cell member is 18x
+// softer than its certificate at a quarter-cell phase shift (+1917 %), and a skin on
+// the cut faces collapses that spread to ~10 points AND flips the model to the
+// conservative side. So the relaxation is tied to the finish, never to the intent
+// alone, and a caller that says nothing gets the safe floor.
+void test_one_cell_needs_a_finish() {
+  const LatticeTopology t = LatticeTopology::Octet;
+  CHECK(aesthetic_cells_per_member_hard_floor(t, true) == 1.0,
+        "B6: with a finish written the hard floor is one cell");
+  CHECK(aesthetic_cells_per_member_hard_floor(t, false) == 2.0,
+        "B6: bare, it stays at the measured bending point of two");
+  CHECK(aesthetic_cells_per_member_hard_floor(t) == 2.0,
+        "B6: the no-argument form must give the SAFE answer — relaxing by omission is "
+        "how a bare 1-cell member ships");
+  // A heavily loaded voxel must NOT reach one cell just because a finish exists: the
+  // accuracy floor still governs the rows the budget applies to.
+  const double loaded = aesthetic_cells_per_member_floor(t, 1.0, 0.01, true);
+  const double idle = aesthetic_cells_per_member_floor(t, 0.0, 0.01, true);
+  CHECK(idle == 1.0, "B6: material carrying nothing reaches one cell with a finish");
+  CHECK(aesthetic_cells_per_member_floor(t, kUnloadedUtilisationMax, 0.01, true) == 1.0,
+        "B6: one cell holds right up to the unloaded threshold");
+  CHECK(aesthetic_cells_per_member_floor(t, 2.0 * kUnloadedUtilisationMax, 0.01, true) > 1.0,
+        "B6: and stops immediately past it — the skinned measurement is one fixture, "
+        "not a licence at any load");
+  CHECK(loaded > 1.0,
+        "B6: material at full utilisation must not reach one cell even with a finish");
+  CHECK(aesthetic_cells_per_member_floor(t, 0.0, 0.01, false) == 2.0,
+        "B6: the same idle voxel stops at two cells when nothing is written on the "
+        "boundary");
+}
+
 }  // namespace
 
 int main() {
@@ -223,6 +258,7 @@ int main() {
   test_node_merge_joins_near_misses();
   test_finish_does_not_change_the_structure();
   test_deterministic();
+  test_one_cell_needs_a_finish();
   std::printf("%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

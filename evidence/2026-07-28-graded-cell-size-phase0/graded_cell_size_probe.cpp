@@ -181,7 +181,13 @@ VoxelGrid build_member(double S, double r, double cells_across, int m_long, int 
   // centre the window on a cell centre so it samples the octahedral core (the best-case
   // connected slice; the sub-cell breakdown is placement-robust and reported as such).
   const bool integer_cells = std::fabs(cells_across - std::lround(cells_across)) < 1e-6;
-  const double off = (cells_across >= 1.0 || integer_cells) ? 0.0 : (0.5 * S - 0.5 * W);
+  double off = (cells_across >= 1.0 || integer_cells) ? 0.0 : (0.5 * S - 0.5 * W);
+  // ★ WHERE THE CUT FALLS. At a FRACTIONAL width the cross-section slices cells, and
+  // which part of the cell it keeps is a free choice this probe must not make silently
+  // — it is the first objection to any fractional measurement. TOPOPT_GCS_MEMBER_PHASE
+  // shifts the window within one cell (0 = aligned, 0.5 = centred on a cell centre).
+  if (const char* ph = std::getenv("TOPOPT_GCS_MEMBER_PHASE"))
+    off += std::atof(ph) * S;
   const Vec3 org{-off, -off, 0.0};                 // (frac subtracts org)
   for (int k = 0; k < g.nz; ++k)
     for (int j = 0; j < g.ny; ++j)
@@ -190,6 +196,47 @@ VoxelGrid build_member(double S, double r, double cells_across, int m_long, int 
         if (octet_dist2_box(c.x, c.y, c.z, S, S, S, org, segs) < r * r)
           g.set_tag(i, j, k, VoxelTag::Interior);
       }
+  // ── ★★ A SKIN ON THE CUT FACES ─────────────────────────────────────────────
+  // Trimming a lattice to a member SEVERS struts at the four lateral surfaces, and a
+  // severed strut is mass that carries no bending load — which is the mechanism behind
+  // the phase sensitivity this sweep measures. A skin re-ties those cut ends, which is
+  // exactly what Aremu et al. say a net-skin is for. Two modes, on purpose:
+  //   1 SOLID  a shell of thickness `t` on the four lateral faces. Not what anyone
+  //            ships — it is the UPPER BOUND. If a solid skin cannot recover the
+  //            stiffness, no lighter skin will, and the experiment stops there.
+  //   2 NET    struts of the lattice's own radius lying IN each face plane on the
+  //            octet's own node pitch (S/2), phase-locked to the lattice through the
+  //            same `org`. This is the diagrid/net-skin, and it is what production
+  //            actually emits.
+  // The skin ADDS MASS the homogenized tensor does not know about, so the reported
+  // rho moves and the error may go NEGATIVE — the macro model then UNDER-predicts,
+  // which is the conservative direction. Both are reported; neither is hidden.
+  const int skin = std::getenv("TOPOPT_GCS_SKIN") ? std::atoi(std::getenv("TOPOPT_GCS_SKIN")) : 0;
+  if (skin > 0) {
+    const double t = (std::getenv("TOPOPT_GCS_SKIN_T")
+                          ? std::atof(std::getenv("TOPOPT_GCS_SKIN_T")) : 2.0) * r;
+    const double pitch = 0.5 * S;
+    auto near_line = [&](double v, double o) {
+      const double u = v + o;                       // into lattice coordinates
+      const double d = std::fabs(u - pitch * std::round(u / pitch));
+      return d < r;
+    };
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) {
+          if (g.tags[(std::size_t)(k * g.ny + j) * g.nx + i] != VoxelTag::Empty) continue;
+          Vec3 c = g.voxel_center(i, j, k);
+          const bool on_x = c.x < t || c.x > W - t;
+          const bool on_y = c.y < t || c.y > W - t;
+          if (!on_x && !on_y) continue;             // interior: never skinned
+          if (skin == 1) { g.set_tag(i, j, k, VoxelTag::Interior); continue; }
+          // NET: in the face plane, a grid of struts on the node pitch. On an x-face
+          // the in-plane axes are y and z; on a y-face they are x and z.
+          const bool hit = (on_x && (near_line(c.y, off) || near_line(c.z, 0.0))) ||
+                           (on_y && (near_line(c.x, off) || near_line(c.z, 0.0)));
+          if (hit) g.set_tag(i, j, k, VoxelTag::Interior);
+        }
+  }
   return g;
 }
 
@@ -448,6 +495,13 @@ std::vector<int> env_ints(const char* key, const std::vector<int>& def) {
   while (std::getline(ss, tok, ',')) if (!tok.empty()) out.push_back(std::atoi(tok.c_str()));
   return out.empty() ? def : out;
 }
+std::vector<double> env_dbls(const char* key, const std::vector<double>& def) {
+  const char* s = std::getenv(key);
+  if (!s) return def;
+  std::vector<double> out; std::stringstream ss(s); std::string tok;
+  while (std::getline(ss, tok, ',')) if (!tok.empty()) out.push_back(std::atof(tok.c_str()));
+  return out.empty() ? def : out;
+}
 int env_int(const char* key, int def) { const char* s = std::getenv(key); return s ? std::atoi(s) : def; }
 double env_dbl(const char* key, double def) { const char* s = std::getenv(key); return s ? std::atof(s) : def; }
 FILE* csv_open(const std::string& name) {
@@ -693,6 +747,89 @@ void C2b_bending() {
   std::printf("  READ: the smallest cells_across with |bend_err|<=2.4%% is the BENDING ceiling. This is the\n"
               "  binding structural number (>= the axial ceiling) because bending loads the section's outer\n"
               "  cells hardest and the homogenized continuum cannot be meshed finer than one cell.\n");
+}
+
+
+// ============================ C2c — FRACTIONAL cells across ==================
+// ★ WHY THIS EXISTS. `aesthetic_cells_per_member_hard_floor` is 2.0 and the ONLY
+// reason it is 2 rather than something smaller is that C2b measured whole cells:
+// {1, 2, 3, 4} -> {+48.5, +8.5, +4.1, +2.59}%. The maintainer's parts routinely want
+// larger cells than 2-across allows, and 8.5% -> 48.5% is a 5.7x jump across one
+// step, so a 1.5 cannot be interpolated — the curve is least linear exactly there.
+// This measures it instead.
+//
+// SAME quantity as C2b: transverse (bending) stiffness of a resolved octet member
+// against the homogenized continuum carrying the periodic cubic tensor at the same
+// density. TWO differences, both forced by the fractional width:
+//
+//   1. the member comes from `build_member`, which admits a fractional cells_across
+//      (C2b used build_octet and whole cells). At 1.5 the cross-section cuts cells.
+//   2. the macro continuum CANNOT be meshed at one element per cell when the width is
+//      not a whole number of cells. So the macro side is solved at SEVERAL element
+//      sizes and all of them are reported. If they agree, the error is scale
+//      separation; if they do not, the macro mesh is doing the talking and the number
+//      is not about cells-per-member at all. Reporting one of them would hide that.
+void C2c_fractional_bending() {
+  std::printf("\n===== C2c — BENDING error at FRACTIONAL cells across a member =====\n");
+  const int vpc = env_int("TOPOPT_GCS_C2C_VPC", 12);
+  const double S = env_dbl("TOPOPT_GCS_C2C_CELL", 5.0);
+  const double tvf = env_dbl("TOPOPT_GCS_C2C_VF", 0.30);
+  const int Lb = env_int("TOPOPT_GCS_C2C_LB", 6);
+  const std::vector<double> as =
+      env_dbls("TOPOPT_GCS_C2C_A", {1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0});
+  const std::vector<int> ns = env_ints("TOPOPT_GCS_C2C_N", {1, 2, 4});
+  const double r = calibrate_octet_r(S, tvf, vpc);
+  const double rho_cell = volume_fraction(build_octet(S, r, 1, 1, 1, vpc));
+  Cubic pt = cubic_of(homogenize(build_octet(S, r, 1, 1, 1, vpc), {0, 1, 2, 3, 4, 5}, 1e-9));
+  CubicTensor Ct{pt.C11, pt.C12, pt.C44};
+  std::printf("  cell S=%.1f mm, vpc=%d, cantilever %d cells long, periodic rho=%.4f\n",
+              S, vpc, Lb, rho_cell);
+  std::printf("  C11=%.1f C12=%.1f C44=%.1f  (the SAME tensor for every row: only the\n"
+              "  width in cells changes, so the column is scale separation alone)\n",
+              Ct.C11, Ct.C12, Ct.C44);
+  std::printf("    %-8s %-9s %-9s %-12s", "a(cells)", "rho_mem", "rho/cell", "K_resolved");
+  for (int n : ns) std::printf(" %-9s %-9s", "K_mac", "err%");
+  std::printf("\n");
+  FILE* csv = csv_open("c2c_fractional_bending.csv");
+  if (csv) {
+    std::fprintf(csv, "cells_across,rho_member,rho_cell,K_resolved");
+    for (int n : ns) std::fprintf(csv, ",K_macro_n%d,err_pct_n%d", n, n);
+    std::fprintf(csv, ",connected\n");
+  }
+  for (double a : as) {
+    VoxelGrid g = build_member(S, r, a, Lb, vpc);
+    const double rho = volume_fraction(g);
+    std::vector<double> ey(g.voxel_count(), 0.0);
+    for (std::size_t e = 0; e < g.voxel_count(); ++e)
+      if (g.tags[e] != VoxelTag::Empty) ey[e] = kE;
+    double msR = 0; long ndR = 0;
+    const double Kres = transverse_K(g, ey, {}, {}, {}, {}, false, &msR, &ndR);
+    std::printf("    %-8.2f %-9.4f %-9.3f %-12.4f", a, rho, rho / rho_cell, Kres);
+    if (csv) std::fprintf(csv, "%.2f,%.4f,%.4f,%.4f", a, rho, rho_cell, Kres);
+    for (int n : ns) {
+      // Macro continuum of the SAME physical bar: cross-section (a*S)^2, length Lb*S,
+      // meshed with cubes of edge (a*S)/n.
+      const double elem = a * S / double(n);
+      const int nz = std::max(1, (int)std::lround(Lb * S / elem));
+      VoxelGrid mg = macro_grid(elem, n, n, nz);
+      std::vector<double> mey(mg.voxel_count(), kE);
+      std::vector<char> mask(mg.voxel_count(), 1);
+      std::vector<double> c11(mg.voxel_count(), Ct.C11), c12(mg.voxel_count(), Ct.C12),
+          c44(mg.voxel_count(), Ct.C44);
+      const double Kh = transverse_K(mg, mey, mask, c11, c12, c44, true);
+      const double err = (Kres > 0 && Kh > 0) ? 100.0 * (Kh - Kres) / Kres : NAN;
+      std::printf(" %-9.4f %-+9.2f", Kh, err);
+      if (csv) std::fprintf(csv, ",%.4f,%.2f", Kh, err);
+    }
+    std::printf("  %s\n", Kres > 0 ? "" : "<- DISCONNECTED / SOLVE-FAIL");
+    if (csv) std::fprintf(csv, ",%d\n", Kres > 0 ? 1 : 0);
+  }
+  if (csv) std::fclose(csv);
+  std::printf("  READ: `rho/cell` is the member's density against the periodic cell's. It drifts at\n"
+              "  fractional widths because the cross-section CUTS cells, and that drift is part of\n"
+              "  the error - it is 'as deployed', the same convention C2b used.\n"
+              "  A fractional floor is only defensible if the err%% columns AGREE across macro\n"
+              "  meshes. Where they disagree, the number is about the macro mesh, not the lattice.\n");
 }
 
 // ================================ C3 ======================================
@@ -1183,6 +1320,7 @@ int main() {
   if (want("c1")) C1_scale_invariance();
   if (want("c2")) C2_cells_per_member();
   if (want("c2b")) C2b_bending();
+  if (want("c2c")) C2c_fractional_bending();
   if (want("c3")) C3_width_cross();
   if (want("b3")) B3_printability();
   if (want("c4")) C4_dyadic();

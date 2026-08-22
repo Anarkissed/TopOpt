@@ -159,16 +159,57 @@ double lattice_percolation_cells_per_member_min(LatticeTopology topo);
 // returns the accuracy floor — absence of measurement is not permission.
 double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
                                         double error_budget);
+// The same rule, told whether a boundary finish is written. With one, the hard floor
+// is 1 and the 1-cell row is read from the SKINNED measurement (conservative, phase-
+// insensitive) rather than the bare one (+48.5 %, and +1917 % off-phase).
+double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation,
+                                        double error_budget,
+                                        bool boundary_finish_written);
 
-// ★ THE HARD FLOOR FOR THE ADAPTIVE RULE, AND WHY IT IS NOT THE PERCOLATION 1.0.
-// `lattice_percolation_cells_per_member_min` is 1.0, but its own declaration warns
-// that it was measured at rho ~= 0.199, AXIAL, octet only, and "must not be quoted
-// unconditionally" — it does not cover bending or the top of the band, which is
-// exactly where an aesthetic lattice may sit. 2 cells is the lowest point that IS
-// measured under the bending case the accuracy floor itself uses (+8.5 %), so the
-// adaptive rule stops there rather than extrapolating onto a number measured under
-// conditions it does not satisfy.
+// ★ THE HARD FLOOR FOR THE ADAPTIVE RULE, AND WHY IT DEPENDS ON THE BOUNDARY FINISH.
+//
+// WITHOUT a finish it is 2. `lattice_percolation_cells_per_member_min` is 1.0, but its
+// own declaration warns it was measured at rho ~= 0.199, AXIAL, octet only, and "must
+// not be quoted unconditionally". 2 cells is the lowest point measured under the
+// bending case the accuracy floor itself uses (+8.5 %).
+//
+// ★★ WITH A FINISH IT IS 1, AND THAT IS MEASURED — evidence/2026-08-21-organic-lattice/
+// cpm/README.md, section 3. The reason a bare 1-cell member is refused is NOT the cell
+// count. It is that trimming SEVERS struts at the member's surface, and a severed
+// strut is mass carrying no bending load. Sweeping the lattice PHASE (where the
+// surface falls within a cell) at fixed density rho = 0.1991:
+//
+//     cells across      aligned     WORST over phase
+//        1                +10.6 %        +1917 %      <- 18x softer at IDENTICAL rho
+//        2                 +8.9 %         +226 %
+//        3                +15.1 %         +102 %
+//
+// A skin on the cut faces re-ties those ends and the phase sensitivity DISAPPEARS —
+// at 1 cell across, a ~1900-point spread collapses to ~10 points:
+//
+//     skin (a = 1 cell)   phase 0.0    phase 0.25    density
+//        none               +10.6 %      +1917 %      1.0x
+//        net  t = 1r        -77.7 %       -67.5 %      1.6x
+//        solid              -93.3 %       -93.4 %      3.9x
+//
+// ★ AND THE SIGN FLIPS, which is the part that makes 1 cell admissible at all. Bare,
+// the homogenized model OVER-predicts stiffness ~20x: the part is far weaker than its
+// certificate, and that is the unsafe direction. Skinned, it UNDER-predicts — the
+// certificate becomes a lower bound on a part that is stiffer than modelled. A
+// conservative model is a usable one; an optimistic model is not.
+//
+// ★ THE COST IS MASS, AND IT IS THE MAINTAINER'S CALL. The lightest skin measured is
+// 1.6x the bare density, which spends the material a bigger cell was meant to save.
+// He asked for this explicitly for AESTHETIC intent, where the look is the product and
+// the plastic is not the constraint: "I am not worried about the density per se... so
+// more plastic is not a problem." It is therefore reachable ONLY with aesthetic intent
+// AND a finish, never as a silent default.
+//
+// The no-argument form keeps the SAFE answer. A caller that has not said whether a
+// finish is written does not get the relaxed floor by omission.
 double aesthetic_cells_per_member_hard_floor(LatticeTopology topo);
+double aesthetic_cells_per_member_hard_floor(LatticeTopology topo,
+                                             bool boundary_finish_written);
 
 // The default error budget: the fraction of the allowable by which the homogenisation
 // error is permitted to perturb this material's contribution. 1 % — the same scale as

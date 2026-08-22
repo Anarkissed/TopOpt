@@ -4254,6 +4254,20 @@ LatticeVariantOutcome lattice_one_variant(
     gp.aesthetic_adaptive_cells_per_member =
         job.grading.aesthetic_adaptive_cells_per_member;
     gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
+    // ★★ IS A BOUNDARY FINISH WRITTEN? This is what lets the adaptive floor reach ONE
+    // cell per member (lattice.hpp states the measurement). A finish exists unless the
+    // export is the BARE lattice — `outer_finish: "skin"` drops the solid shell, and
+    // for organic `grading.organic_boundary_finish: "clean"` then emits nothing at all
+    // on the surface either. Any other combination writes a shell, a skin, a rim or a
+    // diagrid, and any of those re-ties the struts trimming severed.
+    {
+      const bool shell_written = job.lattice.outer_finish != "skin";
+      const bool surface_net =
+          job.grading.algorithm == "organic"
+              ? job.grading.organic_boundary_finish != "clean"
+              : job.lattice.skin != "none";
+      gp.boundary_finish_written = shell_written || surface_net;
+    }
     // MULTISCALE (task multiscale-lattice-to): the optimizer already chose this
     // variant's relative density per voxel, and PAID a compliance objective
     // evaluated at the measured tensor of that density (it is also the density the
@@ -6833,6 +6847,20 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gp.aesthetic_adaptive_cells_per_member =
         job.grading.aesthetic_adaptive_cells_per_member;
     gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
+    // ★★ IS A BOUNDARY FINISH WRITTEN? This is what lets the adaptive floor reach ONE
+    // cell per member (lattice.hpp states the measurement). A finish exists unless the
+    // export is the BARE lattice — `outer_finish: "skin"` drops the solid shell, and
+    // for organic `grading.organic_boundary_finish: "clean"` then emits nothing at all
+    // on the surface either. Any other combination writes a shell, a skin, a rim or a
+    // diagrid, and any of those re-ties the struts trimming severed.
+    {
+      const bool shell_written = job.lattice.outer_finish != "skin";
+      const bool surface_net =
+          job.grading.algorithm == "organic"
+              ? job.grading.organic_boundary_finish != "clean"
+              : job.lattice.skin != "none";
+      gp.boundary_finish_written = shell_written || surface_net;
+    }
     // FIT needs the per-region derivation here too, or the analyze receipt would
     // describe a cell law the run never used. `nullptr` region below means the
     // candidate set is the whole printed design, so voxels outside every declared

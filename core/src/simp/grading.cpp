@@ -202,14 +202,16 @@ GradedField grade_lattice(const VoxelGrid& grid,
     for (std::size_t e = 0; e < n; ++e) {
       if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
       const double f = aesthetic_cells_per_member_floor(
-          topo, demand[e] / params.demand_allowable_mpa, err_budget);
+          topo, demand[e] / params.demand_allowable_mpa, err_budget,
+          params.boundary_finish_written);
       if (f < adaptive_plan_floor) adaptive_plan_floor = f;
     }
   }
   auto n_req = [&](std::size_t e) -> double {
     if (!adaptive_cpm) return n_star;
     const double u = demand[e] / params.demand_allowable_mpa;
-    const double f = aesthetic_cells_per_member_floor(topo, u, err_budget);
+    const double f = aesthetic_cells_per_member_floor(topo, u, err_budget,
+                                                     params.boundary_finish_written);
     if (f < out.aesthetic_min_cells_per_member_allowed)
       out.aesthetic_min_cells_per_member_allowed = f;
     return f;
