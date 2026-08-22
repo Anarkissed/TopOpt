@@ -1,0 +1,39 @@
+{
+  "material": "PLA",
+  "variants": [
+    {
+      "volume_fraction": 1,
+      "printed_fraction": 1,
+      "volume_saved_fraction": 0,
+      "max_stress_mpa": 0.3059653958,
+      "max_interlayer_tension_mpa": 0,
+      "margin": {
+        "in_plane": 179.7588902,
+        "interlayer": null,
+        "worst_case": 179.7588902
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 20,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 0,
+      "min_feature_warning": "",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 37.22137777,
+      "rejection_reason": ""
+    }
+  ],
+  "rejected_variants": []
+}

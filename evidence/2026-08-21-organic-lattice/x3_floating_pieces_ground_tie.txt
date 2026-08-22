@@ -1,0 +1,50 @@
+★ "I CAN'T PRINT IT — A FEW PIECES ARE JUST FLOATING." He was right again, and my
+connectivity bar could not see it.
+
+★★ CONNECTEDNESS IS NOT PRINTABILITY, AND THAT IS THE WHOLE LESSON.
+R3 measured whether the emitted solids TOUCH EACH OTHER: 99.99 % of length in one
+component, 2.0 mm stranded. All true, and all silent about whether the material can be
+BUILT. A printer lays material bottom-up. A strut welded to the lattice at its top and
+starting in mid-air at its bottom is connected AND unprintable.
+
+MEASURED ON THE FILE HE TRIED TO PRINT:
+  soup   14,969 surface components, 14,776 never reaching the plate
+  welded      1 surface component, reaching the plate
+★ So the SOUP is the wrong file to print, and that alone explains most of it: a slicer
+that analyses the mesh calls every shell that misses the plate a floating body.
+
+★ BUT THE WELDED FILE WAS NOT INNOCENT EITHER. Rasterising the emitted solids and
+flooding from the lowest occupied layer found 52 FLOATING VOXELS in 9 pieces —
+"a few pieces", exactly as he described. `keep_largest_component` on the weld hides them
+by DELETING them, which is worse than fixing them: material the tracer placed silently
+vanishes from the file.
+
+THE FIX IS HIS OWN COUPON'S, APPLIED TO THE POST-CLIP SPANS
+(evidence/2026-08-20-lattice-only-grading/coupon/graded_coupon.cpp): rasterise, flood
+from the lowest occupied layer, and drop a VERTICAL LEG from each unreached component's
+own lowest voxel to the ground layer; re-flood; repeat up to 12 rounds.
+
+MEASURED, on the 40 mm cube:
+  floating voxels BEFORE repair : 52
+  ground-tie legs added         : 9   (one round was enough)
+  ★ floating voxels AFTER       : 0
+  welded body                   : 1 component, reaches the plate,
+                                  0 boundary edges, 0 non-manifold edges,
+                                  volume 3721.249 mm^3 (was 3713.626 — the legs)
+
+★ WHY IT FLOODS FROM THE LATTICE'S OWN BASE AND NOT FROM THE PART. The spans this sees
+are the lattice only; the solid shell and the companion body are ground too, and are not
+in the list. Flooding from the lattice's own lowest layer is therefore CONSERVATIVE — in
+a real part it may add a leg the shell would have made unnecessary, and it can never
+omit one that is needed.
+
+★ AND IT REPORTS RATHER THAN REFUSES, DELIBERATELY, WHICH IS A DEPARTURE FROM THE
+COUPON. The coupon refuses when anything still floats, and it can: it builds its own
+base slab, so its ground is complete. Mine is not — a piece genuinely tied to the shell
+would look floating to this flood. Refusing on an incomplete definition of ground would
+reject correct jobs. So `floating_voxels_after_repair` is on every organic receipt, and
+a non-zero value is the number to act on.
+
+WHAT IS STILL TRUE OF THE SOUP: it remains thousands of interpenetrating closed shells,
+by the same contract the shipped octet export has always used. The welded file is the
+one to print. That is now stated at the top of the handoff rather than in a caption.

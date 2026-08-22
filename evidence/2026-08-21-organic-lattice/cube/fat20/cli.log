@@ -1,0 +1,20 @@
+[loadcase] load-group 0: faces=1 |F|=200N voxels_tagged=4096 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=24576 (structural pad, NOT a face protection)
+lattice-part: the imported part, solid vf=1 — NO ladder ran, NO optimization
+  design: fingerprint 15703007687620756355, 0 optimizer iterations originally
+  reproduction: recorded margin 0 == reproduced 184.343 (enforced)
+  solves: 3 certification (design iterations 0, variant meshes 0)
+  lattice: graded cell 5.977 mm, rho 0.05047..0.2795 over 262029 voxels
+  solid margin 184.3 -> latticed margin 26.45 (effective 5.477)
+  strut strength (REPORT, not gated): in-plane 1.284   interlayer 0.794
+  verdict: ACCEPTED
+mesh: fat20/cube_100_lattice.stl
+mesh: fat20/cube_100_lattice_WELDED.stl
+receipt: fat20/cube_100_lattice.report.json
+report: fat20/lattice_variant_report.json
+provenance: fat20/lattice_variant.json
+loadcase: fat20/loadcase.json
+fields: fat20/fields.bin
+wall: 38.15 s

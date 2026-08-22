@@ -1326,6 +1326,13 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"curves_kept\": " + fmt_ll(info.organic_curves_kept);
       gr += ", \"curves_thinned\": " + fmt_ll(info.organic_curves_thinned);
       gr += ", \"curves_too_short\": " + fmt_ll(info.organic_curves_too_short);
+      gr += ", \"dangling_ends_trimmed\": " +
+            fmt_ll(info.organic_dangling_ends_trimmed);
+      gr += ", \"curves_dropped_dangling\": " +
+            fmt_ll(info.organic_curves_dropped_dangling);
+      gr += ", \"dangling_length_removed_mm\": " +
+            fmt(info.organic_dangling_length_removed_mm);
+      gr += ", \"dangling_rounds\": " + fmt_ll(info.organic_dangling_rounds);
       gr += ", \"total_curve_length_mm\": " +
             fmt(info.organic_total_curve_length_mm);
       if (!info.organic_curves_per_family.empty()) {
@@ -1371,6 +1378,47 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"solid_segments\": " + fmt_ll(info.organic_solid_segments);
       gr += ", \"emitted_components\": " +
             fmt_ll(info.organic_emitted_components);
+      gr += ", \"floating_voxels_before_repair\": " +
+            fmt_ll(info.organic_floating_voxels_before);
+      gr += ", \"floating_voxels_after_repair\": " +
+            fmt_ll(info.organic_floating_voxels_after);
+      gr += ", \"ground_tie_legs_added\": " + fmt_ll(info.organic_repair_legs);
+      gr += ", \"ground_tie_rounds\": " + fmt_ll(info.organic_repair_rounds);
+      gr += ", \"free_ends_before_tie\": " +
+            fmt_ll(info.organic_free_ends_before_tie);
+      gr += ", \"ties_added\": " + fmt_ll(info.organic_ties_added);
+      gr += ", \"tie_length_mm\": " + fmt(info.organic_tie_length_mm);
+      gr += ", \"free_ends_unresolved\": " +
+            fmt_ll(info.organic_free_ends_unresolved);
+      gr += ", \"net_skin_landings\": " + fmt_ll(info.organic_net_skin_landings);
+      gr += ", \"net_skin_members\": " + fmt_ll(info.organic_net_skin_members);
+      gr += ", \"net_skin_length_mm\": " + fmt(info.organic_net_skin_length_mm);
+      gr += ", \"net_skin_landings_joined\": " +
+            fmt_ll(info.organic_net_skin_landings_joined);
+      gr += ", \"net_skin_fallback_members\": " +
+            fmt_ll(info.organic_net_skin_fallback_members);
+      gr += ", \"net_skin_edge_landings\": " +
+            fmt_ll(info.organic_net_skin_edge_landings);
+      gr += ", \"net_skin_members_pruned\": " +
+            fmt_ll(info.organic_net_skin_members_pruned);
+      gr += ", \"net_skin_degree_one\": " +
+            fmt_ll(info.organic_net_skin_degree_one);
+      gr += ", \"stranded_components_dropped\": " +
+            fmt_ll(info.organic_stranded_components_dropped);
+      gr += ", \"stranded_spans_dropped\": " +
+            fmt_ll(info.organic_stranded_spans_dropped);
+      gr += ", \"stranded_length_dropped_mm\": " +
+            fmt(info.organic_stranded_length_dropped_mm);
+      gr += ", \"nodes_merged\": " + fmt_ll(info.organic_nodes_merged);
+      gr += ", \"merge_clusters\": " + fmt_ll(info.organic_merge_clusters);
+      gr += ", \"merge_degenerate_spans\": " +
+            fmt_ll(info.organic_merge_degenerate_spans);
+      gr += ", \"pruned_spans\": " + fmt_ll(info.organic_pruned_spans);
+      gr += ", \"pruned_length_mm\": " + fmt(info.organic_pruned_length_mm);
+      gr += ", \"prune_rounds\": " + fmt_ll(info.organic_prune_rounds);
+      gr += ", \"plate_contacts\": " + fmt_ll(info.organic_plate_contacts);
+      gr += ", \"free_ends\": " + fmt_ll(info.organic_free_ends);
+      gr += ", \"free_end_length_mm\": " + fmt(info.organic_free_end_length_mm);
       gr += ", \"emitted_largest_length_fraction\": " +
             fmt(info.organic_emitted_largest_fraction);
       gr += ", \"emitted_stranded_length_mm\": " +

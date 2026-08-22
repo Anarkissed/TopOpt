@@ -131,6 +131,69 @@ inline constexpr double kOrganicTextbookOverhangDeg = 45.0;
 // Material below it is COUNTED and reported OUT OF REGIME, never hidden (§3b).
 inline constexpr double kOrganicCurvesPerMemberFloor = 2.0;
 
+// How many times the ground-tie repair may re-flood before giving up. The coupon uses
+// 12; a leg can itself land on another floating component, so one round is not enough,
+// and a bound is needed because a component wholly outside the region can never tie.
+inline constexpr int kOrganicRepairRounds = 12;
+
+// How many times the dangling-end trim may cascade. Trimming one curve can orphan the
+// next, so one pass is not enough; a bound is needed because a pathological cluster
+// could otherwise consume itself one end at a time.
+inline constexpr int kOrganicTrimRounds = 8;
+// ★★ THE PRUNE. Iterative erosion of unsupported tips, run to a FIXED POINT on the
+// FINAL post-clip span list. A span dies when a tip of it lies in no OTHER live span's
+// solid; killing it can expose the tip that met its other end, so the pass repeats.
+// This is the only construction that can GUARANTEE zero free ends: tying can fail (the
+// tie is itself clipped, or there is nothing in reach), cutting cannot. 64 rounds is a
+// runaway guard, not a budget — the fixed point is reached in far fewer.
+inline constexpr int kOrganicPruneRounds = 64;
+// A connected piece smaller than this fraction of the lattice's total length is
+// DELETED rather than tied down to the plate. Propping a crumb up on a tall thin leg
+// is neither printable nor useful; below this size there is nothing worth saving.
+inline constexpr double kOrganicStrandedKeepFraction = 0.02;
+// How far the surface normal must swing across a point for it to count as an EDGE of
+// the part, for the RIM finish. A flat face reads 0 degrees; a cube edge reads 90.
+inline constexpr double kOrganicRimEdgeAngleDeg = 35.0;
+// When a tip meets ANOTHER SPAN'S TIP rather than its body, that span counts as support
+// only if it leads away rather than folding back along the same line. cos(105 deg): a
+// polyline continuing (+1) and a tie heading off sideways (0) both pass; a sibling
+// doubling back the way the strut came (-1) does not. Bundles of co-terminating
+// near-parallel struts are exactly the -1 case, and they were 100 % of what survived.
+inline constexpr double kOrganicFoldBackCos = -0.2588;
+// ★ NODE MERGING — the OTHER half of the treatment Daynes et al. name.
+// "At the core boundary very small cells are generated, and in such cases nodes are
+// either merged or deleted to avoid formation of excessively small cells"
+// (Materials & Design 127:215-223). Deleting is the prune. THIS is the merge: two span
+// endpoints closer together than one bead are the same node, and leaving them apart is
+// what produced the bundles of six co-terminating struts the dump found at every
+// surviving dead end. As a multiple of the strut RADIUS, so 2.0 is one full bead.
+inline constexpr double kOrganicNodeMergeRatio = 2.0;
+// ★ HOW DEEP THE FINISH REACHES, as a fraction of the local separation.
+// A finish must describe the lattice it is dressing, so it selects the SURFACE NODES
+// of the FINISHED structure — every node within this band of the part's surface —
+// rather than the clipped ends left over from trimming. Keying on leftovers made the
+// finish depend on how much the prune had removed: 661 candidates before the passes
+// were ordered correctly, 121 after, for the same part and the same look asked for.
+inline constexpr double kOrganicFinishBandRatio = 0.5;
+// ★ A FINISH JOIN MUST BE A NEW MEMBER, NOT A REDRAWN ONE.
+// Measured on the cube: joining each surface node to its nearest neighbours produced
+// 2,615 joins of which 1,889 (72 %) duplicated an existing strut endpoint for
+// endpoint, and 83 % of a sample lay entirely INSIDE existing material — mean join
+// length 1.23 mm against a 3.10 mm separation. The finish was drawing the lattice on
+// top of itself, which is why `clean`, `rim` and `skin` rendered identically. A net
+// edge spans the GAP BETWEEN neighbouring curves, so it is at least this fraction of
+// the local separation, and never between two nodes a strut already joins.
+inline constexpr double kOrganicFinishMinSpanRatio = 0.55;
+// Both ends of a surface join must be looking the same way, or the "surface" net cuts
+// the corner and dives through the interior. cos(50 deg).
+inline constexpr double kOrganicFinishCoplanarCos = 0.6428;
+
+// How far a free tip may reach for something to tie to, as a multiple of the local
+// separation. Beyond about one separation the tie stops being a lattice member and
+// becomes a wire across a void, so a tip that finds nothing inside this is REPORTED
+// rather than tied to something arbitrary.
+inline constexpr double kOrganicTieReachRatio = 1.25;
+
 // ★ THE DENSITY OF THREE ORTHOGONAL FAMILIES AT SEPARATION d, STRUT DIAMETER t.
 // A box of edge d carries one strut of each family through it, so the solid fraction
 // is 3 * pi * (t/2)^2 * d / d^3 = 3*pi*t^2 / (4 d^2). Overlaps at the crossings are
@@ -259,6 +322,21 @@ struct OrganicParams {
   // WHICH bound bit — printability or resolution — rather than merely how wide it is.
   double resolution_floor_voxels = 1.0;
 
+  // ★ IS THE REGION BOUNDARY AN ANCHOR? (§1e2.)
+  // A curve end that ran out of REGION reaches the part surface. When the export
+  // WRITES A SHELL, the boundary clip lands that end on the shell and it is genuinely
+  // held — so it must not be trimmed. When the export writes the BARE LATTICE
+  // (`outer_finish: "skin"`), there is no shell there and the same end is a cantilever
+  // sticking out into air, attached at one side only.
+  //
+  // ★ THE MAINTAINER FOUND EXACTLY THOSE, at the right-hand face of a bare cube:
+  // "sections that are horizontal and literally only attach to a singular vertical
+  // strut". They survived the first trim because this defaulted to true.
+  //
+  // The CALLER knows which file it is writing, so the caller states it. True (the
+  // default) is the shell case, which is the shipped default outer finish.
+  bool anchor_at_region_boundary = true;
+
   // The certifiable density band the emitted per-voxel density is clamped into. Both
   // 0 => no clamp (the raw measured density is returned, which is what a probe wants).
   double rho_min = 0.0;
@@ -274,6 +352,12 @@ struct OrganicCurve {
   long long steps = 0;           // RK4 steps taken
   long long clamped_steps = 0;   // ...of which the overhang cone moved
   int connections = 0;           // connectors attached (§1d) — R3's measurement
+  // ★ Did this curve END by leaving the candidate set? An end that ran out of REGION
+  // reaches the part surface and is anchored there by the boundary clip. An end that
+  // stopped INSIDE the material (d_test, a turn, a dead field) is a FREE END hanging
+  // in mid-material, and §1(e2) trims it.
+  bool start_at_boundary = false;
+  bool end_at_boundary = false;
 };
 
 // One connector (§1d / Daynes step 5). Its direction is the CROSS PRODUCT of the two
@@ -282,6 +366,7 @@ struct OrganicCurve {
 // product is. `cross_deviation_deg` MEASURES that rather than asserting it.
 struct OrganicConnector {
   int curve_a = -1, curve_b = -1;  // curve_a < curve_b, indices into `curves`
+  int pt_a = 0, pt_b = 0;          // the attachment point index on each curve
   Vec3 a{0, 0, 0}, b{0, 0, 0};
   double radius_mm = 0.0;
   double length_mm = 0.0;
@@ -305,6 +390,24 @@ struct OrganicReport {
   std::size_t curves_kept = 0;         // after thinning
   std::size_t curves_thinned = 0;      // §1(e)
   std::size_t curves_too_short = 0;    // stubs discarded
+  // ── ★ §1(e2) — DANGLING ENDS, TRIMMED ──────────────────────────────────────
+  // ★ A CURVE'S TAIL BEYOND ITS OUTERMOST CONNECTOR CARRIES NOTHING. It is attached at
+  // one end only, so no load can cross it — and if it runs horizontally it is also an
+  // unsupported overhang the printer has to bridge to nowhere. The maintainer found
+  // these by eye on a cube this task had already called 99.99 % connected: "sections
+  // that are horizontal and literally only attach to a singular vertical strut —
+  // making them absolutely pointless and impossible to print."
+  //
+  // So each curve is cut back to its outermost connector. ★ ENDS THAT LEFT THE REGION
+  // ARE KEPT: those reach the part surface, where the boundary clip lands them on the
+  // shell, and that IS an anchor. Only ends that stopped inside the material are free.
+  //
+  // Iterated, because trimming a curve can remove the only connector holding a
+  // neighbour, which makes that neighbour dangling in turn.
+  std::size_t dangling_ends_trimmed = 0;
+  std::size_t curves_dropped_dangling = 0;
+  double dangling_length_removed_mm = 0.0;
+  int dangling_rounds = 0;
   std::size_t curves_per_family[3] = {0, 0, 0};
   double curve_length_per_family_mm[3] = {0.0, 0.0, 0.0};
   // ── ★ WHY THE TRACER STOPPED AND WHY A SEED WAS REFUSED ────────────────────
@@ -457,6 +560,38 @@ struct OrganicLattice {
   // (mm), i.e. the derived "cell size". 0 off the candidate set.
   std::vector<double> spacing_used_mm;
   OrganicReport report;
+
+  // ── ★★ THE NET-SKIN (organic's diagrid) ─────────────────────────────────────
+  // Trimming a lattice to a surface leaves every crossing strut ENDING on that
+  // surface with nothing joining it — the literature calls these "hanging" struts,
+  // and joining them into an external two-dimensional lattice is Aremu et al.'s
+  // NET-SKIN (Additive Manufacturing, 2017). It is the alternative to a full skin:
+  // it braces the incomplete boundary cells, it weighs far less, and it leaves the
+  // surface open. It is also the only "rim"-shaped finish available on a part with
+  // no analytic faces, which is every voxel or mesh part — `lattice_boundary_for`
+  // creates half-spaces only for CAD faces and bolt bores, so the octet path's rim
+  // emits nothing at all here.
+  //
+  // 0 disables it. Otherwise each landing joins its nearest neighbouring landings
+  // out to this distance, MUTUALLY (both must want the other), which is what stops
+  // one crowded corner growing a hairball.
+  double net_skin_reach_mm = 0.0;
+  int net_skin_degree = 3;         // at most this many joins per landing
+
+  // ── ★★ WHICH BOUNDARY FINISH ───────────────────────────────────────────────
+  //   Clean — nothing. The bare trimmed lattice: every crossing strut simply ends
+  //           on the surface. This is what organic did before.
+  //   Rim   — join ONLY the landings that sit on an EDGE of the part, into a frame
+  //           that follows those edges. This is the nearest honest equivalent of the
+  //           octet path's rim on a part with no analytic faces: `lattice_boundary_for`
+  //           builds half-spaces for CAD faces and bolt bores only, so on a voxel or
+  //           mesh part the octet rim emits nothing at all. Edges are found from the
+  //           BOUNDARY ITSELF — a landing is on an edge when the surface normal swings
+  //           by more than kOrganicRimEdgeAngleDeg across it.
+  //   Skin  — Aremu et al.'s NET-SKIN: join every landing to its neighbours, over the
+  //           whole surface. Braces every hanging strut; heavier than the rim.
+  enum class Finish { Clean, Rim, Skin };
+  Finish net_skin_finish = Finish::Skin;
 };
 
 // ★ THE TRACER (§1). Pure: grid + candidate set + stress tensor + spacing field in,
@@ -517,11 +652,87 @@ struct OrganicGenStats {
   // finish that emitted no geometry, and before this organic emitted none.
   std::uint64_t anchor_nodes = 0;
   std::uint64_t skin_triangles = 0;
+  // ── ★★ THE NET-SKIN, MEASURED ──────────────────────────────────────────────
+  std::size_t net_skin_landings = 0;      // clipped ends that sit on the surface
+  std::size_t net_skin_members = 0;       // joins actually emitted
+  double net_skin_length_mm = 0.0;
+  std::size_t net_skin_landings_joined = 0;   // landings that got at least one join
+  std::size_t net_skin_fallback_members = 0;  // joins the MUTUAL pass would not make
+  std::size_t net_skin_edge_landings = 0;     // landings the RIM finish kept
+  std::size_t net_skin_members_pruned = 0;    // finish joins the clip left as stubs
+  std::size_t net_skin_degree_one = 0;        // ★ net nodes still carrying ONE join
+  // ── ★★ THE GROUND-TIE REPAIR (the maintainer's own coupon method) ──────────
+  // ★ WHY CONNECTEDNESS IS NOT PRINTABILITY, AND THIS IS THE DIFFERENCE.
+  // `emitted_components` says the solids touch each other. It does NOT say the
+  // material can be BUILT: a piece can be welded to the lattice and still begin in
+  // mid-air, and a printer lays material bottom-up. The maintainer printed a cube
+  // whose emitted geometry was 99.99 % one component and still had struts starting
+  // above the plate.
+  //
+  // So the emitted solids are rasterised, flooded from the LOWEST OCCUPIED LAYER, and
+  // every component the flood does not reach is tied down with a VERTICAL LEG dropped
+  // from its own lowest voxel — then re-flooded, up to `kOrganicRepairRounds` times.
+  // That is exactly the repair `graded_coupon.cpp` runs, and the coupon it produced
+  // printed clean with supports off.
+  //
+  // ★ FLOODING FROM THE LATTICE'S OWN BASE IS CONSERVATIVE. In a real part the lattice
+  // also meets the solid shell, which is ground too but is not in this span list — so
+  // this may add a leg that the shell would have made unnecessary. It never omits one.
+  long long floating_voxels_before = 0;
+  long long floating_voxels_after = 0;   // ★ NON-ZERO IS A REFUSAL AT THE CALLER
+  long long repair_legs_added = 0;
+  int repair_rounds = 0;
+
   // ★★ PHYSICAL CONNECTEDNESS OF WHAT WAS ACTUALLY WRITTEN — i.e. AFTER the boundary
   // clip has trimmed and dropped spans. The tracer's own report measures the lattice
   // it TRACED; this measures the lattice in the file. The two can differ, because
   // clipping cuts spans away from the shared polyline vertex on both sides and leaves
   // a gap there, and that gap is invisible to every graph-level check.
+  // ★★ FREE ENDS, MEASURED ON THE EMITTED SOLIDS — the thing the maintainer keeps
+  // seeing and every previous metric kept missing. An endpoint of an emitted span is
+  // FREE when no OTHER span's solid covers it. That is a strut tip hanging in space:
+  // it carries nothing and, if horizontal, the printer bridges to nowhere.
+  //
+  // ★ WHY THE CURVE-GRAPH COULD NOT SEE THIS. "curves with fewer than two
+  // connections" counts CONNECTORS on a curve. A curve can have two connectors and
+  // still end in a free tip if the trim's notion of "outermost connector" and the
+  // geometry disagree — and the ground-tie LEGS have free lower tips by construction.
+  // This counts tips, on the solids, after everything.
+  std::size_t free_ends = 0;              // AFTER the tie pass — the bar is ZERO
+  double free_end_length_mm = 0.0;        // total length of spans carrying a free tip
+  // ── ★★ §1(e3) — THE FREE-END TIE PASS ──────────────────────────────────────
+  // ★ A FREE END MUST NOT BE CREATED, NOT PATCHED OVER BY A SURFACE FINISH. Every
+  // emitted tip that no other solid covers is tied to the nearest material within
+  // reach, as part of building the lattice. The diagrid is a FINISH and belongs to the
+  // surface; this is the algorithm refusing to leave a strut tip in the air anywhere.
+  //
+  // ★ WHY IT IS MEASURED ON THE SOLIDS AND NOT ON THE CURVE GRAPH. Three earlier
+  // metrics in this task reported a clean lattice while the geometry had hundreds of
+  // hanging tips — the graph counts CONNECTORS on a curve, and a curve trimmed to its
+  // outermost connector can still be CLIPPED afterwards into a new free tip that no
+  // graph knows about. Ties are placed from what was written.
+  std::size_t free_ends_before_tie = 0;
+  std::size_t ties_added = 0;
+  double tie_length_mm = 0.0;
+  // Tips with NO material within `tie_reach` — nothing to tie to. These are the
+  // honest remainder and are reported, never hidden.
+  std::size_t free_ends_unresolved = 0;
+  // ── ★★ §1(e4) — THE PRUNE (kOrganicPruneRounds states why) ─────────────────
+  // Every tip a tie could not resolve is CUT, and the cut cascades. `free_ends` above
+  // is measured AFTER this, on the same list that reaches the sink, and the bar is
+  // exactly zero — excluding `plate_contacts`, which are tips resting on the build
+  // plate and are supported by it.
+  std::size_t pruned_spans = 0;
+  double pruned_length_mm = 0.0;
+  int prune_rounds = 0;
+  std::size_t plate_contacts = 0;
+  std::size_t nodes_merged = 0;          // endpoints snapped onto a shared node
+  std::size_t merge_clusters = 0;        // shared nodes created
+  std::size_t merge_degenerate_spans = 0;   // spans the merge collapsed to nothing
+  std::size_t stranded_components_dropped = 0;
+  std::size_t stranded_spans_dropped = 0;
+  double stranded_length_dropped_mm = 0.0;
+
   std::size_t emitted_components = 0;
   double emitted_largest_length_fraction = 0.0;
   double emitted_stranded_length_mm = 0.0;

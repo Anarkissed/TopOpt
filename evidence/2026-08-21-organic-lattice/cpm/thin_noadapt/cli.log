@@ -1,0 +1,13 @@
+[loadcase] load-group 0: faces=1 |F|=200N voxels_tagged=16384 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=98304 (structural pad, NOT a face protection)
+analyze: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/cpm/slab40x3.stl as solid part (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.306 MPa   worst-case margin: 179.8 (required 1.5)
+  load case: declared external load
+  verdict: ACCEPTED
+  voxel mass: 6.2 g
+  min-feature violations: 0
+report: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/cpm/thin_noadapt/analysis_report.json
+provenance: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/cpm/thin_noadapt/analysis.json
+fields: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/unified-shading-lattice-shell-4ac47b/evidence/2026-08-21-organic-lattice/cpm/thin_noadapt/fields.bin
