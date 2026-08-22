@@ -326,21 +326,30 @@ public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
 /// 'Auto' is selected for cell size, a secondary question needs to become visible:
 /// 1. Stepped 2. Default Grade 3. Organic Grade").
 ///
-/// ★ ONLY `defaultGrade` IS WIRED, on his instruction ("For now, only Default Grade
-/// should be wired to the regular algorithm"). It is core's dyadic ladder: cell sizes
-/// are S0·2^L on an ALIGNED octree, which is the only transition rule that makes
-/// coarse and fine cells meet at SHARED NODES. The other two are shown so the shape
-/// of the choice is visible, and are refused rather than silently run as this one —
-/// a control that quietly does something else is the decorative-control defect this
-/// page has paid for twice.
+/// ★★★ ALL THREE ARE NOW WIRED (maintainer, 2026-08-21: "Please connect the Stepped
+/// and Organic algos"). This enum IS core's `LatticeAlgorithm`, in the app's words:
 ///
-/// ★ WHY THE OTHER TWO ARE NOT MERELY UNIMPLEMENTED. `stepped` needs a rule for what
-/// happens AT a step that core does not have (a hard change between arbitrary sizes
-/// leaves strut ends on nothing — PR 250's floating-end reject). `organicGrade` needs
-/// cells that are not on the ladder at all, and PR 235's C5 measured what that costs:
-/// an ~8% per-cell stretch drives Ez/Ex to 1.15, the cell stops being cubic, and the
-/// certification library carries exactly one cubic tensor per topology. Neither is a
-/// UI task.
+///     stepped      -> "stepped"   one cell per declared region, taken VERBATIM
+///     defaultGrade -> "doubled"   the dyadic ladder — THE DEFAULT
+///     organicGrade -> "organic"   struts traced along the stress field
+///
+/// ★ THE PREVIOUS DOCTRINE HERE IS SUPERSEDED, NOT DELETED, AND THIS RECORDS WHY. It
+/// said the other two were "not wired yet" and gave two reasons: stepped needs a rule
+/// for what happens at an unshared seam, and organic needs cells off the ladder that
+/// stop being cubic. BOTH REASONS WERE TRUE AND BOTH ARE NOW ANSWERED IN CORE, not
+/// argued away here:
+///
+///   * `stepped` does not pretend the seam is fine — core COUNTS the floating strut
+///     ends it produces (`LatticeSteppedStats::floating_ends`) and puts them on the
+///     receipt. Measured on main: 4 of 5 abutting region pairs come out mechanically
+///     disconnected. That is a number the user gets to see, not a silent reject.
+///   * `organic` is exactly why the AESTHETIC mode exists. A traced lattice is
+///     anisotropic by construction, so `run_job` REFUSES it under a structural claim
+///     rather than certifying against a cubic tensor that does not describe it. The
+///     old note's "one cubic tensor per topology" is that refusal, now enforced by
+///     core and surfaced at the picker (`LatticeSettings.algorithmRefusalReason`).
+///
+/// So the availability rule below is no longer a hard-coded "not yet": it ASKS CORE.
 public enum LatticeCellTransition: String, Codable, Hashable, Sendable, CaseIterable {
     case stepped
     case defaultGrade
@@ -354,20 +363,23 @@ public enum LatticeCellTransition: String, Codable, Hashable, Sendable, CaseIter
         }
     }
 
-    /// nil ⇒ available. Anything else is the reason it cannot be chosen yet, said as
-    /// a fact about the geometry rather than as "coming soon".
-    public var unavailableReason: String? {
+    /// ★★ CORE'S OWN ALGORITHM NAME. The one place the two vocabularies meet, so a
+    /// picker built on this enum and a job built on that string cannot drift.
+    public var coreAlgorithm: String {
         switch self {
-        case .defaultGrade: return nil
-        case .stepped:
-            return "Not wired yet. A hard change between two cell sizes needs a rule "
-                 + "for what happens at the seam — struts that end on a neighbour's "
-                 + "face instead of on a shared node are a reject."
-        case .organicGrade:
-            return "Not wired yet. Cells off the dyadic ladder stop being cubic, and "
-                 + "the certification library carries one cubic tensor per topology — "
-                 + "an 8% stretch already drives Ez/Ex to 1.15."
+        case .stepped:      return "stepped"
+        case .defaultGrade: return "doubled"
+        case .organicGrade: return "organic"
         }
+    }
+
+    /// nil ⇒ available. ★ ASKED OF CORE, never hard-coded: an algorithm core does not
+    /// know is unavailable, and the reason names what is missing rather than promising
+    /// a date. Replaces the old "not wired yet" pair — see the type's note for why both
+    /// of those reasons are now answered in core.
+    public var unavailableReason: String? {
+        guard !TopOptKit.latticeAlgorithmIsKnown(coreAlgorithm) else { return nil }
+        return "This build's core does not carry the \(title.lowercased()) algorithm."
     }
 
     public var body: String {

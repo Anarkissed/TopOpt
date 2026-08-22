@@ -304,6 +304,13 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // otherwise ride along as `defaultGrade`'s behaviour under another name.
         out.cellTransition = cellTransition.unavailableReason == nil
             ? cellTransition : .defaultGrade
+        // ★★★ AND THE CHOICE NOW REACHES THE JOB (maintainer, 2026-08-21: "Please
+        // connect the Stepped and Organic algos"). `cellTransition` was a control that
+        // set a stored value nothing downstream read — the decorative-control defect
+        // its own note warned about, in the file that warned about it. It is core's
+        // `LatticeAlgorithm`, so it is written as core's own name and `gradingDictionary`
+        // decides whether a key appears at all.
+        out.algorithm = out.cellTransition.coreAlgorithm
         out.retainSubfloorInUnloadedRegions =
             (cellSizeMode == .fit) ? false : retainSubfloor
         if !out.retainSubfloorInUnloadedRegions {

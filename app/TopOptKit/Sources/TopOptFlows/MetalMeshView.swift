@@ -3478,6 +3478,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         set { latticeLayer?.lineWidthMM = newValue }
     }
 
+    /// The printer's layer height (mm) — see `LatticeSDFRenderer.layerHeightMM`.
+    var latticeLayerHeightMM: Double {
+        get { latticeLayer?.layerHeightMM ?? 0 }
+        set { latticeLayer?.layerHeightMM = newValue }
+    }
+
     /// Fit's per-region cell — see `LatticeSDFRenderer.fitCellMM`.
     var latticeFitCellMM: [Double] {
         get { latticeLayer?.fitCellMM ?? [] }
@@ -4763,6 +4769,10 @@ public struct LatticeLayerInputs: Equatable {
     public var subfloorRetention: LatticeSubfloorRetention?
     /// The printer's bead (mm) — the printability law's second half.
     public var lineWidthMM: Double = 0
+    /// ★ The printer's LAYER HEIGHT (mm). Purely a shading input: it bands the material
+    /// the run leaves SOLID as the layers that will actually be laid down there
+    /// (maintainer, 2026-08-21). 0 ⇒ no printer stated ⇒ no banding.
+    public var layerHeightMM: Double = 0
     /// ★ Fit's per-region cell (`W / N*`), in the scene's region order. Empty ⇒ not
     /// a Fit job.
     public var fitCellMM: [Double] = []
@@ -4773,6 +4783,7 @@ public struct LatticeLayerInputs: Equatable {
                 cellSweep: LatticeCellSweep? = nil,
                 subfloorRetention: LatticeSubfloorRetention? = nil,
                 lineWidthMM: Double = 0,
+                layerHeightMM: Double = 0,
                 fitCellMM: [Double] = []) {
         self.scene = scene
         self.params = params
@@ -4783,6 +4794,7 @@ public struct LatticeLayerInputs: Equatable {
         self.cellSweep = cellSweep
         self.subfloorRetention = subfloorRetention
         self.lineWidthMM = lineWidthMM
+        self.layerHeightMM = layerHeightMM
         self.fitCellMM = fitCellMM
     }
 
@@ -5634,6 +5646,10 @@ extension MetalMeshView {
                 }
                 if renderer.latticeLineWidthMM != lat.lineWidthMM {
                     renderer.latticeLineWidthMM = lat.lineWidthMM
+                    dirty = true
+                }
+                if renderer.latticeLayerHeightMM != lat.layerHeightMM {
+                    renderer.latticeLayerHeightMM = lat.layerHeightMM
                     dirty = true
                 }
                 if renderer.latticeFitCellMM != lat.fitCellMM {

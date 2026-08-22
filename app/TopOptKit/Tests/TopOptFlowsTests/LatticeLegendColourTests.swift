@@ -112,7 +112,20 @@ final class LatticeLegendColourTests: XCTestCase {
         guard let r = sh.range(of: "static float3 lsdf_albedo") else {
             return XCTFail("the lattice albedo must exist")
         }
-        let body = String(sh[r.lowerBound...].prefix(3000))
+        // ★★ THE WHOLE FUNCTION, NOT ITS FIRST 3000 CHARACTERS — REPLACED, NOT RELAXED
+        // (2026-08-21). The old window was a guess at how long the function is, and it
+        // went red the moment the printed-layer branch was added ahead of the hue
+        // lines: `U.rimColor` and `U.denseColor` were still there, three lines further
+        // down than an arbitrary constant allowed for. A character count is not a
+        // scope, and a bar that fires on a comment being written is a bar nobody
+        // trusts. Bounding it at the closing brace makes it STRICTER — the tint
+        // exclusion below now covers every line of the function instead of its first
+        // page — and it cannot go red again for a reason that is not about colour.
+        let rest = sh[r.lowerBound...]
+        let end = rest.range(of: "\n}\n") ?? rest.range(of: "\n}")
+        let body = String(end.map { rest[..<$0.upperBound] } ?? rest)
+        XCTAssertGreaterThan(body.count, 500,
+                             "positive control: the function body was actually found")
         XCTAssertFalse(body.contains("ft.a * 2.2"),
                        "★ the group tint must no longer be mixed into a strut — hue "
                        + "belongs to the lattice's structure now")

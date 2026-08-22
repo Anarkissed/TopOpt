@@ -158,6 +158,36 @@ final class LatticeAlgorithmSelectorTests: XCTestCase {
         }
     }
 
+    /// ★★★ THE CONTROL HE ACTUALLY USES IS THE ONE THAT'S WIRED (maintainer,
+    /// 2026-08-21: "Please connect the Stepped and Organic algos").
+    ///
+    /// `LatticeCellTransition` is the wizard's "Cell transition" row. It set a stored
+    /// value that NOTHING downstream read — the decorative-control defect its own
+    /// header warned about, in the file that warned about it. All three now map onto
+    /// core's algorithm names.
+    func testEveryCellTransitionMapsOntoAnAlgorithmCoreKnows() {
+        for t in LatticeCellTransition.allCases {
+            XCTAssertTrue(TopOptKit.latticeAlgorithmIsKnown(t.coreAlgorithm),
+                          "★ \(t.title) maps to \"\(t.coreAlgorithm)\", which core "
+                          + "does not know")
+            XCTAssertNil(t.unavailableReason,
+                         "★ \(t.title) is still refused — core carries all three now")
+        }
+        XCTAssertEqual(LatticeCellTransition.defaultGrade.coreAlgorithm, "doubled",
+                       "★ Default Grade IS the dyadic ladder")
+        XCTAssertEqual(LatticeCellTransition.stepped.coreAlgorithm, "stepped")
+        XCTAssertEqual(LatticeCellTransition.organicGrade.coreAlgorithm, "organic")
+    }
+
+    /// ★★ AND THE THREE ARE DISTINCT. A mapping that collapsed two onto one name would
+    /// satisfy the bar above and still leave the picker inert for one of them.
+    func testTheThreeTransitionsAreThreeDifferentAlgorithms() {
+        let names = Set(LatticeCellTransition.allCases.map(\.coreAlgorithm))
+        XCTAssertEqual(names.count, LatticeCellTransition.allCases.count,
+                       "★ two transitions map to the same algorithm — one of the "
+                       + "buttons does nothing")
+    }
+
     /// Builds the `grading` block the way the job builder does — through `runSpec`,
     /// the ONE place a spec is derived from the settings. Going through it is what
     /// makes this a test of the wiring rather than of the struct's field.

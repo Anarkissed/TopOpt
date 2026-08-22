@@ -1034,12 +1034,10 @@ public struct LatticePage: View {
                         .foregroundStyle(DS.Color.okGreen.color)
                 }
             }
-            // ★★★ THE ALGORITHM CARD (maintainer, 2026-08-21: "connect the different
-            // algorithms"). ORTHOGONAL to the card above: that one says how the cell is
-            // CHOSEN, this one says what is LAID DOWN. The names come from core
-            // (`lattice_algorithm_names`), never from a Swift list, so a fourth
-            // algorithm appears here without an app change.
-            algorithmCard
+            // ★ NO ALGORITHM CARD HERE. One was added on 2026-08-21 and removed the
+            // same day: the WIZARD already has this control ("Cell transition"), and it
+            // is the one he actually uses. Two controls for one job key is how the two
+            // drift — the algorithm is now written from `LatticeCellTransition` alone.
             // Density range card — the BAND IS CORE'S for the selected topology.
             card {
                 HStack(alignment: .firstTextBaseline) {

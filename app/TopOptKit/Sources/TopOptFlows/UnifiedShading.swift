@@ -198,7 +198,7 @@ static inline float3 lsdf_ray(constant LSDFUniforms& U, float2 uv) {
     return normalize(U.rayDir.xyz + U.rayX.xyz * uv.x + U.rayY.xyz * uv.y);
 }
 
-struct LSDFHit { bool hit; float3 pos; float rho; float dressing; };
+struct LSDFHit { bool hit; float3 pos; float rho; float dressing; float solid; };
 
 /// Core's measured strut radius (in CELL-NORMALISED units) for a relative density,
 /// read from the 32 samples the host uploaded. Falls back to the analytic form when
@@ -289,6 +289,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           float3 ro, float3 rd) {
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
     out.dressing = 0.0;
+    out.solid = 0.0;
 
     float S0 = U.latticeOrigin.w;
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
@@ -493,7 +494,35 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // CSG intersection: struts ∩ part. max() of 1-Lipschitz SDFs is a valid
         // SDF, so full sphere-trace steps stay safe; struts are cut flush at the
         // part surface, like a machined section — the straight edge.
-        float F = max(dn * cellHere, dClip);
+        // ★★★ WHERE THE RUN LEAVES IT SOLID, DRAW SOLID — DO NOT DRAW A HOLE
+        // (maintainer, 2026-08-21: "Can we just make it so the empty spots are filled
+        // in with what looks like 3D printed layers? This will cover the holes and also
+        // show what it would actually look like.").
+        //
+        // ★ THE HOLES WERE NEVER MISSING GEOMETRY. A cell whose member cannot hold the
+        // floor is refused, `anyActive` stays false, `dn` stays 1e9 — so F was infinite
+        // and the ray passed straight through. With the body drawn transparent behind
+        // the lattice, that reads as a hole through the wall. It is the opposite: that
+        // material is the DENSEST thing in the part, solid plastic wall to wall.
+        //
+        // ★ SO AN INACTIVE CELL IS CLIPPED BY THE PART AND THE REGION ALONE. `dClip` is
+        // already exactly "inside the part, inside what he declared", which is the solid
+        // the run will build there. It costs no extra field and cannot disagree with the
+        // struts about where the region ends, because it IS the strut's own clip term.
+        // ★★★ AND IT SITS STRICTLY INSIDE THE SURFACE — the fix for the speckle and
+        // the "broken top faces" the first version of this shipped with (maintainer,
+        // 2026-08-21: "Why is it breaking the top faces??? They are just gone").
+        //
+        // ★ THE SHELL ALREADY DRAWS THAT SURFACE. `dClip` reaches 0 exactly AT the part
+        // face, so a solid fill bounded by it renders a second surface at the same
+        // depth as the body's own — z-fighting, which is the salt-and-pepper speckle
+        // across every wall and, where the fill won, the top faces reading as gone.
+        // Pulling the fill in by one SDF voxel gives the shell undisputed ownership of
+        // the boundary: the fill is what you see THROUGH the hole in the shell, never
+        // what you see instead of the shell.
+        float solidInset = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+        float F = anyActive ? max(dn * cellHere, dClip)
+                            : max(max(dPart + solidInset, dBox), dRegion);
         if (F < eps) {
             // Secant refinement to the F = 0 root (see tPrev above): F is locally
             // near-linear along the ray, so one step lands within O(eps²) of the
@@ -508,6 +537,9 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // already known here (it is what fattened the radius), and the albedo
             // needs it to tell BOUNDARY work from interior fill.
             out.dressing = clamp(dressing, 0.0, 1.0);
+            // Carried out so the albedo can draw it as printed layers rather than as
+            // a strut of some invented density.
+            out.solid = anyActive ? 0.0 : 1.0;
             return out;
         }
         FPrev = F; tPrev = t;
@@ -588,7 +620,12 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
                           texture3d<float> tintTex,
                           texture3d<float> stressTex,
                           sampler samp,
-                          float3 hitPos, float hitRho, float hitDressing) {
+                          float3 hitPos, float hitRho, float hitDressing,
+                          // ★ 1 where the run leaves the material SOLID — see the
+                          // printed-layer branch below. Defaulted at every call site
+                          // rather than inferred, because "no strut here" and "solid
+                          // plastic here" are opposite claims about the same voxel.
+                          float hitSolid) {
     // ★★ THE STRESS PLOT, PAINTED ONTO THE STRUTS (maintainer, 2026-08-18:
     // "Allow the stress map to *overlay* on the lattice if it is turned on
     // simultaneously. I want to be able to see the stress map and compare the
@@ -604,6 +641,32 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     if (U.overlayParams.x > 0.5) {
         float3 stc = ((hitPos - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / U.sdfDims.xyz;
         return stressTex.sample(samp, stc).rgb;
+    }
+    // ★★★ SOLID FILL, DRAWN AS PRINTED LAYERS (maintainer, 2026-08-21). Material the
+    // run leaves solid gets the look of what the printer will actually lay down there:
+    // bands at the REAL layer height, stacked along the build direction.
+    //
+    // ★ THE LAYER HEIGHT IS THE PRINTER'S, NOT A CONSTANT. `overlayParams.w` carries
+    // `PrintParams.layerHeightMM`; at 0 (no printer stated) the banding is skipped
+    // entirely rather than drawn at some default, because a wrong layer count is a
+    // picture that lies about the part rather than one that merely looks plain.
+    //
+    // ★ AND IT IS SHADED, NOT STRIPED. A hard stripe at 0.2 mm aliases into moiré the
+    // moment the camera moves; this is a smooth ridge profile whose contrast FADES as
+    // the bands approach a pixel, so it reads as texture at every zoom instead of
+    // shimmering. `fwidth` gives the on-screen period directly.
+    if (hitSolid > 0.5) {
+        float3 solidHue = mix(U.denseColor.xyz, float3(1.0), 0.55);
+        float lh = U.overlayParams.w;
+        if (lh > 1e-4) {
+            float z = hitPos.z / lh;
+            float period = max(fwidth(z), 1e-4);
+            // Contrast dies once one layer is thinner than ~1.4 px.
+            float legible = clamp(1.0 - period / 1.4, 0.0, 1.0);
+            float ridge = 0.5 + 0.5 * cos(6.2831853 * z);
+            solidHue *= 1.0 - 0.16 * legible * (1.0 - ridge);
+        }
+        return solidHue;
     }
     float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y;
     float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
@@ -722,7 +785,8 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     LSDFGBuf o;
     o.eyeZ = -eyeP.z;                     // eye looks down −Z → positive into the screen
     o.enormal = float4(eyeN, 0.0);
-    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho, h.dressing), 1.0);
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho, h.dressing,
+                                  h.solid), 1.0);
     // ★ CLAMPED SO THE DEPTH-DIRECTION DECLARATION IS TRUE BY CONSTRUCTION.
     // (The declaration is named without its brackets on purpose:
     // `testFragmentDepthWritesAreDeclaredConservative` counts that token across

@@ -152,7 +152,45 @@ public enum LatticeRegionEmission {
             // screen — so the shape the user drags and the region the run
             // latticed are one shape, not two that happen to agree on a
             // rectangle. The half-extents above still ship for core's reader.
-            s.outlineLoops = loops
+            // ★★★ THE OUTLINE IS RE-EXPRESSED IN THE SLAB'S OWN FRAME — the fix for
+            // three of his reports at once (2026-08-21: the declared wall renders
+            // solid; the lattice runs past the face into the chamfer; the lattice view
+            // cuts the top faces away).
+            //
+            // ★★ THE OUTLINE WAS BEING MEASURED MIRRORED. `LatticeFaceOutline.loops`
+            // projects the face into `LatticeRegionMask.basis(n)` for the FACE normal.
+            // The slab then carries `-n`, and `LatticeRegionMask.contains` measures the
+            // very same loops in `basis(-n)`. Those are NOT the same frame:
+            //
+            //     basis(+Y) = (u = (0,0, 1), v = (1,0,0))
+            //     basis(-Y) = (u = (0,0,-1), v = (1,0,0))
+            //
+            // u flips and v does not, so the polygon is reflected about v. Measured on
+            // his own two regions, face 15 and face 2 — both mirrored, and on face 15
+            // the reflection moves the outline clean off the wall: EVERY sample taken
+            // at a point genuinely on that face reported OUTSIDE the region (0 of 22).
+            //
+            // ★ WHICH IS ALL THREE SYMPTOMS, from one defect. The wall he declared is
+            // not in the region, so it is left solid. The reflected outline lands on
+            // material he never marked — the chamfer, the top faces — so the lattice
+            // "expands when I have not set it to", and the SHELL, which discards
+            // wherever this same field says "latticed", cuts those top faces away.
+            //
+            // ★ AND WHY NO TEST CAUGHT IT: a reflection preserves AREA. Every bar on
+            // this outline compares areas or half-extents, and all of them still pass
+            // on a mirrored polygon. The check that finds it has to be positional.
+            //
+            // The conversion is exact and assumes nothing about the mirror: rebuild
+            // each point's 3D offset in the frame it was written in, then re-read it
+            // in the frame it will be measured in.
+            let (uFace, vFace) = LatticeRegionMask.basisForTests(ManualPrimitive.unit(normal))
+            let (uSlab, vSlab) = LatticeRegionMask.basisForTests(s.normal)
+            s.outlineLoops = loops.map { loop in
+                loop.map { p -> SIMD2<Double> in
+                    let d = uFace * p.x + vFace * p.y
+                    return SIMD2<Double>(simd_dot(d, uSlab), simd_dot(d, vSlab))
+                }
+            }
             s.inPlaneOffsetMM = loops.isEmpty ? 0 : LatticeSlabExpand.clamp(expandMM)
             s.depthMM = depthMM
             return s.isValid ? s : nil

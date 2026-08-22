@@ -211,6 +211,24 @@ public struct LatticeSDFScene {
                 // ★★★ STRUCTURAL OR AESTHETIC (maintainer, 2026-08-21). Defaults to
                 // structural so every pre-existing call — and every test — keeps the
                 // certified floor it was written against.
+                // ★★★ THE SOLID WALL KEPT AGAINST EVERY SURFACE **EXCEPT** THE FACE HE
+                // PICKED (maintainer, 2026-08-21, after four reports: "there is
+                // *SUPPOSED* to be a chamfer AROUND the lattice, but the lattice is
+                // breaking that top edge").
+                //
+                // ★ WHY `skin` DID NOT DO THIS. `LatticeBoundaryTreatment.faceSkinMM`
+                // returns 0 for every finish except `covered`, so choosing "Skin"
+                // armed a wall of ZERO — which is why setting it changed nothing on his
+                // part. And even armed, that term is `max(region, partSDF + skin)`,
+                // applied uniformly to EVERY surface including the declared face, so it
+                // would also seal the mouth he is trying to look through.
+                //
+                // ★ WHAT HE ACTUALLY DESCRIBED is one-sided: the lattice reaches the
+                // face he marked and stops short of every OTHER boundary. That is not a
+                // finish, it is what a face region means, so it is armed by default from
+                // the printer's own wall ring rather than hidden behind a setting.
+                // 0 disables it and restores the previous behaviour exactly.
+                keepWallMM: Double = 0,
                 stageMode: LatticeStageMode = .structural,
                 // ★ Core's `LatticeAlgorithm` name. Defaults to "" so every existing
                 // call — and every test — still describes a doubled ladder, which is
@@ -318,6 +336,15 @@ public struct LatticeSDFScene {
                 o.depthMM = r.depthMM + pad
                 return o
             }
+            // ★ THE MOUTHS: each declared face's own region, `keepWallMM` deep. Built
+            // from the UNPADDED regions — the pad exists to break a coincidence at the
+            // surface and would widen the exemption by its own 1.5 voxels.
+            let mouths: [LatticeRegionSpec] = keepWallMM <= 0 ? [] : regions.compactMap {
+                guard $0.kind == .face, $0.role == .include else { return nil }
+                var m = $0
+                m.depthMM = keepWallMM
+                return m
+            }
             let partSDFValues = self.partSDF.values
             var f = solid
             var i = 0
@@ -334,7 +361,31 @@ public struct LatticeSDFScene {
                         // stops `skinMM` short of the surface, and the shell —
                         // which discards where this field is negative — SURVIVES
                         // in that band. That surviving band IS the solid wall.
-                        let region = LatticeRegionMask.signedDistance(p, regions: padded)
+                        var region = LatticeRegionMask.signedDistance(p, regions: padded)
+                        // ★★ THE WALL, AND THE MOUTH THAT IS EXEMPT FROM IT.
+                        //
+                        // Intersecting with {at least `keepWallMM` inside the surface}
+                        // is `max(region, partSDF + wall)` — the same shape the skin
+                        // term uses. The whole difference is the exemption: at the
+                        // DECLARED FACE'S OWN MOUTH the wall is not applied, so the
+                        // lattice still runs right up to the face he marked while every
+                        // other boundary — the chamfer, the top edge, the sides — keeps
+                        // its solid wall.
+                        //
+                        // The mouth is exactly "inside this region, within `wall` of the
+                        // face", which is the region itself at a depth of `wall`. No new
+                        // geometry and no second law: if the mouth ever disagreed with
+                        // the region, it would be because someone changed the region.
+                        if keepWallMM > 0 {
+                            let d = Double(partSDFValues[i])
+                            if d > -keepWallMM {
+                                var atMouth = false
+                                for m in mouths where LatticeRegionMask.contains(p, region: m) {
+                                    atMouth = true; break
+                                }
+                                if !atMouth { region = Swift.max(region, d + keepWallMM) }
+                            }
+                        }
                         // ★ AND ONLY WHEN THERE IS A SKIN. `max(region, partSDF + 0)`
                         // pins the field to ~0 AT the surface, which is exactly the
                         // coincidence the front-face pad above exists to break — a
@@ -591,6 +642,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var lineWidthMM: Double = 0 {
         didSet { if lineWidthMM != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★★ THE PRINTER'S LAYER HEIGHT (mm) — what the SOLID fill is banded at, so the
+    /// material the run leaves solid is drawn as the layers that will actually be laid
+    /// down there. 0 means no printer has been stated, and then no banding is drawn
+    /// rather than a default one: a wrong layer count is a picture that lies about the
+    /// part. No rebake — it changes only the SHADING, not which cells exist.
+    var layerHeightMM: Double = 0
     /// ★★ WHY THE PREVIEW DREW NOTHING, WHEN IT DREW NOTHING (maintainer,
     /// 2026-08-20: "instead of showing an empty fucking wall we should have a way to
     /// recognize that it will happen and create a pop-up").
@@ -922,6 +979,35 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 capMM: 16 * Double(occ.spacing.x),
                 perVoxelFloor: scene.cellsPerMemberFloorPerVoxel)
         }
+        // ★★★ AND THE AESTHETIC FLOOR REACHES **SWEPT** TOO (maintainer, 2026-08-21:
+        // "Do you have Aesthetic wired up the way it should be? … Why am I not seeing
+        // MUCH larger cells on this piece?").
+        //
+        // ★ IT DID NOT, AND THIS IS THE GAP. `desired` was filled in for AUTO
+        // (`perLocalMember`) and for FIT, and left EMPTY for swept — so on swept the
+        // whole per-voxel floor was never handed to the planner, and core applied its
+        // own cells-per-member law with the ACCURACY floor of 5. His part is on
+        // Swept 3-8 mm, which is precisely the mode where the relaxation he chose could
+        // not bind. The mode was reaching the uniform bake and nothing else he uses.
+        //
+        // ★ WHAT IT ASKS FOR IS THE SAME QUESTION AUTO ASKS, bounded by HIS window:
+        // the coarsest cell each voxel's own member can hold under the floor that
+        // applies to it, clamped to [min, max]. Only in aesthetic mode and only with a
+        // measured per-voxel floor — with neither, `desired` stays empty and swept is
+        // bit-for-bit the planner it has always been.
+        if desired.isEmpty, scene.stageMode == .aesthetic,
+           !scene.cellsPerMemberFloorPerVoxel.isEmpty, scene.minCellsPerMember > 0 {
+            desired = LatticeMeasuredRegionWidth.desiredCellMM(
+                occupancy: occ, memberThicknessMM: scene.memberThicknessMM,
+                minCellsPerMember: scene.minCellsPerMember,
+                baseCellMM: sweep.minMM,
+                // ★ HIS OWN CEILING. A swept job's window is a statement about what he
+                // wants built; the relaxed floor may make a coarser cell ADMISSIBLE but
+                // it does not get to overrule the number he typed. This is also why the
+                // cells cannot get "MUCH larger" while the window says 8 mm.
+                capMM: sweep.maxMM,
+                perVoxelFloor: scene.cellsPerMemberFloorPerVoxel)
+        }
         if desired.isEmpty, !fitCellMM.isEmpty, fitCellMM.count == scene.regions.count {
             desired = [Double](repeating: 0, count: n)
             for i in 0..<n where candidate[i] {
@@ -1164,7 +1250,15 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                  // normalised floor — the density that prints is a
                                  // function of the cell, and under a graded plan the
                                  // cell is not one number. 0 ⇒ no printer stated.
-                                 Float(0.5 * max(0, lineWidthMM)), 0),
+                                 Float(0.5 * max(0, lineWidthMM)),
+                                 // ★ w = THE PRINTER'S LAYER HEIGHT (mm), for the
+                                 // solid fill's printed-layer banding. A free slot on
+                                 // an EXISTING float4 rather than a new field: this
+                                 // struct matches its MSL twin by BYTE OFFSET, and the
+                                 // last field appended to one side alone had the shader
+                                 // reading `lightDir` as the overlay flags.
+                                 // 0 ⇒ no printer stated ⇒ no banding, never a default.
+                                 Float(max(0, layerHeightMM))),
             rimColor: SIMD4(Float(LatticeStructureColour.rim.r),
                             Float(LatticeStructureColour.rim.g),
                             Float(LatticeStructureColour.rim.b), 1),
@@ -1402,7 +1496,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // boundary work from it, and this standalone preview shares that function —
         // so a call short of an argument does not merely lose the rim hue, it fails
         // to COMPILE, and a shader built with `try?` then fails silently.
-        float3 baseC = lsdf_albedo(U, tintTex, stressTex, samp, hitPos, hitRho, h.dressing);
+        float3 baseC = lsdf_albedo(U, tintTex, stressTex, samp, hitPos, hitRho, h.dressing,
+                                   h.solid);
         float3 lit = baseC * (amb + 0.85 * ndlK + 0.30 * ndlF);
         float rim = pow(1.0 - clamp(dot(n, vdir), 0.0, 1.0), 2.5);
         lit += rim * 0.55 * mix(float3(0.72, 0.78, 0.98), float3(1.0), 0.35);

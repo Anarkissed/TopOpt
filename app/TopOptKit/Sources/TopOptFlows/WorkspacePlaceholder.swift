@@ -553,6 +553,33 @@ public struct WorkspacePlaceholder: View {
         (stage == .lattice || showLatticePage) && project.lattice.stageMode == nil
     }
 
+    /// ★★★ THROW AWAY EVERYTHING DONE UNDER THIS MODE AND ASK AGAIN (maintainer,
+    /// 2026-08-21: "This should delete whatever was done in the Aesthetic mode and bring
+    /// you back to the mode modal").
+    ///
+    /// ★ IT IS A DELETE, NOT A SWITCH, AND THAT IS THE WHOLE POINT. Flipping the mode in
+    /// place would leave regions, depths and densities that were chosen against one
+    /// claim being read against the other — the precise divergence the un-dismissable
+    /// modal exists to prevent. Resetting to `LatticeSettings()` means `stageMode` is nil
+    /// again, which is what makes the modal reappear: one mechanism, not two.
+    ///
+    /// ★ AND THE SELECTION'S LATTICE ROLES GO WITH IT. Those live on the FACE REGIONS,
+    /// not in `LatticeSettings`, so resetting the settings alone would leave a part still
+    /// marked for lattice with nothing configured — a state no page has words for.
+    private func deleteLatticeForMode() {
+        project.lattice = LatticeSettings()
+        showLatticeModeSheet = false
+        showLatticePage = false
+        showStrutPreview = false
+        strutScene = nil
+        latticeSettingsSavedThisSession = false
+        refreshLatticeFaceCards()
+        // ★ SEALED AS ONE UNDO STEP — the reset touches several fields and a half-undone
+        // lattice is a state nothing downstream has words for.
+        project.sealUndoStep()
+        model.persistCurrentProject()
+    }
+
     /// THE BRUSH GESTURE, AS ONE VALUE (task 2026-08-05, bar D1). The SMOOTHING
     /// PAGE OWNS IT while it is up: its brush is the page's whole point, so it
     /// cannot depend on the TO page's Paint toggle — which L1 hides.
@@ -568,6 +595,49 @@ public struct WorkspacePlaceholder: View {
     private var brushGesture: BrushGesture {
         showSmoothingPage ? .smoothingPage(smoothTools)
                           : .workspacePaint(active: paintActive)
+    }
+
+    /// Whether the mode's limitations sheet is up. Opened by tapping the mode title.
+    @State private var showLatticeModeSheet = false
+
+    /// ★ IS A LATTICE HANDLE UNDER THE FINGER RIGHT NOW? Depth, expand and the
+    /// clearance/design-box knobs all move a region, so all three defer the bake. One
+    /// property, so a fourth handle added later has one place to join.
+    private var latticeHandleIsDown: Bool {
+        draggingDepthPlane != nil || draggingExpandPlane != nil || draggingHandleID != nil
+    }
+
+    /// Width the Settings pill needs at the trailing end of the identity row, so the
+    /// mode title stops short of it rather than running under it.
+    private static let settingsClearance: CGFloat = 150
+
+    /// ★ Is the mode name occupying the top span right now? Every top-centre
+    /// notification has to clear it, so the answer lives in ONE place rather than being
+    /// re-derived at each banner.
+    private var latticeStageModeShown: Bool {
+        stage == .lattice && project.lattice.stageMode != nil && viewerMesh != nil
+    }
+
+    /// ★★★ THE MODE, IN THE TOP-CENTRE SLOT (maintainer, 2026-08-21: "place the mode
+    /// name in the top center position - forcing the notification to pop-up *below* the
+    /// mode type").
+    ///
+    /// ★ WHY THE CENTRE AND NOT BESIDE THE WAY BACK. It was put beside the back button
+    /// to stop the two colliding, and it collided anyway — the row's width depends on
+    /// the destination's name. The centre column is owned by nothing else on this stage,
+    /// so the title cannot be crowded out by a longer label appearing to its left, and
+    /// it reads as a statement about the STAGE rather than a decoration on a button.
+    ///
+    /// It is TAPPABLE: the choice is permanent, and a permanent choice with no way to
+    /// read what it committed to — or to undo it — is a trap. See
+    /// `LatticeStageModeSheet`.
+    @ViewBuilder private var latticeStageModeOverlay: some View {
+        // ★ EMPTY ON PURPOSE. The mode title now lives INSIDE the identity row
+        // (`chrome`), where the layout guarantees it clears Redo. Three overlay
+        // versions of this collided with the buttons — the last one rendered the
+        // title TWICE, once here and once in the row. The fourth stopped being an
+        // overlay; this stays as the record of why there is no overlay.
+        EmptyView()
     }
 
     public var body: some View {
@@ -945,6 +1015,11 @@ public struct WorkspacePlaceholder: View {
                                                      // preview refuses what the
                                                      // nozzle cannot lay.
                                                      lineWidthMM: project.printParams.strutLineWidthMM,
+                                                     // ★ …and the LAYER HEIGHT, so the
+                                                     // material the run leaves solid is
+                                                     // drawn as the layers the printer
+                                                     // will actually lay down there.
+                                                     layerHeightMM: project.printParams.layerHeightMM,
                                                      fitCellMM: latticePreviewFitCells)
                               }
                               : nil)
@@ -1074,6 +1149,7 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
                 if viewerMesh != nil { stageNavigationButtonOverlay }
+                if viewerMesh != nil { latticeStageModeOverlay }
                 if viewerMesh != nil { latticeSettingsButtonOverlay }
                 // ★ SAVE, in the slot the greyed-out "Lattice" button vacated.
                 surfaceSaveButtonOverlay
@@ -1157,6 +1233,18 @@ public struct WorkspacePlaceholder: View {
                 }
                 .transition(.opacity)
                 .zIndex(50)
+            }
+            // ★★ THE LIMITATIONS, ON DEMAND — and the only way to unmake the choice
+            // (maintainer, 2026-08-21). Above everything except the modal itself: it
+            // can END with the modal being asked again, so the two must not race.
+            if showLatticeModeSheet, let mode = project.lattice.stageMode {
+                LatticeStageModeSheet(
+                    mode: mode,
+                    topology: project.lattice.topologyID,
+                    onDelete: { deleteLatticeForMode() },
+                    onClose: { showLatticeModeSheet = false })
+                .transition(.opacity)
+                .zIndex(49)
             }
             if showLatticeWizard {
                 LatticeSetupWizard(project: project) {
@@ -2359,13 +2447,30 @@ public struct WorkspacePlaceholder: View {
                 undoRedoButton("arrow.uturn.forward", label: "Redo",
                                enabled: project.canRedoNow) { project.performRedo() }
             }
+
+            // ★★★ THE MODE TITLE LIVES IN THIS ROW — not in an overlay above it
+            // (maintainer, 2026-08-21: "the title is covering the redo button").
+            //
+            // ★ THREE OVERLAY ATTEMPTS ALL COLLIDED, AND FOR ONE REASON: an overlay
+            // has to be TOLD where the buttons end, and every mechanism for telling it
+            // was conditional. `TopClusterEdgeKey` is only filled in while the rebuild
+            // notification is on screen; a fixed 260 pt centred on the window lands on
+            // Redo at this title length. Putting the pill IN the row makes the
+            // clearance a layout fact instead of a measurement — HStack cannot overlap
+            // its own children, at any title length, on any device.
+            //
+            // It still fills the span he asked for: `maxWidth: .infinity` takes
+            // everything between Redo and the trailing inset kept for Settings + the
+            // orientation cube.
+            if stage == .lattice, let mode = project.lattice.stageMode {
+                LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }
+                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)
+            }
         }
-        // ★ ON THE LATTICE / SURFACE STAGES THIS IS THE SECOND ROW. See
-        // `StageNavPlacement`: the stage (and its mode) took the top row, so the name
-        // and undo/redo drop by exactly the stage row's height plus the standard gap.
-        .padding(.top, stage.back == nil
-                 ? DS.Space.xl3
-                 : DS.Space.xl3 + StageNavPlacement.identityRowHeight + PageChrome.gap)
+        // ★ THE IDENTITY ROW IS THE FIRST ROW ON EVERY STAGE — restored 2026-08-21.
+        // The way back sits under it (`StageNavPlacement`) and the lattice MODE takes
+        // the top-CENTRE slot, so nothing competes for this one.
+        .padding(.top, DS.Space.xl3)
         .padding(.leading, DS.Space.xl4)
         // ★ reports its TRAILING edge, for the banner's gap.
         .background(GeometryReader { g in
@@ -2506,10 +2611,30 @@ public struct WorkspacePlaceholder: View {
         // ★ THE SELECTION MOVED ⇒ THE MASK MOVED ⇒ REBAKE. See
         // `latticeRegionInputsKey` for why this is a hash and not the regions.
         .onChange(of: latticeRegionInputsKey) { _ in
+            // ★★★ NOT WHILE A HANDLE IS STILL DOWN (maintainer, 2026-08-21: "When
+            // moving the handles while already in lattice view, the lattice shouldn't
+            // bake until the handle has been let go").
+            //
+            // ★ A DRAG EMITS A NEW KEY EVERY FRAME. Each one started a full scene bake
+            // — an occupancy voxelisation, a member-thickness sweep and core's cell
+            // plan — and on his part that is the better part of a second EACH. The
+            // bakes queue behind the finger, so the picture lags the handle by however
+            // many frames the drag lasted and the last one to land is not necessarily
+            // the last one asked for. Deferring is not a débounce for smoothness: it
+            // is what makes the final picture correspond to the final handle position.
+            if latticeHandleIsDown { return }
             // ★ The same inputs feed the solve's fingerprint, so a change here can
             // make the field STALE as well as the bake. Idempotent when it is not.
             if showStrutPreview, project.lattice.enabled { startStressSolveIfNeeded() }
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
+        }
+        // ★★ AND THE BAKE HAPPENS ON RELEASE. Watching the flag rather than the key
+        // means the deferred change is not lost — the drag ends, this fires once, and
+        // it bakes the position he actually let go at.
+        .onChange(of: latticeHandleIsDown) { down in
+            guard !down, showStrutPreview, project.lattice.enabled else { return }
+            startStressSolveIfNeeded()
+            buildStrutScene()
         }
         .onChange(of: showLatticePage) { open in
             if open { syncLatticeProxy() }
@@ -3349,7 +3474,15 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: Self.topBannerWidth)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(TopBannerGapCentred(edges: topEdges))
-        .padding(.top, PageChrome.edge)
+        // ★★ BELOW THE MODE NAME, NOT OVER IT (maintainer, 2026-08-21: "the
+        // notification is covering the mode name - it *NEEDS* to be pushed *BELOW* the
+        // mode name"). Both this and the mode occupy the span between the two top
+        // clusters — that is what makes them collide, and it is also what makes the
+        // remedy exact: drop by the mode row's own height plus the standard gap,
+        // whenever a mode is showing. A measured drop, not a guessed constant.
+        .padding(.top, PageChrome.edge + (latticeStageModeShown
+                                          ? LatticeStageModeChip.rowHeight + PageChrome.gap
+                                          : 0))
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: strutBakeInFlight)
         .accessibilityIdentifier("strut-baking-banner")
@@ -3411,6 +3544,40 @@ public struct WorkspacePlaceholder: View {
     /// out to each measured edge and centring in the remainder makes the two gaps
     /// equal STRUCTURALLY: whatever is left over is split in half by the centring
     /// itself, with no arithmetic to be wrong.
+    /// ★★ THE SAME INSETS, WITHOUT MEASURING ANYTHING — for a SECOND occupant of the
+    /// top span (the lattice mode name).
+    ///
+    /// ★ WHY IT CANNOT JUST REUSE `TopBannerGapCentred`. That modifier both READS the
+    /// two clusters' inner edges and WRITES a `TopClusterEdgeKey` preference of its
+    /// own (`left: 0`). With one occupant that is harmless. With two, the second
+    /// write reduces into the same key and the measurement collapses to left = 0 — the
+    /// mode's capsule stretched from the screen edge to under the Settings pill, which
+    /// is exactly what it did on the first attempt. One writer, many readers.
+    private struct TopBannerGapReadOnly: ViewModifier {
+        let edges: TopClusterEdges
+        func body(content: Content) -> some View {
+            // ★★ THE WIDTH IS READ LOCALLY, NOT TAKEN FROM THE PREFERENCE. `edges.width`
+            // is only ever filled in by `TopBannerGapCentred`'s own GeometryReader, so
+            // `isMeasured` is false whenever that banner is absent — and the mode name
+            // is present far more often than the banner is. Reading it here makes this
+            // modifier independent of whether the OTHER occupant happens to be on
+            // screen, which is what left the capsule spanning the whole width.
+            GeometryReader { g in
+                let ok = edges.left > 0 && edges.right < .greatestFiniteMagnitude
+                        && g.size.width > edges.left
+                content
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.leading, ok ? edges.left + PageChrome.gap : 0)
+                    .padding(.trailing, ok
+                             ? Swift.max(0, g.size.width - edges.right) + PageChrome.gap
+                             : 0)
+                    .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .frame(height: LatticeStageModeChip.rowHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+    }
+
     private struct TopBannerGapCentred: ViewModifier {
         let edges: TopClusterEdges
         func body(content: Content) -> some View {
@@ -4155,6 +4322,14 @@ public struct WorkspacePlaceholder: View {
                                         // cells-per-member floor the preview draws to,
                                         // so the picture and the run agree about which
                                         // question was asked.
+                                        // ★ NOT ARMED. `keepWallMM` shrinks the region
+                                        // away from every other surface, and the ruling
+                                        // of 2026-08-21 is that the primitive is "ONLY
+                                        // AS BIG AS THE FACE … Never bigger. Never
+                                        // smaller." A wall makes it smaller, so it is
+                                        // the wrong instrument — the chamfer has to
+                                        // survive because the SHELL is not cut there,
+                                        // not because the region was eroded.
                                         stageMode: stageMode,
                                         // ★ Carried so the BANNER can say which
                                         // algorithm the run will build — the marcher
@@ -4222,18 +4397,8 @@ public struct WorkspacePlaceholder: View {
         // ★ THE WAY BACK — top-left, under the project name. Topology is the root
         // and carries none.
         if let back = stage.back {
-            // ★★ THE WAY BACK AND THE MODE SHARE THE TOP ROW (maintainer, 2026-08-21:
-            // "I want the < Topology button at the very top. Next to it is the
-            // 'Structural' or 'Aesthetic' large mode text"). One HStack, so the title
-            // cannot collide with the button the way a separately-placed overlay did.
-            HStack(spacing: DS.Space.m) {
-                stageNavButton(to: back, icon: "chevron.left")
-                if stage == .lattice, let mode = project.lattice.stageMode {
-                    LatticeStageModeChip(mode: mode)
-                        .allowsHitTesting(false)
-                }
-            }
-            .modifier(StageNavPlacement(stage: stage))
+            stageNavButton(to: back, icon: "chevron.left")
+                .modifier(StageNavPlacement(stage: stage))
         }
         // ★ THE WAY FORWARD — the top-right column, LEFT of the gizmo.
         //
@@ -4452,15 +4617,19 @@ public struct WorkspacePlaceholder: View {
                     // `PageChrome.gizmoAlignedTop`.
                     .padding(.top, PageChrome.gizmoAlignedTop)
             case .lattice, .surface:
-                // ★★ THE STAGE ROW IS NOW THE FIRST ROW. It used to sit UNDER the
-                // identity row; the maintainer's ruling puts "where am I" above "which
-                // file is this", because on these stages the stage — and on the lattice
-                // stage its MODE — is the thing that changes what every control below
-                // means. `latticeIdentityRowDrop` moves the name/undo row down to match.
+                // ★★ THE WAY BACK SITS UNDER THE IDENTITY ROW — restored (maintainer,
+                // 2026-08-21: "First, I was wrong about the placement … Please put the
+                // button back *Below* the project name and undo/redo button").
+                //
+                // ★ AND THE MODE NO LONGER RIDES WITH IT. It was put beside this button
+                // to keep the two from colliding; it now has the TOP-CENTRE slot of its
+                // own (`latticeStageModeOverlay`), which is both more prominent and
+                // collision-free by construction.
                 content
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, DS.Space.xl4)
-                    .padding(.top, DS.Space.xl3)
+                    .padding(.top, DS.Space.xl3 + Self.identityRowHeight
+                             + PageChrome.gap)
             }
         }
     }

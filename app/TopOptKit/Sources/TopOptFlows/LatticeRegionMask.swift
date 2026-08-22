@@ -287,6 +287,12 @@ public enum LatticeRegionMask {
     /// convention, asserted against core's own formula in
     /// `LatticeOutlineWireTests` — a conversion at the boundary would have been a
     /// second place for the sign to be wrong.
+    /// The same basis, reachable from tests. `basis` is the ONE pair containment is
+    /// measured in, so a probe that builds its own would be measuring a different plane.
+    static func basisForTests(_ n: SIMD3<Double>) -> (SIMD3<Double>, SIMD3<Double>) {
+        basis(n)
+    }
+
     static func basis(_ n: SIMD3<Double>) -> (SIMD3<Double>, SIMD3<Double>) {
         let a = abs(n.x) < 0.9 ? SIMD3<Double>(1, 0, 0) : SIMD3<Double>(0, 1, 0)
         let u = unit(simd_cross(a, n))

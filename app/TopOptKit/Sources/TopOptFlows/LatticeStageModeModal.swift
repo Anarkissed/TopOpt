@@ -130,6 +130,8 @@ public struct LatticeStageModeModal: View {
             } label: {
                 Text("Use \(mode.title)")
                     .font(.system(size: 16, weight: .semibold))
+                    // ★ Readable ON the fill — see `onAccent`.
+                    .foregroundStyle(LatticeStageModeStyle.onAccent(mode))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, DS.Space.s)
             }
@@ -163,10 +165,33 @@ public enum LatticeStageModeStyle {
     /// Structural reads as the app's own blue — the certified path, continuous with
     /// every other structural affordance. Aesthetic reads violet, the colour the lattice
     /// legend already uses for interior fill, because that is the thing it is about.
+    /// ★★ WHAT TO WRITE **ON** THE ACCENT (maintainer, 2026-08-21: "can't really read
+    /// the text on the Silver button"). Silver is a LIGHT fill, so white-on-silver is
+    /// the unreadable "Use Aesthetic" button in his screenshot; blue is a dark fill and
+    /// wants white. The rule is luminance, not a per-case literal, so a future accent
+    /// cannot reintroduce the same defect by being light.
+    public static func onAccent(_ mode: LatticeStageMode) -> Color {
+        let c = accent(mode)
+        // Rec. 601 luma of the components above — enough to separate light from dark.
+        let r: Double, g: Double, b: Double
+        switch mode {
+        case .structural: (r, g, b) = (0.20, 0.55, 1.00)
+        case .aesthetic:  (r, g, b) = (0.82, 0.84, 0.88)
+        }
+        _ = c
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 0.6
+            ? Color(red: 0.07, green: 0.08, blue: 0.10)   // near-black on a light fill
+            : .white
+    }
+
     public static func accent(_ mode: LatticeStageMode) -> Color {
         switch mode {
         case .structural: return Color(red: 0.20, green: 0.55, blue: 1.00)
-        case .aesthetic:  return Color(red: 0.62, green: 0.44, blue: 0.96)
+        // ★ SILVER, NOT VIOLET (maintainer, 2026-08-21: "Please colour 'Aesthetic' in
+        // *Silver* instead of that purple"). It also settles an older standing note —
+        // "the purple fucking colour should never happen again" — which the violet
+        // borrowed from the lattice legend's interior fill was quietly reopening.
+        case .aesthetic:  return Color(red: 0.82, green: 0.84, blue: 0.88)
         }
     }
 }
@@ -179,23 +204,41 @@ public enum LatticeStageModeStyle {
 /// decoration and, at the size it was, collided with it.
 public struct LatticeStageModeChip: View {
     public let mode: LatticeStageMode
-    public init(mode: LatticeStageMode) { self.mode = mode }
+    /// Tapping it opens the limitations sheet. nil makes the chip inert, which is what
+    /// a preview or a screenshot fixture wants.
+    public var onTap: (() -> Void)?
+    public init(mode: LatticeStageMode, onTap: (() -> Void)? = nil) {
+        self.mode = mode
+        self.onTap = onTap
+    }
+
+    /// The row's height, so the notification below it can clear it without measuring.
+    public static let rowHeight: CGFloat = 44
 
     public var body: some View {
-        HStack(spacing: DS.Space.s) {
-            Circle()
-                .fill(LatticeStageModeStyle.accent(mode))
-                .frame(width: 10, height: 10)
+        // ★ NO LEADING DOT (maintainer, 2026-08-21: "Please get rid of the * at the
+        // start of the chip"). The colour already carries the distinction; the dot was
+        // saying the same thing a second time and reading as a bullet.
+        Button { onTap?() } label: {
             Text(mode.title)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(LatticeStageModeStyle.accent(mode))
+                // ★ IT FILLS THE SPAN BETWEEN THE TWO TOP CLUSTERS (maintainer,
+                // 2026-08-21: "Expand the Mode name to fill the space between the Redo
+                // and the Settings … make sure there is equal padding on both sides").
+                // The equal padding is not eyeballed — the caller wraps this in
+                // `TopBannerGapCentred`, the same modifier the notification uses, which
+                // measures both clusters' inner edges and insets to each.
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DS.Space.s)
+                .background(
+                    Capsule().fill(LatticeStageModeStyle.accent(mode).opacity(0.14)))
+                .overlay(
+                    Capsule().stroke(LatticeStageModeStyle.accent(mode).opacity(0.45),
+                                     lineWidth: 1))
         }
-        .padding(.horizontal, DS.Space.l)
-        .padding(.vertical, DS.Space.s)
-        .background(
-            Capsule().fill(LatticeStageModeStyle.accent(mode).opacity(0.14)))
-        .overlay(
-            Capsule().stroke(LatticeStageModeStyle.accent(mode).opacity(0.45), lineWidth: 1))
+        .buttonStyle(.plain)
+        .disabled(onTap == nil)
         .accessibilityIdentifier("lattice-mode-chip")
     }
 }

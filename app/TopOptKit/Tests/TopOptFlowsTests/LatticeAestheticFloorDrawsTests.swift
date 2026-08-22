@@ -153,6 +153,52 @@ final class LatticeAestheticFloorDrawsTests: XCTestCase {
                        "★ and the picture must be the certified one")
     }
 
+    /// ★★★ AND IT REACHES THE **SWEPT** PLANNER (maintainer, 2026-08-21: "Do you have
+    /// Aesthetic wired up the way it should be?").
+    ///
+    /// ★ IT DID NOT. `desired` was computed for AUTO and FIT and left EMPTY for swept,
+    /// so on a swept job core applied its own accuracy floor of 5 and the mode changed
+    /// nothing at all — on the one cell mode his project actually uses. This bar is on
+    /// the DEMAND that reaches the planner, because that is where the gap was.
+    func testTheAestheticFloorReachesTheSweptPlannerAndNotJustAutoAndFit() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let quiet = field(mesh, fraction: 0.0)
+        let a = try scene(mode: .aesthetic, field: quiet)
+        try XCTSkipIf(a.memberThicknessMM.isEmpty, "core gave no thickness")
+        XCTAssertFalse(a.cellsPerMemberFloorPerVoxel.isEmpty, "positive control")
+
+        // What a SWEPT job hands the planner: no per-local-member flag, no fit cells.
+        let floors = a.cellsPerMemberFloorPerVoxel
+        let relaxed = LatticeMeasuredRegionWidth.desiredCellMM(
+            occupancy: a.occupancy, memberThicknessMM: a.memberThicknessMM,
+            minCellsPerMember: a.minCellsPerMember,
+            baseCellMM: 3.0, capMM: 8.0, perVoxelFloor: floors)
+        let certified = LatticeMeasuredRegionWidth.desiredCellMM(
+            occupancy: a.occupancy, memberThicknessMM: a.memberThicknessMM,
+            minCellsPerMember: a.minCellsPerMember,
+            baseCellMM: 3.0, capMM: 8.0)
+        let asked = relaxed.filter { $0 > 0 }
+        let askedCertified = certified.filter { $0 > 0 }
+        XCTAssertFalse(asked.isEmpty, "positive control: voxels ask for a cell")
+        // The relaxed floor must ask for a COARSER cell somewhere — otherwise the mode
+        // is inert on this path, which is exactly the defect.
+        XCTAssertGreaterThan(asked.reduce(0, +) / Double(asked.count),
+                             askedCertified.isEmpty ? 0
+                                : askedCertified.reduce(0, +) / Double(askedCertified.count),
+                             "★ the aesthetic floor asks for no coarser a cell than the "
+                             + "certified one — on a swept job the mode would be inert")
+        print("""
+
+        ── swept demand, his part ───────────────────────────────────────
+        voxels asking (certified floor) .. \(askedCertified.count)
+        voxels asking (aesthetic floor) .. \(asked.count)
+        mean cell asked, certified ....... \(askedCertified.isEmpty ? 0 : askedCertified.reduce(0,+)/Double(askedCertified.count)) mm
+        mean cell asked, aesthetic ....... \(asked.reduce(0,+)/Double(asked.count)) mm
+        ★ capped by HIS sweep window at .. 8.00 mm
+
+        """)
+    }
+
     /// ★ THE FLOOR TRACKS THE FIELD, not just its presence — a half-worked part sits
     /// between the two, so the rule is graded rather than a switch.
     func testTheFloorSitsBetweenTheTwoOnAHalfWorkedPart() throws {
