@@ -167,6 +167,18 @@ struct LSDFUniforms {
     float4x4 clipFromModel;   // P · V · model — the body's own mvp
     float4x4 eyeFromModel;    // V · model
     float4x4 eyeNormalBasis;  // rotation of V · model, for the G-buffer normal
+    // ★★★ THE BUILD DIRECTION, IN MODEL SPACE — xyz unit, w unused. APPENDED LAST on
+    // both sides, which this struct's own history says is the only safe place.
+    //
+    // ★ IT IS NOT +Y AND IT IS NOT A CONSTANT. The printed-layer fill first banded on
+    // `hitPos.z`, was "corrected" to `hitPos.y` on the reasoning that the viewer calls
+    // model Y the height (`mheight = in.position.y`, the stage's `floorY`) — and that
+    // was wrong. Those are the STAGE frame, after the settle rotation the model matrix
+    // carries. The part's own build direction is `BuildOrientation.buildDirection`,
+    // which defaults to +Z ("Plate up +Z") and MOVES when the orientation is baked. So
+    // it is passed rather than assumed, and the layers stack along whatever the user
+    // is actually printing along.
+    float4 buildDir;
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -240,8 +252,12 @@ struct LCell {
     float3 q;      // position within the covering cell, [-0.5, 0.5]
     float3 blk;    // that cell's index in level-L units
     float  S;      // its size (mm)
-    float  m;      // 2^L, in BASE cells
+    float  m;      // 2^L, in BASE cells (STEPPED: S/S0, an arbitrary real)
     int    L;
+    // ★★★ STEPPED: > 0 when this base cell belongs to a region that stated its own
+    // cell VERBATIM, and then `S` is that size and `L`/`blk` are meaningless. See
+    // `LatticeCellField.steppedCellMM` for why a dyadic level cannot carry it.
+    float  stepped;
 };
 
 // ★ THE READ IS PER BASE CELL, NOT PER STEP. The march samples the same base cell
@@ -260,12 +276,50 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
         lvl = max(0.0, cellTex.read(uint3(bi), 0).g);
     }
     LCell o;
+    o.stepped = 0.0;
+    // ★ STEPPED TAKES THE SIZE STRAIGHT OUT OF THE TEXTURE. `b` is the covering cell's
+    // size in mm, 0 on every other algorithm — so the dyadic path below is untouched
+    // and doubled is bit-identical.
+    if (all(bi >= -0.5) && all(bi < dims - 0.5)) {
+        float sMM = cellTex.read(uint3(bi), 0).b;
+        if (sMM > 0.0) {
+            o.stepped = sMM;
+            o.S = sMM;
+            o.m = sMM / max(S0, 1e-6);
+            o.L = 0;
+            // ★★★ THE BLOCK INDEX, NOT ZERO. This was `float3(0.0)`, and the march
+            // caches its 3x3x3 neighbourhood on `baseCell = LC.blk`: a CONSTANT key
+            // means the cache is filled once and never refreshed, and every neighbour
+            // read `(baseCell + offset) * m` lands next to the grid ORIGIN instead of
+            // next to the ray. Stepped therefore drew whatever the corner of the volume
+            // happened to contain, everywhere. Same formula as the dyadic path — it was
+            // never level-specific, only `m`-specific.
+            o.blk = floor(max(bi, float3(0.0)) / max(o.m, 1e-6));
+            o.q = float3(0.0);   // filled by the caller, from its own point
+            return o;
+        }
+    }
     o.L = int(lvl + 0.5);
     o.m = exp2(float(o.L));
     o.blk = floor(max(bi, float3(0.0)) / o.m);
     o.q = float3(0.0);          // filled by the caller, from its own point
     o.S = S0 * o.m;
     return o;
+}
+
+/// ★ WHERE A POINT SITS INSIDE ITS COVERING CELL, [-0.5, 0.5]. The one place the two
+/// encodings differ, so neither caller has to know which it is holding.
+///
+/// STEPPED tiles the SAME axes from the SAME origin as everything else, with its own
+/// size — so two regions at 5 and 6 mm do not share nodes where they meet. That is the
+/// algorithm, not an approximation of it (core counts the cost as `floating_ends`).
+inline float3 lsdf_cell_q(constant LSDFUniforms& U, LCell c, float3 p) {
+    if (c.stepped > 0.0) {
+        float3 rel = (p - U.latticeOrigin.xyz) / c.stepped;
+        return rel - floor(rel) - 0.5;
+    }
+    float3 cb = (p - U.latticeOrigin.xyz) / U.latticeOrigin.w;
+    return (cb - (c.blk * c.m + (c.m - 1.0) * 0.5)) / c.m;
 }
 
 /// The whole frame for a point — used where the cost of a read does not repeat
@@ -275,8 +329,73 @@ static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
     float S0 = U.latticeOrigin.w;
     float3 cb = (p - U.latticeOrigin.xyz) / S0;
     LCell o = lsdf_cell_frame_at(U, cellTex, round(cb));
-    o.q = (cb - (o.blk * o.m + (o.m - 1.0) * 0.5)) / o.m;
+    o.q = lsdf_cell_q(U, o, p);
     return o;
+}
+
+/// ★ THE PART'S OUTWARD NORMAL AT `p`, from the part SDF's own gradient. Only ever
+/// called within a voxel or two of the surface, where the narrow band is exact.
+inline float lsdf_sdf_at(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                         sampler samp, float3 p) {
+    float3 c = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / U.sdfDims.xyz;
+    return sdfTex.sample(samp, c).r;
+}
+inline float3 lsdf_part_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                               sampler samp, float3 p) {
+    float3 h = U.sdfSpacing.xyz;
+    float3 g = float3(
+        lsdf_sdf_at(U, sdfTex, samp, p + float3(h.x, 0, 0))
+      - lsdf_sdf_at(U, sdfTex, samp, p - float3(h.x, 0, 0)),
+        lsdf_sdf_at(U, sdfTex, samp, p + float3(0, h.y, 0))
+      - lsdf_sdf_at(U, sdfTex, samp, p - float3(0, h.y, 0)),
+        lsdf_sdf_at(U, sdfTex, samp, p + float3(0, 0, h.z))
+      - lsdf_sdf_at(U, sdfTex, samp, p - float3(0, 0, h.z)));
+    float l = length(g);
+    return l > 1e-6 ? g / l : float3(0.0, 1.0, 0.0);
+}
+
+/// ★★★ THE PART CLIP, EXCEPT WHERE THE SHELL HAS STOOD DOWN (maintainer, 2026-08-21:
+/// "the lattices are still peaking through the sides and the top … get rid of that
+/// artifacting").
+///
+/// ★ THE SHELL NOW CORRECTLY SURVIVES on the sides, the chamfer and the top — and the
+/// struts still reached those surfaces from behind. `dClip` bottoms out at `dPart`,
+/// which is 0 AT the surface, so the strut's cut face and the shell's triangles land at
+/// the same depth: z-fighting, resolved per pixel, which is the speckle he is seeing.
+///
+/// ★ SO THE MARCH ASKS THE SHELL'S OWN QUESTION. Where `shell_is_latticed` is true the
+/// shell is gone and the struts must reach the surface — that is the mouth, and a strut
+/// stopping short there would leave a visible ledge. Where it is FALSE the shell owns
+/// the boundary and the lattice is pulled one voxel inside it, out of contention. One
+/// rule, one implementation, evaluated on the part's own normal instead of a fragment's
+/// — so the hole and the lattice cannot disagree about which surfaces are open.
+///
+/// Inert unless the clip is armed (`RC.origin.w`), so the standalone sample block and
+/// every pre-existing path are bit-identical.
+inline float lsdf_part_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                            texture3d<float> regionTex, sampler samp,
+                            constant ShellClip& RC, constant float4* decls,
+                            float3 p, float dPart) {
+    if (RC.origin.w < 0.5) { return dPart; }
+    // ★★★ BOUNDED IN MILLIMETRES, NOT IN VOXELS (maintainer, 2026-08-22: "The lattice
+    // is stuck and not going the full length of the wall").
+    //
+    // ★ THIS WAS ONE SDF VOXEL, AND THE SDF VOXEL IS A PREVIEW SETTING. At Fine 128
+    // on his part that is 1.72 mm; at Fast 64 — which is what he is on — it is 3.45 mm.
+    // So switching the preview to Fast silently ate 3.45 mm of lattice off every
+    // surface the shell still draws, which on a wall this size is most of what he
+    // marked. A margin whose job is to break a DEPTH COINCIDENCE must not scale with a
+    // resolution knob.
+    //
+    // ★ WHAT IT ACTUALLY HAS TO CLEAR is the sampled field's error at the surface, and
+    // core's narrow band is exact on a plane and near-exact on a gentle curve. A
+    // quarter of a voxel covers that; the clamp keeps it a fraction of a millimetre at
+    // any resolution, which is invisible and still wins the depth test.
+    float voxel = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+    float inset = clamp(0.25 * voxel, 0.20, 0.60);
+    if (dPart < -2.0 * inset) { return dPart; }   // deep inside: nothing to fight
+    float3 pn = lsdf_part_normal(U, sdfTex, samp, p);
+    return shell_is_latticed(p, pn, RC, decls, regionTex) ? dPart : dPart + inset;
 }
 
 static LSDFHit lsdf_march(constant LSDFUniforms& U,
@@ -286,6 +405,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           texture3d<float> regionTex,
                           sampler samp,
                           constant ShellClip& RC,
+                          constant float4* decls,
                           float3 ro, float3 rd) {
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
     out.dressing = 0.0;
@@ -360,7 +480,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         }
         float cellHere = LC.S;
         float3 baseCell = LC.blk;
-        float3 q = (cb - (LC.blk * LC.m + (LC.m - 1.0) * 0.5)) / LC.m;
+        float3 q = lsdf_cell_q(U, LC, p);
 
         // Flush trim field: part SDF eroded by `delta` (kills the crease-bulge
         // slivers — see stepParams.y) ∨ the exact part bbox (the bbox term stops
@@ -379,7 +499,10 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // field on the CPU and read here. The SAME field the shell's hole is cut
         // from, so the two cannot describe different volumes.
         float dRegion = regionTex.sample(samp, stc).r;
-        float dClip = max(max(dPart, dBox), dRegion);
+        // ★ See `lsdf_part_clip`: at the declared mouth the struts reach the surface;
+        // everywhere the shell survives they stop one voxel inside it.
+        float dClip = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
+                                             p, dPart), dBox), dRegion);
 
         // ★★ THE BOUNDARY DRESSINGS — RIM AND DIAGRID (task D1; maintainer,
         // 2026-08-19: "rim is supposed to be around only the outside edges" and
@@ -520,9 +643,12 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // Pulling the fill in by one SDF voxel gives the shell undisputed ownership of
         // the boundary: the fill is what you see THROUGH the hole in the shell, never
         // what you see instead of the shell.
-        float solidInset = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
-        float F = anyActive ? max(dn * cellHere, dClip)
-                            : max(max(dPart + solidInset, dBox), dRegion);
+        // ★ THE FILL TAKES `dClip` UNCHANGED NOW. It used to add its own unconditional
+        // one-voxel inset to keep off the shell's surface; `dClip` already does exactly
+        // that, and only where the shell is actually there — so the fill reads flush
+        // through the mouth instead of recessed behind a ledge, and still cannot
+        // z-fight anywhere the shell survives.
+        float F = anyActive ? max(dn * cellHere, dClip) : dClip;
         if (F < eps) {
             // Secant refinement to the F = 0 root (see tPrev above): F is locally
             // near-linear along the ray, so one step lands within O(eps²) of the
@@ -553,7 +679,13 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // by at most one level — so the smallest thing near a level-L cell is S/2,
         // and a 0.7·S step from inside a coarse cell would march straight over a fine
         // neighbour's struts and punch holes in it.
-        float safeCell = LC.L > 0 ? cellHere * 0.5 : cellHere;
+        // ★ THE FINEST CELL THAT CAN BE ADJACENT. Doubled is a 2:1 BALANCED octree, so
+        // a face neighbour is at worst half this one. STEPPED has no balance rule at
+        // all — the region next door states whatever it derived — so the bound is the
+        // finest cell anywhere in the plan, which is exactly what the base cell `S0` is
+        // set to on the stepped path.
+        float safeCell = LC.stepped > 0.0 ? U.latticeOrigin.w
+                       : (LC.L > 0 ? cellHere * 0.5 : cellHere);
         float step = anyActive ? clamp(F * stepScale, 0.05 * safeCell, 0.7 * safeCell)
                                : 0.7 * safeCell;
         step = max(step, dClip - 3.0 * eps);
@@ -574,6 +706,7 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
                           texture3d<float> regionTex,
                           sampler samp,
                           constant ShellClip& RC,
+                          constant float4* decls,
                           float3 hitPos, float hitRho) {
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
     float3 bc = (bmin + bmax) * 0.5, be = (bmax - bmin) * 0.5;
@@ -604,7 +737,9 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
         // part surface takes the part's. Otherwise the cut face is shaded as if
         // it were still a strut and reads as a tear.
         float dR = regionTex.sample(samp, stc).r;
-        d6[k] = max(dmin * LCk.S, max(max(dP, dB), dR));
+        d6[k] = max(dmin * LCk.S,
+                    max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
+                                           pts[k], dP), dB), dR));
     }
     return normalize(float3(d6[0] - d6[1], d6[2] - d6[3], d6[4] - d6[5]) + 1e-6);
 }
@@ -659,7 +794,13 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
         float3 solidHue = mix(U.denseColor.xyz, float3(1.0), 0.55);
         float lh = U.overlayParams.w;
         if (lh > 1e-4) {
-            float z = hitPos.z / lh;
+            // ★★★ STACKED ALONG THE BUILD DIRECTION — see `LSDFUniforms.buildDir` for
+            // why neither Z nor Y is right as a constant. Zero (an old caller that does
+            // not set it) skips the banding rather than banding along an invented axis.
+            float3 bd = U.buildDir.xyz;
+            float bl = length(bd);
+            if (bl < 1e-6) { return mix(U.denseColor.xyz, float3(1.0), 0.55); }
+            float z = dot(hitPos, bd / bl) / lh;
             float period = max(fwidth(z), 1e-4);
             // Contrast dies once one layer is thinner than ~1.4 px.
             float legible = clamp(1.0 - period / 1.4, 0.0, 1.0);
@@ -766,13 +907,20 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                // `LatticeSDFRenderer.bindFragment` binds it on EVERY
                                // path — a declared-but-unbound buffer makes Metal drop
                                // the draw, the trap this file records twice already.
-                               constant ShellClip& RC [[buffer(4)]]) {
+                               constant ShellClip& RC [[buffer(4)]],
+                               // ★ THE DECLARATIONS THE SHELL IS CUT BY — the march
+                               // reads the SAME list so it can stop short of exactly
+                               // the surfaces the shell still draws. Bound on every
+                               // path by `bindFragment`; Metal drops a draw whose
+                               // declared buffer is unbound.
+                               constant float4* shellDecls [[buffer(5)]]) {
     float3 ro = U.eye.xyz;
     float3 rd = lsdf_ray(U, in.uv);
-    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, ro, rd);
+    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls, ro, rd);
     if (!h.hit) { discard_fragment(); }
 
-    float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, h.pos, h.rho);
+    float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
+                           h.pos, h.rho);
     float4 clip = U.clipFromModel * float4(h.pos, 1.0);
     float3 eyeP = (U.eyeFromModel * float4(h.pos, 1.0)).xyz;
     float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);

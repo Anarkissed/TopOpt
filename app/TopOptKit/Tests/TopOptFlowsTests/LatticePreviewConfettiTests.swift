@@ -475,11 +475,15 @@ final class LatticePreviewRegionMaskTests: XCTestCase {
                                  spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
             }
             if geo.isPlane {
-                guard let o = mesh.facePlaneOutline(
-                    f, planeNormal: SIMD3<Float>(geo.planeNormal),
-                    planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
-                return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
-                              halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
+                // ★★ THE ONE BUILDER, as production uses (`ProjectModel
+                // .resolvedLatticeFace` -> `planeFor`). This fixture used to assemble
+                // the plane by hand WITHOUT `outlineLoops`, i.e. as the face's BOUNDING
+                // BOX — 41.2% and 29.8% face on his two walls. The emission now refuses
+                // a B-rep face with no outline rather than declaring material he never
+                // marked, so a hand-built rectangle emits nothing and the fixture went
+                // vacuous. Going through `planeFor` is what makes this test exercise the
+                // shape production actually emits.
+                return LatticeRegionEmission.planeFor(face: f, in: mesh)
             }
             return nil
         }

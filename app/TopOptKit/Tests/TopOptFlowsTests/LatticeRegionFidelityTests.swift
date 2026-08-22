@@ -70,13 +70,18 @@ final class LatticeRegionFidelityTests: XCTestCase {
             center: SIMD3<Double>(0, 0, 0), normal: SIMD3<Double>(0, 0, 1),
             halfUMM: 10, halfWMM: 4)
 
+        // ★ NO `faceID` — this synthetic plane carries no OUTLINE, and the emission now
+        // refuses a B-rep face without one rather than declaring its bounding box (41.2%
+        // and 29.8% face on his two walls). What is under test here is the EXPANDER
+        // acting on the half-extents, which is a rectangle's own property: passing a
+        // face id would be claiming this is a resolved face when it is a box.
         let zero = try XCTUnwrap(LatticeRegionEmission.spec(
-            for: plane, role: .include, depthMM: 6, faceID: 1, expandMM: 0))
+            for: plane, role: .include, depthMM: 6, expandMM: 0))
         XCTAssertEqual(zero.halfUMM, 10, accuracy: 1e-12, "zero is exactly the face")
         XCTAssertEqual(zero.halfWMM, 4, accuracy: 1e-12)
 
         let shrunk = try XCTUnwrap(LatticeRegionEmission.spec(
-            for: plane, role: .include, depthMM: 6, faceID: 1, expandMM: -3))
+            for: plane, role: .include, depthMM: 6, expandMM: -3))
         XCTAssertEqual(shrunk.halfUMM, 7, accuracy: 1e-9,
                        "★ THE DEFECT: a negative expand must PULL THE SLAB IN. It was "
                        + "clamped to zero by a hand-rolled copy of "
@@ -89,7 +94,7 @@ final class LatticeRegionFidelityTests: XCTestCase {
         // And it floors per axis rather than inverting, which is the shared
         // expander's rule and now the emission's too.
         let past = try XCTUnwrap(LatticeRegionEmission.spec(
-            for: plane, role: .include, depthMM: 6, faceID: 1, expandMM: -50))
+            for: plane, role: .include, depthMM: 6, expandMM: -50))
         XCTAssertGreaterThan(past.halfUMM, 0, "a shrink past the face collapses, never inverts")
         XCTAssertGreaterThan(past.halfWMM, 0)
         XCTAssertEqual(past.halfUMM, LatticeSlabExpand.minHalfExtentMM, accuracy: 1e-12)

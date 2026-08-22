@@ -52,10 +52,20 @@ final class LatticeEmptyIsExplainedTests: XCTestCase {
         try XCTSkipIf(scene.memberThicknessMM.isEmpty, "core gave no widths")
         r.setScene(scene)
         r.lineWidthMM = 0.42
-        r.params = LatticeProxyParams(latticeID: "octet", cellMM: 4.0,
+        // ★ DERIVED, so the bar survives the member being measured on the PART and the
+        // floor following the stage MODE — both of which moved the widths this used to
+        // hard-code. What is under test is that an empty region EXPLAINS ITSELF, and
+        // names the members rather than printability.
+        let occ = scene.occupancy
+        let widest = (0..<occ.count).filter { occ.values[$0] > 0.5 }
+            .map { scene.memberThicknessMM[$0] }
+            .filter { $0.isFinite && $0 > 0 }.max() ?? 0
+        XCTAssertGreaterThan(widest, 0, "positive control: measured material")
+        let tooCoarse = 1.2 * widest / Swift.max(scene.minCellsPerMember, 1)
+        r.params = LatticeProxyParams(latticeID: "octet", cellMM: tooCoarse,
                                       minRelativeDensity: 0.25, maxRelativeDensity: 0.55)
         XCTAssertEqual((r.cellField?.field.values ?? []).filter { $0 >= 0 }.count, 0,
-                       "positive control: nothing here can hold a 4 mm cell")
+                       "positive control: nothing here can hold a \(tooCoarse) mm cell")
         let why = try XCTUnwrap(r.emptyReason, "★ an empty region must explain itself")
         XCTAssertTrue(why.contains("too thin"),
                       "★ it must name the MEMBERS, whose remedy is a FINER cell — the "

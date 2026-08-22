@@ -1128,7 +1128,9 @@ std::vector<double> lattice_cell_size_plan(
     const double* width, std::size_t width_count,
     double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
     int cap_radius_voxels, const std::string& topology,
-    const double* desired_cell_mm = nullptr, std::size_t desired_count = 0);
+    const double* desired_cell_mm = nullptr, std::size_t desired_count = 0,
+    // ★ The floor core CULLS by. 0 keeps its accuracy floor (5). See bridge.cpp.
+    double cells_per_member_floor = 0.0);
 
 /// Core's sub-floor retention stress-fraction ceiling (see grading.hpp).
 double lattice_subfloor_retention_fraction();
@@ -1243,9 +1245,26 @@ struct LatticeRegionDerivation {
   // the field can say so before the run rather than after.
   bool prints = false;
 };
+// ★ `cells_per_member_floor` — 0 keeps core's ACCURACY floor (5), which is what every
+// pre-existing caller gets. Pass the mode's own floor to derive the cell the mode
+// actually allows: on an 11 mm wall, 5 gives a 2.20 mm cell and 2 gives 5.50 mm.
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
-    double min_extrudable_width_mm, double stated_relative_density);
+    double min_extrudable_width_mm, double stated_relative_density,
+    double cells_per_member_floor);
+
+// ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES, for the preview. See bridge.cpp for
+// the flat layout and for why the tensor — not a scalar — is the input that gates this.
+std::vector<double> organic_preview_field(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const double* spacing_mm, std::size_t spacing_count,
+    double min_extrudable_width_mm,
+    double build_x, double build_y, double build_z,
+    double overhang_angle_deg, double rho_min, double rho_max,
+    int fnx, int fny, int fnz, double fspacing,
+    double fox, double foy, double foz, double band_mm);
 
 std::vector<std::string> lattice_certifiable_topologies();
 

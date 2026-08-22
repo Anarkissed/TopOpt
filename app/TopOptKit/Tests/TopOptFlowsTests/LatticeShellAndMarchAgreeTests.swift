@@ -251,12 +251,40 @@ final class LatticeShellAndMarchAgreeTests: XCTestCase {
                        + "constant exists to prevent — and which my duplicate reopened "
                        + "for one build during the merge.")
         let start = try XCTUnwrap(src.range(of: "inline bool shell_is_latticed"))
-        let body = String(src[start.lowerBound...].prefix(1200))
-        XCTAssertTrue(body.contains("cellTex"),
-                      "★ the shell must ask the CELL field — a region is a declaration, "
-                      + "not a verdict about whether the run latticed it")
-        XCTAssertTrue(body.contains("filter::nearest"),
-                      "★ cell activation is a FLAG: interpolating it fringes every solid "
-                      + "island with a half-transparent border one cell wide")
+        // ★ THE WHOLE FUNCTION, not a fixed slice. A 1200-character prefix silently
+        // stopped covering the body when the rule grew, so an assertion could pass by
+        // looking at a comment and fail by looking past the end — neither of which is
+        // about the code. Bounded by the closing brace at column 0.
+        let tail = String(src[start.lowerBound...])
+        let body = tail.range(of: "\n}").map { String(tail[..<$0.upperBound]) } ?? tail
+        // ★★★ SUPERSEDED (2026-08-22). This required the shell to ask the CELL field,
+        // on the reasoning that a region is "a declaration, not a verdict about whether
+        // the run latticed it". That rule cut the shell wherever the owning CELL was
+        // active — a question about a POINT — and a face region is a PRISM that
+        // necessarily passes through the chamfer, the top edge and the far wall. Every
+        // one of those was discarded, which is the report the maintainer filed four
+        // times ("Why is it breaking the top faces??? They are just gone").
+        //
+        // The rule now keys on the DECLARED FACE and the fragment's own NORMAL, which is
+        // the only thing that distinguishes the face he marked from a surface merely
+        // standing in the prism's way. What must still be true is that the shell and the
+        // march describe ONE volume — so the shell reads the same baked region field the
+        // march is clipped by, and takes the fragment normal.
+        XCTAssertTrue(body.contains("regionTex.sample"),
+                      "★ the shell must read the same baked region field the march is "
+                      + "clipped by, or the hole and the struts describe two volumes")
+        XCTAssertTrue(body.contains("float3 mnormal"),
+                      "★ …and the fragment's own normal, which is what separates the "
+                      + "declared face from the chamfer standing in the prism")
+        // ★ AND IT INTERPOLATES **DELIBERATELY** NOW, which is the opposite of what
+        // this line used to require. Cell activation was a FLAG — nearest was right,
+        // because interpolating a boolean fringes every solid island with a
+        // half-transparent border one cell wide. A signed DISTANCE is not a flag: it is
+        // the value trilinear sampling exists for, it is how `partSDF` already renders
+        // flat faces straight, and nearest on it would step the hole's edge to the voxel
+        // grid — a 1.7 mm staircase around every declared face.
+        XCTAssertTrue(body.contains("filter::linear"),
+                      "★ a distance field must interpolate, or the hole's edge is a "
+                      + "voxel staircase instead of the face's own outline")
     }
 }

@@ -68,14 +68,38 @@ private struct ViewerUniforms {
 /// `ShadeParams` in `viewerShaderSource`. Every strength is a plain 0…1 multiplier
 /// and 0 means OFF, so the BEFORE capture is the same shader with zeros rather than
 /// a second code path that could drift from the shipping one.
-/// ★ MIRRORS `ShellClip` IN THE SHADER, field for field: where the region field
-/// lives in model space, and whether there is one. The region's SHAPE is in the
-/// field itself (`LatticeSDFScene.regionSDF`) — see `shellClipMSL` for why it is
-/// no longer expressible here.
+/// ★ MIRRORS `ShellClip` IN THE SHADER, field for field — 64 bytes, four float4s,
+/// asserted in `ShellClipLayoutTests`. The DECLARATIONS themselves do not live here:
+/// they are a variable-length list and ride in their own buffer (index 5), which is
+/// what keeps this struct a fixed size that a byte-offset test can pin.
+///
+/// ★★ WHY THE LAYOUT IS THE HAZARD. This struct and its MSL twin are matched by BYTE
+/// OFFSET, not by name — a field added to one side alone shifts everything after it
+/// and the shader reads a neighbouring uniform as this one. That has already happened
+/// once on this file (the shader read `lightDir` as the overlay flags), so the array
+/// went into a buffer rather than growing the struct.
 struct ShellClipUniform {
-    var grid = SIMD4<Float>(0, 0, 0, 0)      // xyz origin, w = enabled
+    /// xyz = the REGION FIELD's voxel-(0,0,0) centre in model mm, w = enabled (>0.5).
+    var grid = SIMD4<Float>(0, 0, 0, 0)
+    /// xyz = the region field's voxel size (mm), w = the nudge INTO the region (mm).
     var spacing = SIMD4<Float>(1, 1, 1, 0)
+    /// xyz = the region field's voxel counts, w = how many declarations are in buffer 5.
     var dims = SIMD4<Float>(1, 1, 1, 0)
+    /// x = cos(the largest angle a surface may differ from the declared face and
+    /// still be opened). y, z, w unused.
+    var gate = SIMD4<Float>(1, 0, 0, 0)
+}
+
+/// ★★★ ONE DECLARATION, AS THE SHELL SHADER READS IT — three float4s, matched to
+/// `SHELL_DECL_STRIDE` in `shellClipMSL`. See there for the rule it feeds.
+struct ShellDeclUniform {
+    /// FACE: xyz = the face's INWARD normal (model space), w = 0.
+    /// BOLT: xyz = the axis direction,                     w = 1.
+    var dir = SIMD4<Float>(0, 0, 1, 0)
+    /// BOLT only: xyz = a point on the axis, w = radius (mm). Unused for a face.
+    var axisPoint = SIMD4<Float>(0, 0, 0, 0)
+    /// BOLT only: w = half-length (mm). Unused for a face.
+    var extent = SIMD4<Float>(0, 0, 0, 0)
 }
 
 private struct ShadeParams {
@@ -174,21 +198,116 @@ private struct ContactUniforms {
 // exact divergence the comment below promises cannot happen. Both libraries now
 // get the same text from the same place.
 let shellClipMSL = """
+#define SHELL_DECL_STRIDE 3
 struct ShellClip {
-    float4 origin;      // xyz = cell-(0,0,0) centre, w = enabled (>0.5)
-    float4 spacing;     // xyz = cell size mm
-    float4 dims;        // xyz = cell counts
+    float4 origin;      // xyz = region-field voxel-(0,0,0) centre, w = enabled (>0.5)
+    float4 spacing;     // xyz = voxel size mm, w = the nudge INTO the region (mm)
+    float4 dims;        // xyz = voxel counts, w = declaration count in `decls`
+    float4 gate;        // x = cos(max angle from the declared face)
+                        // y: 0 = declared-face rule (the STAGE)
+                        //    2 = cell-activation rule (the sample BLOCK) — see below
+                        // zw unused
 };
-inline bool shell_is_latticed(float3 mpos, constant ShellClip& c,
-                              texture3d<float> cellTex) {
+// ★★★ THE SHELL IS CUT OVER THE DECLARED FACE, AND NOWHERE ELSE (maintainer,
+// 2026-08-21, his FOURTH report of the same thing: "there is *SUPPOSED* to be a
+// chamfer AROUND the lattice, but the lattice is breaking that top edge", "Why is
+// it breaking the top faces??? They are just gone").
+//
+// ★★ THE OLD RULE ASKED THE WRONG QUESTION. It was `is this fragment's owning CELL
+// active` — a question about a POINT. A face region is a prism: it starts at the face
+// and runs `depth` into the part, so it necessarily passes THROUGH other surfaces —
+// the chamfer around the face, the top edge, the far wall. Every one of those has
+// fragments inside the prism, so every one of them was discarded. No amount of
+// reshaping the region can fix that, because the region is not what is wrong: a
+// point-in-volume test cannot tell the face he declared from a surface that merely
+// stands in its way. Four sessions of shrinking the region chased exactly this.
+//
+// ★★ SO THE RULE READS THE FRAGMENT'S OWN NORMAL. The face he declared is opened;
+// a surface pointing some other way is not. That is one dot product, and it is the
+// only thing that distinguishes the two — they are at the same place, inside the same
+// prism, and differ ONLY in which way they face.
+//
+//   opened  ⇔  ∃ declaration d :  dot(surfaceNormal, −d.inward) ≥ gate.x
+//                             ∧  the point, nudged into the region, is inside it
+//
+// A chamfer sits ~45° off its face and fails the first test at any sane gate. The
+// far wall of the same plate faces the OTHER way (dot = −1) and fails it too, so a
+// slab deeper than the plate no longer eats the back surface. The origin face itself
+// reads dot = +1 exactly, because its triangles carry that very normal — so the face
+// he declared is always opened, which is the half of the rule that must never fail.
+//
+// ★ THE NUDGE IS WHY THE REGION ITSELF NEED NOT BE PADDED. A face region begins ON
+// the face, so the field's zero crossing is COINCIDENT with the shell's own triangles
+// and a sampled field cannot resolve which side a fragment is on — that coin flip is
+// the speckle. The bake used to move the region's front face 1.5 voxels out to break
+// it, which made the primitive bigger than the face and is exactly what the ruling of
+// 2026-08-21 forbids ("ONLY AS BIG AS THE FACE. Never bigger. Never smaller."). The
+// coincidence is a SAMPLING problem, not a geometry one, so it is fixed at the sample:
+// step `spacing.w` along the direction we already know points into the region. The
+// region stays exactly the face.
+//
+// ★ A BOLT DECLARATION IS A CYLINDER, TESTED IN CLOSED FORM. It has no origin face to
+// agree with — its opening surface is the whole barrel — so it is opened by
+// containment alone, which is what it did before this rule. It is evaluated here
+// rather than read from the field because the field is the UNION of every region: a
+// bolt read from it would re-open every face prism it is unioned with.
+inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c,
+                              constant float4* decls, texture3d<float> regionTex) {
     if (c.origin.w < 0.5) { return false; }
-    float3 g = (mpos - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
-    // Outside the cell grid there is no lattice — and no clamping, which would
-    // smear the edge cells across the whole part.
-    if (any(g < float3(-0.5)) || any(g > c.dims.xyz - float3(0.5))) { return false; }
-    float3 uvw = (g + 0.5) / max(c.dims.xyz, float3(1.0));
-    constexpr sampler s(coord::normalized, filter::nearest, address::clamp_to_edge);
-    return cellTex.sample(s, uvw).r >= 0.0;
+    // ★★★ NO DECLARATIONS ⇒ THE CELL'S OWN EXTENT IS THE RULE — the sample BLOCK.
+    //
+    // ★ WHAT AN EMPTY REGION LIST MEANS IS NOT ONE ANSWER, and this is the second one.
+    // With a declaration, the shell opens over the FACE he marked. With none — the
+    // settings page's sample block, whose entire subject IS the cell — there is no face
+    // to key on, and the honest boundary is where the lattice actually is: the per-cell
+    // activation the march itself folds against.
+    //
+    // ★ SAYING "OPEN EVERYWHERE" HERE WAS TOO BROAD, and `UnifiedShadingTests
+    // .testSharedDepthBufferHidesTheLatticeBehindAnOpaqueShell` caught it: turning the
+    // body opaque changed the indigo count by nothing at all (8,634 -> 8,634), because
+    // the shell had stood down over the WHOLE part. An opaque shell must still occlude
+    // every strut outside a latticed cell — that bracket is what proves the lattice is
+    // sharing one depth buffer rather than being pasted on top.
+    //
+    // `clipTex` carries the CELL field in this mode, and activation is a FLAG: nearest,
+    // never interpolated, or every solid island gets a half-transparent fringe one cell
+    // wide.
+    if (c.gate.y > 1.5) {
+        float3 gc = (mpos - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
+        if (any(gc < float3(-0.5)) || any(gc > c.dims.xyz - float3(0.5))) { return false; }
+        float3 cuv = (gc + 0.5) / max(c.dims.xyz, float3(1.0));
+        constexpr sampler cs(coord::normalized, filter::nearest, address::clamp_to_edge);
+        return regionTex.sample(cs, cuv).r >= 0.0;
+    }
+    int n = int(c.dims.w + 0.5);
+    if (n <= 0) { return false; }
+    float3 sn = normalize(mnormal);
+    constexpr sampler s(coord::normalized, filter::linear, address::clamp_to_edge);
+    for (int i = 0; i < n; i++) {
+        float4 d = decls[SHELL_DECL_STRIDE * i];
+        if (d.w > 0.5) {
+            // BOLT: inside the cylinder, no normal gate.
+            float3 ax = normalize(d.xyz);
+            float3 pa = decls[SHELL_DECL_STRIDE * i + 1].xyz;
+            float3 rel = mpos - pa;
+            float  t = dot(rel, ax);
+            if (abs(t) > decls[SHELL_DECL_STRIDE * i + 2].w) { continue; }
+            if (length(rel - ax * t) > decls[SHELL_DECL_STRIDE * i + 1].w) { continue; }
+            return true;
+        }
+        // FACE: the surface must agree with the one he declared. `d.xyz` points INTO
+        // the part, so the shell's outward normal at that face is its negative.
+        float3 inward = normalize(d.xyz);
+        if (dot(sn, -inward) < c.gate.x) { continue; }
+        float3 p = mpos + inward * c.spacing.w;
+        float3 g = (p - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
+        // Outside the baked field there is no region — and no clamping, which would
+        // smear the edge voxels across the whole part.
+        if (any(g < float3(-0.5)) || any(g > c.dims.xyz - float3(0.5))) { continue; }
+        float3 uvw = (g + 0.5) / max(c.dims.xyz, float3(1.0));
+        if (regionTex.sample(s, uvw).r <= 0.0) { return true; }
+    }
+    return false;
 }
 """
 
@@ -208,6 +327,11 @@ struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]];
 struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight;
               // §6 — the cut's half-space test, per fragment.
               float3 mpos; float member;
+              // ★ THE SURFACE'S OWN NORMAL, IN MODEL SPACE — the shell's declared-face
+              // test. It must be MODEL space because `mpos` and the declared normals
+              // are, and it must be the REST normal (not flexed) for the same reason
+              // `mpos` is: the region was baked against the rest mesh.
+              float3 mnormal;
               // render-quality — world-space shading + eye depth.
               float3 wnormal; float3 wpos; float eyeZ; float3 eyeWS [[flat]]; };
 // ★ §6 — THE CUT, TESTED PER FRAGMENT.
@@ -261,6 +385,7 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
     o.tint = in.tint;
     o.mheight = in.position.y;   // model-space height (rest), for the M7.8 reveal scrub
     o.mpos = in.position;        // §6: rest model position, for the cut's half-space test
+    o.mnormal = in.normal;       // the shell's declared-face test (model space, rest)
     o.member = in.flags.x;       // §6: 1 on faces of the selected region
     // §2 / §3d: the WORLD normal + WORLD position (so the light can stay put while the
     // camera orbits) and the EYE depth (so the far side of a dense lattice can recede).
@@ -308,8 +433,11 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
                                 constant CutUniforms& cut [[buffer(3)]],
                                 texture2d<float, access::sample> aoTex [[texture(0)]],
                                 constant ShellClip& shellClip [[buffer(4)]],
-                                texture3d<float, access::sample> clipCellTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, shellClip, clipCellTex)) { discard_fragment(); }
+                                constant float4* shellDecls [[buffer(5)]],
+                                texture3d<float, access::sample> clipRegionTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex)) {
+        discard_fragment();
+    }
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
         if (t > reveal.x) discard_fragment();
@@ -577,7 +705,8 @@ using namespace metal;
 \(shellClipMSL)
 
 struct DIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; };
-struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; float3 mpos; };
+struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; float3 mpos;
+              float3 mnormal; };   // model-space rest normal — the shell's declared-face test
 struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; float4x4 normalMatrix; };
 struct GBuf { float  eyeZ    [[color(0)]];      // R32Float — unchanged, the contact pass reads this
               float4 enormal [[color(1)]];      // RGBA16Float — eye-space normal (xyz), w unused
@@ -596,6 +725,7 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
     o.eyeZ = -(u.modelView * float4(p, 1.0)).z;   // eye looks down −Z → positive into the screen
     o.enormal = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
     o.mpos = p;                                   // for the shell's lattice clip
+    o.mnormal = in.normal;                        // ditto — which way this surface faces
     return o;
 }
 
@@ -613,8 +743,11 @@ vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]
 // unified-shading task recorded for `bodyAlpha = 0` walls.
 fragment GBuf depth_fragment(DOut in [[stage_in]],
                              constant ShellClip& shellClip [[buffer(4)]],
-                             texture3d<float, access::sample> clipCellTex [[texture(4)]]) {
-    if (shell_is_latticed(in.mpos, shellClip, clipCellTex)) { discard_fragment(); }
+                             constant float4* shellDecls [[buffer(5)]],
+                             texture3d<float, access::sample> clipRegionTex [[texture(4)]]) {
+    if (shell_is_latticed(in.mpos, in.mnormal, shellClip, shellDecls, clipRegionTex)) {
+        discard_fragment();
+    }
     GBuf o;
     o.eyeZ = in.eyeZ;
     // Face the normal toward the eye. The mesh draws with cullMode .none, so a
@@ -3081,13 +3214,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // bound on EVERY path — Metal drops the draw on a missing binding, the same
         // trap the AO texture above documents. Disabled + a 1×1×1 neutral volume is
         // an exact identity when there is no lattice in the frame.
-        var shellClip = shellClipUniform
+        var (shellClip, shellDecls) = shellClipAndDecls
         enc.setFragmentBytes(&shellClip,
                              length: MemoryLayout<ShellClipUniform>.stride, index: 4)
-        enc.setFragmentTexture(latticeInFrame
-                               ? (latticeLayer?.shellClipCellTexture
-                                  ?? neutralShellClipTexture())
-                               : neutralShellClipTexture(), index: 4)
+        shellDecls.withUnsafeBytes {
+            enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 5)
+        }
+        enc.setFragmentTexture(shellClipTexture, index: 4)
         // Render quality: the AO/edge texture and the strengths that scale it.
         // `viewer_fragment` DECLARES both, so both must be bound on every path —
         // Metal drops the draw on a missing binding, the trap `contact_fragment` and
@@ -3478,10 +3611,28 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         set { latticeLayer?.lineWidthMM = newValue }
     }
 
+    /// The part's model-space build direction — see `LatticeSDFRenderer.buildDirection`.
+    var latticeBuildDirection: SIMD3<Double> {
+        get { latticeLayer?.buildDirection ?? SIMD3(0, 0, 1) }
+        set { latticeLayer?.buildDirection = newValue }
+    }
+
     /// The printer's layer height (mm) — see `LatticeSDFRenderer.layerHeightMM`.
     var latticeLayerHeightMM: Double {
         get { latticeLayer?.layerHeightMM ?? 0 }
         set { latticeLayer?.layerHeightMM = newValue }
+    }
+
+    /// The cell the lattice bake actually laid down at a model point — see
+    /// `LatticeSDFRenderer.bakedCellMMAt`. 0 when nothing was baked there.
+    func latticeBakedCellMM(at p: SIMD3<Float>) -> Double {
+        latticeLayer?.bakedCellMMAt(p) ?? 0
+    }
+
+    /// Stepped's per-region cell — see `LatticeSDFRenderer.steppedCellMM`.
+    var latticeSteppedCellMM: [Double] {
+        get { latticeLayer?.steppedCellMM ?? [] }
+        set { latticeLayer?.steppedCellMM = newValue }
     }
 
     /// Fit's per-region cell — see `LatticeSDFRenderer.fitCellMM`.
@@ -3601,10 +3752,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// The 1×1 "fully open, no edge" texture bound whenever AO is off — see
     /// `aoNeutralTex`. Built once, on first use.
-    /// ★ A 1×1×1 VOLUME MEANING "NOTHING IS LATTICED". Metal requires the texture
+    /// ★ A 1×1×1 VOLUME MEANING "INSIDE, EVERYWHERE". Metal requires the texture
     /// binding to exist whenever the shader declares it; binding nil is undefined.
-    /// Its value is −1, which `shell_is_latticed` reads as inactive — but the
-    /// enable flag is already 0 in that case, so this is belt and braces.
+    ///
+    /// ★★ ITS SENSE IS THE OPPOSITE OF THE ONE IT REPLACED, and that is the whole
+    /// point of writing it down. The old clip sampled a per-cell ACTIVATION and asked
+    /// `>= 0`, so a neutral of −1 meant "nothing latticed". The clip now samples the
+    /// region's SIGNED DISTANCE and asks `<= 0`, so the same −1 means the exact
+    /// opposite: inside. It is bound in only two situations and both want "inside":
+    /// the disabled path (where the enable flag already returns false before any
+    /// sample) and the SAMPLE BLOCK, which has no declarations because its whole
+    /// subject is the cell and must show its lattice through the shell.
     private var shellClipNeutralTex: MTLTexture?
     private func neutralShellClipTexture() -> MTLTexture? {
         if let t = shellClipNeutralTex { return t }
@@ -3625,17 +3783,98 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// ★ Only INCLUDE regions cut. An `exclude` is frozen SOLID and carries no
     /// lattice, so cutting there would be the same lie in the other direction.
 
-    private var shellClipUniform: ShellClipUniform {
+    /// ★★★ HOW FAR A SURFACE MAY LEAN AWAY FROM THE FACE HE DECLARED AND STILL BE
+    /// OPENED. The face's own triangles carry its normal exactly, so they read 1.0 and
+    /// are never at risk; the number only has to clear tessellation noise on a
+    /// nominally flat face while rejecting the things he named. A chamfer is ~45° off,
+    /// a side wall 90°, the far wall 180°. 30° sits clear of the first and gives a
+    /// tessellated face a wide margin.
+    static let shellFaceAgreementDegrees: Double = 30
+
+    /// ★ THE SHELL'S CLIP, AND THE DECLARATIONS IT IS CUT BY — built together because
+    /// they are one answer: the uniform is meaningless without the list, and a stale
+    /// pairing would cut a hole shaped like a face that is no longer declared.
+    ///
+    /// ★★ BOTH COME OFF THE SCENE, NOT OFF THE PROJECT. `scene.regions` is the very
+    /// list `scene.regionSDF` was baked from, in the same pass. Re-reading the project
+    /// here would let the hole and the field drift apart for a frame — and the field is
+    /// what the march is clipped by, so that frame would show struts with no hole to
+    /// see them through, or a hole with nothing behind it.
+    private var shellClipAndDecls: (ShellClipUniform, [SIMD4<Float>]) {
         var u = ShellClipUniform()
-        // ★ THE CELL GRID AND THE CELL TEXTURE — main's `shellClipMSL` samples the
-        // per-cell ACTIVATION, so the transform must describe that volume. Binding the
-        // region SDF here read a distance field through a cell-grid transform.
-        guard latticeInFrame, let g = latticeLayer?.shellClipGrid,
-              latticeLayer?.shellClipCellTexture != nil else { return u }
-        u.grid = SIMD4(g.origin, 1)            // w = 1 ⇒ enabled
-        u.spacing = SIMD4(g.spacing, 0)
-        u.dims = SIMD4(g.dims, 0)
-        return u
+        u.gate.x = Float(cos(Self.shellFaceAgreementDegrees * .pi / 180))
+        // One entry the shader always accepts — the SAMPLE BLOCK's answer. It has no
+        // declarations by construction (its subject IS the cell), and a shell that
+        // stayed whole there would hide the only thing on screen. A gate of −2 passes
+        // every normal, and the neutral region volume reads "inside" everywhere, so
+        // the two together say "open, everywhere the lattice draws" — the behaviour
+        // the sample block has always had, expressed in the one rule instead of a
+        // second code path.
+        let openEverywhere: [SIMD4<Float>] = [SIMD4(0, 0, 1, 0), .zero, .zero]
+
+        guard latticeInFrame, let layer = latticeLayer else { return (u, openEverywhere) }
+        let declared = (layer.scene?.regions ?? []).filter { $0.role == .include }
+        guard !declared.isEmpty, let g = layer.regionGrid, layer.regionTexture != nil else {
+            // ★ NO DECLARATIONS ⇒ THE SAMPLE BLOCK, and its rule is the CELL's own
+            // extent — see `shellClipMSL`. The transform must therefore describe the
+            // CELL grid, and the caller binds the cell texture to match.
+            guard let cg = layer.shellClipGrid,
+                  layer.shellClipCellTexture != nil else { return (u, openEverywhere) }
+            u.grid = SIMD4(cg.origin, 1)    // w = 1 ⇒ enabled
+            u.spacing = SIMD4(cg.spacing, 0)
+            u.dims = SIMD4(cg.dims, 0)
+            u.gate.y = 2                    // cell-activation mode
+            return (u, openEverywhere)
+        }
+
+        // ★ THE NUDGE, IN THE FIELD'S OWN UNITS. A face region starts ON the face, so
+        // the field's zero crossing is coincident with the shell's triangles; one
+        // voxel along the direction that points into the region resolves it. See
+        // `shellClipMSL` for why this lives here and not in the bake.
+        let voxel = max(g.spacing.x, max(g.spacing.y, g.spacing.z))
+
+        var decls: [SIMD4<Float>] = []
+        // ★ DEDUPED BY DIRECTION. Two coplanar declared faces give the shader the same
+        // test twice; on his part the walls repeat a handful of normals. The FIELD
+        // still carries every face's own outline — this only collapses the per-fragment
+        // normal test, which is a question about direction alone.
+        var seen: [SIMD3<Float>] = []
+        for r in declared {
+            switch r.kind {
+            case .face:
+                let n = SIMD3<Float>(LatticeRegionMask.unit(r.normal))
+                guard simd_length(n) > 0.5 else { continue }
+                if seen.contains(where: { simd_dot($0, n) > 0.9998 }) { continue }
+                seen.append(n)
+                decls.append(SIMD4(n, 0))          // w = 0 ⇒ face
+                decls.append(.zero)
+                decls.append(.zero)
+            case .bolt:
+                let a = SIMD3<Float>(LatticeRegionMask.unit(r.axisDir))
+                guard simd_length(a) > 0.5, r.radiusMM > 0 else { continue }
+                decls.append(SIMD4(a, 1))          // w = 1 ⇒ bolt
+                decls.append(SIMD4(SIMD3<Float>(r.axisPoint), Float(r.radiusMM)))
+                decls.append(SIMD4(0, 0, 0, Float(r.halfLengthMM)))
+            }
+        }
+        guard !decls.isEmpty else { return (u, openEverywhere) }
+
+        u.grid = SIMD4(g.origin, 1)                                    // w = 1 ⇒ enabled
+        u.spacing = SIMD4(g.spacing, voxel)
+        u.dims = SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), Float(decls.count / 3))
+        return (u, decls)
+    }
+
+    /// The texture `shellClipAndDecls` describes: the baked region field when there are
+    /// declarations, the neutral "inside everywhere" volume otherwise.
+    private var shellClipTexture: MTLTexture? {
+        guard latticeInFrame, let layer = latticeLayer else { return neutralShellClipTexture() }
+        // Declared ⇒ the region field. Undeclared (the sample block) ⇒ the CELL field,
+        // which is what `gate.y == 2` reads. Both are bound here so the uniform and the
+        // texture can never describe different volumes.
+        if (layer.scene?.regions ?? []).contains(where: { $0.role == .include }),
+           let t = layer.regionTexture { return t }
+        return layer.shellClipCellTexture ?? neutralShellClipTexture()
     }
 
     private func neutralAOTexture() -> MTLTexture? {
@@ -3784,11 +4023,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
             // ★ THE SAME CLIP HERE, or the G-buffer keeps a wall the visible pass
             // discarded and AO darkens the interior behind a surface nobody sees.
-            var pClip = shellClipUniform
+            var (pClip, pDecls) = shellClipAndDecls
             penc.setFragmentBytes(&pClip,
                                   length: MemoryLayout<ShellClipUniform>.stride, index: 4)
-            penc.setFragmentTexture(lattice?.shellClipCellTexture ?? neutralShellClipTexture(),
-                                    index: 4)
+            pDecls.withUnsafeBytes {
+                penc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 5)
+            }
+            penc.setFragmentTexture(shellClipTexture, index: 4)
             countedDraw(penc, .triangle, vertexDrawCount)
         }
         if let lattice, let lpipe = latticeGBufferPipeline {
@@ -3800,6 +4041,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             lattice.camera = camera
             lattice.modelRotation = modelRotation
             lattice.modelCenter = modelCenter
+            // ★★★ THE MARCH IS GIVEN THE SHELL'S OWN CLIP — the same uniform and the
+            // same declaration list the two shell passes above were bound with, from
+            // one builder. It is what lets the struts stop short of exactly the
+            // surfaces the shell still draws (`lsdf_part_clip`), and taking it from
+            // anywhere else would be a second answer to "which surfaces are open".
+            (lattice.shellClip, lattice.shellDecls) = shellClipAndDecls
             var lu = lattice.makeUnifiedUniforms(aspect: aspect,
                                                  clipFromModel: uniforms.mvp,
                                                  eyeFromModel: uniforms.modelView,
@@ -4338,7 +4585,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// id pass, keeping "empty space" and "no pass" apart.
     /// One reading of the lattice under a tap, in the two spaces the caller needs:
     /// `model` to sample the baked grids, `world` to put a label back on screen.
-    struct LatticeProbeHit { let model: SIMD3<Float>; let world: SIMD3<Float> }
+    /// ★ `cellMM` is the cell the BAKE laid down at `model`, read out of the very
+    /// field the march samples — never re-derived. 0 when nothing was baked there.
+    struct LatticeProbeHit { let model: SIMD3<Float>; let world: SIMD3<Float>
+                             let cellMM: Double }
 
     /// ★★ THE TAP PROBE — THE STRUT UNDER THE FINGER, NOT THE FACE BEHIND IT
     /// (maintainer, 2026-08-19: "I attempted to touch the green 'Load bearing' area.
@@ -4487,8 +4737,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // every reading came back at the floor of the band.
         let model = simd_inverse(modelViewMatrix()) * eye
         let world = simd_inverse(camera.viewMatrix()) * eye
-        return LatticeProbeHit(model: SIMD3<Float>(model.x, model.y, model.z),
-                               world: SIMD3<Float>(world.x, world.y, world.z))
+        let m = SIMD3<Float>(model.x, model.y, model.z)
+        return LatticeProbeHit(model: m,
+                               world: SIMD3<Float>(world.x, world.y, world.z),
+                               cellMM: latticeLayer?.bakedCellMMAt(m) ?? 0)
     }
 
     func pickFacePass(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> FaceIDPass {
@@ -4623,7 +4875,7 @@ struct MeshViewInputs {
     /// ★ Non-nil only while the lattice key is drilled into a colour: a tap then
     /// READS the strut under the finger (via the march's G-buffer) instead of
     /// selecting a face.
-    var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
+    var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)?
     /// Non-nil while the lattice key is drilled in: a double tap ANYWHERE leaves it.
     var onLatticeProbeExit: (() -> Void)?
     /// ★ §1(b) — THE SECOND TAP. A DOUBLE tap with the same one contact, carrying
@@ -4773,9 +5025,14 @@ public struct LatticeLayerInputs: Equatable {
     /// the run leaves SOLID as the layers that will actually be laid down there
     /// (maintainer, 2026-08-21). 0 ⇒ no printer stated ⇒ no banding.
     public var layerHeightMM: Double = 0
+    /// ★ The part's build direction in MODEL space (`BuildOrientation.buildDirection`).
+    /// Defaults to +Z, which is what the "Plate up +Z" chip reports.
+    public var buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)
     /// ★ Fit's per-region cell (`W / N*`), in the scene's region order. Empty ⇒ not
     /// a Fit job.
     public var fitCellMM: [Double] = []
+    /// ★ STEPPED's per-region cell, one per region in the scene's order.
+    public var steppedCellMM: [Double] = []
 
     public init(scene: LatticeSDFScene, params: LatticeProxyParams,
                 sceneToken: Int, faceTints: [FaceID: SIMD4<Float>],
@@ -4784,7 +5041,9 @@ public struct LatticeLayerInputs: Equatable {
                 subfloorRetention: LatticeSubfloorRetention? = nil,
                 lineWidthMM: Double = 0,
                 layerHeightMM: Double = 0,
-                fitCellMM: [Double] = []) {
+                buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+                fitCellMM: [Double] = [],
+                steppedCellMM: [Double] = []) {
         self.scene = scene
         self.params = params
         self.sceneToken = sceneToken
@@ -4795,7 +5054,9 @@ public struct LatticeLayerInputs: Equatable {
         self.subfloorRetention = subfloorRetention
         self.lineWidthMM = lineWidthMM
         self.layerHeightMM = layerHeightMM
+        self.buildDirection = buildDirection
         self.fitCellMM = fitCellMM
+        self.steppedCellMM = steppedCellMM
     }
 
     /// Equality is by TOKEN and by the cheap interactive values — never by the scene's
@@ -4807,6 +5068,7 @@ public struct LatticeLayerInputs: Equatable {
             && a.cellSweep == b.cellSweep && a.stressOverlay == b.stressOverlay
             && a.subfloorRetention == b.subfloorRetention
             && a.lineWidthMM == b.lineWidthMM && a.fitCellMM == b.fitCellMM
+            && a.steppedCellMM == b.steppedCellMM
             && a.dressingLevel == b.dressingLevel
     }
 }
@@ -4854,7 +5116,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
-                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)? = nil,
+                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)? = nil,
                 onLatticeProbeExit: (() -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
@@ -5015,7 +5277,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
-                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)? = nil,
+                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)? = nil,
                 onLatticeProbeExit: (() -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
@@ -5190,7 +5452,7 @@ extension MetalMeshView {
         /// ★ Set only while the lattice key is drilled in; when it is, a tap READS a
         /// strut instead of selecting, and it is answered by the march's own
         /// G-buffer rather than by the face picker.
-        private var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
+        private var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)?
         /// ★ The way OUT of the drilled-in key. Separate from `onPickDouble` because
         /// that one needs a face, and leaving a key is not a thing you do TO a face.
         private var onLatticeProbeExit: (() -> Void)?
@@ -5648,8 +5910,16 @@ extension MetalMeshView {
                     renderer.latticeLineWidthMM = lat.lineWidthMM
                     dirty = true
                 }
+                if renderer.latticeBuildDirection != lat.buildDirection {
+                    renderer.latticeBuildDirection = lat.buildDirection
+                    dirty = true
+                }
                 if renderer.latticeLayerHeightMM != lat.layerHeightMM {
                     renderer.latticeLayerHeightMM = lat.layerHeightMM
+                    dirty = true
+                }
+                if renderer.latticeSteppedCellMM != lat.steppedCellMM {
+                    renderer.latticeSteppedCellMM = lat.steppedCellMM
                     dirty = true
                 }
                 if renderer.latticeFitCellMM != lat.fitCellMM {
@@ -5765,7 +6035,7 @@ extension MetalMeshView {
             if deliver == nil, let probe = onLatticeProbe {
                 if let hit = renderer.latticeProbe(atNormalizedPoint: normalized,
                                                    width: w, height: h) {
-                    probe(hit.model, hit.world)
+                    probe(hit.model, hit.world, hit.cellMM)
                     return
                 }
             }

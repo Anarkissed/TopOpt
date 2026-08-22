@@ -179,7 +179,12 @@ final class LatticeLegendColourTests: XCTestCase {
                       "★ the MODEL point must undo view·model — it samples the grids")
         XCTAssertTrue(mv.contains("simd_inverse(camera.viewMatrix()) * eye"),
                       "★ the WORLD point must undo the view ALONE — it is projected")
-        XCTAssertTrue(ws.contains("setLatticeProbe(at: model, world: world)"),
+        // ★ The call gained `bakedCellMM:` (the cell is now READ from the baked field
+        // rather than re-derived, after the callout reported a 2.20 mm cell while the
+        // march drew 8.00 mm). The property this bar defends is unchanged: model and
+        // world are two different points and must not be crossed — so it pins the two
+        // labelled arguments and lets the rest of the signature move.
+        XCTAssertTrue(ws.contains("setLatticeProbe(at: model, world: world,"),
                       "★ …and the caller must keep them apart")
     }
 

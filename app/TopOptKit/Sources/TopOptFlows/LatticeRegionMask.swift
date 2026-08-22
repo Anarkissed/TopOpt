@@ -56,6 +56,15 @@ public enum LatticeRegionMask {
                 return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
                     <= region.inPlaneOffsetMM
             }
+            // ★★★ THE RECTANGLE IS A MANUAL PRIMITIVE'S OWN SHAPE, AND NOTHING ELSE'S.
+            // A primitive the user placed and dragged IS a box — measuring it as one is
+            // exact. A B-REP FACE is not: its rectangle is a bounding box that was 41.2%
+            // and 29.8% face on his two lattice walls, so falling back to it declares
+            // material he never marked. A face-derived region reaches this line only if
+            // its outline could not be built, and `LatticeRegionEmission` now refuses to
+            // emit that region at all — so it is counted as skipped and SAID, rather
+            // than silently replaced with a shape 2.4x too big. See `faceID`.
+            guard region.faceID == nil else { return false }
             return abs(uv.x) <= region.halfUMM && abs(uv.y) <= region.halfWMM
         case .bolt:
             let a = unit(region.axisDir)
@@ -103,9 +112,13 @@ public enum LatticeRegionMask {
             if !region.outlineLoops.isEmpty {
                 inPlane = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
                     - region.inPlaneOffsetMM
-            } else {
+            } else if region.faceID == nil {
+                // A manual primitive's own box — see `contains` for why a FACE never
+                // gets this fallback.
                 let q = SIMD2<Double>(abs(uv.x) - region.halfUMM, abs(uv.y) - region.halfWMM)
                 inPlane = simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
+            } else {
+                return big
             }
             let q = SIMD2<Double>(inPlane, along)
             return simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)

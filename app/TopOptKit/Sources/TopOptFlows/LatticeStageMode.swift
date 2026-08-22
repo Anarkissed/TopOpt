@@ -76,9 +76,9 @@ public enum LatticeStageMode: String, Codable, Hashable, Sendable, CaseIterable 
                  + "to certify are left solid, and the strength certificate covers the "
                  + "whole part."
         case .aesthetic:
-            return "Follows the stress pattern for appearance. Goes much finer — down "
-                 + "to 2 cells across a member instead of 5 — so thin walls stay "
-                 + "latticed."
+            return "Follows the stress pattern for appearance. Always goes down to 2 "
+                 + "cells across a member instead of 5, however hard the wall is "
+                 + "working — so every wall you mark gets latticed."
         }
     }
 
@@ -107,13 +107,22 @@ public enum LatticeStageMode: String, Codable, Hashable, Sendable, CaseIterable 
     /// ★ THE FLOOR THIS MODE ASKS FOR, given what the material actually carries.
     ///
     /// STRUCTURAL always takes core's accuracy floor — the utilisation is irrelevant
-    /// because the certificate has to hold. AESTHETIC asks core for the adaptive floor;
-    /// core clamps it to its own hard floor of 2 and never returns less.
+    /// because the certificate has to hold.
     ///
-    /// - Parameter utilisation: demand as a fraction of the allowable, 0…1. A
-    ///   non-finite or non-positive value makes core return the ACCURACY floor —
-    ///   absence of measurement is not permission to relax, and that rule lives in
-    ///   core, not here.
+    /// ★★★ AESTHETIC TAKES CORE'S HARD FLOOR, FLAT (maintainer, 2026-08-21: "wire the
+    /// Aesthetic lattice to *always* lattice at 2 cells/member max … The rule is we
+    /// lattice *WHEREVER* it is asked of us"). It used to ask for the ADAPTIVE floor,
+    /// which is still an accuracy rule: 2 cells only below 11.8 % utilisation, 3 below
+    /// 24.4 %, and the accuracy floor of 5 above that — so a wall doing real work went
+    /// solid in the mode whose entire premise is that it makes no strength claim. It
+    /// also returned the accuracy floor outright when no utilisation was measurable,
+    /// which made the presence of a solve decide whether his wall latticed.
+    ///
+    /// The mirror of this change lives in `core/src/simp/grading.cpp`, so the picture
+    /// and the run take the same number from the same function.
+    ///
+    /// - Parameter utilisation: read only on the structural path — kept in the
+    ///   signature because callers cannot know which mode they hold.
     /// - Returns: 0 when core has no number for the topology, which the caller must
     ///   surface rather than replace with a guess.
     public func cellsPerMemberFloor(topology: String, utilisation: Double) -> Double {
@@ -121,8 +130,7 @@ public enum LatticeStageMode: String, Codable, Hashable, Sendable, CaseIterable 
         case .structural:
             return TopOptKit.latticeLimits(topology: topology).minCellsPerMember
         case .aesthetic:
-            return TopOptKit.latticeAestheticCellsPerMemberFloor(
-                topology: topology, utilisation: utilisation)
+            return TopOptKit.latticeAestheticCellsPerMemberHardFloor(topology: topology)
         }
     }
 }

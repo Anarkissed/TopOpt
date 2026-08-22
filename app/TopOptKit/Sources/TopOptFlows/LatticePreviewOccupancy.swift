@@ -49,7 +49,27 @@ public enum LatticePreviewOccupancy {
     public static func dims(for extent: SIMD3<Float>, maxDim: Int) -> (Int, Int, Int) {
         let e = SIMD3<Float>(Swift.max(extent.x, 1e-4), Swift.max(extent.y, 1e-4), Swift.max(extent.z, 1e-4))
         let longest = Swift.max(e.x, Swift.max(e.y, e.z))
-        func d(_ v: Float) -> Int { Swift.max(2, Int((Float(maxDim) * v / longest).rounded())) }
+        // ★★★ ONE SPACING FOR ALL THREE AXES — THE VOXEL IS A CUBE (maintainer,
+        // 2026-08-22: "Find every reason why the two walls aren't *entirely* being
+        // latticed").
+        //
+        // ★ EACH AXIS USED TO BE ROUNDED INDEPENDENTLY and its spacing derived as
+        // `extent / (n - 1)`, so the three spacings differed by the rounding — and the
+        // SHORTER the axis, the worse it is. On his part: 1.22% at Fine 128, but 5.63%
+        // at Fast 64 (23 voxels across the short axis).
+        //
+        // ★★ AND THAT SILENTLY DISABLED HALF THE PIPELINE. `lattice_member_thickness_mm`
+        // takes ONE cubic spacing and refuses a grid whose axes disagree by more than
+        // 2%, returning an EMPTY array. Empty member thickness means: no cells-per-member
+        // floor, no per-local-member Auto cell, no measured region width (the declared
+        // depth is used instead), and no Auto ceiling. So the preview did something
+        // QUALITATIVELY DIFFERENT at Fast than at Fine, said nothing, and every fix
+        // aimed at the floor looked inert because at 64 there was no floor to fix.
+        //
+        // A cube also makes the voxel isotropic for the SDF and the EDT, which every
+        // consumer already assumed. Dimensions grow by at most one voxel per axis.
+        let sp = longest / Float(Swift.max(1, maxDim - 1))
+        func d(_ v: Float) -> Int { Swift.max(2, Int((v / sp).rounded(.up)) + 1) }
         return (d(e.x), d(e.y), d(e.z))
     }
 
@@ -62,9 +82,11 @@ public enum LatticePreviewOccupancy {
         let extent = bounds.max - bounds.min
         let (nx, ny, nz) = dims(for: extent, maxDim: maxDim)
         // One-voxel pad so the surface is not clipped by the box edge.
-        let sp = SIMD3<Float>(extent.x / Float(nx - 1 == 0 ? 1 : nx - 1),
-                              extent.y / Float(ny - 1 == 0 ? 1 : ny - 1),
-                              extent.z / Float(nz - 1 == 0 ? 1 : nz - 1))
+        // ★ THE SAME CUBIC SPACING `dims` SIZED THE GRID WITH — deriving it per axis
+        // from `extent / (n - 1)` is what made the voxel a brick. See `dims`.
+        let cubic = Swift.max(extent.x, Swift.max(extent.y, extent.z))
+            / Float(Swift.max(1, Swift.max(nx, Swift.max(ny, nz)) - 1))
+        let sp = SIMD3<Float>(repeating: cubic)
         let spacing = SIMD3<Float>(Swift.max(sp.x, 1e-4), Swift.max(sp.y, 1e-4), Swift.max(sp.z, 1e-4))
         let origin = bounds.min
         var vals = [Float](repeating: 0, count: nx * ny * nz)
@@ -465,6 +487,25 @@ public struct LatticeCellField: Sendable {
     /// Per base cell, same layout: the dyadic level of the covering octree cell.
     /// All zero on the ungraded path, which is exactly what "one cell size" means.
     public let level: [Float]
+    /// ★★★ STEPPED: the covering cell's size in mm, per base cell — 0 where this base
+    /// cell is not in a stepped region. EMPTY on every other algorithm, which is what
+    /// keeps doubled bit-identical.
+    ///
+    /// ★ WHY A SIZE AND NOT A LEVEL. `level` is a DYADIC exponent: the shader recovers
+    /// the covering cell as `S0 · 2^L` and its index by integer division, and that
+    /// encoding IS what doubled means. Stepped takes each region's derived cell
+    /// VERBATIM — arbitrary reals like 5.31 mm — so no (base, level) pair expresses it,
+    /// and that is the whole of why the preview could draw only one of core's three
+    /// algorithms. The fix is not a second renderer: it is to stop insisting the size
+    /// be dyadic. A real size per cell costs one more texture channel, and the frame
+    /// the shader builds from it (`floor((p − origin)/S)`) is the same arithmetic with
+    /// the power-of-two assumption removed.
+    ///
+    /// ★ THE SIZES ARE PRE-ROUNDED TO HALF PRECISION by the builder, because the
+    /// texture is `rgba16Float` and a cell whose size differed in the last bit between
+    /// the app and the shader would drift the tiling by a fraction of a millimetre per
+    /// cell across the part.
+    public let steppedCellMM: [Float]
     public let baseCellMM: Double
     public let maxLevel: Int
     /// True when this came from core's plan rather than the uniform fallback — the
@@ -481,7 +522,82 @@ extension LatticePreviewOccupancy {
                                         cellMM: Double) -> LatticeCellField {
         LatticeCellField(field: grid,
                          level: [Float](repeating: 0, count: grid.count),
+                         steppedCellMM: [],
                          baseCellMM: cellMM, maxLevel: 0, fromCorePlan: false)
+    }
+
+    /// ★★★ STEPPED — ONE CELL PER DECLARED REGION, VERBATIM (core's `LatticeAlgorithm`).
+    ///
+    /// Core's definition is "`Fit` WITHOUT THE DYADIC SNAP": each region's cell is
+    /// whatever `lattice_region_derivation` returned for that region's own measured
+    /// member width, used as-is. The caller supplies those cells — from CORE's
+    /// derivation, one entry per region in `regions` order — so nothing about the law
+    /// is re-derived here; this only paints them onto the base grid.
+    ///
+    /// ★ THE GRID IS ANCHORED AT THE ONE LATTICE ORIGIN, NOT PER REGION. Every region
+    /// tiles the same axes from the same point with its OWN size, so two abutting
+    /// regions at 5 and 6 mm do not share nodes at their boundary. That is not a
+    /// rendering compromise — it IS stepped, and core counts the cost of it as
+    /// `LatticeSteppedStats::floating_ends` (measured: 4 of 5 abutting region pairs
+    /// mechanically disconnected). A preview that quietly aligned them would be
+    /// drawing doubled and calling it stepped.
+    ///
+    /// Returns nil when no region states a cell — the caller then keeps the ladder it
+    /// already had rather than drawing an empty part.
+    public static func steppedCellField(occupancy occ: LatticeVoxelGrid,
+                                        demand: LatticeVoxelGrid?,
+                                        regions: [LatticeRegionSpec],
+                                        cellMM: [Double],
+                                        baseCellMM: Double,
+                                        memberThickness: [Double] = [],
+                                        minCellsPerMember: Double = 0,
+                                        cellsPerMemberFloor: [Double] = [])
+        -> LatticeCellField? {
+        guard baseCellMM > 0, cellMM.count == regions.count,
+              cellMM.contains(where: { $0 > 0 }) else { return nil }
+        // The activation + demand the base grid already gets on the uniform path — the
+        // cells-per-member and printability floors are applied there, once.
+        let grid = cellField(occupancy: occ, demand: demand, cellMM: baseCellMM,
+                             memberThickness: memberThickness,
+                             minCellsPerMember: minCellsPerMember,
+                             cellsPerMemberFloor: cellsPerMemberFloor)
+        // ★ HALF-REPRESENTABLE, so the shader's S is the app's S exactly. See the field.
+        let sizes = cellMM.map { Double(halfRepresentable(Float($0))) }
+        var stepped = [Float](repeating: 0, count: grid.count)
+        var painted = 0
+        var i = 0
+        for k in 0..<grid.nz {
+            for j in 0..<grid.ny {
+                for x in 0..<grid.nx {
+                    if grid.values[i] >= 0 {
+                        let p = SIMD3<Double>(
+                            Double(grid.origin.x) + Double(x) * Double(grid.spacing.x),
+                            Double(grid.origin.y) + Double(j) * Double(grid.spacing.y),
+                            Double(grid.origin.z) + Double(k) * Double(grid.spacing.z))
+                        // First match wins — the same rule the density demand uses, so
+                        // an overlap resolves the same way in both.
+                        for (r, region) in regions.enumerated()
+                        where region.role == .include && sizes[r] > 0
+                              && LatticeRegionMask.contains(p, region: region) {
+                            stepped[i] = Float(sizes[r]); painted += 1
+                            break
+                        }
+                    }
+                    i += 1
+                }
+            }
+        }
+        guard painted > 0 else { return nil }
+        return LatticeCellField(field: grid,
+                                level: [Float](repeating: 0, count: grid.count),
+                                steppedCellMM: stepped,
+                                baseCellMM: baseCellMM, maxLevel: 0, fromCorePlan: false)
+    }
+
+    /// Round to the nearest value an IEEE half can hold exactly — see
+    /// `LatticeCellField.steppedCellMM`.
+    static func halfRepresentable(_ v: Float) -> Float {
+        Float(Float16(v))
     }
 
     /// Bake core's plan onto its OWN base grid.
@@ -565,7 +681,8 @@ extension LatticePreviewOccupancy {
             nx: plan.nx, ny: plan.ny, nz: plan.nz,
             origin: originCorner + SIMD3<Float>(repeating: 0.5 * S0),
             spacing: SIMD3<Float>(repeating: S0), values: vals)
-        return LatticeCellField(field: grid, level: lvl, baseCellMM: plan.baseCellMM,
+        return LatticeCellField(field: grid, level: lvl, steppedCellMM: [],
+                                baseCellMM: plan.baseCellMM,
                                 maxLevel: plan.maxLevel, fromCorePlan: true)
     }
 }
@@ -771,7 +888,10 @@ extension LatticePreviewOccupancy {
         return LatticeCellField(
             field: LatticeVoxelGrid(nx: g.nx, ny: g.ny, nz: g.nz, origin: g.origin,
                                     spacing: g.spacing, values: vals),
-            level: lvl, baseCellMM: field.baseCellMM,
+            level: lvl,
+            // The ceiling reshapes a DYADIC plan; it is never reached on the stepped
+            // path, so the sizes pass through untouched rather than being invented.
+            steppedCellMM: field.steppedCellMM, baseCellMM: field.baseCellMM,
             maxLevel: Swift.max(field.maxLevel, ceilingLevel), fromCorePlan: true)
     }
 }

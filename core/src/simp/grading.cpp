@@ -181,7 +181,27 @@ GradedField grade_lattice(const VoxelGrid& grid,
   const double n_star = lattice_cells_per_member_min(topo);
   out.band_rho_min = rho_lo;
   out.band_rho_max = rho_hi;
-  out.cells_per_member_floor = n_star;
+  // ★★★ AESTHETIC LATTICES WHEREVER IT IS ASKED (maintainer, 2026-08-21: "The rule is
+  // we lattice *WHEREVER* it is asked of us"). The floor is then core's own HARD floor
+  // — a flat 2 — and not the adaptive rule.
+  //
+  // ★ THE ADAPTIVE RULE WAS STILL AN ACCURACY RULE, and that is why it kept refusing.
+  // It returns the loosest cell count whose measured stiffness error, WEIGHTED BY
+  // UTILISATION, fits the budget: at the 1 % default, 2 cells needs u <= 11.8 % and
+  // 3 needs u <= 24.4 %, so anything working harder than a quarter of allowable snaps
+  // straight back to the accuracy floor of 5 and the wall goes solid. It also disarmed
+  // itself entirely without an allowable or a measured field, which made "did the solve
+  // reach us" decide whether his wall got latticed at all.
+  //
+  // An aesthetic lattice makes NO strength claim — that is the whole content of the
+  // mode, and it is what the receipt says. So accuracy is not the thing to ration here,
+  // and the floor is the lowest count core has actually MEASURED under the bending
+  // case: 2 (+8.5 %). Everything else about the mode is unchanged — the printability
+  // floor still binds, the band clamp still runs and is still counted, and the
+  // certificate still runs over whatever is emitted.
+  const double aesthetic_hard =
+      aesthetic ? aesthetic_cells_per_member_hard_floor(topo) : n_star;
+  out.cells_per_member_floor = aesthetic_hard;
   // ── ★ THE ADAPTIVE FLOOR (aesthetic only) ────────────────────────────────────
   // Disarms itself without an allowable: utilisation is what it is a function of.
   const bool adaptive_cpm = aesthetic &&
@@ -197,8 +217,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // armed, so every other path is bit-identical.
   // The loosest floor the adaptive rule permits over the candidate set — what the
   // per-CELL planner is allowed to consider. Computed in a fixed voxel order.
-  double adaptive_plan_floor = n_star;
-  if (adaptive_cpm) {
+  double adaptive_plan_floor = aesthetic_hard;
+  if (adaptive_cpm && !aesthetic) {
     for (std::size_t e = 0; e < n; ++e) {
       if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
       const double f = aesthetic_cells_per_member_floor(
@@ -207,6 +227,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
   }
   auto n_req = [&](std::size_t e) -> double {
+    // ★ Flat, in aesthetic. See `aesthetic_hard` above.
+    if (aesthetic) return aesthetic_hard;
     if (!adaptive_cpm) return n_star;
     const double u = demand[e] / params.demand_allowable_mpa;
     const double f = aesthetic_cells_per_member_floor(topo, u, err_budget);

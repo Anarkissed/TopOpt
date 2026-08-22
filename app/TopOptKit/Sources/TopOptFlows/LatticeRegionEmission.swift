@@ -54,9 +54,25 @@ public enum LatticeRegionEmission {
         else { return nil }
         return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
                       halfUMM: Double(o.halfU), halfWMM: Double(o.halfV),
+                      // ★★★ IN THE **FACE'S** FRAME, WHICH IS WHAT `spec` ASSUMES — and
+                      // this passed the INWARD normal, so the mirror was applied TWICE.
+                      //
+                      // ★ `LatticeFaceOutline.loops` projects into `basis(whatever it is
+                      // handed)`. Handed `-planeNormal` it produces loops already in the
+                      // SLAB's frame; `spec(for:.plane:)` then re-expresses them from
+                      // `basis(+normal)` into `basis(-normal)` a second time. Two
+                      // mirrors where one was intended is a mirror, so the outline
+                      // landed reflected about v — on his own faces, 33 of 61 and 31 of
+                      // 73 of each face's OWN centroids fell OUTSIDE the region that
+                      // face declares. Near chance, which is the reflected signature
+                      // (`testTheFacesOwnSurfaceIsInsideItsOwnRegion`).
+                      //
+                      // ★ THE CONVERSION IN `spec` IS THE RIGHT PLACE FOR IT — it is
+                      // written down, argued and tested there. This side simply has to
+                      // hand it what it says it takes: the face's own outward frame.
                       outlineLoops: LatticeFaceOutline.loops(
                           face: face, in: mesh,
-                          normal: -ManualPrimitive.unit(geo.planeNormal),
+                          normal: ManualPrimitive.unit(geo.planeNormal),
                           origin: SIMD3<Double>(o.center)))
     }
 
@@ -119,6 +135,17 @@ public enum LatticeRegionEmission {
             s.halfLengthMM = 0.5 * (hi - lo)
             return s.isValid ? s : nil
         case .plane(let center, let normal, let halfU, let halfW, let loops):
+            // ★★★ NO OUTLINE, NO REGION — for a B-REP FACE. The half-extents are a
+            // BOUNDING BOX (41.2% / 29.8% face on his two lattice walls), so emitting
+            // one in place of an outline declares material he never marked, which the
+            // ruling of 2026-08-21 forbids outright. The caller counts a nil as a
+            // SKIPPED face and the surface says so — drawing less than he marked, out
+            // loud, beats drawing 2.4x more than he marked in silence.
+            //
+            // A region with no `faceID` is a manual primitive, whose shape genuinely IS
+            // the rectangle; it never reaches here (it comes through `spec(for:
+            // ManualPrimitive)` above).
+            if faceID != nil, loops.isEmpty { return nil }
             var s = LatticeRegionSpec(role: role, kind: .face)
             s.faceID = faceID
             // Core's slab runs origin + s·normal, s ∈ [0, depth]. The part's

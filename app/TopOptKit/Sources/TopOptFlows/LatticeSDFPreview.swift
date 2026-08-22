@@ -196,10 +196,16 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         // TEXTURE'S SHAPE, not an oversight. It carries a BASE CELL and an integer
         // DYADIC LEVEL per cell, and the shader recovers which cell it stands in by
         // integer division — that encoding is what makes coarse and fine cells share
-        // nodes, and it is exactly what DOUBLED is. STEPPED takes each region's derived
-        // cell verbatim with no dyadic snap, so its cells are arbitrary reals that no
-        // (base, level) pair can express; ORGANIC has no cells at all, only traced
-        // curves. Neither is representable without a second renderer.
+        // nodes, and it is exactly what DOUBLED is.
+        //
+        // ★★ STEPPED IS NO LONGER IN THIS SENTENCE (2026-08-22). It was, on the
+        // reasoning that its verbatim cells are arbitrary reals no (base, level) pair
+        // can express — true of that encoding, and the encoding changed: the cell
+        // texture now carries a real SIZE per base cell. Stepped is drawn as itself, so
+        // claiming otherwise here would be the same divergence in the other direction.
+        //
+        // ★ ORGANIC REMAINS. Its curves are traced and baked to a distance field, but
+        // the march does not sample that field yet.
         //
         // ★ SO IT SAYS SO. Drawing the doubled ladder under another algorithm's name is
         // precisely the preview/run divergence this branch has spent a week closing —

@@ -96,9 +96,17 @@ public enum LatticeAutoPosture {
     ///
     /// Returns nil when core cannot answer (no bead stated, no region widths), and
     /// the caller then leaves the window alone rather than inventing one.
+    /// ★★★ `cellsPerMemberFloor` — 0 keeps core's ACCURACY floor (5), which is what
+    /// this always used. THE WINDOW IS A CEILING ON EVERY CELL THE PLANNER MAY CHOOSE,
+    /// so leaving it unstated capped Auto at `W / 5` no matter what the stage mode had
+    /// relaxed to (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm
+    /// cells"). On his 11 mm wall that ceiling is 2.20 mm — the number on his card,
+    /// reached from a SECOND place after the per-region derivation was fixed.
     public static func autoWindowMM(regionWidthsMM: [Double],
                                     lineWidthMM: Double,
-                                    topology: String) -> (min: Double, max: Double)? {
+                                    topology: String,
+                                    cellsPerMemberFloor: Double = 0)
+        -> (min: Double, max: Double)? {
         guard lineWidthMM > 0 else { return nil }
         // ★★ THE FINEST PRINTABLE CELL IS NOT A USABLE FLOOR (maintainer,
         // 2026-08-20: "Is it too thick and unable to actually draw the 2.2 mm cell?").
@@ -143,7 +151,8 @@ public enum LatticeAutoPosture {
         for w in regionWidthsMM where w > 0 {
             let d = TopOptKit.latticeRegionDerivation(topology: topology,
                                                       memberWidthMM: w,
-                                                      minExtrudableWidthMM: lineWidthMM)
+                                                      minExtrudableWidthMM: lineWidthMM,
+                                                      cellsPerMemberFloor: cellsPerMemberFloor)
             guard d.valid, d.cellMM > 0 else { continue }
             hi = Swift.max(hi, d.cellMM)
             loFit = Swift.min(loFit, d.cellMM)
@@ -179,7 +188,13 @@ public enum LatticeAutoPosture {
             if posture.cellMode == .swept,
                let w = autoWindowMM(regionWidthsMM: regionWidthsMM,
                                     lineWidthMM: lineWidthMM,
-                                    topology: s.topologyID) {
+                                    topology: s.topologyID,
+                                    // ★ The mode's floor, or Auto's ceiling is W / 5
+                                    // however far the mode relaxed — see the note on
+                                    // `autoWindowMM`.
+                                    cellsPerMemberFloor: (s.stageMode ?? .structural)
+                                        .cellsPerMemberFloor(topology: s.topologyID,
+                                                             utilisation: .nan)) {
                 out.cellMinMM = w.min
                 out.cellMaxMM = w.max
             }

@@ -35,11 +35,22 @@ final class LatticeSolidFillTests: XCTestCase {
     /// different places on the same face — which is the whole class of preview/run
     /// divergence this branch has been closing.
     func testTheSolidUsesTheSameClipTheStrutsDo() {
-        guard let clip = march.range(of: "float dClip = max(max(dPart, dBox), dRegion);"),
+        // ★ THE CLIP GAINED A TERM. `dPart` is now `lsdf_part_clip(...)`, which holds
+        // the struts off any surface the SHELL still draws and lets them reach the
+        // declared mouth — so the literal moved. What this bar is for is unchanged: the
+        // fill must read the SAME `dClip` the struts did, computed before it.
+        guard let clip = march.range(of: "float dClip = max(max(lsdf_part_clip("),
               let use = march.range(of: ": dClip;")
         else { return XCTFail("★ the clip term or its solid-fill use is gone") }
         XCTAssertLessThan(clip.lowerBound, use.lowerBound,
                           "★ the fill must read the clip the struts computed")
+        // ★★ AND IT READS IT VERBATIM. The fill used to add its OWN one-voxel inset
+        // (`dPart + solidInset`) so it could not z-fight the shell; `dClip` now carries
+        // exactly that, and only where the shell actually survives — so through the
+        // declared mouth the fill reads flush instead of recessed behind a ledge.
+        XCTAssertTrue(march.contains("anyActive ? max(dn * cellHere, dClip) : dClip"),
+                      "★ the fill must take the struts' own clip term unmodified — a "
+                      + "second inset here is a second answer to where the part ends")
     }
 
     /// ★★ THE HIT CARRIES WHICH IT IS. Without this the albedo would have to guess from

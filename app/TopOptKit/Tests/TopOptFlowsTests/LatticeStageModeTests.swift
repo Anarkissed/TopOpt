@@ -79,22 +79,27 @@ final class LatticeStageModeTests: XCTestCase {
         }
     }
 
-    /// ★ AND IT IS MONOTONE. A member working harder may never be allowed a coarser cell
-    /// than one working less hard; a non-monotone rule would put the coarsest lattice
-    /// exactly where the stress is.
-    func testTheAestheticFloorRisesWithUtilisation() {
-        var previous = -Double.infinity
+    /// ★★★ SUPERSEDED, NOT DELETED — AND THE ASSERTION IS NOW THE OPPOSITE ONE.
+    ///
+    /// This bar used to require the aesthetic floor to RISE with utilisation, and it
+    /// passed: the adaptive rule is an accuracy rule, so it gave 2 cells only below
+    /// 11.8 % utilisation, 3 below 24.4 %, and the accuracy floor of 5 above that. That
+    /// is exactly why his declared walls kept going solid, and on 2026-08-21 he ruled it
+    /// out: "wire the Aesthetic lattice to *always* lattice at 2 cells/member max … The
+    /// rule is we lattice *WHEREVER* it is asked of us."
+    ///
+    /// So the floor is FLAT now, and this measures the flatness — a re-armed adaptive
+    /// rule would fail here rather than quietly refuse a wall again.
+    func testTheAestheticFloorIsFlatWhateverTheMemberIsCarrying() {
+        let hard = TopOptKit.latticeAestheticCellsPerMemberHardFloor(topology: topology)
         for u in stride(from: 0.0, through: 1.0, by: 0.05) {
-            let f = LatticeStageMode.aesthetic.cellsPerMemberFloor(
-                topology: topology, utilisation: u)
-            XCTAssertGreaterThanOrEqual(
-                f, previous - 1e-12,
-                "★ the floor FELL going from a lesser utilisation to \(u) — that would "
-                + "coarsen the lattice as the load rises")
-            previous = f
+            XCTAssertEqual(
+                LatticeStageMode.aesthetic.cellsPerMemberFloor(
+                    topology: topology, utilisation: u),
+                hard, accuracy: 1e-12,
+                "★ the floor moved at u=\(u) — aesthetic must not ration on accuracy")
         }
-        // The curve itself, printed rather than described — it is steeper than "down to
-        // 2" suggests and anyone reading this file should see where it actually bends.
+        // Printed, so the curve that used to bend here is visibly a line.
         let curve = stride(from: 0.0, through: 1.0, by: 0.1).map {
             String(format: "%.0f%%:%.2g", $0 * 100,
                    LatticeStageMode.aesthetic.cellsPerMemberFloor(
@@ -103,17 +108,38 @@ final class LatticeStageModeTests: XCTestCase {
         print("aesthetic floor vs utilisation — " + curve.joined(separator: "  "))
     }
 
-    /// ★★ ABSENCE OF MEASUREMENT IS NOT PERMISSION TO RELAX. A voxel whose utilisation
-    /// we could not compute takes the accuracy floor, and that rule lives in CORE — this
-    /// bar exists to catch an app-side "0 means unloaded" shortcut being added later.
-    func testAnUnmeasurableUtilisationTakesTheAccuracyFloor() {
-        for u in [Double.nan, -1.0, -Double.infinity] {
+    /// ★ THE POSITIVE CONTROL FOR THE BAR ABOVE. A flat-line assertion is worth nothing
+    /// unless something on this machine is NOT flat — core's adaptive rule still exists
+    /// and still bends, it is simply no longer what the mode asks for.
+    func testCoresAdaptiveRuleStillBendsSoTheFlatnessBarMeansSomething() {
+        let budget = TopOptKit.latticeAestheticErrorBudgetDefault
+        let low = TopOptKit.latticeAestheticCellsPerMemberFloor(
+            topology: topology, utilisation: 0.0, errorBudget: budget)
+        let high = TopOptKit.latticeAestheticCellsPerMemberFloor(
+            topology: topology, utilisation: 1.0, errorBudget: budget)
+        XCTAssertGreaterThan(high, low,
+            "★ core's adaptive rule is flat too — then the bar above proves nothing")
+    }
+
+    /// ★★★ ALSO SUPERSEDED, AND THIS ONE MATTERED MOST IN PRACTICE. It used to require
+    /// that an unmeasurable utilisation take the ACCURACY floor — "absence of
+    /// measurement is not permission to relax". Sound for a mode making a strength
+    /// claim; aesthetic makes none, and the consequence on his part was that whether a
+    /// wall latticed depended on whether the FEA had landed yet.
+    ///
+    /// The floor no longer reads utilisation at all, so there is nothing for a missing
+    /// measurement to change. That is the bar now: a solve arriving must not move it.
+    func testAMissingMeasurementChangesNothing() {
+        let hard = TopOptKit.latticeAestheticCellsPerMemberHardFloor(topology: topology)
+        for u in [Double.nan, -1.0, -Double.infinity, 0.0, 0.5, 1.0] {
             XCTAssertEqual(
                 LatticeStageMode.aesthetic.cellsPerMemberFloor(
                     topology: topology, utilisation: u),
-                accuracyFloor, accuracy: 1e-12,
-                "★ utilisation \(u) is not a measurement; it must not buy a relaxation")
+                hard, accuracy: 1e-12,
+                "★ utilisation \(u) moved the aesthetic floor")
         }
+        XCTAssertLessThan(hard, accuracyFloor,
+                          "★ the relaxation must still BE one — 2 below the accuracy 5")
     }
 
     /// ★★★ THE CLAIM IS CORE'S, WORD FOR WORD. It was paraphrased in Swift for one build

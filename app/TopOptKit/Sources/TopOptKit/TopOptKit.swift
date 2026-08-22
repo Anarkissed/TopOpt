@@ -1076,6 +1076,101 @@ public enum TopOptKit {
     /// than the cap measured" and clears any ceiling. Returns EMPTY when core has no
     /// answer — including when the grid is NOT cubic, which core requires: the caller
     /// must then say so rather than pretend.
+    /// ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES — core's own tracer, for the
+    /// preview. See `bridge.cpp` for the flat layout.
+    ///
+    /// ★ THE TENSOR IS THE GATE. `trace_organic_lattice` needs the full per-voxel
+    /// Cauchy stress in core's Voigt order `[xx,yy,zz,xy,yz,zx]`, TRUE shear, MPa —
+    /// not the von Mises scalar the preview normally holds. `StressTensorField` already
+    /// carries exactly that convention, which is why organic is reachable at all.
+    ///
+    /// `spacingMM` is the SEPARATION field, and for organic it is the INPUT the whole
+    /// method turns on: cell size is derived FROM it, never the other way round.
+    /// Returns `nil` when core refused (bad sizes, no candidate, no stated bead).
+    public struct OrganicTrace: Sendable {
+        /// ★ THE TRACED CAPSULES AS A DISTANCE FIELD (mm, negative inside a strut),
+        /// on the grid the caller asked for — the REGION's bbox, so its voxel can be a
+        /// fraction of the design grid's and a 1-3 mm strut is several voxels across.
+        /// Clamped at `bandMM`, which is an UNDER-estimate and therefore safe to sphere
+        /// trace against.
+        public let field: [Float]
+        public let fieldDims: (Int, Int, Int)
+        public let fieldOrigin: SIMD3<Float>
+        public let fieldSpacingMM: Float
+        public let bandMM: Float
+        public let spanCount: Int
+        public let curveCount: Int
+        public let connectorCount: Int
+        /// The separation the tracer ACHIEVED — organic's derived "cell size".
+        public let spacingUsedMinMM: Double
+        public let spacingUsedMaxMM: Double
+        /// Where the top two |eigenvalues| were too close to rank the frame. Non-zero
+        /// is a real finding about the field, not a failure — core counts it so the
+        /// swirl can be named rather than explained away.
+        public let degenerateFraction: Double
+        /// Grid-indexed measured relative density, clamped into the band when one was
+        /// supplied — what the preview grades its colour ramp by.
+        public let relativeDensity: [Double]
+    }
+
+    public static func organicTrace(nx: Int, ny: Int, nz: Int, spacingMM: Double,
+                                    origin: SIMD3<Double>,
+                                    candidate: [Bool],
+                                    stressTensor: [Double],
+                                    separationMM: [Double],
+                                    minExtrudableWidthMM: Double,
+                                    buildDirection: SIMD3<Double>,
+                                    fieldDims: (Int, Int, Int),
+                                    fieldOrigin: SIMD3<Double>,
+                                    fieldSpacingMM: Double,
+                                    bandMM: Double,
+                                    overhangAngleDeg: Double = 0,
+                                    rhoMin: Double = 0, rhoMax: Double = 0)
+        -> OrganicTrace? {
+        let n = nx * ny * nz
+        let (fnx, fny, fnz) = fieldDims
+        let fn = fnx * fny * fnz
+        guard nx > 0, ny > 0, nz > 0, spacingMM > 0, minExtrudableWidthMM > 0,
+              candidate.count == n, stressTensor.count == 6 * n,
+              separationMM.count == n,
+              fnx > 0, fny > 0, fnz > 0, fieldSpacingMM > 0, bandMM > 0 else { return nil }
+        var flags = [UInt8](repeating: 0, count: n)
+        for i in 0..<n where candidate[i] { flags[i] = 1 }
+        let raw: [Double] = flags.withUnsafeBufferPointer { cb in
+            stressTensor.withUnsafeBufferPointer { tb in
+                separationMM.withUnsafeBufferPointer { sb in
+                    topoptbridge.organic_preview_field(
+                        Int32(nx), Int32(ny), Int32(nz), spacingMM,
+                        origin.x, origin.y, origin.z,
+                        cb.baseAddress, cb.count,
+                        tb.baseAddress, tb.count,
+                        sb.baseAddress, sb.count,
+                        minExtrudableWidthMM,
+                        buildDirection.x, buildDirection.y, buildDirection.z,
+                        overhangAngleDeg, rhoMin, rhoMax,
+                        Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
+                        fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,
+                        bandMM).map { Double($0) }
+                }
+            }
+        }
+        guard raw.count >= 16, raw[0] > 0.5 else { return nil }
+        let head = 16
+        let count = Int(raw[4])
+        guard count == fn, raw.count >= head + fn else { return nil }
+        let field = (0..<fn).map { Float(raw[head + $0]) }
+        let dOff = head + fn
+        let density = raw.count >= dOff + n ? Array(raw[dOff..<(dOff + n)]) : []
+        return OrganicTrace(field: field, fieldDims: fieldDims,
+                            fieldOrigin: SIMD3<Float>(fieldOrigin),
+                            fieldSpacingMM: Float(fieldSpacingMM),
+                            bandMM: Float(raw[8]),
+                            spanCount: Int(raw[1]),
+                            curveCount: Int(raw[2]), connectorCount: Int(raw[3]),
+                            spacingUsedMinMM: raw[5], spacingUsedMaxMM: raw[6],
+                            degenerateFraction: raw[7], relativeDensity: density)
+    }
+
     public static func latticeMemberThicknessMM(nx: Int, ny: Int, nz: Int,
                                                 spacing: SIMD3<Float>,
                                                 solid: [Bool],
@@ -1129,7 +1224,14 @@ public enum TopOptKit {
                                            /// the cell is chosen so exactly N* fit
                                            /// across the member, which satisfies the
                                            /// cells-per-member floor by construction.
-                                           desiredCellMM: [Double] = []) -> LatticeCellSizePlan? {
+                                           desiredCellMM: [Double] = [],
+                                           /// ★★★ THE FLOOR CORE CULLS BY. 0 keeps its
+                                           /// ACCURACY floor of 5. This is what decides
+                                           /// whether a cell SURVIVES in a member, so
+                                           /// leaving it unstated culled an 11 mm wall
+                                           /// that the mode had already relaxed to 2.
+                                           cellsPerMemberFloor: Double = 0)
+        -> LatticeCellSizePlan? {
         let n = nx * ny * nz
         guard nx > 0, ny > 0, nz > 0, candidate.count == n,
               relativeDensity.count == n, memberWidthMM.count == n else { return nil }
@@ -1157,7 +1259,8 @@ public enum TopOptKit {
                             wb.baseAddress, wb.count,
                             minCellMM, maxCellMM, minExtrudableWidthMM,
                             Int32(capRadiusVoxels), std.string(topology),
-                            desired.isEmpty ? nil : db.baseAddress, desired.count)
+                            desired.isEmpty ? nil : db.baseAddress, desired.count,
+                            cellsPerMemberFloor)
                     }
                 }
             }
@@ -1368,10 +1471,14 @@ public enum TopOptKit {
     /// `memberWidthMM`. `statedRelativeDensity <= 0` means AUTO. Never throws.
     public static func latticeRegionDerivation(
         topology: String, memberWidthMM: Double, minExtrudableWidthMM: Double,
-        statedRelativeDensity: Double = 0) -> LatticeRegionDerivation {
+        statedRelativeDensity: Double = 0,
+        // ★ THE FLOOR THE CELL IS DERIVED AGAINST. 0 = core's accuracy floor (5), the
+        // default every pre-existing caller had. The cell is `width / floor`, so this
+        // is the difference between a 2.20 mm and a 5.50 mm cell on an 11 mm wall.
+        cellsPerMemberFloor: Double = 0) -> LatticeRegionDerivation {
         let d = topoptbridge.lattice_region_derivation(
             std.string(topology), memberWidthMM, minExtrudableWidthMM,
-            statedRelativeDensity)
+            statedRelativeDensity, cellsPerMemberFloor)
         return LatticeRegionDerivation(
             valid: d.valid, feasible: d.feasible, cellMM: d.cell_mm,
             derivedRelativeDensity: d.derived_relative_density,

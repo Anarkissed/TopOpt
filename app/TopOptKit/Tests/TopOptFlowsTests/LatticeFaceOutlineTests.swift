@@ -236,19 +236,38 @@ final class LatticeFaceOutlineTests: XCTestCase {
             // being pinned is about the FRONT face, so restrict to points whose
             // only nearby boundary is that one: more than two voxels inside the
             // outline in plane.
-            let n3 = simd_normalize(spec.normal)
+            let n3 = simd_normalize(spec.normal)   // points INTO the part
             let (bu, bv) = LatticeRegionMask.basis(n3)
             var covered = 0, decisive = 0
             for seed in seeds {
-                let d = sample(seed)
+                // ★★★ SAMPLED WHERE THE SHADER SAMPLES — ONE VOXEL INTO THE REGION.
+                //
+                // ★ THIS USED TO READ THE BARE FIELD AT THE SURFACE and require it a
+                // full voxel negative, which was the FRONT-FACE PAD's job: the bake
+                // pushed the slab's front face 1.5 voxels out of the part so the shell
+                // sat unambiguously inside it. The ruling of 2026-08-21 removed that pad
+                // — the primitive is "ONLY AS BIG AS THE FACE … Never bigger" — and the
+                // ambiguity it existed to break is a SAMPLING problem, so it is now
+                // broken at the sample instead: `shell_is_latticed` steps `spacing.w`
+                // along the declared face's inward normal before it reads the field.
+                //
+                // The property under test has not moved an inch: the shell's discard at
+                // the declared face must be DECISIVE, never a per-pixel coin flip. What
+                // moved is where production asks, so this asks in the same place.
+                let d = sample(seed + n3 * Double(voxel))
                 guard d < 9e8 else { continue }
+                // The shader's test is `field <= 0` after the nudge; a quarter-voxel of
+                // margin is what makes it a verdict rather than a coin flip. Requiring a
+                // FULL voxel here would be requiring the pad back by another name — at
+                // exactly one voxel in, the true distance IS one voxel and rounding
+                // decides it.
                 let rel = seed - spec.origin
                 let uv = SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv))
                 let inPlane = LatticeFaceOutline.signedDistance(uv, loops: spec.outlineLoops)
                     - spec.inPlaneOffsetMM
                 guard inPlane < -2.0 * Double(voxel) else { continue }
                 covered += 1
-                if d <= -voxel { decisive += 1 }
+                if d <= -0.25 * voxel { decisive += 1 }
             }
             XCTAssertGreaterThan(covered, 10, "expand \(expand): the region must cover the face")
             XCTAssertEqual(decisive, covered,
@@ -328,13 +347,24 @@ final class LatticeFaceOutlineTests: XCTestCase {
         // … and past it the lattice resumes.
         XCTAssertLessThan(fieldAt(2.0, 5.0), 0,
                           "★ past the skin the region must lattice again")
-        // With NO skin the surface is inside the region — and still clear of the
-        // sampling ambiguity, because the front-face pad is not cancelled by a
-        // zero skin.
-        XCTAssertLessThan(fieldAt(0.0, 0.0), -0.5,
-                          "★ skin 0 must keep the front-face pad: `max(region, "
-                          + "partSDF + 0)` would pin the field to ~0 at the surface "
-                          + "and re-create the coin-flip discard it exists to stop")
+        // ★★★ WITH NO SKIN THE REGION STARTS **AT** THE FACE, exactly as declared.
+        //
+        // ★ THIS USED TO DEMAND THE FIELD BE < -0.5 AT THE SURFACE, which only held
+        // because the bake padded the slab's front face 1.5 voxels out of the part. That
+        // pad made the primitive bigger than the face and was removed by the ruling of
+        // 2026-08-21. At the surface the field is now ~0 BY CONSTRUCTION — that is what
+        // "the region is exactly the face" means — and the coin flip it used to cause is
+        // resolved by the reader instead: the shell steps one voxel inward first.
+        //
+        // So the bar is now the two things that must actually be true.
+        let atSurface = fieldAt(0.0, 0.0)
+        XCTAssertLessThan(abs(Double(atSurface)), 1.0,
+                          "★ with no skin the region's front boundary IS the face — a "
+                          + "field far from zero there means it was moved again")
+        let nudged = fieldAt(0.0, 2.0)
+        XCTAssertLessThan(nudged, -0.5,
+                          "★ and one step in it is decisively inside, which is what the "
+                          + "shell reads (`shell_is_latticed` nudges before sampling)")
     }
 
     /// ★ ONLY `covered` HAS A SOLID THICKNESS — corrected from the first cut,

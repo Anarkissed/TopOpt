@@ -740,8 +740,9 @@ public struct WorkspacePlaceholder: View {
                           // ★ Only while drilled in — the PRESENCE of this closure is
                           // what makes a tap read a strut instead of selecting a face.
                           onLatticeProbe: latticeLegendMode.drilledIn
-                              ? { model, world in
-                                  setLatticeProbe(at: model, world: world)
+                              ? { model, world, cellMM in
+                                  setLatticeProbe(at: model, world: world,
+                                                  bakedCellMM: cellMM)
                               } : nil,
                           // ★ …and the way back out, from anywhere on the viewport.
                           onLatticeProbeExit: latticeLegendMode.drilledIn
@@ -1020,7 +1021,14 @@ public struct WorkspacePlaceholder: View {
                                                      // drawn as the layers the printer
                                                      // will actually lay down there.
                                                      layerHeightMM: project.printParams.layerHeightMM,
-                                                     fitCellMM: latticePreviewFitCells)
+                                                     // ★ The axis the printed layers
+                                                     // stack along — the part's own,
+                                                     // not an assumed +Y or +Z.
+                                                     buildDirection: SIMD3<Double>(
+                                                         project.buildOrientation
+                                                             .resolved(gravity: force.gravity)),
+                                                     fitCellMM: latticePreviewFitCells,
+                                                     steppedCellMM: latticePreviewSteppedCells)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -1746,22 +1754,24 @@ public struct WorkspacePlaceholder: View {
         return includes.map { $0.depthMM }
     }
 
-    private var latticePreviewFitCells: [Double] {
+    /// ★★ CORE'S PER-REGION CELL, ONE ENTRY PER REGION IN THE SCENE'S ORDER.
+    ///
+    /// This is the ONE derivation both Fit and Stepped are built on, which is exactly
+    /// core's own relationship between them: STEPPED is "`Fit` WITHOUT THE DYADIC SNAP"
+    /// (`lattice_algorithm.hpp`). Fit feeds these into the ladder planner, which rounds
+    /// each to a rung; stepped uses them verbatim. Deriving them twice would be the one
+    /// way the two could disagree about what a region asked for.
+    ///
+    /// All roles, not just includes: the bake walks `scene.regions`, so an include-only
+    /// list would mis-index past an exclude.
+    private var latticeRegionCellsMM: [Double] {
         let bead = project.printParams.strutLineWidthMM
         guard bead > 0 else { return [] }
-        let emitted = project.latticeJobRegions().regions
-        let includes = emitted.filter { $0.role == .include }
-        let lat = LatticeAutoPosture.applied(
-            to: project.lattice, includeRegionCount: includes.count,
-            regionWidthsMM: latticeAutoWidthsMM(includes: includes), lineWidthMM: bead)
-        guard lat.cellSizeMode == .fit else { return [] }
-        // One entry per region in the SCENE's order (all roles), because the bake
-        // walks `scene.regions` — an include-only list would mis-index an exclude.
-        return emitted.map { r in
+        return project.latticeJobRegions().regions.map { r in
             guard r.role == .include, r.depthMM > 0 else { return 0 }
-            // ★ FIT CARRIES THE SAME CORRECTION. Its cell is W / N* for THIS region, so
-            // it wants that region's own measured material — not the depth the user
-            // typed. Falls back to the declared depth only when nothing is measured.
+            // ★ THE REGION'S OWN MEASURED MATERIAL, not the depth the user typed —
+            // the cell is W / N* for THIS region. Falls back to the declared depth
+            // only when nothing is measured.
             var w = r.depthMM
             if let s = strutScene, !s.memberThicknessMM.isEmpty {
                 let m = LatticeMeasuredRegionWidth.widthMM(
@@ -1769,11 +1779,44 @@ public struct WorkspacePlaceholder: View {
                     memberThicknessMM: s.memberThicknessMM)
                 if m > 0 { w = m }
             }
+            // ★★★ AGAINST THE MODE'S OWN FLOOR. The cell is `width / floor`, and this
+            // call used to leave the floor unstated — so it came back as core's
+            // ACCURACY floor of 5 whatever the stage mode was, and his 11 mm wall
+            // derived an 11.0/5 = 2.20 mm cell in a mode whose whole content is that
+            // 2 cells across a member is enough. The aesthetic floor reached the
+            // per-VOXEL planner and never reached this, the per-REGION cell that both
+            // Fit and Stepped are built from.
+            let floor = (project.lattice.stageMode ?? .structural)
+                .cellsPerMemberFloor(topology: project.lattice.topologyID,
+                                     utilisation: .nan)
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
                                                       memberWidthMM: w,
-                                                      minExtrudableWidthMM: bead)
+                                                      minExtrudableWidthMM: bead,
+                                                      cellsPerMemberFloor: floor)
             return d.valid ? d.cellMM : 0
         }
+    }
+
+    private var latticePreviewFitCells: [Double] {
+        let bead = project.printParams.strutLineWidthMM
+        guard bead > 0 else { return [] }
+        let includes = project.latticeJobRegions().regions.filter { $0.role == .include }
+        let lat = LatticeAutoPosture.applied(
+            to: project.lattice, includeRegionCount: includes.count,
+            regionWidthsMM: latticeAutoWidthsMM(includes: includes), lineWidthMM: bead)
+        guard lat.cellSizeMode == .fit else { return [] }
+        return latticeRegionCellsMM
+    }
+
+    /// ★★★ STEPPED: the same cells, used as they came. Empty unless the user actually
+    /// chose the algorithm, so every other job draws the ladder exactly as before.
+    ///
+    /// ★ ORTHOGONAL TO THE CELL-SIZE MODE, as core says in `lattice_algorithm.hpp`:
+    /// the mode says how a cell is CHOSEN, the algorithm says what is laid down. So
+    /// this is gated on the algorithm alone and not on Fit.
+    private var latticePreviewSteppedCells: [Double] {
+        guard project.lattice.algorithm == "stepped" else { return [] }
+        return latticeRegionCellsMM
     }
 
     /// The certifiable limits for the current topology, READ FROM CORE at runtime (the
@@ -3665,7 +3708,16 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: Self.topBannerWidth)
         .fixedSize(horizontal: false, vertical: true)
         .modifier(TopBannerGapCentred(edges: topEdges))
-        .padding(.top, PageChrome.edge)
+        // ★★ BELOW THE MODE NAME, NOT OVER IT (maintainer, 2026-08-21, of THIS banner:
+        // "Simulation Running notification should be lower, below the Aesthetic mode
+        // name"). The strut-baking banner was dropped for exactly this reason and this
+        // one was left on the old row — the two are alternatives in the same slot, so
+        // they must clear the same obstacle. Same expression, deliberately: a measured
+        // drop by the mode row's own height plus the standard gap, only when a mode is
+        // showing.
+        .padding(.top, PageChrome.edge + (latticeStageModeShown
+                                          ? LatticeStageModeChip.rowHeight + PageChrome.gap
+                                          : 0))
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: latticeSimIsRunning)
         .accessibilityIdentifier("sim-running-banner")
@@ -3727,9 +3779,18 @@ public struct WorkspacePlaceholder: View {
     /// march grades with (`cellField`, then the shader's own
     /// `rhoMin + (rhoMax-rhoMin) * v^gamma`), so the number on screen is the number
     /// being drawn rather than a second estimate that can drift from it.
-    private func setLatticeProbe(at point: SIMD3<Float>, world: SIMD3<Float>) {
+    private func setLatticeProbe(at point: SIMD3<Float>, world: SIMD3<Float>,
+                                 bakedCellMM: Double) {
         guard let scene = strutScene else { return }
-        let cellMM = latticeProxy.params.cellMM
+        // ★★★ THE CELL THE BAKE LAID DOWN HERE, NOT THE ONE IN THE SETTINGS
+        // (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm cells - which
+        // I highly doubt now"). He was right, and the box contradicted itself: it
+        // reported a 2.56 mm strut inside a 2.20 mm cell, which is geometrically
+        // impossible. The strut was being computed at `params.cellMM` (his 8.00 mm,
+        // matching the picture) while the CELL line re-derived width/N* and got 2.20.
+        // Two numbers, two sources, one of them not describing anything on screen.
+        // 2.56 mm is exactly what 46% density makes at 8.00 mm — measured.
+        let cellMM = bakedCellMM > 0 ? bakedCellMM : latticeProxy.params.cellMM
         let grid = LatticePreviewOccupancy.cellField(
             occupancy: scene.occupancy, demand: scene.demand, cellMM: cellMM)
         let g = (point - grid.origin) / grid.spacing
@@ -3746,24 +3807,13 @@ public struct WorkspacePlaceholder: View {
             * pow(Double(Swift.min(Swift.max(v, 0), 1)), gamma)
         let mm = 2 * latticeProxy.params.lattice.strutRadiusMM(
             relativeDensity: rho, cellMM: cellMM)
-        // ★★ THE CELL AT THIS POINT, not the stored uniform one. Under Auto the march
-        // draws a cell per LOCAL member, so quoting `params.cellMM` described geometry
-        // that is not on screen — and its millimetres were read as a cell size.
-        var probeCellMM = 0.0
-        if let sweep = latticePreviewCellSweep, sweep.perLocalMember,
-           scene.minCellsPerMember > 0, !scene.memberThicknessMM.isEmpty {
-            let og = (point - scene.occupancy.origin) / scene.occupancy.spacing
-            let oi = Swift.min(Swift.max(Int(og.x.rounded()), 0), scene.occupancy.nx - 1)
-            let oj = Swift.min(Swift.max(Int(og.y.rounded()), 0), scene.occupancy.ny - 1)
-            let ok = Swift.min(Swift.max(Int(og.z.rounded()), 0), scene.occupancy.nz - 1)
-            let n = (ok * scene.occupancy.ny + oj) * scene.occupancy.nx + oi
-            if n >= 0, n < scene.memberThicknessMM.count {
-                probeCellMM = LatticeMeasuredRegionWidth.rungForWidthMM(
-                    scene.memberThicknessMM[n],
-                    minCellsPerMember: scene.minCellsPerMember,
-                    baseCellMM: sweep.minMM, maxCellMM: sweep.maxMM)
-            }
-        }
+        // ★ ONE CELL, READ ONCE, USED FOR BOTH LINES. It comes out of the baked field
+        // (see above), so the strut millimetres and the cell millimetres are computed
+        // at the same cell and cannot contradict each other again. The old re-derivation
+        // — a second width/N* rule, live in this function — is gone: it is exactly the
+        // "the app re-derives core's law" pattern, and it reported a cell 3.6x off the
+        // one being drawn.
+        let probeCellMM = bakedCellMM
         // ★★ WHICH CLASS THE TAPPED STRUT IS, by the SAME test the shader makes.
         // The march classifies BOUNDARY work from the dressing it computes out of
         // `dPart` and `dRegion`; repeating that here (rather than guessing from
@@ -4235,6 +4285,20 @@ public struct WorkspacePlaceholder: View {
         // count and the preview's skin must move with it.
         h.combine(project.printParams.wallRingMM)
         h.combine(project.printParams.strutLineWidthMM)
+        // ★★★ AND THE TWO INPUTS THE GRADING DENOMINATOR IS MADE OF, both of which were
+        // missing — so the scene that reads them could never be rebuilt when they moved.
+        //
+        //   minimizePlastic — now caps the aesthetic demand by the true utilisation, so
+        //     ticking the box has to re-bake or the picture keeps the uncapped densities.
+        //   material        — the ALLOWABLE is `yieldStrengthMPa(for:)`, and it IS the
+        //     structural denominator. Changing ABS for something twice as strong halves
+        //     every utilisation, and without this the preview kept the old one.
+        //
+        // Both feed `LatticeSDFScene.demand`, which is baked once per scene; a value
+        // read by the bake and absent from the bake's fingerprint is a stale picture by
+        // construction.
+        h.combine(project.minimizePlastic)
+        h.combine(project.material)
         return h.finalize()
     }
 
@@ -4322,20 +4386,22 @@ public struct WorkspacePlaceholder: View {
                                         // cells-per-member floor the preview draws to,
                                         // so the picture and the run agree about which
                                         // question was asked.
-                                        // ★ NOT ARMED. `keepWallMM` shrinks the region
-                                        // away from every other surface, and the ruling
-                                        // of 2026-08-21 is that the primitive is "ONLY
-                                        // AS BIG AS THE FACE … Never bigger. Never
-                                        // smaller." A wall makes it smaller, so it is
-                                        // the wrong instrument — the chamfer has to
-                                        // survive because the SHELL is not cut there,
-                                        // not because the region was eroded.
+                                        // ★ `keepWallMM` IS GONE, and the sentence that
+                                        // stood here is now implemented rather than
+                                        // merely written down: the chamfer survives
+                                        // because the SHELL is not cut there
+                                        // (`shellClipMSL`), not because the region was
+                                        // eroded away from it.
                                         stageMode: stageMode,
                                         // ★ Carried so the BANNER can say which
                                         // algorithm the run will build — the marcher
                                         // draws only the doubled ladder.
                                         algorithm: algorithmForBake,
                                         allowableMPa: allowableMPa,
+                                        // ★ The checkbox reaches the lattice at last —
+                                        // see the scene's own note for what it does and
+                                        // why it is not core's `utilisationTarget`.
+                                        minimizePlastic: project.minimizePlastic,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,

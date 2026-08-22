@@ -130,30 +130,42 @@ final class LatticeMemberFloorTests: XCTestCase {
         try XCTSkipIf(scene.memberThicknessMM.isEmpty, "core gave no widths")
         let occ = scene.occupancy
 
-        // The material: nothing in this region can hold a 4 mm cell (needs 20 mm).
+        // ★★ THE TOO-COARSE CELL IS DERIVED FROM THE MATERIAL, NOT TYPED.
+        //
+        // ★ THIS SAID "a 4 mm cell needs 20 mm and this region measures at most
+        // ~13.9 mm", and both halves have since moved: `memberThicknessMM` is now an
+        // EDT over the PART rather than over the region-clipped slab (it was measuring
+        // the declaration, which tapered to zero at its own boundary), and the floor is
+        // now the stage MODE's rather than always the accuracy 5. A fixture that hard-
+        // codes either number goes stale the next time one of them is right to change,
+        // and this one already had — twice. So it asks the material.
         let inside = (0..<occ.count).filter { occ.values[$0] > 0.5 }
         let finite = inside.compactMap {
             scene.memberThicknessMM[$0].isFinite ? scene.memberThicknessMM[$0] : nil
         }
         XCTAssertFalse(finite.isEmpty, "positive control: the region has measured material")
-        let qualifying = finite.filter { $0 / 4.0 >= scene.minCellsPerMember }.count
+        // A cell no voxel here can hold: 20% coarser than the thickest material allows.
+        let tooCoarse = 1.2 * (finite.max() ?? 0) / Swift.max(scene.minCellsPerMember, 1)
+        XCTAssertGreaterThan(tooCoarse, 0)
+        let qualifying = finite.filter { $0 / tooCoarse >= scene.minCellsPerMember }.count
         XCTAssertEqual(qualifying, 0,
-                       "★ fixture check: a 4 mm cell needs 20 mm and this region "
-                       + "measures at most ~13.9 mm")
+                       "★ fixture check: at \(tooCoarse) mm nothing here clears "
+                       + "\(scene.minCellsPerMember) cells across")
 
         let with = LatticePreviewOccupancy.cellField(
-            occupancy: occ, demand: scene.demand, cellMM: 4.0,
+            occupancy: occ, demand: scene.demand, cellMM: tooCoarse,
             memberThickness: scene.memberThicknessMM,
             minCellsPerMember: scene.minCellsPerMember)
         let drawn = with.values.filter { $0 >= 0 }.count
         let without = LatticePreviewOccupancy.cellField(
-            occupancy: occ, demand: scene.demand, cellMM: 4.0)
+            occupancy: occ, demand: scene.demand, cellMM: tooCoarse)
         XCTAssertGreaterThan(without.values.filter { $0 >= 0 }.count, 0,
                              "positive control: there are cells to cull")
         XCTAssertEqual(drawn, 0,
-                       "★ if NO voxel can hold a 4 mm cell, no 4 mm cell may be "
-                       + "drawn. 374 were, because a centre in free space read as "
-                       + "consent.")
+                       "★ if NO voxel can hold this cell, none may be drawn. 374 were "
+                       + "once, because a centre in free space read as consent — that "
+                       + "is the defect this bar holds, and it is independent of the "
+                       + "particular width.")
 
         // ★ AND THE FLOOR STILL LETS THE HONEST CASE THROUGH — 2 mm needs 10 mm and
         // 96% of this region clears it, so this must NOT become a blanket refusal.

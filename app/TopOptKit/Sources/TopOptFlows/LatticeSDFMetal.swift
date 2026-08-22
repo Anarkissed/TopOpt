@@ -91,6 +91,11 @@ struct LSDFUniforms {
     var clipFromModel: simd_float4x4 = matrix_identity_float4x4
     var eyeFromModel: simd_float4x4 = matrix_identity_float4x4
     var eyeNormalBasis: simd_float4x4 = matrix_identity_float4x4
+    /// ★★★ THE BUILD DIRECTION IN MODEL SPACE (unit, w unused) — APPENDED LAST, and
+    /// the MSL twin declares `float4 buildDir` in the same final slot. Zero means "not
+    /// stated", and the printed-layer banding is then skipped rather than drawn along a
+    /// guessed axis. See the MSL note for why +Y was wrong.
+    var buildDir: SIMD4<Float> = .zero
 }
 
 /// The immutable per-part scene the preview needs. Baking depends ONLY on the mesh
@@ -211,24 +216,10 @@ public struct LatticeSDFScene {
                 // ★★★ STRUCTURAL OR AESTHETIC (maintainer, 2026-08-21). Defaults to
                 // structural so every pre-existing call — and every test — keeps the
                 // certified floor it was written against.
-                // ★★★ THE SOLID WALL KEPT AGAINST EVERY SURFACE **EXCEPT** THE FACE HE
-                // PICKED (maintainer, 2026-08-21, after four reports: "there is
-                // *SUPPOSED* to be a chamfer AROUND the lattice, but the lattice is
-                // breaking that top edge").
-                //
-                // ★ WHY `skin` DID NOT DO THIS. `LatticeBoundaryTreatment.faceSkinMM`
-                // returns 0 for every finish except `covered`, so choosing "Skin"
-                // armed a wall of ZERO — which is why setting it changed nothing on his
-                // part. And even armed, that term is `max(region, partSDF + skin)`,
-                // applied uniformly to EVERY surface including the declared face, so it
-                // would also seal the mouth he is trying to look through.
-                //
-                // ★ WHAT HE ACTUALLY DESCRIBED is one-sided: the lattice reaches the
-                // face he marked and stops short of every OTHER boundary. That is not a
-                // finish, it is what a face region means, so it is armed by default from
-                // the printer's own wall ring rather than hidden behind a setting.
-                // 0 disables it and restores the previous behaviour exactly.
-                keepWallMM: Double = 0,
+                // ★ THE FOURTH REPORT OF THE CHAMFER used to be answered here, by a
+                // `keepWallMM` that eroded the region away from every surface but the
+                // declared face. It is GONE — see the bake below for why it was the
+                // wrong instrument and where the rule actually lives now.
                 stageMode: LatticeStageMode = .structural,
                 // ★ Core's `LatticeAlgorithm` name. Defaults to "" so every existing
                 // call — and every test — still describes a doubled ladder, which is
@@ -239,6 +230,13 @@ public struct LatticeSDFScene {
                 // supplied", and then the aesthetic floor is not computed at all rather
                 // than computed from a guess.
                 allowableMPa: Double = 0,
+                // ★★★ "MINIMIZE PLASTIC", AND UNTIL NOW IT REACHED NOTHING HERE
+                // (maintainer, 2026-08-22: "the struts are huge, but they SHOULDN'T be
+                // - I have minimize_plastic=on"). He was right: the flag went to the
+                // OPTIMIZER's objective and to the cell-plan helper, and had no path to
+                // the lattice's density at all. See `demand` below for what it now does
+                // and why it is not `utilisationTarget`.
+                minimizePlastic: Bool = false,
                 maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
                 // ★ The band and gamma the raymarcher grades with, so a stated
                 // per-region density can be inverted into the demand value that
@@ -305,46 +303,32 @@ public struct LatticeSDFScene {
         // grid, in the same pass — so no third description of "the region" can
         // exist to drift from the other two.
         if regions.contains(where: { $0.role == .include }) {
-            // ★★ THE SLAB'S FRONT FACE IS NUDGED OUT OF THE PART BEFORE BAKING,
-            // AND THIS IS THE WHOLE OF "the face went solid, with an incredible
-            // amount of artifacts" (maintainer, 2026-08-19).
+            // ★★★ THE REGION IS THE FACE — NOT THE FACE PLUS A MARGIN (maintainer,
+            // 2026-08-21: the primitive is "ONLY AS BIG AS THE FACE … Never bigger.
+            // Never smaller.").
             //
-            // ★ A FACE REGION STARTS **AT** THE FACE — `s ∈ [0, depth]` with the
-            // origin ON the surface. So the region's front boundary is COINCIDENT
-            // with the shell's own triangles. The old analytic clip evaluated
-            // `s >= 0` exactly and that was harmless; a SAMPLED field cannot be
-            // exact there. Measured at the surface the baked field reads +0.00,
-            // and the shell fragment sitting on it tests `field <= 0` against
-            // interpolation error of order the voxel size (1.75 mm here) — a
-            // per-pixel coin flip. Most fragments stayed, so the face read SOLID;
-            // the ones that flipped let a strut through, which is the speckle.
+            // ★ TWO MARGINS USED TO BE ADDED HERE AND BOTH ARE GONE.
             //
-            // ★ MOVING THE FRONT FACE OUTWARD COSTS NOTHING. `normal` points INTO
-            // the part, so `s < 0` is empty space outside it: extending there adds
-            // no material the march could draw (the part SDF still clips it) and
-            // no hole the shell could cut (there is no shell out there). It only
-            // ends the coincidence, so the shell's surface is unambiguously INSIDE
-            // the region and discards cleanly. The INNER face — the depth the user
-            // dragged — is untouched.
-            let pad = 1.5 * Double(Swift.min(solid.spacing.x,
-                                             Swift.min(solid.spacing.y, solid.spacing.z)))
-            let padded: [LatticeRegionSpec] = regions.map { r in
-                guard r.kind == .face, r.role == .include else { return r }
-                var o = r
-                let n = simd_normalize(SIMD3<Double>(r.normal))
-                o.origin = r.origin - n * pad
-                o.depthMM = r.depthMM + pad
-                return o
-            }
-            // ★ THE MOUTHS: each declared face's own region, `keepWallMM` deep. Built
-            // from the UNPADDED regions — the pad exists to break a coincidence at the
-            // surface and would widen the exemption by its own 1.5 voxels.
-            let mouths: [LatticeRegionSpec] = keepWallMM <= 0 ? [] : regions.compactMap {
-                guard $0.kind == .face, $0.role == .include else { return nil }
-                var m = $0
-                m.depthMM = keepWallMM
-                return m
-            }
+            //   1. A 1.5-VOXEL PAD ON THE SLAB'S FRONT FACE. A face region starts ON
+            //      the face, so the field's zero crossing was coincident with the
+            //      shell's own triangles and a SAMPLED field cannot say which side a
+            //      fragment is on — a per-pixel coin flip, which is the speckle. The
+            //      pad broke the coincidence by making the region 1.5 voxels (2.6 mm
+            //      on his part) BIGGER than the face he declared. But the coincidence
+            //      is a SAMPLING problem, not a geometry one: the shell now steps one
+            //      voxel along the face normal before it samples (`shellClipMSL`),
+            //      which resolves the same ambiguity without moving the region.
+            //
+            //   2. `keepWallMM`, WHICH ERODED THE REGION AWAY FROM EVERY OTHER
+            //      SURFACE. It was aimed at the chamfer he keeps reporting, and it is
+            //      the wrong instrument twice over: it makes the region SMALLER than
+            //      the face, and it never worked — armed at his own wall it reclaimed
+            //      6,149 voxels and he still saw the chamfer eaten, because the
+            //      chamfer was never being eaten by the REGION. It was being eaten by
+            //      the SHELL, which discarded any fragment inside the prism no matter
+            //      which way it faced. That is fixed where it lives, in the fragment.
+            //
+            // What remains is the region itself, and the finish's skin.
             let partSDFValues = self.partSDF.values
             var f = solid
             var i = 0
@@ -361,37 +345,20 @@ public struct LatticeSDFScene {
                         // stops `skinMM` short of the surface, and the shell —
                         // which discards where this field is negative — SURVIVES
                         // in that band. That surviving band IS the solid wall.
-                        var region = LatticeRegionMask.signedDistance(p, regions: padded)
-                        // ★★ THE WALL, AND THE MOUTH THAT IS EXEMPT FROM IT.
+                        let region = LatticeRegionMask.signedDistance(p, regions: regions)
+                        // ★ AND ONLY WHEN THERE IS A SKIN — the finish's own number, 0
+                        // for every finish but `covered`.
                         //
-                        // Intersecting with {at least `keepWallMM` inside the surface}
-                        // is `max(region, partSDF + wall)` — the same shape the skin
-                        // term uses. The whole difference is the exemption: at the
-                        // DECLARED FACE'S OWN MOUTH the wall is not applied, so the
-                        // lattice still runs right up to the face he marked while every
-                        // other boundary — the chamfer, the top edge, the sides — keeps
-                        // its solid wall.
-                        //
-                        // The mouth is exactly "inside this region, within `wall` of the
-                        // face", which is the region itself at a depth of `wall`. No new
-                        // geometry and no second law: if the mouth ever disagreed with
-                        // the region, it would be because someone changed the region.
-                        if keepWallMM > 0 {
-                            let d = Double(partSDFValues[i])
-                            if d > -keepWallMM {
-                                var atMouth = false
-                                for m in mouths where LatticeRegionMask.contains(p, region: m) {
-                                    atMouth = true; break
-                                }
-                                if !atMouth { region = Swift.max(region, d + keepWallMM) }
-                            }
-                        }
-                        // ★ AND ONLY WHEN THERE IS A SKIN. `max(region, partSDF + 0)`
-                        // pins the field to ~0 AT the surface, which is exactly the
-                        // coincidence the front-face pad above exists to break — a
-                        // skin of zero would have quietly undone it. With a skin the
-                        // pad is redundant anyway: the zero crossing moves `skinMM`
-                        // inside the wall, which is a far bigger margin than a voxel.
+                        // ★★ IT PULLS THE ZERO CROSSING BACK FROM **EVERY** SURFACE,
+                        // INCLUDING THE DECLARED FACE. The shell's nudge is one voxel,
+                        // so a skin thicker than a voxel moves the region out of the
+                        // shell's reach at the mouth and the declared wall reads solid
+                        // again. That is inert today (his finish is `none` ⇒ 0) and it
+                        // is NOT fixed by widening the nudge, which would only trade one
+                        // arbitrary margin for another. The honest fix is a second
+                        // reader — the march wants the skin, the shell does not — and
+                        // that is a change to make when a finish is actually armed, not
+                        // speculatively against a term that is currently zero.
                         f.values[i] = skinMM > 0
                             ? Float(Swift.max(region, Double(partSDFValues[i]) + skinMM))
                             : Float(region)
@@ -412,8 +379,60 @@ public struct LatticeSDFScene {
                 like: occupancy, regions: regions,
                 rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma)
             : nil
-        self.demand = statedDemand
-            ?? LatticePreviewOccupancy.demand(like: occupancy, field: field)
+        // ★★★ THE DENOMINATOR IS THE MODE'S — and it was hard-wired to AESTHETIC.
+        //
+        // `LatticeStageMode` leads with "THE DENOMINATOR (above) — so the same part
+        // grades differently", and that promise was written down and not implemented:
+        // `demand(...)` defaults `intent` to 1 and BOTH call sites took the default, so
+        // every part was graded aesthetically whichever mode was chosen. Structural was
+        // dividing by a percentile of the part's own field instead of by the material's
+        // allowable, which is the one thing that distinguishes the two modes.
+        //
+        // ★ AND STRUCTURAL NEEDS AN ALLOWABLE TO MEAN ANYTHING. Core returns a demand
+        // of ZERO for every voxel when the reference is not positive
+        // (`grading_demand_fraction`), so asking for the structural denominator with no
+        // yield strength would silently flatten the whole lattice to the band floor.
+        // With no allowable the relative reference is kept, and that is stated rather
+        // than hidden.
+        let intentForGrading = (stageMode == .structural && allowableMPa > 0) ? 0 : 1
+        let relative = LatticePreviewOccupancy.demand(
+            like: occupancy, field: field, intent: intentForGrading,
+            allowableMPa: allowableMPa)
+        // ★★★ MINIMIZE PLASTIC — THE ABSOLUTE ANCHOR UNDER A RELATIVE MAP.
+        //
+        // ★ WHY NOT `utilisationTarget`. That is core's parameter for exactly this
+        // shape of question, and it is the WRONG one twice over: core applies it only
+        // when the intent is Structural (`grading.hpp:153`), so it is inert in the mode
+        // he is using; and it divides, so a LOWER target makes the lattice DENSER — it
+        // is a conservatism dial already sitting at its least-material setting. Wiring
+        // the checkbox to it would have been a no-op in Aesthetic and a regression
+        // everywhere the box is off.
+        //
+        // ★ WHAT ACTUALLY SPENDS THE PLASTIC IS THE MISSING ANCHOR. An aesthetic demand
+        // is `stress / (a high percentile of the part's own stress)`. That is a pure
+        // SHAPE: whatever is working hardest reads ~1.0 and takes the top of the band,
+        // whether the part is at yield or at three percent of it. A relative map with
+        // nothing absolute under it cannot tell those two apart — which is precisely
+        // "it automatically assumes it requires massive struts … when in fact it's a
+        // relative stress map".
+        //
+        // So with the box ticked the relative demand is CAPPED by the true utilisation:
+        // the pattern still follows the field, and no voxel is drawn denser than the
+        // load actually justifies. It can only ever remove material, never add it, so
+        // it cannot make the picture overstate strength. Unticked, nothing changes.
+        var graded = relative
+        if minimizePlastic, stageMode == .aesthetic, allowableMPa > 0,
+           let rel = relative,
+           let absolute = LatticePreviewOccupancy.demand(
+               like: occupancy, field: field, intent: 0, allowableMPa: allowableMPa),
+           absolute.values.count == rel.values.count {
+            var capped = rel
+            for i in 0..<capped.values.count {
+                capped.values[i] = Swift.min(rel.values[i], absolute.values[i])
+            }
+            graded = capped
+        }
+        self.demand = statedDemand ?? graded
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has
         // TWO sources and they are not interchangeable: an FEA field, or a per-region
         // density the user STATED, inverted back into demand so the shader draws the
@@ -473,12 +492,53 @@ public struct LatticeSDFScene {
         // is wasted — anything beyond reads core's +inf "thicker than measured"
         // sentinel, which clears the floor anyway.
         let lim = TopOptKit.latticeLimits(topology: latticeID)
-        self.minCellsPerMember = lim.certifiable ? lim.minCellsPerMember : 0
+        // ★★★ THE FLOOR IN FORCE IS THE MODE'S, AND THIS IS THE ROOT OF THE 2.20 mm
+        // CELL (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm cells").
+        //
+        // ★ THIS LINE TOOK CORE'S ACCURACY FLOOR UNCONDITIONALLY, and it is the
+        // DIVISOR every planner path uses: the auto window's ceiling is
+        // `widest / minCellsPerMember`, the per-local-member cell is
+        // `width / minCellsPerMember`, and the refusal is "is this member N* cells
+        // across". So the aesthetic relaxation was being applied in ONE place — the
+        // per-voxel array below — while five others kept dividing by 5. Fixing the
+        // per-region derivation moved the number in the derivation and nowhere else,
+        // which is why his card still read 2.20.
+        //
+        // ★ SO THE MODE DECIDES IT HERE, ONCE, and every divisor downstream is the
+        // mode's by construction rather than by being individually remembered.
+        // Structural is unchanged: its floor IS the accuracy floor.
+        self.minCellsPerMember = lim.certifiable
+            ? stageMode.cellsPerMemberFloor(topology: latticeID, utilisation: .nan)
+            : 0
         if self.minCellsPerMember > 0 {
-            let solid = occupancy.values.map { $0 > 0.5 }
+            // ★★★ MEASURED ON THE **PART**, NOT ON THE DECLARATION (maintainer,
+            // 2026-08-22: "Find every reason why the two walls aren't *entirely* being
+            // latticed").
+            //
+            // ★ THIS READ `occupancy`, WHICH IS `self.occupancy` — THE REGION-CLIPPED
+            // GRID. So the "member thickness" was an EDT over the declared SLAB rather
+            // than over the wall, and that is wrong in two directions at once:
+            //
+            //   • in DEPTH it measures the region's depth, not the wall. Declare 8 mm
+            //     into an 11 mm wall and every voxel reports 8 mm of member.
+            //   • IN PLANE it tapers to ZERO at the region's own boundary, because the
+            //     clipped set simply ends there. The cells-per-member floor then refuses
+            //     a full cell's worth of border around EVERY declared region — the
+            //     lattice can never reach the edge of what he marked, at any setting.
+            //
+            // A member is a property of the PART. Core's own law reads the part's width
+            // (`local_member_thickness_mm` over the design density), and the declaration
+            // says WHERE to lattice, never how thick the material is. Measuring it on
+            // the mask made the floor a function of the user's own depth control, which
+            // is why a deeper region made MORE of the wall refuse rather than less.
+            //
+            // ★ AND IT POISONED EVERY WIDTH-DERIVED NUMBER DOWNSTREAM — the per-region
+            // cell (`widthMM`), the Auto ceiling and ladder base (`boundsMM`,
+            // `ladderBaseCellMM`) and the per-voxel floor all consume this array.
+            let partSolid = solid.values.map { $0 > 0.5 }
             self.memberThicknessMM = TopOptKit.latticeMemberThicknessMM(
-                nx: occupancy.nx, ny: occupancy.ny, nz: occupancy.nz,
-                spacing: occupancy.spacing, solid: solid, capRadiusVoxels: 16)
+                nx: solid.nx, ny: solid.ny, nz: solid.nz,
+                spacing: solid.spacing, solid: partSolid, capRadiusVoxels: 16)
         }
 
         // ★★★ THE AESTHETIC FLOOR, ONE VOXEL AT A TIME (maintainer, 2026-08-21: "If
@@ -497,30 +557,23 @@ public struct LatticeSDFScene {
         // leaves the array empty, and every voxel then takes the accuracy floor.
         self.stageMode = stageMode
         self.algorithm = algorithm
-        if stageMode == .aesthetic, self.minCellsPerMember > 0, allowableMPa > 0,
-           let measured = stressField ?? field,
-           let util = LatticePreviewOccupancy.demand(like: occupancy, field: measured,
-                                                     intent: 0,
-                                                     allowableMPa: allowableMPa) {
-            let topo = latticeID
-            // Core is asked once per DISTINCT utilisation, quantised to 1 %, because
-            // the call crosses the bridge and a 128³ grid is two million voxels. The
-            // quantisation rounds the utilisation UP (`ceil`), so every voxel is priced
-            // as if it were working slightly harder than measured and its floor is at
-            // least as strict as core's own — the error is spent on the safe side, not
-            // on a coarser cell than core would allow.
-            var cache = [Int: Double]()
-            var floors = [Double](repeating: 0, count: occupancy.values.count)
-            for i in 0..<occupancy.values.count where occupancy.values[i] > 0.5 {
-                let u = Double(util.values[i])
-                let bucket = u.isFinite ? Swift.min(100, Swift.max(0, Int(ceil(u * 100)))) : -1
-                if let hit = cache[bucket] { floors[i] = hit; continue }
-                let f = LatticeStageMode.aesthetic.cellsPerMemberFloor(
-                    topology: topo, utilisation: bucket < 0 ? .nan : Double(bucket) / 100)
-                cache[bucket] = f
-                floors[i] = f
+        // ★★★ AESTHETIC: THE FLOOR IS FLAT, AND IT DOES NOT WAIT FOR A SOLVE
+        // (maintainer, 2026-08-21: "The rule is we lattice *WHEREVER* it is asked of
+        // us"). This used to be gated on a measured field AND a positive allowable and
+        // then priced PER VOXEL from that voxel's utilisation — so the same wall
+        // latticed or went solid depending on whether the FEA had landed yet, and the
+        // parts of it doing real work went solid even after it had. Core's hard floor
+        // is a constant, so this is now one call and one value.
+        if stageMode == .aesthetic, self.minCellsPerMember > 0 {
+            let f = LatticeStageMode.aesthetic.cellsPerMemberFloor(
+                topology: latticeID, utilisation: .nan)
+            if f > 0 {
+                var floors = [Double](repeating: 0, count: occupancy.values.count)
+                for i in 0..<occupancy.values.count where occupancy.values[i] > 0.5 {
+                    floors[i] = f
+                }
+                self.cellsPerMemberFloorPerVoxel = floors
             }
-            self.cellsPerMemberFloorPerVoxel = floors
         }
         self.bounds = mesh.bounds
         self.mesh = mesh
@@ -539,14 +592,25 @@ extension LatticeSDFScene: LatticeSDFPreviewSummary {
     /// because then the job IS doubled and there is nothing to caveat.
     public var algorithmName: String { algorithm }
 
-    /// ★★ WHETHER THE PICTURE IS THAT ALGORITHM. Only DOUBLED is drawn faithfully:
-    /// the cell texture encodes a base cell plus an integer dyadic level, which is
-    /// what doubled means and what neither of the others can be written as. See
-    /// `LatticePreviewBanner.make` for the full reasoning and for why the preview is
-    /// labelled rather than suppressed.
+    /// ★★ WHETHER THE PICTURE IS THAT ALGORITHM.
+    ///
+    /// ★ DOUBLED AND STEPPED BOTH ARE, NOW. The old rule was "only doubled", because
+    /// the cell texture encoded a base cell plus an integer DYADIC level and stepped's
+    /// cells are arbitrary reals. That was a fact about the ENCODING: the texture now
+    /// carries a real cell SIZE per base cell, and the frame is built with the
+    /// power-of-two assumption removed, so stepped is drawn as itself — including its
+    /// unshared nodes at a region boundary, which is the algorithm and not a defect.
+    ///
+    /// ★ ORGANIC STILL IS NOT. Its curves are traced and baked (`organicTrace`), but
+    /// the march does not yet read that field, so the banner must keep saying so.
+    ///
+    /// ★ A CAVEAT THIS CANNOT SEE: stepped is only DRAWN when a region actually derived
+    /// a cell. When none did, the renderer falls back to the ladder and reports it as
+    /// `LatticeSDFRenderer.steppedDrawn == false`; this scene-level flag has no way to
+    /// know. It says which algorithms the preview CAN draw, which is what the banner
+    /// asks it.
     public var algorithmDrawnFaithfully: Bool {
-        algorithm.isEmpty
-            || algorithm == (TopOptKit.latticeAlgorithmNames.first ?? "doubled")
+        algorithm.isEmpty || algorithm == "doubled" || algorithm == "stepped"
     }
 }
 
@@ -628,6 +692,20 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var fitCellMM: [Double] = [] {
         didSet { if fitCellMM != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★★★ STEPPED: each declared region's own cell (mm), VERBATIM from core's
+    /// `lattice_region_derivation` — one entry per region in the scene's order, 0 for a
+    /// region with no cell. Empty ⇒ not a stepped job, and the ladder is drawn.
+    ///
+    /// ★ THE APP DOES NOT DERIVE THIS. Core's definition of stepped is "`Fit` without
+    /// the dyadic snap", and Fit's cell already comes from that one core call — so
+    /// stepped is the same number with the snap removed, not a second law.
+    var steppedCellMM: [Double] = [] {
+        didSet { if steppedCellMM != oldValue, scene != nil { rebakeCellField() } }
+    }
+    /// ★ Whether the last bake actually laid down the STEPPED field. False when stepped
+    /// was asked for but no region derived a cell — the ladder is drawn then, and the
+    /// banner must keep saying so rather than claiming a picture it is not showing.
+    private(set) var steppedDrawn = false
     /// ★ SUB-FLOOR RETENTION, as the job carries it. Armed ⇒ the cells-per-member
     /// floor stands down where the declared set MEASURES as unloaded, exactly as
     /// `retain_subfloor_in_unloaded_regions` does in the run.
@@ -648,6 +726,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// rather than a default one: a wrong layer count is a picture that lies about the
     /// part. No rebake — it changes only the SHADING, not which cells exist.
     var layerHeightMM: Double = 0
+    /// ★ The part's build direction in MODEL space — `BuildOrientation.buildDirection`,
+    /// which is +Z by default and moves when the orientation is baked. Drives the
+    /// printed-layer banding, and (once organic is armed) the tracer's overhang cone.
+    var buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)
     /// ★★ WHY THE PREVIEW DREW NOTHING, WHEN IT DREW NOTHING (maintainer,
     /// 2026-08-20: "instead of showing an empty fucking wall we should have a way to
     /// recognize that it will happen and create a pop-up").
@@ -817,7 +899,29 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let retains = subfloorQualifiesNow(scene)
         subfloorRetained = retains
         var baked: LatticeCellField?
-        if let sweep = cellSweep {
+        // ★★★ STEPPED IS TRIED FIRST, AND THAT ORDER IS THE WHOLE POINT (maintainer,
+        // 2026-08-22: "I attempted a Stepped lattice preview and it didn't work").
+        //
+        // ★ IT WAS GATED ON `baked == nil` AND SAT AFTER THE PLANNER, so on any job
+        // with a sweep — which is every Auto and Swept job, i.e. his — the dyadic
+        // planner filled `baked` first and stepped never ran at all. Stepped is not a
+        // fallback from the ladder, it is the ALTERNATIVE to it: "Fit WITHOUT the
+        // dyadic snap". So it is asked first, and the ladder is what happens when no
+        // region stated a cell.
+        if !steppedCellMM.isEmpty, steppedCellMM.count == scene.regions.count {
+            let stated = steppedCellMM.filter { $0 > 0 }
+            if let finest = stated.min(), finest > 0 {
+                baked = LatticePreviewOccupancy.steppedCellField(
+                    occupancy: scene.occupancy, demand: scene.demand,
+                    regions: scene.regions, cellMM: steppedCellMM,
+                    baseCellMM: finest,
+                    memberThickness: scene.memberThicknessMM,
+                    minCellsPerMember: retains ? 0 : scene.minCellsPerMember,
+                    cellsPerMemberFloor: retains ? [] : scene.cellsPerMemberFloorPerVoxel)
+            }
+        }
+        steppedDrawn = baked != nil
+        if baked == nil, let sweep = cellSweep {
             baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
         }
         // ★★ CAN ANYTHING PRINT AT THIS CELL AT ALL? The band floor has already
@@ -1031,7 +1135,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             minCellMM: sweep.minMM, maxCellMM: sweep.maxMM,
             minExtrudableWidthMM: sweep.minExtrudableWidthMM,
             capRadiusVoxels: 16, topology: params.latticeID,
-            desiredCellMM: desired) else { return nil }
+            desiredCellMM: desired,
+            // ★★★ THE FLOOR CORE KEEPS OR CULLS BY. Without it core required 5 cells
+            // across every member however far the mode had relaxed, so an 11 mm wall
+            // asking for a 4.4 mm cell needed 22 mm of material and was culled to
+            // SOLID — "only lattice in the back of these walls". Retention drops the
+            // ceiling entirely, exactly as it does for the app's own floors above.
+            cellsPerMemberFloor: retains ? 0 : scene.minCellsPerMember) else { return nil }
 
         let field = LatticePreviewOccupancy.gradedCellField(
             occupancy: occ, demand: scene.demand, plan: plan)
@@ -1052,22 +1162,28 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         guard f.level.count == grid.values.count else { return nil }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
-        d.pixelFormat = .rg16Float
+        // ★ FOUR CHANNELS SINCE STEPPED: r = demand, g = dyadic level, b = the stepped
+        // cell's size in mm (0 = not stepped), a unused. The shader reads `.b` only
+        // when it is positive, so the doubled path is byte-identical.
+        d.pixelFormat = .rgba16Float
         d.width = grid.nx; d.height = grid.ny; d.depth = grid.nz
         d.usage = [.shaderRead]
         d.storageMode = .shared
         guard let tex = device.makeTexture(descriptor: d) else { return nil }
-        var halfs = [UInt16](repeating: 0, count: grid.values.count * 2)
+        let hasStepped = f.steppedCellMM.count == grid.values.count
+        var halfs = [UInt16](repeating: 0, count: grid.values.count * 4)
         for n in 0..<grid.values.count {
-            halfs[2 * n] = float32to16(grid.values[n])
-            halfs[2 * n + 1] = float32to16(f.level[n])
+            halfs[4 * n] = float32to16(grid.values[n])
+            halfs[4 * n + 1] = float32to16(f.level[n])
+            halfs[4 * n + 2] = hasStepped ? float32to16(f.steppedCellMM[n]) : 0
+            halfs[4 * n + 3] = 0
         }
         halfs.withUnsafeBytes { raw in
             tex.replace(region: MTLRegionMake3D(0, 0, 0, grid.nx, grid.ny, grid.nz),
                         mipmapLevel: 0, slice: 0,
                         withBytes: raw.baseAddress!,
-                        bytesPerRow: grid.nx * 4,
-                        bytesPerImage: grid.nx * grid.ny * 4)
+                        bytesPerRow: grid.nx * 8,
+                        bytesPerImage: grid.nx * grid.ny * 8)
         }
         return tex
     }
@@ -1229,7 +1345,17 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // faces stay straight (a uniform offset), and nothing renders unless it is
             // genuinely interior.
             // stepParams.z = whether a face-tint volume is bound (A4).
-            stepParams: SIMD4(0.95, 0.35 * minSDFSpacing, tintTex != nil ? 1 : 0, Float(segCount)),
+            // ★★★ AND IT IS BOUNDED IN MILLIMETRES. `0.35 * minSDFSpacing` is a
+            // fraction of a PREVIEW SETTING: 0.60 mm at Fine 128, but 1.21 mm at Fast
+            // 64 on his part — so switching to Fast ate over a millimetre of lattice
+            // off every surface INCLUDING the declared face, and left a solid skin he
+            // never asked for. The error it exists to dominate is the trilinear SDF's
+            // own, which is a fraction of a voxel near a crease and essentially zero on
+            // a flat face; a third of a millimetre covers it at any resolution. Same
+            // reasoning, and the same clamp, as `lsdf_part_clip`.
+            stepParams: SIMD4(0.95,
+                              Float(min(max(0.35 * Double(minSDFSpacing), 0.10), 0.35)),
+                              tintTex != nil ? 1 : 0, Float(segCount)),
             lightDir: SIMD4(lightModel, 0),
             // ★ `denseColor` is now the INTERIOR hue and `sparseColor` the pale end
             // every hue washes out to, so all three classes share one lightness
@@ -1265,7 +1391,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             strutCurve0: curve.0, strutCurve1: curve.1,
             strutCurve2: curve.2, strutCurve3: curve.3,
             strutCurve4: curve.4, strutCurve5: curve.5,
-            strutCurve6: curve.6, strutCurve7: curve.7)
+            strutCurve6: curve.6, strutCurve7: curve.7,
+            buildDir: {
+                let b = simd_normalize(SIMD3<Double>(
+                    buildDirection.x.isFinite ? buildDirection.x : 0,
+                    buildDirection.y.isFinite ? buildDirection.y : 0,
+                    buildDirection.z.isFinite ? buildDirection.z : 1))
+                return simd_length(b) > 0.5 ? SIMD4<Float>(SIMD3<Float>(b), 0) : .zero
+            }())
     }
 
     /// ★★ CORE'S STRUT LAW, SAMPLED ONCE PER BAND (task 2026-08-20). 32 normalised
@@ -1329,6 +1462,43 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// shader reads as "clip nothing": the standalone sample block has no regions
     /// by construction and must still draw its cell.
     var shellClip = ShellClipUniform()
+    /// ★ THE DECLARATION LIST THAT GOES WITH `shellClip` — three float4s each, the
+    /// shader's `SHELL_DECL_STRIDE`. Set together with it by the host, because either
+    /// one alone describes nothing. Never empty: Metal drops a draw on an unbound
+    /// buffer, so the default is one entry the shader's own enable flag ignores.
+    var shellDecls: [SIMD4<Float>] = [SIMD4(0, 0, 1, 0), .zero, .zero]
+
+    /// ★★★ THE CELL THE BAKE ACTUALLY LAID DOWN AT `p` (model mm). 0 when nothing was
+    /// baked there, or the point is outside the grid.
+    ///
+    /// ★ THE READOUT USED TO RE-DERIVE THIS and it was wrong by 3.6x (maintainer,
+    /// 2026-08-22: "The legend is still saying it's 2.2mm cells - which I highly doubt
+    /// now"). He was right to doubt it: the callout re-ran a width/N* rule and reported
+    /// 2.20 mm while the march was drawing his 8.00 mm cell. The give-away was in the
+    /// same box — a 2.56 mm strut cannot fit in a 2.20 mm cell, and 2.56 mm is exactly
+    /// what 46% density makes at 8.00 mm.
+    ///
+    /// ★ SO IT READS THE FIELD THE SHADER READS. `cellField` IS the texture the march
+    /// samples, so the number on the card and the geometry under the finger cannot
+    /// disagree — and it is right for all three algorithms without knowing which one it
+    /// is holding, because the field carries the answer either way.
+    func bakedCellMMAt(_ p: SIMD3<Float>) -> Double {
+        guard let f = cellField else { return 0 }
+        let g = f.field
+        guard g.nx > 0, g.ny > 0, g.nz > 0,
+              g.spacing.x > 0, g.spacing.y > 0, g.spacing.z > 0 else { return 0 }
+        let r = (p - g.origin) / g.spacing
+        let i = Int(r.x.rounded()), j = Int(r.y.rounded()), k = Int(r.z.rounded())
+        guard i >= 0, j >= 0, k >= 0, i < g.nx, j < g.ny, k < g.nz else { return 0 }
+        let n = (k * g.ny + j) * g.nx + i
+        guard n >= 0, n < g.values.count, g.values[n] >= 0 else { return 0 }  // solid here
+        // STEPPED carries the size outright; the ladder carries a dyadic level.
+        if f.steppedCellMM.count == g.values.count, f.steppedCellMM[n] > 0 {
+            return Double(f.steppedCellMM[n])
+        }
+        guard n < f.level.count else { return f.baseCellMM }
+        return f.baseCellMM * pow(2.0, Double(max(0, Int(f.level[n].rounded()))))
+    }
 
     /// The baked region field, for the SHELL's own fragments — the same texture
     /// this renderer's march samples, so the hole and the struts are one volume.
@@ -1361,6 +1531,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // a draw whose declared buffer is unbound.
         var clip = shellClip
         enc.setFragmentBytes(&clip, length: MemoryLayout<ShellClipUniform>.stride, index: 4)
+        var decls = shellDecls.isEmpty ? [SIMD4<Float>(0, 0, 1, 0), .zero, .zero] : shellDecls
+        decls.withUnsafeBytes {
+            enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 5)
+        }
         enc.setFragmentBuffer(segBuffer, offset: 0, index: 1)
         enc.setFragmentTexture(cellTex, index: 0)
         enc.setFragmentTexture(sdfTex, index: 1)
@@ -1473,13 +1647,18 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   texture3d<float> regionTex [[texture(3)]],
                                   texture3d<float> stressTex [[texture(4)]],
                                   sampler samp [[sampler(0)]],
-                                  constant ShellClip& RC [[buffer(4)]]) {
+                                  constant ShellClip& RC [[buffer(4)]],
+                                  // ★ See `lsdf_gbuffer`: the same declaration list,
+                                  // the same buffer index, bound by the same binder.
+                                  constant float4* shellDecls [[buffer(5)]]) {
         float3 ro = U.eye.xyz;
         float3 rd = lsdf_ray(U, in.uv);
-        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, ro, rd);
+        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
+                               ro, rd);
         if (!h.hit) return float4(0.0);
         float3 hitPos = h.pos; float hitRho = h.rho;
-        float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, hitPos, hitRho);
+        float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
+                               hitPos, hitRho);
 
         // ★ THE OLD, SEPARATE LIGHTING MODEL — and §1(d)'s whole point. A model-space
         // key at a different direction and a different strength from the body's, a

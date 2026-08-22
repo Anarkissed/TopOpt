@@ -103,9 +103,25 @@ final class LatticePreviewFloorVsCoreTests: XCTestCase {
     func testCoreLeavesThisFixturesMaterialSolidToo() throws {
         let (scene, params) = try hisFinishScene()
         try XCTSkipIf(scene.memberThicknessMM.isEmpty, "core gave no widths in this build")
+        // ★★ THE CELL IS DERIVED FROM THE MATERIAL, NOT TAKEN FROM THE FIXTURE.
+        //
+        // ★ THIS TOOK `params.cellMM` and asserted core latticeS NOTHING at it. Both
+        // sides of that have since moved for good reasons: `memberThicknessMM` is now an
+        // EDT over the PART (it used to measure the region-clipped SLAB, which tapered
+        // to zero at the declaration's own boundary), and the floor is now the stage
+        // MODE's rather than always the accuracy 5. The FINDING this test records —
+        // that core's own law and the preview agree, and that no aggregation rule could
+        // rescue a cell nothing can hold — is about the AGREEMENT, not about one width.
+        // So the cell is chosen to be genuinely unholdable HERE, and the agreement is
+        // what is asserted.
         let occ = scene.occupancy
-        let cell = params.cellMM
         let nStar = scene.minCellsPerMember
+        let widestHere = (0..<occ.count)
+            .filter { occ.values[$0] > 0.5 }
+            .map { scene.memberThicknessMM[$0] }
+            .filter { $0.isFinite && $0 > 0 }.max() ?? 0
+        XCTAssertGreaterThan(widestHere, 0, "positive control: measured material")
+        let cell = Swift.max(params.cellMM, 1.2 * widestHere / Swift.max(nStar, 1))
         XCTAssertGreaterThan(nStar, 0, "positive control: core must state an N*")
         XCTAssertGreaterThan(cell, 0, "positive control: the fixture must have a cell")
 
@@ -327,17 +343,29 @@ final class LatticePreviewFloorVsCoreTests: XCTestCase {
         let inside = (0..<occ.count).filter { occ.values[$0] > 0.5 }
         XCTAssertGreaterThan(inside.count, 0, "positive control: the region has material")
 
+        // ★★ THE UNHOLDABLE CELL IS DERIVED, NOT THE LITERAL 4 mm. 83c1f142's defect —
+        // a cell CENTRE landing in free space reading as consent — is about the
+        // aggregation rule, not about one width, and the width it was recorded at has
+        // legitimately moved twice since: `memberThicknessMM` now measures the PART
+        // rather than the region-clipped slab, and the floor is the stage MODE's rather
+        // than always 5. Deriving the cell keeps the defect pinned while letting the
+        // material be whatever it honestly is.
+        let widest = inside.map { scene.memberThicknessMM[$0] }
+            .filter { $0.isFinite && $0 > 0 }.max() ?? 0
+        XCTAssertGreaterThan(widest, 0, "positive control: measured material")
+        let cellMM = 1.2 * widest / Swift.max(scene.minCellsPerMember, 1)
+
         let latticed = inside.filter {
-            Self.coreLatticesVoxel(scene.memberThicknessMM[$0], cell: 4.0,
+            Self.coreLatticesVoxel(scene.memberThicknessMM[$0], cell: cellMM,
                                    nStar: scene.minCellsPerMember)
         }.count
         XCTAssertEqual(latticed, 0,
                        "★ 83c1f142's own measurement, re-asked of core's per-voxel law: "
-                       + "at a 4 mm cell NOTHING in this region qualifies. The run "
+                       + "at this cell NOTHING in this region qualifies. The run "
                        + "leaves it entirely solid.")
 
         let drawn = LatticePreviewOccupancy.cellField(
-            occupancy: occ, demand: scene.demand, cellMM: 4.0,
+            occupancy: occ, demand: scene.demand, cellMM: cellMM,
             memberThickness: scene.memberThicknessMM,
             minCellsPerMember: scene.minCellsPerMember)
             .values.filter { $0 >= 0 }.count

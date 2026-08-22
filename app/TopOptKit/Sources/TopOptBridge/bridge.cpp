@@ -36,6 +36,7 @@
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/organic_lattice.hpp"
 #include "topopt/part.hpp"
 #include "topopt/pipeline.hpp"
 #include "topopt/production.hpp"
@@ -2175,6 +2176,188 @@ std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double s
   }
 }
 
+
+// ★★★ THE ORGANIC LATTICE, AS THE PREVIEW NEEDS IT (task 2026-08-22).
+//
+// ★ WHY THE PREVIEW CAN HAVE THIS AT ALL. The standing note said the strut preview
+// could draw only DOUBLED, organic having "no cells at all, only traced curves". The
+// gate was never the curves — it was the INPUT: `trace_organic_lattice` wants the full
+// per-voxel stress TENSOR (6 components, Voigt, MPa), and the preview only ever held
+// the von Mises SCALAR. But the tensor already crosses this bridge for the load-flow
+// overlay (`OptimizeVariant::stress_tensor_field`), so nothing new has to be solved or
+// exported — it only has to be handed to the tracer.
+//
+// ★ CURVES OUT, NOT GEOMETRY. `generate_organic_lattice` sweeps solids and welds them;
+// that is for the exporter. A preview wants CENTRELINES and radii, which the tracer
+// already produced — every polyline segment and every connector, as capsules. The part
+// and region clip is applied by the renderer's own field, exactly as it is for the
+// octet march, so no clip is duplicated here.
+//
+// ★ ONE FLAT ARRAY OUT, header then payload — a POD struct does not survive this
+// boundary and `std::vector` INPUTS do not either (see `lattice_member_thickness_mm`).
+//
+//   [0]  1 = traced, 0 = refused (bad sizes / core threw)
+//   [1]  span count            [2]  curve count        [3]  connector count
+//   [4]  FIELD cell count      [5]  min spacing used   [6]  max spacing used
+//   [7]  degenerate fraction   [8]  band (mm)          [9]  design-grid voxel count n
+//   [10..15] reserved, zero
+//   [16 ..]                    the strut distance field, [4] doubles (mm, negative
+//                              inside a strut, clamped at the band)
+//   [16 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
+std::vector<double> organic_preview_field(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const double* spacing_mm, std::size_t spacing_count,
+    double min_extrudable_width_mm,
+    double build_x, double build_y, double build_z,
+    double overhang_angle_deg, double rho_min, double rho_max,
+    // The field to bake the traced capsules into: its own grid, which is the REGION's
+    // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
+    int fnx, int fny, int fnz, double fspacing,
+    double fox, double foy, double foz, double band_mm) {
+  const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                        static_cast<std::size_t>(nz);
+  std::vector<double> out(16, 0.0);
+  if (nx <= 0 || ny <= 0 || nz <= 0 || !(spacing > 0.0)) return out;
+  if (candidate == nullptr || candidate_count != n) return out;
+  if (tensor == nullptr || tensor_count != 6 * n) return out;
+  if (spacing_mm == nullptr || spacing_count != n) return out;
+  if (!(min_extrudable_width_mm > 0.0)) return out;   // §2c: printability is user input
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(n, topopt::VoxelTag::Empty);
+
+  std::vector<char> cand(n, 0);
+  std::vector<double> sep(n, 0.0);
+  bool any = false;
+  for (std::size_t i = 0; i < n; ++i) {
+    // ★ A CANDIDATE NEEDS A SEPARATION. Core throws on a non-positive spacing anywhere
+    // on the candidate set, so a voxel the caller marked but gave no spacing for is
+    // dropped here rather than turned into an exception the UI cannot act on.
+    const bool c = candidate[i] != 0 && spacing_mm[i] > 0.0;
+    cand[i] = c ? 1 : 0;
+    sep[i] = c ? spacing_mm[i] : 0.0;
+    grid.tags[i] = c ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    any = any || c;
+  }
+  if (!any) return out;
+
+  std::vector<double> stress(tensor, tensor + 6 * n);
+
+  topopt::OrganicParams p;
+  p.build_dir = topopt::Vec3{build_x, build_y, build_z};
+  p.min_extrudable_width_mm = min_extrudable_width_mm;
+  p.overhang_angle_deg = overhang_angle_deg;
+  p.rho_min = rho_min;
+  p.rho_max = rho_max;
+
+  topopt::OrganicLattice lat;
+  try {
+    lat = topopt::trace_organic_lattice(grid, cand, stress, sep, nullptr, p);
+  } catch (...) {
+    return out;   // core refused; the caller says so rather than drawing something
+  }
+
+  // ── ★★★ THE CAPSULES, BAKED TO A DISTANCE FIELD ─────────────────────────────
+  //
+  // ★ WHY A FIELD AND NOT THE SPANS THEMSELVES. The renderer already sphere-traces
+  // volume textures (the part SDF, the region SDF) and clips against them; a strut
+  // field drops straight into that machinery as one more `max()` term. The
+  // alternative — shipping ~100k centreline segments to the GPU with a uniform-grid
+  // index and marching them in world space — is a second renderer for a picture the
+  // existing one can already draw.
+  //
+  // ★ AND WHY THE BAKE IS HERE RATHER THAN IN SWIFT. It is a SCATTER: every span
+  // stamps its own bounding box. On his part that is ~10^8 distance evaluations, which
+  // is a second of C++ and a minute of Swift. Nothing about it is rendering policy —
+  // it is the distance to a union of capsules.
+  //
+  // ★ THE FIELD IS CLAMPED AT `band_mm`, WHICH IS SAFE IN THE ONE DIRECTION THAT
+  // MATTERS. A clamped value is an UNDER-estimate of the true distance, so a sphere
+  // trace against it takes a shorter step and can never overshoot a strut. It only
+  // costs steps in empty space — and inside a region the curve separation is a few mm,
+  // so almost every point is within the band anyway.
+  const std::size_t fn = static_cast<std::size_t>(fnx) * static_cast<std::size_t>(fny) *
+                         static_cast<std::size_t>(fnz);
+  std::vector<double> field;
+  std::size_t span_count = 0;
+  if (fnx > 0 && fny > 0 && fnz > 0 && fspacing > 0.0 && band_mm > 0.0 && fn > 0) {
+    field.assign(fn, band_mm);
+    auto stamp = [&](const topopt::Vec3& a, const topopt::Vec3& b, double r) {
+      ++span_count;
+      const double reach = r + band_mm;
+      int i0 = static_cast<int>(std::floor((std::min(a.x, b.x) - reach - fox) / fspacing));
+      int i1 = static_cast<int>(std::ceil((std::max(a.x, b.x) + reach - fox) / fspacing));
+      int j0 = static_cast<int>(std::floor((std::min(a.y, b.y) - reach - foy) / fspacing));
+      int j1 = static_cast<int>(std::ceil((std::max(a.y, b.y) + reach - foy) / fspacing));
+      int k0 = static_cast<int>(std::floor((std::min(a.z, b.z) - reach - foz) / fspacing));
+      int k1 = static_cast<int>(std::ceil((std::max(a.z, b.z) + reach - foz) / fspacing));
+      i0 = std::max(i0, 0); j0 = std::max(j0, 0); k0 = std::max(k0, 0);
+      i1 = std::min(i1, fnx - 1); j1 = std::min(j1, fny - 1); k1 = std::min(k1, fnz - 1);
+      const double bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z;
+      const double bb = bax * bax + bay * bay + baz * baz;
+      for (int k = k0; k <= k1; ++k) {
+        const double pz = foz + k * fspacing;
+        for (int j = j0; j <= j1; ++j) {
+          const double py = foy + j * fspacing;
+          const std::size_t row = (static_cast<std::size_t>(k) * fny + j) * fnx;
+          for (int i = i0; i <= i1; ++i) {
+            const double px = fox + i * fspacing;
+            const double pax = px - a.x, pay = py - a.y, paz = pz - a.z;
+            double h = bb > 1e-12 ? (pax * bax + pay * bay + paz * baz) / bb : 0.0;
+            h = h < 0.0 ? 0.0 : (h > 1.0 ? 1.0 : h);
+            const double dx = pax - bax * h, dy = pay - bay * h, dz = paz - baz * h;
+            const double d = std::sqrt(dx * dx + dy * dy + dz * dz) - r;
+            double& slot = field[row + i];
+            if (d < slot) slot = d;
+          }
+        }
+      }
+    };
+    for (const topopt::OrganicCurve& c : lat.curves) {
+      if (!(c.radius_mm > 0.0)) continue;
+      for (std::size_t q = 0; q + 1 < c.points.size(); ++q) {
+        stamp(c.points[q], c.points[q + 1], c.radius_mm);
+      }
+    }
+    for (const topopt::OrganicConnector& c : lat.connectors) {
+      if (!(c.radius_mm > 0.0)) continue;
+      stamp(c.a, c.b, c.radius_mm);
+    }
+  }
+
+  double lo = 0.0, hi = 0.0;
+  bool first = true;
+  for (std::size_t i = 0; i < lat.spacing_used_mm.size() && i < n; ++i) {
+    const double s = lat.spacing_used_mm[i];
+    if (!(s > 0.0)) continue;
+    if (first) { lo = hi = s; first = false; }
+    else { lo = std::min(lo, s); hi = std::max(hi, s); }
+  }
+
+  out[0] = 1.0;
+  out[1] = static_cast<double>(span_count);
+  out[2] = static_cast<double>(lat.curves.size());
+  out[3] = static_cast<double>(lat.connectors.size());
+  out[4] = static_cast<double>(field.size());
+  out[5] = lo;
+  out[6] = hi;
+  out[7] = lat.report.degenerate_fraction;
+  out[8] = band_mm;
+  out[9] = static_cast<double>(n);
+  out.insert(out.end(), field.begin(), field.end());
+  if (lat.relative_density.size() == n) {
+    out.insert(out.end(), lat.relative_density.begin(), lat.relative_density.end());
+  } else {
+    out.insert(out.end(), n, 0.0);
+  }
+  return out;
+}
+
 // ★★ CORE'S OWN DYADIC CELL PLAN, READ BY THE PREVIEW (task item 3: "Is there *NO*
 // way to make the *PREVIEW* lattice grade cell size?").
 //
@@ -2208,7 +2391,8 @@ std::vector<double> lattice_cell_size_plan(
     const double* width, std::size_t width_count,
     double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
     int cap_radius_voxels, const std::string& topology,
-    const double* desired_cell_mm, std::size_t desired_count) {
+    const double* desired_cell_mm, std::size_t desired_count,
+    double cells_per_member_floor) {
   const std::size_t want =
       static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
       static_cast<std::size_t>(nz);
@@ -2245,6 +2429,23 @@ std::vector<double> lattice_cell_size_plan(
   pp.max_cell_size_mm = max_cell_mm;
   pp.min_extrudable_width_mm = min_extrudable_width_mm;
   pp.thickness_cap_voxels = cap_radius_voxels;
+  // ★★★ THE FLOOR THE PLANNER CULLS BY, AND IT IS THE LAST CONSUMER OF IT
+  // (maintainer, 2026-08-22: "Why is there only lattice in the back of these walls??").
+  //
+  // ★ CORE CULLS A CELL WHOSE MEMBER CANNOT HOLD `N*` OF IT, and with this left at 0
+  // that N* is `lattice_cells_per_member_min(topology)` — the ACCURACY floor of 5 —
+  // however far the stage mode had relaxed. So the app asked for a 4.4 mm cell in his
+  // 11 mm wall, core required 5 x 4.4 = 22.0 mm of member to keep it, and culled the
+  // whole wall to SOLID. The only material that survived was the thick spine behind
+  // it, which is precisely "only lattice in the back".
+  //
+  // ★ THE FLOOR HAD FOUR CONSUMERS AND THIS WAS THE FOURTH: the per-region derivation,
+  // the Auto window's ceiling, the scene's own `minCellsPerMember`, and this. Fixing
+  // the first three moved the numbers the app computes and left the one that decides
+  // what is actually KEPT still dividing by 5.
+  //
+  // 0 keeps the accuracy floor, so every pre-existing caller is unchanged.
+  pp.cells_per_member_floor_override = cells_per_member_floor;
 
   // ★★ FIT IS THE OTHER PLANNER, AND FOR A THIN WALL IT IS THE RIGHT ONE
   // (maintainer, 2026-08-20: "I set the cell size to Fit and it still looks like
@@ -2374,7 +2575,8 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
 
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
-    double min_extrudable_width_mm, double stated_relative_density) {
+    double min_extrudable_width_mm, double stated_relative_density,
+    double cells_per_member_floor) {
   LatticeRegionDerivation d;
   topopt::LatticeTopology topo;
   if (!lattice_topology_from_name(topology, topo)) return d;
@@ -2382,12 +2584,26 @@ LatticeRegionDerivation lattice_region_derivation(
   d.valid = true;
   d.rho_max = topopt::lattice_rho_max(topo);
   const topopt::LatticeCellDerivation w = topopt::lattice_derive_cell_for_member(
-      topo, member_width_mm, min_extrudable_width_mm);
+      topo, member_width_mm, min_extrudable_width_mm, cells_per_member_floor);
   // FEASIBLE is percolation, not accuracy — the same boundary run_job draws, and
   // for the same reason: buildable-and-uncertifiable is a verdict, not a refusal.
   d.feasible = w.feasible_percolation;
   if (!d.feasible) return d;
-  const double n_star = topopt::lattice_cells_per_member_min(topo);
+  // ★★★ THE FLOOR THE CALLER ASKED FOR — NOT ALWAYS THE ACCURACY ONE (maintainer,
+  // 2026-08-22: "the cell size is stuck at 2.2mm which doesn't make sense unless that
+  // wall is only 4.4mm thick?").
+  //
+  // ★ IT WAS 11.0 / 5. This line read `lattice_cells_per_member_min(topo)` — a hard 5,
+  // the ACCURACY floor — no matter what the caller had chosen. On his 11 mm wall that
+  // is exactly the 2.20 mm he measured. Core's own `lattice_derive_cell_for_member`
+  // has taken a floor as a parameter all along; this bridge simply never passed one,
+  // so the aesthetic relaxation reached the per-voxel planner and never reached the
+  // PER-REGION cell that Fit and Stepped are both built from.
+  //
+  // 0 keeps the accuracy floor, so every existing caller is unchanged.
+  const double n_star = cells_per_member_floor > 0.0
+                            ? cells_per_member_floor
+                            : topopt::lattice_cells_per_member_min(topo);
   d.cell_mm = std::max(member_width_mm / n_star, w.min_printable_cell_mm);
   const double rho = topopt::lattice_min_density_for_strut(topo, d.cell_mm,
                                                            min_extrudable_width_mm);
