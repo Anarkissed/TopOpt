@@ -1216,7 +1216,8 @@ JobDescription parse_job(const std::string& json_text) {
                          "emit_3mf", "skin", "min_extrudable_width_mm",
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "regions", "multiscale",
                          "forecast_only",
-                         "require_lattice_void_reaches_exterior"},
+                         "require_lattice_void_reaches_exterior",
+                         "require_no_midair_start"},
                         "lattice");
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
@@ -1476,6 +1477,11 @@ JobDescription parse_job(const std::string& json_text) {
                     "a boolean");
       job.lattice.require_lattice_void_reaches_exterior = (rv->num != 0.0);
     }
+    if (const JsonValue* mv = find_key(lat, "require_no_midair_start")) {
+      if (mv->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"require_no_midair_start\" must be a boolean");
+      job.lattice.require_no_midair_start = (mv->num != 0.0);
+    }
   }
 
   // Optional "grading" block (handoff 2026-07-29-lattice-grading-law). Absent =>
@@ -1494,7 +1500,9 @@ JobDescription parse_job(const std::string& json_text) {
              "subfloor_aggregate_cap", "report_region_cells",
              "subfloor_per_region",
              "algorithm", "organic_strut_width_mm",
-             "organic_overhang_angle_deg", "organic_boundary_finish"},
+             "organic_overhang_angle_deg", "organic_boundary_finish",
+             "organic_shape_fit", "organic_shape_fit_only",
+             "organic_scale"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1617,6 +1625,76 @@ JobDescription parse_job(const std::string& json_text) {
       if (!grading_intent_from_name(job.grading.intent.c_str(), parsed))
         schema_fail("grading \"intent\" must be \"structural\" or \"aesthetic\" (got \"" +
                     job.grading.intent + "\")");
+    }
+    // ★★ SHAPE-FIT GRADING REQUIRES THE AESTHETIC INTENT, and is REFUSED under any
+    // other, rather than being quietly dropped. Shape fit adds a second, GEOMETRIC
+    // driver to the cell size — distance to the boundary alongside the stress
+    // percentile — so that a cell near a wall is sized to FIT the wall instead of
+    // being tessellated and then truncated by the trim.
+    //
+    // ★ WHY IT CANNOT RIDE ALONG WITH "structural". It only ever SHRINKS cells, so it
+    // cannot breach the slenderness or cells-per-member floors — but shrinking cells
+    // ADDS MATERIAL, and under a structural intent the density is what the certificate
+    // is computed against. A geometric term silently overriding the stress-driven size
+    // would move the certified mass and margin for a reason no load case asked for.
+    // Under an aesthetic intent the density is explicitly a look, and more plastic is
+    // not a defect.
+    //
+    // ★ ORGANIC ALREADY REQUIRES THE AESTHETIC INTENT — see refuse_organic_structural
+    // in run_job.cpp, which throws for a stronger reason than this one: traced struts
+    // follow the principal stress directions, so the lattice is anisotropic by
+    // construction, and the certification library holds one CUBIC tensor per topology.
+    // A structural density would be certified against a material this lattice is not.
+    //
+    // This check is therefore NOT what establishes the coupling, and does not pretend
+    // to be. It is kept for two narrow reasons: it fails at PARSE time naming the
+    // offending key, rather than at run time naming the algorithm; and it makes shape
+    // fit's own requirement stand on its own, so that if organic's rule is ever
+    // relaxed this key does not silently inherit the relaxation.
+    if (const JsonValue* sv = find_key(gr, "organic_shape_fit")) {
+      if (sv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_shape_fit\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_shape_fit\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_shape_fit = (sv->num != 0.0);
+      if (job.grading.organic_shape_fit && job.grading.intent != "aesthetic")
+        schema_fail(
+            "grading \"organic_shape_fit\" requires intent \"aesthetic\" (got \"" +
+            (job.grading.intent.empty() ? std::string("structural (default)")
+                                        : job.grading.intent) +
+            "\"): shape fit changes the density, which under a structural intent is "
+            "what the certificate is computed against");
+    }
+    if (const JsonValue* sv = find_key(gr, "organic_scale")) {
+      job.grading.organic_scale = require_number(*sv, "grading.organic_scale");
+      if (!(job.grading.organic_scale > 0.0) ||
+          !std::isfinite(job.grading.organic_scale))
+        schema_fail("grading \"organic_scale\" must be finite and > 0");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_scale\" is only allowed with algorithm \"organic\"");
+    }
+    if (const JsonValue* sv = find_key(gr, "organic_shape_fit_only")) {
+      if (sv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_shape_fit_only\" must be a boolean");
+      job.grading.organic_shape_fit_only = (sv->num != 0.0);
+      if (job.grading.organic_shape_fit_only) {
+        if (!job.grading.organic_shape_fit)
+          schema_fail(
+              "grading \"organic_shape_fit_only\" requires "
+              "\"organic_shape_fit\": true");
+        if (job.grading.intent != "aesthetic")
+          schema_fail(
+              "grading \"organic_shape_fit_only\" requires intent \"aesthetic\": a "
+              "cell size that does not answer to demand makes no structural claim");
+        if (!(job.grading.cell_min_mm > 0.0 &&
+              job.grading.cell_max_mm >= job.grading.cell_min_mm))
+          schema_fail(
+              "grading \"organic_shape_fit_only\" needs a cell window "
+              "(cell_min_mm, cell_max_mm): the shape grades BETWEEN them");
+      }
     }
     if (const JsonValue* q = find_key(gr, "aesthetic_percentile")) {
       job.grading.aesthetic_percentile =
