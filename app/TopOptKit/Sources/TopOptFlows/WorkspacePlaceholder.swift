@@ -2838,6 +2838,19 @@ public struct WorkspacePlaceholder: View {
             }
             let field = LatticeDemandField(
                 vonMises: v.vonMisesField,
+                // ★★★ AND THE TENSOR (maintainer, 2026-08-22: "the organic lattice
+                // preview looks exactly the same as before. Did you even modify the
+                // preview?"). He was right and the banner was already saying so —
+                // "shown as the doubled ladder; the run builds the organic lattice".
+                //
+                // ★ THE TRACER NEVER GOT ITS INPUT. `latticeStressField` is
+                // `latticePageVariantField ?? latticeSim.field`, so the VARIANT field
+                // outranks the stage's own solve — and this constructor dropped the
+                // tensor, leaving it empty. Organic needs the full Cauchy tensor to
+                // eigen-decompose; with none the bake is skipped and the ladder is
+                // drawn instead. The stage's own path was plumbed and this one was not,
+                // which is why it worked in a test and not on his part.
+                stressTensor: v.stressTensorField.map(Double.init),
                 nx: o.gridNx, ny: o.gridNy, nz: o.gridNz,
                 origin: o.gridOrigin, spacingMM: o.spacing,
                 provenance: .variant(runName: project.name, variantIndex: idx,

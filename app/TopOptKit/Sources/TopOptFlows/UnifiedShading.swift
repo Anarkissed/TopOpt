@@ -274,7 +274,7 @@ struct LCell {
 // change without the base cell changing. The march caches this and recomputes only
 // `q`, which is arithmetic.
 static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellTex,
-                                float3 bi) {
+                                float3 bi, float3 cb) {
     float S0 = U.latticeOrigin.w;
     float3 dims = U.gridDims.xyz;
     float lvl = 0.0;
@@ -300,9 +300,24 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
             // means the cache is filled once and never refreshed, and every neighbour
             // read `(baseCell + offset) * m` lands next to the grid ORIGIN instead of
             // next to the ray. Stepped therefore drew whatever the corner of the volume
-            // happened to contain, everywhere. Same formula as the dyadic path — it was
-            // never level-specific, only `m`-specific.
-            o.blk = floor(max(bi, float3(0.0)) / max(o.m, 1e-6));
+            // happened to contain, everywhere.
+            //
+            // ★★★ AND IT IS `cb`, NOT `bi` — THE TWO ENCODINGS HAVE DIFFERENT PHASE
+            // (maintainer, 2026-08-22: "These are still floating boxes. There is
+            // nothing connecting them … there is empty space between them!").
+            //
+            // The dyadic path anchors a block to the base-cell GRID, so its block index
+            // is `floor(round(cb)/m)` and its centre is `blk*m + (m-1)/2`. Stepped does
+            // NOT: `lsdf_cell_q` tiles from the ORIGIN POINT by `sMM`, so its cell index
+            // is `floor(cb/m)`. Borrowing the dyadic `round(cb)` here put `blk` one cell
+            // over wherever `frac(cb) >= 0.5` — HALF of every axis, so only 0.5³ = 12.5%
+            // of the volume prefetched its OWN neighbourhood. The other 87.5% read a
+            // cell one step away: where that neighbour was inactive the march drew
+            // nothing at all, and the boundary between "right" and "wrong" is a regular
+            // half-cell lattice — which is exactly the grid of disconnected blocks with
+            // void between them that stepped has been rendering. `q` was always correct;
+            // only the block it was paired with was not.
+            o.blk = floor(cb / max(o.m, 1e-6));
             o.q = float3(0.0);   // filled by the caller, from its own point
             return o;
         }
@@ -336,7 +351,7 @@ static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
                              float3 p) {
     float S0 = U.latticeOrigin.w;
     float3 cb = (p - U.latticeOrigin.xyz) / S0;
-    LCell o = lsdf_cell_frame_at(U, cellTex, round(cb));
+    LCell o = lsdf_cell_frame_at(U, cellTex, round(cb), cb);
     o.q = lsdf_cell_q(U, o, p);
     return o;
 }
@@ -485,8 +500,13 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         float3 bi = round(cb);
         if (any(bi != cachedBI)) {
             cachedBI = bi;
-            LC = lsdf_cell_frame_at(U, cellTex, bi);
+            LC = lsdf_cell_frame_at(U, cellTex, bi, cb);
         }
+        // ★ THE TEXTURE READ CACHES ON THE BASE CELL; THE STEPPED BLOCK DOES NOT.
+        // A stepped cell is not aligned to the base-cell grid, so `floor(cb/m)` can
+        // change while `round(cb)` has not — caching `blk` alongside the read would
+        // reintroduce the same off-by-one the frame just fixed. It is two flops.
+        if (LC.stepped > 0.0) { LC.blk = floor(cb / max(LC.m, 1e-6)); }
         float cellHere = LC.S;
         float3 baseCell = LC.blk;
         float3 q = lsdf_cell_q(U, LC, p);
@@ -602,7 +622,19 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                         // step over; its min-corner base cell speaks for all of it,
                         // because every base cell in a block carries the block's
                         // level and the block's demand.
-                        float3 cc = (baseCell + float3(ox, oy, oz)) * LC.m;
+                        // ★ THE NEIGHBOUR'S CENTRE, NOT ITS MIN CORNER. `blk*m` is the
+                        // corner, which for a stepped cell sits ON the seam between two
+                        // base cells (and for a non-integer `m` is not even a base index)
+                        // — a half-voxel of rounding there picks the wrong region's
+                        // activation. The centre is unambiguous at any `m`, and reduces
+                        // to `blk+off` exactly on the dyadic path.
+                        // ★ AND ONLY ON STEPPED. On the dyadic path `blk*m` IS a base
+                        // index and every base cell in the block carries the block's
+                        // level and demand, so the min corner is already exact — leave
+                        // doubled bit-identical.
+                        float3 nb = baseCell + float3(ox, oy, oz);
+                        float3 cc = LC.stepped > 0.0 ? floor((nb + 0.5) * LC.m)
+                                                     : nb * LC.m;
                         float v = -1.0;
                         if (all(cc >= -0.5) && all(cc < ncells - 0.5)) {
                             float2 rg = cellTex.read(uint3(cc), 0).rg;

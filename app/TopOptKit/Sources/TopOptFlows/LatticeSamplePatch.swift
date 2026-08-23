@@ -245,16 +245,20 @@ public enum LatticeSamplePatch {
         case .stepped:
             // Two regions, two cells, meeting abruptly. 1.5x is deliberately NOT a
             // power of two — a dyadic pair would share nodes and draw the ladder.
+            // ★ BOTH HALVES ARE FULL-SIZE BLOCKS (maintainer, 2026-08-22: "why is the
+            // 'stepped' sample so small?"). Asking for `n/2` cells shrank the patch on
+            // EVERY axis — the builder makes cubes — so the sample came out a quarter
+            // the volume of the other two grades and read as a different, smaller
+            // thing rather than as the same block at two cell sizes.
             let n = Swift.max(2, cells)
-            let left = mesh(lattice: lattice, cellMM: cellMM, cells: n / 2,
+            let left = mesh(lattice: lattice, cellMM: cellMM, cells: n,
                             relativeDensity: relativeDensity, boundary: boundary,
                             sides: sides)
-            let right = mesh(lattice: lattice, cellMM: cellMM * 1.5,
-                             cells: Swift.max(1, n / 3),
+            let right = mesh(lattice: lattice, cellMM: cellMM * 1.5, cells: n,
                              relativeDensity: relativeDensity, boundary: boundary,
                              sides: sides)
-            let leftWidth = Float(cellMM) * Float(n / 2)
-            let rightWidth = Float(cellMM * 1.5) * Float(Swift.max(1, n / 3))
+            let leftWidth = Float(cellMM) * Float(n)
+            let rightWidth = Float(cellMM * 1.5) * Float(n)
             let gap = Float(cellMM) * 0.06     // the seam, visible and not welded
             return merged(left, shiftedBy: SIMD3<Float>(-(leftWidth + gap) * 0.5, 0, 0),
                           with: right,
@@ -305,13 +309,41 @@ public enum LatticeSamplePatch {
         var tensor = [Double](repeating: 0, count: 6 * count)
         var cand = [Bool](repeating: false, count: count)
         var sep = [Double](repeating: 0, count: count)
+        // ★★★ A BENDING FIELD, NOT A UNIFORM ONE (maintainer, 2026-08-22: "this is not
+        // what organic lattices looks like at all. Why does it look just like an
+        // outline of boxes?").
+        //
+        // ★ HE WAS LOOKING AT MY OWN FIXTURE. I chose a UNIFORM uniaxial tensor "so the
+        // principal frame is determined" — and a constant tensor has CONSTANT principal
+        // directions, which are the coordinate axes. The tracer then walks straight
+        // lines along x, y and z and the result is a rectangular wireframe: a box grid,
+        // exactly as drawn. The choice that made the frame unambiguous also made the
+        // answer trivial.
+        //
+        // ★ ORGANIC LOOKS ORGANIC BECAUSE THE FIELD BENDS. This is the textbook
+        // cantilever: axial stress growing toward the root and with height off the
+        // neutral axis, plus the parabolic shear that vanishes at the free surfaces.
+        // Its principal directions are the classic arching isostatic lines — the
+        // compression arch and the tension tie — which is what a traced lattice is FOR
+        // and what his printed coupon shows.
         for k in 0..<n { for j in 0..<n { for i in 0..<n {
             let e = (k * n + j) * n + i
             // A one-voxel rind is not a candidate, so tracing has a boundary to stop at.
             let inside = i > 0 && j > 0 && k > 0 && i < n - 1 && j < n - 1 && k < n - 1
             cand[e] = inside
             sep[e] = inside ? cellMM : 0
-            tensor[6 * e] = 10; tensor[6 * e + 1] = 3; tensor[6 * e + 2] = 1
+            guard inside else { continue }
+            // Normalised: x along the beam 0…1, y and z across it -1…1.
+            let x = Double(i) / Double(n - 1)
+            let y = 2 * Double(j) / Double(n - 1) - 1
+            let z = 2 * Double(k) / Double(n - 1) - 1
+            let moment = (1 - x)                    // grows toward the root
+            tensor[6 * e]     = 12 * moment * y     // sigma_xx: bending
+            tensor[6 * e + 1] = 0.6 * moment        // a little transverse
+            tensor[6 * e + 2] = 0.3 * moment
+            tensor[6 * e + 3] = 4 * (1 - y * y)     // tau_xy: parabolic, zero at the faces
+            tensor[6 * e + 4] = 0.8 * z * moment    // tau_yz: breaks the planar symmetry
+            tensor[6 * e + 5] = 2 * (1 - z * z)     // tau_zx
         } } }
         guard let t = TopOptKit.organicTrace(
             nx: n, ny: n, nz: n, spacingMM: h,
