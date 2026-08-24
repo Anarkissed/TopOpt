@@ -1254,6 +1254,30 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         return Swift.max(residual, 3 * lineWidthMM)
     }
 
+    /// ★ WHERE THE PART IS ATTACHED: the part's own material OUTSIDE the latticed
+    /// set, per occupancy voxel — the seed for the attached-only rim (his rule,
+    /// 2026-08-24). A voxel of air outside the region seeds nothing, so an outline
+    /// edge open to the world grows no solid rim.
+    ///
+    /// ★★ NOT FROM `partSDF` — that field's SIGN comes from the REGION-CLIPPED
+    /// occupancy (`signedDistance(like: occupancy)`), so nothing outside the
+    /// declared regions is ever negative and a seed read off it is empty
+    /// (measured: 0 of 416,490 empty voxels). `memberThicknessMM` is computed over
+    /// the WHOLE-PART solid on the same grid — positive (or +inf, the EDT-cap
+    /// sentinel) exactly where the part has material — so it is the honest mask.
+    /// nil when the scene carries no thickness field: the caller then seeds the
+    /// full outline, which is the pre-rule behaviour, not a guess.
+    static func attachedSeed(scene: LatticeSDFScene) -> [Bool]? {
+        let occ = scene.occupancy
+        let mm = scene.memberThicknessMM
+        guard mm.count == occ.values.count else { return nil }
+        var seed = [Bool](repeating: false, count: occ.values.count)
+        for i in 0..<seed.count where occ.values[i] <= 0.5 && mm[i] > 0 {
+            seed[i] = true
+        }
+        return seed
+    }
+
     /// Bake the per-cell activation+demand texture for the CURRENT cell size. Called
     /// from `setScene` and from a cell-size param change — never from `draw`.
     private func rebakeCellField() {
@@ -1309,6 +1333,18 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                 partSDF: scene.partSDF)
                             : nil
                     },
+                    // ★★★ THE RIM ONLY WHERE THE WALL IS ATTACHED (his rule: solid at
+                    // chamfers and wall-to-floor junctions, "never on faces open to
+                    // the world — those are the finish's job"). The seed is the part's
+                    // own material OUTSIDE the latticed set, so an outline edge that
+                    // abuts air seeds nothing and grows no rim; the FIT above keeps
+                    // the full outline — a cell must fit the shape at open edges too.
+                    rimDistancePerRegion: LatticeBoundaryDistance.inPlanePerRegion(
+                        regions: scene.regions,
+                        candidate: scene.occupancy.values.map { $0 > 0.5 },
+                        nx: scene.occupancy.nx, ny: scene.occupancy.ny,
+                        nz: scene.occupancy.nz, spacing: scene.occupancy.spacing,
+                        seed: Self.attachedSeed(scene: scene)),
                     // The finest cell that still prints a bead-wide strut — the halving
                     // stops here rather than at the edge, so the rim is buildable.
                     finestCellMM: steppedFinestPrintableCellMM(finest: finest),

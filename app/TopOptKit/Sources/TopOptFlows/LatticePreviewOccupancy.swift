@@ -613,6 +613,16 @@ extension LatticePreviewOccupancy {
                                         /// pinned by — the rest of the face. Empty ⇒
                                         /// region cell everywhere, exactly as before.
                                         widthPerRegion: [[Double]?] = [],
+                                        /// ★ THE RIM'S OWN DISTANCE — in-plane distance
+                                        /// to the ATTACHED outline only (his rule,
+                                        /// 2026-08-24: solid where a wall meets material
+                                        /// — chamfers, wall-to-floor — never on edges
+                                        /// open to the air; those are the finish's job).
+                                        /// The FIT keeps reading the full outline via
+                                        /// `boundaryDistancePerRegion` — a cell must fit
+                                        /// the shape at open edges too. Empty ⇒ the rim
+                                        /// reads the fit's field, exactly as before.
+                                        rimDistancePerRegion: [[Double]?] = [],
                                         /// The finest cell the grading may fall to — the
                                         /// printable floor. 0 ⇒ no grading.
                                         finestCellMM: Double = 0,
@@ -711,8 +721,11 @@ extension LatticePreviewOccupancy {
         /// its centre from the DEPTH, and solidifying on it is what turned 503 of 964
         /// cells solid on the first attempt.
         func boundaryAtCentre(_ w: SIMD3<Double>, _ r: Int) -> Double {
-            guard r < boundaryDistancePerRegion.count,
-                  let field = boundaryDistancePerRegion[r] else { return 0 }
+            // The RIM's field when the caller split it out (attached edges only);
+            // the fit's field otherwise — one lookup, two possible sources.
+            let source = !rimDistancePerRegion.isEmpty
+                ? rimDistancePerRegion : boundaryDistancePerRegion
+            guard r < source.count, let field = source[r] else { return 0 }
             let g = (SIMD3<Float>(w) - occ.origin) / occ.spacing
             let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
             guard a >= 0, a < occ.nx, b >= 0, b < occ.ny, c >= 0, c < occ.nz else { return 0 }

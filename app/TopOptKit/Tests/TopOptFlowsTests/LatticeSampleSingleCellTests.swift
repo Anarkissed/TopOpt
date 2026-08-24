@@ -13,16 +13,16 @@ final class LatticeSampleSingleCellTests: XCTestCase {
         let model = LatticeWizardModel(settings: LatticeSettings())
         let stored = model.stageMesh()
         let overridden = model.stageMesh(derivedCellMM: model.cellMM * 2)
-        XCTAssertFalse(stored.vertices.isEmpty)
-        XCTAssertFalse(overridden.vertices.isEmpty)
+        XCTAssertFalse(stored.positions.isEmpty)
+        XCTAssertFalse(overridden.positions.isEmpty)
         // Same topology, twice the cell: the block spans twice the extent.
         func maxX(_ m: ViewerMesh) -> Float {
-            stride(from: 0, to: m.vertices.count, by: 3).map { m.vertices[$0] }.max() ?? 0
+            stride(from: 0, to: m.positions.count, by: 3).map { m.positions[$0] }.max() ?? 0
         }
         XCTAssertEqual(maxX(overridden), 2 * maxX(stored), accuracy: 1e-3,
                        "a doubled derived cell must draw a doubled sample")
         // And nil is byte-identical to the stored cell — the toggle-less modes keep
         // the sample they have always had.
-        XCTAssertEqual(model.stageMesh().vertices, stored.vertices)
+        XCTAssertEqual(model.stageMesh().positions, stored.positions)
     }
 }

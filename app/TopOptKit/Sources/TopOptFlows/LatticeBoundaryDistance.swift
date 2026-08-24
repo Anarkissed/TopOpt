@@ -45,22 +45,38 @@ public enum LatticeBoundaryDistance {
     /// ~200 mm against 11 mm of thickness — so the gradient follows the prism's shape.
     ///
     /// Pass the index of the face-normal axis (0=x, 1=y, 2=z); nil measures in 3-D.
+    /// - Parameter seed: which non-candidate voxels count as "the boundary". nil ⇒
+    ///   every non-candidate voxel, the behaviour this function has always had. His
+    ///   attached-walls rule (2026-08-24: solid only where a wall is ATTACHED —
+    ///   chamfers, wall-to-floor — "never on faces open to the world; those are the
+    ///   finish's job") passes the part's own solid here: outline edges that abut
+    ///   MATERIAL seed the field, edges that abut air do not, so the distance — and
+    ///   the solid rim keyed on it — exists only along attached edges.
     public static func millimetres(candidate: [Bool],
                                    nx: Int, ny: Int, nz: Int,
                                    spacing: SIMD3<Float>,
-                                   skipAxis: Int? = nil) -> [Double] {
+                                   skipAxis: Int? = nil,
+                                   seed: [Bool]? = nil) -> [Double] {
         let n = nx * ny * nz
         guard candidate.count == n, n > 0 else { return [] }
+        if let s = seed, s.count != n { return [] }
         let sx = Double(spacing.x), sy = Double(spacing.y), sz = Double(spacing.z)
         guard sx > 0, sy > 0, sz > 0 else { return [] }
 
-        // Seed: 0 inside the "empty" set, +inf inside the candidate set. The transform
-        // then measures every candidate voxel's distance to the nearest empty one.
+        // Seed: 0 inside the "empty" set (or the caller's own seed subset of it),
+        // +inf everywhere else. The transform then measures every candidate voxel's
+        // distance to the nearest seed.
         let INF = Double.greatestFiniteMagnitude / 4
         var d2 = [Double](repeating: 0, count: n)
         var anyCandidate = false, anyEmpty = false
         for i in 0..<n {
-            if candidate[i] { d2[i] = INF; anyCandidate = true } else { anyEmpty = true }
+            if candidate[i] {
+                d2[i] = INF; anyCandidate = true
+            } else if let s = seed {
+                if s[i] { anyEmpty = true } else { d2[i] = INF }
+            } else {
+                anyEmpty = true
+            }
         }
         // All-solid or all-empty: no boundary exists, so there is nothing to grade to.
         // Returning zeros would read as "every voxel is ON the boundary" and collapse
@@ -148,19 +164,34 @@ public enum LatticeBoundaryDistance {
         var out = [Double](repeating: 0, count: n)
         for i in 0..<n where candidate[i] {
             let v2 = d2[i]
-            out[i] = v2 >= INF ? 0 : (v2 > 0 ? v2.squareRoot() : 0)
+            // ★ UNREACHED IS **FAR**, NOT 0. A candidate voxel with no seed in its
+            // own (in-plane) transform used to map to 0 — and 0 downstream means
+            // "ON the boundary", the exact inversion (the same two-meanings-of-zero
+            // defect the stepped outline already paid for once). Unreachable with
+            // the full-outline seeding — every plane has a boundary — it fired the
+            // moment the ATTACHED-ONLY seed left whole planes seedless, and painted
+            // the rim across everything it was meant to spare.
+            out[i] = v2 >= INF ? kFarMM : (v2 > 0 ? v2.squareRoot() : 0)
         }
         return out
     }
+
+    /// "No boundary reachable" — farther than any real part. Distances compare
+    /// against real geometry (a few hundred mm at most), so this is inert in every
+    /// ceiling and rim test while staying finite for the arithmetic around it.
+    public static let kFarMM = 1e6
 
     /// ★★★ ONE IN-PLANE FIELD PER REGION, because each face has its OWN normal and
     /// therefore its own plane. Entry `r` is nil for a region that is not an axis-aligned
     /// include face — there is no plane to drop, so it gets no shape grading rather than
     /// a wrong one.
+    /// - Parameter seed: forwarded to `millimetres` — nil for the full outline
+    ///   (the FIT's question), the part's own solid for the attached-only rim.
     public static func inPlanePerRegion(regions: [LatticeRegionSpec],
                                         candidate: [Bool],
                                         nx: Int, ny: Int, nz: Int,
-                                        spacing: SIMD3<Float>) -> [[Double]?] {
+                                        spacing: SIMD3<Float>,
+                                        seed: [Bool]? = nil) -> [[Double]?] {
         var out = [[Double]?](repeating: nil, count: regions.count)
         // At most three distinct answers, so the transform runs once per AXIS rather
         // than once per region — two faces sharing a normal share the field.
@@ -173,7 +204,10 @@ public enum LatticeBoundaryDistance {
             guard a[axis] > 0.99 else { continue }
             if let cached = byAxis[axis] { out[i] = cached; continue }
             let f = millimetres(candidate: candidate, nx: nx, ny: ny, nz: nz,
-                                spacing: spacing, skipAxis: axis)
+                                spacing: spacing, skipAxis: axis, seed: seed)
+            // An empty transform (no seed voxel at all) is "no field", not a field
+            // of zeros — nil keeps the caller on its stated fallback.
+            guard !f.isEmpty else { continue }
             byAxis[axis] = f
             out[i] = f
         }
