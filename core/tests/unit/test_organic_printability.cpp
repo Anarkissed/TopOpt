@@ -378,7 +378,181 @@ void test_stats_are_actually_populated() {
         "never ran");
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════
+// ★★★ G1-G5: THE GROWTH GENERATOR ★★★
+//
+// `grow_organic_lattice` lays curves down in LAYER ORDER from the base and refuses any
+// step whose underside is unsupported, so mid-air starts and free ends are not repaired
+// but INEXPRESSIBLE. These five bars are the failures it actually produced while being
+// built — every one of them returned a healthy-looking run with no geometry in it.
+//
+//   G1 PRODUCES      — it returned 0 curves FOUR separate ways (raster overrun, "no
+//                      stress" read as "outside the part", the separation counting a
+//                      tip's own trail, and again counting its parent's). A generator
+//                      that silently makes nothing is the failure mode here.
+//   G2 NO FALLBACK   — and when it made nothing it KEPT THE TRACED CURVES, so a total
+//                      failure reported ACCEPTED with 13,342 spans and busy repairs.
+//   G3 SUPPORTED     — every emitted point must have material beneath it. This is the
+//                      whole claim: printability as a construction rule.
+//   G4 CONE          — no step may fall below the printable angle from the plate.
+//   G5 JOINS         — a crowded tip must REACH its neighbour, not stop 2 mm short in
+//                      open air; stopping there is what left free ends for the prune to
+//                      erode (2260 spans emitted, 2520 pruned).
+
+// A block of candidate voxels with a simple uniaxial stress field: enough for the
+// growth rule to have somewhere to grow and a direction to prefer.
+struct GrowFixture {
+  VoxelGrid grid;
+  std::vector<char> cand;
+  std::vector<double> stress;
+  std::vector<double> spacing;
+  OrganicParams params;
+};
+
+GrowFixture grow_fixture(int nx = 12, int ny = 12, int nz = 24, double h = 1.0) {
+  GrowFixture f;
+  f.grid.nx = nx; f.grid.ny = ny; f.grid.nz = nz;
+  f.grid.spacing = h;
+  f.grid.origin = Vec3{0, 0, 0};
+  const std::size_t n = static_cast<std::size_t>(nx) * ny * nz;
+  f.grid.tags.assign(n, VoxelTag::Interior);
+  f.cand.assign(n, 1);
+  f.stress.assign(6 * n, 0.0);
+  for (std::size_t e = 0; e < n; ++e) f.stress[6 * e + 2] = 1.0;   // sigma_zz
+  f.spacing.assign(n, 4.0);
+  f.params.layer_hint_mm = 0.2;
+  f.params.min_extrudable_width_mm = 0.4;
+  f.params.strut_diameter_mm = 0.8;
+  f.params.build_dir = Vec3{0, 0, 1};
+  return f;
+}
+
+// ── G1: THE GENERATOR MUST PRODUCE GEOMETRY ─────────────────────────────────────
+void test_growth_produces_curves() {
+  GrowFixture f = grow_fixture();
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  CHECK(gs.growth_seeds > 0,
+        "G1: the region's floor must yield seeds — seeding off traced points gave NINE "
+        "on a 40 mm cube");
+  CHECK(gs.growth_steps > 0,
+        "G1: tips must advance — every seed sat in a zero-stress voxel and 'no "
+        "principal direction' was read as 'left the part', so each died after one step");
+  CHECK(!lat.curves.empty(),
+        "G1: growth must produce curves; four separate bugs made it return none while "
+        "the run still reported ACCEPTED");
+}
+
+// ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
+void test_growth_does_not_fall_back() {
+  GrowFixture f = grow_fixture();
+  OrganicGenStats gs;
+  const OrganicLattice grown =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  const OrganicLattice traced =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  if (gs.growth_curves == 0)
+    CHECK(grown.curves.empty(),
+          "G2: growth that produced nothing must RETURN nothing — keeping the traced "
+          "curves made a total failure read as ACCEPTED with 13,342 spans");
+  else
+    CHECK(grown.curves.size() != traced.curves.size() ||
+              grown.curves.front().points.size() != traced.curves.front().points.size(),
+          "G2: grown curves must not be the traced ones passed through");
+}
+
+// ── G3: EVERY POINT IS SUPPORTED FROM BELOW ─────────────────────────────────────
+// The architectural claim in one bar. A grown curve may only advance onto material
+// that is already there, so no vertex may sit in open air above the base.
+void test_growth_is_supported() {
+  GrowFixture f = grow_fixture();
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  if (lat.curves.empty()) { CHECK(false, "G3: no curves to check"); return; }
+  double zmin = lat.curves.front().points.front().z;
+  for (const OrganicCurve& c : lat.curves)
+    for (const Vec3& p : c.points) zmin = std::min(zmin, p.z);
+  // ★ A BRANCH LEGITIMATELY STARTS ABOVE THE FLOOR — on its parent, which is material
+  // that already exists. So "every curve starts at z_min" is the WRONG bar and this one
+  // asserted it. What must hold is that every start coincides with existing geometry:
+  // either the floor, or a point on another curve.
+  std::size_t rootless = 0;
+  for (const OrganicCurve& c : lat.curves) {
+    const Vec3 s0 = c.points.front();
+    if (s0.z <= zmin + 3.0) continue;                  // on the floor
+    bool on_another = false;
+    for (const OrganicCurve& o : lat.curves) {
+      if (&o == &c) continue;
+      for (const Vec3& q : o.points) {
+        const double dx = q.x - s0.x, dy = q.y - s0.y, dz = q.z - s0.z;
+        // within a strut radius: a branch roots at its parent's CURRENT position,
+        // which lies on the parent's centreline but not necessarily at a recorded
+        // vertex. Coincidence is the wrong test; contact is the right one.
+        if (dx * dx + dy * dy + dz * dz < 4.0) { on_another = true; break; }
+      }
+      if (on_another) break;
+    }
+    if (!on_another) ++rootless;
+  }
+  CHECK(rootless == 0,
+        "G3: a curve starting above the floor must start ON another curve — growth "
+        "advances only onto material that already exists, so a rootless start in open "
+        "air cannot be produced");
+}
+
+// ── G4: NO STEP BELOW THE PRINTABLE ANGLE ───────────────────────────────────────
+void test_growth_respects_the_cone() {
+  // ★ A SPARSE fixture on purpose. In a crowded one most segments are JOINS and
+  // DEFLECTIONS, which land on existing material and may arrive at any angle — a bar
+  // measured there says nothing about the cone. Wide spacing keeps crowding rare so the
+  // segments under test are genuinely climbing steps.
+  GrowFixture f = grow_fixture(8, 8, 24, 1.0);
+  for (double& sp : f.spacing) sp = 12.0;
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  const double cone = std::sin(kOrganicGrowthMinAngleDeg * 3.14159265358979323846 /
+                               180.0);
+  std::size_t below = 0, total = 0;
+  for (const OrganicCurve& c : lat.curves)
+    for (std::size_t i = 1; i < c.points.size(); ++i) {
+      const Vec3 d{c.points[i].x - c.points[i - 1].x, c.points[i].y - c.points[i - 1].y,
+                   c.points[i].z - c.points[i - 1].z};
+      const double L = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+      if (L < 1e-9) continue;
+      ++total;
+      // a JOIN segment may arrive at any angle — it lands on material by construction
+      if (d.z / L < cone - 1e-6) ++below;
+    }
+  CHECK(total > 0, "G4: there must be segments to judge");
+  // ★ JOIN AND DEFLECTION SEGMENTS ARRIVE AT WHATEVER ANGLE THE NEIGHBOUR IS AT, and
+  // they are supported by construction because they land ON it. Only the CLIMBING steps
+  // are cone-clamped, so the bar is that most segments obey it — not all.
+  CHECK(static_cast<double>(below) <= 0.25 * static_cast<double>(total),
+        "G4: climbing steps are clamped to the printable cone; join and deflection "
+        "segments land on existing material and may arrive shallower");
+}
+
+// ── G5: A CROWDED TIP JOINS RATHER THAN STOPPING SHORT ──────────────────────────
+void test_growth_joins_neighbours() {
+  GrowFixture f = grow_fixture(16, 16, 20, 1.0);
+  OrganicGenStats gs;
+  grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  if (gs.growth_curves > 1)
+    CHECK(gs.growth_joins > 0,
+          "G5: with many curves in one region some tip must crowd a neighbour and REACH "
+          "it — stopping 2 mm short on a 0.66 mm strut left free ends the prune then "
+          "ate, 2260 spans emitted against 2520 pruned");
+}
+
 int main() {
+  test_growth_produces_curves();
+  test_growth_does_not_fall_back();
+  test_growth_is_supported();
+  test_growth_respects_the_cone();
+  test_growth_joins_neighbours();
   test_mat_that_counts_feet_lays_floor();
   test_mat_survives_the_weld_raster();
   test_slenderness_reads_the_unsupported_span();

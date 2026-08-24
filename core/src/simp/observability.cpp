@@ -1450,6 +1450,15 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"slenderness_impossible\": " +
             fmt_ll(info.organic_slenderness_impossible);
       gr += ", \"slenderness_props\": " + fmt_ll(info.organic_slenderness_props);
+      gr += ", \"cantilever_max_reach_mm\": " +
+            fmt(info.organic_cantilever_reach);
+      gr += ", \"cantilever_islands\": " +
+            fmt_ll(info.organic_cantilever_islands);
+      gr += ", \"arched_spans\": " + fmt_ll(info.organic_arched_spans);
+      gr += ", \"arch_max_rise_mm\": " + fmt(info.organic_arch_rise);
+      gr += ", \"filleted_spans\": " + fmt_ll(info.organic_filleted);
+      gr += ", \"fillet_unresolved\": " + fmt_ll(info.organic_fillet_unresolved);
+      gr += ", \"fillet_max_radius_mm\": " + fmt(info.organic_fillet_radius);
       gr += ", \"base_mat_length_mm\": " + fmt(info.organic_base_mat_length_mm);
       gr += ", \"base_mat_z_mm\": " + fmt(info.organic_base_mat_z_mm);
       gr += ", \"fill_mat_cells\": " + fmt_ll(info.organic_fill_mat_cells);

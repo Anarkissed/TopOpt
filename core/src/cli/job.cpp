@@ -1502,7 +1502,7 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale"},
+             "organic_scale", "organic_growth"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1666,6 +1666,14 @@ JobDescription parse_job(const std::string& json_text) {
                                         : job.grading.intent) +
             "\"): shape fit changes the density, which under a structural intent is "
             "what the certificate is computed against");
+    }
+    if (const JsonValue* gv = find_key(gr, "organic_growth")) {
+      if (gv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_growth\" must be a boolean");
+      job.grading.organic_growth = (gv->num != 0.0);
+      if (job.grading.organic_growth && !organic_alg)
+        schema_fail(
+            "grading \"organic_growth\" is only allowed with algorithm \"organic\"");
     }
     if (const JsonValue* sv = find_key(gr, "organic_scale")) {
       job.grading.organic_scale = require_number(*sv, "grading.organic_scale");

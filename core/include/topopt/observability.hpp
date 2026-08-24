@@ -1030,6 +1030,13 @@ struct RunInfo {
   long long organic_slenderness_propped = 0;
   long long organic_slenderness_impossible = 0;
   long long organic_slenderness_props = 0;
+  double organic_cantilever_reach = 0.0;
+  long long organic_cantilever_islands = 0;
+  long long organic_arched_spans = 0;
+  double organic_arch_rise = 0.0;
+  long long organic_filleted = 0;
+  long long organic_fillet_unresolved = 0;
+  double organic_fillet_radius = 0.0;
   long long organic_base_mat_touchdowns = 0;
   double organic_base_mat_length_mm = 0.0;
   double organic_base_mat_z_mm = 0.0;

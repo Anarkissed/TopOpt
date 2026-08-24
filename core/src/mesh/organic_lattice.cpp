@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <utility>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "topopt/lattice_boundary.hpp"
@@ -1460,6 +1461,434 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════════
+// ★★★ GROWN ORGANIC — PRINTABILITY BY CONSTRUCTION ★★★
+//
+// Layer-ordered growth from the base plate. A tip advances only into a direction whose
+// UNDERSIDE lands on material already placed, so mid-air starts and free ends are not
+// repaired — they cannot be produced. The stress field steers within the printable
+// cone; where it points below the cone, the tip climbs at the cone limit toward it.
+//
+// ★ THE ONE HELPER EVERY PREDICATE SHOULD HAVE SHARED. `supported_at` asks about the
+// SOLID — the capsule's underside — not the centreline. Three separate passes in the
+// repair architecture failed by asking about the centreline instead: the arch trigger
+// (0 of 3445 spans matched), the cantilever lookup (0 of 271 cells mapped) and the
+// over-air test (0 of 1893 shallow spans fired). Every one of them ran, reported
+// plausibly, and did nothing. It is written once here and used by everything.
+OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
+                                    const std::vector<char>& candidate,
+                                    const std::vector<double>& stress,
+                                    const std::vector<double>& spacing_mm,
+                                    const std::vector<double>* width_mm,
+                                    const OrganicParams& params,
+                                    OrganicGenStats* gstats) {
+  // Start from the ordinary trace so the field, the spacing floors, the bead law and
+  // the report are all computed by the SAME code the existing path uses — the growth
+  // rule replaces how curves are laid down, not how the physics is read.
+  OrganicLattice out =
+      trace_organic_lattice(grid, candidate, stress, spacing_mm, width_mm, params);
+  const std::size_t n = grid.voxel_count();
+  if (out.curves.empty() || n == 0) return out;
+
+  const double h = grid.spacing;
+  const double layer = params.layer_hint_mm > 0.0 ? params.layer_hint_mm : 0.5 * h;
+  const double step = std::max(1e-6, kOrganicGrowthStepLayers * layer);
+  const double cone_sin = std::sin(kOrganicGrowthMinAngleDeg * M_PI / 180.0);
+
+  // Bounds and an occupancy raster at the LAYER pitch in z: this is the printer's own
+  // discretisation, and the support question is asked in it.
+  Vec3 lo = out.curves.front().points.front(), hi = lo;
+  double rmin = out.curves.front().radius_mm, rsum = 0.0;
+  std::size_t rn = 0;
+  for (const OrganicCurve& c : out.curves) {
+    rmin = std::min(rmin, c.radius_mm);
+    rsum += c.radius_mm; ++rn;
+    for (const Vec3& p : c.points) {
+      lo.x = std::min(lo.x, p.x - c.radius_mm); hi.x = std::max(hi.x, p.x + c.radius_mm);
+      lo.y = std::min(lo.y, p.y - c.radius_mm); hi.y = std::max(hi.y, p.y + c.radius_mm);
+      lo.z = std::min(lo.z, p.z - c.radius_mm); hi.z = std::max(hi.z, p.z + c.radius_mm);
+    }
+  }
+  const double rbar = rn ? rsum / rn : rmin;
+  const double vxy = std::max(rmin, 1e-6);
+  const int GX = static_cast<int>((hi.x - lo.x) / vxy) + 2;
+  const int GY = static_cast<int>((hi.y - lo.y) / vxy) + 2;
+  // ★ HEADROOM: growth climbs above the traced curves, so the raster must cover where
+  // a tip can get to, not only where the trace already is.
+  const double zcap = std::max(hi.z, grid.origin.z + grid.nz * grid.spacing);
+  const int GZ = static_cast<int>((zcap - lo.z) / layer) + 4;
+  if (static_cast<long long>(GX) * GY * GZ > 120000000LL) return out;
+  std::vector<unsigned char> occ(static_cast<std::size_t>(GX) * GY * GZ, 0);
+  auto gidx = [GX, GY](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * GY + j) * GX + i;
+  };
+  auto mark = [&](const Vec3& a, const Vec3& b, double r) {
+    const double L = vlen(vsub(b, a));
+    const int ns = std::max(2, static_cast<int>(L / std::min(vxy, layer)) + 2);
+    const int ri = static_cast<int>(std::ceil(r / vxy));
+    const int rk = static_cast<int>(std::ceil(r / layer));
+    for (int q = 0; q <= ns; ++q) {
+      const Vec3 p = vadd(a, vmul(vsub(b, a), static_cast<double>(q) / ns));
+      const int ci = static_cast<int>((p.x - lo.x) / vxy);
+      const int cj = static_cast<int>((p.y - lo.y) / vxy);
+      const int ck = static_cast<int>((p.z - lo.z) / layer);
+      for (int dk = -rk; dk <= rk; ++dk)
+        for (int dj = -ri; dj <= ri; ++dj)
+          for (int di = -ri; di <= ri; ++di) {
+            const int a2 = ci + di, b2 = cj + dj, c2 = ck + dk;
+            if (a2 < 0 || b2 < 0 || c2 < 0 || a2 >= GX || b2 >= GY || c2 >= GZ) continue;
+            occ[gidx(a2, b2, c2)] = 1;
+          }
+    }
+  };
+  // ★ THE SHARED PREDICATE. Is the UNDERSIDE of a capsule centred at p held? Looks
+  // beneath p.z - r, never beneath p.z.
+  auto supported_at = [&](const Vec3& p, double r) {
+    const int ci = static_cast<int>((p.x - lo.x) / vxy);
+    const int cj = static_cast<int>((p.y - lo.y) / vxy);
+    const int kbot = static_cast<int>((p.z - r - lo.z) / layer);
+    if (ci < 0 || cj < 0 || ci >= GX || cj >= GY) return false;
+    // ★ THE RASTER IS SIZED FROM THE TRACED CURVES, AND GROWTH CLIMBS PAST THEM. A tip
+    // above the original bounds gives kbot >= GZ, and reading occ at that layer walks
+    // off the end of the buffer — the first growth run segfaulted here (exit 139).
+    // Anything above the raster has nothing marked above it, so it is unsupported.
+    if (kbot >= GZ) return false;
+    if (kbot <= 0) return true;                       // resting on the plate
+    const int ri = static_cast<int>(std::ceil(r / vxy));
+    const int reach = std::max(1, static_cast<int>(std::ceil(
+                                      kOrganicGrowthSupportRadii * r / layer)));
+    for (int dk = 1; dk <= reach; ++dk) {
+      const int c2 = kbot - dk;
+      if (c2 < 0) return true;
+      for (int dj = -ri; dj <= ri; ++dj)
+        for (int di = -ri; di <= ri; ++di) {
+          const int a2 = ci + di, b2 = cj + dj;
+          if (a2 < 0 || b2 < 0 || a2 >= GX || b2 >= GY) continue;
+          if (occ[gidx(a2, b2, c2)]) return true;
+        }
+    }
+    return false;
+  };
+  // ★ IN THE REGION is a different question from HAS A DIRECTION, and conflating them
+  // killed the first growth run: every seed sat in a zero-stress voxel at the base, so
+  // `field_at` correctly said "no principal direction" and the loop read that as "left
+  // the part" and stopped after one step. A voxel with no stress has no PREFERENCE; it
+  // is still perfectly good lattice, and vertical is always printable.
+  auto in_region = [&](const Vec3& p) {
+    const int i = static_cast<int>((p.x - grid.origin.x) / h);
+    const int j = static_cast<int>((p.y - grid.origin.y) / h);
+    const int k = static_cast<int>((p.z - grid.origin.z) / h);
+    if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz)
+      return false;
+    const std::size_t e = grid.index(i, j, k);
+    return e < n && candidate[e] != 0;
+  };
+  // ★★ THE WHOLE PRINCIPAL FRAME, not just the major direction. Branches used to depart
+  // along the CARTESIAN axes — with tips climbing near-vertically, cross(dir, x_or_y)
+  // gives due north/south/east/west, and the cube came out as a rectilinear scaffold
+  // with right-angled frames. The second and third principal directions are what the
+  // traced path calls families 1 and 2, and they are what makes organic look organic.
+  auto frame_at = [&](const Vec3& p, Vec3 f[3]) {
+    const int i = static_cast<int>((p.x - grid.origin.x) / h);
+    const int j = static_cast<int>((p.y - grid.origin.y) / h);
+    const int k = static_cast<int>((p.z - grid.origin.z) / h);
+    if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz)
+      return false;
+    const std::size_t e = grid.index(i, j, k);
+    if (e >= n || !candidate[e]) return false;
+    double m[6];
+    for (int c = 0; c < 6; ++c) m[c] = stress[6 * e + c];
+    double ev[3];
+    jacobi_eigen(m, ev, f);
+    return std::fabs(ev[0]) > 0.0;
+  };
+  auto field_at = [&](const Vec3& p, Vec3& d) {
+    const int i = static_cast<int>((p.x - grid.origin.x) / h);
+    const int j = static_cast<int>((p.y - grid.origin.y) / h);
+    const int k = static_cast<int>((p.z - grid.origin.z) / h);
+    if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz)
+      return false;
+    const std::size_t e = grid.index(i, j, k);
+    if (e >= n || !candidate[e]) return false;
+    double m[6];
+    for (int c = 0; c < 6; ++c) m[c] = stress[6 * e + c];
+    double ev[3]; Vec3 vec[3];
+    jacobi_eigen(m, ev, vec);
+    if (!(std::fabs(ev[0]) > 0.0)) return false;
+    d = vec[0];
+    return true;
+  };
+
+  // Seed on the base layer: every curve point already low enough to be resting.
+  // ★★ SEED ON THE REGION'S OWN FLOOR, NOT ON WHATEVER THE TRACE LEFT LOW. Seeding
+  // from traced points gave NINE seeds on a 40 mm cube — the trace happens to place
+  // few points near the bottom, and inheriting that is exactly the coupling this
+  // rewrite exists to break. Walk the candidate set, find each column's lowest voxel,
+  // and seed there at the local separation.
+  // ★ `parent` is exempt from the separation test: a branch starts ON its parent,
+  // so without this every branch is refused for crowding the trunk it grew from —
+  // 121 seeds produced 121 curves and not one branch survived.
+  struct Tip { Vec3 p; Vec3 dir; double r; int family; int parent; };
+  std::vector<Tip> tips;
+  std::vector<Vec3> seed_pts;
+  const double zbase = lo.z;
+  {
+    std::vector<int> floor_k(static_cast<std::size_t>(grid.nx) * grid.ny, -1);
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i)
+        for (int k = 0; k < grid.nz; ++k)
+          if (candidate[grid.index(i, j, k)]) {
+            floor_k[static_cast<std::size_t>(j) * grid.nx + i] = k;
+            break;
+          }
+    // one seed per d_sep-sized cell of the footprint, so the base is covered evenly
+    const double dsep = out.report.achieved_spacing_median_mm > 0.0
+                            ? out.report.achieved_spacing_median_mm
+                            : std::max(4.0 * rbar, 2.0 * h);
+    // ★ SEED AT HALF THE SEPARATION. One seed per d_sep gave 121 columns on a 40 mm
+    // cube, and with joins only firing between crowded neighbours the clusters never
+    // found each other: 3732 curves came out as nine components and the stranded drop
+    // kept 575 spans of 8564. Denser seeding is what puts curves within reach of one
+    // another in the first place.
+    const int stride = std::max(1, static_cast<int>(0.35 * dsep / h));
+    // (the stride is a global sweep; the per-column separation then governs how far
+    //  each tip travels before it crowds a neighbour, which is where grading shows)
+    for (int j = 0; j < grid.ny; j += stride)
+      for (int i = 0; i < grid.nx; i += stride) {
+        const int k = floor_k[static_cast<std::size_t>(j) * grid.nx + i];
+        if (k < 0) continue;
+        const Vec3 p{grid.origin.x + (i + 0.5) * h, grid.origin.y + (j + 0.5) * h,
+                     grid.origin.z + (k + 0.5) * h};
+        tips.push_back({p, Vec3{0, 0, 1}, rbar, 0, -1});
+        seed_pts.push_back(p);
+      }
+  }
+  OrganicGenStats st;
+  st.growth_seeds = tips.size();
+
+  // ★★ THE SEPARATION IS A FIELD, NOT A NUMBER. Written as a single median it made the
+  // growth completely UNGRADED: a job asking for 4-6 mm got one uniform spacing
+  // everywhere, and the receipt still reported the traced curves' 2.04-5.85 mm because
+  // the report describes geometry that was then discarded. `spacing_used_mm` is the
+  // per-voxel separation the grading law already chose — read it where the tip is.
+  const std::vector<double>& sep_field = out.spacing_used_mm;
+  const double dsep_grow = out.report.achieved_spacing_median_mm > 0.0
+                               ? out.report.achieved_spacing_median_mm
+                               : std::max(4.0 * rbar, 2.0 * h);
+  auto sep_at = [&](const Vec3& p) {
+    const int i = static_cast<int>((p.x - grid.origin.x) / h);
+    const int j = static_cast<int>((p.y - grid.origin.y) / h);
+    const int k = static_cast<int>((p.z - grid.origin.z) / h);
+    if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz)
+      return dsep_grow;
+    const std::size_t e = grid.index(i, j, k);
+    if (e >= sep_field.size() || !(sep_field[e] > 0.0)) return dsep_grow;
+    return sep_field[e];
+  };
+  // ★★ JOBARD & LEFER'S SEPARATION, APPLIED DURING GROWTH. Without it branching is
+  // exponential and self-defeating: 121 seeds became 20,001 curves and 2.6 M steps, and
+  // the emission then collapsed the lot to SIXTEEN spans because every curve sat on top
+  // of its neighbours and the node merge ate them. The rule that makes evenly-spaced
+  // streamlines work is that a new curve must be at least d_sep from every existing
+  // one; here it is the budget as well as the aesthetic.
+  // The hash cell is sized on the COARSEST separation so a lookup never misses a
+  // neighbour; the test itself uses the local value at the point being tested.
+  const double cellsz = std::max(kOrganicTestRatio * dsep_grow * 2.0, 1e-6);
+  // each remembered point carries the curve that placed it: a tip must not be
+  // stopped by its own trail, which is what Jobard & Lefer's d_test excludes.
+  std::unordered_map<long long, std::vector<std::pair<Vec3, int>>> placed;
+  auto pkey = [cellsz](const Vec3& p) {
+    return (static_cast<long long>(std::floor(p.x / cellsz)) * 73856093LL) ^
+           (static_cast<long long>(std::floor(p.y / cellsz)) * 19349663LL) ^
+           (static_cast<long long>(std::floor(p.z / cellsz)) * 83492791LL);
+  };
+  auto too_close = [&](const Vec3& p, int self, int parent, Vec3* hit = nullptr) {
+    const double lim = kOrganicTestRatio * sep_at(p);
+    const double lim2 = lim * lim;
+    for (int dz = -1; dz <= 1; ++dz)
+      for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx) {
+          const Vec3 o{p.x + dx * cellsz, p.y + dy * cellsz, p.z + dz * cellsz};
+          auto it = placed.find(pkey(o));
+          if (it == placed.end()) continue;
+          for (const std::pair<Vec3, int>& q : it->second) {
+            if (q.second == self || q.second == parent) continue;  // own trail / trunk
+            const Vec3 d2 = vsub(p, q.first);
+            if (vdot(d2, d2) < lim2) {
+              if (hit) *hit = q.first;
+              return true;
+            }
+          }
+        }
+    return false;
+  };
+  auto remember = [&](const Vec3& p, int who) {
+    placed[pkey(p)].push_back({p, who});
+  };
+  // the floor pattern is part of what the separation test must see
+  // NOT the seeds: a seed registered up front stops its own tip on step one
+  // (0.1 mm travelled against a 1.95 mm separation), which is how growth came
+  // back 0 curves / 0 steps while the run still reported ACCEPTED.
+  std::vector<OrganicCurve> grown;
+  const int MAXSTEP = static_cast<int>((hi.z - lo.z) / step) + 4;
+  // ★ A WORKLIST, not a fixed vector: a growing tip appends branches, and those branches
+  // grow in the same pass. Indexed rather than range-for because the container grows
+  // underneath the loop.
+  // branch spacing is local as well, so a fine region branches more often
+  for (std::size_t ti = 0; ti < tips.size(); ++ti) {
+    Tip t = tips[ti];
+    OrganicCurve cur;
+    cur.family = t.family;
+    cur.radius_mm = t.r;
+    cur.points.push_back(t.p);
+    mark(t.p, t.p, t.r);
+    Vec3 p = t.p, dir = t.dir;
+    double since_branch = 0.0, since_record = 0.0;
+    int joins_used = 0;
+    for (int s = 0; s < MAXSTEP; ++s) {
+      Vec3 f{0, 0, 1};
+      const bool have = field_at(p, f);
+      // Leaving the REGION ends the curve. Having no stress does not — it just means
+      // the field has no opinion, and the tip keeps its heading.
+      if (!in_region(p)) break;
+      if (have && f.z < 0.0) f = vmul(f, -1.0);
+      // ★ THE CONE. Blend toward the field, then CLAMP so the step never falls below
+      // the printable angle. Where the field is flatter than the cone the tip climbs at
+      // the cone limit in the field's horizontal direction — it follows as far as it
+      // can and no further, rather than following into mid-air.
+      Vec3 want = have ? vadd(vmul(dir, 0.35), vmul(f, 0.65)) : dir;
+      const double wl = vlen(want);
+      if (!(wl > 1e-12)) break;
+      want = vmul(want, 1.0 / wl);
+      if (want.z < cone_sin) {
+        const double hx = want.x, hy = want.y;
+        const double hl = std::sqrt(hx * hx + hy * hy);
+        if (hl > 1e-12) {
+          const double s2 = std::sqrt(std::max(0.0, 1.0 - cone_sin * cone_sin));
+          want = Vec3{hx / hl * s2, hy / hl * s2, cone_sin};
+        } else {
+          want = Vec3{0, 0, 1};
+        }
+      }
+      const Vec3 q = vadd(p, vmul(want, step));
+      if (!supported_at(q, t.r)) { ++st.growth_blocked; break; }
+      // ★ d_test: a curve STOPS when it comes within half a separation of another, which
+      // is what keeps the family evenly spaced instead of bundled.
+      // ★★ A CROWDED TIP JOINS WHAT IT CROWDED, it does not stop next to it. d_test is
+      // Jobard & Lefer's rule for 2D streamlines, where curves need never touch; here a
+      // tip halting 1.95 mm from its neighbour on a 0.66 mm strut leaves a FREE END in
+      // open air, and the prune then erodes the whole curve back down — 2260 spans
+      // emitted, 2520 pruned. Reaching the last step to the neighbour removes the free
+      // end and joins the two curves into one component at the same time.
+      // ★ THE SEPARATION HASH HOLDS ONLY RECORDED VERTICES, not every 0.1 mm step.
+      // Holding every step made a join land in the MIDDLE of a neighbour's segment:
+      // geometrically touching, but the node merge matches ENDPOINTS, so the two curves
+      // were never registered as joined — 3267 curves came out as six components and
+      // the stranded drop threw away 88 % of the material. Snapping to a recorded
+      // vertex gives the merge something it can actually see.
+      Vec3 crowd{0, 0, 0};
+      if (too_close(q, static_cast<int>(ti), t.parent, &crowd)) {
+        if (vlen(vsub(crowd, p)) > 1e-9) {
+          cur.points.push_back(crowd);
+          cur.length_mm += vlen(vsub(crowd, p));
+          mark(p, crowd, t.r);
+          ++st.growth_joins;
+        }
+        // ★★ JOIN AND CARRY ON, do not stop. Stopping at the first join made the tip
+        // population die out with height — crowding is likelier the higher a strand
+        // gets, so the cube came out dense at the base with almost nothing at the top.
+        // Deflect away from what was just joined and keep climbing; bounded by
+        // kOrganicGrowthMaxJoins so a tip cannot bounce between two neighbours forever.
+        if (++joins_used > kOrganicGrowthMaxJoins) break;
+        p = crowd;
+        // steer away from the joined strand, and back up toward the cone limit
+        Vec3 away = vsub(p, crowd);
+        if (vlen(away) < 1e-9) {
+          away = Vec3{-dir.y, dir.x, 0.0};      // any transverse direction will do
+          if (vlen(away) < 1e-9) away = Vec3{1, 0, 0};
+        }
+        away = vmul(away, 1.0 / std::max(vlen(away), 1e-9));
+        const double s2 = std::sqrt(std::max(0.0, 1.0 - cone_sin * cone_sin));
+        dir = Vec3{away.x * s2, away.y * s2, cone_sin};
+        since_record = kOrganicGrowthRecordRadii * t.r;  // record the deflection point
+        continue;
+      }
+      mark(p, q, t.r);
+      // ★ RECORD COARSELY: a point every 0.1 mm on a 0.66 mm strut is well inside the
+      // node merge's one-bead radius, and the merge then collapses the whole curve to a
+      // single node. Walk at the layer pitch, record at a multiple of the bead.
+      since_record += step;
+      if (since_record >= kOrganicGrowthRecordRadii * t.r) {
+        since_record = 0.0;
+        cur.points.push_back(q);
+        remember(q, static_cast<int>(ti));   // only vertices enter the hash
+      }
+      cur.length_mm += step;
+      ++st.growth_steps;
+      p = q; dir = want;
+
+      // ★★ OFFER A BRANCH. Transverse to the current heading, departing at the cone
+      // limit so it is printable from its first layer, and only if its first step is
+      // already supported — the root is on the trunk, which exists.
+      since_branch += step;
+      const double branch_every =
+          std::max(step, kOrganicGrowthBranchEverySep * sep_at(p));
+      if (since_branch >= branch_every && tips.size() < kOrganicGrowthMaxTips) {
+        since_branch = 0.0;
+        // ★ THE TRANSVERSE DIRECTION IS THE FIELD'S, NOT THE GRID'S. Families 1 and 2
+        // of the principal frame are the lateral members organic is made of; falling
+        // back to a Cartesian axis only where the frame is unavailable.
+        Vec3 fr[3];
+        Vec3 tr{0, 0, 0};
+        if (frame_at(p, fr)) {
+          // whichever of the two minor directions is least aligned with the heading
+          const double a1 = std::fabs(vdot(fr[1], dir));
+          const double a2 = std::fabs(vdot(fr[2], dir));
+          tr = (a1 <= a2) ? fr[1] : fr[2];
+          // flatten it out of the heading so the branch genuinely departs
+          tr = vsub(tr, vmul(dir, vdot(tr, dir)));
+        }
+        if (vlen(tr) <= 1e-9) {
+          const Vec3 ax = (std::fabs(dir.x) < std::fabs(dir.y)) ? Vec3{1, 0, 0}
+                                                                : Vec3{0, 1, 0};
+          tr = vcross(dir, ax);
+        }
+        const double tl = vlen(tr);
+        if (tl > 1e-9) {
+          tr = vmul(tr, 1.0 / tl);
+          for (int sgn = -1; sgn <= 1; sgn += 2) {
+            const double s2 =
+                std::sqrt(std::max(0.0, 1.0 - cone_sin * cone_sin));
+            const Vec3 bdir{tr.x * sgn * s2, tr.y * sgn * s2, cone_sin};
+            const Vec3 bq = vadd(p, vmul(bdir, step));
+            ++st.growth_branches;
+            if (!in_region(bq) || !supported_at(bq, t.r) || too_close(bq, static_cast<int>(ti), -1)) {
+              ++st.growth_branch_refused;
+              continue;
+            }
+            tips.push_back({p, bdir, t.r, (t.family + 1) % 3, static_cast<int>(ti)});
+          }
+        }
+      }
+    }
+    if (cur.points.empty() || vlen(vsub(cur.points.back(), p)) > 1e-9)
+      cur.points.push_back(p);      // the tip's last position closes the curve
+    if (cur.points.size() >= 2) { grown.push_back(cur); ++st.growth_curves; }
+  }
+  if (tips.size() >= kOrganicGrowthMaxTips) st.growth_tip_budget_hit = true;
+  // ★ NO SILENT FALLBACK. Keeping the traced curves when growth produced nothing made a
+  // total failure read as a healthy run: ACCEPTED, 13342 spans, and the repair passes
+  // busy — because it WAS the traced path. Growth either replaces the curves or the
+  // caller is told it produced none.
+  out.curves.swap(grown);
+  if (gstats) *gstats = st;
+  if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+    std::fprintf(stderr,
+               "[growth] %zu seeds -> %zu curves, %zu steps, %zu blocked by the cone\n",
+               st.growth_seeds, st.growth_curves, st.growth_steps, st.growth_blocked);
+  return out;
+}
+
 OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          TriangleSink& sink,
                                          const LatticeBoundary* boundary,
@@ -1807,12 +2236,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         // cross-section is there. Emitted through `span` like everything else, so the
         // boundary clip decides its extent and it can never leave the part — the mat
         // takes the shape of the footprint without being told what that shape is.
-        // ★ THE MAT CAN BE TURNED OFF, so the question "is the mat what holds this
-        // together?" is answerable by running it both ways through the REAL weld
-        // rather than by an endpoint-matching approximation, which is blind to two
-        // struts that fuse in solid without sharing an endpoint — exactly how a mat
-        // lying under a strut joins it.
-        if (lat.base_mat && !std::getenv("TOPOPT_ORGANIC_NO_BASE_MAT")) {
+        if (lat.base_mat) {
           // The local separation at the base: use the median of what the tracer
           // achieved, which is the spacing this lattice is actually expressed in.
           double dsum = 0.0; std::size_t dn = 0; double rsum = 0.0;
@@ -1866,11 +2290,6 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                 if (p.z <= contact_z) touch.push_back({p.x, p.y});
             }
             st.base_mat_touchdowns = touch.size();
-            std::fprintf(stderr,
-                         "[base-mat] %zu touchdowns at z<=%.4f, pad %.3f mm, pitch "
-                         "%.3f mm, footprint %.1fx%.1f mm\n",
-                         touch.size(), contact_z, kOrganicBaseMatPadPitches * pitch,
-                         pitch, hi.x - lo.x, hi.y - lo.y);
             const double pad = kOrganicBaseMatPadPitches * pitch;
             const double pad2 = pad * pad;
             // A point is padded if any touchdown is within `pad` of it. Bucketed by
@@ -1961,6 +2380,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // mistaken once.
   bool fill_mat_done = false;
   bool slenderness_done = false;
+  bool arch_done = false;
   for (st.fixed_point_rounds = 0;
        st.fixed_point_rounds < kOrganicFixedPointRounds; ++st.fixed_point_rounds) {
     const std::size_t mutations_at_round_start = st.mutations;
@@ -2476,7 +2896,22 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         std::vector<int> lab(static_cast<std::size_t>(RX) * RY, 0);
         // One sweep: find every unsupported island, and hand back its cells.
         struct Island { int k; std::vector<std::pair<int,int>> cells; };
+        // ★★ THE CELLS THAT REACH PAST THEIR OWN SUPPORT, recorded by the same BFS
+        // that measures the reach. The arch pass is driven from THIS rather than from
+        // its own predicate: a first attempt asked whether the strut's CENTRELINE had
+        // material directly beneath, which in a dense weave is nearly always true —
+        // 2472 of 4408 spans were shallow enough to qualify and not one was called
+        // unheld, while this BFS was simultaneously reporting 610 islands reaching up
+        // to 11.79 mm past support. The two disagreed because one measures the
+        // footprint and the other the centreline. Detection and repair now read the
+        // same set, so they cannot disagree again.
+        std::unordered_set<long long> cant_cells;
+        auto ckey3 = [](int a2, int b2, int c2) {
+          return (static_cast<long long>(a2) << 42) ^
+                 (static_cast<long long>(b2) << 21) ^ static_cast<long long>(c2);
+        };
         auto find_islands = [&](std::vector<Island>& out, int& ground) {
+          cant_cells.clear();
           out.clear();
           ground = -1;
           for (int k = 0; k < RZ && ground < 0; ++k)
@@ -2517,6 +2952,65 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                   if (sup) break;
                 }
                 if (!sup) out.push_back({k, cells});
+                // ★★ AND HOW FAR THIS ISLAND REACHES BEYOND ITS OWN SUPPORT. `sup`
+                // above stops at the FIRST supported cell, which is the whole defect:
+                // an island held at one point still passes. Multi-source BFS from every
+                // supported cell, through the island, gives the furthest any part of it
+                // sits from something holding it up.
+                else if (false) {}
+                if (sup && !cells.empty()) {
+                  std::unordered_map<long long, int> dist;
+                  auto ckey = [](int a2, int b2) {
+                    return (static_cast<long long>(a2) << 32) ^
+                           static_cast<long long>(b2 & 0xffffffff);
+                  };
+                  std::vector<std::pair<int,int>> q;
+                  for (const std::pair<int,int>& c : cells) {
+                    bool held = false;
+                    for (int dj = -1; dj <= 1 && !held; ++dj)
+                      for (int di = -1; di <= 1 && !held; ++di) {
+                        const int a2 = c.first + di, b2 = c.second + dj;
+                        if (a2 < 0 || b2 < 0 || a2 >= RX || b2 >= RY) continue;
+                        if (occ[ridx(a2, b2, k - 1)]) held = true;
+                      }
+                    if (held) { dist[ckey(c.first, c.second)] = 0; q.push_back(c); }
+                  }
+                  std::unordered_map<long long, char> inisl;
+                  for (const std::pair<int,int>& c : cells)
+                    inisl[ckey(c.first, c.second)] = 1;
+                  std::size_t head = 0;
+                  int far = 0;
+                  while (head < q.size()) {
+                    const std::pair<int,int> c = q[head++];
+                    const int d0 = dist[ckey(c.first, c.second)];
+                    far = std::max(far, d0);
+                    for (int dj = -1; dj <= 1; ++dj)
+                      for (int di = -1; di <= 1; ++di) {
+                        const int a2 = c.first + di, b2 = c.second + dj;
+                        const long long kk = ckey(a2, b2);
+                        if (!inisl.count(kk) || dist.count(kk)) continue;
+                        dist[kk] = d0 + 1;
+                        q.push_back({a2, b2});
+                      }
+                  }
+                  // cells the BFS never reached are beyond any support in this island
+                  const bool unreached = dist.size() < cells.size();
+                  const double reach_mm = far * vxy;
+                  // Every cell further from support than the bridge limit — plus any
+                  // the BFS never reached at all — is a cell the arch pass must fix.
+                  const int lim_cells =
+                      static_cast<int>(kOrganicMaxCantileverMm / std::max(vxy, 1e-9));
+                  for (const std::pair<int,int>& c : cells) {
+                    const long long kk = ckey(c.first, c.second);
+                    auto it = dist.find(kk);
+                    if (it == dist.end() || it->second > lim_cells)
+                      cant_cells.insert(ckey3(c.first, c.second, k));
+                  }
+                  st.cantilever_max_reach_mm =
+                      std::max(st.cantilever_max_reach_mm, reach_mm);
+                  if (unreached || reach_mm > kOrganicMaxCantileverMm)
+                    ++st.cantilever_islands;
+                }
               }
           }
         };
@@ -2783,6 +3277,171 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           // needs D >= 3.89 mm, which is not a lattice any more. Moving its nodes
           // cannot help either — it is flat BY DESIGN, spanning a gap. Dividing it into
           // four propped pieces takes l/D to 8.7 and changes nothing else about it.
+          // ══════════════════════════════════════════════════════════════════════
+          // ★★★ ARCHING: A SHALLOW, UNHELD SPAN IS BOWED INTO AN ARCH ★★★
+          //
+          // ★ THE DEFECT THIS FIXES WAS INVISIBLE TO EVERY NUMBER IN THE RECEIPT.
+          // The island support test stops at the FIRST supported cell, so an island
+          // held at one point with a long arm over air passes: the shipped cube read
+          // `unsupported_cells_remaining: 0` while carrying 610 islands that reached
+          // past their own support, the worst by 11.79 mm. The maintainer found it in
+          // the slice — a bridge held from the centre that does not meet the outside
+          // for several layers.
+          //
+          // ★ WHY THE ROUND SECTION HIDES IT. A span at angle theta advances
+          // layer_height / tan(theta) along itself per layer; at 5 degrees that is
+          // 2.3 mm per 0.2 mm layer. The span is laid almost all at once and only the
+          // end over material holds it. Nothing about the ENDPOINTS is wrong, which is
+          // why an endpoint test cannot see it.
+          //
+          // ★ THE ARCH. Both halves leave their own node at kOrganicArchMinAngleDeg,
+          // so each layer lands on the previous layer of the SAME strut and the two
+          // halves close at the apex last. The span becomes a two-segment polyline,
+          // emitted through `span` like everything else, so the boundary clip still
+          // decides its extent and an apex pushed outside the region is trimmed.
+          // ★ A PRINTABILITY REPAIR NEEDS A MACHINE TO REPAIR FOR. Without a stated
+          // layer height there is no notion of "the layer below", so filleting is not
+          // merely unnecessary — it is unjustified. It fired on the B2 fixture (a fully
+          // held portal frame with no layer height) and re-emitted spans there, which
+          // broke a bar that had held all session.
+          if (!arch_done && lat.layer_height_mm > 0.0 &&
+              st.mutations == mutations_at_round_start) {
+            arch_done = true;
+            const double shallow_sin =
+                std::sin(kOrganicArchMinAngleDeg * M_PI / 180.0);
+            const double leg_tan = std::tan(kOrganicArchLegSteepness *
+                                            kOrganicArchMinAngleDeg * M_PI / 180.0);
+            std::vector<std::size_t> to_arch;
+            for (std::size_t si = 0; si < emitted.size(); ++si) {
+              if (!live[si]) continue;
+              const EmittedSeg& e = emitted[si];
+              if (!(e.len > 0.0)) continue;
+              if (e.src == Src::Leg || e.src == Src::Fill) continue;  // structural
+              const Vec3 u = vmul(vsub(e.b, e.a), 1.0 / e.len);
+              if (std::fabs(u.z) >= shallow_sin) continue;   // steep enough already
+              // ★ SHALLOW IS NOT ENOUGH — it must also be one of the spans the
+              // CANTILEVER BFS actually flagged. Driving this from a second, private
+              // predicate is what made the first attempt inert: it asked whether the
+              // CENTRELINE had material directly beneath, which in a dense weave is
+              // nearly always true, so 2472 shallow spans yielded zero arches while the
+              // BFS was reporting 610 islands reaching up to 11.79 mm past support. The
+              // strut is a capsule: its footprint edge can hang over nothing while its
+              // centre sits on material. Read the same cells the measurement produced.
+              const int rad_cells =
+                  std::max(1, static_cast<int>(std::ceil(e.r / std::max(vxy, 1e-9))));
+              const int NS =
+                  std::max(2, static_cast<int>(e.len / std::max(vz, 1e-6)));
+              const int rk =
+                  std::max(1, static_cast<int>(std::ceil(e.r / std::max(vz, 1e-9))));
+              double run_t0 = 0.0, worst_run = 0.0;
+              bool flagged_any = false;
+              for (int q = 0; q <= NS; ++q) {
+                const double t = static_cast<double>(q) / NS;
+                const Vec3 pt = vadd(e.a, vmul(vsub(e.b, e.a), t));
+                const int qi = static_cast<int>((pt.x - lo.x) / vxy);
+                const int qj = static_cast<int>((pt.y - lo.y) / vxy);
+                const int qk = static_cast<int>((pt.z - lo.z) / vz);
+                // ★★ THE CAPSULE'S FULL Z EXTENT, not just the centreline's layer.
+                // The raster is inflated by the radius and filled by 3D distance to
+                // the segment, so a strut occupies the layers from centre-r to
+                // centre+r. Checking only the centre layer found NOTHING: 0 of 3445
+                // live spans contained any of the 271 flagged cells, because the cells
+                // that reach past their support are at the capsule's upper and lower
+                // extremes — exactly the layers the centreline is not in.
+                bool flagged = false;
+                for (int dk = -rk; dk <= rk && !flagged; ++dk)
+                  for (int dj = -rad_cells; dj <= rad_cells && !flagged; ++dj)
+                    for (int di = -rad_cells; di <= rad_cells && !flagged; ++di) {
+                      const int a2 = qi + di, b2 = qj + dj, c2 = qk + dk;
+                      if (a2 < 0 || b2 < 0 || a2 >= RX || b2 >= RY || c2 < 0) continue;
+                      if (cant_cells.count(ckey3(a2, b2, c2))) flagged = true;
+                    }
+                // ★ ALSO: is this station over open air at all? The flagged set is
+                // one signal; "nothing directly beneath the footprint" is the other,
+                // and a shallow span with any such stretch is a candidate.
+                // ★★ BELOW THE CAPSULE'S UNDERSIDE, not below its centreline. The
+                // strut's lowest material sits rk layers under the axis, so asking what
+                // is beneath layer qk-1 asks about the middle of the strut and always
+                // finds the strut's own lower half. Measured at qk-1 this test fired on
+                // ZERO of 1893 shallow spans; the same confusion between the centreline
+                // and the capsule's extent has now cost three separate passes.
+                const int kbot = qk - rk - 1;
+                bool over_air = kbot >= 0;
+                for (int dj = -rad_cells; dj <= rad_cells && over_air; ++dj)
+                  for (int di = -rad_cells; di <= rad_cells && over_air; ++di) {
+                    const int a2 = qi + di, b2 = qj + dj;
+                    if (a2 < 0 || b2 < 0 || a2 >= RX || b2 >= RY) continue;
+                    if (occ[ridx(a2, b2, kbot)]) over_air = false;
+                  }
+                if (over_air) flagged_any = true;
+                if (!flagged) run_t0 = t;
+                else worst_run = std::max(worst_run, (t - run_t0) * e.len);
+              }
+              // ★★ EVERY SHALLOW SPAN, NOT ONLY THE BFS-FLAGGED ONES. Gated on the
+              // flagged set it reached 59 of 1893 shallow spans — 3 % — and three
+              // cubes came back visually indistinguishable. The defect is intrinsic to
+              // a shallow CYLINDER (its lowest layer is a full-length sliver over
+              // nothing), so the treatment belongs to every shallow span that is not
+              // already lying on material, not to the handful a path-metric happened
+              // to flag.
+              if (worst_run > kOrganicArchMinUnsupportedMm || flagged_any)
+                to_arch.push_back(si);
+            }
+            // ★★ FILLET, DO NOT BOW. The maintainer's correction, and it is the
+            // difference between improving the defect and reproducing it: a bowed
+            // centreline is still a CYLINDER, and its lowest layer is still a
+            // zero-width sliver along the whole span with nothing under it. Re-emit the
+            // span with a FLARED PROFILE instead — radius R at the ends falling to the
+            // nominal r at the middle, so the underside climbs away from each support
+            // at kOrganicFilletAngleDeg and the two flares meet in the centre. The arch
+            // is then the strut's own surface.
+            const double fil_tan = std::tan(kOrganicFilletAngleDeg * M_PI / 180.0);
+            for (std::size_t si : to_arch) {
+              const EmittedSeg e = emitted[si];      // by value: `emitted` grows below
+              if (!(e.len > 0.0) || !(e.r > 0.0)) continue;
+              // The end radius that would let the two fillets MEET, and the capped one
+              // actually used. Wanted = r + (L/2)*tan(theta); at L = 8 mm, r = 0.5 mm
+              // that is 4.5 mm, a blob nine times the strut, which is why there is a
+              // cap and why a capped span is counted as UNRESOLVED rather than fixed.
+              const double want_end = e.r + 0.5 * e.len * fil_tan;
+              const double r_end =
+                  std::min(want_end, kOrganicFilletMaxRadiusRatio * e.r);
+              if (!(r_end > e.r)) continue;          // nothing to flare
+              live[si] = 0;
+              ++st.support_spans_cut;                // so the compaction below runs
+              const Src saved = cur_src;
+              cur_src = e.src;
+              const std::size_t before = emitted.size();
+              const int NSEG = std::max(2, kOrganicFilletSegments);
+              for (int q = 0; q < NSEG; ++q) {
+                const double t0 = static_cast<double>(q) / NSEG;
+                const double t1 = static_cast<double>(q + 1) / NSEG;
+                const double tm = 0.5 * (t0 + t1);
+                // distance from whichever END is nearer — the flare is symmetric
+                const double d = std::min(tm, 1.0 - tm) * e.len;
+                const double R = std::max(e.r, r_end - d * fil_tan);
+                span(vadd(e.a, vmul(vsub(e.b, e.a), t0)),
+                     vadd(e.a, vmul(vsub(e.b, e.a), t1)), R);
+              }
+              cur_src = saved;
+              live.resize(emitted.size(), 1);
+              if (emitted.size() > before) {
+                ++st.filleted_spans;
+                ++st.mutations;
+                st.fillet_max_radius_mm = std::max(st.fillet_max_radius_mm, r_end);
+                if (r_end < want_end - 1e-9) ++st.fillet_unresolved;
+              }
+            }
+            if (st.filleted_spans > 0 && std::getenv("TOPOPT_ORGANIC_TRACE"))
+              std::fprintf(stderr,
+                           "[fillet] %zu spans flared, %zu still unresolved at the cap, "
+                           "widest end radius %.2f mm\n",
+                           st.filleted_spans, st.fillet_unresolved,
+                           st.fillet_max_radius_mm);
+
+            if (st.mutations != mutations_at_round_start) continue;  // repair the arches
+          }
+
           // ★ AT QUIESCENCE ONLY. Run every round it judged geometry the later
           // passes were still changing and counted 1541 violations against the 197 the
           // shipped spans actually hold — the same defect the fill mat had at both ends
@@ -2878,7 +3537,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             // placed. Gated on props, a pass that found 197 violations and could prop
             // none printed nothing at all — indistinguishable from not running, which
             // is precisely the confusion this line exists to prevent.
-            if (st.slenderness_violating > 0)
+            if (st.slenderness_violating > 0 && std::getenv("TOPOPT_ORGANIC_TRACE"))
               std::fprintf(stderr,
                            "[vdi] %zu struts over l/D, %zu propped, %zu impossible, "
                            "%zu props\n",
