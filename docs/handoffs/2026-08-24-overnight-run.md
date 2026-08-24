@@ -100,9 +100,31 @@ pre-measurement fallback), so toggling single-cell doubles the sample's cell on
 screen. Chain: `derivedSampleCellMM` (LatticeSetupWizard) →
 `stageMesh(derivedCellMM:)`. Test: LatticeSampleSingleCellTests.
 
-### Full test-suite re-run
-Kicked off with three wake-ups (completion notification, failure grep, 10-min
-staleness hang detector). Result recorded below when it lands.
+### Full test-suite re-run — GREEN
+**2194 tests, 30 skipped, 0 failures, exit 0** (the count is up from 2179: tonight
+added ~18 tests and the suite total moved with main's earlier merges). Three
+earlier attempts were void — one piped through `tail` (exit code was tail's, a
+green run measuring nothing), one died on a compile error in a new test, one was
+crashed BY my first attached-rim test indexing an empty field. The final run has
+the real exit code and the totals captured.
+
+### The attached-only rim (your unscheduled solid-edges rule) — DONE, and it found two real bugs
+The rim now keys on an in-plane field seeded only by part material OUTSIDE the
+latticed set: junction edges rim, open edges don't (the finish owns them). In-sim:
+solidRim went 18 → 11 with every other number byte-identical. On the way it
+uncovered (a) `partSDF` is misnamed — its SIGN is the region-clipped occupancy's,
+so nothing outside the regions is ever negative (the seed now reads
+`memberThicknessMM`, the whole-part field); and (b) the distance transform mapped
+UNREACHABLE voxels to 0, which downstream means "on the boundary" — the exact
+two-meanings-of-zero inversion again; unreached is now `kFarMM`.
+
+**Latent gap worth knowing (not fixed tonight):** because `partSDF` is clipped,
+the along-normal width walk still stops at a region's own caps wherever no OTHER
+region continues the material. On your two overlapping faces the measured widths
+are real walls (verified), but a single declared face into a deeper wall will
+still read its declared depth. The honest substrate for that walk is the
+whole-part solid (`memberThicknessMM > 0`), same as the rim seed — a small change
+I did not want to make against a verified picture at the end of the night.
 
 ## PR 352 REVIEW — "Organic lattice: printability, shape fit, and a scale"
 
