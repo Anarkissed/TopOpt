@@ -740,9 +740,10 @@ public struct WorkspacePlaceholder: View {
                           // ★ Only while drilled in — the PRESENCE of this closure is
                           // what makes a tap read a strut instead of selecting a face.
                           onLatticeProbe: latticeLegendMode.drilledIn
-                              ? { model, world, cellMM in
+                              ? { model, world, cellMM, activation in
                                   setLatticeProbe(at: model, world: world,
-                                                  bakedCellMM: cellMM)
+                                                  bakedCellMM: cellMM,
+                                                  bakedActivation: activation)
                               } : nil,
                           // ★ …and the way back out, from anywhere on the viewport.
                           onLatticeProbeExit: latticeLegendMode.drilledIn
@@ -1865,10 +1866,15 @@ public struct WorkspacePlaceholder: View {
     /// this is gated on the algorithm alone and not on Fit.
     private var latticePreviewSteppedCells: [Double] {
         // The guard, said out loud — "stepped NOT RUN" downstream has already cost
-        // one night to a silently failing precondition here.
+        // one night to a silently failing precondition here. ONCE PER CHANGE, not
+        // per SwiftUI evaluation: the first cut logged every frame and buried the
+        // real diagnostics under its own spam.
         if project.lattice.algorithm != "stepped" {
-            NSLog("DIAG steppedCells GUARD algo='\(project.lattice.algorithm)' "
-                  + "(not \"stepped\") — preview draws the ladder")
+            if SteppedGuardLog.last != project.lattice.algorithm {
+                SteppedGuardLog.last = project.lattice.algorithm
+                NSLog("DIAG steppedCells GUARD algo='\(project.lattice.algorithm)' "
+                      + "(not \"stepped\") — preview draws the ladder")
+            }
             return []
         }
         // ★ 0.5, NOT 0.05 — the stepped bake now divides each CELL to its own local
@@ -3852,7 +3858,11 @@ public struct WorkspacePlaceholder: View {
     /// `rhoMin + (rhoMax-rhoMin) * v^gamma`), so the number on screen is the number
     /// being drawn rather than a second estimate that can drift from it.
     private func setLatticeProbe(at point: SIMD3<Float>, world: SIMD3<Float>,
-                                 bakedCellMM: Double) {
+                                 bakedCellMM: Double,
+                                 // ★ The shader's own activation at the owning cell
+                                 // (−1 ⇒ unknown). See below for why this must come
+                                 // from the RENDERER's field and not a re-bake.
+                                 bakedActivation: Float = -1) {
         guard let scene = strutScene else { return }
         // ★★★ THE CELL THE BAKE LAID DOWN HERE, NOT THE ONE IN THE SETTINGS
         // (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm cells - which
@@ -3863,16 +3873,34 @@ public struct WorkspacePlaceholder: View {
         // Two numbers, two sources, one of them not describing anything on screen.
         // 2.56 mm is exactly what 46% density makes at 8.00 mm — measured.
         let cellMM = bakedCellMM > 0 ? bakedCellMM : latticeProxy.params.cellMM
-        let grid = LatticePreviewOccupancy.cellField(
-            occupancy: scene.occupancy, demand: scene.demand, cellMM: cellMM)
-        let g = (point - grid.origin) / grid.spacing
-        let i = Swift.min(Swift.max(Int(g.x.rounded()), 0), grid.nx - 1)
-        let j = Swift.min(Swift.max(Int(g.y.rounded()), 0), grid.ny - 1)
-        let k = Swift.min(Swift.max(Int(g.z.rounded()), 0), grid.nz - 1)
-        let v = grid.values[(k * grid.ny + j) * grid.nx + i]
-        // A negative cell is an INACTIVE one — no lattice there, and reporting a
-        // density for it would invent a strut he cannot see.
-        guard v >= 0 else { latticeLegendProbe = nil; return }
+        // ★★★ THE ACTIVATION COMES FROM THE RENDERER'S BAKED FIELD, NOT A RE-BAKE
+        // (maintainer, 2026-08-24 evening: a tapped 2.00 mm cell read "5% ·
+        // 0.18 mm" — a strut under half a bead — while the bake had LIFTED that
+        // cell to its printability floor of ~25% / 0.45 mm; measured by
+        // LatticeLiftProbe, every graded size lands exactly on rho*).
+        //
+        // ★ THE OLD PATH RE-BAKED a plain uniform `cellField` from `scene.demand`
+        // here — no stepped grading, no printability lift — which is the very
+        // "second estimate that can drift" this function's own header warns
+        // about. The renderer's activation is what the march actually draws; a
+        // −1 (no renderer field yet) falls back to the raw demand read so the
+        // callout still answers, stated at the band floor it really is.
+        let v: Float
+        if bakedActivation >= 0 {
+            v = bakedActivation
+        } else {
+            let grid = LatticePreviewOccupancy.cellField(
+                occupancy: scene.occupancy, demand: scene.demand, cellMM: cellMM)
+            let g = (point - grid.origin) / grid.spacing
+            let i = Swift.min(Swift.max(Int(g.x.rounded()), 0), grid.nx - 1)
+            let j = Swift.min(Swift.max(Int(g.y.rounded()), 0), grid.ny - 1)
+            let k = Swift.min(Swift.max(Int(g.z.rounded()), 0), grid.nz - 1)
+            let raw = grid.values[(k * grid.ny + j) * grid.nx + i]
+            // A negative cell is an INACTIVE one — no lattice there, and reporting
+            // a density for it would invent a strut he cannot see.
+            guard raw >= 0 else { latticeLegendProbe = nil; return }
+            v = raw
+        }
         let span = latticeProxy.params.densitySpan
         let gamma = Swift.max(0.05, latticeProxy.params.gamma)
         let rho = span.lo + (span.hi - span.lo)
@@ -10392,3 +10420,7 @@ public struct WorkspacePlaceholder: View {
     m.open(RecentProject(name: "Shelf Bracket v2", materialName: "PLA", process: .fdm))
     return WorkspacePlaceholder(model: m, project: m.project!)
 }
+
+/// One-line memory for the stepped-guard diagnostic, so it logs on CHANGE rather
+/// than on every SwiftUI evaluation (the first cut flooded the console at 5 Hz).
+enum SteppedGuardLog { @MainActor static var last: String? }

@@ -4667,7 +4667,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// ★ `cellMM` is the cell the BAKE laid down at `model`, read out of the very
     /// field the march samples — never re-derived. 0 when nothing was baked there.
     struct LatticeProbeHit { let model: SIMD3<Float>; let world: SIMD3<Float>
-                             let cellMM: Double }
+                             let cellMM: Double
+                             /// The shader's own activation at the owning cell
+                             /// (−1 ⇒ unknown) — the density half of the callout,
+                             /// read from the SAME field as `cellMM`.
+                             let activation: Float }
 
     /// ★★ THE TAP PROBE — THE STRUT UNDER THE FINGER, NOT THE FACE BEHIND IT
     /// (maintainer, 2026-08-19: "I attempted to touch the green 'Load bearing' area.
@@ -4819,7 +4823,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let m = SIMD3<Float>(model.x, model.y, model.z)
         return LatticeProbeHit(model: m,
                                world: SIMD3<Float>(world.x, world.y, world.z),
-                               cellMM: latticeLayer?.bakedCellMMAt(m) ?? 0)
+                               cellMM: latticeLayer?.bakedCellMMAt(m) ?? 0,
+                               activation: latticeLayer?.bakedActivationAt(m) ?? -1)
     }
 
     func pickFacePass(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> FaceIDPass {
@@ -4954,7 +4959,7 @@ struct MeshViewInputs {
     /// ★ Non-nil only while the lattice key is drilled into a colour: a tap then
     /// READS the strut under the finger (via the march's G-buffer) instead of
     /// selecting a face.
-    var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)?
+    var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double, Float) -> Void)?
     /// Non-nil while the lattice key is drilled in: a double tap ANYWHERE leaves it.
     var onLatticeProbeExit: (() -> Void)?
     /// ★ §1(b) — THE SECOND TAP. A DOUBLE tap with the same one contact, carrying
@@ -5195,7 +5200,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
-                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)? = nil,
+                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double, Float) -> Void)? = nil,
                 onLatticeProbeExit: (() -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
@@ -5356,7 +5361,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil,
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
-                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)? = nil,
+                onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double, Float) -> Void)? = nil,
                 onLatticeProbeExit: (() -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
@@ -5531,7 +5536,7 @@ extension MetalMeshView {
         /// ★ Set only while the lattice key is drilled in; when it is, a tap READS a
         /// strut instead of selecting, and it is answered by the march's own
         /// G-buffer rather than by the face picker.
-        private var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double) -> Void)?
+        private var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double, Float) -> Void)?
         /// ★ The way OUT of the drilled-in key. Separate from `onPickDouble` because
         /// that one needs a face, and leaving a key is not a thing you do TO a face.
         private var onLatticeProbeExit: (() -> Void)?
@@ -6114,7 +6119,7 @@ extension MetalMeshView {
             if deliver == nil, let probe = onLatticeProbe {
                 if let hit = renderer.latticeProbe(atNormalizedPoint: normalized,
                                                    width: w, height: h) {
-                    probe(hit.model, hit.world, hit.cellMM)
+                    probe(hit.model, hit.world, hit.cellMM, hit.activation)
                     return
                 }
             }

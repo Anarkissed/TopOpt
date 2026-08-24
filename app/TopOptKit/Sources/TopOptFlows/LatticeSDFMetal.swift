@@ -1782,10 +1782,21 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let voxelMM = Double(max(occ.spacing.x, max(occ.spacing.y, occ.spacing.z)))
         var baseMM = sweep.minMM
         var topMM = sweep.maxMM
-        let wants = desired.filter { $0 > 0 }
-        if let lo = wants.min(), let hi = wants.max(), lo > 0 {
-            baseMM = lo
-            topMM = Swift.max(hi, lo)
+        // ★★★ THE BASE IS THE WANTS' p05, NOT THEIR MINIMUM (2026-08-24 evening:
+        // "The size of the cells are tiny - no bigger than 2mm" on a wall whose
+        // median member is 20.6 mm). The minimum handed the ladder's base to the
+        // single thinnest voxel class — measured on his part: wants min 1.72 mm
+        // (one 3.44 mm sliver at floor 2) against p05 5.16 and median 10.31 — and
+        // the planner then walks DOWN the ladder, so the sliver's rung became most
+        // of the wall. The same sliver-pins-the-face disease the stepped path was
+        // cured of this morning, one ladder over. p05 is the same conservative end
+        // the width statistic uses; the voxels under it are zeroed by the clamp
+        // below and go SOLID — his own rule for material too thin for its rung.
+        let wants = desired.filter { $0 > 0 }.sorted()
+        if let hi = wants.last, hi > 0 {
+            baseMM = wants[Swift.min(wants.count - 1,
+                                     Int(0.05 * Double(wants.count - 1)))]
+            topMM = Swift.max(hi, baseMM)
         }
         // ★ AND THE GRID IS STILL A FLOOR, because core's rule is stated for a RUN, whose
         // grid is the FEA grid and is always finer than any cell it plans. The preview's
@@ -2263,6 +2274,41 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             }
         }
         return sizeAt((k * g.ny + j) * g.nx + i)
+    }
+
+    /// ★★★ THE ACTIVATION THE SHADER READS, AT A POINT — the sibling of
+    /// `bakedCellMMAt`, for the DENSITY half of the tap callout (2026-08-24
+    /// evening: a tapped 2.00 mm cell read "5% · 0.18 mm" — under half a bead —
+    /// while the BAKE had lifted that cell to its printability floor of ~25%. The
+    /// callout was re-baking a plain uniform field from raw demand and reading
+    /// that: the exact second-estimate drift `bakedCellMMAt`'s own note documents,
+    /// one field over). Same owning-cell search as the size, so the two halves of
+    /// the callout describe ONE cell. Returns −1 when no active cell owns the
+    /// point — the caller falls back rather than inventing a density.
+    func bakedActivationAt(_ p: SIMD3<Float>) -> Float {
+        guard let f = cellField else { return -1 }
+        let g = f.field
+        guard g.nx > 0, g.ny > 0, g.nz > 0,
+              g.spacing.x > 0, g.spacing.y > 0, g.spacing.z > 0 else { return -1 }
+        let r = (p - g.origin) / g.spacing
+        let i = Int(r.x.rounded()), j = Int(r.y.rounded()), k = Int(r.z.rounded())
+        guard i >= 0, j >= 0, k >= 0, i < g.nx, j < g.ny, k < g.nz else { return -1 }
+        for radius in 0...1 {
+            for dk in -radius...radius {
+                for dj in -radius...radius {
+                    for di in -radius...radius where abs(di) == radius || abs(dj) == radius
+                                                     || abs(dk) == radius || radius == 0 {
+                        let a = i + di, b = j + dj, c = k + dk
+                        guard a >= 0, b >= 0, c >= 0,
+                              a < g.nx, b < g.ny, c < g.nz else { continue }
+                        let n = (c * g.ny + b) * g.nx + a
+                        guard n < g.values.count, g.values[n] >= 0 else { continue }
+                        return g.values[n]
+                    }
+                }
+            }
+        }
+        return -1
     }
 
     /// The baked region field, for the SHELL's own fragments — the same texture
