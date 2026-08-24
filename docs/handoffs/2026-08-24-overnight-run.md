@@ -118,13 +118,15 @@ so nothing outside the regions is ever negative (the seed now reads
 UNREACHABLE voxels to 0, which downstream means "on the boundary" — the exact
 two-meanings-of-zero inversion again; unreached is now `kFarMM`.
 
-**Latent gap worth knowing (not fixed tonight):** because `partSDF` is clipped,
-the along-normal width walk still stops at a region's own caps wherever no OTHER
-region continues the material. On your two overlapping faces the measured widths
-are real walls (verified), but a single declared face into a deeper wall will
-still read its declared depth. The honest substrate for that walk is the
-whole-part solid (`memberThicknessMM > 0`), same as the rim seed — a small change
-I did not want to make against a verified picture at the end of the night.
+**Latent gap worth knowing (deliberately not "fixed"):** because `partSDF` is
+clip-signed, the along-normal width walk still stops at a region's own caps
+wherever no OTHER region continues the material — a single declared face into a
+deeper wall reads its declared depth. But note the trade before changing it:
+walking the WHOLE-part solid instead would balloon at junctions (along the front
+wall's normal, the base plate reads as the part's full ~49 mm depth — the same
+junction inflation that made the isotropic measure quilt). The cap-stop is
+partly protective. If this ever needs solving, it needs a junction-aware rule,
+not a substrate swap — one for your eyes, not for 3 a.m.
 
 ## PR 352 REVIEW — "Organic lattice: printability, shape fit, and a scale"
 
