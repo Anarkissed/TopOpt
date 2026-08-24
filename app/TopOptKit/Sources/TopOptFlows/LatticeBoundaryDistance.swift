@@ -180,6 +180,56 @@ public enum LatticeBoundaryDistance {
         return out
     }
 
+    /// ★★★ THE GRADING DISTANCE PER VOXEL, REGION-AWARE — the doubled ladder's
+    /// answer to the same defect the stepped path already fixed (2026-08-24).
+    ///
+    /// ★ THE 3-D DISTANCE REACHES 0 AT THE DEPTH CAPS as much as at the face's
+    /// outline — a face region is an extrusion, so "distance to the edge of the
+    /// latticed material" is ~half the wall thickness through the WHOLE wall. At the
+    /// fine cells the ladder used to draw, that ceiling barely bound (measured: it
+    /// moved 2.9% of cells); at the one-cell-per-wall sizes single-cell now produces
+    /// (12–13 mm), S ≤ 2d binds mid-wall and cuts the very cells the mode exists to
+    /// keep. The IN-PLANE field (thickness axis dropped) is the fit question the
+    /// shape actually asks.
+    ///
+    /// Per voxel: the OWNING include region's in-plane distance, by the same
+    /// first-match rule the emission uses; the 3-D distance where no axis-aligned
+    /// face region owns the voxel (a bolt region, a whole-part lattice) — the
+    /// behaviour those cases have always had.
+    public static func perVoxelForGrading(regions: [LatticeRegionSpec],
+                                          candidate: [Bool],
+                                          nx: Int, ny: Int, nz: Int,
+                                          spacing: SIMD3<Float>,
+                                          origin: SIMD3<Float>) -> [Double] {
+        let volume = millimetres(candidate: candidate, nx: nx, ny: ny, nz: nz,
+                                 spacing: spacing)
+        guard !volume.isEmpty, !regions.isEmpty else { return volume }
+        let perRegion = inPlanePerRegion(regions: regions, candidate: candidate,
+                                         nx: nx, ny: ny, nz: nz, spacing: spacing)
+        guard perRegion.contains(where: { $0 != nil }) else { return volume }
+        var out = volume
+        var i = 0
+        for k in 0..<nz {
+            for j in 0..<ny {
+                for x in 0..<nx {
+                    defer { i += 1 }
+                    guard i < candidate.count, candidate[i] else { continue }
+                    let p = SIMD3<Double>(
+                        Double(origin.x) + Double(x) * Double(spacing.x),
+                        Double(origin.y) + Double(j) * Double(spacing.y),
+                        Double(origin.z) + Double(k) * Double(spacing.z))
+                    for (r, region) in regions.enumerated()
+                    where region.role == .include
+                        && LatticeRegionMask.contains(p, region: region) {
+                        if let f = perRegion[r], i < f.count { out[i] = f[i] }
+                        break
+                    }
+                }
+            }
+        }
+        return out
+    }
+
     /// ★★★ THE CELL A VOXEL THAT CLOSE TO THE EDGE MAY HOLD.
     ///
     /// A cube of side S centred `d` from the boundary stays inside the material when

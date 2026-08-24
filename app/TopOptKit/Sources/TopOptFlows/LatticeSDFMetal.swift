@@ -1703,8 +1703,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // per-member wants set the rungs; the boundary then trims each voxel DOWN within
         // that fixed ladder, and anything it trims below the base rung has no rung left
         // to take and goes SOLID — which is the printable edge he asked for.
-        let boundaryMM = LatticeBoundaryDistance.millimetres(
-            candidate: candidate, nx: occ.nx, ny: occ.ny, nz: occ.nz, spacing: occ.spacing)
+        // ★ IN-PLANE WHERE A FACE REGION OWNS THE VOXEL, 3-D elsewhere — the same
+        // correction the stepped path took (a face region is an extrusion; the 3-D
+        // distance reads the wall's half-thickness at the caps, not the outline).
+        let boundaryMM = LatticeBoundaryDistance.perVoxelForGrading(
+            regions: scene.regions, candidate: candidate,
+            nx: occ.nx, ny: occ.ny, nz: occ.nz, spacing: occ.spacing,
+            origin: occ.origin)
         // The fill for a mode that derived no want of its own happens BEFORE the ladder
         // is derived — it is that mode's only want, so it has to be there to be seen —
         // and it is clamped to his own window, so it cannot drag the base under the end
