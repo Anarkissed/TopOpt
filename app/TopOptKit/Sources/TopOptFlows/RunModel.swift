@@ -1155,7 +1155,29 @@ public final class RunModel: ObservableObject {
             throw RemoteRunError(
                 "the lattice run produced no mesh — see the run's report for why")
         }
-        return try TopOptKit.latticeOutcome(meshPath: mesh, result: r)
+        do {
+            return try TopOptKit.latticeOutcome(meshPath: mesh, result: r)
+        } catch {
+            // ★★★ THE LATTICE STL IS A SOUP, AND THE SOLID IMPORTER MAY REFUSE IT
+            // (found 2026-08-24: two overlapping declared regions → the shared
+            // sheets are written once per region, and the repair correctly reports
+            // "an edge shared by more than two triangles remains" — measured 17,172
+            // duplicated triangles and 194 residual T-junction edges on his own
+            // part). That refusal is about making a SOLID; nothing here needs one.
+            // The certification already ran inside core, and the mesh is only the
+            // picture — so fall back to the same raw parse the RELATTICE path has
+            // always displayed the soup with (`RelatticeRunner` →
+            // `MeshExport.parseBinarySTL`). The LAN and on-device lattice runs now
+            // agree about what this file is.
+            let raw = MeshExport.parseBinarySTL(
+                try Data(contentsOf: URL(fileURLWithPath: mesh)))
+            guard !raw.indices.isEmpty else { throw error }
+            NSLog("DIAG latticeOutcome solid import refused (\(error)); "
+                  + "displaying the soup raw: \(raw.indices.count / 3) triangles")
+            return TopOptKit.latticeOutcome(result: r,
+                                            meshVertices: raw.vertices,
+                                            meshIndices: raw.indices)
+        }
     }
 
     public static func bridgeRunner(_ request: RunRequest,

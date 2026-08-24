@@ -1787,19 +1787,33 @@ public enum TopOptKit {
                                       result: LatticeJobOutcome)
         throws -> OptimizeOutcome {
         let mesh = try importMesh(path: meshPath)
+        return latticeOutcome(result: result,
+                              meshVertices: mesh.vertices, meshIndices: mesh.indices)
+    }
+
+    /// The outcome from vertices the CALLER already holds — split out so the
+    /// on-device lattice runner can fall back to a raw soup parse when core's
+    /// manifold importer refuses the lattice STL (see `latticeBridgeRunner`):
+    /// that file is a deliberately union-less strut soup, and with two
+    /// overlapping declared regions it carries duplicated sheets and T-junction
+    /// edges no solid repair can disambiguate. The certification behind
+    /// `result` already ran in core; the vertices here are only the picture.
+    public static func latticeOutcome(result: LatticeJobOutcome,
+                                      meshVertices: [Float],
+                                      meshIndices: [Int32]) -> OptimizeOutcome {
         let v = OptimizeVariant(
             requestedVolumeFraction: result.achievedVolumeFraction,
             achievedVolumeFraction: result.achievedVolumeFraction,
             massGrams: 0,
             supportVolumeVoxels: 0,
-            meshTriangleCount: mesh.indices.count / 3,
+            meshTriangleCount: meshIndices.count / 3,
             worstCaseMargin: result.marginWorstCase,
             // ★ ACCEPTED IS THE MARGIN'S OWN VERDICT, not a default. A lattice
             // job that ran to completion still has a certification behind it.
             accepted: result.marginWorstCase > 0,
             v3Passes: result.marginWorstCase > 0,
-            meshVertices: mesh.vertices,
-            meshIndices: mesh.indices)
+            meshVertices: meshVertices,
+            meshIndices: meshIndices)
         return OptimizeOutcome(variants: [v], stoppedOnMargin: false,
                                cancelled: false,
                                acceptedCount: v.accepted ? 1 : 0,
