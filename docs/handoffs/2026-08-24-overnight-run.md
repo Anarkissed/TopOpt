@@ -72,9 +72,16 @@ DEPTH CAPS: through a 12 mm wall it reads ~6 mm everywhere. At the one-cell size
 single-cell now produces, `S ≤ 2d` bound mid-wall. `perVoxelForGrading` now hands
 each voxel its OWNING region's in-plane distance (3-D only where no axis-aligned
 face region owns it — bolt regions and whole-part lattices are byte-identical).
-Tested headlessly on your part; **not yet eyeballed in the sim** — switching your
-project to Default Grade would rewrite its algorithm on save, and you said copies
-only. Try it yourself, or tell me duplicating the project is fine.
+Tested headlessly on your part, AND eyeballed in the sim on a copy: the app has
+no Duplicate (long-press offers only Rename/Delete), so I duplicated the project
+DIRECTORY in the container — **"DOUBLED test (Claude copy)"** now sits in your
+project list (its internal id rewritten; the store lists by scanning, and a
+copied id collides silently in the UI — small app bug, noted). The copy bakes
+the doubled ladder end-to-end with the new in-plane field: guard prints
+`algo='doubled'`, preview draws a clean fine ladder on both walls, no crash. At
+ladder-fine cells the ceiling barely binds (as the 2.9% measurement predicted),
+so the headless test remains the sharp evidence for the cap-band fix. Delete the
+copy whenever — it is yours to keep or drop.
 
 ### Organic — deliberately NOT touched here
 The organic-look work is actively owned on other branches (newest:
