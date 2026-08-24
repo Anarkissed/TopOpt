@@ -63,9 +63,85 @@ the sim build installed on the iPad is from this branch tip.
 - **Blank spots (front-left)**: the complaint was against the old 6.5 mm layout;
   at the new one-cell layout coverage is full. Re-check with your own eyes.
 
-## STILL TO DO (continuing tonight, in order)
-- Grade-to-fit-shape on Default Grade (doubled) and Organic.
-- Organic looks organic (PR 352 review, strut diameter from core's law).
-- Grading from stress + stress overlay.
-- Sample patch responds to single-cell toggle.
-- Full test-suite re-run.
+## LATER IN THE NIGHT
+
+### Grade-to-fit-shape on Default Grade (doubled) — the distance was the wall's thickness
+The doubled ladder ALREADY had a shape ceiling (applied to `desired`, all modes) —
+but driven by the 3-D distance to the candidate set's edge, which reaches 0 at the
+DEPTH CAPS: through a 12 mm wall it reads ~6 mm everywhere. At the one-cell sizes
+single-cell now produces, `S ≤ 2d` bound mid-wall. `perVoxelForGrading` now hands
+each voxel its OWNING region's in-plane distance (3-D only where no axis-aligned
+face region owns it — bolt regions and whole-part lattices are byte-identical).
+Tested headlessly on your part; **not yet eyeballed in the sim** — switching your
+project to Default Grade would rewrite its algorithm on save, and you said copies
+only. Try it yourself, or tell me duplicating the project is fine.
+
+### Organic — deliberately NOT touched here
+The organic-look work is actively owned on other branches (newest:
+"Thin beads, level bridges, a flattened roof — the fabric the traced cube was
+loved for" on `claude/organic-lattice-beauty-print-9721c9`, plus
+`claude/organic-growth-generator`). Redoing it on this branch would collide.
+PR 352 (core printability) is OPEN and reviewed — findings at the bottom of this
+doc once the review agent lands them.
+
+### Grading from stress + the overlay — WORKS, and the flatness is physics
+The waveform icon in the lattice-stage viewport toggles the stress view; the part
+paints by von Mises with a legend. On M2 verticalStand at your 5.5 lbs the field
+tops out at ~0.02 MPa against a ~30 MPa allowable — utilisation ~0.1% — so an
+honest utilisation-driven grade is uniform at the band's low end, and the interior
+fill rightly shows no variation. The machinery is wired; this part just is not
+working hard. If you want the grade RELATIVE to the field's own range (visible
+variation even at negligible absolute stress), that is a product decision — say so.
+
+### Sample responds to single-cell — wired
+The settings-page sample now derives its cell through core's own derivation at the
+mode's floor (member = smallest declared include depth, the bake's own
+pre-measurement fallback), so toggling single-cell doubles the sample's cell on
+screen. Chain: `derivedSampleCellMM` (LatticeSetupWizard) →
+`stageMesh(derivedCellMM:)`. Test: LatticeSampleSingleCellTests.
+
+### Full test-suite re-run
+Kicked off with three wake-ups (completion notification, failure grep, 10-min
+staleness hang detector). Result recorded below when it lands.
+
+## PR 352 REVIEW — "Organic lattice: printability, shape fit, and a scale"
+
+**Verdict: not merge-ready.** The full 13-finding review is condensed here (I did
+not post to GitHub — say the word and I will). The headline guarantee — mid-air
+starts refused — holds only on the re-lattice-variant path, only AFTER the refused
+meshes are already written, and only when the job states a `layer_height_mm`.
+
+Ship-blockers:
+1. `require_no_midair_start` enforced only in `lattice_variant_job`; the main
+   optimize run's `emit_lattice` → `lattice_one_variant` path exports the same
+   files with no check.
+2. The refusal throws after the STL/3MF/_WELDED files are on disk — nothing
+   deletes or withholds them.
+3. With `loads.layer_height_mm` unset (default 0), the mid-air census is skipped
+   and the guard passes vacuously — the default config silently disarms it.
+4. The branch-support fallback can't tell anchored/merged tips from dead ones
+   (no flag; all end `alive=false`), so it deletes real lattice material wherever
+   branched support SUCCEEDED.
+5. The fill mat runs on round 0, not at quiescence (unlike slenderness), and its
+   struts are uncuttable — mis-placed fill is permanent.
+6. Pad-under-touchdowns is armed by default with no guard: if no span endpoint is
+   within 1.5·rmat of the cut plane, ZERO mat is emitted, silently (the author's
+   own admission, confirmed reachable in shipped configs).
+7. The flat-base cut applies only to the welded file; the always-written span-soup
+   STL keeps the sub-base capsule caps ("dots").
+8. `organic_scale` is silently inert with plain `cell_mm` (no swept window):
+   multiplies two zeros, no refusal.
+
+Smaller: `curves_kept_for_coverage` plumbed but never incremented (permanent 0 on
+the receipt); base-plane sentinel is value-based (z ≤ 0 base silently skips the
+weld cut); fixed-point cap exits silent (`fixed_point_converged=false` only);
+prune budget is cumulative across rounds then silently skips;
+`organic_shape_fit_only` can COARSEN cells and ignores W/N*, contradicting its
+own header; B9 lacks a positive control (can pass vacuously);
+`TOPOPT_ORGANIC_NO_BASE_MAT` changes shipped geometry with no receipt marker;
+`[scale]/[vdi]/[base-mat]` stderr scaffolding still unconditional.
+
+Minimum to merge: move the refusal before the writes and onto both export paths;
+census must run (or refuse as unverified) when layer_height is 0; per-tip
+anchored/merged flags; gate fill mat on quiescence; fix or remove the pad logic;
+refuse scale without a window; apply the base cut to the soup STL or document it.

@@ -1006,8 +1006,41 @@ public struct LatticeSetupWizard: View {
     /// through here, so the number on screen is the number for every change.
     private func rebuild() {
         let t0 = CFAbsoluteTimeGetCurrent()
-        mesh = model.stageMesh(progress: tileProgress)
+        mesh = model.stageMesh(progress: tileProgress,
+                               derivedCellMM: derivedSampleCellMM)
         lastLatencyMS = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+    }
+
+    /// ★★★ THE CELL THE SAMPLE SHOWS, DERIVED — so the single-cell/member toggle
+    /// moves the sample (his backlog, 2026-08-24). The chain is the BAKE's own:
+    /// core's `latticeRegionDerivation` at the mode's floor, then the
+    /// whole-number-of-cells fit against the declared depth — no law re-derived
+    /// here. The member is the smallest declared include depth, which is exactly
+    /// the pre-measurement fallback the bake itself uses before a scene exists.
+    /// nil (no auto mode, no bead, nothing declared) ⇒ the stored cell, as before.
+    private var derivedSampleCellMM: Double? {
+        guard model.cellSizeMode == .auto else { return nil }
+        let bead = project.printParams.strutLineWidthMM
+        guard bead > 0 else { return nil }
+        let depths = project.lattice.selectableRoles.compactMap {
+            key, role -> Double? in
+            guard role == .include, let d = project.lattice.selectableDepthMM[key],
+                  d > 0 else { return nil }
+            return d
+        }
+        guard let member = depths.min() else { return nil }
+        // The MODEL's live toggles, not the saved settings — the sample must answer
+        // the switch as it moves, before Save & Exit writes anything.
+        let floor = (project.lattice.stageMode ?? .structural).cellsPerMemberFloor(
+            topology: model.topologyID, utilisation: .nan,
+            boundaryFinishWritten: model.singleCellMembers
+                && model.boundary != .none)
+        let d = TopOptKit.latticeRegionDerivation(
+            topology: model.topologyID, memberWidthMM: member,
+            minExtrudableWidthMM: bead, cellsPerMemberFloor: floor)
+        guard d.valid, d.cellMM > 0 else { return nil }
+        let n = Swift.max(1, (member / d.cellMM).rounded())
+        return member / n
     }
 
     private func playCurrent() {

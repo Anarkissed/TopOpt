@@ -483,7 +483,16 @@ public struct LatticeWizardModel: Equatable, Sendable {
 
     /// The mesh the centre stage shows right now: one cell in Stage A, the tiled
     /// block in Stage B. `progress` in [0, 1] drives the tile expansion.
-    public func stageMesh(progress: Double = 1) -> ViewerMesh {
+    /// - Parameter derivedCellMM: the cell CORE'S OWN DERIVATION gives the declared
+    ///   member under the CURRENT floor — supplied by the page, which owns the print
+    ///   bead and the declared depths this model does not carry. Non-nil ⇒ the sample
+    ///   is drawn at that cell, so the single-cell/member toggle (floor 2 → 1) is
+    ///   VISIBLE on the sample instead of decorative (his backlog, 2026-08-24: "the
+    ///   settings-page sample patch does not change when the single-cell/member
+    ///   toggle moves"). nil ⇒ the stored `cellMM`, exactly as before.
+    public func stageMesh(progress: Double = 1,
+                          derivedCellMM: Double? = nil) -> ViewerMesh {
+        let cellMM = derivedCellMM ?? self.cellMM
         let cells = stage == .cell
             ? 1
             : max(1, Int((Double(cellsAcross) * max(0, min(1, progress))).rounded()))
