@@ -688,14 +688,22 @@ public struct LatticeSDFScene {
         // a setting that travels the whole way and draws nothing, which is the
         // exact defect this branch has now hit three times.
         //
-        // ★ AND THE FRACTION IS ALREADY NORMALISED. `LatticePreviewOccupancy
-        // .demand` divides by the field's own peak and clamps to 0…1, so it maps
-        // straight onto `LatticeStressTint.colour` — the same ramp the shell's
-        // plot and the legend use, on the same scale.
-        // ★ THE STRESS COLOURS, on the occupancy's own grid, from the demand the
-        // radii already grade by — so the overlay cannot disagree with the
-        // geometry it is painted on.
-        if let d = self.demand {
+        // ★★★ FROM THE **MEASURED** FIELD, NOT THE GRADING DEMAND (maintainer,
+        // 2026-08-24 evening: "The lattice view doesn't have the actual stress
+        // values *overlayed*... The lattice is blue but does not compare to the
+        // look when the lattice is off").
+        //
+        // ★ IT WAS PAINTED FROM `demand` — the DENSITY input, which minimize
+        // plastic caps by the true utilisation. On a part loaded to 0.1% of its
+        // allowable that cap is ~0 everywhere, so every strut took the ramp's
+        // bottom colour while the solid view (painted from the measured field,
+        // percentile-normalised) showed the load paths. Two views of one part
+        // disagreeing about one field. `stressDemand` is the measured field on
+        // this same grid, normalised to its own percentile — its declaration
+        // says it: "it answers 'where is this part working hardest', which is
+        // the right question for the colour ramp". The grading keeps reading
+        // `demand`; only the PAINT reads the measurement.
+        if let d = self.stressDemand ?? self.demand {
             // RGBA8, matching `makeTintTexture` — the same upload path the
             // face-role tints already use, so there is one volume format here.
             var rgb = [UInt8](repeating: 0, count: d.values.count * 4)
