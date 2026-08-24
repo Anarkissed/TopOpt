@@ -1,5 +1,6 @@
 import XCTest
 import simd
+import TopOptKit
 @testable import TopOptFlows
 
 /// ★ WHY A 13 mm WALL DERIVES A 6.5 mm CELL — the width distribution, printed.
@@ -11,7 +12,11 @@ final class LatticeWallWidthProbe: XCTestCase {
 
     func testTheWidthDistributionOfEachWall() throws {
         let mesh = try LatticePreviewConfettiTests.hisMesh()
-        for (face, depth) in [(FaceID(15), 13.0), (FaceID(2), 12.0)] {
+        // ★ THE TRUE PAIRING, read from his saved project.json (selectableDepthMM):
+        // face 15 → 12 mm, face 2 → 13 mm. The 2026-08-24 handoff had them SWAPPED,
+        // and the swap was the whole mystery: with the real depths the observed
+        // 12.00 / 6.50 falls straight out of the measured widths at floor 1.
+        for (face, depth) in [(FaceID(15), 12.0), (FaceID(2), 13.0)] {
             guard let r = LatticeRegionEmission.planeFor(face: face, in: mesh),
                   let spec = LatticeRegionEmission.spec(for: r, role: .include,
                                                         depthMM: depth, faceID: Int(face))
@@ -51,6 +56,67 @@ final class LatticeWallWidthProbe: XCTestCase {
                 "FACE %d depth %.1f  n=%d  min %.2f  p05 %.2f  p25 %.2f  MEDIAN %.2f  p75 %.2f  max %.2f",
                 Int(face), depth, seen.count, seen.first!, pct(0.05), pct(0.25),
                 pct(0.5), pct(0.75), seen.last!))
+        }
+    }
+
+    /// ★ THE FORMERLY-UNEXPLAINED STEP, INSTRUMENTED — and it is EXPLAINED. With the
+    /// TRUE depth pairing (face 15 → 12, face 2 → 13, from his project.json; the
+    /// handoff had them swapped) the observed screen is the derivation working as
+    /// written, at floor 1 (single-cell + fullSkin finish):
+    ///
+    ///     face 15: w=10.31 → cell 10.31 → n=round(12/10.31)=1 → 12.00  (his back wall)
+    ///     face  2: w= 8.59 → cell  8.59 → n=round(13/ 8.59)=2 →  6.50  (his front wall)
+    ///
+    /// The asymmetry is the p05 width statistic meeting the whole-number-of-cells
+    /// rounding: 13/8.59 = 1.513 sits just past the 1.5 boundary, so the depth is cut
+    /// in two; 12/10.31 = 1.16 does not. The 8.59 is that wall's thinnest sliver —
+    /// its MEDIAN is 12.03 — which is the p05-pinning question the handoff says to
+    /// put to him before changing the statistic.
+    func testWhatTheDerivationDoesWithTheMeasuredWidths() throws {
+        let bead = 0.45   // the shipped profile's strut bead (max of the two wall beads)
+        for (label, w, depth) in [("face15", 10.31, 12.0), ("face2", 8.59, 13.0)] {
+            for floor in [1.0, 2.0, 5.0] {
+                let d = TopOptKit.latticeRegionDerivation(
+                    topology: "octet", memberWidthMM: w,
+                    minExtrudableWidthMM: bead, cellsPerMemberFloor: floor)
+                let n = Swift.max(1, (depth / d.cellMM).rounded())
+                print(String(format:
+                    "DERIVE %@ w=%.2f floor=%.0f  valid=%d feasible=%d coreCell=%.3f "
+                    + "rho=%.3f strut=%.3f prints=%d  ->  n=%.0f final=%.3f",
+                    label, w, floor, d.valid ? 1 : 0, d.feasible ? 1 : 0, d.cellMM,
+                    d.derivedRelativeDensity, d.strutMM, d.prints ? 1 : 0,
+                    n, depth / n))
+            }
+        }
+    }
+
+    /// ★ THE MEASUREMENT THE BAKE ACTUALLY TAKES — `wallWidthAlongNormalMM` itself (not
+    /// this probe's re-walk), on a scene holding BOTH regions at once, which is the
+    /// scene the app hands it. If ITS answer differs from the distribution above, the
+    /// asymmetry lives in the measurement's own scene, not in the derivation.
+    func testTheRealMeasurementOnTheBothRegionsScene() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        var specs: [LatticeRegionSpec] = []
+        for (face, depth) in [(FaceID(15), 12.0), (FaceID(2), 13.0)] {
+            guard let r = LatticeRegionEmission.planeFor(face: face, in: mesh),
+                  let spec = LatticeRegionEmission.spec(for: r, role: .include,
+                                                        depthMM: depth, faceID: Int(face))
+            else { continue }
+            specs.append(spec)
+        }
+        XCTAssertEqual(specs.count, 2, "both faces must yield a region spec")
+        let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet",
+                                    regions: specs, whenEmpty: .latticeNothing)
+        for (i, spec) in specs.enumerated() {
+            let wNormal = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(
+                region: spec, occupancy: scene.occupancy, partSDF: scene.partSDF)
+            let wIso = scene.memberThicknessMM.isEmpty ? -1.0
+                : LatticeMeasuredRegionWidth.widthMM(
+                    region: spec, occupancy: scene.occupancy,
+                    memberThicknessMM: scene.memberThicknessMM)
+            print(String(format:
+                "MEASURE region=%d face=%@ depth=%.1f  alongNormal=%.3f  isotropic=%.3f",
+                i, String(describing: spec.faceID), spec.depthMM, wNormal, wIso))
         }
     }
 }
