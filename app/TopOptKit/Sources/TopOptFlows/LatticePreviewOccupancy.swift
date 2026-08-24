@@ -732,38 +732,34 @@ extension LatticePreviewOccupancy {
             let idx = (c * occ.ny + b) * occ.nx + a
             return idx < field.count ? field[idx] : 0
         }
-        /// ★ THE THINNEST MEASURED WALL UNDER THE CELL — the min over the occupancy
-        /// voxels the cell covers, unmeasured (0) voxels ignored. Min, where
-        /// `boundaryAt` takes the max, because the questions are opposite: the fit
-        /// asks "how much room is there anywhere in this cell", the width asks "can
-        /// this cell's own material hold it EVERYWHERE it sits". 0 ⇒ nothing measured
-        /// under the cell, and the caller must not constrain on it.
+        /// ★ THE WALL AT THE CELL'S OWN CENTRE — where the cell SITS — with the min
+        /// over its footprint only as the fallback when the centre has no
+        /// measurement (a cell straddling the outline).
+        ///
+        /// ★★ NOT THE FOOTPRINT MINIMUM FIRST. Under the never-overshoot ceil
+        /// (2026-08-24 evening) the min turned one thin voxel anywhere within a
+        /// cell's reach into a divided cell: measured on his face 2, 140 of 150
+        /// cells divided, because near a curved outline the along-normal walk
+        /// legitimately shortens and every cell's footprint touches SOME short
+        /// read. The centre is where the cell is; the fit near the outline is the
+        /// SHAPE grade's job, which already handles it with its own distance.
         func widthUnderCell(_ w: SIMD3<Double>, _ r: Int, cellMM: Double) -> Double {
             guard r < widthPerRegion.count, let field = widthPerRegion[r] else { return 0 }
             let g = (SIMD3<Float>(w) - occ.origin) / occ.spacing
-            let half = SIMD3<Int>(
-                Int((Float(cellMM) * 0.5 / occ.spacing.x).rounded(.up)),
-                Int((Float(cellMM) * 0.5 / occ.spacing.y).rounded(.up)),
-                Int((Float(cellMM) * 0.5 / occ.spacing.z).rounded(.up)))
             let c0 = SIMD3<Int>(Int(g.x.rounded()), Int(g.y.rounded()), Int(g.z.rounded()))
-            var thinnest = Double.infinity
-            for dz in -half.z...half.z {
-                let c = c0.z + dz
-                guard c >= 0, c < occ.nz else { continue }
-                for dy in -half.y...half.y {
-                    let b = c0.y + dy
-                    guard b >= 0, b < occ.ny else { continue }
-                    for dx in -half.x...half.x {
-                        let a = c0.x + dx
-                        guard a >= 0, a < occ.nx else { continue }
-                        let idx = (c * occ.ny + b) * occ.nx + a
-                        if idx < field.count, field[idx] > 0, field[idx] < thinnest {
-                            thinnest = field[idx]
-                        }
-                    }
-                }
-            }
-            return thinnest.isFinite ? thinnest : 0
+            guard c0.x >= 0, c0.x < occ.nx, c0.y >= 0, c0.y < occ.ny,
+                  c0.z >= 0, c0.z < occ.nz else { return 0 }
+            let idx = (c0.z * occ.ny + c0.y) * occ.nx + c0.x
+            guard idx < field.count, field[idx] > 0 else { return 0 }
+            // ★ NO MEASUREMENT AT THE CENTRE ⇒ NO CONSTRAINT — the same rule
+            // `boundaryAtCentre` already lives by ("0 means no measurement, and
+            // that is NOT taken as solid"). A footprint-MIN fallback here read
+            // "thin" for every cell straddling a curved surface — on his face 15,
+            // ALL of them — and divided a wall that holds its cell everywhere.
+            // Outline-straddling cells belong to the SHAPE fit, which has its own
+            // distance; the width rule constrains only where the wall under the
+            // cell's own centre was actually measured.
+            return field[idx]
         }
         /// The stage's cells-per-member floor AT this voxel — the per-voxel override
         /// when the scene carries one, the scene floor otherwise, and never below 1:
@@ -974,15 +970,15 @@ extension LatticePreviewOccupancy {
                                 // cell's own wall is thinner, the cell divides to what
                                 // that material holds.
                                 //
-                                // ★ THE LOCAL LAW IS THE REGION LAW, APPLIED HERE — the
-                                // nearest-whole-fit `round`, not a ceil. A ceil re-pins
-                                // the whole face: the region cell is `depth / n` and
-                                // legitimately overshoots the measured wall by up to
-                                // half a cell (his 13 mm cell on a 12.03 mm wall), and
-                                // a ceil would cut every such cell in two — undoing the
-                                // very rounding that sized the region. `round` forgives
-                                // the overshoot the region rule created and still
-                                // catches the sliver: round(13/8.59) = 2.
+                                // ★ CEIL, WITH A FLOAT-SAFE SLACK — his ruling
+                                // (2026-08-24 evening): "I'd rather it never
+                                // overshoot." The region cell no longer exceeds the
+                                // wall's median (the fit depth is clamped to the
+                                // material), so a ceil here no longer fights the
+                                // region rule; it guarantees each cell fits ITS OWN
+                                // wall: ceil(12.03/8.59) = 2 on the sliver, and the
+                                // 1e-6 slack keeps 12.031/12.030 from reading as an
+                                // overshoot and halving an exactly-fitting cell.
                                 //
                                 // ★ NO n==2 BUMP HERE. The "at least by 1/3" step is
                                 // the SHAPE fit's aesthetic; this divisor is a material
@@ -991,7 +987,8 @@ extension LatticePreviewOccupancy {
                                 let wLocal = widthUnderCell(p, r, cellMM: s)
                                 if wLocal > 1e-6 {
                                     let nW = Swift.max(1, Int((s * memberFloorAt(p)
-                                                               / wLocal).rounded()))
+                                                               / wLocal - 1e-6)
+                                                              .rounded(.up)))
                                     if nW > n { n = nW; dbgWidthShrunk += 1 }
                                     dbgW.append(wLocal)
                                 }

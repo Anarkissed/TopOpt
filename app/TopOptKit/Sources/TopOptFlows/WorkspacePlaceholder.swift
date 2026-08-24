@@ -1029,7 +1029,13 @@ public struct WorkspacePlaceholder: View {
                                                          project.buildOrientation
                                                              .resolved(gravity: force.gravity)),
                                                      fitCellMM: latticePreviewFitCells,
-                                                     steppedCellMM: latticePreviewSteppedCells)
+                                                     steppedCellMM: latticePreviewSteppedCells,
+                                                     // ★ Hide the superseded picture
+                                                     // while a NEW scene bakes (his
+                                                     // request, 2026-08-24 evening) —
+                                                     // the "Rebuilding the lattice"
+                                                     // toast is what shows instead.
+                                                     hidden: strutBakeInFlight)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -1814,13 +1820,24 @@ public struct WorkspacePlaceholder: View {
                                                       minExtrudableWidthMM: bead,
                                                       cellsPerMemberFloor: floor)
             guard d.valid, d.cellMM > 0 else { return 0 }
+            // ★★★ THE FIT DEPTH IS THE **MATERIAL'S**, NEVER THE DECLARATION'S
+            // (his ruling, 2026-08-24 evening: "I'd rather it never overshoot —
+            // that a 13mm cell never be on a 12mm wall; instead have a 12mm cell
+            // on the 12mm wall"). A declared depth reaching past the wall is a
+            // statement about the region, not about material that exists — the
+            // walk measured the wall at `w`, and a cell obeying the depth alone
+            // was 13.0 mm on his 12.03 mm wall. The whole-number fit now divides
+            // min(depth, wall), so the cell equals the wall when the wall is the
+            // binding constraint, and the cap-flush phase anchors to material
+            // that is actually there.
+            let effDepth = w > 0 ? Swift.min(r.depthMM, w) : r.depthMM
             // ★ THE WHOLE DERIVATION, SAID OUT LOUD. "On a 13 mm wall the main cell is
             // 4.3 mm — why is it so low?" is a question about four numbers, and every
             // previous answer I gave was inferred from the one at the end.
             NSLog("DIAG regionCell depth=\(r.depthMM) pct=\(widthPercentile) "
-                  + "measuredW=\(w) floor=\(floor) "
-                  + "coreCell=\(d.cellMM) n=\(Swift.max(1, (r.depthMM / d.cellMM).rounded())) "
-                  + "final=\(r.depthMM / Swift.max(1, (r.depthMM / d.cellMM).rounded()))")
+                  + "measuredW=\(w) floor=\(floor) effDepth=\(effDepth) "
+                  + "coreCell=\(d.cellMM) n=\(Swift.max(1, (effDepth / d.cellMM).rounded())) "
+                  + "final=\(effDepth / Swift.max(1, (effDepth / d.cellMM).rounded()))")
             // ★★★ A WHOLE NUMBER OF CELLS ACROSS THE DECLARED DEPTH (maintainer,
             // 2026-08-23: the back wall is quilted while the front is an open truss).
             //
@@ -1842,8 +1859,8 @@ public struct WorkspacePlaceholder: View {
             // origin) puts both on a cell boundary. Rounding never lands further than half
             // a cell from what the derivation asked for, and never below one cell across
             // the declared depth.
-            let n = Swift.max(1, (r.depthMM / d.cellMM).rounded())
-            return r.depthMM / n
+            let n = Swift.max(1, (effDepth / d.cellMM).rounded())
+            return effDepth / n
         }
     }
 
@@ -4536,7 +4553,16 @@ public struct WorkspacePlaceholder: View {
                                         // ★ In Sim mode the solve governs the grading;
                                         // a DERIVED per-region density must not stand
                                         // in for it ("I never typed it").
-                                        statedDensityGoverns: !gradesFromSim,
+                                        // ★ …except a density the USER stated on a
+                                        // face (the aesthetic per-face control,
+                                        // 2026-08-24): `selectableDensity` is written
+                                        // ONLY by that control, so in aesthetic mode a
+                                        // present entry is his choice and outranks the
+                                        // sim field on that face. The 17%/25% incident
+                                        // was DERIVED values in this channel; nothing
+                                        // derives into it any more.
+                                        statedDensityGoverns: !gradesFromSim
+                                            || stageMode == .aesthetic,
                                         // ★ Structural or aesthetic — it decides the
                                         // cells-per-member floor the preview draws to,
                                         // so the picture and the run agree about which
@@ -9403,7 +9429,12 @@ public struct WorkspacePlaceholder: View {
     /// ★ It survived the removal of the group drawer (2026-08-17) — it belongs to
     /// the SELECTABLE drawer and was only sitting next to the group's copy.
     private var perRegionDensity: Bool {
+        // ★ THE DENSITY ROW IS A CONTROL IN AESTHETIC TOO (his spec, 2026-08-24
+        // evening: a per-face density control, aesthetic mode only — scrub is the
+        // slider, the keypad types it). Structural keeps the per-region gate:
+        // there the density is the certificate's business.
         project.lattice.densityMode == .perRegion
+            || (project.lattice.stageMode ?? .structural) == .aesthetic
     }
 
     /// ★ THE DRAWER BENEATH ONE SELECTABLE (the interrupt's §2b) — the SAME
@@ -9434,7 +9465,10 @@ public struct WorkspacePlaceholder: View {
                           // speak fraction, as core's band does. ONE conversion,
                           // here — the same shape `sectorDensityRow` uses.
                           writeDensity: { pct in
-                              project.writeLatticeDensity(ref, fraction: pct / 100)
+                              project.writeLatticeDensity(
+                                  ref, fraction: pct / 100,
+                                  // The face's own cell bounds the aesthetic floor.
+                                  cellMM: latticeSelectableCards[ref.key]?.cellMM ?? 0)
                               refreshLatticeFaceCards()
                           },
                           writeExpand: { mm in

@@ -65,8 +65,10 @@ final class LatticePerVoxelWidthTests: XCTestCase {
             nx: occ.nx, ny: occ.ny, nz: occ.nz, spacing: occ.spacing)
         let widths = [Optional(LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
             region: specs[1], occupancy: occ, partSDF: scene.partSDF))]
-        // The cell the median width derives at floor 1: round(13 / 12.03) = 1 → 13.0.
-        let regionCell = 13.0
+        // ★ NEVER-OVERSHOOT (his ruling, 2026-08-24 evening): the fit depth clamps
+        // to the material, so the region cell is the wall's median 12.03 — never
+        // the declared 13.0 that used to sit on a 12 mm wall.
+        let regionCell = 12.03
         guard let baked = LatticePreviewOccupancy.steppedCellField(
             occupancy: occ, demand: scene.demand, regions: [specs[1]],
             cellMM: [regionCell], baseCellMM: regionCell,
@@ -78,48 +80,67 @@ final class LatticePerVoxelWidthTests: XCTestCase {
         }
         var hist: [Float: Int] = [:]
         for v in baked.steppedCellMM where v > 0 { hist[v, default: 0] += 1 }
-        let full = hist.filter { abs(Double($0.key) - 13.0) < 0.1 }.values.reduce(0, +)
-        let halved = hist.filter { abs(Double($0.key) - 6.5) < 0.1 }.values.reduce(0, +)
-        XCTAssertGreaterThan(full, 0, "the bulk must keep the 13 mm cell; sizes=\(hist)")
+        let full = hist.filter { abs(Double($0.key) - 12.03) < 0.1 }.values.reduce(0, +)
+        let halved = hist.filter { abs(Double($0.key) - 6.02) < 0.1 }.values.reduce(0, +)
+        XCTAssertGreaterThan(full, 0, "the bulk must keep the 12.03 mm cell; sizes=\(hist)")
         XCTAssertGreaterThan(halved, 0,
-                             "the sliver's cells must divide to 6.5; sizes=\(hist)")
+                             "the sliver's cells must divide to ~6.0; sizes=\(hist)")
         XCTAssertGreaterThan(full, halved,
                              "the sliver is a sliver — most of the face is 12 mm thick")
     }
 
-    /// Control: a wall whose width never demands a division is untouched by the new
-    /// field — face 15 at its 12.0 mm cell reads 10.31–12.03 everywhere, and
-    /// round(12/10.31) = 1, so no cell shrinks and the bake is what it always was.
-    func testAUniformWallIsUntouched() throws {
+    /// ★ THE NEVER-OVERSHOOT INVARIANT ITSELF (his ruling, 2026-08-24 evening: "a
+    /// 13mm cell never be on a 12mm wall"): no painted cell may exceed the wall
+    /// measured at its own centre, and the bulk of a wall whose cell equals its
+    /// width must KEEP that cell — the ceil must not divide an exact fit.
+    func testNoCellExceedsItsOwnWall() throws {
         let (scene, specs) = try hisScene()
         let occ = scene.occupancy
         let cand = occ.values.map { $0 > 0.5 }
         let boundary = LatticeBoundaryDistance.inPlanePerRegion(
             regions: [specs[0]], candidate: cand,
             nx: occ.nx, ny: occ.ny, nz: occ.nz, spacing: occ.spacing)
-        let widths = [Optional(LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
-            region: specs[0], occupancy: occ, partSDF: scene.partSDF))]
-        let regionCell = 12.0
+        let widthField = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
+            region: specs[0], occupancy: occ, partSDF: scene.partSDF)
+        let regionCell = 10.31          // face 15's never-overshoot cell = its wall
         guard let baked = LatticePreviewOccupancy.steppedCellField(
             occupancy: occ, demand: scene.demand, regions: [specs[0]],
             cellMM: [regionCell], baseCellMM: regionCell,
             minCellsPerMember: 1,
             boundaryDistancePerRegion: boundary,
-            widthPerRegion: widths,
+            widthPerRegion: [widthField],
             finestCellMM: 1.625) else {
             return XCTFail("stepped bake produced nothing")
         }
-        // The shape-fit near the outline may still grade; the WIDTH must not. So the
-        // check is against the same bake WITHOUT the width field: identical output.
-        guard let control = LatticePreviewOccupancy.steppedCellField(
-            occupancy: occ, demand: scene.demand, regions: [specs[0]],
-            cellMM: [regionCell], baseCellMM: regionCell,
-            minCellsPerMember: 1,
-            boundaryDistancePerRegion: boundary,
-            finestCellMM: 1.625) else {
-            return XCTFail("control bake produced nothing")
+        let g = baked.field
+        var kept = 0, overshoots = 0, painted = 0
+        for i in 0..<baked.steppedCellMM.count where baked.steppedCellMM[i] > 0 {
+            painted += 1
+            let size = Double(baked.steppedCellMM[i])
+            // The wall at this cell's own centre, from the same field the bake read.
+            let z = i / (g.nx * g.ny), y = (i / g.nx) % g.ny, x = i % g.nx
+            let p = SIMD3<Float>(g.origin.x + Float(x) * g.spacing.x,
+                                 g.origin.y + Float(y) * g.spacing.y,
+                                 g.origin.z + Float(z) * g.spacing.z)
+            let og = (p - occ.origin) / occ.spacing
+            let a = Int(og.x.rounded()), b = Int(og.y.rounded()), c = Int(og.z.rounded())
+            guard a >= 0, a < occ.nx, b >= 0, b < occ.ny, c >= 0, c < occ.nz
+            else { continue }
+            let w = widthField[(c * occ.ny + b) * occ.nx + a]
+            guard w > 0 else { continue }   // unmeasured centre = unconstrained cell
+            // Half a voxel of quantisation slack: the walk steps in whole voxels.
+            if size > w + Double(occ.spacing.x) { overshoots += 1 }
         }
-        XCTAssertEqual(baked.steppedCellMM, control.steppedCellMM,
-                       "a wall that holds its cell everywhere must bake byte-identical")
+        for v in baked.steppedCellMM where v > 0 && abs(Double(v) - regionCell) < 0.1 {
+            kept += 1
+        }
+        XCTAssertGreaterThan(painted, 0)
+        var hist: [Float: Int] = [:]
+        for v in baked.steppedCellMM where v > 0 { hist[v, default: 0] += 1 }
+        print("INVARIANT sizes=\(hist) painted=\(painted) kept=\(kept)")
+        XCTAssertEqual(overshoots, 0,
+                       "no cell may exceed the wall at its own centre")
+        XCTAssertGreaterThan(kept, 0,
+                             "an exact fit must be KEPT, not divided by the ceil")
     }
 }

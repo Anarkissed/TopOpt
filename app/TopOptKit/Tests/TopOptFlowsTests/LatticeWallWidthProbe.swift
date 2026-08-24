@@ -79,6 +79,9 @@ final class LatticeWallWidthProbe: XCTestCase {
                 let d = TopOptKit.latticeRegionDerivation(
                     topology: "octet", memberWidthMM: w,
                     minExtrudableWidthMM: bead, cellsPerMemberFloor: floor)
+                // Never-overshoot (2026-08-24 evening): the fit depth is the
+                // material's, so the divided length is min(depth, wall).
+                let depth = Swift.min(depth, w)
                 let n = Swift.max(1, (depth / d.cellMM).rounded())
                 print(String(format:
                     "DERIVE %@ w=%.2f floor=%.0f  valid=%d feasible=%d coreCell=%.3f "

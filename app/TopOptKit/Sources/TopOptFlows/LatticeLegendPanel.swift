@@ -216,9 +216,17 @@ public struct LatticeLegendReading: View {
                 .foregroundStyle(DS.Color.accent.color)
                 .minimumScaleFactor(0.5).lineLimit(1)
             if let unit {
+                // ★ THE UNIT MAY BE TWO NAMED LENGTHS ("0.94 mm strut ⏎ 12.03 mm
+                // cell") — his report (2026-08-24 evening): "there is no cell size
+                // information in the lattice legend". The line WAS emitted and an
+                // inherited one-line limit ate it: "0.94 mm strut…". Both lines,
+                // always.
                 Text(unit)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(DS.Color.accent.opacity(0.85).color)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let caption {
                 Text(caption)

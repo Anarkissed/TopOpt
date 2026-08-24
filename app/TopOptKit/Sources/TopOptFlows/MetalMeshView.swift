@@ -3567,7 +3567,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// True when there is a baked lattice layer to draw. Everything the unified path
     /// adds is gated on this, so a frame without a lattice is byte-for-byte the frame
     /// `render-quality` shipped.
-    private var latticeInFrame: Bool { latticeLayer?.isReady == true }
+    /// ★ `latticeHidden` — TRUE while a new scene bakes (his request, 2026-08-24
+    /// evening): the superseded picture must not draw. The volumes stay resident;
+    /// only the march is skipped, so un-hiding is free.
+    var latticeHidden: Bool = false
+    private var latticeInFrame: Bool {
+        !latticeHidden && latticeLayer?.isReady == true
+    }
 
 
     /// THE ONE ENTRY POINT for putting the lattice in this renderer's passes. The
@@ -5117,6 +5123,12 @@ public struct LatticeLayerInputs: Equatable {
     public var fitCellMM: [Double] = []
     /// ★ STEPPED's per-region cell, one per region in the scene's order.
     public var steppedCellMM: [Double] = []
+    /// ★ TRUE while a NEW scene is being baked (his request, 2026-08-24 evening:
+    /// "The quilt pops up before the lattice shows. I'd like this to be hidden
+    /// while the calculations happen"). The renderer keeps its volumes — tearing
+    /// them down would rebuild megabytes per settings tick — it simply does not
+    /// DRAW the lattice while the picture on hand describes superseded settings.
+    public var hidden: Bool = false
 
     public init(scene: LatticeSDFScene, params: LatticeProxyParams,
                 sceneToken: Int, faceTints: [FaceID: SIMD4<Float>],
@@ -5127,7 +5139,8 @@ public struct LatticeLayerInputs: Equatable {
                 layerHeightMM: Double = 0,
                 buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
                 fitCellMM: [Double] = [],
-                steppedCellMM: [Double] = []) {
+                steppedCellMM: [Double] = [],
+                hidden: Bool = false) {
         self.scene = scene
         self.params = params
         self.sceneToken = sceneToken
@@ -5141,6 +5154,7 @@ public struct LatticeLayerInputs: Equatable {
         self.buildDirection = buildDirection
         self.fitCellMM = fitCellMM
         self.steppedCellMM = steppedCellMM
+        self.hidden = hidden
     }
 
     /// Equality is by TOKEN and by the cheap interactive values — never by the scene's
@@ -5154,6 +5168,7 @@ public struct LatticeLayerInputs: Equatable {
             && a.lineWidthMM == b.lineWidthMM && a.fitCellMM == b.fitCellMM
             && a.steppedCellMM == b.steppedCellMM
             && a.dressingLevel == b.dressingLevel
+            && a.hidden == b.hidden
     }
 }
 
@@ -5973,9 +5988,15 @@ extension MetalMeshView {
             // guarded inside the renderer, so this block is three property writes on an
             // ordinary camera change.
             if let lat = inputs.latticeLayer {
-                if appliedLatticeToken != lat.sceneToken {
-                    appliedLatticeToken = lat.sceneToken
-                    renderer.setLatticeScene(lat.scene, token: lat.sceneToken)
+                // ★★★ PARAMS BEFORE THE SCENE. `setLatticeScene` bakes the cell
+                // field with whatever params the renderer already holds — applied
+                // scene-first, a NEW scene's first bake ran on the PREVIOUS
+                // settings (empty stepped cells on first entry) and the dyadic
+                // quilt flashed for the seconds until the param diffs below landed
+                // and re-baked. Same update pass, order flipped: the first bake of
+                // a scene is the RIGHT bake.
+                if renderer.latticeHidden != lat.hidden {
+                    renderer.latticeHidden = lat.hidden
                     dirty = true
                 }
                 if renderer.latticeParams != lat.params {
@@ -6008,6 +6029,11 @@ extension MetalMeshView {
                 }
                 if renderer.latticeFitCellMM != lat.fitCellMM {
                     renderer.latticeFitCellMM = lat.fitCellMM
+                    dirty = true
+                }
+                if appliedLatticeToken != lat.sceneToken {
+                    appliedLatticeToken = lat.sceneToken
+                    renderer.setLatticeScene(lat.scene, token: lat.sceneToken)
                     dirty = true
                 }
                 if renderer.latticeDressingLevel != lat.dressingLevel {

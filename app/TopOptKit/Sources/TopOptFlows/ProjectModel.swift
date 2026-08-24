@@ -714,16 +714,37 @@ public final class ProjectModel: ObservableObject {
     /// Write one selectable's density. `nil` (or a non-positive value) CLEARS it
     /// back to the group's/mode's answer — "no number stated" must be spellable,
     /// because core's own sentinel for "derive it" is exactly the absence of a key.
-    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?) {
+    /// - Parameter cellMM: the face's own cell, for the AESTHETIC floor. 0 ⇒ the
+    ///   certifiable band's own floor stands in.
+    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?,
+                                    cellMM: Double = 0) {
         guard let f = fraction, f.isFinite, f > 0 else {
             lattice.selectableDensity.removeValue(forKey: ref.key)
             return
         }
         let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
-        // Clamped into core's certifiable band — there is no certificate outside
-        // it, and a value core would refuse must not be storable from a keypad.
-        lattice.selectableDensity[ref.key] =
-            Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+        // ★★ TWO BANDS, BY STAGE MODE (his spec, 2026-08-24 evening: a per-face
+        // density control in Aesthetic, "the low end should be the printable
+        // limit… the upper limit is making it a solid").
+        //
+        //   STRUCTURAL: core's certifiable band, unchanged — there is no
+        //     certificate outside it, and a value core would refuse must not be
+        //     storable from a keypad.
+        //   AESTHETIC: no certificate is claimed, so the honest bounds are the
+        //     physical ones — the density at which this face's cell prints one
+        //     bead, up to 1.0 (solid).
+        if (lattice.stageMode ?? .structural) == .aesthetic {
+            var floor = limits.rhoMin
+            if cellMM > 0, printParams.strutLineWidthMM > 0 {
+                let f0 = LatticeType.named(lattice.topologyID).printabilityDensityFloor(
+                    lineWidthMM: printParams.strutLineWidthMM, cellMM: cellMM)
+                if f0 > 0 { floor = f0 }
+            }
+            lattice.selectableDensity[ref.key] = Swift.min(Swift.max(f, floor), 1.0)
+        } else {
+            lattice.selectableDensity[ref.key] =
+                Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+        }
     }
 
     /// ★ THE IN-PLANE EXPAND IN FORCE FOR ONE SELECTABLE (maintainer,
