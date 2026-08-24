@@ -387,14 +387,54 @@ public enum LatticeMeasuredRegionWidth {
     ///
     /// nil `partSDF` keeps the old region-bounded behaviour, so a caller that has no
     /// part field is unchanged rather than silently measuring something else.
+    /// - Parameter percentile: which end of the measured distribution answers for the
+    ///   region. 0.05 — the conservative end, the cell holdable by the whole wall — is
+    ///   the default every pre-existing caller keeps. STEPPED passes 0.5 (his ruling,
+    ///   2026-08-24): its per-CELL width divisor now handles the thin areas locally, so
+    ///   the region's cell should be the wall the region MOSTLY is, not its thinnest
+    ///   sliver — p05 pinned his 12.03 mm front wall to an 8.59 mm sliver and bought a
+    ///   second cell across a face he set to single-cell.
     public static func wallWidthAlongNormalMM(region: LatticeRegionSpec,
                                               occupancy occ: LatticeVoxelGrid,
-                                              partSDF: LatticeVoxelGrid? = nil) -> Double {
-        guard region.kind == .face else { return 0 }
+                                              partSDF: LatticeVoxelGrid? = nil,
+                                              percentile: Double = 0.05) -> Double {
+        var seen = [Double]()
+        seen.reserveCapacity(1024)
+        for w in wallWidthFieldAlongNormalMM(region: region, occupancy: occ,
+                                             partSDF: partSDF) where w > 0 {
+            seen.append(w)
+        }
+        guard !seen.isEmpty else { return 0 }
+        seen.sort()
+        let f = Swift.max(0, Swift.min(1, percentile))
+        return seen[Swift.min(seen.count - 1, Int(f * Double(seen.count - 1)))]
+    }
+
+    /// ★★★ THE WALL'S THICKNESS **PER VOXEL**, along the region's own normal — his
+    /// ruling, 2026-08-24: "it should read the actual depth of that area. so preferably
+    /// per voxel."
+    ///
+    /// ★ WHY A FIELD AND NOT A STATISTIC. Any single number for a whole face is pinned
+    /// by SOME part of it: the p05 pinned his front wall to its thinnest sliver (8.59 mm
+    /// where the wall's median is 12.03) and bought a second cell across a face he set
+    /// to single-cell; a median would instead hand the sliver a cell it cannot hold.
+    /// The honest answer is the one the material gives at each place, so this returns
+    /// the whole walk — one width per occupancy voxel, 0 where the voxel is not in the
+    /// region (or not solid). The stepped bake reads it per CELL and divides that
+    /// cell's own size to what its own material holds; the per-region statistic above
+    /// remains only to anchor the region's COARSEST cell.
+    ///
+    /// Same walk as the statistic — through `partSDF` (the material) when given,
+    /// region-clipped occupancy otherwise — because two walks would be two answers.
+    public static func wallWidthFieldAlongNormalMM(region: LatticeRegionSpec,
+                                                   occupancy occ: LatticeVoxelGrid,
+                                                   partSDF: LatticeVoxelGrid? = nil)
+        -> [Double] {
+        guard region.kind == .face else { return [] }
         let n = simd_normalize(region.normal)
-        guard simd_length(n) > 0.5 else { return 0 }
+        guard simd_length(n) > 0.5 else { return [] }
         let h = Double(Swift.min(occ.spacing.x, Swift.min(occ.spacing.y, occ.spacing.z)))
-        guard h > 0 else { return 0 }
+        guard h > 0 else { return [] }
         func solid(_ p: SIMD3<Double>) -> Bool {
             if let sdf = partSDF {
                 let g = (SIMD3<Float>(p) - sdf.origin) / sdf.spacing
@@ -412,7 +452,7 @@ public enum LatticeMeasuredRegionWidth {
         let cap = 4.0 * Double(Swift.max(occ.spacing.x * Float(occ.nx),
                                          Swift.max(occ.spacing.y * Float(occ.ny),
                                                    occ.spacing.z * Float(occ.nz))))
-        var seen: [Double] = []
+        var out = [Double](repeating: 0, count: occ.values.count)
         for k in 0..<occ.nz {
             for j in 0..<occ.ny {
                 for i in 0..<occ.nx {
@@ -428,14 +468,10 @@ public enum LatticeMeasuredRegionWidth {
                     while fwd < cap, solid(q + n * h) { q += n * h; fwd += h }
                     q = p
                     while back < cap, solid(q - n * h) { q -= n * h; back += h }
-                    seen.append(fwd + back + h)
+                    out[idx] = fwd + back + h
                 }
             }
         }
-        guard !seen.isEmpty else { return 0 }
-        seen.sort()
-        // The same conservative end the isotropic measure takes, for the same reason:
-        // the cell has to be holdable by the whole wall, not by half of it.
-        return seen[Swift.min(seen.count - 1, Int(0.05 * Double(seen.count - 1)))]
+        return out
     }
 }

@@ -1764,7 +1764,12 @@ public struct WorkspacePlaceholder: View {
     ///
     /// All roles, not just includes: the bake walks `scene.regions`, so an include-only
     /// list would mis-index past an exclude.
-    private var latticeRegionCellsMM: [Double] {
+    /// - Parameter widthPercentile: which end of the measured width distribution sizes
+    ///   each region's cell. Fit keeps 0.05 (core's fit planner takes the conservative
+    ///   end per base cell itself). Stepped passes 0.5 — its bake now divides each CELL
+    ///   to its own local wall (his per-voxel ruling, 2026-08-24), so the region cell
+    ///   anchors on the wall the region mostly is.
+    private func latticeRegionCellsMM(widthPercentile: Double) -> [Double] {
         let bead = project.printParams.strutLineWidthMM
         guard bead > 0 else { return [] }
         return project.latticeJobRegions().regions.map { r in
@@ -1779,7 +1784,8 @@ public struct WorkspacePlaceholder: View {
                 // buys is the quilt (see `wallWidthAlongNormalMM`). The isotropic measure
                 // stays as the fallback — a bolt has no single direction to walk.
                 let d = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(
-                    region: r, occupancy: s.occupancy, partSDF: s.partSDF)
+                    region: r, occupancy: s.occupancy, partSDF: s.partSDF,
+                    percentile: widthPercentile)
                 if d > 0 {
                     w = d
                 } else if !s.memberThicknessMM.isEmpty {
@@ -1810,7 +1816,8 @@ public struct WorkspacePlaceholder: View {
             // ★ THE WHOLE DERIVATION, SAID OUT LOUD. "On a 13 mm wall the main cell is
             // 4.3 mm — why is it so low?" is a question about four numbers, and every
             // previous answer I gave was inferred from the one at the end.
-            NSLog("DIAG regionCell depth=\(r.depthMM) measuredW=\(w) floor=\(floor) "
+            NSLog("DIAG regionCell depth=\(r.depthMM) pct=\(widthPercentile) "
+                  + "measuredW=\(w) floor=\(floor) "
                   + "coreCell=\(d.cellMM) n=\(Swift.max(1, (r.depthMM / d.cellMM).rounded())) "
                   + "final=\(r.depthMM / Swift.max(1, (r.depthMM / d.cellMM).rounded()))")
             // ★★★ A WHOLE NUMBER OF CELLS ACROSS THE DECLARED DEPTH (maintainer,
@@ -1847,7 +1854,7 @@ public struct WorkspacePlaceholder: View {
             to: project.lattice, includeRegionCount: includes.count,
             regionWidthsMM: latticeAutoWidthsMM(includes: includes), lineWidthMM: bead)
         guard lat.cellSizeMode == .fit else { return [] }
-        return latticeRegionCellsMM
+        return latticeRegionCellsMM(widthPercentile: 0.05)
     }
 
     /// ★★★ STEPPED: the same cells, used as they came. Empty unless the user actually
@@ -1858,7 +1865,11 @@ public struct WorkspacePlaceholder: View {
     /// this is gated on the algorithm alone and not on Fit.
     private var latticePreviewSteppedCells: [Double] {
         guard project.lattice.algorithm == "stepped" else { return [] }
-        return latticeRegionCellsMM
+        // ★ 0.5, NOT 0.05 — the stepped bake now divides each CELL to its own local
+        // wall, so the region's cell anchors on the wall the region MOSTLY is (his
+        // per-voxel ruling, 2026-08-24). p05 pinned his front wall to its thinnest
+        // sliver and bought a second cell across a single-cell face.
+        return latticeRegionCellsMM(widthPercentile: 0.5)
     }
 
     /// The certifiable limits for the current topology, READ FROM CORE at runtime (the

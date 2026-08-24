@@ -1299,6 +1299,16 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                         candidate: scene.occupancy.values.map { $0 > 0.5 },
                         nx: scene.occupancy.nx, ny: scene.occupancy.ny,
                         nz: scene.occupancy.nz, spacing: scene.occupancy.spacing),
+                    // ★ THE WALL PER VOXEL, along each region's own normal (his ruling,
+                    // 2026-08-24) — so a cell over a thin sliver divides to what its
+                    // own material holds instead of the sliver pinning the whole face.
+                    widthPerRegion: scene.regions.map { r in
+                        r.kind == .face && r.role == .include
+                            ? LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
+                                region: r, occupancy: scene.occupancy,
+                                partSDF: scene.partSDF)
+                            : nil
+                    },
                     // The finest cell that still prints a bead-wide strut — the halving
                     // stops here rather than at the edge, so the rim is buildable.
                     finestCellMM: steppedFinestPrintableCellMM(finest: finest),

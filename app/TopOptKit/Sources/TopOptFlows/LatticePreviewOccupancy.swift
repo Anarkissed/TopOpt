@@ -603,6 +603,16 @@ extension LatticePreviewOccupancy {
                                         /// one cell per region exactly as before, so
                                         /// every existing bake is byte-identical.
                                         boundaryDistancePerRegion: [[Double]?] = [],
+                                        /// ★★★ THE WALL'S THICKNESS PER OCCUPANCY VOXEL,
+                                        /// along each region's own normal (his ruling,
+                                        /// 2026-08-24: "it should read the actual depth
+                                        /// of that area. so preferably per voxel"). A
+                                        /// cell whose own material is thinner than the
+                                        /// region's cell divides down to what it holds,
+                                        /// so one thin sliver no longer pins — or is
+                                        /// pinned by — the rest of the face. Empty ⇒
+                                        /// region cell everywhere, exactly as before.
+                                        widthPerRegion: [[Double]?] = [],
                                         /// The finest cell the grading may fall to — the
                                         /// printable floor. 0 ⇒ no grading.
                                         finestCellMM: Double = 0,
@@ -709,6 +719,57 @@ extension LatticePreviewOccupancy {
             let idx = (c * occ.ny + b) * occ.nx + a
             return idx < field.count ? field[idx] : 0
         }
+        /// ★ THE THINNEST MEASURED WALL UNDER THE CELL — the min over the occupancy
+        /// voxels the cell covers, unmeasured (0) voxels ignored. Min, where
+        /// `boundaryAt` takes the max, because the questions are opposite: the fit
+        /// asks "how much room is there anywhere in this cell", the width asks "can
+        /// this cell's own material hold it EVERYWHERE it sits". 0 ⇒ nothing measured
+        /// under the cell, and the caller must not constrain on it.
+        func widthUnderCell(_ w: SIMD3<Double>, _ r: Int, cellMM: Double) -> Double {
+            guard r < widthPerRegion.count, let field = widthPerRegion[r] else { return 0 }
+            let g = (SIMD3<Float>(w) - occ.origin) / occ.spacing
+            let half = SIMD3<Int>(
+                Int((Float(cellMM) * 0.5 / occ.spacing.x).rounded(.up)),
+                Int((Float(cellMM) * 0.5 / occ.spacing.y).rounded(.up)),
+                Int((Float(cellMM) * 0.5 / occ.spacing.z).rounded(.up)))
+            let c0 = SIMD3<Int>(Int(g.x.rounded()), Int(g.y.rounded()), Int(g.z.rounded()))
+            var thinnest = Double.infinity
+            for dz in -half.z...half.z {
+                let c = c0.z + dz
+                guard c >= 0, c < occ.nz else { continue }
+                for dy in -half.y...half.y {
+                    let b = c0.y + dy
+                    guard b >= 0, b < occ.ny else { continue }
+                    for dx in -half.x...half.x {
+                        let a = c0.x + dx
+                        guard a >= 0, a < occ.nx else { continue }
+                        let idx = (c * occ.ny + b) * occ.nx + a
+                        if idx < field.count, field[idx] > 0, field[idx] < thinnest {
+                            thinnest = field[idx]
+                        }
+                    }
+                }
+            }
+            return thinnest.isFinite ? thinnest : 0
+        }
+        /// The stage's cells-per-member floor AT this voxel — the per-voxel override
+        /// when the scene carries one, the scene floor otherwise, and never below 1:
+        /// whatever the accuracy question, a cell larger than its own wall is
+        /// geometric nonsense, so 1 is the floor's floor.
+        func memberFloorAt(_ w: SIMD3<Double>) -> Double {
+            var f = minCellsPerMember
+            if !cellsPerMemberFloor.isEmpty {
+                let g = (SIMD3<Float>(w) - occ.origin) / occ.spacing
+                let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
+                if a >= 0, a < occ.nx, b >= 0, b < occ.ny, c >= 0, c < occ.nz {
+                    let idx = (c * occ.ny + b) * occ.nx + a
+                    if idx < cellsPerMemberFloor.count, cellsPerMemberFloor[idx] > 0 {
+                        f = cellsPerMemberFloor[idx]
+                    }
+                }
+            }
+            return Swift.max(1, f)
+        }
         var painted = 0
         var i = 0
         // Instrumentation for the grade audit: what `d` and `n` actually came out as.
@@ -717,6 +778,8 @@ extension LatticePreviewOccupancy {
         var dbgSkipped = 0
         var solidRim = 0
         var dbgCentre: [Double] = []
+        var dbgW: [Double] = []
+        var dbgWidthShrunk = 0
         // The g channel on the stepped path: mm to the face's outline. See the shader.
         var outline = [Float](repeating: 0, count: grid.count)
         for k in 0..<grid.nz {
@@ -891,6 +954,34 @@ extension LatticePreviewOccupancy {
                                 }
                                 // "At least by 1/3" — S/2 is never a size.
                                 if n == 2 { n = 3 }
+                                // ★★★ THE CELL READS ITS OWN MATERIAL (his ruling,
+                                // 2026-08-24: "it should read the actual depth of that
+                                // area. so preferably per voxel"). The region's cell is
+                                // sized to the wall the region MOSTLY is; where this
+                                // cell's own wall is thinner, the cell divides to what
+                                // that material holds.
+                                //
+                                // ★ THE LOCAL LAW IS THE REGION LAW, APPLIED HERE — the
+                                // nearest-whole-fit `round`, not a ceil. A ceil re-pins
+                                // the whole face: the region cell is `depth / n` and
+                                // legitimately overshoots the measured wall by up to
+                                // half a cell (his 13 mm cell on a 12.03 mm wall), and
+                                // a ceil would cut every such cell in two — undoing the
+                                // very rounding that sized the region. `round` forgives
+                                // the overshoot the region rule created and still
+                                // catches the sliver: round(13/8.59) = 2.
+                                //
+                                // ★ NO n==2 BUMP HERE. The "at least by 1/3" step is
+                                // the SHAPE fit's aesthetic; this divisor is a material
+                                // constraint, and S/2 is exactly what an S-cell's
+                                // half-thick wall holds.
+                                let wLocal = widthUnderCell(p, r, cellMM: s)
+                                if wLocal > 1e-6 {
+                                    let nW = Swift.max(1, Int((s * memberFloorAt(p)
+                                                               / wLocal).rounded()))
+                                    if nW > n { n = nW; dbgWidthShrunk += 1 }
+                                    dbgW.append(wLocal)
+                                }
                                 // ★ CLAMPED, NOT SOLIDIFIED. The finest printable cell
                                 // is the floor; the sliver too thin for even that is
                                 // below this grid's resolution and the region clip
@@ -1031,7 +1122,10 @@ extension LatticePreviewOccupancy {
                   + "finest=\(String(format: "%.3f", finestCellMM)) "
                   + "bandMM=\(shapeFitBandMM) solidRim=\(solidRim) "
                   + "dCentre[min=\(String(format: "%.2f", dbgCentre.min() ?? -1)) "
-                  + "n=\(dbgCentre.count)] n=[\(ns)]")
+                  + "n=\(dbgCentre.count)] n=[\(ns)] "
+                  + "w[min=\(String(format: "%.2f", dbgW.min() ?? -1)) "
+                  + "max=\(String(format: "%.2f", dbgW.max() ?? -1)) "
+                  + "n=\(dbgW.count) shrunk=\(dbgWidthShrunk)]")
         } else {
             NSLog("DIAG steppedGrade NO SAMPLES painted=\(painted) skipped=\(dbgSkipped) "
                   + "perRegion=\(boundaryDistancePerRegion.count) finest=\(finestCellMM)")
