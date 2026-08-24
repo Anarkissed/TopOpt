@@ -61,7 +61,19 @@ final class ShellClipLayoutTests: XCTestCase {
                       "the shell rule no longer takes the fragment's own normal")
         XCTAssertTrue(shellClipMSL.contains("regionTex.sample"),
                       "the shell rule no longer reads the declared region's field")
-        XCTAssertTrue(shellClipMSL.contains("dot(sn, -inward) < c.gate.x"),
-                      "the normal-agreement gate is gone")
+        // ★ THE GATE IS NOW TWO TESTS, NOT ONE REJECT — and that is the fix, not a
+        // regression. It read `dot(sn, -inward) < c.gate.x` and rejected: the NEAR cap
+        // only, so the far side of the very wall he declared — whose normal is the exact
+        // opposite — could never open. The prism has two caps and both are the wall he
+        // marked, so each is gated on its own agreement and the sign is carried into the
+        // sample nudge. What must never come back is a rule that ignores the fragment's
+        // normal altogether, which is what these three assertions pin.
+        XCTAssertTrue(shellClipMSL.contains("dot(sn, -inward) >= c.gate.x"),
+                      "the NEAR cap's normal-agreement gate is gone")
+        XCTAssertTrue(shellClipMSL.contains("dot(sn, inward) >= c.gate.x"),
+                      "the FAR cap's normal-agreement gate is gone — the back of a "
+                      + "declared wall is not a bystander")
+        XCTAssertTrue(shellClipMSL.contains("capSign"),
+                      "the cap the fragment belongs to no longer steers the nudge")
     }
 }

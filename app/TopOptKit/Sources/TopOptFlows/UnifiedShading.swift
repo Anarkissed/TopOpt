@@ -187,6 +187,11 @@ struct LSDFUniforms {
     float4 organicOrigin;
     float4 organicSpacing;
     float4 organicDims;
+    // ★★★ DIAGNOSIS ONLY, APPENDED LAST — see `LSDFUniforms.debugParams` in Swift.
+    // x = 1 paints by the cell LEVEL the hit stands in; 0 is the shipping shade.
+    float4 debugParams;
+    // x = solid rim (mm) inward from the region boundary; see Swift `rimParams`.
+    float4 rimParams;
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -218,7 +223,12 @@ static inline float3 lsdf_ray(constant LSDFUniforms& U, float2 uv) {
     return normalize(U.rayDir.xyz + U.rayX.xyz * uv.x + U.rayY.xyz * uv.y);
 }
 
-struct LSDFHit { bool hit; float3 pos; float rho; float dressing; float solid; };
+struct LSDFHit { bool hit; float3 pos; float rho; float dressing; float solid;
+                 // ★ THE CELL THIS HIT STANDS IN (mm), for the level debug shade.
+                 float cellMM;
+                 // ★ THE RAW LEVEL the frame read out of the cell texture, so the
+                 // debug can compare it against the size it derived from it.
+                 float rawLevel; };
 
 /// Core's measured strut radius (in CELL-NORMALISED units) for a relative density,
 /// read from the 32 samples the host uploaded. Falls back to the analytic form when
@@ -266,6 +276,10 @@ struct LCell {
     // cell VERBATIM, and then `S` is that size and `L`/`blk` are meaningless. See
     // `LatticeCellField.steppedCellMM` for why a dyadic level cannot carry it.
     float  stepped;
+    // ★★★ THE TILING'S OWN ORIGIN for this cell, in BASE-CELL units, so two regions on
+    // one axis can each put their declared face on a cell boundary. Zero on every other
+    // path, which is the global grid origin exactly.
+    float3 phase;
 };
 
 // ★ THE READ IS PER BASE CELL, NOT PER STEP. The march samples the same base cell
@@ -289,12 +303,23 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
     // size in mm, 0 on every other algorithm — so the dyadic path below is untouched
     // and doubled is bit-identical.
     if (all(bi >= -0.5) && all(bi < dims - 0.5)) {
-        float sMM = cellTex.read(uint3(bi), 0).b;
+        float4 cs = cellTex.read(uint3(bi), 0);
+        float sMM = cs.b;
         if (sMM > 0.0) {
             o.stepped = sMM;
             o.S = sMM;
             o.m = sMM / max(S0, 1e-6);
             o.L = 0;
+            // ★★★ THE OWNING REGION'S TILING PHASE, unpacked from `axis + fraction`
+            // (`LatticeCellField.steppedPhase`). The struts are cut flush at the region's
+            // cap planes; this is what puts those planes ON a cell boundary instead of
+            // through the middle of a cell, where every strut is sliced at its fattest and
+            // the section reads as a quilt. In BASE cells, because everything below is.
+            float packed = max(0.0, cs.a);
+            int paxis = int(floor(packed + 1e-4));
+            float pfrac = packed - float(paxis);
+            o.phase = float3(0.0);
+            if (paxis >= 0 && paxis <= 2) { o.phase[paxis] = pfrac * o.m; }
             // ★★★ THE BLOCK INDEX, NOT ZERO. This was `float3(0.0)`, and the march
             // caches its 3x3x3 neighbourhood on `baseCell = LC.blk`: a CONSTANT key
             // means the cache is filled once and never refreshed, and every neighbour
@@ -317,12 +342,13 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
             // half-cell lattice — which is exactly the grid of disconnected blocks with
             // void between them that stepped has been rendering. `q` was always correct;
             // only the block it was paired with was not.
-            o.blk = floor(cb / max(o.m, 1e-6));
+            o.blk = floor((cb - o.phase) / max(o.m, 1e-6));
             o.q = float3(0.0);   // filled by the caller, from its own point
             return o;
         }
     }
     o.L = int(lvl + 0.5);
+    o.phase = float3(0.0);
     o.m = exp2(float(o.L));
     o.blk = floor(max(bi, float3(0.0)) / o.m);
     o.q = float3(0.0);          // filled by the caller, from its own point
@@ -338,7 +364,9 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
 /// algorithm, not an approximation of it (core counts the cost as `floating_ends`).
 inline float3 lsdf_cell_q(constant LSDFUniforms& U, LCell c, float3 p) {
     if (c.stepped > 0.0) {
-        float3 rel = (p - U.latticeOrigin.xyz) / c.stepped;
+        // ★ THE PHASE IS IN BASE CELLS; one stepped cell is `m` of them.
+        float3 rel = (p - U.latticeOrigin.xyz) / c.stepped
+                   - c.phase / max(c.m, 1e-6);
         return rel - floor(rel) - 0.5;
     }
     float3 cb = (p - U.latticeOrigin.xyz) / U.latticeOrigin.w;
@@ -421,6 +449,16 @@ inline float lsdf_part_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
     return shell_is_latticed(p, pn, RC, decls, regionTex) ? dPart : dPart + inset;
 }
 
+/// The mm distance to the declared face's OUTLINE at `p`, off the cell field's `g`
+/// channel. Negative return = no answer (outside the grid).
+inline float lsdf_outline_mm(constant LSDFUniforms& U, texture3d<float> cellTex, float3 p) {
+    float S0 = U.latticeOrigin.w;
+    float3 bi = round((p - U.latticeOrigin.xyz) / S0);
+    float3 dims = U.gridDims.xyz;
+    if (any(bi < -0.5) || any(bi >= dims - 0.5)) { return -1.0; }
+    return cellTex.read(uint3(bi), 0).g;
+}
+
 static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           const device float4* segs,
                           texture3d<float> cellTex,
@@ -434,6 +472,8 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
     out.dressing = 0.0;
     out.solid = 0.0;
+    out.cellMM = 0.0;
+    out.rawLevel = 0.0;
 
     float S0 = U.latticeOrigin.w;
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
@@ -506,7 +546,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // A stepped cell is not aligned to the base-cell grid, so `floor(cb/m)` can
         // change while `round(cb)` has not — caching `blk` alongside the read would
         // reintroduce the same off-by-one the frame just fixed. It is two flops.
-        if (LC.stepped > 0.0) { LC.blk = floor(cb / max(LC.m, 1e-6)); }
+        if (LC.stepped > 0.0) { LC.blk = floor((cb - LC.phase) / max(LC.m, 1e-6)); }
         float cellHere = LC.S;
         float3 baseCell = LC.blk;
         float3 q = lsdf_cell_q(U, LC, p);
@@ -569,6 +609,8 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                 // stated uniform density. A wrong hue on a right geometry is the kind of
                 // quiet lie this preview exists to stop.
                 out.rho = U.shadeParams.x; out.dressing = 0.0; out.solid = 0.0;
+                out.cellMM = 0.0;
+    out.rawLevel = 0.0;      // organic has no cell
                 return out;
             }
             FPrev = F2; tPrev = t;
@@ -599,7 +641,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         float eps = max(0.05, 0.015 * cellHere);
         float dressing = 0.0;
         if (U.overlayParams.y > 0.5) {
-            float band = max(0.12 * cellHere, 1e-4);
+            // ★★★ A PHYSICAL WIDTH, NOT A FRACTION OF THE LOCAL CELL. See the Swift
+            // `rimParams` for the measurement: a band scaled by the LOCAL CELL made the skin twice as
+            // wide on the wall whose cell happened to be twice as coarse, out of one
+            // bake — which is the asymmetry he photographed and could not be a setting.
+            float band = max(U.rimParams.x, 1e-4);
             // The EDGE: both bounding surfaces close at once.
             float edge = max(0.0, 1.0 - abs(dPart) / band)
                        * max(0.0, 1.0 - abs(dRegion) / band);
@@ -633,11 +679,16 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                         // level and demand, so the min corner is already exact — leave
                         // doubled bit-identical.
                         float3 nb = baseCell + float3(ox, oy, oz);
-                        float3 cc = LC.stepped > 0.0 ? floor((nb + 0.5) * LC.m)
-                                                     : nb * LC.m;
+                        // A stepped block's centre in BASE-cell coordinates is
+                        // `(nb + 0.5) * m` shifted by the tiling's own phase — the same
+                        // shift `q` is measured from, or the cache would prefetch a cell
+                        // the ray is not standing in.
+                        float3 cc = LC.stepped > 0.0
+                                  ? floor((nb + 0.5) * LC.m + LC.phase)
+                                  : nb * LC.m;
                         float v = -1.0;
                         if (all(cc >= -0.5) && all(cc < ncells - 0.5)) {
-                            float2 rg = cellTex.read(uint3(cc), 0).rg;
+                            float3 rgb = cellTex.read(uint3(cc), 0).rgb;
                             // ★ ONLY SAME-LEVEL NEIGHBOURS CONTRIBUTE. A finer or
                             // coarser neighbour is a different lattice on a different
                             // grid; its struts are marched when the ray is inside IT.
@@ -647,7 +698,22 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                             // strut crossing a level change is cut flush there, the
                             // same way every strut is already cut flush at the part
                             // surface and at the region boundary.
-                            if (int(max(0.0, rg.y) + 0.5) == LC.L) { v = rg.x; }
+                            // ★★★ ON STEPPED THE LEVEL IS ALWAYS 0, SO THIS TEST WAS
+                            // VACUOUS. `steppedCellField` writes `level` as all zeros —
+                            // stepped has no dyadic ladder — so `rg.y == LC.L` passed for
+                            // EVERY neighbour whatever its real cell size. At a grade
+                            // transition a 6 mm cell's neighbourhood pulled in 2 mm cells,
+                            // their densities and radii were read, and their struts were
+                            // evaluated in the WRONG cell's normalised frame: overlapping,
+                            // mixed geometry exactly at the boundaries the grade creates.
+                            // It could only get worse as the grading started working.
+                            //
+                            // Stepped's identity is its CELL SIZE, so that is what is
+                            // compared. The dyadic path keeps the level test, unchanged.
+                            bool sameLattice = LC.stepped > 0.0
+                                ? (abs(rgb.b - LC.S) <= 1e-3 * max(LC.S, 1.0))
+                                : (int(max(0.0, rgb.g) + 0.5) == LC.L);
+                            if (sameLattice) { v = rgb.r; }
                         }
                         if (v >= 0.0) {
                             anyActive = true;
@@ -733,6 +799,37 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // through the mouth instead of recessed behind a ledge, and still cannot
         // z-fight anywhere the shell survives.
         float F = anyActive ? max(dn * cellHere, dClip) : dClip;
+        // ★★★ THE SOLID OUTLINE — the shape fit's last step, UNIONED IN.
+        //
+        // ★ IT CANNOT BE DONE BY DEACTIVATING A CELL, and that is why four attempts
+        // failed. `anyActive` above is a NEIGHBOURHOOD property — true if any of the
+        // 3x3x3 neighbours is active — so a one-cell-wide inactive ring is surrounded by
+        // active cells and still draws their struts. Only a large contiguous inactive
+        // area ever reads as solid, which is the member floor's case, not an outline's.
+        //
+        // So the bake writes the mm distance to the face's OUTLINE into `g` (free on the
+        // stepped path: there is no dyadic ladder, `L` is 0 regardless, and the
+        // same-lattice test keys on the cell SIZE). Within `rimParams.y` of it the field
+        // goes solid, clipped by `dClip` so it stays inside the part and inside what he
+        // declared. A union can only ADD material, so no neighbour can undo it.
+        float outlineBand = U.rimParams.y;
+        if (LC.stepped > 0.0 && outlineBand > 0.0) {
+            float dOutline = lsdf_outline_mm(U, cellTex, p);
+            if (dOutline >= 0.0) {
+                F = min(F, max(dClip, dOutline - outlineBand));
+            }
+        }
+        // ★★★ AND THE LAST SLIVER AT THE OUTLINE IS SOLID, so the lattice meets the
+        // face exactly instead of stopping half a cell short. `dRegion` is negative
+        // inside the declared region, so {dRegion >= -rim} is the band hugging its
+        // boundary; intersecting with `dClip` keeps it inside the part and inside what
+        // he declared, and the union with the struts means it can only ADD material.
+        // ★ NO RIM TERM HERE ANY MORE. The solid outline is baked into the CELL
+        // FIELD (`steppedCellField`), where it can be driven by the face's IN-PLANE
+        // shape. Every version of it in this shader was driven by `dRegion`, which for
+        // an extruded face region reaches 0 at the DEPTH CAPS as much as at the outline —
+        // so it banded the wall's surfaces instead of tracing the face. An inactive cell
+        // already renders solid two lines above; that is the whole mechanism.
         if (F < eps) {
             // Secant refinement to the F = 0 root (see tPrev above): F is locally
             // near-linear along the ray, so one step lands within O(eps²) of the
@@ -750,6 +847,8 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // Carried out so the albedo can draw it as printed layers rather than as
             // a strut of some invented density.
             out.solid = anyActive ? 0.0 : 1.0;
+            out.cellMM = cellHere;
+            out.rawLevel = float(LC.L);
             return out;
         }
         FPrev = F; tPrev = t;
@@ -770,7 +869,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // set to on the stepped path.
         float safeCell = LC.stepped > 0.0 ? U.latticeOrigin.w
                        : (LC.L > 0 ? cellHere * 0.5 : cellHere);
-        float step = anyActive ? clamp(F * stepScale, 0.05 * safeCell, 0.7 * safeCell)
+        // ★ THE FLOOR ON THE STEP IS A FRACTION OF THE CELL, AND THE STRUT IS NOT.
+        // `debugParams.y` overrides it in mm so the two can be told apart; 0 keeps the
+        // shipping arithmetic exactly.
+        float stepLo = U.debugParams.y > 0.0 ? U.debugParams.y : 0.05 * safeCell;
+        float step = anyActive ? clamp(F * stepScale, stepLo, 0.7 * safeCell)
                                : 0.7 * safeCell;
         step = max(step, dClip - 3.0 * eps);
         t += step;
@@ -1025,6 +1128,59 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     o.enormal = float4(eyeN, 0.0);
     o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho, h.dressing,
                                   h.solid), 1.0);
+    // ★★★ THE LEVEL DEBUG SHADE (diagnosis only; `debugParams.x` is 0 on every shipping
+    // frame). Each hit is painted by the CELL it stands in, cycling through six
+    // saturated hues per doubling from the base cell, and material the run leaves SOLID
+    // is painted flat grey. One frame then answers "what cells is this patch made of",
+    // which four rounds of this task tried to infer from the texture instead.
+    // ★ MODE 4: the RELATIVE DENSITY the march graded this hit to. The legend states
+    // one number for the region; the shader grades per CELL from the demand field, and
+    // where that lands high the struts fatten until neighbours merge — which is what a
+    // quilt is. Encoded as rho directly (0..1) so the readback is the number.
+    if (U.debugParams.x > 3.5) {
+        o.enormal = float4(0.0, 0.0, 1.0, 0.0);
+        float v = h.solid > 0.5 ? 0.0 : clamp(h.rho, 0.0, 1.0);
+        o.albedo = float4(v, v, v, 1.0);
+        return o;
+    }
+    // ★ MODE 3: the drawn cell size, ENCODED. Greyscale = cellMM / 32, written into the
+    // albedo attachment, which `latticeMaskDump` blits out unlit — so the cell the march
+    // actually stood in comes back as a NUMBER instead of a colour to be argued about.
+    if (U.debugParams.x > 2.5) {
+        o.enormal = float4(0.0, 0.0, 1.0, 0.0);
+        float v = h.solid > 0.5 ? 0.0 : clamp(h.cellMM / 32.0, 0.0, 1.0);
+        o.albedo = float4(v, v, v, 1.0);
+        return o;
+    }
+    if (U.debugParams.x > 0.5) {
+        // ★★★ AND THE NORMAL IS FLATTENED TO FACE THE EYE. The albedo goes into a
+        // G-BUFFER and is lit afterwards, so a debug colour read off the final pixel is
+        // albedo x light — which is not a diagnosis, it is a picture of the light rig.
+        // Measured: a frame whose levels were all 0 classified as bands 1 and 4 until
+        // this line existed. One constant normal makes the shading term the same at
+        // every pixel, so the hue that comes out is the hue that went in.
+        o.enormal = float4(0.0, 0.0, 1.0, 0.0);
+        if (h.solid > 0.5) {
+            o.albedo = float4(0.35, 0.35, 0.35, 1.0);
+        } else {
+            // x = 1 bands by the cell SIZE the frame drew with; x = 2 bands by the RAW
+            // LEVEL it read out of the texture. If the two disagree, the base cell the
+            // shader is scaling by is not the base cell the bake wrote.
+            float S0 = max(U.latticeOrigin.w, 1e-4);
+            float L = U.debugParams.x > 1.5
+                    ? h.rawLevel
+                    : clamp(log2(max(h.cellMM, 1e-4) / S0), 0.0, 5.0);
+            int band = int(clamp(L, 0.0, 5.0) + 0.5);
+            // ★ PURE CHANNEL COMBINATIONS, not pretty hues. The frame is lit, and
+            // lighting MULTIPLIES: a channel that is exactly 0 stays 0 under any light,
+            // so the on/off pattern of the three channels survives the rig while a
+            // blend of all three does not. A palette of mixed hues read back as the
+            // light's colour, which cost a whole round.
+            const float3 hues[6] = { float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1),
+                                     float3(1, 1, 0), float3(0, 1, 1), float3(1, 0, 1) };
+            o.albedo = float4(hues[band % 6], 1.0);
+        }
+    }
     // ★ CLAMPED SO THE DEPTH-DIRECTION DECLARATION IS TRUE BY CONSTRUCTION.
     // (The declaration is named without its brackets on purpose:
     // `testFragmentDepthWritesAreDeclaredConservative` counts that token across

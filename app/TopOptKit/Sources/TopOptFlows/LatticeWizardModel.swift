@@ -179,6 +179,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// and `applied(to:)` handed the project back whatever it already had.
     public var cellMinMM: Double
     public var cellMaxMM: Double
+    /// How far in from a face's outline the shape-fit grade keeps stepping down, in
+    /// cells. See `LatticeSettings.shapeFitBandMM`.
+    public var shapeFitBandMM: Double
     /// The hand-set strut thickness (mm), or nil for derived — see
     /// `LatticeSettings.manualStrutThicknessMM`.
     public var manualStrutThicknessMM: Double?
@@ -204,6 +207,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
                 densityMode: LatticeDensityMode = .sim,
                 cellSizeMode: LatticeCellSizeMode = .auto,
                 cellMinMM: Double = LatticeSettings.defaultCellMinMM,
+                shapeFitBandMM: Double = LatticeSettings.defaultShapeFitBandCells,
                 cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
                 // ★ DEFAULT NONE (maintainer, 2026-08-14): "it should
                 // default to 'none'". A bare lattice is what the page
@@ -218,6 +222,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.densityMode = densityMode
         self.cellSizeMode = cellSizeMode
         self.cellMinMM = cellMinMM
+        self.shapeFitBandMM = shapeFitBandMM
         self.cellMaxMM = cellMaxMM
         self.boundary = boundary
         self.manualStrutThicknessMM = manualStrutThicknessMM
@@ -277,7 +282,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.init(topologyID: s.topologyID, cellMM: s.cellMM,
                   relativeDensity: max(0.05, s.maxRelativeDensity),
                   densityMode: s.densityMode, cellSizeMode: s.cellSizeMode,
-                  cellMinMM: s.cellMinMM, cellMaxMM: s.cellMaxMM,
+                  cellMinMM: s.cellMinMM,
+                  shapeFitBandMM: s.shapeFitBandMM,
+                  cellMaxMM: s.cellMaxMM,
                   boundary: s.boundary,
                   manualStrutThicknessMM: s.manualStrutThicknessMM,
                   simulateStresses: s.simulateStresses,
@@ -297,6 +304,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // ★ §9(a) — and the window goes back with them, so a range typed in the
         // wizard is the range the job carries.
         out.cellMinMM = cellMinMM
+        out.shapeFitBandMM = shapeFitBandMM
         out.cellMaxMM = cellMaxMM
         out.boundary = boundary
         out.manualStrutThicknessMM = manualStrutThicknessMM

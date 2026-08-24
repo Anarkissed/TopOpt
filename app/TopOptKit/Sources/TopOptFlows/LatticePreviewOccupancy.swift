@@ -174,8 +174,13 @@ public enum LatticePreviewOccupancy {
     ///     cells is NOT latticed — the run leaves it SOLID (grading.hpp bar L4), and
     ///     a preview that draws lattice there is showing a part that will not be
     ///     built. 0 (or no thickness) disables the gate, which is the old behaviour.
+    /// ★★★ `originShiftMM` MOVES THE CELL GRID SO A DECLARED FACE LANDS ON A CELL
+    /// BOUNDARY. Struts are trimmed flush at the region's cap planes, and a cap through
+    /// the middle of a cell slices every strut at its fattest — a surface of X-shaped
+    /// bosses rather than open cells. Zero is the old behaviour exactly.
     public static func cellField(occupancy occ: LatticeVoxelGrid, demand: LatticeVoxelGrid?,
                                  cellMM: Double, insideFraction: Double = 0.02,
+                                 originShiftMM: SIMD3<Float> = .zero,
                                  memberThickness: [Double] = [],
                                  minCellsPerMember: Double = 0,
                                  // ★★ THE AESTHETIC FLOOR, PER OCCUPANCY VOXEL. Core's
@@ -185,14 +190,34 @@ public enum LatticePreviewOccupancy {
                                  // entry) falls back to `minCellsPerMember`, which is
                                  // the structural path bit-for-bit — see the
                                  // equivalence noted at the test below.
-                                 cellsPerMemberFloor: [Double] = []) -> LatticeVoxelGrid {
+                                 cellsPerMemberFloor: [Double] = [],
+                                 /// ★★★ THE CELL THE MEMBER FLOOR IS TESTED AGAINST.
+                                 ///
+                                 /// ★ THIS IS THE EMPTY BAND AT THE OUTLINE. The floor
+                                 /// asks `thickness / cell >= N*`, and it was asked with
+                                 /// the BASE cell — but a graded lattice may draw a much
+                                 /// FINER cell right there, and a finer cell needs
+                                 /// proportionally less material to clear the same floor.
+                                 /// So cells the grade could easily have held were
+                                 /// switched off before the grade ever ran, and grading
+                                 /// only ever assigns sizes to cells that survived. The
+                                 /// band that most needs fine cells is exactly the band
+                                 /// that was deleted.
+                                 ///
+                                 /// 0 ⇒ test against `cellMM`, the historical behaviour.
+                                 floorTestCellMM: Double = 0) -> LatticeVoxelGrid {
         let cell = Float(max(0.1, cellMM))
+        let floorCell = Float(max(0.1, floorTestCellMM > 0 ? floorTestCellMM : cellMM))
+        // ★ THE SHIFT MOVES THE WHOLE GRID — the cells it samples AND the origin it
+        // reports — so activation and the march's tiling cannot disagree about where a
+        // cell starts. It is at most one cell, and the extra cell below covers it.
+        let gridOrigin = occ.origin - originShiftMM
         let extent = SIMD3<Float>(Float(occ.nx - 1) * occ.spacing.x,
                                   Float(occ.ny - 1) * occ.spacing.y,
                                   Float(occ.nz - 1) * occ.spacing.z)
-        let ncx = Swift.max(1, Int(ceil(extent.x / cell)) + 1)
-        let ncy = Swift.max(1, Int(ceil(extent.y / cell)) + 1)
-        let ncz = Swift.max(1, Int(ceil(extent.z / cell)) + 1)
+        let ncx = Swift.max(1, Int(ceil(extent.x / cell)) + 2)
+        let ncy = Swift.max(1, Int(ceil(extent.y / cell)) + 2)
+        let ncz = Swift.max(1, Int(ceil(extent.z / cell)) + 2)
         var vals = [Float](repeating: -1, count: ncx * ncy * ncz)
 
         func occAt(_ w: SIMD3<Float>) -> Bool {
@@ -251,7 +276,7 @@ public enum LatticePreviewOccupancy {
         for ck in 0..<ncz {
             for cj in 0..<ncy {
                 for ci in 0..<ncx {
-                    let center = occ.origin + SIMD3<Float>(Float(ci), Float(cj), Float(ck)) * cell
+                    let center = gridOrigin + SIMD3<Float>(Float(ci), Float(cj), Float(ck)) * cell
                     var insideCount = 0
                     var demandSum: Float = 0
                     // ★ THE FLOOR IS DECIDED PER VOXEL, exactly as core decides it
@@ -277,7 +302,7 @@ public enum LatticePreviewOccupancy {
                             // clears any floor, which is the conservative direction.
                             if let m = memberAt(w), m.thickness > 0, m.floor > 0,
                                m.thickness.isFinite,
-                               m.thickness / Double(cell) < m.floor {
+                               m.thickness / Double(floorCell) < m.floor {
                                 memberHoldsTheCell = false
                             }
                         }
@@ -294,7 +319,7 @@ public enum LatticePreviewOccupancy {
                 }
             }
         }
-        return LatticeVoxelGrid(nx: ncx, ny: ncy, nz: ncz, origin: occ.origin,
+        return LatticeVoxelGrid(nx: ncx, ny: ncy, nz: ncz, origin: gridOrigin,
                                 spacing: SIMD3<Float>(repeating: cell), values: vals)
     }
 
@@ -506,6 +531,22 @@ public struct LatticeCellField: Sendable {
     /// the app and the shader would drift the tiling by a fraction of a millimetre per
     /// cell across the part.
     public let steppedCellMM: [Float]
+    /// ★★★ STEPPED: WHERE THIS CELL'S TILING STARTS, packed as `axis + fraction`.
+    ///
+    /// ★ A SINGLE GRID ORIGIN CANNOT SERVE TWO FACES ON ONE AXIS. Struts are trimmed
+    /// flush at a region's cap planes, and a cap through the middle of a cell slices every
+    /// strut at its fattest — the quilt. Putting a face on a cell boundary is a shift of
+    /// the tiling origin, and two declared faces normal to the SAME axis, with different
+    /// cells and cap planes that are a whole number of neither, need two DIFFERENT
+    /// shifts. Anchoring the one grid origin fixes one face and leaves the other exactly
+    /// as mis-phased as before.
+    ///
+    /// ★ SO THE PHASE IS PER CELL, like the size beside it. `axis` (0/1/2) is the one the
+    /// owning region's normal runs along and `fraction` is the shift in cells, in
+    /// [0, 1) — so 2.25 means "a quarter of a cell along z". Both fit in the texture's
+    /// spare `.a` channel: a half holds ~0.002 near 3, which is 0.014 mm of a 6.9 mm cell.
+    /// EMPTY on every other algorithm, and 0 means no shift, which is the old behaviour.
+    public let steppedPhase: [Float]
     public let baseCellMM: Double
     public let maxLevel: Int
     /// True when this came from core's plan rather than the uniform fallback — the
@@ -522,7 +563,7 @@ extension LatticePreviewOccupancy {
                                         cellMM: Double) -> LatticeCellField {
         LatticeCellField(field: grid,
                          level: [Float](repeating: 0, count: grid.count),
-                         steppedCellMM: [],
+                         steppedCellMM: [], steppedPhase: [],
                          baseCellMM: cellMM, maxLevel: 0, fromCorePlan: false)
     }
 
@@ -549,23 +590,135 @@ extension LatticePreviewOccupancy {
                                         regions: [LatticeRegionSpec],
                                         cellMM: [Double],
                                         baseCellMM: Double,
+                                        originShiftMM: SIMD3<Float> = .zero,
+                                        /// Per region, packed `axis + fraction` — see
+                                        /// `LatticeCellField.steppedPhase`. Empty ⇒ none.
+                                        regionPhase: [Float] = [],
                                         memberThickness: [Double] = [],
                                         minCellsPerMember: Double = 0,
-                                        cellsPerMemberFloor: [Double] = [])
+                                        cellsPerMemberFloor: [Double] = [],
+                                        /// ★★★ GRADE TO FIT SHAPE, IN STEPPED. Distance
+                                        /// from each voxel to the edge of the latticed
+                                        /// region (`LatticeBoundaryDistance`). Empty ⇒
+                                        /// one cell per region exactly as before, so
+                                        /// every existing bake is byte-identical.
+                                        boundaryDistancePerRegion: [[Double]?] = [],
+                                        /// The finest cell the grading may fall to — the
+                                        /// printable floor. 0 ⇒ no grading.
+                                        finestCellMM: Double = 0,
+                                        /// How many cells in from the outline the grade
+                                        /// keeps stepping down. 0 ⇒ fit only.
+                                        shapeFitBandMM: Double = 0,
+                                        /// ★★★ THE DENSITY RISES WITH THE GRADE. A finer
+                                        /// cell at a FIXED density is a thinner strut, so
+                                        /// grading the cell down without touching the
+                                        /// density draws struts the printer cannot lay —
+                                        /// his 0.16 mm back wall. These let the bake lift
+                                        /// each graded cell's density to whatever keeps
+                                        /// one extrusion across its struts. 0 line width
+                                        /// ⇒ inert, exactly as before.
+                                        lineWidthMM: Double = 0,
+                                        densityLo: Double = 0,
+                                        densityHi: Double = 0,
+                                        densityGamma: Double = 1,
+                                        latticeID: String = "")
         -> LatticeCellField? {
         guard baseCellMM > 0, cellMM.count == regions.count,
               cellMM.contains(where: { $0 > 0 }) else { return nil }
         // The activation + demand the base grid already gets on the uniform path — the
         // cells-per-member and printability floors are applied there, once.
         let grid = cellField(occupancy: occ, demand: demand, cellMM: baseCellMM,
+                             originShiftMM: originShiftMM,
                              memberThickness: memberThickness,
                              minCellsPerMember: minCellsPerMember,
-                             cellsPerMemberFloor: cellsPerMemberFloor)
+                             cellsPerMemberFloor: cellsPerMemberFloor,
+                             // ★ A CELL THE GRADE CAN SHRINK MUST NOT BE KILLED AT THE
+                             // COARSE SIZE. Where grading is available the floor is
+                             // tested at the finest cell it can reach; the per-voxel
+                             // grading below then hands each survivor a size its own
+                             // member really can hold.
+                             floorTestCellMM: finestCellMM)
         // ★ HALF-REPRESENTABLE, so the shader's S is the app's S exactly. See the field.
         let sizes = cellMM.map { Double(halfRepresentable(Float($0))) }
         var stepped = [Float](repeating: 0, count: grid.count)
+        var phase = [Float](repeating: 0, count: grid.count)
+        // A copy of the activation, so a cell the outline cannot hold at any printable
+        // size can be turned OFF here and left as solid material.
+        var activation = grid.values
+        /// The boundary distance at a WORLD point, read off the occupancy grid it was
+        /// measured on. 0 (⇒ no ceiling, no grading) outside it.
+        /// ★★★ THE BEST FIT ANYWHERE IN THE CELL, not the value under its centre.
+        ///
+        /// ★ THE CENTRE SAMPLE IS AN ARTEFACT AND IT WAS A BIG ONE. The cell grid is as
+        /// coarse as the cell (6 mm) while the distance field is on the occupancy grid
+        /// (1.72 mm), and the wall is 11 mm thick — so a cell straddling the face very
+        /// often has its centre in NO candidate voxel at all and reads distance 0. That
+        /// is a sampling miss, not "nothing fits here": it put 503 of 964 cells at the
+        /// printable floor (and, before that, turned them solid outright).
+        ///
+        /// Taking the MAX over the occupancy voxels the cell covers asks the question
+        /// that is actually being asked — how much room is there in this cell — and it
+        /// degrades gracefully, because a cell genuinely outside the material still
+        /// reports 0.
+        func boundaryAt(_ w: SIMD3<Double>, _ r: Int, cellMM: Double) -> Double {
+            guard r < boundaryDistancePerRegion.count,
+                  let field = boundaryDistancePerRegion[r] else { return 0 }
+            let g = (SIMD3<Float>(w) - occ.origin) / occ.spacing
+            let half = SIMD3<Int>(
+                Int((Float(cellMM) * 0.5 / occ.spacing.x).rounded(.up)),
+                Int((Float(cellMM) * 0.5 / occ.spacing.y).rounded(.up)),
+                Int((Float(cellMM) * 0.5 / occ.spacing.z).rounded(.up)))
+            let c0 = SIMD3<Int>(Int(g.x.rounded()), Int(g.y.rounded()), Int(g.z.rounded()))
+            var best = 0.0
+            for dz in -half.z...half.z {
+                let c = c0.z + dz
+                guard c >= 0, c < occ.nz else { continue }
+                for dy in -half.y...half.y {
+                    let b = c0.y + dy
+                    guard b >= 0, b < occ.ny else { continue }
+                    for dx in -half.x...half.x {
+                        let a = c0.x + dx
+                        guard a >= 0, a < occ.nx else { continue }
+                        let idx = (c * occ.ny + b) * occ.nx + a
+                        if idx < field.count, field[idx] > best { best = field[idx] }
+                    }
+                }
+            }
+            return best
+        }
+        /// The in-plane distance AT THE CELL'S OWN CENTRE.
+        ///
+        /// ★ TWO QUESTIONS, TWO SAMPLES. `boundaryAt` takes the MAX over the cell — the
+        /// best fit available anywhere in it — which is the right optimism for "how fine
+        /// must this cell be": it refuses to shrink a cell on the strength of one corner
+        /// poking out. The SOLID test is the opposite question — "can anything at all
+        /// live here" — and the max answers it far too generously: on his part the max
+        /// never drops below 1.72 mm, so no cell would ever be solid however close to
+        /// the outline it sits.
+        ///
+        /// 0 means the centre has no measurement (outside the latticed material), and
+        /// that is NOT taken as "solid": a coarse cell straddling a thin wall reads 0 at
+        /// its centre from the DEPTH, and solidifying on it is what turned 503 of 964
+        /// cells solid on the first attempt.
+        func boundaryAtCentre(_ w: SIMD3<Double>, _ r: Int) -> Double {
+            guard r < boundaryDistancePerRegion.count,
+                  let field = boundaryDistancePerRegion[r] else { return 0 }
+            let g = (SIMD3<Float>(w) - occ.origin) / occ.spacing
+            let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
+            guard a >= 0, a < occ.nx, b >= 0, b < occ.ny, c >= 0, c < occ.nz else { return 0 }
+            let idx = (c * occ.ny + b) * occ.nx + a
+            return idx < field.count ? field[idx] : 0
+        }
         var painted = 0
         var i = 0
+        // Instrumentation for the grade audit: what `d` and `n` actually came out as.
+        var dbgD: [Double] = []
+        var dbgN: [Int: Int] = [:]
+        var dbgSkipped = 0
+        var solidRim = 0
+        var dbgCentre: [Double] = []
+        // The g channel on the stepped path: mm to the face's outline. See the shader.
+        var outline = [Float](repeating: 0, count: grid.count)
         for k in 0..<grid.nz {
             for j in 0..<grid.ny {
                 for x in 0..<grid.nx {
@@ -579,7 +732,286 @@ extension LatticePreviewOccupancy {
                         for (r, region) in regions.enumerated()
                         where region.role == .include && sizes[r] > 0
                               && LatticeRegionMask.contains(p, region: region) {
-                            stepped[i] = Float(sizes[r]); painted += 1
+                            // ★★★ THE REGION'S CELL, DIVIDED A WHOLE NUMBER OF TIMES
+                            // TOWARD ITS OWN EDGE — S/2, S/3, S/4, …
+                            //
+                            // ★ NOT DYADIC (maintainer, 2026-08-23: *"Why dyadic?
+                            // Shouldn't it just change to *any* number?"*). He is right
+                            // that halving is too strong, and the first cut of this was
+                            // wrong to use it. The dyadic rule belongs to core's OCTREE
+                            // ladder, where 2:1 balance is a property of the octree
+                            // itself. Nothing here builds an octree — this picks a cell
+                            // per voxel — so the only rule that actually binds is the
+                            // one below, and it admits every integer divisor. That is a
+                            // far smoother gradient: S, S/2, S/3, S/4 instead of S, S/2,
+                            // S/4, S/8.
+                            //
+                            // ★ WHY NOT *ANY REAL NUMBER*, THOUGH — and this is the one
+                            // constraint that is real. The cap planes are only flush
+                            // because every cell in the region divides the declared depth
+                            // a whole number of times at the region's own phase; that is
+                            // what killed the quilt. S/n keeps every graded cell on that
+                            // same grid — the coarse nodes at multiples of S are still
+                            // nodes of the S/n grid — so the caps stay flush and the
+                            // grading costs nothing. An arbitrary real does not divide
+                            // the depth, so it walks the caps back off the boundary and
+                            // brings the quilt back with it.
+                            //
+                            // ★ AND IT IS HONEST ABOUT WHAT IT STILL COSTS. Two
+                            // neighbouring zones at S/2 and S/3 share only the coarse
+                            // S-nodes, so a transition between them leaves unshared nodes
+                            // — floating strut ends. Stepped is the algorithm that
+                            // declares it does no transition handling and COUNTS them
+                            // (`LatticeSteppedStats::floating_ends`), so this is inside
+                            // its stated contract rather than a defect hidden in it.
+                            //
+                            // ★ AND IT STOPS AT THE PRINTABLE FLOOR rather than at the
+                            // edge. A cell finer than `finestCellMM` has struts thinner
+                            // than a bead, so the division stops and the rim keeps the
+                            // finest cell that can actually be built.
+                            // ★★★ FILL THE FACE BY FITTING CELLS TO IT, largest first
+                            // (his spec, 2026-08-23: *"the OUTLINE needs to create
+                            // smaller and smaller cells to create finer and finer
+                            // resolution for the arcs and straight lines required to FIT
+                            // THE SHAPE OF THE FACE. We want the lattice to fill the
+                            // space that was REMOVED from the model."*).
+                            //
+                            // ★ IT IS A FILL, NOT A RAMP. The cell shrinks because it
+                            // does not FIT, not because of where it happens to be — so
+                            // the interior keeps the biggest cell and only the outline
+                            // pays. The ramp I invented before this graded the whole face
+                            // off a number with no physical meaning and threw away the
+                            // member-derived cell over half the wall.
+                            //
+                            //   n_fit  the fewest whole divisions that fit inside the
+                            //          outline: a cell of side S/n needs S/2n of room,
+                            //          so n ≥ S / 2d.
+                            //   +1     one further level inside a band one cell wide, so
+                            //          the grade reads as deliberate instead of only
+                            //          where the geometry forces it (his "Both — fit
+                            //          first, then smooth").
+                            //   never  n == 2 — the step is "at least by 1/3".
+                            //   cap    S/n ≥ the finest printable cell.
+                            //
+                            // ★ AND WHAT STILL WILL NOT FIT GOES **SOLID**, which is the
+                            // other half of his rule: "get to the point where the lattice
+                            // is as small as is printable and fill the rest with solid
+                            // material". Marked by deactivating the cell (−1), the same
+                            // marker the member floor already uses.
+                            var s = sizes[r]
+                            if boundaryDistancePerRegion.isEmpty || finestCellMM <= 0 {
+                                dbgSkipped += 1
+                            }
+                            if !boundaryDistancePerRegion.isEmpty, finestCellMM > 0 {
+                                let d = boundaryAt(p, r, cellMM: s)
+                                dbgD.append(d)
+                                // ★★★ THE HALF-FLOAT ROUNDING WAS EATING A WHOLE RUNG.
+                                //
+                                // `sizes[r]` is `halfRepresentable(...)` — the cell the
+                                // SHADER can hold exactly — so a 4.3333 mm cell arrives
+                                // here as 4.332. Against an unrounded 2.16667 floor that
+                                // is 1.99938, and `.rounded(.down)` makes it 1: no
+                                // subdivision permitted, `levels` collapses to 0, and n
+                                // is 1 for every cell on the face. The DIAGNOSTIC
+                                // computed the same ratio from the UNROUNDED cell and
+                                // printed 2, so the log and the bake disagreed and the
+                                // band looked inert for no visible reason.
+                                //
+                                // A relative epsilon is the fix, not a fudge: the two
+                                // numbers describe the same ladder and differ only by
+                                // one half-float step.
+                                // ★ A RELATIVE TOLERANCE, SIZED TO HALF PRECISION. An
+                                // absolute 1e-4 was too small — the actual gap on his
+                                // 4.3333 mm cell is 6.2e-4, so the rung stayed lost. A
+                                // half's relative precision is ~2^-11 (4.9e-4), and 2e-3
+                                // clears that with room while being three orders below a
+                                // real rung ratio, so it can never invent a rung.
+                                let nCap = Swift.max(1, Int((s / finestCellMM * (1 + 2e-3)).rounded(.down)))
+                                // ★ NO MEASUREMENT AT THE CENTRE ⇒ TAKE THE FINEST
+                                // PRINTABLE CELL, NOT SOLID. The cell grid is coarse
+                                // (6 mm) against a 1.72 mm occupancy grid, so a cell that
+                                // straddles the outline often has its CENTRE outside the
+                                // candidate set — that is a sampling artefact, not a
+                                // statement that nothing fits. Solidifying on it turned
+                                // 503 of 964 cells to solid and emptied the very band he
+                                // wants filled.
+                                var n = d > 1e-6
+                                    ? Swift.max(1, Int((s / (2 * d)).rounded(.up)))
+                                    : nCap
+                                // Smooth: one more level while still inside a band one
+                                // fitted cell wide of the outline.
+                                // ★★★ THE BAND IS A RAMP INSIDE ITSELF, NOT A FLAG.
+                                //
+                                // ★ THE FIRST CUT STEPPED DOWN ANYWHERE INSIDE THE BAND,
+                                // so a 4-cell band with a 3.6 mm cell caught everything
+                                // within 14 mm of the outline — which on his wall is the
+                                // WHOLE wall. Every cell went to the floor at once: not
+                                // a gradient, just a uniformly finer lattice, and the
+                                // "main cells as large as possible" rule broken.
+                                //
+                                // Inside the band the divisor ramps from the finest
+                                // printable at the outline to 1 at the band's inner edge,
+                                // so the grade is visible AND confined to the band he set.
+                                if shapeFitBandMM > 0 {
+                                    // ★★★ THE BAND IS A DISTANCE IN MILLIMETRES (his
+                                    // ruling, 2026-08-23), and it is measured that way
+                                    // because BOTH cell-counted readings failed on his
+                                    // own face and for opposite reasons:
+                                    //
+                                    //   band x BASE cell   4 x 6.0  = 24 mm -> the fine
+                                    //     cells took the space the 6 mm cells should
+                                    //     have had, on a face only ~38 mm deep.
+                                    //   band x FINEST cell 4 x 1.5  =  6 mm -> a border
+                                    //     3% of the face; reads as no grade at all.
+                                    //
+                                    // A millimetre cannot drift when the cell changes,
+                                    // and it is the only reading he can dial to what he
+                                    // can actually see.
+                                    let reach = shapeFitBandMM
+                                    if d < reach {
+                                        let t = Swift.max(0, Swift.min(1, d / reach))
+                                        // ★★★ THE WHOLE BAND STEPS DOWN, NOT HALF OF IT.
+                                        //
+                                        // ★ ROUNDING THE RAMP THREW AWAY MOST OF THE BAND
+                                        // WHENEVER THERE WERE FEW LEVELS. With `nCap = 2`
+                                        // — which is what his printer and density band
+                                        // actually allow — `round(2 - t)` only reaches 2
+                                        // while t <= 0.5, so a 10 mm band graded 5 mm and
+                                        // touched 4.6% of the face. Every tap landed on
+                                        // the base cell and it read as no grade at all.
+                                        //
+                                        // `ceil` over the levels ABOVE the base instead:
+                                        // at the outline it is `nCap`, and it stays >= 2
+                                        // right up to the band's inner edge, returning to
+                                        // the full cell only OUTSIDE the band. That is
+                                        // what "a band N mm wide" has to mean.
+                                        let levels = Double(nCap - 1) * (1 - t)
+                                        n = Swift.max(n, 1 + Int(levels.rounded(.up)))
+                                    }
+                                }
+                                // "At least by 1/3" — S/2 is never a size.
+                                if n == 2 { n = 3 }
+                                // ★ CLAMPED, NOT SOLIDIFIED. The finest printable cell
+                                // is the floor; the sliver too thin for even that is
+                                // below this grid's resolution and the region clip
+                                // already trims it. Going solid here is a separate,
+                                // measured step — not a side effect of a sampling miss.
+                                n = Swift.min(n, nCap)
+                                dbgN[n, default: 0] += 1
+                                s /= Double(n)
+
+                                // ★★★ THE SOLID OUTLINE — THE SHAPE FIT'S LAST STEP.
+                                //
+                                // His rule, 2026-08-23: "6mm cells can't make the face
+                                // prism's exact shape, so it gets smaller at the ends to
+                                // make the shape until it becomes a complete solid
+                                // outline of the shape. But it's not the depth! It's the
+                                // shape of the face!"
+                                //
+                                // ★ SO IT USES THE SAME IN-PLANE DISTANCE THE GRADE DOES,
+                                // and it is decided HERE, not in the shader. Every shader
+                                // attempt drove it off `dRegion` — and a face region is an
+                                // EXTRUSION, `q = (inPlane, along)`, so `dRegion` reaches
+                                // 0 at the DEPTH CAP PLANES every bit as much as at the
+                                // outline. That banded the wall's front and back surfaces:
+                                // the depth, which is precisely what he said it is not.
+                                //
+                                // ★ AND AN INACTIVE CELL IS ALREADY SOLID — the march
+                                // draws `F = dClip` wherever no cell is active. So marking
+                                // the cell here IS the solid: no new field, no new texture,
+                                // and nothing that can disagree with the struts about where
+                                // the region ends. The band is half the finest printable
+                                // cell, which is exactly the sliver no cell can occupy — a
+                                // cell centred closer than S/2 to the outline has no room
+                                // for a node.
+                                // ★ ONE FINAL CELL, NOT HALF OF ONE — because half is
+                                // below what the grid can say. The in-plane field is
+                                // measured on the occupancy grid, whose smallest non-zero
+                                // distance inside the material IS one voxel (1.72 mm on
+                                // his part). A 0.75 mm threshold can therefore never be
+                                // met by any cell centre, and `solidRim` came back 0 for
+                                // exactly that reason. One cell is the granularity the
+                                // solid can actually be expressed at, and it is the ring
+                                // whose cell has no room for a node of its own size.
+                                // ★★★ THE SOLID OUTLINE IS A **BAKED DISTANCE**, NOT A
+                                // DEACTIVATED CELL. Two reasons the deactivation could
+                                // never have worked, both confirmed in the march:
+                                //
+                                //   1. `anyActive` IS A NEIGHBOURHOOD PROPERTY. It is set
+                                //      true if ANY of the 3x3x3 neighbours is active, so a
+                                //      one-cell-wide inactive RING is surrounded by active
+                                //      cells and still draws their struts. Only a large
+                                //      contiguous inactive area (the member floor's case)
+                                //      ever reads as solid.
+                                //   2. A deactivated cell also lost its `stepped` size, so
+                                //      the shader stopped treating it as stepped at all and
+                                //      fell to the dyadic path at the BASE cell — a
+                                //      different lattice, not solid.
+                                //
+                                // So the distance to the outline is written into the cell
+                                // field instead and the march UNIONS a solid term from it.
+                                // Additive, so it cannot be undone by a neighbour.
+                                let dCentre = boundaryAtCentre(p, r)
+                                if dCentre > 1e-6 { dbgCentre.append(dCentre) }
+                                // ★★★ 0 IS "NO MEASUREMENT", AND AS A DISTANCE 0 MEANS
+                                // "ON THE OUTLINE" — the same number cannot mean both.
+                                // Written raw, every cell whose centre falls outside the
+                                // candidate set would read as distance 0 and turn SOLID,
+                                // which is every cell outside every region. A far
+                                // sentinel keeps "unmeasured" out of the band.
+                                //
+                                // ★ AND ONLY PAINTED CELLS GET ONE. The `g` channel is
+                                // the DYADIC LEVEL on every other path — an unpainted
+                                // cell must stay 0 or `lsdf_cell_frame_at` reads a level
+                                // of 12 and the tap readout reports `baseCell * 2^12`.
+                                outline[i] = dCentre > 1e-6 ? Float(Swift.min(dCentre, 1e3))
+                                                            : 1e3
+                                if dCentre > 1e-6, dCentre <= Swift.max(finestCellMM,
+                                        Double(Swift.max(occ.spacing.x,
+                                          Swift.max(occ.spacing.y, occ.spacing.z)))) {
+                                    solidRim += 1
+                                }
+
+                                // ★★★ HOLD THE STRUT AT ONE BEAD (his ruling: option 1).
+                                //
+                                // `rho* = printabilityDensityFloor(cell)` is the density
+                                // at which a strut of this cell is exactly one extrusion.
+                                // Below it the lattice is undrawable, which is what the
+                                // 0.16 mm strut was. So the cell's DEMAND is lifted until
+                                // the shader's own law
+                                //     rho = lo + (hi - lo)·demand^gamma
+                                // lands at or above rho*.
+                                //
+                                // ★ AND IF THE BAND CANNOT REACH IT, THE CELL BACKS OFF
+                                // rather than drawing something unprintable — coarsening
+                                // is always available, and a coarser cell needs LESS
+                                // density, so this terminates.
+                                if lineWidthMM > 0, densityHi > densityLo, !latticeID.isEmpty {
+                                    let lat = LatticeType.named(latticeID)
+                                    var rhoStar = lat.printabilityDensityFloor(
+                                        lineWidthMM: lineWidthMM, cellMM: s)
+                                    while rhoStar > densityHi + 1e-9, n > 1 {
+                                        n -= 1
+                                        s = sizes[r] / Double(n)
+                                        rhoStar = lat.printabilityDensityFloor(
+                                            lineWidthMM: lineWidthMM, cellMM: s)
+                                    }
+                                    if rhoStar > densityLo {
+                                        let t = (rhoStar - densityLo) / (densityHi - densityLo)
+                                        let clamped = Swift.max(0, Swift.min(1, t))
+                                        let dem = densityGamma > 0
+                                            ? pow(clamped, 1 / densityGamma) : clamped
+                                        // Never LOWER a cell's own demand — the stress
+                                        // field still owns the upper hand.
+                                        activation[i] = Swift.max(activation[i], Float(dem))
+                                    }
+                                }
+                            }
+                            stepped[i] = halfRepresentable(Float(s)); painted += 1
+                            // ★ THE OWNING REGION'S TILING PHASE TRAVELS WITH ITS SIZE.
+                            // Same first-match rule, same cell, so the two can never
+                            // describe different regions.
+                            if r < regionPhase.count { phase[i] = regionPhase[r] }
                             break
                         }
                     }
@@ -587,10 +1019,34 @@ extension LatticePreviewOccupancy {
                 }
             }
         }
+        if !dbgD.isEmpty {
+            let sorted = dbgD.sorted()
+            func q(_ f: Double) -> Double { sorted[Int(f * Double(sorted.count - 1))] }
+            let ns = dbgN.keys.sorted().map { "n\($0)=\(dbgN[$0]!)" }.joined(separator: " ")
+            NSLog("DIAG steppedGrade painted=\(painted) skipped=\(dbgSkipped) "
+                  + "d[min=\(String(format: "%.2f", sorted.first!)) "
+                  + "p25=\(String(format: "%.2f", q(0.25))) "
+                  + "p50=\(String(format: "%.2f", q(0.5))) "
+                  + "max=\(String(format: "%.2f", sorted.last!))] "
+                  + "finest=\(String(format: "%.3f", finestCellMM)) "
+                  + "bandMM=\(shapeFitBandMM) solidRim=\(solidRim) "
+                  + "dCentre[min=\(String(format: "%.2f", dbgCentre.min() ?? -1)) "
+                  + "n=\(dbgCentre.count)] n=[\(ns)]")
+        } else {
+            NSLog("DIAG steppedGrade NO SAMPLES painted=\(painted) skipped=\(dbgSkipped) "
+                  + "perRegion=\(boundaryDistancePerRegion.count) finest=\(finestCellMM)")
+        }
         guard painted > 0 else { return nil }
-        return LatticeCellField(field: grid,
-                                level: [Float](repeating: 0, count: grid.count),
-                                steppedCellMM: stepped,
+        var outGrid = grid
+        outGrid.values = activation
+        return LatticeCellField(field: outGrid,
+                                // ★ ON STEPPED THE `g` CHANNEL IS THE OUTLINE DISTANCE,
+                                // not a dyadic level — stepped has no ladder, the shader's
+                                // stepped branch sets `L = 0` regardless, and since the
+                                // same-lattice test now keys on the CELL SIZE, nothing
+                                // reads `g` as a level here. It is the only free channel.
+                                level: outline,
+                                steppedCellMM: stepped, steppedPhase: phase,
                                 baseCellMM: baseCellMM, maxLevel: 0, fromCorePlan: false)
     }
 
@@ -681,7 +1137,7 @@ extension LatticePreviewOccupancy {
             nx: plan.nx, ny: plan.ny, nz: plan.nz,
             origin: originCorner + SIMD3<Float>(repeating: 0.5 * S0),
             spacing: SIMD3<Float>(repeating: S0), values: vals)
-        return LatticeCellField(field: grid, level: lvl, steppedCellMM: [],
+        return LatticeCellField(field: grid, level: lvl, steppedCellMM: [], steppedPhase: [],
                                 baseCellMM: plan.baseCellMM,
                                 maxLevel: plan.maxLevel, fromCorePlan: true)
     }
@@ -891,7 +1347,8 @@ extension LatticePreviewOccupancy {
             level: lvl,
             // The ceiling reshapes a DYADIC plan; it is never reached on the stepped
             // path, so the sizes pass through untouched rather than being invented.
-            steppedCellMM: field.steppedCellMM, baseCellMM: field.baseCellMM,
+            steppedCellMM: field.steppedCellMM, steppedPhase: field.steppedPhase,
+            baseCellMM: field.baseCellMM,
             maxLevel: Swift.max(field.maxLevel, ceilingLevel), fromCorePlan: true)
     }
 }

@@ -243,33 +243,86 @@ public enum LatticeSamplePatch {
                         relativeDensity: relativeDensity, boundary: boundary, sides: sides)
 
         case .stepped:
-            // Two regions, two cells, meeting abruptly. 1.5x is deliberately NOT a
-            // power of two — a dyadic pair would share nodes and draw the ladder.
-            // ★ BOTH HALVES ARE FULL-SIZE BLOCKS (maintainer, 2026-08-22: "why is the
-            // 'stepped' sample so small?"). Asking for `n/2` cells shrank the patch on
-            // EVERY axis — the builder makes cubes — so the sample came out a quarter
-            // the volume of the other two grades and read as a different, smaller
-            // thing rather than as the same block at two cell sizes.
+            // ★★★ ONE BLOCK. ONE OUTER BOX. THE CELL STEPS ACROSS IT (maintainer,
+            // 2026-08-23: "Remove one of them and add a stepped gradient onto a SINGLE
+            // FUCKING SAMPLE BLOCK").
+            //
+            // ★ TWICE NOW I BUILT TWO BLOCKS AND CALLED IT ONE. First two cubes of
+            // different SIZES with a gap; then two cubes of the same size abutting —
+            // which is still two cubes, because each one carries its own six faces and
+            // the seam is a plane you can see straight through. "One sample" means one
+            // envelope, and the only thing that changes across it is the cell.
+            //
+            // ★ SO BOTH DIVISIONS ARE BUILT OVER THE **SAME** BOX and each contributes
+            // only its own half. `mesh(...)` already tiles a block of a stated extent at
+            // a stated cell — including the finish dressing on that block's faces — so
+            // taking the left half of one and the right half of the other yields a
+            // single block whose left is at one cell and right at the other, with one
+            // continuous rim around the whole thing.
             let n = Swift.max(2, cells)
-            let left = mesh(lattice: lattice, cellMM: cellMM, cells: n,
-                            relativeDensity: relativeDensity, boundary: boundary,
-                            sides: sides)
-            let right = mesh(lattice: lattice, cellMM: cellMM * 1.5, cells: n,
-                             relativeDensity: relativeDensity, boundary: boundary,
-                             sides: sides)
-            let leftWidth = Float(cellMM) * Float(n)
-            let rightWidth = Float(cellMM * 1.5) * Float(n)
-            let gap = Float(cellMM) * 0.06     // the seam, visible and not welded
-            return merged(left, shiftedBy: SIMD3<Float>(-(leftWidth + gap) * 0.5, 0, 0),
-                          with: right,
-                          shiftedBy: SIMD3<Float>((rightWidth + gap) * 0.5, 0, 0))
+            let extentMM = cellMM * Double(n)
+            // ★ THE OTHER DIVISION MUST NOT BE DYADIC. A power-of-two pair shares nodes
+            // at the seam, which is what DOUBLED does — drawing that here would make the
+            // two grades identical and the control meaningless.
+            func dyadic(_ a: Int, _ b: Int) -> Bool {
+                let r = Double(Swift.max(a, b)) / Double(Swift.min(a, b))
+                return abs(pow(2.0, log2(r).rounded()) - r) < 1e-9
+            }
+            var m = Swift.max(1, Int((Double(n) / 1.5).rounded()))
+            while m == n || dyadic(n, m) { m += 1 }
 
-        case .organicGrade:
+            let fine = mesh(lattice: lattice, cellMM: extentMM / Double(n), cells: n,
+                            relativeDensity: relativeDensity, boundary: boundary, sides: sides)
+            let coarse = mesh(lattice: lattice, cellMM: extentMM / Double(m), cells: m,
+                              relativeDensity: relativeDensity, boundary: boundary, sides: sides)
+            return halves(fine, keepingXBelow: 0, and: coarse)
+
+                case .organicGrade:
             return organicMesh(cellMM: cellMM, cells: cells,
                                relativeDensity: relativeDensity, sides: sides)
                 ?? mesh(lattice: lattice, cellMM: cellMM, cells: cells,
                         relativeDensity: relativeDensity, boundary: boundary, sides: sides)
         }
+    }
+
+
+    /// ★ ONE BLOCK OUT OF TWO DIVISIONS OF THE SAME BOX: every triangle of `a` whose
+    /// centroid is on the low-x side, every triangle of `b` on the high-x side. Both were
+    /// built over the SAME extent, so the result has ONE outer envelope and one rim — the
+    /// cell is the only thing that changes across the seam, which is what stepped IS.
+    ///
+    /// Filtering by CENTROID and not by vertex: a strut is a closed prism, so its
+    /// triangles either belong to it or they do not, and the centroid decides that once.
+    /// A vertex test would split individual prisms and leave open shells behind.
+    private static func halves(_ a: ViewerMesh, keepingXBelow split: Float,
+                               and b: ViewerMesh) -> ViewerMesh {
+        var pos: [Float] = []
+        var idx: [Int32] = []
+        func append(_ m: ViewerMesh, keepLow: Bool) {
+            var remap = [Int32: Int32]()
+            var t = 0
+            while t + 2 < m.indices.count {
+                let i0 = Int(m.indices[t]), i1 = Int(m.indices[t + 1]), i2 = Int(m.indices[t + 2])
+                let cx = (m.positions[i0 * 3] + m.positions[i1 * 3] + m.positions[i2 * 3]) / 3
+                t += 3
+                guard keepLow ? (cx < split) : (cx >= split) else { continue }
+                var tri = [Int32]()
+                for i in [i0, i1, i2] {
+                    let key = Int32(i)
+                    if let r = remap[key] { tri.append(r); continue }
+                    let r = Int32(pos.count / 3)
+                    pos.append(m.positions[i * 3])
+                    pos.append(m.positions[i * 3 + 1])
+                    pos.append(m.positions[i * 3 + 2])
+                    remap[key] = r
+                    tri.append(r)
+                }
+                idx += tri
+            }
+        }
+        append(a, keepLow: true)
+        append(b, keepLow: false)
+        return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
     }
 
     /// Two patches side by side in one mesh. Indices are rebased, so the seam is two

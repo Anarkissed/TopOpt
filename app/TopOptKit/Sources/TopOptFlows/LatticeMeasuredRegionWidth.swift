@@ -249,15 +249,70 @@ public enum LatticeMeasuredRegionWidth {
         return Swift.max(s0, finestPrintableMM)
     }
 
-    /// The measured member width under ONE declared region, in mm — Fit's own question,
-    /// asked of the material instead of the declaration.
+    /// The measured member width under ONE declared region, in mm — Fit's and Stepped's
+    /// own question, asked of the material instead of the declaration.
     ///
-    /// Fit sizes each region independently at `W / N*`, so it needs a single number per
-    /// region rather than a ladder. The THICKEST material under the region is the right
-    /// one: it is the coarsest cell that region can hold anywhere, and core's per-voxel
-    /// floor still culls the cells that land on thinner material. Taking the thinnest
-    /// instead would size every region for its worst voxel — the too-fine direction
-    /// this whole file exists to stop.
+    /// Fit and Stepped size each region independently at `W / N*`, so they need a single
+    /// number per region rather than a ladder. That number is the width the region can
+    /// hold EVERYWHERE — the 5th percentile of the measured thickness under it.
+    ///
+    /// ★★★ A LOW PERCENTILE, NOT THE MIDDLE ONE (maintainer, 2026-08-23: "the back-wall
+    /// … has a big hole in the center", "Make it *CONSISTENT* with the first wall").
+    ///
+    /// ★ THE CELL HAS TO BE HOLDABLE BY THE WHOLE REGION, NOT BY HALF OF IT. The floor is
+    /// `width/cell >= N*` PER VOXEL, so a cell derived from the median is refused
+    /// everywhere the region is thinner than the median — and a face prism reaches past
+    /// the wall it was declared on into whatever junction is behind it, which drags the
+    /// median up. Measured on his own two declared faces at his 10 mm depth, N* = 2:
+    ///
+    ///     statistic   region 0 cell / culled     region 1 cell / culled
+    ///     median          6.93 mm /  0%             13.86 mm / 28%
+    ///     p10             6.93 mm /  0%             10.39 mm /  8%
+    ///     p05             6.93 mm /  0%              6.93 mm /  1%
+    ///     min             3.46 mm /  0%              3.46 mm /  0%
+    ///
+    /// His region 1 runs 6.93 mm to 48.51 mm of material. At the median a QUARTER of that
+    /// wall cannot hold its own cell and is culled to solid — the hole in the middle of
+    /// the back wall, and why it does not match the front. p05 gives BOTH walls the same
+    /// 6.93 mm cell and culls 1%.
+    ///
+    /// ★ AND NOT THE MINIMUM. The minimum culls nothing by construction, but it sizes the
+    /// whole region for its single thinnest voxel — 3.46 mm here, halving a cell that
+    /// 99% of the region could have held. p05 is the coarsest cell that still leaves the
+    /// region essentially uncut, which is the trade this number exists to make.
+    ///
+    /// ★ A PERCENTILE OF MEASURED VALUES, so an exactly-20 mm wall still reports 20.00 —
+    /// the reason this is not a bucketed mode ("I made sure the walls here are *exactly*
+    /// 20mm wide. That's 4mm cells 5x wide.").
+    ///
+    /// ★★★ IT USED TO BE THE MAXIMUM, AND THAT IS WHY STEPPED DREW NOTHING ON HIS PART
+    /// (maintainer, 2026-08-22, four rounds of "I attempted a Stepped lattice preview and
+    /// it didn't work").
+    ///
+    /// ★ THE THICKEST VOXEL UNDER A REGION IS NOT THE REGION'S MEMBER. `memberThicknessMM`
+    /// is core's local member thickness of the WHOLE PART, and a face region is a prism
+    /// that necessarily reaches past the wall it was declared on — on his part an 11 mm
+    /// slab on a 9 mm wall contains voxels where the wall meets the base and the part
+    /// measures 45.95 mm thick. Taking the max sized that region at 45.95 / 2 = 22.98 mm.
+    ///
+    /// ★ AND THE ARGUMENT THAT DEFENDED THE MAX IS THE ONE THAT FAILS. It was "core's
+    /// per-voxel floor still culls the cells that land on thinner material" — true, and
+    /// on his part the culling removes EVERY cell: a 22.98 mm cell needs 45.95 mm of
+    /// member and nothing in his declared slab is that thick, so `steppedCellField`
+    /// returned nil and the preview silently drew the DOUBLED LADDER instead. Measured on
+    /// his part at Balanced 96, aesthetic, N* = 2:
+    ///
+    ///     width statistic          width      cell     stepped bake
+    ///     max (what this was)      45.95 mm   22.98 mm  NOTHING
+    ///     p90                      41.36 mm   20.68 mm  NOTHING
+    ///     p05 (this)                6.93 mm    3.46 mm  latticed, both walls alike
+    ///
+    /// 4.60 mm is also inside the 4-8 mm window his page states, which the 22.98 mm the
+    /// maximum produced was not.
+    ///
+    /// ★ `+infinity` IS CORE'S "THICKER THAN THE EDT CAP" SENTINEL, not a measurement,
+    /// and it is excluded — a handful of capped voxels would otherwise drag the median
+    /// to infinity and take the whole region with it.
     ///
     /// Returns 0 when core measured nothing under the region, and the caller must then
     /// fall back rather than invent a width.
@@ -265,22 +320,122 @@ public enum LatticeMeasuredRegionWidth {
                                occupancy: LatticeVoxelGrid,
                                memberThicknessMM: [Double]) -> Double {
         guard memberThicknessMM.count == occupancy.values.count else { return 0 }
-        var hi = 0.0
+        var seen: [Double] = []
         for k in 0..<occupancy.nz {
             for j in 0..<occupancy.ny {
                 for i in 0..<occupancy.nx {
                     let n = (k * occupancy.ny + j) * occupancy.nx + i
                     guard occupancy.values[n] > 0.5 else { continue }
                     let w = memberThicknessMM[n]
-                    guard w.isFinite, w > 0, w > hi else { continue }
+                    guard w.isFinite, w > 0 else { continue }
                     let p = SIMD3<Double>(
                         Double(occupancy.origin.x) + Double(i) * Double(occupancy.spacing.x),
                         Double(occupancy.origin.y) + Double(j) * Double(occupancy.spacing.y),
                         Double(occupancy.origin.z) + Double(k) * Double(occupancy.spacing.z))
-                    if LatticeRegionMask.contains(p, region: region) { hi = w }
+                    if LatticeRegionMask.contains(p, region: region) { seen.append(w) }
                 }
             }
         }
-        return hi
+        guard !seen.isEmpty else { return 0 }
+        seen.sort()
+        return seen[Swift.min(seen.count - 1, Int(0.05 * Double(seen.count - 1)))]
+    }
+
+    /// ★★★ THE WALL, ALONG THE FACE'S OWN NORMAL — not the largest sphere that fits
+    /// (maintainer, 2026-08-23: the back wall is "still quilted on part of it", and the
+    /// quilt is the UPPER part, where the two walls meet).
+    ///
+    /// ★ `memberThicknessMM` IS ISOTROPIC, AND A JUNCTION IS NOT A THICK WALL. Core's
+    /// local member thickness is the largest inscribed sphere; where two walls meet, that
+    /// sphere spans BOTH of them and reports material several times thicker than either.
+    /// The cell is `width / N*`, so a corner buys a coarse cell — and a coarse cell in a
+    /// thin wall is the quilt. It appears at the junction and nowhere else, which is
+    /// exactly where he sees it.
+    ///
+    /// ★ A FACE REGION HAS A DIRECTION, SO ITS WIDTH SHOULD TOO. The user declared a
+    /// depth ALONG a face normal; the material that has to hold the cell is the wall
+    /// measured in that same direction. Walked here through the occupancy, both ways from
+    /// each voxel, which is the wall's own thickness and nothing else's.
+    ///
+    /// Measured on his two declared faces (Fast 64):
+    ///
+    ///                     isotropic EDT                along the normal
+    ///     region 0    p05 13.86  med 13.86  p95 48.51   10.39  10.39  10.39
+    ///     region 1    p05 13.86  med 27.72  p95 48.51   10.39  13.86  13.86
+    ///
+    /// The walls are 10.4-13.9 mm. The isotropic number reaches 48.51 — up to 4.7x the
+    /// wall — and it is that inflation, not the wall, that the cell was being derived
+    /// from. Along the normal the thickness is nearly constant inside a region, which is
+    /// what a wall actually is.
+    ///
+    /// Returns 0 for a region with no normal (a bolt has no single direction), and the
+    /// caller falls back to the isotropic measure rather than inventing one.
+    /// ★★★ THE WALK MUST BE THROUGH THE **PART**, NOT THROUGH THE REGION.
+    ///
+    /// ★ THIS MEASURED THE DECLARATION AND CALLED IT THE MATERIAL. `occ` is
+    /// `scene.occupancy`, which is `LatticeRegionMask.clipped(solid, to: regions)` — it
+    /// is ALREADY cut to the region. So the walk along the normal stopped at the
+    /// region's own cap planes and returned the DEPTH THE USER TYPED, every time. Every
+    /// cell the preview has ever shown was therefore `depth / floor`: 12 mm -> 6.00,
+    /// 11 mm -> 5.50, 13 mm -> 4.33. The measurement that exists to read his part has
+    /// been reading his input back to him.
+    ///
+    /// `partSDF` (negative inside the part, on the same grid) is the material itself, so
+    /// the walk now leaves the region and stops at the real wall. The ENUMERATION still
+    /// uses `occ` — only voxels in the region get a vote, which is what makes it "this
+    /// region's wall" rather than the whole part's.
+    ///
+    /// nil `partSDF` keeps the old region-bounded behaviour, so a caller that has no
+    /// part field is unchanged rather than silently measuring something else.
+    public static func wallWidthAlongNormalMM(region: LatticeRegionSpec,
+                                              occupancy occ: LatticeVoxelGrid,
+                                              partSDF: LatticeVoxelGrid? = nil) -> Double {
+        guard region.kind == .face else { return 0 }
+        let n = simd_normalize(region.normal)
+        guard simd_length(n) > 0.5 else { return 0 }
+        let h = Double(Swift.min(occ.spacing.x, Swift.min(occ.spacing.y, occ.spacing.z)))
+        guard h > 0 else { return 0 }
+        func solid(_ p: SIMD3<Double>) -> Bool {
+            if let sdf = partSDF {
+                let g = (SIMD3<Float>(p) - sdf.origin) / sdf.spacing
+                let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
+                guard a >= 0, a < sdf.nx, b >= 0, b < sdf.ny, c >= 0, c < sdf.nz
+                else { return false }
+                return sdf.values[(c * sdf.ny + b) * sdf.nx + a] < 0
+            }
+            let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
+            let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
+            guard a >= 0, a < occ.nx, b >= 0, b < occ.ny, c >= 0, c < occ.nz else { return false }
+            return occ.values[(c * occ.ny + b) * occ.nx + a] > 0.5
+        }
+        // A bound on the walk so a mis-oriented normal cannot run the length of the part.
+        let cap = 4.0 * Double(Swift.max(occ.spacing.x * Float(occ.nx),
+                                         Swift.max(occ.spacing.y * Float(occ.ny),
+                                                   occ.spacing.z * Float(occ.nz))))
+        var seen: [Double] = []
+        for k in 0..<occ.nz {
+            for j in 0..<occ.ny {
+                for i in 0..<occ.nx {
+                    let idx = (k * occ.ny + j) * occ.nx + i
+                    guard occ.values[idx] > 0.5 else { continue }
+                    let p = SIMD3<Double>(
+                        Double(occ.origin.x) + Double(i) * Double(occ.spacing.x),
+                        Double(occ.origin.y) + Double(j) * Double(occ.spacing.y),
+                        Double(occ.origin.z) + Double(k) * Double(occ.spacing.z))
+                    guard LatticeRegionMask.contains(p, region: region) else { continue }
+                    var fwd = 0.0, back = 0.0
+                    var q = p
+                    while fwd < cap, solid(q + n * h) { q += n * h; fwd += h }
+                    q = p
+                    while back < cap, solid(q - n * h) { q -= n * h; back += h }
+                    seen.append(fwd + back + h)
+                }
+            }
+        }
+        guard !seen.isEmpty else { return 0 }
+        seen.sort()
+        // The same conservative end the isotropic measure takes, for the same reason:
+        // the cell has to be holdable by the whole wall, not by half of it.
+        return seen[Swift.min(seen.count - 1, Int(0.05 * Double(seen.count - 1)))]
     }
 }

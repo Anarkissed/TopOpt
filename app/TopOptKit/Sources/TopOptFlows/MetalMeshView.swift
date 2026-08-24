@@ -297,9 +297,37 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
         }
         // FACE: the surface must agree with the one he declared. `d.xyz` points INTO
         // the part, so the shell's outward normal at that face is its negative.
+        //
+        // ★★★ AND THE PRISM HAS TWO CAPS (maintainer, 2026-08-23: "the lattices were
+        // inverted on the back wall too … Try getting it to show an actual octet truss
+        // lattice on the back wall first").
+        //
+        // ★ THE BACK OF A LATTICED WALL IS NOT A BYSTANDER. This tested the NEAR cap
+        // only — `dot(sn, -inward) >= gate` — so the far side of the very wall he
+        // declared, whose normal is the exact opposite, could never open. With an OPAQUE
+        // body (which is what a project with declared regions gets:
+        // `LatticePreviewBodyAlpha.value(latticeLayerDrawn: true, hasIncludeRegion:
+        // true) == 1`) that means the back of the wall draws SHELL where the lattice is,
+        // and the lattice shows only through the front. Solid where the struts are and
+        // open where they are not is precisely "inverted".
+        //
+        // ★ IT IS STILL THE PRISM'S OWN CAPS, NOT "ANY SURFACE". A chamfer sits ~45 deg
+        // off and fails BOTH tests at any sane gate; a wall facing some third direction
+        // fails both. What is added is the ONE surface that is the other side of the
+        // region he declared — and the containment test below still has to pass, so a
+        // region that stops short of the far surface does not open it.
+        //
+        // ★ AND THE NUDGE FOLLOWS THE CAP. `spacing.w` steps INTO the region to break the
+        // coincidence between the region's zero crossing and the shell's own triangles;
+        // from the far cap "into the region" is the other way, so the sign tracks which
+        // cap opened. Nudging the wrong way samples OUTSIDE the region and the far cap
+        // would never open however the gate was set.
         float3 inward = normalize(d.xyz);
-        if (dot(sn, -inward) < c.gate.x) { continue; }
-        float3 p = mpos + inward * c.spacing.w;
+        float capSign = 0.0;
+        if (dot(sn, -inward) >= c.gate.x) { capSign = 1.0; }
+        else if (dot(sn, inward) >= c.gate.x) { capSign = -1.0; }
+        else { continue; }
+        float3 p = mpos + inward * (c.spacing.w * capSign);
         float3 g = (p - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
         // Outside the baked field there is no region — and no clamping, which would
         // smear the edge voxels across the whole part.
@@ -3627,6 +3655,37 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// `LatticeSDFRenderer.bakedCellMMAt`. 0 when nothing was baked there.
     func latticeBakedCellMM(at p: SIMD3<Float>) -> Double {
         latticeLayer?.bakedCellMMAt(p) ?? 0
+    }
+
+    /// ★ THE LATTICE LAYER ITSELF, for diagnosis. Internal, so only `@testable`
+    /// callers reach it: a probe that wants to know WHICH field the bake chose
+    /// (stepped, the ladder, or the uniform fallback) has to read the layer, and
+    /// re-deriving that decision in the test would let the test agree with itself
+    /// while disagreeing with the frame.
+    var latticeLayerForTests: LatticeSDFRenderer? { latticeLayer }
+
+    /// ★ DIAGNOSIS ONLY — see `LatticeSDFRenderer.debugLevelShade`.
+    var latticeDebugLevelShade: Bool {
+        get { latticeLayer?.debugLevelShade ?? false }
+        set { latticeLayer?.debugLevelShade = newValue }
+    }
+
+    /// ★ DIAGNOSIS ONLY — 0 ship, 1 band by drawn cell size, 2 band by raw level.
+    var latticeDebugShadeMode: Int {
+        get { latticeLayer?.debugShadeMode ?? 0 }
+        set { latticeLayer?.debugShadeMode = newValue }
+    }
+
+    /// ★ DIAGNOSIS ONLY — the march's step budget; 512 ships.
+    var latticeDebugMaxSteps: Int {
+        get { latticeLayer?.debugMaxSteps ?? 512 }
+        set { latticeLayer?.debugMaxSteps = newValue }
+    }
+
+    /// ★ DIAGNOSIS ONLY — the march's minimum step in mm; 0 ships.
+    var latticeDebugMinStepMM: Double {
+        get { latticeLayer?.debugMinStepMM ?? 0 }
+        set { latticeLayer?.debugMinStepMM = newValue }
     }
 
     /// Stepped's per-region cell — see `LatticeSDFRenderer.steppedCellMM`.

@@ -62,11 +62,22 @@ final class LatticeSteppedPhaseTests: XCTestCase {
     /// compiles, not only in the Swift replica above.
     func testTheShaderSourceDerivesTheSteppedBlockFromTheUnroundedCoord() {
         let src = latticeFieldSource
-        XCTAssertTrue(src.contains("o.blk = floor(cb / max(o.m, 1e-6));"),
+        // ★ STILL THE UNROUNDED `cb`, now less the region's own tiling phase
+        // (`LatticeCellField.steppedPhase`) — the guarantee this test was written for is
+        // that `blk` is NOT derived from the rounded base index, and that is unchanged.
+        XCTAssertTrue(src.contains("o.blk = floor((cb - o.phase) / max(o.m, 1e-6));"),
                       "stepped block index is not taken from the unrounded base coord")
         XCTAssertFalse(src.contains("o.blk = floor(max(bi, float3(0.0)) / max(o.m, 1e-6));"),
                        "the dyadic-phase block index is still on the stepped path")
-        XCTAssertTrue(src.contains("if (LC.stepped > 0.0) { LC.blk = floor(cb / max(LC.m, 1e-6)); }"),
+        XCTAssertTrue(src.contains(
+            "if (LC.stepped > 0.0) { LC.blk = floor((cb - LC.phase) / max(LC.m, 1e-6)); }"),
                       "the march caches blk on the base cell without re-deriving it")
+        // ★★ AND THE TWO MUST AGREE. The frame builder sets `blk` and the march RECOMPUTES
+        // it every step; adding the phase to one and not the other put the ray in a
+        // different cell from the one it prefetched, which is the same class of defect
+        // this whole file exists for. Caught by exactly this test.
+        XCTAssertEqual(src.components(separatedBy: "- LC.phase) / max(LC.m").count - 1, 1)
+        XCTAssertTrue(src.contains("rel = (p - U.latticeOrigin.xyz) / c.stepped"),
+                      "q must still tile from the lattice origin by the stated cell")
     }
 }

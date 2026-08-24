@@ -316,9 +316,17 @@ final class StrutLineWidthTests: XCTestCase {
         // `lattice_derive_cell_for_member`, which is the same printability frontier
         // against a member width. A wall bead here would hand every region a cell it
         // cannot hold and grade the part back to solid.
-        XCTAssertEqual(strutSites, 11,
-                       "the eleven audited lattice sites (AppModel 2, LatticePage 2, "
-                       + "WorkspacePlaceholder 5, ProjectModel 1, LatticeSetupWizard 1). "
+        // ★ TWELVE SINCE 2026-08-24 (the shape-fit ladder readout), AUDITED:
+        //
+        // NEW SITE: `LatticeSetupWizard.shapeFitSteps`. It answers "how many cell sizes
+        // can the shape fit actually use here" as `cell / finest printable cell`, and the
+        // floor it walks down to is `printabilityDensityFloor` — one lone unsupported
+        // STRUT extrusion, never a wall loop. A wall bead here would overstate the ladder
+        // and the panel would promise a gradient the printer cannot lay, which is the
+        // decorative-control defect this page has paid for before.
+        XCTAssertEqual(strutSites, 12,
+                       "the twelve audited lattice sites (AppModel 2, LatticePage 2, "
+                       + "WorkspacePlaceholder 5, ProjectModel 1, LatticeSetupWizard 2). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

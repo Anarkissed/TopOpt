@@ -1773,11 +1773,21 @@ public struct WorkspacePlaceholder: View {
             // the cell is W / N* for THIS region. Falls back to the declared depth
             // only when nothing is measured.
             var w = r.depthMM
-            if let s = strutScene, !s.memberThicknessMM.isEmpty {
-                let m = LatticeMeasuredRegionWidth.widthMM(
-                    region: r, occupancy: s.occupancy,
-                    memberThicknessMM: s.memberThicknessMM)
-                if m > 0 { w = m }
+            if let s = strutScene {
+                // ★ THE WALL ALONG THIS FACE'S OWN NORMAL FIRST. Core's isotropic member
+                // thickness reports the junction, not the wall, and the coarse cell that
+                // buys is the quilt (see `wallWidthAlongNormalMM`). The isotropic measure
+                // stays as the fallback — a bolt has no single direction to walk.
+                let d = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(
+                    region: r, occupancy: s.occupancy, partSDF: s.partSDF)
+                if d > 0 {
+                    w = d
+                } else if !s.memberThicknessMM.isEmpty {
+                    let m = LatticeMeasuredRegionWidth.widthMM(
+                        region: r, occupancy: s.occupancy,
+                        memberThicknessMM: s.memberThicknessMM)
+                    if m > 0 { w = m }
+                }
             }
             // ★★★ AGAINST THE MODE'S OWN FLOOR. The cell is `width / floor`, and this
             // call used to leave the floor unstated — so it came back as core's
@@ -1796,7 +1806,36 @@ public struct WorkspacePlaceholder: View {
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,
                                                       cellsPerMemberFloor: floor)
-            return d.valid ? d.cellMM : 0
+            guard d.valid, d.cellMM > 0 else { return 0 }
+            // ★ THE WHOLE DERIVATION, SAID OUT LOUD. "On a 13 mm wall the main cell is
+            // 4.3 mm — why is it so low?" is a question about four numbers, and every
+            // previous answer I gave was inferred from the one at the end.
+            NSLog("DIAG regionCell depth=\(r.depthMM) measuredW=\(w) floor=\(floor) "
+                  + "coreCell=\(d.cellMM) n=\(Swift.max(1, (r.depthMM / d.cellMM).rounded())) "
+                  + "final=\(r.depthMM / Swift.max(1, (r.depthMM / d.cellMM).rounded()))")
+            // ★★★ A WHOLE NUMBER OF CELLS ACROSS THE DECLARED DEPTH (maintainer,
+            // 2026-08-23: the back wall is quilted while the front is an open truss).
+            //
+            // ★ THE STRUTS ARE TRIMMED FLUSH AT THE REGION'S TWO CAP PLANES, and where
+            // those planes fall INSIDE the cell is what you see. A cap on a cell boundary
+            // leaves open cells — the truss he calls correct. A cap through the middle of
+            // a cell slices every strut at its fattest, and those cross-sections nearly
+            // touch: a surface of X-shaped bosses, which is the quilt. Measured on his own
+            // two faces at a 6.93 mm cell:
+            //
+            //     region 0 (11.0 mm)   near cap phase 0.41   far cap 1.00   depth/cell 1.59
+            //     region 1 (12.0 mm)   near cap phase 0.00   far cap 0.73   depth/cell 1.73
+            //
+            // One clean cap and one mid-cell cap EACH — one geometry showing two faces,
+            // which is exactly what he photographed from the front and the back.
+            //
+            // ★ SO THE DEPTH IS DIVIDED A WHOLE NUMBER OF TIMES. Both caps then sit at
+            // the SAME phase, and anchoring that phase to the face (see the bake's grid
+            // origin) puts both on a cell boundary. Rounding never lands further than half
+            // a cell from what the derivation asked for, and never below one cell across
+            // the declared depth.
+            let n = Swift.max(1, (r.depthMM / d.cellMM).rounded())
+            return r.depthMM / n
         }
     }
 
@@ -4226,7 +4265,22 @@ public struct WorkspacePlaceholder: View {
     /// "hide the shell" and "draw the lattice" must never be able to disagree — the
     /// frame where they did is the one that drew neither.
     private var latticeLayerIsDrawn: Bool {
-        showStrutPreview && (visible.latticeControls || showLatticePage)
+        // ★★★ AND NOT WHILE THE BAKE IS IN FLIGHT (maintainer, 2026-08-23: "half-way
+        // through calculating, the quilt comes up ... can you make it so the quilt
+        // *never* comes up?").
+        //
+        // ★ THE MID-BAKE PICTURE IS THE **PREVIOUS** LATTICE, and it is drawn against
+        // whatever the settings now say — a different cell, a different region, a
+        // different depth. That mismatch is what reads as the quilt, and my first two
+        // attempts missed it because they gated inside the RENDERER: during the CPU
+        // bake the renderer's own scene and cell field are still consistent with each
+        // other, so nothing there looks stale. The staleness is only visible up here,
+        // where `strutBakeInFlight` already says a bake is running for the banner.
+        //
+        // Hiding the layer shows the plain body for the ~1.4 s of the bake, which is
+        // honest: there IS no current lattice to show.
+        showStrutPreview && !strutBakeInFlight
+            && (visible.latticeControls || showLatticePage)
     }
 
     /// ★★ EVERY INPUT THE BAKE READS — AND IT USED TO BE ONLY THE SELECTION

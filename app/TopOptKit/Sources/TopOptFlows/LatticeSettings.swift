@@ -685,12 +685,26 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// Meaningful only when `cellSizeMode == .auto`; the other modes carry their own
     /// answer (Fit is per region, Swept is the ladder over the user's window).
     public var cellTransition: LatticeCellTransition = .defaultGrade
+    public static let defaultShapeFitBandCells: Double = 1
     public var cellSizeMode: LatticeCellSizeMode
     /// The sweep window's ends (mm), used only in `.swept`. Stored as the user's raw
     /// pick; the lower end is clamped to CORE's printability floor at use
     /// (`LatticeBounds.cellFloorMM`), never to a number written here.
     public var cellMinMM: Double
     public var cellMaxMM: Double
+    /// ★★★ HOW WIDE THE SHAPE-FIT GRADE IS, IN CELLS (his request, 2026-08-23: *"under
+    /// the grading selection, include a slider/numeric input that sets a rim band that
+    /// lets the user change how much of a gradient there is to fit the shape"*).
+    ///
+    /// The lattice already subdivides wherever a cell will not FIT inside the face's
+    /// outline — that part is geometry and is not negotiable. This is the band on TOP of
+    /// it: within `shapeFitBandMM` cells of the outline the lattice steps down a
+    /// further level, so the grade reads as deliberate rather than only where the
+    /// geometry forces it.
+    ///
+    /// MILLIMETRES in from the outline. 0 ⇒ fit only, no extra band (the strict
+    /// geometric answer).
+    public var shapeFitBandMM: Double
     /// The density RANGE the lattice grades between (relative density, dimensionless).
     /// Stored as the user's raw pick; CLAMPED to the core band [rhoMin, rhoMax] at use
     /// (`LatticeBounds`). The neutral open defaults (0…1) carry no band number.
@@ -1006,6 +1020,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 cellSizeMode: LatticeCellSizeMode = .auto,
                 cellMinMM: Double = LatticeSettings.defaultCellMinMM,
                 cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
+                shapeFitBandMM: Double = LatticeSettings.defaultShapeFitBandCells,
                 minRelativeDensity: Double = 0, maxRelativeDensity: Double = 1,
                 region: ManualPrimitive? = nil,
                 includePrimitives: [ManualPrimitive] = [],
@@ -1056,6 +1071,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.cellMM = cellMM
         self.cellSizeMode = cellSizeMode
         self.cellMinMM = cellMinMM
+        self.shapeFitBandMM = shapeFitBandMM
         self.cellMaxMM = cellMaxMM
         self.minRelativeDensity = minRelativeDensity
         self.maxRelativeDensity = maxRelativeDensity
@@ -1098,6 +1114,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case selectableExpandMM
         case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
+        // ★ Absent from every older snapshot ⇒ decodes to its default, so an existing
+        // project keeps the grade it has always had.
+        case shapeFitBandMM
         // ★ The Sim permission (2026-08-17). Absent from every older
         // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
         // keeps asking for the solve it has always asked for.
@@ -1127,6 +1146,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // exactly the job they emitted before (bar R1).
         cellSizeMode = try c.decodeIfPresent(LatticeCellSizeMode.self, forKey: .cellSizeMode) ?? .fixed
         cellMinMM = try c.decodeIfPresent(Double.self, forKey: .cellMinMM) ?? LatticeSettings.defaultCellMinMM
+        shapeFitBandMM = try c.decodeIfPresent(Double.self, forKey: .shapeFitBandMM)
+            ?? LatticeSettings.defaultShapeFitBandCells
         cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
@@ -1218,6 +1239,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if !algorithm.isEmpty { try c.encode(algorithm, forKey: .algorithm) }
         try c.encode(cellSizeMode, forKey: .cellSizeMode)
         try c.encode(cellMinMM, forKey: .cellMinMM)
+        try c.encode(shapeFitBandMM, forKey: .shapeFitBandMM)
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)
@@ -1592,11 +1614,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // renderer uses, then clamped to what the machine can actually print.
         if let t = manualThicknessDensity(limits: limits) {
             return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
+                                      shapeFitBandMM: shapeFitBandMM,
                                       minRelativeDensity: t, maxRelativeDensity: t,
                                       gamma: demandExponent,
                                       uniformRelativeDensity: t)
         }
         return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
+                                  shapeFitBandMM: shapeFitBandMM,
                                   minRelativeDensity: b.densityLo,
                                   maxRelativeDensity: b.densityHi,
                                   // ★ CORE'S OWN EXPONENT, NOT A HARDCODED 1

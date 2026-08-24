@@ -374,6 +374,17 @@ public struct LatticeSetupWizard: View {
     private static let cellTransitions: [LatticeCellTransition] =
         [.stepped, .defaultGrade, .organicGrade]
 
+    /// How many distinct cell sizes the shape fit can use here. The walk lives in
+    /// `LatticeShapeFitLadder` — inline in this property it TRAPPED on an `Int`
+    /// overflow and took the app down every time the sample switched from "One cell"
+    /// to "In the part". See that file for the mechanism.
+    private var shapeFitSteps: Int? {
+        LatticeShapeFitLadder.steps(cellMM: model.cellMM,
+                                    lineWidthMM: project.printParams.strutLineWidthMM,
+                                    topologyID: model.topologyID,
+                                    densityCeiling: model.relativeDensity)
+    }
+
     @ViewBuilder private var cellTransitionRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Cell transition")
@@ -408,6 +419,53 @@ public struct LatticeSetupWizard: View {
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // ★★★ GRADE TO SHAPE BAND — directly under the transition it belongs to
+            // (his placement, 2026-08-23). It is a property of HOW the cells change
+            // across a face, so it sits with Stepped/Default/Organic and not with the
+            // cell-size mode, where the first cut put it.
+            //
+            // The lattice ALWAYS subdivides where a cell will not fit inside the face's
+            // outline — geometry, not a preference, and this cannot switch it off. What
+            // this sets is how far in from the outline the stepping continues.
+            Text("Grade to shape band")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .padding(.top, DS.Space.s)
+            scrubRow("shapeFitBand", value: model.shapeFitBandMM, unit: " mm",
+                     step: 1, range: 0...60) {
+                model.shapeFitBandMM = $0
+                rebuild()
+            }
+            Text("How far in from the face's outline the cells keep stepping down, "
+                 + "in millimetres. 0 grades only where a cell will not fit.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            // ★★★ HOW MANY STEPS THIS PART CAN ACTUALLY GRADE (maintainer, 2026-08-23:
+            // the band offered 0–60 mm while his settings allowed exactly ONE step, and
+            // nothing said so).
+            //
+            // ★ THE LADDER'S DEPTH IS `cell / finest printable cell`, and the floor moves
+            // with the SQUARE of the bead: at 0.45 mm a 4.5 mm cell can only halve once
+            // before a strut is under one extrusion at any density in the band. A control
+            // that implies a gradient the printer cannot lay is the decorative-control
+            // defect this page has paid for before.
+            if let steps = shapeFitSteps, steps <= 1 {
+                Text("At this cell and bead there is no room to step down — a finer cell "
+                     + "would need struts under one extrusion. Use a coarser cell, or a "
+                     + "finer nozzle, to grade.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("wizard-shape-fit-no-room")
+            } else if let steps = shapeFitSteps {
+                Text("\(steps) cell sizes available at this cell and bead.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("wizard-shape-fit-band-note")
+            }
         }
     }
 
