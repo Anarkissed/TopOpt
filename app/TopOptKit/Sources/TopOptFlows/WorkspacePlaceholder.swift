@@ -1864,7 +1864,13 @@ public struct WorkspacePlaceholder: View {
     /// the mode says how a cell is CHOSEN, the algorithm says what is laid down. So
     /// this is gated on the algorithm alone and not on Fit.
     private var latticePreviewSteppedCells: [Double] {
-        guard project.lattice.algorithm == "stepped" else { return [] }
+        // The guard, said out loud — "stepped NOT RUN" downstream has already cost
+        // one night to a silently failing precondition here.
+        if project.lattice.algorithm != "stepped" {
+            NSLog("DIAG steppedCells GUARD algo='\(project.lattice.algorithm)' "
+                  + "(not \"stepped\") — preview draws the ladder")
+            return []
+        }
         // ★ 0.5, NOT 0.05 — the stepped bake now divides each CELL to its own local
         // wall, so the region's cell anchors on the wall the region MOSTLY is (his
         // per-voxel ruling, 2026-08-24). p05 pinned his front wall to its thinnest

@@ -684,7 +684,24 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// How Auto varies the cell across the part — see `LatticeCellTransition`.
     /// Meaningful only when `cellSizeMode == .auto`; the other modes carry their own
     /// answer (Fit is per region, Swept is the ladder over the user's window).
-    public var cellTransition: LatticeCellTransition = .defaultGrade
+    ///
+    /// ★★★ COMPUTED OVER `algorithm`, NOT A SECOND STORED FIELD (2026-08-24). It was
+    /// stored, and NOT in `CodingKeys` — so it decoded to `.defaultGrade` on every
+    /// project load while `algorithm` decoded to what the user chose. The settings
+    /// page then stamped `algorithm = cellTransition.coreAlgorithm` on save, and a
+    /// project saved with "stepped" quietly became "doubled" the first time its
+    /// settings page was SAVED after a relaunch — measured live: project.json said
+    /// `algorithm = stepped`, the running guard said `algo='doubled'`. One value with
+    /// two homes is how they drifted; now the algorithm string is the one home, and
+    /// the picker state is a reading of it. `""` (not stated) reads as
+    /// `.defaultGrade`, which is exactly how core resolves an unstated algorithm.
+    public var cellTransition: LatticeCellTransition {
+        get {
+            LatticeCellTransition.allCases.first { $0.coreAlgorithm == algorithm }
+                ?? .defaultGrade
+        }
+        set { algorithm = newValue.coreAlgorithm }
+    }
     public static let defaultShapeFitBandCells: Double = 1
     public var cellSizeMode: LatticeCellSizeMode
     /// The sweep window's ends (mm), used only in `.swept`. Stored as the user's raw
