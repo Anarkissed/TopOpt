@@ -8868,7 +8868,14 @@ public struct WorkspacePlaceholder: View {
     /// EVERY failure with its number, its target and the fix with its value
     /// (§3b/§3c).
     @ViewBuilder private func latticeDiagnosisBadge(_ g: SelectionGroup) -> some View {
-        let d = latticeDiagnosis(g)
+        // ★ NEVER IN AESTHETIC (his ruling, 2026-08-25: "'Won't certify — tap
+        // for the fix' must not show in aesthetic" — categorical). The floor fix
+        // of 2026-08-24 silenced ONE trigger; the nozzle and strut checks in
+        // `LatticeFaceDiagnosis.of` could still hang a certificate warning on a
+        // stage that makes no certificate claim. So the badge itself is gated:
+        // whatever the diagnosis finds, aesthetic renders nothing.
+        let d = (project.lattice.stageMode ?? .structural) == .aesthetic
+            ? LatticeFaceDiagnosis.merged([]) : latticeDiagnosis(g)
         if let badge = d.badge {
             let tint = latticeVerdictTint(d.severity)
             HStack(spacing: DS.Space.xs) {
