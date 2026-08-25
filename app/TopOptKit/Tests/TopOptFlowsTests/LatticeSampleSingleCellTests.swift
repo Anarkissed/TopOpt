@@ -64,15 +64,20 @@ final class LatticeSampleSingleCellTests: XCTestCase {
                           "flipping the floor must change the structure")
         // The grade around: both samples carry geometry OUTSIDE the central
         // member cube (the shell) and INSIDE it (the centre cell(s)).
+        // ★ THE MESH IS CENTRED ON THE ORIGIN (the cell-granular rebuild uses
+        // the same convention `mesh()` always had), so the middle-member core is
+        // |x|,|y|,|z| < member/2. The previous box assumed an uncentred frame
+        // and passed only because it happened to overlap a shell corner — the
+        // corner the cutaway now removes, which is how the accident surfaced.
         func counts(_ m: ViewerMesh) -> (core: Int, shell: Int) {
             var core = 0, shell = 0
-            let lo = Float(member) / 2, hi = Float(member) * 1.5
+            let half = Float(member) / 2
             var t = 0
             while t + 2 < m.indices.count {
                 let i = Int(m.indices[t])
                 let x = m.positions[i * 3], y = m.positions[i * 3 + 1]
                 let z = m.positions[i * 3 + 2]
-                if x > lo, x < hi, y > lo, y < hi, z > lo, z < hi { core += 1 }
+                if abs(x) < half, abs(y) < half, abs(z) < half { core += 1 }
                 else { shell += 1 }
                 t += 3
             }
