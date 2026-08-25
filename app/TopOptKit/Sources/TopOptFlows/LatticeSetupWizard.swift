@@ -264,6 +264,12 @@ public struct LatticeSetupWizard: View {
             if model.stage == .lattice, model.cellSizeMode == .auto {
                 cellTransitionRow
             }
+            // ★ THE GRADING OPTIONS (his request, 2026-08-25) — STEPPED only:
+            // his ruling scopes the new modes to the stepped algorithm and
+            // leaves Default's dyadic rule untouched.
+            if model.stage == .lattice, model.cellTransition == .stepped {
+                gradingRow
+            }
             if model.stage == .lattice { singleCellSwitch }
             // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
             // the 'too thin to certify' button from the aesthetic mode"). The
@@ -288,6 +294,78 @@ public struct LatticeSetupWizard: View {
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
         .animation(DS.Motion.emphasized, value: model.stage)
+    }
+
+    /// ★ THE GRADING OPTIONS ROW (2026-08-25): Full / Fit shape / No grade, and
+    /// the step style beneath it whenever the fit-shape grade is in play.
+    @ViewBuilder private var gradingRow: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Grading")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+            HStack(spacing: DS.Space.xs) {
+                ForEach([LatticeGradingMode.full, .fitShape, .none],
+                        id: \.rawValue) { m in
+                    Button {
+                        model.gradingMode = m
+                        rebuild()
+                    } label: {
+                        Text(m == .full ? "Full"
+                             : m == .fitShape ? "Fit shape" : "No grade")
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                            .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                            .frame(maxWidth: .infinity)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                                .fill((model.gradingMode == m
+                                       ? DS.Color.accent.opacity(0.85)
+                                       : DS.Color.background.opacity(0.35)).color))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("wizard-grading-\(m.rawValue)")
+                }
+            }
+            Text(model.gradingMode == .full
+                 ? "Cells fit the shape and the density follows the stress."
+                 : model.gradingMode == .fitShape
+                 ? "Cells grade near the outline only; one density everywhere. "
+                   + "The Cell dial lives on each face."
+                 : "One cell, one density. The Cell dial lives on each face.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            if model.gradingMode != LatticeGradingMode.none {
+                HStack(spacing: DS.Space.xs) {
+                    ForEach([LatticeGradeStepStyle.stepped, .dyadic],
+                            id: \.rawValue) { st in
+                        Button {
+                            model.gradeStepStyle = st
+                            rebuild()
+                        } label: {
+                            Text(st == .stepped ? "Stepped steps" : "Dyadic steps")
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                                .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                                .frame(maxWidth: .infinity)
+                                .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                                    .fill((model.gradeStepStyle == st
+                                           ? DS.Color.accent.opacity(0.85)
+                                           : DS.Color.background.opacity(0.35)).color))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("wizard-grade-step-\(st.rawValue)")
+                    }
+                }
+                Text(model.gradeStepStyle == .stepped
+                     ? "Any whole division — S/2, S/3, S/4 — the smoothest ramp."
+                     : "Halving only — every graded cell shares its parent's nodes.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     /// ★ THE VIEW SWITCH — the whole of what the floating card is now. Two views,

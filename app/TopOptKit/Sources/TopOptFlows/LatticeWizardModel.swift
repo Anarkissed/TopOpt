@@ -241,6 +241,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// ★ HOW AUTO VARIES THE CELL — the secondary question that appears only when the
     /// cell size is Auto. Only `defaultGrade` is wired; see `LatticeCellTransition`.
     public var cellTransition: LatticeCellTransition = .defaultGrade
+    /// ★ THE GRADING OPTIONS (2026-08-25) — see `LatticeGradingMode`.
+    public var gradingMode: LatticeGradingMode = .full
+    public var gradeStepStyle: LatticeGradeStepStyle = .stepped
     /// ★ "Allow single-cell members" — see `LatticeSettings.singleCellMembers`. Setting
     /// it TRUE also writes the finish, because core's one-cell floor requires one.
     public var singleCellMembers: Bool = false {
@@ -291,6 +294,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   retainSubfloor: s.retainSubfloorInUnloadedRegions)
         self.cellTransition = s.cellTransition
         self.singleCellMembers = s.singleCellMembers
+        self.gradingMode = s.gradingMode
+        self.gradeStepStyle = s.gradeStepStyle
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -337,6 +342,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // `LatticeAlgorithm`, so it is written as core's own name and `gradingDictionary`
         // decides whether a key appears at all.
         out.algorithm = out.cellTransition.coreAlgorithm
+        // ★ The grading options ride with the algorithm choice (2026-08-25).
+        out.gradingMode = gradingMode
+        out.gradeStepStyle = gradeStepStyle
         out.retainSubfloorInUnloadedRegions =
             (cellSizeMode == .fit) ? false : retainSubfloor
         if !out.retainSubfloorInUnloadedRegions {

@@ -672,7 +672,26 @@ extension LatticePreviewOccupancy {
                                         densityLo: Double = 0,
                                         densityHi: Double = 0,
                                         densityGamma: Double = 1,
-                                        latticeID: String = "")
+                                        latticeID: String = "",
+                                        /// ★ THE GRADING OPTIONS (2026-08-25).
+                                        /// `shapeFit: false` ⇒ "No grade": the
+                                        /// outline never subdivides a cell; the
+                                        /// rim, the per-spot material rule and
+                                        /// the printability lift all still run.
+                                        shapeFit: Bool = true,
+                                        /// ★ Dyadic stepping: every fit-shape
+                                        /// division is a power of two, so each
+                                        /// graded cell shares nodes with its
+                                        /// parent. Default keeps the stepped
+                                        /// integer divisors.
+                                        dyadicSteps: Bool = false,
+                                        /// ★ Per region: TRUE where `cellMM[r]`
+                                        /// is the USER'S OWN number. A stated
+                                        /// cell is honoured as stated — the
+                                        /// per-spot rule only CAPS it at
+                                        /// min(declared depth, local wall),
+                                        /// never re-derives it.
+                                        cellIsUserStated: [Bool] = [])
         -> LatticeCellField? {
         guard baseCellMM > 0, cellMM.count == regions.count,
               cellMM.contains(where: { $0 > 0 }) else { return nil }
@@ -923,12 +942,21 @@ extension LatticePreviewOccupancy {
                             // back of BOTH his faces. An unmeasured centre keeps
                             // the region's cell (his ruling: unmeasured is
                             // unconstrained).
+                            let stated = r < cellIsUserStated.count
+                                && cellIsUserStated[r]
                             let wLocal = widthUnderCell(p, r, cellMM: s)
                             if wLocal > 1e-6 {
-                                let f = memberFloorAt(p)
                                 let declared = region.depthMM > 0
                                     ? region.depthMM : wLocal
-                                let t = Swift.min(declared, wLocal) / f
+                                // ★ A USER-STATED CELL IS HONOURED AS STATED
+                                // (2026-08-25, the grading options): the
+                                // per-spot rule only CAPS it — never-overshoot
+                                // is a ruling, a typed number is not a licence
+                                // past the wall — and never divides it by the
+                                // floor: the number typed is the cell meant.
+                                let t = stated
+                                    ? Swift.min(s, Swift.min(declared, wLocal))
+                                    : Swift.min(declared, wLocal) / memberFloorAt(p)
                                 if t > 1e-6, abs(t - s) > 1e-9 {
                                     s = t
                                     dbgWidthShrunk += 1
@@ -971,9 +999,16 @@ extension LatticePreviewOccupancy {
                                 // statement that nothing fits. Solidifying on it turned
                                 // 503 of 964 cells to solid and emptied the very band he
                                 // wants filled.
-                                var n = d > 1e-6
-                                    ? Swift.max(1, Int((s / (2 * d)).rounded(.up)))
-                                    : nCap
+                                // ★ "NO GRADE" (2026-08-25): the fit never
+                                // subdivides — n stays 1 and only the outline
+                                // rim, the per-spot material rule and the
+                                // printability checks below apply.
+                                var n = 1
+                                if shapeFit {
+                                    n = d > 1e-6
+                                        ? Swift.max(1, Int((s / (2 * d)).rounded(.up)))
+                                        : nCap
+                                }
                                 // Smooth: one more level while still inside a band one
                                 // fitted cell wide of the outline.
                                 // ★★★ THE BAND IS A RAMP INSIDE ITSELF, NOT A FLAG.
@@ -988,7 +1023,7 @@ extension LatticePreviewOccupancy {
                                 // Inside the band the divisor ramps from the finest
                                 // printable at the outline to 1 at the band's inner edge,
                                 // so the grade is visible AND confined to the band he set.
-                                if shapeFitBandMM > 0 {
+                                if shapeFit, shapeFitBandMM > 0 {
                                     // ★★★ THE BAND IS A DISTANCE IN MILLIMETRES (his
                                     // ruling, 2026-08-23), and it is measured that way
                                     // because BOTH cell-counted readings failed on his
@@ -1025,8 +1060,20 @@ extension LatticePreviewOccupancy {
                                         n = Swift.max(n, 1 + Int(levels.rounded(.up)))
                                     }
                                 }
-                                // "At least by 1/3" — S/2 is never a size.
-                                if n == 2 { n = 3 }
+                                if dyadicSteps {
+                                    // ★ DYADIC STEPPING (2026-08-25): round the
+                                    // division UP to a power of two, so every
+                                    // graded cell's nodes land on its parent's —
+                                    // the conformity Doubled's ladder has. The
+                                    // "never S/2" bump is stepped's aesthetic
+                                    // and does not apply: halving IS the step.
+                                    var p2 = 1
+                                    while p2 < n { p2 <<= 1 }
+                                    n = p2
+                                } else if n == 2 {
+                                    // "At least by 1/3" — S/2 is never a size.
+                                    n = 3
+                                }
                                 // ★ THE OLD PER-VOXEL WIDTH DIVISOR STOOD HERE — a
                                 // SHRINK-ONLY integer divide of the region's cell.
                                 // Superseded by his 2026-08-25 ruling, applied at the
@@ -1040,6 +1087,13 @@ extension LatticePreviewOccupancy {
                                 // already trims it. Going solid here is a separate,
                                 // measured step — not a side effect of a sampling miss.
                                 n = Swift.min(n, nCap)
+                                if dyadicSteps, n > 1 {
+                                    // The printable cap may land between rungs —
+                                    // fall to the largest power of two under it.
+                                    var p2 = 1
+                                    while p2 * 2 <= n { p2 <<= 1 }
+                                    n = p2
+                                }
                                 dbgN[n, default: 0] += 1
                                 // ★ THE DIVISION'S BASE IS THE PER-SPOT CELL, and the
                                 // printability backoff below must re-divide the SAME

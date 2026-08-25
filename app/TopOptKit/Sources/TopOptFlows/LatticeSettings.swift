@@ -123,6 +123,30 @@ public enum LatticeGroupRole: String, Codable, Equatable, Sendable {
 /// One `lattice.regions` entry, exactly the wire shape core's job.cpp accepts
 /// (role ∈ include|exclude, kind ∈ bolt|face, geometry with every extent > 0).
 /// Values are model-space mm, the same frame as a manual clearance.
+/// ★★★ THE GRADING OPTIONS (his request, 2026-08-25: "add two new settings for
+/// the grading options"). How the CELL is allowed to vary inside a region —
+/// STEPPED algorithm only; Default's dyadic ladder is untouched by his ruling.
+///
+///   full      everything shipped so far: the cells grade to fit the face's
+///             shape near the outline AND the density follows the stress field
+///             where one governs.
+///   fitShape  "Grade to fit Shape" — the cells grade near the outline only;
+///             the density is ONE number everywhere (the dial, or Auto).
+///   none      "No grade" — one cell, one density; the per-face Cell size is
+///             the dial. (The per-spot material rule still applies — a cell
+///             never exceeds its own wall; that is sizing, not grading.)
+public enum LatticeGradingMode: String, Equatable, Sendable, Codable {
+    case full, fitShape, none
+}
+
+/// ★ HOW THE FIT-SHAPE GRADE STEPS DOWN — his "either stepped or default
+/// (dyadic) options": stepped admits every integer divisor (S/2, S/3, S/4 …),
+/// dyadic halves (S/2, S/4, S/8) so every graded cell shares nodes with its
+/// parent.
+public enum LatticeGradeStepStyle: String, Equatable, Sendable, Codable {
+    case stepped, dyadic
+}
+
 public struct LatticeRegionSpec: Equatable, Sendable {
     public enum Kind: String, Equatable, Sendable { case bolt, face }
     public let role: LatticeGroupRole
@@ -970,6 +994,19 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// Ask the run for the per-region breakdown in its receipt.
     public var reportRegionCells: Bool
 
+    /// ★ THE GRADING OPTIONS (2026-08-25). `.full` is every existing project's
+    /// behaviour; absent from every older snapshot ⇒ decodes to `.full`.
+    public var gradingMode: LatticeGradingMode = .full
+    /// How the fit-shape grade steps — stepped divisors or dyadic halving.
+    public var gradeStepStyle: LatticeGradeStepStyle = .stepped
+    /// ★ THE PER-FACE CELL (mm), stated by the user — the dial the two new
+    /// grading modes expose ("include a cell size value above density").
+    /// Keyed by `LatticeSelectableRef.key`, like the density beside it. Absent
+    /// ⇒ derived, and the key is not stored at all. Never a licence to
+    /// overshoot: the bake still caps every cell at min(declared depth, its
+    /// own wall).
+    public var selectableCellMM: [String: Double] = [:]
+
     /// ★ THE ENCLOSED-VOID RULE — the OFF control (task
     /// 2026-08-06-arm-projection-and-void-check, S2c). DEFAULT TRUE, matching
     /// core's own `lattice.require_lattice_void_reaches_exterior`.
@@ -1146,6 +1183,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case requireVoidReachesExterior
         // the per-region lattice density (task 2026-08-13-lattice-as-a-material)
         case frozenRegionDensity
+        // the grading options (2026-08-25) — absent ⇒ full / stepped / none stated
+        case gradingMode, gradeStepStyle, selectableCellMM
     }
 
     public init(from decoder: Decoder) throws {
@@ -1243,6 +1282,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // existing project out of a rule the maintainer turned on, silently.
         requireVoidReachesExterior = try c.decodeIfPresent(
             Bool.self, forKey: .requireVoidReachesExterior) ?? true
+        // Absent from every older snapshot ⇒ `.full` / `.stepped` / nothing
+        // stated ⇒ existing projects keep the behaviour they have always had.
+        gradingMode = try c.decodeIfPresent(LatticeGradingMode.self,
+                                            forKey: .gradingMode) ?? .full
+        gradeStepStyle = try c.decodeIfPresent(LatticeGradeStepStyle.self,
+                                               forKey: .gradeStepStyle) ?? .stepped
+        selectableCellMM = try c.decodeIfPresent([String: Double].self,
+                                                 forKey: .selectableCellMM) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1286,6 +1333,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(subfloorPerRegion, forKey: .subfloorPerRegion)
         try c.encode(reportRegionCells, forKey: .reportRegionCells)
         try c.encode(requireVoidReachesExterior, forKey: .requireVoidReachesExterior)
+        // Written only when moved off the default, so an untouched project's
+        // bytes do not move (bar U1).
+        if gradingMode != .full { try c.encode(gradingMode, forKey: .gradingMode) }
+        if gradeStepStyle != .stepped {
+            try c.encode(gradeStepStyle, forKey: .gradeStepStyle)
+        }
+        if !selectableCellMM.isEmpty {
+            try c.encode(selectableCellMM, forKey: .selectableCellMM)
+        }
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the

@@ -1030,6 +1030,16 @@ public struct WorkspacePlaceholder: View {
                                                              .resolved(gravity: force.gravity)),
                                                      fitCellMM: latticePreviewFitCells,
                                                      steppedCellMM: latticePreviewSteppedCells,
+                                                     // ★ The grading options
+                                                     // (2026-08-25): No grade /
+                                                     // Fit shape, the step style
+                                                     // and the user-stated cells.
+                                                     steppedShapeFit:
+                                                        project.lattice.gradingMode != LatticeGradingMode.none,
+                                                     steppedDyadicSteps:
+                                                        project.lattice.gradeStepStyle == .dyadic,
+                                                     steppedCellStated:
+                                                        latticePreviewSteppedStated,
                                                      // ★ Hide the superseded picture
                                                      // while a NEW scene bakes (his
                                                      // request, 2026-08-24 evening) —
@@ -1912,7 +1922,43 @@ public struct WorkspacePlaceholder: View {
         // wall, so the region's cell anchors on the wall the region MOSTLY is (his
         // per-voxel ruling, 2026-08-24). p05 pinned his front wall to its thinnest
         // sliver and bought a second cell across a single-cell face.
-        return latticeRegionCellsMM(widthPercentile: 0.5)
+        var cells = latticeRegionCellsMM(widthPercentile: 0.5)
+        // ★ A USER-STATED CELL WINS over the derivation (2026-08-25, the grading
+        // options' Cell dial). The bake still caps it per voxel at
+        // min(declared depth, local wall) — a typed number is not a licence to
+        // overshoot.
+        let stated = latticeStatedCellByFace
+        if !stated.isEmpty {
+            let regions = project.latticeJobRegions().regions
+            for (i, r) in regions.enumerated() where i < cells.count {
+                if let f = r.faceID, let mm = stated[f], mm > 0 { cells[i] = mm }
+            }
+        }
+        return cells
+    }
+
+    /// faceID → the user's own cell (mm), from the per-selectable store. The key
+    /// carries the face id as its last component ("f:<group>:<face>").
+    private var latticeStatedCellByFace: [Int: Double] {
+        var out: [Int: Double] = [:]
+        for (key, mm) in project.lattice.selectableCellMM where mm > 0 {
+            if let last = key.split(separator: ":").last, let f = Int(last) {
+                out[f] = mm
+            }
+        }
+        return out
+    }
+
+    /// Per region, TRUE where the stepped cell is the user's own number — the
+    /// bake honours those as stated (cap-only, no floor division).
+    private var latticePreviewSteppedStated: [Bool] {
+        guard project.lattice.algorithm == "stepped" else { return [] }
+        let stated = latticeStatedCellByFace
+        guard !stated.isEmpty else { return [] }
+        return project.latticeJobRegions().regions.map {
+            guard let f = $0.faceID else { return false }
+            return stated[f] != nil
+        }
     }
 
     /// The certifiable limits for the current topology, READ FROM CORE at runtime (the
@@ -4457,6 +4503,12 @@ public struct WorkspacePlaceholder: View {
         // construction.
         h.combine(project.minimizePlastic)
         h.combine(project.material)
+        // ★ The grading options (2026-08-25): all three feed the stepped bake.
+        h.combine(l.gradingMode)
+        h.combine(l.gradeStepStyle)
+        for (k, v) in l.selectableCellMM.sorted(by: { $0.key < $1.key }) {
+            h.combine(k); h.combine(v)
+        }
         return h.finalize()
     }
 
@@ -4480,7 +4532,15 @@ public struct WorkspacePlaceholder: View {
         // the picture disagreed with the job the Lattice button would send.
         // The mode is what decides now, not which page is up.
         let field: StressField?
-        if project.lattice.densityMode.needsSimulation,
+        if (project.lattice.gradingMode == .fitShape
+                || project.lattice.gradingMode == LatticeGradingMode.none),
+           project.lattice.algorithm == "stepped" {
+            // ★ THE GRADING OPTIONS (2026-08-25): "No grade" and "Grade to fit
+            // Shape" both mean the DENSITY is one number everywhere — the dial,
+            // or Auto — so no stress field reaches the grading. Stepped only;
+            // Default's dyadic path keeps its own law untouched.
+            field = nil
+        } else if project.lattice.densityMode.needsSimulation,
            let f = latticeStressField {
             field = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
                                 origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
@@ -9010,7 +9070,10 @@ public struct WorkspacePlaceholder: View {
         writeDensity: ((Double) -> Void)? = nil,
         // ★ THE IN-PLANE EXPAND'S SETTER (maintainer, 2026-08-17), in mm like
         // the depth — and separate from it, because they grow different axes.
-        writeExpand: ((Double) -> Void)? = nil) -> some View {
+        writeExpand: ((Double) -> Void)? = nil,
+        // ★ THE PER-FACE CELL'S SETTER (2026-08-25, the grading options), in mm.
+        // 0 clears back to the derived cell — same escape the density has.
+        writeCell: ((Double) -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let head = drawer.headline {
                 let tint = latticeVerdictTint(head.verdict)
@@ -9063,6 +9126,7 @@ public struct WorkspacePlaceholder: View {
                         let write: ((Double) -> Void)? =
                             row.kind == .density ? writeDensity
                             : row.kind == .expand ? writeExpand
+                            : row.kind == .cell ? writeCell
                             : writeDepth
                         Text(row.value)
                             // ★ 5.4 — the DENSITY control pops: white, heavier,
@@ -9173,6 +9237,7 @@ public struct WorkspacePlaceholder: View {
         case .density: return 0.5      // percent per point
         case .expand:  return 0.05     // mm per point
         case .depth:   return 0.05     // mm per point (its own drag uses this)
+        case .cell:    return 0.05     // mm per point — a cell is a length too
         case .fact:    return 0        // a fact does not move
         }
     }
@@ -9517,6 +9582,13 @@ public struct WorkspacePlaceholder: View {
             ? (Swift.min(Swift.max(storedRho, band.lo), band.hi) - band.lo)
                 / (band.hi - band.lo) * 100
             : 0
+        // ★ THE CELL ROW IS A CONTROL ONLY UNDER THE NEW GRADING OPTIONS (his
+        // 2026-08-25 instruction: "Only make the cell size visible with the new
+        // grading options") — under Full it stays the fact row it always was.
+        let cellControl = aesthetic
+            && project.lattice.gradingMode != .full
+            && project.lattice.algorithm == "stepped"
+        let statedCell = project.latticeSelectableCellMM(ref)
         let drawer = LatticeRegionDrawer.make(
             card: card,
             depthMM: project.latticeSlabDepthMM(ref, in: g.id),
@@ -9531,6 +9603,13 @@ public struct WorkspacePlaceholder: View {
             densityDisplay: aesthetic
                 ? (userStated ? String(format: "%.0f%%", relativePct)
                               : String(format: "Auto · %.0f%%", relativePct))
+                : nil,
+            cellControl: cellControl,
+            // ★ "Auto · N mm" when nobody typed one — same escape hatch the
+            // density row has; typing 0 clears back to Auto.
+            cellDisplay: cellControl
+                ? (statedCell.map { String(format: "%.2f mm", $0) }
+                    ?? String(format: "Auto · %.2f mm", card?.cellMM ?? 0))
                 : nil,
             expandMM: project.latticeExpandMM(ref))
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
@@ -9558,6 +9637,17 @@ public struct WorkspacePlaceholder: View {
                           },
                           writeExpand: { mm in
                               project.writeLatticeExpandMM(ref, mm: mm)
+                              refreshLatticeFaceCards()
+                          },
+                          // ★ The per-face CELL (2026-08-25). 0 clears to Auto;
+                          // the write clamps to the declared depth and the bake
+                          // caps per voxel at the local wall — never-overshoot
+                          // survives a typed number.
+                          writeCell: { mm in
+                              project.writeLatticeCellMM(
+                                  ref, mm: mm > 0 ? mm : nil,
+                                  declaredDepthMM:
+                                      project.latticeSlabDepthMM(ref, in: g.id))
                               refreshLatticeFaceCards()
                           })
             .padding(.leading, DS.Space.m)

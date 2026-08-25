@@ -743,6 +743,30 @@ public final class ProjectModel: ObservableObject {
         }
     }
 
+    /// ★ THE PER-FACE CELL IN FORCE (2026-08-25, the grading options): the
+    /// user's own number, or nil ⇒ derived. No group fallback — a cell is a
+    /// property of the face's own wall.
+    public func latticeSelectableCellMM(_ ref: LatticeSelectableRef) -> Double? {
+        if let v = lattice.selectableCellMM[ref.key], v.isFinite, v > 0 { return v }
+        return nil
+    }
+
+    /// Write one selectable's cell (mm). nil / non-positive CLEARS back to
+    /// derived — absence is core's own "derive it" sentinel, same as the
+    /// density beside it. Clamped into what can exist: never past the declared
+    /// depth (the bake further caps per voxel at the local wall —
+    /// never-overshoot), never below two beads (no strut prints down there).
+    public func writeLatticeCellMM(_ ref: LatticeSelectableRef, mm: Double?,
+                                   declaredDepthMM: Double = 0) {
+        guard let v = mm, v.isFinite, v > 0 else {
+            lattice.selectableCellMM.removeValue(forKey: ref.key)
+            return
+        }
+        let lo = Swift.max(0.5, 2 * printParams.strutLineWidthMM)
+        let hi = declaredDepthMM > 0 ? Swift.max(lo, declaredDepthMM) : 1e3
+        lattice.selectableCellMM[ref.key] = Swift.min(Swift.max(v, lo), hi)
+    }
+
     /// ★★★ THE AESTHETIC DENSITY BAND FOR A FACE (his ruling, 2026-08-24 night):
     /// the low end is the printable limit at that face's cell, "the max is the
     /// QUILT" — the density where the struts fuse and the windows close — never

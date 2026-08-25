@@ -3605,6 +3605,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var layerHeightMM: Double = 0
         var steppedCellMM: [Double] = []
         var fitCellMM: [Double] = []
+        var steppedShapeFit = true
+        var steppedDyadicSteps = false
+        var steppedCellStated: [Bool] = []
     }
     private var latticeDesired = LatticeDesired()
 
@@ -3629,6 +3632,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 fresh.layerHeightMM = latticeDesired.layerHeightMM
                 fresh.steppedCellMM = latticeDesired.steppedCellMM
                 fresh.fitCellMM = latticeDesired.fitCellMM
+                fresh.steppedShapeFit = latticeDesired.steppedShapeFit
+                fresh.steppedDyadicSteps = latticeDesired.steppedDyadicSteps
+                fresh.steppedCellStated = latticeDesired.steppedCellStated
             }
             latticeLayer = fresh
             latticeSceneToken = -1
@@ -3737,6 +3743,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     var latticeSteppedCellMM: [Double] {
         get { latticeLayer?.steppedCellMM ?? latticeDesired.steppedCellMM }
         set { latticeDesired.steppedCellMM = newValue; latticeLayer?.steppedCellMM = newValue }
+    }
+
+    /// ★ The grading options (2026-08-25) — store-and-forward like every wrapper.
+    var latticeSteppedShapeFit: Bool {
+        get { latticeLayer?.steppedShapeFit ?? latticeDesired.steppedShapeFit }
+        set { latticeDesired.steppedShapeFit = newValue; latticeLayer?.steppedShapeFit = newValue }
+    }
+    var latticeSteppedDyadicSteps: Bool {
+        get { latticeLayer?.steppedDyadicSteps ?? latticeDesired.steppedDyadicSteps }
+        set { latticeDesired.steppedDyadicSteps = newValue; latticeLayer?.steppedDyadicSteps = newValue }
+    }
+    var latticeSteppedCellStated: [Bool] {
+        get { latticeLayer?.steppedCellStated ?? latticeDesired.steppedCellStated }
+        set { latticeDesired.steppedCellStated = newValue; latticeLayer?.steppedCellStated = newValue }
     }
 
     /// Fit's per-region cell — see `LatticeSDFRenderer.fitCellMM`.
@@ -5162,6 +5182,12 @@ public struct LatticeLayerInputs: Equatable {
     public var fitCellMM: [Double] = []
     /// ★ STEPPED's per-region cell, one per region in the scene's order.
     public var steppedCellMM: [Double] = []
+    /// ★ THE GRADING OPTIONS (2026-08-25) — see `LatticePreviewOccupancy
+    /// .steppedCellField`. Defaults are every existing caller's behaviour.
+    public var steppedShapeFit: Bool = true
+    public var steppedDyadicSteps: Bool = false
+    /// Per region, TRUE where the stepped cell is the USER'S OWN number.
+    public var steppedCellStated: [Bool] = []
     /// ★ TRUE while a NEW scene is being baked (his request, 2026-08-24 evening:
     /// "The quilt pops up before the lattice shows. I'd like this to be hidden
     /// while the calculations happen"). The renderer keeps its volumes — tearing
@@ -5179,6 +5205,9 @@ public struct LatticeLayerInputs: Equatable {
                 buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
                 fitCellMM: [Double] = [],
                 steppedCellMM: [Double] = [],
+                steppedShapeFit: Bool = true,
+                steppedDyadicSteps: Bool = false,
+                steppedCellStated: [Bool] = [],
                 hidden: Bool = false) {
         self.scene = scene
         self.params = params
@@ -5193,6 +5222,9 @@ public struct LatticeLayerInputs: Equatable {
         self.buildDirection = buildDirection
         self.fitCellMM = fitCellMM
         self.steppedCellMM = steppedCellMM
+        self.steppedShapeFit = steppedShapeFit
+        self.steppedDyadicSteps = steppedDyadicSteps
+        self.steppedCellStated = steppedCellStated
         self.hidden = hidden
     }
 
@@ -5206,6 +5238,9 @@ public struct LatticeLayerInputs: Equatable {
             && a.subfloorRetention == b.subfloorRetention
             && a.lineWidthMM == b.lineWidthMM && a.fitCellMM == b.fitCellMM
             && a.steppedCellMM == b.steppedCellMM
+            && a.steppedShapeFit == b.steppedShapeFit
+            && a.steppedDyadicSteps == b.steppedDyadicSteps
+            && a.steppedCellStated == b.steppedCellStated
             && a.dressingLevel == b.dressingLevel
             && a.hidden == b.hidden
     }
@@ -6064,6 +6099,18 @@ extension MetalMeshView {
                 }
                 if renderer.latticeSteppedCellMM != lat.steppedCellMM {
                     renderer.latticeSteppedCellMM = lat.steppedCellMM
+                    dirty = true
+                }
+                if renderer.latticeSteppedShapeFit != lat.steppedShapeFit {
+                    renderer.latticeSteppedShapeFit = lat.steppedShapeFit
+                    dirty = true
+                }
+                if renderer.latticeSteppedDyadicSteps != lat.steppedDyadicSteps {
+                    renderer.latticeSteppedDyadicSteps = lat.steppedDyadicSteps
+                    dirty = true
+                }
+                if renderer.latticeSteppedCellStated != lat.steppedCellStated {
+                    renderer.latticeSteppedCellStated = lat.steppedCellStated
                     dirty = true
                 }
                 if renderer.latticeFitCellMM != lat.fitCellMM {

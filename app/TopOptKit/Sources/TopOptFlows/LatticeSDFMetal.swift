@@ -955,6 +955,18 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var steppedCellMM: [Double] = [] {
         didSet { if steppedCellMM != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★ THE GRADING OPTIONS (2026-08-25) — see `steppedCellField`. Defaults are
+    /// every existing bake's behaviour.
+    var steppedShapeFit: Bool = true {
+        didSet { if steppedShapeFit != oldValue, scene != nil { rebakeCellField() } }
+    }
+    var steppedDyadicSteps: Bool = false {
+        didSet { if steppedDyadicSteps != oldValue, scene != nil { rebakeCellField() } }
+    }
+    /// Per region, TRUE where the stepped cell is the USER'S OWN number.
+    var steppedCellStated: [Bool] = [] {
+        didSet { if steppedCellStated != oldValue, scene != nil { rebakeCellField() } }
+    }
     /// ★ Whether the last bake actually laid down the STEPPED field. False when stepped
     /// was asked for but no region derived a cell — the ladder is drawn then, and the
     /// banner must keep saying so rather than claiming a picture it is not showing.
@@ -1395,7 +1407,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     densityLo: params.densitySpan.lo,
                     densityHi: params.densitySpan.hi,
                     densityGamma: params.gamma,
-                    latticeID: params.latticeID)
+                    latticeID: params.latticeID,
+                    shapeFit: steppedShapeFit,
+                    dyadicSteps: steppedDyadicSteps,
+                    cellIsUserStated: steppedCellStated)
             }
         }
         // ★ THE BAKE, SAID OUT LOUD. Every "no grading" report so far has been a

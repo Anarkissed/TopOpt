@@ -53,6 +53,9 @@ public struct LatticeDrawerRow: Equatable, Sendable {
         /// The relative density, as a PERCENT in the UI and a fraction in the
         /// model. Typeable only, and only under the per-region mode.
         case density
+        /// ★ The per-face CELL, in mm (2026-08-25, the grading options) — a
+        /// control only under the No-grade / Fit-shape modes; a fact otherwise.
+        case cell
         /// ★ THE IN-PLANE EXPAND, in mm (maintainer, 2026-08-17) — how far the
         /// slab reaches PAST the face it came from, in x and y, never in depth.
         case expand
@@ -70,7 +73,7 @@ public struct LatticeDrawerRow: Equatable, Sendable {
     /// looked on screen.
     public var unit: String {
         switch kind {
-        case .depth, .expand: return "mm"
+        case .depth, .expand, .cell: return "mm"
         case .density: return "%"
         case .fact: return ""
         }
@@ -164,6 +167,11 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                             // ★ Overrides the card's absolute % — the RELATIVE
                             // reading against the printable→quilt band (fix 5.5).
                             densityDisplay: String? = nil,
+                            // ★ The Cell row as a CONTROL (2026-08-25): only
+                            // under the No-grade / Fit-shape grading modes, and
+                            // shown directly ABOVE Density (his spec).
+                            cellControl: Bool = false,
+                            cellDisplay: String? = nil,
                             expandMM: Double = 0) -> LatticeRegionDrawer {
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
@@ -217,7 +225,8 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             // and that number was one multiplication away and not on screen.
             LatticeDrawerRow(label: "As lattice", value: c.latticedText),
             LatticeDrawerRow(label: "Saved", value: c.savedText),
-            LatticeDrawerRow(label: "Cell", value: c.cellText),
+            LatticeDrawerRow(label: "Cell", value: cellDisplay ?? c.cellText,
+                             kind: cellControl ? .cell : .fact),
             // ★ A FACT in every mode but one. Under per-region the user states
             // this number, so there it is the second control — and ONLY there
             // (maintainer, 2026-08-17: "ensure this can be editable — only when
@@ -241,6 +250,13 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
         if densityFirst, let i = rows.firstIndex(where: { $0.label == "Density" }) {
             let r = rows.remove(at: i)
             rows.insert(r, at: 0)
+        }
+        // ★ The CELL sits directly ABOVE the density whenever it is a control
+        // ("include a cell size value above 'density'" — 2026-08-25).
+        if cellControl, let ci = rows.firstIndex(where: { $0.label == "Cell" }) {
+            let r = rows.remove(at: ci)
+            let di = rows.firstIndex(where: { $0.label == "Density" }) ?? rows.count
+            rows.insert(r, at: di)
         }
         return LatticeRegionDrawer(headline: head, collapsedValue: c.heldText,
                                    verdict: c.verdict, rows: rows, held: held)
