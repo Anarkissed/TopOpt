@@ -3584,6 +3584,30 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// ★ THE LAYER IS BAKE-ONLY. It never draws itself; `encodeDepthPrepass` and
     /// `encode` draw it, into THIS renderer's G-buffer and THIS renderer's colour +
     /// depth attachments. That sentence is the entire task.
+    /// ★★★ THE LAYER'S DESIRED STATE, HELD BY THE HOST. Every wrapper below used
+    /// to write `latticeLayer?.x = v` — and on a frame where the layer does not
+    /// exist yet (it is created lazily right here), the write was silently
+    /// dropped on nil. A FRESH layer's first bake then ran with the DEFAULTS —
+    /// empty stepped cells — which bakes the dyadic ladder: the wrong-algorithm
+    /// flash he keeps reporting ("half-way through calculating, the quilt comes
+    /// up"), re-created on every teardown/rebuild of the layer. The host now
+    /// remembers what it wants and REPLAYS it onto a newly created layer before
+    /// its first scene bake, so "params before the scene" holds by construction
+    /// rather than by the luck of which update pass ran first.
+    private struct LatticeDesired {
+        var stressOverlay = false
+        var dressingLevel: Float = 0
+        var params = LatticeProxyParams()
+        var cellSweep: LatticeCellSweep?
+        var subfloorRetention: LatticeSubfloorRetention?
+        var lineWidthMM: Double = 0
+        var buildDirection = SIMD3<Double>(0, 0, 1)
+        var layerHeightMM: Double = 0
+        var steppedCellMM: [Double] = []
+        var fitCellMM: [Double] = []
+    }
+    private var latticeDesired = LatticeDesired()
+
     func setLatticeScene(_ scene: LatticeSDFScene?, token: Int) {
         guard let scene else {
             if latticeLayer != nil { latticeLayer = nil; latticeSceneToken = -1
@@ -3591,7 +3615,22 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             return
         }
         if latticeLayer == nil {
-            latticeLayer = LatticeSDFRenderer(device: device, buildPipeline: false)
+            let fresh = LatticeSDFRenderer(device: device, buildPipeline: false)
+            if let fresh {
+                // The replay — every didSet skips its rebake because the layer
+                // has no scene yet, so this is ten property writes and no work.
+                fresh.stressOverlay = latticeDesired.stressOverlay
+                fresh.dressingLevel = latticeDesired.dressingLevel
+                fresh.params = latticeDesired.params
+                fresh.cellSweep = latticeDesired.cellSweep
+                fresh.subfloorRetention = latticeDesired.subfloorRetention
+                fresh.lineWidthMM = latticeDesired.lineWidthMM
+                fresh.buildDirection = latticeDesired.buildDirection
+                fresh.layerHeightMM = latticeDesired.layerHeightMM
+                fresh.steppedCellMM = latticeDesired.steppedCellMM
+                fresh.fitCellMM = latticeDesired.fitCellMM
+            }
+            latticeLayer = fresh
             latticeSceneToken = -1
             latticeAppliedTints = nil
         }
@@ -3610,51 +3649,51 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// workspace when BOTH views are up; the lattice keeps its density ramp
     /// otherwise.
     var latticeStressOverlay: Bool {
-        get { latticeLayer?.stressOverlay ?? false }
-        set { latticeLayer?.stressOverlay = newValue }
+        get { latticeLayer?.stressOverlay ?? latticeDesired.stressOverlay }
+        set { latticeDesired.stressOverlay = newValue; latticeLayer?.stressOverlay = newValue }
     }
 
     /// ★ THE BOUNDARY DRESSING (rim / diagrid) the Finish setting asks for.
     var latticeDressingLevel: Float {
-        get { latticeLayer?.dressingLevel ?? 0 }
-        set { latticeLayer?.dressingLevel = newValue }
+        get { latticeLayer?.dressingLevel ?? latticeDesired.dressingLevel }
+        set { latticeDesired.dressingLevel = newValue; latticeLayer?.dressingLevel = newValue }
     }
 
     var latticeParams: LatticeProxyParams {
-        get { latticeLayer?.params ?? LatticeProxyParams() }
-        set { latticeLayer?.params = newValue }
+        get { latticeLayer?.params ?? latticeDesired.params }
+        set { latticeDesired.params = newValue; latticeLayer?.params = newValue }
     }
 
     /// The swept cell window — nil for a Fixed/Auto job, which is ONE cell size.
     /// Assigning rebakes the per-cell field once inside the layer, exactly as a cell
     /// size change does; it is never touched per frame.
     var latticeCellSweep: LatticeCellSweep? {
-        get { latticeLayer?.cellSweep }
-        set { latticeLayer?.cellSweep = newValue }
+        get { latticeLayer?.cellSweep ?? latticeDesired.cellSweep }
+        set { latticeDesired.cellSweep = newValue; latticeLayer?.cellSweep = newValue }
     }
 
     /// Sub-floor retention, as the job carries it. Assigning rebakes once.
     var latticeSubfloorRetention: LatticeSubfloorRetention? {
-        get { latticeLayer?.subfloorRetention }
-        set { latticeLayer?.subfloorRetention = newValue }
+        get { latticeLayer?.subfloorRetention ?? latticeDesired.subfloorRetention }
+        set { latticeDesired.subfloorRetention = newValue; latticeLayer?.subfloorRetention = newValue }
     }
 
     /// The printer's bead (mm) — see `LatticeSDFRenderer.lineWidthMM`.
     var latticeLineWidthMM: Double {
-        get { latticeLayer?.lineWidthMM ?? 0 }
-        set { latticeLayer?.lineWidthMM = newValue }
+        get { latticeLayer?.lineWidthMM ?? latticeDesired.lineWidthMM }
+        set { latticeDesired.lineWidthMM = newValue; latticeLayer?.lineWidthMM = newValue }
     }
 
     /// The part's model-space build direction — see `LatticeSDFRenderer.buildDirection`.
     var latticeBuildDirection: SIMD3<Double> {
-        get { latticeLayer?.buildDirection ?? SIMD3(0, 0, 1) }
-        set { latticeLayer?.buildDirection = newValue }
+        get { latticeLayer?.buildDirection ?? latticeDesired.buildDirection }
+        set { latticeDesired.buildDirection = newValue; latticeLayer?.buildDirection = newValue }
     }
 
     /// The printer's layer height (mm) — see `LatticeSDFRenderer.layerHeightMM`.
     var latticeLayerHeightMM: Double {
-        get { latticeLayer?.layerHeightMM ?? 0 }
-        set { latticeLayer?.layerHeightMM = newValue }
+        get { latticeLayer?.layerHeightMM ?? latticeDesired.layerHeightMM }
+        set { latticeDesired.layerHeightMM = newValue; latticeLayer?.layerHeightMM = newValue }
     }
 
     /// The cell the lattice bake actually laid down at a model point — see
@@ -3696,14 +3735,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// Stepped's per-region cell — see `LatticeSDFRenderer.steppedCellMM`.
     var latticeSteppedCellMM: [Double] {
-        get { latticeLayer?.steppedCellMM ?? [] }
-        set { latticeLayer?.steppedCellMM = newValue }
+        get { latticeLayer?.steppedCellMM ?? latticeDesired.steppedCellMM }
+        set { latticeDesired.steppedCellMM = newValue; latticeLayer?.steppedCellMM = newValue }
     }
 
     /// Fit's per-region cell — see `LatticeSDFRenderer.fitCellMM`.
     var latticeFitCellMM: [Double] {
-        get { latticeLayer?.fitCellMM ?? [] }
-        set { latticeLayer?.fitCellMM = newValue }
+        get { latticeLayer?.fitCellMM ?? latticeDesired.fitCellMM }
+        set { latticeDesired.fitCellMM = newValue; latticeLayer?.fitCellMM = newValue }
     }
 
     /// Face-role tints on the lattice (the preview's bar A4), baked from the SAME

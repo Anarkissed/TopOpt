@@ -1294,12 +1294,37 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// from `setScene` and from a cell-size param change — never from `draw`.
     private func rebakeCellField() {
         guard let scene else { return }
+        // ★★★ NEVER BAKE THE WRONG ALGORITHM (his standing rule — the quilt "must
+        // never come up"). When the scene says STEPPED but the per-region cells
+        // have not reached this layer yet (they arrive through a separate property
+        // write), the old fallthrough baked the DYADIC LADDER and marked it
+        // current — the wrong algorithm on screen for the frames until the cells
+        // landed. The host now replays its state onto a fresh layer before the
+        // first bake, so this gate should never fire; it stands anyway, because a
+        // deferred bake (the layer simply stays hidden — `latticeFieldIsCurrent`
+        // false) is strictly better than a wrong picture.
+        if scene.algorithm == "stepped",
+           steppedCellMM.isEmpty || steppedCellMM.count != scene.regions.count,
+           scene.regions.contains(where: { $0.role == .include }) {
+            NSLog("DIAG stepped bake DEFERRED — algorithm is stepped but "
+                  + "steppedCellMM has \(steppedCellMM.count) entries for "
+                  + "\(scene.regions.count) regions; layer stays hidden rather "
+                  + "than baking the ladder")
+            return
+        }
         // ★ DOES THE DECLARED SET QUALIFY FOR RETENTION? Core's own arithmetic, on
         // core's own ceiling — and its guard that no demand field means no retention,
         // because an unmeasured region is not an unloaded one.
         let retains = subfloorQualifiesNow(scene)
         subfloorRetained = retains
         var baked: LatticeCellField?
+        // ★ ONE CANDIDATE MAP AND ONE IN-PLANE FIELD PER BAKE. The candidate array
+        // was built THREE times per bake (fit field, rim field, diagnostics) and
+        // the in-plane distance BFS ran twice — the diagnostics block re-ran the
+        // whole multi-source sweep just to print two numbers. On his 128-grid
+        // part that is real seconds of "quite some time to load" for nothing.
+        let candidate = scene.occupancy.values.map { $0 > 0.5 }
+        var steppedBoundary: [[Double]?] = []
         // ★★★ STEPPED IS TRIED FIRST, AND THAT ORDER IS THE WHOLE POINT (maintainer,
         // 2026-08-22: "I attempted a Stepped lattice preview and it didn't work").
         //
@@ -1330,11 +1355,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     // already covered by the floor"). Measured in 3-D it is ~half the
                     // wall thickness everywhere and moves 2.9% of the cells; in-plane it
                     // spans the face.
-                    boundaryDistancePerRegion: LatticeBoundaryDistance.inPlanePerRegion(
-                        regions: scene.regions,
-                        candidate: scene.occupancy.values.map { $0 > 0.5 },
-                        nx: scene.occupancy.nx, ny: scene.occupancy.ny,
-                        nz: scene.occupancy.nz, spacing: scene.occupancy.spacing),
+                    boundaryDistancePerRegion: {
+                        steppedBoundary = LatticeBoundaryDistance.inPlanePerRegion(
+                            regions: scene.regions,
+                            candidate: candidate,
+                            nx: scene.occupancy.nx, ny: scene.occupancy.ny,
+                            nz: scene.occupancy.nz, spacing: scene.occupancy.spacing)
+                        return steppedBoundary
+                    }(),
                     // ★ THE WALL PER VOXEL, along each region's own normal (his ruling,
                     // 2026-08-24) — so a cell over a thin sliver divides to what its
                     // own material holds instead of the sliver pinning the whole face.
@@ -1353,7 +1381,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     // the full outline — a cell must fit the shape at open edges too.
                     rimDistancePerRegion: LatticeBoundaryDistance.inPlanePerRegion(
                         regions: scene.regions,
-                        candidate: scene.occupancy.values.map { $0 > 0.5 },
+                        candidate: candidate,
                         nx: scene.occupancy.nx, ny: scene.occupancy.ny,
                         nz: scene.occupancy.nz, spacing: scene.occupancy.spacing,
                         seed: Self.attachedSeed(scene: scene)),
@@ -1382,11 +1410,15 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // has no plane to drop) are different failures with different fixes.
             do {
                 let sc = scene
-                let pr = LatticeBoundaryDistance.inPlanePerRegion(
-                    regions: sc.regions,
-                    candidate: sc.occupancy.values.map { $0 > 0.5 },
-                    nx: sc.occupancy.nx, ny: sc.occupancy.ny,
-                    nz: sc.occupancy.nz, spacing: sc.occupancy.spacing)
+                // ★ THE FIELD THE BAKE ALREADY BUILT — recomputing the whole BFS
+                // for a log line was a third of the bake's cost.
+                let pr = steppedBoundary.isEmpty
+                    ? LatticeBoundaryDistance.inPlanePerRegion(
+                        regions: sc.regions,
+                        candidate: candidate,
+                        nx: sc.occupancy.nx, ny: sc.occupancy.ny,
+                        nz: sc.occupancy.nz, spacing: sc.occupancy.spacing)
+                    : steppedBoundary
                 let nonNil = pr.filter { $0 != nil }.count
                 let dmax = pr.compactMap { $0?.max() }.max() ?? 0
                 let normals = sc.regions.map {
@@ -1516,32 +1548,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                 origin: SIMD3<Float>) -> [Float] {
         var out = [Float](repeating: 0, count: regions.count)
         for (i, r) in regions.enumerated() where r.role == .include && r.kind == .face {
-            let n = simd_normalize(r.normal)
-            guard simd_length(n) > 0.5 else { continue }
             let cell = (i < cellMM.count && cellMM[i] > 0) ? cellMM[i] : fallbackCellMM
-            guard cell > 0 else { continue }
-            let a = abs(n)
-            let axis = a.x >= a.y && a.x >= a.z ? 0 : (a.y >= a.z ? 1 : 2)
-            guard a[axis] > 0.99 else { continue }
-            // Where the near cap sits inside the cell, measured along the grid's own axis.
-            // ★ THE CAP'S COORDINATE ALONG THE GRID'S OWN AXIS. The shader tiles on the
-            // world axis, so the phase must be measured there too — `dot(·, n)` is the
-            // same number with `n[axis]`'s sign, which cancels below.
-            let s0 = simd_dot(r.origin - SIMD3<Double>(origin), n)
-            let t = s0 / cell
-            var frac = t - t.rounded(.down)            // in [0, 1)
-            if n[axis] < 0, frac != 0 { frac = 1 - frac }
-            // ★★★ AND IT IS KEPT OFF THE INTEGER BOUNDARY. This is packed as
-            // `axis + fraction` into ONE half-float channel, and a half near 2.0 resolves
-            // to ~0.001 — so a fraction of 0.9995 packs as 1.9995, rounds to 2.0, and the
-            // shader decodes AXIS 2 with no shift at all. The correction then lands on the
-            // wrong axis and the region is exactly as mis-phased as if there were none,
-            // which is the quilt coming back after a depth change moved the fraction.
-            //
-            // A cap within a thousandth of a cell of a boundary IS on the boundary; saying
-            // so removes the encoding's only ambiguous value.
-            if frac > 0.999 || frac < 0.001 { frac = 0 }
-            out[i] = Float(axis) + Float(frac)
+            // ★ ONE RULE, ONE IMPLEMENTATION — the same helper the stepped bake
+            // uses per cell, so the encoder and the per-cell rescale cannot
+            // drift apart (the 2026-08-25 shrunk-cell quilt was exactly that).
+            if let ph = LatticePreviewOccupancy.tilingPhase(region: r, cellMM: cell,
+                                                           origin: origin) {
+                out[i] = ph
+            }
         }
         return out
     }
