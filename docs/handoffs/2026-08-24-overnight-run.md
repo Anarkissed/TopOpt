@@ -176,3 +176,59 @@ Minimum to merge: move the refusal before the writes and onto both export paths;
 census must run (or refuse as unverified) when layer_height is 0; per-tip
 anchored/merged flags; gate fill mat on quiescence; fix or remove the pad logic;
 refuse scale without a window; apply the base cut to the soup STL or document it.
+
+---
+
+# EVENING SESSION (after his desk review, 2026-08-24 ~18:00–20:00)
+
+His review found real failures; each was measured, fixed, tested, shipped to the
+sim. Eleven commits since the morning. The DOUBLED test copy's saved state was
+left untouched (wizard changes made during verification were never saved).
+
+## Fixed, with the measurement that found it
+1. **Tap callout lied** ("5% · 0.18 mm at a 2.00 mm cell"): the BAKE was right —
+   LatticeLiftProbe shows every graded size lifted exactly to its printability
+   floor (struts 0.45 mm) — the callout re-baked its own unlifted field. It now
+   reads the renderer's own activation (`bakedActivationAt`, same owning-cell
+   search as the size).
+2. **Default Grade's 2 mm haze**: ladder base was min(wants) — one 3.44 mm sliver
+   class (want 1.72 mm = his measured cells) pulled the whole ladder down. Base
+   now anchors at the wants' p05 (5.16 mm here); sub-p05 slivers go SOLID.
+3. **Stress overlay flat blue**: strut paint was baked from the GRADING demand
+   (utilisation-capped ≈ 0); now from stressDemand, the measured field on the
+   same percentile ramp as the solid plot. Verified in his own screenshots.
+4. **Never-overshoot (his ruling)**: fit divides min(depth, measured wall) — his
+   faces now derive 10.31/12.03 (verified in-app: stated=[10.312, 12.031]).
+   Local divisor round→ceil with 1e-6 slack, reading the wall at the cell's own
+   CENTRE. Two traps found on the way: footprint-MIN + ceil divided 140/150
+   cells (every footprint near a curved outline touches a short read), and an
+   unmeasured centre must mean "unconstrained", not "thin". Invariant test:
+   0 overshoots, 209 exact fits kept.
+5. **Mid-bake quilt hidden** (his request): a `hidden` flag rides the lattice
+   layer while a scene bakes, and the update pass now applies PARAMS BEFORE the
+   scene — the first bake of a scene is the right bake (the quilt was the old
+   params' bake flashing until the diffs landed).
+6. **Legend cell line**: it was emitted and a one-line limit ate it. Fixed.
+7. **Per-face Density control, Aesthetic only** (his spec): the Density row in
+   each face's drawer is now a control in aesthetic mode (scrub + keypad),
+   clamped [printable floor at that face's cell → 100% solid]; a user-stated
+   face density governs over the sim field. Structural keeps the certifiable
+   band. He confirmed the floor keys on the strut LINE WIDTH (0.45), which is
+   what core's law uses.
+8. **Stepped sample answers the floor with STRUCTURE**: coarse half = the
+   floor's worth of derived cells (single-cell ⇒ 2×2×2 block, half at the full
+   derived cell) vs a finer non-dyadic half, at constant block size. NOTE: a
+   literal "ONE cell filling half the cube" needs a non-cubic sample block —
+   the generator builds cubes; say the word and I'll reshape it.
+
+## Still open
+- **Rim at attached edges**: stepped bakes rim cells (solidRim census) but the
+  band is ~1.3–1.7 mm — likely too thin to read as "solid edges" even when it
+  draws; DOUBLED has no rim mechanism at all (its shape-fit solid edge, now
+  thicker via the p05 base, is the only solid it gets). Needs either a wider rim
+  rule (e.g. scale with the local cell) — a look decision for him — and a second
+  texture channel for doubled (the phase channel is free on the dyadic path).
+- **Lattice depth vs chamfer** (his img 5): not yet measured.
+- **His answers logged**: watertight lattice STL = core-side boolean, queued;
+  stress display = relative in Aesthetic / absolute in Structural (structural
+  half not yet wired); organic = hands off until he says.
