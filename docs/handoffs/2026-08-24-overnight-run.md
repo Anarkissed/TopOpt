@@ -241,3 +241,34 @@ left untouched (wizard changes made during verification were never saved).
 - **His answers logged**: watertight lattice STL = core-side boolean, queued;
   stress display = relative in Aesthetic / absolute in Structural (structural
   half not yet wired); organic = hands off until he says.
+
+## Late round (his 8 items, 2026-08-24 evening) — commits ac0dcefe..977fee72
+1. **Stepped sample re-made from scratch** (his verdict + spec): centre-and-shell —
+   one envelope two members across, centre = the floor's worth of derived cells
+   (single-cell ⇒ ONE big cell "filling half the cube", floor 2 ⇒ 2×2×2), wrapped
+   by a one-step-finer shell ("the grade around"). The toggle changes STRUCTURE at
+   constant block size. `LatticeSamplePatch.centreAndShell`, test holds the envelope.
+2. **"Quilt is back on default density" root-caused**: the old clamp bug left a
+   STORED 20% on that face, and stored beats derived. Now an undialled face shows
+   "Auto · N%" and typing 0 clears the override back to Auto — that face needs one
+   0-entry to shed the stale 20%.
+3. **Aesthetic "Won't certify" popup gone**: `latticeDiagnosis` keys on the STAGE
+   floor, not core's accuracy floor of 5.
+4. **2-cell flash**: the 128³ wall walk ran on every SwiftUI body evaluation; now
+   memoised per scene token + input fingerprint (`LatticeRegionCellMemo`). The
+   mid-bake `hidden` gate from earlier stands.
+5. **Retention switch is structural-only** (his "REMOVE the too-thin-to-certify
+   button from the aesthetic mode").
+6. **Labels**: ALL modifiable rows white + bold (his final ruling after one
+   round-trip both ways); Density's VALUE keeps its extra size/weight.
+7. **Density editability (his item 7)**: kept editable, per-face, aesthetic only,
+   clamped into [printable floor, quilt] with relative % display and Auto/0-clear —
+   it cannot select an unprintable or quilted value, so no grey-out needed.
+
+Full suite 2199 green. Installed to the iPad sim (Debug, over com.nadim.topopt).
+
+**Still open from this round**: holes in the stepped lattice + the stepped solid
+rim at the chamfer (his img 5) — needs the live bake's `DIAG rim` /
+`DIAG steppedGrade` lines from HIS part; the attached-only rim seeding is the
+suspect (a seed miss ⇒ every distance is the far sentinel ⇒ zero solid). Open the
+stepped copy and arm the preview; I read the log passively.
