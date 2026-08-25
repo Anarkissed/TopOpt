@@ -952,7 +952,10 @@ public struct LatticeSetupWizard: View {
         HStack(spacing: DS.Space.xs) {
             Text(String(format: "%.0f ms", lastLatencyMS))
                 .font(.system(size: 11, weight: .bold)).monospacedDigit()
-            Text("\(model.stageTriangleCount) tris")
+            // ★ THE MESH ON SCREEN, not the uniform-block PREDICTION — the
+            // prediction ignores the transition, so it read 118,920 whatever the
+            // stepped sample drew and cost an hour of "nothing changed" (2026-08-25).
+            Text("\((mesh?.indices.count ?? 0) / 3) tris")
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(DS.Color.textQuaternary.color)
         }

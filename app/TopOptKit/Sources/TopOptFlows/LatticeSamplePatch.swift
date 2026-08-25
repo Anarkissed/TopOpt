@@ -369,11 +369,21 @@ public enum LatticeSamplePatch {
 
         // The grade around: whole shell cells, the core's skipped — the hole is
         // exactly (2k)³ shell cells, so its boundary lies on shell-cell planes.
+        //
+        // ★ AND A QUARTER IS CUT AWAY. A shell that goes all the way around hides
+        // the one thing the sample exists to show — the coarse centre sat fully
+        // enclosed and the block read as a uniform fine lattice (the old build
+        // only "showed" the centre through its clipping wreckage). One vertical
+        // quarter of shell cells is omitted, cell-granular like everything else,
+        // so the section reads: shell outside, the floor's big cell(s) within —
+        // his sentence, visible.
+        let mid = 2 * k
         for cz in -1...across { for cy in -1...across { for cx in -1...across {
             let coreCell = cx * S >= coreLo && (cx + 1) * S <= coreHi
                 && cy * S >= coreLo && (cy + 1) * S <= coreHi
                 && cz * S >= coreLo && (cz + 1) * S <= coreHi
             if coreCell { continue }
+            if cx >= mid && cy >= mid { continue }      // the cutaway quarter
             let ox = cx * S, oy = cy * S, oz = cz * S
             for s in lattice.struts {
                 let a = LatticeType.Node(s.a.x + ox, s.a.y + oy, s.a.z + oz)

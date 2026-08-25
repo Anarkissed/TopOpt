@@ -499,6 +499,11 @@ public struct LatticeWizardModel: Equatable, Sendable {
         let cells = stage == .cell
             ? 1
             : max(1, Int((Double(cellsAcross) * max(0, min(1, progress))).rounded()))
+        // ★ THE SAMPLE, SAID OUT LOUD — the 2026-08-25 round burned an hour on a
+        // sample that never changed while every control claimed it should.
+        NSLog("DIAG sampleMesh stage=\(stage) transition=\(cellTransition.rawValue) "
+              + "k=\(steppedCoarsePerHalf.map(String.init) ?? "nil") cells=\(cells) "
+              + "cellMM=\(String(format: "%.2f", cellMM)) derived=\(derivedCellMM != nil)")
         // ★ §10 — THE FINISH REACHES THE GEOMETRY. This call omitted `boundary`
         // entirely, so None / Rim / Skin all produced the same mesh and the chips
         // were decoration. The lone cell shows no boundary — a single cell has no
@@ -509,7 +514,22 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // algorithms differ, which is also where the control lives.
         return LatticeSamplePatch.mesh(lattice: lattice, cellMM: cellMM,
                                        cells: cells,
-                                       relativeDensity: relativeDensity,
+                                       // ★ CLAMPED FOR LEGIBILITY, DISPLAY-ONLY,
+                                       // IN-THE-PART ONLY (2026-08-25): his
+                                       // aesthetic band stores max = 1.0, and at
+                                       // solid density every strut fuses — the
+                                       // block sample WAS the quilt ("It looks
+                                       // terrible"). The block's job is
+                                       // STRUCTURE, so its struts draw at a
+                                       // density that never fuses. The ONE CELL
+                                       // view keeps the honest thickness (that
+                                       // view exists to show it), and the
+                                       // model's own value round-trips to
+                                       // maxRelativeDensity on Save & Exit and
+                                       // must not move.
+                                       relativeDensity: stage == .cell
+                                           ? relativeDensity
+                                           : min(0.35, relativeDensity),
                                        boundary: stage == .cell ? .none : boundary,
                                        transition: stage == .cell
                                            ? .defaultGrade : cellTransition,
