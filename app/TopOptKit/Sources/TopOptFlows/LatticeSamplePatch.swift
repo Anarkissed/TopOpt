@@ -293,9 +293,14 @@ public enum LatticeSamplePatch {
                 // sample, and a block so dense it read as a solid. The floor is a
                 // statement about how many cells cross a MEMBER, so it sets the
                 // first cube; the grade steps that follow are the grade's own.
-                let steps = dyadicSteps ? [2, 4, 8] : [3, 4, 5]
+                // ★ TWICE THE USUAL SIZE, NOT FOUR TIMES (his 2026-08-25: "I meant
+                // to only make the sample twice the usual size - have a single cell
+                // for the entire cube and then the rest is graded"). Two cubes: the
+                // first is the single cell spanning the whole depth, the second is
+                // the graded one beside it.
+                let next = dyadicSteps ? 2 * k : 3 * k
                 return gradedRun(lattice: lattice, cellMM: cellMM * Double(k),
-                                 divisors: [k] + steps,
+                                 divisors: [k, next],
                                  relativeDensity: relativeDensity, sides: sides)
             }
             let n = Swift.max(2, cells)

@@ -585,6 +585,11 @@ extension LatticePreviewOccupancy {
     ///
     /// Returns nil when no region states a cell — the caller then keeps the ladder it
     /// already had rather than drawing an empty part.
+    /// ★ HOW FAR THE SHAPE BAND'S SMOOTHING MAY SUBDIVIDE, on top of whatever the
+    /// FIT itself demands. Three keeps a visible grade at the outline (S, S/2, S/3)
+    /// without turning a face into fabric — see the ramp's own note.
+    static let shapeBandMaxDivisor = 3
+
     /// ★★★ ONE PHASE RULE. The cap-flush tiling shift for ONE region at ONE cell
     /// size, as `axis + fraction` (see `LatticeCellField.steppedPhase`). This is
     /// the single implementation behind BOTH the per-region encoder
@@ -1121,8 +1126,30 @@ extension LatticePreviewOccupancy {
                                         // right up to the band's inner edge, returning to
                                         // the full cell only OUTSIDE the band. That is
                                         // what "a band N mm wide" has to mean.
+                                        // ★★★ THE BAND SMOOTHS; IT DOES NOT DRIVE TO
+                                        // THE FLOOR (his 2026-08-25 tap: a 12.03 mm
+                                        // region cell reading 2.01 mm — S/6 — with a
+                                        // 0.45 mm strut, one bead, over most of the
+                                        // face. That is the quilt: a correctly meshed
+                                        // lattice subdivided into bead-thin threads).
+                                        //
+                                        // ★ THE RAMP RAN TO `nCap`, the FINEST PRINTABLE
+                                        // cell. With his 10 mm reach on a face only a few
+                                        // tens of millimetres across, most of the wall sits
+                                        // inside the band, so most of the wall went to the
+                                        // floor — under every algorithm and every toggle,
+                                        // because the band does not read either.
+                                        //
+                                        // The FIT term above is the one that must be free:
+                                        // it subdivides exactly where a cell will not fit
+                                        // inside the outline, which is geometry. This ramp
+                                        // is the aesthetic on top of it — "fit first, then
+                                        // smooth" — so it is capped at a couple of steps.
+                                        // The shape is still fitted; the wall is no longer
+                                        // fabric.
                                         let levels = Double(nCap - 1) * (1 - t)
-                                        n = Swift.max(n, 1 + Int(levels.rounded(.up)))
+                                        let ramp = 1 + Int(levels.rounded(.up))
+                                        n = Swift.max(n, Swift.min(ramp, Self.shapeBandMaxDivisor))
                                     }
                                 }
                                 if dyadicSteps {

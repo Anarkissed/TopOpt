@@ -1451,10 +1451,9 @@ public struct WorkspacePlaceholder: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre
-        // ★ …and LEFT of it: trailing inset shrinks the span it centres in, which
-        // moves its centre left by half. Inert on every stage without a mode name,
-        // where it keeps the exact centre it always had.
-        .padding(.trailing, latticeStageModeShown ? Self.secondRowSplit : 0)
+        // ★ DIRECTLY BENEATH IT, DEAD CENTRE (his 2026-08-25: "Can you put 'See
+        // Results' directly beneath 'Aesthetic' right in the center of the
+        // screen?"). Only the transient banners step aside now.
     }
 
     /// The orientation gizmo lives in the ABSOLUTE top-right corner, ALWAYS (design-overhaul
