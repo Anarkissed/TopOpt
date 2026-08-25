@@ -767,6 +767,74 @@ public final class ProjectModel: ObservableObject {
         lattice.selectableCellMM[ref.key] = Swift.min(Swift.max(v, lo), hi)
     }
 
+    /// ★★★ THE DIAL IS LINEAR IN STRUT WIDTH, NOT IN DENSITY (his ruling,
+    /// 2026-08-25: "Make 1% be the printability floor. Make 100% be the quilt" —
+    /// after "density is set to nearly double … and there's no difference").
+    ///
+    /// ★ MEASURED, ON HIS OWN 13 mm CELL. Mapping the dial through RHO puts most of
+    /// it where nothing happens: core's strut law saturates, so
+    ///
+    ///     33% → Ø 3.37 mm    62% → Ø 4.99 mm    75/90/100% → Ø 4.99 mm
+    ///
+    /// The top 38 % of the control is mechanically dead — no setting in it can
+    /// change a pixel — which is exactly the "no difference" he photographed. And
+    /// the band it mapped through came back rho [0.000, 1.000] at that cell, so the
+    /// printable floor and the quilt he ruled were not in force at all.
+    ///
+    /// So the dial's ends are the two WIDTHS he named — one extruded bead, and the
+    /// width at which neighbouring struts fuse — and the percentage runs linearly
+    /// between them. Every step moves the picture by the same amount, and 100 % is
+    /// the fattest strut the law can actually produce rather than a number the
+    /// geometry ignores.
+    public func latticeDensityBandDiametersMM(cellMM: Double) -> (lo: Double, hi: Double) {
+        let lat = LatticeType.named(lattice.topologyID)
+        let bead = Swift.max(0.05, printParams.strutLineWidthMM)
+        // The law's own ceiling: what a fully dense cell of this size produces.
+        let solid = 2 * lat.strutRadiusMM(relativeDensity: 1, cellMM: cellMM)
+        // The quilt: neighbouring struts meet when the diameter reaches half the
+        // cell. Whichever comes first is the top of the dial.
+        let quilt = Swift.min(cellMM / 2, solid)
+        // ★ AND THE BOTTOM IS WHAT THE LAW CAN ACTUALLY DRAW. A bead is the
+        // PRINTABLE floor, but on a coarse cell core's curve cannot produce a
+        // strut that thin at any density — at 13 mm its thinnest is 1.18 mm — so
+        // anchoring the dial at 0.45 mm spent its first tenth on a width nothing
+        // can render. The floor is the thinner of the two, measured, not assumed.
+        let floorRho = lat.printabilityDensityFloor(lineWidthMM: bead, cellMM: cellMM)
+        let thinnest = 2 * lat.strutRadiusMM(relativeDensity: floorRho, cellMM: cellMM)
+        let lo = Swift.max(bead, thinnest)
+        return (Swift.min(lo, quilt * 0.5), Swift.max(quilt, lo * 2))
+    }
+
+    /// A stored density → the percent to SHOW, 1…100 across the width band.
+    public func latticeDensityPercent(rho: Double, cellMM: Double) -> Double {
+        guard cellMM > 0 else { return 1 }
+        let b = latticeDensityBandDiametersMM(cellMM: cellMM)
+        guard b.hi > b.lo else { return 1 }
+        let d = 2 * LatticeType.named(lattice.topologyID)
+            .strutRadiusMM(relativeDensity: rho, cellMM: cellMM)
+        let t = (d - b.lo) / (b.hi - b.lo)
+        return 1 + 99 * Swift.max(0, Swift.min(1, t))
+    }
+
+    /// A typed percent → the density to STORE. The inverse of the above, through
+    /// core's own curve (`relativeDensity(strutRadiusMM:)` bisects it), so the
+    /// number he types is the strut he gets.
+    public func latticeDensityForPercent(_ pct: Double, cellMM: Double) -> Double {
+        guard cellMM > 0 else { return 0 }
+        let b = latticeDensityBandDiametersMM(cellMM: cellMM)
+        let t = Swift.max(0, Swift.min(1, (pct - 1) / 99))
+        let d = b.lo + t * (b.hi - b.lo)
+        let rho = LatticeType.named(lattice.topologyID)
+            .relativeDensity(strutRadiusMM: d / 2, cellMM: cellMM)
+        return Swift.min(1, Swift.max(0, rho))
+    }
+
+    /// ★ WHERE "AUTO" SITS — his ruling: "Place Auto in the middle - whatever looks
+    /// nicest (not necessarily 50%)." 45 % of the width band draws a truss with
+    /// real material in it and windows still clearly open; the floor drew a wall you
+    /// could see straight through, which is what made a fresh face look empty.
+    public static let latticeAutoDensityPercent: Double = 45
+
     /// ★★★ THE AESTHETIC DENSITY BAND FOR A FACE (his ruling, 2026-08-24 night):
     /// the low end is the printable limit at that face's cell, "the max is the
     /// QUILT" — the density where the struts fuse and the windows close — never

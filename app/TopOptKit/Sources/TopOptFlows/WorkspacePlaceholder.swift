@@ -1420,6 +1420,17 @@ public struct WorkspacePlaceholder: View {
     /// every workspace state it appears in (design-overhaul round 2, item 8). Vertically
     /// aligned with the top-left chrome row so it reads as part of the top bar; the chrome is
     /// top-left and the gizmo top-right, so the centre is always clear.
+    /// ★★★ THE SECOND ROW'S SPLIT (his ruling, 2026-08-25: "make it so Aesthetic is
+    /// the top, See results is below that and to the left and whatever else is there
+    /// is below and to the right").
+    ///
+    /// Three things wanted the top-centre slot — the MODE name, See Results, and
+    /// whichever status banner is up — and all three were pinned to the same y with
+    /// the same centring, so they drew on top of each other. The mode keeps the top
+    /// row; the other two drop below it and separate by this much, one either side
+    /// of the centre line.
+    private static let secondRowSplit: CGFloat = 300
+
     private var seeResultsChip: some View {
         VStack {
             Button { viewOriginal = false } label: {
@@ -1433,10 +1444,17 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.6).color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
-            .padding(.top, DS.Space.xl3)   // align with the top chrome row
+            // ★ BELOW THE MODE NAME, never on its row — see `secondRowSplit`.
+            .padding(.top, DS.Space.xl3 + (latticeStageModeShown
+                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
+                                           : 0))
             Spacer()
         }
         .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre
+        // ★ …and LEFT of it: trailing inset shrinks the span it centres in, which
+        // moves its centre left by half. Inert on every stage without a mode name,
+        // where it keeps the exact centre it always had.
+        .padding(.trailing, latticeStageModeShown ? Self.secondRowSplit : 0)
     }
 
     /// The orientation gizmo lives in the ABSOLUTE top-right corner, ALWAYS (design-overhaul
@@ -3692,6 +3710,8 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, PageChrome.edge + (latticeStageModeShown
                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
                                           : 0))
+        // ★ AND RIGHT OF CENTRE, so it clears See Results on the same row.
+        .padding(.leading, latticeStageModeShown ? Self.secondRowSplit : 0)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: strutBakeInFlight)
         .accessibilityIdentifier("strut-baking-banner")
@@ -3884,6 +3904,8 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, PageChrome.edge + (latticeStageModeShown
                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
                                           : 0))
+        // ★ AND RIGHT OF CENTRE, so it clears See Results on the same row.
+        .padding(.leading, latticeStageModeShown ? Self.secondRowSplit : 0)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: latticeSimIsRunning)
         .accessibilityIdentifier("sim-running-banner")
@@ -9598,12 +9620,15 @@ public struct WorkspacePlaceholder: View {
         let card = latticeSelectableCards[ref.key]
         let band = project.latticeAestheticDensityBand(cellMM: card?.cellMM ?? 0)
         let userStated = project.lattice.selectableDensity[ref.key] != nil
+        // ★★★ THE DIAL IS LINEAR IN STRUT WIDTH (his 2026-08-25 ruling and the
+        // saturation measured on his own cell — see `latticeDensityPercent`).
+        let cardCell = card?.cellMM ?? 0
+        let autoRho = project.latticeDensityForPercent(
+            ProjectModel.latticeAutoDensityPercent, cellMM: cardCell)
         let storedRho = project.latticeSelectableDensity(ref, in: g.id)
-            ?? card?.relativeDensity ?? 0
-        let relativePct = band.hi > band.lo
-            ? (Swift.min(Swift.max(storedRho, band.lo), band.hi) - band.lo)
-                / (band.hi - band.lo) * 100
-            : 0
+            ?? (cardCell > 0 ? autoRho : (card?.relativeDensity ?? 0))
+        let relativePct = project.latticeDensityPercent(rho: storedRho,
+                                                        cellMM: cardCell)
         // ★ THE CELL ROW IS A CONTROL ONLY UNDER THE NEW GRADING OPTIONS (his
         // 2026-08-25 instruction: "Only make the cell size visible with the new
         // grading options") — under Full it stays the fact row it always was.
@@ -9649,9 +9674,9 @@ public struct WorkspacePlaceholder: View {
                               // 0 (or less) clears back to AUTO — the one way
                               // out of a stored override.
                               let f: Double? = pct <= 0 ? nil
-                                  : aesthetic && band.hi > band.lo
-                                  ? band.lo + Swift.min(pct, 100)
-                                      / 100 * (band.hi - band.lo)
+                                  : aesthetic
+                                  ? project.latticeDensityForPercent(
+                                        Swift.min(pct, 100), cellMM: cardCell)
                                   : pct / 100
                               project.writeLatticeDensity(
                                   ref, fraction: f, cellMM: card?.cellMM ?? 0)
