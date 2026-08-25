@@ -54,6 +54,77 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
     public let nodes: [Node]         // canonical cell nodes (for the node blobs)
     public let densityCoefficient: Double  // K in ρ ≈ K·(r/L)²
 
+    // MARK: - ★★★ WHERE THE LATTICE FUSES
+
+    private static let separationCache = NSCache<NSString, NSNumber>()
+
+    /// ★★★ THE DIAMETER, AS A FRACTION OF THE CELL, AT WHICH THIS TOPOLOGY'S STRUTS
+    /// TOUCH — the quilt, expressed geometrically.
+    ///
+    /// ★ IT IS NOT `1/2`, AND ASSUMING SO IS WHY THE QUILT SURVIVED EVERY SETTING
+    /// (his 2026-08-25). An octet's struts lie on the FACE DIAGONALS, so a pair of
+    /// neighbouring parallel struts is `cell/(2√2)` apart — they meet a full √2
+    /// before a diameter of `cell/2`. A simple cubic's struts DO run along the
+    /// edges and meet at `cell`. One number cannot serve both.
+    ///
+    /// So it is MEASURED off the topology's own canonical struts: the smallest
+    /// distance between two struts that do not share an endpoint, taken over the
+    /// cell and its immediate neighbours (a strut's closest companion is often in
+    /// the next cell, not its own). Cached — the answer is a property of the
+    /// topology, not of the call.
+    public var separationFactor: Double {
+        if let hit = Self.separationCache.object(forKey: id as NSString) {
+            return hit.doubleValue
+        }
+        let S = Double(denominator)
+        func p(_ n: Node) -> SIMD3<Double> {
+            SIMD3(Double(n.x) / S, Double(n.y) / S, Double(n.z) / S)
+        }
+        /// Distance between two segments, and whether they share an endpoint.
+        func gap(_ a0: SIMD3<Double>, _ a1: SIMD3<Double>,
+                 _ b0: SIMD3<Double>, _ b1: SIMD3<Double>) -> Double {
+            let u = a1 - a0, v = b1 - b0, w = a0 - b0
+            let a = simd_dot(u, u), b = simd_dot(u, v), c = simd_dot(v, v)
+            let d = simd_dot(u, w), e = simd_dot(v, w)
+            let den = a * c - b * b
+            var s = 0.0, t = 0.0
+            if den > 1e-12 {
+                s = Swift.max(0, Swift.min(1, (b * e - c * d) / den))
+                t = Swift.max(0, Swift.min(1, (a * e - b * d) / den))
+                // one refinement, so a clamped pair still reports its true gap
+                s = Swift.max(0, Swift.min(1, (b * t - d) / Swift.max(a, 1e-12)))
+                t = Swift.max(0, Swift.min(1, (b * s + e) / Swift.max(c, 1e-12)))
+            } else {
+                t = Swift.max(0, Swift.min(1, e / Swift.max(c, 1e-12)))
+            }
+            return simd_length(w + u * s - v * t)
+        }
+        let base = struts.map { (p($0.a), p($0.b)) }
+        var best = Double.infinity
+        for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+            let off = SIMD3<Double>(Double(dx), Double(dy), Double(dz))
+            for (i, s) in base.enumerated() {
+                for (j, t) in base.enumerated() {
+                    if dx == 0, dy == 0, dz == 0, j <= i { continue }
+                    let b0 = t.0 + off, b1 = t.1 + off
+                    // Struts that MEET are not candidates — a shared node is a
+                    // junction, not a collision.
+                    let shares = [s.0, s.1].contains { q in
+                        simd_length(q - b0) < 1e-9 || simd_length(q - b1) < 1e-9
+                    }
+                    if shares { continue }
+                    let g = gap(s.0, s.1, b0, b1)
+                    if g > 1e-9, g < best { best = g }
+                }
+            }
+        } } }
+        // The gap is centre-to-centre, so the struts touch when the DIAMETER
+        // reaches it. Fall back to the cell side if a topology reports nothing.
+        let f = best.isFinite ? best : 1.0
+        Self.separationCache.setObject(NSNumber(value: f), forKey: id as NSString)
+        return f
+    }
+
     // MARK: relative-density ↔ strut-radius grading (the map the proxy shades by)
 
     /// The strut radius (mm) that gives relative density `rho` at cell size `cellMM`.
@@ -119,7 +190,23 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
     /// huge cell), so the ceiling can never fall below the printable floor.
     public func quiltDensityCeiling(cellMM: Double) -> Double {
         guard cellMM > 0 else { return 1 }
-        let target = cellMM / 4          // radius = cell/4 ⇔ diameter = cell/2
+        // ★★★ THE STRUTS MEET A FULL √2 EARLIER THAN cell/2 (his 2026-08-25:
+        // "even the default grade with single-cell/member=off is quilted!!! …
+        // It's in *every* setting!").
+        //
+        // ★ THE OLD BOUND WAS THE CELL'S SIDE, AND THE STRUTS DO NOT RUN ALONG IT.
+        // An octet's struts lie on the FACE DIAGONALS, so the perpendicular gap
+        // between neighbouring parallel struts is `cell/(2√2)`, not `cell/2`. Asked
+        // for the wrong bound the ceiling almost never bound at all: measured on his
+        // own part it returned 1.0 — solid — at 5, 8 and 13 mm alike, so the top of
+        // the density band was a FUSED lattice in every algorithm, and the sim's
+        // grading (which normalises to the part's own peak, and so drives most of a
+        // wall near the top) mapped straight into it. That is the quilt, and it is
+        // why it appeared under Default and Stepped, single-cell on or off.
+        //
+        // `separationFactor` is the topology's own answer — see the family table —
+        // so a lattice whose struts DO run along the side keeps the old bound.
+        let target = cellMM * separationFactor / 2
         guard strutRadiusMM(relativeDensity: 1.0, cellMM: cellMM) > target
         else { return 1 }
         var lo = 0.0, hi = 1.0
