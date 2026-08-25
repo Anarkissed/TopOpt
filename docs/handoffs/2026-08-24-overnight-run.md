@@ -222,12 +222,14 @@ left untouched (wizard changes made during verification were never saved).
    the generator builds cubes; say the word and I'll reshape it.
 
 ## Still open
-- **Rim at attached edges**: stepped bakes rim cells (solidRim census) but the
-  band is ~1.3–1.7 mm — likely too thin to read as "solid edges" even when it
-  draws; DOUBLED has no rim mechanism at all (its shape-fit solid edge, now
-  thicker via the p05 base, is the only solid it gets). Needs either a wider rim
-  rule (e.g. scale with the local cell) — a look decision for him — and a second
-  texture channel for doubled (the phase channel is free on the dyadic path).
+- **Rim at attached edges — DOUBLED half done**: the ladder's decided-solid
+  cells (shape-fit wants trimmed below the base rung) now RENDER solid — the
+  march unions dClip wherever the sample's own cell is inactive, no new texture
+  channel, gated on rimParams.z so every other path is byte-identical. Verified
+  on the copy: solid margins along the wall outlines, the chamfered corner meets
+  material instead of floating. STILL YOURS TO RULE: the stepped rim band is
+  ~1.3–1.7 mm (may read too thin even when drawn) — if you want a chunkier solid
+  edge, name the width (a fraction of the local cell? fixed mm?).
 - **Lattice depth vs chamfer** (his img 5): MEASURED, and it is by-construction,
   not a clip bug. The chamfer is its own CAD face, so the declared face's
   outline — and the prism — stops where the bevel starts. Exactly a ~3 mm band
