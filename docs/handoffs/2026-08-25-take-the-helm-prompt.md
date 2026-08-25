@@ -260,6 +260,38 @@ Why it can still fail on his part — investigate in THIS order:
    renderer's own baked activation — trust it) and screenshots at known
    coordinates before changing anything.
 
+### C. The 2D look, and the depth the prism took but the lattice does not fill
+
+Two more of his standing reports, related to each other and to §4B:
+
+1. **The lattice reads as 2D** — a flat wallpaper pasted on the wall instead of
+   a truss with visible depth (his img 14 of the night round, and again in the
+   02:05 screenshot's front view). Candidate causes, in order of likelihood:
+   (a) it literally IS shallow — see point 2; (b) a single cell across the
+   depth (n = 1 after the whole-number fit) puts both cap planes on the same
+   cell's boundaries, so front and back show the same cross-section and nothing
+   interior is ever visible at grazing angles; (c) shading — the raymarched
+   struts' normals/AO may be flattening the read; compare against the doubled
+   path, which he accepts as 3D. Diagnose by orbiting the same wall in the sim
+   and by reading the tap callout's cell/cells-across before touching code.
+2. **The lattice does not reach the entire depth the face-prism removed.** The
+   carve takes the DECLARED depth (13 mm on face 2), but the drawn lattice sits
+   visibly shallower — a void slab behind the struts, which also feeds the
+   floating/2D read and the "chamfer held up in thin air" picture. Places the
+   depths can diverge — check each: (a) the never-overshoot clamp
+   (`effDepth = min(declared, measured wall)`) must size the CELL only; if any
+   path lets it shrink the clip/tiling extent, the strut field ends at the
+   measured wall while the carve honours the declaration; (b) the occupancy
+   mask the bake tiles into may be thinner than the declaration on curved or
+   chamfered walls (the along-normal walk stops at the first exit); (c) the
+   shell-cut and the march use different prisms (`lsdf_part_clip` + decls vs
+   the bake's region field). Measure, don't guess: on face 2, compare the
+   carved void's depth against the strutted depth at three probe points, and
+   log which of the three volumes (declaration, occupancy, clip) each number
+   matches. The fix must make the STRUTS fill the carve — never the carve
+   shrink to the struts (his never-overshoot ruling governs cell size, not
+   coverage; the declared volume must end up either strutted or solid, no air).
+
 ## 5. Bigger queued items (in his priority language)
 
 - **Preview ↔ run parity** — the ultimate question, answered: the job document
