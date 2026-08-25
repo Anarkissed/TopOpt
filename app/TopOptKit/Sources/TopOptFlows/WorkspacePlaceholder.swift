@@ -9024,14 +9024,15 @@ public struct WorkspacePlaceholder: View {
             }
             ForEach(Array(drawer.rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: DS.Space.s) {
-                    // ★ A CONTROL'S LABEL READS AS A CONTROL (his fixes 5.4 + the
-                    // follow-up "the word 'Depth' isn't white and bold"): every
-                    // modifiable row's label is white and heavier; a fact row
-                    // stays quiet.
+                    // ★ THE **DENSITY** LABEL POPS — his correction, 2026-08-24
+                    // late: "I meant 'Density' not 'Depth'! Make Density white
+                    // and bold!" The first read of his 5.4 painted every
+                    // modifiable label white; only the Density control gets the
+                    // emphasis, every other row stays quiet.
                     Text(row.label)
-                        .font(.system(size: row.modifiable ? 11 : 10,
-                                      weight: row.modifiable ? .bold : .semibold))
-                        .foregroundStyle(row.modifiable
+                        .font(.system(size: row.kind == .density ? 11 : 10,
+                                      weight: row.kind == .density ? .bold : .semibold))
+                        .foregroundStyle(row.kind == .density
                             ? Color.white : DS.Color.textQuaternary.color)
                     Spacer(minLength: 0)
                     // ★ §4b — a DERIVED row gets no gesture and no control
