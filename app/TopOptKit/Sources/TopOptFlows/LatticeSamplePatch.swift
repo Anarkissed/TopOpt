@@ -308,58 +308,108 @@ public enum LatticeSamplePatch {
 
 
     /// ★★★ THE STEPPED SAMPLE: a centre of the floor's worth of derived cells,
-    /// wrapped by a one-step-finer shell — his sentence, built literally. The
-    /// centre spans the middle `memberMM` cube of a `2·memberMM` block; the shell
-    /// is the same block divided one grade finer with its middle removed. One
-    /// envelope, two structures, and the single-cell toggle flips the CENTRE
-    /// between one cell and 2×2×2 at constant block size.
+    /// wrapped by a one-step-finer shell — his sentence ("a single cell filling
+    /// half the cube, with a grade AROUND"), built literally. The centre spans
+    /// the middle `memberMM` cube of a `2·memberMM` block; the shell is the same
+    /// block one dyadic grade finer with its middle removed. One envelope, two
+    /// structures, and the single-cell toggle flips the CENTRE between one cell
+    /// and 2×2×2 at constant block size.
+    ///
+    /// ★★ RE-BUILT CELL-GRANULAR (his verdict, 2026-08-25: "It looks terrible").
+    /// The previous cut built TWO complete meshes and clipped their TRIANGLES by
+    /// centroid against the core box — so every strut crossing the interface was
+    /// chopped mid-prism, half-prisms of the coarse cell burst through the fine
+    /// shell, and the seam read as fused wreckage. Nothing is clipped now: the
+    /// shell tiles whole cells of `m/2k` over the block and simply SKIPS the
+    /// core's cells; the centre tiles its own cells (2× the shell's, an integer
+    /// scale of the same canonical node lattice) exactly into the hole. The core
+    /// spans a whole number of shell cells by construction, so every interface
+    /// node is SHARED — the coarse cell's corners land on shell nodes, dyadic
+    /// conformity, no overlap, no shard. Each grade keeps its own strut radius
+    /// (the same law everything else uses), so the grade reads as thick-to-thin
+    /// rather than as noise.
     static func centreAndShell(lattice: LatticeType, memberMM m: Double,
                                coarseAcross k: Int, relativeDensity: Double,
                                sides: Int) -> ViewerMesh {
-        let shellCell = m / Double(2 * k)
-        let shell = mesh(lattice: lattice, cellMM: shellCell, cells: 4 * k,
-                         relativeDensity: relativeDensity, boundary: .none,
-                         sides: sides)
-        let centre = mesh(lattice: lattice, cellMM: m / Double(k), cells: k,
-                          relativeDensity: relativeDensity, boundary: .none,
-                          sides: sides)
-        let lo = Float(m) / 2, hi = Float(m) * 1.5
-        var pos: [Float] = []
-        var idx: [Int32] = []
-        func inCore(_ x: Float, _ y: Float, _ z: Float) -> Bool {
-            x > lo && x < hi && y > lo && y < hi && z > lo && z < hi
-        }
-        func append(_ mIn: ViewerMesh, offset: Float, dropCore: Bool) {
-            var remap = [Int32: Int32]()
-            var t = 0
-            while t + 2 < mIn.indices.count {
-                let i0 = Int(mIn.indices[t]), i1 = Int(mIn.indices[t + 1])
-                let i2 = Int(mIn.indices[t + 2])
-                t += 3
-                let cx = (mIn.positions[i0 * 3] + mIn.positions[i1 * 3]
-                          + mIn.positions[i2 * 3]) / 3 + offset
-                let cy = (mIn.positions[i0 * 3 + 1] + mIn.positions[i1 * 3 + 1]
-                          + mIn.positions[i2 * 3 + 1]) / 3 + offset
-                let cz = (mIn.positions[i0 * 3 + 2] + mIn.positions[i1 * 3 + 2]
-                          + mIn.positions[i2 * 3 + 2]) / 3 + offset
-                if dropCore, inCore(cx, cy, cz) { continue }
-                if !dropCore, !inCore(cx, cy, cz) { continue }
-                var tri = [Int32]()
-                for i in [i0, i1, i2] {
-                    let key = Int32(i)
-                    if let r = remap[key] { tri.append(r); continue }
-                    let r = Int32(pos.count / 3)
-                    pos.append(mIn.positions[i * 3] + offset)
-                    pos.append(mIn.positions[i * 3 + 1] + offset)
-                    pos.append(mIn.positions[i * 3 + 2] + offset)
-                    remap[key] = r
-                    tri.append(r)
-                }
-                idx += tri
+        let S = lattice.denominator
+        let shellCellMM = m / Double(2 * k)          // one dyadic grade finer
+        let centreCellMM = m / Double(k)
+        let unit = Float(shellCellMM) / Float(S)     // world mm per integer step
+        let across = 4 * k                           // shell cells across the block
+        let extent = across * S                      // block span in shell units
+        let coreLo = k * S, coreHi = 3 * k * S       // the middle m, in shell units
+        let rShell = Float(lattice.strutRadiusMM(relativeDensity: relativeDensity,
+                                                 cellMM: shellCellMM))
+        let rCentre = Float(lattice.strutRadiusMM(relativeDensity: relativeDensity,
+                                                  cellMM: centreCellMM))
+
+        var segSet = Set<[Int]>()
+        var segments: [(LatticeType.Node, LatticeType.Node, Float)] = []
+        var nodeRadius: [[Int]: Float] = [:]
+        var nodeOrder: [[Int]] = []
+
+        func consider(_ a: LatticeType.Node, _ b: LatticeType.Node,
+                      radius: Float, lo: Int, hi: Int) {
+            func inside(_ p: LatticeType.Node) -> Bool {
+                p.x >= lo && p.x <= hi && p.y >= lo && p.y <= hi
+                    && p.z >= lo && p.z <= hi
+            }
+            guard inside(a), inside(b) else { return }
+            let key = order(a, b)
+            if segSet.insert(key).inserted { segments.append((a, b, radius)) }
+            for p in [a, b] {
+                let nk = [p.x, p.y, p.z]
+                if nodeRadius[nk] == nil { nodeOrder.append(nk) }
+                // A node where two grades meet wears the FATTER radius, so the
+                // joint closes rather than showing the thin blob inside the fat
+                // strut's end.
+                nodeRadius[nk] = Swift.max(nodeRadius[nk] ?? 0, radius)
             }
         }
-        append(shell, offset: 0, dropCore: true)          // the grade around
-        append(centre, offset: Float(m) / 2, dropCore: false)  // the cell(s) within
+
+        // The grade around: whole shell cells, the core's skipped — the hole is
+        // exactly (2k)³ shell cells, so its boundary lies on shell-cell planes.
+        for cz in -1...across { for cy in -1...across { for cx in -1...across {
+            let coreCell = cx * S >= coreLo && (cx + 1) * S <= coreHi
+                && cy * S >= coreLo && (cy + 1) * S <= coreHi
+                && cz * S >= coreLo && (cz + 1) * S <= coreHi
+            if coreCell { continue }
+            let ox = cx * S, oy = cy * S, oz = cz * S
+            for s in lattice.struts {
+                let a = LatticeType.Node(s.a.x + ox, s.a.y + oy, s.a.z + oz)
+                let b = LatticeType.Node(s.b.x + ox, s.b.y + oy, s.b.z + oz)
+                // A shell strut may not reach INTO the core interior — cells
+                // outside it own only the interface, never the hole.
+                consider(a, b, radius: rShell, lo: 0, hi: extent)
+            }
+        } } }
+
+        // The cell(s) within: the same canonical struts at 2× the integer scale,
+        // tiled into the hole. Every corner lands on a shell node.
+        for cz in 0..<k { for cy in 0..<k { for cx in 0..<k {
+            let ox = coreLo + cx * 2 * S
+            let oy = coreLo + cy * 2 * S
+            let oz = coreLo + cz * 2 * S
+            for s in lattice.struts {
+                let a = LatticeType.Node(2 * s.a.x + ox, 2 * s.a.y + oy, 2 * s.a.z + oz)
+                let b = LatticeType.Node(2 * s.b.x + ox, 2 * s.b.y + oy, 2 * s.b.z + oz)
+                consider(a, b, radius: rCentre, lo: coreLo, hi: coreHi)
+            }
+        } } }
+
+        var pos: [Float] = []
+        var idx: [Int32] = []
+        func world(_ p: LatticeType.Node) -> SIMD3<Float> {
+            SIMD3<Float>(Float(p.x), Float(p.y), Float(p.z)) * unit
+                - SIMD3<Float>(repeating: Float(extent) * unit * 0.5)
+        }
+        for (a, b, r) in segments {
+            emitStrut(world(a), world(b), radius: r, sides: sides, pos: &pos, idx: &idx)
+        }
+        for nk in nodeOrder {
+            let p = LatticeType.Node(nk[0], nk[1], nk[2])
+            emitNode(world(p), radius: nodeRadius[nk] ?? rShell, pos: &pos, idx: &idx)
+        }
         return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
     }
 
