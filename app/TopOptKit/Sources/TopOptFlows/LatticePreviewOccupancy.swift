@@ -585,6 +585,37 @@ extension LatticePreviewOccupancy {
     ///
     /// Returns nil when no region states a cell — the caller then keeps the ladder it
     /// already had rather than drawing an empty part.
+    /// ★★★ ONE PHASE RULE. The cap-flush tiling shift for ONE region at ONE cell
+    /// size, as `axis + fraction` (see `LatticeCellField.steppedPhase`). This is
+    /// the single implementation behind BOTH the per-region encoder
+    /// (`LatticeSDFRenderer.faceTilingPhase`) and the per-cell write in the
+    /// stepped bake — the 2026-08-25 quilt round was exactly these two speaking
+    /// different units (the encoder measured in REGION cells, the shader shifted
+    /// by the LOCAL cell), and two implementations is how they drift apart again.
+    ///
+    /// nil when the region has no axis-aligned face plane to anchor to; the
+    /// caller then keeps whatever phase it already had.
+    static func tilingPhase(region: LatticeRegionSpec, cellMM: Double,
+                            origin: SIMD3<Float>) -> Float? {
+        guard region.role == .include, region.kind == .face else { return nil }
+        let n = simd_normalize(region.normal)
+        guard simd_length(n) > 0.5, cellMM > 0 else { return nil }
+        let a = abs(n)
+        let axis = a.x >= a.y && a.x >= a.z ? 0 : (a.y >= a.z ? 1 : 2)
+        guard a[axis] > 0.99 else { return nil }
+        // The cap's coordinate along the grid's own axis — `dot(·, n)` is the
+        // same number with `n[axis]`'s sign, which the flip below cancels.
+        let s0 = simd_dot(region.origin - SIMD3<Double>(origin), n)
+        let t = s0 / cellMM
+        var frac = t - t.rounded(.down)                 // in [0, 1)
+        if n[axis] < 0, frac != 0 { frac = 1 - frac }
+        // ★ KEPT OFF THE INTEGER BOUNDARY — packed as `axis + fraction` into one
+        // half channel, a fraction of 0.9995 packs as the NEXT axis with no
+        // shift. A cap within a thousandth of a cell of a boundary IS on it.
+        if frac > 0.999 || frac < 0.001 { frac = 0 }
+        return Float(axis) + Float(frac)
+    }
+
     public static func steppedCellField(occupancy occ: LatticeVoxelGrid,
                                         demand: LatticeVoxelGrid?,
                                         regions: [LatticeRegionSpec],
@@ -871,6 +902,39 @@ extension LatticePreviewOccupancy {
                             // material". Marked by deactivating the cell (−1), the same
                             // marker the member floor already uses.
                             var s = sizes[r]
+                            // ★★★ HIS RULING (2026-08-25, closing the far-cap
+                            // conflict): "per-spot cell = min(prism depth, local
+                            // material depth), both directions, stepped algorithm
+                            // only — Default's dyadic rule untouched."
+                            //
+                            // The region's stated cell is the MEDIAN wall's fit;
+                            // each cell now re-fits to ITS OWN material. Thinner
+                            // wall → smaller cell (never overshoot, as before);
+                            // thicker wall → the cell GROWS to span it (his corner
+                            // rule: "a corner that truly measures 15 gets 15"),
+                            // capped at the declared depth. Divided by the
+                            // per-voxel cells-per-member floor so a structural
+                            // member still holds its count. The far cut is then
+                            // flush BY CONSTRUCTION: where the wall is thinner
+                            // than the declaration, the material's own back face
+                            // is the last cell boundary; where it is thicker, the
+                            // declared cap plane is — which closes the 0.97 mm /
+                            // 1.70 mm sliced band the cap probe measured at the
+                            // back of BOTH his faces. An unmeasured centre keeps
+                            // the region's cell (his ruling: unmeasured is
+                            // unconstrained).
+                            let wLocal = widthUnderCell(p, r, cellMM: s)
+                            if wLocal > 1e-6 {
+                                let f = memberFloorAt(p)
+                                let declared = region.depthMM > 0
+                                    ? region.depthMM : wLocal
+                                let t = Swift.min(declared, wLocal) / f
+                                if t > 1e-6, abs(t - s) > 1e-9 {
+                                    s = t
+                                    dbgWidthShrunk += 1
+                                }
+                                dbgW.append(wLocal)
+                            }
                             if boundaryDistancePerRegion.isEmpty || finestCellMM <= 0 {
                                 dbgSkipped += 1
                             }
@@ -963,35 +1027,13 @@ extension LatticePreviewOccupancy {
                                 }
                                 // "At least by 1/3" — S/2 is never a size.
                                 if n == 2 { n = 3 }
-                                // ★★★ THE CELL READS ITS OWN MATERIAL (his ruling,
-                                // 2026-08-24: "it should read the actual depth of that
-                                // area. so preferably per voxel"). The region's cell is
-                                // sized to the wall the region MOSTLY is; where this
-                                // cell's own wall is thinner, the cell divides to what
-                                // that material holds.
-                                //
-                                // ★ CEIL, WITH A FLOAT-SAFE SLACK — his ruling
-                                // (2026-08-24 evening): "I'd rather it never
-                                // overshoot." The region cell no longer exceeds the
-                                // wall's median (the fit depth is clamped to the
-                                // material), so a ceil here no longer fights the
-                                // region rule; it guarantees each cell fits ITS OWN
-                                // wall: ceil(12.03/8.59) = 2 on the sliver, and the
-                                // 1e-6 slack keeps 12.031/12.030 from reading as an
-                                // overshoot and halving an exactly-fitting cell.
-                                //
-                                // ★ NO n==2 BUMP HERE. The "at least by 1/3" step is
-                                // the SHAPE fit's aesthetic; this divisor is a material
-                                // constraint, and S/2 is exactly what an S-cell's
-                                // half-thick wall holds.
-                                let wLocal = widthUnderCell(p, r, cellMM: s)
-                                if wLocal > 1e-6 {
-                                    let nW = Swift.max(1, Int((s * memberFloorAt(p)
-                                                               / wLocal - 1e-6)
-                                                              .rounded(.up)))
-                                    if nW > n { n = nW; dbgWidthShrunk += 1 }
-                                    dbgW.append(wLocal)
-                                }
+                                // ★ THE OLD PER-VOXEL WIDTH DIVISOR STOOD HERE — a
+                                // SHRINK-ONLY integer divide of the region's cell.
+                                // Superseded by his 2026-08-25 ruling, applied at the
+                                // top of this block: the per-spot BASE is
+                                // min(prism depth, local wall)/floor in BOTH
+                                // directions, so a thin sliver still gets a smaller
+                                // cell and a thick corner now gets a bigger one.
                                 // ★ CLAMPED, NOT SOLIDIFIED. The finest printable cell
                                 // is the floor; the sliver too thin for even that is
                                 // below this grid's resolution and the region clip
@@ -999,7 +1041,12 @@ extension LatticePreviewOccupancy {
                                 // measured step — not a side effect of a sampling miss.
                                 n = Swift.min(n, nCap)
                                 dbgN[n, default: 0] += 1
-                                s /= Double(n)
+                                // ★ THE DIVISION'S BASE IS THE PER-SPOT CELL, and the
+                                // printability backoff below must re-divide the SAME
+                                // base — `sizes[r]` here would silently re-inflate a
+                                // cell the per-spot rule shrank.
+                                let sBase = s
+                                s = sBase / Double(n)
 
                                 // ★★★ THE SOLID OUTLINE — THE SHAPE FIT'S LAST STEP.
                                 //
@@ -1093,7 +1140,7 @@ extension LatticePreviewOccupancy {
                                         lineWidthMM: lineWidthMM, cellMM: s)
                                     while rhoStar > densityHi + 1e-9, n > 1 {
                                         n -= 1
-                                        s = sizes[r] / Double(n)
+                                        s = sBase / Double(n)
                                         rhoStar = lat.printabilityDensityFloor(
                                             lineWidthMM: lineWidthMM, cellMM: s)
                                     }
@@ -1114,30 +1161,21 @@ extension LatticePreviewOccupancy {
                             // describe different regions.
                             //
                             // ★★★ AND THE FRACTION IS RE-MEASURED IN THIS CELL'S OWN
-                            // UNITS. `faceTilingPhase` measures the cap's offset in
-                            // REGION cells; the shader shifts by `pfrac × the LOCAL
-                            // cell` (`lsdf_cell_frame_at`). Copied verbatim onto a cell
-                            // the grade or the per-voxel width divide shrank to S/n,
-                            // the shift lands the caps `((n−1)·frac mod 1)` cells off a
-                            // boundary — mid-cell slices, the quilt, re-created exactly
-                            // in the shrunk bands. Measured on his face 15 (frac
-                            // 0.1011): 107 of 304 cells at S/2–S/3, caps 0.51–0.68 mm
-                            // off. A cap on a boundary of the S grid is on a boundary
-                            // of the S/n grid iff the fraction is rescaled: frac·n mod
-                            // 1 — so it is, per cell, with the encoder's own snap for
-                            // the half-packing ambiguity near a whole cell.
-                            if r < regionPhase.count {
-                                let packed = Double(regionPhase[r])
-                                let ratio = (sizes[r] / s).rounded()
-                                if packed > 0, ratio > 1 {
-                                    let axisPart = packed.rounded(.down)
-                                    var frac = (packed - axisPart) * ratio
-                                    frac -= frac.rounded(.down)
-                                    if frac > 0.999 || frac < 0.001 { frac = 0 }
-                                    phase[i] = Float(axisPart + frac)
-                                } else {
-                                    phase[i] = regionPhase[r]
-                                }
+                            // UNITS, from the region spec itself — `tilingPhase`, the
+                            // SAME implementation the per-region encoder uses. The
+                            // 2026-08-25 quilt round was the encoder measuring in
+                            // REGION cells while the shader shifted by the LOCAL cell
+                            // (face 15, frac 0.1011: 107 of 304 shrunk cells, caps
+                            // 0.51–0.68 mm off a boundary). Computing per cell from
+                            // the region origin is exact at ANY size ratio — which
+                            // the per-spot both-directions rule above now produces —
+                            // where the earlier integer rescale was exact only at
+                            // whole divisions of the region cell.
+                            if let ph = tilingPhase(region: region, cellMM: s,
+                                                    origin: occ.origin - originShiftMM) {
+                                phase[i] = ph
+                            } else if r < regionPhase.count {
+                                phase[i] = regionPhase[r]
                             }
                             break
                         }
@@ -1177,7 +1215,23 @@ extension LatticePreviewOccupancy {
                                 // reads `g` as a level here. It is the only free channel.
                                 level: outline,
                                 steppedCellMM: stepped, steppedPhase: phase,
-                                baseCellMM: baseCellMM, maxLevel: 0, fromCorePlan: false)
+                                baseCellMM: baseCellMM,
+                                // ★ THE RAY-BOX PAD MUST COVER THE BIGGEST COVERING
+                                // CELL (`gridDims.w = 2^maxLevel`, in BASE cells).
+                                // Stepped declared 0 — one base cell — which was
+                                // already optimistic for a second region's coarser
+                                // cell and is wrong outright now that the per-spot
+                                // rule can GROW a cell past the region's stated one:
+                                // a strut of a grown cell near the volume's edge
+                                // would be clipped out of the march's padded box.
+                                maxLevel: {
+                                    let maxMM = stepped.max() ?? 0
+                                    guard maxMM > 0, baseCellMM > 0 else { return 0 }
+                                    let ratio = Double(maxMM) / baseCellMM
+                                    return ratio > 1
+                                        ? Int(log2(ratio).rounded(.up)) : 0
+                                }(),
+                                fromCorePlan: false)
     }
 
     /// Round to the nearest value an IEEE half can hold exactly — see

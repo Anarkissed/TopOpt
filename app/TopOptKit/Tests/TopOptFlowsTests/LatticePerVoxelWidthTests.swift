@@ -3,15 +3,16 @@ import simd
 import TopOptKit
 @testable import TopOptFlows
 
-/// ★★★ THE CELL READS ITS OWN MATERIAL — his ruling, 2026-08-24: "it should read the
-/// actual depth of that area. so preferably per voxel."
+/// ★★★ THE CELL READS ITS OWN MATERIAL — his rulings, 2026-08-24 ("it should read
+/// the actual depth of that area. so preferably per voxel") and 2026-08-25
+/// ("per-spot cell = min(prism depth, local material depth), both directions,
+/// stepped algorithm only").
 ///
 /// Before this, the whole face took ONE width — the p05 — so his 12.03 mm front wall
-/// was pinned to its 8.59 mm sliver and drew a 6.50 mm cell across a face he had set
-/// to single-cell/member. Now the region's cell anchors on the wall's MEDIAN and each
-/// painted cell divides down to what its OWN wall holds, by the same nearest-whole-fit
-/// law the region uses (`round`, not `ceil` — the region cell legitimately overshoots
-/// the measured wall by up to half a cell and a ceil would cut every such cell in two).
+/// was pinned to its 8.59 mm sliver. Now each painted cell is fitted to ITS OWN
+/// material in BOTH directions: a thin spot gets its own (smaller) wall as the cell,
+/// and a spot whose wall reaches the declared depth grows to span it — which is what
+/// puts the far cap on a cell boundary everywhere it touches material.
 final class LatticePerVoxelWidthTests: XCTestCase {
 
     /// His two faces at their true depths (project.json: face 15 → 12, face 2 → 13).
@@ -52,10 +53,13 @@ final class LatticePerVoxelWidthTests: XCTestCase {
             med, accuracy: 1e-9)
     }
 
-    /// Through the REAL bake: with the region cell at the median-derived 13.0 mm, the
-    /// bulk of face 2 keeps one 13 mm cell and only the cells whose own wall is the
-    /// 8.59 mm sliver divide — the sliver no longer pins the whole face, and the face
-    /// no longer hands the sliver a cell it cannot hold.
+    /// Through the REAL bake, under his 2026-08-25 ruling: "per-spot cell =
+    /// min(prism depth, local material depth), both directions". The bulk of
+    /// face 2 keeps its ~12 mm cell, the cells whose own wall REACHES the
+    /// declared 13 mm GROW to span it (the far cap lands flush by
+    /// construction), and a thin spot gets its own wall — never a division of
+    /// someone else's cell. The sliver no longer pins the face in either
+    /// direction.
     func testASliverNoLongerPinsTheWholeFace() throws {
         let (scene, specs) = try hisScene()
         let occ = scene.occupancy
@@ -81,12 +85,17 @@ final class LatticePerVoxelWidthTests: XCTestCase {
         var hist: [Float: Int] = [:]
         for v in baked.steppedCellMM where v > 0 { hist[v, default: 0] += 1 }
         let full = hist.filter { abs(Double($0.key) - 12.03) < 0.1 }.values.reduce(0, +)
-        let halved = hist.filter { abs(Double($0.key) - 6.02) < 0.1 }.values.reduce(0, +)
+        // ★ THE RULING'S SIGNATURE: where the wall measures at (or past) the
+        // declared 13 mm, the cell GROWS to the declaration and the far cap is
+        // flush by construction — the 0.97 mm sliced band at the back is gone.
+        let grown = hist.filter { abs(Double($0.key) - 13.0) < 0.1 }.values.reduce(0, +)
         XCTAssertGreaterThan(full, 0, "the bulk must keep the 12.03 mm cell; sizes=\(hist)")
-        XCTAssertGreaterThan(halved, 0,
-                             "the sliver's cells must divide to ~6.0; sizes=\(hist)")
-        XCTAssertGreaterThan(full, halved,
-                             "the sliver is a sliver — most of the face is 12 mm thick")
+        XCTAssertGreaterThan(grown, 0,
+                             "cells over the thick wall must grow to the declared "
+                             + "13 mm (both directions, his ruling); sizes=\(hist)")
+        XCTAssertGreaterThan(full + grown, hist.values.reduce(0, +) / 2,
+                             "most of the face is ~12-13 mm thick and must carry "
+                             + "full-depth cells; sizes=\(hist)")
     }
 
     /// ★ THE NEVER-OVERSHOOT INVARIANT ITSELF (his ruling, 2026-08-24 evening: "a
