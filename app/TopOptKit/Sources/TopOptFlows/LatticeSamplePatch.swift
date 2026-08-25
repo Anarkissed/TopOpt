@@ -286,9 +286,16 @@ public enum LatticeSamplePatch {
                 // The floor multiplies every divisor, so with single-cell OFF the
                 // run starts at 2 across and steps from there — the toggle changes
                 // the STRUCTURE at a constant cube size, as it always had to.
-                let steps = dyadicSteps ? [1, 2, 4, 8] : [1, 3, 4, 5]
+                // ★ THE FLOOR MOVES THE FIRST CUBE ONLY (his 2026-08-25: "the
+                // sample is too big … I meant to only make the sample twice the
+                // usual size"). Multiplying EVERY divisor by the floor put a 10³
+                // column in the run — 1.57 million triangles and 537 ms for a
+                // sample, and a block so dense it read as a solid. The floor is a
+                // statement about how many cells cross a MEMBER, so it sets the
+                // first cube; the grade steps that follow are the grade's own.
+                let steps = dyadicSteps ? [2, 4, 8] : [3, 4, 5]
                 return gradedRun(lattice: lattice, cellMM: cellMM * Double(k),
-                                 divisors: steps.map { $0 * k },
+                                 divisors: [k] + steps,
                                  relativeDensity: relativeDensity, sides: sides)
             }
             let n = Swift.max(2, cells)

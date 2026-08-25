@@ -605,6 +605,17 @@ public struct WorkspacePlaceholder: View {
     /// property, so a fourth handle added later has one place to join.
     private var latticeHandleIsDown: Bool {
         draggingDepthPlane != nil || draggingExpandPlane != nil || draggingHandleID != nil
+            // ★★★ A DRAWER SCRUB AND AN OPEN KEYPAD COUNT AS "STILL DOWN" (his
+            // ruling, 2026-08-25: "It should only rebake once the drag is done
+            // (lifted up) or the numeric value has been OK'd").
+            //
+            // The scrub already deferred its OWN rebake — but every `onChanged`
+            // WRITES the value, and the written value is part of
+            // `latticeRegionInputsKey`, so the fingerprint moved and the bake fired
+            // from there instead: a full scene bake per frame of the drag, and one
+            // per keystroke while typing. Both writes are still live (the number on
+            // screen tracks the finger), only the BAKE waits for the release.
+            || latticeRowScrubSeed != nil || depthPadKey != nil
     }
 
     /// Width the Settings pill needs at the trailing end of the identity row, so the
@@ -9159,7 +9170,18 @@ public struct WorkspacePlaceholder: View {
                             // adjustment and writes through the same setter.
                             .onTapGesture { if write != nil { depthPadKey = padKey } }
                             .numberPad(Binding(get: { depthPadKey == padKey },
-                                               set: { if !$0 { depthPadKey = nil } }),
+                                               set: {
+                                                   // ★ THE PAD CLOSING IS THE
+                                                   // COMMIT: one bake, on OK.
+                                                   if !$0 {
+                                                       depthPadKey = nil
+                                                       refreshLatticeFaceCards()
+                                                       if showStrutPreview,
+                                                          project.lattice.enabled {
+                                                           buildStrutScene()
+                                                       }
+                                                   }
+                                               }),
                                        // ★ THE ROW'S OWN UNIT. "DENSITY 35 mm"
                                        // is what the shared-setter bug looked
                                        // like on screen.
