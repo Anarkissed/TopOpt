@@ -107,6 +107,33 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
     /// linear: a 0.2 mm nozzle gives 9.9%, not the ~0.25 a linear scaling
     /// suggests. It also moves with the CELL — a coarser cell can print a much
     /// lower density, which is why the unloaded wall wants a coarse cell.
+    /// ★★★ THE QUILT CEILING — the density at which the lattice stops being a
+    /// lattice (his ruling, 2026-08-24 night: "saying the max is solid is wrong.
+    /// The max is the quilt"). As the density rises the struts fatten until the
+    /// windows between them close and the face reads as a quilt of bosses; past
+    /// that point more density is not more lattice, it is a worse solid. The
+    /// geometric proxy: the strut DIAMETER reaching half the cell — neighbouring
+    /// struts' surfaces meet and the openings are gone. Inverted from the same
+    /// measured strut law everything else uses, by bisection (the law is
+    /// monotone in rho). Returns 1.0 when even solid stays under the bound (a
+    /// huge cell), so the ceiling can never fall below the printable floor.
+    public func quiltDensityCeiling(cellMM: Double) -> Double {
+        guard cellMM > 0 else { return 1 }
+        let target = cellMM / 4          // radius = cell/4 ⇔ diameter = cell/2
+        guard strutRadiusMM(relativeDensity: 1.0, cellMM: cellMM) > target
+        else { return 1 }
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<64 {
+            let mid = 0.5 * (lo + hi)
+            if strutRadiusMM(relativeDensity: mid, cellMM: cellMM) >= target {
+                hi = mid
+            } else {
+                lo = mid
+            }
+        }
+        return hi
+    }
+
     public func printabilityDensityFloor(lineWidthMM: Double, cellMM: Double) -> Double {
         guard lineWidthMM > 0, cellMM > 0 else { return 0 }
         return min(1, relativeDensity(strutRadiusMM: lineWidthMM / 2, cellMM: cellMM))

@@ -158,6 +158,12 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                             held: Bool,
                             latticeReachesTheRun: Bool = true,
                             perRegionDensity: Bool = false,
+                            // ★ Density row FIRST + emphasized (his fixes 5.2/5.4,
+                            // 2026-08-24 night) — single-cell aesthetic only.
+                            densityFirst: Bool = false,
+                            // ★ Overrides the card's absolute % — the RELATIVE
+                            // reading against the printable→quilt band (fix 5.5).
+                            densityDisplay: String? = nil,
                             expandMM: Double = 0) -> LatticeRegionDrawer {
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
@@ -192,7 +198,7 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
         case .certified:
             head = nil
         }
-        let rows = [
+        var rows = [
             // ★ THE DEPTH ROW PRINTS THE DEPTH IT WAS HANDED, NOT THE CARD'S
             // (task 2026-08-17-lattice-stage-repair §2). `depthMM` is the value
             // `ProjectModel.latticeSlabDepthMM(ref:in:)` resolves for the thing
@@ -218,7 +224,7 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             // the per-region setting has been selected"). `.density` carries its
             // own setter and its own unit; before this task it inherited the
             // DEPTH's, which is why typing here wrote millimetres of depth.
-            LatticeDrawerRow(label: "Density", value: c.densityText,
+            LatticeDrawerRow(label: "Density", value: densityDisplay ?? c.densityText,
                              kind: perRegionDensity ? .density : .fact),
             LatticeDrawerRow(label: "Strut", value: c.strutText),
             LatticeDrawerRow(label: "Cells across", value: c.cellsText),
@@ -230,6 +236,12 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                              value: String(format: "%.1f mm", expandMM),
                              kind: .expand),
         ]
+        // ★ 5.2 — the density leads the list when the caller says it is the
+        // face's primary dial (single-cell aesthetic).
+        if densityFirst, let i = rows.firstIndex(where: { $0.label == "Density" }) {
+            let r = rows.remove(at: i)
+            rows.insert(r, at: 0)
+        }
         return LatticeRegionDrawer(headline: head, collapsedValue: c.heldText,
                                    verdict: c.verdict, rows: rows, held: held)
     }

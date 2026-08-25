@@ -314,11 +314,22 @@ public enum LatticeSamplePatch {
         func append(_ m: ViewerMesh, keepLow: Bool) {
             var remap = [Int32: Int32]()
             var t = 0
+            // ★ A strut may poke past the seam by up to its own radius — enough
+            // slack that a prism whose CENTROID is on this side keeps its whole
+            // body, but a shard reaching deep into the other half is dropped
+            // (his fix 4, 2026-08-24 night: "jagged edges that stick out in
+            // between the two cell sizes"). Centroid picks the owner; the reach
+            // test kills the spikes.
+            let reach: Float = 1.5
             while t + 2 < m.indices.count {
                 let i0 = Int(m.indices[t]), i1 = Int(m.indices[t + 1]), i2 = Int(m.indices[t + 2])
-                let cx = (m.positions[i0 * 3] + m.positions[i1 * 3] + m.positions[i2 * 3]) / 3
+                let x0 = m.positions[i0 * 3], x1 = m.positions[i1 * 3], x2 = m.positions[i2 * 3]
+                let cx = (x0 + x1 + x2) / 3
                 t += 3
                 guard keepLow ? (cx < split) : (cx >= split) else { continue }
+                let far = keepLow ? max(x0, max(x1, x2)) : min(x0, min(x1, x2))
+                guard keepLow ? (far < split + reach) : (far > split - reach)
+                else { continue }
                 var tri = [Int32]()
                 for i in [i0, i1, i2] {
                     let key = Int32(i)

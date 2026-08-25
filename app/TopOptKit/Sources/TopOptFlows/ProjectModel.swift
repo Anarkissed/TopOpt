@@ -734,17 +734,37 @@ public final class ProjectModel: ObservableObject {
         //     physical ones — the density at which this face's cell prints one
         //     bead, up to 1.0 (solid).
         if (lattice.stageMode ?? .structural) == .aesthetic {
-            var floor = limits.rhoMin
-            if cellMM > 0, printParams.strutLineWidthMM > 0 {
-                let f0 = LatticeType.named(lattice.topologyID).printabilityDensityFloor(
-                    lineWidthMM: printParams.strutLineWidthMM, cellMM: cellMM)
-                if f0 > 0 { floor = f0 }
-            }
-            lattice.selectableDensity[ref.key] = Swift.min(Swift.max(f, floor), 1.0)
+            let band = latticeAestheticDensityBand(cellMM: cellMM)
+            lattice.selectableDensity[ref.key] =
+                Swift.min(Swift.max(f, band.lo), band.hi)
         } else {
             lattice.selectableDensity[ref.key] =
                 Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
         }
+    }
+
+    /// ★★★ THE AESTHETIC DENSITY BAND FOR A FACE (his ruling, 2026-08-24 night):
+    /// the low end is the printable limit at that face's cell, "the max is the
+    /// QUILT" — the density where the struts fuse and the windows close — never
+    /// 1.0 solid. The per-face control clamps into this band, and its PERCENT is
+    /// displayed relative to it: 0% = the thinnest printable lattice, 100% = the
+    /// quilt. Both ends from core's own strut law, nothing invented here.
+    public func latticeAestheticDensityBand(cellMM: Double)
+        -> (lo: Double, hi: Double) {
+        let lat = LatticeType.named(lattice.topologyID)
+        let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
+        var lo = limits.rhoMin
+        var hi = 1.0
+        if cellMM > 0 {
+            if printParams.strutLineWidthMM > 0 {
+                let f0 = lat.printabilityDensityFloor(
+                    lineWidthMM: printParams.strutLineWidthMM, cellMM: cellMM)
+                if f0 > 0 { lo = f0 }
+            }
+            hi = lat.quiltDensityCeiling(cellMM: cellMM)
+        }
+        if hi <= lo { hi = Swift.min(1.0, lo + 1e-3) }
+        return (lo, hi)
     }
 
     /// ★ THE IN-PLANE EXPAND IN FORCE FOR ONE SELECTABLE (maintainer,

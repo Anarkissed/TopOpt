@@ -9024,8 +9024,14 @@ public struct WorkspacePlaceholder: View {
                             : row.kind == .expand ? writeExpand
                             : writeDepth
                         Text(row.value)
-                            .font(.system(size: 11, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(DS.Color.textPrimary.color)
+                            // ★ 5.4 — the DENSITY control pops: white, heavier,
+                            // larger than its sibling rows (his fix, 2026-08-24
+                            // night: "make it white and a bit bold").
+                            .font(.system(size: row.kind == .density ? 13 : 11,
+                                          weight: row.kind == .density
+                                              ? .heavy : .bold)).monospacedDigit()
+                            .foregroundStyle(row.kind == .density
+                                ? Color.white : DS.Color.textPrimary.color)
                             .padding(.vertical, 3).padding(.horizontal, DS.Space.sm)
                             .background(Capsule().fill(DS.Color.fillSelected.color))
                             .contentShape(Rectangle())
@@ -9230,9 +9236,17 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("lattice-row-disclose-\(ref.key)")
+            // ★ 5.1 (2026-08-24 night): "Make clicking the face name open up the
+            // face details." The chevron is a 9 pt target; the NAME is what a
+            // finger actually lands on, so it drives the same disclosure. Only
+            // the name — the role chips to its right keep their own taps.
             Text(latticePrimitiveName(ref))
                 .font(.system(size: 10, weight: .semibold)).monospacedDigit()
                 .foregroundStyle(DS.Color.textTertiary.color)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    latticeDisclosure.toggle(ref, regions: &project.faceRegions)
+                }
             // ★ THE ONE HONEST DIFFERENCE (the interrupt's §3). The choice is
             // CAPTURED, and the row says the run will freeze this region without
             // latticing it — core's `lattice.regions` are geometry predicates and
@@ -9448,12 +9462,28 @@ public struct WorkspacePlaceholder: View {
         // (task 2026-08-17-lattice-stage-repair §2). It was the GROUP's card
         // under a per-selectable depth label until this task, which is why
         // dragging a face's handle moved the number and nothing under it.
+        // ★ THE AESTHETIC DENSITY IS A RELATIVE DIAL (his ruling, 2026-08-24
+        // night): 0% = the thinnest printable lattice at this face's cell, 100% =
+        // the QUILT (struts fused). The stored value stays an absolute fraction;
+        // only the READING and the KEYPAD speak the relative scale.
+        let aesthetic = (project.lattice.stageMode ?? .structural) == .aesthetic
+        let card = latticeSelectableCards[ref.key]
+        let band = project.latticeAestheticDensityBand(cellMM: card?.cellMM ?? 0)
+        let storedRho = project.latticeSelectableDensity(ref, in: g.id)
+            ?? card?.relativeDensity ?? 0
+        let relativePct = band.hi > band.lo
+            ? (Swift.min(Swift.max(storedRho, band.lo), band.hi) - band.lo)
+                / (band.hi - band.lo) * 100
+            : 0
         let drawer = LatticeRegionDrawer.make(
-            card: latticeSelectableCards[ref.key],
+            card: card,
             depthMM: project.latticeSlabDepthMM(ref, in: g.id),
             held: force.isProtected(g.id),
             latticeReachesTheRun: ref.latticeReachesTheRun,
             perRegionDensity: perRegionDensity,
+            densityFirst: aesthetic && project.lattice.singleCellMembers,
+            densityDisplay: aesthetic
+                ? String(format: "%.0f%%", relativePct) : nil,
             expandMM: project.latticeExpandMM(ref))
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
                           identifier: "lattice-drawer-\(ref.key)",
@@ -9465,10 +9495,14 @@ public struct WorkspacePlaceholder: View {
                           // speak fraction, as core's band does. ONE conversion,
                           // here — the same shape `sectorDensityRow` uses.
                           writeDensity: { pct in
+                              // ★ Aesthetic keypads speak the RELATIVE scale
+                              // (printable→quilt); the store stays absolute.
+                              let f = aesthetic && band.hi > band.lo
+                                  ? band.lo + Swift.min(Swift.max(pct, 0), 100)
+                                      / 100 * (band.hi - band.lo)
+                                  : pct / 100
                               project.writeLatticeDensity(
-                                  ref, fraction: pct / 100,
-                                  // The face's own cell bounds the aesthetic floor.
-                                  cellMM: latticeSelectableCards[ref.key]?.cellMM ?? 0)
+                                  ref, fraction: f, cellMM: card?.cellMM ?? 0)
                               refreshLatticeFaceCards()
                           },
                           writeExpand: { mm in
@@ -9539,6 +9573,14 @@ public struct WorkspacePlaceholder: View {
         let resolution = Self.latticeCardPreviewResolution
         let topology = project.lattice.lattice
         let widthMM = project.printParams.strutLineWidthMM
+        // ★ THE STAGE'S FLOOR, derived once for the batch — the same expression
+        // the bake uses, so the cards and the picture obey one law.
+        let stageFloor = (project.lattice.stageMode ?? .structural)
+            .cellsPerMemberFloor(topology: project.lattice.topologyID,
+                                 utilisation: .nan,
+                                 boundaryFinishWritten:
+                                    project.lattice.singleCellMembers
+                                    && project.lattice.boundary != .none)
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
         let rhosCopy = rhos
@@ -9569,7 +9611,8 @@ public struct WorkspacePlaceholder: View {
                     // against cannot disagree about the nozzle. A card built
                     // without it would fall back to "cannot tell", never to a
                     // silent pass.
-                    minExtrudableWidthMM: widthMM)
+                    minExtrudableWidthMM: widthMM,
+                    cellsPerMemberFloor: stageFloor)
             }
             // The group cards keep their UUID key (the group row reads them by
             // group id); everything else is keyed by `LatticeSelectableRef.key`.
