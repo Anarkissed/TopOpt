@@ -710,6 +710,37 @@ extension LatticePreviewOccupancy {
                              floorTestCellMM: finestCellMM)
         // ★ HALF-REPRESENTABLE, so the shader's S is the app's S exactly. See the field.
         let sizes = cellMM.map { Double(halfRepresentable(Float($0))) }
+        // ★★★ ONE WALL, ONE LATTICE (his 3:45 PM report, 2026-08-25: "a quilt
+        // with open space where lattice is supposed to be"). Two include faces
+        // declared on OPPOSITE sides of the same wall — his face 15 (front,
+        // 12 mm) and face 2 (the inner curve, 13 mm, normal anti-parallel) —
+        // carve overlapping slabs, and every cell whose centre slipped past the
+        // first region's declared depth was claimed by the SECOND: a second
+        // lattice at a different size, anchor and phase, interleaved with the
+        // first. The tap callout named it — a 13.00 mm cell standing in face
+        // 15's wall. Such a pair is ONE wall: the later region keeps its own
+        // OUTLINE (its curve still grades and rims), but inherits the earlier
+        // one's cell size, declared depth, stated flag and tiling anchor, so
+        // the shared material carries one coherent lattice and both mouths
+        // land flush through the per-spot rule.
+        var primary = Array(0..<regions.count)
+        for r in 0..<regions.count where regions[r].role == .include
+            && regions[r].kind == .face {
+            let nr = LatticeRegionMask.unit(regions[r].normal)
+            guard simd_length(nr) > 0.5 else { continue }
+            for q in 0..<r where regions[q].role == .include
+                && regions[q].kind == .face && primary[q] == q {
+                let nq = LatticeRegionMask.unit(regions[q].normal)
+                guard simd_dot(nr, nq) < -0.99 else { continue }
+                // Overlap along the shared axis: r's slab reaches back through
+                // q's ([sOnQ − depth_r, sOnQ] against q's [0, depth_q]).
+                let sOnQ = simd_dot(regions[r].origin - regions[q].origin, nq)
+                if sOnQ > -1e-6, sOnQ - regions[r].depthMM < regions[q].depthMM + 1e-6 {
+                    primary[r] = q
+                    break
+                }
+            }
+        }
         var stepped = [Float](repeating: 0, count: grid.count)
         var phase = [Float](repeating: 0, count: grid.count)
         // A copy of the activation, so a cell the outline cannot hold at any printable
@@ -920,7 +951,12 @@ extension LatticePreviewOccupancy {
                             // is as small as is printable and fill the rest with solid
                             // material". Marked by deactivating the cell (−1), the same
                             // marker the member floor already uses.
-                            var s = sizes[r]
+                            // ★ THE PAIR'S PRIMARY (see `primary` above): the
+                            // wall's one cell law. `r` keeps its own outline
+                            // and rim fields below.
+                            let prime = primary[r]
+                            let primeRegion = regions[prime]
+                            var s = sizes[prime]
                             // ★★★ HIS RULING (2026-08-25, closing the far-cap
                             // conflict): "per-spot cell = min(prism depth, local
                             // material depth), both directions, stepped algorithm
@@ -942,12 +978,12 @@ extension LatticePreviewOccupancy {
                             // back of BOTH his faces. An unmeasured centre keeps
                             // the region's cell (his ruling: unmeasured is
                             // unconstrained).
-                            let stated = r < cellIsUserStated.count
-                                && cellIsUserStated[r]
+                            let stated = prime < cellIsUserStated.count
+                                && cellIsUserStated[prime]
                             let wLocal = widthUnderCell(p, r, cellMM: s)
                             if wLocal > 1e-6 {
-                                let declared = region.depthMM > 0
-                                    ? region.depthMM : wLocal
+                                let declared = primeRegion.depthMM > 0
+                                    ? primeRegion.depthMM : wLocal
                                 // ★ A USER-STATED CELL IS HONOURED AS STATED
                                 // (2026-08-25, the grading options): the
                                 // per-spot rule only CAPS it — never-overshoot
@@ -1225,11 +1261,11 @@ extension LatticePreviewOccupancy {
                             // the per-spot both-directions rule above now produces —
                             // where the earlier integer rescale was exact only at
                             // whole divisions of the region cell.
-                            if let ph = tilingPhase(region: region, cellMM: s,
+                            if let ph = tilingPhase(region: primeRegion, cellMM: s,
                                                     origin: occ.origin - originShiftMM) {
                                 phase[i] = ph
-                            } else if r < regionPhase.count {
-                                phase[i] = regionPhase[r]
+                            } else if prime < regionPhase.count {
+                                phase[i] = regionPhase[prime]
                             }
                             break
                         }
