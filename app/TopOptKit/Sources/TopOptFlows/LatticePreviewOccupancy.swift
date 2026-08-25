@@ -1112,7 +1112,33 @@ extension LatticePreviewOccupancy {
                             // ★ THE OWNING REGION'S TILING PHASE TRAVELS WITH ITS SIZE.
                             // Same first-match rule, same cell, so the two can never
                             // describe different regions.
-                            if r < regionPhase.count { phase[i] = regionPhase[r] }
+                            //
+                            // ★★★ AND THE FRACTION IS RE-MEASURED IN THIS CELL'S OWN
+                            // UNITS. `faceTilingPhase` measures the cap's offset in
+                            // REGION cells; the shader shifts by `pfrac × the LOCAL
+                            // cell` (`lsdf_cell_frame_at`). Copied verbatim onto a cell
+                            // the grade or the per-voxel width divide shrank to S/n,
+                            // the shift lands the caps `((n−1)·frac mod 1)` cells off a
+                            // boundary — mid-cell slices, the quilt, re-created exactly
+                            // in the shrunk bands. Measured on his face 15 (frac
+                            // 0.1011): 107 of 304 cells at S/2–S/3, caps 0.51–0.68 mm
+                            // off. A cap on a boundary of the S grid is on a boundary
+                            // of the S/n grid iff the fraction is rescaled: frac·n mod
+                            // 1 — so it is, per cell, with the encoder's own snap for
+                            // the half-packing ambiguity near a whole cell.
+                            if r < regionPhase.count {
+                                let packed = Double(regionPhase[r])
+                                let ratio = (sizes[r] / s).rounded()
+                                if packed > 0, ratio > 1 {
+                                    let axisPart = packed.rounded(.down)
+                                    var frac = (packed - axisPart) * ratio
+                                    frac -= frac.rounded(.down)
+                                    if frac > 0.999 || frac < 0.001 { frac = 0 }
+                                    phase[i] = Float(axisPart + frac)
+                                } else {
+                                    phase[i] = regionPhase[r]
+                                }
+                            }
                             break
                         }
                     }
