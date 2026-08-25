@@ -228,7 +228,14 @@ left untouched (wizard changes made during verification were never saved).
   thicker via the p05 base, is the only solid it gets). Needs either a wider rim
   rule (e.g. scale with the local cell) — a look decision for him — and a second
   texture channel for doubled (the phase channel is free on the dyadic path).
-- **Lattice depth vs chamfer** (his img 5): not yet measured.
+- **Lattice depth vs chamfer** (his img 5): MEASURED, and it is by-construction,
+  not a clip bug. The chamfer is its own CAD face, so the declared face's
+  outline — and the prism — stops where the bevel starts. Exactly a ~3 mm band
+  of material sits outside the prism (face 15: +3,834 voxels, face 2: +4,151;
+  expansion saturates at +3 mm — +5 mm adds nothing). Remedies: the existing
+  per-face EXPAND control at 3 mm covers it today; or an auto-rule that absorbs
+  adjacent chamfer faces into the region — your call. Probe:
+  LatticeChamferGapProbe.
 - **His answers logged**: watertight lattice STL = core-side boolean, queued;
   stress display = relative in Aesthetic / absolute in Structural (structural
   half not yet wired); organic = hands off until he says.
