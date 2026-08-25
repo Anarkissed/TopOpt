@@ -45,15 +45,17 @@ final class LatticeSampleSingleCellTests: XCTestCase {
     func testTheRunIsWideAndOneCellDeep() {
         let member = 10.0
         let e = extent(run(member, k: 1, dyadic: false))
-        // Four columns, each one cube wide; height and depth stay ONE cube.
+        // ★ TWO cubes (his 2026-08-25: "only … twice the usual size - have a single
+        // cell for the entire cube and then the rest is graded"). Height and depth
+        // stay ONE cube, so the run reads as wide.
         XCTAssertEqual(e.h, e.d, accuracy: 1.5, "the run is square in section")
-        XCTAssertGreaterThan(e.w, 3 * e.h,
-                             "the run must be much wider than it is deep — "
+        XCTAssertGreaterThan(e.w, 1.4 * e.h,
+                             "the run must be wider than it is deep — "
                              + "w \(e.w) vs h \(e.h)")
         // The hull includes the strut RADIUS, so the tolerance is a strut, not a
         // micron — the failure this guards is a rescale, not a skin.
-        XCTAssertEqual(e.w, Float(4 * member), accuracy: 3.0,
-                       "four columns, each one derived cell wide")
+        XCTAssertEqual(e.w, Float(2 * member), accuracy: 3.0,
+                       "two cubes, each one derived cell wide")
         XCTAssertEqual(e.h, Float(member), accuracy: 3.0,
                        "one cell spans the whole depth")
     }

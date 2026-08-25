@@ -261,16 +261,25 @@ public struct LatticeSetupWizard: View {
             // ★★ THE SECONDARY QUESTION AUTO RAISES (maintainer, 2026-08-20). Only
             // under Auto: Fit and Swept each carry their own answer already, and
             // Manual has no transition to make.
-            if model.stage == .lattice, model.cellSizeMode == .auto {
-                cellTransitionRow
+            // ★★★ THE GRADING QUESTION, IN HIS ORDER (2026-08-25: "make it so it
+            // first asks IF you want to grade, then offer the type of grading
+            // (full = stress+shape/shape/stress) and then the grade style
+            // (stepped/default/organic). If full/shape is selected, add the grade
+            // to shape band below it. Then at the very end, you add the
+            // single-cell/member option").
+            //
+            // ★ AND NOTHING HIDES BEHIND ONE ALGORITHM ANY MORE. The band and the
+            // grading options used to appear only under Stepped — "a mess right
+            // now with settings only available in the Stepped section" — which
+            // made the grade look like a property of that algorithm rather than a
+            // question asked of all three.
+            if model.stage == .lattice {
+                gradeToggleRow
+                if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
+                gradeStyleRow
+                if model.gradingMode.fitsShape { shapeBandRow }
+                singleCellSwitch
             }
-            // ★ THE GRADING OPTIONS (his request, 2026-08-25) — STEPPED only:
-            // his ruling scopes the new modes to the stepped algorithm and
-            // leaves Default's dyadic rule untouched.
-            if model.stage == .lattice, model.cellTransition == .stepped {
-                gradingRow
-            }
-            if model.stage == .lattice { singleCellSwitch }
             // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
             // the 'too thin to certify' button from the aesthetic mode"). The
             // switch's whole sentence is about the strength certificate; the
@@ -296,22 +305,45 @@ public struct LatticeSetupWizard: View {
         .animation(DS.Motion.emphasized, value: model.stage)
     }
 
-    /// ★ THE GRADING OPTIONS ROW (2026-08-25): Full / Fit shape / No grade, and
-    /// the step style beneath it whenever the fit-shape grade is in play.
-    @ViewBuilder private var gradingRow: some View {
+    /// ★ 1 — DO YOU WANT TO GRADE AT ALL? The first question, above everything.
+    @ViewBuilder private var gradeToggleRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(
+                get: { model.gradingMode != LatticeGradingMode.none },
+                set: { on in
+                    model.gradingMode = on ? .full : LatticeGradingMode.none
+                    rebuild()
+                })) {
+                Text("Grade the lattice")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
+            .accessibilityIdentifier("wizard-grade-toggle")
+            Text(model.gradingMode == LatticeGradingMode.none
+                 ? "One cell, one density, everywhere."
+                 : "The lattice varies across the part — how, below.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// ★ 2 — WHAT VARIES: the stress, the shape, or both.
+    @ViewBuilder private var gradeTypeRow: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("Grading")
+            Text("Grade")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.xs) {
-                ForEach([LatticeGradingMode.full, .fitShape, .none],
+                ForEach([LatticeGradingMode.full, .fitShape, .stressOnly],
                         id: \.rawValue) { m in
                     Button {
                         model.gradingMode = m
                         rebuild()
                     } label: {
-                        Text(m == .full ? "Full"
-                             : m == .fitShape ? "Fit shape" : "No grade")
+                        Text(m == .full ? "Stress + shape"
+                             : m == .fitShape ? "Shape" : "Stress")
                             .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1).minimumScaleFactor(0.8)
                             .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
@@ -323,48 +355,17 @@ public struct LatticeSetupWizard: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("wizard-grading-\(m.rawValue)")
+                    .accessibilityIdentifier("wizard-grade-type-\(m.rawValue)")
                 }
             }
             Text(model.gradingMode == .full
-                 ? "Cells fit the shape and the density follows the stress."
+                 ? "The density follows the solve and the cells fit the outline."
                  : model.gradingMode == .fitShape
-                 ? "Cells grade near the outline only; one density everywhere. "
-                   + "The Cell dial lives on each face."
-                 : "One cell, one density. The Cell dial lives on each face.")
+                 ? "The cells fit the outline; one density everywhere."
+                 : "The density follows the solve; one cell size everywhere.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .fixedSize(horizontal: false, vertical: true)
-            if model.gradingMode != LatticeGradingMode.none {
-                HStack(spacing: DS.Space.xs) {
-                    ForEach([LatticeGradeStepStyle.stepped, .dyadic],
-                            id: \.rawValue) { st in
-                        Button {
-                            model.gradeStepStyle = st
-                            rebuild()
-                        } label: {
-                            Text(st == .stepped ? "Stepped steps" : "Dyadic steps")
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1).minimumScaleFactor(0.8)
-                                .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
-                                .frame(maxWidth: .infinity)
-                                .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
-                                    .fill((model.gradeStepStyle == st
-                                           ? DS.Color.accent.opacity(0.85)
-                                           : DS.Color.background.opacity(0.35)).color))
-                                .foregroundStyle(DS.Color.textPrimary.color)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("wizard-grade-step-\(st.rawValue)")
-                    }
-                }
-                Text(model.gradeStepStyle == .stepped
-                     ? "Any whole division — S/2, S/3, S/4 — the smoothest ramp."
-                     : "Halving only — every graded cell shares its parent's nodes.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 
@@ -472,9 +473,11 @@ public struct LatticeSetupWizard: View {
                                     densityCeiling: model.relativeDensity)
     }
 
-    @ViewBuilder private var cellTransitionRow: some View {
+    /// ★ 3 — HOW the cells change: the algorithm. Always asked, whatever the
+    /// grade, because it is what is laid down rather than how it varies.
+    @ViewBuilder private var gradeStyleRow: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("Cell transition")
+            Text("Grade style")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.xs) {
@@ -515,6 +518,13 @@ public struct LatticeSetupWizard: View {
             // The lattice ALWAYS subdivides where a cell will not fit inside the face's
             // outline — geometry, not a preference, and this cannot switch it off. What
             // this sets is how far in from the outline the stepping continues.
+        }
+    }
+
+    /// ★ 4 — HOW FAR IN the shape grade reaches. Only when the grade fits the
+    /// shape at all; a stress-only grade has no outline to step toward.
+    @ViewBuilder private var shapeBandRow: some View {
+        VStack(alignment: .leading, spacing: 5) {
             Text("Grade to shape band")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color)
@@ -1102,7 +1112,7 @@ public struct LatticeSetupWizard: View {
                                // stepped sample's coarse half: single-cell ⇒ ONE.
                                steppedCoarsePerHalf: model.cellTransition == .stepped
                                    ? (model.singleCellMembers ? 1 : 2) : nil,
-                               dyadicSteps: model.gradeStepStyle == .dyadic)
+                               dyadicSteps: model.cellTransition == .defaultGrade)
         lastLatencyMS = (CFAbsoluteTimeGetCurrent() - t0) * 1000
     }
 

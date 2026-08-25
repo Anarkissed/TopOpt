@@ -136,7 +136,21 @@ public enum LatticeGroupRole: String, Codable, Equatable, Sendable {
 ///             the dial. (The per-spot material rule still applies — a cell
 ///             never exceeds its own wall; that is sizing, not grading.)
 public enum LatticeGradingMode: String, Equatable, Sendable, Codable {
-    case full, fitShape, none
+    /// Stress + shape — the density follows the solve AND the cells fit the outline.
+    case full
+    /// Shape only — the cells fit the outline; one density everywhere.
+    case fitShape
+    /// ★ Stress only (his 2026-08-25 restructure): the density follows the solve,
+    /// the cell stays one size. No shape band applies.
+    case stressOnly
+    /// No grade at all — one cell, one density.
+    case none
+
+    /// Does this mode grade the CELL to the face's outline? Only these two offer
+    /// the shape band.
+    public var fitsShape: Bool { self == .full || self == .fitShape }
+    /// Does the SOLVE decide the density here?
+    public var followsStress: Bool { self == .full || self == .stressOnly }
 }
 
 /// ★ HOW THE FIT-SHAPE GRADE STEPS DOWN — his "either stepped or default

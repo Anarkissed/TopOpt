@@ -1046,7 +1046,7 @@ public struct WorkspacePlaceholder: View {
                                                      // Fit shape, the step style
                                                      // and the user-stated cells.
                                                      steppedShapeFit:
-                                                        project.lattice.gradingMode != LatticeGradingMode.none,
+                                                        project.lattice.gradingMode.fitsShape,
                                                      steppedDyadicSteps:
                                                         project.lattice.gradeStepStyle == .dyadic,
                                                      steppedCellStated:
@@ -1056,7 +1056,20 @@ public struct WorkspacePlaceholder: View {
                                                      // request, 2026-08-24 evening) —
                                                      // the "Rebuilding the lattice"
                                                      // toast is what shows instead.
-                                                     hidden: strutBakeInFlight)
+                                                     // ★★★ AND HIDDEN WHILE THE
+                                                     // SOLVE RUNS (his 2026-08-25:
+                                                     // "It showed a full-quilted
+                                                     // lattice while still
+                                                     // calculating … This should
+                                                     // *NEVER* happen"). The gate
+                                                     // covered the BAKE only; the
+                                                     // FEA that grades every strut
+                                                     // is a separate job, and the
+                                                     // picture standing while it
+                                                     // runs is graded by whatever
+                                                     // field preceded it.
+                                                     hidden: strutBakeInFlight
+                                                        || latticeSimIsRunning)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -4564,9 +4577,7 @@ public struct WorkspacePlaceholder: View {
         // the picture disagreed with the job the Lattice button would send.
         // The mode is what decides now, not which page is up.
         let field: StressField?
-        if (project.lattice.gradingMode == .fitShape
-                || project.lattice.gradingMode == LatticeGradingMode.none),
-           project.lattice.algorithm == "stepped" {
+        if !project.lattice.gradingMode.followsStress {
             // ★ THE GRADING OPTIONS (2026-08-25): "No grade" and "Grade to fit
             // Shape" both mean the DENSITY is one number everywhere — the dial,
             // or Auto — so no stress field reaches the grading. Stepped only;
@@ -9596,7 +9607,14 @@ public struct WorkspacePlaceholder: View {
         // evening: a per-face density control, aesthetic mode only — scrub is the
         // slider, the keypad types it). Structural keeps the per-region gate:
         // there the density is the certificate's business.
-        project.lattice.densityMode == .perRegion
+        // ★★★ NOT UNDER SIM (his ruling, 2026-08-25: "Remove the manual density
+        // since the Density is set to 'Sim' … Make it grey and make sure it cannot
+        // be adjusted when in Sim. Let Sim do its thing"). A finite-element solve
+        // decides every strut there; a keypad beside it edits a number the picture
+        // does not read, which is the decorative-control defect this page keeps
+        // paying down.
+        if project.lattice.densityMode == .sim { return false }
+        return project.lattice.densityMode == .perRegion
             || (project.lattice.stageMode ?? .structural) == .aesthetic
     }
 
@@ -9633,7 +9651,6 @@ public struct WorkspacePlaceholder: View {
         // grading options") — under Full it stays the fact row it always was.
         let cellControl = aesthetic
             && project.lattice.gradingMode != .full
-            && project.lattice.algorithm == "stepped"
         let statedCell = project.latticeSelectableCellMM(ref)
         let drawer = LatticeRegionDrawer.make(
             card: card,

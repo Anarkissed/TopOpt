@@ -344,7 +344,11 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.algorithm = out.cellTransition.coreAlgorithm
         // ★ The grading options ride with the algorithm choice (2026-08-25).
         out.gradingMode = gradingMode
-        out.gradeStepStyle = gradeStepStyle
+        // ★ THE STEP STYLE IS THE ALGORITHM, not a second control beside it (his
+        // 2026-08-25 restructure): Default Grade IS core's dyadic ladder, Stepped
+        // IS the any-whole-division one. Deriving it here removes the orphaned
+        // chip that used to sit under Stepped only.
+        out.gradeStepStyle = cellTransition == .defaultGrade ? .dyadic : .stepped
         out.retainSubfloorInUnloadedRegions =
             (cellSizeMode == .fit) ? false : retainSubfloor
         if !out.retainSubfloorInUnloadedRegions {
