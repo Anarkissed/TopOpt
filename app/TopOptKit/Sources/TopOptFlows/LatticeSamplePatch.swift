@@ -266,13 +266,21 @@ public enum LatticeSamplePatch {
             // taking the left half of one and the right half of the other yields a
             // single block whose left is at one cell and right at the other, with one
             // continuous rim around the whole thing.
-            // ★ THE FLOOR SHAPES THE SAMPLE (his spec): with a coarse-per-half
-            // count, the block is exactly 2·k derived cells across — so at k = 1
-            // ONE cell fills its half of the cube, and flipping single-cell
-            // changes the STRUCTURE at constant block size instead of rescaling
-            // the same picture.
-            let n = steppedCoarsePerHalf.map { Swift.max(1, $0) * 2 }
-                ?? Swift.max(2, cells)
+            // ★★★ RE-MADE FROM SCRATCH (his verdict, 2026-08-24 late: "still
+            // looks awful. Please re-make from scratch"), to his own sentence:
+            // "a single cell filling half the cube, with a grade AROUND". One
+            // envelope: a centre of exactly the floor's worth of derived cells —
+            // ONE cell at single-cell, 2×2×2 at floor two — wrapped on all sides
+            // by a shell one grade step finer. The block size is pinned to the
+            // MEMBER, so the toggle changes the structure, never the scale.
+            if let k = steppedCoarsePerHalf.map({ Swift.max(1, $0) }) {
+                return centreAndShell(lattice: lattice,
+                                      memberMM: cellMM * Double(k),
+                                      coarseAcross: k,
+                                      relativeDensity: relativeDensity,
+                                      sides: sides)
+            }
+            let n = Swift.max(2, cells)
             let extentMM = cellMM * Double(n)
             // ★ THE OTHER DIVISION MUST NOT BE DYADIC. A power-of-two pair shares nodes
             // at the seam, which is what DOUBLED does — drawing that here would make the
@@ -298,6 +306,62 @@ public enum LatticeSamplePatch {
         }
     }
 
+
+    /// ★★★ THE STEPPED SAMPLE: a centre of the floor's worth of derived cells,
+    /// wrapped by a one-step-finer shell — his sentence, built literally. The
+    /// centre spans the middle `memberMM` cube of a `2·memberMM` block; the shell
+    /// is the same block divided one grade finer with its middle removed. One
+    /// envelope, two structures, and the single-cell toggle flips the CENTRE
+    /// between one cell and 2×2×2 at constant block size.
+    static func centreAndShell(lattice: LatticeType, memberMM m: Double,
+                               coarseAcross k: Int, relativeDensity: Double,
+                               sides: Int) -> ViewerMesh {
+        let shellCell = m / Double(2 * k)
+        let shell = mesh(lattice: lattice, cellMM: shellCell, cells: 4 * k,
+                         relativeDensity: relativeDensity, boundary: .none,
+                         sides: sides)
+        let centre = mesh(lattice: lattice, cellMM: m / Double(k), cells: k,
+                          relativeDensity: relativeDensity, boundary: .none,
+                          sides: sides)
+        let lo = Float(m) / 2, hi = Float(m) * 1.5
+        var pos: [Float] = []
+        var idx: [Int32] = []
+        func inCore(_ x: Float, _ y: Float, _ z: Float) -> Bool {
+            x > lo && x < hi && y > lo && y < hi && z > lo && z < hi
+        }
+        func append(_ mIn: ViewerMesh, offset: Float, dropCore: Bool) {
+            var remap = [Int32: Int32]()
+            var t = 0
+            while t + 2 < mIn.indices.count {
+                let i0 = Int(mIn.indices[t]), i1 = Int(mIn.indices[t + 1])
+                let i2 = Int(mIn.indices[t + 2])
+                t += 3
+                let cx = (mIn.positions[i0 * 3] + mIn.positions[i1 * 3]
+                          + mIn.positions[i2 * 3]) / 3 + offset
+                let cy = (mIn.positions[i0 * 3 + 1] + mIn.positions[i1 * 3 + 1]
+                          + mIn.positions[i2 * 3 + 1]) / 3 + offset
+                let cz = (mIn.positions[i0 * 3 + 2] + mIn.positions[i1 * 3 + 2]
+                          + mIn.positions[i2 * 3 + 2]) / 3 + offset
+                if dropCore, inCore(cx, cy, cz) { continue }
+                if !dropCore, !inCore(cx, cy, cz) { continue }
+                var tri = [Int32]()
+                for i in [i0, i1, i2] {
+                    let key = Int32(i)
+                    if let r = remap[key] { tri.append(r); continue }
+                    let r = Int32(pos.count / 3)
+                    pos.append(mIn.positions[i * 3] + offset)
+                    pos.append(mIn.positions[i * 3 + 1] + offset)
+                    pos.append(mIn.positions[i * 3 + 2] + offset)
+                    remap[key] = r
+                    tri.append(r)
+                }
+                idx += tri
+            }
+        }
+        append(shell, offset: 0, dropCore: true)          // the grade around
+        append(centre, offset: Float(m) / 2, dropCore: false)  // the cell(s) within
+        return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
+    }
 
     /// ★ ONE BLOCK OUT OF TWO DIVISIONS OF THE SAME BOX: every triangle of `a` whose
     /// centroid is on the low-x side, every triangle of `b` on the high-x side. Both were

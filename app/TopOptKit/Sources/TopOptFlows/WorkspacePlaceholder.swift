@@ -1779,7 +1779,19 @@ public struct WorkspacePlaceholder: View {
     private func latticeRegionCellsMM(widthPercentile: Double) -> [Double] {
         let bead = project.printParams.strutLineWidthMM
         guard bead > 0 else { return [] }
-        return project.latticeJobRegions().regions.map { r in
+        let regions = project.latticeJobRegions().regions
+        let memoKey = "\(strutSceneToken)|\(widthPercentile)|\(bead)|"
+            + "\(project.lattice.stageMode ?? .structural)|"
+            + "\(project.lattice.topologyID)|\(project.lattice.singleCellMembers)|"
+            + "\(project.lattice.boundary)|"
+            + regions.map { "\($0.role):\($0.depthMM)" }.joined(separator: ",")
+        let tokenPart = "\(strutSceneToken)"
+        if LatticeRegionCellMemo.token != tokenPart {
+            LatticeRegionCellMemo.token = tokenPart
+            LatticeRegionCellMemo.byKey = [:]
+        }
+        if let hit = LatticeRegionCellMemo.byKey[memoKey] { return hit }
+        let out = regions.map { r -> Double in
             guard r.role == .include, r.depthMM > 0 else { return 0 }
             // ★ THE REGION'S OWN MEASURED MATERIAL, not the depth the user typed —
             // the cell is W / N* for THIS region. Falls back to the declared depth
@@ -1862,6 +1874,8 @@ public struct WorkspacePlaceholder: View {
             let n = Swift.max(1, (effDepth / d.cellMM).rounded())
             return effDepth / n
         }
+        LatticeRegionCellMemo.byKey[memoKey] = out
+        return out
     }
 
     private var latticePreviewFitCells: [Double] {
@@ -8925,9 +8939,22 @@ public struct WorkspacePlaceholder: View {
     private func latticeDiagnosis(_ g: SelectionGroup) -> LatticeFaceDiagnosis {
         let limits = TopOptKit.latticeLimits(topology: project.lattice.lattice.id)
         let nozzle = project.printParams.strutLineWidthMM
+        // ★ THE STAGE'S FLOOR, NOT THE ACCURACY FLOOR (his fix 3, 2026-08-24
+        // late): the badge judged every face against core's floor of 5 whatever
+        // the stage, so a single-cell aesthetic face — floor 1, baking exactly as
+        // asked — wore "Won't certify" the moment its density was dialled. The
+        // aesthetic stage makes no strength claim; its badge judges what it DOES
+        // claim: the stage's own floor and the nozzle. Structural is unchanged.
+        let floor = (project.lattice.stageMode ?? .structural)
+            .cellsPerMemberFloor(topology: project.lattice.topologyID,
+                                 utilisation: .nan,
+                                 boundaryFinishWritten:
+                                    project.lattice.singleCellMembers
+                                    && project.lattice.boundary != .none)
         let each = latticedSelectableCards(g).map {
             LatticeFaceDiagnosis.of(card: $0,
-                                    cellsPerMemberFloor: limits.minCellsPerMember,
+                                    cellsPerMemberFloor: floor > 0
+                                        ? floor : limits.minCellsPerMember,
                                     nozzleWidthMM: nozzle)
         }
         return LatticeFaceDiagnosis.merged(each)
@@ -8997,9 +9024,15 @@ public struct WorkspacePlaceholder: View {
             }
             ForEach(Array(drawer.rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: DS.Space.s) {
+                    // ★ A CONTROL'S LABEL READS AS A CONTROL (his fixes 5.4 + the
+                    // follow-up "the word 'Depth' isn't white and bold"): every
+                    // modifiable row's label is white and heavier; a fact row
+                    // stays quiet.
                     Text(row.label)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .font(.system(size: row.modifiable ? 11 : 10,
+                                      weight: row.modifiable ? .bold : .semibold))
+                        .foregroundStyle(row.modifiable
+                            ? Color.white : DS.Color.textQuaternary.color)
                     Spacer(minLength: 0)
                     // ★ §4b — a DERIVED row gets no gesture and no control
                     // chrome: it is a fact, not a picker.
@@ -9469,6 +9502,7 @@ public struct WorkspacePlaceholder: View {
         let aesthetic = (project.lattice.stageMode ?? .structural) == .aesthetic
         let card = latticeSelectableCards[ref.key]
         let band = project.latticeAestheticDensityBand(cellMM: card?.cellMM ?? 0)
+        let userStated = project.lattice.selectableDensity[ref.key] != nil
         let storedRho = project.latticeSelectableDensity(ref, in: g.id)
             ?? card?.relativeDensity ?? 0
         let relativePct = band.hi > band.lo
@@ -9482,8 +9516,14 @@ public struct WorkspacePlaceholder: View {
             latticeReachesTheRun: ref.latticeReachesTheRun,
             perRegionDensity: perRegionDensity,
             densityFirst: aesthetic && project.lattice.singleCellMembers,
+            // ★ AUTO IS SAID OUT LOUD (his fix 7): a face nobody dialled shows
+            // "Auto · N%" — so a stored override (like the stale clamped 20%
+            // that painted his 'default' quilt) is distinguishable from the
+            // derived default at a glance. Typing 0 clears back to Auto.
             densityDisplay: aesthetic
-                ? String(format: "%.0f%%", relativePct) : nil,
+                ? (userStated ? String(format: "%.0f%%", relativePct)
+                              : String(format: "Auto · %.0f%%", relativePct))
+                : nil,
             expandMM: project.latticeExpandMM(ref))
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
                           identifier: "lattice-drawer-\(ref.key)",
@@ -9497,8 +9537,11 @@ public struct WorkspacePlaceholder: View {
                           writeDensity: { pct in
                               // ★ Aesthetic keypads speak the RELATIVE scale
                               // (printable→quilt); the store stays absolute.
-                              let f = aesthetic && band.hi > band.lo
-                                  ? band.lo + Swift.min(Swift.max(pct, 0), 100)
+                              // 0 (or less) clears back to AUTO — the one way
+                              // out of a stored override.
+                              let f: Double? = pct <= 0 ? nil
+                                  : aesthetic && band.hi > band.lo
+                                  ? band.lo + Swift.min(pct, 100)
                                       / 100 * (band.hi - band.lo)
                                   : pct / 100
                               project.writeLatticeDensity(
@@ -10501,3 +10544,17 @@ public struct WorkspacePlaceholder: View {
 /// One-line memory for the stepped-guard diagnostic, so it logs on CHANGE rather
 /// than on every SwiftUI evaluation (the first cut flooded the console at 5 Hz).
 enum SteppedGuardLog { @MainActor static var last: String? }
+
+/// ★★★ THE WALL WALK IS MEASURED ONCE PER SCENE, NOT ONCE PER BODY EVALUATION.
+/// `wallWidthAlongNormalMM` walks a 128³ occupancy per region, and SwiftUI
+/// evaluates the workspace body on every drawer keystroke — the re-measurement
+/// was the wait he watched the 2-cell ladder flash through. The scene token
+/// (bumped exactly when a new strut scene lands) plus the derivation's actual
+/// inputs form the key; everything else returns the remembered cells.
+enum LatticeRegionCellMemo {
+    // Keyed by the full input fingerprint, cleared when the scene token moves —
+    // Fit (p05) and Stepped (p50) can both evaluate in one frame, so one slot
+    // would thrash between the two and memoise nothing.
+    @MainActor static var token = ""
+    @MainActor static var byKey: [String: [Double]] = [:]
+}

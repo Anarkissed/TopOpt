@@ -265,7 +265,16 @@ public struct LatticeSetupWizard: View {
                 cellTransitionRow
             }
             if model.stage == .lattice { singleCellSwitch }
-            if model.stage == .lattice { subfloorRetentionSwitch }
+            // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
+            // the 'too thin to certify' button from the aesthetic mode"). The
+            // switch's whole sentence is about the strength certificate; the
+            // aesthetic stage makes no such claim, and arming it there dropped
+            // every floor and shredded the lattice (his img 8). Structural keeps
+            // it exactly as it was.
+            if model.stage == .lattice,
+               (project.lattice.stageMode ?? .structural) == .structural {
+                subfloorRetentionSwitch
+            }
             latencyReadout
             // ★ THE CARD, MOVED HERE: "place the one on the right at the very
             // bottom of the one on the left."
