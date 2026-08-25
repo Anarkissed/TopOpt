@@ -1,12 +1,11 @@
 import XCTest
 @testable import TopOptFlows
 
-/// ★ THE SAMPLE ANSWERS THE SINGLE-CELL TOGGLE (his backlog, 2026-08-24: "the
-/// settings-page sample patch does not change when the single-cell/member toggle
-/// moves"). The page derives the sample's cell through core's own derivation at the
-/// mode's floor — floor 2 → 1 doubles the derived cell on the same member — and
-/// hands it to `stageMesh(derivedCellMM:)`. This asserts the handoff is real: a
-/// different derived cell is a different sample, and nil keeps the stored cell.
+/// ★ THE SAMPLE ANSWERS THE SINGLE-CELL TOGGLE (his backlog, 2026-08-24), and since
+/// 2026-08-25 it answers it in the shape he specified: "a single cell that fits the
+/// entire depth and goes all the way through, and the sample should be WIDER than
+/// the others to show that it then is graded to 3 then 4 then 5 to fit the shape" —
+/// dyadic being "the same but in twos".
 final class LatticeSampleSingleCellTests: XCTestCase {
 
     func testTheDerivedCellChangesTheSample() {
@@ -15,78 +14,74 @@ final class LatticeSampleSingleCellTests: XCTestCase {
         let overridden = model.stageMesh(derivedCellMM: model.cellMM * 2)
         XCTAssertFalse(stored.positions.isEmpty)
         XCTAssertFalse(overridden.positions.isEmpty)
-        // Same topology, twice the cell: the block spans twice the extent.
         func maxX(_ m: ViewerMesh) -> Float {
             stride(from: 0, to: m.positions.count, by: 3).map { m.positions[$0] }.max() ?? 0
         }
         XCTAssertEqual(maxX(overridden), 2 * maxX(stored), accuracy: 1e-3,
                        "a doubled derived cell must draw a doubled sample")
-        // And nil is byte-identical to the stored cell — the toggle-less modes keep
-        // the sample they have always had.
         XCTAssertEqual(model.stageMesh().positions, stored.positions)
     }
 
-    /// ★★★ THE RE-MADE STEPPED SAMPLE (his verdict: "still looks awful. Please
-    /// re-make from scratch") is his own sentence built literally: "a single cell
-    /// filling half the cube, with a grade around". The block is pinned to the
-    /// MEMBER — flipping the floor between 1 and 2 keeps the envelope and changes
-    /// the STRUCTURE, which is exactly what every previous rescaling version
-    /// failed to do.
-    func testCentreAndShellHoldsTheEnvelopeAcrossTheToggle() {
+    private func run(_ member: Double, k: Int, dyadic: Bool) -> ViewerMesh {
+        LatticeSamplePatch.mesh(lattice: .named("octet"), cellMM: member,
+                                cells: 2, relativeDensity: 0.3,
+                                boundary: .none, transition: .stepped,
+                                sides: 6, steppedCoarsePerHalf: k,
+                                dyadicSteps: dyadic)
+    }
+
+    private func extent(_ m: ViewerMesh) -> (w: Float, h: Float, d: Float) {
+        let xs = stride(from: 0, to: m.positions.count, by: 3).map { m.positions[$0] }
+        let ys = stride(from: 1, to: m.positions.count, by: 3).map { m.positions[$0] }
+        let zs = stride(from: 2, to: m.positions.count, by: 3).map { m.positions[$0] }
+        return ((xs.max() ?? 0) - (xs.min() ?? 0),
+                (ys.max() ?? 0) - (ys.min() ?? 0),
+                (zs.max() ?? 0) - (zs.min() ?? 0))
+    }
+
+    /// ★ WIDER THAN IT IS DEEP, and by the number of steps in the run — the whole
+    /// point of the shape he asked for: one cell through the depth, then the grade
+    /// marching across the width.
+    func testTheRunIsWideAndOneCellDeep() {
         let member = 10.0
-        // Single-cell ON: derived cell == member, one coarse cell per half.
-        let on = LatticeSamplePatch.mesh(lattice: .named("octet"), cellMM: member,
-                                         cells: 2, relativeDensity: 0.3,
-                                         boundary: .none, transition: .stepped,
-                                         sides: 6, steppedCoarsePerHalf: 1)
-        // OFF (floor 2): derived cell == member / 2, two coarse cells per half.
-        let off = LatticeSamplePatch.mesh(lattice: .named("octet"), cellMM: member / 2,
-                                          cells: 4, relativeDensity: 0.3,
-                                          boundary: .none, transition: .stepped,
-                                          sides: 6, steppedCoarsePerHalf: 2)
-        func bounds(_ m: ViewerMesh) -> (Float, Float) {
-            let xs = stride(from: 0, to: m.positions.count, by: 3).map { m.positions[$0] }
-            return (xs.min() ?? 0, xs.max() ?? 0)
-        }
-        XCTAssertFalse(on.positions.isEmpty)
-        XCTAssertFalse(off.positions.isEmpty)
-        let bOn = bounds(on), bOff = bounds(off)
-        // Strut RADIUS pads the hull past the lattice extent, and it scales
-        // with the shell's own cell — so the envelope agrees to within a strut
-        // diameter, not to a micron. The failure this guards against was a 2x
-        // rescale, not a 0.8 mm skin.
-        XCTAssertEqual(bOn.1 - bOn.0, bOff.1 - bOff.0, accuracy: 2.0,
-                       "the toggle must not rescale the sample block")
-        XCTAssertEqual(bOn.1 - bOn.0, Float(2 * member), accuracy: 2.0,
-                       "the block is two members across")
-        // Different structure, not a different size: OFF subdivides the centre.
+        let e = extent(run(member, k: 1, dyadic: false))
+        // Four columns, each one cube wide; height and depth stay ONE cube.
+        XCTAssertEqual(e.h, e.d, accuracy: 1.5, "the run is square in section")
+        XCTAssertGreaterThan(e.w, 3 * e.h,
+                             "the run must be much wider than it is deep — "
+                             + "w \(e.w) vs h \(e.h)")
+        // The hull includes the strut RADIUS, so the tolerance is a strut, not a
+        // micron — the failure this guards is a rescale, not a skin.
+        XCTAssertEqual(e.w, Float(4 * member), accuracy: 3.0,
+                       "four columns, each one derived cell wide")
+        XCTAssertEqual(e.h, Float(member), accuracy: 3.0,
+                       "one cell spans the whole depth")
+    }
+
+    /// ★ THE TOGGLE CHANGES THE STRUCTURE, NOT THE SCALE — floor 2 divides every
+    /// column twice as finely inside the SAME run.
+    func testTheToggleChangesStructureNotScale() {
+        let member = 10.0
+        let on = run(member, k: 1, dyadic: false)      // single-cell: 1·3·4·5
+        let off = run(member / 2, k: 2, dyadic: false) // floor 2: 2·6·8·10
+        let a = extent(on), b = extent(off)
+        XCTAssertEqual(a.w, b.w, accuracy: 2.0, "the run must not rescale")
+        XCTAssertEqual(a.h, b.h, accuracy: 2.0)
         XCTAssertNotEqual(on.indices.count, off.indices.count,
                           "flipping the floor must change the structure")
-        // The grade around: both samples carry geometry OUTSIDE the central
-        // member cube (the shell) and INSIDE it (the centre cell(s)).
-        // ★ THE MESH IS CENTRED ON THE ORIGIN (the cell-granular rebuild uses
-        // the same convention `mesh()` always had), so the middle-member core is
-        // |x|,|y|,|z| < member/2. The previous box assumed an uncentred frame
-        // and passed only because it happened to overlap a shell corner — the
-        // corner the cutaway now removes, which is how the accident surfaced.
-        func counts(_ m: ViewerMesh) -> (core: Int, shell: Int) {
-            var core = 0, shell = 0
-            let half = Float(member) / 2
-            var t = 0
-            while t + 2 < m.indices.count {
-                let i = Int(m.indices[t])
-                let x = m.positions[i * 3], y = m.positions[i * 3 + 1]
-                let z = m.positions[i * 3 + 2]
-                if abs(x) < half, abs(y) < half, abs(z) < half { core += 1 }
-                else { shell += 1 }
-                t += 3
-            }
-            return (core, shell)
-        }
-        let cOn = counts(on), cOff = counts(off)
-        XCTAssertGreaterThan(cOn.core, 0); XCTAssertGreaterThan(cOn.shell, 0)
-        XCTAssertGreaterThan(cOff.core, 0); XCTAssertGreaterThan(cOff.shell, 0)
-        XCTAssertGreaterThan(cOff.core, cOn.core,
-                             "2×2×2 centre cells carry more triangles than one")
+        XCTAssertGreaterThan(off.indices.count, on.indices.count,
+                             "a finer floor carries more struts")
+    }
+
+    /// ★ DYADIC IS "THE SAME BUT IN TWOS" — same envelope, different run.
+    func testDyadicKeepsTheEnvelopeAndChangesTheRun() {
+        let member = 10.0
+        let stepped = run(member, k: 1, dyadic: false)  // 1·3·4·5
+        let dyadic = run(member, k: 1, dyadic: true)    // 1·2·4·8
+        let a = extent(stepped), b = extent(dyadic)
+        XCTAssertEqual(a.w, b.w, accuracy: 2.0, "same envelope")
+        XCTAssertEqual(a.h, b.h, accuracy: 2.0)
+        XCTAssertNotEqual(stepped.indices.count, dyadic.indices.count,
+                          "the step style must change what is drawn")
     }
 }

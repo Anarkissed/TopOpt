@@ -502,7 +502,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
                           derivedCellMM: Double? = nil,
                           // ★ The single-cell floor, for the stepped sample's
                           // coarse half (1 ⇒ one cell fills it). nil ⇒ legacy.
-                          steppedCoarsePerHalf: Int? = nil) -> ViewerMesh {
+                          steppedCoarsePerHalf: Int? = nil,
+                          /// ★ Dyadic stepping — the sample run grades in twos.
+                          dyadicSteps: Bool = false) -> ViewerMesh {
         let cellMM = derivedCellMM ?? self.cellMM
         let cells = stage == .cell
             ? 1
@@ -542,7 +544,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
                                        transition: stage == .cell
                                            ? .defaultGrade : cellTransition,
                                        steppedCoarsePerHalf: stage == .cell
-                                           ? nil : steppedCoarsePerHalf)
+                                           ? nil : steppedCoarsePerHalf,
+                                       dyadicSteps: dyadicSteps)
     }
 
     /// The triangle count the current stage will draw — the latency budget, known

@@ -243,7 +243,11 @@ public enum LatticeSamplePatch {
                             boundary: LatticeBoundaryTreatment,
                             transition: LatticeCellTransition,
                             sides: Int = 8,
-                            steppedCoarsePerHalf: Int? = nil) -> ViewerMesh {
+                            steppedCoarsePerHalf: Int? = nil,
+                            /// ★ Dyadic stepping ⇒ the run grades in TWOS (his
+                            /// 2026-08-25 spec: "the dyadic one should be the same
+                            /// but in twos").
+                            dyadicSteps: Bool = false) -> ViewerMesh {
         switch transition {
         case .defaultGrade:
             return mesh(lattice: lattice, cellMM: cellMM, cells: cells,
@@ -274,11 +278,18 @@ public enum LatticeSamplePatch {
             // by a shell one grade step finer. The block size is pinned to the
             // MEMBER, so the toggle changes the structure, never the scale.
             if let k = steppedCoarsePerHalf.map({ Swift.max(1, $0) }) {
-                return centreAndShell(lattice: lattice,
-                                      memberMM: cellMM * Double(k),
-                                      coarseAcross: k,
-                                      relativeDensity: relativeDensity,
-                                      sides: sides)
+                // ★★★ HIS SPEC (2026-08-25): the first cube is ONE cell spanning
+                // the whole depth — you see straight through it — and the run
+                // grades finer along its width to show the fit-to-shape step.
+                // Stepped grades 1·3·4·5; dyadic "the same but in twos".
+                //
+                // The floor multiplies every divisor, so with single-cell OFF the
+                // run starts at 2 across and steps from there — the toggle changes
+                // the STRUCTURE at a constant cube size, as it always had to.
+                let steps = dyadicSteps ? [1, 2, 4, 8] : [1, 3, 4, 5]
+                return gradedRun(lattice: lattice, cellMM: cellMM * Double(k),
+                                 divisors: steps.map { $0 * k },
+                                 relativeDensity: relativeDensity, sides: sides)
             }
             let n = Swift.max(2, cells)
             let extentMM = cellMM * Double(n)
@@ -306,6 +317,77 @@ public enum LatticeSamplePatch {
         }
     }
 
+
+    /// ★★★ THE STEPPED SAMPLE, TO HIS SPEC (2026-08-25): "a single cell that fits
+    /// the entire depth and goes all the way through, and the sample should be
+    /// WIDER than the others to show that it then is graded to 3 then 4 then 5 to
+    /// fit the shape" — and dyadic "the same but in twos".
+    ///
+    /// So the block is a RUN of `divisors.count` cubes, each one derived-cell wide,
+    /// tall and deep. The first is ONE cell — it spans the whole depth and you can
+    /// see straight through it. Each cube after it is the same cube divided more
+    /// finely, which is precisely what grade-to-fit-shape does as it approaches the
+    /// face's outline.
+    ///
+    /// ★ AND EVERY DIVISOR IS WHOLE, so the columns MESH: the coarse cell's corners
+    /// are nodes of the fine grid beside it. That is the same law the part's bake
+    /// now obeys (`steppedCellField`) after his close-up showed struts cut to
+    /// pieces where 12.00 mm sat beside 13.00 mm — so the sample teaches the rule
+    /// the part follows, instead of a picture nothing else obeys.
+    static func gradedRun(lattice: LatticeType, cellMM m: Double,
+                          divisors: [Int], relativeDensity: Double,
+                          sides: Int) -> ViewerMesh {
+        var pos: [Float] = []
+        var idx: [Int32] = []
+        let S = lattice.denominator
+        let cols = Swift.max(1, divisors.count)
+        let centre = SIMD3<Float>(Float(m) * Float(cols) / 2,
+                                  Float(m) / 2, Float(m) / 2)
+        for (k, nRaw) in divisors.enumerated() {
+            let n = Swift.max(1, nRaw)
+            let c = Float(m) / Float(n)              // this column's cell
+            let unit = c / Float(S)
+            let radius = Float(lattice.strutRadiusMM(relativeDensity: relativeDensity,
+                                                     cellMM: Double(c)))
+            let x0 = Float(k) * Float(m)
+            let extent = n * S
+            var segSet = Set<[Int]>()
+            var nodeSet = Set<[Int]>()
+            var segs: [(LatticeType.Node, LatticeType.Node)] = []
+            var nodes: [LatticeType.Node] = []
+            func inside(_ p: LatticeType.Node) -> Bool {
+                p.x >= 0 && p.x <= extent && p.y >= 0 && p.y <= extent
+                    && p.z >= 0 && p.z <= extent
+            }
+            for cz in -1...n { for cy in -1...n { for cx in -1...n {
+                let ox = cx * S, oy = cy * S, oz = cz * S
+                for st in lattice.struts {
+                    let a = LatticeType.Node(st.a.x + ox, st.a.y + oy, st.a.z + oz)
+                    let b = LatticeType.Node(st.b.x + ox, st.b.y + oy, st.b.z + oz)
+                    guard inside(a), inside(b) else { continue }
+                    let key = order(a, b)
+                    if segSet.insert(key).inserted { segs.append((a, b)) }
+                    for p in [a, b] {
+                        let nk = [p.x, p.y, p.z]
+                        if nodeSet.insert(nk).inserted { nodes.append(p) }
+                    }
+                }
+            } } }
+            func world(_ p: LatticeType.Node) -> SIMD3<Float> {
+                SIMD3<Float>(Float(p.x) * unit + x0,
+                             Float(p.y) * unit,
+                             Float(p.z) * unit) - centre
+            }
+            for (a, b) in segs {
+                emitStrut(world(a), world(b), radius: radius, sides: sides,
+                          pos: &pos, idx: &idx)
+            }
+            for p in nodes {
+                emitNode(world(p), radius: radius, pos: &pos, idx: &idx)
+            }
+        }
+        return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: true)
+    }
 
     /// ★★★ THE STEPPED SAMPLE: a centre of the floor's worth of derived cells,
     /// wrapped by a one-step-finer shell — his sentence ("a single cell filling

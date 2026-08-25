@@ -85,17 +85,22 @@ final class LatticePerVoxelWidthTests: XCTestCase {
         var hist: [Float: Int] = [:]
         for v in baked.steppedCellMM where v > 0 { hist[v, default: 0] += 1 }
         let full = hist.filter { abs(Double($0.key) - 12.03) < 0.1 }.values.reduce(0, +)
-        // ★ THE RULING'S SIGNATURE: where the wall measures at (or past) the
-        // declared 13 mm, the cell GROWS to the declaration and the far cap is
-        // flush by construction — the 0.97 mm sliced band at the back is gone.
-        let grown = hist.filter { abs(Double($0.key) - 13.0) < 0.1 }.values.reduce(0, +)
         XCTAssertGreaterThan(full, 0, "the bulk must keep the 12.03 mm cell; sizes=\(hist)")
-        XCTAssertGreaterThan(grown, 0,
-                             "cells over the thick wall must grow to the declared "
-                             + "13 mm (both directions, his ruling); sizes=\(hist)")
-        XCTAssertGreaterThan(full + grown, hist.values.reduce(0, +) / 2,
-                             "most of the face is ~12-13 mm thick and must carry "
-                             + "full-depth cells; sizes=\(hist)")
+        XCTAssertGreaterThan(full, hist.values.reduce(0, +) / 2,
+                             "most of the face is ~12 mm thick and must carry the "
+                             + "region's own cell; sizes=\(hist)")
+        // ★★★ EVERY SIZE IS A WHOLE-NUMBER DIVISION OF THE REGION'S CELL (his
+        // 2026-08-25 close-up: struts cut to pieces where incommensurate sizes met).
+        // A thin spot still gets a finer cell — his per-spot ruling's intent — but
+        // only at S/n, so the coarse cell's corners stay nodes of the fine grid
+        // beside it and the strut has somewhere to land.
+        for (size, count) in hist {
+            let n = regionCell / Double(size)
+            XCTAssertEqual(n, n.rounded(), accuracy: 0.02,
+                           "\(count) cells at \(size) mm are not a whole division "
+                           + "of the \(regionCell) mm region cell — that boundary "
+                           + "cuts every strut crossing it")
+        }
     }
 
     /// ★ THE NEVER-OVERSHOOT INVARIANT ITSELF (his ruling, 2026-08-24 evening: "a

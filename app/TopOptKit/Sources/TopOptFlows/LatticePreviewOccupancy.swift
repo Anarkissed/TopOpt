@@ -990,12 +990,41 @@ extension LatticePreviewOccupancy {
                                 // is a ruling, a typed number is not a licence
                                 // past the wall — and never divides it by the
                                 // floor: the number typed is the cell meant.
-                                let t = stated
+                                let target = stated
                                     ? Swift.min(s, Swift.min(declared, wLocal))
                                     : Swift.min(declared, wLocal) / memberFloorAt(p)
-                                if t > 1e-6, abs(t - s) > 1e-9 {
-                                    s = t
-                                    dbgWidthShrunk += 1
+                                // ★★★ ONLY WHOLE-NUMBER DIVISIONS OF THE REGION'S
+                                // CELL (his 2026-08-25 close-up: struts in pieces,
+                                // cut on flat planes with no nodes joining them —
+                                // IDENTICAL at 64³ and 128³, so not sampling).
+                                //
+                                // Two cells share nodes only when one size divides
+                                // the other a whole number of times. The first cut
+                                // of his per-spot ruling took each cell's own
+                                // material VERBATIM, so a wall carried 12.00 beside
+                                // 13.00 beside 10.31 — tilings that can never meet,
+                                // and the march cuts every strut that crosses
+                                // between them. Measured on his own two faces
+                                // (`LatticeNeighbourMeshProbe`): 13 distinct sizes
+                                // and 15.7% of neighbour boundaries unable to mesh,
+                                // against 0.5% with the rule off.
+                                //
+                                // So the local cell is quantised: S/n, n whole and
+                                // rounded UP so the result still fits the material
+                                // (never-overshoot survives). A thin spot still
+                                // gets a finer cell — his ruling's intent — and
+                                // every neighbour still shares its nodes. GROWTH to
+                                // an arbitrary local depth is dropped: it cannot be
+                                // made to mesh, and a disconnected lattice is not a
+                                // lattice. See the handoff for what that costs at
+                                // the far cap and the two ways to buy it back.
+                                if target > 1e-6 {
+                                    let n = Swift.max(1.0, (s / target - 1e-6).rounded(.up))
+                                    let q = s / n
+                                    if abs(q - s) > 1e-9 {
+                                        s = q
+                                        dbgWidthShrunk += 1
+                                    }
                                 }
                                 dbgW.append(wLocal)
                             }
