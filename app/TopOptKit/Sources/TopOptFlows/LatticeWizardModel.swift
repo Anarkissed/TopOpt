@@ -491,7 +491,10 @@ public struct LatticeWizardModel: Equatable, Sendable {
     ///   settings-page sample patch does not change when the single-cell/member
     ///   toggle moves"). nil ⇒ the stored `cellMM`, exactly as before.
     public func stageMesh(progress: Double = 1,
-                          derivedCellMM: Double? = nil) -> ViewerMesh {
+                          derivedCellMM: Double? = nil,
+                          // ★ The single-cell floor, for the stepped sample's
+                          // coarse half (1 ⇒ one cell fills it). nil ⇒ legacy.
+                          steppedCoarsePerHalf: Int? = nil) -> ViewerMesh {
         let cellMM = derivedCellMM ?? self.cellMM
         let cells = stage == .cell
             ? 1
@@ -509,7 +512,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
                                        relativeDensity: relativeDensity,
                                        boundary: stage == .cell ? .none : boundary,
                                        transition: stage == .cell
-                                           ? .defaultGrade : cellTransition)
+                                           ? .defaultGrade : cellTransition,
+                                       steppedCoarsePerHalf: stage == .cell
+                                           ? nil : steppedCoarsePerHalf)
     }
 
     /// The triangle count the current stage will draw — the latency budget, known

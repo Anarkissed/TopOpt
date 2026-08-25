@@ -1007,7 +1007,11 @@ public struct LatticeSetupWizard: View {
     private func rebuild() {
         let t0 = CFAbsoluteTimeGetCurrent()
         mesh = model.stageMesh(progress: tileProgress,
-                               derivedCellMM: derivedSampleCellMM)
+                               derivedCellMM: derivedSampleCellMM,
+                               // The floor decides how many derived cells fill the
+                               // stepped sample's coarse half: single-cell ⇒ ONE.
+                               steppedCoarsePerHalf: model.cellTransition == .stepped
+                                   ? (model.singleCellMembers ? 1 : 2) : nil)
         lastLatencyMS = (CFAbsoluteTimeGetCurrent() - t0) * 1000
     }
 

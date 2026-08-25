@@ -232,11 +232,18 @@ public enum LatticeSamplePatch {
     ///                  exporter runs (node merge, free-end tie, support prune,
     ///                  stranded drop), so the sample shows the spans a file would
     ///                  contain rather than the raw curves.
+    /// - Parameter steppedCoarsePerHalf: how many cells the COARSE half of the
+    ///   stepped sample shows across itself — the single-cell/member floor (his
+    ///   spec, 2026-08-24 evening: "There should be a single cell filling half
+    ///   the cube, with a grade around"). 1 ⇒ one derived cell fills its half;
+    ///   2 ⇒ two across. nil keeps the legacy proportions, where the toggle only
+    ///   rescaled the block and read as no change at all.
     public static func mesh(lattice: LatticeType, cellMM: Double, cells: Int,
                             relativeDensity: Double,
                             boundary: LatticeBoundaryTreatment,
                             transition: LatticeCellTransition,
-                            sides: Int = 8) -> ViewerMesh {
+                            sides: Int = 8,
+                            steppedCoarsePerHalf: Int? = nil) -> ViewerMesh {
         switch transition {
         case .defaultGrade:
             return mesh(lattice: lattice, cellMM: cellMM, cells: cells,
@@ -259,7 +266,13 @@ public enum LatticeSamplePatch {
             // taking the left half of one and the right half of the other yields a
             // single block whose left is at one cell and right at the other, with one
             // continuous rim around the whole thing.
-            let n = Swift.max(2, cells)
+            // ★ THE FLOOR SHAPES THE SAMPLE (his spec): with a coarse-per-half
+            // count, the block is exactly 2·k derived cells across — so at k = 1
+            // ONE cell fills its half of the cube, and flipping single-cell
+            // changes the STRUCTURE at constant block size instead of rescaling
+            // the same picture.
+            let n = steppedCoarsePerHalf.map { Swift.max(1, $0) * 2 }
+                ?? Swift.max(2, cells)
             let extentMM = cellMM * Double(n)
             // ★ THE OTHER DIVISION MUST NOT BE DYADIC. A power-of-two pair shares nodes
             // at the seam, which is what DOUBLED does — drawing that here would make the
