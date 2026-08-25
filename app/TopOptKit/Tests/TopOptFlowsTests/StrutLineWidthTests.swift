@@ -316,17 +316,22 @@ final class StrutLineWidthTests: XCTestCase {
         // `lattice_derive_cell_for_member`, which is the same printability frontier
         // against a member width. A wall bead here would hand every region a cell it
         // cannot hold and grade the part back to solid.
-        // ★ TWELVE SINCE 2026-08-24 (the shape-fit ladder readout), AUDITED:
+        // ★ THIRTEEN SINCE 2026-08-24 EVENING (the per-face density floor), AUDITED:
         //
-        // NEW SITE: `LatticeSetupWizard.shapeFitSteps`. It answers "how many cell sizes
-        // can the shape fit actually use here" as `cell / finest printable cell`, and the
-        // floor it walks down to is `printabilityDensityFloor` — one lone unsupported
-        // STRUT extrusion, never a wall loop. A wall bead here would overstate the ladder
-        // and the panel would promise a gradient the printer cannot lay, which is the
-        // decorative-control defect this page has paid for before.
-        XCTAssertEqual(strutSites, 12,
-                       "the twelve audited lattice sites (AppModel 2, LatticePage 2, "
-                       + "WorkspacePlaceholder 5, ProjectModel 1, LatticeSetupWizard 2). "
+        // TWELFTH SITE: `LatticeSetupWizard.shapeFitSteps`. It answers "how many cell
+        // sizes can the shape fit actually use here" as `cell / finest printable cell`,
+        // and the floor it walks down to is `printabilityDensityFloor` — one lone
+        // unsupported STRUT extrusion, never a wall loop. A wall bead here would
+        // overstate the ladder and promise a gradient the printer cannot lay.
+        //
+        // THIRTEENTH SITE: `ProjectModel.writeLatticeDensity` — the AESTHETIC per-face
+        // density control's low bound is the printability floor at that face's cell,
+        // and the maintainer confirmed it in his own words (2026-08-24 evening: "yes,
+        // I meant line width (0.45)"). A wall bead here would let the slider store a
+        // density whose strut cannot extrude.
+        XCTAssertEqual(strutSites, 13,
+                       "the thirteen audited lattice sites (AppModel 2, LatticePage 2, "
+                       + "WorkspacePlaceholder 5, ProjectModel 2, LatticeSetupWizard 2). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

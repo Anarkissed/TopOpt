@@ -819,6 +819,26 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                 F = min(F, max(dClip, dOutline - outlineBand));
             }
         }
+        // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24
+        // evening: "I'm not seeing a solid outline meaning the entire chamfers
+        // are held up in thin air"). The ladder's shape fit already DECIDES
+        // which cells go solid — a want trimmed below the base rung deactivates
+        // the cell — but `anyActive` is a neighbourhood property, so a thin
+        // solid ring at the outline still drew its neighbours' struts straight
+        // through the material. The sample's OWN cell being inactive is the
+        // decision, read back; the union with dClip keeps it inside the part
+        // and the declared region. Gated on rimParams.z (armed only when the
+        // doubled path baked with declared regions), so every other bake is
+        // byte-identical.
+        if (LC.stepped == 0.0 && U.rimParams.z > 0.5) {
+            float S0d = U.latticeOrigin.w;
+            float3 bid = round((p - U.latticeOrigin.xyz) / S0d);
+            if (all(bid >= -0.5) && all(bid < U.gridDims.xyz - 0.5)) {
+                if (cellTex.read(uint3(bid), 0).r < 0.0) {
+                    F = min(F, dClip);
+                }
+            }
+        }
         // ★★★ AND THE LAST SLIVER AT THE OUTLINE IS SOLID, so the lattice meets the
         // face exactly instead of stopping half a cell short. `dRegion` is negative
         // inside the declared region, so {dRegion >= -rim} is the band hugging its

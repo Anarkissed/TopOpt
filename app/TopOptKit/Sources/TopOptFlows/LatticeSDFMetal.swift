@@ -1245,6 +1245,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         return Swift.max(steppedFinestPrintableCellMM(finest: finest), voxel)
     }
 
+    /// See `rebakeCellField` — TRUE only when the doubled ladder baked with
+    /// declared regions, so the march may render its decided-solid cells as solid.
+    private var doubledSolidCellsArmed = false
+
     private var steppedSolidRimMM: Double {
         // ★ NOT GATED ON `steppedDrawn` — that flag is only set at the END of a bake,
         // so reading it here made the rim 0.0 on the very bake that needed it and 0.9
@@ -1408,8 +1412,17 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         }
         steppedDrawn = baked != nil
         defer { bakedSerial = sceneSerial }
+        // ★ Whether the DOUBLED path's inactive cells should render solid — armed
+        // only when the ladder baked against declared regions, so a whole-part
+        // lattice (and every stepped/organic bake) is byte-identical. See the
+        // march's rimParams.z branch.
+        doubledSolidCellsArmed = false
         if baked == nil, let sweep = cellSweep {
             baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
+            if baked != nil,
+               scene.regions.contains(where: { $0.role == .include }) {
+                doubledSolidCellsArmed = true
+            }
         }
         // ★★ CAN ANYTHING PRINT AT THIS CELL AT ALL? The band floor has already
         // risen to the printability floor, so the usual answer is yes and every
@@ -2131,7 +2144,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 return SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0)
             }(),
             debugParams: SIMD4(Float(debugShadeMode), Float(debugMinStepMM), 0, 0),
-            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineBandMM), 0, 0))
+            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineBandMM),
+                             doubledSolidCellsArmed ? 1 : 0, 0))
     }
 
     /// ★★★ DIAGNOSIS ONLY: paint each hit by the CELL it stands in. Off on every
