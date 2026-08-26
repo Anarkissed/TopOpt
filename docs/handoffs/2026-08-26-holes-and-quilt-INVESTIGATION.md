@@ -42,6 +42,42 @@ bundle against the build product AND hash the running process's binary
 
 ---
 
+## 1b. IN-APP DIAGNOSTICS — USE THESE, THEY ARE THE FASTEST TOOLS YOU HAVE
+
+**★ TAP THE LEGEND TO HIDE THE PART AND SEE THE NAKED LATTICE.** The maintainer
+taught me this and it is the single most useful move on this page. The legend panel
+("TAP TO EXPLORE") sits on the **right-hand side** of the viewport and lists
+**Rim & skin** and **Interior fill**. Tapping a row drills into "explore" mode for
+that colour, which **makes the prism/body invisible** so you see the strut geometry
+alone, with nothing drawn over it. **Double-tap anywhere to go back.**
+
+Why it matters here: with the body hidden the lattice looked CONTINUOUS, which is
+what first proved the bake was not dropping geometry and pushed the search toward
+the shell and the march. Any claim of the form "the lattice is missing there" must
+be checked in this mode before you believe it — otherwise you cannot tell missing
+struts from struts hidden behind a surface.
+
+Isolating **Rim & skin** vs **Interior fill** separately is also how you tell the
+SKIN's diagrid apart from the interior truss — which matters enormously for the
+quilt, since the fine triangular fabric blanketing his wall is the skin, not the
+lattice (§6 step 3).
+
+*Practical note:* when driving the simulator, aim carefully — the legend is a narrow
+panel on the right. I wasted several attempts tapping ~90 pt to its left and hitting
+the viewport instead, which orbits the camera rather than opening explore mode.
+
+**★ THE TAP CALLOUT.** Tapping a strut reports the density, strut diameter and cell
+size AT THAT STRUT, read back from the renderer's own baked field — trust it. This
+is what produced the decisive numbers: a 12.03 mm region cell reading **2.01 mm with
+a 0.45 mm strut** (the shape-band quilt), and the fact that tapping inside a hole
+only ever returns a strut at its **EDGE** (proving the void is genuinely empty).
+
+**★ THE RESOLUTION CHIP** (Fast·64³ / Fine·128³) — flipping it and re-baking is a
+ten-second test that discriminates sampling artefacts from real geometry. It already
+ruled out the whole clip-resolution family of theories.
+
+---
+
 ## 2. WHAT IS FIXED (measured, committed)
 
 | Commit | What | Evidence |
