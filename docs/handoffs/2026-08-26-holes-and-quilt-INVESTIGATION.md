@@ -58,10 +58,53 @@ The rim exists for a good reason (tie the lattice into surrounding material inst
 of ending in air, `solidOutlineBandMM` / `steppedSolidRimMM` in `LatticeSDFMetal.swift`).
 It is meant to be a thin edge skin. At Fast·64³ it is eating a sixth of the wall.
 
-**First test, end to end:** force `outlineBand` (`rimParams.y`) to 0, rebuild,
-install, and re-capture at the camera of image `02`. The pink should vanish. That
-confirms it in the product, not just in a probe. Then design the real fix — the band
-must not be tied to the occupancy voxel, and must not be able to swallow interior
+**THAT TEST WAS RUN (2026-08-26 ~02:45). Result: the rim IS the pink, and the rim
+is NOT the main problem.** `solidOutlineBandMM` was forced to 0, rebuilt, installed
+and judged in the simulator by the maintainer:
+
+* The **pink solid blobs went away** — the rim is confirmed as their cause.
+* What remained he judged **WORSE**: a *uniform dense fabric* over the whole wall,
+  previously masked by the blobs. His words: *"It's even worse now."*
+
+**So do NOT "fix" the quilt by disabling the rim.** The change has been reverted;
+`solidOutlineBandMM` is back to its real value and the note is recorded in
+`LatticeSDFMetal.swift` at that property.
+
+### ★★★ THE DOMINANT DEFECT: CELLS FAR TOO SMALL, WITH ONE-BEAD STRUTS
+
+Four tap readings he took, across two walls and both single-cell states — this is
+the best evidence in the whole investigation:
+
+| where | reading | region cell should be |
+|---|---|---|
+| front wall, single-cell OFF | `5% · 0.55 mm strut · **6.00 mm cell**` | ~12 mm |
+| back wall | `17% · 0.45 mm strut · **2.58 mm cell**` | ~12 mm |
+| back wall, single-cell ON | `5% · 0.47 mm strut · **5.16 mm cell**` | ~12 mm |
+| earlier, front | `5% · 1.10 mm strut · 12.03 mm cell` | ~12 mm ✅ |
+
+**Every quilted area is a cell 2–5× finer than its wall wants, carrying a strut at
+or near ONE BEAD (0.45 mm).** Thousands of tiny cells with hairline struts tiled
+across a wall is exactly what reads as woven fabric. The single 12.03 mm reading is
+from an area that looks correct.
+
+Note `2.58 mm` = S/4.66 of a 12 mm cell, and the shape-band ramp was capped at S/3
+(`shapeBandMaxDivisor`, commit `00af9728`) — so **either that cap is not reaching
+this path, or something else subdivides after it**. Finding what produces a 2.58 mm
+cell on a 12 mm wall is the single highest-value question left.
+
+He also reported, at single-cell ON: *"It's just bigger quilt"*, plus holes still
+present in it, and a *"strange ~5 mm quilted cell"* on the back wall. So the defect
+survives the single-cell toggle — it only changes the fabric's grain.
+
+**Start from the tap numbers, not from the renderer.** Instrument the bake to print,
+per region, the derived region cell and then the full histogram of per-cell sizes it
+actually writes (the `DIAG stepped regions … sizes=[…]` line already does some of
+this). Then find which code path writes 2.58 mm where the region cell is ~12 mm.
+The bake is CPU-side and headless — this needs no GPU and no simulator.
+
+**The rim's own real fix, once the fabric is solved:** the band must not be tied to
+the occupancy voxel (at Fast·64³ the band and the distance field's floor are the
+same 3.46 mm, so everything at the floor tips solid) and must not swallow interior
 cells; it should hug the ATTACHED outline only.
 
 **REFUTED — do not re-run:** the `anyActive` / `sameLattice` "isolated cell renders
