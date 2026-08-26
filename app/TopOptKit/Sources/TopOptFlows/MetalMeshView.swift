@@ -86,8 +86,11 @@ struct ShellClipUniform {
     /// xyz = the region field's voxel counts, w = how many declarations are in buffer 5.
     var dims = SIMD4<Float>(1, 1, 1, 0)
     /// x = cos(the largest angle a surface may differ from the declared face and
-    /// still be opened). y, z, w unused.
+    /// still be opened). y = mode (2 ⇒ cell-activation). z, w unused.
     var gate = SIMD4<Float>(1, 0, 0, 0)
+    /// ★★★ THE EYE, IN MODEL SPACE — so the shell can open the cap you are LOOKING
+    /// AT and leave the other one standing. See `shell_is_latticed`. w unused.
+    var eye = SIMD4<Float>(0, 0, 0, 0)
 }
 
 /// ★★★ ONE DECLARATION, AS THE SHELL SHADER READS IT — three float4s, matched to
@@ -207,6 +210,9 @@ struct ShellClip {
                         // y: 0 = declared-face rule (the STAGE)
                         //    2 = cell-activation rule (the sample BLOCK) — see below
                         // zw unused
+    // ★ xyz = the EYE in model space — so the shell can open the cap being LOOKED
+    // AT and leave the other one standing. See the FACE branch below. w unused.
+    float4 eye;
 };
 // ★★★ THE SHELL IS CUT OVER THE DECLARED FACE, AND NOWHERE ELSE (maintainer,
 // 2026-08-21, his FOURTH report of the same thing: "there is *SUPPOSED* to be a
@@ -322,6 +328,25 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
         // from the far cap "into the region" is the other way, so the sign tracks which
         // cap opened. Nudging the wrong way samples OUTSIDE the region and the far cap
         // would never open however the gate was set.
+        // ★★★ ONLY THE CAP YOU ARE LOOKING AT (his 2026-08-25 "massive hole").
+        //
+        // ★ OPENING BOTH CAPS IS WHAT MADE THE WALL SEE-THROUGH. The 2026-08-23 fix
+        // opened the far cap as well, so the back of a declared wall would show its
+        // lattice instead of shell. But a declared region spans the WHOLE wall, so
+        // both of its surfaces then stand down at once — and an octet is at most
+        // 38.4% of a cell across at ANY density (measured, every cell size), so the
+        // truss between them can never close. The ray goes in the front, through the
+        // open truss, out the back, and lands on the background: a hole straight
+        // through solid material, immune to density, cell size, algorithm and grade
+        // because none of those can close a truss.
+        //
+        // The cap facing the eye opens — that is the one whose lattice you are meant
+        // to see. The other stays and BACKS it, so you see struts against material
+        // instead of daylight. Viewed from behind the roles swap, so the 08-23
+        // complaint ("inverted on the back wall") stays fixed: whichever side you
+        // are on is the side that opens.
+        float3 toEye = c.eye.xyz - mpos;
+        if (dot(sn, toEye) <= 0.0) { continue; }
         float3 inward = normalize(d.xyz);
         float capSign = 0.0;
         if (dot(sn, -inward) >= c.gate.x) { capSign = 1.0; }
@@ -3927,6 +3952,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var shellClipAndDecls: (ShellClipUniform, [SIMD4<Float>]) {
         var u = ShellClipUniform()
         u.gate.x = Float(cos(Self.shellFaceAgreementDegrees * .pi / 180))
+        // ★★★ THE EYE, UN-SETTLED INTO MODEL SPACE — the same transform the lattice
+        // march uses for its own eye (`LatticeSDFMetal`, `eyeModel`), so the shell
+        // and the struts agree about which side of a wall is being looked at.
+        u.eye = SIMD4(modelCenter
+                      + modelRotation.inverse.act(camera.eye - modelCenter), 0)
         // One entry the shader always accepts — the SAMPLE BLOCK's answer. It has no
         // declarations by construction (its subject IS the cell), and a shell that
         // stayed whole there would hide the only thing on screen. A gate of −2 passes
