@@ -17,6 +17,17 @@ Every number here was measured, not estimated. Where I was wrong, it says so.
 **Where to look:** open his part and **zoom on the BOTTOM OF THE FRONT of the
 model**. That is where he photographed both, most recently at 02:04 on 2026-08-26.
 
+**★ STRONGEST LEAD, FOUND LAST (see the evidence README):** in
+`evidence/2026-08-26-holes-and-quilt/02_quilting_pink_his_camera.png` the pink
+patches are **flat, angular, solid blobs with no struts inside them** — the march
+drawing SOLID, not a fine lattice. `F = anyActive ? max(dn*cellHere, dClip) : dClip`
+draws solid whenever a cell finds no active neighbour, and `anyActive` skips every
+neighbour of a DIFFERENT CELL SIZE (the `sameLattice` gate). A cell surrounded by
+differently-sized cells is therefore rendered solid. The shape grade creates size
+changes all over a face. **Test this first** — the README has two cheap decisive
+tests. It is immune to density, appears under both algorithms, and survives every
+bake-side check, which matches every symptom.
+
 **SEE IT FIRST:** `evidence/2026-08-26-holes-and-quilt/01_holes_and_quilt_front_bottom.png`
 is a capture of exactly that area with both defects visible, plus a README pointing
 out which marks are the quilt and which are the holes. Look at it before you touch
