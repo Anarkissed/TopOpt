@@ -17,16 +17,56 @@ Every number here was measured, not estimated. Where I was wrong, it says so.
 **Where to look:** open his part and **zoom on the BOTTOM OF THE FRONT of the
 model**. That is where he photographed both, most recently at 02:04 on 2026-08-26.
 
-**★ STRONGEST LEAD, FOUND LAST (see the evidence README):** in
-`evidence/2026-08-26-holes-and-quilt/02_quilting_pink_his_camera.png` the pink
-patches are **flat, angular, solid blobs with no struts inside them** — the march
-drawing SOLID, not a fine lattice. `F = anyActive ? max(dn*cellHere, dClip) : dClip`
-draws solid whenever a cell finds no active neighbour, and `anyActive` skips every
-neighbour of a DIFFERENT CELL SIZE (the `sameLattice` gate). A cell surrounded by
-differently-sized cells is therefore rendered solid. The shape grade creates size
-changes all over a face. **Test this first** — the README has two cheap decisive
-tests. It is immune to density, appears under both algorithms, and survives every
-bake-side check, which matches every symptom.
+**★★★ THE QUILT IS IDENTIFIED AND MEASURED — START HERE.**
+
+The maintainer confirmed it: *"THAT'S the fucking quilt! That's been the issue we've
+been dealing with this entire time!!!"*
+
+In `evidence/2026-08-26-holes-and-quilt/02_quilting_pink_his_camera.png` the pink
+patches are **flat blobs with NO strut structure inside them**. They are not a fine
+lattice. They are the march drawing **SOLID MATERIAL**. That is why the quilt never
+responded to density, cell size, algorithm or grade — you cannot thin a strut that
+is not a strut.
+
+**Which solid term, measured on his own bake** (`LatticeSolidFillProbe`, committed):
+
+```
+painted cells 528
+OUTLINE RIM: band 3.46 mm, 397 cells carry a distance (3.46 .. 36.83),
+             82 are INSIDE the band -> drawn SOLID  (15.5% of painted)
+cells drawn solid for "no same-size neighbour": 0 (0.0%)
+```
+
+**The mechanism**, `UnifiedShading.swift` ~line 815:
+
+```
+float outlineBand = U.rimParams.y;
+if (LC.stepped > 0.0 && outlineBand > 0.0) {
+    float dOutline = lsdf_outline_mm(U, cellTex, p);
+    if (dOutline >= 0.0) F = min(F, max(dClip, dOutline - outlineBand));
+}
+```
+
+Every cell whose baked outline distance is under the band renders SOLID, wherever it
+sits. And **the band and the field's floor are the same number**: at Fast·64³ the
+band is `max(finest printable cell, one occupancy voxel)` = **3.46 mm**, and the
+smallest non-zero distance that grid can express is also one voxel = 3.46 mm. So
+everything sitting at the field's floor tips solid, and because the distance is
+quantised to the voxel it lands in irregular blobs rather than a clean rim.
+
+The rim exists for a good reason (tie the lattice into surrounding material instead
+of ending in air, `solidOutlineBandMM` / `steppedSolidRimMM` in `LatticeSDFMetal.swift`).
+It is meant to be a thin edge skin. At Fast·64³ it is eating a sixth of the wall.
+
+**First test, end to end:** force `outlineBand` (`rimParams.y`) to 0, rebuild,
+install, and re-capture at the camera of image `02`. The pink should vanish. That
+confirms it in the product, not just in a probe. Then design the real fix — the band
+must not be tied to the occupancy voxel, and must not be able to swallow interior
+cells; it should hug the ATTACHED outline only.
+
+**REFUTED — do not re-run:** the `anyActive` / `sameLattice` "isolated cell renders
+solid" theory. Measured at exactly 0 cells, because a cell is its own neighbour at
+offset (0,0,0).
 
 **SEE IT FIRST:** `evidence/2026-08-26-holes-and-quilt/01_holes_and_quilt_front_bottom.png`
 is a capture of exactly that area with both defects visible, plus a README pointing
