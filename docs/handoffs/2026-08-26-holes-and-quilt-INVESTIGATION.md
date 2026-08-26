@@ -17,6 +17,13 @@ Every number here was measured, not estimated. Where I was wrong, it says so.
 **Where to look:** open his part and **zoom on the BOTTOM OF THE FRONT of the
 model**. That is where he photographed both, most recently at 02:04 on 2026-08-26.
 
+**SEE IT FIRST:** `evidence/2026-08-26-holes-and-quilt/01_holes_and_quilt_front_bottom.png`
+is a capture of exactly that area with both defects visible, plus a README pointing
+out which marks are the quilt and which are the holes. Look at it before you touch
+code. Capture your own with
+`xcrun simctl io <udid> screenshot <path>.png` (the MCP screenshot action does not
+write a file) — same camera, before and after every candidate fix.
+
 ---
 
 ## 1. REPRODUCTION
