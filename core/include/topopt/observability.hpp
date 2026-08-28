@@ -1351,6 +1351,14 @@ struct RunInfo {
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's
 // report.cpp style). write_run_info throws std::runtime_error on IO failure.
+// ★★ THE GROWTH COUNTERS' ONE COPY PATH. Declared here rather than hidden in
+// run_job.cpp's anonymous namespace so a test can exercise the CHAIN, not just the
+// serializer: the counters were once filled and never read, and a test that only
+// checks run_info_json cannot see that. Forward-declared to keep organic_lattice.hpp
+// out of every observability consumer.
+struct OrganicGenStats;
+void copy_growth_stats(RunInfo& d, const OrganicGenStats& g, bool ran);
+
 std::string run_info_json(const RunInfo& info);
 void write_run_info(const std::string& path, const RunInfo& info);
 

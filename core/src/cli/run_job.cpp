@@ -705,19 +705,13 @@ struct LatticeExportOutcome {
   // traced run reports false and every counter below is meaningless, which is the
   // same rule this receipt already applies to shape-fit reporting. Without it a run
   // that truncated at the tip budget is indistinguishable from one that finished.
-  bool organic_growth_ran = false;
-  long long organic_growth_seeds = 0;
-  long long organic_growth_curves = 0;
-  long long organic_growth_steps = 0;
-  long long organic_growth_blocked = 0;
-  long long organic_growth_clamped = 0;
-  double organic_growth_clamp_max_deg = 0.0;
-  long long organic_growth_branches = 0;
-  long long organic_growth_branch_refused = 0;
-  long long organic_growth_joins = 0;
-  long long organic_growth_join_refused_span = 0;
-  bool organic_growth_tip_budget_hit = false;
-  double organic_growth_layer_height_mm = 0.0;
+  // ★★ CARRY THE STRUCT, NOT A FLATTENED COPY OF IT. Twelve mirrored fields meant a
+  // thirteenth counter had to be added in FIVE places, one of which was a hand-written
+  // block with no compiler enforcement — precisely the shape that let the growth
+  // counters be filled and never read in the first place. Holding the generator's own
+  // struct means adding a counter is one line in OrganicGenStats and nothing else.
+  OrganicGenStats growth;
+  bool growth_ran = false;
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
   long long organic_filleted = 0;
@@ -4296,28 +4290,6 @@ void fill_stepped_run_info(RunInfo& gi, const SteppedOutcome& so) {
   }
 }
 
-// ★★ ONE COPY OF THE GROWTH COUNTERS, so the analyze receipt and the geometry
-// receipt cannot disagree about what grew. `growth_ran` is set from whether the
-// generator was actually called, never inferred from a counter being non-zero — a
-// run that grew nothing and a run that never grew are different facts.
-template <class Dst>
-void copy_growth_stats(Dst& d, const OrganicGenStats& g, bool ran) {
-  d.organic_growth_ran = ran;
-  d.organic_growth_seeds = static_cast<long long>(g.growth_seeds);
-  d.organic_growth_curves = static_cast<long long>(g.growth_curves);
-  d.organic_growth_steps = static_cast<long long>(g.growth_steps);
-  d.organic_growth_blocked = static_cast<long long>(g.growth_blocked);
-  d.organic_growth_clamped = static_cast<long long>(g.growth_clamped);
-  d.organic_growth_clamp_max_deg = g.growth_clamp_max_deg;
-  d.organic_growth_branches = static_cast<long long>(g.growth_branches);
-  d.organic_growth_branch_refused = static_cast<long long>(g.growth_branch_refused);
-  d.organic_growth_joins = static_cast<long long>(g.growth_joins);
-  d.organic_growth_join_refused_span =
-      static_cast<long long>(g.growth_join_refused_span);
-  d.organic_growth_tip_budget_hit = g.growth_tip_budget_hit;
-  d.organic_growth_layer_height_mm = g.growth_layer_height_mm;
-}
-
 void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   const OrganicReport& r = oo.lat.report;
   gi.organic_present = true;
@@ -4958,7 +4930,8 @@ LatticeVariantOutcome lattice_one_variant(
     // ★ THE GEOMETRY PATH REBUILDS A BARE OrganicOutcome FOR THE RECEIPT (see the
     // `tmp` below), so the growth counters cannot ride there — they travel on the
     // export outcome, which survives to the receipt intact.
-    copy_growth_stats(R.oc, organic.growth, organic.growth_ran);
+    R.oc.growth = organic.growth;
+    R.oc.growth_ran = organic.growth_ran;
     // The posture the certification consumes is now the TRACED one.
     gf.posture.mask = organic.lat.mask;
     gf.posture.relative_density = organic.lat.relative_density;
@@ -8301,20 +8274,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         tmp.lat.report = R.organic;
         tmp.trace_seconds = R.organic_trace_seconds;
         fill_organic_run_info(gi, tmp);
-        // ...and are restored here, overwriting the zeros `tmp` carried.
-        copy_growth_stats(gi, OrganicGenStats{}, R.oc.organic_growth_ran);
-        gi.organic_growth_seeds = R.oc.organic_growth_seeds;
-        gi.organic_growth_curves = R.oc.organic_growth_curves;
-        gi.organic_growth_steps = R.oc.organic_growth_steps;
-        gi.organic_growth_blocked = R.oc.organic_growth_blocked;
-        gi.organic_growth_clamped = R.oc.organic_growth_clamped;
-        gi.organic_growth_clamp_max_deg = R.oc.organic_growth_clamp_max_deg;
-        gi.organic_growth_branches = R.oc.organic_growth_branches;
-        gi.organic_growth_branch_refused = R.oc.organic_growth_branch_refused;
-        gi.organic_growth_joins = R.oc.organic_growth_joins;
-        gi.organic_growth_join_refused_span = R.oc.organic_growth_join_refused_span;
-        gi.organic_growth_tip_budget_hit = R.oc.organic_growth_tip_budget_hit;
-        gi.organic_growth_layer_height_mm = R.oc.organic_growth_layer_height_mm;
+        // ★ ...and the growth counters are restored from the export outcome, which is
+        // what carried them across. ONE call: `tmp` has no growth stats to contribute,
+        // so there is nothing to overwrite field by field.
+        copy_growth_stats(gi, R.oc.growth, R.oc.growth_ran);
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;
         gi.organic_emitted_stranded_length_mm = R.oc.organic_emitted_stranded_mm;

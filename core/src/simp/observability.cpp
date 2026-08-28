@@ -1,4 +1,5 @@
 #include "topopt/observability.hpp"
+#include "topopt/organic_lattice.hpp"  // OrganicGenStats, for copy_growth_stats
 
 #include <chrono>
 #include <cmath>
@@ -472,6 +473,29 @@ std::string json_escape(const std::string& s) {
 std::string bool_json(bool b) { return b ? "true" : "false"; }
 
 }  // namespace
+
+// ★★ ONE COPY OF THE GROWTH COUNTERS, so the analyze receipt and the geometry
+// receipt cannot disagree about what grew. `growth_ran` is set from whether the
+// generator was actually called, never inferred from a counter being non-zero — a
+// run that grew nothing and a run that never grew are different facts.
+// It writes to RunInfo and nothing else now that the export outcome carries the
+// generator's own struct, so it is a plain function rather than a template.
+void copy_growth_stats(RunInfo& d, const OrganicGenStats& g, bool ran) {
+  d.organic_growth_ran = ran;
+  d.organic_growth_seeds = static_cast<long long>(g.growth_seeds);
+  d.organic_growth_curves = static_cast<long long>(g.growth_curves);
+  d.organic_growth_steps = static_cast<long long>(g.growth_steps);
+  d.organic_growth_blocked = static_cast<long long>(g.growth_blocked);
+  d.organic_growth_clamped = static_cast<long long>(g.growth_clamped);
+  d.organic_growth_clamp_max_deg = g.growth_clamp_max_deg;
+  d.organic_growth_branches = static_cast<long long>(g.growth_branches);
+  d.organic_growth_branch_refused = static_cast<long long>(g.growth_branch_refused);
+  d.organic_growth_joins = static_cast<long long>(g.growth_joins);
+  d.organic_growth_join_refused_span =
+      static_cast<long long>(g.growth_join_refused_span);
+  d.organic_growth_tip_budget_hit = g.growth_tip_budget_hit;
+  d.organic_growth_layer_height_mm = g.growth_layer_height_mm;
+}
 
 std::string run_info_json(const RunInfo& info) {
   std::string s = "{\n";

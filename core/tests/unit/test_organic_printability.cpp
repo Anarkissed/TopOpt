@@ -575,6 +575,89 @@ void test_growth_joins_neighbours() {
           "ate, 2260 spans emitted against 2520 pruned");
 }
 
+// ── G8: WHAT THE JOIN REFUSAL COSTS IN CONNECTEDNESS ────────────────────────────
+// ★★ THE REFUSAL IS CORRECT AND MIGHT STILL BE A BAD TRADE. Refusing an over-long
+// join keeps the bridge under kOrganicMaxCantileverMm, but a join is the lattice's
+// LATERAL CONNECTION, and the growth header's own argument is that floor-seeded
+// growth without lateral connection gives parallel columns that never meet. At
+// separation 8.0 the generator attempts ~2786 joins and refuses 2406 of them, so the
+// question "is this still one object?" is not rhetorical.
+//
+// ★ MEASURED ON THE EMITTED SPANS, never on the curve graph. `emitted_components` is
+// union-find over the emitted segments with a geometric touch test (segment distance
+// <= sum of radii); a count taken on the generator's own intermediate representation
+// is the failure this project has hit four times — curves that "join" in the graph
+// while their geometry never touches.
+void test_growth_stays_connected() {
+  auto grow_and_emit = [](double sep, OrganicGenStats& gs_out) {
+    GrowFixture f = grow_fixture();
+    for (double& sp : f.spacing) sp = sep;
+    OrganicGenStats gs;
+    const OrganicLattice lat =
+        grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+    OrganicGenStats est;
+    run(lat, est);                       // the EMITTER: components come from here
+    gs_out = gs;
+    return est;
+  };
+
+  // (a) the default fixture, where refusals are rare
+  {
+    OrganicGenStats gs;
+    const OrganicGenStats est = grow_and_emit(4.0, gs);
+    std::fprintf(stderr,
+                 "[G8] separation 4.0: joins %zu refused-span %zu | emitted components "
+                 "%zu largest-fraction %.4f stranded %.2f mm\n",
+                 gs.growth_joins, gs.growth_join_refused_span, est.emitted_components,
+                 est.emitted_largest_length_fraction, est.emitted_stranded_length_mm);
+    CHECK(est.emitted_components == 1,
+          "G8: at the default separation the grown geometry must emit as ONE "
+          "component — the join refusal is rare here and must not fragment it");
+  }
+
+  // (b) the coarse fixture, where the refusal actually bites
+  {
+    OrganicGenStats gs;
+    const OrganicGenStats est = grow_and_emit(8.0, gs);
+    std::fprintf(stderr,
+                 "[G8] separation 8.0: joins %zu refused-span %zu | emitted components "
+                 "%zu largest-fraction %.4f stranded %.2f mm\n",
+                 gs.growth_joins, gs.growth_join_refused_span, est.emitted_components,
+                 est.emitted_largest_length_fraction, est.emitted_stranded_length_mm);
+    CHECK(gs.growth_join_refused_span > 0,
+          "G8 precondition: the coarse fixture must actually exercise the refusal, "
+          "or this measures nothing");
+    // ★ THE BAR IS STATED FROM THE MEASUREMENT, NOT ASSUMED. If coarse growth does not
+    // come out as one object that is a REPORTED FACT for the maintainer to rule on
+    // (shorter permitted reach, an intermediate node, or a cap on separation under
+    // growth) — it is not something to paper over here. What this test locks is that
+    // the number cannot get WORSE without someone noticing.
+    // ★★ MEASURED, 2026-08-28, Release, this fixture:
+    //
+    //   sep 8.0, refusal ON : 210 emitted spans, 2 components, largest 0.5405,
+    //                         202.03 mm stranded, 2406 joins refused
+    //   sep 8.0, refusal OFF: 464 emitted spans, 1 component,  largest 1.0000,
+    //                         0.00 mm stranded   (cap raised to 1e9 to ablate it)
+    //
+    // So at COARSE separation the refusal genuinely costs connectedness: one object
+    // becomes two and 202 mm strands. That is REPORTED, not repaired here — the fix
+    // is a maintainer call between a shorter permitted reach, an intermediate node,
+    // and a cap on how coarse separation may go under growth.
+    //
+    // ★ AND IT IS NOT THE WHOLE STORY. At separation 6.0 the same fixture emits
+    // THREE components with largest 0.3370 and ZERO joins refused, in both the
+    // refusing and the ablated build. Coarse separation fragments this lattice on its
+    // own; the refusal makes it worse at 8.0 but did not create it. Anyone choosing a
+    // remedy should know they are chasing two things.
+    CHECK(est.emitted_components <= 2,
+          "G8: coarse growth emitted 2 components when this bar was written; more "
+          "than that is a regression someone must look at");
+    CHECK(est.emitted_largest_length_fraction >= 0.54,
+          "G8: the largest component held 54.05 % of emitted length at the coarse "
+          "separation; less than that is a regression");
+  }
+}
+
 // ── G7: THE GROWTH COUNTERS REACH THE RECEIPT ───────────────────────────────────
 // ★★ THE TELEMETRY WAS DEAD. `run_organic_step` filled `oo.growth` and nothing ever
 // read it, so every growth counter was discarded on both the analyze and the geometry
@@ -639,13 +722,77 @@ void test_growth_stats_reach_the_receipt() {
   }
 }
 
+// ── G9: THE COPY CHAIN, NOT THE SERIALIZER ──────────────────────────────────────
+// ★★ G7 HAND-FILLS A RunInfo AND CHECKS THE JSON. That locks the absent-keys rule but
+// it cannot see a DROPPED FIELD, because it never runs the copy that would drop it.
+// The original defect was exactly of that shape: the counters were filled by the
+// generator and never read, and every serializer test in the world would have passed.
+//
+// So: give OrganicGenStats a DISTINCT non-zero value in every growth field, push it
+// through `copy_growth_stats` — the one path both receipts now use — and assert each
+// value arrives. A thirteenth counter wired in four places out of five fails here.
+void test_growth_copy_path_drops_nothing() {
+  OrganicGenStats g;
+  g.growth_seeds = 11;
+  g.growth_curves = 22;
+  g.growth_steps = 33;
+  g.growth_blocked = 44;
+  g.growth_clamped = 55;
+  g.growth_clamp_max_deg = 6.5;
+  g.growth_branches = 77;
+  g.growth_branch_refused = 88;
+  g.growth_joins = 99;
+  g.growth_join_refused_span = 111;
+  g.growth_tip_budget_hit = true;
+  g.growth_layer_height_mm = 0.125;
+
+  RunInfo gi;
+  copy_growth_stats(gi, g, /*ran=*/true);
+
+  CHECK(gi.organic_growth_ran, "G9: growth_ran must arrive");
+  CHECK(gi.organic_growth_seeds == 11, "G9: growth_seeds dropped by the copy path");
+  CHECK(gi.organic_growth_curves == 22, "G9: growth_curves dropped by the copy path");
+  CHECK(gi.organic_growth_steps == 33, "G9: growth_steps dropped by the copy path");
+  CHECK(gi.organic_growth_blocked == 44, "G9: growth_blocked dropped by the copy path");
+  CHECK(gi.organic_growth_clamped == 55, "G9: growth_clamped dropped by the copy path");
+  CHECK(gi.organic_growth_clamp_max_deg == 6.5,
+        "G9: growth_clamp_max_deg dropped by the copy path");
+  CHECK(gi.organic_growth_branches == 77, "G9: growth_branches dropped");
+  CHECK(gi.organic_growth_branch_refused == 88, "G9: growth_branch_refused dropped");
+  CHECK(gi.organic_growth_joins == 99, "G9: growth_joins dropped");
+  CHECK(gi.organic_growth_join_refused_span == 111,
+        "G9: growth_join_refused_span dropped");
+  CHECK(gi.organic_growth_tip_budget_hit, "G9: growth_tip_budget_hit dropped");
+  CHECK(gi.organic_growth_layer_height_mm == 0.125,
+        "G9: growth_layer_height_mm dropped");
+
+  // ★ and the values must SURVIVE to the receipt, so the chain is checked end to end
+  // rather than only at its first hop.
+  gi.grading_present = true;
+  gi.organic_present = true;
+  const std::string j = run_info_json(gi);
+  CHECK(j.find("\"growth_join_refused_span\": 111") != std::string::npos,
+        "G9: a value copied in must still be the value serialized out");
+  CHECK(j.find("\"growth_clamped\": 55") != std::string::npos,
+        "G9: a value copied in must still be the value serialized out");
+
+  // ran=false must zero nothing and claim nothing: the counters are meaningless, and
+  // the receipt suppresses them, but the flag is the thing that says so.
+  RunInfo gf;
+  copy_growth_stats(gf, g, /*ran=*/false);
+  CHECK(!gf.organic_growth_ran,
+        "G9: growth_ran must follow the argument, never be inferred from a counter");
+}
+
 int main() {
   test_growth_produces_curves();
   test_growth_does_not_fall_back();
   test_growth_is_supported();
   test_growth_respects_the_cone();
   test_growth_joins_neighbours();
+  test_growth_stays_connected();
   test_growth_stats_reach_the_receipt();
+  test_growth_copy_path_drops_nothing();
   test_mat_that_counts_feet_lays_floor();
   test_mat_survives_the_weld_raster();
   test_slenderness_reads_the_unsupported_span();

@@ -1827,8 +1827,12 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
         const double jrun = std::sqrt(jdx * jdx + jdy * jdy);
         if (jrun > kOrganicMaxCantileverMm) {
           ++st.growth_join_refused_span;
-          if (!supported_at(q, t.r)) { ++st.growth_blocked; break; }
-          // uncrowded behaviour: carry on climbing along the clamped direction
+          // ★ NO RE-TEST OF supported_at(q) HERE. `q` passed that same predicate a few
+          // lines above with `occ` unchanged since, so a second call cannot fire — and
+          // if anything were ever inserted between the two, it would double-count
+          // growth_blocked for a single terminated step. The tip simply carries on
+          // climbing along the clamped direction, which is what it would have done had
+          // it never been crowded.
           mark(p, q, t.r);
           since_record += step;
           if (since_record >= kOrganicGrowthRecordRadii * t.r) {
