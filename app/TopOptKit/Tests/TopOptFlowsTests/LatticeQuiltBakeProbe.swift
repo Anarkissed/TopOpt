@@ -68,9 +68,25 @@ final class LatticeQuiltBakeProbe: XCTestCase {
     /// ladder cap that ends the grade in SOLID, and overlap ownership at the outline.
     /// It is RE-PINNED, never loosened — a harness that is allowed to drift from the
     /// app is a harness that can prove anything.
+    /// ★ RE-PINNED 2026-08-28, build b54215d7, single-cell members OFF — read off the
+    /// RUNNING app's own line after his ruling *"Once you hit the printability floor go
+    /// solid"*:
+    ///
+    ///     DIAG stepped regions=2 stated=[6.0, 5.156120181083679] finest=5.156120181083679
+    ///       printableFloor=5.156120181083679 nCap=1 bandMM=10.0 baked=true
+    ///       sizes=[4.30=34 5.16=1764 6.00=1571]
+    ///     DIAG steppedGrade painted=3369 ... solidRim=488 gradedToSolid=126 n=[n1=3369]
+    ///
+    /// ★ WHY IT IS STRONGER, NOT LOOSER. The previous pin (eight rungs down to 1.29 mm)
+    /// recorded a ladder that ran PAST the printability floor: those rungs could only be
+    /// drawn by raising the density to the floor — 52.1% at 1.29 mm — which is above the
+    /// 47.5% at which fix #1 measured an octet merging into a sheet with periodic holes.
+    /// So the old pin was pinning the defect. The new one pins a ladder that stops where
+    /// the lattice stops being printable and hands the rest to SOLID: `gradedToSolid`
+    /// 0 -> 126 and `solidRim` 89 -> 488 are the terminus actually firing, which the old
+    /// histogram never showed.
     static let appSizes: [String: Int] = [
-        "1.29": 369, "1.43": 16, "1.50": 497, "1.72": 346,
-        "2.00": 290, "4.30": 18, "5.16": 1049, "6.00": 784,
+        "4.30": 34, "5.16": 1764, "6.00": 1571,
     ]
 
     // MARK: - the scene, assembled the way the app assembles it
@@ -142,12 +158,17 @@ final class LatticeQuiltBakeProbe: XCTestCase {
             regions: specs, cellMM: cells, fallbackCellMM: finestStated,
             origin: occ.origin)
         // `steppedFinestPrintableCellMM`.
+        // ★ AGAINST `rhoMin`, NOT `rhoMax` — mirrors the product after his ruling of
+        // 2026-08-28 (*"Once you hit the printability floor go solid"*). This harness
+        // carries its own copy of the rule, so it has to move with it or it stops
+        // being a check on the app and becomes a second opinion.
         var floorMM = finestStated
         let lat = LatticeType.named("octet")
         while floorMM > 0 {
             let half = floorMM / 2
+            let binds = LatticeSDFRenderer.floorTestAtCeiling ? h.rhoMax : h.rhoMin
             if lat.printabilityDensityFloor(lineWidthMM: h.lineWidthMM,
-                                            cellMM: half) > h.rhoMax + 1e-9 { break }
+                                            cellMM: half) > binds + 1e-9 { break }
             floorMM = half
         }
         return Inputs(scene: sc, cells: cells, boundary: boundary, rim: rim,

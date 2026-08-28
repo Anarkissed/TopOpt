@@ -1191,29 +1191,60 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// (`floor((cb - phase) / m)`), so a cell finer than a voxel draws exactly right. The
     /// only thing the voxel limits is how sharply the SIZE may vary in space, which is a
     /// smoothness question, not a floor.
+    /// ★ INSTRUMENTATION ONLY — restore the pre-2026-08-28 ceiling test, so the two
+    /// ladder floors can be compared on the device at one camera from one binary
+    /// (handoff §5: judging a render of mine against a memory of his screen is how the
+    /// worst regression of this task shipped). Nothing in the product sets it.
+    static var floorTestAtCeiling: Bool {
+        ProcessInfo.processInfo.environment["TOPOPT_LATTICE_FLOOR_AT_HI"] == "1"
+    }
+
     private func steppedFinestPrintableCellMM(finest: Double) -> Double {
         guard finest > 0 else { return 0 }
         var s = finest
         while s > 0 {
             let half = s / 2
             if lineWidthMM > 0 {
-                // ★★★ AGAINST THE **SPARSEST** DENSITY, NOT THE BAND'S CEILING — and
-                // getting this wrong is what drew his back wall at a 0.16 mm strut.
+                // ★★★ THE LADDER STOPS WHERE THE PRINTABILITY FLOOR STARTS TO BIND —
+                // his ruling, 2026-08-28: *"Once you hit the printability floor go
+                // solid."* This reverses the 2026-08-23 reading below, deliberately,
+                // and both are kept here because the reversal is the whole point.
                 //
-                // The strut is thinnest where the density is LOWEST, so that is where
-                // printability binds. Testing `densitySpan.hi` asks "could SOME density
-                // in the band print at this cell", which is true far below the cell the
-                // part is actually drawn at (his was drawn at 5%). The cell then kept
-                // halving to 1.80 mm and the strut came out under a third of a bead.
-                // ★★★ AGAINST THE BAND'S CEILING, because the bake now RAISES the
-                // density to whatever each graded cell needs (his ruling, 2026-08-23).
-                // The limit is therefore the finest cell the band can reach at all, not
-                // the finest cell the CURRENT density happens to print — that reading
-                // pinned the floor at his region cell (4.33 mm, nCap = 1) and made the
-                // whole feature arithmetically impossible at 5%.
+                // ★ WHY THE CEILING TEST HAD TO GO. Measured on his own part
+                // (`LatticeCurvedOutlineBandProbe.testTheDensityTheGradedBandIsDrawnAt`),
+                // the floor RISES as the cell shrinks — a smaller cell cannot be
+                // printed thin, one bead fills more of it:
+                //
+                //     5.16 mm -> 0.0%   1.72 mm -> 33.5%   1.43 mm -> 44.4%
+                //     2.00 mm -> 26.5%  1.50 mm -> 41.0%   1.29 mm -> 52.1%
+                //
+                // Against `densitySpan.hi` (0.90) every one of those passes, so the
+                // ladder ran to 1.29 mm and 369 cells were drawn at 52.1% — past the
+                // 47.5% at which fix #1 measured an octet's struts MERGING into a
+                // sheet with periodic holes. So the grade, whose job is to thin the
+                // material out toward the outline, was making it DENSER, and the band
+                // it left reads on screen as the holes he has been reporting.
+                //
+                // ★ THE SPARSEST DENSITY IS THE RIGHT TEST, for the reason the
+                // 2026-08-23 note gives against itself: the strut is thinnest where
+                // the density is LOWEST, so that is where printability binds. A rung
+                // is permitted only while it can still be drawn at the density the
+                // part is actually drawn at; the moment stepping down would force the
+                // cell denser than that, the lattice has run out and the rest is
+                // SOLID — *"ONLY WHEN NO MORE CAN FIT can you make the rest solid."*
+                //
+                // ★ THIS DOES **NOT** RESURRECT THE DEAD GRADE the 08-23 note warns
+                // about. That reading pinned the floor at the region cell and left
+                // `nCap = 1` because it also fed the SHAPE ladder, so nothing could
+                // subdivide at all. What replaced the grade then was nothing; what
+                // replaces the refused rungs now is solid, which is the behaviour he
+                // asked for. `TOPOPT_LATTICE_FLOOR_AT_HI=1` restores the ceiling test
+                // so both can be seen on the DEVICE, at one camera, from one binary.
                 let rhoStar = params.lattice.printabilityDensityFloor(
                     lineWidthMM: lineWidthMM, cellMM: half)
-                if rhoStar > params.densitySpan.hi + 1e-9 { break }
+                let bindsAt = Self.floorTestAtCeiling
+                    ? params.densitySpan.hi : params.densitySpan.lo
+                if rhoStar > bindsAt + 1e-9 { break }
             } else if half < 0.2 {
                 break                       // no bead stated: a hard sanity stop
             }

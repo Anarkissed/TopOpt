@@ -937,3 +937,140 @@ extension LatticeCurvedOutlineBandProbe {
         }
     }
 }
+
+// MARK: - 12. THE LADDER FLOOR, PINNED
+
+/// ★★★ A GUARD FOR HIS RULING OF 2026-08-28: *"Once you hit the printability floor go
+/// solid."*
+///
+/// ★ WHY THIS TEST HAD TO BE WRITTEN. Changing the ladder floor from the density
+/// band's CEILING to its FLOOR removed subdivision from 1,518 of 3,369 painted cells
+/// — 45% of the wall — and turned exactly ONE guard in the whole suite red
+/// (`LatticeQuiltBakeProbe.testTheHeadlessBakeMatchesTheApp`, which pins his part's
+/// histogram and nothing else). A rule that big with that little holding it down can
+/// be reverted by accident. This pins the rule itself, on arithmetic, independent of
+/// his part: no rung may require a density the part is not drawn at.
+extension LatticeCurvedOutlineBandProbe {
+
+    /// The ladder floor, as the product computes it.
+    private func floor(finest: Double, lineWidthMM: Double, binds: Double) -> Double {
+        let lat = LatticeType.named("octet")
+        var s = finest
+        while s > 0 {
+            let half = s / 2
+            if lat.printabilityDensityFloor(lineWidthMM: lineWidthMM,
+                                            cellMM: half) > binds + 1e-9 { break }
+            s = half
+        }
+        return s
+    }
+
+    func testNoRungSurvivesThatTheDensityBandCannotPrint() throws {
+        let lat = LatticeType.named("octet")
+        let lw = 0.45
+        // His part's region cells, and two others so the rule is pinned as a rule and
+        // not as one part's arithmetic.
+        for finest in [5.156120181083679, 6.0, 12.0, 3.0] {
+            for lo in [0.05, 0.20, 0.45] {
+                let f = floor(finest: finest, lineWidthMM: lw, binds: lo)
+                let need = lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: f)
+                // ★ THE LADDER NEVER GOES COARSER THAN THE REGION'S OWN CELL.
+                XCTAssertLessThanOrEqual(f, finest + 1e-9)
+                // ★★★ THE INVARIANT, AND IT IS ABOUT WHAT THE LADDER **ADDS**.
+                //
+                // ★ MY FIRST VERSION OF THIS ASSERTION WAS WRONG AND THE TEST CAUGHT
+                // IT. I asserted that the surviving floor always prints at the
+                // sparsest density — which fails at finest = 3.0 mm, lo = 5%: the
+                // loop only ever tests the NEXT halving, so it returns the STARTING
+                // cell untested, and 3.0 mm already needs 13.1%. That is not this
+                // rule's business — the region's own cell is set by the cells-per-
+                // member derivation upstream — so the contract is conditional: every
+                // rung the ladder actually TAKES must be printable at `lo`.
+                //
+                // ★ AND THE UNCONDITIONAL CASE IS A REAL LEAD, NOT AN EXCUSE. When
+                // the region cell itself needs more than `lo`, the whole wall is
+                // drawn at the printability floor with NO grading involved — which is
+                // the one thing his 2026-08-28 report says and this change cannot
+                // explain: *the holes survive Grade off.* On his part the region
+                // cells are 5.16 / 6.00 mm and need 0.0%, so it does not bite there;
+                // on a thinner wall it would. See `testAThinWallIsAboveTheBandBefore
+                // AnyGradingAtAll`.
+                if f < finest - 1e-9 {
+                    XCTAssertLessThanOrEqual(need, lo + 1e-9,
+                        "★ the ladder STEPPED DOWN to \(f) mm, which needs \(need) "
+                        + "density — above the sparsest the part is drawn at (\(lo)). "
+                        + "The grade would be making the material DENSER as it thins, "
+                        + "which is the perforated band of 2026-08-28")
+                }
+                // And it is the FINEST such rung — one more halving must fail.
+                if f > 1e-6, f < finest - 1e-9 || lat.printabilityDensityFloor(
+                    lineWidthMM: lw, cellMM: finest) <= lo + 1e-9 {
+                    let next = lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: f / 2)
+                    XCTAssertGreaterThan(next, lo + 1e-9,
+                        "★ the ladder stopped early: \(f / 2) mm would still print at "
+                        + "\(lo), so a rung the grade could have used was refused")
+                }
+            }
+        }
+    }
+
+    /// ★ AND THE REGRESSION ITSELF, NAMED. Against the band's CEILING his part reached
+    /// 1.29 mm, whose floor is 52.1% — above the 47.5% at which fix #1 measured an
+    /// octet merging into a sheet with periodic holes. Against the band's FLOOR it
+    /// stops at his region cell. This pins the difference so the ceiling test cannot
+    /// come back without someone reading why it went.
+    func testTheCeilingTestIsWhatReachedTheMergedBand() throws {
+        let lat = LatticeType.named("octet")
+        let lw = 0.45, finest = 5.156120181083679
+        let atCeiling = floor(finest: finest, lineWidthMM: lw, binds: 0.90)
+        let atFloor = floor(finest: finest, lineWidthMM: lw, binds: 0.05)
+        XCTAssertEqual(atCeiling, 1.2890300452709198, accuracy: 1e-9)
+        XCTAssertEqual(atFloor, finest, accuracy: 1e-9)
+        let needCeiling = lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: atCeiling)
+        XCTAssertGreaterThan(needCeiling, 0.475,
+            "★ the 1.29 mm rung the ceiling test allowed needs \(needCeiling) density; "
+            + "if this ever drops below 0.475 the merge argument for this change is "
+            + "gone and the ruling should be revisited, not the test relaxed")
+        XCTAssertEqual(lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: atFloor), 0,
+                       accuracy: 1e-6)
+    }
+}
+
+// MARK: - 13. THE LEAD THIS CHANGE DOES **NOT** EXPLAIN
+
+extension LatticeCurvedOutlineBandProbe {
+
+    /// ★★★ HIS ONE REPORT THAT SURVIVES THIS FIX: *the holes survive Grade off.*
+    ///
+    /// Grade off means `n = 1` everywhere — no ladder, no rungs, nothing for the
+    /// 2026-08-28 change to act on. So if a band still reads as holes with grading
+    /// off, the density it is drawn at cannot be coming from the ladder. This pins the
+    /// only other way that happens: **the REGION'S OWN CELL already needs more density
+    /// than the part is drawn at**, so the whole wall sits at the printability floor
+    /// before any grading is considered.
+    ///
+    /// It does not bite on his `M2 verticalStand` (region cells 5.16 / 6.00 mm, floor
+    /// 0.0% against a 5% band), which is why the fix worked there. It bites as soon as
+    /// the wall is thin enough to derive a small cell.
+    func testAThinWallIsAboveTheBandBeforeAnyGradingAtAll() throws {
+        let lat = LatticeType.named("octet")
+        let lw = 0.45, lo = 0.05
+        // His part: the region cell is free — nothing forced.
+        for cell in [5.156120181083679, 6.0] {
+            XCTAssertEqual(lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: cell), 0,
+                           accuracy: 1e-6,
+                           "★ his region cells must cost nothing, or the fix of "
+                           + "2026-08-28 was measuring the wrong thing")
+        }
+        // A thinner wall's cell is forced above the band with no grading in sight.
+        let thin = 3.0
+        let need = lat.printabilityDensityFloor(lineWidthMM: lw, cellMM: thin)
+        XCTAssertGreaterThan(need, lo,
+            "★ if this stops being true the 'holes survive Grade off' lead is dead "
+            + "and should be struck from the handoff rather than left standing")
+        print(String(format:
+            "LEAD  a %.2f mm region cell is forced to %.1f%% before any grading; "
+            + "the band's floor is %.0f%% — %.1fx",
+            thin, need * 100, lo * 100, need / lo))
+    }
+}
