@@ -6,11 +6,11 @@ NOTE: this is the TRIANGLE BUILD, which is what a change costs.
 what makes them small.
 
 interaction                                        ms   triangles
-stage A · type morph (octet→bcc)                 3.16        1432
-stage A · cell size                             10.21        1432
-stage A · strut thickness                       10.21        1432
-stage B · tiled sample (one frame)             841.34      118920
-stage B · density mode                         841.64      118920
-stage B · boundary finish                      842.23      118920
-stage B · worst case (cap 5³)                  838.40      118920
+stage A · type morph (octet→bcc)                 3.31        1432
+stage A · cell size                             10.59        1432
+stage A · strut thickness                       10.49        1432
+stage B · tiled sample (one frame)             858.98      118920
+stage B · density mode                         859.55      118920
+stage B · boundary finish                      861.43      118920
+stage B · worst case (cap 5³)                  857.33      118920
 stage C · baked stress field (sample)            0.50        1728

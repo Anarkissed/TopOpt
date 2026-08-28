@@ -146,6 +146,14 @@ static float3 to_edge_fade(float3 color, float edge, float edgeStrength,
 /// `TOPOPT_LATTICE_SURFACE_INSET=<mm>` pins the inset to a fixed number of
 /// millimetres (0 disables it) so the two behaviours can be compared on the DEVICE,
 /// at one camera, from one binary. Nothing in the product sets it.
+/// ★ RESTORE THE PRE-2026-08-28 GEOMETRIC INSET for an on-device A/B.
+/// `TOPOPT_LATTICE_INSET_GEOMETRIC=1` puts the inset back into `lsdf_part_clip`,
+/// where it MOVED the lattice 1.29 mm inside the part and left the dark band at every
+/// grazing outline. The shipping path applies the same magnitude as a DEPTH bias
+/// instead — see `lsdf_gbuffer`.
+let latticeInsetIsGeometric: Bool =
+    ProcessInfo.processInfo.environment["TOPOPT_LATTICE_INSET_GEOMETRIC"] == "1"
+
 let latticeSurfaceInsetMSL: String = {
     if let raw = ProcessInfo.processInfo.environment["TOPOPT_LATTICE_SURFACE_INSET"],
        let v = Double(raw), v >= 0 {
@@ -155,6 +163,7 @@ let latticeSurfaceInsetMSL: String = {
 }()
 
 let latticeFieldSource = """
+constant bool latticeInsetGeometric = \(latticeInsetIsGeometric ? "true" : "false");
 \(shellClipMSL)
 
 struct LSDFUniforms {
@@ -501,6 +510,29 @@ inline float lsdf_part_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
     // The floor matters as much as the scale: at Fast 64 the voxel is 3.45 mm, and
     // scaling alone would push the inset to 2.6 mm — so it is clamped, and the clamp is
     // what keeps a resolution knob from eating lattice.
+    // ★★★ THE INSET NO LONGER MOVES THE LATTICE (2026-08-28, his marked-up frame of a
+    // dark strip inside the chamfer along every curved outline).
+    //
+    // ★ WHAT WAS WRONG WITH MOVING IT. Holding the struts 1.29 mm inside the part
+    // wherever the shell survives was justified as FREE — "everything held back here
+    // is hidden behind it anyway". That is true only where the shell FACES the eye.
+    // At a grazing angle the surviving shell covers a sliver of screen and the ray
+    // passes its silhouette edge straight into the gap, so the inset stops being
+    // hidden and becomes a visible dark band exactly at the silhouette and on every
+    // curved outline seen edge-on. Proven on the device, one binary, one camera, one
+    // variable: `TOPOPT_LATTICE_SURFACE_INSET=0` and the band is gone.
+    //
+    // ★ AND IT IS GRADE-INDEPENDENT, which is the one property his standing report
+    // "the holes survive Grade off" demands and which no bake-side cause explains.
+    //
+    // ★ THE DEPTH TEST IS THE RIGHT INSTRUMENT, NOT THE GEOMETRY. The struts and the
+    // shell share ONE depth buffer, so "the shell owns this boundary" is a DEPTH
+    // statement. `lsdf_gbuffer` now pushes the lattice's recorded depth back by this
+    // same magnitude along the VIEW RAY where `shell_is_latticed` is false: the shell
+    // still wins every pixel it actually covers, and where it does not cover there is
+    // nothing to lose to, so the struts reach the surface and the band closes. The
+    // shading position and normal are untouched, so nothing moves on screen.
+    if (!latticeInsetGeometric) { return dPart; }
     float inset = \(latticeSurfaceInsetMSL);
     if (dPart < -2.0 * inset) { return dPart; }   // deep inside: nothing to fight
     float3 pn = lsdf_part_normal(U, sdfTex, samp, p);
@@ -1280,8 +1312,21 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
 
     float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
                            h.pos, h.rho);
-    float4 clip = U.clipFromModel * float4(h.pos, 1.0);
-    float3 eyeP = (U.eyeFromModel * float4(h.pos, 1.0)).xyz;
+    // ★★★ THE DEPTH BIAS — see `lsdf_part_clip` for why this replaced a geometric
+    // inset. Where the shell survives it OWNS the boundary, so the lattice must lose
+    // the depth test there; pushing the position used for DEPTH back along the view
+    // ray does exactly that without moving where the strut is drawn or shaded.
+    // The conservative depth qualifier this pass already declares (see
+    // `testFragmentDepthWritesAreDeclaredConservative`, which counts those
+    // declarations by TEXT — so do not spell the attribute out in a comment) permits
+    // pushing AWAY from the eye, which is exactly the direction needed here.
+    float3 posForDepth = h.pos;
+    if (!shell_is_latticed(h.pos, n, RC, shellDecls, regionTex)) {
+        float voxel = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+        posForDepth += rd * (\(latticeSurfaceInsetMSL));
+    }
+    float4 clip = U.clipFromModel * float4(posForDepth, 1.0);
+    float3 eyeP = (U.eyeFromModel * float4(posForDepth, 1.0)).xyz;
     float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);
     // Face the normal toward the eye — the same one-sign-check `depth_fragment`
     // does, and for the same reason: the AO hemisphere must be built on the side of

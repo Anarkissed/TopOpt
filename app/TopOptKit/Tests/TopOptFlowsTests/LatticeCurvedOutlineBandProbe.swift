@@ -1163,11 +1163,32 @@ extension LatticeCurvedOutlineBandProbe {
                 total += 1
                 if solid { yes += 1 }
             }
+            let share = total > 0 ? 100.0 * Double(yes) / Double(total) : 0
             print(String(format:
                 "region %d face %@  outline pts with a PAINTED cell just inside: %d   "
                 + "of which SOLID: %d  (%.0f%%)  <- 100%% is a ring, less is a dotted line",
-                ri, String(describing: r.faceID) as NSString, total, yes,
-                total > 0 ? 100.0 * Double(yes) / Double(total) : 0))
+                ri, String(describing: r.faceID) as NSString, total, yes, share))
+            // ★★★ AND IT IS PINNED. `gradedToSolid` went 126 -> 875 on this change and
+            // NOT ONE test in the 784-test suite went red — the same gap that let the
+            // ladder floor ship unpinned. A print-only probe pins nothing, so this is
+            // an assertion: the terminus must be a RING.
+            //
+            // ★ 80%, NOT 100%, AND WHY. The metric samples the cell containing a point
+            // 0.1 mm inside each outline vertex; where the drawn cell is 6.00 mm that
+            // cell's own centre can still sit just past the half-cell test, so a
+            // perfect ring scores in the high 80s/90s rather than 100. Measured at the
+            // shipping rule: face 2 = 96%, face 15 = 84%. The floor is set below the
+            // weaker of the two with room for tessellation noise, and it is FAR above
+            // the 25% / 32% the centre test produced — which is the regression this
+            // guards. If this goes red, the terminus has gone back to a dotted line;
+            // re-pin it UP if the rule genuinely improved, never down.
+            XCTAssertGreaterThan(share, 75.0,
+                "★ the solid terminus is a DOTTED LINE again on face "
+                + "\(String(describing: r.faceID)): only \(yes) of \(total) outline "
+                + "points have a solid cell just inside. His rule is that the grade "
+                + "ends in 'a solid [that] connects the sides' — a ring. The centre "
+                + "test scored 25% / 32% here; anything in that range means the exact "
+                + "outline distance or the cuts-the-outline gate has been lost.")
         }
         print("maps -> \(out)")
     }

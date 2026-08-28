@@ -13,276 +13,6 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKRWMesh.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKRWMesh"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKHLR.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKHLR"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKV3d.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKV3d"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKVCAF.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKVCAF"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKFillet.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKFillet"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/lib3mf-ios/lib3mf.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "lib3mf"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKLCAF.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKLCAF"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKCDF.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKCDF"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXSBase.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKXSBase"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKG3d.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKG3d"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKMath.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKMath"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXmlTObj.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKXmlTObj"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDECascade.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKDECascade"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBinXCAF.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKBinXCAF"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBool.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKBool"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
         "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXCAF.xcframework",
         "source" : {
           "type" : "local"
@@ -301,11 +31,11 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKStdL.xcframework",
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBinL.xcframework",
         "source" : {
           "type" : "local"
         },
-        "targetName" : "TKStdL"
+        "targetName" : "TKBinL"
       },
       {
         "kind" : {
@@ -319,11 +49,11 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXmlXCAF.xcframework",
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEPLY.xcframework",
         "source" : {
           "type" : "local"
         },
-        "targetName" : "TKXmlXCAF"
+        "targetName" : "TKDEPLY"
       },
       {
         "kind" : {
@@ -337,11 +67,11 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXmlL.xcframework",
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEOBJ.xcframework",
         "source" : {
           "type" : "local"
         },
-        "targetName" : "TKXmlL"
+        "targetName" : "TKDEOBJ"
       },
       {
         "kind" : {
@@ -355,47 +85,11 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKernel.xcframework",
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKG2d.xcframework",
         "source" : {
           "type" : "local"
         },
-        "targetName" : "TKernel"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKMesh.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKMesh"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBRep.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKBRep"
+        "targetName" : "TKG2d"
       },
       {
         "kind" : {
@@ -427,11 +121,155 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEIGES.xcframework",
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKFillet.xcframework",
         "source" : {
           "type" : "local"
         },
-        "targetName" : "TKDEIGES"
+        "targetName" : "TKFillet"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBRep.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKBRep"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBool.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKBool"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKVCAF.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKVCAF"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKMesh.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKMesh"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKV3d.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKV3d"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXmlL.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKXmlL"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKTObj.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKTObj"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKStd.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKStd"
       },
       {
         "kind" : {
@@ -463,6 +301,186 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXmlTObj.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKXmlTObj"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDESTEP.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKDESTEP"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/lib3mf-ios/lib3mf.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "lib3mf"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKCDF.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKCDF"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKMath.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKMath"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEGLTF.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKDEGLTF"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBinXCAF.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKBinXCAF"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBinTObj.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKBinTObj"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXmlXCAF.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKXmlXCAF"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKHLR.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKHLR"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
         "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKTopAlgo.xcframework",
         "source" : {
           "type" : "local"
@@ -481,11 +499,119 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKService.xcframework",
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXSBase.xcframework",
         "source" : {
           "type" : "local"
         },
-        "targetName" : "TKService"
+        "targetName" : "TKXSBase"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKCAF.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKCAF"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKRWMesh.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKRWMesh"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKGeomBase.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKGeomBase"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDE.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKDE"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKLCAF.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKLCAF"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDESTL.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKDESTL"
       },
       {
         "kind" : {
@@ -517,11 +643,209 @@
           "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
           "name" : "TopOptKit"
         },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEPLY.xcframework",
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEVRML.xcframework",
         "source" : {
           "type" : "local"
         },
-        "targetName" : "TKDEPLY"
+        "targetName" : "TKDEVRML"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKStdL.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKStdL"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXml.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKXml"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKernel.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKernel"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBO.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKBO"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEIGES.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKDEIGES"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKOffset.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKOffset"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKG3d.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKG3d"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKFeat.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKFeat"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKShHealing.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKShHealing"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDECascade.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKDECascade"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "topoptkit",
+          "kind" : "fileSystem",
+          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
+          "name" : "TopOptKit"
+        },
+        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKService.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "TKService"
       },
       {
         "kind" : {
@@ -558,330 +882,6 @@
           "type" : "local"
         },
         "targetName" : "TopOptCore"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKGeomBase.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKGeomBase"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKOffset.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKOffset"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKStd.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKStd"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKCAF.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKCAF"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBinTObj.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKBinTObj"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEGLTF.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKDEGLTF"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKG2d.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKG2d"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBO.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKBO"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDESTL.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKDESTL"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEOBJ.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKDEOBJ"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKTObj.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKTObj"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDEVRML.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKDEVRML"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKFeat.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKFeat"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDESTEP.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKDESTEP"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKShHealing.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKShHealing"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKXml.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKXml"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKBinL.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKBinL"
-      },
-      {
-        "kind" : {
-          "xcframework" : {
-
-          }
-        },
-        "packageRef" : {
-          "identity" : "topoptkit",
-          "kind" : "fileSystem",
-          "location" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit",
-          "name" : "TopOptKit"
-        },
-        "path" : "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/vendor/occt-ios/TKDE.xcframework",
-        "source" : {
-          "type" : "local"
-        },
-        "targetName" : "TKDE"
       }
     ],
     "dependencies" : [
