@@ -89,18 +89,51 @@ final class LatticePerVoxelWidthTests: XCTestCase {
         XCTAssertGreaterThan(full, hist.values.reduce(0, +) / 2,
                              "most of the face is ~12 mm thick and must carry the "
                              + "region's own cell; sizes=\(hist)")
-        // ★★★ EVERY SIZE IS A WHOLE-NUMBER DIVISION OF THE REGION'S CELL (his
-        // 2026-08-25 close-up: struts cut to pieces where incommensurate sizes met).
-        // A thin spot still gets a finer cell — his per-spot ruling's intent — but
-        // only at S/n, so the coarse cell's corners stay nodes of the fine grid
-        // beside it and the strut has somewhere to land.
+        // ★★★ SUPERSEDED 2026-08-26 — THE WHOLE-NUMBER-DIVISION RULE IS GONE.
+        //
+        // This used to assert that every size is `regionCell / n` for whole n, on the
+        // reasoning that only then do neighbouring cells share nodes. He replaced the
+        // rule directly:
+        //
+        //   "single-cell/member means make the largest single cell across the entire
+        //    model — per voxel. So this will change based on the thickness of the area
+        //    it's in. If the area is 13 mm, the cell is 13 mm, if the area next to it
+        //    is 12 mm the cell next to it is 12 mm."
+        //
+        // The S/n ladder could not express that: a 10.31 mm wall under a 12.03 mm
+        // region cell had no permitted size between 12.03 (overshoot) and 6.02 (HALF
+        // the wall), so it took 6.02 — and a wall carrying S beside S/2 beside S/3 is
+        // the quilt. What is asserted instead is the rule he actually stated, plus the
+        // one he stated in the same breath about which divisors stepped may use.
+        let floorAcross = 1.0                       // single-cell: one cell across
         for (size, count) in hist {
-            let n = regionCell / Double(size)
-            XCTAssertEqual(n, n.rounded(), accuracy: 0.02,
-                           "\(count) cells at \(size) mm are not a whole division "
-                           + "of the \(regionCell) mm region cell — that boundary "
-                           + "cuts every strut crossing it")
+            let mm = Double(size)
+            // ★ NEVER OVERSHOOT (§8) — still binding, and now by construction: the
+            // cell is min(declared depth, local wall) / cellsAcross, so it can never
+            // exceed the material. 13.0 is face 2's declared depth and is the cap.
+            XCTAssertLessThanOrEqual(
+                mm, 13.0 / floorAcross + 1e-6,
+                "\(count) cells at \(size) mm exceed the declared depth — "
+                + "the face prism cannot make a wall thicker than it is")
+            // ★ AND S/2 IS NEVER A STEPPED SIZE (his 2026-08-26 rule: "Stepped grade
+            // means NOT dyadic (any number but 1/2 is ok)"). This is the size his tap
+            // callouts kept reporting while the wall looked like fabric.
+            XCTAssertGreaterThan(
+                abs(mm - regionCell / 2), 0.05,
+                "\(count) cells sit at exactly half the \(regionCell) mm region "
+                + "cell — S/2 is the one divisor stepped may never produce")
         }
+        // ★ AND THE BODY OF THE FACE FOLLOWS ITS OWN WALL. Face 2 measures ~12.03 mm
+        // over most of its area and reaches the declared 13.0 where the material is
+        // thicker; both are legitimate, and neither is a division of the other.
+        let followsWall = hist.filter {
+            let mm = Double($0.key)
+            return mm >= 10.0 && mm <= 13.01
+        }.values.reduce(0, +)
+        XCTAssertGreaterThan(
+            followsWall, hist.values.reduce(0, +) / 2,
+            "most of the face must carry a cell that spans its OWN wall, not a "
+            + "division of someone else's; sizes=\(hist)")
     }
 
     /// ★ THE NEVER-OVERSHOOT INVARIANT ITSELF (his ruling, 2026-08-24 evening: "a

@@ -24,10 +24,24 @@ final class LatticeSolidFillTests: XCTestCase {
 
     /// ★★★ THE FIELD. An inactive cell must fall back to the CLIP, not to infinity.
     func testAnInactiveCellIsClippedByThePartInsteadOfBeingInfinite() {
+        // ★ RE-PINNED 2026-08-27. The single `F` was split into the two fields it was
+        // always a min() of, so the hit can name WHICH one produced it (see
+        // `testTheHitSaysWhetherItIsSolid`). The behaviour here is unchanged and can be
+        // checked by hand: with `anyActive` false, `Fstrut` is 1e9 and `Fsolid` is
+        // `dClip`, so `F = min(1e9, dClip) = dClip` — exactly what the old single line
+        // produced. With it true, `Fsolid` is 1e9 and `F = max(dn * cellHere, dClip)`,
+        // also exactly as before.
         XCTAssertTrue(
-            march.contains("float F = anyActive ? max(dn * cellHere, dClip) : dClip;"),
+            march.contains("float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;"),
+            "★ the strut field must be infinite where no cell is active, so the solid "
+            + "term below can own that ray")
+        XCTAssertTrue(
+            march.contains("float Fsolid = anyActive ? 1e9 : dClip;"),
             "★ the march must give a refused cell the part/region clip as its field — "
             + "with 1e9 the ray passes through and the wall reads as holed")
+        XCTAssertTrue(
+            march.contains("float F = min(Fstrut, Fsolid);"),
+            "★ and the field the ray actually traces must be the min of the two")
     }
 
     /// ★ AND THE SOLID IS BOUNDED BY THE STRUTS' OWN CLIP TERM, not a second one. If a
@@ -48,9 +62,15 @@ final class LatticeSolidFillTests: XCTestCase {
         // (`dPart + solidInset`) so it could not z-fight the shell; `dClip` now carries
         // exactly that, and only where the shell actually survives — so through the
         // declared mouth the fill reads flush instead of recessed behind a ledge.
-        XCTAssertTrue(march.contains("anyActive ? max(dn * cellHere, dClip) : dClip"),
+        XCTAssertTrue(march.contains("float Fsolid = anyActive ? 1e9 : dClip;"),
                       "★ the fill must take the struts' own clip term unmodified — a "
                       + "second inset here is a second answer to where the part ends")
+        // ★ AND SO MUST THE OUTLINE'S SOLID BAND, which is the OTHER way a hit can be
+        // solid. It is clipped by the same `dClip`, so the grade's terminus ends exactly
+        // where the struts it replaces would have.
+        XCTAssertTrue(
+            march.contains("Fsolid = min(Fsolid, max(dClip, dOutline - outlineBand));"),
+            "★ the outline's solid band must be bounded by the same clip")
     }
 
     /// ★★ THE HIT CARRIES WHICH IT IS. Without this the albedo would have to guess from
@@ -59,9 +79,22 @@ final class LatticeSolidFillTests: XCTestCase {
     func testTheHitSaysWhetherItIsSolid() {
         XCTAssertTrue(march.contains("float solid;"),
                       "★ the hit record must carry it")
-        XCTAssertTrue(march.contains("out.solid = anyActive ? 0.0 : 1.0;"),
-                      "★ and it must be set from the same flag the field branched on, "
-                      + "so the picture and the field cannot disagree")
+        // ★★★ RE-PINNED 2026-08-27, AND THE OLD LITERAL WAS THE DEFECT.
+        //
+        // `anyActive` was only ever a PROXY for "this hit came from the solid fill". It
+        // held while the sole route to solid was a cell being inactive, and it stopped
+        // holding the moment the march's self-neighbour lookup was fixed: every painted
+        // cell now reports `anyActive`, so the grade's solid band AT THE OUTLINE was
+        // being shaded as a strut — flat, untextured, at a neighbouring strut's density.
+        // That is a picture disagreeing with its own field, which is exactly what this
+        // test exists to forbid.
+        //
+        // Comparing the two fields is not a looser bar, it is the bar this test always
+        // meant: the hit is solid IFF the solid field is the one that produced it.
+        XCTAssertTrue(march.contains("out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;"),
+                      "★ and it must name the FIELD that produced the hit, not a "
+                      + "neighbourhood flag that merely correlates with it — or the "
+                      + "picture and the field can disagree")
     }
 
     /// ★★★ THE LAYER HEIGHT IS THE PRINTER'S — read from the uniform, never a constant.

@@ -108,8 +108,24 @@ final class LatticeSteppedGradeProbe: XCTestCase {
         // Some painted cell must be close enough to the outline to go solid at the band
         // the renderer will use (finest cell, floored at one voxel).
         let band = Swift.max(1.5, Double(occ.spacing.x))
-        XCTAssertTrue(measured.contains { Double($0) <= band },
-                      "no cell is within \(band) mm of the outline — the ring is empty")
+        // ★★★ THE RING IS EITHER A SMALL DISTANCE **OR** THE SOLID MARKER (2026-08-27).
+        //
+        // This used to ask only for a small POSITIVE outline distance, and that
+        // predicate went blind the moment the grade started terminating in solid: a
+        // cell that close to the outline now writes 0, the solid marker, which
+        // `measured` filters out with `$0 > 0`. The test then reported "the ring is
+        // empty" for a bake whose ring is the most solid it has ever been — a false
+        // alarm that would have been silenced by loosening the bound, and the loosened
+        // version would no longer catch a genuinely empty ring.
+        //
+        // Asking for either marker is strictly STRONGER: it fails if the outline band
+        // carries neither a fine graded cell nor solid, which is the actual defect.
+        let solidRing = zip(baked.steppedCellMM, outline)
+            .filter { $0.0 > 0 && $0.1 == 0 }.count
+        let gradedRing = measured.filter { Double($0) <= band }.count
+        XCTAssertTrue(solidRing + gradedRing > 0,
+                      "no painted cell within \(band) mm of the outline and none marked "
+                      + "solid — the ring is empty. graded=\(gradedRing) solid=\(solidRing)")
         // ★ AND AN UNPAINTED CELL MUST STAY 0. `g` is the DYADIC LEVEL everywhere else;
         // a sentinel left in an unpainted cell makes the tap readout report
         // `baseCell * 2^1000`.

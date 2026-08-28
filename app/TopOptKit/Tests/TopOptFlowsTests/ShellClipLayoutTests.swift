@@ -14,15 +14,26 @@ import simd
 
 final class ShellClipLayoutTests: XCTestCase {
 
-    func testTheSwiftStructIsFourFloat4s() {
-        XCTAssertEqual(MemoryLayout<ShellClipUniform>.size, 64)
-        XCTAssertEqual(MemoryLayout<ShellClipUniform>.stride, 64)
+    /// ★ FIVE, NOT FOUR — and this test was RED at `1320715f`.
+    ///
+    /// `7885e3cd` ("only the cap you are looking at") added the `eye` field so the
+    /// shell could tell which side of a wall is being viewed, and did not update the
+    /// two assertions here. The struct has been 80 bytes since; the test still said
+    /// 64, so the ONE guard against a one-sided edit of this boundary has been
+    /// failing ever since — which is exactly the failure mode its own header warns
+    /// about ("there is no compiler on either side of that boundary; the only guard
+    /// is a test"). Brought back in line with the struct and the MSL, both of which
+    /// already agree with each other.
+    func testTheSwiftStructIsFiveFloat4s() {
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.size, 80)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.stride, 80)
         XCTAssertEqual(MemoryLayout<ShellClipUniform>.alignment, 16)
         // The offsets the shader reads, in the shader's own order.
         XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.grid), 0)
         XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.spacing), 16)
         XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.dims), 32)
         XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.gate), 48)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.eye), 64)
     }
 
     func testTheMSLDeclaresTheSameFieldsInTheSameOrder() {
@@ -36,12 +47,12 @@ final class ShellClipLayoutTests: XCTestCase {
             guard t.hasPrefix("float4 ") else { return nil }
             return String(t.dropFirst("float4 ".count).prefix(while: { $0 != ";" }))
         }
-        XCTAssertEqual(fields, ["origin", "spacing", "dims", "gate"],
+        XCTAssertEqual(fields, ["origin", "spacing", "dims", "gate", "eye"],
                        "the MSL struct moved; `ShellClipUniform` must move with it")
     }
 
     /// ★ THE DECLARATION BUFFER'S STRIDE. The list rides in its own buffer precisely so
-    /// this struct can stay a fixed 64 bytes — but the buffer has a stride of its own,
+    /// this struct can stay a fixed size — but the buffer has a stride of its own,
     /// and the shader indexes it with `SHELL_DECL_STRIDE`.
     func testTheDeclarationStrideAgreesWithTheShader() {
         XCTAssertTrue(shellClipMSL.contains("#define SHELL_DECL_STRIDE 3"),
