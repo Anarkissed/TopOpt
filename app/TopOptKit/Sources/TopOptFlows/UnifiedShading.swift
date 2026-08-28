@@ -128,6 +128,32 @@ static float3 to_edge_fade(float3 color, float edge, float edgeStrength,
 /// emission, the secant refinement, the step schedule and the ±h gradient are the
 /// lines that shipped. This task changes PIXELS, NOT GEOMETRY (R4), and the field is
 /// the geometry.
+/// ★★★ THE SURFACE INSET, OVERRIDABLE FOR ONE RUN — instrumentation only.
+///
+/// `lsdf_part_clip` holds the lattice this far inside the part wherever
+/// `shell_is_latticed` is FALSE, so the strut's cut face and the shell's triangles
+/// cannot trade pixels. Fix #17 of 2026-08-28 widened it from 0.25 to 0.75 voxel
+/// (0.43 -> 1.29 mm) to kill a chamfer z-fight, on the argument that it is FREE
+/// because the shell hides whatever is held back.
+///
+/// ★ THAT ARGUMENT HOLDS ONLY WHERE THE SHELL FACES YOU. At a grazing angle — the
+/// silhouette, and every curved outline seen edge-on — the surviving shell covers
+/// only a sliver, and the ray passes its edge straight into the 1.29 mm gap behind
+/// it. So the inset stops being free exactly where he reports the dark band, and it
+/// does so independently of the grade, which is the one property his "the holes
+/// survive Grade off" report demands.
+///
+/// `TOPOPT_LATTICE_SURFACE_INSET=<mm>` pins the inset to a fixed number of
+/// millimetres (0 disables it) so the two behaviours can be compared on the DEVICE,
+/// at one camera, from one binary. Nothing in the product sets it.
+let latticeSurfaceInsetMSL: String = {
+    if let raw = ProcessInfo.processInfo.environment["TOPOPT_LATTICE_SURFACE_INSET"],
+       let v = Double(raw), v >= 0 {
+        return String(format: "%.4f", v)
+    }
+    return "clamp(0.75 * voxel, 0.60, 1.80)"
+}()
+
 let latticeFieldSource = """
 \(shellClipMSL)
 
@@ -475,7 +501,7 @@ inline float lsdf_part_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
     // The floor matters as much as the scale: at Fast 64 the voxel is 3.45 mm, and
     // scaling alone would push the inset to 2.6 mm — so it is clamped, and the clamp is
     // what keeps a resolution knob from eating lattice.
-    float inset = clamp(0.75 * voxel, 0.60, 1.80);
+    float inset = \(latticeSurfaceInsetMSL);
     if (dPart < -2.0 * inset) { return dPart; }   // deep inside: nothing to fight
     float3 pn = lsdf_part_normal(U, sdfTex, samp, p);
     return shell_is_latticed(p, pn, RC, decls, regionTex) ? dPart : dPart + inset;

@@ -1074,3 +1074,174 @@ extension LatticeCurvedOutlineBandProbe {
             thin, need * 100, lo * 100, need / lo))
     }
 }
+
+// MARK: - 14. IS THE SOLID TERMINUS A RING, OR A DOTTED LINE?
+
+/// ★★★ HIS 2026-08-28 SCREENSHOT: deep-purple, cell-sized lumps scattered along both
+/// curved outlines. Solid draws at the deep end of its class (fix #16), so those are
+/// solid cells — and the complaint is that they are SCATTERED. His rule is that the
+/// grade ends in *"a solid [that] connects the sides"*: a ring, not a dotted line.
+///
+/// ★ CONFOUND CONTROL: no pixels and no camera. `cf.level` IS the outline channel the
+/// shader reads on the stepped path, and `0` there means the bake decided SOLID. This
+/// rasterises that decision in the declared face's own (u,v) plane, so "ring or dots"
+/// is answered by the bake's own output rather than by looking at a render.
+extension LatticeCurvedOutlineBandProbe {
+
+    func testTheSolidTerminusIsARingNotADottedLine() throws {
+        var hh = P.His(); hh.boundaryFinishWritten = false
+        let i = try P.inputs(hh, faces: LatticeRefusedCellProbe.hisFaces)
+        guard let cf = P.bake(i) else { throw XCTSkip("no bake") }
+        let inc = i.scene.regions.filter { $0.role == .include }
+        let out = ProcessInfo.processInfo.environment["QUILT_OUT"]
+            ?? NSTemporaryDirectory() + "quilt"
+
+        /// (painted, solid) at a model point, straight off the baked cell field.
+        func cellAt(_ p: SIMD3<Double>) -> (Bool, Bool) {
+            let f = cf.field
+            let vx = Int((((p.x - Double(f.origin.x)) / Double(f.spacing.x))).rounded())
+            let vy = Int((((p.y - Double(f.origin.y)) / Double(f.spacing.y))).rounded())
+            let vz = Int((((p.z - Double(f.origin.z)) / Double(f.spacing.z))).rounded())
+            guard vx >= 0, vy >= 0, vz >= 0, vx < f.nx, vy < f.ny, vz < f.nz
+            else { return (false, false) }
+            let idx = vx + f.nx * (vy + f.ny * vz)
+            guard idx < cf.steppedCellMM.count, idx < cf.level.count else { return (false, false) }
+            let painted = cf.steppedCellMM[idx] > 0
+            return (painted, painted && cf.level[idx] == 0)
+        }
+
+        let size = 512
+        for (ri, r) in inc.enumerated() {
+            guard let loop = r.outlineLoops.first, loop.count > 8 else { continue }
+            let n = LatticeRegionMask.unit(r.normal)
+            let (u, v) = LatticeRegionMask.basis(n)
+            var lo = SIMD2<Double>(1e9, 1e9), hi = SIMD2<Double>(-1e9, -1e9)
+            for lp in r.outlineLoops { for q in lp { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
+            lo -= SIMD2(6, 6); hi += SIMD2(6, 6)
+            let span = Swift.max(hi.x - lo.x, hi.y - lo.y)
+            var px = [UInt8](repeating: 0, count: size * size * 4)
+            for py in 0..<size { for pxi in 0..<size {
+                let uu = lo.x + span * (Double(pxi) + 0.5) / Double(size)
+                let vv = lo.y + span * (Double(size - 1 - py) + 0.5) / Double(size)
+                let p = r.origin + u * uu + v * vv + n * 1.0
+                let d = LatticeFaceOutline.signedDistance(SIMD2(uu, vv), loops: r.outlineLoops)
+                var c: (UInt8, UInt8, UInt8) = (0, 0, 0)
+                if d <= 0 {
+                    let (painted, solid) = cellAt(p)
+                    c = solid ? (230, 40, 40) : (painted ? (40, 170, 90) : (60, 60, 66))
+                }
+                let o = 4 * (py * size + pxi)
+                px[o] = c.0; px[o + 1] = c.1; px[o + 2] = c.2; px[o + 3] = 255
+            } }
+            LatticeQuiltFrameProbe.writePNG(px, size: size,
+                to: out + "/solid_region\(ri)_face\(r.faceID.map(String.init) ?? "?").png")
+
+            // ★ THE NUMBER: walk the outline and ask, at each vertex, whether the cell
+            // just inside it is solid. A RING answers yes everywhere; a dotted line
+            // answers yes for a fraction, and that fraction IS the defect.
+            var yes = 0, total = 0
+            let m = loop.count
+            for k in 0..<m {
+                let a = loop[(k + m - 1) % m], b = loop[k], c2 = loop[(k + 1) % m]
+                let e0 = b - a, e1 = c2 - b
+                guard simd_length(e0) > 1e-6, simd_length(e1) > 1e-6 else { continue }
+                let t = simd_normalize(e0 / simd_length(e0) + e1 / simd_length(e1))
+                var inward = SIMD2<Double>(-t.y, t.x)
+                if LatticeFaceOutline.signedDistance(b + inward * 0.5, loops: r.outlineLoops)
+                    > LatticeFaceOutline.signedDistance(b - inward * 0.5, loops: r.outlineLoops) {
+                    inward = -inward
+                }
+                // ★ A TENTH OF A MILLIMETRE INSIDE — as close to the outline as the
+                // question allows. At 1.0 mm the cell CONTAINING that point can have
+                // its own centre up to half a cell further in, so even a perfect ring
+                // scores only ~80% and the metric flatters nothing. Sampling at the
+                // outline asks about the cell the outline actually cuts.
+                let uv = b + inward * 0.1
+                let p = r.origin + u * uv.x + v * uv.y + n * 1.0
+                let (painted, solid) = cellAt(p)
+                guard painted else { continue }
+                total += 1
+                if solid { yes += 1 }
+            }
+            print(String(format:
+                "region %d face %@  outline pts with a PAINTED cell just inside: %d   "
+                + "of which SOLID: %d  (%.0f%%)  <- 100%% is a ring, less is a dotted line",
+                ri, String(describing: r.faceID) as NSString, total, yes,
+                total > 0 ? 100.0 * Double(yes) / Double(total) : 0))
+        }
+        print("maps -> \(out)")
+    }
+}
+
+// MARK: - 15. IS THE DARK BAND MATERIAL DEEPER THAN THE PRISM?
+
+/// ★★★ HIS 2026-08-28 MARK-UP: a dark grey empty strip just inside the chamfer along
+/// the CURVED left edge, with fine lattice cells right beside it.
+///
+/// The bake's in-plane coverage is now a continuous ring (probe 14: 96% / 84%), so
+/// the strip is not a gap in the outline's own plane. The other axis is DEPTH: his
+/// prism is 11 mm (face 15) and 12 mm (face 2), and the wall is only a ~10 mm skin
+/// where face 16 backs it — which it does NOT near the outer edges. This measures the
+/// material's actual thickness along the face normal at points just inside the
+/// outline, against the prism that is supposed to lattice it.
+///
+/// ★ CONFOUND CONTROL: `partSDF` is the distance to the PART, baked from the mesh and
+/// never clipped to a region, so "how thick is the wall here" is answered by geometry
+/// alone — no bake, no shell, no camera, no far wall.
+extension LatticeCurvedOutlineBandProbe {
+
+    func testHowDeepTheMaterialIsWhereHeMarkedTheDarkBand() throws {
+        var hh = P.His(); hh.boundaryFinishWritten = false
+        let i = try P.inputs(hh, faces: LatticeRefusedCellProbe.hisFaces)
+        let inc = i.scene.regions.filter { $0.role == .include }
+        let psdf = i.scene.partSDF
+        func inside(_ p: SIMD3<Double>) -> Bool { Self.sampleLinear(psdf, p) <= 0 }
+
+        for (ri, r) in inc.enumerated() {
+            guard let loop = r.outlineLoops.first, loop.count > 8 else { continue }
+            let n = LatticeRegionMask.unit(r.normal)      // points INTO the part
+            let (u, v) = LatticeRegionMask.basis(n)
+            var deeper = 0, total = 0
+            var depths: [Double] = []
+            let m = loop.count
+            for k in 0..<m {
+                let b = loop[k]
+                // ★ STEP 2 mm INSIDE THE OUTLINE FIRST. An outline vertex sits exactly
+                // ON the boundary, where the part test is a coin flip — walking the
+                // normal from there measures nothing, which is what the first version
+                // of this probe did (it printed no rows at all).
+                let a0 = loop[(k + m - 1) % m], c0 = loop[(k + 1) % m]
+                let e0 = b - a0, e1 = c0 - b
+                guard simd_length(e0) > 1e-6, simd_length(e1) > 1e-6 else { continue }
+                let tg = simd_normalize(e0 / simd_length(e0) + e1 / simd_length(e1))
+                var inward2 = SIMD2<Double>(-tg.y, tg.x)
+                if LatticeFaceOutline.signedDistance(b + inward2 * 0.5, loops: r.outlineLoops)
+                    > LatticeFaceOutline.signedDistance(b - inward2 * 0.5, loops: r.outlineLoops) {
+                    inward2 = -inward2
+                }
+                let uvIn = b + inward2 * 2.0
+                var best = 0.0
+                var t = 0.0
+                while t <= 60.0 {
+                    let p = r.origin + u * uvIn.x + v * uvIn.y + n * t
+                    if !inside(p) { break }
+                    best = t; t += 0.25
+                }
+                guard best > 0.5 else { continue }
+                total += 1
+                depths.append(best)
+                if best > r.depthMM + 0.5 { deeper += 1 }
+            }
+            guard total > 0 else { continue }
+            let s = depths.sorted()
+            func q(_ f: Double) -> Double { s[Swift.min(s.count - 1, Int(f * Double(s.count - 1)))] }
+            print(String(format:
+                "region %d face %@  prism depth %.1f mm | material depth at the outline: "
+                + "p10 %.1f  p50 %.1f  p90 %.1f  max %.1f mm | DEEPER than the prism at "
+                + "%d of %d outline points (%.0f%%)",
+                ri, String(describing: r.faceID) as NSString, r.depthMM,
+                q(0.1), q(0.5), q(0.9), q(1.0), deeper, total,
+                100.0 * Double(deeper) / Double(total)))
+        }
+    }
+}

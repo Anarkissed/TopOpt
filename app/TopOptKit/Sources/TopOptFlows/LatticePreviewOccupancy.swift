@@ -602,10 +602,27 @@ extension LatticePreviewOccupancy {
         return 1.0
     }()
 
+    /// ★★★ ONE RING, NOT TWO (2026-08-28) — and the old 2 was compensating for a
+    /// predicate that only fired on a quarter of the boundary.
+    ///
+    /// While the terminus asked `n > ladderCap` against a BFS distance quantised to
+    /// the 1.72 mm voxel, it caught 25% (face 2) and 32% (face 15) of outline points,
+    /// scattered — his 2026-08-28 screenshot of purple lumps along both curves. Two
+    /// rings of a quarter-firing test is less solid than one ring of a correct one, so
+    /// the constant was tuned against the bug. With the exact outline distance in
+    /// place, the numbers on his part are:
+    ///
+    ///     rings   gradedToSolid   outline points with a solid cell (face 2 / face 15)
+    ///       1          875              96% / 84%
+    ///       2         1643             100% / 89%      <- 49% of the wall, far too much
+    ///
+    /// One ring IS his rule — *"ONLY WHEN NO MORE CAN FIT can you make the rest
+    /// solid"* — because one ring is exactly the set of cells the outline CUTS, which
+    /// is the set that provably cannot hold a strut node.
     static let solidRingCells: Int = {
         if let raw = ProcessInfo.processInfo.environment["TOPOPT_LATTICE_SOLID_RING"],
            let v = Int(raw), v >= 1 { return v }
-        return 2
+        return 1
     }()
 
     static let shapeLadderCap: Int = {
@@ -1599,21 +1616,127 @@ extension LatticePreviewOccupancy {
                                 // this is the AESTHETIC one, and it is the tighter of the
                                 // two.
                                 let ladderCap = Swift.min(nCap, Self.shapeLadderCap)
-                                // ★ ONE RING OR TWO — see `solidRingCells`. At 1 only a
-                                // cell with NO measurement at its centre (no room inside
-                                // the outline at all) terminates in solid; a cell that
-                                // still has a distance keeps grading, capped.
-                                let noRoomAtAll = !(d > 1e-6)
+                                // ★★★ "NO ROOM" IS AN OVERLAP TEST, NOT A CENTRE TEST
+                                // (2026-08-28, his screenshot of purple blobs scattered
+                                // along both curved outlines).
+                                //
+                                // ★ A CENTRE TEST MAKES A DOTTED LINE, NOT A RING. This
+                                // was `!(d > 1e-6)` — solid only where the fit distance
+                                // measured AT THE CELL CENTRE was exactly zero. `d` is a
+                                // BFS distance on the 1.72 mm occupancy grid sampled once
+                                // per 5.16 mm base cell, so `d == 0` catches roughly one
+                                // boundary cell in three, and WHICH third depends on where
+                                // the cell grid happens to fall against the boundary. On a
+                                // straight, phase-aligned edge that is all-or-nothing; on
+                                // a CURVE the distance slides smoothly and the ring breaks
+                                // into scattered cell-sized lumps. That is the same 3:1
+                                // lottery as the rim band of 2026-08-26 ("a 6:1 lottery
+                                // makes a scatter, not a ring"), and the same centre-test
+                                // error as region ownership and the occupancy gate before
+                                // it: along a curved outline a straight cell grid
+                                // NECESSARILY straddles, so any question asked only at the
+                                // centre answers for a sample, not for the cell.
+                                //
+                                // ★ THE FILE ALREADY STATES THE RIGHT RULE, in
+                                // `solidOutlineCellFraction`: *"a cell whose centre sits
+                                // closer than S/2 to the outline cannot hold a strut
+                                // node"*. So "no room" is `d < S/2` — and `S` is the size
+                                // this cell will actually be DRAWN at, after the ladder
+                                // has stepped it down as far as it is permitted to. That
+                                // is his rule exactly: grade down as far as it can fit,
+                                // and only when even the finest permitted cell cannot hold
+                                // a node does it become "a solid and connect the sides".
+                                //
+                                // ★ IT CANNOT EAT THE INTERIOR. `d` is the distance to the
+                                // outline, so this is false everywhere but the boundary
+                                // row, and `centreInside` below still keeps the overshoot
+                                // ring out of solid entirely.
+                                // ★★★ AND IT IS ASKED OF THE **EXACT** OUTLINE, not of
+                                // the BFS field. `d` is a voxel-grid distance quantised
+                                // to 1.72 mm, and the threshold it is compared against is
+                                // half a cell — 2.58 mm. A +/-0.86 mm slop on a 2.58 mm
+                                // decision is a 33% relative error on the very number
+                                // that says "ring or no ring", so the ring came out as a
+                                // dotted line: measured on his part, only 25% (face 2)
+                                // and 32% (face 15) of outline points had a solid cell
+                                // just inside them. `LatticeFaceOutline.signedDistance`
+                                // is the analytic polygon distance — the same function
+                                // `LatticeRegionMask` decides membership with — so the
+                                // ring is exact and cannot alias against the cell grid.
+                                //
+                                // ★ IT IS AFFORDABLE HERE. The note in
+                                // `LatticeRegionMask.signedDistance` about this being the
+                                // expensive term is about calling it PER VOXEL over the
+                                // whole bbox; this loop runs per BASE CELL (24k of them,
+                                // ~70 outline vertices), which is nothing.
+                                //
+                                // ★ AND `n > ladderCap` IS GONE FROM THIS BRANCH ON
+                                // PURPOSE. That was the same quantised `d` in disguise
+                                // (`n_fit = ceil(s/2d)`, so `n > 1` IS `d < s/2`), so
+                                // keeping it as a conjunct would have re-imposed the
+                                // scatter this replaces. The new test is the complete
+                                // statement of the rule on its own: at the size this cell
+                                // will actually be DRAWN, is there room for a node.
+                                let drawnCellMM = s / Double(Swift.max(1, Swift.min(n, ladderCap)))
+                                var dOutlineExact = Double.nan
+                                if region.kind == .face, !region.outlineLoops.isEmpty {
+                                    let rn = LatticeRegionMask.unit(region.normal)
+                                    let (bu, bv) = LatticeRegionMask.basis(rn)
+                                    let rel = p - region.origin
+                                    // `signedDistance` is negative INSIDE, so negate to
+                                    // get "how far in from the outline this centre sits".
+                                    dOutlineExact = -(LatticeFaceOutline.signedDistance(
+                                        SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
+                                        loops: region.outlineLoops) - region.inPlaneOffsetMM)
+                                }
+                                // ★ THE RING DEPTH, IN WHOLE CELLS. One ring is exactly
+                                // the cells the outline CUTS — centre within half a cell
+                                // of it — which is the set that provably cannot hold a
+                                // node, and so is precisely his *"ONLY WHEN NO MORE CAN
+                                // FIT can you make the rest solid."* Each further ring
+                                // adds one more full cell inward.
+                                let ringDepthMM =
+                                    (Double(Self.solidRingCells) - 0.5) * drawnCellMM
+                                let noRoomAtAll = dOutlineExact.isNaN
+                                    ? (n > ladderCap && !(d > 1e-6))   // no outline: as before
+                                    : dOutlineExact < ringDepthMM
                                 // ★ AND THE OVERSHOOT RING IS NEVER SOLID. Solid is the
                                 // terminus for a cell INSIDE the face that cannot fit a
                                 // printable lattice — "ONLY WHEN NO MORE CAN FIT can you
                                 // make the rest solid" (2026-08-27). A cell outside the
                                 // outline is not "unable to fit"; it is excess, and the
                                 // prism cuts it.
-                                let fitWantedFinerThanPrintable = centreInside
-                                    && (Self.solidRingCells > 1
-                                        ? n > ladderCap
-                                        : (n > ladderCap && noRoomAtAll))
+                                // ★ ONE RULE FOR EVERY RING COUNT. The ring count is now
+                                // a DEPTH in `noRoomAtAll` (see `ringDepthMM`), so the
+                                // old split — `n > ladderCap` for two rings, the centre
+                                // test for one — is gone. That split is what let the
+                                // shipping default (2) run on the quantised `d` and never
+                                // reach the exact test at all.
+                                //
+                                // ★★★ AND THE GATE IS "DOES THE OUTLINE CUT THIS CELL",
+                                // NOT `centreInside` — the last break in the ring.
+                                //
+                                // A cell whose centre falls just OUTSIDE the outline is
+                                // the one the outline cuts hardest, and `centreInside`
+                                // refused it. So along the boundary the cut cells
+                                // alternated — centre in, centre out — and the ring came
+                                // out as a 50/50 dotted line: measured 51% and 52% of
+                                // outline points with the exact depth test but this gate
+                                // still in place. Half a ring is not a ring.
+                                //
+                                // ★ IT ADDS NO MATERIAL OUTSIDE THE FACE, which is the
+                                // whole of the 2026-08-27 ruling this looks like it
+                                // crosses. Solid is still clipped by `dClip`, which
+                                // unions the region's own SDF — so a straddling cell
+                                // marked solid fills only the part of itself INSIDE the
+                                // prism, and the excess is cut exactly as before. What
+                                // the ruling forbids is solid standing in for the
+                                // overshoot ring; a cell entirely outside the face is
+                                // still excluded here, by the `-0.5 · cell` bound.
+                                let cutsTheOutline = dOutlineExact.isNaN
+                                    ? centreInside
+                                    : dOutlineExact > -0.5 * drawnCellMM
+                                let fitWantedFinerThanPrintable = cutsTheOutline && noRoomAtAll
                                 if fitWantedFinerThanPrintable { dbgSolid += 1 }
                                 n = Swift.min(n, ladderCap)
                                 if dyadicSteps, n > 1 {
