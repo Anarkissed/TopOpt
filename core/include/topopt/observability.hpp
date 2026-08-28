@@ -1037,6 +1037,24 @@ struct RunInfo {
   long long organic_filleted = 0;
   long long organic_fillet_unresolved = 0;
   double organic_fillet_radius = 0.0;
+  // ── ★★ GROWTH TELEMETRY (task PR-353 amendment §1) ──────────────────────────
+  // `growth_ran` distinguishes "growth measured zero" from "growth never ran": a
+  // traced run reports false and every counter below is meaningless, which is the
+  // same rule this receipt already applies to shape-fit reporting. Without it a run
+  // that truncated at the tip budget is indistinguishable from one that finished.
+  bool organic_growth_ran = false;
+  long long organic_growth_seeds = 0;
+  long long organic_growth_curves = 0;
+  long long organic_growth_steps = 0;
+  long long organic_growth_blocked = 0;
+  long long organic_growth_clamped = 0;
+  double organic_growth_clamp_max_deg = 0.0;
+  long long organic_growth_branches = 0;
+  long long organic_growth_branch_refused = 0;
+  long long organic_growth_joins = 0;
+  long long organic_growth_join_refused_span = 0;
+  bool organic_growth_tip_budget_hit = false;
+  double organic_growth_layer_height_mm = 0.0;
   long long organic_base_mat_touchdowns = 0;
   double organic_base_mat_length_mm = 0.0;
   double organic_base_mat_z_mm = 0.0;

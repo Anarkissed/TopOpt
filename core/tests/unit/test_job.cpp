@@ -550,6 +550,57 @@ static void test_lattice_block() {
 // value is refused rather than clamped, and it is refused outside the algorithm it
 // belongs to. The delivered-spacing arithmetic was measured directly instead: a 4-6 mm
 // window at x2 requested 8.12-12.00 and delivered 4.09-12.23 against 2.04-5.85 at x1.
+// --- G6: GROWTH REQUIRES A STATED LAYER HEIGHT (PR 353 amendment §2) ------------
+// ★ WHY THIS IS A SCHEMA TEST. `grading.organic_growth` asks its support question ONE
+// LAYER AT A TIME, so the layer height is the discretisation the entire printability
+// argument is computed in. Unstated, run_organic_step passed 0 and the generator fell
+// back to `0.5 * grid.spacing` — on the maintainer's 1.705 mm voxel that is a 0.85 mm
+// layer, roughly four times a real one, and the whole argument was then made in the
+// wrong units with nothing raised. There is no defensible default here, so it is an
+// error rather than a fallback.
+//
+// The pair is what makes this test mean something: the negative alone would pass for
+// an implementation that refused organic_growth outright.
+static void test_growth_requires_a_stated_layer_height() {
+  // NEGATIVE: growth asked for, no loads block at all, hence no stated layer height.
+  check_rejects(
+      mutate("\"mesh_prefix\": \"variant\" }",
+             "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": "
+             "\"octet\", \"cell_mm\": 3.0, \"min_extrudable_width_mm\": 0.4, "
+             "\"algorithm\": \"organic\", \"intent\": \"aesthetic\", "
+             "\"organic_growth\": true }"),
+      "G6: organic_growth without a stated loads layer_height_mm must be refused — "
+      "unstated, growth silently substitutes half a voxel");
+
+  // POSITIVE CONTROL: the identical grading block parses once the layer height is
+  // stated, so the refusal above is about the layer height and nothing else.
+  const std::string with_layer = R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "grading": { "topology": "octet", "cell_mm": 3.0, "min_extrudable_width_mm": 0.4,
+               "algorithm": "organic", "intent": "aesthetic", "organic_growth": true },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ],
+             "layer_height_mm": 0.2 }
+})";
+  const JobDescription jl = parse_job(with_layer);
+  CHECK(jl.grading.organic_growth,
+        "G6 positive control: organic_growth parses when a layer height is stated");
+  CHECK(jl.loads.layer_height_mm == 0.2,
+        "G6 positive control: the stated layer height is carried verbatim");
+
+  // A layer height of zero is not a statement of one — the same job with 0.0 must be
+  // refused by the loads parser, so growth can never inherit a meaningless value.
+  const std::string zero_layer = R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "grading": { "topology": "octet", "cell_mm": 3.0, "min_extrudable_width_mm": 0.4,
+               "algorithm": "organic", "intent": "aesthetic", "organic_growth": true },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ],
+             "layer_height_mm": 0.0 }
+})";
+  check_rejects(zero_layer, "G6: a zero layer height is not a stated layer height");
+}
+
 static void test_organic_scale_and_gates() {
   auto organic = [](const std::string& extra) {
     return mutate("\"mesh_prefix\": \"variant\" }",
@@ -850,6 +901,7 @@ int main() {
   test_wall_loops();
   test_lattice_block();
   test_grading_block();
+  test_growth_requires_a_stated_layer_height();
   test_organic_scale_and_gates();
   test_warm_start_block();
   test_mode_analyze();

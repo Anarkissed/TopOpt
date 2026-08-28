@@ -23,6 +23,7 @@
 #include "topopt/mesh.hpp"
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
+#include "topopt/observability.hpp"
 #include "topopt/organic_lattice.hpp"
 
 #include <cmath>
@@ -503,36 +504,63 @@ void test_growth_is_supported() {
 }
 
 // ── G4: NO STEP BELOW THE PRINTABLE ANGLE ───────────────────────────────────────
+// ★★ TWO POPULATIONS, TWO BARS. The old form measured every segment together and
+// allowed 25 % below the cone, on a SPARSE fixture chosen so that joins would be rare.
+// Both halves of that were wrong. A blended bar cannot fail for the reason it exists:
+// measured on the DEFAULT fixture (12x12x24, spacing 4.0), 68.2 % of segments sit
+// below the cone and 66.8 % of material length is in them, so the 25 % bar would fail
+// there — not because the cone is violated but because joins dominate. And the sparse
+// fixture reads 18.2 %, passing while never exercising the regime that ships.
+//
+// The generator knows which segments are which, so ask it. A CLIMB is cone-clamped
+// and must obey the cone with NO tolerance. A JOIN or DEFLECT lands on material at
+// both ends — it is a bridge, not an overhang — so its bar is the horizontal RUN
+// against kOrganicMaxCantileverMm, which is the limit this codebase already commits to.
 void test_growth_respects_the_cone() {
-  // ★ A SPARSE fixture on purpose. In a crowded one most segments are JOINS and
-  // DEFLECTIONS, which land on existing material and may arrive at any angle — a bar
-  // measured there says nothing about the cone. Wide spacing keeps crowding rare so the
-  // segments under test are genuinely climbing steps.
-  GrowFixture f = grow_fixture(8, 8, 24, 1.0);
-  for (double& sp : f.spacing) sp = 12.0;
+  GrowFixture f = grow_fixture();            // ★ DEFAULT: the regime that ships
   OrganicGenStats gs;
   const OrganicLattice lat =
       grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
   const double cone = std::sin(kOrganicGrowthMinAngleDeg * 3.14159265358979323846 /
                                180.0);
-  std::size_t below = 0, total = 0;
-  for (const OrganicCurve& c : lat.curves)
+  std::size_t climbs = 0, climb_below = 0, joins = 0, join_over = 0;
+  double worst_run = 0.0, worst_climb_deficit = 0.0;
+  for (const OrganicCurve& c : lat.curves) {
+    // the tags must describe the segments they are parallel to, or every number
+    // below is measured against the wrong geometry
+    CHECK(c.seg_kind.size() + 1 == c.points.size(),
+          "G4: seg_kind must be parallel to the segments of points");
     for (std::size_t i = 1; i < c.points.size(); ++i) {
       const Vec3 d{c.points[i].x - c.points[i - 1].x, c.points[i].y - c.points[i - 1].y,
                    c.points[i].z - c.points[i - 1].z};
       const double L = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
       if (L < 1e-9) continue;
-      ++total;
-      // a JOIN segment may arrive at any angle — it lands on material by construction
-      if (d.z / L < cone - 1e-6) ++below;
+      const auto kind = static_cast<OrganicCurve::Seg>(c.seg_kind[i - 1]);
+      if (kind == OrganicCurve::Seg::Climb) {
+        ++climbs;
+        if (d.z / L < cone - 1e-6) {
+          ++climb_below;
+          worst_climb_deficit = std::max(worst_climb_deficit, cone - d.z / L);
+        }
+      } else {
+        ++joins;
+        const double run = std::sqrt(d.x * d.x + d.y * d.y);
+        if (run > worst_run) worst_run = run;
+        if (run > kOrganicMaxCantileverMm + 1e-9) ++join_over;
+      }
     }
-  CHECK(total > 0, "G4: there must be segments to judge");
-  // ★ JOIN AND DEFLECTION SEGMENTS ARRIVE AT WHATEVER ANGLE THE NEIGHBOUR IS AT, and
-  // they are supported by construction because they land ON it. Only the CLIMBING steps
-  // are cone-clamped, so the bar is that most segments obey it — not all.
-  CHECK(static_cast<double>(below) <= 0.25 * static_cast<double>(total),
-        "G4: climbing steps are clamped to the printable cone; join and deflection "
-        "segments land on existing material and may arrive shallower");
+  }
+  CHECK(climbs > 0, "G4: there must be climbing segments to judge");
+  CHECK(climb_below == 0,
+        "G4: a CLIMBING step is cone-clamped and must never fall below the printable "
+        "angle — no tolerance, because there is no mechanism that would produce one");
+  CHECK(join_over == 0,
+        "G4: a JOIN or DEFLECTION span lands on material at both ends, so it is a "
+        "BRIDGE — its horizontal run must not exceed kOrganicMaxCantileverMm. Nothing "
+        "checked this before: the run was bounded only by d_test, half the local "
+        "SEPARATION (2.00 mm here = spacing 4.0 / 2). Measured, separation 8.0 puts "
+        "d_test at 4.0 mm and yields 2406 joins over the 3.0 mm cap");
+  (void)worst_run; (void)worst_climb_deficit; (void)joins;
 }
 
 // ── G5: A CROWDED TIP JOINS RATHER THAN STOPPING SHORT ──────────────────────────
@@ -547,12 +575,77 @@ void test_growth_joins_neighbours() {
           "ate, 2260 spans emitted against 2520 pruned");
 }
 
+// ── G7: THE GROWTH COUNTERS REACH THE RECEIPT ───────────────────────────────────
+// ★★ THE TELEMETRY WAS DEAD. `run_organic_step` filled `oo.growth` and nothing ever
+// read it, so every growth counter was discarded on both the analyze and the geometry
+// path. The consequence that matters: `growth_tip_budget_hit` is the receipt's only
+// way of saying a run TRUNCATED at 20,000 tips rather than finishing, and a truncated
+// run was indistinguishable from a complete one.
+//
+// This test is at the RunInfo -> json seam rather than end-to-end because that is
+// where the loss was, and because a unit test cannot run the full job pipeline. It
+// asserts the two facts a receipt must carry: the counters appear when growth ran, and
+// `growth_ran` is FALSE — not merely absent, and not a zero — when it did not.
+void test_growth_stats_reach_the_receipt() {
+  {
+    RunInfo gi;
+    gi.grading_present = true;   // the receipt's grading block gates the rest
+    gi.organic_present = true;
+    gi.organic_growth_ran = true;
+    gi.organic_growth_seeds = 41;
+    gi.organic_growth_curves = 7;
+    gi.organic_growth_steps = 1234;
+    gi.organic_growth_blocked = 5;
+    gi.organic_growth_clamped = 99;
+    gi.organic_growth_clamp_max_deg = 12.5;
+    gi.organic_growth_joins = 3;
+    gi.organic_growth_join_refused_span = 2;
+    gi.organic_growth_tip_budget_hit = true;
+    gi.organic_growth_layer_height_mm = 0.2;
+    const std::string j = run_info_json(gi);
+    CHECK(j.find("\"growth_ran\": true") != std::string::npos,
+          "G7: growth_ran must be reported true when growth ran");
+    CHECK(j.find("\"growth_seeds\": 41") != std::string::npos,
+          "G7: growth_seeds must reach the receipt — it was discarded entirely");
+    CHECK(j.find("\"growth_steps\": 1234") != std::string::npos,
+          "G7: growth_steps must reach the receipt");
+    CHECK(j.find("\"growth_clamped\": 99") != std::string::npos,
+          "G7: growth_clamped must reach the receipt — the clamp is the event that "
+          "growth_blocked was wrongly documented as counting");
+    CHECK(j.find("\"growth_join_refused_span\": 2") != std::string::npos,
+          "G7: joins refused for span must reach the receipt");
+    CHECK(j.find("\"growth_tip_budget_hit\": true") != std::string::npos,
+          "G7: a run TRUNCATED at the tip budget must say so — the header promises "
+          "the receipt reports this 'rather than silently truncating'");
+    CHECK(j.find("\"growth_layer_height_mm\"") != std::string::npos,
+          "G7: the layer height the result was computed in must be recorded");
+  }
+  {
+    // A TRACED organic run: growth_ran false, and no growth counter may appear at all.
+    // A zero that was never measured is not a passing zero.
+    RunInfo gi;
+    gi.grading_present = true;   // the receipt's grading block gates the rest
+    gi.organic_present = true;
+    gi.organic_growth_ran = false;
+    const std::string j = run_info_json(gi);
+    CHECK(j.find("\"growth_ran\": false") != std::string::npos,
+          "G7: a traced run must report growth_ran false, so 'growth measured zero' "
+          "and 'growth never ran' are distinguishable");
+    CHECK(j.find("\"growth_seeds\"") == std::string::npos,
+          "G7: no growth counter may be emitted on a traced run — an unmeasured zero "
+          "would read as a passing zero");
+    CHECK(j.find("\"growth_tip_budget_hit\"") == std::string::npos,
+          "G7: no growth counter may be emitted on a traced run");
+  }
+}
+
 int main() {
   test_growth_produces_curves();
   test_growth_does_not_fall_back();
   test_growth_is_supported();
   test_growth_respects_the_cone();
   test_growth_joins_neighbours();
+  test_growth_stats_reach_the_receipt();
   test_mat_that_counts_feet_lays_floor();
   test_mat_survives_the_weld_raster();
   test_slenderness_reads_the_unsupported_span();

@@ -715,6 +715,16 @@ struct OrganicCurve {
   // stopped INSIDE the material (d_test, a turn, a dead field) is a FREE END hanging
   // in mid-material, and §1(e2) trims it.
   bool start_at_boundary = false;
+  // ★★ WHAT KIND OF SEGMENT IS THIS? Parallel to the SEGMENTS of `points`, so
+  // `seg_kind[i]` describes points[i] -> points[i+1]; size is points.size() - 1 when
+  // growth wrote it and EMPTY on the traced path, which has no such distinction.
+  //
+  // It exists because the printability bar differs by kind and a blended bar means
+  // nothing. A CLIMB is cone-clamped and must obey the cone with no tolerance. A JOIN
+  // or DEFLECT lands on material that is already there and may arrive at any angle —
+  // what bounds it is the horizontal RUN of the span, not its slope.
+  enum class Seg : unsigned char { Climb = 0, Join = 1, Deflect = 2 };
+  std::vector<unsigned char> seg_kind;
   bool end_at_boundary = false;
 };
 
@@ -1201,20 +1211,40 @@ struct OrganicGenStats {
   // `fillet_unresolved` those whose flare hit the radius cap before the two sides met,
   // so the span is better but not fixed — reported separately, never folded into the
   // success count.
-  // ★★ GROWTH REPORTING. `growth_steps` is how many tip advances were taken;
-  // `growth_blocked` how many were refused because the cone had no supported
-  // direction — the honest measure of how often the stress field asked for something
-  // the machine cannot build.
+  // ★★ GROWTH REPORTING. `growth_steps` is how many tip advances were taken.
+  //
+  // `growth_blocked` counts steps that TERMINATED FOR WANT OF SUPPORT: the clamped
+  // direction was taken, the candidate point was tested, and nothing held it. It was
+  // previously described as "how often the stress field asked for something the
+  // machine cannot build", which is the CLAMP's event, not this one — and it reads 0
+  // on every crowded fixture because the clamp fires first and the tip's own trail
+  // then supports the step. The field's demand is `growth_clamped`.
   std::size_t growth_seeds = 0;
   std::size_t growth_steps = 0;
   std::size_t growth_blocked = 0;
   std::size_t growth_curves = 0;
+  // ★★ THE CLAMP IS THE EVENT WORTH COUNTING. `growth_clamped` is the number of steps
+  // where the field asked to go flatter than the printable cone and was pulled back to
+  // it; `growth_clamp_max_deg` is the largest such departure — how far below the cone
+  // the field wanted to go, in degrees, on the worst step. Together they say how much
+  // of this lattice is the field's shape and how much is the machine's limit.
+  std::size_t growth_clamped = 0;
+  double growth_clamp_max_deg = 0.0;
   // Branches offered, and how many were refused for want of support at their root.
   std::size_t growth_branches = 0;
   std::size_t growth_branch_refused = 0;
   // Tips that reached the neighbour they crowded instead of stopping beside it.
   std::size_t growth_joins = 0;
+  // ★★ JOINS REFUSED FOR SPAN. A join segment lands on material at both ends, so it is
+  // a BRIDGE, not an overhang — but a bridge still has a length limit. Counted here
+  // when the horizontal run of the join would exceed kOrganicMaxCantileverMm and the
+  // tip was made to stop or deflect instead.
+  std::size_t growth_join_refused_span = 0;
   bool growth_tip_budget_hit = false;
+  // ★ THE DISCRETISATION THIS RESULT WAS COMPUTED IN. Growth asks its support question
+  // one layer at a time, so the answer is only meaningful alongside the layer height
+  // that produced it. Recorded so a receipt can never be ambiguous about which.
+  double growth_layer_height_mm = 0.0;
   std::size_t filleted_spans = 0;
   std::size_t fillet_unresolved = 0;
   double fillet_max_radius_mm = 0.0;

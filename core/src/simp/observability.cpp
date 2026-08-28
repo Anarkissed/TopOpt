@@ -1454,6 +1454,31 @@ std::string run_info_json(const RunInfo& info) {
             fmt(info.organic_cantilever_reach);
       gr += ", \"cantilever_islands\": " +
             fmt_ll(info.organic_cantilever_islands);
+      // ★★ GROWTH. `growth_ran` first and always: every counter after it is
+      // meaningless on a traced run, and a zero that was never measured is not a
+      // passing zero. `growth_tip_budget_hit` is the one that must never be silent —
+      // a run truncated at the tip budget otherwise reads exactly like a finished one.
+      gr += ", \"growth_ran\": " +
+            std::string(info.organic_growth_ran ? "true" : "false");
+      if (info.organic_growth_ran) {
+        gr += ", \"growth_seeds\": " + fmt_ll(info.organic_growth_seeds);
+        gr += ", \"growth_curves\": " + fmt_ll(info.organic_growth_curves);
+        gr += ", \"growth_steps\": " + fmt_ll(info.organic_growth_steps);
+        gr += ", \"growth_blocked\": " + fmt_ll(info.organic_growth_blocked);
+        gr += ", \"growth_clamped\": " + fmt_ll(info.organic_growth_clamped);
+        gr += ", \"growth_clamp_max_deg\": " +
+              fmt(info.organic_growth_clamp_max_deg);
+        gr += ", \"growth_branches\": " + fmt_ll(info.organic_growth_branches);
+        gr += ", \"growth_branch_refused\": " +
+              fmt_ll(info.organic_growth_branch_refused);
+        gr += ", \"growth_joins\": " + fmt_ll(info.organic_growth_joins);
+        gr += ", \"growth_join_refused_span\": " +
+              fmt_ll(info.organic_growth_join_refused_span);
+        gr += ", \"growth_tip_budget_hit\": " +
+              std::string(info.organic_growth_tip_budget_hit ? "true" : "false");
+        gr += ", \"growth_layer_height_mm\": " +
+              fmt(info.organic_growth_layer_height_mm);
+      }
       gr += ", \"arched_spans\": " + fmt_ll(info.organic_arched_spans);
       gr += ", \"arch_max_rise_mm\": " + fmt(info.organic_arch_rise);
       gr += ", \"filleted_spans\": " + fmt_ll(info.organic_filleted);

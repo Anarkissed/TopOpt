@@ -700,6 +700,24 @@ struct LatticeExportOutcome {
   long long organic_slenderness_props = 0;
   double organic_cantilever_reach = 0.0;
   long long organic_cantilever_islands = 0;
+  // ── ★★ GROWTH TELEMETRY (task PR-353 amendment §1) ──────────────────────────
+  // `growth_ran` distinguishes "growth measured zero" from "growth never ran": a
+  // traced run reports false and every counter below is meaningless, which is the
+  // same rule this receipt already applies to shape-fit reporting. Without it a run
+  // that truncated at the tip budget is indistinguishable from one that finished.
+  bool organic_growth_ran = false;
+  long long organic_growth_seeds = 0;
+  long long organic_growth_curves = 0;
+  long long organic_growth_steps = 0;
+  long long organic_growth_blocked = 0;
+  long long organic_growth_clamped = 0;
+  double organic_growth_clamp_max_deg = 0.0;
+  long long organic_growth_branches = 0;
+  long long organic_growth_branch_refused = 0;
+  long long organic_growth_joins = 0;
+  long long organic_growth_join_refused_span = 0;
+  bool organic_growth_tip_budget_hit = false;
+  double organic_growth_layer_height_mm = 0.0;
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
   long long organic_filleted = 0;
@@ -3867,6 +3885,10 @@ class ScopedLadderSolverIsolation {
 // what the nozzle lays.
 struct OrganicOutcome {
   OrganicGenStats growth;
+  // ★ TRUE IFF grow_organic_lattice WAS CALLED. Never inferred from a counter: a run
+  // that grew and produced nothing is a different fact from a traced run, and the
+  // counters above are meaningless in the second case.
+  bool growth_ran = false;
   // ★★ SHAPE-FIT REPORTING. Reported whether or not the feature is on, so "it did
   // nothing" and "it was never asked to run" are distinguishable in the receipt — a
   // zero that was never measured is not a passing zero.
@@ -4237,6 +4259,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // parameter: it refuses to lay material whose underside is unsupported, so the six
   // repair passes have nothing left to repair. Off by default — the traced path stays
   // byte-identical until a job asks.
+  oo.growth_ran = jg.organic_growth;
   oo.lat = jg.organic_growth
                ? grow_organic_lattice(grid, cand, stress_tensor, spacing, &width, op,
                                       &oo.growth)
@@ -4273,11 +4296,34 @@ void fill_stepped_run_info(RunInfo& gi, const SteppedOutcome& so) {
   }
 }
 
+// ★★ ONE COPY OF THE GROWTH COUNTERS, so the analyze receipt and the geometry
+// receipt cannot disagree about what grew. `growth_ran` is set from whether the
+// generator was actually called, never inferred from a counter being non-zero — a
+// run that grew nothing and a run that never grew are different facts.
+template <class Dst>
+void copy_growth_stats(Dst& d, const OrganicGenStats& g, bool ran) {
+  d.organic_growth_ran = ran;
+  d.organic_growth_seeds = static_cast<long long>(g.growth_seeds);
+  d.organic_growth_curves = static_cast<long long>(g.growth_curves);
+  d.organic_growth_steps = static_cast<long long>(g.growth_steps);
+  d.organic_growth_blocked = static_cast<long long>(g.growth_blocked);
+  d.organic_growth_clamped = static_cast<long long>(g.growth_clamped);
+  d.organic_growth_clamp_max_deg = g.growth_clamp_max_deg;
+  d.organic_growth_branches = static_cast<long long>(g.growth_branches);
+  d.organic_growth_branch_refused = static_cast<long long>(g.growth_branch_refused);
+  d.organic_growth_joins = static_cast<long long>(g.growth_joins);
+  d.organic_growth_join_refused_span =
+      static_cast<long long>(g.growth_join_refused_span);
+  d.organic_growth_tip_budget_hit = g.growth_tip_budget_hit;
+  d.organic_growth_layer_height_mm = g.growth_layer_height_mm;
+}
+
 void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   const OrganicReport& r = oo.lat.report;
   gi.organic_present = true;
   gi.organic_strut_diameter_mm = r.strut_diameter_mm;
   gi.organic_trace_seconds = oo.trace_seconds;
+  copy_growth_stats(gi, oo.growth, oo.growth_ran);
   gi.organic_candidate_voxels = static_cast<long long>(r.candidate_voxels);
   gi.organic_degenerate_voxels = static_cast<long long>(r.degenerate_voxels);
   gi.organic_degenerate_fraction = r.degenerate_fraction;
@@ -4909,6 +4955,10 @@ LatticeVariantOutcome lattice_one_variant(
     R.organic_ran = true;
     R.organic = organic.lat.report;
     R.organic_trace_seconds = organic.trace_seconds;
+    // ★ THE GEOMETRY PATH REBUILDS A BARE OrganicOutcome FOR THE RECEIPT (see the
+    // `tmp` below), so the growth counters cannot ride there — they travel on the
+    // export outcome, which survives to the receipt intact.
+    copy_growth_stats(R.oc, organic.growth, organic.growth_ran);
     // The posture the certification consumes is now the TRACED one.
     gf.posture.mask = organic.lat.mask;
     gf.posture.relative_density = organic.lat.relative_density;
@@ -8251,6 +8301,20 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         tmp.lat.report = R.organic;
         tmp.trace_seconds = R.organic_trace_seconds;
         fill_organic_run_info(gi, tmp);
+        // ...and are restored here, overwriting the zeros `tmp` carried.
+        copy_growth_stats(gi, OrganicGenStats{}, R.oc.organic_growth_ran);
+        gi.organic_growth_seeds = R.oc.organic_growth_seeds;
+        gi.organic_growth_curves = R.oc.organic_growth_curves;
+        gi.organic_growth_steps = R.oc.organic_growth_steps;
+        gi.organic_growth_blocked = R.oc.organic_growth_blocked;
+        gi.organic_growth_clamped = R.oc.organic_growth_clamped;
+        gi.organic_growth_clamp_max_deg = R.oc.organic_growth_clamp_max_deg;
+        gi.organic_growth_branches = R.oc.organic_growth_branches;
+        gi.organic_growth_branch_refused = R.oc.organic_growth_branch_refused;
+        gi.organic_growth_joins = R.oc.organic_growth_joins;
+        gi.organic_growth_join_refused_span = R.oc.organic_growth_join_refused_span;
+        gi.organic_growth_tip_budget_hit = R.oc.organic_growth_tip_budget_hit;
+        gi.organic_growth_layer_height_mm = R.oc.organic_growth_layer_height_mm;
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;
         gi.organic_emitted_stranded_length_mm = R.oc.organic_emitted_stranded_mm;

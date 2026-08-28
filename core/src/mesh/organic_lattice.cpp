@@ -1491,6 +1491,11 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
   if (out.curves.empty() || n == 0) return out;
 
   const double h = grid.spacing;
+  // ★ THE LAYER HEIGHT THIS RUN ACTUALLY USED. parse_job now refuses growth without a
+  // stated loads "layer_height_mm", so the fallback below should be unreachable from a
+  // job; it remains for direct callers (the unit fixtures) and is RECORDED either way,
+  // because a support argument computed at 0.85 mm and one computed at 0.2 mm are
+  // different claims and the receipt has to say which it is.
   const double layer = params.layer_hint_mm > 0.0 ? params.layer_hint_mm : 0.5 * h;
   const double step = std::max(1e-6, kOrganicGrowthStepLayers * layer);
   const double cone_sin = std::sin(kOrganicGrowthMinAngleDeg * M_PI / 180.0);
@@ -1664,6 +1669,7 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
       }
   }
   OrganicGenStats st;
+  st.growth_layer_height_mm = layer;   // the discretisation this result is in
   st.growth_seeds = tips.size();
 
   // ★★ THE SEPARATION IS A FIELD, NOT A NUMBER. Written as a single median it made the
@@ -1744,6 +1750,8 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
     mark(t.p, t.p, t.r);
     Vec3 p = t.p, dir = t.dir;
     double since_branch = 0.0, since_record = 0.0;
+    // what the NEXT recorded segment is: a climb unless a join just deflected it
+    OrganicCurve::Seg next_kind = OrganicCurve::Seg::Climb;
     int joins_used = 0;
     for (int s = 0; s < MAXSTEP; ++s) {
       Vec3 f{0, 0, 1};
@@ -1761,6 +1769,16 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
       if (!(wl > 1e-12)) break;
       want = vmul(want, 1.0 / wl);
       if (want.z < cone_sin) {
+        // ★ THIS is the event `growth_blocked` was described as counting and does not:
+        // the field asked for a direction flatter than the machine can build, and was
+        // pulled back to the cone. Record how far below it wanted to go — the tip
+        // usually carries on afterwards, so a step that is clamped is not a step that
+        // failed, and conflating the two hid the field's real demand behind a zero.
+        ++st.growth_clamped;
+        const double asked_deg = std::asin(std::max(-1.0, std::min(1.0, want.z))) *
+                                 180.0 / M_PI;
+        const double short_by = kOrganicGrowthMinAngleDeg - asked_deg;
+        if (short_by > st.growth_clamp_max_deg) st.growth_clamp_max_deg = short_by;
         const double hx = want.x, hy = want.y;
         const double hl = std::sqrt(hx * hx + hy * hy);
         if (hl > 1e-12) {
@@ -1788,8 +1806,46 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
       // vertex gives the merge something it can actually see.
       Vec3 crowd{0, 0, 0};
       if (too_close(q, static_cast<int>(ti), t.parent, &crowd)) {
+        // ★★ A JOIN SEGMENT IS A BRIDGE, AND A BRIDGE HAS A LENGTH LIMIT. The climbing
+        // candidate is support-tested by `supported_at` above; the segment p -> crowd
+        // never was. It was safe only by accident.
+        //
+        // ★ AND THE BOUND IS THE SEPARATION, NOT THE BEAD. The join lands on a hash
+        // vertex within d_test, and d_test is half the LOCAL SEPARATION: the 2.00 mm
+        // seen on the default fixture is spacing 4.0 / 2, not the recording radius
+        // (6 * 0.4 = 2.4 mm, which it never reaches). MEASURED: doubling the strut to
+        // 1.6 mm leaves the worst run at 2.00 mm exactly, while raising the separation
+        // to 8.0 puts d_test at 4.0 mm and produces 2406 joins over the 3.0 mm cap.
+        // So it is the cell window that walks this past the limit, and nothing
+        // objected before this test existed.
+        //
+        // This is a BRIDGING limit, not an overhang limit: both ends sit on material,
+        // and a short span between two such points is ordinary FDM bridging. A long one
+        // is not. Refuse the join when the span is too long and let the tip do what it
+        // would have done uncrowded — stop for want of support, or deflect.
+        const double jdx = crowd.x - p.x, jdy = crowd.y - p.y;
+        const double jrun = std::sqrt(jdx * jdx + jdy * jdy);
+        if (jrun > kOrganicMaxCantileverMm) {
+          ++st.growth_join_refused_span;
+          if (!supported_at(q, t.r)) { ++st.growth_blocked; break; }
+          // uncrowded behaviour: carry on climbing along the clamped direction
+          mark(p, q, t.r);
+          since_record += step;
+          if (since_record >= kOrganicGrowthRecordRadii * t.r) {
+            since_record = 0.0;
+            cur.points.push_back(q);
+            cur.seg_kind.push_back(static_cast<unsigned char>(next_kind));
+            next_kind = OrganicCurve::Seg::Climb;
+            remember(q, static_cast<int>(ti));
+          }
+          cur.length_mm += step;
+          ++st.growth_steps;
+          p = q; dir = want;
+          continue;
+        }
         if (vlen(vsub(crowd, p)) > 1e-9) {
           cur.points.push_back(crowd);
+          cur.seg_kind.push_back(static_cast<unsigned char>(OrganicCurve::Seg::Join));
           cur.length_mm += vlen(vsub(crowd, p));
           mark(p, crowd, t.r);
           ++st.growth_joins;
@@ -1800,9 +1856,16 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
         // Deflect away from what was just joined and keep climbing; bounded by
         // kOrganicGrowthMaxJoins so a tip cannot bounce between two neighbours forever.
         if (++joins_used > kOrganicGrowthMaxJoins) break;
+        // ★★ DEFLECT FROM WHERE THE TIP WAS, NOT FROM WHERE IT LANDED. `p = crowd`
+        // came first and `away = p - crowd` was therefore the ZERO VECTOR on every
+        // join, so the "steer away from the joined strand" branch below was dead code
+        // and every join fell through to the arbitrary transverse fallback. The tip
+        // then had no reason to leave, and only kOrganicGrowthMaxJoins stopped it
+        // ping-ponging — a bound doing the job a direction was supposed to do.
+        const Vec3 p_before = p;
         p = crowd;
         // steer away from the joined strand, and back up toward the cone limit
-        Vec3 away = vsub(p, crowd);
+        Vec3 away = vsub(p_before, crowd);
         if (vlen(away) < 1e-9) {
           away = Vec3{-dir.y, dir.x, 0.0};      // any transverse direction will do
           if (vlen(away) < 1e-9) away = Vec3{1, 0, 0};
@@ -1811,6 +1874,7 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
         const double s2 = std::sqrt(std::max(0.0, 1.0 - cone_sin * cone_sin));
         dir = Vec3{away.x * s2, away.y * s2, cone_sin};
         since_record = kOrganicGrowthRecordRadii * t.r;  // record the deflection point
+        next_kind = OrganicCurve::Seg::Deflect;   // the span leaving the join
         continue;
       }
       mark(p, q, t.r);
@@ -1821,6 +1885,10 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
       if (since_record >= kOrganicGrowthRecordRadii * t.r) {
         since_record = 0.0;
         cur.points.push_back(q);
+        // ★ A TAG IS OWED EXACTLY WHEN A POINT IS PUSHED, or seg_kind desynchronises
+        // from the segments it describes and every bar measured through it is wrong.
+        cur.seg_kind.push_back(static_cast<unsigned char>(next_kind));
+        next_kind = OrganicCurve::Seg::Climb;
         remember(q, static_cast<int>(ti));   // only vertices enter the hash
       }
       cur.length_mm += step;
@@ -1871,8 +1939,13 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
         }
       }
     }
-    if (cur.points.empty() || vlen(vsub(cur.points.back(), p)) > 1e-9)
+    if (cur.points.empty() || vlen(vsub(cur.points.back(), p)) > 1e-9) {
       cur.points.push_back(p);      // the tip's last position closes the curve
+      // ★ BRACES MATTER HERE. The closing segment is owed a tag like any other, but
+      // the push is CONDITIONAL — tagging unconditionally beside it desynchronises
+      // seg_kind on every curve that ended exactly on a recorded vertex.
+      cur.seg_kind.push_back(static_cast<unsigned char>(next_kind));
+    }
     if (cur.points.size() >= 2) { grown.push_back(cur); ++st.growth_curves; }
   }
   if (tips.size() >= kOrganicGrowthMaxTips) st.growth_tip_budget_hit = true;
@@ -2236,7 +2309,16 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         // cross-section is there. Emitted through `span` like everything else, so the
         // boundary clip decides its extent and it can never leave the part — the mat
         // takes the shape of the footprint without being told what that shape is.
-        if (lat.base_mat) {
+        // ★ THE MAT CAN BE TURNED OFF, so the question "is the mat what holds this
+        // together?" is answerable by running it both ways through the REAL weld
+        // rather than by an endpoint-matching approximation, which is blind to two
+        // struts that fuse in solid without sharing an endpoint — exactly how a mat
+        // lying under a strut joins it.
+        // ★★ AND IT MATTERS MORE UNDER GROWTH THAN IT DID UNDER TRACING. Every grown
+        // seed starts on the floor, so the mat is under the whole population by
+        // construction; without the ablation there is no way to tell a lattice that
+        // holds itself together from one the mat is holding together.
+        if (lat.base_mat && !std::getenv("TOPOPT_ORGANIC_NO_BASE_MAT")) {
           // The local separation at the base: use the median of what the tracer
           // achieved, which is the spacing this lattice is actually expressed in.
           double dsum = 0.0; std::size_t dn = 0; double rsum = 0.0;
