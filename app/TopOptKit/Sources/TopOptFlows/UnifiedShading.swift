@@ -280,6 +280,19 @@ struct LCell {
     // one axis can each put their declared face on a cell boundary. Zero on every other
     // path, which is the global grid origin exactly.
     float3 phase;
+    // ★★★ THE DEMAND AT THE TEXEL `S` WAS READ FROM, and the fix for the holes
+    // (2026-08-26). See `lsdf_march`'s prefetch: the 27-neighbour cache resolves
+    // EVERY entry — self included — by the covering block's CENTRE base cell, while
+    // `S` here came from `bi = round(cb)`, the base cell the point is actually in.
+    // Over most of a block's extent those are different texels, and a per-spot cell
+    // rule gives them different SIZES, so the `sameLattice` test failed for SELF and
+    // every segment self owns was skipped. Measured on his own scene: 53.4% of
+    // painted cells with single-cell OFF, 81.9% with it ON — which is the order he
+    // reported ("it seems to have more holes than with it off").
+    //
+    // Carrying the demand out of the SAME read makes the self entry true by
+    // construction: it can never disagree with the frame it belongs to.
+    float  act;
 };
 
 // ★ THE READ IS PER BASE CELL, NOT PER STEP. The march samples the same base cell
@@ -299,6 +312,7 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
     }
     LCell o;
     o.stepped = 0.0;
+    o.act = -1.0;
     // ★ STEPPED TAKES THE SIZE STRAIGHT OUT OF THE TEXTURE. `b` is the covering cell's
     // size in mm, 0 on every other algorithm — so the dyadic path below is untouched
     // and doubled is bit-identical.
@@ -307,6 +321,7 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
         float sMM = cs.b;
         if (sMM > 0.0) {
             o.stepped = sMM;
+            o.act = cs.r;
             o.S = sMM;
             o.m = sMM / max(S0, 1e-6);
             o.L = 0;
@@ -443,7 +458,24 @@ inline float lsdf_part_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
     // quarter of a voxel covers that; the clamp keeps it a fraction of a millimetre at
     // any resolution, which is invisible and still wins the depth test.
     float voxel = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
-    float inset = clamp(0.25 * voxel, 0.20, 0.60);
+    // ★★★ DEEP ENOUGH TO WIN THE DEPTH TEST AT A GRAZING ANGLE (2026-08-28).
+    //
+    // His report: *"I'm seeing a lot of artifacts on the curved chamfers around the
+    // lattices."* That is the salt-and-pepper z-fight this inset exists to prevent,
+    // and 0.25 voxel — 0.43 mm on his Fine 128 grid — is not enough of it. Depth
+    // separation on screen is the offset TIMES the cosine of the view angle, so on a
+    // chamfer seen edge-on a 0.43 mm gap collapses to a fraction of a depth unit and
+    // the two surfaces trade pixels.
+    //
+    // ★ AND IT IS FREE. This branch is only taken where `shell_is_latticed` is FALSE —
+    // where the shell survives and OWNS the boundary, so everything held back here is
+    // hidden behind it anyway. Where the shell is cut the clip is `dPart` untouched and
+    // the struts still reach the surface, which is the property the mouth needs.
+    //
+    // The floor matters as much as the scale: at Fast 64 the voxel is 3.45 mm, and
+    // scaling alone would push the inset to 2.6 mm — so it is clamped, and the clamp is
+    // what keeps a resolution knob from eating lattice.
+    float inset = clamp(0.75 * voxel, 0.60, 1.80);
     if (dPart < -2.0 * inset) { return dPart; }   // deep inside: nothing to fight
     float3 pn = lsdf_part_normal(U, sdfTex, samp, p);
     return shell_is_latticed(p, pn, RC, decls, regionTex) ? dPart : dPart + inset;
@@ -747,6 +779,46 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             }
         }
 
+        // ★★★ SELF IS RESOLVED FROM THE FRAME'S OWN TEXEL — the holes (2026-08-26).
+        //
+        // The prefetch above locates every neighbour, self included, at the covering
+        // block's CENTRE base cell (`floor((nb + 0.5) * m + phase)`). For a true
+        // neighbour that is right. For SELF it is not: `LC.S` was read at
+        // `bi = round(cb)`, and over most of a block's extent those two base cells are
+        // different texels. A per-spot cell rule gives them different SIZES, the
+        // `sameLattice` test fails, `rnCache[13]` goes to −1, and EVERY segment self
+        // owns is skipped by the loop below — most of the strutwork the ray is
+        // standing in. `anyActive` still comes back true off a neighbour, so nothing
+        // is reported, the march carries on, and the result is a thinned, cell-shaped,
+        // grid-aligned patch that returns no hit when tapped.
+        //
+        // Measured on his own scene, replaying this arithmetic on the baked field
+        // (`LatticeSelfNeighbourProbe`): 1,415 of 2,649 painted cells (53.4%) with
+        // single-cell members OFF, 308 of 376 (81.9%) with it ON — which is the order
+        // he reported, "it seems to have more holes than with it off". Zero cells lose
+        // ALL 27, which is why this never showed up as a fully dark cell.
+        //
+        // `LC.act` is the demand carried out of the SAME read that gave `LC.S`, so the
+        // self entry cannot disagree with the frame it belongs to. It is recomputed
+        // every step rather than inside the block-keyed cache above, because `bi` can
+        // change while the block does not — that is the whole defect. No texture read.
+        //
+        // −1 in the field means the run leaves that material SOLID; self stays inactive
+        // there so the solid term below owns it. Dyadic sets `act` to −1 and is
+        // therefore bit-identical.
+        if (LC.stepped > 0.0 && LC.act >= 0.0) {
+            anyActive = true;
+            float rhoSelf = hasDemand
+                ? (rhoMin + (rhoMax - rhoMin) * pow(clamp(LC.act, 0.0, 1.0), gamma))
+                : uniformRho;
+            rhoCache[13] = rhoSelf;
+            float rnPrintSelf = U.overlayParams.z > 0.0
+                              ? U.overlayParams.z / max(LC.S, 1e-4) : 0.0;
+            rnCache[13] = clamp(max(max(radiusFloor, rnPrintSelf),
+                                    lsdf_strut_radius_norm(U, rhoSelf)),
+                                0.0, 0.49);
+        }
+
         float dn = 1e9;
         float rhoNear = uniformRho;
         if (anyActive) {
@@ -798,7 +870,18 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // that, and only where the shell is actually there — so the fill reads flush
         // through the mouth instead of recessed behind a ledge, and still cannot
         // z-fight anywhere the shell survives.
-        float F = anyActive ? max(dn * cellHere, dClip) : dClip;
+        // ★★★ THE TWO TERMS ARE KEPT APART SO THE HIT CAN NAME THE ONE THAT WON
+        // (2026-08-27). `out.solid` used to be read off `anyActive`, which was only
+        // ever a PROXY for "this hit came from the solid fill, not from a strut" — it
+        // happened to hold while the only way to get solid was for a cell to be
+        // inactive. It stopped holding the moment the self entry was fixed (see the
+        // prefetch above): every painted cell now reports `anyActive`, so the grade's
+        // solid band AT THE OUTLINE was being shaded as a strut — flat, untextured,
+        // and at a neighbouring strut's density — which is what an edge band with no
+        // printed layers in it looks like. Comparing the two fields is exact and needs
+        // no proxy.
+        float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;
+        float Fsolid = anyActive ? 1e9 : dClip;
         // ★★★ THE SOLID OUTLINE — the shape fit's last step, UNIONED IN.
         //
         // ★ IT CANNOT BE DONE BY DEACTIVATING A CELL, and that is why four attempts
@@ -812,11 +895,26 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // same-lattice test keys on the cell SIZE). Within `rimParams.y` of it the field
         // goes solid, clipped by `dClip` so it stays inside the part and inside what he
         // declared. A union can only ADD material, so no neighbour can undo it.
-        float outlineBand = U.rimParams.y;
-        if (LC.stepped > 0.0 && outlineBand > 0.0) {
+        // ★★★ THE BAND IS A FRACTION OF **THIS CELL**, NOT A MILLIMETRE (2026-08-26).
+        //
+        // `rimParams.y` used to be millimetres, computed as
+        // `max(finestPrintableCell, oneVoxel)` — and the in-plane field is measured ON
+        // the occupancy grid, so its smallest non-zero value inside material is one
+        // voxel too. The band and the field's floor were the same number, so the test
+        // fired wherever the field bottomed out. Worse, `lsdf_outline_mm` NEAREST-reads
+        // one value per BASE CELL, so a 1.72 mm test was being evaluated on a 10.31 mm
+        // grid: not a ring, a scatter of isolated solid cells mid-wall. That scatter is
+        // the "empty space" — solid fill is pale and flat and the shell covers it, so it
+        // reads as nothing while still reporting a cell size when tapped.
+        //
+        // Scaling by `LC.S` asks the question the band was always meant to ask — "does
+        // this cell's own extent reach the outline" — in units that cannot collide with
+        // the grid's resolution.
+        float outlineBand = U.rimParams.y * LC.S;
+        if (LC.stepped > 0.0 && U.rimParams.y > 0.0 && LC.S > 0.0) {
             float dOutline = lsdf_outline_mm(U, cellTex, p);
             if (dOutline >= 0.0) {
-                F = min(F, max(dClip, dOutline - outlineBand));
+                Fsolid = min(Fsolid, max(dClip, dOutline - outlineBand));
             }
         }
         // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24
@@ -835,10 +933,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             float3 bid = round((p - U.latticeOrigin.xyz) / S0d);
             if (all(bid >= -0.5) && all(bid < U.gridDims.xyz - 0.5)) {
                 if (cellTex.read(uint3(bid), 0).r < 0.0) {
-                    F = min(F, dClip);
+                    Fsolid = min(Fsolid, dClip);
                 }
             }
         }
+        float F = min(Fstrut, Fsolid);
         // ★★★ AND THE LAST SLIVER AT THE OUTLINE IS SOLID, so the lattice meets the
         // face exactly instead of stopping half a cell short. `dRegion` is negative
         // inside the declared region, so {dRegion >= -rim} is the band hugging its
@@ -866,7 +965,9 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             out.dressing = clamp(dressing, 0.0, 1.0);
             // Carried out so the albedo can draw it as printed layers rather than as
             // a strut of some invented density.
-            out.solid = anyActive ? 0.0 : 1.0;
+            // Which FIELD produced this hit, not which neighbourhood happened to be
+            // active — see the two terms above.
+            out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;
             out.cellMM = cellHere;
             out.rawLevel = float(LC.L);
             return out;
@@ -998,7 +1099,26 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     // the bands approach a pixel, so it reads as texture at every zoom instead of
     // shimmering. `fwidth` gives the on-screen period directly.
     if (hitSolid > 0.5) {
-        float3 solidHue = mix(U.denseColor.xyz, float3(1.0), 0.55);
+        // ★★★ SOLID IS THE **DEEP** END, NOT THE PALE ONE (2026-08-27).
+        //
+        // This was `mix(denseColor, white, 0.55)` — 55% of the way to white, which made
+        // fully dense material PALER than the sparsest strut on the part and inverted
+        // the legend the page states in words: *"Thickness follows the density — pale
+        // is thin, deep is thick."* A 100%-dense band drawn paler than a 5% strut reads
+        // as a gap in the lattice, and that is exactly what he has been circling: the
+        // grade's solid ring along the outline (449 cells on his part, measured), drawn
+        // as a smooth featureless strip.
+        //
+        // Proved by a controlled A/B on the device rather than by argument: with the
+        // aesthetic ladder cap lifted so the same 449 cells draw as lattice instead of
+        // solid (`gradedToSolid` 449 -> 49, everything else identical), the band fills
+        // in. The material was always there; only its colour said otherwise.
+        //
+        // ★ AND IT TAKES ITS NEIGHBOURS' CLASS. The same rule the struts use below —
+        // boundary work is the rim hue, interior fill the dense hue — so the solid at a
+        // face's outline is continuous with the struts it terminates, instead of being
+        // a third colour that has to be learned.
+        float3 solidHue = hitDressing > 0.05 ? U.rimColor.xyz : U.denseColor.xyz;
         float lh = U.overlayParams.w;
         if (lh > 1e-4) {
             // ★★★ STACKED ALONG THE BUILD DIRECTION — see `LSDFUniforms.buildDir` for
@@ -1006,7 +1126,7 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
             // not set it) skips the banding rather than banding along an invented axis.
             float3 bd = U.buildDir.xyz;
             float bl = length(bd);
-            if (bl < 1e-6) { return mix(U.denseColor.xyz, float3(1.0), 0.55); }
+            if (bl < 1e-6) { return solidHue; }
             float z = dot(hitPos, bd / bl) / lh;
             float period = max(fwidth(z), 1e-4);
             // Contrast dies once one layer is thinner than ~1.4 px.

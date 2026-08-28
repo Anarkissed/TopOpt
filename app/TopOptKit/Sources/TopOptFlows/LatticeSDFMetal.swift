@@ -1246,15 +1246,51 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// IS one voxel and a narrower band could never be met.
     ///
     /// 0 on every non-stepped bake, so doubled and organic are untouched.
-    private var solidOutlineBandMM: Double {
+    /// ★★★ AND IT IS A FRACTION OF THE **LOCAL CELL**, NOT A MILLIMETRE (2026-08-26).
+    /// This is the "empty space" he photographed for a week.
+    ///
+    /// The rule used to be `max(finestPrintableCell, oneVoxel)`. On his part that is
+    /// `max(1.289, 1.719) = 1.719 mm` — and the in-plane distance is MEASURED on the
+    /// occupancy grid, so its smallest non-zero value inside material is also one
+    /// voxel. His own DIAG: `dCentre[min = 1.72]`. **The band and the field's floor
+    /// were the same number**, so the test fired exactly where the field bottomed
+    /// out, wherever that happened to be.
+    ///
+    /// ★ AND IT IS SAMPLED ONCE PER CELL. `lsdf_outline_mm` NEAREST-reads one float
+    /// per BASE CELL — the distance the bake took at that cell's centre — so a
+    /// 1.72 mm test is being evaluated on a 10.31 mm grid. A 6:1 lottery cannot make
+    /// a ring; it makes a SCATTER of isolated solid cells in the middle of a wall.
+    /// Measured on his own bake: 18 cells solid, and they included 2.58 / 3.00 /
+    /// 3.44 / 4.00 mm graded cells nowhere near an outline. Solid renders
+    /// `mix(denseColor, white, 0.55)` — pale and flat — and sits strictly inside the
+    /// surface so the shell covers it, which is why it reads as EMPTY SPACE that
+    /// still reports a cell size when tapped and does not move when he orbits.
+    ///
+    /// A fraction of the local cell is the resolution-independent form of the rule
+    /// this band was always meant to express, and it is the file's own original
+    /// justification: *"a cell whose centre sits closer than S/2 to the outline
+    /// cannot hold a strut node"*. A third rather than a half keeps it a ring rather
+    /// than a wide border. Measured against the same bake:
+    ///
+    ///     max(finestPrintable, voxel)  18 cells, incl. 2.58/3.00/3.44/4.00  <- scatter
+    ///     0.50 · S                     27 cells, all 10.31/12.00
+    ///     0.33 · S                     13 cells, all 10.31/12.00            <- this
+    ///     0.25 · S                      7 cells, all 10.31/12.00
+    ///
+    /// Only the per-cell rules catch full-size boundary cells and nothing else.
+    static let solidOutlineCellFraction: Double = 1.0 / 3.0
+
+    /// ★ INSTRUMENTATION ONLY — override the fraction for one frame, so a probe can
+    /// A/B the rim. `nil` is the shipping rule. Nothing in the app writes this.
+    var debugSolidOutlineFraction: Double?
+
+    /// The fraction of the LOCAL cell the march turns solid at the attached outline.
+    /// 0 on every non-stepped bake, so doubled and organic are untouched.
+    private var solidOutlineFraction: Double {
+        if let d = debugSolidOutlineFraction { return d }
         guard !steppedCellMM.isEmpty else { return 0 }
-        let stated = steppedCellMM.filter { $0 > 0 }
-        guard let finest = stated.min(), finest > 0 else { return 0 }
-        let voxel = scene.map {
-            Double(Swift.max($0.occupancy.spacing.x,
-                             Swift.max($0.occupancy.spacing.y, $0.occupancy.spacing.z)))
-        } ?? 0
-        return Swift.max(steppedFinestPrintableCellMM(finest: finest), voxel)
+        guard steppedCellMM.contains(where: { $0 > 0 }) else { return 0 }
+        return Self.solidOutlineCellFraction
     }
 
     /// See `rebakeCellField` — TRUE only when the doubled ladder baked with
@@ -1447,7 +1483,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             for v in baked?.steppedCellMM ?? [] where v > 0 { hist[v, default: 0] += 1 }
             let sizes = hist.keys.sorted()
                 .map { String(format: "%.2f=%d", $0, hist[$0]!) }.joined(separator: " ")
-            NSLog("DIAG rim dressing=\(dressingBandMM) outlineBand=\(solidOutlineBandMM) lineWidth=\(lineWidthMM) "
+            NSLog("DIAG rim dressing=\(dressingBandMM) outlineFrac=\(solidOutlineFraction) lineWidth=\(lineWidthMM) "
                   + "steppedDrawn=\(baked != nil)")
             NSLog("DIAG stepped regions=\(steppedCellMM.count) stated=\(stated) "
                   + "finest=\(finest) printableFloor=\(floorMM) "
@@ -2092,7 +2128,35 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // reads would shift every octree block — so both come from one place.
             latticeOrigin: SIMD4(cellOrigin.x, cellOrigin.y, cellOrigin.z, cell),
             gradeParams: SIMD4(Float(lo), Float(hi), Float(max(0.05, params.gamma)), K),
-            shadeParams: SIMD4(Float(params.uniformRelativeDensity), hasDemand, 0.03,
+            // ★★★ WITH NO DEMAND FIELD THE MARCH DREW THE **MIDPOINT OF THE BAND**,
+            // AND THE CALLOUT SAID THE FLOOR. That disagreement is the quilt
+            // (2026-08-26).
+            //
+            // `proxyParams` sets `uniformRelativeDensity = 0.5 * (densityLo +
+            // densityHi)` — a sensible "typical" value for the settings page's SAMPLE
+            // BLOCK, where there is no part and no field and something has to be
+            // shown. On a real part with no solve yet it is a fabrication: his band is
+            // 5–90%, so the whole wall marched at **47.5%**, where an octet's struts
+            // merge into a continuous sheet with only the cell centres left open.
+            // That is precisely the "dense fabric of small shapes" he has been
+            // reporting, and it is immune to cell size, resolution, algorithm and
+            // grade — because none of them touch it.
+            //
+            // ★ AND THE TAP CALLOUT SAID 5% THE WHOLE TIME. It reads the BAKED
+            // activation, which `cellField` writes as 0 when `demand` is nil, and maps
+            // it through `lo + (hi - lo)·v^gamma` — so it reported the band FLOOR while
+            // the march drew the MIDPOINT. Every tap anyone took said the struts were
+            // hairline; the picture was ten times denser. Two numbers for one strut is
+            // how this survived every measurement aimed at it.
+            //
+            // So with no field the march draws what the bake and the callout both
+            // already say: the floor. One number, one place. The sample block is
+            // untouched — it has no scene, so `demand` is nil there too, but it also
+            // has no declared region, and it is the DECLARED case that must not lie.
+            shadeParams: SIMD4(Float(hasDemand > 0.5 || (scene?.regions.isEmpty ?? true)
+                                     ? params.uniformRelativeDensity
+                                     : params.densitySpan.lo),
+                               hasDemand, 0.03,
                                Float(debugMaxSteps)),
             // stepParams.y = the trim's inward EROSION (mm). Near creases the trilinear
             // SDF underestimates true distance (min-of-planes is concave), so its zero
@@ -2173,7 +2237,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 return SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0)
             }(),
             debugParams: SIMD4(Float(debugShadeMode), Float(debugMinStepMM), 0, 0),
-            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineBandMM),
+            // ★ .y IS NOW A FRACTION OF THE LOCAL CELL, not millimetres — see
+            // `solidOutlineFraction`. The shader multiplies it by `LC.S`.
+            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction),
                              doubledSolidCellsArmed ? 1 : 0, 0))
     }
 

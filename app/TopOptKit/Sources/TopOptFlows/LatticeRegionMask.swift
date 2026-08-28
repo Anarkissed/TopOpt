@@ -39,6 +39,40 @@ public enum LatticeRegionMask {
     /// symmetric in both, so which pair does not matter, only that they are
     /// perpendicular and unit.
     public static func contains(_ p: SIMD3<Double>, region: LatticeRegionSpec) -> Bool {
+        contains(p, region: region, inPlaneReachMM: 0)
+    }
+
+    /// ★★★ `contains`, WITH THE IN-PLANE TEST RELAXED BY `inPlaneReachMM` — for
+    /// deciding which base cells a face OWNS, as distinct from where its material is
+    /// (2026-08-27).
+    ///
+    /// ★ WHY OWNERSHIP IS A WIDER QUESTION THAN CONTAINMENT. The cell field is one
+    /// value per base cell, and a cell is emitted only if its centre passes this test.
+    /// A base cell straddling the face's outline — centre just outside, most of its
+    /// volume inside — was therefore not owned by anybody, emitted nothing, and left a
+    /// band up to half a cell wide with no struts in it. That is the "empty areas just
+    /// at the ends" (maintainer, 2026-08-27), and his rule for it is:
+    ///
+    ///     "this is where the grade to fit should go in if it's applied — if it's not
+    ///      applied, the cell should just be cut off where it ends."
+    ///
+    /// Both halves fall out of simply OWNING the cell. With grade to shape on, the fit
+    /// distance at such a centre is 0, so the ladder runs to its cap and the cell goes
+    /// SOLID — "graded until it becomes a solid". With it off the cell keeps its full
+    /// size and the march's `dClip` (which unions the region's own SDF) cuts its struts
+    /// flush at the outline — "cut off where it ends".
+    ///
+    /// ★ AND WIDENING THE PAINT CANNOT LEAK MATERIAL. `dClip` is `max(partClip, bbox,
+    /// dRegion)` and `dRegion` is sampled from the SAME field the shell's hole is cut
+    /// from — untouched by this. A wider owner can therefore only ADD material inside
+    /// the declared face where there was none; it can never place a strut outside it.
+    ///
+    /// ★ THE DEPTH SLAB IS NOT RELAXED. His ruling: *"the face-prism only makes what's
+    /// solid into lattice, it cannot make walls thicker."* The cap planes stay flush by
+    /// construction, so the reach is in-plane ONLY.
+    public static func contains(_ p: SIMD3<Double>, region: LatticeRegionSpec,
+                                inPlaneReachMM: Double) -> Bool {
+        let reach = Swift.max(0, inPlaneReachMM)
         switch region.kind {
         case .face:
             let n = unit(region.normal)
@@ -54,7 +88,7 @@ public enum LatticeRegionMask {
             // the struts were drawn into. See `LatticeFaceOutline`.
             if !region.outlineLoops.isEmpty {
                 return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
-                    <= region.inPlaneOffsetMM
+                    <= region.inPlaneOffsetMM + reach
             }
             // ★★★ THE RECTANGLE IS A MANUAL PRIMITIVE'S OWN SHAPE, AND NOTHING ELSE'S.
             // A primitive the user placed and dragged IS a box — measuring it as one is
@@ -65,14 +99,16 @@ public enum LatticeRegionMask {
             // emit that region at all — so it is counted as skipped and SAID, rather
             // than silently replaced with a shape 2.4x too big. See `faceID`.
             guard region.faceID == nil else { return false }
-            return abs(uv.x) <= region.halfUMM && abs(uv.y) <= region.halfWMM
+            return abs(uv.x) <= region.halfUMM + reach
+                && abs(uv.y) <= region.halfWMM + reach
         case .bolt:
             let a = unit(region.axisDir)
             guard simd_length(a) > 0.5, region.radiusMM > 0 else { return false }
             let d = p - region.axisPoint
             let t = simd_dot(d, a)
+            // A bolt's "in-plane" is radial; its length is the depth axis.
             guard abs(t) <= region.halfLengthMM else { return false }
-            return simd_length(d - a * t) <= region.radiusMM
+            return simd_length(d - a * t) <= region.radiusMM + reach
         }
     }
 

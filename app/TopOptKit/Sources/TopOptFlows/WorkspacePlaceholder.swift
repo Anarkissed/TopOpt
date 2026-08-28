@@ -1876,8 +1876,7 @@ public struct WorkspacePlaceholder: View {
                 .cellsPerMemberFloor(topology: project.lattice.topologyID,
                                      utilisation: .nan,
                                      boundaryFinishWritten:
-                                        project.lattice.singleCellMembers
-                                        && project.lattice.boundary != .none)
+                                        project.lattice.singleCellMembers)
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,
@@ -4710,8 +4709,7 @@ public struct WorkspacePlaceholder: View {
                                         // the request for it — see
                                         // `LatticeSettings.singleCellMembers`.
                                         boundaryFinishWritten:
-                                            project.lattice.singleCellMembers
-                                            && project.lattice.boundary != .none,
+                                            project.lattice.singleCellMembers,
                                         organic: organicForBake,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
@@ -9059,8 +9057,7 @@ public struct WorkspacePlaceholder: View {
             .cellsPerMemberFloor(topology: project.lattice.topologyID,
                                  utilisation: .nan,
                                  boundaryFinishWritten:
-                                    project.lattice.singleCellMembers
-                                    && project.lattice.boundary != .none)
+                                    project.lattice.singleCellMembers)
         let each = latticedSelectableCards(g).map {
             LatticeFaceDiagnosis.of(card: $0,
                                     cellsPerMemberFloor: floor > 0
@@ -9783,8 +9780,7 @@ public struct WorkspacePlaceholder: View {
             .cellsPerMemberFloor(topology: project.lattice.topologyID,
                                  utilisation: .nan,
                                  boundaryFinishWritten:
-                                    project.lattice.singleCellMembers
-                                    && project.lattice.boundary != .none)
+                                    project.lattice.singleCellMembers)
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
         let rhosCopy = rhos

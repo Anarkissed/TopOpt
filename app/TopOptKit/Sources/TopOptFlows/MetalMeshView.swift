@@ -3752,6 +3752,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         set { latticeLayer?.debugShadeMode = newValue }
     }
 
+    /// ★ INSTRUMENTATION ONLY — see `LatticeSDFRenderer.debugSolidOutlineBandMM`.
+    var latticeDebugSolidOutlineFraction: Double? {
+        get { latticeLayer?.debugSolidOutlineFraction }
+        set { latticeLayer?.debugSolidOutlineFraction = newValue }
+    }
+
     /// ★ DIAGNOSIS ONLY — the march's step budget; 512 ships.
     var latticeDebugMaxSteps: Int {
         get { latticeLayer?.debugMaxSteps ?? 512 }
@@ -3940,6 +3946,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// tessellated face a wide margin.
     static let shellFaceAgreementDegrees: Double = 30
 
+    /// ★ INSTRUMENTATION ONLY — override the agreement angle for one frame, so a probe
+    /// can ask "is that flat grey patch the SHELL standing over lattice that is really
+    /// there, or is there nothing behind it". `nil` is the shipping value above.
+    /// Nothing in the app writes this; see `LatticeEmptySpaceProbe`.
+    var debugShellGateDegrees: Double?
+
     /// ★ THE SHELL'S CLIP, AND THE DECLARATIONS IT IS CUT BY — built together because
     /// they are one answer: the uniform is meaningless without the list, and a stale
     /// pairing would cut a hole shaped like a face that is no longer declared.
@@ -3951,7 +3963,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// see them through, or a hole with nothing behind it.
     private var shellClipAndDecls: (ShellClipUniform, [SIMD4<Float>]) {
         var u = ShellClipUniform()
-        u.gate.x = Float(cos(Self.shellFaceAgreementDegrees * .pi / 180))
+        u.gate.x = Float(cos((debugShellGateDegrees ?? Self.shellFaceAgreementDegrees)
+                             * .pi / 180))
         // ★★★ THE EYE, UN-SETTLED INTO MODEL SPACE — the same transform the lattice
         // march uses for its own eye (`LatticeSDFMetal`, `eyeModel`), so the shell
         // and the struts agree about which side of a wall is being looked at.

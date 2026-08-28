@@ -1004,6 +1004,25 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// `none` and `rim` cannot re-tie a severed strut, and Skin is the pattern core
     /// builds. Turning it OFF leaves the finish alone: he may well want the skin for
     /// its own sake.
+    /// ★★★ AND IN THE PREVIEW IT NEEDS NO FINISH (2026-08-26).
+    ///
+    /// Every preview call site used to gate core's one-cell floor on
+    /// `singleCellMembers && boundary != .none`, because core will only allow one
+    /// cell across a member when a finish re-ties the struts a one-cell member
+    /// severs. The effect on screen was that setting **Finish = None** silently
+    /// halved every cell on the part — his 12.03 mm wall came back at 6.00 mm and
+    /// his 10.31 mm wall at 5.16 mm, twice as many cells each carrying a one-bead
+    /// strut — with nothing in the UI saying the toggle had been overruled. Those
+    /// are exactly the two numbers his tap callouts kept reporting while he was
+    /// calling the wall quilted.
+    ///
+    /// His rule, stated 2026-08-26, carries no such caveat: *"single-cell/member
+    /// means make the largest single cell across the entire model — per voxel."*
+    /// And on the same day: *"The algo has not been updated with the needs I've
+    /// created in this UI so for now, you can't just pass the algo onto the
+    /// preview."* So the PREVIEW honours the toggle as written. Core's own floor is
+    /// unchanged — this property is read by the preview's four call sites only, and
+    /// the job still asks core.
     public var singleCellMembers: Bool = false
     /// Ask the run for the per-region breakdown in its receipt.
     public var reportRegionCells: Bool

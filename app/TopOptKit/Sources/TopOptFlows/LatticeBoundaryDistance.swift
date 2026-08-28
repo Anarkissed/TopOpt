@@ -204,13 +204,65 @@ public enum LatticeBoundaryDistance {
             guard a[axis] > 0.99 else { continue }
             if let cached = byAxis[axis] { out[i] = cached; continue }
             let f = millimetres(candidate: candidate, nx: nx, ny: ny, nz: nz,
-                                spacing: spacing, skipAxis: axis, seed: seed)
+                                spacing: spacing, skipAxis: axis,
+                                seed: seed.map {
+                                    inPlaneSeed($0, candidate: candidate,
+                                                nx: nx, ny: ny, nz: nz, skipAxis: axis)
+                                })
             // An empty transform (no seed voxel at all) is "no field", not a field
             // of zeros — nil keeps the caller on its stated fallback.
             guard !f.isEmpty else { continue }
             byAxis[axis] = f
             out[i] = f
         }
+        return out
+    }
+
+
+    /// ★★★ A COLUMN THAT CONTAINS LATTICED MATERIAL IS NOT OUTSIDE THE LATTICE
+    /// IN-PLANE — 2026-08-26, and this was his "empty space".
+    ///
+    /// `LatticeSDFRenderer.attachedSeed` marks every voxel of part material that is
+    /// NOT in the latticed set, so the rim can grow from where a wall is attached to
+    /// something. This transform then drops the THICKNESS axis. Together those two
+    /// facts mean a seed voxel anywhere along a depth column zeroes that entire
+    /// in-plane column — including columns whose material IS latticed and which are
+    /// nowhere near the face's outline.
+    ///
+    /// On his part the prism is 12.0 mm on a wall measuring 12.03, so a 0.03 mm
+    /// sliver of unlatticed material sits behind essentially every position on the
+    /// face. Measured: **33,257 of 46,764 seed voxels (71.1%) are in-plane INSIDE a
+    /// region** — outside only in DEPTH. The rim distance therefore bottomed out at
+    /// one voxel almost everywhere, and the march turned whichever cells happened to
+    /// sample that floor into SOLID: pale, flat, cell-shaped patches mid-wall that
+    /// still report a cell size when tapped and do not move with the camera.
+    ///
+    /// The seed is a statement about the IN-PLANE outline, so it is filtered in the
+    /// same terms: a column carrying any candidate voxel seeds nothing. What survives
+    /// is material genuinely beside the face — the chamfers and the wall-to-floor
+    /// junction the rim exists for.
+    static func inPlaneSeed(_ seed: [Bool], candidate: [Bool],
+                            nx: Int, ny: Int, nz: Int, skipAxis: Int) -> [Bool] {
+        guard seed.count == nx * ny * nz, candidate.count == seed.count else { return seed }
+        // Which in-plane columns carry latticed material.
+        let dims = [nx, ny, nz]
+        let a0 = (skipAxis + 1) % 3, a1 = (skipAxis + 2) % 3
+        var latticed = [Bool](repeating: false, count: dims[a0] * dims[a1])
+        func columnIndex(_ x: Int, _ y: Int, _ z: Int) -> Int {
+            let c = [x, y, z]
+            return c[a1] * dims[a0] + c[a0]
+        }
+        var i = 0
+        for z in 0..<nz { for y in 0..<ny { for x in 0..<nx {
+            if candidate[i] { latticed[columnIndex(x, y, z)] = true }
+            i += 1
+        } } }
+        var out = seed
+        i = 0
+        for z in 0..<nz { for y in 0..<ny { for x in 0..<nx {
+            if out[i], latticed[columnIndex(x, y, z)] { out[i] = false }
+            i += 1
+        } } }
         return out
     }
 
