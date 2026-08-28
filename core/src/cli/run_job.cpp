@@ -641,6 +641,12 @@ struct LatticeExportOutcome {
   // ★★ ORGANIC's POST-CLIP connectivity (OrganicGenStats): the connectedness of what
   // was WRITTEN, after the boundary clip trimmed and dropped spans. The tracer's own
   // number describes the lattice it traced; this one describes the file.
+  // ★★ WHERE THE MILLIMETRES WENT. Live span length at each stage of the emission
+  // pipeline, plus the grown length handed in. -1 in a stage means that pass DID NOT
+  // RUN — it is not zero length, and differencing without checking is how an unrun
+  // pass reads as having deleted everything.
+  std::vector<double> organic_census_len_mm;
+  double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_mm = 0.0;
@@ -1985,6 +1991,9 @@ LatticeExportOutcome export_latticed_variant(
     st.anchor_nodes = g.anchor_nodes;
     st.skin_triangles = g.skin_triangles;
     st.landings = g.anchor_nodes;
+    oc.organic_census_len_mm.assign(g.census_len_mm,
+                                    g.census_len_mm + OrganicGenStats::kCensusStages);
+    oc.organic_census_grown_len_mm = g.census_grown_len_mm;
     oc.organic_emitted_components = static_cast<long long>(g.emitted_components);
     oc.organic_floating_before = g.floating_voxels_before;
     oc.organic_floating_after = g.floating_voxels_after;
@@ -8278,6 +8287,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         // what carried them across. ONE call: `tmp` has no growth stats to contribute,
         // so there is nothing to overwrite field by field.
         copy_growth_stats(gi, R.oc.growth, R.oc.growth_ran);
+        gi.organic_census_len_mm = R.oc.organic_census_len_mm;
+        gi.organic_census_grown_len_mm = R.oc.organic_census_grown_len_mm;
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;
         gi.organic_emitted_stranded_length_mm = R.oc.organic_emitted_stranded_mm;

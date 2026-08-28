@@ -1966,6 +1966,24 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
   return out;
 }
 
+const char* organic_census_stage_name(int stage) {
+  switch (stage) {
+    case OrganicGenStats::CensusEmitted:       return "emitted";
+    case OrganicGenStats::CensusNodeMerge:     return "node_merge";
+    case OrganicGenStats::CensusBaseCut:       return "base_cut";
+    case OrganicGenStats::CensusSupportPrune:  return "support_prune";
+    case OrganicGenStats::CensusStrandedDrop:  return "stranded_drop";
+    case OrganicGenStats::CensusGroundTie:     return "ground_tie";
+    case OrganicGenStats::CensusBranchSupport: return "branch_support";
+    case OrganicGenStats::CensusDangling:      return "dangling";
+    case OrganicGenStats::CensusStrandedDrop2: return "stranded_drop_2";
+    case OrganicGenStats::CensusFillMat:       return "fill_mat";
+    case OrganicGenStats::CensusFinish:        return "finish";
+    case OrganicGenStats::CensusWritten:       return "written";
+    default:                                   return "?";
+  }
+}
+
 OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          TriangleSink& sink,
                                          const LatticeBoundary* boundary,
@@ -1975,6 +1993,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   if (nseg < 3)
     throw std::invalid_argument("generate_organic_lattice: nseg must be >= 3");
   OrganicGenStats st;
+  // ★ THE INPUT LENGTH, recorded before anything can consume it, so survival is
+  // answerable from the stats alone without the caller holding the lattice.
+  for (const OrganicCurve& c0 : lat.curves) st.census_grown_len_mm += c0.length_mm;
   bool any = false;
   auto note = [&](double d) {
     if (!any) { st.min_strut_diameter_mm = st.max_strut_diameter_mm = d; any = true; }
@@ -2006,6 +2027,15 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                       Src src = Src::Curve; };
   Src cur_src = Src::Curve;
   std::vector<EmittedSeg> emitted;
+  // ★ THE LENGTH CENSUS. One number per stage: live span length at that point. It is
+  // the only instrument that separates "the lattice fragmented" from "the lattice was
+  // DELETED" — a connectivity ratio reads perfect when both its terms are near zero.
+  auto census_len = [&]() {
+    double t = 0.0;
+    for (const EmittedSeg& e : emitted) t += e.len;
+    return t; };
+  auto census_at = [&](OrganicGenStats::CensusStage stage) {
+    st.census_len_mm[stage] = census_len(); };
   auto emit_node_once = [&](const Vec3& p, double r) {
     // ★ THE SAME GUARD THE OCTET GENERATOR HOLDS, AND FOR THE SAME REASON
     // (lattice_gen.cpp, the interior-node loop): a node ball whose SOLID would breach
@@ -2104,6 +2134,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // left alone, because moving it there would push the swept solid through the surface
   // and the export's no-protrusion invariant would refuse the file — which is exactly
   // how the arc-length bug in this same function announced itself.
+  census_at(OrganicGenStats::CensusEmitted);   // ★ before any pass touches it
   if (!emitted.empty()) {
     struct Ep { std::size_t span; int end; };
     std::vector<Ep> eps;
@@ -2175,6 +2206,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       mkeep.push_back(e);
     }
     emitted.swap(mkeep);
+    census_at(OrganicGenStats::CensusNodeMerge);
   }
 
   // ── ★★ CUT EVERYTHING BELOW THE BASE (kOrganicBaseDominanceFraction states why) ──
@@ -2308,6 +2340,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           keep.push_back(c);
         }
         emitted.swap(keep);
+        census_at(OrganicGenStats::CensusBaseCut);
         // ── ★★ AND NOW BUILD THE FOUNDATION (kOrganicBaseMatSpacingRatio) ───────
         // A crossed planar grid at the base plane, spanning whatever of the part's
         // cross-section is there. Emitted through `span` like everything else, so the
@@ -2680,6 +2713,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         for (std::size_t i = 0; i < emitted.size(); ++i)
           if (alive[i]) kept.push_back(emitted[i]);
         emitted.swap(kept);
+        census_at(OrganicGenStats::CensusSupportPrune);
         alive.assign(emitted.size(), 1);
         rebuild();
       }
@@ -2743,6 +2777,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           if (kv.first != biggest && kv.second < kOrganicStrandedKeepFraction * total)
             ++st.stranded_components_dropped;
         emitted.swap(body);
+        census_at(OrganicGenStats::CensusStrandedDrop);
       }
 
       // The census is NOT taken here. The ground tie below still APPENDS legs, and a
@@ -3638,6 +3673,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           for (std::size_t i = 0; i < emitted.size(); ++i)
             if (live[i]) keep.push_back(emitted[i]);
           emitted.swap(keep);
+          census_at(OrganicGenStats::CensusDangling);
           live.assign(emitted.size(), 1);
         }
         // ── ★★ AND THE STRANDED DROP RUNS AGAIN, BECAUSE THE CUTS SHATTERED IT ─────
@@ -3705,6 +3741,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             }
           }
           emitted.swap(sbody);
+          census_at(OrganicGenStats::CensusStrandedDrop2);
         }
       } else {
         // ★ THE CHECK DID NOT RUN, which is NOT the same as passing. The caller
@@ -4215,6 +4252,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     for (std::size_t i = 0; i < emitted.size(); ++i)
       if (alive[i]) fkeep.push_back(emitted[i]);
     emitted.swap(fkeep);
+    census_at(OrganicGenStats::CensusFinish);
   }
 
   }
@@ -4436,6 +4474,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       total += emitted[i].len;
     }
     st.emitted_components = comp.size();
+    st.census_len_mm[OrganicGenStats::CensusWritten] = total;
     double biggest = 0.0;
     for (const auto& kv : comp) biggest = std::max(biggest, kv.second);
     st.emitted_largest_length_fraction = total > 0.0 ? biggest / total : 0.0;

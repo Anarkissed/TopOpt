@@ -575,86 +575,109 @@ void test_growth_joins_neighbours() {
           "ate, 2260 spans emitted against 2520 pruned");
 }
 
-// ── G8: WHAT THE JOIN REFUSAL COSTS IN CONNECTEDNESS ────────────────────────────
-// ★★ THE REFUSAL IS CORRECT AND MIGHT STILL BE A BAD TRADE. Refusing an over-long
-// join keeps the bridge under kOrganicMaxCantileverMm, but a join is the lattice's
-// LATERAL CONNECTION, and the growth header's own argument is that floor-seeded
-// growth without lateral connection gives parallel columns that never meet. At
-// separation 8.0 the generator attempts ~2786 joins and refuses 2406 of them, so the
-// question "is this still one object?" is not rhetorical.
+// ── G8: CONNECTEDNESS, AND THE MATERIAL IT IS MEASURED ON ───────────────────────
+// ★★ A RATIO IS PERFECT WHEN BOTH ITS TERMS ARE NEARLY ZERO. The first version of
+// this test asserted components and largest-fraction alone, and sampled {4.0, 6.0,
+// 8.0}. Both halves were too weak, and the sweep below is why:
 //
-// ★ MEASURED ON THE EMITTED SPANS, never on the curve graph. `emitted_components` is
-// union-find over the emitted segments with a geometric touch test (segment distance
-// <= sum of radii); a count taken on the generator's own intermediate representation
-// is the failure this project has hit four times — curves that "join" in the graph
-// while their geometry never touches.
+//   sep 4.0 : 4086.2 mm grown ->  4199.0 mm written (102.8 %)  comp 1  largest 1.0000
+//   sep 4.5 : 3736.7 mm grown ->   193.2 mm written (  5.2 %)  comp 5  largest 0.8628
+//   sep 5.0 : 3878.8 mm grown ->    15.0 mm written (  0.4 %)  comp 2  largest 0.5995
+//   sep 7.0 : 1248.1 mm grown ->   140.9 mm written ( 11.3 %)  comp 1  largest 1.0000
+//
+// Separation 7.0 reports ONE component and largest-fraction 1.0000 on ELEVEN PER CENT
+// of the material. Separation 5.0 passed the old bars (comp <= 2, largest >= 0.54)
+// with FIFTEEN MILLIMETRES of lattice. So every connectivity assertion here is now
+// paired with a SURVIVAL bar, and the sweep is a sweep: 5.0 and 7.0 are both invisible
+// from {4.0, 6.0, 8.0}, and the curve between them is not monotone.
+//
+// ★ Measured on the EMITTED SPANS via the existing union-find (segment distance <=
+// sum of radii), never on the curve graph.
 void test_growth_stays_connected() {
-  auto grow_and_emit = [](double sep, OrganicGenStats& gs_out) {
+  // ★ THE FLOOR IS SET FROM THE MEASUREMENT, NOT GUESSED. Separation 4.0 survives at
+  // 102.8 %; the failing separations sit at 0.4-15 %. 0.80 sits an order of magnitude
+  // above the failures and comfortably below the one regime that works, so it fails
+  // for the reason it exists rather than on noise.
+  const double kSurvivalFloor = 0.80;
+
+  auto measure = [](double sep, OrganicGenStats& grow_out, OrganicGenStats& emit_out) {
     GrowFixture f = grow_fixture();
     for (double& sp : f.spacing) sp = sep;
-    OrganicGenStats gs;
-    const OrganicLattice lat =
-        grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
-    OrganicGenStats est;
-    run(lat, est);                       // the EMITTER: components come from here
-    gs_out = gs;
-    return est;
+    const OrganicLattice lat = grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing,
+                                                   nullptr, f.params, &grow_out);
+    run(lat, emit_out);                      // the EMITTER decides what ships
   };
 
-  // (a) the default fixture, where refusals are rare
-  {
-    OrganicGenStats gs;
-    const OrganicGenStats est = grow_and_emit(4.0, gs);
+  // ── the sweep. Reported for every point, asserted where the bar applies. ────────
+  bool any_survived = false;
+  for (double sep : {4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0}) {
+    OrganicGenStats gs, es;
+    measure(sep, gs, es);
+    const double grown = es.census_grown_len_mm;
+    const double wrote = es.census_len_mm[OrganicGenStats::CensusWritten];
+    const double survival = grown > 0.0 ? wrote / grown : 0.0;
     std::fprintf(stderr,
-                 "[G8] separation 4.0: joins %zu refused-span %zu | emitted components "
-                 "%zu largest-fraction %.4f stranded %.2f mm\n",
-                 gs.growth_joins, gs.growth_join_refused_span, est.emitted_components,
-                 est.emitted_largest_length_fraction, est.emitted_stranded_length_mm);
-    CHECK(est.emitted_components == 1,
-          "G8: at the default separation the grown geometry must emit as ONE "
-          "component — the join refusal is rare here and must not fragment it");
+                 "[G8] sep %.1f: grown %8.1f -> written %8.1f mm (%5.1f %%)  comp %2zu "
+                 "largest %.4f  | joins %zu refused %zu\n",
+                 sep, grown, wrote, 100.0 * survival, es.emitted_components,
+                 es.emitted_largest_length_fraction, gs.growth_joins,
+                 gs.growth_join_refused_span);
+    if (survival >= kSurvivalFloor) {
+      any_survived = true;
+      // ★ CONNECTIVITY IS ONLY ASSERTED WHERE THERE IS MATERIAL TO CONNECT. Asserting
+      // it on 0.4 % of the lattice is what let separation 5.0 pass at 15 mm.
+      CHECK(es.emitted_components == 1,
+            "G8: where the material survives, the emitted geometry must be ONE "
+            "component");
+      CHECK(es.emitted_largest_length_fraction > 0.99,
+            "G8: where the material survives, essentially all of it must be in the "
+            "largest component");
+    }
+  }
+  CHECK(any_survived,
+        "G8: at least one separation must survive emission above the floor — if none "
+        "does, the pipeline deletes every lattice and the connectivity bars above "
+        "would be vacuous");
+
+  // ── the survival bar itself, at the one separation known to work ───────────────
+  {
+    OrganicGenStats gs, es;
+    measure(4.0, gs, es);
+    const double survival =
+        es.census_len_mm[OrganicGenStats::CensusWritten] / es.census_grown_len_mm;
+    CHECK(survival >= kSurvivalFloor,
+          "G8: at the default separation the emitter must ship what growth grew — "
+          "measured 102.8 % when this bar was written; the floor is 0.80 because the "
+          "failing separations sit at 0.4-15 %, and a connectivity ratio cannot see "
+          "the difference");
   }
 
-  // (b) the coarse fixture, where the refusal actually bites
+  // ── WHERE THE MILLIMETRES GO. Diagnosis only; this task does not repair it. ─────
+  // MEASURED 2026-08-28, Release: the SUPPORT PRUNE is the sole deleter. Every other
+  // pass either did not run or passed material through unchanged.
+  //
+  //   sep 4.0: into prune 4298.2 -> out 4199.0  (2.3 % removed)
+  //   sep 4.5: into prune 3967.1 -> out  193.2  (95.1 % removed)
+  //   sep 5.0: into prune 4194.1 -> out   15.0  (99.6 % removed)
+  //
+  // WHY 4.0 ESCAPES: the emitter's prune is a SPAN-TO-SPAN contact test (a tip is
+  // supported if it lands on another span's interior, or on a tip that leads away).
+  // Growth's guarantee is different in kind — an occupancy raster in layer order that
+  // counts the BUILD PLATE. A curve climbing from the floor is supported under growth
+  // and has no neighbouring span at its tip, so the emitter prunes it and the erosion
+  // walks back down the curve. At separation 4.0 there are 1520 joins, so nearly every
+  // tip is a T-joint and the emitter's test is satisfied INCIDENTALLY. The two support
+  // criteria disagree; density hides the disagreement.
   {
-    OrganicGenStats gs;
-    const OrganicGenStats est = grow_and_emit(8.0, gs);
-    std::fprintf(stderr,
-                 "[G8] separation 8.0: joins %zu refused-span %zu | emitted components "
-                 "%zu largest-fraction %.4f stranded %.2f mm\n",
-                 gs.growth_joins, gs.growth_join_refused_span, est.emitted_components,
-                 est.emitted_largest_length_fraction, est.emitted_stranded_length_mm);
-    CHECK(gs.growth_join_refused_span > 0,
-          "G8 precondition: the coarse fixture must actually exercise the refusal, "
-          "or this measures nothing");
-    // ★ THE BAR IS STATED FROM THE MEASUREMENT, NOT ASSUMED. If coarse growth does not
-    // come out as one object that is a REPORTED FACT for the maintainer to rule on
-    // (shorter permitted reach, an intermediate node, or a cap on separation under
-    // growth) — it is not something to paper over here. What this test locks is that
-    // the number cannot get WORSE without someone noticing.
-    // ★★ MEASURED, 2026-08-28, Release, this fixture:
-    //
-    //   sep 8.0, refusal ON : 210 emitted spans, 2 components, largest 0.5405,
-    //                         202.03 mm stranded, 2406 joins refused
-    //   sep 8.0, refusal OFF: 464 emitted spans, 1 component,  largest 1.0000,
-    //                         0.00 mm stranded   (cap raised to 1e9 to ablate it)
-    //
-    // So at COARSE separation the refusal genuinely costs connectedness: one object
-    // becomes two and 202 mm strands. That is REPORTED, not repaired here — the fix
-    // is a maintainer call between a shorter permitted reach, an intermediate node,
-    // and a cap on how coarse separation may go under growth.
-    //
-    // ★ AND IT IS NOT THE WHOLE STORY. At separation 6.0 the same fixture emits
-    // THREE components with largest 0.3370 and ZERO joins refused, in both the
-    // refusing and the ablated build. Coarse separation fragments this lattice on its
-    // own; the refusal makes it worse at 8.0 but did not create it. Anyone choosing a
-    // remedy should know they are chasing two things.
-    CHECK(est.emitted_components <= 2,
-          "G8: coarse growth emitted 2 components when this bar was written; more "
-          "than that is a regression someone must look at");
-    CHECK(est.emitted_largest_length_fraction >= 0.54,
-          "G8: the largest component held 54.05 % of emitted length at the coarse "
-          "separation; less than that is a regression");
+    OrganicGenStats gs, es;
+    measure(5.0, gs, es);
+    const double in_prune = es.census_len_mm[OrganicGenStats::CensusNodeMerge];
+    const double out_prune = es.census_len_mm[OrganicGenStats::CensusSupportPrune];
+    CHECK(in_prune > 0.0 && out_prune >= 0.0,
+          "G8 census precondition: both sides of the support prune must be measured, "
+          "not defaulted — a -1 stage means the pass did not run");
+    std::fprintf(stderr, "[G8] sep 5.0 support prune: %.1f -> %.1f mm (%.1f %% removed)\n",
+                 in_prune, out_prune, 100.0 * (1.0 - out_prune / in_prune));
   }
 }
 

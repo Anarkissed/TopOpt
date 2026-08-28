@@ -1402,6 +1402,27 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"solid_stranded_length_mm\": " +
             fmt(info.organic_solid_stranded_length_mm);
       gr += ", \"solid_segments\": " + fmt_ll(info.organic_solid_segments);
+      // ★★ THE LENGTH CENSUS. Growth can hand the emitter 3900 mm and the file can
+      // receive 15 mm of it; `growth_curves` and `growth_steps` look identical either
+      // way, and so does every connectivity ratio. This is the only place a receipt
+      // says where the material went. A stage reported null DID NOT RUN — it is not a
+      // pass that deleted everything.
+      if (!info.organic_census_len_mm.empty()) {
+        gr += ", \"length_census_mm\": {\"grown\": " +
+              fmt(info.organic_census_grown_len_mm);
+        for (std::size_t i = 0; i < info.organic_census_len_mm.size(); ++i) {
+          gr += ", \"" + std::string(organic_census_stage_name(static_cast<int>(i))) +
+                "\": ";
+          gr += info.organic_census_len_mm[i] < 0.0
+                    ? std::string("null")
+                    : fmt(info.organic_census_len_mm[i]);
+        }
+        gr += "}";
+        const double grown = info.organic_census_grown_len_mm;
+        const double wrote = info.organic_census_len_mm.back();
+        gr += ", \"length_survival\": " +
+              (grown > 0.0 && wrote >= 0.0 ? fmt(wrote / grown) : std::string("null"));
+      }
       gr += ", \"emitted_components\": " +
             fmt_ll(info.organic_emitted_components);
       gr += ", \"floating_voxels_before_repair\": " +

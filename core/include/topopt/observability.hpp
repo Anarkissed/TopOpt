@@ -966,6 +966,12 @@ struct RunInfo {
   double organic_solid_stranded_length_mm = 0.0;
   long long organic_solid_segments = 0;
   // ★★ AND THE SAME TEST ON WHAT WAS WRITTEN — after the boundary clip.
+  // ★★ WHERE THE MILLIMETRES WENT. Live span length at each stage of the emission
+  // pipeline, plus the grown length handed in. -1 in a stage means that pass DID NOT
+  // RUN — it is not zero length, and differencing without checking is how an unrun
+  // pass reads as having deleted everything.
+  std::vector<double> organic_census_len_mm;
+  double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   // ★★ THE GROUND-TIE REPAIR. floating_after != 0 means material the printer cannot
   // build — it starts in mid-air — and the caller REFUSES on it.

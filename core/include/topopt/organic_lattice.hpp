@@ -1245,6 +1245,43 @@ struct OrganicGenStats {
   // one layer at a time, so the answer is only meaningful alongside the layer height
   // that produced it. Recorded so a receipt can never be ambiguous about which.
   double growth_layer_height_mm = 0.0;
+
+  // ── ★★ THE LENGTH CENSUS (task PR-353 third follow-up §1) ───────────────────
+  // WHERE THE MILLIMETRES GO. Measured on the maintainer's sweep: growth produces
+  // 3300-3900 mm of curve at separation 4.5-5.5 and the file receives 15-495 mm of
+  // it. That is not fragmentation, it is DELETION, and no connectivity ratio can see
+  // it — separation 7.0 reports ONE component and largest-fraction 1.0000 on 11.3 %
+  // of the material, because a ratio is perfect when both its terms are near zero.
+  //
+  // So: total live span length at each stage of the emission pipeline, in order.
+  // Deltas between consecutive stages name the pass that took the material — and
+  // because some passes ADD (base mat, ground tie, branch support, fillet), a signed
+  // delta is the honest instrument rather than a subtraction count.
+  //
+  // `census_grown_len_mm` is the INPUT: the summed length of the curves handed to the
+  // emitter, so survival = census_len_mm[Written] / census_grown_len_mm is answerable
+  // without the caller holding the lattice.
+  enum CensusStage {
+    CensusEmitted = 0,      // spans laid down from the curves, before any pass
+    CensusNodeMerge,
+    CensusBaseCut,
+    CensusSupportPrune,
+    CensusStrandedDrop,
+    CensusGroundTie,
+    CensusBranchSupport,
+    CensusDangling,
+    CensusStrandedDrop2,
+    CensusFillMat,
+    CensusFinish,
+    CensusWritten,          // the final list the file is built from
+    kCensusStages
+  };
+  // ★ -1 MEANS "THIS STAGE DID NOT RUN", and it must not be 0. Several passes sit
+  // inside conditionals; a zero-initialised array reports an unrun pass as having
+  // deleted everything, which is the same unmeasured-zero error this receipt already
+  // refuses elsewhere. Readers must test for negative before differencing.
+  double census_len_mm[kCensusStages] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+  double census_grown_len_mm = 0.0;
   std::size_t filleted_spans = 0;
   std::size_t fillet_unresolved = 0;
   double fillet_max_radius_mm = 0.0;
@@ -1290,6 +1327,10 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
                                     const std::vector<double>* width_mm,
                                     const OrganicParams& params,
                                     OrganicGenStats* gstats = nullptr);
+
+// The census stage names, in enum order. One table, so the receipt and the log can
+// never disagree about which pass a number belongs to.
+const char* organic_census_stage_name(int stage);
 
 OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          TriangleSink& sink,
