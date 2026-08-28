@@ -252,7 +252,137 @@ void test_one_cell_needs_a_finish() {
 
 }  // namespace
 
+// ══════════════════════════════════════════════════════════════════════════════════
+// ★★★ B7-B10: THE BARS THIS SESSION'S DEFECTS WOULD HAVE FAILED ★★★
+//
+// Every one of these encodes a pass that reported success while emitting nothing, or a
+// measurement that answered a different question than the one asked. All four were
+// found by the maintainer looking at a slice after my numbers said the geometry was
+// fine — the same way B1-B4 were found — and all four presented as ACCEPTED, converged,
+// one component, with the defect fully present.
+
+// ── THE FIXTURE THE MAT BARS NEED ────────────────────────────────────────────────
+// Reaching the base mat at all takes more than "some struts on a plane", and finding
+// that out cost four failed fixtures. The base-plane rule wants THREE things at once:
+//   * `layer_height_mm > 0` — without it the trim never runs (it rasters Z at the
+//     machine's pitch, and refuses to invent one);
+//   * a layer whose area is >= half the fattest layer's — so stilts are skipped;
+//   * whose largest CONNECTED cross-section is >= half that layer — so a field of
+//     separate uprights never qualifies, however many there are.
+// Hence a connected slab (uprights tied horizontally) standing on thin stilts: the
+// stilts are the thin layers the rule steps over, the slab is the base it lands on.
+OrganicLattice mat_fixture(int n = 5, double pitch = 2.0, double r = 0.35,
+                           int stilts = 3, double drop = 2.0) {
+  OrganicLattice lat;
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < n; ++j)
+      add_curve(lat, {Vec3{pitch * i, pitch * j, 0.0}, Vec3{pitch * i, pitch * j, 6.0}}, r);
+  for (double z : {0.0, 3.0, 6.0}) {
+    for (int i = 0; i < n; ++i)
+      add_curve(lat, {Vec3{pitch * i, 0.0, z}, Vec3{pitch * i, pitch * (n - 1), z}}, r);
+    for (int j = 0; j < n; ++j)
+      add_curve(lat, {Vec3{0.0, pitch * j, z}, Vec3{pitch * (n - 1), pitch * j, z}}, r);
+  }
+  for (int k = 0; k < stilts; ++k)
+    add_curve(lat, {Vec3{pitch * k, 0.0, -drop}, Vec3{pitch * k, 0.0, 0.0}}, r);
+  lat.base_mat = true;
+  lat.trim_below_base = true;
+  lat.layer_height_mm = 0.2;
+  return lat;
+}
+
+// ── B7: A MAT THAT COUNTS FEET MUST LAY FLOOR ─────────────────────────────────────
+// On one grading the base mat reported 1336 touchdowns and emitted 0 struts: the debug
+// line looked healthy, the verdict was ACCEPTED, and the part had no foundation at all.
+// A pass that finds work and then does none of it is what this file exists to catch.
+//
+// ★ THE PRECONDITION IS ASSERTED, NOT ASSUMED. Written as `if (touchdowns > 0) CHECK`,
+// this bar passed VACUOUSLY on a fixture that never reached the mat — the same "green
+// run measuring nothing" it was written to prevent, reproduced inside the test.
+void test_mat_that_counts_feet_lays_floor() {
+  const OrganicLattice lat = mat_fixture();
+  OrganicGenStats st;
+  run(lat, st);
+  CHECK(st.base_trim_found,
+        "B7 precondition: the fixture must actually reach the base trim, or every "
+        "check below passes by not running");
+  CHECK(st.base_mat_touchdowns > 0,
+        "B7 precondition: a slab standing on the base plane has feet");
+  CHECK(st.base_mat_struts > 0,
+        "B7: the mat found touchdowns and must emit struts for them — reporting feet "
+        "while laying no floor is how a cube shipped with no foundation");
+  CHECK(st.base_mat_length_mm > 0.0,
+        "B7: mat struts must carry length; a count without length is not geometry");
+}
+
+// ── B8: THE MAT MAY NOT BE THINNER THAN THE RASTER THAT MESHES IT ────────────────
+// Halving the mat radius on measured grounds drove its height to 0.273 mm against a
+// weld pitch of 0.28 — under one voxel — and the mat VANISHED from the slice while
+// every statistic still read green. With the pitch declared, the mat must still be
+// emitted; the generator raises the radius rather than emitting into nothing.
+void test_mat_survives_the_weld_raster() {
+  OrganicLattice lat = mat_fixture();
+  lat.weld_pitch_hint_mm = 0.28;
+  OrganicGenStats st;
+  run(lat, st);
+  CHECK(st.base_trim_found, "B8 precondition: the fixture must reach the base trim");
+  CHECK(st.base_mat_struts > 0,
+        "B8: a mat must survive the raster that will mesh it — below two weld voxels "
+        "it is erased outright, and the generator must raise it rather than emit it");
+}
+
+// ── B9: SLENDERNESS IS THE UNSUPPORTED SPAN, NOT THE WHOLE STRUT ─────────────────
+// Measured on total length the check called 1541 struts too slender and then found
+// "nothing beneath" for every one of them — material WAS there, it just was not being
+// counted as support. A bar lying across a bed of struts is not a bridge of its own
+// length. Same bar, twice: propped along its run, and spanning free air.
+void test_slenderness_reads_the_unsupported_span() {
+  const double r = 0.30;
+  const double span = 24.0;
+
+  OrganicLattice held;
+  add_curve(held, {Vec3{0.0, 0.0, 6.0}, Vec3{span, 0.0, 6.0}}, r);
+  for (double x = 0.0; x <= span + 1e-9; x += 3.0)
+    add_curve(held, {Vec3{x, 0.0, 0.0}, Vec3{x, 0.0, 6.0}}, r);
+  OrganicGenStats st_held;
+  run(held, st_held);
+
+  OrganicLattice bridge;
+  add_curve(bridge, {Vec3{0.0, 0.0, 6.0}, Vec3{span, 0.0, 6.0}}, r);
+  add_curve(bridge, {Vec3{0.0, 0.0, 0.0}, Vec3{0.0, 0.0, 6.0}}, r);
+  add_curve(bridge, {Vec3{span, 0.0, 0.0}, Vec3{span, 0.0, 6.0}}, r);
+  OrganicGenStats st_bridge;
+  run(bridge, st_bridge);
+
+  CHECK(st_held.slenderness_violating <= st_bridge.slenderness_violating,
+        "B9: a bar propped along its length is not more slender than the same bar "
+        "spanning free air — reading total length instead of the unsupported run "
+        "flagged 1541 struts and could prop none of them");
+}
+
+// ── B10: A COUNTER THAT IS SET MUST BE NON-ZERO WHERE IT APPLIES ─────────────────
+// `base_mat_touchdowns` read 0 in the receipt for hours while the generator was
+// measured carrying 684 — a stat wired into three of the four hops it must travel.
+// This bar cannot see the JSON, but it holds the generator end honest: a silent zero
+// is caught here rather than in a slice.
+void test_stats_are_actually_populated() {
+  const OrganicLattice lat = mat_fixture();
+  OrganicGenStats st;
+  run(lat, st);
+  CHECK(st.base_trim_found, "B10 precondition: the fixture must reach the base trim");
+  CHECK(st.base_trim_z_mm != 0.0,
+        "B10: a found base trim carries a plane; a zero here is an unset field");
+  CHECK(st.base_mat_touchdowns > 0,
+        "B10: a slab standing on the base plane has touchdowns and they must be "
+        "counted — a stat that is always zero is indistinguishable from a pass that "
+        "never ran");
+}
+
 int main() {
+  test_mat_that_counts_feet_lays_floor();
+  test_mat_survives_the_weld_raster();
+  test_slenderness_reads_the_unsupported_span();
+  test_stats_are_actually_populated();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();
   test_node_merge_joins_near_misses();

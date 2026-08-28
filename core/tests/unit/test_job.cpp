@@ -541,6 +541,85 @@ static void test_lattice_block() {
 }
 
 // --- Optional "grading" block (handoff 2026-07-29-lattice-grading-law)
+// --- ORGANIC: the scale, and the aesthetic gates (task 2026-08-21-organic-lattice)
+//
+// ★ WHY A SCHEMA TEST AND NOT A GEOMETRY ONE. `organic_scale` multiplies the requested
+// cell window inside run_organic_step, which the generator-level bars in
+// test_organic_printability cannot reach. What IS testable here is the contract: the
+// key parses, the default is 1.0 (so an absent key is byte-identical), a nonsensical
+// value is refused rather than clamped, and it is refused outside the algorithm it
+// belongs to. The delivered-spacing arithmetic was measured directly instead: a 4-6 mm
+// window at x2 requested 8.12-12.00 and delivered 4.09-12.23 against 2.04-5.85 at x1.
+static void test_organic_scale_and_gates() {
+  auto organic = [](const std::string& extra) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": "
+                  "\"octet\", \"cell_mm\": 3.0, \"min_extrudable_width_mm\": 0.4, "
+                  "\"algorithm\": \"organic\", \"intent\": \"aesthetic\"" +
+                      extra + " }");
+  };
+  // Absent => 1.0, and 1.0 must be a no-op by construction.
+  {
+    const JobDescription j = parse_job(organic(""));
+    CHECK(j.grading.organic_scale == 1.0,
+          "organic_scale: absent defaults to 1.0, so an unstated scale cannot move "
+          "the lattice");
+  }
+  {
+    const JobDescription j = parse_job(organic(", \"organic_scale\": 2.5"));
+    CHECK(j.grading.organic_scale == 2.5, "organic_scale: parsed verbatim");
+  }
+  // Refused, never clamped: a scale of zero or below is not a lattice.
+  check_rejects(organic(", \"organic_scale\": 0"),
+                "organic_scale: zero must be refused, not silently treated as 1");
+  check_rejects(organic(", \"organic_scale\": -1"),
+                "organic_scale: negative must be refused");
+  // Only with the algorithm it belongs to.
+  check_rejects(
+      mutate("\"mesh_prefix\": \"variant\" }",
+             "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": "
+             "\"octet\", \"cell_mm\": 3.0, \"min_extrudable_width_mm\": 0.4, "
+             "\"organic_scale\": 2.0 }"),
+      "organic_scale: refused without algorithm \"organic\"");
+
+  // ── the aesthetic gates ──────────────────────────────────────────────────────
+  // Shape fit changes the density, and under a structural intent the density is what
+  // the certificate is computed against. Organic is already refused outside
+  // "aesthetic" for a stronger reason (its traced geometry has no measured tensor);
+  // these keys state their own requirement so a future relaxation of that rule does
+  // not silently carry them along.
+  //
+  // The window lives on the SWEPT ladder, which is exclusive with a single `cell_mm` —
+  // hence a separate builder rather than bolting a window onto the one above.
+  auto organic_swept = [](const std::string& extra) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": "
+                  "\"octet\", \"min_extrudable_width_mm\": 0.4, "
+                  "\"algorithm\": \"organic\", \"intent\": \"aesthetic\", "
+                  "\"cell_mode\": \"swept\", \"cell_min_mm\": 3.0, "
+                  "\"cell_max_mm\": 6.0" + extra + " }");
+  };
+  {
+    const JobDescription j = parse_job(organic_swept(
+        ", \"organic_shape_fit\": true, \"organic_shape_fit_only\": true"));
+    CHECK(j.grading.organic_shape_fit, "organic_shape_fit: parsed");
+    CHECK(j.grading.organic_shape_fit_only, "organic_shape_fit_only: parsed");
+    CHECK(j.grading.organic_scale == 1.0,
+          "organic_shape_fit_only: scale still defaults to 1.0 alongside it");
+  }
+  {
+    const JobDescription j = parse_job(organic_swept(
+        ", \"organic_shape_fit\": true, \"organic_shape_fit_only\": true, "
+        "\"organic_scale\": 2.0"));
+    CHECK(j.grading.organic_scale == 2.0,
+          "organic_scale: applies in the aesthetic-only mode too — the factor lands "
+          "on the window before any branch reads it, so both gradings scale");
+  }
+  check_rejects(organic_swept(", \"organic_shape_fit_only\": true"),
+                "shape_fit_only without shape_fit must be refused");
+
+}
+
 static void test_grading_block() {
   // Absent => present false (byte-identical, bar L1).
   {
@@ -771,6 +850,7 @@ int main() {
   test_wall_loops();
   test_lattice_block();
   test_grading_block();
+  test_organic_scale_and_gates();
   test_warm_start_block();
   test_mode_analyze();
   test_lattice_regions();

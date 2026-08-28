@@ -1326,6 +1326,8 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"curves_kept\": " + fmt_ll(info.organic_curves_kept);
       gr += ", \"curves_thinned\": " + fmt_ll(info.organic_curves_thinned);
       gr += ", \"curves_too_short\": " + fmt_ll(info.organic_curves_too_short);
+      gr += ", \"curves_kept_for_coverage\": " +
+            fmt_ll(info.organic_curves_kept_for_coverage);
       gr += ", \"dangling_ends_trimmed\": " +
             fmt_ll(info.organic_dangling_ends_trimmed);
       gr += ", \"curves_dropped_dangling\": " +
@@ -1403,6 +1405,68 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.organic_net_skin_members_pruned);
       gr += ", \"net_skin_degree_one\": " +
             fmt_ll(info.organic_net_skin_degree_one);
+      gr += ", \"unsupported_islands_found\": " +
+            fmt_ll(info.organic_unsupported_islands_found);
+      gr += ", \"unsupported_islands_remaining\": " +
+            fmt_ll(info.organic_unsupported_islands_remaining);
+      gr += ", \"support_legs_added\": " + fmt_ll(info.organic_support_legs_added);
+      gr += ", \"support_leg_length_mm\": " +
+            fmt(info.organic_support_leg_length_mm);
+      gr += ", \"support_rounds\": " + fmt_ll(info.organic_support_rounds);
+      gr += ", \"support_converged\": " +
+            std::string(info.organic_support_converged ? "true" : "false");
+      gr += ", \"fixed_point_rounds\": " + fmt_ll(info.organic_fixed_point_rounds);
+      gr += ", \"fixed_point_converged\": " +
+            std::string(info.organic_fixed_point_converged ? "true" : "false");
+      gr += ", \"mutations\": " + fmt_ll(info.organic_mutations);
+      gr += ", \"support_legs_impossible\": " +
+            fmt_ll(info.organic_support_legs_impossible);
+      gr += ", \"unsupported_cells_remaining\": " +
+            fmt_ll(info.organic_unsupported_cells_remaining);
+      gr += ", \"unsupported_volume_mm3\": " +
+            fmt(info.organic_unsupported_volume_mm3);
+      gr += ", \"unsupported_cells_found\": " +
+            fmt_ll(info.organic_unsupported_cells_found);
+      gr += ", \"support_legs_diagonal\": " +
+            fmt_ll(info.organic_support_legs_diagonal);
+      gr += ", \"support_spans_cut\": " + fmt_ll(info.organic_support_spans_cut);
+      gr += ", \"support_cleanup_pruned\": " +
+            fmt_ll(info.organic_support_cleanup_pruned);
+      gr += ", \"base_trim_found\": " +
+            std::string(info.organic_base_trim_found ? "true" : "false");
+      gr += ", \"base_trim_z_mm\": " + fmt(info.organic_base_trim_z_mm);
+      gr += ", \"base_trim_spans_cut\": " +
+            fmt_ll(info.organic_base_trim_spans_cut);
+      gr += ", \"base_trim_spans_clipped\": " +
+            fmt_ll(info.organic_base_trim_spans_clipped);
+      gr += ", \"base_trim_length_mm\": " + fmt(info.organic_base_trim_length_mm);
+      gr += ", \"base_mat_struts\": " + fmt_ll(info.organic_base_mat_struts);
+      gr += ", \"base_mat_touchdowns\": " +
+            fmt_ll(info.organic_base_mat_touchdowns);
+      gr += ", \"slenderness_violating\": " +
+            fmt_ll(info.organic_slenderness_violating);
+      gr += ", \"slenderness_propped\": " +
+            fmt_ll(info.organic_slenderness_propped);
+      gr += ", \"slenderness_impossible\": " +
+            fmt_ll(info.organic_slenderness_impossible);
+      gr += ", \"slenderness_props\": " + fmt_ll(info.organic_slenderness_props);
+      gr += ", \"base_mat_length_mm\": " + fmt(info.organic_base_mat_length_mm);
+      gr += ", \"base_mat_z_mm\": " + fmt(info.organic_base_mat_z_mm);
+      gr += ", \"fill_mat_cells\": " + fmt_ll(info.organic_fill_mat_cells);
+      gr += ", \"fill_mat_struts\": " + fmt_ll(info.organic_fill_mat_struts);
+      gr += ", \"fill_mat_length_mm\": " + fmt(info.organic_fill_mat_length_mm);
+      gr += ", \"branch_seeds\": " + fmt_ll(info.organic_branch_seeds);
+      gr += ", \"branch_merges\": " + fmt_ll(info.organic_branch_merges);
+      gr += ", \"branch_trunks\": " + fmt_ll(info.organic_branch_trunks);
+      gr += ", \"branch_anchored_on_model\": " +
+            fmt_ll(info.organic_branch_anchored_on_model);
+      gr += ", \"branch_length_mm\": " + fmt(info.organic_branch_length_mm);
+      gr += ", \"support_cut_length_mm\": " +
+            fmt(info.organic_support_cut_length_mm);
+      gr += ", \"support_layer_height_mm\": " +
+            fmt(info.organic_support_layer_height_mm);
+      gr += ", \"support_grid_too_large\": " +
+            std::string(info.organic_support_grid_too_large ? "true" : "false");
       gr += ", \"stranded_components_dropped\": " +
             fmt_ll(info.organic_stranded_components_dropped);
       gr += ", \"stranded_spans_dropped\": " +

@@ -147,6 +147,212 @@ inline constexpr int kOrganicTrimRounds = 8;
 // tie is itself clipped, or there is nothing in reach), cutting cannot. 64 rounds is a
 // runaway guard, not a budget — the fixed point is reached in far fewer.
 inline constexpr int kOrganicPruneRounds = 64;
+// ★★ HOW MANY TIMES THE MID-AIR-START REPAIR MAY RUN.
+// Both remedies CASCADE. A leg adds material that may itself need support beneath it,
+// and CUTTING a span removes support from whatever was resting on it — so one round's
+// fix is the next round's defect. At 8 the pass was still making progress when it ran
+// out (7 regions -> 4 across the last two rounds), which is a budget, not a fixed
+// point. This is a runaway guard; the loop also stops the moment a round can neither
+// support nor cut anything, and reports which of the two happened.
+inline constexpr int kOrganicSupportRounds = 64;
+// ★★ HOW MANY TIMES THE WHOLE REPAIR SET MAY ITERATE. The repairs form a CYCLE — each
+// one's fix is the next one's defect — so they run together until a full round changes
+// nothing. A runaway guard, not a budget: `fixed_point_converged` reports which it was.
+inline constexpr int kOrganicFixedPointRounds = 24;
+
+// ★★ WHERE THE PART ACTUALLY STARTS, AND WHY EVERYTHING BELOW IT IS SCRAP.
+// The maintainer sliced a cube and read the layers off the preview: layer 1 printed a
+// handful of dots, layer 3 was already extruding overhangs, and only at layer 5 did the
+// "swirl" appear — one continuous ring that the whole cube is then built on. His words:
+// "this should be the first layer... everything is built from it."
+//
+// Those dots are REAL and they TOUCH THE PLATE, which is exactly why the mid-air check
+// passes them: they are the tips of struts grazing the bottom face. But a speck of
+// plastic with no neighbours does not adhere — it gets dragged by the nozzle, and takes
+// the layer above with it. Measured on his cube at a 0.1 mm layer height:
+//
+//     layer   z(mm)   cells   islands   largest   largest/cells
+//       0     0.018     173      79        26        15 %
+//       4     0.418    4571      77       671        15 %
+//       5     0.518    8007      66      1996        25 %
+//       6     0.618   12812      46      8854        69 %   <- the swirl closes
+//
+// The signature is unmistakable: below the base the layer is SCATTER (dozens of islands,
+// none of them dominant); at the base one region takes most of the layer. So the base is
+// the lowest layer whose largest connected region holds at least this fraction of that
+// layer's own material, and everything below it is cut.
+inline constexpr double kOrganicBaseDominanceFraction = 0.5;
+// ★★ AND THE RULE THAT ACTUALLY MAKES THE BOTTOM FLAT: AREA, NOT CONNECTEDNESS.
+// The dominance test above asks whether ONE connected region owns a layer. On a sparse
+// lattice that identified the base correctly, but on a dense one even a layer holding
+// nothing but STILTS is internally connected, so it fires at layer 0 and trims nothing
+// — the maintainer's render showed the cube standing on a handful of legs.
+//
+// "Flat" is a statement about how much material a layer has, not how it is joined. The
+// base is the lowest layer whose cross-section reaches this fraction of the LARGEST
+// cross-section in the bottom band. Stilts are a percent or two of it; the real first
+// layer of the body is most of it.
+inline constexpr double kOrganicBaseAreaFraction = 0.5;
+
+// ══ ★★★ THE BASE MAT — BUILD A FOUNDATION, DO NOT TRIM DOWN TO ONE ★★★ ══════════
+// The maintainer's observation, and it turns the problem the right way up: when the
+// "swirl" happened to land as the first layer the print started beautifully, because
+// that layer was ONE CONTINUOUS REGION SPANNING THE FOOTPRINT — a foundation the rest
+// of the lattice could stand on. Everything since has been an attempt to FIND such a
+// layer by trimming, which only works when the trace happens to produce one. Twice it
+// did not, and the cube came out on stilts.
+//
+// So the mat is EMITTED, not discovered: a planar grid of struts at the base plane,
+// covering the part's cross-section there, at the local separation. Then it is simply
+// existing material, and every pass that follows anchors to it for free — the branch
+// support finds it beneath any island, the tie pass reaches it, the mid-air census
+// treats it as ground.
+//
+// ★ IT IS TWO FAMILIES, NOT ONE. A single direction is a comb, not a mat: it has no
+// in-plane stiffness across the strands and nothing stops them separating on the bed.
+// Crossed at the local separation it is a grid, and the crossings are what make the
+// first layer stick.
+// ★★ THE MAT IS A GRID, AND MUST NOT FUSE INTO A SLAB. Its pitch is a multiple of the
+// mat strut's DIAMETER, and the multiple must exceed 1 — this is exact geometry, not a
+// taste call. A capsule of radius r centred at height zc has half-width
+// sqrt(r^2 - (z-zc)^2), which peaks at r, so adjacent lines MERGE at the widest layer
+// whenever pitch <= 2r. Keyed to the lattice cell the pitch was 4-6 mm and the mat
+// sliced as scattered fragments; set to 0.9 diameters it was 1.8r < 2r and the third
+// layer came out as one solid square under the whole part. Above 1 diameter a gap
+// survives at every height.
+inline constexpr double kOrganicBaseMatPitchPerDiameter = 1.35;
+
+// ★★ HOW FAR A MAT PAD REACHES AROUND A TOUCHDOWN, in mat pitches. The mat used to be
+// laid across the ENTIRE footprint whether or not anything landed on it: on the 40 mm
+// cube the first seven layers printed a full 40x40 square of which only a part was ever
+// built upon. A foundation is for the things standing on it, so the mat is emitted only
+// within this reach of a point where the lattice actually meets the base plane.
+// Generous enough that neighbouring touchdowns merge into one pad rather than leaving a
+// field of isolated islands.
+inline constexpr double kOrganicBaseMatPadPitches = 3.0;
+
+// How close to the base plane a strut end must be to COUNT as a touchdown, in mat
+// radii. A leg that stops a whisker above the plane is not standing on it.
+inline constexpr double kOrganicBaseMatContactRadii = 1.5;
+
+// ★★ HOW THICK THE MAT'S STRUTS ARE, as a multiple of the local strut radius — and
+// with the centreline ON the cut plane, this is also the mat's HEIGHT, since the weld
+// takes its lower half.
+//
+// ★ IT CANNOT BE THINNED AT THE CURRENT WELD PITCH, and that is a RASTER limit rather
+// than a design one. Halving it to 0.5 was tried on the measured grounds that the mat
+// only carries 4 supported cells and does not hold the part together (running the real
+// weld with and without it left the part at ONE component either way). The result was
+// that the mat DISAPPEARED from the slice entirely: at ratio 0.5 its height came to
+// 0.273 mm against a `welded_pitch_mm` of 0.28, so the whole mat was thinner than a
+// single voxel of the raster that builds the mesh and was erased by it.
+//
+// At 1.0 the height is ~0.545 mm, about two voxels — already close to the floor. Any
+// future thinning has to come with a finer weld pitch, or by giving the mat its own.
+inline constexpr double kOrganicBaseMatRadiusRatio = 1.0;
+
+// ══ ★★★ THE FILL MAT — COVERAGE IN THE LOW-STRESS INTERIOR ★★★ ═══════════════════
+// The base mat solved the FLOOR by emitting a foundation instead of hoping the trace
+// left one. The same argument applies to the BODY: where the stress field is weakest —
+// the corner of a cube furthest from the load path — no curve survives tracing, and an
+// 8 x 8 mm column comes out with NO MATERIAL AT ALL. Measured on the maintainer's cube:
+// 117 of 1000 4 mm cells completely empty, in one persistent corner.
+//
+// ★ WHY THE OBVIOUS FIX FAILED, AND WHY THIS ONE IS DIFFERENT. Keeping the short curves
+// the tracer discards there does NOT work: a stub alone in an empty region is
+// unsupported by construction, so the free-end prune and the mid-air pass delete it
+// again (658 kept, empty cells 117 -> 125, worse than doing nothing). Coverage cannot
+// be bought with material the printability rules exist to remove.
+//
+// The fill mat is emitted as STRUCTURE and, crucially, EXTENDS PAST the empty region
+// into the material around it, so it is anchored at both ends the moment it exists and
+// nothing downstream can call it loose. Same reason the base mat survived.
+//
+// ★ IT IS AN OVERRIDE OF THE GRADE AND IT IS REPORTED AS ONE. The stress field says
+// there is nothing to carry here; this puts material there anyway because a part with
+// a hole in it is not what anyone asked for. That is a legitimate choice and it costs
+// mass, so `fill_mat_struts` and `fill_mat_length_mm` are on the receipt.
+// How far an arm may search for material to land on, in cells. Beyond this the void is
+// too wide to bridge with one strut and the cell is left alone rather than sprouting a
+// free end into it.
+// ★★ HOW FAR SHAPE FIT MAY SHRINK A CELL, as a fraction of the size the stress asked
+// for. Used only when the job states no cell window; with one, the user's own
+// `cell_min_mm` is the floor and this is not consulted. Unbounded, the boundary cap
+// (2 x distance) drives the outermost voxels to two voxels — far below any stated cell
+// — which slams the whole shell into the tracer's resolution floor: seeds multiply,
+// the trace ran 10x longer than its twin without finishing, and the part would come
+// back with a solid skin rather than a graded one.
+inline constexpr double kOrganicShapeFitMinCellRatio = 0.5;
+
+inline constexpr int kOrganicFillMaxReachCells = 4;
+inline constexpr int kOrganicFillMaxCells = 400000;
+
+// ★★ THE VDI 3405-3-4:2019 DENSITY FLOOR, AND IT IS DERIVED, NOT CHOSEN.
+// The standard limits a bar's SLENDERNESS, not its angle alone: at or above the
+// critical downskin angle (45 deg) it requires l/D <= 5, and for a vertical bar
+// l/D <= 10, where l is the bar length and D its outer diameter. Reintjes & Lorenz
+// (PAMM 2021, doi:10.1002/pamm.202000204) encode exactly this as the linear
+// constraints of a support-free lattice MIP.
+//
+// For a traced lattice the bar length IS the local separation d, and the mass coupling
+// fixes the diameter: t = 2 d sqrt(rho / 3pi). So
+//
+//     l/D = d / (2 d sqrt(rho/3pi)) = sqrt(3pi) / (2 sqrt(rho))
+//
+// ★ THE SEPARATION CANCELS. Slenderness is a function of DENSITY ALONE, and the rule
+// becomes a floor on rho:  l/D <= 5  <=>  rho >= 3pi/100 = 0.0942.
+//
+// ★ WHY IT IS NEEDED SEPARATELY FROM THE AESTHETIC BAND: the per-voxel density is
+// clamped to the LIBRARY band, whose floor is 0.05047 — below this. Measured on the
+// maintainer's cube with an aesthetic band of [0.25, 0.45], 558 voxels still landed on
+// 0.05047, giving l/D = 6.8 and a 0.44 mm strut. Those are the specks his slicer
+// printed in layer 1 and the reason three cubes failed on the bed.
+inline constexpr double kOrganicVdiSlendernessMax = 5.0;
+
+// ★★ THE HORIZONTAL-BAR LIMIT, VDI 3405-3-4:2019. The 5.0 above applies to a bar at the
+// critical overhang angle; a bar at delta = 90 deg (flat, bridging) is allowed l/D <= 10.
+// The two together are the rule that actually governs a STRUT, as against the 45 deg
+// SURFACE rule a slicer paints with — which on the maintainer's cube called 64.3 % of
+// struts overhanging while only 2.1 % violated the standard for bars.
+inline constexpr double kOrganicVdiSlendernessFlatMax = 10.0;
+
+// The angle from the build plate, in degrees, below which a strut is treated as FLAT
+// and judged against the flat limit. VDI states the two endpoints; this is where the
+// generator switches between them.
+inline constexpr double kOrganicVdiFlatAngleDeg = 45.0;
+
+// How many pieces an over-slender strut may be divided into by propping it. A 38.88 mm
+// flat bar at 1.12 mm across is l/D 34.7 and needs four pieces to clear 10; beyond this
+// the strut is left alone and COUNTED rather than propped into a thicket.
+inline constexpr int kOrganicSlendernessMaxProps = 4;
+inline constexpr double kOrganicVdiDensityFloor =
+    3.0 * 3.14159265358979323846 / (kOrganicVdiSlendernessMax *
+                                    kOrganicVdiSlendernessMax * 4.0);
+// The standard's other hard number: no bar thinner than 1 mm for material extrusion.
+inline constexpr double kOrganicVdiMinBarDiameterMm = 1.0;
+
+// ── ★★ BRANCHED SUPPORT, AFTER TREE SUPPORTS ────────────────────────────────────
+// The maintainer's suggestion, and it is the right one: "having everything come back
+// to original base struts". A vertical pillar per unsupported island is the naive
+// scheme tree supports were invented to replace — 448 of them on his cube, each
+// demanding an anchor directly beneath it and ignoring perfectly good material a
+// millimetre to one side.
+//
+// THREE MECHANISMS ARE TAKEN, ONE IS NOT:
+//   MERGE      branches whose tips come within this radius COALESCE into one trunk
+//              and descend together. This is the mechanism that makes the support
+//              converge on a few base struts instead of raining pillars.
+//   TILT       a branch may step sideways as it descends, within an angle of
+//              vertical, so it can REACH an anchor rather than demand one below.
+//   ANCHOR ON  a branch stops the instant it meets existing lattice — it does not
+//   THE MODEL  insist on the plate. In a lattice this is most of the win.
+//   (not taken) RADIUS GROWTH with carried load. Tree supports thicken a trunk as it
+//              gathers branches; here the branches ARE lattice, and varying their
+//              diameter would fight the mass coupling that sets strut thickness from
+//              density (organic_strut_diameter_for). Constant radius, stated.
+inline constexpr double kOrganicBranchMergeRadiusRatio = 2.5;   // x the strut radius
+inline constexpr double kOrganicBranchMaxTiltDeg = 40.0;
+inline constexpr int kOrganicBranchMaxSteps = 4000;
 // A connected piece smaller than this fraction of the lattice's total length is
 // DELETED rather than tied down to the plate. Propping a crumb up on a tall thin leg
 // is neither printable nor useful; below this size there is nothing worth saving.
@@ -389,7 +595,10 @@ struct OrganicReport {
   std::size_t curves_traced = 0;       // before thinning
   std::size_t curves_kept = 0;         // after thinning
   std::size_t curves_thinned = 0;      // §1(e)
-  std::size_t curves_too_short = 0;    // stubs discarded
+  std::size_t curves_too_short = 0;
+  // ★ Stubs KEPT because nothing else covered their patch. A grade may make a region
+  // sparse; it may never make it absent.
+  std::size_t curves_kept_for_coverage = 0;    // stubs discarded
   // ── ★ §1(e2) — DANGLING ENDS, TRIMMED ──────────────────────────────────────
   // ★ A CURVE'S TAIL BEYOND ITS OUTERMOST CONNECTOR CARRIES NOTHING. It is attached at
   // one end only, so no load can cross it — and if it runs horizontally it is also an
@@ -575,6 +784,26 @@ struct OrganicLattice {
   // 0 disables it. Otherwise each landing joins its nearest neighbouring landings
   // out to this distance, MUTUALLY (both must want the other), which is what stops
   // one crowded corner growing a hairball.
+  // The layer height the part will be PRINTED at. The mid-air-start check rasters Z
+  // at this pitch, because a lowest point can clear a strut-radius layer test and
+  // still float for two real layers. 0 falls back to the strut radius and the check
+  // is then coarser than the machine.
+  double layer_height_mm = 0.0;
+  // ★ CUT THE SCATTER BELOW THE BASE (kOrganicBaseDominanceFraction). Needs a layer
+  // height — without one there is no layer to test, and it does nothing rather than
+  // guessing a pitch.
+  bool trim_below_base = true;
+  // ★ EMIT A BASE MAT at the trimmed base plane — a crossed planar grid spanning the
+  // footprint, so the first layer is a foundation rather than whatever the trace
+  // happened to leave there. Needs a layer height and a boundary.
+  bool base_mat = true;
+  // The pitch the WELD will raster at. The generator refuses to emit a base mat too
+  // thin for that raster to keep — a mat below one voxel is erased outright, which is
+  // how a deliberately thinned one vanished from the slice. 0 = unknown, check skipped.
+  double weld_pitch_hint_mm = 0.0;
+  // ★ FILL the low-stress interior where the tracer left holes. An override of the
+  // grade, reported as one.
+  bool fill_mat = true;
   double net_skin_reach_mm = 0.0;
   int net_skin_degree = 3;         // at most this many joins per landing
 
@@ -729,6 +958,85 @@ struct OrganicGenStats {
   std::size_t nodes_merged = 0;          // endpoints snapped onto a shared node
   std::size_t merge_clusters = 0;        // shared nodes created
   std::size_t merge_degenerate_spans = 0;   // spans the merge collapsed to nothing
+  // ── ★★ NOTHING STARTS IN MID-AIR ────────────────────────────────────────────
+  // A LAYER-LOCAL bar, and it is not the same as `floating_voxels_*` above. That one
+  // asks whether every piece is reachable from the plate in the FINISHED solid; this
+  // one asks the printer's question — does every island of material in a layer land on
+  // material in the layer beneath. A strut can be rigidly connected and still start
+  // over open space, held only by struts printed later. THE BAR IS
+  // `unsupported_islands_remaining == 0`.
+  std::size_t unsupported_islands_found = 0;
+  std::size_t unsupported_islands_remaining = 0;   // fragile: see the two below
+  // ★ THESE ARE THE BAR, NOT THE ISLAND COUNT. Grouping is unstable — the same spans
+  // read as 1 island or 21 depending on the cell size in its fourth decimal, because a
+  // diagonal bridge in the flood either happens or does not. The AREA is stable and
+  // both an internal census and an outside probe agree on it.
+  std::size_t unsupported_cells_remaining = 0;
+  double unsupported_volume_mm3 = 0.0;
+  std::size_t support_legs_added = 0;
+  double support_leg_length_mm = 0.0;
+  int support_rounds = 0;
+  // ★ DID THE REPAIR FINISH, OR RUN OUT OF BUDGET? `support_rounds == 8` read like
+  // "it worked eight times" when it meant "it never converged". A repair that exits on
+  // its round cap must say so.
+  bool support_converged = false;
+  // Islands with no legal centreline anywhere beneath them — a vertical leg cannot
+  // reach them without breaching the surface. Counted rather than skipped.
+  std::size_t support_legs_impossible = 0;
+  std::size_t support_legs_diagonal = 0;    // vertical was illegal; angled in instead
+  // ── ★★ BRANCHED SUPPORT ─────────────────────────────────────────────────────
+  std::size_t branch_seeds = 0;             // islands needing support
+  std::size_t branch_merges = 0;            // ★ tips that coalesced into a trunk
+  std::size_t branch_trunks = 0;            // branches that actually reached ground
+  std::size_t branch_anchored_on_model = 0; // stopped on lattice, never reached base
+  double branch_length_mm = 0.0;
+  std::size_t support_post_stranded_dropped = 0;   // fragments the CUTS created
+  // ── ★★ THE JOINT FIXED POINT ────────────────────────────────────────────────
+  // Every span added or removed by ANY repair. A round that changes nothing is
+  // quiescence, and that is the only state the census may be read in.
+  std::size_t mutations = 0;
+  int fixed_point_rounds = 0;
+  bool fixed_point_converged = false;   // ★ false = ran out of rounds, NOT settled
+  std::size_t support_spans_cut = 0;        // could not be held up, so not printed
+  // Tips left dangling BY those cuts, eroded afterwards. The mid-air repair must not
+  // reintroduce the free ends the prune exists to remove.
+  std::size_t support_cleanup_pruned = 0;
+  // ── ★★ THE BASE TRIM ────────────────────────────────────────────────────────
+  double base_trim_z_mm = 0.0;          // the swirl's layer; 0 = nothing was cut
+  // ── ★★ VDI 3405-3-4:2019 COMPLIANCE, MEASURED ON WHAT WAS EMITTED ───────────
+  std::size_t vdi_slenderness_violations = 0;   // spans with l/D above the limit
+  std::size_t vdi_thin_bar_violations = 0;      // spans under the 1 mm minimum
+  double vdi_max_slenderness = 0.0;
+  double vdi_min_bar_diameter_mm = 0.0;
+  double vdi_density_floor_applied = 0.0;       // 0 = the floor was not raised
+  std::size_t base_trim_spans_cut = 0;
+  std::size_t base_trim_spans_clipped = 0;
+  double base_trim_length_mm = 0.0;
+  bool base_trim_found = false;         // false = no dominant layer, nothing cut
+  // ── ★★ THE BASE MAT ─────────────────────────────────────────────────────────
+  std::size_t base_mat_struts = 0;
+  double base_mat_length_mm = 0.0;
+  // Points where the lattice actually reaches the base plane; the mat is emitted
+  // only around these, so "how much foundation" is legible next to "for how many feet".
+  std::size_t base_mat_touchdowns = 0;
+  // ★ VDI SLENDERNESS PROPPING. `violating` counts struts over the l/D the standard
+  // allows for their angle; `propped` those a leg could be dropped under; `impossible`
+  // those with nothing beneath to stand on. Reported separately because a strut that
+  // could not be propped is still in the file, and a total would hide it.
+  std::size_t slenderness_violating = 0;
+  std::size_t slenderness_propped = 0;
+  std::size_t slenderness_impossible = 0;
+  std::size_t slenderness_props_added = 0;
+  bool base_mat_radius_raised_for_raster = false;
+  double base_mat_z_mm = 0.0;
+  // ── ★★ THE FILL MAT ─────────────────────────────────────────────────────────
+  std::size_t fill_mat_cells = 0;      // empty cells the tracer left behind
+  std::size_t fill_mat_struts = 0;
+  double fill_mat_length_mm = 0.0;
+  double support_cut_length_mm = 0.0;
+  std::size_t unsupported_cells_found = 0;  // before any repair
+  double support_layer_height_mm = 0.0;     // the Z pitch the check actually used
+  bool support_grid_too_large = false;      // ★ CHECK DID NOT RUN — never a pass
   std::size_t stranded_components_dropped = 0;
   std::size_t stranded_spans_dropped = 0;
   double stranded_length_dropped_mm = 0.0;
@@ -801,7 +1109,12 @@ struct OrganicWeldStats {
 // so a fine lattice in a big part cannot allocate without bound; the pitch is coarsened
 // to fit and the pitch actually used is reported.
 TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm,
-                          long long max_voxels, OrganicWeldStats& stats);
+                          long long max_voxels, OrganicWeldStats& stats,
+                          // ★ CUT THE SOLID FLAT AT THIS Z. A centreline trim leaves
+                          // each clipped capsule a hemispherical cap a radius below the
+                          // plane — the very dots the base trim removes. Only a cut on
+                          // the SOLID gives a flat face. -inf = no cut.
+                          double floor_z = -1e30);
 
 }  // namespace topopt
 

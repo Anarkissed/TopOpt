@@ -938,6 +938,7 @@ struct RunInfo {
   long long organic_curves_kept = 0;
   long long organic_curves_thinned = 0;
   long long organic_curves_too_short = 0;
+  long long organic_curves_kept_for_coverage = 0;
   std::vector<long long> organic_curves_per_family;
   std::vector<double> organic_curve_length_per_family_mm;
   // WHY each half-trace stopped, and why each offered seed was refused. Two ledgers
@@ -1000,6 +1001,50 @@ struct RunInfo {
   long long organic_merge_degenerate_spans = 0;
   long long organic_net_skin_members_pruned = 0;
   long long organic_net_skin_degree_one = 0;
+  long long organic_unsupported_islands_found = 0;
+  long long organic_unsupported_islands_remaining = 0;
+  long long organic_support_legs_added = 0;
+  double organic_support_leg_length_mm = 0.0;
+  long long organic_support_rounds = 0;
+  bool organic_support_converged = false;
+  long long organic_fixed_point_rounds = 0;
+  bool organic_fixed_point_converged = false;
+  long long organic_mutations = 0;
+  long long organic_support_legs_impossible = 0;
+  long long organic_unsupported_cells_remaining = 0;
+  double organic_unsupported_volume_mm3 = 0.0;
+  long long organic_support_legs_diagonal = 0;
+  long long organic_support_spans_cut = 0;
+  long long organic_support_cleanup_pruned = 0;
+  double organic_base_trim_z_mm = 0.0;
+  long long organic_base_trim_spans_cut = 0;
+  long long organic_base_trim_spans_clipped = 0;
+  double organic_base_trim_length_mm = 0.0;
+  bool organic_base_trim_found = false;
+  long long organic_base_mat_struts = 0;
+  // ★★ VDI SLENDERNESS. `violating` are struts over the l/D their angle allows;
+  // `propped` those a leg could be dropped under; `impossible` those with nothing
+  // beneath. Reported SEPARATELY and always: a strut that could not be propped still
+  // ships, and a single total would hide it.
+  long long organic_slenderness_violating = 0;
+  long long organic_slenderness_propped = 0;
+  long long organic_slenderness_impossible = 0;
+  long long organic_slenderness_props = 0;
+  long long organic_base_mat_touchdowns = 0;
+  double organic_base_mat_length_mm = 0.0;
+  double organic_base_mat_z_mm = 0.0;
+  long long organic_fill_mat_cells = 0;
+  long long organic_fill_mat_struts = 0;
+  double organic_fill_mat_length_mm = 0.0;
+  long long organic_branch_seeds = 0;
+  long long organic_branch_merges = 0;
+  long long organic_branch_trunks = 0;
+  long long organic_branch_anchored_on_model = 0;
+  double organic_branch_length_mm = 0.0;
+  double organic_support_cut_length_mm = 0.0;
+  long long organic_unsupported_cells_found = 0;
+  double organic_support_layer_height_mm = 0.0;
+  bool organic_support_grid_too_large = false;
   long long organic_repair_rounds = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_length_mm = 0.0;

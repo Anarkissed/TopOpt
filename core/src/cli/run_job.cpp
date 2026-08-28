@@ -672,6 +672,46 @@ struct LatticeExportOutcome {
   long long organic_merge_degenerate = 0;
   long long organic_net_pruned = 0;
   long long organic_net_deg1 = 0;
+  long long organic_unsupported_found = 0;
+  long long organic_unsupported_left = 0;
+  long long organic_support_legs = 0;
+  double organic_support_leg_len = 0.0;
+  long long organic_support_rounds = 0;
+  bool organic_support_converged = false;
+  long long organic_fp_rounds = 0;
+  bool organic_fp_converged = false;
+  long long organic_mutations = 0;
+  long long organic_support_impossible = 0;
+  long long organic_unsupported_cells = 0;
+  double organic_unsupported_mm3 = 0.0;
+  long long organic_support_diagonal = 0;
+  long long organic_support_cut = 0;
+  long long organic_support_cleanup = 0;
+  double organic_base_trim_z = 0.0;
+  long long organic_base_trim_cut = 0;
+  long long organic_base_trim_clipped = 0;
+  double organic_base_trim_len = 0.0;
+  bool organic_base_trim_found = false;
+  long long organic_base_mat_struts = 0;
+  long long organic_base_mat_touchdowns = 0;
+  long long organic_slenderness_violating = 0;
+  long long organic_slenderness_propped = 0;
+  long long organic_slenderness_impossible = 0;
+  long long organic_slenderness_props = 0;
+  double organic_base_mat_len = 0.0;
+  double organic_base_mat_z = 0.0;
+  long long organic_fill_cells = 0;
+  long long organic_fill_struts = 0;
+  double organic_fill_len = 0.0;
+  long long organic_branch_seeds = 0;
+  long long organic_branch_merges = 0;
+  long long organic_branch_trunks = 0;
+  long long organic_branch_anchored = 0;
+  double organic_branch_len = 0.0;
+  double organic_support_cut_len = 0.0;
+  long long organic_unsupported_found_cells = 0;
+  double organic_support_layer_mm = 0.0;
+  bool organic_support_grid_too_large = false;
   // The welded single-body file, when one was asked for.
   bool welded = false;
   OrganicWeldStats weld;
@@ -1904,6 +1944,9 @@ LatticeExportOutcome export_latticed_variant(
   // The POST-CLIP spans, kept so the welded single-body file can be built from what
   // was actually written rather than from the traced intent.
   std::vector<OrganicSpan> organic_spans;
+  // ★ WHERE THE BASE WAS CUT, so the WELD can cut the solid at the same plane. The
+  // span trim and the marched body must agree on it or the file disagrees with itself.
+  double organic_base_trim_z = 0.0;
   // ★ ORGANIC's stats, mapped onto the SAME LatticeGenStats every consumer already
   // reads (§4a: the selector is cheap because nothing downstream branches). The
   // fields that have no organic meaning stay 0 and are NOT invented: an organic run
@@ -1952,6 +1995,48 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_merge_degenerate = static_cast<long long>(g.merge_degenerate_spans);
     oc.organic_net_pruned = static_cast<long long>(g.net_skin_members_pruned);
     oc.organic_net_deg1 = static_cast<long long>(g.net_skin_degree_one);
+    oc.organic_unsupported_found = static_cast<long long>(g.unsupported_islands_found);
+    oc.organic_unsupported_left = static_cast<long long>(g.unsupported_islands_remaining);
+    oc.organic_support_legs = static_cast<long long>(g.support_legs_added);
+    oc.organic_support_leg_len = g.support_leg_length_mm;
+    oc.organic_support_rounds = g.support_rounds;
+    oc.organic_support_converged = g.support_converged;
+    oc.organic_fp_rounds = g.fixed_point_rounds;
+    oc.organic_fp_converged = g.fixed_point_converged;
+    oc.organic_mutations = static_cast<long long>(g.mutations);
+    oc.organic_support_impossible = static_cast<long long>(g.support_legs_impossible);
+    oc.organic_unsupported_cells = static_cast<long long>(g.unsupported_cells_remaining);
+    oc.organic_unsupported_mm3 = g.unsupported_volume_mm3;
+    oc.organic_support_diagonal = static_cast<long long>(g.support_legs_diagonal);
+    oc.organic_support_cut = static_cast<long long>(g.support_spans_cut);
+    oc.organic_support_cleanup = static_cast<long long>(g.support_cleanup_pruned);
+    oc.organic_base_trim_z = g.base_trim_z_mm;
+    organic_base_trim_z = g.base_trim_found ? g.base_trim_z_mm : 0.0;
+    oc.organic_base_trim_cut = static_cast<long long>(g.base_trim_spans_cut);
+    oc.organic_base_trim_clipped = static_cast<long long>(g.base_trim_spans_clipped);
+    oc.organic_base_trim_len = g.base_trim_length_mm;
+    oc.organic_base_trim_found = g.base_trim_found;
+    oc.organic_base_mat_struts = static_cast<long long>(g.base_mat_struts);
+    oc.organic_base_mat_touchdowns = static_cast<long long>(g.base_mat_touchdowns);
+    oc.organic_slenderness_violating = static_cast<long long>(g.slenderness_violating);
+    oc.organic_slenderness_propped = static_cast<long long>(g.slenderness_propped);
+    oc.organic_slenderness_impossible =
+        static_cast<long long>(g.slenderness_impossible);
+    oc.organic_slenderness_props = static_cast<long long>(g.slenderness_props_added);
+    oc.organic_base_mat_len = g.base_mat_length_mm;
+    oc.organic_base_mat_z = g.base_mat_z_mm;
+    oc.organic_fill_cells = static_cast<long long>(g.fill_mat_cells);
+    oc.organic_fill_struts = static_cast<long long>(g.fill_mat_struts);
+    oc.organic_fill_len = g.fill_mat_length_mm;
+    oc.organic_branch_seeds = static_cast<long long>(g.branch_seeds);
+    oc.organic_branch_merges = static_cast<long long>(g.branch_merges);
+    oc.organic_branch_trunks = static_cast<long long>(g.branch_trunks);
+    oc.organic_branch_anchored = static_cast<long long>(g.branch_anchored_on_model);
+    oc.organic_branch_len = g.branch_length_mm;
+    oc.organic_support_cut_len = g.support_cut_length_mm;
+    oc.organic_unsupported_found_cells = static_cast<long long>(g.unsupported_cells_found);
+    oc.organic_support_layer_mm = g.support_layer_height_mm;
+    oc.organic_support_grid_too_large = g.support_grid_too_large;
     oc.organic_emitted_largest_fraction = g.emitted_largest_length_fraction;
     oc.organic_emitted_stranded_mm = g.emitted_stranded_length_mm;
     st.interior_volume_mm3 = g.volume_mm3;
@@ -2113,8 +2198,13 @@ LatticeExportOutcome export_latticed_variant(
     // 40 million voxels is ~320 MB of field — the cap exists so a fine lattice in a
     // big part coarsens the pitch instead of allocating without bound, and the pitch
     // actually used is reported rather than assumed.
+    // ★ THE BASE PLANE IS CUT HERE, ON THE SOLID. The span-level trim removes the
+    // scatter below the base, but each clipped capsule still carries a hemispherical
+    // cap a radius under the plane — 0.5 mm of it on the cube — and those caps ARE
+    // the dots. Only the marched field can be cut flat.
     TriangleMesh welded =
-        organic_weld(organic_spans, lat.welded_pitch_mm, 40000000LL, ws);
+        organic_weld(organic_spans, lat.welded_pitch_mm, 40000000LL, ws,
+                     organic_base_trim_z > 0.0 ? organic_base_trim_z : -1e30);
     // The SAME rigid motion the streamed soup is rotated by, from the same helper —
     // vertex order and winding preserved (det +1), so the two files describe one
     // placement of one object.
@@ -3762,6 +3852,12 @@ class ScopedLadderSolverIsolation {
 // global density parameter" — and it is why the grade never has to thin a strut below
 // what the nozzle lays.
 struct OrganicOutcome {
+  // ★★ SHAPE-FIT REPORTING. Reported whether or not the feature is on, so "it did
+  // nothing" and "it was never asked to run" are distinguishable in the receipt — a
+  // zero that was never measured is not a passing zero.
+  std::size_t shape_fit_voxels_shrunk = 0;
+  std::size_t shape_fit_candidates = 0;
+  double shape_fit_min_ratio = 1.0;
   bool net_skin_wanted = false;   // bare lattice only — see run_organic_step
   bool ran = false;
   OrganicLattice lat;
@@ -3824,7 +3920,23 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // it each voxel sits, and the BEAD falls out of the mass coupling instead of being
   // fixed — the same three quantities (rho, d, t) related the same way, read in the
   // direction the user's control actually points.
-  const bool have_window = jg.cell_min_mm > 0.0 && jg.cell_max_mm >= jg.cell_min_mm;
+  // ★★ THE SCALE, APPLIED TO THE REQUESTED WINDOW AND NOWHERE ELSE. Multiplying the
+  // cell window is what carries a pattern onto a bigger part: the weave keeps its
+  // proportions and simply gets coarser. It is applied HERE, before anything reads the
+  // window, so the shape-fit cap, the grading law and the mass coupling all see the one
+  // scaled window rather than each applying the factor for themselves.
+  //
+  // ★ THE FLOORS ARE NOT SCALED. min_extrudable_width_mm is the nozzle, and the VDI
+  // density floor is the standard; neither knows how big the part is. Scaling DOWN
+  // therefore stops at what will print rather than going through it, and the tracer
+  // counts the voxels it had to raise.
+  const double lat_scale = jg.organic_scale > 0.0 ? jg.organic_scale : 1.0;
+  const double cell_min_mm = jg.cell_min_mm * lat_scale;
+  const double cell_max_mm = jg.cell_max_mm * lat_scale;
+  if (lat_scale != 1.0)
+    std::fprintf(stderr, "[scale] x%.3f: cell window %.2f-%.2f -> %.2f-%.2f mm\n",
+                 lat_scale, jg.cell_min_mm, jg.cell_max_mm, cell_min_mm, cell_max_mm);
+  const bool have_window = cell_min_mm > 0.0 && cell_max_mm >= cell_min_mm;
 
   // ★ WHERE IN THE WINDOW: the grading law's OWN density, normalised over the band it
   // actually used — so §4(b) still holds and all three algorithms take their density
@@ -3875,7 +3987,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
     if (have_window) {
       double f = rho_span > 0.0 ? (rho - rho_lo) / rho_span : 0.0;
       f = std::pow(std::min(1.0, std::max(0.0, f)), f_exponent);
-      d = jg.cell_max_mm - (jg.cell_max_mm - jg.cell_min_mm) * f;
+      d = cell_max_mm - (cell_max_mm - cell_min_mm) * f;
       // The bead the mass coupling asks for at this (rho, d) — floored, always, at the
       // stated minimum extrudable width. Printability is user input and outranks the
       // coupling; voxels the floor raised are counted by the tracer.
@@ -3893,11 +4005,185 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   }
   if (candidates == 0) return oo;  // nothing graded — the caller reports it as such
 
+
   // The SAME member-width field the grading law reads, at the law's own cap, so a
   // curves-per-member figure in the receipt and a cells-per-member figure beside it
   // are measured against the identical widths.
   const std::vector<double> width =
       local_member_thickness_mm(grid, density, printed_iso, thickness_cap_voxels);
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ★★★ SHAPE-FIT GRADING — THE CELL ALSO FITS THE MEMBER, NOT ONLY THE STRESS ★★★
+  //
+  // ★ WHAT IT IS FOR, MEASURED. On the 40 mm cube the missing material is not spread
+  // through the part, it sits in the SHELL: of 79 empty 4 mm cells, 68 were on the
+  // outer layer and 3 were interior — 13.9 % of the shell against 0.6 % of the
+  // interior, a 24x concentration. That is the truncated-boundary-cell signature the
+  // conformal-lattice literature describes: tessellate at a size chosen without
+  // reference to the wall, then TRIM, and the cells the trim catches are left as stubs
+  // the prune removes. It also explains why aiming fill struts at those cells never
+  // cleared them — the clip will not accept material there, so the fill re-fired on the
+  // same ~58 cells every round without resolving one.
+  //
+  // ★★ TWO DRIVERS, BECAUSE THEY CATCH DIFFERENT DEFECTS. This was measured the hard
+  // way: keyed on member width ALONE the pass was completely inert on the cube — the
+  // span dump came back byte-identical with the flag on and off. The reason is that a
+  // 40 mm cube's local member IS the whole 40 mm block, so W/N* is about 20 mm against
+  // a 4-6 mm spacing and the cap never binds. Member width cannot see boundary
+  // truncation at all, and an earlier revision of this block deleted the driver that
+  // could, on the mistaken view that the two were the same law wearing two names.
+  //
+  //   W / N*      — "this MEMBER is too thin to hold the cell". Thin walls. This is
+  //                 exactly `CellSizeMode::Fit`'s coarsest admissible cell, and using
+  //                 the same measured width field and the same N* is deliberate: the
+  //                 codebase has already paid for a second copy of a lattice law
+  //                 drifting from the first (the app's strut law sat 1.4x off core's).
+  //   2 * dist    — "this CELL straddles the surface". A cell of size d centred dist
+  //                 inside the boundary is truncated when dist < d/2. Independent of
+  //                 member thickness: it fires on a solid cube, where W/N* never does.
+  //
+  // The cap is the MIN of the two. Neither subsumes the other.
+  // Fit derives the cell from the member it must fit into — S_want(W) = max(W/N*,
+  // S_print_min), exactly N* cells across where the member can hold them — and that
+  // mode has shipped for the doubled and stepped paths since 2026-08-05. Organic was
+  // the algorithm WITHOUT it. Keying this on the same measured member-width field, and
+  // on the same N*, is deliberate: an earlier iteration of this block keyed on distance
+  // to the boundary instead, which is a different rule wearing the same name, and this
+  // codebase has already paid for a second copy of a lattice law drifting from the
+  // first (the app's strut law sat 1.4x off core's).
+  //
+  // ★ IT ONLY EVER SHRINKS. `std::min` against the stress-driven size means no voxel is
+  // ever coarsened, so the cells-per-member floor cannot be breached from above; and the
+  // tracer RAISES anything below its print and resolution floors (dsep clamping in
+  // organic_lattice.cpp), so it cannot go below printable from below. A member too thin
+  // to hold even the finest printable cell is left to those floors, which is the same
+  // place Fit sends it — graded back towards solid rather than left as a hole.
+  if (jg.organic_shape_fit) {
+    const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+    // Distance in voxels to the nearest NON-candidate — the boundary of the region the
+    // lattice may occupy, not the part outline, since a role or keep-clear narrows it.
+    // Two-pass chamfer over the 6-neighbourhood; consumed as a length cap, not as a
+    // geometric construction, so 6-connected is precise enough here.
+    const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+    const long long BIG = 1LL << 30;
+    std::vector<long long> dist(static_cast<std::size_t>(nx) * ny * nz, BIG);
+    auto at = [&](int i, int j, int k) {
+      return (static_cast<std::size_t>(k) * ny + j) * nx + i;
+    };
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t e = at(i, j, k);
+          if (!cand[e]) { dist[e] = 0; continue; }
+          if (i == 0 || j == 0 || k == 0 || i == nx - 1 || j == ny - 1 || k == nz - 1)
+            dist[e] = 1;   // on the grid face: the wall it sits in ends here
+        }
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t e = at(i, j, k);
+          if (i) dist[e] = std::min(dist[e], dist[at(i - 1, j, k)] + 1);
+          if (j) dist[e] = std::min(dist[e], dist[at(i, j - 1, k)] + 1);
+          if (k) dist[e] = std::min(dist[e], dist[at(i, j, k - 1)] + 1);
+        }
+    for (int k = nz - 1; k >= 0; --k)
+      for (int j = ny - 1; j >= 0; --j)
+        for (int i = nx - 1; i >= 0; --i) {
+          const std::size_t e = at(i, j, k);
+          if (i + 1 < nx) dist[e] = std::min(dist[e], dist[at(i + 1, j, k)] + 1);
+          if (j + 1 < ny) dist[e] = std::min(dist[e], dist[at(i, j + 1, k)] + 1);
+          if (k + 1 < nz) dist[e] = std::min(dist[e], dist[at(i, j, k + 1)] + 1);
+        }
+    std::size_t shrunk = 0;
+    double worst_ratio = 1.0;
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    // ★★★ SHAPE-FIT ONLY — THE CELL IS PURE GEOMETRY, THE STRESS FIELD IS NOT READ ★★★
+    // The maintainer's call, and it is a different thing from the cap below rather
+    // than a stronger version of it. The capped form still starts from the
+    // stress-driven size and only shrinks it, so what the part looks like still
+    // depends on where the load happened to fall. This form ignores the stress map
+    // entirely and derives the cell from the SHAPE alone: biggest cells deepest
+    // inside, grading down to the smallest at the faces, edges and corners.
+    //
+    // ★ IT IS AN AESTHETIC MODE AND NOTHING ELSE. With the cell no longer a function
+    // of demand, the lattice makes no claim about carrying anything — which is
+    // consistent with organic already being refused outside intent "aesthetic", for
+    // the stronger reason that its traced geometry has no measured tensor.
+    if (jg.organic_shape_fit_only && have_window) {
+      long long dmax = 0;
+      for (std::size_t e = 0; e < cand.size(); ++e)
+        if (cand[e] && dist[e] < BIG) dmax = std::max(dmax, dist[e]);
+      if (dmax > 0) {
+        for (std::size_t e = 0; e < cand.size(); ++e) {
+          if (!cand[e]) continue;
+          // t = 0 at the boundary, 1 at the deepest interior point.
+          const double t = std::min(1.0, static_cast<double>(dist[e]) /
+                                             static_cast<double>(dmax));
+          const double before = spacing[e];
+          spacing[e] = cell_min_mm + (cell_max_mm - cell_min_mm) * t;
+          if (spacing[e] < before) {
+            ++shrunk;
+            worst_ratio = std::min(worst_ratio, spacing[e] / before);
+          }
+          bead[e] = organic_strut_diameter_for(spacing[e], relative_density[e]);
+          if (!(bead[e] > jg.min_extrudable_width_mm))
+            bead[e] = jg.min_extrudable_width_mm;
+        }
+        oo.shape_fit_voxels_shrunk = shrunk;
+        oo.shape_fit_candidates = candidates;
+        oo.shape_fit_min_ratio = shrunk ? worst_ratio : 1.0;
+        std::fprintf(stderr,
+                     "[shape-fit] ONLY-mode: cell %.2f mm at the faces to %.2f mm at "
+                     "the core (depth %lld voxels), stress map NOT read\n",
+                     cell_min_mm, cell_max_mm, dmax);
+      }
+    } else if (n_star > 0.0) {
+      for (std::size_t e = 0; e < cand.size(); ++e) {
+        if (!cand[e]) continue;
+        const double w = width[e];
+        // Fit's coarsest admissible cell. An unmeasured or "thicker than we measured"
+        // width bounds nothing from above, which is the honest reading of the sentinel.
+        const double cap_member = (w > 0.0 && std::isfinite(w))
+                                      ? w / n_star
+                                      : std::numeric_limits<double>::infinity();
+        const double cap_boundary = 2.0 * static_cast<double>(dist[e]) * grid.spacing;
+        double cap = std::min(cap_member, cap_boundary);
+        // ★★ THE LOWER LIMIT. Shape fit GRADES within the range the job declared; it
+        // does not get to leave it. `cell_min_mm` is the user's own stated smallest
+        // cell, and printability is user input — the same rule that already makes the
+        // bead floor outrank the mass coupling. Without this the boundary cap reaches
+        // two voxels at the outermost shell, every shell voxel lands on the tracer's
+        // resolution floor, and the "grade" is not a grade at all but a solid skin.
+        const double floor_mm = have_window
+                                    ? cell_min_mm
+                                    : kOrganicShapeFitMinCellRatio * spacing[e];
+        if (cap < floor_mm) cap = floor_mm;
+        if (!(cap > 0.0) || !(cap < spacing[e])) continue;
+        const double before = spacing[e];
+        spacing[e] = cap;
+        ++shrunk;
+        worst_ratio = std::min(worst_ratio, cap / before);
+        // ★ THE BEAD MUST FOLLOW THE SPACING. The mass coupling ties strut diameter to
+        // (rho, d); leaving the bead at the value computed for the OLD d would emit a
+        // strut sized for a cell it is no longer in — the same class of defect as a
+        // census measuring one representation while the pass measures another.
+        if (have_window) {
+          bead[e] = organic_strut_diameter_for(spacing[e], relative_density[e]);
+          if (!(bead[e] > jg.min_extrudable_width_mm))
+            bead[e] = jg.min_extrudable_width_mm;
+        }
+      }
+    }
+    oo.shape_fit_voxels_shrunk = shrunk;
+    oo.shape_fit_candidates = candidates;
+    oo.shape_fit_min_ratio = shrunk ? worst_ratio : 1.0;
+    std::fprintf(stderr,
+                 "[shape-fit] shrunk %zu of %zu candidates, smallest cell %.3fx the "
+                 "stress-driven size (floor %s)\n",
+                 shrunk, candidates, shrunk ? worst_ratio : 1.0,
+                 have_window ? "cell_min_mm" : "ratio");
+  }
 
   OrganicParams op;
   op.build_dir = build_dir;
@@ -3916,7 +4202,12 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   op.min_extrudable_width_mm = jg.min_extrudable_width_mm;
   op.strut_diameter_mm = t_fixed;
   op.strut_diameter_field = &bead;
-  op.rho_min = band_rho_min;
+  // ★★ THE VDI FLOOR OUTRANKS THE LIBRARY BAND. The library's 0.05047 is a
+  // CERTIFIABILITY limit — the lightest lattice the tensor library can describe. It
+  // says nothing about whether the bar can be BUILT, and at that density the slenderness
+  // is l/D = 6.8 against the standard's 5. Printability is user input and outranks a
+  // modelling limit, so the floor is the larger of the two.
+  op.rho_min = std::max(band_rho_min, kOrganicVdiDensityFloor);
   op.rho_max = band_rho_max;
   const double t0 = wall_seconds();
   oo.lat = trace_organic_lattice(grid, cand, stress_tensor, spacing, &width, op);
@@ -3965,6 +4256,8 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   gi.organic_curves_kept = static_cast<long long>(r.curves_kept);
   gi.organic_curves_thinned = static_cast<long long>(r.curves_thinned);
   gi.organic_curves_too_short = static_cast<long long>(r.curves_too_short);
+  gi.organic_curves_kept_for_coverage =
+      static_cast<long long>(r.curves_kept_for_coverage);
   gi.organic_dangling_ends_trimmed = static_cast<long long>(r.dangling_ends_trimmed);
   gi.organic_curves_dropped_dangling =
       static_cast<long long>(r.curves_dropped_dangling);
@@ -4551,6 +4844,17 @@ LatticeVariantOutcome lattice_one_variant(
                                gf.band_rho_max, job.grading,
                                job.loads.present && job.loads.minimize_plastic,
                                v.applied_build_dir, printed_iso, 32);
+    // ★ THE WELD'S RASTER PITCH, so the generator can refuse to emit a base mat too
+    // thin for that raster to KEEP. Set beside the layer height below for the same
+    // reason: both are machine facts the generator cannot infer, and without this one
+    // a mat under a voxel tall is erased silently — which is how a deliberately
+    // thinned mat vanished from the slice entirely while every stat still read green.
+    organic.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
+    // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
+    // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
+    // and passes parts that float for two real layers. 0 = not stated, and the
+    // check says so on the receipt rather than inferring one.
+    organic.lat.layer_height_mm = job.loads.layer_height_mm;
     if (!organic.ran || organic.lat.report.latticed_voxels == 0) {
       // Same posture as the law's own L4 refusal: no object was produced, nothing
       // was written, and the caller decides whether that kills the run or skips a
@@ -6929,6 +7233,17 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                                 gf.band_rho_min, gf.band_rho_max, job.grading,
                                 job.loads.present && job.loads.minimize_plastic,
                                 applied_build_dir, 0.5, gp.thickness_cap_voxels);
+    // ★ THE WELD'S RASTER PITCH, so the generator can refuse to emit a base mat too
+    // thin for that raster to KEEP. Set beside the layer height below for the same
+    // reason: both are machine facts the generator cannot infer, and without this one
+    // a mat under a voxel tall is erased silently — which is how a deliberately
+    // thinned mat vanished from the slice entirely while every stat still read green.
+    an_org.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
+    // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
+    // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
+    // and passes parts that float for two real layers. 0 = not stated, and the
+    // check says so on the receipt rather than inferring one.
+    an_org.lat.layer_height_mm = job.loads.layer_height_mm;
 
     RunInfo gi = build_run_info(job, options, RunObservability{});
     gi.grading_present = true;
@@ -7935,6 +8250,85 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_merge_degenerate_spans = R.oc.organic_merge_degenerate;
         gi.organic_net_skin_members_pruned = R.oc.organic_net_pruned;
         gi.organic_net_skin_degree_one = R.oc.organic_net_deg1;
+        gi.organic_unsupported_islands_found = R.oc.organic_unsupported_found;
+        gi.organic_unsupported_islands_remaining = R.oc.organic_unsupported_left;
+        gi.organic_support_legs_added = R.oc.organic_support_legs;
+        gi.organic_support_leg_length_mm = R.oc.organic_support_leg_len;
+        gi.organic_support_rounds = R.oc.organic_support_rounds;
+        gi.organic_support_converged = R.oc.organic_support_converged;
+        gi.organic_fixed_point_rounds = R.oc.organic_fp_rounds;
+        gi.organic_fixed_point_converged = R.oc.organic_fp_converged;
+        gi.organic_mutations = R.oc.organic_mutations;
+        gi.organic_support_legs_impossible = R.oc.organic_support_impossible;
+        gi.organic_unsupported_cells_remaining = R.oc.organic_unsupported_cells;
+        gi.organic_unsupported_volume_mm3 = R.oc.organic_unsupported_mm3;
+        gi.organic_support_legs_diagonal = R.oc.organic_support_diagonal;
+        gi.organic_support_spans_cut = R.oc.organic_support_cut;
+        gi.organic_support_cleanup_pruned = R.oc.organic_support_cleanup;
+        gi.organic_base_trim_z_mm = R.oc.organic_base_trim_z;
+        gi.organic_base_trim_spans_cut = R.oc.organic_base_trim_cut;
+        gi.organic_base_trim_spans_clipped = R.oc.organic_base_trim_clipped;
+        gi.organic_base_trim_length_mm = R.oc.organic_base_trim_len;
+        gi.organic_base_trim_found = R.oc.organic_base_trim_found;
+        gi.organic_base_mat_struts = R.oc.organic_base_mat_struts;
+        // ★ THE THIRD HOP. A stat travels gen-stats -> oc -> gi -> JSON, and a field
+        // added to the first three still reports 0 if this line is missing: the copy
+        // site was measured carrying touchdowns=684 while the receipt printed 0.
+        gi.organic_base_mat_touchdowns = R.oc.organic_base_mat_touchdowns;
+        gi.organic_slenderness_violating = R.oc.organic_slenderness_violating;
+        gi.organic_slenderness_propped = R.oc.organic_slenderness_propped;
+        gi.organic_slenderness_impossible = R.oc.organic_slenderness_impossible;
+        gi.organic_slenderness_props = R.oc.organic_slenderness_props;
+        gi.organic_base_mat_length_mm = R.oc.organic_base_mat_len;
+        gi.organic_base_mat_z_mm = R.oc.organic_base_mat_z;
+        gi.organic_fill_mat_cells = R.oc.organic_fill_cells;
+        gi.organic_fill_mat_struts = R.oc.organic_fill_struts;
+        gi.organic_fill_mat_length_mm = R.oc.organic_fill_len;
+        gi.organic_branch_seeds = R.oc.organic_branch_seeds;
+        gi.organic_branch_merges = R.oc.organic_branch_merges;
+        gi.organic_branch_trunks = R.oc.organic_branch_trunks;
+        gi.organic_branch_anchored_on_model = R.oc.organic_branch_anchored;
+        gi.organic_branch_length_mm = R.oc.organic_branch_len;
+        gi.organic_support_cut_length_mm = R.oc.organic_support_cut_len;
+        gi.organic_unsupported_cells_found = R.oc.organic_unsupported_found_cells;
+        gi.organic_support_layer_height_mm = R.oc.organic_support_layer_mm;
+        gi.organic_support_grid_too_large = R.oc.organic_support_grid_too_large;
+        // ── ★★ THE REFUSAL. Same posture as the sealed-cavity check: ON by default,
+        // only an explicit false disarms it, and REMOVING the key does not.
+        //
+        // The support pass tries a vertical leg, then a diagonal one, then CUTS the
+        // span. That set is closed, so a remainder means the geometry defeated all
+        // three. The maintainer watched his printer extrude a strut into open air;
+        // shipping a file we KNOW does that is worse than refusing to write it.
+        if (job.lattice.require_no_midair_start) {
+          if (R.oc.organic_support_grid_too_large)
+            throw JobError(
+                "organic: the mid-air-start check COULD NOT RUN — this part needs a "
+                "raster beyond the 120M-cell budget at the stated layer height, so "
+                "nothing was verified. A check that did not run is not a check that "
+                "passed. State a coarser \"layer_height_mm\" in \"loads\", or set "
+                "\"require_no_midair_start\": false to export unverified.");
+          if (R.oc.organic_unsupported_cells > 0) {
+            std::ostringstream m;
+            m << "organic: " << R.oc.organic_unsupported_cells
+              << " raster cells of material (" << R.oc.organic_unsupported_mm3
+              << " mm^3, in " << R.oc.organic_unsupported_left
+              << " region(s)) would be extruded INTO OPEN AIR — they sit in a print "
+                 "layer with nothing beneath them, checked at a "
+              << R.oc.organic_support_layer_mm
+              << " mm layer height. The algorithm added " << R.oc.organic_support_legs
+              << " support leg(s) (" << R.oc.organic_support_diagonal
+              << " angled in where a vertical leg would breach the surface) and CUT "
+              << R.oc.organic_support_cut
+              << " span(s) it could not hold up; these defeated both. TO PROCEED, "
+                 "either change the geometry — a denser band or a larger cell gives "
+                 "each island more neighbours to land on — or set "
+                 "\"require_no_midair_start\": false in the job's \"lattice\" block "
+                 "to export anyway. THIS CHECK IS ON BY DEFAULT, so REMOVING the key "
+                 "does not turn it off.";
+            throw JobError(m.str());
+          }
+        }
       }
       if (R.stepped_ran) fill_stepped_run_info(gi, R.stepped);
     }
