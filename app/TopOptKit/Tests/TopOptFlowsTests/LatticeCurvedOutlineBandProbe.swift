@@ -1266,3 +1266,251 @@ extension LatticeCurvedOutlineBandProbe {
         }
     }
 }
+
+// MARK: - 16. THE PERMUTATION SWEEP
+
+/// ★★★ EVERY SETTING PERMUTATION THE BAKE CAN EXPRESS, CLASSIFIED — his standing bar
+/// is "no holes and no quilt across EVERY setting permutation", and until now only
+/// one permutation had been checked.
+///
+/// ★ CONFOUND CONTROL: no pixels, no camera, no far wall. Each permutation is baked
+/// and then its DECLARED FACES are classified in their own (u,v) plane at 1 mm depth,
+/// which is the same measurement `testDrawTheWallFaceOn` makes and the same one that
+/// showed 92-96% drawn on his shipping settings. "Empty" here means a specific,
+/// checkable thing: a point inside the outline with material behind it where the bake
+/// painted NO cell (`unpainted`) or the march's own clip would cut it (`clipped`).
+///
+/// ★ WHAT THIS CANNOT SEE. The march's strut geometry — a painted, unclipped cell can
+/// still draw no strut (that was fix #10). So a clean row here is necessary, not
+/// sufficient, and the rows that look worst are the ones to take to the simulator.
+extension LatticeCurvedOutlineBandProbe {
+
+    struct SweepRow {
+        var label = ""
+        var painted = 0
+        var sizes = ""
+        var drawn = 0.0, clipped = 0.0, unpainted = 0.0, notOwned = 0.0, noMat = 0.0
+        var ring = 0.0
+        var solidPct = 0.0
+        var solidCells = 0
+    }
+
+    /// Classify one bake over both declared faces, area-weighted by (u,v) pixels.
+    static func classify(_ i: Inputs2, _ cf: LatticeCellField, depth: Double = 1.0) -> SweepRow {
+        var r = SweepRow()
+        let inc = i.scene.regions.filter { $0.role == .include }
+        guard let rg = i.scene.regionSDF else { return r }
+        let occ = i.scene.occupancy
+        func cell(_ p: SIMD3<Double>) -> (painted: Bool, solid: Bool) {
+            let f = cf.field
+            let vx = Int((((p.x - Double(f.origin.x)) / Double(f.spacing.x))).rounded())
+            let vy = Int((((p.y - Double(f.origin.y)) / Double(f.spacing.y))).rounded())
+            let vz = Int((((p.z - Double(f.origin.z)) / Double(f.spacing.z))).rounded())
+            guard vx >= 0, vy >= 0, vz >= 0, vx < f.nx, vy < f.ny, vz < f.nz else { return (false, false) }
+            let k = vx + f.nx * (vy + f.ny * vz)
+            guard k < cf.steppedCellMM.count, k < cf.level.count else { return (false, false) }
+            let pa = cf.steppedCellMM[k] > 0
+            return (pa, pa && cf.level[k] == 0)
+        }
+        func occAt(_ p: SIMD3<Double>) -> Float {
+            let vx = Int((((p.x - Double(occ.origin.x)) / Double(occ.spacing.x))).rounded())
+            let vy = Int((((p.y - Double(occ.origin.y)) / Double(occ.spacing.y))).rounded())
+            let vz = Int((((p.z - Double(occ.origin.z)) / Double(occ.spacing.z))).rounded())
+            guard vx >= 0, vy >= 0, vz >= 0, vx < occ.nx, vy < occ.ny, vz < occ.nz else { return -9 }
+            return occ.values[vx + occ.nx * (vy + occ.ny * vz)]
+        }
+        var tally: [String: Int] = [:]
+        var ringYes = 0, ringTot = 0
+        let size = 260
+        for reg in inc {
+            guard !reg.outlineLoops.isEmpty else { continue }
+            let n = LatticeRegionMask.unit(reg.normal)
+            let (u, v) = LatticeRegionMask.basis(n)
+            var lo = SIMD2<Double>(1e9, 1e9), hi = SIMD2<Double>(-1e9, -1e9)
+            for lp in reg.outlineLoops { for q in lp { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
+            lo -= SIMD2(4, 4); hi += SIMD2(4, 4)
+            let span = Swift.max(hi.x - lo.x, hi.y - lo.y)
+            for py in 0..<size { for px in 0..<size {
+                let uu = lo.x + span * (Double(px) + 0.5) / Double(size)
+                let vv = lo.y + span * (Double(size - 1 - py) + 0.5) / Double(size)
+                guard LatticeFaceOutline.signedDistance(SIMD2(uu, vv),
+                                                        loops: reg.outlineLoops) <= 0 else { continue }
+                let p = reg.origin + u * uu + v * vv + n * depth
+                if occAt(p) <= 0.5 { tally["noMat", default: 0] += 1; continue }
+                if !inc.contains(where: { LatticeRegionMask.contains(p, region: $0) }) {
+                    tally["notOwned", default: 0] += 1; continue
+                }
+                let c = cell(p)
+                // ★★★ SOLID IS TESTED BEFORE CLIPPED, and getting that order wrong is
+                // what made this metric report a 2.7% "hole" at single-cell ON that
+                // does not exist. The solid ring is material the run DELIVERS; its
+                // cells sit at the outline where the region field is naturally >= 0,
+                // so testing `sampleLinear > 0` first counted every solid cell as a
+                // clipped one. The face-on map, which checks solid first, showed 112
+                // red pixels on face 2 (0.17%) against the 2.7% this printed.
+                if !c.painted { tally["unpainted", default: 0] += 1 }
+                else if c.solid { tally["solid", default: 0] += 1 }
+                else if Self.sampleLinear(rg, p) > 0 { tally["clipped", default: 0] += 1 }
+                else { tally["drawn", default: 0] += 1 }
+            } }
+            // ring continuity, 0.1 mm inside each outline vertex
+            let loop = reg.outlineLoops[0]; let m = loop.count
+            for k in 0..<m {
+                let a = loop[(k + m - 1) % m], b = loop[k], c2 = loop[(k + 1) % m]
+                let e0 = b - a, e1 = c2 - b
+                guard simd_length(e0) > 1e-6, simd_length(e1) > 1e-6 else { continue }
+                let tg = simd_normalize(e0 / simd_length(e0) + e1 / simd_length(e1))
+                var iw = SIMD2<Double>(-tg.y, tg.x)
+                if LatticeFaceOutline.signedDistance(b + iw * 0.5, loops: reg.outlineLoops)
+                    > LatticeFaceOutline.signedDistance(b - iw * 0.5, loops: reg.outlineLoops) { iw = -iw }
+                let p = reg.origin + u * (b + iw * 0.1).x + v * (b + iw * 0.1).y + n * depth
+                let c = cell(p)
+                guard c.painted else { continue }
+                ringTot += 1; if c.solid { ringYes += 1 }
+            }
+        }
+        let tot = Swift.max(1, tally.values.reduce(0, +))
+        func pc(_ k: String) -> Double { 100.0 * Double(tally[k] ?? 0) / Double(tot) }
+        r.drawn = pc("drawn"); r.clipped = pc("clipped"); r.unpainted = pc("unpainted")
+        r.notOwned = pc("notOwned"); r.noMat = pc("noMat"); r.solidPct = pc("solid")
+        r.ring = ringTot > 0 ? 100.0 * Double(ringYes) / Double(ringTot) : 0
+        r.painted = cf.steppedCellMM.filter { $0 > 0 }.count
+        r.solidCells = cf.level.enumerated().filter {
+            $0.offset < cf.steppedCellMM.count && cf.steppedCellMM[$0.offset] > 0 && $0.element == 0
+        }.count
+        var h: [String: Int] = [:]
+        for v2 in cf.steppedCellMM where v2 > 0 { h[String(format: "%.2f", v2), default: 0] += 1 }
+        r.sizes = h.keys.sorted { (Double($0) ?? 0) < (Double($1) ?? 0) }
+            .map { "\($0)=\(h[$0]!)" }.joined(separator: " ")
+        return r
+    }
+
+    typealias Inputs2 = LatticeQuiltBakeProbe.Inputs
+
+    /// ★ IS THE "EMPTY" AT SINGLE-CELL ON A HOLE, OR IS IT THE SKIN?
+    ///
+    /// single-cell ON also auto-sets the SKIN finish (his own vocabulary table), and
+    /// the region field is `max(region, partSDF + skinMM)` — so the clip legitimately
+    /// cuts everything within `skinMM` of the surface. Sampling at 1 mm with a 0.9 mm
+    /// skin sits right on that edge, and would report the skin as a hole. A hole does
+    /// not care how deep you look; a skin disappears as soon as you look past it.
+    func testIsTheSingleCellEmptinessTheSkinOrAHole() throws {
+        for (label, single, skin, dyadic) in [
+            ("single OFF · Stepped   (skin 0.0)", false, 0.0, false),
+            ("single ON  · Stepped   (skin 0.9)", true,  0.9, false),
+            ("single ON  · DYADIC    (skin 0.9)", true,  0.9, true),
+            ("single OFF · COVERED   (skin 1.8)", false, 1.8, false),
+        ] {
+            var h = LatticeQuiltBakeProbe.His()
+            h.boundaryFinishWritten = single
+            h.skinMM = skin
+            h.dyadicSteps = dyadic
+            guard let i = try? LatticeQuiltBakeProbe.inputs(h, faces: LatticeRefusedCellProbe.hisFaces),
+                  let cf = LatticeQuiltBakeProbe.bake(i) else { continue }
+            var line = "  \(label): clipped at depth"
+            for d in [1.0, 1.5, 2.0, 3.0, 4.0] {
+                let r = Self.classify(i, cf, depth: d)
+                line += String(format: "  %.1fmm=%.1f%%", d, r.clipped)
+            }
+            print(line)
+        }
+        print("  ★ a SKIN falls away with depth; a HOLE does not.")
+
+        // ★ AND WHERE IS IT? Draw the single-cell-ON face at 3 mm — past the 0.9 mm
+        // skin, so anything still red is a hole and not the finish.
+        var h = LatticeQuiltBakeProbe.His()
+        h.boundaryFinishWritten = true; h.skinMM = 0.9
+        guard let i = try? LatticeQuiltBakeProbe.inputs(h, faces: LatticeRefusedCellProbe.hisFaces),
+              let cf = LatticeQuiltBakeProbe.bake(i), let rg = i.scene.regionSDF else { return }
+        let out = ProcessInfo.processInfo.environment["QUILT_OUT"] ?? NSTemporaryDirectory() + "quilt"
+        let inc = i.scene.regions.filter { $0.role == .include }
+        let occ = i.scene.occupancy
+        let size = 512
+        for (ri, reg) in inc.enumerated() {
+            guard !reg.outlineLoops.isEmpty else { continue }
+            let n = LatticeRegionMask.unit(reg.normal)
+            let (u, v) = LatticeRegionMask.basis(n)
+            var lo = SIMD2<Double>(1e9, 1e9), hi = SIMD2<Double>(-1e9, -1e9)
+            for lp in reg.outlineLoops { for q in lp { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
+            lo -= SIMD2(4, 4); hi += SIMD2(4, 4)
+            let span = Swift.max(hi.x - lo.x, hi.y - lo.y)
+            var px = [UInt8](repeating: 0, count: size * size * 4)
+            for py in 0..<size { for pxi in 0..<size {
+                let uu = lo.x + span * (Double(pxi) + 0.5) / Double(size)
+                let vv = lo.y + span * (Double(size - 1 - py) + 0.5) / Double(size)
+                var c: (UInt8, UInt8, UInt8) = (0, 0, 0)
+                if LatticeFaceOutline.signedDistance(SIMD2(uu, vv), loops: reg.outlineLoops) <= 0 {
+                    let p = reg.origin + u * uu + v * vv + n * 3.0
+                    let vx = Int((((p.x - Double(occ.origin.x)) / Double(occ.spacing.x))).rounded())
+                    let vy = Int((((p.y - Double(occ.origin.y)) / Double(occ.spacing.y))).rounded())
+                    let vz = Int((((p.z - Double(occ.origin.z)) / Double(occ.spacing.z))).rounded())
+                    let ok = vx >= 0 && vy >= 0 && vz >= 0 && vx < occ.nx && vy < occ.ny && vz < occ.nz
+                    let o = ok ? occ.values[vx + occ.nx * (vy + occ.ny * vz)] : -9
+                    if o <= 0.5 { c = (60, 60, 66) }
+                    else {
+                        let f = cf.field
+                        let bx = Int((((p.x - Double(f.origin.x)) / Double(f.spacing.x))).rounded())
+                        let by = Int((((p.y - Double(f.origin.y)) / Double(f.spacing.y))).rounded())
+                        let bz = Int((((p.z - Double(f.origin.z)) / Double(f.spacing.z))).rounded())
+                        let ok2 = bx >= 0 && by >= 0 && bz >= 0 && bx < f.nx && by < f.ny && bz < f.nz
+                        let k = ok2 ? bx + f.nx * (by + f.ny * bz) : -1
+                        let painted = k >= 0 && k < cf.steppedCellMM.count && cf.steppedCellMM[k] > 0
+                        let solid = painted && k < cf.level.count && cf.level[k] == 0
+                        if !painted { c = (240, 150, 30) }
+                        else if solid { c = (150, 60, 200) }
+                        else if Self.sampleLinear(rg, p) > 0 { c = (230, 40, 40) }
+                        else { c = (40, 170, 90) }
+                    }
+                }
+                let o2 = 4 * (py * size + pxi)
+                px[o2] = c.0; px[o2 + 1] = c.1; px[o2 + 2] = c.2; px[o2 + 3] = 255
+            } }
+            LatticeQuiltFrameProbe.writePNG(px, size: size,
+                to: out + "/singleON_face\(reg.faceID.map(String.init) ?? "?")_d3.png")
+            _ = ri
+        }
+        print("  maps -> \(out)  (red = CLIPPED at 3 mm = the hole)")
+    }
+
+    func testSweepEverySettingPermutation() throws {
+        var rows: [SweepRow] = []
+        // (label, singleCell, shapeFit, dyadic, skinMM, rhoLo, rhoHi)
+        let perms: [(String, Bool, Bool, Bool, Double, Double, Double)] = [
+            ("single OFF · Stepped · grade on  · None",    false, true,  false, 0.0, 0.05, 0.90),
+            ("single ON  · Stepped · grade on  · Skin",    true,  true,  false, 0.9, 0.05, 0.90),
+            ("single OFF · Stepped · GRADE OFF · None",    false, false, false, 0.0, 0.05, 0.90),
+            ("single ON  · Stepped · GRADE OFF · Skin",    true,  false, false, 0.9, 0.05, 0.90),
+            ("single OFF · DYADIC  · grade on  · None",    false, true,  true,  0.0, 0.05, 0.90),
+            ("single ON  · DYADIC  · grade on  · Skin",    true,  true,  true,  0.9, 0.05, 0.90),
+            ("single OFF · Stepped · grade on  · Covered", false, true,  false, 1.8, 0.05, 0.90),
+            ("single OFF · Stepped · grade on  · UNIFORM", false, true,  false, 0.0, 0.20, 0.20),
+            ("single OFF · Stepped · grade on  · dense",   false, true,  false, 0.0, 0.30, 0.90),
+        ]
+        for (label, single, fit, dyadic, skin, lo, hi) in perms {
+            var h = LatticeQuiltBakeProbe.His()
+            h.boundaryFinishWritten = single
+            h.shapeFit = fit
+            h.dyadicSteps = dyadic
+            h.skinMM = skin
+            h.rhoMin = lo; h.rhoMax = hi
+            guard let i = try? LatticeQuiltBakeProbe.inputs(h, faces: LatticeRefusedCellProbe.hisFaces),
+                  let cf = LatticeQuiltBakeProbe.bake(i) else {
+                print("SKIP \(label)"); continue
+            }
+            var r = Self.classify(i, cf)
+            r.label = label
+            rows.append(r)
+        }
+        print("")
+        print("PERMUTATION SWEEP — % of the declared faces at 1 mm depth")
+        print(String(repeating: "-", count: 118))
+        print("  setting                                    drawn  SOLID  clipped unpaint notOwn  ring  painted")
+        for r in rows {
+            print(String(format: "  %-42@ %5.1f%% %5.1f%% %6.1f%% %6.1f%% %6.1f%% %5.0f%% %7d",
+                         r.label as NSString, r.drawn, r.solidPct, r.clipped, r.unpainted,
+                         r.notOwned, r.ring, r.painted))
+        }
+        print("")
+        for r in rows { print("  \(r.label)\n      sizes: \(r.sizes)") }
+    }
+}

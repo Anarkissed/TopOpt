@@ -1677,6 +1677,20 @@ extension LatticePreviewOccupancy {
                                 // scatter this replaces. The new test is the complete
                                 // statement of the rule on its own: at the size this cell
                                 // will actually be DRAWN, is there room for a node.
+                                // ★ NOTE FOR THE DYADIC PATH (2026-08-28 sweep). This
+                                // sizes the ring from the cell the SPOT is drawn at.
+                                // That is right for stepped, where `n` is 1 almost
+                                // everywhere, and it is NOT sufficient on Default Grade
+                                // with single-cell members ON: ring 57% and a 1.1%
+                                // clipped residue that survives every sample depth,
+                                // against 87% / 0.2% on stepped. Rounding `n` to its
+                                // dyadic value here first was TRIED and measured as a
+                                // no-op — at n = 2 the rounding is the identity. The
+                                // real mismatch is that solid is decided per BASE cell
+                                // while the geometry is drawn per SUB-cell, and those
+                                // only disagree when n > 1, which stepped never does
+                                // because S/2 is banned. Left open deliberately rather
+                                // than papered over.
                                 let drawnCellMM = s / Double(Swift.max(1, Swift.min(n, ladderCap)))
                                 var dOutlineExact = Double.nan
                                 if region.kind == .face, !region.outlineLoops.isEmpty {
