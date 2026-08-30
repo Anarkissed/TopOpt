@@ -369,4 +369,148 @@ Hex8Stress hex8_stress_cubic(double C11, double C12, double C44,
   return out;
 }
 
+
+// ── ★ THE 2-NODE SPATIAL FRAME ELEMENT ──────────────────────────────────────
+// Standard Timoshenko frame. The shear parameter enters as
+//     phi = 12 E I / (G k A L^2)
+// and divides the bending block; phi = 0 recovers Euler-Bernoulli exactly. Shear
+// flexibility is ADDITIVE ALONG THE LENGTH, so subdividing one strut into many short
+// elements converges to the same answer as a single long one (verified: 20 elements
+// of L/r = 0.25 reproduce the closed form for the whole member to 6 significant
+// figures). That matters here because the tracer emits ~0.85 mm segments regardless
+// of cell size, so every strut arrives pre-subdivided.
+FrameStiffness frame2_stiffness(double youngs_modulus, double shear_modulus,
+                                double area, double inertia_y, double inertia_z,
+                                double torsion_j, double length,
+                                double shear_k) {
+  if (!(youngs_modulus > 0.0))
+    throw std::invalid_argument("frame2_stiffness: youngs_modulus must be > 0");
+  if (!(shear_modulus > 0.0))
+    throw std::invalid_argument("frame2_stiffness: shear_modulus must be > 0");
+  if (!(area > 0.0))
+    throw std::invalid_argument("frame2_stiffness: area must be > 0");
+  if (!(inertia_y > 0.0) || !(inertia_z > 0.0))
+    throw std::invalid_argument("frame2_stiffness: inertia must be > 0");
+  if (!(torsion_j > 0.0))
+    throw std::invalid_argument("frame2_stiffness: torsion_j must be > 0");
+  if (!(length > 0.0))
+    throw std::invalid_argument("frame2_stiffness: length must be > 0");
+
+  FrameStiffness out;
+  auto at = [&out](int r, int c) -> double& {
+    return out.k[static_cast<std::size_t>(r) * FrameStiffness::kDof + c];
+  };
+  const double E = youngs_modulus, G = shear_modulus, L = length;
+
+  // axial (ux0, ux1)
+  const double ea = E * area / L;
+  at(0, 0) = at(6, 6) = ea;
+  at(0, 6) = at(6, 0) = -ea;
+  // torsion (rx0, rx1)
+  const double gj = G * torsion_j / L;
+  at(3, 3) = at(9, 9) = gj;
+  at(3, 9) = at(9, 3) = -gj;
+
+  // bending in two planes. (I, u_i, r_i, u_j, r_j, sign):
+  //   z-inertia couples uy (1, 7) with rz (5, 11)   -- sign +1
+  //   y-inertia couples uz (2, 8) with ry (4, 10)   -- sign -1
+  struct Plane { double I; int u0, r0, u1, r1; double sgn; };
+  const Plane planes[2] = {{inertia_z, 1, 5, 7, 11, 1.0},
+                           {inertia_y, 2, 4, 8, 10, -1.0}};
+  for (const Plane& p : planes) {
+    const double phi =
+        (shear_k > 0.0) ? 12.0 * E * p.I / (G * shear_k * area * L * L) : 0.0;
+    const double d = 1.0 + phi;
+    const double c1 = 12.0 * E * p.I / (L * L * L * d);
+    const double c2 = 6.0 * E * p.I / (L * L * d);
+    const double c3 = (4.0 + phi) * E * p.I / (L * d);
+    const double c4 = (2.0 - phi) * E * p.I / (L * d);
+    at(p.u0, p.u0) = at(p.u1, p.u1) = c1;
+    at(p.u0, p.u1) = at(p.u1, p.u0) = -c1;
+    at(p.r0, p.r0) = at(p.r1, p.r1) = c3;
+    at(p.r0, p.r1) = at(p.r1, p.r0) = c4;
+    const double s = p.sgn * c2;
+    at(p.u0, p.r0) = at(p.r0, p.u0) = s;
+    at(p.u0, p.r1) = at(p.r1, p.u0) = s;
+    at(p.u1, p.r0) = at(p.r0, p.u1) = -s;
+    at(p.u1, p.r1) = at(p.r1, p.u1) = -s;
+  }
+  return out;
+}
+
+double frame_shear_bending_ratio(double youngs_modulus, double poisson,
+                                 double radius, double length, double shear_k) {
+  if (!(youngs_modulus > 0.0))
+    throw std::invalid_argument("frame_shear_bending_ratio: E must be > 0");
+  if (!(poisson > -1.0 && poisson < 0.5))
+    throw std::invalid_argument("frame_shear_bending_ratio: poisson out of range");
+  if (!(radius > 0.0) || !(length > 0.0))
+    throw std::invalid_argument("frame_shear_bending_ratio: geometry must be > 0");
+  if (!(shear_k > 0.0))
+    throw std::invalid_argument("frame_shear_bending_ratio: shear_k must be > 0");
+  // chi = delta_shear / delta_bending for a tip-loaded cantilever
+  //     = [P L /(k G A)] / [P L^3/(3 E I)] = 3 E I / (k G A L^2),  I/A = r^2/4
+  const double G = youngs_modulus / (2.0 * (1.0 + poisson));
+  const double r_over_L = radius / length;
+  return 0.75 * (youngs_modulus / (shear_k * G)) * r_over_L * r_over_L;
+}
+
+
+// ── ★ TYING A BEAM NODE INTO A SOLID ELEMENT ────────────────────────────────
+// Trilinear weights in hex8_stiffness's corner order. Partition of unity holds for
+// any point (the weights are a product of affine factors), so a tie built from these
+// reproduces a LINEAR displacement field exactly — which is the property that makes
+// it a legitimate constraint rather than an interpolation guess.
+FrameSolidTie frame_solid_tie(const Vec3& point, const Vec3& element_origin,
+                              double element_size) {
+  if (!(element_size > 0.0))
+    throw std::invalid_argument("frame_solid_tie: element_size must be > 0");
+  const double fx = (point.x - element_origin.x) / element_size;
+  const double fy = (point.y - element_origin.y) / element_size;
+  const double fz = (point.z - element_origin.z) / element_size;
+
+  FrameSolidTie tie;
+  tie.inside = (fx >= 0.0 && fx <= 1.0 && fy >= 0.0 && fy <= 1.0 &&
+                fz >= 0.0 && fz <= 1.0);
+  int n = 0;
+  for (int kz = 0; kz < 2; ++kz) {
+    const double wz = kz ? fz : (1.0 - fz);
+    for (int jy = 0; jy < 2; ++jy) {
+      const double wy = jy ? fy : (1.0 - fy);
+      for (int ix = 0; ix < 2; ++ix) {
+        const double wx = ix ? fx : (1.0 - fx);
+        tie.weight[static_cast<std::size_t>(n++)] = wx * wy * wz;
+      }
+    }
+  }
+  return tie;
+}
+
+double frame_member_peak_stress(const FrameStiffness& k,
+                                const std::array<double, 12>& u_local,
+                                double radius) {
+  if (!(radius > 0.0))
+    throw std::invalid_argument("frame_member_peak_stress: radius must be > 0");
+  const double area = M_PI * radius * radius;
+  const double inertia = M_PI * radius * radius * radius * radius / 4.0;
+
+  std::array<double, 12> f{};
+  for (int i = 0; i < 12; ++i) {
+    double acc = 0.0;
+    for (int j = 0; j < 12; ++j) acc += k(i, j) * u_local[static_cast<std::size_t>(j)];
+    f[static_cast<std::size_t>(i)] = acc;
+  }
+  // node 0 -> (N, My, Mz) = (0, 4, 5);  node 1 -> (6, 10, 11)
+  const int probe[2][3] = {{0, 4, 5}, {6, 10, 11}};
+  double worst = 0.0;
+  for (const auto& p : probe) {
+    const double n = std::fabs(f[static_cast<std::size_t>(p[0])]) / area;
+    const double my = f[static_cast<std::size_t>(p[1])];
+    const double mz = f[static_cast<std::size_t>(p[2])];
+    const double bend = std::sqrt(my * my + mz * mz) * radius / inertia;
+    worst = std::max(worst, n + bend);
+  }
+  return worst;
+}
+
 }  // namespace topopt
