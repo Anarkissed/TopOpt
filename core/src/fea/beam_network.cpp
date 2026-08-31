@@ -1,11 +1,13 @@
 #include "topopt/beam_network.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <array>
 #include <map>
 #include <string>
 #include <numeric>
+#include <set>
 #include <stdexcept>
 
 namespace topopt {
@@ -156,6 +158,8 @@ BeamRestraintReport beam_network_restraint(const BeamNetwork& net,
   BeamRestraintReport rep;
   rep.members_total = net.members.size();
   rep.member_unrestrained.assign(net.members.size(), 0);
+  rep.member_load_free.assign(net.members.size(), 0);
+  rep.member_underconstrained.assign(net.members.size(), 0);
   for (char t : node_tied) rep.nodes_tied += (t != 0) ? 1u : 0u;
 
   // Node degree within the network.
@@ -183,10 +187,20 @@ BeamRestraintReport beam_network_restraint(const BeamNetwork& net,
 
   // Components, and whether each reaches a tie at all. A component with no tie
   // carries no load however well its members are connected to each other.
+  // ★ COMPONENTS ARE COUNTED OVER MEMBERS, NOT OVER NODES. A node attached to
+  // nothing is a leftover, not a lattice component -- and dropping members leaves
+  // exactly such nodes behind. Counting them inflated a real part's components from
+  // 385 to 3,203 after one prune, turning a converging problem into a phantom one.
   DisjointSet comp(net.nodes.size());
   for (const BeamNetwork::Member& m : net.members) comp.unite(m.node_a, m.node_b);
+  std::vector<char> node_has_member(net.nodes.size(), 0);
+  for (const BeamNetwork::Member& m : net.members) {
+    node_has_member[static_cast<std::size_t>(m.node_a)] = 1;
+    node_has_member[static_cast<std::size_t>(m.node_b)] = 1;
+  }
   std::map<int, bool> root_has_tie;
   for (std::size_t n = 0; n < net.nodes.size(); ++n) {
+    if (!node_has_member[n]) continue;          // no member: not a component
     const int r = comp.find(static_cast<int>(n));
     auto it = root_has_tie.find(r);
     const bool tied = node_tied[n] != 0;
@@ -197,6 +211,51 @@ BeamRestraintReport beam_network_restraint(const BeamNetwork& net,
     ++rep.components_total;
     if (!kv.second) ++rep.components_unrestrained;
   }
+  for (std::size_t i = 0; i < net.members.size(); ++i) {
+    const int r = comp.find(net.members[i].node_a);
+    const auto it = root_has_tie.find(r);
+    if (it != root_has_tie.end() && !it->second) rep.member_load_free[i] = 1;
+  }
+
+  // ★ THREE NON-COLLINEAR TIES PER COMPONENT. Gather each component's tied points
+  // and test that they span a plane, not a line or a point.
+  std::set<int> under_roots;
+  std::map<int, std::vector<Vec3>> root_ties;
+  for (std::size_t n = 0; n < net.nodes.size(); ++n) {
+    if (!node_has_member[n] || node_tied[n] == 0) continue;
+    root_ties[comp.find(static_cast<int>(n))].push_back(net.nodes[n]);
+  }
+  for (const auto& kv : root_has_tie) {
+    if (!kv.second) continue;                   // already counted as untied
+    const auto it = root_ties.find(kv.first);
+    const std::vector<Vec3>& pts2 =
+        (it == root_ties.end()) ? std::vector<Vec3>() : it->second;
+    bool ok = false;
+    if (pts2.size() >= 3) {
+      // non-collinear if some pair of edge vectors from pts2[0] has a non-zero cross
+      double best = 0.0, scale = 0.0;
+      for (std::size_t a = 1; a < pts2.size(); ++a) {
+        const double ux = pts2[a].x - pts2[0].x, uy = pts2[a].y - pts2[0].y,
+                     uz = pts2[a].z - pts2[0].z;
+        scale = std::max(scale, std::sqrt(ux * ux + uy * uy + uz * uz));
+        for (std::size_t b2 = a + 1; b2 < pts2.size(); ++b2) {
+          const double vx = pts2[b2].x - pts2[0].x, vy = pts2[b2].y - pts2[0].y,
+                       vz = pts2[b2].z - pts2[0].z;
+          const double cx = uy * vz - uz * vy, cy = uz * vx - ux * vz,
+                       cz = ux * vy - uy * vx;
+          best = std::max(best, std::sqrt(cx * cx + cy * cy + cz * cz));
+        }
+      }
+      ok = (scale > 0.0) && (best > 1e-9 * scale * scale);
+    }
+    if (!ok) {
+      ++rep.components_underconstrained;
+      under_roots.insert(kv.first);
+    }
+  }
+  for (std::size_t i = 0; i < net.members.size(); ++i)
+    if (under_roots.count(comp.find(net.members[i].node_a)))
+      rep.member_underconstrained[i] = 1;
   return rep;
 }
 
@@ -263,6 +322,175 @@ Csr compress(const Sparse& s, int n) {
 
 }  // namespace
 
+
+namespace {
+
+// ── ★ REVERSE CUTHILL-McKEE ─────────────────────────────────────────────────
+// The coupled system numbers all the SOLID dof first and all the BEAM dof after,
+// so every tie scatters its coupling far off the diagonal. RCM renumbers by
+// breadth-first distance from a peripheral node, which pulls those entries in.
+// A narrow band is what makes an incomplete factorisation a good approximation:
+// IC(0) keeps only the sparsity of A, so the further the true fill-in lies from
+// that pattern, the more of it is thrown away.
+std::vector<int> rcm_order(const Csr& A) {
+  const int n = A.n;
+  std::vector<int> deg(static_cast<std::size_t>(n));
+  for (int i = 0; i < n; ++i)
+    deg[static_cast<std::size_t>(i)] =
+        A.ptr[static_cast<std::size_t>(i) + 1] - A.ptr[static_cast<std::size_t>(i)];
+  std::vector<char> seen(static_cast<std::size_t>(n), 0);
+  std::vector<int> order;
+  order.reserve(static_cast<std::size_t>(n));
+  for (int start = 0; start < n; ++start) {
+    if (seen[static_cast<std::size_t>(start)]) continue;
+    // a low-degree seed approximates a peripheral node cheaply
+    int seed = start;
+    for (int i = start; i < n; ++i)
+      if (!seen[static_cast<std::size_t>(i)] &&
+          deg[static_cast<std::size_t>(i)] < deg[static_cast<std::size_t>(seed)])
+        seed = i;
+    std::vector<int> queue{seed};
+    seen[static_cast<std::size_t>(seed)] = 1;
+    for (std::size_t qi = 0; qi < queue.size(); ++qi) {
+      const int v = queue[qi];
+      order.push_back(v);
+      std::vector<int> nbr;
+      for (int k = A.ptr[static_cast<std::size_t>(v)];
+           k < A.ptr[static_cast<std::size_t>(v) + 1]; ++k) {
+        const int w = A.idx[static_cast<std::size_t>(k)];
+        if (w != v && !seen[static_cast<std::size_t>(w)]) {
+          seen[static_cast<std::size_t>(w)] = 1;
+          nbr.push_back(w);
+        }
+      }
+      std::sort(nbr.begin(), nbr.end(), [&](int a, int b) {
+        return deg[static_cast<std::size_t>(a)] < deg[static_cast<std::size_t>(b)];
+      });
+      for (int w : nbr) queue.push_back(w);
+    }
+  }
+  std::reverse(order.begin(), order.end());   // the R in RCM
+  return order;
+}
+
+// ── ★ INCOMPLETE CHOLESKY, IC(0) ────────────────────────────────────────────
+// A ~ L L^T keeping ONLY the sparsity of A's lower triangle. Symmetric, so it
+// preserves the property CG needs; ILU does not. IC(0) can break down on an
+// ill-conditioned matrix (a non-positive pivot), and the standard remedy is a
+// diagonal shift, retried with a growing shift until it succeeds. Returns false
+// if even a large shift fails, so the caller can fall back to Jacobi rather than
+// silently using a broken preconditioner.
+struct IncompleteCholesky {
+  std::vector<int> ptr, idx;
+  std::vector<double> val;   // lower triangle including the diagonal
+  int n = 0;
+
+  bool factor(const Csr& A, double shift) {
+    n = A.n;
+    ptr.assign(static_cast<std::size_t>(n) + 1, 0);
+    idx.clear();
+    val.clear();
+    // lower-triangle pattern of A
+    for (int i = 0; i < n; ++i) {
+      for (int k = A.ptr[static_cast<std::size_t>(i)];
+           k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        if (A.idx[static_cast<std::size_t>(k)] <= i) {
+          idx.push_back(A.idx[static_cast<std::size_t>(k)]);
+          val.push_back(A.val[static_cast<std::size_t>(k)]);
+        }
+      ptr[static_cast<std::size_t>(i) + 1] = static_cast<int>(idx.size());
+    }
+    for (int i = 0; i < n; ++i)
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        if (idx[static_cast<std::size_t>(k)] == i)
+          val[static_cast<std::size_t>(k)] *= (1.0 + shift);
+
+    std::vector<double> work(static_cast<std::size_t>(n), 0.0);
+    std::vector<int> pos(static_cast<std::size_t>(n), -1);
+    for (int i = 0; i < n; ++i) {
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        work[static_cast<std::size_t>(idx[static_cast<std::size_t>(k)])] =
+            val[static_cast<std::size_t>(k)];
+        pos[static_cast<std::size_t>(idx[static_cast<std::size_t>(k)])] = k;
+      }
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = idx[static_cast<std::size_t>(k)];
+        if (j >= i) continue;
+        double s = work[static_cast<std::size_t>(j)];
+        for (int m = ptr[static_cast<std::size_t>(j)];
+             m < ptr[static_cast<std::size_t>(j) + 1]; ++m) {
+          const int c = idx[static_cast<std::size_t>(m)];
+          if (c >= j) break;
+          if (pos[static_cast<std::size_t>(c)] >= 0)
+            s -= val[static_cast<std::size_t>(m)] *
+                 val[static_cast<std::size_t>(pos[static_cast<std::size_t>(c)])];
+        }
+        double djj = 0.0;
+        for (int m = ptr[static_cast<std::size_t>(j)];
+             m < ptr[static_cast<std::size_t>(j) + 1]; ++m)
+          if (idx[static_cast<std::size_t>(m)] == j) djj = val[static_cast<std::size_t>(m)];
+        if (!(std::fabs(djj) > 0.0)) return false;
+        val[static_cast<std::size_t>(k)] = s / djj;
+        work[static_cast<std::size_t>(j)] = val[static_cast<std::size_t>(k)];
+      }
+      // the diagonal
+      int dk = -1;
+      double d = 0.0;
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        if (idx[static_cast<std::size_t>(k)] == i) { dk = k; d = work[static_cast<std::size_t>(i)]; }
+      if (dk < 0) return false;
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = idx[static_cast<std::size_t>(k)];
+        if (j < i) d -= val[static_cast<std::size_t>(k)] * val[static_cast<std::size_t>(k)];
+      }
+      if (!(d > 0.0)) return false;                    // breakdown: caller shifts
+      val[static_cast<std::size_t>(dk)] = std::sqrt(d);
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        pos[static_cast<std::size_t>(idx[static_cast<std::size_t>(k)])] = -1;
+        work[static_cast<std::size_t>(idx[static_cast<std::size_t>(k)])] = 0.0;
+      }
+    }
+    return true;
+  }
+
+  // z = (L L^T)^-1 r
+  void apply(const std::vector<double>& r, std::vector<double>& z) const {
+    z = r;
+    for (int i = 0; i < n; ++i) {              // forward
+      double s = z[static_cast<std::size_t>(i)];
+      double d = 1.0;
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = idx[static_cast<std::size_t>(k)];
+        if (j < i) s -= val[static_cast<std::size_t>(k)] * z[static_cast<std::size_t>(j)];
+        else if (j == i) d = val[static_cast<std::size_t>(k)];
+      }
+      z[static_cast<std::size_t>(i)] = s / d;
+    }
+    for (int i = n - 1; i >= 0; --i) {         // backward
+      double d = 1.0;
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        if (idx[static_cast<std::size_t>(k)] == i) d = val[static_cast<std::size_t>(k)];
+      z[static_cast<std::size_t>(i)] /= d;
+      for (int k = ptr[static_cast<std::size_t>(i)];
+           k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = idx[static_cast<std::size_t>(k)];
+        if (j < i) z[static_cast<std::size_t>(j)] -= val[static_cast<std::size_t>(k)] *
+                                                     z[static_cast<std::size_t>(i)];
+      }
+    }
+  }
+};
+
+}  // namespace
+
 CoupledLatticeSolve solve_coupled_lattice(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const BeamNetwork& net, const std::vector<DirichletBC>& bcs,
@@ -314,11 +542,43 @@ CoupledLatticeSolve solve_coupled_lattice(
     const int i = static_cast<int>(std::floor((p.x - grid.origin.x) / grid.spacing));
     const int j = static_cast<int>(std::floor((p.y - grid.origin.y) / grid.spacing));
     const int k = static_cast<int>(std::floor((p.z - grid.origin.z) / grid.spacing));
-    if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz) continue;
-    if (!hex_mask[grid.index(i, j, k)]) continue;
-    const Vec3 org{grid.origin.x + i * grid.spacing, grid.origin.y + j * grid.spacing,
-                   grid.origin.z + k * grid.spacing};
+    // ★ TIE AT THE INTERFACE, not only strictly inside a meshed voxel. The lattice
+    // occupies a region that by construction has NO hex elements, so "inside a hex"
+    // ties almost nothing: measured 166 of 22,252 nodes on a real part, leaving the
+    // lattice hanging off 166 points. A strut is bonded wherever it TOUCHES solid,
+    // so search the 3x3x3 neighbourhood for a meshed voxel and clamp onto it.
+    int hi = -1, hj = -1, hk = -1;
+    {
+      double best = -1.0;
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            const int ci = i + di, cj = j + dj, ck = k + dk;
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= grid.nx || cj >= grid.ny ||
+                ck >= grid.nz)
+              continue;
+            if (!hex_mask[grid.index(ci, cj, ck)]) continue;
+            const double cx = grid.origin.x + (ci + 0.5) * grid.spacing;
+            const double cy = grid.origin.y + (cj + 0.5) * grid.spacing;
+            const double cz = grid.origin.z + (ck + 0.5) * grid.spacing;
+            const double d2 = (p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy) +
+                              (p.z - cz) * (p.z - cz);
+            if (best < 0.0 || d2 < best) { best = d2; hi = ci; hj = cj; hk = ck; }
+          }
+    }
+    if (hi < 0) continue;
+    const int i_h = hi, j_h = hj, k_h = hk;
+    const Vec3 org{grid.origin.x + i_h * grid.spacing,
+                   grid.origin.y + j_h * grid.spacing,
+                   grid.origin.z + k_h * grid.spacing};
     tie_w[b] = frame_solid_tie(p, org, grid.spacing);
+    // clamp the local coordinates: a node just OUTSIDE its host must tie to the
+    // nearest face, never extrapolate (which would invent stiffness).
+    {
+      double sum = 0.0;
+      for (double& w : tie_w[b].weight) { w = std::max(0.0, w); sum += w; }
+      if (sum > 0.0) for (double& w : tie_w[b].weight) w /= sum;
+    }
     // frame_solid_tie returns weights in x-fastest order; remap BOTH the weights
     // and the node ids into core's bottom-CCW-then-top-CCW order so a tie lands on
     // the same corner the element stiffness used.
@@ -328,7 +588,7 @@ CoupledLatticeSolve solve_coupled_lattice(
     for (int dk = 0; dk < 2 && ok; ++dk)
       for (int dj = 0; dj < 2 && ok; ++dj)
         for (int di = 0; di < 2 && ok; ++di) {
-          const int id = nid[node_index(i + di, j + dj, k + dk)];
+          const int id = nid[node_index(i_h + di, j_h + dj, k_h + dk)];
           if (id < 0) ok = false;
           raw_ids[n++] = id;
         }
@@ -342,17 +602,72 @@ CoupledLatticeSolve solve_coupled_lattice(
       }
       tie_w[b] = remapped;
     }
-    if (ok) { tied[b] = 1; ++out.beam_nodes_tied; }
+    if (ok) { tied[b] = 1; ++out.beam_nodes_tied;
+              if (!tie_w[b].inside) ++out.beam_nodes_tied_by_projection; }
   }
 
   // ── ★ RESTRAINT BEFORE FACTORISATION, not after it fails ─────────────────
   out.restraint = beam_network_restraint(net, tied);
+  if (out.restraint.components_unrestrained > 0) {
+    out.refusal =
+        std::to_string(out.restraint.components_unrestrained) + " of " +
+        std::to_string(out.restraint.components_total) +
+        " lattice component(s) reach no tie at all: they carry no load and make the "
+        "system singular. Drop them, or widen the tie, before solving.";
+    return out;
+  }
+  if (out.restraint.components_underconstrained > 0) {
+    out.refusal =
+        std::to_string(out.restraint.components_underconstrained) + " of " +
+        std::to_string(out.restraint.components_total) +
+        " lattice component(s) are held at fewer than three NON-COLLINEAR tie "
+        "points: a pinned tie restrains translation only, so they can still rotate "
+        "rigidly and the system is singular.";
+    return out;
+  }
   if (out.restraint.members_unrestrained > 0) {
     out.refusal = "the network contains " +
                   std::to_string(out.restraint.members_unrestrained) +
                   " unrestrained member(s): a pinned tie leaves them free to rotate, "
                   "so the system would be singular. Drop or restrain them first.";
     return out;
+  }
+
+  // ── ★ THE SOLID MUST REACH A SUPPORT TOO ──────────────────────────────────
+  // Every restraint rule above is about the LATTICE. None of them notices that the
+  // part itself can contain hex islands with no path to a Dirichlet node -- rigid
+  // bodies that make the system singular however perfectly the lattice is tied. The
+  // STL is one body only after the lattice is added; the solid alone need not be.
+  {
+    DisjointSet sc(static_cast<std::size_t>(NS));
+    for (std::size_t e : hex_cells) {
+      const int i = static_cast<int>(e % grid.nx);
+      const int j = static_cast<int>((e / grid.nx) % grid.ny);
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * grid.ny));
+      int first = -1;
+      for (int dk = 0; dk < 2; ++dk)
+        for (int dj = 0; dj < 2; ++dj)
+          for (int di = 0; di < 2; ++di) {
+            const int id = nid[node_index(i + di, j + dj, k + dk)];
+            if (first < 0) first = id; else sc.unite(first, id);
+          }
+    }
+    std::set<int> grounded;
+    for (const DirichletBC& b : bcs) {
+      if (b.node < 0 || static_cast<std::size_t>(b.node) >= nid.size()) continue;
+      const int n = nid[static_cast<std::size_t>(b.node)];
+      if (n >= 0) grounded.insert(sc.find(n));
+    }
+    std::size_t floating = 0;
+    for (int n = 0; n < NS; ++n)
+      if (!grounded.count(sc.find(n))) ++floating;
+    if (floating > 0) {
+      out.refusal = std::to_string(floating) + " of " + std::to_string(NS) +
+                    " SOLID nodes reach no support: the part contains free-floating "
+                    "hex island(s), so the system is singular regardless of how the "
+                    "lattice is tied.";
+      return out;
+    }
   }
 
   // ── master DOF: [3*NS solid][the beam dof that are NOT slaved] ────────────
@@ -494,67 +809,135 @@ CoupledLatticeSolve solve_coupled_lattice(
   if (nbc == 0) { out.refusal = "no support landed on the solid mesh"; return out; }
   if (nld == 0) { out.refusal = "no load landed on the solid mesh"; return out; }
 
-  // ── solve: Jacobi-preconditioned CG on the free DOF ──────────────────────
-  Csr A = compress(K, M);
-  std::vector<double> diag(static_cast<std::size_t>(M), 0.0);
+  // ── solve on the FREE dof: RCM reorder, IC(0) preconditioner, CG ─────────
+  // The previous version masked fixed dof inside a full-size matrix and used a
+  // Jacobi preconditioner. That is the crudest useful choice, and on a mixed
+  // solid/beam system it is a poor one: hex stiffness scales as E*h (thousands)
+  // while beam bending goes as EI/L^3 with I ~ 0.05 mm^4. Measured on a real
+  // 6 mm lattice: 9,492 iterations, 598 s.
+  Csr Afull = compress(K, M);
+  {
+    std::vector<double> dg(static_cast<std::size_t>(M), 0.0);
+    for (int i = 0; i < M; ++i)
+      for (int k = Afull.ptr[static_cast<std::size_t>(i)];
+           k < Afull.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        if (Afull.idx[static_cast<std::size_t>(k)] == i)
+          dg[static_cast<std::size_t>(i)] += Afull.val[static_cast<std::size_t>(k)];
+    for (int i = 0; i < M; ++i)
+      if (!(dg[static_cast<std::size_t>(i)] > 0.0)) fixed[static_cast<std::size_t>(i)] = 1;
+  }
+  std::vector<int> to_free(static_cast<std::size_t>(M), -1);
+  std::vector<int> from_free;
   for (int i = 0; i < M; ++i)
+    if (!fixed[static_cast<std::size_t>(i)]) {
+      to_free[static_cast<std::size_t>(i)] = static_cast<int>(from_free.size());
+      from_free.push_back(i);
+    }
+  const int NF = static_cast<int>(from_free.size());
+  if (NF == 0) { out.refusal = "every degree of freedom is constrained"; return out; }
+
+  Sparse Sf;
+  for (int i = 0; i < M; ++i) {
+    const int fi = to_free[static_cast<std::size_t>(i)];
+    if (fi < 0) continue;
+    for (int k = Afull.ptr[static_cast<std::size_t>(i)];
+         k < Afull.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+      const int fj = to_free[static_cast<std::size_t>(Afull.idx[static_cast<std::size_t>(k)])];
+      if (fj >= 0) Sf.add(fi, fj, Afull.val[static_cast<std::size_t>(k)]);
+    }
+  }
+  Csr Af = compress(Sf, NF);
+
+  // RCM: renumber so the tie coupling sits near the diagonal, which is what makes
+  // IC(0) -- a factorisation restricted to A's own sparsity -- a good approximation.
+  const std::vector<int> perm = rcm_order(Af);
+  std::vector<int> inv(static_cast<std::size_t>(NF), 0);
+  for (int i = 0; i < NF; ++i) inv[static_cast<std::size_t>(perm[static_cast<std::size_t>(i)])] = i;
+  Sparse Sp;
+  for (int i = 0; i < NF; ++i)
+    for (int k = Af.ptr[static_cast<std::size_t>(i)];
+         k < Af.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+      Sp.add(inv[static_cast<std::size_t>(i)],
+             inv[static_cast<std::size_t>(Af.idx[static_cast<std::size_t>(k)])],
+             Af.val[static_cast<std::size_t>(k)]);
+  Csr A = compress(Sp, NF);
+
+  std::vector<double> Fp(static_cast<std::size_t>(NF), 0.0);
+  for (int i = 0; i < NF; ++i)
+    Fp[static_cast<std::size_t>(inv[static_cast<std::size_t>(i)])] =
+        F[static_cast<std::size_t>(from_free[static_cast<std::size_t>(i)])];
+
+  std::vector<double> diag(static_cast<std::size_t>(NF), 1.0);
+  for (int i = 0; i < NF; ++i)
     for (int k = A.ptr[static_cast<std::size_t>(i)];
          k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
       if (A.idx[static_cast<std::size_t>(k)] == i)
-        diag[static_cast<std::size_t>(i)] += A.val[static_cast<std::size_t>(k)];
-  for (int i = 0; i < M; ++i)
-    if (fixed[static_cast<std::size_t>(i)] || !(diag[static_cast<std::size_t>(i)] > 0.0))
-      fixed[static_cast<std::size_t>(i)] = 1;
+        diag[static_cast<std::size_t>(i)] = A.val[static_cast<std::size_t>(k)];
 
-  auto mask_apply = [&](std::vector<double>& v) {
-    for (int i = 0; i < M; ++i)
-      if (fixed[static_cast<std::size_t>(i)]) v[static_cast<std::size_t>(i)] = 0.0;
+  // ★ IC(0) IS OFF BY DEFAULT, AND THAT IS A MEASUREMENT, NOT A PREFERENCE.
+  // It looked like the obvious upgrade over Jacobi on a badly-conditioned mixed
+  // system. MEASURED on the 6 mm lattice: Jacobi converged in 598 s; IC(0)+RCM was
+  // killed after 1 h 29 m without finishing -- at least 9x slower. The factorisation
+  // and its two sequential triangular solves per iteration cost more than the
+  // iterations they save at this size. Kept, and reachable, because it may win on a
+  // different shape; never enabled without measuring that shape.
+  IncompleteCholesky ic;
+  bool have_ic = false;
+  if (const char* want = std::getenv("TOPOPT_BEAM_IC")) {
+    if (std::string(want) == "1")
+      for (double shift : {0.0, 1e-3, 1e-2, 1e-1, 1.0})
+        if (ic.factor(A, shift)) { have_ic = true; out.ic_shift = shift; break; }
+  }
+  out.used_incomplete_cholesky = have_ic;
+
+  std::vector<double> u(static_cast<std::size_t>(NF), 0.0), r = Fp,
+      z(static_cast<std::size_t>(NF), 0.0), p(static_cast<std::size_t>(NF), 0.0),
+      Ap(static_cast<std::size_t>(NF), 0.0);
+  auto precondition = [&](const std::vector<double>& rr, std::vector<double>& zz) {
+    if (have_ic) { ic.apply(rr, zz); return; }
+    zz.assign(static_cast<std::size_t>(NF), 0.0);
+    for (int i = 0; i < NF; ++i)
+      zz[static_cast<std::size_t>(i)] = rr[static_cast<std::size_t>(i)] /
+                                        diag[static_cast<std::size_t>(i)];
   };
-  std::vector<double> u(static_cast<std::size_t>(M), 0.0), r = F, z(static_cast<std::size_t>(M)),
-      p(static_cast<std::size_t>(M)), Ap(static_cast<std::size_t>(M));
-  mask_apply(r);
   double fnorm = 0.0;
   for (double v : r) fnorm += v * v;
   fnorm = std::sqrt(fnorm);
   if (!(fnorm > 0.0)) { out.refusal = "the applied load is zero on the free dof"; return out; }
-  for (int i = 0; i < M; ++i)
-    z[static_cast<std::size_t>(i)] =
-        fixed[static_cast<std::size_t>(i)] ? 0.0
-                                           : r[static_cast<std::size_t>(i)] /
-                                                 diag[static_cast<std::size_t>(i)];
+  precondition(r, z);
   p = z;
   double rz = 0.0;
-  for (int i = 0; i < M; ++i) rz += r[static_cast<std::size_t>(i)] * z[static_cast<std::size_t>(i)];
+  for (int i = 0; i < NF; ++i) rz += r[static_cast<std::size_t>(i)] * z[static_cast<std::size_t>(i)];
   int it = 0;
   double rn = fnorm;
   for (; it < cg_max_iterations && rn > cg_tolerance * fnorm; ++it) {
     A.multiply(p, Ap);
-    mask_apply(Ap);
     double pAp = 0.0;
-    for (int i = 0; i < M; ++i) pAp += p[static_cast<std::size_t>(i)] * Ap[static_cast<std::size_t>(i)];
+    for (int i = 0; i < NF; ++i) pAp += p[static_cast<std::size_t>(i)] * Ap[static_cast<std::size_t>(i)];
     if (!(std::fabs(pAp) > 0.0)) break;
     const double alpha = rz / pAp;
-    for (int i = 0; i < M; ++i) {
+    for (int i = 0; i < NF; ++i) {
       u[static_cast<std::size_t>(i)] += alpha * p[static_cast<std::size_t>(i)];
       r[static_cast<std::size_t>(i)] -= alpha * Ap[static_cast<std::size_t>(i)];
     }
-    for (int i = 0; i < M; ++i)
-      z[static_cast<std::size_t>(i)] =
-          fixed[static_cast<std::size_t>(i)] ? 0.0
-                                             : r[static_cast<std::size_t>(i)] /
-                                                   diag[static_cast<std::size_t>(i)];
+    precondition(r, z);
     double rz2 = 0.0, r2 = 0.0;
-    for (int i = 0; i < M; ++i) {
+    for (int i = 0; i < NF; ++i) {
       rz2 += r[static_cast<std::size_t>(i)] * z[static_cast<std::size_t>(i)];
       r2 += r[static_cast<std::size_t>(i)] * r[static_cast<std::size_t>(i)];
     }
     const double beta = rz2 / rz;
     rz = rz2;
     rn = std::sqrt(r2);
-    for (int i = 0; i < M; ++i)
+    for (int i = 0; i < NF; ++i)
       p[static_cast<std::size_t>(i)] = z[static_cast<std::size_t>(i)] +
                                        beta * p[static_cast<std::size_t>(i)];
   }
+  std::vector<double> ufull(static_cast<std::size_t>(M), 0.0);
+  for (int i = 0; i < NF; ++i)
+    ufull[static_cast<std::size_t>(from_free[static_cast<std::size_t>(i)])] =
+        u[static_cast<std::size_t>(inv[static_cast<std::size_t>(i)])];
+  u = ufull;
   out.iterations = it;
   out.residual = rn / fnorm;
   if (!(out.residual <= cg_tolerance) || !std::isfinite(out.residual)) {

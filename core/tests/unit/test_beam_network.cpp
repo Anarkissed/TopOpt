@@ -274,6 +274,134 @@ void test_coupled_solve_REFUSES_a_mechanism() {
   CHECK(r2.restraint.members_unrestrained == 1, "and it is named as unrestrained");
 }
 
+void test_coupled_solve_REFUSES_untied_components_instantly() {
+  // ★ THE 40-MINUTE FAILURE. On a real part 292 of 385 lattice components reached
+  // NO tie -- floating, carrying nothing, guaranteed singular. The restraint report
+  // said so, but the solve only refused on unrestrained MEMBERS, so it ground for
+  // 2,406 s and then failed on residual. The information to refuse was available in
+  // milliseconds. A component that reaches no tie is now a refusal, not a solve.
+  const int nx = 4, ny = 4, nz = 4;
+  const double h = 1.7;
+  topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+  // mesh only the LOWER half as solid; the lattice will sit in the empty upper half
+  std::vector<char> mask(g.voxel_count(), 0);
+  for (int k = 0; k < 2; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) mask[g.index(i, j, k)] = 1;
+
+  // a connected chain floating well above the meshed solid: restrained internally
+  // (every member meets another at a junction) but reaching no tie whatsoever
+  std::vector<BeamSegment> segs;
+  const double zf = 3.6 * h;
+  for (int i = 0; i < 4; ++i)
+    segs.push_back({Vec3{1.0 * h + 0.2 * i, 2.0 * h, zf},
+                    Vec3{1.0 * h + 0.2 * (i + 1), 2.0 * h, zf}, 0.2});
+  segs.push_back({Vec3{1.0 * h + 0.4, 2.0 * h, zf},
+                  Vec3{1.0 * h + 0.4, 2.0 * h + 0.3, zf}, 0.2});
+  const topopt::BeamNetwork net = topopt::build_beam_network(segs);
+
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int j = 0; j <= ny; ++j)
+    for (int i = 0; i <= nx; ++i)
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(i, j, 0), c, 0.0});
+  lds.push_back({nod(2, 2, 2), 2, 1.0});
+
+  const topopt::CoupledLatticeSolve r = topopt::solve_coupled_lattice(
+      g, mask, net, bcs, lds, 3500.0, 0.35, 0.9, 1e-8, 100000);
+  CHECK(!r.refusal.empty() && !r.converged,
+        "a component that reaches NO tie is refused, not solved");
+  CHECK(r.restraint.components_unrestrained >= 1,
+        "and the untied component is counted");
+  CHECK(r.iterations == 0,
+        "the refusal costs ZERO solver iterations -- it is checked before assembly");
+  // and the caller is told WHICH members to drop, not merely how many
+  std::size_t flagged = 0;
+  for (char c : r.restraint.member_load_free) flagged += c ? 1u : 0u;
+  CHECK(flagged == net.member_count(),
+        "every member of the untied component is NAMED as load-free");
+}
+
+void test_component_needs_three_noncollinear_ties() {
+  // ★ THE MECHANISM THAT SURVIVED EVERY EARLIER CHECK. A component can be fully
+  // connected, reach a tie, and have no unrestrained member, and STILL rotate
+  // rigidly -- because pinned ties restrain TRANSLATION only. A real part reached
+  // 0 untied components and diverged to a residual of 6.6e6 for exactly this.
+  auto line_net = [](int n_ties) {
+    std::vector<BeamSegment> segs;
+    for (int i = 0; i < 6; ++i)
+      segs.push_back({Vec3{0.5 * i, 0, 0}, Vec3{0.5 * (i + 1), 0, 0}, 0.2});
+    return topopt::build_beam_network(segs);
+  };
+  const topopt::BeamNetwork line = line_net(0);
+
+  // one tie: spins about the tie point
+  std::vector<char> t1(line.node_count(), 0); t1[0] = 1;
+  CHECK(topopt::beam_network_restraint(line, t1).components_underconstrained == 1,
+        "ONE tie leaves the component free to rotate");
+
+  // two ties, necessarily collinear on a straight chain: spins about their axis
+  std::vector<char> t2(line.node_count(), 0); t2[0] = 1; t2[line.node_count() - 1] = 1;
+  const topopt::BeamRestraintReport r2 = topopt::beam_network_restraint(line, t2);
+  CHECK(r2.components_underconstrained == 1,
+        "TWO COLLINEAR ties still leave the axial spin");
+  std::size_t flagged2 = 0;
+  for (char c : r2.member_underconstrained) flagged2 += c ? 1u : 0u;
+  CHECK(flagged2 == line.member_count(),
+        "and every member of it is NAMED, so a caller can drop them");
+
+  // three ties spanning a plane: rigid
+  std::vector<BeamSegment> tri;
+  for (int i = 0; i < 3; ++i)
+    tri.push_back({Vec3{0.5 * i, 0, 0}, Vec3{0.5 * (i + 1), 0, 0}, 0.2});
+  tri.push_back({Vec3{0.5, 0, 0}, Vec3{0.5, 1.0, 0}, 0.2});
+  const topopt::BeamNetwork plane = topopt::build_beam_network(tri);
+  std::vector<char> t3(plane.node_count(), 0);
+  int marked = 0;
+  for (std::size_t n = 0; n < plane.node_count() && marked < 3; ++n) {
+    const Vec3& q = plane.nodes[n];
+    const bool corner = (std::fabs(q.x) < 1e-9 && std::fabs(q.y) < 1e-9) ||
+                        (std::fabs(q.x - 1.5) < 1e-9) ||
+                        (std::fabs(q.y - 1.0) < 1e-9);
+    if (corner) { t3[n] = 1; ++marked; }
+  }
+  CHECK(marked == 3, "three tie points marked");
+  CHECK(topopt::beam_network_restraint(plane, t3).components_underconstrained == 0,
+        "THREE NON-COLLINEAR ties fully restrain the component");
+}
+
+void test_components_ignore_dangling_nodes() {
+  // ★ A NODE ATTACHED TO NOTHING IS NOT A COMPONENT. Dropping load-free members
+  // leaves their nodes behind; counting those as components inflated a real part
+  // from 385 to 3,203 after one prune and made the retry look hopeless.
+  std::vector<BeamSegment> segs = {
+      {Vec3{0, 0, 0}, Vec3{1, 0, 0}, 0.5},
+      {Vec3{1, 0, 0}, Vec3{2, 0, 0}, 0.5},
+      {Vec3{50, 50, 50}, Vec3{51, 50, 50}, 0.5}};   // a separate stick
+  const topopt::BeamNetwork full = topopt::build_beam_network(segs);
+  std::vector<char> tied(full.node_count(), 0);
+  tied[0] = 1;
+  const topopt::BeamRestraintReport before = topopt::beam_network_restraint(full, tied);
+  CHECK(before.components_total == 2, "two real components before pruning");
+
+  // now drop the separate stick's member but keep every node, as a prune does
+  topopt::BeamNetwork pruned;
+  pruned.nodes = full.nodes;
+  for (const auto& m : full.members) {
+    const Vec3& a = full.nodes[static_cast<std::size_t>(m.node_a)];
+    if (a.x < 10.0) pruned.members.push_back(m);
+  }
+  const topopt::BeamRestraintReport after =
+      topopt::beam_network_restraint(pruned, tied);
+  CHECK(after.components_total == 1,
+        "the orphaned NODES do not become components");
+  CHECK(after.components_unrestrained == 0,
+        "and the remaining component still reaches its tie");
+}
+
 void test_coupled_solve_refuses_missing_supports() {
   const topopt::VoxelGrid g = block_grid(2, 2, 2, 1.7);
   const std::vector<char> mask(g.voxel_count(), 1);
@@ -309,6 +437,9 @@ int main() {
   test_circular_section();
   test_coupled_solve_matches_the_closed_form();
   test_coupled_solve_REFUSES_a_mechanism();
+  test_coupled_solve_REFUSES_untied_components_instantly();
+  test_component_needs_three_noncollinear_ties();
+  test_components_ignore_dangling_nodes();
   test_coupled_solve_refuses_missing_supports();
   test_refusals();
   std::printf("test_beam_network: %d checks, %d failures\n", g_checks, g_failures);

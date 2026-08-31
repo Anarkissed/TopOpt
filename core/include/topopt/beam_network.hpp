@@ -75,8 +75,22 @@ struct BeamRestraintReport {
   std::size_t members_unrestrained = 0;   // would leave a mechanism in the solve
   std::size_t components_total = 0;
   std::size_t components_unrestrained = 0;  // no tie at all: carries no load
-  // Grid-free per-member flag: 0 = restrained, 1 = free to spin.
-  std::vector<char> member_unrestrained;
+  // ★ A COMPONENT NEEDS THREE NON-COLLINEAR TIES. Pinned ties restrain TRANSLATION
+  // only, so a component held at one point spins freely about it, and one held at
+  // two (or at any number of COLLINEAR) points still spins about the line joining
+  // them -- both proved in test_frame_element. Connectivity does not imply restraint
+  // at the component level any more than it does at the member level: a real part
+  // reached 0 untied components and still diverged, because many of those components
+  // were held at too few points to be rigid.
+  std::size_t components_underconstrained = 0;
+  // Per-member flags, so a caller can DROP what cannot carry load rather than only
+  // being told how much of it there is. A report that counts the problem without
+  // naming it leaves the caller unable to act: measured on a real part, 108 of 385
+  // components reached no tie and the only available response was to give up.
+  std::vector<char> member_unrestrained;    // 1 = free to spin (a mechanism)
+  std::vector<char> member_load_free;       // 1 = in a component that reaches no tie
+  std::vector<char> member_underconstrained;  // 1 = in a component held at < 3
+                                              //     non-collinear tie points
 };
 
 BeamRestraintReport beam_network_restraint(const BeamNetwork& net,
@@ -132,11 +146,20 @@ struct CoupledLatticeSolve {
   std::string refusal;              // empty on success; why not, otherwise
   double residual = 0.0;
   int iterations = 0;
+  // IC(0) is OFF unless TOPOPT_BEAM_IC=1: measured 9x SLOWER than Jacobi on a real
+  // 6 mm lattice (598 s vs >1 h 29 m, killed unfinished). See beam_network.cpp.
+  bool used_incomplete_cholesky = false;  // false = Jacobi (the default)
+  double ic_shift = 0.0;                  // diagonal shift IC(0) needed to factor
   std::vector<double> solid_displacement;  // 3 per numbered solid node
   std::vector<double> member_stress_mpa;   // one per network member
   double peak_member_stress_mpa = 0.0;
   int peak_member = -1;
   std::size_t beam_nodes_tied = 0;
+  // Of those, how many were NOT inside their host element and had their weights
+  // clamped onto it. A clamped tie is a PROJECTION, not an interpolation: it does
+  // not reproduce a linear field, and many of them can make the reduced system
+  // rank-deficient however well the lattice is restrained.
+  std::size_t beam_nodes_tied_by_projection = 0;
   BeamRestraintReport restraint;
 };
 
