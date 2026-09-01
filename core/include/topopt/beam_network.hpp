@@ -30,6 +30,7 @@
 //      exactly singular. Ask about ROTATION, not just about load paths.
 
 #include <cstddef>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -127,6 +128,43 @@ struct BeamSection {
 
 BeamSection beam_section_circular(double radius_mm);
 
+// ── ★ A WALL AS A SHELL MESH ────────────────────────────────────────────────
+// A lattice region is a DECLARED PLANAR FACE -- origin, unit normal, an orthonormal
+// (u, w) basis, half-extents, a thickness, and 2D loops in that basis. So its
+// mid-surface is not something to extract from voxels: it IS the declaration, offset
+// half a thickness along the normal. Meshing it is triangulating a 2D polygon, not
+// meshing a volume.
+//
+// WHY THIS MATTERS. Filling a wall with solid voxels is the wrong element for a thin
+// plate twice over. Solid scales with VOLUME and a shell with AREA -- on the M2
+// stand 0.11 M hex against ~11 k triangles, and at 256 the difference between 14.6
+// GB (past a 16 GB machine) and well under one. And a hex node has NO rotational
+// dof, so a beam tied into solid can only be pinned: measured nullity 10 for one
+// tie, against 6 when the same beam is tied to a SHELL node, which has rotations.
+//
+// THE MESH IS UNIFORM IN THE PLANE. `target_edge_mm` sets the spacing; points
+// outside the loops are dropped, so a concave outline is respected. This is a
+// structured triangulation, not a Delaunay mesher: it is adequate for a wall whose
+// outline the caller already declared, and it has no dependencies.
+struct ShellMesh {
+  std::vector<Vec3> nodes;                 // on the mid-surface, in world coordinates
+  struct Tri { int a = 0, b = 0, c = 0; };
+  std::vector<Tri> triangles;
+  double thickness_mm = 0.0;
+  // The element frame: nodes projected into the face's own (u, w) basis, so a caller
+  // can build the element in 2D and rotate with `basis_u` / `basis_w` / `normal`.
+  std::vector<double> local_u, local_w;
+  Vec3 basis_u{}, basis_w{}, normal{};
+};
+
+// `loops` are closed polygons in the face's (u, w) basis; loop 0 is the outline and
+// any others are holes. Empty `loops` means the plain half_u x half_w rectangle.
+// Throws std::invalid_argument on a non-physical extent, thickness or edge length.
+ShellMesh mesh_face_region_midsurface(
+    const Vec3& origin, const Vec3& normal, double half_u, double half_w,
+    double thickness_mm, const std::vector<std::vector<std::array<double, 2>>>& loops,
+    double target_edge_mm);
+
 // ── ★ THE COUPLED SOLVE ─────────────────────────────────────────────────────
 // Solid hex elements for the part, frame elements for the lattice, tied together.
 // No homogenisation anywhere — De Biasi et al. (Mater. Des. 255, 2025) measured
@@ -163,11 +201,33 @@ struct CoupledLatticeSolve {
   BeamRestraintReport restraint;
 };
 
+// ★ PARTIAL FILL. `hex_solid_fraction` (optional, grid-indexed) is the fraction of
+// each meshed voxel that is SOLID material — i.e. what is left after subtracting the
+// volume the BEAM elements already represent. Pass nullptr for the old behaviour,
+// every meshed voxel fully solid.
+//
+// WHY IT EXISTS. The struts are beams, so the hex mesh only has to carry the SOLID.
+// But a strut runs THROUGH voxels, and a binary mask has only two wrong answers for
+// those: call the voxel solid and the strut is counted TWICE (once as a beam, once
+// as solid — the part reads stiffer than it is), or carve it out and real plastic is
+// deleted, which on a 3 mm lattice fragmented the part into free-floating islands.
+// Neither is a resolution problem: at the job's 1.705 mm pitch a 1 mm strut is 0.59
+// voxels wide, and reaching one voxel per strut needs ~224 (9.7 GB) or 256 (14.6 GB,
+// past this machine). A fraction says the true thing at ANY pitch.
+//
+// The scaling is LINEAR in the fraction (Voigt), which is an UPPER bound on the
+// stiffness of a partially filled cell: where the hole sits matters and this ignores
+// it. The error is therefore optimistic, but it is small and bounded, against a
+// binary mask whose error is a factor of two in stiffness or a broken model.
+// Fractions are clamped to [kHexFractionFloor, 1] so a voxel can never be singular.
+inline constexpr double kHexFractionFloor = 1e-3;
+
 CoupledLatticeSolve solve_coupled_lattice(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const BeamNetwork& net, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, double youngs_modulus, double poisson,
-    double shear_k, double cg_tolerance, int cg_max_iterations);
+    double shear_k, double cg_tolerance, int cg_max_iterations,
+    const std::vector<double>* hex_solid_fraction = nullptr);
 
 }  // namespace topopt
 

@@ -513,4 +513,253 @@ double frame_member_peak_stress(const FrameStiffness& k,
   return worst;
 }
 
+
+// ── ★ THE DKT PLATE-BENDING TRIANGLE ────────────────────────────────────────
+// Batoz, Bathe & Ho (1980), eqs (27)-(31) and Appendix A, transcribed directly.
+namespace {
+
+// The nine-component H_x,xi / H_y,xi / H_x,eta / H_y,eta vectors of Appendix A.
+// The paper's node numbering is 1,2,3 for the corners and 4,5,6 for the mid-points
+// of sides 23, 31, 12 respectively; here index 0..2 and the coefficient arrays are
+// indexed by k-4 (so a[0] is the paper's a_4, on side 23).
+struct DktCoef { double a[3], b[3], c[3], d[3], e[3], P[3], q[3], r[3], t[3]; };
+
+DktCoef dkt_coefficients(const double x[3], const double y[3]) {
+  DktCoef C{};
+  // k = 4,5,6 for sides ij = 23, 31, 12  (eq. 28)
+  const int I[3] = {1, 2, 0};
+  const int J[3] = {2, 0, 1};
+  for (int k = 0; k < 3; ++k) {
+    const double xij = x[I[k]] - x[J[k]];
+    const double yij = y[I[k]] - y[J[k]];
+    const double l2 = xij * xij + yij * yij;
+    if (!(l2 > 0.0))
+      throw std::invalid_argument("dkt_stiffness: degenerate triangle (zero-length side)");
+    C.a[k] = -xij / l2;
+    C.b[k] = 0.75 * xij * yij / l2;
+    C.c[k] = (0.25 * xij * xij - 0.5 * yij * yij) / l2;
+    C.d[k] = -yij / l2;
+    C.e[k] = (0.25 * yij * yij - 0.5 * xij * xij) / l2;
+    C.P[k] = -6.0 * xij / l2;          // = 6 a_k
+    C.q[k] = 3.0 * xij * yij / l2;     // = 4 b_k
+    C.r[k] = 3.0 * yij * yij / l2;
+    C.t[k] = -6.0 * yij / l2;          // = 6 d_k
+  }
+  return C;
+}
+
+// Appendix A, verbatim. Index k-4: P[0]=P4, P[1]=P5, P[2]=P6, etc.
+void dkt_H_derivatives(const DktCoef& C, double xi, double eta,
+                       double Hxx[9], double Hyx[9], double Hxe[9], double Hye[9]) {
+  const double P4 = C.P[0], P5 = C.P[1], P6 = C.P[2];
+  const double q4 = C.q[0], q5 = C.q[1], q6 = C.q[2];
+  const double r4 = C.r[0], r5 = C.r[1], r6 = C.r[2];
+  const double t4 = C.t[0], t5 = C.t[1], t6 = C.t[2];
+
+  Hxx[0] = P6 * (1 - 2 * xi) + (P5 - P6) * eta;
+  Hxx[1] = q6 * (1 - 2 * xi) - (q5 + q6) * eta;
+  Hxx[2] = -4 + 6 * (xi + eta) + r6 * (1 - 2 * xi) - eta * (r5 + r6);
+  Hxx[3] = -P6 * (1 - 2 * xi) + eta * (P4 + P6);
+  Hxx[4] = q6 * (1 - 2 * xi) - eta * (q6 - q4);
+  Hxx[5] = -2 + 6 * xi + r6 * (1 - 2 * xi) + eta * (r4 - r6);
+  Hxx[6] = -eta * (P5 + P4);
+  Hxx[7] = eta * (q4 - q5);
+  Hxx[8] = -eta * (r5 - r4);
+
+  Hyx[0] = t6 * (1 - 2 * xi) + eta * (t5 - t6);
+  Hyx[1] = 1 + r6 * (1 - 2 * xi) - eta * (r5 + r6);
+  Hyx[2] = -q6 * (1 - 2 * xi) + eta * (q5 + q6);
+  Hyx[3] = -t6 * (1 - 2 * xi) + eta * (t4 + t6);
+  Hyx[4] = -1 + r6 * (1 - 2 * xi) + eta * (r4 - r6);
+  Hyx[5] = -q6 * (1 - 2 * xi) - eta * (q4 - q6);
+  Hyx[6] = -eta * (t4 + t5);
+  Hyx[7] = eta * (r4 - r5);
+  Hyx[8] = -eta * (q4 - q5);
+
+  Hxe[0] = -P5 * (1 - 2 * eta) - xi * (P6 - P5);
+  Hxe[1] = q5 * (1 - 2 * eta) - xi * (q5 + q6);
+  Hxe[2] = -4 + 6 * (xi + eta) + r5 * (1 - 2 * eta) - xi * (r5 + r6);
+  Hxe[3] = xi * (P4 + P6);
+  Hxe[4] = xi * (q4 - q6);
+  Hxe[5] = -xi * (r6 - r4);
+  Hxe[6] = P5 * (1 - 2 * eta) - xi * (P4 + P5);
+  Hxe[7] = q5 * (1 - 2 * eta) + xi * (q4 - q5);
+  Hxe[8] = -2 + 6 * eta + r5 * (1 - 2 * eta) + xi * (r4 - r5);
+
+  Hye[0] = -t5 * (1 - 2 * eta) - xi * (t6 - t5);
+  Hye[1] = 1 + r5 * (1 - 2 * eta) - xi * (r5 + r6);
+  Hye[2] = -q5 * (1 - 2 * eta) + xi * (q5 + q6);
+  Hye[3] = xi * (t4 + t6);
+  Hye[4] = xi * (r4 - r6);
+  Hye[5] = -xi * (q4 - q6);
+  Hye[6] = t5 * (1 - 2 * eta) - xi * (t4 + t5);
+  Hye[7] = -1 + r5 * (1 - 2 * eta) + xi * (r4 - r5);
+  Hye[8] = -q5 * (1 - 2 * eta) - xi * (q4 - q5);
+}
+
+}  // namespace
+
+DktStiffness dkt_stiffness(const double x[3], const double y[3],
+                           double youngs_modulus, double poisson,
+                           double thickness) {
+  if (!(youngs_modulus > 0.0))
+    throw std::invalid_argument("dkt_stiffness: youngs_modulus must be > 0");
+  if (!(poisson > -1.0 && poisson < 0.5))
+    throw std::invalid_argument("dkt_stiffness: poisson out of range");
+  if (!(thickness > 0.0))
+    throw std::invalid_argument("dkt_stiffness: thickness must be > 0");
+
+  const double x31 = x[2] - x[0], x12 = x[0] - x[1];
+  const double y31 = y[2] - y[0], y12 = y[0] - y[1];
+  const double twoA = x31 * y12 - x12 * y31;          // = 2A (under eq. 30)
+  if (!(std::fabs(twoA) > 0.0))
+    throw std::invalid_argument("dkt_stiffness: degenerate triangle (zero area)");
+  const double A = 0.5 * std::fabs(twoA);
+
+  // bending constitutive matrix D_b for an isotropic plate (eq. 12a)
+  const double f = youngs_modulus * thickness * thickness * thickness /
+                   (12.0 * (1.0 - poisson * poisson));
+  const double Db[3][3] = {{f, f * poisson, 0.0},
+                           {f * poisson, f, 0.0},
+                           {0.0, 0.0, f * (1.0 - poisson) * 0.5}};
+
+  const DktCoef C = dkt_coefficients(x, y);
+  DktStiffness out;
+
+  // EXACT with three points at the edge mid-nodes: the integrand is quadratic
+  // (paper's note under eq. 31), so this is not an approximation.
+  const double gp[3][2] = {{0.5, 0.0}, {0.5, 0.5}, {0.0, 0.5}};
+  const double wgt = 1.0 / 6.0;                      // sum = 1/2, the ref triangle
+
+  for (int g = 0; g < 3; ++g) {
+    double Hxx[9], Hyx[9], Hxe[9], Hye[9];
+    dkt_H_derivatives(C, gp[g][0], gp[g][1], Hxx, Hyx, Hxe, Hye);
+    // eq. (30): B = (1/2A) [ y31*Hx,xi + y12*Hx,eta ;
+    //                       -x31*Hy,xi - x12*Hy,eta ;
+    //                       -x31*Hx,xi - x12*Hx,eta + y31*Hy,xi + y12*Hy,eta ]
+    double B[3][9];
+    for (int i = 0; i < 9; ++i) {
+      B[0][i] = (y31 * Hxx[i] + y12 * Hxe[i]) / twoA;
+      B[1][i] = (-x31 * Hyx[i] - x12 * Hye[i]) / twoA;
+      B[2][i] = (-x31 * Hxx[i] - x12 * Hxe[i] + y31 * Hyx[i] + y12 * Hye[i]) / twoA;
+    }
+    // K += 2A * w * B^T Db B
+    const double scale = 2.0 * A * wgt;
+    for (int i = 0; i < 9; ++i) {
+      double DB[3];
+      for (int r2 = 0; r2 < 3; ++r2)
+        DB[r2] = Db[r2][0] * B[0][i] + Db[r2][1] * B[1][i] + Db[r2][2] * B[2][i];
+      for (int j = 0; j < 9; ++j)
+        out.k[static_cast<std::size_t>(i) * 9 + j] +=
+            scale * (B[0][j] * DB[0] + B[1][j] * DB[1] + B[2][j] * DB[2]);
+    }
+  }
+  return out;
+}
+
+
+// ── ★ THE FLAT FACET SHELL TRIANGLE ─────────────────────────────────────────
+ShellStiffness shell3_stiffness(const double x[3], const double y[3],
+                                double youngs_modulus, double poisson,
+                                double thickness, double drilling_factor) {
+  if (!(youngs_modulus > 0.0))
+    throw std::invalid_argument("shell3_stiffness: youngs_modulus must be > 0");
+  if (!(poisson > -1.0 && poisson < 0.5))
+    throw std::invalid_argument("shell3_stiffness: poisson out of range");
+  if (!(thickness > 0.0))
+    throw std::invalid_argument("shell3_stiffness: thickness must be > 0");
+
+  const double x31 = x[2] - x[0], x12 = x[0] - x[1];
+  const double y31 = y[2] - y[0], y12 = y[0] - y[1];
+  const double twoA = x31 * y12 - x12 * y31;
+  if (!(std::fabs(twoA) > 0.0))
+    throw std::invalid_argument("shell3_stiffness: degenerate triangle");
+  const double A = 0.5 * std::fabs(twoA);
+
+  ShellStiffness out;
+  auto at = [&out](int r, int c) -> double& {
+    return out.k[static_cast<std::size_t>(r) * ShellStiffness::kDof + c];
+  };
+
+  // ── MEMBRANE: the constant-strain triangle. B is constant, so K = t*A*B^T D B
+  // exactly -- no quadrature. Node i's shape function gradient is (b_i, c_i)/2A
+  // with b_i = y_j - y_k, c_i = x_k - x_j (cyclic).
+  const double b[3] = {y[1] - y[2], y[2] - y[0], y[0] - y[1]};
+  const double c[3] = {x[2] - x[1], x[0] - x[2], x[1] - x[0]};
+  const double dm = youngs_modulus / (1.0 - poisson * poisson);
+  const double Dm[3][3] = {{dm, dm * poisson, 0.0},
+                           {dm * poisson, dm, 0.0},
+                           {0.0, 0.0, dm * (1.0 - poisson) * 0.5}};
+  double Bm[3][6];
+  for (int n = 0; n < 3; ++n) {
+    Bm[0][2 * n + 0] = b[n] / twoA;  Bm[0][2 * n + 1] = 0.0;
+    Bm[1][2 * n + 0] = 0.0;          Bm[1][2 * n + 1] = c[n] / twoA;
+    Bm[2][2 * n + 0] = c[n] / twoA;  Bm[2][2 * n + 1] = b[n] / twoA;
+  }
+  // local dof index of membrane entry m (node m/2, component m%2 -> u or v)
+  const int mdof[6] = {0, 1, 6, 7, 12, 13};
+  for (int i = 0; i < 6; ++i) {
+    double DB[3];
+    for (int r = 0; r < 3; ++r)
+      DB[r] = Dm[r][0] * Bm[0][i] + Dm[r][1] * Bm[1][i] + Dm[r][2] * Bm[2][i];
+    for (int j = 0; j < 6; ++j)
+      at(mdof[i], mdof[j]) += thickness * A *
+          (Bm[0][j] * DB[0] + Bm[1][j] * DB[1] + Bm[2][j] * DB[2]);
+  }
+
+  // ── BENDING: the DKT triangle, scattered into (w, theta_x, theta_y).
+  const DktStiffness Kb = dkt_stiffness(x, y, youngs_modulus, poisson, thickness);
+  const int bdof[9] = {2, 3, 4, 8, 9, 10, 14, 15, 16};
+  for (int i = 0; i < 9; ++i)
+    for (int j = 0; j < 9; ++j) at(bdof[i], bdof[j]) += Kb(i, j);
+
+  // ── DRILLING: theta_z tied to the membrane's OWN rotation (Hughes-Brezzi).
+  // A naive penalty on theta_z alone does NOT work, and the failure is silent: the
+  // membrane already represents in-plane rotation through u and v, theta_z
+  // represents the same physical rotation, and a term that only couples the three
+  // theta_z values leaves the DIFFERENCE between the two representations as a free
+  // zero-energy mode. MEASURED: the element came back with nullity 7 instead of 6,
+  // and a test that only checked six NAMED modes were force-free passed anyway --
+  // asserting the nullity is what caught it.
+  //
+  // So penalise (theta_z - omega), where omega is the CST's constant in-plane
+  // rotation (1/2)(dv/dx - du/dy) = (1/4A) sum (b_i v_i - c_i u_i). That couples the
+  // two and removes the spurious mode. gamma is a penalty, not physics: a test
+  // asserts a 100x sweep leaves real bending and membrane answers unchanged.
+  if (drilling_factor > 0.0) {
+    double mean_diag = 0.0;
+    for (int i = 0; i < 9; ++i) mean_diag += Kb(i, i);
+    mean_diag /= 9.0;
+    const double gamma = drilling_factor * mean_diag;
+    // The penalty is a FIELD integral, gamma/2 * int (theta_z - omega)^2 dA, with
+    // theta_z interpolated LINEARLY over the triangle. A rank-1 form on the AVERAGE
+    // theta_z is not enough -- it leaves the two differential theta_z modes free
+    // (measured: nullity 8). The full integral constrains all three.
+    //   int Ni Nj dA = (A/12)(1 + delta_ij),   int Ni dA = A/3,   omega is constant.
+    const int tz[3] = {5, 11, 17};
+    double w[18] = {};                          // omega as a linear form on the dof
+    for (int n = 0; n < 3; ++n) {
+      w[6 * n + 0] = -c[n] / (2.0 * twoA);      // -(1/4A) c_n u_n
+      w[6 * n + 1] = b[n] / (2.0 * twoA);       // +(1/4A) b_n v_n
+    }
+    // theta_z^T M theta_z
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j)
+        at(tz[i], tz[j]) += gamma * (A / 12.0) * ((i == j) ? 2.0 : 1.0);
+    // -2 * (A/3) * theta_z_i * omega   (symmetrised)
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 18; ++j)
+        if (w[j] != 0.0) {
+          const double v = -gamma * (A / 3.0) * w[j];
+          at(tz[i], j) += v;
+          at(j, tz[i]) += v;
+        }
+    // + A * omega^2
+    for (int i = 0; i < 18; ++i)
+      for (int j = 0; j < 18; ++j)
+        if (w[i] != 0.0 && w[j] != 0.0) at(i, j) += gamma * A * w[i] * w[j];
+  }
+  return out;
+}
+
 }  // namespace topopt

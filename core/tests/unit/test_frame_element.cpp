@@ -17,6 +17,8 @@
 
 #include "topopt/fea.hpp"
 
+#include <algorithm>
+
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -483,6 +485,85 @@ void test_pinned_tie_mechanism() {
   // before solving rather than discovering it as a failed factorisation.
 }
 
+// ── ★ PHASE 4: THE BEAM-TO-SHELL TIE ────────────────────────────────────────
+// The whole reason for the shell. A hex node has 3 translations and NO rotations, so
+// a beam tied into solid can only be PINNED: it transmits force, not moment, and the
+// tests above measure what that costs -- nullity 9 for one tie, 7 for two collinear
+// ones. A SHELL node has rotations, so the joint can be properly BUILT IN, and the
+// mechanism disappears.
+int shell_tied_beam_nullity(int ties, bool weld_rotations) {
+  const double E = 2300.0, nu = 0.35, G = E / (2.0 * (1.0 + nu));
+  const double r = 0.5, L = 0.6, t = 1.0;
+  const double A = M_PI * r * r, I = M_PI * r * r * r * r / 4.0;
+  const double sx[3] = {0.0, 3.0, 0.0}, sy[3] = {0.0, 0.0, 3.0};
+
+  const topopt::ShellStiffness Ks = topopt::shell3_stiffness(sx, sy, E, nu, t);
+  const topopt::FrameStiffness Kb =
+      topopt::frame2_stiffness(E, G, A, I, I, 2.0 * I, L, 0.9);
+
+  // dof: [18 shell][12 beam]; the beam runs in the shell's plane from (0.5,0.5)
+  const int N = 30;
+  std::vector<double> K(static_cast<std::size_t>(N) * N, 0.0);
+  for (int i = 0; i < 18; ++i)
+    for (int j = 0; j < 18; ++j) K[static_cast<std::size_t>(i) * N + j] += Ks(i, j);
+  for (int i = 0; i < 12; ++i)
+    for (int j = 0; j < 12; ++j)
+      K[static_cast<std::size_t>(18 + i) * N + (18 + j)] += Kb(i, j);
+
+  // Tie the first `ties` beam nodes to shell node 0. With weld_rotations the beam's
+  // ROTATIONS are slaved to the shell's rotational dof too -- the moment path a hex
+  // simply does not have.
+  const int per = weld_rotations ? 6 : 3;
+  const int M = 30 - per * ties;
+  std::vector<double> T(static_cast<std::size_t>(N) * M, 0.0);
+  for (int i = 0; i < 18; ++i) T[static_cast<std::size_t>(i) * M + i] = 1.0;
+  int col = 18;
+  for (int nB = 0; nB < 2; ++nB)
+    for (int c2 = 0; c2 < 6; ++c2) {
+      const int row = 18 + 6 * nB + c2;
+      if (nB < ties && c2 < per)
+        T[static_cast<std::size_t>(row) * M + c2] = 1.0;   // onto shell node 0
+      else
+        T[static_cast<std::size_t>(row) * M + col++] = 1.0;
+    }
+  std::vector<double> KT(static_cast<std::size_t>(N) * M, 0.0), Kr(static_cast<std::size_t>(M) * M, 0.0);
+  for (int i = 0; i < N; ++i)
+    for (int k = 0; k < N; ++k) {
+      const double v = K[static_cast<std::size_t>(i) * N + k];
+      if (v == 0.0) continue;
+      for (int j = 0; j < M; ++j)
+        KT[static_cast<std::size_t>(i) * M + j] += v * T[static_cast<std::size_t>(k) * M + j];
+    }
+  for (int i = 0; i < M; ++i)
+    for (int k = 0; k < N; ++k) {
+      const double v = T[static_cast<std::size_t>(k) * M + i];
+      if (v == 0.0) continue;
+      for (int j = 0; j < M; ++j)
+        Kr[static_cast<std::size_t>(i) * M + j] += v * KT[static_cast<std::size_t>(k) * M + j];
+    }
+  double scale = 0.0;
+  for (int i = 0; i < M; ++i)
+    scale = std::max(scale, std::fabs(Kr[static_cast<std::size_t>(i) * M + i]));
+  return M - matrix_rank(Kr, M, 1e-9 * scale);
+}
+
+void test_shell_tie_removes_the_spin() {
+  // A PINNED tie into the shell reproduces the hex behaviour: the beam still spins.
+  const int pinned = shell_tied_beam_nullity(1, /*weld_rotations=*/false);
+  CHECK(pinned > 6, "a PINNED tie into a shell still leaves spin modes");
+
+  // WELDING the rotations -- possible only because a shell node HAS them -- removes
+  // them. Six rigid-body modes and nothing else, from a SINGLE tie point: the
+  // "three non-collinear ties per component" rule a pinned tie forces simply does
+  // not apply to a moment-transferring joint.
+  const int welded = shell_tied_beam_nullity(1, /*weld_rotations=*/true);
+  CHECK(welded == 6,
+        "a MOMENT-TRANSFERRING tie leaves exactly 6 rigid-body modes from ONE point");
+  if (welded != 6)
+    std::fprintf(stderr, "   welded nullity %d (expected 6), pinned was %d\n", welded, pinned);
+  CHECK(welded < pinned, "welding the rotations strictly removes mechanisms");
+}
+
 }  // namespace
 
 int main() {
@@ -496,6 +577,7 @@ int main() {
   test_tie_weights();
   test_tie_reproduces_a_linear_field();
   test_pinned_tie_mechanism();
+  test_shell_tie_removes_the_spin();
   std::printf("test_frame_element: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

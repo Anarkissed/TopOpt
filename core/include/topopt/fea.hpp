@@ -137,6 +137,89 @@ double frame_member_peak_stress(const FrameStiffness& k,
                                 const std::array<double, 12>& u_local,
                                 double radius);
 
+// ── ★ THE DKT PLATE-BENDING TRIANGLE (organic-lattice shell walls) ──────────
+// Batoz, Bathe & Ho, "A study of three-node triangular plate bending elements",
+// Int. J. Numer. Methods Eng. 15, 1771-1812 (1980), equations (27)-(31) and
+// Appendix A. Three nodes, NINE dof -- (w, theta_x, theta_y) per corner -- built by
+// the discrete-Kirchhoff technique: Kirchhoff's normality is imposed at the corners
+// and edge mid-points rather than everywhere, which is what lets a 9-dof triangle
+// behave.
+//
+// WHY A PLATE ELEMENT AT ALL. A lattice region is a WALL, and filling a wall with
+// solid voxels is the wrong element for a thin plate. Solid scales with VOLUME
+// (N^3), a plate with AREA (N^2): on the M2 stand that is 0.11 M hex at the job's
+// resolution against ~11 k plate triangles, and at 256 it is the difference between
+// 14.6 GB (past a 16 GB machine) and well under one. The walls are ALWAYS there --
+// Structural organic requires grade-to-solid, so a solid skin is guaranteed.
+//
+// AND THE DOF MATTER MORE THAN THE SPEED. A hex node has 3 translations and no
+// rotations, so a beam tied into solid can only be PINNED: it transmits force, not
+// moment, and a strut held that way spins freely (test_frame_element measures
+// nullity 9 for one tie, 7 for two collinear). A plate node HAS rotations, so a
+// beam-to-plate joint is properly built in.
+//
+// VALIDITY. This is a THIN-plate (Kirchhoff) element: transverse shear is neglected.
+// MEASURED on the real part's declared regions: thickness/span 1/16.2 and 1/14.9 --
+// inside the usual 1/10 limit but NOT in the deeply safe (<1/20) regime. If a wall
+// is thicker than that, a Mindlin-type element (DKMQ) is the correct fallback and
+// this one must NOT be stretched to cover it. That is the same assumption class that
+// made Euler-Bernoulli wrong for stubby struts, so it is stated, not assumed.
+//
+// LOCAL AXES. The three corners are given in the element's OWN plane as (x, y)
+// pairs; the caller rotates. DOF order is (w1, tx1, ty1, w2, tx2, ty2, w3, tx3, ty3).
+// Integration is EXACT with three points at the edge mid-nodes -- the integrand is
+// quadratic (the paper's note under eq. 31), so this is not a quadrature choice.
+//
+// Throws std::invalid_argument on a degenerate triangle or non-physical material.
+struct DktStiffness {
+  static constexpr int kNodes = 3;
+  static constexpr int kDof = 9;
+  std::array<double, static_cast<std::size_t>(kDof) * kDof> k{};
+  double operator()(int row, int col) const {
+    return k[static_cast<std::size_t>(row) * kDof + col];
+  }
+};
+
+DktStiffness dkt_stiffness(const double x[3], const double y[3],
+                           double youngs_modulus, double poisson,
+                           double thickness);
+
+// ── ★ THE FLAT FACET SHELL TRIANGLE ─────────────────────────────────────────
+// MEMBRANE (constant-strain triangle: in-plane u, v) + BENDING (the DKT above)
+// assembled in the element's own plane. Three nodes, EIGHTEEN dof --
+// (u, v, w, theta_x, theta_y, theta_z) per node -- returned in LOCAL axes; the
+// caller rotates to global with the element's own frame.
+//
+// FLAT IS ENOUGH, AND THAT IS WHY THIS IS SMALL. Curved shells need a MITC-type
+// formulation to survive membrane locking. A lattice region is a DECLARED PLANAR
+// FACE -- origin, normal, an orthonormal basis and 2D loops -- so its mid-surface is
+// flat by construction and a facet element is exact for the geometry, not an
+// approximation of it.
+//
+// THE DRILLING DOF. theta_z (rotation about the element normal) carries no stiffness
+// in either the membrane or the bending part: a flat facet simply has no strain
+// associated with it. Left at zero the assembled matrix is SINGULAR wherever
+// coplanar elements meet. `drilling_factor` adds a small fictitious rotational
+// stiffness, scaled off the element's own diagonal, purely to remove that
+// singularity -- the standard remedy. It is NOT physics: too large and it stiffens
+// the shell, too small and the conditioning stays bad. The default is the usual
+// 1e-3 of the mean bending diagonal; a test asserts the element's real behaviour is
+// insensitive to it across three orders of magnitude.
+//
+// Throws std::invalid_argument on a degenerate triangle or non-physical material.
+struct ShellStiffness {
+  static constexpr int kNodes = 3;
+  static constexpr int kDof = 18;  // 3 translations + 3 rotations per node
+  std::array<double, static_cast<std::size_t>(kDof) * kDof> k{};
+  double operator()(int row, int col) const {
+    return k[static_cast<std::size_t>(row) * kDof + col];
+  }
+};
+
+ShellStiffness shell3_stiffness(const double x[3], const double y[3],
+                                double youngs_modulus, double poisson,
+                                double thickness, double drilling_factor = 1e-3);
+
 // Isotropic 8-node hexahedral element stiffness for Young's modulus
 // `youngs_modulus` (> 0), Poisson ratio `poisson` (in (-1, 0.5)) and cubic
 // voxel edge `element_size` (> 0). For fixed Poisson ratio the matrix scales

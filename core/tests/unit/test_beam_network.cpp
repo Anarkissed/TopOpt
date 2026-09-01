@@ -237,6 +237,62 @@ void test_coupled_solve_matches_the_closed_form() {
         "the block slightly, so a small deficit is physical)");
 }
 
+void test_partial_fill_scales_the_solid_exactly() {
+  // ★ THE FIX FOR THE BINARY MASK. A uniformly half-filled block must extend exactly
+  // TWICE as far as a full one: element stiffness is linear in the modulus, so a
+  // fraction is an exact scalar, not an approximation of the SOLVE. (It is an
+  // approximation of the PHYSICS -- Voigt, an upper bound -- which is a different
+  // and much smaller error than counting a strut twice or deleting real plastic.)
+  const int nx = 4, ny = 4, nz = 8;
+  const double h = 1.7, E = 3500.0, nu = 0.35, P = 1.0;
+  const topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+  const std::vector<char> mask(g.voxel_count(), 1);
+  const topopt::BeamNetwork empty;
+
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int j = 0; j <= ny; ++j)
+    for (int i = 0; i <= nx; ++i) {
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(i, j, 0), c, 0.0});
+      lds.push_back({nod(i, j, nz), 2, P / static_cast<double>(NXn * NYn)});
+    }
+  auto extension = [&](const std::vector<double>* frac) {
+    const topopt::CoupledLatticeSolve r = topopt::solve_coupled_lattice(
+        g, mask, empty, bcs, lds, E, nu, 0.9, 1e-11, 200000, frac);
+    if (!r.converged) return -1.0;
+    double sum = 0.0; int n = 0;
+    for (int j = 0; j <= ny; ++j)
+      for (int i = 0; i <= nx; ++i) {
+        sum += r.solid_displacement[static_cast<std::size_t>(3 * nod(i, j, nz) + 2)];
+        ++n;
+      }
+    return sum / n;
+  };
+  const double full = extension(nullptr);
+  CHECK(full > 0.0, "the full-density block solves");
+  const std::vector<double> half(g.voxel_count(), 0.5);
+  const double soft = extension(&half);
+  CHECK(soft > 0.0, "the half-filled block solves");
+  CHECK(std::fabs(soft / full - 2.0) < 1e-6,
+        "a uniformly HALF-filled block extends exactly twice as far");
+  if (!(std::fabs(soft / full - 2.0) < 1e-6))
+    std::fprintf(stderr, "  ratio %.9f (expected 2)\n", soft / full);
+
+  // a fraction of 1 everywhere must be bit-identical to passing nullptr
+  const std::vector<double> ones(g.voxel_count(), 1.0);
+  CHECK(std::fabs(extension(&ones) - full) < 1e-12,
+        "fraction 1.0 everywhere reproduces the unmodified path");
+
+  // and a bad-sized array is refused, not silently ignored
+  const std::vector<double> wrong(7, 0.5);
+  CHECK(!topopt::solve_coupled_lattice(g, mask, empty, bcs, lds, E, nu, 0.9,
+                                       1e-10, 1000, &wrong).refusal.empty(),
+        "refuses a fraction array of the wrong length");
+}
+
 void test_coupled_solve_REFUSES_a_mechanism() {
   // ★ REFUSAL, NOT A NUMBER. One untied, unconnected strut is a mechanism. The
   // solve must say so BEFORE factorising -- a prototype returned its best iterate
@@ -411,6 +467,77 @@ void test_coupled_solve_refuses_missing_supports() {
   CHECK(!r.refusal.empty(), "refuses when no support lands on the mesh");
 }
 
+void test_midsurface_mesh() {
+  // ★ THE MID-SURFACE IS THE DECLARATION. A region already carries origin, normal,
+  // basis, extents, thickness and 2D loops -- so meshing a wall is triangulating a
+  // polygon, not meshing a volume. These checks pin the three things that would be
+  // silently wrong: the offset, the outline, and the plane.
+  const Vec3 org{10.0, 20.0, 30.0};
+  const Vec3 nrm{0.0, -1.0, 0.0};
+  const double hu = 50.0, hw = 40.0, t = 12.0;
+
+  const topopt::ShellMesh m =
+      topopt::mesh_face_region_midsurface(org, nrm, hu, hw, t, {}, 10.0);
+  CHECK(!m.nodes.empty() && !m.triangles.empty(), "a plain rectangle meshes");
+  CHECK(m.nodes.size() == m.local_u.size() && m.nodes.size() == m.local_w.size(),
+        "every node carries its (u, w) coordinates");
+
+  // (a) THE OFFSET. Every node must sit exactly half a thickness along the normal
+  // from the declared face -- the MID-surface, not the face.
+  double worst_off = 0.0;
+  for (const Vec3& q : m.nodes) {
+    const double d = (q.x-org.x)*m.normal.x + (q.y-org.y)*m.normal.y + (q.z-org.z)*m.normal.z;
+    worst_off = std::max(worst_off, std::fabs(d - 0.5*t));
+  }
+  CHECK(worst_off < 1e-9, "every node lies half a thickness in from the declared face");
+
+  // (b) THE PLANE. Nodes must be coplanar and the basis orthonormal, or the loops
+  // mean something different here than in the region declaration.
+  const double uu = m.basis_u.x*m.basis_u.x + m.basis_u.y*m.basis_u.y + m.basis_u.z*m.basis_u.z;
+  const double ww = m.basis_w.x*m.basis_w.x + m.basis_w.y*m.basis_w.y + m.basis_w.z*m.basis_w.z;
+  const double uw = m.basis_u.x*m.basis_w.x + m.basis_u.y*m.basis_w.y + m.basis_u.z*m.basis_w.z;
+  CHECK(std::fabs(uu-1.0) < 1e-12 && std::fabs(ww-1.0) < 1e-12 && std::fabs(uw) < 1e-12,
+        "the in-plane basis is orthonormal");
+
+  // (c) THE AREA. A full rectangle's triangles must sum to exactly 2hu x 2hw.
+  double area = 0.0;
+  for (const auto& tri : m.triangles) {
+    const double ax = m.local_u[static_cast<std::size_t>(tri.a)], ay = m.local_w[static_cast<std::size_t>(tri.a)];
+    const double bx = m.local_u[static_cast<std::size_t>(tri.b)], by = m.local_w[static_cast<std::size_t>(tri.b)];
+    const double cx = m.local_u[static_cast<std::size_t>(tri.c)], cy = m.local_w[static_cast<std::size_t>(tri.c)];
+    area += 0.5 * std::fabs((bx-ax)*(cy-ay) - (cx-ax)*(by-ay));
+  }
+  CHECK(std::fabs(area - 4.0*hu*hw) < 1e-6*4.0*hu*hw,
+        "the meshed area equals the declared rectangle exactly");
+
+  // (d) THE OUTLINE. A loop that carves out half the face must halve the area --
+  // a mesher that ignored the loops would pass every check above.
+  const std::vector<std::vector<std::array<double,2>>> half_loop = {
+      {{{-hu, -hw}}, {{0.0, -hw}}, {{0.0, hw}}, {{-hu, hw}}}};
+  const topopt::ShellMesh h =
+      topopt::mesh_face_region_midsurface(org, nrm, hu, hw, t, half_loop, 5.0);
+  double harea = 0.0;
+  for (const auto& tri : h.triangles) {
+    const double ax = h.local_u[static_cast<std::size_t>(tri.a)], ay = h.local_w[static_cast<std::size_t>(tri.a)];
+    const double bx = h.local_u[static_cast<std::size_t>(tri.b)], by = h.local_w[static_cast<std::size_t>(tri.b)];
+    const double cx = h.local_u[static_cast<std::size_t>(tri.c)], cy = h.local_w[static_cast<std::size_t>(tri.c)];
+    harea += 0.5 * std::fabs((bx-ax)*(cy-ay) - (cx-ax)*(by-ay));
+  }
+  CHECK(harea < 0.6*4.0*hu*hw && harea > 0.3*4.0*hu*hw,
+        "a loop covering half the face meshes about half the area");
+
+  // (e) SCALES WITH AREA, NOT VOLUME -- the whole reason for shells.
+  const topopt::ShellMesh fine =
+      topopt::mesh_face_region_midsurface(org, nrm, hu, hw, t, {}, 5.0);
+  CHECK(fine.triangles.size() > 3 * m.triangles.size(),
+        "halving the edge length roughly quadruples the triangle count (area scaling)");
+
+  bool threw = false;
+  try { topopt::mesh_face_region_midsurface(org, nrm, hu, hw, 0.0, {}, 10.0); }
+  catch (const std::invalid_argument&) { threw = true; }
+  CHECK(threw, "refuses a zero thickness");
+}
+
 void test_refusals() {
   bool threw = false;
   try { topopt::build_beam_network({{Vec3{0,0,0}, Vec3{1,0,0}, 0.0}}); }
@@ -436,11 +563,13 @@ int main() {
   test_a_junction_restrains_its_members();
   test_circular_section();
   test_coupled_solve_matches_the_closed_form();
+  test_partial_fill_scales_the_solid_exactly();
   test_coupled_solve_REFUSES_a_mechanism();
   test_coupled_solve_REFUSES_untied_components_instantly();
   test_component_needs_three_noncollinear_ties();
   test_components_ignore_dangling_nodes();
   test_coupled_solve_refuses_missing_supports();
+  test_midsurface_mesh();
   test_refusals();
   std::printf("test_beam_network: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

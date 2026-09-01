@@ -505,6 +505,12 @@ add_executable(test_beam_network tests/unit/test_beam_network.cpp)
 target_link_libraries(test_beam_network PRIVATE topopt)
 add_test(NAME beam_network COMMAND test_beam_network)
 
+# The DKT plate-bending triangle. Pure C++/std: rigid-body modes, the
+# constant-curvature patch test, and the paper's own plate benchmarks.
+add_executable(test_dkt_plate tests/unit/test_dkt_plate.cpp)
+target_link_libraries(test_dkt_plate PRIVATE topopt)
+add_test(NAME dkt_plate COMMAND test_dkt_plate)
+
 # Orientation candidate generation + support-volume proxy metric (M4.3). Pure
 # C++/std (no OCCT, no Eigen): builds its meshes and voxel grids in code, so it
 # runs in every configuration like the hex-element test.

@@ -271,6 +271,97 @@ BeamSection beam_section_circular(double radius_mm) {
 }
 
 
+
+// ── ★ A WALL AS A SHELL MESH ────────────────────────────────────────────────
+namespace {
+
+// Even-odd point-in-polygon on a set of loops: loop 0 is the outline, the rest are
+// holes, so an odd crossing count means inside.
+bool inside_loops(double u, double w,
+                  const std::vector<std::vector<std::array<double, 2>>>& loops) {
+  bool in = false;
+  for (const auto& loop : loops) {
+    const std::size_t n = loop.size();
+    for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+      const double ui = loop[i][0], wi = loop[i][1];
+      const double uj = loop[j][0], wj = loop[j][1];
+      if (((wi > w) != (wj > w)) &&
+          (u < (uj - ui) * (w - wi) / (wj - wi) + ui))
+        in = !in;
+    }
+  }
+  return in;
+}
+
+}  // namespace
+
+ShellMesh mesh_face_region_midsurface(
+    const Vec3& origin, const Vec3& normal, double half_u, double half_w,
+    double thickness_mm, const std::vector<std::vector<std::array<double, 2>>>& loops,
+    double target_edge_mm) {
+  if (!(half_u > 0.0) || !(half_w > 0.0))
+    throw std::invalid_argument("mesh_face_region_midsurface: extents must be > 0");
+  if (!(thickness_mm > 0.0))
+    throw std::invalid_argument("mesh_face_region_midsurface: thickness must be > 0");
+  if (!(target_edge_mm > 0.0))
+    throw std::invalid_argument("mesh_face_region_midsurface: edge length must be > 0");
+  const double nl = std::sqrt(normal.x*normal.x + normal.y*normal.y + normal.z*normal.z);
+  if (!(nl > 0.0))
+    throw std::invalid_argument("mesh_face_region_midsurface: zero normal");
+
+  ShellMesh m;
+  m.thickness_mm = thickness_mm;
+  m.normal = Vec3{normal.x/nl, normal.y/nl, normal.z/nl};
+  // the SAME plane basis the region declaration uses, so (u, w) here means what it
+  // means there -- a different basis would silently rotate every loop
+  {
+    const Vec3 ref = std::fabs(m.normal.x) < 0.9 ? Vec3{1,0,0} : Vec3{0,1,0};
+    const Vec3 uu{ref.y*m.normal.z - ref.z*m.normal.y,
+                  ref.z*m.normal.x - ref.x*m.normal.z,
+                  ref.x*m.normal.y - ref.y*m.normal.x};
+    const double ul = std::sqrt(uu.x*uu.x + uu.y*uu.y + uu.z*uu.z);
+    if (!(ul > 1e-12))
+      throw std::invalid_argument("mesh_face_region_midsurface: degenerate basis");
+    m.basis_u = Vec3{uu.x/ul, uu.y/ul, uu.z/ul};
+    m.basis_w = Vec3{m.normal.y*m.basis_u.z - m.normal.z*m.basis_u.y,
+                     m.normal.z*m.basis_u.x - m.normal.x*m.basis_u.z,
+                     m.normal.x*m.basis_u.y - m.normal.y*m.basis_u.x};
+  }
+  // the mid-surface sits HALF A THICKNESS in from the declared face
+  const double off = 0.5 * thickness_mm;
+  const Vec3 base{origin.x + m.normal.x*off, origin.y + m.normal.y*off,
+                  origin.z + m.normal.z*off};
+
+  const int nu = std::max(1, static_cast<int>(std::ceil(2.0*half_u/target_edge_mm)));
+  const int nw = std::max(1, static_cast<int>(std::ceil(2.0*half_w/target_edge_mm)));
+  const double du = 2.0*half_u/nu, dw = 2.0*half_w/nw;
+
+  std::vector<int> id(static_cast<std::size_t>(nu+1)*(nw+1), -1);
+  for (int j = 0; j <= nw; ++j)
+    for (int i = 0; i <= nu; ++i) {
+      const double u = -half_u + i*du, w = -half_w + j*dw;
+      if (!loops.empty() && !inside_loops(u, w, loops)) continue;
+      id[static_cast<std::size_t>(j)*(nu+1) + i] = static_cast<int>(m.nodes.size());
+      m.local_u.push_back(u);
+      m.local_w.push_back(w);
+      m.nodes.push_back(Vec3{base.x + m.basis_u.x*u + m.basis_w.x*w,
+                             base.y + m.basis_u.y*u + m.basis_w.y*w,
+                             base.z + m.basis_u.z*u + m.basis_w.z*w});
+    }
+  // two triangles per cell, but only where all four corners survived the outline
+  for (int j = 0; j < nw; ++j)
+    for (int i = 0; i < nu; ++i) {
+      const int a = id[static_cast<std::size_t>(j)*(nu+1) + i];
+      const int b = id[static_cast<std::size_t>(j)*(nu+1) + i+1];
+      const int c = id[static_cast<std::size_t>(j+1)*(nu+1) + i+1];
+      const int d = id[static_cast<std::size_t>(j+1)*(nu+1) + i];
+      if (a < 0 || b < 0 || c < 0 || d < 0) continue;
+      m.triangles.push_back({a, b, c});
+      m.triangles.push_back({a, c, d});
+    }
+  return m;
+}
+
 // ── ★ THE COUPLED SOLVE ─────────────────────────────────────────────────────
 namespace {
 
@@ -495,8 +586,13 @@ CoupledLatticeSolve solve_coupled_lattice(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const BeamNetwork& net, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, double youngs_modulus, double poisson,
-    double shear_k, double cg_tolerance, int cg_max_iterations) {
+    double shear_k, double cg_tolerance, int cg_max_iterations,
+    const std::vector<double>* hex_solid_fraction) {
   CoupledLatticeSolve out;
+  if (hex_solid_fraction && hex_solid_fraction->size() != grid.voxel_count()) {
+    out.refusal = "hex_solid_fraction size does not match the grid";
+    return out;
+  }
   if (hex_mask.size() != grid.voxel_count()) {
     out.refusal = "hex_mask size does not match the grid";
     return out;
@@ -724,11 +820,19 @@ CoupledLatticeSolve solve_coupled_lattice(
       for (int a = 0; a < 8; ++a) tmp[a] = n8[ccw[a]];
       for (int a = 0; a < 8; ++a) n8[a] = tmp[a];
     }
+    // Element stiffness is exactly linear in the modulus, so the partial fill is a
+    // scalar on the assembled element -- no second element type, no re-integration.
+    double fill = 1.0;
+    if (hex_solid_fraction) {
+      fill = (*hex_solid_fraction)[e];
+      if (!(fill > kHexFractionFloor)) fill = kHexFractionFloor;
+      if (fill > 1.0) fill = 1.0;
+    }
     for (int a = 0; a < 8; ++a)
       for (int ca = 0; ca < 3; ++ca)
         for (int b2 = 0; b2 < 8; ++b2)
           for (int cb = 0; cb < 3; ++cb)
-            K.add(3 * n8[a] + ca, 3 * n8[b2] + cb, Kh(3 * a + ca, 3 * b2 + cb));
+            K.add(3 * n8[a] + ca, 3 * n8[b2] + cb, fill * Kh(3 * a + ca, 3 * b2 + cb));
   }
 
   const double G = youngs_modulus / (2.0 * (1.0 + poisson));
