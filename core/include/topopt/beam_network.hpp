@@ -94,8 +94,13 @@ struct BeamRestraintReport {
                                               //     non-collinear tie points
 };
 
-BeamRestraintReport beam_network_restraint(const BeamNetwork& net,
-                                           const std::vector<char>& node_tied);
+// `node_welded` (optional, same length as the nodes) marks nodes joined by a
+// MOMENT-TRANSFERRING tie -- to a shell, which has rotational dof. One such tie
+// fully restrains a component, so the three-non-collinear-points rule does not apply
+// to it: that rule exists only because a PINNED tie cannot carry moment.
+BeamRestraintReport beam_network_restraint(
+    const BeamNetwork& net, const std::vector<char>& node_tied,
+    const std::vector<char>* node_welded = nullptr);
 
 // ── ★ WHAT THE SOLVE NEEDS FROM THE NETWORK ─────────────────────────────────
 // The coupled system is [solid hex dof][beam frame dof] with the tied beam
@@ -193,6 +198,12 @@ struct CoupledLatticeSolve {
   double peak_member_stress_mpa = 0.0;
   int peak_member = -1;
   std::size_t beam_nodes_tied = 0;
+  std::size_t beam_nodes_welded_to_shell = 0;   // moment-transferring joints
+  std::size_t shell_nodes = 0, shell_triangles = 0;
+  std::size_t shell_nodes_tied = 0;   // skin nodes bonded into the solid mesh
+  std::size_t floating_dof = 0;       // free dof reaching no support at all
+  std::string preconditioner;         // which one actually ran
+  double matrix_asymmetry = 0.0;      // max |K_ij - K_ji| / max|K|; CG needs ~0
   // Of those, how many were NOT inside their host element and had their weights
   // clamped onto it. A clamped tie is a PROJECTION, not an interpolation: it does
   // not reproduce a linear field, and many of them can make the reduced system
@@ -222,12 +233,66 @@ struct CoupledLatticeSolve {
 // Fractions are clamped to [kHexFractionFloor, 1] so a voxel can never be singular.
 inline constexpr double kHexFractionFloor = 1e-3;
 
+// ★ THE THREE-WAY MODEL. A face prism cuts the part into two pieces, and each
+// piece wants a different element:
+//
+//   OUTSIDE the prism   the original model, CHUNKY -- median 27 mm thick on the M2
+//                       stand, t/span about 1/7. Solid hex, and the job's own
+//                       resolution is ample.
+//   THE GRADE-TO-SOLID  a thin plate bounding the lattice: 2 mm on a 194 mm span,
+//                       t/span 1/97. It is only 1.17 VOXELS thick, and a single hex
+//                       through the thickness is a famously poor bending element --
+//                       so the one part of the structure that actually flexes was
+//                       being represented by the element least able to represent it.
+//                       SHELL.
+//   THE LATTICE         struts. BEAMS, exact at any resolution because they are
+//                       never meshed.
+//
+// AND THE SKIN IS WHERE THE LATTICE ATTACHES, which is the second reason it must be
+// a shell: a hex node has no rotational dof, so a beam tied to it can only be PINNED
+// (measured nullity 10 for one tie, and the "three non-collinear ties per component"
+// rule this file enforces exists only because of that). A shell node HAS rotations,
+// so the joint is properly welded -- nullity 6 from a SINGLE point.
+//
+// `shells` may be empty, which is the pure hex+beam path, byte-identical to before.
+// ★ STAGE CHECKPOINTS. The CG is only the last phase; assembly, tie construction,
+// reordering and the preconditioner all precede it, and a run that is slow or wrong
+// there looks the same from outside as one that is slow in the solve. Each stage
+// reports its elapsed time AND a size, because "slow" is only meaningful next to
+// "how much" -- 2 s to weld 22 k nodes is fine, 2 s to weld 200 is not.
+struct SolveStage {
+  void (*fn)(const char* stage, double seconds, double size, void* user) = nullptr;
+  void* user = nullptr;
+};
+
+// ★ PROGRESS. A solve that runs for tens of minutes and prints nothing until it
+// exits is indistinguishable, while running, from one that has stalled. Every long
+// run in this codebase's history has been opaque in exactly that way, and the failed
+// ones cost the most because a stall looked identical to slow progress until the
+// hour was up. Set a callback and the CG reports its iteration and RELATIVE residual
+// as it goes; return false from it to abort the solve cleanly (reported as a
+// refusal, never as a converged answer).
+struct CgProgress {
+  // called every `every` iterations, and once on the final iteration
+  bool (*fn)(int iteration, double relative_residual, void* user) = nullptr;
+  void* user = nullptr;
+  int every = 100;
+};
+
+struct ShellPatch {
+  ShellMesh mesh;
+  double thickness_mm = 0.0;   // overrides mesh.thickness_mm when > 0
+};
+
 CoupledLatticeSolve solve_coupled_lattice(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const BeamNetwork& net, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, double youngs_modulus, double poisson,
     double shear_k, double cg_tolerance, int cg_max_iterations,
-    const std::vector<double>* hex_solid_fraction = nullptr);
+    const std::vector<double>* hex_solid_fraction = nullptr,
+    const std::vector<ShellPatch>* shells = nullptr,
+    const CgProgress* progress = nullptr,
+    const SolveStage* stage = nullptr);
 
 }  // namespace topopt
 
