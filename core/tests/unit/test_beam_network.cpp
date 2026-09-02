@@ -847,6 +847,76 @@ void test_skin_as_plates_matches_skin_as_hex() {
         "25% (36x apart on the real part is what this exists to catch)");
 }
 
+// ── ★ A LOAD LANDS ON WHATEVER CARRIES THE MATERIAL ──────────────────────────
+// Loads are declared on GRID NODES and used to be applied only where a HEX node
+// existed. The whole point of this model is that some voxels carry beams and plates
+// instead of hex, so that silently threw the force away.
+//
+// MEASURED on the real part, same 5,973 declared loads: 31.8% of |F| went missing
+// with the skin meshed as hex, 54.1% with it meshed as plates. Both converged to
+// residual 1e-13 and reported healthy -- a part that is not pushed is quiet, so the
+// failure is invisible. It also made the two models incomparable: they dropped
+// DIFFERENT loads, which is why adding material appeared to make the part softer.
+void test_a_load_over_lattice_is_APPLIED_not_dropped() {
+  const int nx = 4, ny = 4, nz = 6;
+  const double h = 1.7, E = 3500.0, nu = 0.35, P = 1.0;
+  const topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+  // solid only in the bottom four layers; the top two are lattice
+  std::vector<char> mask(g.voxel_count(), 0);
+  for (int k = 0; k < 4; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) mask[g.index(i, j, k)] = 1;
+
+  // four columns rising from inside the solid to the TOP GRID PLANE, braced so the
+  // component has three non-collinear ties
+  std::vector<BeamSegment> segs;
+  const double xs[2] = {1 * h, 3 * h}, ys[2] = {1 * h, 3 * h};
+  for (double x : xs)
+    for (double y : ys)
+      for (int t = 1; t < 6 * 4; ++t)
+        segs.push_back({Vec3{x, y, t * h / 4.0}, Vec3{x, y, (t + 1) * h / 4.0}, 0.25});
+  for (int t = 0; t < 8; ++t) {   // braces at z = h, in both directions
+    segs.push_back({Vec3{xs[0] + t * (xs[1]-xs[0]) / 8, ys[0], h},
+                    Vec3{xs[0] + (t+1) * (xs[1]-xs[0]) / 8, ys[0], h}, 0.25});
+    segs.push_back({Vec3{xs[0], ys[0] + t * (ys[1]-ys[0]) / 8, h},
+                    Vec3{xs[0], ys[0] + (t+1) * (ys[1]-ys[0]) / 8, h}, 0.25});
+    segs.push_back({Vec3{xs[1], ys[0] + t * (ys[1]-ys[0]) / 8, h},
+                    Vec3{xs[1], ys[0] + (t+1) * (ys[1]-ys[0]) / 8, h}, 0.25});
+    segs.push_back({Vec3{xs[0] + t * (xs[1]-xs[0]) / 8, ys[1], h},
+                    Vec3{xs[0] + (t+1) * (xs[1]-xs[0]) / 8, ys[1], h}, 0.25});
+  }
+  const topopt::BeamNetwork net = topopt::build_beam_network(segs);
+
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int j = 0; j <= ny; ++j)
+    for (int i = 0; i <= nx; ++i)
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(i, j, 0), c, 0.0});
+  // the loaded plane is z = nz*h: TWO cells above the solid, so no hex node exists
+  // there at all. Every one of these used to vanish.
+  for (int j : {1, 3})
+    for (int i : {1, 3}) lds.push_back({nod(i, j, nz), 2, -P / 4.0});
+
+  const topopt::CoupledLatticeSolve r = topopt::solve_coupled_lattice(
+      g, mask, net, bcs, lds, E, nu, 0.9, 1e-10, 50000);
+  if (!r.refusal.empty()) std::fprintf(stderr, "  refusal: %s\n", r.refusal.c_str());
+  CHECK(r.refusal.empty(), "a load over lattice does not refuse the solve");
+  if (!r.refusal.empty()) return;
+  std::printf("  loads: %zu applied (%zu on beam, %zu on shell), %zu dropped, "
+              "%.1f%% of |F| lost\n", r.loads_applied, r.loads_on_beam,
+              r.loads_on_shell, r.loads_dropped, 100.0 * r.load_dropped_fraction);
+  CHECK(r.loads_dropped == 0, "no load is thrown away");
+  CHECK(r.load_dropped_fraction == 0.0, "and none of |F| goes missing");
+  CHECK(r.loads_on_beam == lds.size(),
+        "every load over lattice is carried by the BEAM under it, because there is "
+        "no hex node within two cells of the loaded plane");
+  CHECK(r.compliance > 0.0,
+        "the part does work under the load -- a dropped load gives a silent zero");
+}
+
 void test_refusals() {
   bool threw = false;
   try { topopt::build_beam_network({{Vec3{0,0,0}, Vec3{1,0,0}, 0.0}}); }
@@ -884,6 +954,7 @@ int main() {
   test_skin_mesh_carries_the_skin_MASS();
   test_skin_mesh_is_CONNECTED_across_a_fold();
   test_skin_as_plates_matches_skin_as_hex();
+  test_a_load_over_lattice_is_APPLIED_not_dropped();
   test_refusals();
   std::printf("test_beam_network: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

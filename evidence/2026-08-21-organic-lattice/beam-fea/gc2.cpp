@@ -1931,12 +1931,29 @@ int main(int argc, char** argv) {
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
         if (inside_lattice(c)) mk[e] |= 2u;
+        // ★ bit2 = THE GRADE-TO-SOLID SKIN. A lattice region is not uniform: it is
+        // solid where the grade has closed to 100% -- the rim that bonds the lattice
+        // to the surrounding walls -- and sparse struts in the middle. Treating the
+        // region as ONE thing is wrong in both directions, and both were tried:
+        // excluding all of it deleted the skin the lattice attaches to (166 of
+        // 22,252 nodes touched solid), and including all of it meshed the sparse
+        // interior as solid plastic and counted every strut twice.
+        //
+        // The skin is REAL SOLID and belongs in the hex mesh; the sparse interior
+        // belongs to the beams. Neither needs a finer grid: the solid is chunky
+        // (median 27 mm on this part) and the struts are beam elements, exact at any
+        // pitch. cdist is the distance from the region border the rim was grown on.
+        if ((mk[e] & 2u) && !cdist.empty() && cdist[e] <= rim_mm) mk[e] |= 4u;
       }
       if (FILE* mf = std::fopen((beam_path + ".mask").c_str(), "wb")) {
         std::fwrite(mk.data(), 1, mk.size(), mf); std::fclose(mf);
         std::size_t ns = 0, nl = 0;
         for (unsigned char v : mk) { if (v & 1u) ++ns; if ((v & 1u) && (v & 2u)) ++nl; }
-        std::printf("hybrid masks: %zu solid voxels, %zu of them in a lattice region\n", ns, nl);
+        std::size_t nskin = 0;
+        for (unsigned char v : mk) if ((v & 1u) && (v & 4u)) ++nskin;
+        std::printf("hybrid masks: %zu solid voxels, %zu in a lattice region, "
+                    "%zu of those are GRADE-TO-SOLID SKIN (hex) leaving %zu sparse "
+                    "interior (beams)\n", ns, nl, nskin, nl - nskin);
       }
     }
     // the SOLID-region global field (too stiff; the baseline)

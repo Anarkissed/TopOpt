@@ -49,13 +49,16 @@ static bool report(int it, double rel, void* user) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 2) { std::fprintf(stderr, "usage: %s <lattice.beam> [E] [nu] [regions.txt] [rim_mm] [edge_mm]\n", argv[0]); return 2; }
+  if (argc < 2) { std::fprintf(stderr, "usage: %s <lattice.beam> [E] [nu] [regions.txt|mask] [rim_mm] [edge_mm] [cell_mm]\n", argv[0]); return 2; }
   const std::string path = argv[1];
   const double E = argc > 2 ? std::atof(argv[2]) : 3500.0;
   const double nu = argc > 3 ? std::atof(argv[3]) : 0.35;
   const std::string regions_path = argc > 4 ? argv[4] : std::string();
   const double rim_mm  = argc > 5 ? std::atof(argv[5]) : 2.0;
   const double edge_mm = argc > 6 ? std::atof(argv[6]) : 6.0;
+  // ★ THE LATTICE CELL, so a load over a pore can reach the strut under it. Not
+  // guessable from the grid: the cell is a design parameter and the voxel is not.
+  const double cell_mm = argc > 7 ? std::atof(argv[7]) : 0.0;
 
   double ox=0, oy=0, oz=0, h=1; int nx=0, ny=0, nz=0;
   std::vector<BeamSegment> segs;
@@ -288,7 +291,7 @@ int main(int argc, char** argv) {
     auto s0=std::chrono::steady_clock::now();
     const CoupledLatticeSolve r = solve_coupled_lattice(
         g, hex_mask, net, bcs, lds, E, nu, 0.9, 1e-8, 100000, nullptr,
-        shells.empty() ? nullptr : &shells, &prog, &stg);
+        shells.empty() ? nullptr : &shells, cell_mm, &prog, &stg);
     const double secs=std::chrono::duration<double>(std::chrono::steady_clock::now()-s0).count();
     std::printf("  skin bonded to solid at %zu of %zu shell nodes\n",
                 r.shell_nodes_tied, r.shell_nodes);
@@ -316,9 +319,10 @@ int main(int argc, char** argv) {
       std::printf("    dropping %zu load-free member(s), retrying\n", drop);
       net = pruned; continue;
     }
-    std::printf("  LOAD LANDED: %zu of %zu loads (%.2f%% of |F| dropped); "
-                "%zu of %zu bcs\n", r.loads_applied, r.loads_applied + r.loads_dropped,
-                100.0 * r.load_dropped_fraction, r.bcs_applied,
+    std::printf("  LOAD LANDED: %zu of %zu loads (%zu on shell, %zu on beam), "
+                "%.2f%% of |F| dropped; %zu of %zu bcs\n",
+                r.loads_applied, r.loads_applied + r.loads_dropped, r.loads_on_shell,
+                r.loads_on_beam, 100.0 * r.load_dropped_fraction, r.bcs_applied,
                 r.bcs_applied + r.bcs_dropped);
     std::printf("  CONVERGED: residual %.3e in %d iterations  [%.2f s]\n",
                 r.residual, r.iterations, secs);

@@ -966,8 +966,8 @@ CoupledLatticeSolve solve_coupled_lattice(
     const std::vector<NodalLoad>& loads, double youngs_modulus, double poisson,
     double shear_k, double cg_tolerance, int cg_max_iterations,
     const std::vector<double>* hex_solid_fraction,
-    const std::vector<ShellPatch>* shells, const CgProgress* progress,
-    const SolveStage* stage) {
+    const std::vector<ShellPatch>* shells, double load_reach_mm,
+    const CgProgress* progress, const SolveStage* stage) {
   CoupledLatticeSolve out;
   auto stage_t0 = std::chrono::steady_clock::now();
   auto mark = [&](const char* name, double size) {
@@ -1721,14 +1721,142 @@ CoupledLatticeSolve solve_coupled_lattice(
     fixed[static_cast<std::size_t>(3 * n + b.component)] = 1;
     ++nbc;
   }
+  // ── ★ A LOAD GOES WHERE THE MATERIAL IS, WHATEVER ELEMENT CARRIES IT ──────
+  // Loads are declared on GRID NODES, and used to be applied only where a hex node
+  // existed. In a model whose whole point is that some voxels carry beams and plates
+  // instead of hex, that silently threw the force away: measured on the same part
+  // and the same 5,973 loads, 31.8% of |F| went missing with the skin meshed as hex
+  // and 54.1% with it meshed as plates. Both solves converged to 1e-13 and reported
+  // healthy, because a part that is not pushed is quiet.
+  //
+  // So fall back: solid node, else the nearest SHELL node, else the nearest BEAM
+  // node, within one cell. Both are applied through the same master-slave maps the
+  // assembly uses, so a tied or welded node routes the force to its masters and the
+  // total is preserved. Only a load with no material within a cell is dropped, and
+  // that is counted and refused below rather than passed over.
+  struct NearNode { int kind; int id; Vec3 pos; };   // kind 0 = shell, 1 = beam
+  std::unordered_map<long long, std::vector<NearNode>> near;
+  const double lh = grid.spacing;
+  auto cell_key3 = [](long long a, long long b3, long long c3) {
+    return (a * 73856093LL) ^ (b3 * 19349663LL) ^ (c3 * 83492791LL);
+  };
+  auto cell_key = [&](const Vec3& p) {
+    return cell_key3(static_cast<long long>(std::floor(p.x / lh)),
+                     static_cast<long long>(std::floor(p.y / lh)),
+                     static_cast<long long>(std::floor(p.z / lh)));
+  };
+  if (NSH > 0)
+    for (std::size_t pidx = 0; pidx < shells->size(); ++pidx) {
+      const ShellMesh& sm3 = (*shells)[pidx].mesh;
+      for (std::size_t n = 0; n < sm3.nodes.size(); ++n)
+        near[cell_key(sm3.nodes[n])].push_back(
+            {0, shell_base[pidx] + static_cast<int>(n), sm3.nodes[n]});
+    }
+  for (std::size_t b = 0; b < NB; ++b)
+    near[cell_key(net.nodes[b])].push_back({1, static_cast<int>(b), net.nodes[b]});
+  // ★ AND THE MEMBERS THEMSELVES. A face traction is carried by the material behind
+  // the face; over a lattice that is a STRUT, and the strut usually passes BETWEEN
+  // its end nodes rather than ending at the loaded point. Index each member by the
+  // cells its ends and midpoint fall in, then place the load on the nearest point
+  // ALONG it, split to its two ends by the linear shape functions so the total force
+  // and its line of action are both preserved.
+  const double reach = load_reach_mm > 0.0 ? load_reach_mm : lh;
+  std::unordered_map<long long, std::vector<int>> memb;
+  for (std::size_t m2 = 0; m2 < net.member_count(); ++m2) {
+    const auto& mm2 = net.members[m2];
+    const Vec3& A4 = net.nodes[static_cast<std::size_t>(mm2.node_a)];
+    const Vec3& B4 = net.nodes[static_cast<std::size_t>(mm2.node_b)];
+    const Vec3 mid{0.5*(A4.x+B4.x), 0.5*(A4.y+B4.y), 0.5*(A4.z+B4.z)};
+    for (const Vec3& q : {A4, B4, mid}) memb[cell_key(q)].push_back(static_cast<int>(m2));
+  }
+
   for (const NodalLoad& l : loads) {
     load_all += std::fabs(l.value);
-    const bool ok = l.node >= 0 && static_cast<std::size_t>(l.node) < nid.size() &&
-                    nid[static_cast<std::size_t>(l.node)] >= 0;
-    if (!ok) { ++out.loads_dropped; load_lost += std::fabs(l.value); continue; }
-    const int n = nid[static_cast<std::size_t>(l.node)];
-    F[static_cast<std::size_t>(3 * n + l.component)] += l.value;
+    if (l.component < 0 || l.component > 2) { ++out.loads_dropped; load_lost += std::fabs(l.value); continue; }
+    const bool on_solid = l.node >= 0 && static_cast<std::size_t>(l.node) < nid.size() &&
+                          nid[static_cast<std::size_t>(l.node)] >= 0;
+    if (on_solid) {
+      const int n = nid[static_cast<std::size_t>(l.node)];
+      F[static_cast<std::size_t>(3 * n + l.component)] += l.value;
+      ++nld;
+      continue;
+    }
+    if (l.node < 0 || static_cast<std::size_t>(l.node) >=
+                          static_cast<std::size_t>(NX) * NY * (grid.nz + 1)) {
+      ++out.loads_dropped; load_lost += std::fabs(l.value); continue;
+    }
+    const std::size_t nidx = static_cast<std::size_t>(l.node);
+    const Vec3 p{grid.origin.x + static_cast<double>(nidx % NX) * lh,
+                 grid.origin.y + static_cast<double>((nidx / NX) % NY) * lh,
+                 grid.origin.z + static_cast<double>(nidx / (static_cast<std::size_t>(NX) * NY)) * lh};
+    // nearest shell node first, then nearest beam node: a plate spreads a surface
+    // traction better than a single strut end does
+    int best_kind = -1, best_id = -1;
+    double best_d2[2] = {lh * lh, lh * lh};
+    int best_of[2] = {-1, -1};
+    const long long ci = static_cast<long long>(std::floor(p.x / lh));
+    const long long cj = static_cast<long long>(std::floor(p.y / lh));
+    const long long ck = static_cast<long long>(std::floor(p.z / lh));
+    for (int di = -1; di <= 1; ++di)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int dk = -1; dk <= 1; ++dk) {
+          const auto it = near.find(cell_key3(ci + di, cj + dj, ck + dk));
+          if (it == near.end()) continue;
+          for (const NearNode& cand : it->second) {
+            const double d2 = (p.x-cand.pos.x)*(p.x-cand.pos.x) +
+                              (p.y-cand.pos.y)*(p.y-cand.pos.y) +
+                              (p.z-cand.pos.z)*(p.z-cand.pos.z);
+            if (d2 < best_d2[cand.kind]) { best_d2[cand.kind] = d2; best_of[cand.kind] = cand.id; }
+          }
+        }
+    if (best_of[0] >= 0) { best_kind = 0; best_id = best_of[0]; }
+    else if (best_of[1] >= 0) { best_kind = 1; best_id = best_of[1]; }
+    if (best_kind >= 0) {
+      const Map mm = (best_kind == 0) ? shell_map(best_id, l.component)
+                                      : map_of(static_cast<std::size_t>(best_id), l.component);
+      for (int x = 0; x < mm.n; ++x)
+        F[static_cast<std::size_t>(mm.dof[static_cast<std::size_t>(x)])] +=
+            l.value * mm.w[static_cast<std::size_t>(x)];
+      ++nld;
+      if (best_kind == 0) ++out.loads_on_shell; else ++out.loads_on_beam;
+      continue;
+    }
+    // nothing ended at this point: find the nearest strut PASSING under it
+    int hit_m = -1; double hit_t = 0.0, hit_d2 = reach * reach;
+    const int span = static_cast<int>(std::ceil(reach / lh));
+    for (int di = -span; di <= span; ++di)
+      for (int dj = -span; dj <= span; ++dj)
+        for (int dk = -span; dk <= span; ++dk) {
+          const auto it = memb.find(cell_key3(ci + di, cj + dj, ck + dk));
+          if (it == memb.end()) continue;
+          for (int m3 : it->second) {
+            const auto& mm3 = net.members[static_cast<std::size_t>(m3)];
+            const Vec3& A5 = net.nodes[static_cast<std::size_t>(mm3.node_a)];
+            const Vec3& B5 = net.nodes[static_cast<std::size_t>(mm3.node_b)];
+            const double ex = B5.x-A5.x, ey = B5.y-A5.y, ez = B5.z-A5.z;
+            const double L2 = ex*ex + ey*ey + ez*ez;
+            double t = 0.0;
+            if (L2 > 0.0) t = ((p.x-A5.x)*ex + (p.y-A5.y)*ey + (p.z-A5.z)*ez) / L2;
+            t = std::min(1.0, std::max(0.0, t));
+            const double qx = A5.x + t*ex, qy = A5.y + t*ey, qz = A5.z + t*ez;
+            const double d2 = (p.x-qx)*(p.x-qx) + (p.y-qy)*(p.y-qy) + (p.z-qz)*(p.z-qz);
+            if (d2 < hit_d2) { hit_d2 = d2; hit_m = m3; hit_t = t; }
+          }
+        }
+    if (hit_m < 0) { ++out.loads_dropped; load_lost += std::fabs(l.value); continue; }
+    const auto& mmf = net.members[static_cast<std::size_t>(hit_m)];
+    const std::size_t ends[2] = {static_cast<std::size_t>(mmf.node_a),
+                                 static_cast<std::size_t>(mmf.node_b)};
+    const double wt[2] = {1.0 - hit_t, hit_t};
+    for (int e2 = 0; e2 < 2; ++e2) {
+      if (wt[e2] == 0.0) continue;
+      const Map mm4 = map_of(ends[e2], l.component);
+      for (int x = 0; x < mm4.n; ++x)
+        F[static_cast<std::size_t>(mm4.dof[static_cast<std::size_t>(x)])] +=
+            l.value * wt[e2] * mm4.w[static_cast<std::size_t>(x)];
+    }
     ++nld;
+    ++out.loads_on_beam;
   }
   out.bcs_applied = nbc;
   out.loads_applied = nld;

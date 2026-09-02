@@ -239,7 +239,8 @@ struct CoupledLatticeSolve {
   // above kLoadDropRefuseFraction of the applied force.
   std::size_t bcs_applied = 0, bcs_dropped = 0;
   std::size_t loads_applied = 0, loads_dropped = 0;
-  double load_dropped_fraction = 0.0;   // by |force|, not by count
+  double load_dropped_fraction = 0.0;
+  std::size_t loads_on_shell = 0, loads_on_beam = 0;  // re-homed off the solid   // by |force|, not by count
   int peak_member = -1;
   std::size_t beam_nodes_tied = 0;
   std::size_t beam_nodes_welded_to_shell = 0;   // moment-transferring joints
@@ -349,6 +350,15 @@ CoupledLatticeSolve solve_coupled_lattice(
     double shear_k, double cg_tolerance, int cg_max_iterations,
     const std::vector<double>* hex_solid_fraction = nullptr,
     const std::vector<ShellPatch>* shells = nullptr,
+    // ★ HOW FAR A LOAD MAY REACH TO FIND MATERIAL. A load is declared on a GRID
+    // NODE, but where the model carries a lattice the material under that node is a
+    // STRUT, and the nearest strut can be most of a lattice cell away -- a surface
+    // node can sit over a pore. Default is one voxel, which is right for a solid or
+    // a plate and far too tight for a 6 mm lattice on a 1.7 mm grid: measured, 34.9%
+    // of the applied force still had nowhere to go. Pass the lattice CELL size; the
+    // caller knows it and this function must not guess. Loads that find nothing
+    // within it are counted and refused, never silently dropped.
+    double load_reach_mm = -1.0,
     const CgProgress* progress = nullptr,
     const SolveStage* stage = nullptr);
 
