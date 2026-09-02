@@ -193,6 +193,24 @@ std::vector<char> beam_network_bridges(const BeamNetwork& net);
 // when the cell is constant, and it must not be applied to a graded plan: score a
 // grade by its length (or by the effective uniform cell that length implies), never
 // by either end of its range.
+//
+// ★ AND THE RESIDUALS ARE ONE-SIDED, so material is the dominant term and not the
+// only one. Measured minus length-interpolated: +1.92, +2.99, +2.06, +0.57 -- four
+// for four positive, and the same sign on the count interpolation. Every graded plan
+// measured is BETTER connected than the uniform lattice with equal material, by a
+// consistent 0.6-3.0 points. "Contiguity tracks material regardless of distribution"
+// overstates it and is contradicted by the residuals of the fit offered to support
+// it; the gate can still read material, because 3 points is small against the 40+
+// points that separate a lattice from rubble. n = 4: do not build on the bonus.
+//
+// ★ THE VERDICT u4mm AND g3->8 SHARE IS *MARGINAL*. They are the same case
+// (90.02% vs 91.20% top-2, 9.98% vs 8.80% dust, 54.4% vs 54.7% bridges) and the
+// line is drawn where the MAJORITY of struts become bridges: past 50%, most struts
+// are the only path to what is beyond them, which is measured to remove both
+// prunability and load sharing. So the graded headline narrows -- 3->4, 3->5 and
+// 3->6 are lattices; 3->8 is marginal, exactly as uniform 4 mm is. With eleven
+// configurations the boundary is coarse and it is a judgement, not a derived
+// threshold.
 
 // ── ★ A WALL AS A SHELL MESH ────────────────────────────────────────────────
 // A lattice region is a DECLARED PLANAR FACE -- origin, unit normal, an orthonormal

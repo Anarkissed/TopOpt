@@ -1281,6 +1281,20 @@ struct OrganicGenStats {
   // deleted everything, which is the same unmeasured-zero error this receipt already
   // refuses elsewhere. Readers must test for negative before differencing.
   double census_len_mm[kCensusStages] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+  // ★ COMPONENT COUNT BESIDE THE LENGTH, AT EVERY STAGE. A LENGTH census is blind to
+  // a pass that changes TOPOLOGY without changing material: the node merge welds
+  // coincident endpoints, which fuses components and moves no length at all. So
+  // "the support prune is the sole deleter" is established in the LENGTH dimension
+  // only, and a claim about CONNECTIVITY cannot rest on it.
+  //
+  // MEASURED at separation 4.5: the emitted spans with the prune ablated give 16
+  // components with the largest at 10.69%, while the PRE-EMISSION curve network gives
+  // 45 components with its largest at 10.32%. Same largest fraction, nearly three
+  // times the component count -- something between the two merges components while
+  // preserving length, and only a component census can see it.
+  //
+  // -1 means the stage did not run.
+  int census_components[kCensusStages] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
   double census_grown_len_mm = 0.0;
   std::size_t filleted_spans = 0;
   std::size_t fillet_unresolved = 0;

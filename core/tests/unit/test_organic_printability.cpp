@@ -807,6 +807,58 @@ void test_growth_copy_path_drops_nothing() {
         "G9: growth_ran must follow the argument, never be inferred from a counter");
 }
 
+// ── ★ THE CENSUS MUST COUNT PIECES, NOT ONLY MILLIMETRES ────────────────────────
+// A LENGTH census is blind to a pass that changes topology without moving material.
+// The node merge welds coincident endpoints: it fuses components and deletes almost
+// nothing, so a length-only census reports it as a no-op and "the support prune is
+// the sole deleter" gets read as "nothing else re-wired anything". The first claim is
+// true; the second does not follow from it.
+//
+// MEASURED on this fixture at separation 4.0: emitted 4331 mm / 26 components ->
+// node merge 4298 mm / 9 components. It removed 0.8% of the length and two thirds of
+// the pieces.
+void test_census_counts_components_not_only_length() {
+  GrowFixture f = grow_fixture();
+  for (double& v : f.spacing) v = 4.0;
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  OrganicGenStats st;
+  const std::vector<OrganicSpan> spans = run(lat, st);
+  CHECK(!spans.empty(), "census precondition: the fixture must emit geometry");
+  if (spans.empty()) return;
+
+  // every stage that recorded a length must also have recorded a component count:
+  // a half-populated census is what let a topology change go unseen.
+  int with_len = 0, with_comps = 0;
+  for (int i = 0; i < OrganicGenStats::kCensusStages; ++i) {
+    if (st.census_len_mm[i] < 0.0) continue;
+    ++with_len;
+    if (st.census_components[i] >= 0) ++with_comps;
+  }
+  std::printf("  census: %d stage(s) with a length, %d of them with components\n",
+              with_len, with_comps);
+  CHECK(with_len > 0, "the census records at least one stage");
+  CHECK(with_comps == with_len,
+        "every stage with a length also has a component count -- a stage missing one "
+        "is a stage where a re-wiring pass cannot be seen");
+
+  const double len_emit = st.census_len_mm[OrganicGenStats::CensusEmitted];
+  const double len_merge = st.census_len_mm[OrganicGenStats::CensusNodeMerge];
+  const int c_emit = st.census_components[OrganicGenStats::CensusEmitted];
+  const int c_merge = st.census_components[OrganicGenStats::CensusNodeMerge];
+  if (len_emit > 0.0 && c_emit > 0 && c_merge > 0) {
+    std::printf("  node merge: %.0f mm / %d comps -> %.0f mm / %d comps\n",
+                len_emit, c_emit, len_merge, c_merge);
+    CHECK(c_merge < c_emit,
+          "the node merge FUSES components -- the property a length census cannot "
+          "see, and the reason this census reports both");
+    CHECK(std::fabs(len_merge - len_emit) / len_emit < 0.10,
+          "...while moving under 10% of the length, which is why it reads as a no-op "
+          "in the length dimension");
+  }
+}
+
 int main() {
   test_growth_produces_curves();
   test_growth_does_not_fall_back();
@@ -826,6 +878,7 @@ int main() {
   test_finish_does_not_change_the_structure();
   test_deterministic();
   test_one_cell_needs_a_finish();
+  test_census_counts_components_not_only_length();
   std::printf("%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

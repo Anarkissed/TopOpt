@@ -2034,8 +2034,53 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     double t = 0.0;
     for (const EmittedSeg& e : emitted) t += e.len;
     return t; };
+  // ★ COUNT THE PIECES, NOT ONLY THE MILLIMETRES. A pass that welds nodes changes
+  // the component count and leaves the length untouched, so a length-only census
+  // cannot tell "nothing else executed" from "something else re-wired it". Union-find
+  // over the live spans' shared endpoints, quantised to the same tolerance the merge
+  // uses, so the count means the same thing the geometry does.
+  auto census_components = [&]() {
+    std::unordered_map<long long, int> node_of;
+    std::vector<int> par;
+    const double q = 1e-4;   // 0.1 micron: coincident endpoints, not near ones
+    auto key = [&](const Vec3& p) {
+      const long long a = static_cast<long long>(std::llround(p.x / q));
+      const long long b = static_cast<long long>(std::llround(p.y / q));
+      const long long c = static_cast<long long>(std::llround(p.z / q));
+      return (a * 73856093LL) ^ (b * 19349663LL) ^ (c * 83492791LL);
+    };
+    auto id_of = [&](const Vec3& p) {
+      const long long k = key(p);
+      auto it = node_of.find(k);
+      if (it != node_of.end()) return it->second;
+      const int id = static_cast<int>(par.size());
+      par.push_back(id);
+      node_of.emplace(k, id);
+      return id;
+    };
+    std::function<int(int)> find = [&](int x) {
+      while (par[static_cast<std::size_t>(x)] != x) {
+        par[static_cast<std::size_t>(x)] =
+            par[static_cast<std::size_t>(par[static_cast<std::size_t>(x)])];
+        x = par[static_cast<std::size_t>(x)];
+      }
+      return x;
+    };
+    // walk `emitted` exactly as census_len does, so the two numbers always describe
+    // the same set of spans and cannot drift apart
+    if (emitted.empty()) return 0;
+    for (const EmittedSeg& e : emitted) {
+      const int a = id_of(e.a), b = id_of(e.b);
+      const int ra = find(a), rb = find(b);
+      if (ra != rb) par[static_cast<std::size_t>(ra > rb ? ra : rb)] = ra < rb ? ra : rb;
+    }
+    std::set<int> roots;
+    for (const EmittedSeg& e : emitted) roots.insert(find(id_of(e.a)));
+    return static_cast<int>(roots.size());
+  };
   auto census_at = [&](OrganicGenStats::CensusStage stage) {
-    st.census_len_mm[stage] = census_len(); };
+    st.census_len_mm[stage] = census_len();
+    st.census_components[stage] = census_components(); };
   auto emit_node_once = [&](const Vec3& p, double r) {
     // ★ THE SAME GUARD THE OCTET GENERATOR HOLDS, AND FOR THE SAME REASON
     // (lattice_gen.cpp, the interior-node loop): a node ball whose SOLID would breach
@@ -4475,6 +4520,11 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     }
     st.emitted_components = comp.size();
     st.census_len_mm[OrganicGenStats::CensusWritten] = total;
+    // ★ AND ITS COMPONENT COUNT, so the census is complete in BOTH dimensions at
+    // every stage. This site computes the components already (`comp`); leaving the
+    // census entry at -1 here made the last row of the table the one row where a
+    // topology change could not be seen.
+    st.census_components[OrganicGenStats::CensusWritten] = static_cast<int>(comp.size());
     double biggest = 0.0;
     for (const auto& kv : comp) biggest = std::max(biggest, kv.second);
     st.emitted_largest_length_fraction = total > 0.0 ? biggest / total : 0.0;

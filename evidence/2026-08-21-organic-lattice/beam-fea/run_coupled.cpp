@@ -325,20 +325,42 @@ int main(int argc, char** argv) {
       for (std::size_t i=0;i<net.members.size();++i)
         if (!r.restraint.member_unrestrained[i] && !r.restraint.member_load_free[i] &&
             !r.restraint.member_underconstrained[i]) pruned.members.push_back(net.members[i]);
-      // ★ SAY WHAT LEAVES THE SOLVE BUT STAYS IN THE FILE. These members are written
-      // to lattice.beam and to the exported STL; they are excluded here only because
-      // the beam network finds them attached to nothing. The certified object is
-      // therefore not the exported object, and the size of that gap has to be on the
-      // receipt rather than inferred.
+      // ★ SAY WHAT LEAVES THE SOLVE BUT STAYS IN THE FILE. These members are
+      // written to lattice.beam and to the exported STL; they are excluded here only
+      // because the beam network finds them attached to nothing. The certified object
+      // is therefore not the exported object, and the size of that gap belongs on the
+      // receipt rather than being inferred.
+      //
+      // ★ INDEXED BY NETWORK MEMBER, NOT BY INPUT SEGMENT. The restraint flags are
+      // one per welded MEMBER (78,514 here) and the input is one per SEGMENT
+      // (106,464): indexing the segment array with a member index reads a different
+      // strut and runs off the end. It did, and it reported 1,085.4 mm where the
+      // truth is 130.5 mm -- an 8x overstatement of how much geometry leaves the
+      // solve, from a mismatch between two arrays that are both "the lattice".
       double droplen = 0.0;
-      for (std::size_t i = 0; i < segs.size(); ++i)
-        if (r.restraint.member_unrestrained[i] || r.restraint.member_load_free[i])
-          droplen += std::sqrt(
-              (segs[i].b.x-segs[i].a.x)*(segs[i].b.x-segs[i].a.x) +
-              (segs[i].b.y-segs[i].a.y)*(segs[i].b.y-segs[i].a.y) +
-              (segs[i].b.z-segs[i].a.z)*(segs[i].b.z-segs[i].a.z));
+      for (std::size_t i = 0; i < net.members.size(); ++i)
+        if (r.restraint.member_unrestrained[i] || r.restraint.member_load_free[i] ||
+            r.restraint.member_underconstrained[i]) {
+          const Vec3& a2 = net.nodes[net.members[i].node_a];
+          const Vec3& b2 = net.nodes[net.members[i].node_b];
+          droplen += std::sqrt((b2.x-a2.x)*(b2.x-a2.x) + (b2.y-a2.y)*(b2.y-a2.y) +
+                               (b2.z-a2.z)*(b2.z-a2.z));
+        }
       std::printf("    dropping %zu load-free member(s) (%.1f mm), retrying — these "
                   "stay in the exported geometry\n", drop, droplen);
+      if (const char* dp = std::getenv("TOPOPT_DUMP_DROPPED"))
+        if (FILE* df = std::fopen(dp, "w")) {
+          for (std::size_t i = 0; i < net.members.size(); ++i)
+            if (r.restraint.member_unrestrained[i] || r.restraint.member_load_free[i] ||
+                r.restraint.member_underconstrained[i]) {
+              const Vec3& a2 = net.nodes[net.members[i].node_a];
+              const Vec3& b2 = net.nodes[net.members[i].node_b];
+              std::fprintf(df, "SEG %.8g %.8g %.8g %.8g %.8g %.8g %.6g\n",
+                           a2.x, a2.y, a2.z, b2.x, b2.y, b2.z, net.members[i].radius_mm);
+            }
+          std::fclose(df);
+          std::printf("    dropped members written to %s\n", dp);
+        }
       net = pruned; continue;
     }
     std::printf("  LOAD LANDED: %zu of %zu loads (%zu on shell, %zu on beam), "
