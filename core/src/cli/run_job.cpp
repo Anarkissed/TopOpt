@@ -641,6 +641,12 @@ struct LatticeExportOutcome {
   // ★★ ORGANIC's POST-CLIP connectivity (OrganicGenStats): the connectedness of what
   // was WRITTEN, after the boundary clip trimmed and dropped spans. The tracer's own
   // number describes the lattice it traced; this one describes the file.
+  // ★★ WHERE THE MILLIMETRES WENT. Live span length at each stage of the emission
+  // pipeline, plus the grown length handed in. -1 in a stage means that pass DID NOT
+  // RUN — it is not zero length, and differencing without checking is how an unrun
+  // pass reads as having deleted everything.
+  std::vector<double> organic_census_len_mm;
+  double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_mm = 0.0;
@@ -698,6 +704,25 @@ struct LatticeExportOutcome {
   long long organic_slenderness_propped = 0;
   long long organic_slenderness_impossible = 0;
   long long organic_slenderness_props = 0;
+  double organic_cantilever_reach = 0.0;
+  long long organic_cantilever_islands = 0;
+  // ── ★★ GROWTH TELEMETRY (task PR-353 amendment §1) ──────────────────────────
+  // `growth_ran` distinguishes "growth measured zero" from "growth never ran": a
+  // traced run reports false and every counter below is meaningless, which is the
+  // same rule this receipt already applies to shape-fit reporting. Without it a run
+  // that truncated at the tip budget is indistinguishable from one that finished.
+  // ★★ CARRY THE STRUCT, NOT A FLATTENED COPY OF IT. Twelve mirrored fields meant a
+  // thirteenth counter had to be added in FIVE places, one of which was a hand-written
+  // block with no compiler enforcement — precisely the shape that let the growth
+  // counters be filled and never read in the first place. Holding the generator's own
+  // struct means adding a counter is one line in OrganicGenStats and nothing else.
+  OrganicGenStats growth;
+  bool growth_ran = false;
+  long long organic_arched_spans = 0;
+  double organic_arch_rise = 0.0;
+  long long organic_filleted = 0;
+  long long organic_fillet_unresolved = 0;
+  double organic_fillet_radius = 0.0;
   double organic_base_mat_len = 0.0;
   double organic_base_mat_z = 0.0;
   long long organic_fill_cells = 0;
@@ -1966,6 +1991,9 @@ LatticeExportOutcome export_latticed_variant(
     st.anchor_nodes = g.anchor_nodes;
     st.skin_triangles = g.skin_triangles;
     st.landings = g.anchor_nodes;
+    oc.organic_census_len_mm.assign(g.census_len_mm,
+                                    g.census_len_mm + OrganicGenStats::kCensusStages);
+    oc.organic_census_grown_len_mm = g.census_grown_len_mm;
     oc.organic_emitted_components = static_cast<long long>(g.emitted_components);
     oc.organic_floating_before = g.floating_voxels_before;
     oc.organic_floating_after = g.floating_voxels_after;
@@ -2023,6 +2051,13 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_slenderness_impossible =
         static_cast<long long>(g.slenderness_impossible);
     oc.organic_slenderness_props = static_cast<long long>(g.slenderness_props_added);
+    oc.organic_cantilever_reach = g.cantilever_max_reach_mm;
+    oc.organic_cantilever_islands = static_cast<long long>(g.cantilever_islands);
+    oc.organic_arched_spans = static_cast<long long>(g.arched_spans);
+    oc.organic_arch_rise = g.arch_max_rise_mm;
+    oc.organic_filleted = static_cast<long long>(g.filleted_spans);
+    oc.organic_fillet_unresolved = static_cast<long long>(g.fillet_unresolved);
+    oc.organic_fillet_radius = g.fillet_max_radius_mm;
     oc.organic_base_mat_len = g.base_mat_length_mm;
     oc.organic_base_mat_z = g.base_mat_z_mm;
     oc.organic_fill_cells = static_cast<long long>(g.fill_mat_cells);
@@ -3852,6 +3887,11 @@ class ScopedLadderSolverIsolation {
 // global density parameter" — and it is why the grade never has to thin a strut below
 // what the nozzle lays.
 struct OrganicOutcome {
+  OrganicGenStats growth;
+  // ★ TRUE IFF grow_organic_lattice WAS CALLED. Never inferred from a counter: a run
+  // that grew and produced nothing is a different fact from a traced run, and the
+  // counters above are meaningless in the second case.
+  bool growth_ran = false;
   // ★★ SHAPE-FIT REPORTING. Reported whether or not the feature is on, so "it did
   // nothing" and "it was never asked to run" are distinguishable in the receipt — a
   // zero that was never measured is not a passing zero.
@@ -3889,7 +3929,12 @@ OrganicOutcome run_organic_step(bool shell_is_written,
                                 // exponent below. No second control is invented.
                                 bool minimize_plastic,
                                 const Vec3& build_dir, double printed_iso,
-                                int thickness_cap_voxels) {
+                                int thickness_cap_voxels,
+                                // ★ The machine's layer height, needed by the GROWTH
+                                // path: it advances a tip one layer at a time and asks
+                                // its support question in that discretisation. 0 = not
+                                // stated, and growth falls back to half a voxel.
+                                double layer_height_mm = 0.0) {
   OrganicOutcome oo;
   const std::size_t n = grid.voxel_count();
   // NO STRESS TENSOR, NO ORGANIC LATTICE. The whole method is the eigen-decomposition
@@ -3933,7 +3978,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   const double lat_scale = jg.organic_scale > 0.0 ? jg.organic_scale : 1.0;
   const double cell_min_mm = jg.cell_min_mm * lat_scale;
   const double cell_max_mm = jg.cell_max_mm * lat_scale;
-  if (lat_scale != 1.0)
+  if (lat_scale != 1.0 && std::getenv("TOPOPT_ORGANIC_TRACE"))
     std::fprintf(stderr, "[scale] x%.3f: cell window %.2f-%.2f -> %.2f-%.2f mm\n",
                  lat_scale, jg.cell_min_mm, jg.cell_max_mm, cell_min_mm, cell_max_mm);
   const bool have_window = cell_min_mm > 0.0 && cell_max_mm >= cell_min_mm;
@@ -4133,6 +4178,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
         oo.shape_fit_voxels_shrunk = shrunk;
         oo.shape_fit_candidates = candidates;
         oo.shape_fit_min_ratio = shrunk ? worst_ratio : 1.0;
+        if (std::getenv("TOPOPT_ORGANIC_TRACE"))
         std::fprintf(stderr,
                      "[shape-fit] ONLY-mode: cell %.2f mm at the faces to %.2f mm at "
                      "the core (depth %lld voxels), stress map NOT read\n",
@@ -4178,7 +4224,8 @@ OrganicOutcome run_organic_step(bool shell_is_written,
     oo.shape_fit_voxels_shrunk = shrunk;
     oo.shape_fit_candidates = candidates;
     oo.shape_fit_min_ratio = shrunk ? worst_ratio : 1.0;
-    std::fprintf(stderr,
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr,
                  "[shape-fit] shrunk %zu of %zu candidates, smallest cell %.3fx the "
                  "stress-driven size (floor %s)\n",
                  shrunk, candidates, shrunk ? worst_ratio : 1.0,
@@ -4210,7 +4257,16 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   op.rho_min = std::max(band_rho_min, kOrganicVdiDensityFloor);
   op.rho_max = band_rho_max;
   const double t0 = wall_seconds();
-  oo.lat = trace_organic_lattice(grid, cand, stress_tensor, spacing, &width, op);
+  op.layer_hint_mm = jg.organic_growth ? layer_height_mm : 0.0;
+  // ★★ GROW OR TRACE. The growth path is a different ARCHITECTURE, not a different
+  // parameter: it refuses to lay material whose underside is unsupported, so the six
+  // repair passes have nothing left to repair. Off by default — the traced path stays
+  // byte-identical until a job asks.
+  oo.growth_ran = jg.organic_growth;
+  oo.lat = jg.organic_growth
+               ? grow_organic_lattice(grid, cand, stress_tensor, spacing, &width, op,
+                                      &oo.growth)
+               : trace_organic_lattice(grid, cand, stress_tensor, spacing, &width, op);
   oo.trace_seconds = wall_seconds() - t0;
   if (oo.net_skin_wanted) {
     oo.lat.net_skin_reach_mm = oo.lat.report.achieved_spacing_median_mm;
@@ -4248,6 +4304,7 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   gi.organic_present = true;
   gi.organic_strut_diameter_mm = r.strut_diameter_mm;
   gi.organic_trace_seconds = oo.trace_seconds;
+  copy_growth_stats(gi, oo.growth, oo.growth_ran);
   gi.organic_candidate_voxels = static_cast<long long>(r.candidate_voxels);
   gi.organic_degenerate_voxels = static_cast<long long>(r.degenerate_voxels);
   gi.organic_degenerate_fraction = r.degenerate_fraction;
@@ -4843,7 +4900,8 @@ LatticeVariantOutcome lattice_one_variant(
                                gf.posture.relative_density, gf.band_rho_min,
                                gf.band_rho_max, job.grading,
                                job.loads.present && job.loads.minimize_plastic,
-                               v.applied_build_dir, printed_iso, 32);
+                               v.applied_build_dir, printed_iso, 32,
+                               job.loads.layer_height_mm);
     // ★ THE WELD'S RASTER PITCH, so the generator can refuse to emit a base mat too
     // thin for that raster to KEEP. Set beside the layer height below for the same
     // reason: both are machine facts the generator cannot infer, and without this one
@@ -4878,6 +4936,11 @@ LatticeVariantOutcome lattice_one_variant(
     R.organic_ran = true;
     R.organic = organic.lat.report;
     R.organic_trace_seconds = organic.trace_seconds;
+    // ★ THE GEOMETRY PATH REBUILDS A BARE OrganicOutcome FOR THE RECEIPT (see the
+    // `tmp` below), so the growth counters cannot ride there — they travel on the
+    // export outcome, which survives to the receipt intact.
+    R.oc.growth = organic.growth;
+    R.oc.growth_ran = organic.growth_ran;
     // The posture the certification consumes is now the TRACED one.
     gf.posture.mask = organic.lat.mask;
     gf.posture.relative_density = organic.lat.relative_density;
@@ -7232,7 +7295,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                                 gf.posture.mask, gf.posture.relative_density,
                                 gf.band_rho_min, gf.band_rho_max, job.grading,
                                 job.loads.present && job.loads.minimize_plastic,
-                                applied_build_dir, 0.5, gp.thickness_cap_voxels);
+                                applied_build_dir, 0.5, gp.thickness_cap_voxels,
+                                job.loads.layer_height_mm);
     // ★ THE WELD'S RASTER PITCH, so the generator can refuse to emit a base mat too
     // thin for that raster to KEEP. Set beside the layer height below for the same
     // reason: both are machine facts the generator cannot infer, and without this one
@@ -8219,6 +8283,12 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         tmp.lat.report = R.organic;
         tmp.trace_seconds = R.organic_trace_seconds;
         fill_organic_run_info(gi, tmp);
+        // ★ ...and the growth counters are restored from the export outcome, which is
+        // what carried them across. ONE call: `tmp` has no growth stats to contribute,
+        // so there is nothing to overwrite field by field.
+        copy_growth_stats(gi, R.oc.growth, R.oc.growth_ran);
+        gi.organic_census_len_mm = R.oc.organic_census_len_mm;
+        gi.organic_census_grown_len_mm = R.oc.organic_census_grown_len_mm;
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;
         gi.organic_emitted_stranded_length_mm = R.oc.organic_emitted_stranded_mm;
@@ -8279,6 +8349,13 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_slenderness_propped = R.oc.organic_slenderness_propped;
         gi.organic_slenderness_impossible = R.oc.organic_slenderness_impossible;
         gi.organic_slenderness_props = R.oc.organic_slenderness_props;
+        gi.organic_cantilever_reach = R.oc.organic_cantilever_reach;
+        gi.organic_cantilever_islands = R.oc.organic_cantilever_islands;
+        gi.organic_arched_spans = R.oc.organic_arched_spans;
+        gi.organic_arch_rise = R.oc.organic_arch_rise;
+        gi.organic_filleted = R.oc.organic_filleted;
+        gi.organic_fillet_unresolved = R.oc.organic_fillet_unresolved;
+        gi.organic_fillet_radius = R.oc.organic_fillet_radius;
         gi.organic_base_mat_length_mm = R.oc.organic_base_mat_len;
         gi.organic_base_mat_z_mm = R.oc.organic_base_mat_z;
         gi.organic_fill_mat_cells = R.oc.organic_fill_cells;

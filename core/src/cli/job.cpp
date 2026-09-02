@@ -1502,7 +1502,7 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale"},
+             "organic_scale", "organic_growth"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1666,6 +1666,27 @@ JobDescription parse_job(const std::string& json_text) {
                                         : job.grading.intent) +
             "\"): shape fit changes the density, which under a structural intent is "
             "what the certificate is computed against");
+    }
+    if (const JsonValue* gv = find_key(gr, "organic_growth")) {
+      if (gv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_growth\" must be a boolean");
+      job.grading.organic_growth = (gv->num != 0.0);
+      if (job.grading.organic_growth && !organic_alg)
+        schema_fail(
+            "grading \"organic_growth\" is only allowed with algorithm \"organic\"");
+      // ★★ GROWTH WITHOUT A STATED LAYER HEIGHT IS A SCHEMA ERROR, not a default.
+      // The generator asks its support question ONE LAYER AT A TIME, so the layer
+      // height is the discretisation the whole printability argument is computed in.
+      // Unstated, it fell back to half a voxel: 0.85 mm on the maintainer's 1.705 mm
+      // grid — about four times a real layer — and the argument was then made in the
+      // wrong units with nothing raised. `layer_height_mm` defaults to 0.0 and is only
+      // set when stated, so this tests STATED, not merely positive.
+      if (job.grading.organic_growth && !(job.loads.layer_height_mm > 0.0))
+        schema_fail(
+            "grading \"organic_growth\" requires a stated loads "
+            "\"layer_height_mm\": growth asks its support question one layer at a "
+            "time, and without a stated layer height it would silently substitute "
+            "half a voxel");
     }
     if (const JsonValue* sv = find_key(gr, "organic_scale")) {
       job.grading.organic_scale = require_number(*sv, "grading.organic_scale");

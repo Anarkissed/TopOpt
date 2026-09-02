@@ -407,6 +407,10 @@ struct JobGrading {
   // the extrudable width, the VDI density floor, and the tracer's print and resolution
   // floors — so scaling DOWN cannot produce a lattice that will not print; it produces
   // the finest one that will, and the receipt reports how many voxels were raised.
+  // ★★ GROWTH: build the lattice bottom-up under a printability cone instead of
+  // tracing and then repairing. Requires organic; default off so every existing job is
+  // byte-identical.
+  bool organic_growth = false;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

@@ -325,6 +325,154 @@ inline constexpr double kOrganicVdiFlatAngleDeg = 45.0;
 // flat bar at 1.12 mm across is l/D 34.7 and needs four pieces to clear 10; beyond this
 // the strut is left alone and COUNTED rather than propped into a thicket.
 inline constexpr int kOrganicSlendernessMaxProps = 4;
+
+// ★★ HOW FAR A LAYER'S ISLAND MAY REACH BEYOND ITS OWN SUPPORT, in mm. Beyond this the
+// leading edge is being laid over open air for long enough to droop — the round strut
+// section means a diagonal arrives at its far node several layers after it leaves the
+// near one, and in between the arm is a cantilever whatever the island-level support
+// flag says. Reported first and acted on second: the flag has been reporting 0 while
+// the geometry carried exactly this.
+inline constexpr double kOrganicMaxCantileverMm = 3.0;
+
+// ══ ★★★ ARCHING — A SHALLOW SPAN IS BOWED INTO AN ARCH ★★★ ═══════════════════════
+//
+// ★ THE MECHANISM, IN ONE LINE. A strut at angle theta from the plate advances
+// layer_height / tan(theta) along its own length per layer. At 5 degrees and a 0.2 mm
+// layer that is 2.3 mm of new material laid in one pass — the span appears almost at
+// once, and only whichever end happens to sit over material is holding it. The round
+// section is what makes this invisible to an endpoint test: the strut leaves its near
+// node many layers before it arrives at the far one.
+//
+// ★ WHY UP AND NOT DOWN. Bowed UP, each half rises steeply from its own node, every
+// layer lands on the previous layer OF THE SAME STRUT, and the halves close at the
+// apex last — an arch, printed the way arches are built. Sagged DOWN the middle is
+// lowest, so it prints FIRST, over nothing at all.
+//
+// Below this angle from the build plate a span is shallow enough to be worth arching.
+inline constexpr double kOrganicArchMinAngleDeg = 20.0;
+
+// ...but only if it is actually unsupported for this far along its length. A shallow
+// bar lying on the weave is held every few millimetres and needs no arch; the measured
+// part had 610 islands reaching past their own support, the worst by 11.79 mm.
+inline constexpr double kOrganicArchMinUnsupportedMm = 0.01;
+
+// How steep each half of the arch is made, as a multiple of the shallow-angle
+// threshold. 1.0 puts both legs exactly at kOrganicArchMinAngleDeg, which is the
+// least material that clears the rule the arch exists to satisfy.
+inline constexpr double kOrganicArchLegSteepness = 1.0;
+
+// ══ ★★★ THE FILLET — THE STRUT'S OWN UNDERSIDE IS THE ARCH ★★★ ═══════════════════
+//
+// ★ WHY ARCHING THE CENTRELINE WAS THE WRONG FIX, in the maintainer's words: "instead
+// of a cylinder connected to a cylinder, there needs to be a fillet at its edges that
+// meet at the center". A strut is a CAPSULE. Its lowest layer is a zero-width sliver
+// running the WHOLE length of the span with nothing under it, touching down only where
+// an end happens to land on something. Bowing the centreline moves that sliver; it does
+// not remove it, because the bowed strut is still a cylinder with the same underside.
+// A one-legged span of this kind is not a hard bridge, it is an impossible one.
+//
+// ★ THE FILLET. Flare the radius at the ends and taper to nominal at the middle. The
+// UNDERSIDE then rises from each support at kOrganicFilletAngleDeg and the two flares
+// meet at the centre, so every layer of the strut lands on the layer below it — the
+// arch is the strut's own surface, not its path.
+//
+// The angle the underside climbs away from each support.
+// ══ ★★★ GROWTH — PRINTABILITY AS A CONSTRUCTION RULE, NOT A REPAIR ★★★ ═══════════
+//
+// ★ WHY THE TRACE-THEN-REPAIR ARCHITECTURE CANNOT BE PATCHED. `trace_organic_lattice`
+// draws curves through 3D space along the stress field, and SIX passes then try to make
+// the result printable: tie, prune, stranded drop, ground tie, branch support, fillet.
+// Each fixes a defect another has already fixed, which is why they need a joint fixed
+// point to terminate at all. A day of work on those passes ended with the maintainer
+// pointing at a slice and saying "there's a whole complete mid-air print here" — the
+// repairs cannot reach what the generator was free to create.
+//
+// ★ THE GROWTH RULE. Build in LAYER ORDER from the base plate, the way the machine
+// does, and never emit material whose underside is unsupported. Mid-air then is not
+// repaired, it is INEXPRESSIBLE. Free ends likewise: a curve only ever extends from
+// material that is already held, so a tip in open space cannot be produced.
+//
+// ★ THE FIELD BECOMES A PREFERENCE, NOT AN INSTRUCTION. The stress direction still
+// steers — organic stays organic — but only within the cone that will print. Where the
+// field points below the cone the growth climbs at the cone limit toward it, or waits
+// for a neighbour to rise and support that direction. 56 % of the spans on the
+// maintainer's cube sit below 20 degrees from the plate; the field genuinely wants
+// horizontal members, and the honest resolution is that it does not always get them.
+//
+// The steepest departure from vertical a growing tip may take. VDI's surface rule is
+// 45, but the measured limit for a STRUT on FFF is shallower: struts print with ~10 %
+// dimensional deviation and < 1 mm shape deviation at 30 degrees from the plate, and
+// the threshold moves with extrusion temperature, speed and cooling — so this is a
+// property of the profile, not a constant of the geometry.
+inline constexpr double kOrganicGrowthMinAngleDeg = 30.0;
+
+// How far a tip advances per growth step, as a multiple of the layer height. One layer
+// per step is the finest the machine can resolve and the most faithful to "what the
+// printer will do"; larger is faster and coarser.
+inline constexpr double kOrganicGrowthStepLayers = 1.0;
+
+// A growing tip is supported when material exists within this many strut radii beneath
+// its underside. Slightly over 1 so a tip resting exactly on the layer below counts.
+inline constexpr double kOrganicGrowthSupportRadii = 1.25;
+
+// ★★ BRANCHING IS WHAT MAKES IT A LATTICE RATHER THAN A COMB. Seeded only on the floor,
+// growth gave 121 parallel columns: each seed climbs, none ever meets another, and a
+// diagrid finish had nothing to dress. A 3D lattice needs LATERAL connection, and a
+// lateral connection is a horizontal strut — precisely what will not print. The
+// resolution self-supporting lattices use is that laterals are DIAGONAL: a curve
+// branches off material that already exists and departs at the cone limit, and branches
+// from neighbouring columns cross and meet. Every branch is therefore supported at its
+// root by construction, exactly like the trunk it left.
+//
+// How far a tip climbs between offering a branch, as a multiple of the local separation.
+// 0.75 gave a printable but sparse weave — the maintainer checked every layer and
+// found only a couple of floating strays, wanting "more nodes to hold up those floating
+// regions". Branching more often is what puts a node within reach of a stray tip.
+inline constexpr double kOrganicGrowthBranchEverySep = 0.5;
+
+// The most tips alive at once. Branching is exponential if unbounded; this is the
+// budget, and the receipt reports when it binds rather than silently truncating.
+inline constexpr std::size_t kOrganicGrowthMaxTips = 20000;
+
+// ★★ GROW FINELY, RECORD COARSELY. The support question is a question about LAYERS, so
+// a tip must advance one layer at a time to be asked it honestly. But a recorded point
+// every 0.1 mm on a 0.66 mm strut is far inside the node merge's one-bead radius, so
+// the merge collapses an entire curve into a single node: growth emitted 84,232 spans
+// and the repairs deleted essentially all of them. Points are therefore RECORDED only
+// once the tip has travelled this many strut radii, while the walk itself stays at the
+// layer pitch.
+// ★ AND IT MUST CLEAR THE MERGE DISTANCE, NOT JUST THE BEAD. The node merge joins
+// endpoints within kOrganicNodeMergeRatio BEADS (= 2 x that many radii), so recording
+// every 3 radii was still inside it: each grown curve collapsed to ONE straight span
+// from base to tip, 20 mm long, and the cube came out as fifteen sticks. 6 radii is
+// safely clear and lands near d_sep, which is the polyline resolution the traced path
+// uses anyway.
+inline constexpr double kOrganicGrowthRecordRadii = 6.0;
+
+// ★★ HOW MANY TIMES ONE TIP MAY JOIN AND CARRY ON. A tip that joins a neighbour used to
+// STOP there, and since crowding grows more likely with height the tip population died
+// out as it rose: the maintainer's cube came out dense at the base and with "the top
+// almost non-existent". Deflecting after a join and continuing keeps strands alive all
+// the way up. Bounded so a tip cannot ping-pong between two neighbours forever.
+inline constexpr int kOrganicGrowthMaxJoins = 6;
+
+inline constexpr double kOrganicFilletAngleDeg = 45.0;
+
+// ★ AND A CAP, because the honest arithmetic is expensive: fully filleting a span of
+// length L needs an end radius of r + (L/2)*tan(theta), which at L = 8 mm and r =
+// 0.5 mm is 4.5 mm — a blob nine times the strut. Capped, the fillet does not reach
+// the middle and the span is IMPROVED rather than solved; the receipt reports the
+// residual so a partial fix is never read as a complete one.
+// ★ AND THE CAP IS WHAT KEEPS IT A FILLET RATHER THAN A BALL. At 6.0 the widest end
+// radius on the maintainer's cube came to 4.87 mm on a ~1.3 mm strut — a 10 mm sphere
+// big enough that the slicer put INFILL inside it, which he spotted immediately. The
+// flare is meant to be a gusset at a junction, not a node the size of a cell. 2.5 keeps
+// the widest end near 1.6 mm; spans needing more than that are counted unresolved.
+inline constexpr double kOrganicFilletMaxRadiusRatio = 2.5;
+
+// How many segments a filleted span is emitted as. The taper is piecewise-constant in
+// radius, so this is the resolution of the underside's slope.
+inline constexpr int kOrganicFilletSegments = 12;
 inline constexpr double kOrganicVdiDensityFloor =
     3.0 * 3.14159265358979323846 / (kOrganicVdiSlendernessMax *
                                     kOrganicVdiSlendernessMax * 4.0);
@@ -465,6 +613,10 @@ inline double organic_default_strut_diameter_mm(double grid_spacing_mm,
 
 // ── the parameters ──────────────────────────────────────────────────────────────
 struct OrganicParams {
+  // The machine's layer height. The GROWTH rule advances a tip one layer at a time and
+  // asks its support question in that discretisation, because "will this print" is a
+  // question about LAYERS, not about model units. 0 = not stated.
+  double layer_hint_mm = 0.0;
   // The build direction (unit, model frame) the overhang cone is measured from.
   Vec3 build_dir{0.0, 0.0, 1.0};
 
@@ -563,6 +715,16 @@ struct OrganicCurve {
   // stopped INSIDE the material (d_test, a turn, a dead field) is a FREE END hanging
   // in mid-material, and §1(e2) trims it.
   bool start_at_boundary = false;
+  // ★★ WHAT KIND OF SEGMENT IS THIS? Parallel to the SEGMENTS of `points`, so
+  // `seg_kind[i]` describes points[i] -> points[i+1]; size is points.size() - 1 when
+  // growth wrote it and EMPTY on the traced path, which has no such distinction.
+  //
+  // It exists because the printability bar differs by kind and a blended bar means
+  // nothing. A CLIMB is cone-clamped and must obey the cone with no tolerance. A JOIN
+  // or DEFLECT lands on material that is already there and may arrive at any angle —
+  // what bounds it is the horizontal RUN of the span, not its slope.
+  enum class Seg : unsigned char { Climb = 0, Join = 1, Deflect = 2 };
+  std::vector<unsigned char> seg_kind;
   bool end_at_boundary = false;
 };
 
@@ -796,6 +958,9 @@ struct OrganicLattice {
   // ★ EMIT A BASE MAT at the trimmed base plane — a crossed planar grid spanning the
   // footprint, so the first layer is a foundation rather than whatever the trace
   // happened to leave there. Needs a layer height and a boundary.
+  // ★★ GROW INSTEAD OF TRACE-THEN-REPAIR. See kOrganicGrowthMinAngleDeg. Off by
+  // default: the existing path stays byte-identical until a job asks for this.
+  bool growth = false;
   bool base_mat = true;
   // The pitch the WELD will raster at. The generator refuses to emit a base mat too
   // thin for that raster to keep — a mat below one voxel is erased outright, which is
@@ -1027,6 +1192,113 @@ struct OrganicGenStats {
   std::size_t slenderness_propped = 0;
   std::size_t slenderness_impossible = 0;
   std::size_t slenderness_props_added = 0;
+  // ★★ CANTILEVER REACH. An island is called supported when ONE of its cells sits over
+  // material — so an island held only at its centre, with a long arm over nothing,
+  // passes. That is what the maintainer found in the slice: a bridge anchored at the
+  // middle that does not reach the outside for several layers. These measure the thing
+  // the support flag does not: how far, in mm, the furthest cell of an island is from
+  // the nearest cell of that island that IS over material.
+  double cantilever_max_reach_mm = 0.0;
+  std::size_t cantilever_islands = 0;      // islands whose reach exceeds the bridge limit
+  std::size_t cantilever_layers = 0;       // layers carrying at least one such island
+  // ★★ ARCHING. `arched` counts spans bowed into an arch; `arch_rise_mm` the tallest
+  // apex raised. A span that was shallow but already held along its length is not
+  // arched and not counted — the bar is "unsupported for long enough to droop", not
+  // "shallow".
+  std::size_t arched_spans = 0;
+  double arch_max_rise_mm = 0.0;
+  // ★★ FILLETING. `filleted` counts spans re-emitted with a flared profile;
+  // `fillet_unresolved` those whose flare hit the radius cap before the two sides met,
+  // so the span is better but not fixed — reported separately, never folded into the
+  // success count.
+  // ★★ GROWTH REPORTING. `growth_steps` is how many tip advances were taken.
+  //
+  // `growth_blocked` counts steps that TERMINATED FOR WANT OF SUPPORT: the clamped
+  // direction was taken, the candidate point was tested, and nothing held it. It was
+  // previously described as "how often the stress field asked for something the
+  // machine cannot build", which is the CLAMP's event, not this one — and it reads 0
+  // on every crowded fixture because the clamp fires first and the tip's own trail
+  // then supports the step. The field's demand is `growth_clamped`.
+  std::size_t growth_seeds = 0;
+  std::size_t growth_steps = 0;
+  std::size_t growth_blocked = 0;
+  std::size_t growth_curves = 0;
+  // ★★ THE CLAMP IS THE EVENT WORTH COUNTING. `growth_clamped` is the number of steps
+  // where the field asked to go flatter than the printable cone and was pulled back to
+  // it; `growth_clamp_max_deg` is the largest such departure — how far below the cone
+  // the field wanted to go, in degrees, on the worst step. Together they say how much
+  // of this lattice is the field's shape and how much is the machine's limit.
+  std::size_t growth_clamped = 0;
+  double growth_clamp_max_deg = 0.0;
+  // Branches offered, and how many were refused for want of support at their root.
+  std::size_t growth_branches = 0;
+  std::size_t growth_branch_refused = 0;
+  // Tips that reached the neighbour they crowded instead of stopping beside it.
+  std::size_t growth_joins = 0;
+  // ★★ JOINS REFUSED FOR SPAN. A join segment lands on material at both ends, so it is
+  // a BRIDGE, not an overhang — but a bridge still has a length limit. Counted here
+  // when the horizontal run of the join would exceed kOrganicMaxCantileverMm and the
+  // tip was made to stop or deflect instead.
+  std::size_t growth_join_refused_span = 0;
+  bool growth_tip_budget_hit = false;
+  // ★ THE DISCRETISATION THIS RESULT WAS COMPUTED IN. Growth asks its support question
+  // one layer at a time, so the answer is only meaningful alongside the layer height
+  // that produced it. Recorded so a receipt can never be ambiguous about which.
+  double growth_layer_height_mm = 0.0;
+
+  // ── ★★ THE LENGTH CENSUS (task PR-353 third follow-up §1) ───────────────────
+  // WHERE THE MILLIMETRES GO. Measured on the maintainer's sweep: growth produces
+  // 3300-3900 mm of curve at separation 4.5-5.5 and the file receives 15-495 mm of
+  // it. That is not fragmentation, it is DELETION, and no connectivity ratio can see
+  // it — separation 7.0 reports ONE component and largest-fraction 1.0000 on 11.3 %
+  // of the material, because a ratio is perfect when both its terms are near zero.
+  //
+  // So: total live span length at each stage of the emission pipeline, in order.
+  // Deltas between consecutive stages name the pass that took the material — and
+  // because some passes ADD (base mat, ground tie, branch support, fillet), a signed
+  // delta is the honest instrument rather than a subtraction count.
+  //
+  // `census_grown_len_mm` is the INPUT: the summed length of the curves handed to the
+  // emitter, so survival = census_len_mm[Written] / census_grown_len_mm is answerable
+  // without the caller holding the lattice.
+  enum CensusStage {
+    CensusEmitted = 0,      // spans laid down from the curves, before any pass
+    CensusNodeMerge,
+    CensusBaseCut,
+    CensusSupportPrune,
+    CensusStrandedDrop,
+    CensusGroundTie,
+    CensusBranchSupport,
+    CensusDangling,
+    CensusStrandedDrop2,
+    CensusFillMat,
+    CensusFinish,
+    CensusWritten,          // the final list the file is built from
+    kCensusStages
+  };
+  // ★ -1 MEANS "THIS STAGE DID NOT RUN", and it must not be 0. Several passes sit
+  // inside conditionals; a zero-initialised array reports an unrun pass as having
+  // deleted everything, which is the same unmeasured-zero error this receipt already
+  // refuses elsewhere. Readers must test for negative before differencing.
+  double census_len_mm[kCensusStages] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+  // ★ COMPONENT COUNT BESIDE THE LENGTH, AT EVERY STAGE. A LENGTH census is blind to
+  // a pass that changes TOPOLOGY without changing material: the node merge welds
+  // coincident endpoints, which fuses components and moves no length at all. So
+  // "the support prune is the sole deleter" is established in the LENGTH dimension
+  // only, and a claim about CONNECTIVITY cannot rest on it.
+  //
+  // MEASURED at separation 4.5: the emitted spans with the prune ablated give 16
+  // components with the largest at 10.69%, while the PRE-EMISSION curve network gives
+  // 45 components with its largest at 10.32%. Same largest fraction, nearly three
+  // times the component count -- something between the two merges components while
+  // preserving length, and only a component census can see it.
+  //
+  // -1 means the stage did not run.
+  int census_components[kCensusStages] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+  double census_grown_len_mm = 0.0;
+  std::size_t filleted_spans = 0;
+  std::size_t fillet_unresolved = 0;
+  double fillet_max_radius_mm = 0.0;
   bool base_mat_radius_raised_for_raster = false;
   double base_mat_z_mm = 0.0;
   // ── ★★ THE FILL MAT ─────────────────────────────────────────────────────────
@@ -1056,6 +1328,23 @@ struct OrganicSpan {
 class LatticeBoundary;  // topopt/lattice_boundary.hpp
 
 struct LatticeGenObserver;  // topopt/lattice_gen.hpp — the SAME read-only tap
+
+// ★★ GROWN organic: printability as a construction rule. Same inputs as the tracer —
+// it calls the tracer first for the field, the spacing floors and the bead law — but
+// lays the curves down in LAYER ORDER from the base, refusing any step whose underside
+// is unsupported. Mid-air starts and free ends are not repaired but inexpressible.
+// `gstats` receives the growth counters; pass nullptr if not wanted.
+OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
+                                    const std::vector<char>& candidate,
+                                    const std::vector<double>& stress,
+                                    const std::vector<double>& spacing_mm,
+                                    const std::vector<double>* width_mm,
+                                    const OrganicParams& params,
+                                    OrganicGenStats* gstats = nullptr);
+
+// The census stage names, in enum order. One table, so the receipt and the log can
+// never disagree about which pass a number belongs to.
+const char* organic_census_stage_name(int stage);
 
 OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          TriangleSink& sink,

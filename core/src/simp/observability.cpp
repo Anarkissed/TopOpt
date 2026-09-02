@@ -1,4 +1,5 @@
 #include "topopt/observability.hpp"
+#include "topopt/organic_lattice.hpp"  // OrganicGenStats, for copy_growth_stats
 
 #include <chrono>
 #include <cmath>
@@ -472,6 +473,29 @@ std::string json_escape(const std::string& s) {
 std::string bool_json(bool b) { return b ? "true" : "false"; }
 
 }  // namespace
+
+// ★★ ONE COPY OF THE GROWTH COUNTERS, so the analyze receipt and the geometry
+// receipt cannot disagree about what grew. `growth_ran` is set from whether the
+// generator was actually called, never inferred from a counter being non-zero — a
+// run that grew nothing and a run that never grew are different facts.
+// It writes to RunInfo and nothing else now that the export outcome carries the
+// generator's own struct, so it is a plain function rather than a template.
+void copy_growth_stats(RunInfo& d, const OrganicGenStats& g, bool ran) {
+  d.organic_growth_ran = ran;
+  d.organic_growth_seeds = static_cast<long long>(g.growth_seeds);
+  d.organic_growth_curves = static_cast<long long>(g.growth_curves);
+  d.organic_growth_steps = static_cast<long long>(g.growth_steps);
+  d.organic_growth_blocked = static_cast<long long>(g.growth_blocked);
+  d.organic_growth_clamped = static_cast<long long>(g.growth_clamped);
+  d.organic_growth_clamp_max_deg = g.growth_clamp_max_deg;
+  d.organic_growth_branches = static_cast<long long>(g.growth_branches);
+  d.organic_growth_branch_refused = static_cast<long long>(g.growth_branch_refused);
+  d.organic_growth_joins = static_cast<long long>(g.growth_joins);
+  d.organic_growth_join_refused_span =
+      static_cast<long long>(g.growth_join_refused_span);
+  d.organic_growth_tip_budget_hit = g.growth_tip_budget_hit;
+  d.organic_growth_layer_height_mm = g.growth_layer_height_mm;
+}
 
 std::string run_info_json(const RunInfo& info) {
   std::string s = "{\n";
@@ -1378,6 +1402,27 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"solid_stranded_length_mm\": " +
             fmt(info.organic_solid_stranded_length_mm);
       gr += ", \"solid_segments\": " + fmt_ll(info.organic_solid_segments);
+      // ★★ THE LENGTH CENSUS. Growth can hand the emitter 3900 mm and the file can
+      // receive 15 mm of it; `growth_curves` and `growth_steps` look identical either
+      // way, and so does every connectivity ratio. This is the only place a receipt
+      // says where the material went. A stage reported null DID NOT RUN — it is not a
+      // pass that deleted everything.
+      if (!info.organic_census_len_mm.empty()) {
+        gr += ", \"length_census_mm\": {\"grown\": " +
+              fmt(info.organic_census_grown_len_mm);
+        for (std::size_t i = 0; i < info.organic_census_len_mm.size(); ++i) {
+          gr += ", \"" + std::string(organic_census_stage_name(static_cast<int>(i))) +
+                "\": ";
+          gr += info.organic_census_len_mm[i] < 0.0
+                    ? std::string("null")
+                    : fmt(info.organic_census_len_mm[i]);
+        }
+        gr += "}";
+        const double grown = info.organic_census_grown_len_mm;
+        const double wrote = info.organic_census_len_mm.back();
+        gr += ", \"length_survival\": " +
+              (grown > 0.0 && wrote >= 0.0 ? fmt(wrote / grown) : std::string("null"));
+      }
       gr += ", \"emitted_components\": " +
             fmt_ll(info.organic_emitted_components);
       gr += ", \"floating_voxels_before_repair\": " +
@@ -1450,6 +1495,40 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"slenderness_impossible\": " +
             fmt_ll(info.organic_slenderness_impossible);
       gr += ", \"slenderness_props\": " + fmt_ll(info.organic_slenderness_props);
+      gr += ", \"cantilever_max_reach_mm\": " +
+            fmt(info.organic_cantilever_reach);
+      gr += ", \"cantilever_islands\": " +
+            fmt_ll(info.organic_cantilever_islands);
+      // ★★ GROWTH. `growth_ran` first and always: every counter after it is
+      // meaningless on a traced run, and a zero that was never measured is not a
+      // passing zero. `growth_tip_budget_hit` is the one that must never be silent —
+      // a run truncated at the tip budget otherwise reads exactly like a finished one.
+      gr += ", \"growth_ran\": " +
+            std::string(info.organic_growth_ran ? "true" : "false");
+      if (info.organic_growth_ran) {
+        gr += ", \"growth_seeds\": " + fmt_ll(info.organic_growth_seeds);
+        gr += ", \"growth_curves\": " + fmt_ll(info.organic_growth_curves);
+        gr += ", \"growth_steps\": " + fmt_ll(info.organic_growth_steps);
+        gr += ", \"growth_blocked\": " + fmt_ll(info.organic_growth_blocked);
+        gr += ", \"growth_clamped\": " + fmt_ll(info.organic_growth_clamped);
+        gr += ", \"growth_clamp_max_deg\": " +
+              fmt(info.organic_growth_clamp_max_deg);
+        gr += ", \"growth_branches\": " + fmt_ll(info.organic_growth_branches);
+        gr += ", \"growth_branch_refused\": " +
+              fmt_ll(info.organic_growth_branch_refused);
+        gr += ", \"growth_joins\": " + fmt_ll(info.organic_growth_joins);
+        gr += ", \"growth_join_refused_span\": " +
+              fmt_ll(info.organic_growth_join_refused_span);
+        gr += ", \"growth_tip_budget_hit\": " +
+              std::string(info.organic_growth_tip_budget_hit ? "true" : "false");
+        gr += ", \"growth_layer_height_mm\": " +
+              fmt(info.organic_growth_layer_height_mm);
+      }
+      gr += ", \"arched_spans\": " + fmt_ll(info.organic_arched_spans);
+      gr += ", \"arch_max_rise_mm\": " + fmt(info.organic_arch_rise);
+      gr += ", \"filleted_spans\": " + fmt_ll(info.organic_filleted);
+      gr += ", \"fillet_unresolved\": " + fmt_ll(info.organic_fillet_unresolved);
+      gr += ", \"fillet_max_radius_mm\": " + fmt(info.organic_fillet_radius);
       gr += ", \"base_mat_length_mm\": " + fmt(info.organic_base_mat_length_mm);
       gr += ", \"base_mat_z_mm\": " + fmt(info.organic_base_mat_z_mm);
       gr += ", \"fill_mat_cells\": " + fmt_ll(info.organic_fill_mat_cells);
