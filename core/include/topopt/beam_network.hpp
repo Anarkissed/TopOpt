@@ -151,6 +151,49 @@ BeamSection beam_section_circular(double radius_mm);
 // one leaves the other.
 std::vector<char> beam_network_bridges(const BeamNetwork& net);
 
+// ── ★ NOT `cells_per_member_floor`. TWO DIFFERENT NUMBERS, TWO DIFFERENT QUESTIONS ──
+// A contiguity rule of the form "N cells across the region's thinnest dimension" will
+// be read as the same thing as `cell_plan.hpp`'s `cells_per_member_floor` (= 5 for
+// octet). It is not, and confusing them would apply one's threshold to the other's
+// question:
+//
+//   cells_per_member_floor  — HOMOGENIZATION ACCURACY. How many cells a member needs
+//                             across it before the homogenised stiffness of the
+//                             lattice is a usable stand-in for the real thing. It
+//                             comes from PR 235's bending convergence study and it
+//                             governs whether a SOLVE about the lattice can be
+//                             believed.
+//
+//   contiguity cells-across — GEOMETRIC CONNECTEDNESS. How many cells fit across the
+//                             region before the traced curves stop having room to
+//                             route around one another, at which point almost every
+//                             strut becomes the only path to what is past it (93.7%
+//                             bridges at 2.0 cells across on the M2). It governs
+//                             whether the geometry is a LATTICE at all, and it says
+//                             nothing about homogenization.
+//
+// They are not interchangeable and neither bounds the other. A plan can satisfy the
+// homogenization floor and still be geometrically shattered, and vice versa.
+//
+// ── ★ AND CELLS-ACROSS IS UNIFORM-ONLY. IT READS MATERIAL, NOT GEOMETRY ──────────
+// Across a UNIFORM sweep, cells-across and total strut length fall together
+// monotonically, so that sweep cannot say which quantity the rule is actually
+// reading. GRADED plans separate them, and there the cells-across form breaks.
+// Scored against the four measured graded rows on the M2 (top-2 share):
+//
+//   candidate input          3->4     3->5     3->6     3->8    verdict
+//   measured top-2          98.17%   96.91%   94.63%   91.20%
+//   cells-across, COARSE end   3.0      2.4      2.0      1.5    refuses 3 of 4
+//   cells-across, FINE end     4.0      4.0      4.0      4.0    accepts everything,
+//                                                               including 3->50
+//   total LENGTH (interp.)   96.25%   93.92%   92.57%   90.63%   within 0.6-3.0 pts
+//   segment COUNT (interp.)  96.55%   94.28%   92.78%   90.39%   within 0.8-2.6 pts
+//
+// So the gate reads TOTAL MATERIAL. Cells-across is a proxy that happens to track it
+// when the cell is constant, and it must not be applied to a graded plan: score a
+// grade by its length (or by the effective uniform cell that length implies), never
+// by either end of its range.
+
 // ── ★ A WALL AS A SHELL MESH ────────────────────────────────────────────────
 // A lattice region is a DECLARED PLANAR FACE -- origin, unit normal, an orthonormal
 // (u, w) basis, half-extents, a thickness, and 2D loops in that basis. So its

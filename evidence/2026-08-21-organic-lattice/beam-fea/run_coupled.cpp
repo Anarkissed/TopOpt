@@ -325,7 +325,20 @@ int main(int argc, char** argv) {
       for (std::size_t i=0;i<net.members.size();++i)
         if (!r.restraint.member_unrestrained[i] && !r.restraint.member_load_free[i] &&
             !r.restraint.member_underconstrained[i]) pruned.members.push_back(net.members[i]);
-      std::printf("    dropping %zu load-free member(s), retrying\n", drop);
+      // ★ SAY WHAT LEAVES THE SOLVE BUT STAYS IN THE FILE. These members are written
+      // to lattice.beam and to the exported STL; they are excluded here only because
+      // the beam network finds them attached to nothing. The certified object is
+      // therefore not the exported object, and the size of that gap has to be on the
+      // receipt rather than inferred.
+      double droplen = 0.0;
+      for (std::size_t i = 0; i < segs.size(); ++i)
+        if (r.restraint.member_unrestrained[i] || r.restraint.member_load_free[i])
+          droplen += std::sqrt(
+              (segs[i].b.x-segs[i].a.x)*(segs[i].b.x-segs[i].a.x) +
+              (segs[i].b.y-segs[i].a.y)*(segs[i].b.y-segs[i].a.y) +
+              (segs[i].b.z-segs[i].a.z)*(segs[i].b.z-segs[i].a.z));
+      std::printf("    dropping %zu load-free member(s) (%.1f mm), retrying — these "
+                  "stay in the exported geometry\n", drop, droplen);
       net = pruned; continue;
     }
     std::printf("  LOAD LANDED: %zu of %zu loads (%zu on shell, %zu on beam), "

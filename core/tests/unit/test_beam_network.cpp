@@ -843,9 +843,15 @@ void test_skin_as_plates_matches_skin_as_hex() {
               wa, wb, (wb != 0.0) ? wa / wb : 0.0);
   std::printf("    skin: %zu shell nodes, %zu bonded into the solid\n",
               rb.shell_nodes, rb.shell_nodes_tied);
+  // ★ "WITHIN 25%" IS THE BAR, AND THE MEASURED GAP IS 11% (ratio 0.89). That is a
+  // real difference, not agreement: a plate model and a hex model of the same
+  // material do NOT give the same answer, they give answers of the same ORDER. The
+  // bar is set where it is to catch the failure this test exists for -- 36x apart on
+  // the real part -- and not to certify the two representations as equivalent.
   CHECK(std::fabs(wa) > 0.0 && std::fabs(wb / wa - 1.0) < 0.25,
-        "the same material as plates gives the same part stiffness as hex within "
-        "25% (36x apart on the real part is what this exists to catch)");
+        "plates and hex agree on part stiffness to within 25% (measured gap 11%); "
+        "this catches representation errors of the 36x kind, it does not say the two "
+        "are interchangeable");
 }
 
 // ── ★ A LOAD LANDS ON WHATEVER CARRIES THE MATERIAL ──────────────────────────

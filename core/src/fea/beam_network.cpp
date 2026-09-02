@@ -1947,6 +1947,14 @@ CoupledLatticeSolve solve_coupled_lattice(
   // nothing -- the failure is invisible precisely because everything else looks
   // healthy. Loads land on SOLID nodes only; a load applied where the mesh now
   // carries plates or beams instead has to be moved there, not dropped.
+  // ★ 5% IS A MAINTAINER CHOICE, NOT A DERIVED BOUND. Nothing measured says the
+  // error from 4.9% of missing force is tolerable and 5.1% is not; the number exists
+  // so that a small unplaceable remainder does not stop a run while a large one does.
+  // What makes it safe is that the fraction is REPORTED on every run whatever it is
+  // (`load_dropped_fraction`, printed by the driver even at 0.00%), so a run that
+  // lost 4.9% cannot look identical to one that lost none. Revisit it with a
+  // measurement of how peak strut stress moves with the dropped fraction; until then
+  // it is a guard rail, not a result.
   constexpr double kLoadDropRefuseFraction = 0.05;
   if (out.load_dropped_fraction > kLoadDropRefuseFraction) {
     out.refusal = std::to_string(out.loads_dropped) + " of " +
