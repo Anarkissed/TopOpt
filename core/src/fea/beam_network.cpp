@@ -274,6 +274,71 @@ BeamRestraintReport beam_network_restraint(
   return rep;
 }
 
+std::vector<char> beam_network_bridges(const BeamNetwork& net) {
+  const std::size_t NV = net.nodes.size(), NE = net.members.size();
+  std::vector<char> is_bridge(NE, 0);
+  if (NV == 0 || NE == 0) return is_bridge;
+  // adjacency in CSR: each member appears once from each end, carrying its own id so
+  // the search can tell two parallel members apart
+  std::vector<int> start(NV + 1, 0);
+  for (const auto& m : net.members) {
+    ++start[static_cast<std::size_t>(m.node_a) + 1];
+    ++start[static_cast<std::size_t>(m.node_b) + 1];
+  }
+  for (std::size_t i = 0; i < NV; ++i) start[i + 1] += start[i];
+  std::vector<int> adj_v(2 * NE), adj_e(2 * NE), fill(start.begin(), start.end() - 1);
+  for (std::size_t e = 0; e < NE; ++e) {
+    const int a = net.members[e].node_a, b = net.members[e].node_b;
+    adj_v[static_cast<std::size_t>(fill[static_cast<std::size_t>(a)])] = b;
+    adj_e[static_cast<std::size_t>(fill[static_cast<std::size_t>(a)]++)] = static_cast<int>(e);
+    adj_v[static_cast<std::size_t>(fill[static_cast<std::size_t>(b)])] = a;
+    adj_e[static_cast<std::size_t>(fill[static_cast<std::size_t>(b)]++)] = static_cast<int>(e);
+  }
+  // Tarjan, ITERATIVE. A traced lattice is 70,000 nodes deep in places and a
+  // recursive walk overflows the stack on the real part rather than on any fixture.
+  std::vector<int> disc(NV, -1), low(NV, 0), cur(NV, 0), pe(NV, -1), stack;
+  int timer = 0;
+  for (std::size_t s0 = 0; s0 < NV; ++s0) {
+    if (disc[s0] >= 0) continue;
+    disc[s0] = low[s0] = timer++;
+    cur[s0] = start[s0];
+    pe[s0] = -1;
+    stack.assign(1, static_cast<int>(s0));
+    while (!stack.empty()) {
+      const int u = stack.back();
+      if (cur[static_cast<std::size_t>(u)] < start[static_cast<std::size_t>(u) + 1]) {
+        const int idx = cur[static_cast<std::size_t>(u)]++;
+        const int v = adj_v[static_cast<std::size_t>(idx)];
+        const int e = adj_e[static_cast<std::size_t>(idx)];
+        // ★ skip the exact EDGE we arrived by, not every edge back to the parent.
+        // Skipping by parent NODE would call a pair of parallel members a bridge,
+        // when removing either one leaves the other holding the join.
+        if (e == pe[static_cast<std::size_t>(u)]) continue;
+        if (disc[static_cast<std::size_t>(v)] >= 0) {
+          low[static_cast<std::size_t>(u)] =
+              std::min(low[static_cast<std::size_t>(u)], disc[static_cast<std::size_t>(v)]);
+        } else {
+          disc[static_cast<std::size_t>(v)] = low[static_cast<std::size_t>(v)] = timer++;
+          pe[static_cast<std::size_t>(v)] = e;
+          cur[static_cast<std::size_t>(v)] = start[static_cast<std::size_t>(v)];
+          stack.push_back(v);
+        }
+      } else {
+        stack.pop_back();
+        if (!stack.empty()) {
+          const int p = stack.back();
+          low[static_cast<std::size_t>(p)] =
+              std::min(low[static_cast<std::size_t>(p)], low[static_cast<std::size_t>(u)]);
+          if (low[static_cast<std::size_t>(u)] > disc[static_cast<std::size_t>(p)] &&
+              pe[static_cast<std::size_t>(u)] >= 0)
+            is_bridge[static_cast<std::size_t>(pe[static_cast<std::size_t>(u)])] = 1;
+        }
+      }
+    }
+  }
+  return is_bridge;
+}
+
 BeamSection beam_section_circular(double radius_mm) {
   if (!(radius_mm > 0.0))
     throw std::invalid_argument("beam_section_circular: radius must be > 0");

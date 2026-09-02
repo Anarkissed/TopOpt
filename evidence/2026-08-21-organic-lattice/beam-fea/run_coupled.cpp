@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
   // ★ "mask" = MESH THE SKIN THE GENERATOR ACTUALLY FLAGGED. Deriving the plates
   // from the region OUTLINE (the branch below) was measured wrong on this part by
   // 219% of skin volume, in the wrong places. The mask carries the exact cells.
-  if (regions_path == "mask") {
+  if (regions_path.rfind("mask", 0) == 0) {
     std::vector<char> skinmask(mk.size(), 0);
     std::size_t ns2 = 0;
     for (std::size_t e = 0; e < mk.size(); ++e)
@@ -343,6 +343,36 @@ int main(int argc, char** argv) {
       }
       std::printf("  COMPLIANCE (F.u): %.6g N.mm    peak solid deflection %.6g mm\n",
                   r.compliance, std::sqrt(umax));
+    }
+    // ★ CAN THIS LATTICE BE PRUNED AT ALL? Cross the stress field against the
+    // BRIDGES. A strut that carries no load and is not a bridge is disposable. A
+    // strut that carries no load and IS a bridge is the only thing holding a piece
+    // of lattice on -- deleting it disconnects the part rather than redistributing
+    // anything. The ratio between those two says whether pruning is viable at this
+    // cell size before any of it is attempted.
+    {
+      const std::vector<char> br = beam_network_bridges(net);
+      double pk = 0.0;
+      for (double v : r.member_stress_mpa) pk = std::max(pk, v);
+      std::size_t nbridge = 0;
+      for (char c : br) nbridge += c ? 1u : 0u;
+      std::printf("  BRIDGES: %zu of %zu struts (%.1f%%) are the only link holding "
+                  "something on\n", nbridge, br.size(),
+                  100.0 * double(nbridge) / double(br.size() ? br.size() : 1));
+      std::printf("  %-9s %10s %10s %10s   %s\n", "idle if <", "idle", "  ...free",
+                  " ...bridge", "removable share of the lattice");
+      for (double frac : {0.0001, 0.001, 0.01, 0.10}) {
+        const double thr = frac * pk;
+        std::size_t idle = 0, idle_free = 0, idle_bridge = 0;
+        for (std::size_t i = 0; i < r.member_stress_mpa.size() && i < br.size(); ++i) {
+          if (r.member_stress_mpa[i] >= thr) continue;
+          ++idle;
+          if (br[i]) ++idle_bridge; else ++idle_free;
+        }
+        std::printf("  %8.4f%% %10zu %10zu %10zu   %5.1f%% of all struts\n",
+                    100.0 * frac, idle, idle_free, idle_bridge,
+                    100.0 * double(idle_free) / double(br.size() ? br.size() : 1));
+      }
     }
     // ★ PRINT THE DISTRIBUTION, NOT ONE NUMBER. The peak is a MAX over ~16,500
     // members, so comparing peaks between two models compares two single members and

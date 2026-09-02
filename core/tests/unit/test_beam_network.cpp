@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -917,6 +918,75 @@ void test_a_load_over_lattice_is_APPLIED_not_dropped() {
         "the part does work under the load -- a dropped load gives a silent zero");
 }
 
+// ── ★ BRIDGES: THE IDLE STRUTS THAT STILL HOLD THE LATTICE TOGETHER ──────────
+// Pruning by stress alone deletes struts that carry no load. Some of those are the
+// ONLY connection between a piece of lattice and the rest, and removing them does
+// not redistribute load -- it disconnects the part. A bridge is exactly that strut,
+// and it is a graph property, so it costs no solve.
+void test_bridges() {
+  auto net_of = [](std::initializer_list<std::pair<Vec3, Vec3>> es) {
+    std::vector<BeamSegment> segs;
+    for (const auto& e : es) segs.push_back({e.first, e.second, 0.2});
+    return topopt::build_beam_network(segs);
+  };
+  const Vec3 A{0,0,0}, B{1,0,0}, C{2,0,0}, D{1,1,0};
+
+  // a chain: every strut is the only path onward, so every strut is a bridge
+  {
+    const topopt::BeamNetwork n = net_of({{A,B},{B,C}});
+    const std::vector<char> br = topopt::beam_network_bridges(n);
+    CHECK(br.size() == n.member_count(), "one flag per member");
+    int nb = 0; for (char c : br) nb += c ? 1 : 0;
+    CHECK(nb == 2, "in a chain A-B-C both struts are bridges");
+  }
+  // a triangle: nothing is a bridge, every node keeps a second way round
+  {
+    const topopt::BeamNetwork n = net_of({{A,B},{B,D},{D,A}});
+    const std::vector<char> br = topopt::beam_network_bridges(n);
+    int nb = 0; for (char c : br) nb += c ? 1 : 0;
+    CHECK(nb == 0, "no strut of a triangle is a bridge");
+  }
+  // a triangle with a tail: only the tail is
+  {
+    const topopt::BeamNetwork n = net_of({{A,B},{B,D},{D,A},{B,C}});
+    const std::vector<char> br = topopt::beam_network_bridges(n);
+    int nb = 0, tail = -1;
+    for (std::size_t i = 0; i < br.size(); ++i) {
+      if (br[i]) { ++nb; tail = static_cast<int>(i); }
+    }
+    CHECK(nb == 1, "a triangle with a tail has exactly one bridge");
+    if (tail >= 0) {
+      const auto& m = n.members[static_cast<std::size_t>(tail)];
+      const Vec3& p = n.nodes[static_cast<std::size_t>(m.node_a)];
+      const Vec3& q = n.nodes[static_cast<std::size_t>(m.node_b)];
+      const bool is_tail = (std::fabs(p.x-2.0) < 1e-9) || (std::fabs(q.x-2.0) < 1e-9);
+      CHECK(is_tail, "and it is the TAIL, not one of the triangle's own struts");
+    }
+  }
+  // ★ PARALLEL STRUTS ARE NOT BRIDGES. Two members joining the same pair of welded
+  // nodes each leave the other holding the join. A search that refuses to walk back
+  // to the parent NODE (rather than along the parent EDGE) calls both of them
+  // bridges, which would pin struts that are genuinely redundant.
+  {
+    std::vector<BeamSegment> segs{{A, B, 0.2}, {A, B, 0.2}};
+    const topopt::BeamNetwork n = topopt::build_beam_network(segs);
+    const std::vector<char> br = topopt::beam_network_bridges(n);
+    int nb = 0; for (char c : br) nb += c ? 1 : 0;
+    std::printf("  parallel pair: %zu members, %d bridge(s)\n", n.member_count(), nb);
+    CHECK(n.member_count() < 2 || nb == 0,
+          "neither of two parallel struts is a bridge");
+  }
+  // an already-split network: a bridge is about making it WORSE, not about the
+  // pieces it already has
+  {
+    const Vec3 E{9,9,9}, F{10,9,9};
+    const topopt::BeamNetwork n = net_of({{A,B},{E,F}});
+    const std::vector<char> br = topopt::beam_network_bridges(n);
+    int nb = 0; for (char c : br) nb += c ? 1 : 0;
+    CHECK(nb == 2, "each of two separate chains is its own bridge");
+  }
+}
+
 void test_refusals() {
   bool threw = false;
   try { topopt::build_beam_network({{Vec3{0,0,0}, Vec3{1,0,0}, 0.0}}); }
@@ -955,6 +1025,7 @@ int main() {
   test_skin_mesh_is_CONNECTED_across_a_fold();
   test_skin_as_plates_matches_skin_as_hex();
   test_a_load_over_lattice_is_APPLIED_not_dropped();
+  test_bridges();
   test_refusals();
   std::printf("test_beam_network: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

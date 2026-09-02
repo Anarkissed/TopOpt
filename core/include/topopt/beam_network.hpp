@@ -133,6 +133,24 @@ struct BeamSection {
 
 BeamSection beam_section_circular(double radius_mm);
 
+// ── ★ WHICH STRUTS HOLD THE LATTICE TOGETHER ─────────────────────────────────
+// One flag per member: 1 when removing that member alone would split the network
+// into more pieces than it already has -- a BRIDGE, in the graph sense.
+//
+// This exists to make pruning safe. The stress field says which struts carry load,
+// and on a coarse lattice most of them carry almost none: measured on the M2 part,
+// max/p50 is 611x at a 3 mm cell and 58,340x at 6 mm. The temptation is to delete
+// everything idle. But an idle strut can be the ONLY thing connecting a loaded
+// region to the rest, and deleting it does not redistribute the load -- it
+// disconnects the part. Idle AND not a bridge is disposable; idle AND a bridge is
+// structure, whatever its stress says.
+//
+// It is a graph property, so it costs one pass and no solve, which makes it usable
+// as a gate BEFORE deciding whether a cell size is prunable at all. Parallel members
+// between the same pair of nodes are handled: neither is a bridge, because removing
+// one leaves the other.
+std::vector<char> beam_network_bridges(const BeamNetwork& net);
+
 // ── ★ A WALL AS A SHELL MESH ────────────────────────────────────────────────
 // A lattice region is a DECLARED PLANAR FACE -- origin, unit normal, an orthonormal
 // (u, w) basis, half-extents, a thickness, and 2D loops in that basis. So its
@@ -189,6 +207,16 @@ struct ShellMesh {
 // the surface comes out as ONE connected shell across its folds rather than a pile
 // of disconnected plates; the returned mesh is NOT planar, which is why the assembly
 // takes each facet's frame from its own nodes.
+// ★ GRADE-TO-SOLID IS ALWAYS A PLATE. His rule, and it is a RULE, not a property of
+// one part: the grade-to-solid wraps every side that outlines the lattice region's
+// shape. Where the model continues beyond such a face, it is a plate AND THEN hex --
+// the plate bonded to the solid behind it -- not hex instead of a plate. The only
+// face with no plate is one where the lattice is genuinely exposed, which is the
+// face you look at; skinning that would make the aesthetics worthless.
+//
+// I briefly special-cased the DEPTH face of this part to hex because its skin cells
+// are thin along the region normal. That fitted one model and would have been wrong
+// on the next: a front or back that is partially covered still grades to shape.
 ShellMesh mesh_skin_midsurface(const VoxelGrid& grid, const std::vector<char>& skin_mask,
                                double weld_tol_mm = -1.0);
 
