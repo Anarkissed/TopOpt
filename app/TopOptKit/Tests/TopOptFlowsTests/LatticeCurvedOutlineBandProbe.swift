@@ -1512,5 +1512,35 @@ extension LatticeCurvedOutlineBandProbe {
         }
         print("")
         for r in rows { print("  \(r.label)\n      sizes: \(r.sizes)") }
+
+        // ★★★ AND EVERY ROW IS PINNED. Two behaviour changes in a row (the ladder
+        // floor, then the solid ring) moved thousands of cells and turned NOTHING red
+        // in a ~790-test suite. His bar is "no holes across EVERY setting permutation",
+        // so the sweep asserts rather than prints.
+        //
+        // ★ COVERED IS EXEMPT FROM THE CLIPPED BOUND, AND ONLY THAT ONE. Its finish is
+        // a 1.8 mm solid skin and this samples at 1 mm, so it legitimately reads as
+        // clipped there — `testIsTheSingleCellEmptinessTheSkinOrAHole` shows it
+        // collapsing 83.0% -> 0.3% between 1.5 and 2.0 mm, which is the skin's own
+        // depth. Its ring and unpainted bounds still apply.
+        for r in rows {
+            XCTAssertEqual(r.unpainted, 0.0, accuracy: 0.05,
+                "★ \(r.label): the bake left OWNED material with no cell — a hole the "
+                + "march cannot fill. This must stay exactly zero.")
+            XCTAssertEqual(r.notOwned, 0.0, accuracy: 0.05,
+                "★ \(r.label): material inside the outline that no region owns.")
+            XCTAssertGreaterThan(r.ring, 75.0,
+                "★ \(r.label): the solid terminus is a DOTTED LINE (\(r.ring)%). "
+                + "Default Grade + single-cell ON scored 57% before the ring was sized "
+                + "by the BASE cell instead of the drawn sub-cell; if this is red again "
+                + "that granularity has been lost.")
+            if !r.label.contains("Covered") {
+                XCTAssertLessThan(r.clipped, 0.5,
+                    "★ \(r.label): \(r.clipped)% of the declared face is painted but "
+                    + "clipped away — empty space on screen. Every permutation measured "
+                    + "0.1% once the ring was sized by the base cell; Default Grade with "
+                    + "single-cell ON was 2.3% before that.")
+            }
+        }
     }
 }

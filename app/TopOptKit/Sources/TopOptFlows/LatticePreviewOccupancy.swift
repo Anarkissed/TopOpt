@@ -1677,21 +1677,35 @@ extension LatticePreviewOccupancy {
                                 // scatter this replaces. The new test is the complete
                                 // statement of the rule on its own: at the size this cell
                                 // will actually be DRAWN, is there room for a node.
-                                // ★ NOTE FOR THE DYADIC PATH (2026-08-28 sweep). This
-                                // sizes the ring from the cell the SPOT is drawn at.
-                                // That is right for stepped, where `n` is 1 almost
-                                // everywhere, and it is NOT sufficient on Default Grade
-                                // with single-cell members ON: ring 57% and a 1.1%
-                                // clipped residue that survives every sample depth,
-                                // against 87% / 0.2% on stepped. Rounding `n` to its
-                                // dyadic value here first was TRIED and measured as a
-                                // no-op — at n = 2 the rounding is the identity. The
-                                // real mismatch is that solid is decided per BASE cell
-                                // while the geometry is drawn per SUB-cell, and those
-                                // only disagree when n > 1, which stepped never does
-                                // because S/2 is banned. Left open deliberately rather
-                                // than papered over.
-                                let drawnCellMM = s / Double(Swift.max(1, Swift.min(n, ladderCap)))
+                                // ★★★ THE RING IS SIZED BY THE CELL THE MARKER COVERS —
+                                // the BASE cell — not by the sub-cell drawn inside it
+                                // (2026-08-30, the Default Grade row of the sweep).
+                                //
+                                // ★ SOLID IS ALL-OR-NOTHING PER BASE CELL. `outline[i]`
+                                // is one value per base cell, so the finest thing this
+                                // decision can address is a whole base cell. Sizing the
+                                // ring from `s/n` asked a question about the SUB-cell
+                                // and then answered it at the base cell's granularity:
+                                // on Default Grade with single-cell members ON, `n` is
+                                // 2 over much of the boundary, so the ring came out
+                                // HALF as deep as the cell it marks and the ring broke.
+                                // Measured: ring 57% and a 1.1% clipped residue that
+                                // survives every sample depth, against 87% / 0.2% on
+                                // stepped — where `n` is 1 and the two were already the
+                                // same number, which is exactly why stepped never showed
+                                // this.
+                                //
+                                // ★ AND IT IS INERT ON STEPPED. `s/1 == s`, so every
+                                // stepped number is unchanged; this only moves the path
+                                // where a base cell is actually subdivided. `s` here is
+                                // still the per-spot cell — the division `s = sBase / n`
+                                // happens further down.
+                                //
+                                // ★ WHAT I TRIED FIRST AND MEASURED AS A NO-OP: rounding
+                                // `n` to its dyadic value before this. At n = 2 the
+                                // rounding is the identity, so it changed nothing. The
+                                // granularity was the mismatch, not the rounding.
+                                let drawnCellMM = s
                                 var dOutlineExact = Double.nan
                                 if region.kind == .face, !region.outlineLoops.isEmpty {
                                     let rn = LatticeRegionMask.unit(region.normal)
