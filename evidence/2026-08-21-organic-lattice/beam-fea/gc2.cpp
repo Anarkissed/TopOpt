@@ -1961,6 +1961,32 @@ int main(int argc, char** argv) {
         std::printf("hybrid masks: %zu solid voxels, %zu in a lattice region, "
                     "%zu of those are GRADE-TO-SOLID SKIN (hex) leaving %zu sparse "
                     "interior (beams)\n", ns, nl, nskin, nl - nskin);
+        // ── ★ BEAM-ONLY: STOP HERE ────────────────────────────────────────────
+        // MEASURED on the 3 mm run: lattice.beam and its mask are complete at
+        // 23:36:49 and out.stl lands at 23:45:46 -- under two minutes of work, then
+        // NINE minutes emitting and writing 944 MB of triangles. Contiguity,
+        // component and bridge analysis read only the beam file, so a sweep that
+        // asks those questions pays 5x for geometry it never opens.
+        //
+        // This exits before emission. It cannot produce a wrong part because it
+        // produces NO part: nothing downstream is disarmed, skipped or relaxed --
+        // the run simply stops. What is lost with it is everything the emission
+        // reports: the region net, the prune rounds, the raster connectivity and the
+        // STL itself. Never use it for a configuration you intend to print or to
+        // check with the raster instrument.
+        //
+        // ★ AND NOTE WHAT THE BEAM FILE IS. It is written HERE, before the region-net
+        // drop and before the prune rounds, so it holds the PRE-PRUNE traced network.
+        // The exported STL is that network minus 16,413 region-net drops and 5,803
+        // pruned struts (3 mm run). Analysis on the beam file describes the traced
+        // lattice, not the shipped geometry, whether or not this flag is set.
+        if (std::getenv("TOPOPT_BEAM_ONLY")) {
+          std::printf("TOPOPT_BEAM_ONLY: stopping after the beam model and mask. "
+                      "No region net, no prune, no raster connectivity, no STL -- "
+                      "and the beam file is the PRE-PRUNE traced network.\n");
+          std::fflush(stdout);
+          return 0;
+        }
       }
     }
     // the SOLID-region global field (too stiff; the baseline)
