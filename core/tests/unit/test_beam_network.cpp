@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace {
@@ -235,6 +236,128 @@ void test_coupled_solve_matches_the_closed_form() {
   CHECK(err < 0.02,
         "block extension matches PL/(AE) within 2% (a fully clamped base stiffens "
         "the block slightly, so a small deficit is physical)");
+}
+
+// ── ★ THE CORNER HINGE ────────────────────────────────────────────────────────
+// A voxel that touches the part only at an EDGE or a CORNER shares a line or a
+// point with it. Every test that asks "is there a path through shared nodes" calls
+// that connected; the physics calls it a HINGE, free to rotate about the contact at
+// zero energy. It is a null space, and no preconditioner can solve past one.
+//
+// This cost most of a night. On the real M2 part the hex mesh is ONE component by
+// shared-node connectivity and THIRTY-ONE by face connectivity: one real body at
+// 97.08% and 30 specks at 2.92% reaching no support. Jacobi, block-diagonal and
+// block+Schur each drove the residual to the same floor (~0.15-0.2) and then
+// diverged -- the same floor every time, which is the signature of a null space
+// rather than of conditioning. Three preconditioners were built to fix a mesh
+// defect. Nothing asserted this, so nothing caught it.
+//
+// Build a block with one voxel hanging off a corner and check it is dropped, that
+// the answer is unchanged, and that the solve still converges.
+void test_a_corner_hinged_island_is_dropped() {
+  const int nx = 6, ny = 6, nz = 8;
+  const double h = 1.7, E = 3500.0, nu = 0.35, P = 1.0;
+  const topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+
+  // the block is the first 4x4 columns; one voxel sits diagonally off its corner,
+  // touching it at a single POINT
+  std::vector<char> mask(g.voxel_count(), 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < 4; ++j)
+      for (int i = 0; i < 4; ++i) mask[g.index(i, j, k)] = 1;
+  mask[g.index(4, 4, 3)] = 1;   // corner contact with (3,3,3): one shared node
+
+  std::vector<BeamSegment> segs;
+  const double cx = 2 * h, cy = 2 * h, cz = 4 * h;
+  for (int i = 0; i < 4; ++i)
+    segs.push_back({Vec3{cx + 0.2 * i, cy, cz}, Vec3{cx + 0.2 * (i + 1), cy, cz}, 0.2});
+  segs.push_back({Vec3{cx + 0.4, cy, cz}, Vec3{cx + 0.4, cy + 0.3, cz}, 0.2});
+  const topopt::BeamNetwork net = topopt::build_beam_network(segs);
+
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int j = 0; j <= 4; ++j)
+    for (int i = 0; i <= 4; ++i) {
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(i, j, 0), c, 0.0});
+      lds.push_back({nod(i, j, nz), 2, P / 25.0});
+    }
+
+  const topopt::CoupledLatticeSolve r = topopt::solve_coupled_lattice(
+      g, mask, net, bcs, lds, E, nu, 0.9, 1e-10, 50000);
+  if (!r.refusal.empty()) std::fprintf(stderr, "  refusal: %s\n", r.refusal.c_str());
+  CHECK(r.refusal.empty(), "a corner-hinged speck does not refuse the solve");
+  CHECK(r.converged, "the solve converges once the hinge is gone");
+  CHECK(r.solid_islands_dropped == 1,
+        "exactly one corner-hinged island is found (it is connected through a "
+        "shared NODE, so only face adjacency can see it)");
+  CHECK(r.solid_islands_elements == 1, "that island is the one voxel");
+
+  // and the answer is still the block's: dropping a hinge removes no load path.
+  // ★ SOLID NODE IDS ARE COMPACTED OVER THE MESHED NODES, so a grid node index is
+  // NOT a displacement index unless every grid node is meshed. It is in the full-
+  // block test above; here the block is a 4x4 corner of a 6x6 grid and the hinged
+  // voxel has been dropped, so the ids must be renumbered the same way the solver
+  // does -- in increasing grid-node order over the nodes a kept voxel touches.
+  std::vector<int> sid(static_cast<std::size_t>(NXn) * NYn * (nz + 1), -1);
+  int next = 0;
+  for (int k = 0; k <= nz; ++k)
+    for (int j = 0; j <= ny; ++j)
+      for (int i = 0; i <= nx; ++i)
+        if (i <= 4 && j <= 4) sid[static_cast<std::size_t>(nod(i, j, k))] = next++;
+  const double L = nz * h, A = (4 * h) * (4 * h);
+  const double exact = P * L / (A * E);
+  double sum = 0.0; int n = 0;
+  for (int j = 0; j <= 4; ++j)
+    for (int i = 0; i <= 4; ++i) {
+      sum += r.solid_displacement[static_cast<std::size_t>(3 * sid[static_cast<std::size_t>(nod(i, j, nz))] + 2)];
+      ++n;
+    }
+  const double err = std::fabs(sum / n - exact) / exact;
+  std::printf("  hinged block: got %.6e  exact %.6e  error %.3f%%\n",
+              sum / n, exact, 100.0 * err);
+  CHECK(err < 0.02, "dropping the hinge leaves the block's extension unchanged");
+}
+
+// ★ DROPPING A LOT OF THE PART IS A DIFFERENT MATTER. A speck is noise; a third of
+// the model hanging on corners means the mesh is genuinely hinged, and deleting it
+// quietly would report a stiffness for a part that was never solved. Refuse.
+void test_a_mostly_hinged_mesh_is_REFUSED() {
+  const int nx = 12, ny = 12, nz = 6;
+  const double h = 1.7, E = 3500.0, nu = 0.35;
+  const topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+  std::vector<char> mask(g.voxel_count(), 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < 4; ++j)
+      for (int i = 0; i < 4; ++i) mask[g.index(i, j, k)] = 1;
+  // a diagonal staircase of separate voxels, each touching only at corners
+  for (int d = 0; d < 8; ++d) mask[g.index(4 + d, 4 + d, 3)] = 1;
+
+  std::vector<BeamSegment> segs;
+  const double cx = 2 * h, cy = 2 * h, cz = 3 * h;
+  for (int i = 0; i < 4; ++i)
+    segs.push_back({Vec3{cx + 0.2 * i, cy, cz}, Vec3{cx + 0.2 * (i + 1), cy, cz}, 0.2});
+  segs.push_back({Vec3{cx + 0.4, cy, cz}, Vec3{cx + 0.4, cy + 0.3, cz}, 0.2});
+  const topopt::BeamNetwork net = topopt::build_beam_network(segs);
+
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int j = 0; j <= 4; ++j)
+    for (int i = 0; i <= 4; ++i) {
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(i, j, 0), c, 0.0});
+      lds.push_back({nod(i, j, nz), 2, 1.0 / 25.0});
+    }
+  const topopt::CoupledLatticeSolve r = topopt::solve_coupled_lattice(
+      g, mask, net, bcs, lds, E, nu, 0.9, 1e-10, 2000);
+  CHECK(!r.refusal.empty(), "a mesh that is mostly hinges is REFUSED, not silently trimmed");
+  CHECK(r.refusal.find("corner") != std::string::npos,
+        "and the refusal says the pieces touch only at an edge or a corner");
+  if (!r.refusal.empty()) std::printf("  refused: %s\n", r.refusal.c_str());
 }
 
 void test_partial_fill_scales_the_solid_exactly() {
@@ -538,6 +661,192 @@ void test_midsurface_mesh() {
   CHECK(threw, "refuses a zero thickness");
 }
 
+// ── ★ THE SKIN MESHED FROM THE CELLS THE GENERATOR FLAGGED ───────────────────
+// The plate model of the grade-to-solid skin used to be derived from the lattice
+// REGION'S OUTLINE, and measured against the real part that was wrong three ways at
+// once: it laid a full sheet across the region's OPEN outer face (the part ends at
+// y = 3.10 mm, the sheet went to y = 3.68), it made the far sheet 2.8x larger than
+// the skin actually there (13,920 mm^2 against 5,013), and it omitted the side walls
+// -- about 60% of the real skin. Net: 92,470 mm^3 of plate against 42,225 mm^3 of
+// real skin, 219%. Too much material makes the part too stiff, which unloads the
+// struts, which is why peak strut stress read 0.31 MPa where the same geometry
+// meshed as hex gives 3.40 MPa -- an 11x error in the number the structural gate
+// reads.
+//
+// The generator knows where the skin is; it decided it. So the two properties that
+// actually failed are what these assert: the plate carries the SAME MASS as the
+// cells it stands for, and the surface comes out CONNECTED across its folds.
+void test_skin_mesh_carries_the_skin_MASS() {
+  const int n = 8;
+  const double h = 1.7;
+  const topopt::VoxelGrid g = block_grid(n, n, 4, h);
+  std::vector<char> skin(g.voxel_count(), 0);
+  // a flat sheet two cells deep: 6x6 in plan, k = 1..2
+  int cells = 0;
+  for (int j = 1; j < 7; ++j)
+    for (int i = 1; i < 7; ++i)
+      for (int k = 1; k < 3; ++k) { skin[g.index(i, j, k)] = 1; ++cells; }
+
+  const topopt::ShellMesh m = topopt::mesh_skin_midsurface(g, skin);
+  CHECK(!m.triangles.empty(), "the flagged cells produce a mesh");
+  CHECK(m.tri_thickness.size() == m.triangles.size(),
+        "every facet carries its own thickness");
+  double vol = 0.0;
+  for (std::size_t t = 0; t < m.triangles.size(); ++t) {
+    const topopt::Vec3& A = m.nodes[(std::size_t)m.triangles[t].a];
+    const topopt::Vec3& B = m.nodes[(std::size_t)m.triangles[t].b];
+    const topopt::Vec3& C = m.nodes[(std::size_t)m.triangles[t].c];
+    const double ux=B.x-A.x, uy=B.y-A.y, uz=B.z-A.z;
+    const double vx=C.x-A.x, vy=C.y-A.y, vz=C.z-A.z;
+    const double cx=uy*vz-uz*vy, cy=uz*vx-ux*vz, cz=ux*vy-uy*vx;
+    vol += 0.5*std::sqrt(cx*cx+cy*cy+cz*cz) * m.tri_thickness[t];
+  }
+  const double exact = cells * h * h * h;
+  std::printf("  skin mesh: %zu nodes, %zu facets, volume %.2f mm^3 (cells %.2f)\n",
+              m.nodes.size(), m.triangles.size(), vol, exact);
+  CHECK(std::fabs(vol - exact) / exact < 1e-9,
+        "a flat skin's plate volume EQUALS the volume of the cells it stands for "
+        "(this is the 219% error that made the struts read 11x low)");
+  // the sheet is two cells deep, so every facet is 2h thick -- not the 2 mm nominal
+  for (double t : m.tri_thickness)
+    CHECK(std::fabs(t - 2 * h) < 1e-9, "facet thickness is the run's real depth");
+}
+
+void test_skin_mesh_is_CONNECTED_across_a_fold() {
+  const int n = 10;
+  const double h = 1.7;
+  const topopt::VoxelGrid g = block_grid(n, n, n, h);
+  std::vector<char> skin(g.voxel_count(), 0);
+  // an L: a floor (k=1) and a wall rising off its edge (i=1) -- the shape the real
+  // skin makes where a far face meets a side wall. Derived from the region outline
+  // this fold did not exist at all.
+  for (int j = 1; j < 8; ++j) {
+    for (int i = 1; i < 8; ++i) skin[g.index(i, j, 1)] = 1;   // floor
+    for (int k = 1; k < 8; ++k) skin[g.index(1, j, k)] = 1;   // wall
+  }
+  const topopt::ShellMesh m = topopt::mesh_skin_midsurface(g, skin);
+  CHECK(!m.triangles.empty(), "the folded skin produces a mesh");
+
+  // one connected surface, walking node-sharing between facets
+  std::vector<std::vector<int>> tri_of(m.nodes.size());
+  for (std::size_t t = 0; t < m.triangles.size(); ++t) {
+    tri_of[(std::size_t)m.triangles[t].a].push_back((int)t);
+    tri_of[(std::size_t)m.triangles[t].b].push_back((int)t);
+    tri_of[(std::size_t)m.triangles[t].c].push_back((int)t);
+  }
+  std::vector<char> seen(m.triangles.size(), 0);
+  std::vector<int> stack{0}; seen[0] = 1; std::size_t reached = 1;
+  while (!stack.empty()) {
+    const int t = stack.back(); stack.pop_back();
+    const int nd[3] = {m.triangles[(std::size_t)t].a, m.triangles[(std::size_t)t].b,
+                       m.triangles[(std::size_t)t].c};
+    for (int q : nd)
+      for (int t2 : tri_of[(std::size_t)q])
+        if (!seen[(std::size_t)t2]) { seen[(std::size_t)t2] = 1; ++reached; stack.push_back(t2); }
+  }
+  std::printf("  folded skin: %zu nodes, %zu facets, %zu reachable from one\n",
+              m.nodes.size(), m.triangles.size(), reached);
+  CHECK(reached == m.triangles.size(),
+        "the skin is ONE connected shell across the fold -- disconnected plates "
+        "would each be a free body and make the system singular");
+}
+
+// ── ★ THE SAME MATERIAL, AS HEX AND AS PLATES, MUST GIVE THE SAME PART ───────
+// A grade-to-solid skin can be meshed either way. If the two disagree, one of them
+// is wrong, and every strut stress downstream inherits the error.
+//
+// MEASURED on the real part before this test existed: peak deflection 0.0307 mm with
+// the skin as hex and 0.00086 mm with the same skin as plates -- 36x stiffer -- so
+// the plates were carrying the whole part and the lattice read ~60x under-stressed
+// at p95. The skin's MASS was right to 2%, so it is the representation, not the
+// material. This is the smallest case that reproduces it: a cantilever slab whose
+// top two cell layers are either hex or plates.
+void test_skin_as_plates_matches_skin_as_hex() {
+  const int nx = 10, ny = 4, nz = 6;
+  const double h = 1.7, E = 3500.0, nu = 0.35, P = 1.0;
+  const topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+
+  // one strut, well away from the skin, so the coupled path is exercised either way
+  std::vector<BeamSegment> segs;
+  const double cx = 3 * h, cy = 2 * h, cz = 1.5 * h;
+  for (int i = 0; i < 4; ++i)
+    segs.push_back({Vec3{cx + 0.2 * i, cy, cz}, Vec3{cx + 0.2 * (i + 1), cy, cz}, 0.2});
+  segs.push_back({Vec3{cx + 0.4, cy, cz}, Vec3{cx + 0.4, cy + 0.3, cz}, 0.2});
+  const topopt::BeamNetwork net = topopt::build_beam_network(segs);
+
+  // clamp i=0, push down on the far end: a cantilever, so the skin's contribution
+  // shows up as bending stiffness, which is where hex and plate differ most
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int k = 0; k <= nz; ++k)
+    for (int j = 0; j <= ny; ++j) {
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(0, j, k), c, 0.0});
+      lds.push_back({nod(nx, j, 0), 2, -P / static_cast<double>((nz + 1) * (NYn))});
+    }
+
+  auto tip = [&](const topopt::CoupledLatticeSolve& r, const std::vector<int>& sid) {
+    double w = 0.0; int n = 0;
+    for (int id : sid) { w += r.solid_displacement[(std::size_t)(3 * id + 2)]; ++n; }
+    return n ? w / n : 0.0;
+  };
+
+  // (a) the skin as HEX: the whole block is solid
+  std::vector<char> full(g.voxel_count(), 1);
+  std::vector<int> sid_full;
+  { int next = 0;
+    std::vector<int> map((std::size_t)NXn * NYn * (nz + 1), -1);
+    for (int k = 0; k <= nz; ++k) for (int j = 0; j <= ny; ++j) for (int i = 0; i <= nx; ++i)
+      map[(std::size_t)nod(i,j,k)] = next++;
+    for (int j = 0; j <= ny; ++j) sid_full.push_back(map[(std::size_t)nod(nx, j, 0)]);
+  }
+  const topopt::CoupledLatticeSolve ra = topopt::solve_coupled_lattice(
+      g, full, net, bcs, lds, E, nu, 0.9, 1e-10, 50000);
+  CHECK(ra.refusal.empty(), "the all-hex control solves");
+  if (!ra.refusal.empty()) std::fprintf(stderr, "  a: %s\n", ra.refusal.c_str());
+
+  // (b) the same material with the TOP TWO LAYERS as plates instead of hex
+  std::vector<char> core_only(g.voxel_count(), 0);
+  std::vector<char> skin(g.voxel_count(), 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        // ONE cell deep, which is what the real skin mostly is: its mid-surface then
+        // sits half a cell off the interface. At two cells deep the mid-surface is a
+        // full cell away and the +/-1 bonding search finds nothing at all -- measured,
+        // "bonded to the solid at 0 node(s)". That fragility is itself a defect.
+        if (k == nz - 1) skin[g.index(i, j, k)] = 1;
+        else             core_only[g.index(i, j, k)] = 1;
+      }
+  topopt::ShellPatch sp;
+  sp.mesh = topopt::mesh_skin_midsurface(g, skin);
+  sp.thickness_mm = 0.0;
+  std::vector<topopt::ShellPatch> shells{sp};
+  std::vector<int> sid_core;
+  { int next = 0;
+    std::vector<int> map((std::size_t)NXn * NYn * (nz + 1), -1);
+    for (int k = 0; k <= nz; ++k) for (int j = 0; j <= ny; ++j) for (int i = 0; i <= nx; ++i)
+      if (k <= nz - 1) map[(std::size_t)nod(i,j,k)] = next++;
+    for (int j = 0; j <= ny; ++j) sid_core.push_back(map[(std::size_t)nod(nx, j, 0)]);
+  }
+  const topopt::CoupledLatticeSolve rb = topopt::solve_coupled_lattice(
+      g, core_only, net, bcs, lds, E, nu, 0.9, 1e-10, 50000, nullptr, &shells);
+  CHECK(rb.refusal.empty(), "the hex-core + plate-skin model solves");
+  if (!rb.refusal.empty()) std::fprintf(stderr, "  b: %s\n", rb.refusal.c_str());
+  if (!ra.refusal.empty() || !rb.refusal.empty()) return;
+
+  const double wa = tip(ra, sid_full), wb = tip(rb, sid_core);
+  std::printf("  cantilever tip: all-hex %.6e mm   hex+plate skin %.6e mm   ratio %.2f\n",
+              wa, wb, (wb != 0.0) ? wa / wb : 0.0);
+  std::printf("    skin: %zu shell nodes, %zu bonded into the solid\n",
+              rb.shell_nodes, rb.shell_nodes_tied);
+  CHECK(std::fabs(wa) > 0.0 && std::fabs(wb / wa - 1.0) < 0.25,
+        "the same material as plates gives the same part stiffness as hex within "
+        "25% (36x apart on the real part is what this exists to catch)");
+}
+
 void test_refusals() {
   bool threw = false;
   try { topopt::build_beam_network({{Vec3{0,0,0}, Vec3{1,0,0}, 0.0}}); }
@@ -563,6 +872,8 @@ int main() {
   test_a_junction_restrains_its_members();
   test_circular_section();
   test_coupled_solve_matches_the_closed_form();
+  test_a_corner_hinged_island_is_dropped();
+  test_a_mostly_hinged_mesh_is_REFUSED();
   test_partial_fill_scales_the_solid_exactly();
   test_coupled_solve_REFUSES_a_mechanism();
   test_coupled_solve_REFUSES_untied_components_instantly();
@@ -570,6 +881,9 @@ int main() {
   test_components_ignore_dangling_nodes();
   test_coupled_solve_refuses_missing_supports();
   test_midsurface_mesh();
+  test_skin_mesh_carries_the_skin_MASS();
+  test_skin_mesh_is_CONNECTED_across_a_fold();
+  test_skin_as_plates_matches_skin_as_hex();
   test_refusals();
   std::printf("test_beam_network: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

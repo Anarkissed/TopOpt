@@ -175,6 +175,17 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(topopt PUBLIC Threads::Threads)
 
+# ★ ACCELERATE: the direct sparse Cholesky in src/fea/beam_network.cpp. The coupled
+# beam/shell/solid system is SPD once the corner-hinged solid islands are dropped,
+# and a supernodal direct factorisation is both exact and far faster than iterating
+# on a matrix whose hex, beam-bending and shell terms differ by orders of magnitude.
+# Apple-only, so the conjugate-gradient path stays as the portable fallback and CI
+# on other platforms keeps building; nothing in the public API changes either way.
+if(APPLE)
+  target_link_libraries(topopt PRIVATE "-framework Accelerate")
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_ACCELERATE)
+endif()
+
 # STEP import (M1.4) requires OCCT. Compile it into the library and link the
 # needed OCCT toolkits only when OCCT is present. OCCT is LGPL 2.1 and its
 # imported targets are SHARED (dynamic linking only, ARCHITECTURE.md §4/§10).

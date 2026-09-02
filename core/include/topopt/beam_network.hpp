@@ -160,7 +160,37 @@ struct ShellMesh {
   // can build the element in 2D and rotate with `basis_u` / `basis_w` / `normal`.
   std::vector<double> local_u, local_w;
   Vec3 basis_u{}, basis_w{}, normal{};
+  // ★ OPTIONAL PER-FACET THICKNESS, one entry per triangle. Empty means every facet
+  // uses the patch thickness. A skin meshed from voxels is one or two cells deep
+  // depending where you stand, so it needs this; a flat analytic patch does not.
+  // The mesh no longer has to be PLANAR either -- the assembly takes each facet's
+  // frame from its own three nodes, so a patch may be a folded or curved surface.
+  std::vector<double> tri_thickness;
 };
+
+// ── ★ THE SKIN AS THE GENERATOR ACTUALLY BUILT IT ────────────────────────────
+// Build the grade-to-solid skin's mid-surface from the voxels the lattice generator
+// FLAGGED as skin, rather than from the lattice region's outline.
+//
+// This exists because deriving it from the region outline was measured wrong on the
+// real part: it laid a full sheet across the region's OPEN outer face (the part ends
+// at y=3.10 mm, the sheet was placed at y=3.68), made the far sheet 2.8x larger than
+// the skin actually there (13,920 mm^2 against 5,013), and omitted the side walls
+// entirely -- about 60% of the real skin. The result carried 92,470 mm^3 of plate
+// against 42,225 mm^3 of real skin (219%), which stiffens the part, unloads the
+// struts, and put peak strut stress at 0.31 MPa where the same geometry meshed as
+// hex gives 3.40 MPa.
+//
+// The generator knows exactly where the skin is -- it decided it -- so read that
+// instead of re-deriving it. `skin_mask` is one flag per voxel. Each run of skin
+// cells through its own thinnest direction becomes one facet at the run's centre,
+// carrying that run's depth as its thickness, so the mesh has the skin's real shape
+// AND its real mass. Facets are welded within `weld_tol_mm` (default 0.75 cells) so
+// the surface comes out as ONE connected shell across its folds rather than a pile
+// of disconnected plates; the returned mesh is NOT planar, which is why the assembly
+// takes each facet's frame from its own nodes.
+ShellMesh mesh_skin_midsurface(const VoxelGrid& grid, const std::vector<char>& skin_mask,
+                               double weld_tol_mm = -1.0);
 
 // `loops` are closed polygons in the face's (u, w) basis; loop 0 is the outline and
 // any others are holes. Empty `loops` means the plain half_u x half_w rectangle.
@@ -196,13 +226,41 @@ struct CoupledLatticeSolve {
   std::vector<double> solid_displacement;  // 3 per numbered solid node
   std::vector<double> member_stress_mpa;   // one per network member
   double peak_member_stress_mpa = 0.0;
+  // ★ COMPLIANCE F.u -- the work the load does on the WHOLE assembly, and the only
+  // honest single-number stiffness for this model. A peak deflection is a MAX over
+  // nodes, so one floppy tongue of skin dominates it: measured, that made an all-hex
+  // skin look 14x SOFTER than no skin at all, which cannot happen. Lower is stiffer.
+  double compliance = 0.0;
+  // ★ WHAT LANDED, AND WHAT DID NOT. A support or a load whose node is not part of
+  // the meshed solid used to be skipped in silence. That is how a model gets solved
+  // with its load missing and still reports "converged": meshing the skin as plates
+  // takes those voxels OUT of the hex mesh, so every load that lands on the skin --
+  // and the loaded face IS skin -- simply disappeared. Counted here, and refused
+  // above kLoadDropRefuseFraction of the applied force.
+  std::size_t bcs_applied = 0, bcs_dropped = 0;
+  std::size_t loads_applied = 0, loads_dropped = 0;
+  double load_dropped_fraction = 0.0;   // by |force|, not by count
   int peak_member = -1;
   std::size_t beam_nodes_tied = 0;
   std::size_t beam_nodes_welded_to_shell = 0;   // moment-transferring joints
   std::size_t shell_nodes = 0, shell_triangles = 0;
   std::size_t shell_nodes_tied = 0;   // skin nodes bonded into the solid mesh
   std::size_t floating_dof = 0;       // free dof reaching no support at all
+  // ★ SOLID ISLANDS HANGING ON A CORNER. Voxels that touch only at an edge or a
+  // corner share a line or a point: connected to a union-find over shared nodes,
+  // a HINGE in the physics. Those pieces are the null space that made every
+  // preconditioner stall at the same floor and then diverge. They are dropped
+  // (they reach no support, so they carry no load) and counted here.
+  std::size_t solid_islands_dropped = 0;    // face-connected pieces removed
+  std::size_t solid_islands_elements = 0;   // hex elements in them
+  double solid_islands_fraction = 0.0;      // of the meshed solid, by element count
   std::string preconditioner;         // which one actually ran
+  // Where the residual lives when the solve stops: the share carried by each
+  // element family, and the single worst dof. A mechanism shows as one family
+  // holding nearly all of it.
+  double residual_share_solid = 0.0, residual_share_shell = 0.0, residual_share_beam = 0.0;
+  int worst_residual_dof = -1, worst_residual_node = -1, worst_residual_component = -1;
+  std::string worst_residual_family;
   double matrix_asymmetry = 0.0;      // max |K_ij - K_ji| / max|K|; CG needs ~0
   // Of those, how many were NOT inside their host element and had their weights
   // clamped onto it. A clamped tie is a PROJECTION, not an interpolation: it does

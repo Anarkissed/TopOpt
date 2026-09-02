@@ -5,12 +5,17 @@
 #include <cmath>
 #include <array>
 #include <map>
+#include <unordered_map>
 #include <string>
 #include <chrono>
 #include <numeric>
 #include <functional>
 #include <set>
 #include <stdexcept>
+
+#if defined(TOPOPT_HAVE_ACCELERATE)
+#include <Accelerate/Accelerate.h>
+#endif
 
 namespace topopt {
 namespace {
@@ -305,6 +310,127 @@ bool inside_loops(double u, double w,
 
 }  // namespace
 
+ShellMesh mesh_skin_midsurface(const VoxelGrid& grid, const std::vector<char>& skin_mask,
+                               double weld_tol_mm) {
+  ShellMesh m;
+  if (skin_mask.size() != grid.voxel_count()) return m;
+  const double h = grid.spacing;
+  const double tol = weld_tol_mm > 0.0 ? weld_tol_mm : 0.75 * h;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  auto at = [&](int i, int j, int k) {
+    if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) return false;
+    return skin_mask[grid.index(i, j, k)] != 0;
+  };
+  // ── which way is each skin cell THIN? ───────────────────────────────────────
+  // The skin is a shell one or two cells deep; the direction in which the run of
+  // skin through a cell is SHORTEST is the through-thickness direction, and the
+  // plate lies across the other two. A cell on a side wall is thin across the wall;
+  // a cell on the far face is thin along the region normal. Nothing has to know
+  // which is which -- the geometry says so.
+  const int step[3][3] = {{1,0,0},{0,1,0},{0,0,1}};
+  std::vector<signed char> axis(grid.voxel_count(), -1);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        if (!at(i, j, k)) continue;
+        int best = -1, bestrun = 0;
+        for (int a = 0; a < 3; ++a) {
+          int run = 1;
+          for (int d = 1;; ++d) {
+            if (!at(i + step[a][0]*d, j + step[a][1]*d, k + step[a][2]*d)) break;
+            ++run;
+          }
+          for (int d = 1;; ++d) {
+            if (!at(i - step[a][0]*d, j - step[a][1]*d, k - step[a][2]*d)) break;
+            ++run;
+          }
+          if (best < 0 || run < bestrun) { best = a; bestrun = run; }
+        }
+        axis[grid.index(i, j, k)] = static_cast<signed char>(best);
+      }
+  // ── one facet per RUN, at the run's centre, carrying the run's depth ────────
+  // welded node store: a hash grid at the weld tolerance, so facets that meet at a
+  // fold share nodes and the skin comes out as one connected shell
+  std::unordered_map<long long, std::vector<int>> bucket;
+  auto key_of = [&](int a, int b, int c) {
+    return (static_cast<long long>(a) * 73856093LL) ^
+           (static_cast<long long>(b) * 19349663LL) ^
+           (static_cast<long long>(c) * 83492791LL);
+  };
+  auto node_of = [&](const Vec3& p) {
+    const int ci = static_cast<int>(std::floor(p.x / tol));
+    const int cj = static_cast<int>(std::floor(p.y / tol));
+    const int ck = static_cast<int>(std::floor(p.z / tol));
+    for (int di = -1; di <= 1; ++di)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int dk = -1; dk <= 1; ++dk) {
+          auto it = bucket.find(key_of(ci + di, cj + dj, ck + dk));
+          if (it == bucket.end()) continue;
+          for (int id : it->second) {
+            const Vec3& q = m.nodes[static_cast<std::size_t>(id)];
+            const double dx = p.x-q.x, dy = p.y-q.y, dz = p.z-q.z;
+            if (dx*dx + dy*dy + dz*dz <= tol*tol) return id;
+          }
+        }
+    const int id = static_cast<int>(m.nodes.size());
+    m.nodes.push_back(p);
+    bucket[key_of(ci, cj, ck)].push_back(id);
+    return id;
+  };
+  std::vector<char> done(grid.voxel_count(), 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!at(i, j, k) || done[e]) continue;
+        const int a = axis[e];
+        if (a < 0) continue;
+        // walk to the start of this cell's run, then to its end, taking only cells
+        // that agree this is their thin direction
+        int si = i, sj = j, sk = k;
+        while (at(si - step[a][0], sj - step[a][1], sk - step[a][2]) &&
+               axis[grid.index(si - step[a][0], sj - step[a][1], sk - step[a][2])] == a) {
+          si -= step[a][0]; sj -= step[a][1]; sk -= step[a][2];
+        }
+        int run = 0, ei = si, ej = sj, ek = sk;
+        while (at(ei, ej, ek) && axis[grid.index(ei, ej, ek)] == a) {
+          done[grid.index(ei, ej, ek)] = 1;
+          ++run;
+          ei += step[a][0]; ej += step[a][1]; ek += step[a][2];
+        }
+        // the facet plane sits at the centre of the run; it spans the cell footprint
+        const double cu = grid.origin.x + (si + 0.5) * h + step[a][0] * 0.5 * (run - 1) * h;
+        const double cv = grid.origin.y + (sj + 0.5) * h + step[a][1] * 0.5 * (run - 1) * h;
+        const double cw = grid.origin.z + (sk + 0.5) * h + step[a][2] * 0.5 * (run - 1) * h;
+        const int u_ax = (a + 1) % 3, w_ax = (a + 2) % 3;
+        auto corner = [&](int su, int sw) {
+          Vec3 p{cu, cv, cw};
+          double* xyz[3] = {&p.x, &p.y, &p.z};
+          *xyz[u_ax] += su * 0.5 * h;
+          *xyz[w_ax] += sw * 0.5 * h;
+          return p;
+        };
+        const int c00 = node_of(corner(-1,-1)), c10 = node_of(corner(+1,-1));
+        const int c11 = node_of(corner(+1,+1)), c01 = node_of(corner(-1,+1));
+        const double th = run * h;
+        if (c00 != c10 && c10 != c11 && c00 != c11) {
+          m.triangles.push_back({c00, c10, c11});
+          m.tri_thickness.push_back(th);
+        }
+        if (c00 != c11 && c11 != c01 && c00 != c01) {
+          m.triangles.push_back({c00, c11, c01});
+          m.tri_thickness.push_back(th);
+        }
+      }
+  // a folded shell has no single normal or basis; the assembly takes them per facet.
+  // Report the mean thickness so a caller that ignores tri_thickness still gets mass
+  // of the right order rather than zero.
+  double tsum = 0.0;
+  for (double t : m.tri_thickness) tsum += t;
+  m.thickness_mm = m.tri_thickness.empty() ? 0.0 : tsum / static_cast<double>(m.tri_thickness.size());
+  return m;
+}
+
 ShellMesh mesh_face_region_midsurface(
     const Vec3& origin, const Vec3& normal, double half_u, double half_w,
     double thickness_mm, const std::vector<std::vector<std::array<double, 2>>>& loops,
@@ -463,7 +589,16 @@ namespace {
 // between those scales is exactly what has to be captured, and Jacobi captures none
 // of it. MEASURED with Jacobi on a real part: residual parked at 2.0 after 20,500
 // iterations, on a system that is symmetric, positive semi-definite and fully
-// connected -- so nothing was wrong except the preconditioner.
+// connected.
+//
+// ★ THAT LAST SENTENCE USED TO READ "so nothing was wrong except the
+// preconditioner", AND IT WAS WRONG. The mesh contained corner-hinged solid islands
+// -- pieces touching the part at a single point, connected to a shared-node test and
+// free to rotate at zero energy. No preconditioner can remove a null space. The
+// parked residual was a mechanism, not conditioning, and this whole smoother was
+// built chasing it. It is kept because it is a correct smoother and may earn its
+// place on the CG fallback, but it never was the fix. See the island drop in
+// solve_coupled_lattice.
 //
 // SGS applies (D+L) D^-1 (D+U), i.e. a forward sweep and a backward sweep. It costs
 // two triangular solves per iteration -- the same shape as IC(0) but with NO
@@ -512,6 +647,150 @@ struct SymGaussSeidel {
       }
       z[static_cast<std::size_t>(i)] = acc / diag[static_cast<std::size_t>(i)];
     }
+  }
+};
+
+// ── ★ THE BLOCK PRECONDITIONER ──────────────────────────────────────────────
+// This is the structure the mixed-dimensional beam-solid literature prescribes
+// (arXiv 2402.18414, 2606.06035) and the reason Jacobi and global SGS both fail
+// here.
+//
+// THE DIAGNOSIS. Partition the dof into the SOLID block (hex, and shell where
+// present) and the BEAM block. Each block is, on its own, an ordinary
+// well-conditioned FE matrix -- hex stiffness scales as E*h, beam bending as
+// EI/L^3 with I ~ 0.05 mm^4. It is the RATIO BETWEEN THE BLOCKS, four or more
+// orders of magnitude, that wrecks the conditioning. A preconditioner built from
+// the diagonal (Jacobi) or from a global sweep (SGS) sees one system and cannot
+// represent that split: MEASURED, Jacobi parks at residual 2.0 after 20,500
+// iterations and SGS diverges to 3.3e4 in 1,000, on a matrix that is symmetric,
+// positive semi-definite and fully connected.
+//
+// THE FIX. Precondition each block SEPARATELY, so each is solved in its own scale:
+//
+//     M^-1 = [ A_ss^-1     0     ]
+//            [   0      A_bb^-1  ]
+//
+// with each diagonal block approximated by its own symmetric Gauss-Seidel sweeps.
+// This is block-Jacobi -- the first and simplest member of the family, dropping the
+// off-diagonal coupling entirely. The published methods add a Schur-complement
+// correction for that coupling (SIMPLE-type, with algebraic multigrid on the solid
+// block); this deliberately does not, because the coupling term is only worth
+// building once the block split itself is shown to help.
+struct BlockPrecon {
+  const Csr* A = nullptr;
+  std::vector<char> in_beam;                  // per free-dof: which block
+  std::vector<double> diag;
+  int sweeps = 2;
+
+  void build(const Csr& a, std::vector<char> beam_flag, int nsweeps) {
+    A = &a;
+    in_beam = std::move(beam_flag);
+    sweeps = nsweeps;
+    diag.assign(static_cast<std::size_t>(a.n), 0.0);
+    for (int i = 0; i < a.n; ++i)
+      for (int k = a.ptr[static_cast<std::size_t>(i)];
+           k < a.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        if (a.idx[static_cast<std::size_t>(k)] == i)
+          diag[static_cast<std::size_t>(i)] += a.val[static_cast<std::size_t>(k)];
+    for (double& d : diag) if (!(d > 0.0)) d = 1.0;
+  }
+
+  // Symmetric Gauss-Seidel sweeps RESTRICTED to one block: rows outside the block
+  // are skipped and their couplings ignored, which is what makes this block-Jacobi
+  // rather than a global sweep.
+  void sweep_block(bool beam, const std::vector<double>& r, std::vector<double>& z) const {
+    const Csr& a = *A;
+    for (int pass = 0; pass < sweeps; ++pass) {
+      for (int i = 0; i < a.n; ++i) {
+        if ((in_beam[static_cast<std::size_t>(i)] != 0) != beam) continue;
+        double acc = r[static_cast<std::size_t>(i)];
+        for (int k = a.ptr[static_cast<std::size_t>(i)];
+             k < a.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+          const int j = a.idx[static_cast<std::size_t>(k)];
+          if (j == i) continue;
+          if ((in_beam[static_cast<std::size_t>(j)] != 0) != beam) continue;  // block-local
+          acc -= a.val[static_cast<std::size_t>(k)] * z[static_cast<std::size_t>(j)];
+        }
+        z[static_cast<std::size_t>(i)] = acc / diag[static_cast<std::size_t>(i)];
+      }
+      for (int i = a.n - 1; i >= 0; --i) {          // and the reverse sweep, for symmetry
+        if ((in_beam[static_cast<std::size_t>(i)] != 0) != beam) continue;
+        double acc = r[static_cast<std::size_t>(i)];
+        for (int k = a.ptr[static_cast<std::size_t>(i)];
+             k < a.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+          const int j = a.idx[static_cast<std::size_t>(k)];
+          if (j == i) continue;
+          if ((in_beam[static_cast<std::size_t>(j)] != 0) != beam) continue;
+          acc -= a.val[static_cast<std::size_t>(k)] * z[static_cast<std::size_t>(j)];
+        }
+        z[static_cast<std::size_t>(i)] = acc / diag[static_cast<std::size_t>(i)];
+      }
+    }
+  }
+
+  // ── ★ THE SCHUR COMPLEMENT CORRECTION ────────────────────────────────────
+  // Block-DIAGONAL preconditioning drops the coupling between the blocks entirely.
+  // MEASURED: that alone took the residual to 0.156 -- ten times closer than Jacobi
+  // ever reached -- and then diverged, because the dropped coupling is not small.
+  //
+  // The published form is block-TRIANGULAR (arXiv 2402.18414, a SIMPLE-type
+  // factorisation). Writing the system as
+  //
+  //     [ A_ss  A_sb ] [ z_s ]   [ r_s ]
+  //     [ A_bs  A_bb ] [ z_b ] = [ r_b ]
+  //
+  // the exact block factorisation is
+  //
+  //     z_s = A_ss^-1 (r_s - A_sb z_b),      z_b = S^-1 (r_b - A_bs A_ss^-1 r_s)
+  //     with the Schur complement  S = A_bb - A_bs A_ss^-1 A_sb.
+  //
+  // S is never formed: it is APPROXIMATED by A_bb, which is what makes this
+  // affordable and is exactly the approximation the paper makes. The correction is
+  // the part that matters here -- the beam solve sees the load the solid has
+  // already taken (r_b - A_bs z_s), and the solid solve is then corrected for what
+  // the beams carry (r_s - A_sb z_b). Dropping either term is block-Jacobi again.
+  void apply(const std::vector<double>& r, std::vector<double>& z) const {
+    const Csr& a = *A;
+    const int n = a.n;
+    z.assign(static_cast<std::size_t>(n), 0.0);
+
+    // 1. predict the SOLID block from its own residual
+    sweep_block(false, r, z);
+
+    // 2. the beam block sees what the solid has already absorbed:  r_b - A_bs z_s
+    std::vector<double> rb(static_cast<std::size_t>(n), 0.0);
+    for (int i = 0; i < n; ++i) {
+      if (!in_beam[static_cast<std::size_t>(i)]) continue;
+      double acc = r[static_cast<std::size_t>(i)];
+      for (int k = a.ptr[static_cast<std::size_t>(i)];
+           k < a.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = a.idx[static_cast<std::size_t>(k)];
+        if (!in_beam[static_cast<std::size_t>(j)])            // the coupling block
+          acc -= a.val[static_cast<std::size_t>(k)] * z[static_cast<std::size_t>(j)];
+      }
+      rb[static_cast<std::size_t>(i)] = acc;
+    }
+    sweep_block(true, rb, z);                  // z_b ~ A_bb^-1 (r_b - A_bs z_s)
+
+    // 3. correct the solid for what the beams turned out to carry: r_s - A_sb z_b
+    std::vector<double> rs(static_cast<std::size_t>(n), 0.0);
+    for (int i = 0; i < n; ++i) {
+      if (in_beam[static_cast<std::size_t>(i)]) continue;
+      double acc = r[static_cast<std::size_t>(i)];
+      for (int k = a.ptr[static_cast<std::size_t>(i)];
+           k < a.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = a.idx[static_cast<std::size_t>(k)];
+        if (in_beam[static_cast<std::size_t>(j)])
+          acc -= a.val[static_cast<std::size_t>(k)] * z[static_cast<std::size_t>(j)];
+      }
+      rs[static_cast<std::size_t>(i)] = acc;
+    }
+    // recompute the solid block from the corrected residual, so the pass is
+    // SYMMETRIC overall (solid, beam, solid) -- an unsymmetric preconditioner
+    // breaks the Krylov theory CG rests on, which is how SGS failed here.
+    for (int i = 0; i < n; ++i)
+      if (!in_beam[static_cast<std::size_t>(i)]) z[static_cast<std::size_t>(i)] = 0.0;
+    sweep_block(false, rs, z);
   }
 };
 
@@ -716,6 +995,106 @@ CoupledLatticeSolve solve_coupled_lattice(
     return (static_cast<std::size_t>(k) * NY + j) * NX + i;
   };
 
+  // ── ★ DROP THE SOLID ISLANDS THAT HANG ON A CORNER ───────────────────────
+  // Two voxels meeting at an EDGE or a CORNER share a line or a point. They are
+  // "connected" to any test that unions shared nodes, and they are a HINGE in the
+  // physics: free to rotate about that contact at zero energy. A voxelised part
+  // grows them wherever a surface steps diagonally.
+  //
+  // MEASURED on the real M2 part: 48,439 hex elements form ONE component by
+  // shared-node connectivity and THIRTY-ONE by face connectivity -- one real body
+  // at 97.08% that reaches the supports, and 30 specks totalling 2.92% that reach
+  // no support at all, the largest 322 elements.
+  //
+  // Those specks were the null space. Every preconditioner -- Jacobi,
+  // block-diagonal, block+Schur -- drove the residual to the same floor
+  // (~0.15-0.2) and then diverged, and 86% of the leftover residual sat in the
+  // SOLID, not the lattice. It is also why the physically WRONG model converged:
+  // meshing the whole region as solid filled the diagonal gaps and welded the
+  // hinges shut by accident.
+  //
+  // They carry no load, so they are dropped and counted, exactly as the caller
+  // drops load-free beam members. Dropping a LOT of the part is a different
+  // matter -- that means the mesh is genuinely hinged rather than speckled -- so
+  // past kIslandRefuseFraction this refuses instead of quietly deleting material.
+  constexpr double kIslandRefuseFraction = 0.05;
+  std::vector<char> hex_use(hex_mask.begin(), hex_mask.end());
+  {
+    std::vector<int> comp(grid.voxel_count(), -1);
+    std::vector<std::size_t> stack, members;
+    std::vector<std::size_t> comp_size;
+    int nc = 0;
+    for (std::size_t seed = 0; seed < grid.voxel_count(); ++seed) {
+      if (!hex_use[seed] || comp[seed] >= 0) continue;
+      const int c = nc++;
+      std::size_t count = 0;
+      stack.assign(1, seed);
+      comp[seed] = c;
+      while (!stack.empty()) {
+        const std::size_t e = stack.back();
+        stack.pop_back();
+        ++count;
+        const int i = static_cast<int>(e % grid.nx);
+        const int j = static_cast<int>((e / grid.nx) % grid.ny);
+        const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * grid.ny));
+        const int step[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for (const auto& d : step) {
+          const int ni = i + d[0], nj = j + d[1], nk = k + d[2];
+          if (ni < 0 || nj < 0 || nk < 0 || ni >= grid.nx || nj >= grid.ny || nk >= grid.nz)
+            continue;
+          const std::size_t f = grid.index(ni, nj, nk);
+          if (!hex_use[f] || comp[f] >= 0) continue;
+          comp[f] = c;
+          stack.push_back(f);
+        }
+      }
+      comp_size.push_back(count);
+    }
+    // A component is real if a Dirichlet node sits on one of its elements.
+    std::vector<char> supported(static_cast<std::size_t>(nc), 0);
+    for (const DirichletBC& b : bcs) {
+      if (b.node < 0 ||
+          static_cast<std::size_t>(b.node) >= static_cast<std::size_t>(NX) * NY * (grid.nz + 1))
+        continue;
+      const std::size_t nidx = static_cast<std::size_t>(b.node);
+      const int i = static_cast<int>(nidx % NX);
+      const int j = static_cast<int>((nidx / NX) % NY);
+      const int k = static_cast<int>(nidx / (static_cast<std::size_t>(NX) * NY));
+      for (int dk = -1; dk <= 0; ++dk)
+        for (int dj = -1; dj <= 0; ++dj)
+          for (int di = -1; di <= 0; ++di) {
+            const int ci = i + di, cj = j + dj, ck = k + dk;
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= grid.nx || cj >= grid.ny || ck >= grid.nz)
+              continue;
+            const int c = comp[grid.index(ci, cj, ck)];
+            if (c >= 0) supported[static_cast<std::size_t>(c)] = 1;
+          }
+    }
+    std::size_t meshed = 0, dropped_elems = 0, dropped_comps = 0;
+    for (std::size_t e = 0; e < grid.voxel_count(); ++e) {
+      if (comp[e] < 0) continue;
+      ++meshed;
+      if (!supported[static_cast<std::size_t>(comp[e])]) { hex_use[e] = 0; ++dropped_elems; }
+    }
+    for (int c = 0; c < nc; ++c)
+      if (!supported[static_cast<std::size_t>(c)]) ++dropped_comps;
+    out.solid_islands_dropped = dropped_comps;
+    out.solid_islands_elements = dropped_elems;
+    out.solid_islands_fraction = meshed ? static_cast<double>(dropped_elems) / static_cast<double>(meshed) : 0.0;
+    if (out.solid_islands_fraction > kIslandRefuseFraction) {
+      out.refusal =
+          std::to_string(dropped_comps) + " solid piece(s) totalling " +
+          std::to_string(dropped_elems) + " element(s) (" +
+          std::to_string(100.0 * out.solid_islands_fraction) +
+          "% of the meshed solid) touch the rest of the part only at an edge or a "
+          "corner and reach no support: they are hinges, not structure, and no "
+          "preconditioner can solve past them. That is too much of the part to drop "
+          "silently -- repair the mesh or re-voxelise finer.";
+      return out;
+    }
+  }
+  mark("solid islands dropped", static_cast<double>(out.solid_islands_elements));
+
   // ── number the solid nodes a meshed voxel touches ────────────────────────
   std::vector<int> nid(static_cast<std::size_t>(NX) * NY * (grid.nz + 1), -1);
   std::vector<std::size_t> hex_cells;
@@ -723,7 +1102,7 @@ CoupledLatticeSolve solve_coupled_lattice(
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         const std::size_t e = grid.index(i, j, k);
-        if (!hex_mask[e]) continue;
+        if (!hex_use[e]) continue;
         hex_cells.push_back(e);
         for (int dk = 0; dk < 2; ++dk)
           for (int dj = 0; dj < 2; ++dj)
@@ -782,7 +1161,7 @@ CoupledLatticeSolve solve_coupled_lattice(
               const int ci = i + di, cj = j + dj, ck = k + dk;
               if (ci < 0 || cj < 0 || ck < 0 || ci >= grid.nx || cj >= grid.ny ||
                   ck >= grid.nz) continue;
-              if (!hex_mask[grid.index(ci, cj, ck)]) continue;
+              if (!hex_use[grid.index(ci, cj, ck)]) continue;
               const double cx = grid.origin.x + (ci + 0.5) * grid.spacing;
               const double cy = grid.origin.y + (cj + 0.5) * grid.spacing;
               const double cz = grid.origin.z + (ck + 0.5) * grid.spacing;
@@ -843,6 +1222,18 @@ CoupledLatticeSolve solve_coupled_lattice(
 
   // ── tie every beam node that lands in a meshed voxel ──────────────────────
   const std::size_t NB = net.node_count();
+  // ★ DIAGNOSTIC: TOPOPT_BEAM_SKIN_PINNED=1 slaves only the TRANSLATIONS of a beam
+  // node welded to the skin, leaving its rotations free -- the same joint a
+  // beam-to-HEX tie makes, because a solid element has no rotational dof to tie to.
+  // It exists to separate two explanations of the same number: with the skin meshed
+  // as hex the lattice is held at 6,738 PINNED points and peak strut stress is
+  // 3.40 MPa; with the skin meshed as plates it is held at 7,115 RIGID welds and
+  // reads 0.125 MPa. Nearly the same attachment count, so if joint type is the whole
+  // difference this flag closes it.
+  const bool skin_pinned = [] {
+    const char* v = std::getenv("TOPOPT_BEAM_SKIN_PINNED");
+    return v && std::string(v) == "1";
+  }();
   std::vector<char> tied(NB, 0), welded(NB, 0);
   std::vector<int> weld_to(NB, -1);
   // ── ★ WELD TO THE SKIN FIRST. The lattice attaches at the grade-to-solid
@@ -858,10 +1249,39 @@ CoupledLatticeSolve solve_coupled_lattice(
         reach = std::max(reach, std::sqrt(dx*dx+dy*dy+dz*dz));
       }
     reach *= 0.75;
+    // ★ A WELD MEANS THE STRUT REACHES THE PLATE, AND DISTANCE TO THE NEAREST SKIN
+    // NODE DOES NOT MEASURE THAT. `reach` is a LATERAL mesh-spacing number -- 0.75 of
+    // the longest triangle edge -- and using it as a NORMAL-offset test welds
+    // anything within a mesh cell of the surface in ANY direction.
+    //
+    // My first guess was that one stretched triangle had inflated it. MEASURED, that
+    // is false: the skin mesh is clean (median edge 5.95 mm, max 8.36 mm, so
+    // reach = 6.27 mm). The real cause is geometric -- each lattice region is only
+    // 12-13 mm deep, which puts its two skin patches ~10-11 mm apart, so EVERY strut
+    // node between them is inside 6.27 mm of one of them. 22,122 of 22,252 beam
+    // nodes -- 99.4%, the entire lattice -- were rigidly welded (all six dof) to two
+    // plates they never touch, gluing the lattice into a stiff sandwich: peak strut
+    // stress 0.2556 MPa against 3.397 MPa for the SAME geometry with the skin meshed
+    // as hex, a factor of 13.
+    //
+    // The skin is a band `thickness` deep centred on the mid-surface, so a strut that
+    // ends in it lies within about half a thickness of the plane. Gate on distance to
+    // the patch PLANE (one thickness, generous), and keep the lateral radius for what
+    // it is actually good for: choosing WHICH node to attach to, and rejecting a node
+    // that is beside the patch rather than on it.
+    mark("shell weld radius mm", reach);
     for (std::size_t b = 0; b < NB; ++b) {
       double best = reach; int hit = -1;
       for (std::size_t pidx = 0; pidx < shells->size(); ++pidx) {
         const ShellMesh& sm2 = (*shells)[pidx].mesh;
+        if (sm2.nodes.empty()) continue;
+        const double th = (*shells)[pidx].thickness_mm > 0.0
+                              ? (*shells)[pidx].thickness_mm : sm2.thickness_mm;
+        const Vec3& o2 = sm2.nodes[0];
+        const double plane_d = std::fabs((net.nodes[b].x - o2.x) * sm2.normal.x +
+                                         (net.nodes[b].y - o2.y) * sm2.normal.y +
+                                         (net.nodes[b].z - o2.z) * sm2.normal.z);
+        if (th > 0.0 && plane_d > th) continue;   // not in the skin band
         for (std::size_t n = 0; n < sm2.nodes.size(); ++n) {
           const double dx = net.nodes[b].x - sm2.nodes[n].x;
           const double dy = net.nodes[b].y - sm2.nodes[n].y;
@@ -899,7 +1319,7 @@ CoupledLatticeSolve solve_coupled_lattice(
             if (ci < 0 || cj < 0 || ck < 0 || ci >= grid.nx || cj >= grid.ny ||
                 ck >= grid.nz)
               continue;
-            if (!hex_mask[grid.index(ci, cj, ck)]) continue;
+            if (!hex_use[grid.index(ci, cj, ck)]) continue;
             const double cx = grid.origin.x + (ci + 0.5) * grid.spacing;
             const double cy = grid.origin.y + (cj + 0.5) * grid.spacing;
             const double cz = grid.origin.z + (ck + 0.5) * grid.spacing;
@@ -950,7 +1370,7 @@ CoupledLatticeSolve solve_coupled_lattice(
 
   mark("beam-to-solid ties", static_cast<double>(out.beam_nodes_tied));
   // ── ★ RESTRAINT BEFORE FACTORISATION, not after it fails ─────────────────
-  out.restraint = beam_network_restraint(net, tied, &welded);
+  out.restraint = beam_network_restraint(net, tied, skin_pinned ? nullptr : &welded);
   if (out.restraint.components_unrestrained > 0) {
     out.refusal =
         std::to_string(out.restraint.components_unrestrained) + " of " +
@@ -983,11 +1403,30 @@ CoupledLatticeSolve solve_coupled_lattice(
   // bodies that make the system singular however perfectly the lattice is tied. The
   // STL is one body only after the lattice is added; the solid alone need not be.
   {
+    // ★ FACE ADJACENCY, NOT SHARED NODES. Two voxels meeting at an EDGE or a CORNER
+    // share a line or a point: they are "connected" to a union-find over shared
+    // nodes, and they are a HINGE in the physics -- free to rotate about that
+    // contact at zero energy. MEASURED on the real part: 48,439 hex elements form
+    // ONE component by shared-node connectivity and THIRTY-ONE by face
+    // connectivity, so 30 pieces hang on a corner or an edge.
+    //
+    // That is the whole reason this solve never worked. Every preconditioner --
+    // Jacobi, block-diagonal, block+Schur -- drove the residual to the same floor
+    // (~0.15-0.2) and then diverged, because they were all resolving the same
+    // solvable part and stalling on the same null space; 86% of the leftover
+    // residual sat in the SOLID, not the lattice. It also explains why the
+    // physically WRONG model converged: meshing the whole region as solid filled
+    // the diagonal gaps and welded the hinges shut by accident.
+    //
+    // Connectivity is not restraint. This file already learned that for beam ties
+    // and for untied components; the solid check was still asking "is there a
+    // path" instead of "can it resist rotation".
     DisjointSet sc(static_cast<std::size_t>(NS));
     for (std::size_t e : hex_cells) {
       const int i = static_cast<int>(e % grid.nx);
       const int j = static_cast<int>((e / grid.nx) % grid.ny);
       const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * grid.ny));
+      // unite this element's own eight nodes (it is a rigid block on its own)
       int first = -1;
       for (int dk = 0; dk < 2; ++dk)
         for (int dj = 0; dj < 2; ++dj)
@@ -996,6 +1435,23 @@ CoupledLatticeSolve solve_coupled_lattice(
             if (first < 0) first = id; else sc.unite(first, id);
           }
     }
+    // and only join NEIGHBOURING elements that share a FACE
+    std::size_t face_joins = 0;
+    for (std::size_t e : hex_cells) {
+      const int i = static_cast<int>(e % grid.nx);
+      const int j = static_cast<int>((e / grid.nx) % grid.ny);
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * grid.ny));
+      const int step[3][3] = {{1,0,0},{0,1,0},{0,0,1}};
+      for (const auto& d : step) {
+        const int ni = i + d[0], nj = j + d[1], nk = k + d[2];
+        if (ni >= grid.nx || nj >= grid.ny || nk >= grid.nz) continue;
+        if (!hex_use[grid.index(ni, nj, nk)]) continue;
+        const int a = nid[node_index(i + d[0], j + d[1], k + d[2])];
+        const int b2 = nid[node_index(i, j, k)];
+        if (a >= 0 && b2 >= 0) { sc.unite(a, b2); ++face_joins; }
+      }
+    }
+    (void)face_joins;
     std::set<int> grounded;
     for (const DirichletBC& b : bcs) {
       if (b.node < 0 || static_cast<std::size_t>(b.node) >= nid.size()) continue;
@@ -1020,11 +1476,21 @@ CoupledLatticeSolve solve_coupled_lattice(
   const int SHB = SB + 6 * NSH;          // shell dof slots (tied ones are slaved)
   std::vector<int> beam_dof(6 * NB, -1);
   int M = SHB;
+  // block membership: everything below SHB is solid or shell; the beam dof follow.
+  // Tracked here rather than inferred later, because the RCM permutation and the
+  // free-dof compaction both renumber and the block split has to survive them.
+  std::vector<char> dof_is_beam;
   for (std::size_t b = 0; b < NB; ++b)
     for (int c = 0; c < 6; ++c) {
-      if (welded[b]) continue;                 // ALL SIX slaved onto a shell node
+      if (welded[b] && (!skin_pinned || c < 3)) continue;  // slaved onto a shell node
       if (c < 3 && tied[b]) continue;          // translations slaved onto a hex
       beam_dof[6 * b + static_cast<std::size_t>(c)] = M++;
+    }
+  dof_is_beam.assign(static_cast<std::size_t>(M), 0);
+  for (std::size_t b = 0; b < NB; ++b)
+    for (int c = 0; c < 6; ++c) {
+      const int d = beam_dof[6 * b + static_cast<std::size_t>(c)];
+      if (d >= 0) dof_is_beam[static_cast<std::size_t>(d)] = 1;
     }
 
   // A beam or shell local DOF maps to either one master or (tied translation) eight.
@@ -1048,7 +1514,8 @@ CoupledLatticeSolve solve_coupled_lattice(
   };
   auto map_of = [&](std::size_t b, int c) {
     Map m;
-    if (welded[b]) return shell_map(weld_to[b], c);  // through the skin's own tie
+    if (welded[b] && (!skin_pinned || c < 3))
+      return shell_map(weld_to[b], c);              // through the skin's own tie
     if (c < 3 && tied[b]) {
       for (int a = 0; a < 8; ++a) {
         m.dof[static_cast<std::size_t>(a)] =
@@ -1113,20 +1580,44 @@ CoupledLatticeSolve solve_coupled_lattice(
                                                  : sp2.mesh.thickness_mm;
       if (!(th > 0.0)) { out.refusal = "shell patch has no thickness"; return out; }
       const int base = shell_base[pidx];
-      // the patch's own frame: local (u, w) in-plane, normal out of plane
-      const Vec3& eu = sp2.mesh.basis_u;
-      const Vec3& ew = sp2.mesh.basis_w;
-      const Vec3& en = sp2.mesh.normal;
-      const double R[9] = {eu.x, eu.y, eu.z, ew.x, ew.y, ew.z, en.x, en.y, en.z};
+      // ★ EACH TRIANGLE IN ITS OWN FRAME, NOT THE PATCH'S. A flat-FACET shell is
+      // defined that way -- every facet is planar even when the surface is not --
+      // and taking the frame from the patch silently required the whole patch to lie
+      // in one plane. That is why the skin could only ever be modelled as flat
+      // sheets across the lattice region's faces, which is not where the skin is:
+      // the real grade-to-solid is a ribbon around the region's SIDES plus a partial
+      // sheet at its far face, and no single plane holds that.
+      //
+      // For an isotropic material the assembled GLOBAL stiffness does not depend on
+      // which in-plane basis the element was built in, so on a flat patch this is
+      // the same matrix as before -- it only stops constraining what a patch may be.
+      std::size_t ti = 0;
       for (const ShellMesh::Tri& tri : sp2.mesh.triangles) {
         const int n3[3] = {tri.a, tri.b, tri.c};
-        double lx[3], ly[3];
-        for (int a = 0; a < 3; ++a) {
-          lx[a] = sp2.mesh.local_u[static_cast<std::size_t>(n3[a])];
-          ly[a] = sp2.mesh.local_w[static_cast<std::size_t>(n3[a])];
-        }
-        const ShellStiffness Ke = shell3_stiffness(lx, ly, youngs_modulus, poisson, th);
-        // rotate the 18x18 from the patch frame to global: block-diagonal in R,
+        const Vec3& A3 = sp2.mesh.nodes[static_cast<std::size_t>(tri.a)];
+        const Vec3& B3 = sp2.mesh.nodes[static_cast<std::size_t>(tri.b)];
+        const Vec3& C3 = sp2.mesh.nodes[static_cast<std::size_t>(tri.c)];
+        const Vec3 ab{B3.x - A3.x, B3.y - A3.y, B3.z - A3.z};
+        const Vec3 ac{C3.x - A3.x, C3.y - A3.y, C3.z - A3.z};
+        const double abl = std::sqrt(ab.x*ab.x + ab.y*ab.y + ab.z*ab.z);
+        Vec3 nn{ab.y*ac.z - ab.z*ac.y, ab.z*ac.x - ab.x*ac.z, ab.x*ac.y - ab.y*ac.x};
+        const double nl2 = std::sqrt(nn.x*nn.x + nn.y*nn.y + nn.z*nn.z);
+        if (!(abl > 0.0) || !(nl2 > 0.0)) { ++ti; continue; }   // degenerate facet
+        const Vec3 eu{ab.x/abl, ab.y/abl, ab.z/abl};
+        const Vec3 en{nn.x/nl2, nn.y/nl2, nn.z/nl2};
+        const Vec3 ew{en.y*eu.z - en.z*eu.y, en.z*eu.x - en.x*eu.z, en.x*eu.y - en.y*eu.x};
+        const double R[9] = {eu.x, eu.y, eu.z, ew.x, ew.y, ew.z, en.x, en.y, en.z};
+        const double lx[3] = {0.0, abl, ac.x*eu.x + ac.y*eu.y + ac.z*eu.z};
+        const double ly[3] = {0.0, 0.0, ac.x*ew.x + ac.y*ew.y + ac.z*ew.z};
+        // ★ PER-FACET THICKNESS when the mesh carries one. A skin derived from
+        // voxels is one or two cells deep depending on where you stand, and calling
+        // all of it one thickness would put material where there is none.
+        const double tht = (ti < sp2.mesh.tri_thickness.size() &&
+                            sp2.mesh.tri_thickness[ti] > 0.0)
+                               ? sp2.mesh.tri_thickness[ti] : th;
+        ++ti;
+        const ShellStiffness Ke = shell3_stiffness(lx, ly, youngs_modulus, poisson, tht);
+        // rotate the 18x18 from the facet frame to global: block-diagonal in R,
         // one 3x3 block per (translation, rotation) triple per node
         double T[18][18] = {};
         for (int blk = 0; blk < 6; ++blk)
@@ -1221,19 +1712,41 @@ CoupledLatticeSolve solve_coupled_lattice(
   std::vector<char> fixed(static_cast<std::size_t>(M), 0);
   std::vector<double> F(static_cast<std::size_t>(M), 0.0);
   std::size_t nbc = 0, nld = 0;
+  double load_all = 0.0, load_lost = 0.0;
   for (const DirichletBC& b : bcs) {
-    if (b.node < 0 || static_cast<std::size_t>(b.node) >= nid.size()) continue;
+    const bool ok = b.node >= 0 && static_cast<std::size_t>(b.node) < nid.size() &&
+                    nid[static_cast<std::size_t>(b.node)] >= 0;
+    if (!ok) { ++out.bcs_dropped; continue; }
     const int n = nid[static_cast<std::size_t>(b.node)];
-    if (n < 0) continue;
     fixed[static_cast<std::size_t>(3 * n + b.component)] = 1;
     ++nbc;
   }
   for (const NodalLoad& l : loads) {
-    if (l.node < 0 || static_cast<std::size_t>(l.node) >= nid.size()) continue;
+    load_all += std::fabs(l.value);
+    const bool ok = l.node >= 0 && static_cast<std::size_t>(l.node) < nid.size() &&
+                    nid[static_cast<std::size_t>(l.node)] >= 0;
+    if (!ok) { ++out.loads_dropped; load_lost += std::fabs(l.value); continue; }
     const int n = nid[static_cast<std::size_t>(l.node)];
-    if (n < 0) continue;
     F[static_cast<std::size_t>(3 * n + l.component)] += l.value;
     ++nld;
+  }
+  out.bcs_applied = nbc;
+  out.loads_applied = nld;
+  out.load_dropped_fraction = load_all > 0.0 ? load_lost / load_all : 0.0;
+  // ★ REFUSE A MODEL THAT LOST ITS LOAD. Solving the part with a share of the force
+  // missing gives a stiffer, quieter answer that converges beautifully and means
+  // nothing -- the failure is invisible precisely because everything else looks
+  // healthy. Loads land on SOLID nodes only; a load applied where the mesh now
+  // carries plates or beams instead has to be moved there, not dropped.
+  constexpr double kLoadDropRefuseFraction = 0.05;
+  if (out.load_dropped_fraction > kLoadDropRefuseFraction) {
+    out.refusal = std::to_string(out.loads_dropped) + " of " +
+                  std::to_string(loads.size()) + " load(s), carrying " +
+                  std::to_string(100.0 * out.load_dropped_fraction) +
+                  "% of the applied force, land on nodes that are not part of the "
+                  "meshed solid, so the part would be solved with that force absent. "
+                  "Apply them to whatever now occupies those voxels.";
+    return out;
   }
   if (nbc == 0) { out.refusal = "no support landed on the solid mesh"; return out; }
   if (nld == 0) { out.refusal = "no load landed on the solid mesh"; return out; }
@@ -1255,6 +1768,80 @@ CoupledLatticeSolve solve_coupled_lattice(
           dg[static_cast<std::size_t>(i)] += Afull.val[static_cast<std::size_t>(k)];
     for (int i = 0; i < M; ++i)
       if (!(dg[static_cast<std::size_t>(i)] > 0.0)) fixed[static_cast<std::size_t>(i)] = 1;
+  }
+  // ── ★ CONSTRAIN THE SUB-ASSEMBLIES THAT REACH NO SUPPORT ─────────────────
+  // A part of the assembled system that touches no support is a free body. The
+  // matrix stays positive SEMI-definite, so nothing diverges and the indefiniteness
+  // test passes -- CG just stagnates forever on a load component in the null space.
+  // This used to REFUSE. Refusing is right when the floating part is a real chunk of
+  // the model, and wrong when it is the handful of specks every real geometry grows:
+  // meshing the skin from the cells the generator flagged produces 72 connected
+  // pieces, and a few small ones sit out in the sparse interior touching neither the
+  // kept solid nor a load-bearing strut.
+  //
+  // They carry no load, exactly like the corner-hinged solid islands and the
+  // load-free beam members, so constrain them to zero and COUNT them. Past
+  // kFloatRefuseFraction that is no longer a speck and it refuses instead, because
+  // silently pinning a real piece of the part would report a stiffness for a
+  // structure that was never solved.
+  constexpr double kFloatRefuseFraction = 0.05;
+  {
+    std::vector<int> par(static_cast<std::size_t>(M));
+    for (int i = 0; i < M; ++i) par[static_cast<std::size_t>(i)] = i;
+    std::function<int(int)> findp = [&](int x) {
+      while (par[static_cast<std::size_t>(x)] != x) {
+        par[static_cast<std::size_t>(x)] =
+            par[static_cast<std::size_t>(par[static_cast<std::size_t>(x)])];
+        x = par[static_cast<std::size_t>(x)];
+      }
+      return x;
+    };
+    for (int i = 0; i < M; ++i) {
+      if (fixed[static_cast<std::size_t>(i)]) continue;
+      for (int k = Afull.ptr[static_cast<std::size_t>(i)];
+           k < Afull.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = Afull.idx[static_cast<std::size_t>(k)];
+        if (fixed[static_cast<std::size_t>(j)]) continue;
+        const int a = findp(i), b2 = findp(j);
+        if (a != b2) par[static_cast<std::size_t>(std::max(a, b2))] = std::min(a, b2);
+      }
+    }
+    std::set<int> supported;
+    for (int i = 0; i < M; ++i) {
+      if (!fixed[static_cast<std::size_t>(i)]) continue;
+      for (int k = Afull.ptr[static_cast<std::size_t>(i)];
+           k < Afull.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = Afull.idx[static_cast<std::size_t>(k)];
+        if (!fixed[static_cast<std::size_t>(j)]) supported.insert(findp(j));
+      }
+    }
+    std::size_t free_before = 0, floating = 0;
+    for (int i = 0; i < M; ++i) if (!fixed[static_cast<std::size_t>(i)]) ++free_before;
+    std::set<int> float_roots;
+    for (int i = 0; i < M; ++i) {
+      if (fixed[static_cast<std::size_t>(i)]) continue;
+      const int r = findp(i);
+      if (supported.count(r)) continue;
+      float_roots.insert(r);
+      ++floating;
+    }
+    out.floating_dof = floating;
+    const double frac = free_before ? static_cast<double>(floating) /
+                                      static_cast<double>(free_before) : 0.0;
+    if (frac > kFloatRefuseFraction) {
+      out.refusal = std::to_string(floating) + " of " + std::to_string(free_before) +
+                    " free dof (" + std::to_string(100.0 * frac) + "%) lie in " +
+                    std::to_string(float_roots.size()) +
+                    " sub-assembl(ies) that reach NO support: they are free bodies, "
+                    "and that is too much of the model to pin silently. Tie them, or "
+                    "leave them out of the mesh.";
+      return out;
+    }
+    if (floating > 0)
+      for (int i = 0; i < M; ++i)
+        if (!fixed[static_cast<std::size_t>(i)] && !supported.count(findp(i)))
+          fixed[static_cast<std::size_t>(i)] = 1;
+    mark("unsupported sub-assemblies pinned", static_cast<double>(floating));
   }
   std::vector<int> to_free(static_cast<std::size_t>(M), -1);
   std::vector<int> from_free;
@@ -1356,8 +1943,11 @@ CoupledLatticeSolve solve_coupled_lattice(
     std::size_t floating_dof = 0, floating_comps = 0;
     for (const auto& kv : comp_size)
       if (!supported.count(kv.first)) { floating_dof += static_cast<std::size_t>(kv.second); ++floating_comps; }
-    out.floating_dof = floating_dof;
+    // ★ A GUARD NOW, NOT THE ACTION. The pass above pins unsupported sub-assemblies
+    // before compaction, so this should always find zero; if it ever does not, the
+    // pinning logic is wrong and the solve must not proceed on a null space.
     if (floating_dof > 0) {
+      out.floating_dof = floating_dof;
       out.refusal = std::to_string(floating_dof) + " of " + std::to_string(NF) +
                     " free dof lie in " + std::to_string(floating_comps) +
                     " sub-assembl(ies) that reach NO support. The matrix stays "
@@ -1369,6 +1959,10 @@ CoupledLatticeSolve solve_coupled_lattice(
   mark("assembly connectivity", static_cast<double>(NF));
   mark("symmetry check", out.matrix_asymmetry);
   mark("free-free submatrix", static_cast<double>(Af.nnz()));
+  std::vector<char> free_is_beam(static_cast<std::size_t>(NF), 0);
+  for (int i = 0; i < NF; ++i)
+    free_is_beam[static_cast<std::size_t>(i)] =
+        dof_is_beam[static_cast<std::size_t>(from_free[static_cast<std::size_t>(i)])];
   const std::vector<int> perm = rcm_order(Af);
   std::vector<int> inv(static_cast<std::size_t>(NF), 0);
   for (int i = 0; i < NF; ++i) inv[static_cast<std::size_t>(perm[static_cast<std::size_t>(i)])] = i;
@@ -1381,10 +1975,179 @@ CoupledLatticeSolve solve_coupled_lattice(
              Af.val[static_cast<std::size_t>(k)]);
   Csr A = compress(Sp, NF);
 
+  std::vector<char> perm_is_beam(static_cast<std::size_t>(NF), 0);
+  for (int i = 0; i < NF; ++i)
+    perm_is_beam[static_cast<std::size_t>(inv[static_cast<std::size_t>(i)])] =
+        free_is_beam[static_cast<std::size_t>(i)];
   std::vector<double> Fp(static_cast<std::size_t>(NF), 0.0);
   for (int i = 0; i < NF; ++i)
     Fp[static_cast<std::size_t>(inv[static_cast<std::size_t>(i)])] =
         F[static_cast<std::size_t>(from_free[static_cast<std::size_t>(i)])];
+
+  // ── ★ THE FAST PATH: A DIRECT SPARSE CHOLESKY ────────────────────────────
+  // With the corner-hinged islands gone the free-free matrix is genuinely SPD, and
+  // once a matrix is SPD the honest question is not "which preconditioner" but "why
+  // iterate at all". This system is ~300k dof with ~10.6M non-zeros; Accelerate's
+  // supernodal Cholesky factors that once and back-substitutes, giving the EXACT
+  // answer with no tolerance, no iteration count and no convergence to argue about.
+  //
+  // It is also the only method whose cost does not depend on conditioning -- which
+  // is the whole trouble with this system: it mixes hex (stiffness ~ E*h), beam
+  // bending (~ E*I/L^3) and shell terms whose magnitudes differ by orders, and every
+  // iterative scheme pays for that spread on every iteration.
+  //
+  // The symbolic stage predicts the factor size before any memory is committed, so a
+  // part whose fill-in would not fit falls back to CG rather than being killed by
+  // the OOM reaper.
+  bool direct_ok = false;
+  const char* direct_which = "Cholesky";
+  std::vector<double> u_direct;
+  double direct_rn = 0.0, direct_factor_gb = 0.0;
+  const char* pc_env = std::getenv("TOPOPT_BEAM_PRECON");
+  const std::string pc_sel = pc_env ? std::string(pc_env) : std::string("direct");
+#if defined(TOPOPT_HAVE_ACCELERATE)
+  if (pc_sel == "direct" || pc_sel == "cholesky") {
+    // lower triangle in coordinate form; Accelerate sums duplicates itself
+    std::vector<int> ri, ci;
+    std::vector<double> va;
+    ri.reserve(static_cast<std::size_t>(A.nnz() / 2 + NF));
+    ci.reserve(ri.capacity());
+    va.reserve(ri.capacity());
+    for (int i = 0; i < NF; ++i)
+      for (int k = A.ptr[static_cast<std::size_t>(i)];
+           k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = A.idx[static_cast<std::size_t>(k)];
+        if (j > i) continue;                       // keep the lower triangle only
+        ri.push_back(i);
+        ci.push_back(j);
+        va.push_back(A.val[static_cast<std::size_t>(k)]);
+      }
+    // ★ WHAT DOES THE DIAGONAL LOOK LIKE? A Cholesky that aborts with
+    // SparseFactorizationFailed hit a non-positive pivot; the diagonal is the first
+    // place to look, and its spread is also the conditioning number that matters.
+    {
+      double dmin = 0.0, dmax = 0.0;
+      int nonpos = 0;
+      bool first = true;
+      for (int i = 0; i < NF; ++i)
+        for (int k = A.ptr[static_cast<std::size_t>(i)];
+             k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+          if (A.idx[static_cast<std::size_t>(k)] == i) {
+            const double d = A.val[static_cast<std::size_t>(k)];
+            if (d <= 0.0) ++nonpos;
+            if (first) { dmin = dmax = d; first = false; }
+            dmin = std::min(dmin, d);
+            dmax = std::max(dmax, d);
+          }
+      mark("diagonal min", dmin);
+      mark("diagonal max", dmax);
+      mark("non-positive diagonals", static_cast<double>(nonpos));
+    }
+    SparseAttributes_t attr{};
+    attr.kind = SparseSymmetric;
+    attr.triangle = SparseLowerTriangle;
+    SparseMatrix_Double Amat = SparseConvertFromCoordinate(
+        NF, NF, static_cast<long>(va.size()), 1, attr, ri.data(), ci.data(), va.data());
+    SparseSymbolicFactorOptions sopt{};
+    sopt.control = SparseDefaultControl;
+    sopt.orderMethod = SparseOrderAMD;   // fill-reducing; the RCM order above is for CG
+    sopt.order = nullptr;
+    sopt.ignoreRowsAndColumns = nullptr;
+    sopt.malloc = malloc;
+    sopt.free = free;
+    sopt.reportError = nullptr;
+    // ★ LDLT BY DEFAULT, AND THAT IS A MEASUREMENT. Cholesky is the cheaper
+    // factorisation and the obvious first choice for a stiffness matrix, but it
+    // needs STRICT positive definiteness and it refused on every real model
+    // measured -- SparseFactorizationFailed, a non-positive pivot, on c6 (303k dof),
+    // c3 (569k) and c3_r192 (1.05M) alike, while the diagonal itself is entirely
+    // positive (min 79, max 15385 on c6) and CG still descends. The system is
+    // marginally definite, not indefinite: rounding at a pivot, not a mechanism.
+    // Trying it first therefore buys nothing and costs the whole failed elimination
+    // -- 0.45 s at 303k dof, 42.32 s at 1.05M. LDLT needs only symmetry, is exact,
+    // and the residual gate below is what actually decides the answer is kept.
+    // TOPOPT_BEAM_PRECON=cholesky to try the other one and re-measure.
+    const bool try_cholesky = (pc_env && std::string(pc_env) == "cholesky");
+    SparseFactorization_t ftype =
+        try_cholesky ? SparseFactorizationCholesky : SparseFactorizationLDLT;
+    SparseOpaqueSymbolicFactorization sym = SparseFactor(ftype, Amat.structure, sopt);
+    if (sym.status != SparseStatusOK)
+      mark("symbolic factorization FAILED", static_cast<double>(sym.status));
+    if (sym.status == SparseStatusOK) {
+      direct_factor_gb = static_cast<double>(sym.factorSize_Double) / (1024.0 * 1024.0 * 1024.0);
+      mark("symbolic factorization", direct_factor_gb);
+      constexpr double kMaxFactorGb = 24.0;
+      if (direct_factor_gb > kMaxFactorGb)
+        mark("factor too large, falling back to CG", direct_factor_gb);
+      if (direct_factor_gb <= kMaxFactorGb) {
+        SparseNumericFactorOptions nopt{};
+        nopt.control = SparseDefaultControl;
+        nopt.scalingMethod = SparseScalingDefault;
+        nopt.scaling = nullptr;
+        nopt.pivotTolerance = 0.0;
+        nopt.zeroTolerance = 0.0;
+        SparseOpaqueFactorization_Double fac = SparseFactor(sym, Amat, nopt);
+        const char* which = try_cholesky ? "Cholesky" : "LDLT";
+        // ★ LDLT WHEN CHOLESKY REFUSES. Cholesky needs strict positive
+        // definiteness; LDLT only needs symmetry, and it is just as exact and
+        // essentially as fast. On the real part Cholesky aborts with a non-positive
+        // pivot (SparseFactorizationFailed, 0.45 s in) while conjugate gradients
+        // still descends, so the matrix is at worst marginally definite -- a
+        // rounding-level pivot, not a mechanism. LDLT pivots through that instead of
+        // giving up, and the residual measured below is what decides whether the
+        // answer is kept, so nothing rests on which factorisation ran.
+        if (fac.status != SparseStatusOK && try_cholesky) {
+          mark("numeric Cholesky refused, trying LDLT", static_cast<double>(fac.status));
+          SparseCleanup(fac);
+          SparseCleanup(sym);
+          sym = SparseFactor(SparseFactorizationLDLT, Amat.structure, sopt);
+          fac = SparseFactor(sym, Amat, nopt);
+          which = "LDLT";
+          if (fac.status != SparseStatusOK)
+            mark("numeric LDLT FAILED", static_cast<double>(fac.status));
+        }
+        if (fac.status == SparseStatusOK) {
+          mark("numeric factorization", direct_factor_gb);
+          u_direct = Fp;
+          DenseVector_Double xb{NF, u_direct.data()};
+          SparseSolve(fac, xb);
+          // ★ MEASURE THE ANSWER, DO NOT TRUST IT. A direct solve reports no
+          // residual of its own, so compute ||b - Ax|| / ||b|| here; a factorisation
+          // that silently lost accuracy must not pass as an exact answer.
+          double bn = 0.0, rr = 0.0;
+          for (int i = 0; i < NF; ++i) {
+            double ax = 0.0;
+            for (int k = A.ptr[static_cast<std::size_t>(i)];
+                 k < A.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+              ax += A.val[static_cast<std::size_t>(k)] *
+                    u_direct[static_cast<std::size_t>(A.idx[static_cast<std::size_t>(k)])];
+            const double b = Fp[static_cast<std::size_t>(i)];
+            bn += b * b;
+            rr += (b - ax) * (b - ax);
+          }
+          direct_rn = bn > 0.0 ? std::sqrt(rr) / std::sqrt(bn) : 0.0;
+          // ★ A DIRECT SOLVE REPORTS NO RESIDUAL OF ITS OWN, SO GATE ON THE MEASURED
+          // ONE. Accepting the answer because the factorisation returned OK is how a
+          // wrong displacement field passes as exact. If it is not small, fall
+          // through to CG rather than ship it.
+          direct_ok = direct_rn < 1e-6;
+          direct_which = which;
+          mark(direct_ok ? "direct solve accepted" : "direct solve REJECTED (residual)",
+               direct_rn);
+        }
+        SparseCleanup(fac);
+      }
+      SparseCleanup(sym);
+    }
+    SparseCleanup(Amat);
+    if (direct_ok) {
+      out.preconditioner = std::string("direct sparse ") + direct_which +
+                           " (Accelerate, AMD, factor " +
+                           std::to_string(direct_factor_gb) + " GB)";
+      mark("direct solve", direct_rn);
+    }
+  }
+#endif
 
   std::vector<double> diag(static_cast<std::size_t>(NF), 1.0);
   for (int i = 0; i < NF; ++i)
@@ -1409,15 +2172,26 @@ CoupledLatticeSolve solve_coupled_lattice(
   // a well-conditioned system and wrong, or inapplicable, on this one, and the cause
   // is not yet known. Shipping it as the default would have replaced a slow solve
   // with a broken one. TOPOPT_BEAM_PRECON=sgs to experiment.
-  const char* pc = std::getenv("TOPOPT_BEAM_PRECON");
-  const bool want_sgs = (pc && std::string(pc) == "sgs");
+  const std::string pcname = pc_sel;
+  const bool want_sgs = !direct_ok && (pcname == "sgs");
+  const bool want_block = !direct_ok && (pcname == "block");
   SymGaussSeidel sgs;
   if (want_sgs) sgs.build(A);
-  out.preconditioner = want_sgs ? "SGS" : "Jacobi";
+  BlockPrecon blk;
+  std::size_t n_beam_dof = 0;
+  if (want_block) {
+    for (char c2 : perm_is_beam) n_beam_dof += c2 ? 1u : 0u;
+    blk.build(A, perm_is_beam, 2);
+  }
+  if (!direct_ok)
+  out.preconditioner = want_block ? ("block (" + std::to_string(n_beam_dof) + " beam / " +
+                                     std::to_string(NF - static_cast<int>(n_beam_dof)) +
+                                     " solid dof)")
+                                  : (want_sgs ? "SGS" : "Jacobi");
 
   IncompleteCholesky ic;
   bool have_ic = false;
-  if (const char* want = std::getenv("TOPOPT_BEAM_IC")) {
+  if (const char* want = direct_ok ? nullptr : std::getenv("TOPOPT_BEAM_IC")) {
     if (std::string(want) == "1")
       for (double shift : {0.0, 1e-3, 1e-2, 1e-1, 1.0})
         if (ic.factor(A, shift)) { have_ic = true; out.ic_shift = shift; break; }
@@ -1430,6 +2204,7 @@ CoupledLatticeSolve solve_coupled_lattice(
       Ap(static_cast<std::size_t>(NF), 0.0);
   auto precondition = [&](const std::vector<double>& rr, std::vector<double>& zz) {
     if (have_ic) { ic.apply(rr, zz); return; }
+    if (want_block) { blk.apply(rr, zz); return; }
     if (want_sgs) { sgs.apply(rr, zz); return; }
     zz.assign(static_cast<std::size_t>(NF), 0.0);
     for (int i = 0; i < NF; ++i)
@@ -1447,8 +2222,14 @@ CoupledLatticeSolve solve_coupled_lattice(
   int it = 0;
   double rn = fnorm;
   bool aborted = false;
+  // ★ KEEP THE BEST ITERATE. On this system CG descends to a floor and then diverges
+  // -- the LAST iterate is noise, and attributing anything to it says nothing. The
+  // floor is where everything resolvable has been resolved and what remains is the
+  // part no solver can remove, so that is the iterate worth reporting from.
+  std::vector<double> u_best;
+  double rn_best = fnorm;
   const int every = (progress && progress->every > 0) ? progress->every : 100;
-  for (; it < cg_max_iterations && rn > cg_tolerance * fnorm; ++it) {
+  for (; !direct_ok && it < cg_max_iterations && rn > cg_tolerance * fnorm; ++it) {
     if (progress && progress->fn && (it % every) == 0) {
       if (!progress->fn(it, rn / fnorm, progress->user)) { aborted = true; break; }
     }
@@ -1490,15 +2271,88 @@ CoupledLatticeSolve solve_coupled_lattice(
     const double beta = rz2 / rz;
     rz = rz2;
     rn = std::sqrt(r2);
+    if (rn < rn_best) { rn_best = rn; u_best = u; }
     for (int i = 0; i < NF; ++i)
       p[static_cast<std::size_t>(i)] = z[static_cast<std::size_t>(i)] +
                                        beta * p[static_cast<std::size_t>(i)];
   }
+  // ★ ORDER MATTERS HERE, AND IT BIT ME. The direct solution and the best CG
+  // iterate are both in PERMUTED FREE-DOF order (length NF). The scatter below
+  // un-permutes and expands to full dof order (length M). Applying either restore
+  // AFTER the scatter writes an NF-length vector in permuted order into a slot that
+  // is read as M-length in original order: the block-extension test came out 94% low
+  // and still reported "converged", because the residual was measured on the vector
+  // that WAS correct. Restore first, scatter second.
+  if (!u_best.empty() && rn_best < rn) { u.swap(u_best); rn = rn_best; }
+  if (direct_ok) { u.swap(u_direct); rn = direct_rn * fnorm; }
+  const std::vector<double> u_free = u;   // permuted free order, for the locator
   std::vector<double> ufull(static_cast<std::size_t>(M), 0.0);
   for (int i = 0; i < NF; ++i)
     ufull[static_cast<std::size_t>(from_free[static_cast<std::size_t>(i)])] =
         u[static_cast<std::size_t>(inv[static_cast<std::size_t>(i)])];
   u = ufull;
+  // ── ★ WHERE IS THE MECHANISM? ─────────────────────────────────────────────
+  // Three preconditioners -- Jacobi, block-diagonal, and block+Schur -- all drove
+  // the residual to the SAME floor (~0.15-0.2) and then diverged. A better
+  // preconditioner reaching a lower floor would mean conditioning; the same floor
+  // every time means a NULL-SPACE component that no solver can remove.
+  //
+  // ★ ANSWERED: the null space was corner-hinged solid islands, found by counting
+  // FACE-connected components (31) against shared-node components (1). This locator
+  // pointed at the solid, but its family shares were computed on a MIS-INDEXED
+  // vector -- it multiplied the NF x NF matrix by the full-length displacement -- so
+  // it pointed the right way by luck, and the finding rests on the component count,
+  // not on this. Fixed to use the permuted free-dof vector; kept because "where does
+  // the residual live" is the right question to ask of any stalled solve.
+  {
+    // ★ u_free, NOT u. A is NF x NF in permuted order; u has already been expanded
+    // to M in original order. Multiplying by it read the wrong entries and made the
+    // attribution meaningless -- it is what produced the "solid 85.8%" figure that
+    // sent me looking at the hex mesh. The corner-hinge finding was confirmed
+    // independently by counting face-connected components, not by this number.
+    std::vector<double> rf(static_cast<std::size_t>(NF), 0.0);
+    A.multiply(u_free, rf);
+    for (int i = 0; i < NF; ++i)
+      rf[static_cast<std::size_t>(i)] = Fp[static_cast<std::size_t>(i)] -
+                                        rf[static_cast<std::size_t>(i)];
+    // undo the RCM permutation, then attribute each dof back to its element family
+    double solid_sq = 0.0, shell_sq = 0.0, beam_sq = 0.0, total_sq = 0.0;
+    double worst = 0.0; int worst_dof = -1;
+    for (int i = 0; i < NF; ++i) {
+      const int orig = from_free[static_cast<std::size_t>(perm[static_cast<std::size_t>(i)])];
+      const double v = rf[static_cast<std::size_t>(i)] * rf[static_cast<std::size_t>(i)];
+      total_sq += v;
+      if (v > worst) { worst = v; worst_dof = orig; }
+      if (orig < SB) solid_sq += v;
+      else if (orig < SHB) shell_sq += v;
+      else beam_sq += v;
+    }
+    if (total_sq > 0.0) {
+      out.residual_share_solid = solid_sq / total_sq;
+      out.residual_share_shell = shell_sq / total_sq;
+      out.residual_share_beam  = beam_sq / total_sq;
+      out.worst_residual_dof = worst_dof;
+      out.worst_residual_family =
+          (worst_dof < SB) ? "solid" : (worst_dof < SHB ? "shell" : "beam");
+      if (worst_dof >= SHB) {
+        const int bd = worst_dof - SHB;
+        // find which beam node owns it
+        for (std::size_t b = 0; b < NB; ++b)
+          for (int c = 0; c < 6; ++c)
+            if (beam_dof[6 * b + static_cast<std::size_t>(c)] == worst_dof) {
+              out.worst_residual_node = static_cast<int>(b);
+              out.worst_residual_component = c;
+            }
+        (void)bd;
+      } else if (worst_dof >= SB) {
+        out.worst_residual_node = (worst_dof - SB) / 6;
+        out.worst_residual_component = (worst_dof - SB) % 6;
+      } else {
+        out.worst_residual_node = worst_dof / 3;
+        out.worst_residual_component = worst_dof % 3;
+      }
+    }
+  }
   mark("CG", static_cast<double>(it));
   out.iterations = it;
   out.residual = rn / fnorm;
@@ -1536,6 +2390,12 @@ CoupledLatticeSolve solve_coupled_lattice(
     }
     return u[static_cast<std::size_t>(beam_dof[6 * b + static_cast<std::size_t>(c)])];
   };
+  {
+    double comp = 0.0;
+    for (int i = 0; i < M; ++i)
+      comp += F[static_cast<std::size_t>(i)] * u[static_cast<std::size_t>(i)];
+    out.compliance = comp;
+  }
   mark("recover displacements", static_cast<double>(M));
   out.member_stress_mpa.assign(net.member_count(), 0.0);
   for (std::size_t mi = 0; mi < net.member_count(); ++mi) {

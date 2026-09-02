@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <vector>
 using namespace topopt;
 
@@ -108,7 +109,99 @@ int main(int argc, char** argv) {
   // face's (u, w) basis -- the loops are expressed in it, and flipping the normal
   // would silently reinterpret them. The far patch is placed by moving its origin.
   std::vector<ShellPatch> shells;
-  if (!regions_path.empty()) {
+  // ★ "mask" = MESH THE SKIN THE GENERATOR ACTUALLY FLAGGED. Deriving the plates
+  // from the region OUTLINE (the branch below) was measured wrong on this part by
+  // 219% of skin volume, in the wrong places. The mask carries the exact cells.
+  if (regions_path == "mask") {
+    std::vector<char> skinmask(mk.size(), 0);
+    std::size_t ns2 = 0;
+    for (std::size_t e = 0; e < mk.size(); ++e)
+      if (mk[e] & 4u) { skinmask[e] = 1; ++ns2; }
+    ShellPatch sp2;
+    sp2.mesh = mesh_skin_midsurface(g, skinmask);
+    sp2.thickness_mm = 0.0;                    // per-facet thickness carries it
+    double vol = 0.0;
+    for (std::size_t t = 0; t < sp2.mesh.triangles.size(); ++t) {
+      const Vec3& A = sp2.mesh.nodes[(std::size_t)sp2.mesh.triangles[t].a];
+      const Vec3& B = sp2.mesh.nodes[(std::size_t)sp2.mesh.triangles[t].b];
+      const Vec3& C = sp2.mesh.nodes[(std::size_t)sp2.mesh.triangles[t].c];
+      const double ux=B.x-A.x, uy=B.y-A.y, uz=B.z-A.z;
+      const double vx=C.x-A.x, vy=C.y-A.y, vz=C.z-A.z;
+      const double cx=uy*vz-uz*vy, cy=uz*vx-ux*vz, cz=ux*vy-uy*vx;
+      vol += 0.5*std::sqrt(cx*cx+cy*cy+cz*cz) * sp2.mesh.tri_thickness[t];
+    }
+    const double cellvol = double(ns2) * g.spacing * g.spacing * g.spacing;
+    std::printf("skin from MASK: %zu flagged cells (%.0f mm^3) -> %zu nodes, %zu facets, "
+                "%.0f mm^3 of plate (%.1f%% of the cells)\n",
+                ns2, cellvol, sp2.mesh.nodes.size(), sp2.mesh.triangles.size(),
+                vol, 100.0*vol/cellvol);
+    // ★ DROP THE SKIN FRAGMENTS THAT REACH NOTHING. The flagged cells are not one
+    // body: a few small clusters sit out in the sparse interior, touching neither
+    // the kept solid nor a load-bearing strut. As plates they are free bodies, and
+    // the solver says so ("2124 of 269877 free dof lie in 18 sub-assemblies that
+    // reach NO support"). They carry no load, exactly like the corner-hinged solid
+    // islands and the load-free beam members, so drop them and SAY how much.
+    {
+      std::vector<std::vector<int>> tri_of(sp2.mesh.nodes.size());
+      for (std::size_t t = 0; t < sp2.mesh.triangles.size(); ++t) {
+        tri_of[(std::size_t)sp2.mesh.triangles[t].a].push_back((int)t);
+        tri_of[(std::size_t)sp2.mesh.triangles[t].b].push_back((int)t);
+        tri_of[(std::size_t)sp2.mesh.triangles[t].c].push_back((int)t);
+      }
+      std::vector<int> comp(sp2.mesh.triangles.size(), -1);
+      int nc = 0;
+      for (std::size_t t0 = 0; t0 < comp.size(); ++t0) {
+        if (comp[t0] >= 0) continue;
+        const int c = nc++;
+        std::vector<int> st{(int)t0}; comp[t0] = c;
+        while (!st.empty()) {
+          const int t = st.back(); st.pop_back();
+          const int nd[3] = {sp2.mesh.triangles[(std::size_t)t].a,
+                             sp2.mesh.triangles[(std::size_t)t].b,
+                             sp2.mesh.triangles[(std::size_t)t].c};
+          for (int q : nd)
+            for (int t2 : tri_of[(std::size_t)q])
+              if (comp[(std::size_t)t2] < 0) { comp[(std::size_t)t2] = c; st.push_back(t2); }
+        }
+      }
+      // a component is anchored if any of its nodes sits inside a meshed hex voxel
+      std::vector<char> anchored((std::size_t)nc, 0);
+      for (std::size_t t = 0; t < comp.size(); ++t) {
+        const int nd[3] = {sp2.mesh.triangles[t].a, sp2.mesh.triangles[t].b,
+                           sp2.mesh.triangles[t].c};
+        for (int q : nd) {
+          const Vec3& P = sp2.mesh.nodes[(std::size_t)q];
+          const int ii=int((P.x-ox)/h), jj=int((P.y-oy)/h), kk=int((P.z-oz)/h);
+          if (ii<0||jj<0||kk<0||ii>=nx||jj>=ny||kk>=nz) continue;
+          if (hex_mask[(std::size_t)(kk*(std::size_t)ny+jj)*nx+ii])
+            anchored[(std::size_t)comp[t]] = 1;
+        }
+      }
+      ShellMesh keep;
+      keep.thickness_mm = sp2.mesh.thickness_mm;
+      std::vector<int> remap(sp2.mesh.nodes.size(), -1);
+      std::size_t dropped = 0;
+      for (std::size_t t = 0; t < comp.size(); ++t) {
+        if (!anchored[(std::size_t)comp[t]]) { ++dropped; continue; }
+        int nd[3] = {sp2.mesh.triangles[t].a, sp2.mesh.triangles[t].b, sp2.mesh.triangles[t].c};
+        for (int& q : nd) {
+          if (remap[(std::size_t)q] < 0) {
+            remap[(std::size_t)q] = (int)keep.nodes.size();
+            keep.nodes.push_back(sp2.mesh.nodes[(std::size_t)q]);
+          }
+          q = remap[(std::size_t)q];
+        }
+        keep.triangles.push_back({nd[0], nd[1], nd[2]});
+        keep.tri_thickness.push_back(sp2.mesh.tri_thickness[t]);
+      }
+      int unanch = 0; for (int c = 0; c < nc; ++c) if (!anchored[(std::size_t)c]) ++unanch;
+      std::printf("  skin: %d connected piece(s); dropped %d reaching no solid "
+                  "(%zu of %zu facets, %.1f%%)\n", nc, unanch, dropped,
+                  comp.size(), 100.0*double(dropped)/double(comp.size()));
+      sp2.mesh = keep;
+    }
+    if (!sp2.mesh.triangles.empty()) shells.push_back(sp2);
+  } else if (!regions_path.empty()) {
     std::ifstream f(regions_path); std::string ln; std::getline(f, ln);
     const int nreg = std::atoi(ln.c_str());
     for (int r = 0; r < nreg; ++r) {
@@ -203,6 +296,12 @@ int main(int argc, char** argv) {
                 "  [%.2f s]\n", attempt, r.beam_nodes_tied, net.node_count(),
                 r.beam_nodes_welded_to_shell, r.restraint.components_total, r.restraint.components_unrestrained,
                 r.restraint.components_underconstrained, secs);
+    if (r.residual_share_solid + r.residual_share_shell + r.residual_share_beam > 0.0)
+      std::printf("  WHERE THE RESIDUAL LIVES: solid %.1f%%  shell %.1f%%  beam %.1f%%"
+                  "   worst dof: %s node %d component %d\n",
+                  100*r.residual_share_solid, 100*r.residual_share_shell,
+                  100*r.residual_share_beam, r.worst_residual_family.c_str(),
+                  r.worst_residual_node, r.worst_residual_component);
     if (!r.refusal.empty()) {
       std::printf("    REFUSED: %s\n", r.refusal.c_str());
       std::size_t drop=0;
@@ -217,10 +316,44 @@ int main(int argc, char** argv) {
       std::printf("    dropping %zu load-free member(s), retrying\n", drop);
       net = pruned; continue;
     }
+    std::printf("  LOAD LANDED: %zu of %zu loads (%.2f%% of |F| dropped); "
+                "%zu of %zu bcs\n", r.loads_applied, r.loads_applied + r.loads_dropped,
+                100.0 * r.load_dropped_fraction, r.bcs_applied,
+                r.bcs_applied + r.bcs_dropped);
     std::printf("  CONVERGED: residual %.3e in %d iterations  [%.2f s]\n",
                 r.residual, r.iterations, secs);
     std::printf("  PEAK STRUT STRESS: %.6g MPa  (member %d)\n",
                 r.peak_member_stress_mpa, r.peak_member);
+    // ★ HOW STIFF IS THE WHOLE PART? Strut stress alone cannot say whether the
+    // lattice is genuinely unloaded or whether the model has simply been made too
+    // stiff overall. Peak solid deflection is the global control: if two models
+    // deflect the same but load the struts differently, the difference is in how the
+    // lattice attaches; if one barely deflects, its skin is carrying the part.
+    {
+      double umax = 0.0;
+      for (std::size_t n = 0; n + 2 < r.solid_displacement.size(); n += 3) {
+        const double m2 = r.solid_displacement[n]*r.solid_displacement[n] +
+                          r.solid_displacement[n+1]*r.solid_displacement[n+1] +
+                          r.solid_displacement[n+2]*r.solid_displacement[n+2];
+        if (m2 > umax) umax = m2;
+      }
+      std::printf("  COMPLIANCE (F.u): %.6g N.mm    peak solid deflection %.6g mm\n",
+                  r.compliance, std::sqrt(umax));
+    }
+    // ★ PRINT THE DISTRIBUTION, NOT ONE NUMBER. The peak is a MAX over ~16,500
+    // members, so comparing peaks between two models compares two single members and
+    // reads as a large disagreement even when the fields agree everywhere else.
+    // Percentiles say whether two models differ throughout or only in one strut.
+    {
+      std::vector<double> ss;
+      for (double v : r.member_stress_mpa) if (v > 0.0) ss.push_back(v);
+      std::sort(ss.begin(), ss.end());
+      auto q = [&](double f) { return ss.empty() ? 0.0 : ss[(std::size_t)(f * (ss.size() - 1))]; };
+      std::printf("  STRUT STRESS MPa over %zu members: p50 %.4f  p95 %.4f  "
+                  "p99 %.4f  p99.9 %.4f  max %.4f\n",
+                  ss.size(), q(0.50), q(0.95), q(0.99), q(0.999),
+                  ss.empty() ? 0.0 : ss.back());
+    }
     return 0;
   }
   return 3;
