@@ -433,6 +433,32 @@ public enum LatticeCellTransition: String, Codable, Hashable, Sendable, CaseIter
     }
 }
 
+/// ★★★ ORGANIC'S BOUNDARY FINISH — core's `organic_boundary_finish`, as its own name.
+///
+/// ★ A FINISH IS A LOOK, NOT A REPAIR (his ruling, and core honours it): the finish
+/// runs LAST and the structural core of all three is byte-identical. So this changes
+/// what the edge looks like and never what the lattice IS.
+///
+/// ★ `skin` IS THE DEFAULT AND IT IS THE SHARP ONE. It drops the shell, so every
+/// clipped strut end becomes a cantilever unless the net-skin picks it up. That is
+/// core's default, not a choice this app makes, and it is restated here only so the
+/// picker can show it — the key is still written only when the user has moved it.
+public enum LatticeOrganicFinish: String, Codable, Equatable, Sendable, CaseIterable {
+    case clean, rim, skin
+
+    /// Exactly core's spelling. One source for the picker and the job document, so
+    /// they cannot drift.
+    public var jobValue: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .clean: return "Clean"
+        case .rim:   return "Rim"
+        case .skin:  return "Skin"
+        }
+    }
+}
+
 public enum LatticeCellSizeMode: String, Codable, Equatable, Sendable {
     case auto
     case fixed
@@ -546,6 +572,24 @@ public struct LatticeSpec: Equatable, Sendable {
     /// every existing `LatticeSpec(...)` call is unchanged and produces the same job.
     public var algorithm: String = ""
 
+    // ★ ORGANIC's seven keys, carried the same way `algorithm` is: plain `var`s with
+    // core's own defaults, so every existing `LatticeSpec(...)` call site is unchanged
+    // and produces the same job document. `gradingDictionary()` decides what is
+    // actually written; nothing here is emitted merely by being set.
+    public var organicGrowth: Bool = false
+    public var organicStrutWidthMM: Double = 0
+    public var organicOverhangDeg: Double = 0
+    public var organicBoundaryFinish: String = LatticeOrganicFinish.skin.jobValue
+    public var organicShapeFit: Bool = false
+    public var organicShapeFitOnly: Bool = false
+    public var organicScale: Double = 1
+    /// ★ THE LAYER HEIGHT THIS JOB WILL CARRY, for the growth precondition only.
+    /// `organic_growth` is a SCHEMA REFUSAL without a stated `loads.layer_height_mm`,
+    /// so the key is not written unless one is really there — the job document is the
+    /// last place that rule can be enforced, and enforcing it only in the UI would let
+    /// any other caller build a job that dies at parse.
+    public var layerHeightMM: Double = 0
+
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
                 maxRelativeDensity: Double, emitSTL: Bool = true, emit3MF: Bool = false,
@@ -648,6 +692,48 @@ public struct LatticeSpec: Equatable, Sendable {
         if TopOptKit.latticeAlgorithmIsKnown(algorithm) {
             grading["algorithm"] = algorithm
         }
+        // ══════════════════════════════════════════════════════════════════════
+        // ORGANIC — the seven keys, each written only when ALL of these hold.
+        //
+        // ★★★ NOTE FOR ANYONE LOOKING FOR A TOPOLOGY SWITCH: there isn't one.
+        // Organic is chosen by `grading.algorithm`, NOT by `grading.topology` —
+        // core SCHEMA-REFUSES any topology but "octet" (job.cpp ~1509), so an
+        // organic run still says octet and that is correct, not a leftover.
+        //
+        //   1. THE USER CHOSE ORGANIC. Core refuses each of these keys under any
+        //      other algorithm ("only allowed with algorithm organic"), so one of
+        //      them beside octet kills the whole job after the solve.
+        //   2. THE LINKED CORE KNOWS THE KEY. Runs use `reject_unknown_keys`, and
+        //      this app is built against cores carrying three of these seven and
+        //      cores carrying all seven. The probe is the only honest test.
+        //   3. THE USER MOVED IT off core's own default. Restating a default is a
+        //      DIFFERENT DOCUMENT from omitting it, and bar U1 is that an untouched
+        //      project emits byte-identically to before organic existed.
+        if algorithm == "organic" {
+            func put(_ key: String, _ value: Any) {
+                guard TopOptKit.gradingSchemaAccepts(key: key) else { return }
+                grading[key] = value
+            }
+            if organicStrutWidthMM > 0 { put("organic_strut_width_mm", organicStrutWidthMM) }
+            if organicOverhangDeg > 0 {
+                // ★ TRACE ONLY — grown clamps to a compile-time 30 deg that no job key
+                // reaches, so writing it under growth states a number core will ignore.
+                if !organicGrowth { put("organic_overhang_angle_deg", organicOverhangDeg) }
+            }
+            if organicBoundaryFinish != LatticeOrganicFinish.skin.jobValue {
+                put("organic_boundary_finish", organicBoundaryFinish)
+            }
+            if organicShapeFit { put("organic_shape_fit", true) }
+            if organicShapeFitOnly { put("organic_shape_fit_only", true) }
+            if organicScale != 1 { put("organic_scale", organicScale) }
+            // ★★★ GROWTH NEEDS A STATED LAYER HEIGHT — a SCHEMA REFUSAL since the
+            // PR 353 amendment, not a fallback. Without one core would substitute half
+            // a voxel (0.85 mm on the M2's 1.705 mm grid, roughly four times a real
+            // layer) and compute the whole printability argument in the wrong
+            // discretisation. So the key is simply not written without one, and the UI
+            // disables the control and says why (`organicGrowthRefusalReason`).
+            if organicGrowth, layerHeightMM > 0 { put("organic_growth", true) }
+        }
         return grading
     }
 }
@@ -740,6 +826,77 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         }
         set { algorithm = newValue.coreAlgorithm }
     }
+    // ══════════════════════════════════════════════════════════════════════════
+    // ORGANIC — the seven `organic_*` job keys.
+    //
+    // ★★★ EVERY ONE IS GATED TWICE and the gates are NOT the same question:
+    //   1. the user chose organic  (`isOrganic`) — core REFUSES an organic_* key
+    //      under any other algorithm (job.cpp: "only allowed with algorithm organic"),
+    //      so emitting one beside octet kills the whole job;
+    //   2. the LINKED core knows the key (`TopOptKit.gradingSchemaAccepts`) — runs use
+    //      `reject_unknown_keys`, and this app is built against cores that carry three
+    //      of these seven and cores that carry all seven.
+    // Both live in `gradingBlock`, never here: this struct stores the user's raw pick
+    // and nothing else, the same rule `cellSizeMode` follows.
+    //
+    // ★ NOT EXPOSED, DELIBERATELY. `OrganicParams` internals that no job key reaches —
+    // test_ratio, seed_ratio, connect_ratio, step_ratio, thin_ratio, min_length_ratio,
+    // families, max_curves, max_steps_per_curve, resolution_floor_voxels,
+    // anchor_at_region_boundary, rho_min/rho_max. The UI must not invent them.
+
+    /// ★★★ TRACED (false) vs GROWN (true) — core's `organic_growth`.
+    ///
+    /// ★ A DIFFERENT ARCHITECTURE, NOT A PARAMETER. Traced curves follow the stress
+    /// field; grown ones are laid down in LAYER ORDER and refuse any step whose
+    /// underside is unsupported. They share a name and nothing else.
+    ///
+    /// ★ AND IT HAS A HARD PRECONDITION — see `organicGrowthRefusalReason`. Growth asks
+    /// its support question one layer at a time, so core SCHEMA-REFUSES it without a
+    /// stated `loads.layer_height_mm` rather than substituting half a voxel (0.85 mm on
+    /// the M2's 1.705 mm grid — about four times a real layer, which would compute the
+    /// entire printability argument in the wrong discretisation).
+    public var organicGrowth: Bool = false
+    /// Strut width (mm). 0 ⇒ DERIVE from the density band and cell, which is core's
+    /// own default; core refuses a stated value that is not > 0.
+    public var organicStrutWidthMM: Double = 0
+    /// Overhang limit, degrees, [0, 90].
+    /// ★ TRACE ONLY. Grown clamps to a compile-time 30 deg that no job key reaches, so
+    /// this control is DEAD in grown mode — see `organicOverhangIsLive`.
+    public var organicOverhangDeg: Double = 0
+    /// The edge treatment — see `LatticeOrganicFinish`. Core's default is `.skin`.
+    public var organicBoundaryFinish: LatticeOrganicFinish = .skin
+    /// Pull cells toward the region boundary.
+    public var organicShapeFit: Bool = false
+    /// Shape fit WITHOUT the stress grading.
+    public var organicShapeFitOnly: Bool = false
+    /// Uniform scale on the derived spacing.
+    public var organicScale: Double = 1.0
+
+    /// Is organic the chosen algorithm? Asked of the RESOLVED name, so "not stated"
+    /// (which core resolves to doubled) is correctly not organic.
+    public var isOrganic: Bool { resolvedAlgorithm == "organic" }
+
+    /// ★★★ WHY GROWTH IS UNAVAILABLE — nil when it can be offered.
+    ///
+    /// The layer height travels in the job's `loads` block and is always written, so
+    /// "stated" means a real number: a 0 reaches core as a stated zero and growth's
+    /// support question has no discretisation to ask in. The UI disables the control
+    /// and shows this, rather than letting the user arm a job that dies at parse.
+    public func organicGrowthRefusalReason(layerHeightMM: Double) -> String? {
+        if !TopOptKit.gradingSchemaAccepts(key: "organic_growth") {
+            return "This build's core does not carry the grown organic lattice."
+        }
+        if !(layerHeightMM > 0) {
+            return "Grown organic lays the lattice down one printed layer at a time, "
+                 + "so it needs the layer height. Set it in Print Parameters."
+        }
+        return nil
+    }
+
+    /// ★ IS THE OVERHANG CONTROL LIVE? Grown clamps to a compile-time constant no job
+    /// key reaches, so offering the slider there is a dead knob.
+    public var organicOverhangIsLive: Bool { isOrganic && !organicGrowth }
+
     public static let defaultShapeFitBandCells: Double = 1
     public var cellSizeMode: LatticeCellSizeMode
     /// The sweep window's ends (mm), used only in `.swept`. Stored as the user's raw
@@ -1218,6 +1375,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case frozenRegionDensity
         // the grading options (2026-08-25) — absent ⇒ full / stepped / none stated
         case gradingMode, gradeStepStyle, selectableCellMM
+        // ★ ORGANIC (2026-09-02). Absent from every earlier snapshot ⇒ each decodes to
+        // its own default ⇒ an existing project emits exactly the job it always has.
+        case organicGrowth, organicStrutWidthMM, organicOverhangDeg
+        case organicBoundaryFinish, organicShapeFit, organicShapeFitOnly, organicScale
     }
 
     public init(from decoder: Decoder) throws {
@@ -1231,6 +1392,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Absent in every project saved before the selector existed, and "" is exactly
         // what those projects mean: not stated, so core takes doubled.
         algorithm = try c.decodeIfPresent(String.self, forKey: .algorithm) ?? ""
+        // ★ ORGANIC — absent in every snapshot written before these existed, and each
+        // default is CORE's own, so a project that never chose organic decodes to the
+        // state that writes no organic_* key at all.
+        organicGrowth = try c.decodeIfPresent(Bool.self, forKey: .organicGrowth) ?? false
+        organicStrutWidthMM = try c.decodeIfPresent(Double.self, forKey: .organicStrutWidthMM) ?? 0
+        organicOverhangDeg = try c.decodeIfPresent(Double.self, forKey: .organicOverhangDeg) ?? 0
+        organicBoundaryFinish = try c.decodeIfPresent(
+            LatticeOrganicFinish.self, forKey: .organicBoundaryFinish) ?? .skin
+        organicShapeFit = try c.decodeIfPresent(Bool.self, forKey: .organicShapeFit) ?? false
+        organicShapeFitOnly = try c.decodeIfPresent(Bool.self, forKey: .organicShapeFitOnly) ?? false
+        organicScale = try c.decodeIfPresent(Double.self, forKey: .organicScale) ?? 1.0
         // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
         // exactly the job they emitted before (bar R1).
         cellSizeMode = try c.decodeIfPresent(LatticeCellSizeMode.self, forKey: .cellSizeMode) ?? .fixed
