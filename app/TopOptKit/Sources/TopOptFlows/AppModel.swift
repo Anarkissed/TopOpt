@@ -304,7 +304,8 @@ public final class AppModel: ObservableObject {
             // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
             // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
             minimizePlastic: project.minimizePlastic,
-        )
+            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
+            layerHeightMM: project.printParams.layerHeightMM)
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,

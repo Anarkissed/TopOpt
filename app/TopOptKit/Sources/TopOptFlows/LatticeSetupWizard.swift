@@ -277,6 +277,7 @@ public struct LatticeSetupWizard: View {
                 gradeToggleRow
                 if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
                 gradeStyleRow
+                if model.cellTransition == .organicGrade { organicRow }
                 if model.gradingMode.fitsShape { shapeBandRow }
                 singleCellSwitch
             }
@@ -523,6 +524,149 @@ public struct LatticeSetupWizard: View {
 
     /// ★ 4 — HOW FAR IN the shape grade reaches. Only when the grade fits the
     /// shape at all; a stress-only grade has no outline to step toward.
+    // ══════════════════════════════════════════════════════════════════════════
+    // ★★★ ORGANIC (2026-09-02). Shown only under the Organic grade style; every
+    // control here maps to ONE `organic_*` job key, and `gradingDictionary()` is
+    // the only place that decides whether a key is written — this row never gates
+    // the document, it only tells the user what will happen.
+    //
+    // ★ NOT A TOPOLOGY. Organic is chosen by `grading.algorithm`; the topology stays
+    // "octet" (core refuses any other) and that is correct, not a leftover.
+    // ══════════════════════════════════════════════════════════════════════════
+    @ViewBuilder private var organicRow: some View {
+        let layerH = project.printParams.layerHeightMM
+        let growthRefusal = LatticeSettings.organicGrowthRefusalReason(layerHeightMM: layerH)
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Organic lattice")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .padding(.top, DS.Space.s)
+            // ★ TRACED vs GROWN — two ARCHITECTURES, not a parameter (§1B).
+            HStack(spacing: DS.Space.xs) {
+                organicPill("Traced", on: !model.organicGrowth, enabled: true) {
+                    model.organicGrowth = false; rebuild()
+                }
+                organicPill("Grown", on: model.organicGrowth, enabled: growthRefusal == nil) {
+                    guard growthRefusal == nil else { return }
+                    model.organicGrowth = true; rebuild()
+                }
+            }
+            if let why = growthRefusal {
+                // ★ SAY WHY IT IS DISABLED (§2A) — a greyed control with no sentence is
+                // the failure the refusal reason exists to avoid.
+                Text(why).dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(model.organicGrowth
+                     ? "Laid down in printed-layer order; every step refuses an unsupported underside."
+                     : "Struts traced along the stress field.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // ★ THE FINISH — a LOOK, not a repair; the structural core is identical.
+            if TopOptKit.gradingSchemaAccepts(key: "organic_boundary_finish") {
+                Text("Edge finish").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+                HStack(spacing: DS.Space.xs) {
+                    ForEach(LatticeOrganicFinish.allCases, id: \.rawValue) { f in
+                        organicPill(f.title, on: model.organicBoundaryFinish == f, enabled: true) {
+                            model.organicBoundaryFinish = f; rebuild()
+                        }
+                    }
+                }
+                Text("Skin drops the shell, so every clipped strut end is a cantilever "
+                     + "unless the net-skin picks it up. Rim keeps the edge loops; Clean "
+                     + "keeps nothing. None of them changes the lattice itself.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit") {
+                Toggle(isOn: Binding(get: { model.organicShapeFit },
+                                     set: { model.organicShapeFit = $0; rebuild() })) {
+                    Text("Pull cells toward the region boundary").dsStyle(DS.TypeScale.caption)
+                }
+            }
+            if TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit_only") {
+                Toggle(isOn: Binding(get: { model.organicShapeFitOnly },
+                                     set: { model.organicShapeFitOnly = $0; rebuild() })) {
+                    Text("Shape fit only — no stress grading").dsStyle(DS.TypeScale.caption)
+                }
+            }
+            if TopOptKit.gradingSchemaAccepts(key: "organic_strut_width_mm") {
+                Text("Strut width").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+                scrubRow("organicStrut", value: model.organicStrutWidthMM, unit: " mm",
+                         step: 0.1, range: 0...5) {
+                    model.organicStrutWidthMM = $0; rebuild()
+                }
+                Text("0 derives it from the density band and the cell.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            // ★ OVERHANG IS TRACE-ONLY (§2C). Grown clamps to a compile-time 30 deg that
+            // no job key reaches, so under growth the slider is a dead knob — hidden,
+            // and the reason said.
+            if TopOptKit.gradingSchemaAccepts(key: "organic_overhang_angle_deg") {
+                Text("Overhang limit").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+                if model.organicGrowth {
+                    Text("Grown organic holds a fixed 30° overhang; the limit is not "
+                         + "adjustable there.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                } else {
+                    scrubRow("organicOverhang", value: model.organicOverhangDeg, unit: "°",
+                             step: 5, range: 0...90) {
+                        model.organicOverhangDeg = $0; rebuild()
+                    }
+                    Text("0 leaves it to core.").dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                }
+            }
+            if TopOptKit.gradingSchemaAccepts(key: "organic_scale") {
+                Text("Spacing scale").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+                scrubRow("organicScale", value: model.organicScale, unit: "×",
+                         step: 0.05, range: 0.5...2) {
+                    model.organicScale = $0; rebuild()
+                }
+                // ★ ADVISORY ONLY (§6) — never a filter. Two DIFFERENT datasets, not
+                // merged: traced measured on the M2, grown on a 12x12x24 fixture.
+                Text(model.organicGrowth
+                     ? "For a grown lattice the spacing is not a smooth dial: measured "
+                       + "on a fixture, 4.0 was one connected piece and 4.5 was 16 "
+                       + "pieces with 5% survival. One step coarser than the default "
+                       + "may not be a lattice at all."
+                     : "Coarser cells fragment: measured on this part, a 5 mm uniform "
+                       + "cell left 40% of the material as dust and 6 mm left 85%.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// One pill of an organic segment — the same look as `gradeStyleRow`'s.
+    private func organicPill(_ title: String, on: Bool, enabled: Bool,
+                             _ pick: @escaping () -> Void) -> some View {
+        Button { if enabled { pick() } } label: {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                .frame(maxWidth: .infinity)
+                .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                    .fill((on ? DS.Color.accent.opacity(0.85)
+                              : DS.Color.background.opacity(0.35)).color))
+                .foregroundStyle((!enabled ? DS.Color.textTertiary
+                                  : on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder private var shapeBandRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Grade to shape band")

@@ -244,6 +244,16 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// ★ THE GRADING OPTIONS (2026-08-25) — see `LatticeGradingMode`.
     public var gradingMode: LatticeGradingMode = .full
     public var gradeStepStyle: LatticeGradeStepStyle = .stepped
+    /// ★ ORGANIC — mirrored from `LatticeSettings` verbatim; the settings struct and
+    /// `gradingDictionary()` own every gate, this only carries the user's picks
+    /// through the sheet. Defaults are core's own.
+    public var organicGrowth: Bool = false
+    public var organicStrutWidthMM: Double = 0
+    public var organicOverhangDeg: Double = 0
+    public var organicBoundaryFinish: LatticeOrganicFinish = .skin
+    public var organicShapeFit: Bool = false
+    public var organicShapeFitOnly: Bool = false
+    public var organicScale: Double = 1.0
     /// ★ "Allow single-cell members" — see `LatticeSettings.singleCellMembers`. Setting
     /// it TRUE also writes the finish, because core's one-cell floor requires one.
     public var singleCellMembers: Bool = false {
@@ -296,6 +306,13 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.singleCellMembers = s.singleCellMembers
         self.gradingMode = s.gradingMode
         self.gradeStepStyle = s.gradeStepStyle
+        self.organicGrowth = s.organicGrowth
+        self.organicStrutWidthMM = s.organicStrutWidthMM
+        self.organicOverhangDeg = s.organicOverhangDeg
+        self.organicBoundaryFinish = s.organicBoundaryFinish
+        self.organicShapeFit = s.organicShapeFit
+        self.organicShapeFitOnly = s.organicShapeFitOnly
+        self.organicScale = s.organicScale
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -332,6 +349,15 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // consistent on the wire, so a job can never ask for a one-cell floor without
         // the finish core needs to grant it.
         out.singleCellMembers = singleCellMembers
+        // ★ ORGANIC picks travel whatever the algorithm; `gradingDictionary()` writes
+        // none of them unless organic was chosen and the linked core accepts the key.
+        out.organicGrowth = organicGrowth
+        out.organicStrutWidthMM = organicStrutWidthMM
+        out.organicOverhangDeg = organicOverhangDeg
+        out.organicBoundaryFinish = organicBoundaryFinish
+        out.organicShapeFit = organicShapeFit
+        out.organicShapeFitOnly = organicShapeFitOnly
+        out.organicScale = organicScale
         if out.singleCellMembers, out.boundary == .none || out.boundary == .rim {
             out.boundary = .fullSkin
         }

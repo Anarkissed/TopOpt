@@ -3390,7 +3390,8 @@ public struct WorkspacePlaceholder: View {
             // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
             // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
             minimizePlastic: project.minimizePlastic,
-        )
+            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
+            layerHeightMM: project.printParams.layerHeightMM)
         // THE VARIANT'S OWN IDENTITY AND ITS OWN NUMBER (task
         // 2026-08-04-variant-volume-fraction-mismatch). This passed
         // `ctx.requestedVolumeFraction` — the LADDER RUNG — into a job key core
@@ -3485,7 +3486,8 @@ public struct WorkspacePlaceholder: View {
             // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
             // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
             minimizePlastic: project.minimizePlastic,
-        )
+            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
+            layerHeightMM: project.printParams.layerHeightMM)
         run.runner = { _, _, _ in
             let result = try RelatticeRun.run(inputs)
             guard let spec = echo else { return result.outcome }

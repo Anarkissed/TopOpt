@@ -883,6 +883,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// support question has no discretisation to ask in. The UI disables the control
     /// and shows this, rather than letting the user arm a job that dies at parse.
     public func organicGrowthRefusalReason(layerHeightMM: Double) -> String? {
+        Self.organicGrowthRefusalReason(layerHeightMM: layerHeightMM)
+    }
+    /// The same answer with no settings in hand — the wizard asks it of a draft.
+    public static func organicGrowthRefusalReason(layerHeightMM: Double) -> String? {
         if !TopOptKit.gradingSchemaAccepts(key: "organic_growth") {
             return "This build's core does not carry the grown organic lattice."
         }
@@ -1502,6 +1506,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(enabled, forKey: .enabled)
         try c.encode(topologyID, forKey: .topologyID)
         try c.encode(cellMM, forKey: .cellMM)
+        // ★ ORGANIC — written ALWAYS, decoded with defaults: a snapshot round-trips even
+        // when the user left a key at core's default. (The job document is where
+        // defaults are omitted; the snapshot is not the job.)
+        try c.encode(organicGrowth, forKey: .organicGrowth)
+        try c.encode(organicStrutWidthMM, forKey: .organicStrutWidthMM)
+        try c.encode(organicOverhangDeg, forKey: .organicOverhangDeg)
+        try c.encode(organicBoundaryFinish, forKey: .organicBoundaryFinish)
+        try c.encode(organicShapeFit, forKey: .organicShapeFit)
+        try c.encode(organicShapeFitOnly, forKey: .organicShapeFitOnly)
+        try c.encode(organicScale, forKey: .organicScale)
         try c.encodeIfPresent(stageMode, forKey: .stageMode)
         // Written only when stated, so an untouched project's file is byte-identical
         // to one saved before the selector existed (bar U1).
@@ -1542,8 +1556,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // bytes do not move (bar U1).
         if gradingMode != .full { try c.encode(gradingMode, forKey: .gradingMode) }
         if gradeStepStyle != .stepped {
-            try c.encode(gradeStepStyle, forKey: .gradeStepStyle)
-        }
+            try c.encode(gradeStepStyle, forKey: .gradeStepStyle)        }
         if !selectableCellMM.isEmpty {
             try c.encode(selectableCellMM, forKey: .selectableCellMM)
         }
@@ -1691,7 +1704,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         // ★ THE OBJECTIVE SHAPES "AUTO" — see `resolvedCellPlan`.
                         // Defaults to the app's own default so every existing call
                         // site keeps the minimise-plastic behaviour it had.
-                        minimizePlastic: Bool = true)
+                        minimizePlastic: Bool = true,
+                        // ★ THE LAYER HEIGHT THE JOB WILL CARRY — only the growth
+                        // precondition reads it. Defaulted so every existing call site
+                        // is unchanged; a 0 here means growth is simply not written.
+                        layerHeightMM: Double = 0)
         -> LatticeSpec? {
         guard enabled else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
@@ -1808,6 +1825,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // including "" — `gradingDictionary` is the single place that decides
             // whether a key is written, so "not stated" cannot become "doubled" here.
             spec.algorithm = algorithm
+
+            // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
+            spec.organicGrowth = organicGrowth
+            spec.organicStrutWidthMM = organicStrutWidthMM
+            spec.organicOverhangDeg = organicOverhangDeg
+            spec.organicBoundaryFinish = organicBoundaryFinish.jobValue
+            spec.organicShapeFit = organicShapeFit
+            spec.organicShapeFitOnly = organicShapeFitOnly
+            spec.organicScale = organicScale
+            spec.layerHeightMM = layerHeightMM
             return spec
         }
         let genRho = b.generateRelativeDensity
@@ -1831,6 +1858,21 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // independent axes in core's schema. Set on BOTH construction paths, so
         // a graded job and a uniform one cannot disagree about the cover.
         spec2.outerFinish = boundary.jobOuterFinish
+        // ★ THE ALGORITHM ON THIS PATH TOO (2026-09-02). `spec` carried it and `spec2`
+        // did not, so a stated algorithm was silently dropped from the job on the
+        // generatable-topology path — and organic can only be emitted through it.
+        // "" is still not written, so an untouched project is unchanged.
+        spec2.algorithm = algorithm
+
+        // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
+        spec2.organicGrowth = organicGrowth
+        spec2.organicStrutWidthMM = organicStrutWidthMM
+        spec2.organicOverhangDeg = organicOverhangDeg
+        spec2.organicBoundaryFinish = organicBoundaryFinish.jobValue
+        spec2.organicShapeFit = organicShapeFit
+        spec2.organicShapeFitOnly = organicShapeFitOnly
+        spec2.organicScale = organicScale
+        spec2.layerHeightMM = layerHeightMM
         return spec2
     }
 
@@ -1846,7 +1888,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         cellModes: LatticeCellModeCapability = .fromCore,
                         // ★ LAST, matching the other `runSpec` — see
                         // `resolvedCellPlan`.
-                        minimizePlastic: Bool = true)
+                        minimizePlastic: Bool = true,
+                        layerHeightMM: Double = 0)
         -> LatticeSpec? {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
@@ -1854,7 +1897,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
                        regions: regions, capability: capability,
-                       cellModes: cellModes, minimizePlastic: minimizePlastic)
+                       cellModes: cellModes, minimizePlastic: minimizePlastic,
+                       layerHeightMM: layerHeightMM)
     }
 
     /// The proxy grading parameters for the current settings, with the density range
