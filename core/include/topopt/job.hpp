@@ -340,6 +340,13 @@ struct JobLattice {
   // through — because a silent pass is indistinguishable from a check that
   // never ran.
   bool require_lattice_void_reaches_exterior = true;
+  // ★ NOTHING MAY START IN MID-AIR. A printer lays layer k on layer k-1; material in
+  // an island with nothing beneath it is extruded into open space. The organic
+  // algorithm supports what it can and CUTS what it cannot, so a remainder means the
+  // geometry defeated both — and the export refuses rather than shipping a part the
+  // maintainer already watched fail on the bed. ON by default; only an explicit false
+  // turns it off, and removing the key does NOT.
+  bool require_no_midair_start = true;
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the
@@ -394,6 +401,32 @@ struct JobGrading {
   // written, every crossing strut lands on that shell and none of this applies.
   // Default "skin": Aremu et al.'s net-skin, which is the finish that braces the
   // hanging struts trimming always creates.
+  // ★★ SHAPE-FIT GRADING — REQUIRES intent "aesthetic", refused otherwise (job.cpp).
+  // A second, GEOMETRIC driver of the cell size (distance to the boundary) alongside
+  // the stress percentile, so a cell at a wall is sized to fit it instead of being
+  // tessellated and then truncated. Default OFF: it changes the density, and a density
+  // change is never a default.
+  // ★★ THE LATTICE SCALE. Multiplies the requested cell window, so one job's pattern
+  // can be carried onto a part of a different size without re-deriving the numbers:
+  // scale 2 on a 4-6 mm window asks for 8-12 mm. 1.0 (the default) is byte-identical
+  // to not stating it.
+  //
+  // ★ IT SCALES THE REQUEST, NOT THE RESULT. Every floor still applies underneath —
+  // the extrudable width, the VDI density floor, and the tracer's print and resolution
+  // floors — so scaling DOWN cannot produce a lattice that will not print; it produces
+  // the finest one that will, and the receipt reports how many voxels were raised.
+  // ★★ GROWTH: build the lattice bottom-up under a printability cone instead of
+  // tracing and then repairing. Requires organic; default off so every existing job is
+  // byte-identical.
+  bool organic_growth = false;
+  double organic_scale = 1.0;
+  bool organic_shape_fit = false;
+  // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the
+  // stress map is not read. Biggest cells deepest inside, smallest at the faces and
+  // corners. Requires organic_shape_fit and a declared cell window, and like it is
+  // refused outside intent "aesthetic": a cell that does not answer to demand makes
+  // no structural claim.
+  bool organic_shape_fit_only = false;
   std::string organic_boundary_finish = "skin";
 
   // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────

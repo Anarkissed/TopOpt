@@ -357,6 +357,11 @@ struct GradingLawParams {
   // by the same rule; the band clamp still runs and is still COUNTED; and the
   // certificate still runs over whatever is emitted. Aesthetic changes what the
   // density MEANS, never whether it is checked.
+  // ★★ SHAPE-FIT GRADING (see job.cpp, where it is REFUSED outside intent
+  // "aesthetic"). Adds distance-to-boundary as a second driver of the cell size, so a
+  // cell at a wall is sized to fit it rather than tessellated and then truncated. Only
+  // ever shrinks, so it cannot breach the slenderness or cells-per-member floors.
+  bool organic_shape_fit = false;
   double aesthetic_rho_min = 0.0;
   double aesthetic_rho_max = 0.0;
 

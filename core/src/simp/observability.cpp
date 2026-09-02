@@ -1,4 +1,5 @@
 #include "topopt/observability.hpp"
+#include "topopt/organic_lattice.hpp"  // OrganicGenStats, for copy_growth_stats
 
 #include <chrono>
 #include <cmath>
@@ -472,6 +473,29 @@ std::string json_escape(const std::string& s) {
 std::string bool_json(bool b) { return b ? "true" : "false"; }
 
 }  // namespace
+
+// ★★ ONE COPY OF THE GROWTH COUNTERS, so the analyze receipt and the geometry
+// receipt cannot disagree about what grew. `growth_ran` is set from whether the
+// generator was actually called, never inferred from a counter being non-zero — a
+// run that grew nothing and a run that never grew are different facts.
+// It writes to RunInfo and nothing else now that the export outcome carries the
+// generator's own struct, so it is a plain function rather than a template.
+void copy_growth_stats(RunInfo& d, const OrganicGenStats& g, bool ran) {
+  d.organic_growth_ran = ran;
+  d.organic_growth_seeds = static_cast<long long>(g.growth_seeds);
+  d.organic_growth_curves = static_cast<long long>(g.growth_curves);
+  d.organic_growth_steps = static_cast<long long>(g.growth_steps);
+  d.organic_growth_blocked = static_cast<long long>(g.growth_blocked);
+  d.organic_growth_clamped = static_cast<long long>(g.growth_clamped);
+  d.organic_growth_clamp_max_deg = g.growth_clamp_max_deg;
+  d.organic_growth_branches = static_cast<long long>(g.growth_branches);
+  d.organic_growth_branch_refused = static_cast<long long>(g.growth_branch_refused);
+  d.organic_growth_joins = static_cast<long long>(g.growth_joins);
+  d.organic_growth_join_refused_span =
+      static_cast<long long>(g.growth_join_refused_span);
+  d.organic_growth_tip_budget_hit = g.growth_tip_budget_hit;
+  d.organic_growth_layer_height_mm = g.growth_layer_height_mm;
+}
 
 std::string run_info_json(const RunInfo& info) {
   std::string s = "{\n";
@@ -1326,6 +1350,8 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"curves_kept\": " + fmt_ll(info.organic_curves_kept);
       gr += ", \"curves_thinned\": " + fmt_ll(info.organic_curves_thinned);
       gr += ", \"curves_too_short\": " + fmt_ll(info.organic_curves_too_short);
+      gr += ", \"curves_kept_for_coverage\": " +
+            fmt_ll(info.organic_curves_kept_for_coverage);
       gr += ", \"dangling_ends_trimmed\": " +
             fmt_ll(info.organic_dangling_ends_trimmed);
       gr += ", \"curves_dropped_dangling\": " +
@@ -1376,6 +1402,27 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"solid_stranded_length_mm\": " +
             fmt(info.organic_solid_stranded_length_mm);
       gr += ", \"solid_segments\": " + fmt_ll(info.organic_solid_segments);
+      // ★★ THE LENGTH CENSUS. Growth can hand the emitter 3900 mm and the file can
+      // receive 15 mm of it; `growth_curves` and `growth_steps` look identical either
+      // way, and so does every connectivity ratio. This is the only place a receipt
+      // says where the material went. A stage reported null DID NOT RUN — it is not a
+      // pass that deleted everything.
+      if (!info.organic_census_len_mm.empty()) {
+        gr += ", \"length_census_mm\": {\"grown\": " +
+              fmt(info.organic_census_grown_len_mm);
+        for (std::size_t i = 0; i < info.organic_census_len_mm.size(); ++i) {
+          gr += ", \"" + std::string(organic_census_stage_name(static_cast<int>(i))) +
+                "\": ";
+          gr += info.organic_census_len_mm[i] < 0.0
+                    ? std::string("null")
+                    : fmt(info.organic_census_len_mm[i]);
+        }
+        gr += "}";
+        const double grown = info.organic_census_grown_len_mm;
+        const double wrote = info.organic_census_len_mm.back();
+        gr += ", \"length_survival\": " +
+              (grown > 0.0 && wrote >= 0.0 ? fmt(wrote / grown) : std::string("null"));
+      }
       gr += ", \"emitted_components\": " +
             fmt_ll(info.organic_emitted_components);
       gr += ", \"floating_voxels_before_repair\": " +
@@ -1403,6 +1450,102 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.organic_net_skin_members_pruned);
       gr += ", \"net_skin_degree_one\": " +
             fmt_ll(info.organic_net_skin_degree_one);
+      gr += ", \"unsupported_islands_found\": " +
+            fmt_ll(info.organic_unsupported_islands_found);
+      gr += ", \"unsupported_islands_remaining\": " +
+            fmt_ll(info.organic_unsupported_islands_remaining);
+      gr += ", \"support_legs_added\": " + fmt_ll(info.organic_support_legs_added);
+      gr += ", \"support_leg_length_mm\": " +
+            fmt(info.organic_support_leg_length_mm);
+      gr += ", \"support_rounds\": " + fmt_ll(info.organic_support_rounds);
+      gr += ", \"support_converged\": " +
+            std::string(info.organic_support_converged ? "true" : "false");
+      gr += ", \"fixed_point_rounds\": " + fmt_ll(info.organic_fixed_point_rounds);
+      gr += ", \"fixed_point_converged\": " +
+            std::string(info.organic_fixed_point_converged ? "true" : "false");
+      gr += ", \"mutations\": " + fmt_ll(info.organic_mutations);
+      gr += ", \"support_legs_impossible\": " +
+            fmt_ll(info.organic_support_legs_impossible);
+      gr += ", \"unsupported_cells_remaining\": " +
+            fmt_ll(info.organic_unsupported_cells_remaining);
+      gr += ", \"unsupported_volume_mm3\": " +
+            fmt(info.organic_unsupported_volume_mm3);
+      gr += ", \"unsupported_cells_found\": " +
+            fmt_ll(info.organic_unsupported_cells_found);
+      gr += ", \"support_legs_diagonal\": " +
+            fmt_ll(info.organic_support_legs_diagonal);
+      gr += ", \"support_spans_cut\": " + fmt_ll(info.organic_support_spans_cut);
+      gr += ", \"support_cleanup_pruned\": " +
+            fmt_ll(info.organic_support_cleanup_pruned);
+      gr += ", \"base_trim_found\": " +
+            std::string(info.organic_base_trim_found ? "true" : "false");
+      gr += ", \"base_trim_z_mm\": " + fmt(info.organic_base_trim_z_mm);
+      gr += ", \"base_trim_spans_cut\": " +
+            fmt_ll(info.organic_base_trim_spans_cut);
+      gr += ", \"base_trim_spans_clipped\": " +
+            fmt_ll(info.organic_base_trim_spans_clipped);
+      gr += ", \"base_trim_length_mm\": " + fmt(info.organic_base_trim_length_mm);
+      gr += ", \"base_mat_struts\": " + fmt_ll(info.organic_base_mat_struts);
+      gr += ", \"base_mat_touchdowns\": " +
+            fmt_ll(info.organic_base_mat_touchdowns);
+      gr += ", \"slenderness_violating\": " +
+            fmt_ll(info.organic_slenderness_violating);
+      gr += ", \"slenderness_propped\": " +
+            fmt_ll(info.organic_slenderness_propped);
+      gr += ", \"slenderness_impossible\": " +
+            fmt_ll(info.organic_slenderness_impossible);
+      gr += ", \"slenderness_props\": " + fmt_ll(info.organic_slenderness_props);
+      gr += ", \"cantilever_max_reach_mm\": " +
+            fmt(info.organic_cantilever_reach);
+      gr += ", \"cantilever_islands\": " +
+            fmt_ll(info.organic_cantilever_islands);
+      // ★★ GROWTH. `growth_ran` first and always: every counter after it is
+      // meaningless on a traced run, and a zero that was never measured is not a
+      // passing zero. `growth_tip_budget_hit` is the one that must never be silent —
+      // a run truncated at the tip budget otherwise reads exactly like a finished one.
+      gr += ", \"growth_ran\": " +
+            std::string(info.organic_growth_ran ? "true" : "false");
+      if (info.organic_growth_ran) {
+        gr += ", \"growth_seeds\": " + fmt_ll(info.organic_growth_seeds);
+        gr += ", \"growth_curves\": " + fmt_ll(info.organic_growth_curves);
+        gr += ", \"growth_steps\": " + fmt_ll(info.organic_growth_steps);
+        gr += ", \"growth_blocked\": " + fmt_ll(info.organic_growth_blocked);
+        gr += ", \"growth_clamped\": " + fmt_ll(info.organic_growth_clamped);
+        gr += ", \"growth_clamp_max_deg\": " +
+              fmt(info.organic_growth_clamp_max_deg);
+        gr += ", \"growth_branches\": " + fmt_ll(info.organic_growth_branches);
+        gr += ", \"growth_branch_refused\": " +
+              fmt_ll(info.organic_growth_branch_refused);
+        gr += ", \"growth_joins\": " + fmt_ll(info.organic_growth_joins);
+        gr += ", \"growth_join_refused_span\": " +
+              fmt_ll(info.organic_growth_join_refused_span);
+        gr += ", \"growth_tip_budget_hit\": " +
+              std::string(info.organic_growth_tip_budget_hit ? "true" : "false");
+        gr += ", \"growth_layer_height_mm\": " +
+              fmt(info.organic_growth_layer_height_mm);
+      }
+      gr += ", \"arched_spans\": " + fmt_ll(info.organic_arched_spans);
+      gr += ", \"arch_max_rise_mm\": " + fmt(info.organic_arch_rise);
+      gr += ", \"filleted_spans\": " + fmt_ll(info.organic_filleted);
+      gr += ", \"fillet_unresolved\": " + fmt_ll(info.organic_fillet_unresolved);
+      gr += ", \"fillet_max_radius_mm\": " + fmt(info.organic_fillet_radius);
+      gr += ", \"base_mat_length_mm\": " + fmt(info.organic_base_mat_length_mm);
+      gr += ", \"base_mat_z_mm\": " + fmt(info.organic_base_mat_z_mm);
+      gr += ", \"fill_mat_cells\": " + fmt_ll(info.organic_fill_mat_cells);
+      gr += ", \"fill_mat_struts\": " + fmt_ll(info.organic_fill_mat_struts);
+      gr += ", \"fill_mat_length_mm\": " + fmt(info.organic_fill_mat_length_mm);
+      gr += ", \"branch_seeds\": " + fmt_ll(info.organic_branch_seeds);
+      gr += ", \"branch_merges\": " + fmt_ll(info.organic_branch_merges);
+      gr += ", \"branch_trunks\": " + fmt_ll(info.organic_branch_trunks);
+      gr += ", \"branch_anchored_on_model\": " +
+            fmt_ll(info.organic_branch_anchored_on_model);
+      gr += ", \"branch_length_mm\": " + fmt(info.organic_branch_length_mm);
+      gr += ", \"support_cut_length_mm\": " +
+            fmt(info.organic_support_cut_length_mm);
+      gr += ", \"support_layer_height_mm\": " +
+            fmt(info.organic_support_layer_height_mm);
+      gr += ", \"support_grid_too_large\": " +
+            std::string(info.organic_support_grid_too_large ? "true" : "false");
       gr += ", \"stranded_components_dropped\": " +
             fmt_ll(info.organic_stranded_components_dropped);
       gr += ", \"stranded_spans_dropped\": " +

@@ -40,6 +40,186 @@ struct Hex8Stiffness {
   }
 };
 
+// ── ★ THE 2-NODE SPATIAL FRAME ELEMENT (organic-lattice beam FEA) ───────────
+// A lattice is a NETWORK OF STRUTS, and the honest cheap way to analyse one is to
+// give every strut a beam element rather than resolving it in solid voxels. On the
+// M2 stand that is 421 k DOF against 184 M for 3 voxels across a 1 mm strut — a
+// factor of ~440 — with no meshing step at all, because the generator already emits
+// the centrelines and radii this consumes.
+//
+// TIMOSHENKO, NOT EULER-BERNOULLI, AND THAT IS NOT A PREFERENCE. Euler-Bernoulli
+// drops shear deformation and so OVERSTATES the stiffness of stubby members.
+// Polymers 18(16):2003 (doi 10.3390/polym18162003) gives the transferable test as
+// the shear-to-bending compliance ratio, shear-corrected elements being required
+// once it reaches ~0.5. For a solid circular strut at nu = 0.35, kappa = 0.9 that is
+//
+//     chi = 2.25 * (r/L)^2      ->  shear correction needed when L/r < 2.12
+//
+// and it must be judged on the WORST-LOADED strut, not the median. MEASURED on the
+// M2 lattice: the peak-stress strut was 0.83 mm long (L/r 1.7, chi 0.77) while the
+// median strut was chi 0.086, and the 5th-percentile strut is ~0.85 mm at EVERY cell
+// size because that is one integration step of the tracer. Euler-Bernoulli overstated
+// the peak stress by 2.5x on both the 3 mm and 6 mm lattices. Pass shear_k <= 0 to
+// get the Euler-Bernoulli element, which exists ONLY so a test can measure that gap.
+//
+// LOCAL AXES. x is the element axis (node 0 -> node 1); y and z are the principal
+// bending axes. DOF order per node is [ux, uy, uz, rx, ry, rz], node 0 then node 1,
+// so the matrix is 12x12. The caller rotates to global with its own frame; this
+// returns the LOCAL matrix, exactly as hex8_stiffness returns an axis-aligned one.
+//
+// Throws std::invalid_argument on a non-physical length, area, inertia or modulus.
+struct FrameStiffness {
+  static constexpr int kNodes = 2;
+  static constexpr int kDof = 12;  // 3 translational + 3 rotational per node
+
+  // Row-major 12x12 LOCAL element stiffness matrix.
+  std::array<double, static_cast<std::size_t>(kDof) * kDof> k{};
+
+  double operator()(int row, int col) const {
+    return k[static_cast<std::size_t>(row) * kDof + col];
+  }
+};
+
+FrameStiffness frame2_stiffness(double youngs_modulus, double shear_modulus,
+                                double area, double inertia_y, double inertia_z,
+                                double torsion_j, double length,
+                                double shear_k);
+
+// The shear-to-bending compliance ratio of a SOLID CIRCULAR strut, the criterion
+// above. Returns chi; compare against ~0.5. Throws on a non-physical input.
+double frame_shear_bending_ratio(double youngs_modulus, double poisson,
+                                 double radius, double length, double shear_k);
+
+// ── ★ TYING A BEAM NODE INTO A SOLID ELEMENT ────────────────────────────────
+// A lattice strut embedded in solid material has to transfer load into it, and the
+// two element families do not share a DOF set: a hex node carries 3 translations,
+// a frame node carries 3 translations AND 3 rotations. There is no rotational DOF
+// on the solid side for a moment to land on.
+//
+// THIS IS THE PINNED TIE, the conservative choice: the beam node's TRANSLATIONS are
+// slaved to the trilinear interpolation of the host element's 8 corners, and its
+// ROTATIONS are left free. It therefore transfers FORCE but not MOMENT. A real strut
+// embedded in plastic does carry some moment, so this under-restrains the lattice —
+// more lattice deflection and more lattice stress, i.e. it errs toward a SMALLER
+// margin. A moment-transferring tie (a force couple distributed over the 8 corners)
+// is the higher-fidelity option and is deliberately NOT what this is.
+//
+// `weight` are the eight trilinear coefficients in the same corner order as
+// hex8_stiffness: (x,y,z) varying fastest in x, then y, then z. They sum to 1 for
+// any point, inside or out; `inside` reports whether the point actually lies within
+// the element, which the caller needs because extrapolating a tie outside its host
+// silently invents stiffness. Throws std::invalid_argument on a non-physical size.
+struct FrameSolidTie {
+  static constexpr int kNodes = 8;
+  std::array<double, 8> weight{};
+  bool inside = false;
+};
+
+FrameSolidTie frame_solid_tie(const Vec3& point, const Vec3& element_origin,
+                              double element_size);
+
+// Peak axial + bending stress on the surface of a solid circular frame member,
+// evaluated at BOTH ends and reported as the larger. `u_local` is the element's
+// 12 displacements in LOCAL axes (the caller rotates); `k` is the matrix
+// frame2_stiffness returned for this member.
+//
+// ★ FROM END FORCES, f = k u — NEVER from end rotations. Recovering the bending
+// moment from the rotational DOFs alone drops the transverse-displacement terms.
+// That version reproduced a cantilever's tip deflection EXACTLY while reporting
+// 95,467 MPa where the closed form gives 636.62 — a factor of 150, invisible to any
+// check that only looked at displacement. test_frame_element asserts the root moment
+// against P L for exactly this reason.
+//
+// sigma = |N|/A + sqrt(My^2 + Mz^2) * r / I, the standard combined stress on the
+// extreme fibre. Shear and torsion are NOT included: this is a design-margin proxy
+// for slender-ish members, not a full stress state. Throws on a non-physical radius.
+double frame_member_peak_stress(const FrameStiffness& k,
+                                const std::array<double, 12>& u_local,
+                                double radius);
+
+// ── ★ THE DKT PLATE-BENDING TRIANGLE (organic-lattice shell walls) ──────────
+// Batoz, Bathe & Ho, "A study of three-node triangular plate bending elements",
+// Int. J. Numer. Methods Eng. 15, 1771-1812 (1980), equations (27)-(31) and
+// Appendix A. Three nodes, NINE dof -- (w, theta_x, theta_y) per corner -- built by
+// the discrete-Kirchhoff technique: Kirchhoff's normality is imposed at the corners
+// and edge mid-points rather than everywhere, which is what lets a 9-dof triangle
+// behave.
+//
+// WHY A PLATE ELEMENT AT ALL. A lattice region is a WALL, and filling a wall with
+// solid voxels is the wrong element for a thin plate. Solid scales with VOLUME
+// (N^3), a plate with AREA (N^2): on the M2 stand that is 0.11 M hex at the job's
+// resolution against ~11 k plate triangles, and at 256 it is the difference between
+// 14.6 GB (past a 16 GB machine) and well under one. The walls are ALWAYS there --
+// Structural organic requires grade-to-solid, so a solid skin is guaranteed.
+//
+// AND THE DOF MATTER MORE THAN THE SPEED. A hex node has 3 translations and no
+// rotations, so a beam tied into solid can only be PINNED: it transmits force, not
+// moment, and a strut held that way spins freely (test_frame_element measures
+// nullity 9 for one tie, 7 for two collinear). A plate node HAS rotations, so a
+// beam-to-plate joint is properly built in.
+//
+// VALIDITY. This is a THIN-plate (Kirchhoff) element: transverse shear is neglected.
+// MEASURED on the real part's declared regions: thickness/span 1/16.2 and 1/14.9 --
+// inside the usual 1/10 limit but NOT in the deeply safe (<1/20) regime. If a wall
+// is thicker than that, a Mindlin-type element (DKMQ) is the correct fallback and
+// this one must NOT be stretched to cover it. That is the same assumption class that
+// made Euler-Bernoulli wrong for stubby struts, so it is stated, not assumed.
+//
+// LOCAL AXES. The three corners are given in the element's OWN plane as (x, y)
+// pairs; the caller rotates. DOF order is (w1, tx1, ty1, w2, tx2, ty2, w3, tx3, ty3).
+// Integration is EXACT with three points at the edge mid-nodes -- the integrand is
+// quadratic (the paper's note under eq. 31), so this is not a quadrature choice.
+//
+// Throws std::invalid_argument on a degenerate triangle or non-physical material.
+struct DktStiffness {
+  static constexpr int kNodes = 3;
+  static constexpr int kDof = 9;
+  std::array<double, static_cast<std::size_t>(kDof) * kDof> k{};
+  double operator()(int row, int col) const {
+    return k[static_cast<std::size_t>(row) * kDof + col];
+  }
+};
+
+DktStiffness dkt_stiffness(const double x[3], const double y[3],
+                           double youngs_modulus, double poisson,
+                           double thickness);
+
+// ── ★ THE FLAT FACET SHELL TRIANGLE ─────────────────────────────────────────
+// MEMBRANE (constant-strain triangle: in-plane u, v) + BENDING (the DKT above)
+// assembled in the element's own plane. Three nodes, EIGHTEEN dof --
+// (u, v, w, theta_x, theta_y, theta_z) per node -- returned in LOCAL axes; the
+// caller rotates to global with the element's own frame.
+//
+// FLAT IS ENOUGH, AND THAT IS WHY THIS IS SMALL. Curved shells need a MITC-type
+// formulation to survive membrane locking. A lattice region is a DECLARED PLANAR
+// FACE -- origin, normal, an orthonormal basis and 2D loops -- so its mid-surface is
+// flat by construction and a facet element is exact for the geometry, not an
+// approximation of it.
+//
+// THE DRILLING DOF. theta_z (rotation about the element normal) carries no stiffness
+// in either the membrane or the bending part: a flat facet simply has no strain
+// associated with it. Left at zero the assembled matrix is SINGULAR wherever
+// coplanar elements meet. `drilling_factor` adds a small fictitious rotational
+// stiffness, scaled off the element's own diagonal, purely to remove that
+// singularity -- the standard remedy. It is NOT physics: too large and it stiffens
+// the shell, too small and the conditioning stays bad. The default is the usual
+// 1e-3 of the mean bending diagonal; a test asserts the element's real behaviour is
+// insensitive to it across three orders of magnitude.
+//
+// Throws std::invalid_argument on a degenerate triangle or non-physical material.
+struct ShellStiffness {
+  static constexpr int kNodes = 3;
+  static constexpr int kDof = 18;  // 3 translations + 3 rotations per node
+  std::array<double, static_cast<std::size_t>(kDof) * kDof> k{};
+  double operator()(int row, int col) const {
+    return k[static_cast<std::size_t>(row) * kDof + col];
+  }
+};
+
+ShellStiffness shell3_stiffness(const double x[3], const double y[3],
+                                double youngs_modulus, double poisson,
+                                double thickness, double drilling_factor = 1e-3);
+
 // Isotropic 8-node hexahedral element stiffness for Young's modulus
 // `youngs_modulus` (> 0), Poisson ratio `poisson` (in (-1, 0.5)) and cubic
 // voxel edge `element_size` (> 0). For fixed Poisson ratio the matrix scales

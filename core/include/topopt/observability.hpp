@@ -938,6 +938,7 @@ struct RunInfo {
   long long organic_curves_kept = 0;
   long long organic_curves_thinned = 0;
   long long organic_curves_too_short = 0;
+  long long organic_curves_kept_for_coverage = 0;
   std::vector<long long> organic_curves_per_family;
   std::vector<double> organic_curve_length_per_family_mm;
   // WHY each half-trace stopped, and why each offered seed was refused. Two ledgers
@@ -965,6 +966,12 @@ struct RunInfo {
   double organic_solid_stranded_length_mm = 0.0;
   long long organic_solid_segments = 0;
   // ★★ AND THE SAME TEST ON WHAT WAS WRITTEN — after the boundary clip.
+  // ★★ WHERE THE MILLIMETRES WENT. Live span length at each stage of the emission
+  // pipeline, plus the grown length handed in. -1 in a stage means that pass DID NOT
+  // RUN — it is not zero length, and differencing without checking is how an unrun
+  // pass reads as having deleted everything.
+  std::vector<double> organic_census_len_mm;
+  double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   // ★★ THE GROUND-TIE REPAIR. floating_after != 0 means material the printer cannot
   // build — it starts in mid-air — and the caller REFUSES on it.
@@ -1000,6 +1007,75 @@ struct RunInfo {
   long long organic_merge_degenerate_spans = 0;
   long long organic_net_skin_members_pruned = 0;
   long long organic_net_skin_degree_one = 0;
+  long long organic_unsupported_islands_found = 0;
+  long long organic_unsupported_islands_remaining = 0;
+  long long organic_support_legs_added = 0;
+  double organic_support_leg_length_mm = 0.0;
+  long long organic_support_rounds = 0;
+  bool organic_support_converged = false;
+  long long organic_fixed_point_rounds = 0;
+  bool organic_fixed_point_converged = false;
+  long long organic_mutations = 0;
+  long long organic_support_legs_impossible = 0;
+  long long organic_unsupported_cells_remaining = 0;
+  double organic_unsupported_volume_mm3 = 0.0;
+  long long organic_support_legs_diagonal = 0;
+  long long organic_support_spans_cut = 0;
+  long long organic_support_cleanup_pruned = 0;
+  double organic_base_trim_z_mm = 0.0;
+  long long organic_base_trim_spans_cut = 0;
+  long long organic_base_trim_spans_clipped = 0;
+  double organic_base_trim_length_mm = 0.0;
+  bool organic_base_trim_found = false;
+  long long organic_base_mat_struts = 0;
+  // ★★ VDI SLENDERNESS. `violating` are struts over the l/D their angle allows;
+  // `propped` those a leg could be dropped under; `impossible` those with nothing
+  // beneath. Reported SEPARATELY and always: a strut that could not be propped still
+  // ships, and a single total would hide it.
+  long long organic_slenderness_violating = 0;
+  long long organic_slenderness_propped = 0;
+  long long organic_slenderness_impossible = 0;
+  long long organic_slenderness_props = 0;
+  double organic_cantilever_reach = 0.0;
+  long long organic_cantilever_islands = 0;
+  long long organic_arched_spans = 0;
+  double organic_arch_rise = 0.0;
+  long long organic_filleted = 0;
+  long long organic_fillet_unresolved = 0;
+  double organic_fillet_radius = 0.0;
+  // ── ★★ GROWTH TELEMETRY (task PR-353 amendment §1) ──────────────────────────
+  // `growth_ran` distinguishes "growth measured zero" from "growth never ran": a
+  // traced run reports false and every counter below is meaningless, which is the
+  // same rule this receipt already applies to shape-fit reporting. Without it a run
+  // that truncated at the tip budget is indistinguishable from one that finished.
+  bool organic_growth_ran = false;
+  long long organic_growth_seeds = 0;
+  long long organic_growth_curves = 0;
+  long long organic_growth_steps = 0;
+  long long organic_growth_blocked = 0;
+  long long organic_growth_clamped = 0;
+  double organic_growth_clamp_max_deg = 0.0;
+  long long organic_growth_branches = 0;
+  long long organic_growth_branch_refused = 0;
+  long long organic_growth_joins = 0;
+  long long organic_growth_join_refused_span = 0;
+  bool organic_growth_tip_budget_hit = false;
+  double organic_growth_layer_height_mm = 0.0;
+  long long organic_base_mat_touchdowns = 0;
+  double organic_base_mat_length_mm = 0.0;
+  double organic_base_mat_z_mm = 0.0;
+  long long organic_fill_mat_cells = 0;
+  long long organic_fill_mat_struts = 0;
+  double organic_fill_mat_length_mm = 0.0;
+  long long organic_branch_seeds = 0;
+  long long organic_branch_merges = 0;
+  long long organic_branch_trunks = 0;
+  long long organic_branch_anchored_on_model = 0;
+  double organic_branch_length_mm = 0.0;
+  double organic_support_cut_length_mm = 0.0;
+  long long organic_unsupported_cells_found = 0;
+  double organic_support_layer_height_mm = 0.0;
+  bool organic_support_grid_too_large = false;
   long long organic_repair_rounds = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_length_mm = 0.0;
@@ -1281,6 +1357,14 @@ struct RunInfo {
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's
 // report.cpp style). write_run_info throws std::runtime_error on IO failure.
+// ★★ THE GROWTH COUNTERS' ONE COPY PATH. Declared here rather than hidden in
+// run_job.cpp's anonymous namespace so a test can exercise the CHAIN, not just the
+// serializer: the counters were once filled and never read, and a test that only
+// checks run_info_json cannot see that. Forward-declared to keep organic_lattice.hpp
+// out of every observability consumer.
+struct OrganicGenStats;
+void copy_growth_stats(RunInfo& d, const OrganicGenStats& g, bool ran);
+
 std::string run_info_json(const RunInfo& info);
 void write_run_info(const std::string& path, const RunInfo& info);
 

@@ -23,6 +23,7 @@
 #include "topopt/mesh.hpp"
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
+#include "topopt/observability.hpp"
 #include "topopt/organic_lattice.hpp"
 
 #include <cmath>
@@ -252,13 +253,632 @@ void test_one_cell_needs_a_finish() {
 
 }  // namespace
 
+// ══════════════════════════════════════════════════════════════════════════════════
+// ★★★ B7-B10: THE BARS THIS SESSION'S DEFECTS WOULD HAVE FAILED ★★★
+//
+// Every one of these encodes a pass that reported success while emitting nothing, or a
+// measurement that answered a different question than the one asked. All four were
+// found by the maintainer looking at a slice after my numbers said the geometry was
+// fine — the same way B1-B4 were found — and all four presented as ACCEPTED, converged,
+// one component, with the defect fully present.
+
+// ── THE FIXTURE THE MAT BARS NEED ────────────────────────────────────────────────
+// Reaching the base mat at all takes more than "some struts on a plane", and finding
+// that out cost four failed fixtures. The base-plane rule wants THREE things at once:
+//   * `layer_height_mm > 0` — without it the trim never runs (it rasters Z at the
+//     machine's pitch, and refuses to invent one);
+//   * a layer whose area is >= half the fattest layer's — so stilts are skipped;
+//   * whose largest CONNECTED cross-section is >= half that layer — so a field of
+//     separate uprights never qualifies, however many there are.
+// Hence a connected slab (uprights tied horizontally) standing on thin stilts: the
+// stilts are the thin layers the rule steps over, the slab is the base it lands on.
+OrganicLattice mat_fixture(int n = 5, double pitch = 2.0, double r = 0.35,
+                           int stilts = 3, double drop = 2.0) {
+  OrganicLattice lat;
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < n; ++j)
+      add_curve(lat, {Vec3{pitch * i, pitch * j, 0.0}, Vec3{pitch * i, pitch * j, 6.0}}, r);
+  for (double z : {0.0, 3.0, 6.0}) {
+    for (int i = 0; i < n; ++i)
+      add_curve(lat, {Vec3{pitch * i, 0.0, z}, Vec3{pitch * i, pitch * (n - 1), z}}, r);
+    for (int j = 0; j < n; ++j)
+      add_curve(lat, {Vec3{0.0, pitch * j, z}, Vec3{pitch * (n - 1), pitch * j, z}}, r);
+  }
+  for (int k = 0; k < stilts; ++k)
+    add_curve(lat, {Vec3{pitch * k, 0.0, -drop}, Vec3{pitch * k, 0.0, 0.0}}, r);
+  lat.base_mat = true;
+  lat.trim_below_base = true;
+  lat.layer_height_mm = 0.2;
+  return lat;
+}
+
+// ── B7: A MAT THAT COUNTS FEET MUST LAY FLOOR ─────────────────────────────────────
+// On one grading the base mat reported 1336 touchdowns and emitted 0 struts: the debug
+// line looked healthy, the verdict was ACCEPTED, and the part had no foundation at all.
+// A pass that finds work and then does none of it is what this file exists to catch.
+//
+// ★ THE PRECONDITION IS ASSERTED, NOT ASSUMED. Written as `if (touchdowns > 0) CHECK`,
+// this bar passed VACUOUSLY on a fixture that never reached the mat — the same "green
+// run measuring nothing" it was written to prevent, reproduced inside the test.
+void test_mat_that_counts_feet_lays_floor() {
+  const OrganicLattice lat = mat_fixture();
+  OrganicGenStats st;
+  run(lat, st);
+  CHECK(st.base_trim_found,
+        "B7 precondition: the fixture must actually reach the base trim, or every "
+        "check below passes by not running");
+  CHECK(st.base_mat_touchdowns > 0,
+        "B7 precondition: a slab standing on the base plane has feet");
+  CHECK(st.base_mat_struts > 0,
+        "B7: the mat found touchdowns and must emit struts for them — reporting feet "
+        "while laying no floor is how a cube shipped with no foundation");
+  CHECK(st.base_mat_length_mm > 0.0,
+        "B7: mat struts must carry length; a count without length is not geometry");
+}
+
+// ── B8: THE MAT MAY NOT BE THINNER THAN THE RASTER THAT MESHES IT ────────────────
+// Halving the mat radius on measured grounds drove its height to 0.273 mm against a
+// weld pitch of 0.28 — under one voxel — and the mat VANISHED from the slice while
+// every statistic still read green. With the pitch declared, the mat must still be
+// emitted; the generator raises the radius rather than emitting into nothing.
+void test_mat_survives_the_weld_raster() {
+  OrganicLattice lat = mat_fixture();
+  lat.weld_pitch_hint_mm = 0.28;
+  OrganicGenStats st;
+  run(lat, st);
+  CHECK(st.base_trim_found, "B8 precondition: the fixture must reach the base trim");
+  CHECK(st.base_mat_struts > 0,
+        "B8: a mat must survive the raster that will mesh it — below two weld voxels "
+        "it is erased outright, and the generator must raise it rather than emit it");
+}
+
+// ── B9: SLENDERNESS IS THE UNSUPPORTED SPAN, NOT THE WHOLE STRUT ─────────────────
+// Measured on total length the check called 1541 struts too slender and then found
+// "nothing beneath" for every one of them — material WAS there, it just was not being
+// counted as support. A bar lying across a bed of struts is not a bridge of its own
+// length. Same bar, twice: propped along its run, and spanning free air.
+void test_slenderness_reads_the_unsupported_span() {
+  const double r = 0.30;
+  const double span = 24.0;
+
+  OrganicLattice held;
+  add_curve(held, {Vec3{0.0, 0.0, 6.0}, Vec3{span, 0.0, 6.0}}, r);
+  for (double x = 0.0; x <= span + 1e-9; x += 3.0)
+    add_curve(held, {Vec3{x, 0.0, 0.0}, Vec3{x, 0.0, 6.0}}, r);
+  OrganicGenStats st_held;
+  run(held, st_held);
+
+  OrganicLattice bridge;
+  add_curve(bridge, {Vec3{0.0, 0.0, 6.0}, Vec3{span, 0.0, 6.0}}, r);
+  add_curve(bridge, {Vec3{0.0, 0.0, 0.0}, Vec3{0.0, 0.0, 6.0}}, r);
+  add_curve(bridge, {Vec3{span, 0.0, 0.0}, Vec3{span, 0.0, 6.0}}, r);
+  OrganicGenStats st_bridge;
+  run(bridge, st_bridge);
+
+  CHECK(st_held.slenderness_violating <= st_bridge.slenderness_violating,
+        "B9: a bar propped along its length is not more slender than the same bar "
+        "spanning free air — reading total length instead of the unsupported run "
+        "flagged 1541 struts and could prop none of them");
+}
+
+// ── B10: A COUNTER THAT IS SET MUST BE NON-ZERO WHERE IT APPLIES ─────────────────
+// `base_mat_touchdowns` read 0 in the receipt for hours while the generator was
+// measured carrying 684 — a stat wired into three of the four hops it must travel.
+// This bar cannot see the JSON, but it holds the generator end honest: a silent zero
+// is caught here rather than in a slice.
+void test_stats_are_actually_populated() {
+  const OrganicLattice lat = mat_fixture();
+  OrganicGenStats st;
+  run(lat, st);
+  CHECK(st.base_trim_found, "B10 precondition: the fixture must reach the base trim");
+  CHECK(st.base_trim_z_mm != 0.0,
+        "B10: a found base trim carries a plane; a zero here is an unset field");
+  CHECK(st.base_mat_touchdowns > 0,
+        "B10: a slab standing on the base plane has touchdowns and they must be "
+        "counted — a stat that is always zero is indistinguishable from a pass that "
+        "never ran");
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════
+// ★★★ G1-G5: THE GROWTH GENERATOR ★★★
+//
+// `grow_organic_lattice` lays curves down in LAYER ORDER from the base and refuses any
+// step whose underside is unsupported, so mid-air starts and free ends are not repaired
+// but INEXPRESSIBLE. These five bars are the failures it actually produced while being
+// built — every one of them returned a healthy-looking run with no geometry in it.
+//
+//   G1 PRODUCES      — it returned 0 curves FOUR separate ways (raster overrun, "no
+//                      stress" read as "outside the part", the separation counting a
+//                      tip's own trail, and again counting its parent's). A generator
+//                      that silently makes nothing is the failure mode here.
+//   G2 NO FALLBACK   — and when it made nothing it KEPT THE TRACED CURVES, so a total
+//                      failure reported ACCEPTED with 13,342 spans and busy repairs.
+//   G3 SUPPORTED     — every emitted point must have material beneath it. This is the
+//                      whole claim: printability as a construction rule.
+//   G4 CONE          — no step may fall below the printable angle from the plate.
+//   G5 JOINS         — a crowded tip must REACH its neighbour, not stop 2 mm short in
+//                      open air; stopping there is what left free ends for the prune to
+//                      erode (2260 spans emitted, 2520 pruned).
+
+// A block of candidate voxels with a simple uniaxial stress field: enough for the
+// growth rule to have somewhere to grow and a direction to prefer.
+struct GrowFixture {
+  VoxelGrid grid;
+  std::vector<char> cand;
+  std::vector<double> stress;
+  std::vector<double> spacing;
+  OrganicParams params;
+};
+
+GrowFixture grow_fixture(int nx = 12, int ny = 12, int nz = 24, double h = 1.0) {
+  GrowFixture f;
+  f.grid.nx = nx; f.grid.ny = ny; f.grid.nz = nz;
+  f.grid.spacing = h;
+  f.grid.origin = Vec3{0, 0, 0};
+  const std::size_t n = static_cast<std::size_t>(nx) * ny * nz;
+  f.grid.tags.assign(n, VoxelTag::Interior);
+  f.cand.assign(n, 1);
+  f.stress.assign(6 * n, 0.0);
+  for (std::size_t e = 0; e < n; ++e) f.stress[6 * e + 2] = 1.0;   // sigma_zz
+  f.spacing.assign(n, 4.0);
+  f.params.layer_hint_mm = 0.2;
+  f.params.min_extrudable_width_mm = 0.4;
+  f.params.strut_diameter_mm = 0.8;
+  f.params.build_dir = Vec3{0, 0, 1};
+  return f;
+}
+
+// ── G1: THE GENERATOR MUST PRODUCE GEOMETRY ─────────────────────────────────────
+void test_growth_produces_curves() {
+  GrowFixture f = grow_fixture();
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  CHECK(gs.growth_seeds > 0,
+        "G1: the region's floor must yield seeds — seeding off traced points gave NINE "
+        "on a 40 mm cube");
+  CHECK(gs.growth_steps > 0,
+        "G1: tips must advance — every seed sat in a zero-stress voxel and 'no "
+        "principal direction' was read as 'left the part', so each died after one step");
+  CHECK(!lat.curves.empty(),
+        "G1: growth must produce curves; four separate bugs made it return none while "
+        "the run still reported ACCEPTED");
+}
+
+// ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
+void test_growth_does_not_fall_back() {
+  GrowFixture f = grow_fixture();
+  OrganicGenStats gs;
+  const OrganicLattice grown =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  const OrganicLattice traced =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  if (gs.growth_curves == 0)
+    CHECK(grown.curves.empty(),
+          "G2: growth that produced nothing must RETURN nothing — keeping the traced "
+          "curves made a total failure read as ACCEPTED with 13,342 spans");
+  else
+    CHECK(grown.curves.size() != traced.curves.size() ||
+              grown.curves.front().points.size() != traced.curves.front().points.size(),
+          "G2: grown curves must not be the traced ones passed through");
+}
+
+// ── G3: EVERY POINT IS SUPPORTED FROM BELOW ─────────────────────────────────────
+// The architectural claim in one bar. A grown curve may only advance onto material
+// that is already there, so no vertex may sit in open air above the base.
+void test_growth_is_supported() {
+  GrowFixture f = grow_fixture();
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  if (lat.curves.empty()) { CHECK(false, "G3: no curves to check"); return; }
+  double zmin = lat.curves.front().points.front().z;
+  for (const OrganicCurve& c : lat.curves)
+    for (const Vec3& p : c.points) zmin = std::min(zmin, p.z);
+  // ★ A BRANCH LEGITIMATELY STARTS ABOVE THE FLOOR — on its parent, which is material
+  // that already exists. So "every curve starts at z_min" is the WRONG bar and this one
+  // asserted it. What must hold is that every start coincides with existing geometry:
+  // either the floor, or a point on another curve.
+  std::size_t rootless = 0;
+  for (const OrganicCurve& c : lat.curves) {
+    const Vec3 s0 = c.points.front();
+    if (s0.z <= zmin + 3.0) continue;                  // on the floor
+    bool on_another = false;
+    for (const OrganicCurve& o : lat.curves) {
+      if (&o == &c) continue;
+      for (const Vec3& q : o.points) {
+        const double dx = q.x - s0.x, dy = q.y - s0.y, dz = q.z - s0.z;
+        // within a strut radius: a branch roots at its parent's CURRENT position,
+        // which lies on the parent's centreline but not necessarily at a recorded
+        // vertex. Coincidence is the wrong test; contact is the right one.
+        if (dx * dx + dy * dy + dz * dz < 4.0) { on_another = true; break; }
+      }
+      if (on_another) break;
+    }
+    if (!on_another) ++rootless;
+  }
+  CHECK(rootless == 0,
+        "G3: a curve starting above the floor must start ON another curve — growth "
+        "advances only onto material that already exists, so a rootless start in open "
+        "air cannot be produced");
+}
+
+// ── G4: NO STEP BELOW THE PRINTABLE ANGLE ───────────────────────────────────────
+// ★★ TWO POPULATIONS, TWO BARS. The old form measured every segment together and
+// allowed 25 % below the cone, on a SPARSE fixture chosen so that joins would be rare.
+// Both halves of that were wrong. A blended bar cannot fail for the reason it exists:
+// measured on the DEFAULT fixture (12x12x24, spacing 4.0), 68.2 % of segments sit
+// below the cone and 66.8 % of material length is in them, so the 25 % bar would fail
+// there — not because the cone is violated but because joins dominate. And the sparse
+// fixture reads 18.2 %, passing while never exercising the regime that ships.
+//
+// The generator knows which segments are which, so ask it. A CLIMB is cone-clamped
+// and must obey the cone with NO tolerance. A JOIN or DEFLECT lands on material at
+// both ends — it is a bridge, not an overhang — so its bar is the horizontal RUN
+// against kOrganicMaxCantileverMm, which is the limit this codebase already commits to.
+void test_growth_respects_the_cone() {
+  GrowFixture f = grow_fixture();            // ★ DEFAULT: the regime that ships
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  const double cone = std::sin(kOrganicGrowthMinAngleDeg * 3.14159265358979323846 /
+                               180.0);
+  std::size_t climbs = 0, climb_below = 0, joins = 0, join_over = 0;
+  double worst_run = 0.0, worst_climb_deficit = 0.0;
+  for (const OrganicCurve& c : lat.curves) {
+    // the tags must describe the segments they are parallel to, or every number
+    // below is measured against the wrong geometry
+    CHECK(c.seg_kind.size() + 1 == c.points.size(),
+          "G4: seg_kind must be parallel to the segments of points");
+    for (std::size_t i = 1; i < c.points.size(); ++i) {
+      const Vec3 d{c.points[i].x - c.points[i - 1].x, c.points[i].y - c.points[i - 1].y,
+                   c.points[i].z - c.points[i - 1].z};
+      const double L = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+      if (L < 1e-9) continue;
+      const auto kind = static_cast<OrganicCurve::Seg>(c.seg_kind[i - 1]);
+      if (kind == OrganicCurve::Seg::Climb) {
+        ++climbs;
+        if (d.z / L < cone - 1e-6) {
+          ++climb_below;
+          worst_climb_deficit = std::max(worst_climb_deficit, cone - d.z / L);
+        }
+      } else {
+        ++joins;
+        const double run = std::sqrt(d.x * d.x + d.y * d.y);
+        if (run > worst_run) worst_run = run;
+        if (run > kOrganicMaxCantileverMm + 1e-9) ++join_over;
+      }
+    }
+  }
+  CHECK(climbs > 0, "G4: there must be climbing segments to judge");
+  CHECK(climb_below == 0,
+        "G4: a CLIMBING step is cone-clamped and must never fall below the printable "
+        "angle — no tolerance, because there is no mechanism that would produce one");
+  CHECK(join_over == 0,
+        "G4: a JOIN or DEFLECTION span lands on material at both ends, so it is a "
+        "BRIDGE — its horizontal run must not exceed kOrganicMaxCantileverMm. Nothing "
+        "checked this before: the run was bounded only by d_test, half the local "
+        "SEPARATION (2.00 mm here = spacing 4.0 / 2). Measured, separation 8.0 puts "
+        "d_test at 4.0 mm and yields 2406 joins over the 3.0 mm cap");
+  (void)worst_run; (void)worst_climb_deficit; (void)joins;
+}
+
+// ── G5: A CROWDED TIP JOINS RATHER THAN STOPPING SHORT ──────────────────────────
+void test_growth_joins_neighbours() {
+  GrowFixture f = grow_fixture(16, 16, 20, 1.0);
+  OrganicGenStats gs;
+  grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  if (gs.growth_curves > 1)
+    CHECK(gs.growth_joins > 0,
+          "G5: with many curves in one region some tip must crowd a neighbour and REACH "
+          "it — stopping 2 mm short on a 0.66 mm strut left free ends the prune then "
+          "ate, 2260 spans emitted against 2520 pruned");
+}
+
+// ── G8: CONNECTEDNESS, AND THE MATERIAL IT IS MEASURED ON ───────────────────────
+// ★★ A RATIO IS PERFECT WHEN BOTH ITS TERMS ARE NEARLY ZERO. The first version of
+// this test asserted components and largest-fraction alone, and sampled {4.0, 6.0,
+// 8.0}. Both halves were too weak, and the sweep below is why:
+//
+//   sep 4.0 : 4086.2 mm grown ->  4199.0 mm written (102.8 %)  comp 1  largest 1.0000
+//   sep 4.5 : 3736.7 mm grown ->   193.2 mm written (  5.2 %)  comp 5  largest 0.8628
+//   sep 5.0 : 3878.8 mm grown ->    15.0 mm written (  0.4 %)  comp 2  largest 0.5995
+//   sep 7.0 : 1248.1 mm grown ->   140.9 mm written ( 11.3 %)  comp 1  largest 1.0000
+//
+// Separation 7.0 reports ONE component and largest-fraction 1.0000 on ELEVEN PER CENT
+// of the material. Separation 5.0 passed the old bars (comp <= 2, largest >= 0.54)
+// with FIFTEEN MILLIMETRES of lattice. So every connectivity assertion here is now
+// paired with a SURVIVAL bar, and the sweep is a sweep: 5.0 and 7.0 are both invisible
+// from {4.0, 6.0, 8.0}, and the curve between them is not monotone.
+//
+// ★ Measured on the EMITTED SPANS via the existing union-find (segment distance <=
+// sum of radii), never on the curve graph.
+void test_growth_stays_connected() {
+  // ★ THE FLOOR IS SET FROM THE MEASUREMENT, NOT GUESSED. Separation 4.0 survives at
+  // 102.8 %; the failing separations sit at 0.4-15 %. 0.80 sits an order of magnitude
+  // above the failures and comfortably below the one regime that works, so it fails
+  // for the reason it exists rather than on noise.
+  const double kSurvivalFloor = 0.80;
+
+  auto measure = [](double sep, OrganicGenStats& grow_out, OrganicGenStats& emit_out) {
+    GrowFixture f = grow_fixture();
+    for (double& sp : f.spacing) sp = sep;
+    const OrganicLattice lat = grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing,
+                                                   nullptr, f.params, &grow_out);
+    run(lat, emit_out);                      // the EMITTER decides what ships
+  };
+
+  // ── the sweep. Reported for every point, asserted where the bar applies. ────────
+  bool any_survived = false;
+  for (double sep : {4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0}) {
+    OrganicGenStats gs, es;
+    measure(sep, gs, es);
+    const double grown = es.census_grown_len_mm;
+    const double wrote = es.census_len_mm[OrganicGenStats::CensusWritten];
+    const double survival = grown > 0.0 ? wrote / grown : 0.0;
+    std::fprintf(stderr,
+                 "[G8] sep %.1f: grown %8.1f -> written %8.1f mm (%5.1f %%)  comp %2zu "
+                 "largest %.4f  | joins %zu refused %zu\n",
+                 sep, grown, wrote, 100.0 * survival, es.emitted_components,
+                 es.emitted_largest_length_fraction, gs.growth_joins,
+                 gs.growth_join_refused_span);
+    if (survival >= kSurvivalFloor) {
+      any_survived = true;
+      // ★ CONNECTIVITY IS ONLY ASSERTED WHERE THERE IS MATERIAL TO CONNECT. Asserting
+      // it on 0.4 % of the lattice is what let separation 5.0 pass at 15 mm.
+      CHECK(es.emitted_components == 1,
+            "G8: where the material survives, the emitted geometry must be ONE "
+            "component");
+      CHECK(es.emitted_largest_length_fraction > 0.99,
+            "G8: where the material survives, essentially all of it must be in the "
+            "largest component");
+    }
+  }
+  CHECK(any_survived,
+        "G8: at least one separation must survive emission above the floor — if none "
+        "does, the pipeline deletes every lattice and the connectivity bars above "
+        "would be vacuous");
+
+  // ── the survival bar itself, at the one separation known to work ───────────────
+  {
+    OrganicGenStats gs, es;
+    measure(4.0, gs, es);
+    const double survival =
+        es.census_len_mm[OrganicGenStats::CensusWritten] / es.census_grown_len_mm;
+    CHECK(survival >= kSurvivalFloor,
+          "G8: at the default separation the emitter must ship what growth grew — "
+          "measured 102.8 % when this bar was written; the floor is 0.80 because the "
+          "failing separations sit at 0.4-15 %, and a connectivity ratio cannot see "
+          "the difference");
+  }
+
+  // ── WHERE THE MILLIMETRES GO. Diagnosis only; this task does not repair it. ─────
+  // MEASURED 2026-08-28, Release: the SUPPORT PRUNE is the sole deleter. Every other
+  // pass either did not run or passed material through unchanged.
+  //
+  //   sep 4.0: into prune 4298.2 -> out 4199.0  (2.3 % removed)
+  //   sep 4.5: into prune 3967.1 -> out  193.2  (95.1 % removed)
+  //   sep 5.0: into prune 4194.1 -> out   15.0  (99.6 % removed)
+  //
+  // WHY 4.0 ESCAPES: the emitter's prune is a SPAN-TO-SPAN contact test (a tip is
+  // supported if it lands on another span's interior, or on a tip that leads away).
+  // Growth's guarantee is different in kind — an occupancy raster in layer order that
+  // counts the BUILD PLATE. A curve climbing from the floor is supported under growth
+  // and has no neighbouring span at its tip, so the emitter prunes it and the erosion
+  // walks back down the curve. At separation 4.0 there are 1520 joins, so nearly every
+  // tip is a T-joint and the emitter's test is satisfied INCIDENTALLY. The two support
+  // criteria disagree; density hides the disagreement.
+  {
+    OrganicGenStats gs, es;
+    measure(5.0, gs, es);
+    const double in_prune = es.census_len_mm[OrganicGenStats::CensusNodeMerge];
+    const double out_prune = es.census_len_mm[OrganicGenStats::CensusSupportPrune];
+    CHECK(in_prune > 0.0 && out_prune >= 0.0,
+          "G8 census precondition: both sides of the support prune must be measured, "
+          "not defaulted — a -1 stage means the pass did not run");
+    std::fprintf(stderr, "[G8] sep 5.0 support prune: %.1f -> %.1f mm (%.1f %% removed)\n",
+                 in_prune, out_prune, 100.0 * (1.0 - out_prune / in_prune));
+  }
+}
+
+// ── G7: THE GROWTH COUNTERS REACH THE RECEIPT ───────────────────────────────────
+// ★★ THE TELEMETRY WAS DEAD. `run_organic_step` filled `oo.growth` and nothing ever
+// read it, so every growth counter was discarded on both the analyze and the geometry
+// path. The consequence that matters: `growth_tip_budget_hit` is the receipt's only
+// way of saying a run TRUNCATED at 20,000 tips rather than finishing, and a truncated
+// run was indistinguishable from a complete one.
+//
+// This test is at the RunInfo -> json seam rather than end-to-end because that is
+// where the loss was, and because a unit test cannot run the full job pipeline. It
+// asserts the two facts a receipt must carry: the counters appear when growth ran, and
+// `growth_ran` is FALSE — not merely absent, and not a zero — when it did not.
+void test_growth_stats_reach_the_receipt() {
+  {
+    RunInfo gi;
+    gi.grading_present = true;   // the receipt's grading block gates the rest
+    gi.organic_present = true;
+    gi.organic_growth_ran = true;
+    gi.organic_growth_seeds = 41;
+    gi.organic_growth_curves = 7;
+    gi.organic_growth_steps = 1234;
+    gi.organic_growth_blocked = 5;
+    gi.organic_growth_clamped = 99;
+    gi.organic_growth_clamp_max_deg = 12.5;
+    gi.organic_growth_joins = 3;
+    gi.organic_growth_join_refused_span = 2;
+    gi.organic_growth_tip_budget_hit = true;
+    gi.organic_growth_layer_height_mm = 0.2;
+    const std::string j = run_info_json(gi);
+    CHECK(j.find("\"growth_ran\": true") != std::string::npos,
+          "G7: growth_ran must be reported true when growth ran");
+    CHECK(j.find("\"growth_seeds\": 41") != std::string::npos,
+          "G7: growth_seeds must reach the receipt — it was discarded entirely");
+    CHECK(j.find("\"growth_steps\": 1234") != std::string::npos,
+          "G7: growth_steps must reach the receipt");
+    CHECK(j.find("\"growth_clamped\": 99") != std::string::npos,
+          "G7: growth_clamped must reach the receipt — the clamp is the event that "
+          "growth_blocked was wrongly documented as counting");
+    CHECK(j.find("\"growth_join_refused_span\": 2") != std::string::npos,
+          "G7: joins refused for span must reach the receipt");
+    CHECK(j.find("\"growth_tip_budget_hit\": true") != std::string::npos,
+          "G7: a run TRUNCATED at the tip budget must say so — the header promises "
+          "the receipt reports this 'rather than silently truncating'");
+    CHECK(j.find("\"growth_layer_height_mm\"") != std::string::npos,
+          "G7: the layer height the result was computed in must be recorded");
+  }
+  {
+    // A TRACED organic run: growth_ran false, and no growth counter may appear at all.
+    // A zero that was never measured is not a passing zero.
+    RunInfo gi;
+    gi.grading_present = true;   // the receipt's grading block gates the rest
+    gi.organic_present = true;
+    gi.organic_growth_ran = false;
+    const std::string j = run_info_json(gi);
+    CHECK(j.find("\"growth_ran\": false") != std::string::npos,
+          "G7: a traced run must report growth_ran false, so 'growth measured zero' "
+          "and 'growth never ran' are distinguishable");
+    CHECK(j.find("\"growth_seeds\"") == std::string::npos,
+          "G7: no growth counter may be emitted on a traced run — an unmeasured zero "
+          "would read as a passing zero");
+    CHECK(j.find("\"growth_tip_budget_hit\"") == std::string::npos,
+          "G7: no growth counter may be emitted on a traced run");
+  }
+}
+
+// ── G9: THE COPY CHAIN, NOT THE SERIALIZER ──────────────────────────────────────
+// ★★ G7 HAND-FILLS A RunInfo AND CHECKS THE JSON. That locks the absent-keys rule but
+// it cannot see a DROPPED FIELD, because it never runs the copy that would drop it.
+// The original defect was exactly of that shape: the counters were filled by the
+// generator and never read, and every serializer test in the world would have passed.
+//
+// So: give OrganicGenStats a DISTINCT non-zero value in every growth field, push it
+// through `copy_growth_stats` — the one path both receipts now use — and assert each
+// value arrives. A thirteenth counter wired in four places out of five fails here.
+void test_growth_copy_path_drops_nothing() {
+  OrganicGenStats g;
+  g.growth_seeds = 11;
+  g.growth_curves = 22;
+  g.growth_steps = 33;
+  g.growth_blocked = 44;
+  g.growth_clamped = 55;
+  g.growth_clamp_max_deg = 6.5;
+  g.growth_branches = 77;
+  g.growth_branch_refused = 88;
+  g.growth_joins = 99;
+  g.growth_join_refused_span = 111;
+  g.growth_tip_budget_hit = true;
+  g.growth_layer_height_mm = 0.125;
+
+  RunInfo gi;
+  copy_growth_stats(gi, g, /*ran=*/true);
+
+  CHECK(gi.organic_growth_ran, "G9: growth_ran must arrive");
+  CHECK(gi.organic_growth_seeds == 11, "G9: growth_seeds dropped by the copy path");
+  CHECK(gi.organic_growth_curves == 22, "G9: growth_curves dropped by the copy path");
+  CHECK(gi.organic_growth_steps == 33, "G9: growth_steps dropped by the copy path");
+  CHECK(gi.organic_growth_blocked == 44, "G9: growth_blocked dropped by the copy path");
+  CHECK(gi.organic_growth_clamped == 55, "G9: growth_clamped dropped by the copy path");
+  CHECK(gi.organic_growth_clamp_max_deg == 6.5,
+        "G9: growth_clamp_max_deg dropped by the copy path");
+  CHECK(gi.organic_growth_branches == 77, "G9: growth_branches dropped");
+  CHECK(gi.organic_growth_branch_refused == 88, "G9: growth_branch_refused dropped");
+  CHECK(gi.organic_growth_joins == 99, "G9: growth_joins dropped");
+  CHECK(gi.organic_growth_join_refused_span == 111,
+        "G9: growth_join_refused_span dropped");
+  CHECK(gi.organic_growth_tip_budget_hit, "G9: growth_tip_budget_hit dropped");
+  CHECK(gi.organic_growth_layer_height_mm == 0.125,
+        "G9: growth_layer_height_mm dropped");
+
+  // ★ and the values must SURVIVE to the receipt, so the chain is checked end to end
+  // rather than only at its first hop.
+  gi.grading_present = true;
+  gi.organic_present = true;
+  const std::string j = run_info_json(gi);
+  CHECK(j.find("\"growth_join_refused_span\": 111") != std::string::npos,
+        "G9: a value copied in must still be the value serialized out");
+  CHECK(j.find("\"growth_clamped\": 55") != std::string::npos,
+        "G9: a value copied in must still be the value serialized out");
+
+  // ran=false must zero nothing and claim nothing: the counters are meaningless, and
+  // the receipt suppresses them, but the flag is the thing that says so.
+  RunInfo gf;
+  copy_growth_stats(gf, g, /*ran=*/false);
+  CHECK(!gf.organic_growth_ran,
+        "G9: growth_ran must follow the argument, never be inferred from a counter");
+}
+
+// ── ★ THE CENSUS MUST COUNT PIECES, NOT ONLY MILLIMETRES ────────────────────────
+// A LENGTH census is blind to a pass that changes topology without moving material.
+// The node merge welds coincident endpoints: it fuses components and deletes almost
+// nothing, so a length-only census reports it as a no-op and "the support prune is
+// the sole deleter" gets read as "nothing else re-wired anything". The first claim is
+// true; the second does not follow from it.
+//
+// MEASURED on this fixture at separation 4.0: emitted 4331 mm / 26 components ->
+// node merge 4298 mm / 9 components. It removed 0.8% of the length and two thirds of
+// the pieces.
+void test_census_counts_components_not_only_length() {
+  GrowFixture f = grow_fixture();
+  for (double& v : f.spacing) v = 4.0;
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  OrganicGenStats st;
+  const std::vector<OrganicSpan> spans = run(lat, st);
+  CHECK(!spans.empty(), "census precondition: the fixture must emit geometry");
+  if (spans.empty()) return;
+
+  // every stage that recorded a length must also have recorded a component count:
+  // a half-populated census is what let a topology change go unseen.
+  int with_len = 0, with_comps = 0;
+  for (int i = 0; i < OrganicGenStats::kCensusStages; ++i) {
+    if (st.census_len_mm[i] < 0.0) continue;
+    ++with_len;
+    if (st.census_components[i] >= 0) ++with_comps;
+  }
+  std::printf("  census: %d stage(s) with a length, %d of them with components\n",
+              with_len, with_comps);
+  CHECK(with_len > 0, "the census records at least one stage");
+  CHECK(with_comps == with_len,
+        "every stage with a length also has a component count -- a stage missing one "
+        "is a stage where a re-wiring pass cannot be seen");
+
+  const double len_emit = st.census_len_mm[OrganicGenStats::CensusEmitted];
+  const double len_merge = st.census_len_mm[OrganicGenStats::CensusNodeMerge];
+  const int c_emit = st.census_components[OrganicGenStats::CensusEmitted];
+  const int c_merge = st.census_components[OrganicGenStats::CensusNodeMerge];
+  if (len_emit > 0.0 && c_emit > 0 && c_merge > 0) {
+    std::printf("  node merge: %.0f mm / %d comps -> %.0f mm / %d comps\n",
+                len_emit, c_emit, len_merge, c_merge);
+    CHECK(c_merge < c_emit,
+          "the node merge FUSES components -- the property a length census cannot "
+          "see, and the reason this census reports both");
+    CHECK(std::fabs(len_merge - len_emit) / len_emit < 0.10,
+          "...while moving under 10% of the length, which is why it reads as a no-op "
+          "in the length dimension");
+  }
+}
+
 int main() {
+  test_growth_produces_curves();
+  test_growth_does_not_fall_back();
+  test_growth_is_supported();
+  test_growth_respects_the_cone();
+  test_growth_joins_neighbours();
+  test_growth_stays_connected();
+  test_growth_stats_reach_the_receipt();
+  test_growth_copy_path_drops_nothing();
+  test_mat_that_counts_feet_lays_floor();
+  test_mat_survives_the_weld_raster();
+  test_slenderness_reads_the_unsupported_span();
+  test_stats_are_actually_populated();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();
   test_node_merge_joins_near_misses();
   test_finish_does_not_change_the_structure();
   test_deterministic();
   test_one_cell_needs_a_finish();
+  test_census_counts_components_not_only_length();
   std::printf("%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

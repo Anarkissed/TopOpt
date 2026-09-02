@@ -121,6 +121,7 @@ add_library(topopt
   src/simp/lattice_algorithm.cpp
   src/simp/observability.cpp
   src/fea/hex_element.cpp
+  src/fea/beam_network.cpp
   src/fea/lattice.cpp
   src/fea/lattice_material.cpp
   src/fea/strut_strength.cpp
@@ -173,6 +174,17 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(topopt PUBLIC Threads::Threads)
+
+# ★ ACCELERATE: the direct sparse Cholesky in src/fea/beam_network.cpp. The coupled
+# beam/shell/solid system is SPD once the corner-hinged solid islands are dropped,
+# and a supernodal direct factorisation is both exact and far faster than iterating
+# on a matrix whose hex, beam-bending and shell terms differ by orders of magnitude.
+# Apple-only, so the conjugate-gradient path stays as the portable fallback and CI
+# on other platforms keeps building; nothing in the public API changes either way.
+if(APPLE)
+  target_link_libraries(topopt PRIVATE "-framework Accelerate")
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_ACCELERATE)
+endif()
 
 # STEP import (M1.4) requires OCCT. Compile it into the library and link the
 # needed OCCT toolkits only when OCCT is present. OCCT is LGPL 2.1 and its
@@ -490,6 +502,25 @@ target_link_libraries(test_fea PRIVATE topopt)
 target_compile_definitions(test_fea PRIVATE
   FEA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/fea")
 add_test(NAME hex_element COMMAND test_fea)
+
+# The 2-node spatial frame element (organic-lattice beam FEA). Pure C++/std, no
+# Eigen and no fixtures: it asserts against CLOSED FORMS (cantilever bending +
+# shear, axial, torsion) and against the shear/bending criterion of Polymers
+# 18(16):2003. Builds and runs in every configuration like the hex-element test.
+add_executable(test_frame_element tests/unit/test_frame_element.cpp)
+target_link_libraries(test_frame_element PRIVATE topopt)
+add_test(NAME frame_element COMMAND test_frame_element)
+
+# The beam network: contact welding and the restraint analysis. Pure C++/std.
+add_executable(test_beam_network tests/unit/test_beam_network.cpp)
+target_link_libraries(test_beam_network PRIVATE topopt)
+add_test(NAME beam_network COMMAND test_beam_network)
+
+# The DKT plate-bending triangle. Pure C++/std: rigid-body modes, the
+# constant-curvature patch test, and the paper's own plate benchmarks.
+add_executable(test_dkt_plate tests/unit/test_dkt_plate.cpp)
+target_link_libraries(test_dkt_plate PRIVATE topopt)
+add_test(NAME dkt_plate COMMAND test_dkt_plate)
 
 # Orientation candidate generation + support-volume proxy metric (M4.3). Pure
 # C++/std (no OCCT, no Eigen): builds its meshes and voxel grids in code, so it
