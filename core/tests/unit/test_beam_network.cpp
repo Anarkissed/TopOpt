@@ -987,6 +987,81 @@ void test_bridges() {
   }
 }
 
+// ★ THE PLATE IS AS THICK AS IT WAS DESIGNED, NOT AS THICK AS THE RASTER MADE IT.
+// A facet built from voxels is a whole number of cells deep: on a 1.705 mm grid a
+// 2.0 mm rim comes out 1.705 or 3.41 mm and never 2.0. Bending goes as t^3, so that
+// is 0.62x or 4.9x on the exact property a stiffening skin is there to provide -- and
+// the MASS still matches the cells either way, so a volume check sails past it.
+void test_skin_thickness_comes_from_the_DESIGN() {
+  const int n = 8;
+  const double h = 1.7, design = 2.0;
+  const topopt::VoxelGrid g = block_grid(n, n, 4, h);
+  std::vector<char> skin(g.voxel_count(), 0);
+  for (int j = 1; j < 7; ++j)
+    for (int i = 1; i < 7; ++i)
+      for (int k = 1; k < 3; ++k) skin[g.index(i, j, k)] = 1;   // two cells deep
+
+  const topopt::ShellMesh raster = topopt::mesh_skin_midsurface(g, skin);
+  const topopt::ShellMesh designed = topopt::mesh_skin_midsurface(g, skin, -1.0, design);
+  CHECK(!designed.triangles.empty(), "the designed-thickness mesh is built");
+  CHECK(raster.triangles.size() == designed.triangles.size(),
+        "the thickness does not change the geometry, only the section");
+  for (double t : raster.tri_thickness)
+    CHECK(std::fabs(t - 2 * h) < 1e-9, "without a design, a facet is its run of cells");
+  for (double t : designed.tri_thickness)
+    CHECK(std::fabs(t - design) < 1e-9, "with one, every facet is the DESIGNED thickness");
+  std::printf("  skin thickness: raster %.4f mm  designed %.4f mm  (bending ratio %.2fx)\n",
+              2 * h, design, std::pow(2 * h / design, 3.0));
+}
+
+// ★ A SKIN TWO CELLS DEEP MUST STILL BOND. The mid-surface of a plate sits half its
+// thickness off the material it fuses to, so a fixed +/-1 voxel search finds the
+// solid for a one-cell skin and NOTHING for a two-cell one. Measured before the fix:
+// "shell patch 0 is bonded to the solid at 0 node(s)", purely because of how many
+// voxels deep the raster happened to make it.
+void test_a_two_cell_skin_still_bonds_to_the_solid() {
+  const int nx = 10, ny = 4, nz = 6;
+  const double h = 1.7, E = 3500.0, nu = 0.35;
+  const topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+  std::vector<char> core_only(g.voxel_count(), 0), skin(g.voxel_count(), 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        if (k >= nz - 2) skin[g.index(i, j, k)] = 1;      // TWO cells deep
+        else             core_only[g.index(i, j, k)] = 1;
+      }
+  std::vector<BeamSegment> segs;
+  const double cx = 3 * h, cy = 2 * h, cz = 1.5 * h;
+  for (int i = 0; i < 4; ++i)
+    segs.push_back({Vec3{cx + 0.2 * i, cy, cz}, Vec3{cx + 0.2 * (i + 1), cy, cz}, 0.2});
+  segs.push_back({Vec3{cx + 0.4, cy, cz}, Vec3{cx + 0.4, cy + 0.3, cz}, 0.2});
+  const topopt::BeamNetwork net = topopt::build_beam_network(segs);
+
+  topopt::ShellPatch sp;
+  sp.mesh = topopt::mesh_skin_midsurface(g, skin);
+  sp.thickness_mm = 0.0;
+  std::vector<topopt::ShellPatch> shells{sp};
+
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int k = 0; k <= nz; ++k)
+    for (int j = 0; j <= ny; ++j) {
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(0, j, k), c, 0.0});
+      lds.push_back({nod(nx, j, 0), 2, -1.0 / double((nz + 1) * NYn)});
+    }
+  const topopt::CoupledLatticeSolve r = topopt::solve_coupled_lattice(
+      g, core_only, net, bcs, lds, E, nu, 0.9, 1e-10, 50000, nullptr, &shells);
+  if (!r.refusal.empty()) std::fprintf(stderr, "  refusal: %s\n", r.refusal.c_str());
+  std::printf("  two-cell skin: %zu shell nodes, %zu bonded into the solid\n",
+              r.shell_nodes, r.shell_nodes_tied);
+  CHECK(r.refusal.empty(), "a two-cell skin does not refuse the solve");
+  CHECK(r.shell_nodes_tied > 0,
+        "a skin two cells deep still finds the solid it fuses to (0 was the bug)");
+}
+
 void test_refusals() {
   bool threw = false;
   try { topopt::build_beam_network({{Vec3{0,0,0}, Vec3{1,0,0}, 0.0}}); }
@@ -1026,6 +1101,8 @@ int main() {
   test_skin_as_plates_matches_skin_as_hex();
   test_a_load_over_lattice_is_APPLIED_not_dropped();
   test_bridges();
+  test_skin_thickness_comes_from_the_DESIGN();
+  test_a_two_cell_skin_still_bonds_to_the_solid();
   test_refusals();
   std::printf("test_beam_network: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

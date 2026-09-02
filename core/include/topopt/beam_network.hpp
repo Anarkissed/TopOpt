@@ -217,8 +217,16 @@ struct ShellMesh {
 // I briefly special-cased the DEPTH face of this part to hex because its skin cells
 // are thin along the region normal. That fitted one model and would have been wrong
 // on the next: a front or back that is partially covered still grades to shape.
+// `design_thickness_mm`, when positive, is the thickness the skin was DESIGNED to
+// have, and every facet takes it. Without it a facet is as thick as the run of cells
+// it stands for, which is quantised to whole voxels: on a 1.705 mm grid a 2.0 mm rim
+// comes out 1.705 mm or 3.41 mm and never 2.0. Plate bending goes as t^3, so that is
+// 0.62x too floppy or 4.9x too stiff -- wrong in both directions, on the property a
+// stiffening skin exists for. The MASS still matches the cells either way, which is
+// why a volume check does not catch it.
 ShellMesh mesh_skin_midsurface(const VoxelGrid& grid, const std::vector<char>& skin_mask,
-                               double weld_tol_mm = -1.0);
+                               double weld_tol_mm = -1.0,
+                               double design_thickness_mm = -1.0);
 
 // `loops` are closed polygons in the face's (u, w) basis; loop 0 is the outline and
 // any others are holes. Empty `loops` means the plain half_u x half_w rectangle.
@@ -268,7 +276,14 @@ struct CoupledLatticeSolve {
   std::size_t bcs_applied = 0, bcs_dropped = 0;
   std::size_t loads_applied = 0, loads_dropped = 0;
   double load_dropped_fraction = 0.0;
-  std::size_t loads_on_shell = 0, loads_on_beam = 0;  // re-homed off the solid   // by |force|, not by count
+  std::size_t loads_on_shell = 0, loads_on_beam = 0;  // re-homed off the solid
+  // ★ HOW FAR A LOAD ACTUALLY HAD TO REACH to find material, in mm. `load_reach_mm`
+  // is a single number and a GRADED lattice has no single cell, so the safe choice
+  // is to pass the COARSEST cell -- the nearest material is always taken, so a
+  // generous cap costs nothing where cells are fine. This reports what the cap was
+  // actually used for: if it approaches the cap, loads are being attached across
+  // pores and the number deserves a look rather than a shrug.
+  double load_reach_used_max = 0.0;   // by |force|, not by count
   int peak_member = -1;
   std::size_t beam_nodes_tied = 0;
   std::size_t beam_nodes_welded_to_shell = 0;   // moment-transferring joints

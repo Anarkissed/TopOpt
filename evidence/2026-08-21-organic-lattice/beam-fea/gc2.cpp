@@ -1895,6 +1895,13 @@ int main(int argc, char** argv) {
       std::fprintf(bf, "GRID %.10g %.10g %.10g %.10g %d %d %d\n",
                    grid.origin.x, grid.origin.y, grid.origin.z, grid.spacing,
                    grid.nx, grid.ny, grid.nz);
+      // ★ THE SKIN'S DESIGNED THICKNESS. The mask says WHICH cells are grade-to-solid
+      // but not how thick the rim was meant to be, and a consumer that meshes them as
+      // plates can only count voxels -- which quantises a 2.0 mm rim to 1.705 or
+      // 3.41 mm on this grid. Plate bending goes as t^3, so that is a 0.62x/4.9x
+      // error on the property the skin exists to provide. It is a design parameter;
+      // hand it over rather than making the reader guess it from the raster.
+      if (rim_mm > 0.0) std::fprintf(bf, "SKIN %.10g\n", rim_mm);
       const int NX = grid.nx + 1, NY = grid.ny + 1;
       auto node_xyz = [&](int n, double& x, double& y, double& z) {
         const int i = n % NX, j = (n / NX) % NY, k = n / (NX * NY);

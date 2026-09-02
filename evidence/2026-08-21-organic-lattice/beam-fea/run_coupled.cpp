@@ -61,6 +61,7 @@ int main(int argc, char** argv) {
   const double cell_mm = argc > 7 ? std::atof(argv[7]) : 0.0;
 
   double ox=0, oy=0, oz=0, h=1; int nx=0, ny=0, nz=0;
+  double skin_thickness_mm = -1.0;   // from the file when the generator recorded it
   std::vector<BeamSegment> segs;
   struct P { double x,y,z; int c; double v; };
   std::vector<P> bc_raw, ld_raw;
@@ -68,6 +69,7 @@ int main(int argc, char** argv) {
     while (std::getline(f, ln)) {
       std::istringstream is(ln); std::string t; is >> t;
       if (t == "GRID") is >> ox >> oy >> oz >> h >> nx >> ny >> nz;
+      else if (t == "SKIN") is >> skin_thickness_mm;   // the rim's DESIGNED thickness
       else if (t == "SEG") { BeamSegment s; double r;
         is >> s.a.x >> s.a.y >> s.a.z >> s.b.x >> s.b.y >> s.b.z >> r;
         s.radius_mm = r; segs.push_back(s); }
@@ -121,7 +123,14 @@ int main(int argc, char** argv) {
     for (std::size_t e = 0; e < mk.size(); ++e)
       if (mk[e] & 4u) { skinmask[e] = 1; ++ns2; }
     ShellPatch sp2;
-    sp2.mesh = mesh_skin_midsurface(g, skinmask);
+    // the file carries the designed rim when the generator recorded it; lattices
+    // traced before that fall back to the rim this run was told about, which is the
+    // same number. Either beats counting voxels.
+    const double design_t = skin_thickness_mm > 0.0 ? skin_thickness_mm : rim_mm;
+    sp2.mesh = mesh_skin_midsurface(g, skinmask, -1.0, design_t);
+    std::printf("skin: plate thickness %.3f mm (%s), not the voxel run of %.3f mm\n",
+                design_t, skin_thickness_mm > 0.0 ? "from the file" : "from rim_mm",
+                g.spacing);
     sp2.thickness_mm = 0.0;                    // per-facet thickness carries it
     double vol = 0.0;
     for (std::size_t t = 0; t < sp2.mesh.triangles.size(); ++t) {

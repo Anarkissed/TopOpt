@@ -376,7 +376,7 @@ bool inside_loops(double u, double w,
 }  // namespace
 
 ShellMesh mesh_skin_midsurface(const VoxelGrid& grid, const std::vector<char>& skin_mask,
-                               double weld_tol_mm) {
+                               double weld_tol_mm, double design_thickness_mm) {
   ShellMesh m;
   if (skin_mask.size() != grid.voxel_count()) return m;
   const double h = grid.spacing;
@@ -477,7 +477,9 @@ ShellMesh mesh_skin_midsurface(const VoxelGrid& grid, const std::vector<char>& s
         };
         const int c00 = node_of(corner(-1,-1)), c10 = node_of(corner(+1,-1));
         const int c11 = node_of(corner(+1,+1)), c01 = node_of(corner(-1,+1));
-        const double th = run * h;
+        // the DESIGNED thickness when the caller knows it; otherwise the run of
+        // cells, which is the raster's opinion rounded to whole voxels
+        const double th = design_thickness_mm > 0.0 ? design_thickness_mm : run * h;
         if (c00 != c10 && c10 != c11 && c00 != c11) {
           m.triangles.push_back({c00, c10, c11});
           m.tri_thickness.push_back(th);
@@ -1218,11 +1220,22 @@ CoupledLatticeSolve solve_coupled_lattice(
         const int i = static_cast<int>(std::floor((q.x - grid.origin.x) / grid.spacing));
         const int j = static_cast<int>(std::floor((q.y - grid.origin.y) / grid.spacing));
         const int k = static_cast<int>(std::floor((q.z - grid.origin.z) / grid.spacing));
+        // ★ THE SEARCH MUST SCALE WITH THE PLATE, NOT WITH THE GRID. A fixed +/-1
+        // voxel bonds a skin whose mid-surface sits half a cell off the interface and
+        // finds NOTHING for one that sits a full cell off -- measured, a one-cell
+        // skin bonded at 82% of its nodes and a two-cell skin at 0%, purely because
+        // of how many voxels deep the raster made it. The mid-surface of a plate of
+        // thickness t lies t/2 from the material it fuses to, so reach that far plus
+        // the half-voxel of grid slack, and turn it into a cell span.
+        const double th_here = (*shells)[pidx].thickness_mm > 0.0
+                                   ? (*shells)[pidx].thickness_mm : sm2.thickness_mm;
+        const double want = 0.5 * (th_here > 0.0 ? th_here : grid.spacing) + 0.5 * grid.spacing;
+        const int span = std::max(1, static_cast<int>(std::ceil(want / grid.spacing)));
         int hi = -1, hj = -1, hk = -1;
         double best = -1.0;
-        for (int dk = -1; dk <= 1; ++dk)
-          for (int dj = -1; dj <= 1; ++dj)
-            for (int di = -1; di <= 1; ++di) {
+        for (int dk = -span; dk <= span; ++dk)
+          for (int dj = -span; dj <= span; ++dj)
+            for (int di = -span; di <= span; ++di) {
               const int ci = i + di, cj = j + dj, ck = k + dk;
               if (ci < 0 || cj < 0 || ck < 0 || ci >= grid.nx || cj >= grid.ny ||
                   ck >= grid.nz) continue;
@@ -1884,6 +1897,8 @@ CoupledLatticeSolve solve_coupled_lattice(
             l.value * mm.w[static_cast<std::size_t>(x)];
       ++nld;
       if (best_kind == 0) ++out.loads_on_shell; else ++out.loads_on_beam;
+      out.load_reach_used_max =
+          std::max(out.load_reach_used_max, std::sqrt(best_d2[best_kind]));
       continue;
     }
     // nothing ended at this point: find the nearest strut PASSING under it
@@ -1922,6 +1937,7 @@ CoupledLatticeSolve solve_coupled_lattice(
     }
     ++nld;
     ++out.loads_on_beam;
+    out.load_reach_used_max = std::max(out.load_reach_used_max, std::sqrt(hit_d2));
   }
   out.bcs_applied = nbc;
   out.loads_applied = nld;
@@ -2192,6 +2208,10 @@ CoupledLatticeSolve solve_coupled_lattice(
   // The symbolic stage predicts the factor size before any memory is committed, so a
   // part whose fill-in would not fit falls back to CG rather than being killed by
   // the OOM reaper.
+  // the residual a DIRECT factorisation must reach to be believed. Not a stopping
+  // rule -- a factorisation does not iterate -- but an accuracy floor: below this the
+  // answer is exact for engineering purposes, and above it something is wrong.
+  constexpr double kDirectAcceptResidual = 1e-6;
   bool direct_ok = false;
   const char* direct_which = "Cholesky";
   std::vector<double> u_direct;
@@ -2323,7 +2343,7 @@ CoupledLatticeSolve solve_coupled_lattice(
           // ONE. Accepting the answer because the factorisation returned OK is how a
           // wrong displacement field passes as exact. If it is not small, fall
           // through to CG rather than ship it.
-          direct_ok = direct_rn < 1e-6;
+          direct_ok = direct_rn < kDirectAcceptResidual;
           direct_which = which;
           mark(direct_ok ? "direct solve accepted" : "direct solve REJECTED (residual)",
                direct_rn);
@@ -2556,9 +2576,18 @@ CoupledLatticeSolve solve_coupled_lattice(
                   std::to_string(out.residual) + ")";
     return out;
   }
-  if (!(out.residual <= cg_tolerance) || !std::isfinite(out.residual)) {
+  // ★ A DIRECT SOLVE IS NOT JUDGED BY A CG STOPPING TOLERANCE. cg_tolerance is the
+  // point at which ITERATING stops being worth it; a factorisation cannot iterate to
+  // tighten, so demanding it of one is a category error. It refused a perfectly good
+  // answer on the 3 mm model -- "did not converge (relative residual 0.000000)", a
+  // residual too small to print -- because the factorisation landed just above 1e-8.
+  // The direct path already gates on a MEASURED residual (kDirectAcceptResidual);
+  // this uses the same bar, and the iterative path keeps the caller's tolerance.
+  const double accept = direct_ok ? kDirectAcceptResidual : cg_tolerance;
+  if (!(out.residual <= accept) || !std::isfinite(out.residual)) {
     out.refusal = "the solve did not converge (relative residual " +
-                  std::to_string(out.residual) + ")";
+                  std::to_string(out.residual) + ", accepted below " +
+                  std::to_string(accept) + ")";
     return out;
   }
   out.converged = true;
