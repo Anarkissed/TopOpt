@@ -62,4 +62,27 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         XCTAssertNil(g["cell_min_mm"]); XCTAssertNil(g["cell_max_mm"])
         XCTAssertEqual(g["algorithm"] as? String, "organic")
     }
+
+    /// ★ THE REAL SOURCE (measured 2026-09-03 01:17): the on-device request runs
+    /// `LatticeAutoPosture.applied` BEFORE `runSpec`, and that posture had already
+    /// rewritten Auto into the octet's swept window, so a guard in `runSpec` keyed on
+    /// `.auto` never fired on device while its unit test passed. The posture now leaves
+    /// an organic Auto alone; the octet control still derives its window.
+    func testTheAutoPostureLeavesAnOrganicAutoAlone() throws {
+        guard TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit") else { throw XCTSkip("no organic in core") }
+        var s = LatticeSettings(); s.enabled = true; s.stageMode = .aesthetic
+        s.densityMode = .sim; s.cellSizeMode = .auto
+        let octet = LatticeAutoPosture.applied(to: s, includeRegionCount: 1,
+                                               regionWidthsMM: [12], lineWidthMM: 0.42)
+        XCTAssertNotEqual(octet.cellSizeMode, .auto, "control: the octet posture rewrites Auto")
+        var o = s; o.algorithm = "organic"
+        let organic = LatticeAutoPosture.applied(to: o, includeRegionCount: 1,
+                                                 regionWidthsMM: [12], lineWidthMM: 0.42)
+        XCTAssertEqual(organic.cellSizeMode, .auto)
+        XCTAssertEqual(organic.cellMinMM, o.cellMinMM); XCTAssertEqual(organic.cellMaxMM, o.cellMaxMM)
+        // and through the same builder the device uses: core's auto, no window
+        let lim = TopOptKit.LatticeLimits(rhoMin: 0.1, rhoMax: 0.6, certifiable: true, minCellsPerMember: 1)
+        let g = organic.runSpec(limits: lim, generatable: true, memberMM: 12, lineWidthMM: 0.42)?.gradingDictionary() ?? [:]
+        XCTAssertEqual(g["cell_mode"] as? String, "auto"); XCTAssertNil(g["cell_min_mm"])
+    }
 }

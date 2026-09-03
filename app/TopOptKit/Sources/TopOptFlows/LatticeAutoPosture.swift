@@ -181,6 +181,16 @@ public enum LatticeAutoPosture {
                               retainSubfloor: s.retainSubfloorInUnloadedRegions,
                               transition: s.cellTransition)
         var out = s
+        // ★★ ORGANIC DOES NOT INHERIT THE OCTET'S WINDOW — HERE, at the source
+        // (reviewer, 2026-09-03). This posture turns an Auto pick into the octet
+        // ladder's per-member SWEPT window BEFORE `runSpec` ever runs — measured on
+        // the simulator 2026-09-03 01:17: `cellSizeMode: auto` persisted, the pane lit
+        // "Auto · grade", and the job STILL carried `cell_mode: swept, 5.5–6 mm` after
+        // a guard in `runSpec` keyed on `.auto` (which this rewrite had already made
+        // `.swept`). For organic the window IS the separation field and the part's
+        // cliff is unmeasured, so Auto stays Auto — core's own `auto` — and only an
+        // explicit size is ever sent. Octet is untouched.
+        if s.algorithm == "organic", s.cellSizeMode == .auto { return s }
         if s.cellSizeMode == .auto {
             out.cellSizeMode = posture.cellMode
             // ★ AND THE WINDOW COMES WITH IT. Auto is swept-without-typing, so the

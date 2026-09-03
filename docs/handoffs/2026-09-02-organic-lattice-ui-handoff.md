@@ -23,14 +23,23 @@
 > M2's own separation cliff (§14 below when written).
 >
 > UI fixes on disk (uncommitted until the suite names its failures):
-> - **The octet window no longer rides into organic — at its real source.** The
->   on-disk project said `cellSizeMode: auto` (window 4–8); the job carried `swept
->   5.5–6` because `runSpec`'s PR 310 plan turns an octet Auto into a per-member
->   swept window. Under `algorithm == "organic"` an Auto pick now travels as core's
->   own `cell_mode: auto` with no window (only an explicit size is ever sent); the
->   octet path is untouched. Test: `testOrganicAutoDoesNotInheritTheOctetsDerivedWindow`
->   (octet control still derives). The wizard row additionally resets an inherited
->   swept/fit mode to Auto out loud and lights nothing for an inherited mode.
+> - **The octet window no longer rides into organic — at its real source, measured
+>   twice.** The on-disk project said `cellSizeMode: auto` (window 4–8); the job
+>   carried `swept 5.5–6`. First fix (a guard in `runSpec`, commit e7e8fc45) passed
+>   its unit test and STILL shipped the window on device (Debug dylib
+>   `f84512590c1a71e5`, 01:17: job `cell_mode: swept, 5.5–6`) — because the on-device
+>   request runs `LatticeAutoPosture.applied` BEFORE `runSpec`, and that posture had
+>   already rewritten Auto into the octet's per-member swept window. The posture now
+>   leaves an organic Auto alone (`LatticeAutoPosture.swift`, one line). Proof on
+>   device (Debug dylib `564db78a1220c5b7`, 01:29, container `DC305934…`, new write):
+>   `grading = {intent aesthetic, algorithm organic, organic_shape_fit true, topology
+>   octet, cell_mode auto}` — no window. Tests:
+>   `testTheAutoPostureLeavesAnOrganicAutoAlone` (octet control still derives) and
+>   `testOrganicAutoDoesNotInheritTheOctetsDerivedWindow`. The wizard row additionally
+>   resets an inherited swept/fit mode to Auto out loud and lights nothing for one.
+>   Note the value judgement is NOT made: core's `auto` is "a single uniform cell"
+>   per the plan's own comment; what organic should do with Auto is the maintainer's
+>   default to pick — the UI only stopped sending a window nobody chose.
 > - **Section 6(i) struck from the UI** (addendum A): the "up to 4 mm stayed one
 >   lattice / 5 mm left 40 % dust / 6 mm 85 %" captions were gc2's inline tracer, not
 >   `trace_organic_lattice`; both captions are now neutral. No cell-size verdicts or
