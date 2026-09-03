@@ -44,6 +44,10 @@
 > fixed 30° overhang; the limit is not adjustable there" in place of the scrub
 > (`LatticeSetupWizard.swift` ~734).
 >
+> **Closing suite for this round (Debug, SwiftPM): 2289 tests, 30 skipped, 0 failures,
+> 3742 s.** The thin-strut app-bake case runs as a strict expected failure inside
+> `OrganicRenderMarchTests` and prints its numbers; nothing else is red.
+>
 > **The thin-strut fixture (reviewer §2), 3000 rays each, exact shader replica:**
 >
 > | case | voxel | epsO | reached | hit | through | missed |
