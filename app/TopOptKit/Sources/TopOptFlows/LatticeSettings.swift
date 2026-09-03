@@ -1787,8 +1787,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // window this app derives from the objective, because core's own
             // `auto` is a single uniform cell and cannot grade.
             let plan = resolvedCellPlan(bounds: b, minimizePlastic: minimizePlastic)
-            let lo = plan.loMM
-            let hi = plan.hiMM
+            var lo = plan.loMM
+            var hi = plan.hiMM
             // Core refuses a non-positive ladder end, so a snapshot carrying one falls
             // back to the fixed cell rather than shipping a job the schema rejects.
             // FIT falls back the same way when the LINKED core does not carry the
@@ -1798,6 +1798,19 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             var mode: LatticeCellSizeMode = (plan.mode == .swept && !(lo > 0))
                 ? .fixed : plan.mode
             if mode == .fit && !cellModes.fit { mode = .fixed }
+            // ★★ ORGANIC DOES NOT INHERIT THE OCTET'S WINDOW (reviewer, 2026-09-03).
+            // The plan above turns an Auto pick into the octet ladder's per-member
+            // SWEPT window. Measured on-device 2026-09-02: the project said
+            // `cellSizeMode: auto`, the pane lit "Auto · grade", and the organic job
+            // carried `cell_mode: swept, 5.5–6 mm`. For organic that window IS the
+            // separation field and the M2's cliff is unmeasured (the fixture
+            // fragmented at 5.5–6.0; only 4.0 gave one component). Until the maintainer
+            // picks a default, Auto travels as core's own `auto` — a single derived
+            // separation, stated as such — and only an EXPLICIT size or window is
+            // ever sent. The octet path is untouched (bar U1: byte-identical).
+            if algorithm == "organic", cellSizeMode == .auto {
+                mode = .auto; lo = 0; hi = 0
+            }
             // ★ FIT DERIVES FROM A DECLARED REGION, so core REFUSES the mode on a job
             // that declares none (job.cpp: "a job that declares none states no
             // requirement to fit"). Caught by this task's own schema test, which

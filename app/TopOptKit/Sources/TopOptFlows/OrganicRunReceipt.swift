@@ -19,6 +19,9 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     public var growthRan: Bool?
     public var growthTipBudgetHit: Bool?          // ★ TRUE means the run TRUNCATED — surface it
     public var growthLayerHeightMM: Double?
+    /// Grown mode: spans the join step refused. Carried, never judged (addendum
+    /// 2026-09-03: expose the receipt fields, leave policy out).
+    public var growthJoinRefusedSpan: Int?
     // Contiguity — reported, never judged here.
     public var lengthSurvival: Double?            // written length / grown length
     public var emittedComponents: Int?
@@ -31,13 +34,30 @@ public struct OrganicRunReceipt: Equatable, Sendable {
                 growthRan: Bool? = nil, growthTipBudgetHit: Bool? = nil,
                 growthLayerHeightMM: Double? = nil, lengthSurvival: Double? = nil,
                 emittedComponents: Int? = nil, emittedLargestLengthFraction: Double? = nil,
-                emittedStrandedLengthMM: Double? = nil, lengthCensusMM: [String: Double?] = [:]) {
+                emittedStrandedLengthMM: Double? = nil, lengthCensusMM: [String: Double?] = [:],
+                growthJoinRefusedSpan: Int? = nil) {
         self.spanCount = spanCount; self.spanLengthMM = spanLengthMM; self.spanPath = spanPath
         self.growthRan = growthRan; self.growthTipBudgetHit = growthTipBudgetHit
         self.growthLayerHeightMM = growthLayerHeightMM; self.lengthSurvival = lengthSurvival
         self.emittedComponents = emittedComponents
         self.emittedLargestLengthFraction = emittedLargestLengthFraction
         self.emittedStrandedLengthMM = emittedStrandedLengthMM; self.lengthCensusMM = lengthCensusMM
+        self.growthJoinRefusedSpan = growthJoinRefusedSpan
+    }
+
+    /// ★ THE RECEIPT, SAID IN ONE LINE — the four fields the reviewer asked the UI to
+    /// carry (addendum 2026-09-03: length survival, pieces, largest piece, joins
+    /// refused), with nothing judged and nothing invented: absent fields are absent.
+    public var contiguityLine: String? {
+        var parts: [String] = []
+        if let s = lengthSurvival { parts.append(String(format: "%.1f%% of traced length kept", s * 100)) }
+        if let n = emittedComponents {
+            var p = n == 1 ? "1 piece" : "\(n) pieces"
+            if n > 1, let f = emittedLargestLengthFraction { p += String(format: " (largest %.0f%%)", f * 100) }
+            parts.append(p)
+        }
+        if let j = growthJoinRefusedSpan, growthRan == true { parts.append("\(j) joins refused") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// From the receipt's top-level dictionary (the same `info` the strut-strength
@@ -57,6 +77,7 @@ public struct OrganicRunReceipt: Equatable, Sendable {
         spanPath = g["span_path"] as? String
         growthRan = b("growth_ran"); growthTipBudgetHit = b("growth_tip_budget_hit")
         growthLayerHeightMM = d("growth_layer_height_mm")
+        growthJoinRefusedSpan = i("growth_join_refused_span")
         lengthSurvival = d("length_survival"); emittedComponents = i("emitted_components")
         emittedLargestLengthFraction = d("emitted_largest_length_fraction")
         emittedStrandedLengthMM = d("emitted_stranded_length_mm")

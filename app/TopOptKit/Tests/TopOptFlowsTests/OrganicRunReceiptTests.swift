@@ -51,4 +51,22 @@ final class OrganicRunReceiptTests: XCTestCase {
         XCTAssertNil(r.mismatch(againstIndexedCount: 1240, totalLengthMM: 783.28))
         XCTAssertNotNil(r.mismatch(againstIndexedCount: 1239, totalLengthMM: 783.28))
     }
+
+    /// ★ THE FOUR FIELDS THE UI CARRIES (addendum 2026-09-03): survival, pieces,
+    /// largest, joins refused — one line, absent fields absent, nothing judged. Pinned
+    /// to the traced replay of run 2 (survival 0.130, 5 pieces, largest 45.2 %) and to
+    /// a grown-shaped receipt for the join count.
+    func testTheContiguityLineCarriesTheReceiptAndJudgesNothing() {
+        let traced = OrganicRunReceipt(info: ["grading": ["organic": [
+            "length_survival": 0.1301973212, "emitted_components": 5,
+            "emitted_largest_length_fraction": 0.4518794471, "growth_ran": false]]])
+        XCTAssertEqual(traced.contiguityLine, "13.0% of traced length kept · 5 pieces (largest 45%)")
+        XCTAssertNil(traced.growthJoinRefusedSpan)
+        let grown = OrganicRunReceipt(info: ["grading": ["organic": [
+            "length_survival": 0.5, "emitted_components": 1, "growth_ran": true,
+            "growth_join_refused_span": 12]]])
+        XCTAssertEqual(grown.growthJoinRefusedSpan, 12)
+        XCTAssertEqual(grown.contiguityLine, "50.0% of traced length kept · 1 piece · 12 joins refused")
+        XCTAssertNil(OrganicRunReceipt(info: nil).contiguityLine, "no receipt ⇒ no line, no invention")
+    }
 }

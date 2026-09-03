@@ -39,4 +39,27 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         var back = model; back.cellTransition = .defaultGrade
         XCTAssertNotEqual(back.applied(to: settings).algorithm, "organic")
     }
+
+    /// ★ THE OCTET WINDOW MUST NOT RIDE INTO ORGANIC (reviewer, 2026-09-03). Measured
+    /// on-device 2026-09-02: `cellSizeMode: auto` on disk, "Auto · grade" lit, and the
+    /// organic job carried `cell_mode: swept, 5.5–6 mm` — the octet ladder's derived
+    /// window, which for organic IS the separation field. Under organic an Auto pick
+    /// now travels as core's own `auto` with no window; the octet path is the control
+    /// and still derives its window (bar U1: byte-identical).
+    func testOrganicAutoDoesNotInheritTheOctetsDerivedWindow() throws {
+        guard TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit") else { throw XCTSkip("no organic in core") }
+        var s = LatticeSettings(); s.enabled = true; s.stageMode = .aesthetic
+        s.densityMode = .sim; s.cellSizeMode = .auto
+        let lim = TopOptKit.LatticeLimits(rhoMin: 0.1, rhoMax: 0.6, certifiable: true, minCellsPerMember: 1)
+        // control: octet Auto derives a window (the PR 310 plan)
+        let octet = s.runSpec(limits: lim, generatable: true, memberMM: 12, lineWidthMM: 0.42)?.gradingDictionary() ?? [:]
+        XCTAssertNotEqual(octet["cell_mode"] as? String, "auto",
+                          "control: the octet ladder still turns Auto into its own plan")
+        // organic Auto: core's auto, no window
+        var o = s; o.algorithm = "organic"
+        let g = o.runSpec(limits: lim, generatable: true, memberMM: 12, lineWidthMM: 0.42)?.gradingDictionary() ?? [:]
+        XCTAssertEqual(g["cell_mode"] as? String, "auto")
+        XCTAssertNil(g["cell_min_mm"]); XCTAssertNil(g["cell_max_mm"])
+        XCTAssertEqual(g["algorithm"] as? String, "organic")
+    }
 }

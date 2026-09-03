@@ -193,6 +193,9 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         if let src = scene.organicSpanSource {
             label += String(format: " · %d struts from the run's emitted spans", src.count)
         }
+        // ★ THE RECEIPT'S OWN NUMBERS, CARRIED NOT JUDGED (addendum 2026-09-03):
+        // survival, pieces, largest piece, joins refused. Policy stays out.
+        if let r = scene.organicReceiptSummary { label += " · " + r }
         if let bad = scene.organicReceiptMismatch {
             label = "★ PREVIEW DOES NOT MATCH THE RUN — " + bad + "  " + label
         }
@@ -271,6 +274,7 @@ public protocol LatticeSDFPreviewSummary {
 
 
     var organicReceiptMismatch: String? { get }
+    var organicReceiptSummary: String? { get }
     /// Voxels of the part's own interior in the baked occupancy grid. Zero means the
     /// solid voxelisation found nothing to fill — there is no lattice, at any setting.
     var interiorVoxelCount: Int { get }
@@ -289,6 +293,7 @@ public protocol LatticeSDFPreviewSummary {
 public extension LatticeSDFPreviewSummary {
     var organicSpanSource: (count: Int, lengthMM: Double)? { nil }
     var organicReceiptMismatch: String? { nil }
+    var organicReceiptSummary: String? { nil }
 }
 
 

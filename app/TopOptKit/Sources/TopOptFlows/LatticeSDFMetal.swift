@@ -267,6 +267,9 @@ public struct LatticeSDFScene {
     /// that draws a different object from the one certified is the failure this whole
     /// chain exists to prevent, so the label carries it in capitals.
     public let organicReceiptMismatch: String?
+    /// The run's own contiguity receipt, one line, judged by nobody (addendum
+    /// 2026-09-03): length survival · pieces (largest %) · joins refused.
+    public let organicReceiptSummary: String?
     public let organicBandMM: Double
     /// What the trace reported, for the banner: curves, connectors and the separation it
     /// actually ACHIEVED (organic's cell size is an output, not an input).
@@ -703,6 +706,7 @@ public struct LatticeSDFScene {
         self.organicField = organicOut
         self.organicSpanSource = organicSpanReceipt
         self.organicReceiptMismatch = organicMismatch
+        self.organicReceiptSummary = organicReceipt?.contiguityLine
         self.organicBandMM = organicBand
         self.organicSummary = organicSaid
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has

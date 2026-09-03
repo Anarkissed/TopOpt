@@ -545,10 +545,22 @@ public struct LatticeSetupWizard: View {
     // "octet" (core refuses any other) and that is correct, not a leftover.
     // ══════════════════════════════════════════════════════════════════════════
     @State private var organicPicking = false
+    /// ★ HONEST INDEX: a swept/fit mode inherited from the lattice types lights
+    /// NOTHING here (−1) — it is not one of these three choices, and lighting
+    /// "Auto · grade" over a job that carried the octet's 5.5–6 mm window was the
+    /// 2026-09-02 defect. The chip and the row reset such a mode to Auto out loud.
     private var organicCellIndex: Int {
-        if model.simulateStresses { return model.cellSizeMode == .auto ? 0 : (organicPicking ? 2 : 1) }
-        return organicPicking ? 1 : 0
+        switch model.cellSizeMode {
+        case .auto: return model.simulateStresses ? 0 : -1
+        case .fixed:
+            if model.simulateStresses { return organicPicking ? 2 : 1 }
+            return organicPicking ? 1 : 0
+        default: return -1
+        }
     }
+    /// True once this sheet reset an inherited swept/fit window to Auto for organic,
+    /// so the pane can SAY it happened instead of the job quietly changing.
+    @State private var organicWindowReset = false
     private var organicDensityIndex: Int {
         if model.organicStrutWidthMM > 0 { return model.simulateStresses ? 2 : 1 }
         return (model.simulateStresses && model.densityMode == .sim) ? 1 : 0
@@ -564,7 +576,14 @@ public struct LatticeSetupWizard: View {
                 .padding(.top, DS.Space.s)
                 // ★ FORCED ON LOAD TOO — a project saved with organic before this rule
                 // existed must not keep an un-fitted outline.
-                .onAppear { if !model.organicShapeFit { model.organicShapeFit = true } }
+                .onAppear {
+                    if !model.organicShapeFit { model.organicShapeFit = true }
+                    // ★ A project SAVED with organic over an inherited swept/fit
+                    // window gets the same reset as the chip tap, and says so.
+                    if model.cellSizeMode == .swept || model.cellSizeMode == .fit {
+                        model.setCellSizeMode(.auto); organicWindowReset = true
+                    }
+                }
             // ★ TRACED vs GROWN — two ARCHITECTURES, not a parameter (§1B).
             HStack(spacing: DS.Space.xs) {
                 organicPill("Traced", on: !model.organicGrowth, enabled: true) {
@@ -594,6 +613,13 @@ public struct LatticeSetupWizard: View {
             // cell is the SEPARATION field; a graded window is what makes a graded lattice.
             Text("Cell size").font(.system(size: 10, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+            if organicWindowReset {
+                Text("Reset to Auto: the lattice types' cell window is not a tested organic "
+                     + "spacing on this part. Pick a size to state one.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             segmentRow(model.simulateStresses ? ["Auto · grade", "Fit · one size", "Pick a size"]
                                               : ["Fit · one size", "Pick a size"],
                        selected: organicCellIndex) { i in
@@ -621,14 +647,13 @@ public struct LatticeSetupWizard: View {
                     // ★ ADVISORY, NEVER A FILTER (§6): the band that MEASURED as a
                     // lattice on this part. Structural-mode restriction is pending the
                     // maintainer's ruling and is not applied here.
-                    Text(model.organicGrowth
-                         ? "Sizes that fit the thinnest member. A grown lattice's spacing is "
-                           + "not a smooth dial: one step coarser than the default may not be "
-                           + "a lattice at all. The run's receipt reports what was built."
-                         : "Sizes that fit the thinnest member. Measured on this part, up to "
-                           + "4 mm uniform (or 3→6 mm graded) stayed one lattice; coarser left "
-                           + "most of the material as dust. The run's receipt reports what "
-                           + "was built.")
+                    // ★ NO VERDICTS HERE (addendum, 2026-09-03): the "up to 4 mm stayed
+                    // one lattice / coarser left dust" numbers came from gc2's inline
+                    // tracer (section 6(i)), not from core's trace_organic_lattice, and
+                    // nothing derived from it may advise a user. The receipt is the only
+                    // source of what was built.
+                    Text("Sizes that fit the thinnest member. The run's receipt reports "
+                         + "what was built: length survival, pieces, largest piece.")
                         .dsStyle(DS.TypeScale.caption2)
                         .foregroundStyle(DS.Color.textQuaternary.color)
                         .fixedSize(horizontal: false, vertical: true)
@@ -715,13 +740,12 @@ public struct LatticeSetupWizard: View {
                 }
                 // ★ ADVISORY ONLY (§6) — never a filter. Two DIFFERENT datasets, not
                 // merged: traced measured on the M2, grown on a 12x12x24 fixture.
-                Text(model.organicGrowth
-                     ? "For a grown lattice the spacing is not a smooth dial: measured "
-                       + "on a fixture, 4.0 was one connected piece and 4.5 was 16 "
-                       + "pieces with 5% survival. One step coarser than the default "
-                       + "may not be a lattice at all."
-                     : "Coarser cells fragment: measured on this part, a 5 mm uniform "
-                       + "cell left 40% of the material as dust and 6 mm left 85%.")
+                // ★ NO THRESHOLDS HERE (addendum, 2026-09-03): the "5 mm left 40 % dust /
+                // 6 mm left 85 %" figures were gc2's tracer (section 6(i), struck), and
+                // the fixture sweep (6(ii)) is one 12×12×24 fixture, not this part. The
+                // control is exposed; what a spacing did is the run's receipt to say.
+                Text("Scales the spacing the solve derives. Coarser spacing can fragment "
+                     + "the lattice; the run's receipt reports survival and pieces.")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1170,6 +1194,15 @@ public struct LatticeSetupWizard: View {
             // ★ FINISH IS ALWAYS "GRADE TO FIT SHAPE" for organic (his item 3): the
             // cells are pulled to the face-prism's OUTLINE. Forced here, not offered.
             model.organicShapeFit = true
+            // ★★ THE OCTET WINDOW MUST NOT RIDE INTO ORGANIC UNTESTED (reviewer,
+            // 2026-09-03): for organic the cell window IS the separation field, and
+            // the M2's cliff has not been measured. A swept/fit mode inherited from
+            // the lattice types is reset to Auto HERE, out loud (the pane says so),
+            // never carried silently — measured 2026-09-02: the pane lit "Auto ·
+            // grade" while the job carried the octet's swept 5.5–6 mm.
+            if model.cellSizeMode == .swept || model.cellSizeMode == .fit {
+                model.setCellSizeMode(.auto); organicWindowReset = true
+            }
             rebuild()
         } label: {
             Text("Organic")

@@ -1,5 +1,93 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ STATE AT 2026-09-03 — REVERTED: no core change in this PR
+> On 2026-09-02 the maintainer said organic should be available under Structural;
+> the agent read that as a core instruction and retired two core gates on disk
+> (`run_job.cpp refuse_organic_structural`, `job.cpp` shape-fit intent check). The
+> reviewer ruled that a deleted assertion is forbidden regardless of who asked:
+> core has NO INSTRUMENT to certify organic geometry under a structural intent (the
+> certificate reads density against the OCTET tensor; nothing has measured a tensor
+> for traced geometry). **Reverted** — `git status core/` is clean at commit
+> `94313e30`. The UI keeps the committed behaviour: the Organic chip is offered in
+> both intents, DISABLED under Structural with the reason shown, never hidden,
+> never silently switched; it never writes a job core refuses. Making organic
+> certifiable under Structural is a CORE task (resolved beam-network certification
+> over the GRID/SKIN/SEG span export) — out of scope here.
+>
+> Also per the reviewer: the traced path's refusals are the traced path behaving as
+> known (trace-then-repair cannot be made clean by adding passes —
+> `organic_lattice.cpp:2477-2479`; traced 40 mm cube 8,793 legs vs GROWN 0). Fix (a)
+> "re-run support after cleanup" is DECLINED. `support_converged = true` in the
+> receipt describes the state BEFORE cleanup changed it and is not a printability
+> claim. The next measurements are the GROWN path on the same job bytes and the
+> M2's own separation cliff (§14 below when written).
+>
+> UI fixes on disk (uncommitted until the suite names its failures):
+> - **The octet window no longer rides into organic — at its real source.** The
+>   on-disk project said `cellSizeMode: auto` (window 4–8); the job carried `swept
+>   5.5–6` because `runSpec`'s PR 310 plan turns an octet Auto into a per-member
+>   swept window. Under `algorithm == "organic"` an Auto pick now travels as core's
+>   own `cell_mode: auto` with no window (only an explicit size is ever sent); the
+>   octet path is untouched. Test: `testOrganicAutoDoesNotInheritTheOctetsDerivedWindow`
+>   (octet control still derives). The wizard row additionally resets an inherited
+>   swept/fit mode to Auto out loud and lights nothing for an inherited mode.
+> - **Section 6(i) struck from the UI** (addendum A): the "up to 4 mm stayed one
+>   lattice / 5 mm left 40 % dust / 6 mm 85 %" captions were gc2's inline tracer, not
+>   `trace_organic_lattice`; both captions are now neutral. No cell-size verdicts or
+>   thresholds remain in the organic pane.
+> - **The receipt's four fields are carried, not judged:** `OrganicRunReceipt`
+>   gains `growthJoinRefusedSpan` and a one-line `contiguityLine` (survival · pieces
+>   (largest %) · joins refused); the scene exposes it as `organicReceiptSummary` and
+>   the preview label appends it. Pinned in `OrganicRunReceiptTests`.
+>
+> ### E. The census — every organic run in this handoff (Release core `build/topopt-cli`, 2026-09-02/03)
+> `length_census_mm` per stage (mm). **`census_components[]` is NOT in the receipt
+> this core build writes** — every stage's component count is absent, not null;
+> the length census is what exists. `null` = stage did not run.
+>
+> | stage | TRACED, run-2 bytes, gate off | GROWN, run-2 bytes + `organic_growth` |
+> |---|---|---|
+> | grown (initial curves) | 6016.08 | 15646.75 |
+> | emitted | 7683.25 | 16073.25 |
+> | node_merge | 7211.25 | 13533.31 |
+> | base_cut | null | null |
+> | support_prune | 783.28 | 85.71 |
+> | stranded_drop | 783.28 | 85.71 |
+> | ground_tie | null (yet `ground_tie_legs_added` = 8) | null |
+> | branch_support | null | null |
+> | dangling | 783.28 | 85.71 |
+> | stranded_drop_2 | 783.28 | 85.71 |
+> | fill_mat | null | null |
+> | finish | null | null |
+> | written | 783.28 | 85.71 |
+>
+> Traced receipt: survival 0.130, 1240 spans, 5 pieces, largest 45.2 %, stranded
+> 429.3 mm, legs 7343, cuts 607, `unsupported_cells_remaining` 17 (the run-2
+> refusal). Grown receipt (report only — addendum B withdraws "switch to grown";
+> traced ships): survival 0.0055, 103 spans, 6 pieces, largest 37.7 %, stranded
+> 53.4 mm, legs 1834, cuts 462, `unsupported_cells_remaining` 0; the support prune
+> took 13,533 → 85.7 mm. **Receipt defect to report:** `growth_ran` reads `false`
+> although the grown branch ran (the "grown" census row is 2.6× the traced one and
+> `oo.lat = jg.organic_growth ? grow… : trace…` is unambiguous) — on the
+> lattice-variant path `R.oc.growth_ran` reaches the receipt unset. The separation
+> sweep (3.0–6.0) was started under the earlier instruction and STOPPED at its first
+> point when the addendum withdrew it; no sweep numbers exist.
+>
+> **The organic SAMPLE preview is NOT built.** The wizard's sample is still
+> `LatticeSamplePatch` (an octet patch); it has no organic branch, so what he saw
+> is not an organic lattice. Plan: generate the 40 mm cube's spans with the recipe's
+> bending load (`scratchpad/cube/job.json` is written: `cube40.stl`, force
+> `[200, 0, −100]`, `emit_organic_spans`, res 64), bundle the `_SPANS.txt` as a
+> `TopOptFlows` resource (Package.swift has no `resources:` yet), and add an
+> organic branch to `stageMesh` that draws capsules from `OrganicSpanIndex` — no
+> tube/capsule mesh helper exists in the app yet. The run itself was blocked:
+> `cd <scratchpad>/cube && ../../build/topopt-cli lattice-variant job.json --out out`.
+>
+> **The real-part preview from a run's spans IS wired** (`organicSpans` →
+> `bakeField` → capsule-min field; label names the span count) but has never been
+> exercised on device because no on-device organic run has yet completed (three
+> endings, §9). The Mac replay proves core's side (§10).
+
 **Branch:** `claude/topopt-lattice-preview-holes-5ab466` (merged `origin/main` @ PR 353 at `de96877d`)
 **Last green commit:** `dbcb356e` (settings, keys, gates, wizard row — 7/7 tests)
 **§2 now compiles and its 15 tests are green** (OrganicSpanIndex ×4, OrganicRunReceipt ×2,
@@ -142,6 +230,23 @@ project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
 12. Restored his `project.json` from the session backup (`BACKUP2`, sha `d6d1d335…`)
     into the current data container after the runs; the app was relaunched to the
     project list.
+14. **CORE TASK, REPORTED NOT FIXED (reviewer §4b): the 0.0318 mm shell escape under
+    shape fit is a real traced-path bug.** Measurement site: the per-element observer in
+    `run_job.cpp` (~2136–2190) records `max_out` per pass into `oc.max_protrusion_mm`
+    with `worst_protrusion_pass` ("interior strut" here — organic feeds the same
+    observer as octet); the guard at `run_job.cpp:5597` refuses when
+    `max_protrusion_mm > protrusion_allowance_mm` (0.0001 mm on an ordinary run).
+    On run 3 (organic, `organic_shape_fit: true`): 5 of 237,996 vertices out, worst
+    0.0318 mm at (25.947, −48.942, 14.680). Where organic ENDS are clipped to the shell
+    before emission was not traced; open whether the shape-fit pull moves an end past
+    the clip or a capsule cap is unclipped.
+15. **Reviewer §3 — components, reported not changed.** `kOrganicStrandedKeepFraction
+    = 0.02` kept 5 pieces on a 2-region part (receipt: `emitted_components 5`, largest
+    45.2 % of 783.28 mm, `emitted_stranded_length_mm 429.3`, 8 components / 115.1 mm
+    dropped). An endpoint-exact union over the SPANS file (no capsule overlap) splits
+    finer — 30 pieces: 335.0 / 184.7 / 132.8 / 50.3 / 13.3 mm then 25 pieces under
+    13 mm — so the receipt's 5 are welded-overlap components, not shared-endpoint
+    ones. Keep-by-fraction vs keep-by-attachment is the maintainer's decision.
 13. OPEN (QA): the organic pane showed "Cell size · Auto·grade" lit while both captured
     jobs carried the OCTET's window — `cell_mode: swept, cell_min 5.5, cell_max 6` —
     inherited from the project's earlier octet settings. `organicCellIndex` reads

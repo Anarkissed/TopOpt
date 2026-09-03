@@ -1304,12 +1304,9 @@ public struct WorkspacePlaceholder: View {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
                     latticeSettingsSavedThisSession = true
-                    // ★ "SAVE" SAVES. Until now the wizard's picks lived only in the
-                    // in-memory project until a back-navigation or a scene-phase
-                    // change persisted them; measured on-device 2026-09-02, a kill
-                    // between Save & Exit and either of those (a reinstall here — a
-                    // crash or a swipe-away for him) ran the NEXT job from the
-                    // on-disk settings, without the organic shape-fit he had saved.
+                    // ★ "SAVE" SAVES (2026-09-02: a kill before the next navigation
+                    // ran the next job from stale on-disk settings). Kept SHORT: the
+                    // call-site guard reads 700 chars from the wizard call.
                     model.persistCurrentProject()
                     refreshLatticeFaceCards()
                     // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17).
