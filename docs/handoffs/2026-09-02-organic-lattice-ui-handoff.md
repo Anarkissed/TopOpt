@@ -1,5 +1,71 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-03 (latest) — the sample IS the PR 353 cube; the thin-strut fixture measured
+>
+> **The sample.** The wizard's organic sample is now CUBE_FINAL — PR 353 round 4, the
+> job the printed cube came from (`evidence/2026-08-21-organic-lattice/cube/final_organic.json`:
+> TRACED, aesthetic, swept 3–6 mm, 40 mm, 64³, axial −200 N). Its spans were regenerated
+> from that job with `emit_organic_spans` (Release core `ca56654d2805`, 76.7 s):
+> `evidence/2026-08-21-organic-lattice/cube/final_organic_replay_2026-09-03/` — **12,434
+> spans, 20,233.09 mm, ONE component, strut diameter 0.42 mm (file radii 0.263–0.391),
+> 748 support legs, free tips kept**. Only the traced set exists (the printed one); no
+> grown set was generated, so the Traced | Grown segment does not switch the sample.
+> Bundled as `TopOptFlows/OrganicSample/` (SwiftPM resources; the folder must not be
+> named `Resources` — a shallow iOS bundle with that top-level folder fails CodeSign,
+> "bundle format unrecognized"). Rendered through the SAME path a run's spans take
+> (`OrganicSpanIndex` bake + the march via `LatticeSDFScene`, `latticeLayer` on the
+> wizard's `MetalMeshView`, box at body alpha 0), at the radius in the file, 40 mm, no
+> rescale. Label: "The PR 353 test cube, as printed. Your part will differ." + the
+> measurement; first tab "Sample" under organic. The bake (12,434 spans → 150³) runs
+> off the main thread once per launch — synchronously it pinned the app at 100 % CPU
+> with the sheet frozen mid-animation (measured, fixed).
+>
+> **On device (Debug dylib `b8094ef35d7bb700`, band 4 mm, 09:05):** the sheet opens on
+> "Sample" with the banner "Baking the printed cube — 12,434 struts through the run's
+> own preview path…" and stays live (the bake is off-thread); ~4 min later the cube
+> renders through the march with the banner reading "The PR 353 test cube, as printed.
+> Your part will differ. 12434 struts, 20233 mm indexed — matches the run's receipt."
+> WHAT IT SHOWS: at the app's 0.35 mm voxel floor (`fs = max(0.35, longest/384)`) with
+> file radii 0.26–0.39 mm, neighbouring struts merge into sheets where the print shows
+> separate fine struts — the same bake-resolution question as the thin-strut rule (the
+> 12 M cap alone would allow ~0.19 mm here). Reported, not changed. The 2 mm sample
+> index (band 2 mm, ~8× fewer stamps) ships in dylib `8841c7597f87598e`: measured on the
+> simulator (Debug) the bake ran **22 s** wall (app CPU >50 % then back to 0.1 %) from
+> the Settings tap to the cube on screen, sheet live throughout; the banner then reads
+> "12434 struts, 20233 mm indexed — matches the run's receipt." (09:08 screenshot). The
+> merged-sheet look at the 0.35 mm voxel floor is unchanged by the band (it is the
+> voxel, not the band).
+>
+> **Measured (f):** the bundled receipt says span_count 12434 / span_length_mm
+> 20233.09307; the bake indexes 12434 spans / 20233.1 mm — `mismatch()` nil. Pinned by
+> `testThePrintedCubeIsHitAtItsOwnRadius` (which also marches it: see below).
+>
+> **Overhang under Grown:** confirmed hidden — the row shows "Grown organic holds a
+> fixed 30° overhang; the limit is not adjustable there" in place of the scrub
+> (`LatticeSetupWizard.swift` ~734).
+>
+> **The thin-strut fixture (reviewer §2), 3000 rays each, exact shader replica:**
+>
+> | case | voxel | epsO | reached | hit | through | missed |
+> |---|---|---|---|---|---|---|
+> | run-2 spans, own radii (0.43–2.05) | 0.521 | 0.130 | 1605 | 1605 | 0 | 0 |
+> | PR 353 cube, printed radius (0.26–0.39) | 0.350 | 0.088 | 2592 | 2592 | 0 | 0 |
+> | run-2 re-baked at r = 0.225, APP BAKE | 0.521 | 0.130 | 1536 | 1422 | **9** | **105** |
+> | candidate (a): voxel = r_min | 0.225 | 0.056 | 1525 | 1525 | 0 | 0 |
+> | candidate (b): epsO = ½ diagonal | 0.521 | 0.451 | 1546 | 1546 | 0 | 0 |
+>
+> The reviewer's arithmetic is confirmed: at the schema floor on the M2's voxel, 7.4 %
+> of rays that reach a capsule find no surface (114 of 1536). The printed cube at its
+> own radius is whole. Both candidate BAKE rules close the holes: (a) costs
+> 890×268×215 = 51 M voxels (the app caps at 12 M and would coarsen back); (b) costs
+> surfaces read up to 0.45 mm fat. Not chosen — the maintainer's call. The app-bake
+> thin case is a STRICT `XCTExpectFailure` in `OrganicRenderMarchTests` (prints its
+> numbers; flips to a failure the day a rule lands without updating it); the two
+> candidates print theirs. The pass-through criterion now counts a real crossing only
+> (chord > 2·epsO, hit > epsO past the exit); tangent grazes (chord ≈ 0, hit within
+> epsO of the touch) are tallied separately — the closing suite of the previous round
+> had caught two such grazes as "holes" with "largest chord skipped 0.0 mm".
+
 > ## ★ 2026-09-03 (later) — names confirmed, substitution closed, SHA answered
 >
 > **The core SHA.** `ca56654d2805` is a COMMIT on this branch

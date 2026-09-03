@@ -175,6 +175,12 @@ var packageTargets: [Target] = [
     .target(
         name: "TopOptFlows",
         dependencies: ["TopOptKit", "TopOptDesign"],
+        // ★ THE ORGANIC SAMPLE IS THE PR 353 TEST CUBE, AS PRINTED (maintainer,
+        // 2026-09-03): its emitted spans and receipt ride as resources, so the wizard's
+        // sample is real traced geometry through the run's own preview path.
+        // (The folder is NOT named "Resources": a shallow iOS bundle with a top-level
+        // directory of that name fails CodeSign — "bundle format unrecognized".)
+        resources: [.copy("OrganicSample")],
         swiftSettings: [.interoperabilityMode(.Cxx)]
     ),
     .testTarget(

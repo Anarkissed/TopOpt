@@ -90,6 +90,18 @@ public struct LatticeSetupWizard: View {
 
     // MARK: the centre — the object
 
+    /// ★★★ THE ORGANIC SAMPLE IS THE PR 353 TEST CUBE, AS PRINTED (maintainer,
+    /// 2026-09-03) — its real emitted spans, rendered through the SAME path a run's
+    /// spans take (`OrganicSpanIndex` bake + the march, `LatticeSDFScene`), at the
+    /// radius in the span file, free tips kept, no rescale. The box mesh is drawn at
+    /// alpha 0: it only clips the march to the part, exactly as a run's part does.
+    @State private var organicScene: LatticeSDFScene?
+    @State private var organicSceneToken = 0
+    /// What the sample bake indexed against the receipt bundled beside the spans —
+    /// the same §10 check a run gets. Shown in the banner; nil when not organic.
+    @State private var organicSampleMeasurement: String?
+    private var organicSampleShown: Bool { model.cellTransition == .organicGrade }
+
     private var stageView: some View {
         MetalMeshView(mesh: mesh, camera: camera,
                       stressTints: model.stage != .cell && model.densityMode == .sim
@@ -98,8 +110,15 @@ public struct LatticeSetupWizard: View {
                       // It was `densityMode == .sim ? wipe : 1`, with `wipe`
                       // starting at 0 and `.auto` the default: the page opened
                       // with every fragment discarded.
-                      reveal: Float(reveal.value))
+                      reveal: Float(reveal.value),
+                      bodyAlpha: organicSampleShown ? 0 : 1,
+                      latticeLayer: organicScene.map {
+                          LatticeLayerInputs(scene: $0, params: LatticeProxyParams(),
+                                             sceneToken: organicSceneToken, faceTints: [:])
+                      })
             .ignoresSafeArea()
+            // ★ The printed cube bakes off the main thread, once per launch.
+            .task(id: organicSampleShown) { await loadOrganicSample() }
     }
 
     /// Re-fit the camera to whatever is on the stage now. `reframe` re-anchors the
@@ -162,7 +181,7 @@ public struct LatticeSetupWizard: View {
                                                     : DS.Color.strokeSubtle).color)
                             .frame(width: s == model.stage ? 22 : 10, height: 4)
                     }
-                    Text(model.stage.title)
+                    Text(organicSampleShown && model.stage == .cell ? "Sample" : model.stage.title)
                         .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
                         .foregroundStyle(DS.Color.textPrimary.color)
                     Spacer(minLength: 0)
@@ -389,7 +408,9 @@ public struct LatticeSetupWizard: View {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on: Bool = (model.stage == s)
                 Button { model.jump(to: s); rebuild(); frameSample() } label: {
-                    Text(s.title)
+                    // ★ "One cell" has no meaning for organic (maintainer, 2026-09-03):
+                    // the first tab is the printed cube — "Sample".
+                    Text(organicSampleShown && s == .cell ? "Sample" : s.title)
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle((on ? DS.Color.textPrimary
                                              : DS.Color.textTertiary).color)
@@ -1414,7 +1435,13 @@ public struct LatticeSetupWizard: View {
             VStack {
                 HStack(spacing: DS.Space.s) {
                     Image(systemName: "info.circle.fill").font(.system(size: 11))
-                    Text(LatticeWizardSample.provenanceNote)
+                    // ★ Organic: the truth about the sample, with its measurement
+                    // (maintainer, 2026-09-03: "The PR 353 test cube, as printed. Your
+                    // part will differ." — and the count/length the bake indexed
+                    // against the receipt, the same check a run gets).
+                    Text(organicSampleShown
+                         ? (organicSampleMeasurement ?? OrganicSampleCube.label)
+                         : LatticeWizardSample.provenanceNote)
                         .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
                     Button { model.showDisclaimer = false } label: {
                         Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
@@ -1469,7 +1496,35 @@ public struct LatticeSetupWizard: View {
                                steppedCoarsePerHalf: model.cellTransition == .stepped
                                    ? (model.singleCellMembers ? 1 : 2) : nil,
                                dyadicSteps: model.cellTransition == .defaultGrade)
+        // ★★★ ORGANIC: the printed cube, through the run's own preview path. Built
+        // ONCE per sheet (the spans do not change with any control here — they are
+        // what core built for that job; the controls describe what the user's run
+        // will ask for), and MEASURED: what the bake indexed against the receipt.
+        // The bake itself is OFF the main thread and cached (`OrganicSampleCube.baked`,
+        // kicked by `.task` on the stage view); here we only show what has landed.
+        if organicSampleShown {
+            if let scene = organicScene { mesh = scene.mesh }
+        } else if organicScene != nil {
+            organicScene = nil; organicSampleMeasurement = nil
+        }
         lastLatencyMS = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+    }
+
+    /// Kicked when the organic sample is shown: waits for the cached bake, then
+    /// publishes the scene. Cancels cleanly if the sheet leaves organic meanwhile.
+    private func loadOrganicSample() async {
+        guard organicSampleShown, organicScene == nil else { return }
+        organicSampleMeasurement = "Baking the printed cube — 12,434 struts through the run's own preview path…"
+        let baked = await OrganicSampleCube.baked(latticeID: model.topologyID)
+        guard !Task.isCancelled, organicSampleShown else { return }
+        if let b = baked {
+            organicScene = b.scene; organicSceneToken += 1
+            organicSampleMeasurement = b.measurement
+            mesh = b.mesh
+            frameSample()
+        } else {
+            organicSampleMeasurement = "The printed cube's spans are not bundled in this build."
+        }
     }
 
     /// ★★★ THE CELL THE SAMPLE SHOWS, DERIVED — so the single-cell/member toggle

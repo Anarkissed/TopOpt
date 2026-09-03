@@ -83,9 +83,9 @@ final class OrganicRenderMarchTests: XCTestCase {
     /// (`dClip = -inf`, so `F2 = dOrg`) and the octet cell frame's size as `cellHere`.
     private func marchLikeTheShader(_ g: LatticeVoxelGrid, band: Float, voxel: Float,
                                     ro: SIMD3<Float>, rd: SIMD3<Float>, tMax: Float,
-                                    cellHere: Float = 8) -> Float? {
+                                    cellHere: Float = 8, epsO epsIn: Float? = nil) -> Float? {
         let stepScale: Float = 0.95                          // LatticeSDFMetal:2262
-        let epsO = max(0.02, 0.25 * voxel)                   // UnifiedShading:686
+        let epsO = epsIn ?? max(0.02, 0.25 * voxel)          // UnifiedShading:686
         var t: Float = 0, tPrev: Float = 0, FPrev: Float = 1e9
         var steps = 0
         while t < tMax && steps < 4000 {
@@ -154,7 +154,78 @@ final class OrganicRenderMarchTests: XCTestCase {
         }
         let sp = try OrganicSpanIndex.read(path: Self.spansPath)
         XCTAssertEqual(sp.count, 1240, "the run-2 replay's spans")
-        let (g, band, voxel) = bakeLikeTheApp(sp)
+        try marchEverything(sp, label: "run-2 spans at their own radii")
+    }
+
+    /// ★ THE THIN-STRUT FIXTURE (reviewer, 2026-09-03): the linear sampler over-estimates
+    /// by up to half a voxel diagonal (0.451 mm at voxel 0.521) against epsO 0.130 mm; a
+    /// strut with r below that threading a voxel between its corners could have every
+    /// sample — inside included — read above epsO and exit unhit. Run-2's r ≈ 0.82 cannot
+    /// show it. The schema allows organic_strut_width_mm down to 0.45 mm, r = 0.225 —
+    /// half the threshold — so the same spans are re-baked at r = 0.225, same voxel,
+    /// same band, same protocol.
+    func testThinStrutsAtTheSchemaFloorAreStillHit() throws {
+        guard FileManager.default.fileExists(atPath: Self.spansPath) else {
+            throw XCTSkip("fixture missing: \(Self.spansPath)")
+        }
+        let base = try OrganicSpanIndex.read(path: Self.spansPath)
+        let thin = OrganicSpanIndex(
+            gridOrigin: base.gridOrigin, gridSpacing: base.gridSpacing, gridDims: base.gridDims,
+            segments: base.segments.map { OrganicSpanIndex.Segment(a: $0.a, b: $0.b, r: 0.225) },
+            cellMM: base.cellMM)
+        // ★ MEASURED 2026-09-03 (voxel 0.521, half-diagonal 0.451, epsO 0.130): of 1531
+        // rays reaching a capsule, 5 passed through (largest chord 0.635 mm) and 127
+        // registered no hit — 8.6 % holes. The reviewer's arithmetic, confirmed. The
+        // fix is a BAKE rule, to be chosen by the maintainer from the numbers; until it
+        // is, this case is an EXPECTED failure that still prints its measurement and
+        // flips to a failure the day the rule lands without this expectation updated.
+        XCTExpectFailure("thin-strut holes at the schema floor: bake rule pending the maintainer's choice", strict: true) {
+            try? marchEverything(thin, label: "run-2 spans re-baked at r = 0.225 mm (schema floor), app bake")
+        }
+        // ★ THE TWO CANDIDATE RULES, MEASURED (not chosen):
+        //   (a) voxel scaled to the thinnest strut (voxel = r_min, the cap ignored here)
+        //   (b) epsO raised to the half-diagonal (surfaces read fat by up to that much)
+        XCTExpectFailure("candidate (a) measured only", strict: false) {
+            try? marchEverything(thin, label: "candidate (a): voxel = r_min 0.225 mm", voxelOverride: 0.225)
+        }
+        XCTExpectFailure("candidate (b) measured only", strict: false) {
+            try? marchEverything(thin, label: "candidate (b): epsO = half-diagonal 0.451 mm", epsOOverride: 0.451)
+        }
+    }
+
+    /// The app's bake at a stated voxel (no cap), for the candidate-rule measurements.
+    private func bakeAtVoxel(_ sp: OrganicSpanIndex, voxel: Float) -> (grid: LatticeVoxelGrid, band: Float, voxel: Float) {
+        let mn = sp.indexOrigin
+        let ext = SIMD3<Float>(sp.indexDims) * sp.cellMM
+        let fs = Double(voxel)
+        let fnx = Swift.max(2, Int(Double(ext.x) / fs) + 2)
+        let fny = Swift.max(2, Int(Double(ext.y) / fs) + 2)
+        let fnz = Swift.max(2, Int(Double(ext.z) / fs) + 2)
+        let band = Float(Swift.max(2.0, Double(sp.cellMM)))
+        let g = sp.bakeField(origin: mn, spacing: SIMD3<Float>(repeating: voxel),
+                             dims: SIMD3<Int>(fnx, fny, fnz), bandMM: band)
+        return (g, band, voxel)
+    }
+
+    /// ★ THE PRINTED CUBE AT ITS OWN RADIUS: the PR 353 CUBE_FINAL spans the wizard's
+    /// sample renders (12,434 spans, r = 0.21 mm — the schema floor, bead width). At
+    /// the app's bake for a 40 mm cube (voxel 0.35 mm, half-diagonal 0.30 mm) this IS
+    /// the thin-strut regime the reviewer named. Same protocol, same assertions.
+    func testThePrintedCubeIsHitAtItsOwnRadius() throws {
+        // index cell 2 mm ⇒ band 2 mm — exactly what the wizard's sample bakes
+        guard let sp = OrganicSampleCube.index(cellMM: 2) else { throw XCTSkip("cube spans not bundled") }
+        XCTAssertEqual(sp.count, 12434, "CUBE_FINAL's emitted spans")
+        // the sample's own §10 check, exactly as the wizard runs it
+        let r = try XCTUnwrap(OrganicSampleCube.receipt())
+        XCTAssertNil(r.mismatch(againstIndexedCount: sp.count, totalLengthMM: sp.totalLengthMM),
+                     "the bundled spans and the bundled receipt must agree (12434 / 20233.09 mm)")
+        try marchEverything(sp, label: "PR 353 cube at its printed radius")
+    }
+
+    private func marchEverything(_ sp: OrganicSpanIndex, label: String,
+                                 voxelOverride: Float? = nil, epsOOverride: Float? = nil) throws {
+        let (g, band, voxel) = voxelOverride.map { bakeAtVoxel(sp, voxel: $0) } ?? bakeLikeTheApp(sp)
+        let epsMarch: Float = epsOOverride ?? max(0.02, 0.25 * voxel)
         let lo = g.origin, hi = g.origin + SIMD3<Float>(Float(g.nx - 1), Float(g.ny - 1), Float(g.nz - 1)) * g.spacing
         let centre = (lo + hi) * 0.5, radius = simd_length(hi - lo) * 0.6
 
@@ -183,9 +254,10 @@ final class OrganicRenderMarchTests: XCTestCase {
         }
 
         var reached = 0, hit = 0, lateByMoreThanTolerance = 0, passedThrough = 0, missedEntirely = 0
+        var tangentGrazes = 0
         var indexExcludedFirstCapsule = 0, indexExcludedHit = 0
         var smallestChordHit = Float.infinity, largestChordMissed: Float = 0
-        let epsO: Float = max(0.02, 0.25 * voxel)
+        let epsO: Float = epsMarch
         let halfDiagonal: Float = 0.5 * voxel * Float(3.0).squareRoot()
         let tolEarly: Float = epsO + halfDiagonal
         for (ro, rd) in rays {
@@ -204,12 +276,25 @@ final class OrganicRenderMarchTests: XCTestCase {
             let excluded = !sp.candidates(near: pBefore).contains(Int32(f.i))
             if excluded { indexExcludedFirstCapsule += 1 }
 
-            let tHit = marchLikeTheShader(g, band: band, voxel: voxel, ro: ro, rd: rd, tMax: f.tOut + band)
+            let tHit = marchLikeTheShader(g, band: band, voxel: voxel, ro: ro, rd: rd, tMax: f.tOut + band,
+                                          epsO: epsMarch)
             guard let th = tHit else {
                 missedEntirely += 1; largestChordMissed = max(largestChordMissed, chord); continue
             }
-            if th > f.tOut + 1e-4 {
-                passedThrough += 1; largestChordMissed = max(largestChordMissed, chord)
+            // ★ A PASS-THROUGH is a REAL crossing (chord longer than twice the hit
+            // epsilon) whose hit lands more than epsO beyond the exit. A tangent graze
+            // (chord ≈ 0, the ray skimming the surface) registers its hit within epsO of
+            // the touch point — a hair after the analytic exit is the tolerance, not a
+            // hole. The closing suite of 2026-09-03 caught two such grazes ("largest
+            // chord skipped 0.0 mm") and they are counted separately, not as holes.
+            if th > f.tOut + epsO {
+                if chord > 2 * epsO {
+                    passedThrough += 1; largestChordMissed = max(largestChordMissed, chord)
+                } else {
+                    tangentGrazes += 1
+                    hit += 1
+                    if excluded { indexExcludedHit += 1 }
+                }
             } else {
                 hit += 1; smallestChordHit = min(smallestChordHit, chord)
                 if excluded { indexExcludedHit += 1 }
@@ -226,8 +311,9 @@ final class OrganicRenderMarchTests: XCTestCase {
                 if trueD > tolEarly { lateByMoreThanTolerance += 1 }   // a surface claimed where none is
             }
         }
-        print(String(format: "★ organic render march on run-2 spans: bake %d×%d×%d voxel %.3f mm band %.1f mm; rays reaching a capsule %d; hit before leaving it %d; passed through %d; missed entirely %d; smallest chord hit %.3f mm; largest chord missed %.3f mm; first capsule outside the index cell %d of which hit %d; early hits beyond tolerance %d",
-                     g.nx, g.ny, g.nz, voxel, band, reached, hit, passedThrough, missedEntirely,
+        let rMin = sp.segments.map(\.r).min() ?? 0, rMax = sp.segments.map(\.r).max() ?? 0
+        print(String(format: "★ organic render march [%@]: %d spans r %.3f–%.3f mm; bake %d×%d×%d voxel %.3f mm band %.1f mm; rays reaching a capsule %d; hit before leaving it %d (of which tangent grazes %d); passed through %d; missed entirely %d; smallest chord hit %.3f mm; largest chord missed %.3f mm; first capsule outside the index cell %d of which hit %d; early hits beyond tolerance %d",
+                     label, sp.count, rMin, rMax, g.nx, g.ny, g.nz, voxel, band, reached, hit, tangentGrazes, passedThrough, missedEntirely,
                      smallestChordHit, largestChordMissed, indexExcludedFirstCapsule, indexExcludedHit, lateByMoreThanTolerance))
         XCTAssertGreaterThan(reached, 1000, "the sample must reach capsules")
         XCTAssertGreaterThan(indexExcludedFirstCapsule, 0,
