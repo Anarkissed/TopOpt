@@ -589,6 +589,11 @@ public struct LatticeSpec: Equatable, Sendable {
     /// last place that rule can be enforced, and enforcing it only in the UI would let
     /// any other caller build a job that dies at parse.
     public var layerHeightMM: Double = 0
+    /// The stage's Structural/Aesthetic choice, mirrored for the job's `intent`.
+    /// Core refuses ORGANIC unless the job states `"intent": "aesthetic"` itself
+    /// (run_job.cpp `refuse_organic_structural`), and no other algorithm reads it
+    /// here, so an untouched project still emits byte-identically.
+    public var stageMode: LatticeStageMode? = nil
 
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
@@ -725,6 +730,16 @@ public struct LatticeSpec: Equatable, Sendable {
             }
             if organicShapeFit { put("organic_shape_fit", true) }
             if organicShapeFitOnly { put("organic_shape_fit_only", true) }
+            // ★ INTENT, STATED. Core refuses organic unless the job SAYS
+            // "intent": "aesthetic" (run_job.cpp `refuse_organic_structural`): the
+            // traced lattice is anisotropic and the certification library holds one
+            // CUBIC tensor per topology, so a structural density would be certified
+            // against a material this lattice is not. The stage's own word travels —
+            // "aesthetic" runs; "structural" is refused by core with core's reason,
+            // never quietly upgraded here. Measured on-device 2026-09-02: without
+            // this key the organic run died at core's validation ("this job says
+            // nothing").
+            if let m = stageMode { put("intent", m == .structural ? "structural" : "aesthetic") }
             if organicScale != 1 { put("organic_scale", organicScale) }
             // ★★★ GROWTH NEEDS A STATED LAYER HEIGHT — a SCHEMA REFUSAL since the
             // PR 353 amendment, not a fallback. Without one core would substitute half
@@ -1835,6 +1850,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.organicShapeFitOnly = organicShapeFitOnly
             spec.organicScale = organicScale
             spec.layerHeightMM = layerHeightMM
+            spec.stageMode = stageMode
             return spec
         }
         let genRho = b.generateRelativeDensity
@@ -1873,6 +1889,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.organicShapeFitOnly = organicShapeFitOnly
         spec2.organicScale = organicScale
         spec2.layerHeightMM = layerHeightMM
+        spec2.stageMode = stageMode
         return spec2
     }
 

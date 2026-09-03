@@ -242,7 +242,14 @@ public struct LatticeSetupWizard: View {
             // stage's setting — it decides what the OTHER settings may offer —
             // so it sits outside the stage list rather than inside it.
             simulateStressesSwitch
-            ForEach(model.stage.settings.filter { !$0.isRenderedByCellSize },
+            // ★ ORGANIC IS A DIFFERENT "IN THE PART" (his ruling, 2026-09-02, and the
+            // on-device screenshot of 21:12 that showed both): the stage's Cell size /
+            // Density / Finish rows are the OCTET's — a traced lattice has no cell to
+            // size, its density is the strut width, and its finish is fixed. Under
+            // Organic `organicRow` carries all three; showing the octet rows above it
+            // was the "same section" he asked to replace.
+            ForEach(model.stage.settings.filter {
+                        !$0.isRenderedByCellSize && !(organicPaneOwns($0)) },
                     id: \.rawValue) { s in
                 settingControl(s, titled: true)
             }
@@ -1119,7 +1126,14 @@ public struct LatticeSetupWizard: View {
     @ViewBuilder private var organicTypeRow: some View {
         HStack(spacing: DS.Space.s) {
             organicTypeChip
-            Text(model.cellTransition == .organicGrade
+            // ★ CORE'S LAW, SHOWN HERE RATHER THAN AFTER THE SOLVE: organic is
+            // aesthetic-only (run_job.cpp `refuse_organic_structural` — one CUBIC
+            // tensor per topology, none measured for traced struts). Under a
+            // Structural stage the chip is disabled and this caption says why; the
+            // house rule is a control that never opens a page that then apologises.
+            Text(organicRefusedByStage
+                 ? "Organic is aesthetic-only: the certificate has no tensor for traced struts (core). Switch the stage to Aesthetic."
+                 : model.cellTransition == .organicGrade
                  ? "Struts grown or traced along the stress field — not a repeating cell."
                  : "Or an organic lattice: struts traced along the stress field.")
                 .dsStyle(DS.TypeScale.caption2)
@@ -1134,9 +1148,22 @@ public struct LatticeSetupWizard: View {
     /// `grading.algorithm` and refuses any `grading.topology` but "octet" — so this
     /// chip sets the algorithm and leaves the topology alone. One mechanism:
     /// `cellTransition == .organicGrade` IS `algorithm == "organic"`.
+    /// Under Organic on the lattice stage, its own pane owns these three rows.
+    private func organicPaneOwns(_ s: LatticeWizardSetting) -> Bool {
+        guard model.stage == .lattice, model.cellTransition == .organicGrade else { return false }
+        return s == .cellSize || s == .density || s == .finish
+    }
+
+    /// Core refuses organic under a Structural stage; the chip is disabled there.
+    private var organicRefusedByStage: Bool {
+        (project.lattice.stageMode ?? .structural) == .structural
+    }
+
     private var organicTypeChip: some View {
         let on = model.cellTransition == .organicGrade
-        let ink: Color = (on ? DS.Color.textPrimary : DS.Color.textTertiary).color
+        let refused = organicRefusedByStage
+        let ink: Color = (refused ? DS.Color.textQuaternary
+                          : on ? DS.Color.textPrimary : DS.Color.textTertiary).color
         let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
         return Button {
             model.cellTransition = .organicGrade
@@ -1153,11 +1180,16 @@ public struct LatticeSetupWizard: View {
                 .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .disabled(refused)
         .accessibilityIdentifier("wizard-type-organic")
     }
 
     private func typeChip(_ t: LatticeType) -> some View {
-        let on: Bool = (model.topologyID == t.id)
+        // ★ ONE selection in the Type group. Under Organic the topology is still
+        // octet by core's law, but that is not the user's pick — showing "Octet
+        // truss" lit beside a lit "Organic" read as two selections (on-device,
+        // 2026-09-02 21:11). Tapping any type chip still leaves organic.
+        let on: Bool = (model.topologyID == t.id) && model.cellTransition != .organicGrade
         let ink: Color = (on ? DS.Color.textPrimary : DS.Color.textTertiary).color
         let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
         return Button {

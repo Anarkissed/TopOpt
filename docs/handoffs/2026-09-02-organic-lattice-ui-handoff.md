@@ -64,3 +64,52 @@ still unverified.
   the shader path is the fidelity upgrade. Blocker 1 in the task doc is stale on this tree.
 - §7: multi-component grown is REPORTED (`contiguityReport`), never judged.
 - Organic Grade pill + `LatticePage.algorithmCard` (dead) untouched pending Q3.
+
+## On-device, 2026-09-02 evening — what the simulator actually showed
+
+Measured on `A030C20C…` (iPad Pro 13", 1032×1376 pt), build hash `60f9dc2dbd24fb7c`,
+project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
+`"organic"` by hand (backup: scratchpad `project.json.BACKUP2`, sha `d6d1d335…`).
+
+1. **The Organic chip is real and the state round-trips.** With the project saying
+   organic, the wizard opens with Organic selected (filled chip, its "on" caption).
+   The "chip won't select" lead from earlier tonight was a HARNESS SCALE error:
+   the screenshot is ~1500 px wide for 1032 pt, so pt = px × 0.688, not ÷2 — every
+   tap landed at 73 % of its target (a control chip missed the same way). Fixed in
+   memory; no code was wrong.
+2. **The organic run died at core's validation** (screenshot 21:07): `organic
+   requires "intent": "aesthetic", stated explicitly (this job says nothing)`. The
+   app never wrote `grading.intent`. Fixed: `LatticeSpec.stageMode` mirrors the
+   stage's Structural/Aesthetic choice and the organic block emits `intent` from
+   it (`"aesthetic"` runs; `"structural"` travels as the stage's own word so core's
+   refusal stays faithful; a non-organic job still emits no `intent` — bar U1).
+   Test: `LatticeWizardOrganicChipTests` (positive, structural, and no-key controls).
+3. **Core makes organic AESTHETIC-ONLY** (`run_job.cpp refuse_organic_structural`:
+   one cubic tensor per topology, none measured for traced struts). So Q1 is not
+   an app choice: under a Structural stage the Organic chip is now DISABLED with
+   that reason as its caption. His item (1) "Structural shows only true lattices"
+   cannot arise inside Organic — it must be his call whether Structural+Organic
+   should instead flip the stage to Aesthetic.
+4. **"In the part" was showing BOTH sections** (screenshot 21:12): the octet Cell
+   size / Density / Finish rows above the organic block. Fixed: under Organic the
+   stage's three rows are dropped and `organicRow` carries them.
+5. The results screen's Lattice entry is BLOCKED for on-device runs (same "re-run
+   on a Mac worker" refusal as Smooth) and the blocked Smooth caption pushes the
+   Lattice chip OFF-SCREEN to the right on portrait 13" (Smooth's VStack is up to
+   260 pt wide). Not touched tonight — the lattice stage is reached from the
+   workspace's top-right "Lattice" chip → "Settings"; noted for QA.
+6. Two iPads were booted; `screenshot`/`tap` without `udid` go to the OTHER one.
+   Always pass `udid`.
+
+7. **After the rebuild (dylib `f49df957ac923314`, 21:30) the captured job document**
+   (`lattice_job.json`, copied while it existed) carries
+   `grading: {algorithm: organic, intent: aesthetic, topology: octet, cell_mode: swept,
+   cell_min 5.5 / cell_max 6, min_extrudable_width_mm 0.45}` and
+   `lattice.emit_organic_spans: true`, `loads.layer_height_mm: 0.2`. The run passed
+   core's validation (it died there at 21:07; at 21:34 it was 2:26 into the solve).
+   NOT in the job: `organic_shape_fit` — the wizard forces it in the model, but
+   `project.json` still has the 20:56 mtime after Save & Exit, so persistence of the
+   forced pick is an OPEN question (check the project store's write path).
+8. `LatticeWizardOrganicChipTests` first SKIPPED silently: the guard used
+   `latticeSchemaAccepts` (the lattice-block probe) on a GRADING key. A skip reads
+   as green in a filtered run — read the "skipped" count, not the exit code.
