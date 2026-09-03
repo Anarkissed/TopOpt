@@ -902,7 +902,9 @@ public struct LatticeSetupWizard: View {
                     .foregroundStyle(DS.Color.textTertiary.color)
             }
             switch s {
-            case .type: typeRow
+            case .type:
+                typeRow
+                organicTypeRow
             case .size:
                 // ★ NEVER RENDERED HERE. `isRenderedByCellSize` filters it out of
                 // the list; the cell dimension is drawn by `.cellSize` below, as
@@ -1105,10 +1107,26 @@ public struct LatticeSetupWizard: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: DS.Space.xs) {
                 ForEach(LatticeType.family, id: \.id) { t in typeChip(t) }
-                organicTypeChip
             }
             .padding(.trailing, DS.Space.xs)
         }
+    }
+
+    /// ★★★ ORGANIC, ITS OWN ROW BELOW THE LATTICE TYPES (his ruling, 2026-09-02: "add an
+    /// Organic option BELOW the lattice selection"). Not a fourth chip inside the
+    /// scrolling Type row — there it was clipped off the sheet's right edge and could
+    /// not be discovered, and it is not a topology anyway.
+    @ViewBuilder private var organicTypeRow: some View {
+        HStack(spacing: DS.Space.s) {
+            organicTypeChip
+            Text(model.cellTransition == .organicGrade
+                 ? "Struts grown or traced along the stress field — not a repeating cell."
+                 : "Or an organic lattice: struts traced along the stress field.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, DS.Space.xs)
     }
 
     /// ★★★ ORGANIC, AT THE TYPE LEVEL (his ruling, 2026-09-02): a fourth choice below
