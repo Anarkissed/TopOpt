@@ -527,6 +527,7 @@ std::string run_info_json(const RunInfo& info) {
 
   str("cli_version", info.cli_version);
   str("fingerprint", info.fingerprint);
+  str("build_time", info.build_time);
   str("mode", info.mode);
   // ★ THE CHECKBOX, WHICH `mode` ABOVE HAS NEVER CARRIED. `mode` is the job KIND
   // ("minimize_plastic" vs "analyze") and reads the same on every optimisation
@@ -1418,6 +1419,25 @@ std::string run_info_json(const RunInfo& info) {
                     : fmt(info.organic_census_len_mm[i]);
         }
         gr += "}";
+        // ★ AND THE COMPONENT CENSUS BESIDE IT. Same stages, same order, same null
+        // convention: a pass that did not run reports null in BOTH. Without this a
+        // receipt cannot distinguish "nothing else deleted material" from "nothing
+        // else changed the geometry", and the node merge is the counter-example --
+        // it fuses components while moving almost no length.
+        if (!info.organic_census_components.empty()) {
+          gr += ", \"component_census\": {";
+          bool first_cc = true;
+          for (std::size_t i = 0; i < info.organic_census_components.size(); ++i) {
+            if (!first_cc) gr += ", ";
+            first_cc = false;
+            gr += "\"" +
+                  std::string(organic_census_stage_name(static_cast<int>(i))) + "\": ";
+            gr += info.organic_census_components[i] < 0
+                      ? std::string("null")
+                      : std::to_string(info.organic_census_components[i]);
+          }
+          gr += "}";
+        }
         const double grown = info.organic_census_grown_len_mm;
         const double wrote = info.organic_census_len_mm.back();
         gr += ", \"length_survival\": " +
@@ -1458,8 +1478,8 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"support_leg_length_mm\": " +
             fmt(info.organic_support_leg_length_mm);
       gr += ", \"support_rounds\": " + fmt_ll(info.organic_support_rounds);
-      gr += ", \"support_converged\": " +
-            std::string(info.organic_support_converged ? "true" : "false");
+      gr += ", \"support_rounds_converged\": " +
+            std::string(info.organic_support_rounds_converged ? "true" : "false");
       gr += ", \"fixed_point_rounds\": " + fmt_ll(info.organic_fixed_point_rounds);
       gr += ", \"fixed_point_converged\": " +
             std::string(info.organic_fixed_point_converged ? "true" : "false");

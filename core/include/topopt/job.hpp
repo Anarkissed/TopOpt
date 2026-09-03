@@ -272,6 +272,12 @@ struct JobLattice {
   // The maintainer hit exactly that. The material is connected; the MESH is not one
   // object, and this is the file that is.
   bool emit_welded_stl = false;
+  // ★ WRITE THE EMITTED SPANS beside the mesh: <prefix>_<vf>_lattice_SPANS.txt, one
+  // SEG per span, AFTER every pass (clip, node merge, support, prune, stranded drop,
+  // finish, endpoint fit) — i.e. exactly the geometry in the file. gc2's own writer
+  // is not a substitute: it writes before the region-net drop and the prune rounds,
+  // so it describes the traced network and not the shipped part.
+  bool emit_organic_spans = false;
   // The weld raster pitch (mm). 0 (the DEFAULT) = half the thinnest emitted strut's
   // RADIUS, which resolves the strut properly and is what the volume measurement
   // wants. A coarser pitch trades surface fidelity for triangle count: the count
@@ -1012,6 +1018,12 @@ struct RunObservability {
   int mg_algebraic_level1 = -1;
   int matfree_mixed_precision = -1;
   int mg_rearm_period = 0;
+  // ★ WHEN THIS BINARY WAS COMPILED (__DATE__ " " __TIME__ of the CLI's own TU).
+  // `fingerprint` is the git SHA at CONFIGURE time and says which SOURCE ERA; this
+  // says whether the binary is CURRENT. A targeted build that reports success
+  // without relinking leaves the SHA right and the binary stale — measured, that
+  // cost 21 minutes and three runs reading as "the code path is never reached".
+  std::string build_time;
 };
 
 // The outcome of run_job, exposing enough for callers (the CLI main and the

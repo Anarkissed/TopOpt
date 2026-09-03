@@ -1214,7 +1214,8 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish", "emit_welded_stl", "welded_pitch_mm", "regions", "multiscale",
+                         "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
+                         "regions", "multiscale",
                          "forecast_only",
                          "require_lattice_void_reaches_exterior",
                          "require_no_midair_start"},
@@ -1440,6 +1441,16 @@ JobDescription parse_job(const std::string& json_text) {
       if (w->type != JsonValue::Type::Bool)
         schema_fail("lattice \"emit_welded_stl\" must be a boolean");
       job.lattice.emit_welded_stl = (w->num != 0.0);
+    }
+    // ★ THE EMITTED SPANS, AS A FILE. Post-clip, post-prune, post-finish — exactly
+    // the geometry written into the mesh. Two consumers need it and neither can read
+    // it out of an STL: comparing core's tracer against the gc2 coupon, and
+    // certifying organic structurally through the beam-network solver, which already
+    // speaks this format. The app already emits this key on organic jobs.
+    if (const JsonValue* os = find_key(lat, "emit_organic_spans")) {
+      if (os->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_organic_spans\" must be a boolean");
+      job.lattice.emit_organic_spans = (os->num != 0.0);
     }
     if (const JsonValue* wp = find_key(lat, "welded_pitch_mm")) {
       job.lattice.welded_pitch_mm =

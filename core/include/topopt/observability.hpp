@@ -265,6 +265,12 @@ class SnapshotCapture {
 struct RunInfo {
   std::string cli_version;   // topopt::version()
   std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core git sha or "dev")
+  // ★ WHEN THIS BINARY WAS COMPILED (__DATE__ " " __TIME__ of the CLI's own
+  // translation unit). The SHA says which SOURCE ERA; this says whether the binary
+  // is actually current. A targeted build that reports success without relinking
+  // leaves the SHA correct and the binary stale, which is exactly the failure this
+  // exists to make visible.
+  std::string build_time;
   std::string mode;          // job.mode
   std::string material;      // job.material
   // The TRUE source format the user supplied ("step" | "stl" | "3mf"). When the
@@ -971,6 +977,12 @@ struct RunInfo {
   // RUN — it is not zero length, and differencing without checking is how an unrun
   // pass reads as having deleted everything.
   std::vector<double> organic_census_len_mm;
+  // ★ THE SAME CENSUS IN THE OTHER DIMENSION. A length census is blind to a pass that
+  // re-wires without deleting -- the node merge fuses components and moves 0.4-0.8%
+  // of the length -- so "the support prune is the sole deleter" is a statement about
+  // LENGTH only and says nothing about connectivity. Absent from the receipt until
+  // now, which is why that distinction could not be checked from a run.
+  std::vector<int> organic_census_components;
   double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   // ★★ THE GROUND-TIE REPAIR. floating_after != 0 means material the printer cannot
@@ -1012,7 +1024,10 @@ struct RunInfo {
   long long organic_support_legs_added = 0;
   double organic_support_leg_length_mm = 0.0;
   long long organic_support_rounds = 0;
-  bool organic_support_converged = false;
+    // ★ the SUPPORT ROUNDS converged -- NOT the shipped geometry. Seven passes run
+  // after this is set and several move or delete material, so a true here can sit on
+  // a run the raster gate refuses. unsupported_cells_remaining is the shipped number.
+  bool organic_support_rounds_converged = false;
   long long organic_fixed_point_rounds = 0;
   bool organic_fixed_point_converged = false;
   long long organic_mutations = 0;

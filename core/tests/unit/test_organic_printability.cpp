@@ -817,6 +817,51 @@ void test_growth_copy_path_drops_nothing() {
 // MEASURED on this fixture at separation 4.0: emitted 4331 mm / 26 components ->
 // node merge 4298 mm / 9 components. It removed 0.8% of the length and two thirds of
 // the pieces.
+// ── ★ A STAGE THAT RAN MUST NOT REPORT NULL ─────────────────────────────────────
+// -1 in the census is documented to mean THE PASS DID NOT RUN, and differencing
+// without checking is how an unrun pass reads as having deleted everything. Three
+// stages were declared in the enum with NO site ever calling census_at for them --
+// CensusGroundTie, CensusBranchSupport, CensusFillMat -- so they read -1 forever and
+// the receipt rendered null beside their own nonzero counters. Measured on the
+// maintainer's device: four stages doing it at once (ground_tie legs 8/22,
+// branch_support seeds 537/286, fill_mat struts 415/24, finish fillets 72/2).
+//
+// This fails if any stage is left unrecorded again: every declared stage must have a
+// call site, so a pass that runs can always say so.
+void test_every_census_stage_is_recorded() {
+  GrowFixture f = grow_fixture();
+  for (double& v : f.spacing) v = 4.0;
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  OrganicGenStats st;
+  const std::vector<OrganicSpan> spans = run(lat, st);
+  CHECK(!spans.empty(), "census precondition: the fixture must emit geometry");
+  if (spans.empty()) return;
+
+  // Every stage that this run actually executed must carry BOTH numbers. A stage the
+  // run genuinely skipped may stay -1; a stage that recorded a length must also have
+  // recorded components, and vice versa -- a half-populated stage is the same defect
+  // wearing a different face.
+  int recorded = 0;
+  for (int i = 0; i < OrganicGenStats::kCensusStages; ++i) {
+    const bool has_len = st.census_len_mm[i] >= 0.0;
+    const bool has_comp = st.census_components[i] >= 0;
+    if (has_len || has_comp) ++recorded;
+    CHECK(has_len == has_comp,
+          "a census stage records LENGTH and COMPONENTS together, never one alone");
+    if (has_len != has_comp)
+      std::fprintf(stderr, "  stage %s: len %.1f components %d\n",
+                   organic_census_stage_name(i), st.census_len_mm[i],
+                   st.census_components[i]);
+  }
+  std::printf("  census: %d of %d stages recorded on this fixture\n", recorded,
+              static_cast<int>(OrganicGenStats::kCensusStages));
+  CHECK(recorded >= 4,
+        "a real run records several stages -- if only one or two appear, the census "
+        "is not being written and 'null' has stopped meaning 'did not run'");
+}
+
 void test_census_counts_components_not_only_length() {
   GrowFixture f = grow_fixture();
   for (double& v : f.spacing) v = 4.0;
@@ -878,6 +923,7 @@ int main() {
   test_finish_does_not_change_the_structure();
   test_deterministic();
   test_one_cell_needs_a_finish();
+  test_every_census_stage_is_recorded();
   test_census_counts_components_not_only_length();
   std::printf("%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);

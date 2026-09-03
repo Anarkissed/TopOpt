@@ -184,6 +184,7 @@ RunInfo build_run_info(const JobDescription& job,
   RunInfo info;
   info.cli_version = version();
   info.fingerprint = obs.fingerprint;
+  info.build_time = obs.build_time;
   info.mode = job.mode;
   info.material = job.material;
   // True source format for provenance (handoff 2026-07-26-3mf-optimize-path).
@@ -646,6 +647,7 @@ struct LatticeExportOutcome {
   // RUN — it is not zero length, and differencing without checking is how an unrun
   // pass reads as having deleted everything.
   std::vector<double> organic_census_len_mm;
+  std::vector<int> organic_census_components;
   double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   double organic_emitted_largest_fraction = 0.0;
@@ -683,7 +685,7 @@ struct LatticeExportOutcome {
   long long organic_support_legs = 0;
   double organic_support_leg_len = 0.0;
   long long organic_support_rounds = 0;
-  bool organic_support_converged = false;
+  bool organic_support_rounds_converged = false;
   long long organic_fp_rounds = 0;
   bool organic_fp_converged = false;
   long long organic_mutations = 0;
@@ -787,7 +789,11 @@ struct LatticeExportOutcome {
   // answer instead of reporting it would be repeating the mistake in prose.
   bool clipped_against_shell = false;
   double max_protrusion_mm = 0.0;   // largest distance OUTSIDE the shell
-  long long protruding_vertices = 0;  // lattice vertices strictly outside it
+  long long protruding_vertices = 0;  // triangle CORNERS strictly outside it
+  // ★ what the corner count could not say: how many DISTINCT points escaped, and how
+  // many elements they belong to. One vertex of valence five reads as five corners.
+  long long protruding_unique_vertices = 0;
+  long long protruding_elements = 0;
   long long measured_vertices = 0;    // lattice vertices examined
   Vec3 worst_protrusion_at{};         // where the worst one is, model frame
   // WHICH GENERATOR PASS emitted the worst one. The generator has five of them
@@ -799,6 +805,38 @@ struct LatticeExportOutcome {
   // between a diagnosis and a puzzle.
   std::string worst_protrusion_pass;
 };
+
+// ── ★★ THE RECEIPT A REFUSED RUN LEAVES BEHIND ────────────────────────────────
+// A guard that throws before run_info.json is written destroys the very measurements
+// needed to diagnose it. The organic census is complete by the time the export guards
+// run, so this writes it out, marked refused and with the reason named, next to the
+// run's other outputs. It is a DIAGNOSTIC receipt: it never claims the run succeeded,
+// and nothing downstream may read it as a certificate.
+void write_refusal_receipt(const std::string& out_dir, const char* reason,
+                           const LatticeExportOutcome& oc) {
+  const std::string path = join_path(out_dir, "refusal_receipt.json");
+  std::ofstream f(path);
+  if (!f) return;
+  f << "{\n";
+  f << "  \"refused\": true,\n";
+  f << "  \"reason\": \"" << reason << "\",\n";
+  f << "  \"note\": \"DIAGNOSTIC ONLY. This run was REFUSED and wrote no "
+       "certified geometry. These are the measurements taken before the refusal, "
+       "so the refusal can be diagnosed without re-running with a guard disabled. "
+       "Never read this as a certificate.\",\n";
+  f << "  \"max_protrusion_mm\": " << oc.max_protrusion_mm << ",\n";
+  f << "  \"protrusion_allowance_mm\": " << oc.protrusion_allowance_mm << ",\n";
+  f << "  \"protruding_unique_vertices\": " << oc.protruding_unique_vertices << ",\n";
+  f << "  \"protruding_elements\": " << oc.protruding_elements << ",\n";
+  f << "  \"protruding_triangle_corners\": " << oc.protruding_vertices << ",\n";
+  f << "  \"organic_support_rounds_converged\": "
+    << (oc.organic_support_rounds_converged ? "true" : "false") << ",\n";
+  f << "  \"organic_support_legs\": " << oc.organic_support_legs << ",\n";
+  f << "  \"organic_unsupported_cells\": " << oc.organic_unsupported_cells << ",\n";
+  f << "  \"organic_emitted_components\": " << oc.organic_emitted_components << "\n";
+  f << "}\n";
+}
+
 
 std::string lattice_base_name(const std::string& prefix, double requested_vf) {
   char digits[8];
@@ -1936,10 +1974,18 @@ LatticeExportOutcome export_latticed_variant(
     const VoxelGrid* grid = nullptr;
     const std::vector<float>* floor = nullptr;
     double max_out = 0.0;
-    long long n_out = 0;
-    long long n_seen = 0;
+    long long n_out = 0;          // triangle CORNERS outside (kept: the old number)
+    long long n_seen = 0;         // triangle corners seen
     Vec3 worst{};
     long long worst_vertex = -1;
+    // ★ CORNERS ARE NOT VERTICES, AND THE DIFFERENCE MATTERED. `one()` runs per
+    // triangle CORNER, so a single escaping point is counted once per incident
+    // triangle. The receipt read "5 of 980892 lattice vertices" for what was ONE
+    // vertex of valence five -- it looked like a tolerance population and it was a
+    // single strut end cap. Count distinct points, and the elements they sit on.
+    std::set<std::array<long long, 3>> unique_out;   // quantised to 1 nm
+    long long elements_out = 0;
+    bool this_element_out = false;
     void one(const Vec3& v) {
       ++n_seen;
       const VoxelGrid& g = *grid;
@@ -1952,6 +1998,21 @@ LatticeExportOutcome export_latticed_variant(
       const double out = -dist->signed_distance(v);
       if (out > 0.0) {
         ++n_out;
+        unique_out.insert({static_cast<long long>(std::llround(v.x * 1e6)),
+                           static_cast<long long>(std::llround(v.y * 1e6)),
+                           static_cast<long long>(std::llround(v.z * 1e6))});
+        this_element_out = true;
+        // ★ NAME EVERY ESCAPING VERTEX, NOT JUST THE WORST. Both observed runs put
+        // EXACTLY FIVE vertices outside the shell -- 5 of 237,996 at 0.0318 mm and
+        // 5 of 980,892 at 0.0017 mm. The magnitude scales with the cell and the count
+        // does not, which is the signature of a FIXED SET of points rather than a
+        // tolerance population. A single worst-vertex report cannot show that; the
+        // whole set can.
+        if (std::getenv("TOPOPT_PROTRUSION_TRACE"))
+          std::fprintf(stderr,
+                       "[protrusion] #%lld vertex %lld at (%.9g, %.9g, %.9g) out by "
+                       "%.9g mm\n",
+                       n_out, n_seen - 1, v.x, v.y, v.z, out);
         if (out > max_out) {
           max_out = out;
           worst = v;
@@ -1991,6 +2052,8 @@ LatticeExportOutcome export_latticed_variant(
     st.anchor_nodes = g.anchor_nodes;
     st.skin_triangles = g.skin_triangles;
     st.landings = g.anchor_nodes;
+    oc.organic_census_components.assign(
+        g.census_components, g.census_components + OrganicGenStats::kCensusStages);
     oc.organic_census_len_mm.assign(g.census_len_mm,
                                     g.census_len_mm + OrganicGenStats::kCensusStages);
     oc.organic_census_grown_len_mm = g.census_grown_len_mm;
@@ -2028,7 +2091,7 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_support_legs = static_cast<long long>(g.support_legs_added);
     oc.organic_support_leg_len = g.support_leg_length_mm;
     oc.organic_support_rounds = g.support_rounds;
-    oc.organic_support_converged = g.support_converged;
+    oc.organic_support_rounds_converged = g.support_rounds_converged;
     oc.organic_fp_rounds = g.fixed_point_rounds;
     oc.organic_fp_converged = g.fixed_point_converged;
     oc.organic_mutations = static_cast<long long>(g.mutations);
@@ -2113,10 +2176,24 @@ LatticeExportOutcome export_latticed_variant(
     // sink having to know anything about the generator. Observing never changes
     // the emitted bytes (lattice_gen.hpp), so this cannot move the file.
     std::vector<std::pair<long long, const char*>> pass_marks;
+    // ★ NAME THE ELEMENT THAT ESCAPED, not just the pass. on_element fires straight
+    // after its own triangles, so a rise in n_out across one element attributes the
+    // escape to THAT strut -- endpoints and radius -- which is what a clip fix needs.
+    long long prev_n_out = 0;
     LatticeGenObserver obs;
-    obs.on_element = [&m, &pass_marks, &organic_spans, &lat](
+    obs.on_element = [&m, &pass_marks, &organic_spans, &lat, &prev_n_out](
                          LatticeGenElement k, const Vec3& ea, const Vec3& eb,
                          double er) {
+      if (m.this_element_out) { ++m.elements_out; m.this_element_out = false; }
+      if (m.n_out > prev_n_out && std::getenv("TOPOPT_PROTRUSION_TRACE")) {
+        std::fprintf(stderr,
+                     "[protrusion] ^ emitted by element kind=%d  a=(%.9g, %.9g, %.9g)"
+                     "  b=(%.9g, %.9g, %.9g)  r=%.9g  len=%.9g\n",
+                     static_cast<int>(k), ea.x, ea.y, ea.z, eb.x, eb.y, eb.z, er,
+                     std::sqrt((eb.x-ea.x)*(eb.x-ea.x) + (eb.y-ea.y)*(eb.y-ea.y) +
+                               (eb.z-ea.z)*(eb.z-ea.z)));
+        prev_n_out = m.n_out;
+      }
       // Same ledger as the non-measuring path above, so the welded body does not
       // depend on whether the protrusion measurement happened to be armed.
       if (lat.emit_welded_stl) organic_spans.push_back({ea, eb, er});
@@ -2137,8 +2214,16 @@ LatticeExportOutcome export_latticed_variant(
     // escaping the shell.
     const LatticeGenStats st =
         organic
-            ? organic_stats(generate_organic_lattice(*organic, m, &boundary, 8, &obs,
-                                                     &organic_spans))
+            // ★ THE GUARD'S OWN MeshDistance GOES TO THE CLIP. `shell` is
+            // `variant.v3.mesh` by const reference and nothing mutates it between
+            // shell_dist's construction and export, so this IS the shell as written.
+            // Passing it makes the generator and the export guard measure ONE
+            // surface; before, the clip eroded the analytic boundary and the guard
+            // measured the meshed shell, and a 1.75 um disagreement between them
+            // refused the file over a single strut cap.
+            ? organic_stats(generate_organic_lattice(
+                  *organic, m, &boundary, 8, &obs, &organic_spans,
+                  measure_protrusion ? &shell_dist : nullptr))
             : (stepped ? generate_lattice_stepped(LatticeGenTopology::Octet,
                                                   *stepped, m, skin, &obs)
                        : (swept ? generate_lattice_multilevel(
@@ -2173,6 +2258,10 @@ LatticeExportOutcome export_latticed_variant(
       oc.worst_protrusion_pass = worst_pass;
     }
     oc.protruding_vertices = std::max(oc.protruding_vertices, m.n_out);
+    oc.protruding_unique_vertices =
+        std::max(oc.protruding_unique_vertices,
+                 static_cast<long long>(m.unique_out.size()));
+    oc.protruding_elements = std::max(oc.protruding_elements, m.elements_out);
     oc.measured_vertices = std::max(oc.measured_vertices, m.n_seen);
     return st;
   };
@@ -2228,6 +2317,41 @@ LatticeExportOutcome export_latticed_variant(
   // streamed soup; this body is marched from the UNROTATED spans, so it is rotated
   // here by the same rigid motion, or the two files would describe different
   // placements of the same object.
+  // ── ★★ THE EMITTED SPANS, AS A FILE ────────────────────────────────────────
+  // These are the spans AFTER every pass — clip, node merge, support, prune,
+  // stranded drop, the finish, and the endpoint-clearance fit — i.e. exactly the
+  // geometry written into the STL. Two things need them and neither can get them
+  // today:
+  //
+  //   * comparing core's tracer against the gc2 coupon, which is the only way to
+  //     know whether the contiguity numbers measured on gc2 describe core at all;
+  //   * certifying organic structurally, which reads a welded beam network and
+  //     already speaks this format.
+  //
+  // gc2's own writer is NOT a substitute: it writes at its line 1924, BEFORE the
+  // region-net drop and the prune rounds, so it describes the traced network and not
+  // the shipped part. This writes what ships.
+  //
+  // Format is the one the beam-network solver already reads: GRID, then the skin's
+  // designed thickness, then one SEG per span.
+  if (lat.emit_organic_spans && !organic_spans.empty()) {
+    const std::string spath = base + "_SPANS.txt";
+    std::ofstream sf(spath);
+    if (sf) {
+      sf.setf(std::ios::fmtflags(0), std::ios::floatfield);
+      sf.precision(10);
+      sf << "GRID " << sg.origin.x << ' ' << sg.origin.y << ' ' << sg.origin.z << ' '
+         << sg.spacing << ' ' << sg.nx << ' ' << sg.ny << ' ' << sg.nz << '\n';
+      // No SKIN line: this job carries no declared rim thickness on `lat`, and a
+      // number invented here would be read downstream as a design value. The
+      // consumer falls back to its own rim argument when the line is absent.
+      for (const OrganicSpan& sp : organic_spans)
+        sf << "SEG " << sp.a.x << ' ' << sp.a.y << ' ' << sp.a.z << ' '
+           << sp.b.x << ' ' << sp.b.y << ' ' << sp.b.z << ' ' << sp.r << '\n';
+      std::printf("organic spans: %zu written to %s\n", organic_spans.size(),
+                  spath.c_str());
+    }
+  }
   if (lat.emit_welded_stl && !organic_spans.empty()) {
     OrganicWeldStats ws;
     // 40 million voxels is ~320 MB of field — the cap exists so a fine lattice in a
@@ -5523,15 +5647,35 @@ LatticeVariantOutcome lattice_one_variant(
   // when that pass actually ran, so an ordinary run is still held to zero, and
   // the receipt reports the allowance beside the measurement so the bar a run
   // was judged against is never left to inference.
+  // ★ BRACES. This `if` had none, and inserting the receipt write below turned the
+  // write into its entire body and the throw into an UNCONDITIONAL statement — every
+  // lattice run then refused with "0 vertex/vertices on 0 element(s), the worst by
+  // 0 mm", and six tests aborted. A brace-less body that grows a second statement is
+  // a silent behaviour change; braces make it impossible.
   if (R.oc.protrusion_measured &&
-      R.oc.max_protrusion_mm > R.oc.protrusion_allowance_mm)
+      R.oc.max_protrusion_mm > R.oc.protrusion_allowance_mm) {
+    // ── ★★ A REFUSAL CARRIES A RECEIPT ─────────────────────────────────────────
+    // This throw aborts before run_info.json is written, so a refused run used to be
+    // undiagnosable: the organic census -- support rounds, legs, cuts, the cleanup
+    // prune, unsupported cells remaining -- was measured and then thrown away with
+    // the exception. Diagnosing refusal 1 needed exactly those numbers on a run that
+    // refuses HERE, which is why a gate-off replay was being asked for.
+    //
+    // The counters exist on R.oc by this point. Write them, marked refused and with
+    // the reason attached, so the next question can be answered from the run that
+    // failed rather than from a second run with a guard disabled.
+    write_refusal_receipt(out_dir, "lattice_protrusion", R.oc);
     throw JobError(
+        // ★ UNIQUE POINTS AND THE ELEMENTS THEY SIT ON. The old wording counted
+        // triangle CORNERS: "5 of 980892 lattice vertices" was ONE vertex of valence
+        // five on ONE strut end cap. Reporting corners made a single escaping cap
+        // read as a tolerance population and sent the diagnosis after a structure
+        // that emits five endpoints, which does not exist.
         "lattice geometry escaped the exported shell: " +
-        std::to_string(R.oc.protruding_vertices) + " of " +
-        std::to_string(R.oc.measured_vertices) +
-        " lattice vertices lie OUTSIDE the solid shell written into the same "
-        "file, the worst by " + json_num(R.oc.max_protrusion_mm) +
-        " mm at (" + json_num(R.oc.worst_protrusion_at.x) + ", " +
+        std::to_string(R.oc.protruding_unique_vertices) + " vertex/vertices on " +
+        std::to_string(R.oc.protruding_elements) + " element(s), the worst by " +
+        json_num(R.oc.max_protrusion_mm) +
+        " mm proud, at (" + json_num(R.oc.worst_protrusion_at.x) + ", " +
         json_num(R.oc.worst_protrusion_at.y) + ", " +
         json_num(R.oc.worst_protrusion_at.z) + "), emitted by the " +
         R.oc.worst_protrusion_pass +
@@ -5542,6 +5686,7 @@ LatticeVariantOutcome lattice_one_variant(
         "surface, and the certificate — which describes the composite INSIDE "
         "the shell — would not describe it. Refusing rather than writing an "
         "object that disagrees with its own receipt.");
+  }
 
   // ── M4: A SKIN MODE THAT PRODUCED NOTHING MUST SAY SO. The full root cause and
   // why the predicate is the MEASURED count rather than a prediction are on
@@ -8288,6 +8433,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         // so there is nothing to overwrite field by field.
         copy_growth_stats(gi, R.oc.growth, R.oc.growth_ran);
         gi.organic_census_len_mm = R.oc.organic_census_len_mm;
+        gi.organic_census_components = R.oc.organic_census_components;
         gi.organic_census_grown_len_mm = R.oc.organic_census_grown_len_mm;
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;
@@ -8325,7 +8471,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_support_legs_added = R.oc.organic_support_legs;
         gi.organic_support_leg_length_mm = R.oc.organic_support_leg_len;
         gi.organic_support_rounds = R.oc.organic_support_rounds;
-        gi.organic_support_converged = R.oc.organic_support_converged;
+        gi.organic_support_rounds_converged = R.oc.organic_support_rounds_converged;
         gi.organic_fixed_point_rounds = R.oc.organic_fp_rounds;
         gi.organic_fixed_point_converged = R.oc.organic_fp_converged;
         gi.organic_mutations = R.oc.organic_mutations;

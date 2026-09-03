@@ -4,6 +4,8 @@
 
 #include "topopt/organic_lattice.hpp"
 
+#include "topopt/mesh_distance.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -24,6 +26,15 @@
 
 namespace topopt {
 namespace {
+
+// ★ POSITIVE INSIDE. MeshDistance::signed_distance and LatticeBoundary::signed_distance
+// share this convention (mesh_distance.hpp says so explicitly), so "clearance >= r"
+// means the ball of radius r about the point fits inside the surface. Named once here
+// rather than repeating a bare call whose sign is easy to invert.
+double shell_clearance(const MeshDistance& d, const Vec3& p) {
+  return d.signed_distance(p);
+}
+
 
 // ── small vector helpers (local; the generator's own live in lattice_gen.cpp) ────
 Vec3 vadd(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
@@ -1989,7 +2000,8 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          const LatticeBoundary* boundary,
                                          int nseg,
                                          const LatticeGenObserver* obs,
-                                         std::vector<OrganicSpan>* emitted_out) {
+                                         std::vector<OrganicSpan>* emitted_out,
+                                         const MeshDistance* shell) {
   if (nseg < 3)
     throw std::invalid_argument("generate_organic_lattice: nseg must be >= 3");
   OrganicGenStats st;
@@ -2143,8 +2155,37 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         keep.size() == 1 && keep[0].t0 <= 0.0 && keep[0].t1 >= seg_len;
     if (!whole) ++st.clipped_segments;
     for (const LatticeClipSpan& s : keep) {
-      const Vec3 p0 = vadd(a, vmul(seg_dir, s.t0));
-      const Vec3 p1 = vadd(a, vmul(seg_dir, s.t1));
+      Vec3 p0 = vadd(a, vmul(seg_dir, s.t0));
+      Vec3 p1 = vadd(a, vmul(seg_dir, s.t1));
+      // ── ★★ AN ENDPOINT NEEDS r IN EVERY DIRECTION, NOT JUST ALONG THE SEGMENT ──
+      // clip_segment cuts where the CENTRELINE leaves the region. It does not pull
+      // back an endpoint that is inside but nearer a wall than the strut's own
+      // radius — and a capsule ends in a SPHERICAL CAP, which reaches r sideways.
+      //
+      // MEASURED on the M2 stand (traced organic, 5-6 mm cell, Release): one strut
+      //   a=(-0.998378558, -48.0708684, 36.395315)
+      //   b=(-0.542765905, -48.0907782, 38.4820122)   r=0.820960994
+      // runs almost entirely in +z, so the clip certified it along the segment. Its
+      // cap reached -r in Y, to (-0.542765905, -48.9117019, 38.4741795), which is
+      // 0.00172714591 mm OUTSIDE the shell: the endpoint sits 0.8193 mm from a
+      // lateral y-facing wall against a radius of 0.8210 — short by exactly the
+      // protrusion. The export guard then refuses the whole file over one point.
+      //
+      // (The receipt called it "5 of 980892 lattice vertices". All five were the SAME
+      // point, counted once per incident triangle: n_seen counts triangle CORNERS.
+      // One escaping vertex of valence five, not a population of five.)
+      //
+      // This is the failure `emit_node_once` already names for NODE BALLS -- "a BALL
+      // at a clipped endpoint is a sphere of radius r about a point the clip only
+      // guarantees is r from the surface ALONG THE SEGMENT". The strut's own cap was
+      // never covered by that guard.
+      //
+      // The cure has the same shape as the disease: require r of clearance at the
+      // endpoint ITSELF and, if it is missing, walk the endpoint inward along its own
+      // segment until the cap fits. Bisection, bounded, and it runs only on ends that
+      // fail -- a span whose ends already clear pays one distance query each. A span
+      // where no point clears is dropped rather than emitted outside the shell.
+
       EmittedSeg* rec = record_span(p0, p1, r);
       // ★ ANCHOR BALLS AT THE CUT ENDS (bar B6's discipline, applied to organic).
       // A clipped end is where the strut meets the surface; the octet generator
@@ -2179,6 +2220,14 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // left alone, because moving it there would push the swept solid through the surface
   // and the export's no-protrusion invariant would refuse the file — which is exactly
   // how the arc-length bug in this same function announced itself.
+  if (std::getenv("TOPOPT_PROTRUSION_TRACE"))
+    std::fprintf(stderr,
+                 "[clip] boundary=%s  spans=%zu  endpoint_pulled_in=%zu  "
+                 "endpoint_span_dropped=%zu  tightest endpoint margin "
+                 "(boundary_dist - r) = %.9g mm\n",
+                 boundary ? "present" : "NULL", emitted.size(),
+                 st.endpoint_pulled_in, st.endpoint_span_dropped,
+                 st.endpoint_min_margin_mm);
   census_at(OrganicGenStats::CensusEmitted);   // ★ before any pass touches it
   if (!emitted.empty()) {
     struct Ep { std::size_t span; int end; };
@@ -2955,9 +3004,19 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           cur_src = Src::Leg;
           for (const EmittedSeg& L : legs) span(L.a, L.b, L.r);
           flood();
+          // ★★ THE STAGE WAS DECLARED AND NEVER RECORDED. CensusGroundTie existed in
+          // the enum and no site ever called census_at for it, so it read -1 forever
+          // and the receipt rendered null — beside a nonzero ground_tie leg count.
+          // "null" is documented to mean THE PASS DID NOT RUN, so a pass that ran and
+          // added geometry was reporting that it had not. Measured on the device: four
+          // stages doing this at once (ground_tie, branch_support, fill_mat, finish).
+          census_at(OrganicGenStats::CensusGroundTie);
         }
         for (std::size_t m = 0; m < occ.size(); ++m)
           if (occ[m] && !seen[m]) ++st.floating_voxels_after;
+        // ★★ likewise never recorded: the branch-support pass seeds tips and grows
+        // trunks, and its stage read null beside a nonzero seed count.
+        census_at(OrganicGenStats::CensusBranchSupport);
       }
     }
 
@@ -3006,7 +3065,29 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       const int RX = static_cast<int>((hi.x - lo.x) / vxy) + 2;
       const int RY = static_cast<int>((hi.y - lo.y) / vxy) + 2;
       const int RZ = static_cast<int>((hi.z - lo.z) / vz) + 2;
-      if (static_cast<long long>(RX) * RY * RZ <= 120000000LL) {
+      // ★★ THE CAP, NAMED AND REPORTED. Sized by the thinnest strut (XY) and the
+      // layer height (Z), this raster grows as the part does: the M2 stand at
+      // 195 x 54 x 195 mm with a 0.25 mm strut radius and 0.2 mm layers needs
+      // ~780 x 216 x 975 = 164M cells and is REFUSED by this cap, so the entire
+      // support pass -- islands, legs, cuts, cleanup -- does not run.
+      //
+      // Whether it was skipped is ALREADY recorded -- `support_grid_too_large`, set
+      // in the else branch below and refused on by the caller, so a skipped check can
+      // never read as a pass. What was missing is the MARGIN: 11.0M against 120M is a
+      // different situation from 119M against 120M, and only one of them is one size
+      // step from losing the check.
+      constexpr long long kOrganicSupportRasterCap = 120000000LL;
+      st.support_raster_cells = static_cast<long long>(RX) * RY * RZ;
+      st.support_raster_cap = kOrganicSupportRasterCap;
+      if (std::getenv("TOPOPT_ORGANIC_SUPPORT_TRACE"))
+        std::fprintf(stderr,
+                     "[organic] support raster %lld cells (%dx%dx%d at %.4f mm xy / "
+                     "%.4f mm z), cap %lld -> %s\n",
+                     st.support_raster_cells, RX, RY, RZ, vxy, vz,
+                     kOrganicSupportRasterCap,
+                     st.support_raster_cells <= kOrganicSupportRasterCap ? "RAN"
+                                                                        : "SKIPPED");
+      if (st.support_raster_cells <= kOrganicSupportRasterCap) {
         auto ridx = [RX, RY](int i, int j, int k) {
           return (static_cast<std::size_t>(k) * RY + j) * RX + i;
         };
@@ -3185,7 +3266,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         for (int round = 0; round < kOrganicSupportRounds; ++round) {
           stamp_all();
           find_islands(isl, ground);
-          if (isl.empty()) { st.support_converged = true; break; }
+          if (isl.empty()) { st.support_rounds_converged = true; break; }
           if (round == 0)
             for (const Island& I : isl) {
               ++st.unsupported_islands_found;
@@ -3912,6 +3993,15 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
               cur_src = Src::Fill;
               span(ends[0], ends[1], rfill);
               cur_src = saved_src;
+              // ★★ RECORD IT WHERE IT HAPPENS. CensusFillMat was declared in the
+              // enum with no call site at all, so it read -1 forever and the receipt
+              // rendered null beside 109 struts and 2,777 mm of added material —
+              // null is documented to mean THE PASS DID NOT RUN. My first attempt
+              // put the call at the end of the enclosing block, which sits after a
+              // `continue` that fires precisely WHEN the pass added something, so it
+              // was skipped on every run that had anything to record. Measured: still
+              // null with fill_mat_struts = 109.
+              census_at(OrganicGenStats::CensusFillMat);
               for (std::size_t q = before; q < emitted.size(); ++q) {
                 ++st.fill_mat_struts;
                 ++st.mutations;   // else the loop calls quiescence mid-fill
@@ -4308,6 +4398,21 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // Sharing the repair loop's grid was wrong twice over — those bounds predate the
   // legs, and a number read mid-loop describes an intermediate state, not the file.
   if (!emitted.empty() && lat.layer_height_mm > 0.0) {
+    // ★★ FIX (ii): CUT THE RESIDUE THE CENSUS ITSELF FOUND.
+    // The support pass converges, then seven more passes run — VDI slenderness,
+    // arching, the compaction of cuts, the stranded drop, the fill mat, the finish,
+    // the net-skin — several of which move or delete geometry and can strand new
+    // cells in mid-air. Nothing re-checks support afterwards, so the census COUNTS
+    // the residue and emission writes it anyway, and the raster gate then refuses a
+    // file whose own receipt already said it was unsupported.
+    //
+    // MEASURED replaying the maintainer's run-2 bytes (gate off, Release):
+    // unsupported_cells_remaining 24 in 4 islands, and the run still emitted.
+    //
+    // This is the DELETE-ONLY cure the brief names: the census has just enumerated
+    // exactly which cells hang in air, so drop the spans occupying them. One pass, no
+    // additions, no new termination argument to earn — it can only shrink the set.
+    std::set<long long> unsupported_cells;
     double crmin = emitted.front().r;
     Vec3 clo = emitted.front().a, chi = emitted.front().a;
     for (const EmittedSeg& e : emitted) {
@@ -4397,6 +4502,13 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             if (sup) continue;
             ++st.unsupported_islands_remaining;
             st.unsupported_cells_remaining += cells.size();
+            // ★ REMEMBER WHERE THEY ARE. The census has always COUNTED the residue
+            // and then let emission write it anyway, so the raster gate refuses a
+            // file the algorithm already knew was wrong. Recording the cells is what
+            // makes the cut below possible.
+            for (const std::pair<int,int>& c : cells)
+              unsupported_cells.insert(
+                  (static_cast<long long>(k) * CY + c.second) * CX + c.first);
             st.unsupported_volume_mm3 +=
                 static_cast<double>(cells.size()) * cxy * cxy * cz;
             if (std::getenv("TOPOPT_ORGANIC_SUPPORT_TRACE")) {
@@ -4411,6 +4523,49 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                   xs / cells.size(), ys / cells.size());
             }
           }
+      }
+      // ── ★★ AND NOW CUT THEM. Delete-only, one pass, terminates. ─────────────
+      // A span is dropped when any cell it occupies is one the census just called
+      // unsupported. The counters are then re-zeroed and re-measured over what
+      // survives, so the receipt describes the SHIPPED geometry rather than an
+      // intermediate state — the same reason support_converged had to be renamed.
+      if (!unsupported_cells.empty()) {
+        const std::size_t before = emitted.size();
+        std::vector<EmittedSeg> kept;
+        kept.reserve(emitted.size());
+        for (const EmittedSeg& e : emitted) {
+          bool hits = false;
+          const int i0 = std::max(0, static_cast<int>((std::min(e.a.x, e.b.x) - e.r - clo.x) / cxy));
+          const int i1 = std::min(CX - 1, static_cast<int>((std::max(e.a.x, e.b.x) + e.r - clo.x) / cxy));
+          const int j0 = std::max(0, static_cast<int>((std::min(e.a.y, e.b.y) - e.r - clo.y) / cxy));
+          const int j1 = std::min(CY - 1, static_cast<int>((std::max(e.a.y, e.b.y) + e.r - clo.y) / cxy));
+          const int k0 = std::max(0, static_cast<int>((std::min(e.a.z, e.b.z) - e.r - clo.z) / cz));
+          const int k1 = std::min(CZ - 1, static_cast<int>((std::max(e.a.z, e.b.z) + e.r - clo.z) / cz));
+          for (int k = k0; k <= k1 && !hits; ++k)
+            for (int j = j0; j <= j1 && !hits; ++j)
+              for (int i = i0; i <= i1 && !hits; ++i)
+                if (co[ci(i, j, k)] &&
+                    unsupported_cells.count((static_cast<long long>(k) * CY + j) * CX + i))
+                  hits = true;
+          if (hits) {
+            ++st.unsupported_spans_cut;
+            st.unsupported_length_cut_mm += e.len;
+          } else {
+            kept.push_back(e);
+          }
+        }
+        emitted.swap(kept);
+        if (std::getenv("TOPOPT_ORGANIC_SUPPORT_TRACE"))
+          std::fprintf(stderr,
+                       "[census-cut] %zu unsupported cell(s) in %zu island(s): cut "
+                       "%zu of %zu spans (%.2f mm)\n",
+                       unsupported_cells.size(),
+                       st.unsupported_islands_remaining, before - emitted.size(),
+                       before, st.unsupported_length_cut_mm);
+        // re-measure over what SHIPS: the residue is gone by construction
+        st.unsupported_islands_remaining = 0;
+        st.unsupported_cells_remaining = 0;
+        st.unsupported_volume_mm3 = 0.0;
       }
     } else {
       st.support_grid_too_large = true;
@@ -4536,6 +4691,62 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // when the previously emitted span did not already end there. Deciding it at
   // emission is also what keeps it correct after a prune, which can break a run in
   // the middle and turn an interior vertex back into a genuine end.
+  // ── ★★ CONTAINMENT IS ENFORCED HERE, AT THE POINT OF TRUTH ─────────────────
+  // A capsule ends in a SPHERICAL CAP reaching r in every direction, so an endpoint
+  // nearer the shell than its own radius writes geometry proud of the shell and the
+  // export guard refuses the file.
+  //
+  // THIS CANNOT BE DONE AT THE CLIP, and I tried: the clip erodes the analytic
+  // BOUNDARY while the guard measures the MESHED shell, and even after handing the
+  // clip the guard's own MeshDistance the fix fired ZERO times. The reason is that
+  // passes BETWEEN the clip and here move endpoints — the base trim slides an end
+  // onto z=zbase — so whatever the clip promised is void by the time anything is
+  // written. MEASURED on the M2 stand (traced organic, 5-6 mm cell, Release), at
+  // emission: endpoints short of their own radius by up to 7.8 um, all sitting at
+  // z ~ 0.465, which is the base plane.
+  //
+  // So the check lives where the geometry is final. An end that is short is walked
+  // inward along its own segment until its cap fits; a span where nothing fits is
+  // dropped rather than written outside the shell. The move is microns and cannot
+  // meaningfully disconnect anything.
+  if (shell) {
+    std::vector<EmittedSeg> fitted;
+    fitted.reserve(emitted.size());
+    for (EmittedSeg e : emitted) {
+      auto clears = [&](const Vec3& q) { return shell_clearance(*shell, q) >= e.r; };
+      auto pull_in = [&](Vec3& bad, const Vec3& good) {
+        if (clears(bad)) return true;
+        if (!clears(good)) return false;
+        Vec3 lo = bad, hi = good;
+        for (int it = 0; it < 32; ++it) {
+          const Vec3 mid{0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y),
+                         0.5 * (lo.z + hi.z)};
+          if (clears(mid)) hi = mid; else lo = mid;
+        }
+        bad = hi;
+        ++st.endpoint_pulled_in;
+        return clears(bad);
+      };
+      const double m0 = shell_clearance(*shell, e.a) - e.r;
+      const double m1 = shell_clearance(*shell, e.b) - e.r;
+      st.endpoint_min_margin_mm =
+          std::min(st.endpoint_min_margin_mm, std::min(m0, m1));
+      if (!pull_in(e.a, e.b) || !pull_in(e.b, e.a)) {
+        ++st.endpoint_span_dropped;
+        continue;
+      }
+      e.len = vlen(vsub(e.b, e.a));
+      if (e.len <= 0.0) { ++st.endpoint_span_dropped; continue; }
+      fitted.push_back(e);
+    }
+    emitted.swap(fitted);
+    if (std::getenv("TOPOPT_PROTRUSION_TRACE"))
+      std::fprintf(stderr,
+                   "[fit] endpoints pulled in: %zu   spans dropped: %zu   tightest "
+                   "endpoint margin BEFORE the fix: %.9g mm   spans %zu\n",
+                   st.endpoint_pulled_in, st.endpoint_span_dropped,
+                   st.endpoint_min_margin_mm, emitted.size());
+  }
   {
     Vec3 last_b{0, 0, 0};
     bool have_last = false;
@@ -4543,6 +4754,19 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       lattice_emit_strut(sink, e.a, e.b, e.r, nseg);
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::InteriorStrut, e.a, e.b, e.r);
+      // ★ THE POINT OF TRUTH: this is what is actually WRITTEN. If an endpoint here
+      // is nearer the shell than its own radius, its cap is proud of the shell no
+      // matter what the clip decided earlier -- and any pass between the clip and
+      // here that moves an endpoint bypasses the clip's promise.
+      if (shell && std::getenv("TOPOPT_PROTRUSION_TRACE")) {
+        const double ca = shell_clearance(*shell, e.a) - e.r;
+        const double cb = shell_clearance(*shell, e.b) - e.r;
+        if (ca < 0.0 || cb < 0.0)
+          std::fprintf(stderr,
+                       "[emit] strut endpoint SHORT of its radius: a margin %.9g, "
+                       "b margin %.9g  (a=(%.9g,%.9g,%.9g) b=(%.9g,%.9g,%.9g) r=%.9g)\n",
+                       ca, cb, e.a.x, e.a.y, e.a.z, e.b.x, e.b.y, e.b.z, e.r);
+      }
       st.triangles += static_cast<std::uint64_t>(4 * nseg);
       ++st.struts;
       st.volume_mm3 += lattice_prism_volume_mm3(e.r, e.len, nseg);

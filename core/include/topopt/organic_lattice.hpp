@@ -1144,7 +1144,17 @@ struct OrganicGenStats {
   // ★ DID THE REPAIR FINISH, OR RUN OUT OF BUDGET? `support_rounds == 8` read like
   // "it worked eight times" when it meant "it never converged". A repair that exits on
   // its round cap must say so.
-  bool support_converged = false;
+  // ★ RENAMED, BECAUSE IT DESCRIBED AN INTERMEDIATE STATE. This is set inside the
+  // support ROUND LOOP the moment a round finds no islands. SEVEN passes then run
+  // before the census -- VDI slenderness, arching, the compaction of cuts, the
+  // stranded drop, the fill mat, the finish, the net-skin -- several of which move
+  // or delete geometry and can create new unsupported cells. A run could therefore
+  // report support_converged=true and still be refused by the raster gate, which is
+  // a green flag on a state that no longer exists by the time anything is written.
+  //
+  // The number that describes the SHIPPED geometry is unsupported_cells_remaining,
+  // measured at the census after every pass. This one now says only what it means.
+  bool support_rounds_converged = false;
   // Islands with no legal centreline anywhere beneath them — a vertical leg cannot
   // reach them without breaching the surface. Counted rather than skipped.
   std::size_t support_legs_impossible = 0;
@@ -1166,6 +1176,28 @@ struct OrganicGenStats {
   // Tips left dangling BY those cuts, eroded afterwards. The mid-air repair must not
   // reintroduce the free ends the prune exists to remove.
   std::size_t support_cleanup_pruned = 0;
+  // ★ ENDPOINT CLEARANCE. A capsule ends in a spherical cap that reaches r in every
+  // direction, while the clip only certifies the centreline ALONG the segment. These
+  // count the ends walked inward to make the cap fit, and the spans dropped because
+  // no point on them could.
+  std::size_t endpoint_pulled_in = 0;
+  std::size_t endpoint_span_dropped = 0;
+  // ★ FIX (ii): spans deleted because the census found the cells they occupy hanging
+  // in air. Delete-only, so it always terminates; reported so a run cannot lose
+  // material silently.
+  std::size_t unsupported_spans_cut = 0;
+  double unsupported_length_cut_mm = 0.0;
+  double endpoint_min_margin_mm = 1e30;   // tightest (boundary_dist - r) over ends
+  // ★ HOW CLOSE THE SUPPORT RASTER CAME TO ITS CAP. Whether the pass ran at all is
+  // already `support_grid_too_large`, which the caller refuses on; what was missing
+  // is the MARGIN. The raster is sized by the thinnest strut in XY and the layer
+  // height in Z, so it grows with part size, strut fineness and layer resolution
+  // together — and a job one size step away from losing the support check entirely
+  // should not look identical to one with room to spare. MEASURED on the M2 stand at
+  // 128^3, 5-6 mm cell, 0.2 mm layers: 11.0M cells (427x117x221 at 0.4599 mm xy)
+  // against the 120M cap, so ~11x of headroom.
+  long long support_raster_cells = 0;      // RX*RY*RZ, whether or not the pass ran
+  long long support_raster_cap = 0;        // the cap it was compared against
   // ── ★★ THE BASE TRIM ────────────────────────────────────────────────────────
   double base_trim_z_mm = 0.0;          // the swirl's layer; 0 = nothing was cut
   // ── ★★ VDI 3405-3-4:2019 COMPLIANCE, MEASURED ON WHAT WAS EMITTED ───────────
@@ -1326,6 +1358,7 @@ struct OrganicSpan {
 };
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp
+class MeshDistance;     // topopt/mesh_distance.hpp — the EXPORTED shell's distance
 
 struct LatticeGenObserver;  // topopt/lattice_gen.hpp — the SAME read-only tap
 
@@ -1358,7 +1391,21 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          const LatticeGenObserver* observer = nullptr,
                                          // Optional: the POST-CLIP spans, in emission
                                          // order. Non-null to weld them below.
-                                         std::vector<OrganicSpan>* emitted_out = nullptr);
+                                         std::vector<OrganicSpan>* emitted_out = nullptr,
+                                         // ★★ THE SHELL AS WRITTEN, so the generator
+                                         // and the export guard measure ONE surface.
+                                         // The clip erodes the analytic boundary; the
+                                         // guard measures the MESHED shell, and the
+                                         // two disagree — measured, 1.75 um on the M2
+                                         // stand, against a 0.1 um allowance. An
+                                         // endpoint 27.7 nm inside the boundary put
+                                         // its cap 1.73 um outside the shell and the
+                                         // export refused the file. Containment in a
+                                         // surface the clip never sees cannot be
+                                         // guaranteed, so it is handed the same
+                                         // MeshDistance the guard reads. Null keeps
+                                         // the old behaviour exactly.
+                                         const MeshDistance* shell = nullptr);
 
 // ── ★ THE WELDED, SINGLE-BODY VERSION ──────────────────────────────────────────
 //
