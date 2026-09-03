@@ -63,6 +63,24 @@
 > fails). 5 consecutive runs green. The preview bake does not depend on the
 > outside case (`bakeField` stamps its own `r + bandMM` reach).
 >
+> **The index re-pin's condition (reviewer): the render cannot have holes — proved at
+> the march.** (1) The step IS clamped to the bake's band: the march steps
+> `clamp(F2 * stepScale, 0.05 * voxel, 0.7 * cellHere)` (`UnifiedShading.swift:707`)
+> with `F2 = max(dOrg, dClip)`; `dOrg` is the baked field, whose empty voxels are
+> filled with `bandMM` and whose stamped voxels are mins (`OrganicSpanIndex.bakeField`,
+> reach `r + band`), so `dOrg ≤ band` everywhere and the step ≤ 0.95 × band
+> (`stepScale = 0.95`, `LatticeSDFMetal.swift:2262`). What the GPU marches is that
+> baked field, a LOWER bound at voxel centres — not the index's `distance`. The only
+> over-estimate is the linear sampler between centres (`LatticeSDFMetal.swift:1169`),
+> ≤ ½ voxel diagonal. (2) RENDER-LEVEL TEST `OrganicRenderMarchTests`: an exact CPU
+> replica of the shader's sampling, epsilon and step, marched through the run-2
+> spans baked with the app's own parameters (386×117×94, voxel 0.521 mm, band 4.0 mm)
+> against analytic ray–capsule intersections, 3000 rays (1500 random + 1500 grazing).
+> Measured: rays reaching a capsule 1621 — hit before leaving it 1621, passed through
+> 0, missed 0, smallest chord hit 0.066 mm; first capsules OUTSIDE the span index's
+> stamp at the sampled cell: 1370, all hit; hits claiming a surface where none is
+> (true distance > eps + ½ diagonal): 0. Fixture: `evidence/…/run2_replay_gate_off_SPANS.txt`.
+>
 > **The graded:false gap, generalised:**
 > `testEveryPathThatYieldsAnOrganicSpecWritesTheAlgorithm` sweeps both `runSpec`
 > overloads × {sim, uniform} × {auto, fit, fixed, swept} × generatable on/off × with/
