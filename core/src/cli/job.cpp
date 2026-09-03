@@ -1214,7 +1214,8 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish", "emit_welded_stl", "welded_pitch_mm", "regions", "multiscale",
+                         "outer_finish", "emit_welded_stl", "welded_pitch_mm",
+                         "emit_organic_spans", "regions", "multiscale",
                          "forecast_only",
                          "require_lattice_void_reaches_exterior",
                          "require_no_midair_start"},
@@ -1467,6 +1468,11 @@ JobDescription parse_job(const std::string& json_text) {
       if (w->type != JsonValue::Type::Bool)
         schema_fail("lattice \"emit_welded_stl\" must be a boolean");
       job.lattice.emit_welded_stl = (w->num != 0.0);
+    }
+    if (const JsonValue* sp = find_key(lat, "emit_organic_spans")) {
+      if (sp->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_organic_spans\" must be a boolean");
+      job.lattice.emit_organic_spans = (sp->num != 0.0);
     }
     if (const JsonValue* wp = find_key(lat, "welded_pitch_mm")) {
       job.lattice.welded_pitch_mm =

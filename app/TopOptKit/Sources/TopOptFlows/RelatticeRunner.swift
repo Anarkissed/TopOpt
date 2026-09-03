@@ -151,6 +151,12 @@ public enum RelatticeJobBuilder {
         // the latter two unless `skin == "diagrid"`, which is why only the
         // unambiguous "shell" is ever emitted.
         if let of = lat.outerFinish { block["outer_finish"] = of }
+        // ★ ASK FOR THE EMITTED SPANS when the lattice is organic (2026-09-02): the
+        // preview draws the organic field from them. Gated on the linked core knowing
+        // the key — `reject_unknown_keys` kills the whole job over one it does not.
+        if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
+            block["emit_organic_spans"] = true
+        }
         job["lattice"] = block
         return try JSONSerialization.data(withJSONObject: job,
                                           options: [.sortedKeys])
@@ -215,6 +221,9 @@ public struct RelatticeResult {
     /// screen can show the composite margins and the strut-strength report the
     /// same way a lattice optimize run's does.
     public let receiptJSON: Data?
+    /// ★ THE RUN'S EMITTED SPANS, verbatim — `<mesh>_SPANS.txt` when the job asked for
+    /// it (organic). nil when it did not, or the file is absent.
+    public let spanText: String?
     /// The job's own provenance record — the no-ladder facts and the
     /// reproduction proof.
     public let provenanceJSON: Data?
@@ -224,9 +233,10 @@ public struct RelatticeResult {
     public var forecastJSON: Data?
 
     public init(outcome: OptimizeOutcome, receiptJSON: Data?,
-                provenanceJSON: Data?, forecastJSON: Data? = nil) {
+                provenanceJSON: Data?, forecastJSON: Data? = nil, spanText: String? = nil) {
         self.outcome = outcome
         self.receiptJSON = receiptJSON
+        self.spanText = spanText
         self.provenanceJSON = provenanceJSON
         self.forecastJSON = forecastJSON
     }
@@ -471,6 +481,9 @@ public enum RelatticeRun {
                 + "(\(meshData.count) bytes) — not showing an empty part.")
         }
         let receipt = file("variant_\(vfTag)_lattice.report.json")
+        // Core writes the spans beside the mesh as `<base>_SPANS.txt`.
+        let spanText = file("variant_\(vfTag)_lattice_SPANS.txt")
+            .flatMap { String(data: $0, encoding: .utf8) }
         let provenance = file("lattice_variant.json")
         let fields = file("fields.bin").flatMap { RemoteFieldsContainer.parse($0) }
         let block = fields?.variants.first
@@ -506,6 +519,6 @@ public enum RelatticeRun {
             gridOrigin: fields?.gridOrigin ?? .zero, spacing: fields?.spacing ?? 0,
             computedRemotely: true)
         return RelatticeResult(outcome: outcome, receiptJSON: receipt,
-                               provenanceJSON: provenance)
+                               provenanceJSON: provenance, spanText: spanText)
     }
 }

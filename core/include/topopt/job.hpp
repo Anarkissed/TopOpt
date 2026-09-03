@@ -287,6 +287,14 @@ struct JobLattice {
   // ~4.2 M at the default — the fidelity the maintainer's own printed coupon used.
   // The pitch actually used is reported, so a coarsened raster is never silent.
   double welded_pitch_mm = 0.0;
+  // ★ WRITE THE EMITTED SPANS (2026-09-02, the organic preview). One line per strut
+  // actually EMITTED — post-prune, from the same `on_element` ledger the weld reads —
+  // so the app's preview is built from the object that was certified and not from a
+  // pre-prune network. Independent of `emit_welded_stl`: the ledger is collected
+  // whenever EITHER asks (§2B of the task — a span file that depended on the weld
+  // flag came back empty and reported green, four times). An EMPTY ledger is refused,
+  // never written.
+  bool emit_organic_spans = false;
 
   // THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix, bar F3).
   // true => `lattice_variant_job` runs the grading law and the role accounting on

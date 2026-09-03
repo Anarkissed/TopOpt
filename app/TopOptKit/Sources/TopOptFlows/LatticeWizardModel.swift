@@ -254,6 +254,27 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var organicShapeFit: Bool = false
     public var organicShapeFitOnly: Bool = false
     public var organicScale: Double = 1.0
+
+    /// ★★★ THE CELL SIZES THAT CAN FIT THE SELECTED REGIONS (his item 1, 2026-09-02):
+    /// the region's thinnest member divided by 1, 2, 3 ..., keeping only sizes whose
+    /// printability floor is inside the density band — the same law
+    /// (`printabilityDensityFloor`) the ladder uses. Largest first. Geometry and the
+    /// bead only; CONTIGUITY is not computable before the run and is reported from the
+    /// receipt, never guessed here.
+    public func organicCellCandidates(memberMM: Double?, lineWidthMM: Double,
+                                      densityCeiling: Double) -> [Double] {
+        guard let w = memberMM, w > 0, lineWidthMM > 0 else { return [] }
+        let lat = LatticeType.named(topologyID)
+        var out: [Double] = []
+        for k in 1...12 {
+            let c = w / Double(k)
+            guard c >= 1.0 else { break }
+            guard lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: c)
+                    <= densityCeiling + 1e-9 else { break }
+            out.append((c * 100).rounded() / 100)
+        }
+        return out
+    }
     /// ★ "Allow single-cell members" — see `LatticeSettings.singleCellMembers`. Setting
     /// it TRUE also writes the finish, because core's one-cell floor requires one.
     public var singleCellMembers: Bool = false {

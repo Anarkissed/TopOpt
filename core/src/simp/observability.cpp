@@ -1566,6 +1566,11 @@ std::string run_info_json(const RunInfo& info) {
             fmt(info.organic_emitted_largest_fraction);
       gr += ", \"emitted_stranded_length_mm\": " +
             fmt(info.organic_emitted_stranded_length_mm);
+      if (!info.organic_span_path.empty()) {
+        gr += ", \"span_count\": " + std::to_string(info.organic_span_count);
+        gr += ", \"span_length_mm\": " + fmt(info.organic_span_length_mm);
+        gr += ", \"span_path\": \"" + json_escape(info.organic_span_path) + "\"";
+      }
       gr += ", \"largest_component_fraction\": " +
             fmt(info.organic_largest_component_fraction);
       gr += ", \"connector_median_length_mm\": " +

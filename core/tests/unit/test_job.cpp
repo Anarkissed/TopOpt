@@ -561,6 +561,31 @@ static void test_lattice_block() {
 //
 // The pair is what makes this test mean something: the negative alone would pass for
 // an implementation that refused organic_growth outright.
+// --- S1: THE SPAN EXPORT KEY (2026-09-02, the organic preview) -----------------
+// `lattice.emit_organic_spans` asks run_job to write the EMITTED spans — the
+// post-prune ledger — for the app's preview. Schema contract only: the key parses, an
+// absent key is byte-identical to before (default false), and a non-boolean is
+// refused rather than coerced. The refuse-on-empty rule is a run-time contract and is
+// exercised by the run, not here.
+static void test_emit_organic_spans_is_a_boolean_lattice_key() {
+  check_rejects(
+      mutate("\"mesh_prefix\": \"variant\" }",
+             "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"topology\": \"octet\", "
+             "\"cell_mm\": 3.0, \"strut_radius_mm\": 0.4, \"emit_organic_spans\": 1 }"),
+      "S1: emit_organic_spans must be a boolean, not a number");
+  const std::string ok = mutate(
+      "\"mesh_prefix\": \"variant\" }",
+      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"topology\": \"octet\", "
+      "\"cell_mm\": 3.0, \"strut_radius_mm\": 0.4, \"emit_organic_spans\": true }");
+  const JobDescription j = parse_job(ok);
+  CHECK(j.lattice.emit_organic_spans, "S1: emit_organic_spans true parses");
+  const JobDescription j0 = parse_job(mutate(
+      "\"mesh_prefix\": \"variant\" }",
+      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"topology\": \"octet\", "
+      "\"cell_mm\": 3.0, \"strut_radius_mm\": 0.4 }"));
+  CHECK(!j0.lattice.emit_organic_spans, "S1: absent ⇒ false, byte-identical to before");
+}
+
 static void test_growth_requires_a_stated_layer_height() {
   // NEGATIVE: growth asked for, no loads block at all, hence no stated layer height.
   check_rejects(
@@ -901,6 +926,7 @@ int main() {
   test_wall_loops();
   test_lattice_block();
   test_grading_block();
+  test_emit_organic_spans_is_a_boolean_lattice_key();
   test_growth_requires_a_stated_layer_height();
   test_organic_scale_and_gates();
   test_warm_start_block();

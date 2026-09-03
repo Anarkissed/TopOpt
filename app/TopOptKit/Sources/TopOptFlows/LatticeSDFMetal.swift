@@ -258,6 +258,15 @@ public struct LatticeSDFScene {
     /// algorithm. Clamped at `organicBandMM`, an UNDER-estimate and therefore safe to
     /// sphere-trace against.
     public let organicField: LatticeVoxelGrid?
+    /// ★ WHAT THE FIELD WAS BAKED FROM when it came from a span file: (count, total
+    /// length mm) — the numbers to hold against the run's receipt (§10). nil when the
+    /// field was traced at preview time or there is no organic field.
+    public let organicSpanSource: (count: Int, lengthMM: Double)?
+    /// ★★★ THE §10 VERDICT — nil when the indexed spans match the run's receipt (or
+    /// there was nothing to check); otherwise a sentence naming the mismatch. A preview
+    /// that draws a different object from the one certified is the failure this whole
+    /// chain exists to prevent, so the label carries it in capitals.
+    public let organicReceiptMismatch: String?
     public let organicBandMM: Double
     /// What the trace reported, for the banner: curves, connectors and the separation it
     /// actually ACHIEVED (organic's cell size is an output, not an input).
@@ -291,6 +300,16 @@ public struct LatticeSDFScene {
     /// filled the entire interior regardless of the declarations. Empty ⇒ no
     /// clipping, which is what the settings page's sample block needs.
     public init(mesh: ViewerMesh, field: StressField?, latticeID: String,
+                // ★★★ THE RUN'S EMITTED SPANS (2026-09-02). When present and the
+                // algorithm is organic, the organic field is BAKED from them — the
+                // post-prune object the run certified — instead of traced at preview
+                // time. nil keeps every existing call site and picture unchanged.
+                organicSpans: OrganicSpanIndex? = nil,
+                // ★ THE RUN'S OWN RECEIPT for those spans. When both are here the scene
+                // computes the §10 cross-check itself — count and total length of what
+                // it indexed against what the run says it emitted — and carries the
+                // verdict in `organicReceiptMismatch` for the preview label to shout.
+                organicReceipt: OrganicRunReceipt? = nil,
                 // ★★ THE MEASURED FIELD, SEPARATELY FROM THE GRADING ONE (maintainer,
                 // 2026-08-20: "the FEA we run to get the stress map needs to be enough
                 // to say 'This is an unloaded wall'"). `field` may be withheld by the
@@ -569,10 +588,37 @@ public struct LatticeSDFScene {
         // part's resolution they would be sub-voxel and the preview would be mush. The
         // region's own bbox is a fraction of the part, so the same budget buys a voxel
         // several times finer.
+        var organicMismatch: String? = nil
+        var organicSpanReceipt: (count: Int, lengthMM: Double)? = nil
         var organicOut: LatticeVoxelGrid?
         var organicBand = 0.0
         var organicSaid = ""
-        if let o = organic, o.minExtrudableWidthMM > 0,
+        // ★★★ SPANS FIRST. A span file is the run's own emitted geometry; a trace is a
+        // preview-time estimate of it. When the spans are here the estimate is not
+        // asked for. Grid: the index's own bounds (the capsules, plus their reach), at
+        // the same spacing rule the trace uses — longest extent / 384, capped at 12 M
+        // voxels — so the picture's resolution does not change with the source.
+        if organicOut == nil, algorithm == "organic", let sp = organicSpans {
+            let mn = sp.indexOrigin
+            let ext = SIMD3<Float>(sp.indexDims) * sp.cellMM
+            let longest = Swift.max(ext.x, Swift.max(ext.y, ext.z))
+            var fs = Swift.max(0.35, Double(longest) / 384.0)
+            while (Double(ext.x) / fs + 2) * (Double(ext.y) / fs + 2)
+                    * (Double(ext.z) / fs + 2) > 12_000_000 { fs *= 1.25 }
+            let fnx = Swift.max(2, Int(Double(ext.x) / fs) + 2)
+            let fny = Swift.max(2, Int(Double(ext.y) / fs) + 2)
+            let fnz = Swift.max(2, Int(Double(ext.z) / fs) + 2)
+            let band = Swift.max(2.0, Double(sp.cellMM))
+            organicOut = sp.bakeField(origin: mn, spacing: SIMD3<Float>(repeating: Float(fs)),
+                                      dims: SIMD3<Int>(fnx, fny, fnz), bandMM: Float(band))
+            organicBand = band
+            organicSaid = "\(sp.count) struts, "
+                + String(format: "%.0f mm — the run's emitted spans", sp.totalLengthMM)
+            organicSpanReceipt = (sp.count, sp.totalLengthMM)
+            organicMismatch = organicReceipt?.mismatch(againstIndexedCount: sp.count,
+                                                       totalLengthMM: sp.totalLengthMM)
+        }
+        if organicOut == nil, let o = organic, o.minExtrudableWidthMM > 0,
            o.tensor.count == 6 * o.dims.0 * o.dims.1 * o.dims.2 {
             let occ = self.occupancy
             // The candidate set and the separation, both on the TENSOR's grid — that is
@@ -655,6 +701,8 @@ public struct LatticeSDFScene {
             }
         }
         self.organicField = organicOut
+        self.organicSpanSource = organicSpanReceipt
+        self.organicReceiptMismatch = organicMismatch
         self.organicBandMM = organicBand
         self.organicSummary = organicSaid
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has

@@ -273,11 +273,15 @@ public struct LatticeSetupWizard: View {
             // now with settings only available in the Stepped section" — which
             // made the grade look like a property of that algorithm rather than a
             // question asked of all three.
-            if model.stage == .lattice {
+            // ★★★ ORGANIC HAS ITS OWN "IN THE PART" (his ruling, 2026-09-02): the octet
+            // ladder below is about cells, transitions and finishes that a traced or
+            // grown lattice does not have. Nothing here is shared by accident.
+            if model.stage == .lattice, model.cellTransition == .organicGrade {
+                organicRow
+            } else if model.stage == .lattice {
                 gradeToggleRow
                 if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
                 gradeStyleRow
-                if model.cellTransition == .organicGrade { organicRow }
                 if model.gradingMode.fitsShape { shapeBandRow }
                 singleCellSwitch
             }
@@ -533,6 +537,16 @@ public struct LatticeSetupWizard: View {
     // ★ NOT A TOPOLOGY. Organic is chosen by `grading.algorithm`; the topology stays
     // "octet" (core refuses any other) and that is correct, not a leftover.
     // ══════════════════════════════════════════════════════════════════════════
+    @State private var organicPicking = false
+    private var organicCellIndex: Int {
+        if model.simulateStresses { return model.cellSizeMode == .auto ? 0 : (organicPicking ? 2 : 1) }
+        return organicPicking ? 1 : 0
+    }
+    private var organicDensityIndex: Int {
+        if model.organicStrutWidthMM > 0 { return model.simulateStresses ? 2 : 1 }
+        return (model.simulateStresses && model.densityMode == .sim) ? 1 : 0
+    }
+
     @ViewBuilder private var organicRow: some View {
         let layerH = project.printParams.layerHeightMM
         let growthRefusal = LatticeSettings.organicGrowthRefusalReason(layerHeightMM: layerH)
@@ -541,6 +555,9 @@ public struct LatticeSetupWizard: View {
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .padding(.top, DS.Space.s)
+                // ★ FORCED ON LOAD TOO — a project saved with organic before this rule
+                // existed must not keep an un-fitted outline.
+                .onAppear { if !model.organicShapeFit { model.organicShapeFit = true } }
             // ★ TRACED vs GROWN — two ARCHITECTURES, not a parameter (§1B).
             HStack(spacing: DS.Space.xs) {
                 organicPill("Traced", on: !model.organicGrowth, enabled: true) {
@@ -565,46 +582,102 @@ public struct LatticeSetupWizard: View {
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            // ★ THE FINISH — a LOOK, not a repair; the structural core is identical.
-            if TopOptKit.gradingSchemaAccepts(key: "organic_boundary_finish") {
-                Text("Edge finish").font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
-                HStack(spacing: DS.Space.xs) {
-                    ForEach(LatticeOrganicFinish.allCases, id: \.rawValue) { f in
-                        organicPill(f.title, on: model.organicBoundaryFinish == f, enabled: true) {
-                            model.organicBoundaryFinish = f; rebuild()
+            // ★★★ CELL SIZE (his item 1): Auto (grade) / Fit (one size) / a size picked
+            // from the list of sizes that CAN FIT the selected regions. For organic the
+            // cell is the SEPARATION field; a graded window is what makes a graded lattice.
+            Text("Cell size").font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+            segmentRow(model.simulateStresses ? ["Auto · grade", "Fit · one size", "Pick a size"]
+                                              : ["Fit · one size", "Pick a size"],
+                       selected: organicCellIndex) { i in
+                let modes: [LatticeCellSizeMode] = model.simulateStresses
+                    ? [.auto, .fixed, .fixed] : [.fixed, .fixed]
+                organicPicking = (model.simulateStresses ? i == 2 : i == 1)
+                model.setCellSizeMode(modes[i]); rebuild()
+            }
+            if model.cellSizeMode == .fixed {
+                let cands = model.organicCellCandidates(
+                    memberMM: project.lattice.regionMemberMM,
+                    lineWidthMM: project.printParams.strutLineWidthMM,
+                    densityCeiling: model.relativeDensity)
+                if organicPicking, !cands.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: DS.Space.xs) {
+                            ForEach(cands, id: \.self) { c in
+                                organicPill(String(format: "%.2f mm", c),
+                                            on: abs(model.cellMM - c) < 1e-6, enabled: true) {
+                                    model.cellMM = c; model.touched(.size); rebuild()
+                                }
+                            }
                         }
                     }
+                    // ★ ADVISORY, NEVER A FILTER (§6): the band that MEASURED as a
+                    // lattice on this part. Structural-mode restriction is pending the
+                    // maintainer's ruling and is not applied here.
+                    Text(model.organicGrowth
+                         ? "Sizes that fit the thinnest member. A grown lattice's spacing is "
+                           + "not a smooth dial: one step coarser than the default may not be "
+                           + "a lattice at all. The run's receipt reports what was built."
+                         : "Sizes that fit the thinnest member. Measured on this part, up to "
+                           + "4 mm uniform (or 3→6 mm graded) stayed one lattice; coarser left "
+                           + "most of the material as dust. The run's receipt reports what "
+                           + "was built.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    scrubRow("organicCell", value: model.cellMM, unit: "mm", step: 0.05,
+                             range: 1...20) { model.cellMM = $0; model.touched(.size); rebuild() }
                 }
-                Text("Skin drops the shell, so every clipped strut end is a cantilever "
-                     + "unless the net-skin picks it up. Rim keeps the edge loops; Clean "
-                     + "keeps nothing. None of them changes the lattice itself.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            if TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit") {
-                Toggle(isOn: Binding(get: { model.organicShapeFit },
-                                     set: { model.organicShapeFit = $0; rebuild() })) {
-                    Text("Pull cells toward the region boundary").dsStyle(DS.TypeScale.caption)
-                }
+            // ★★★ DENSITY (his item 2): from the print parameters, thickened on request,
+            // or left to the solve. Auto and Sim both leave `organic_strut_width_mm` at
+            // 0 (core derives it from the band and the cell); Manual states a width.
+            Text("Density").font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+            segmentRow(model.simulateStresses ? ["Auto", "Sim", "Thicker"] : ["Auto", "Thicker"],
+                       selected: organicDensityIndex) { i in
+                if model.simulateStresses {
+                    switch i {
+                    case 0: model.organicStrutWidthMM = 0; model.setDensityMode(.uniform)
+                    case 1: model.organicStrutWidthMM = 0; model.setDensityMode(.sim)
+                    default: if model.organicStrutWidthMM <= 0 {
+                                 model.organicStrutWidthMM = 2 * project.printParams.strutLineWidthMM }
+                    }
+                } else if i == 0 { model.organicStrutWidthMM = 0 }
+                else if model.organicStrutWidthMM <= 0 {
+                    model.organicStrutWidthMM = 2 * project.printParams.strutLineWidthMM }
+                rebuild()
             }
+            if model.organicStrutWidthMM > 0,
+               TopOptKit.gradingSchemaAccepts(key: "organic_strut_width_mm") {
+                scrubRow("organicStrut", value: model.organicStrutWidthMM, unit: " mm",
+                         step: 0.1, range: 0.2...5) { model.organicStrutWidthMM = $0; rebuild() }
+                Text("Stated strut width; the run holds it.")
+                    .dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textQuaternary.color)
+            } else {
+                Text(model.densityMode == .sim
+                     ? "A finite-element solve sets the strut width from the stress."
+                     : "Derived from the print parameters, the density band and the cell.")
+                    .dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            // ★★★ FINISH IS ALWAYS "GRADE TO FIT SHAPE" (his ruling, 2026-09-02, item 3):
+            // the cells are pulled to the face-prism's OUTLINE and that is the whole
+            // finish — there is no rim or skin on the faces of an organic lattice. So
+            // there is no picker here: `organic_shape_fit` is forced on when Organic is
+            // chosen (and below, on load), and the sentence says so.
+            Text("Finish").font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+            Text("Grade to fit the shape — the lattice follows the outline of the "
+                 + "face-prism. There is no finish on the faces.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+                .fixedSize(horizontal: false, vertical: true)
             if TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit_only") {
                 Toggle(isOn: Binding(get: { model.organicShapeFitOnly },
                                      set: { model.organicShapeFitOnly = $0; rebuild() })) {
                     Text("Shape fit only — no stress grading").dsStyle(DS.TypeScale.caption)
                 }
-            }
-            if TopOptKit.gradingSchemaAccepts(key: "organic_strut_width_mm") {
-                Text("Strut width").font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
-                scrubRow("organicStrut", value: model.organicStrutWidthMM, unit: " mm",
-                         step: 0.1, range: 0...5) {
-                    model.organicStrutWidthMM = $0; rebuild()
-                }
-                Text("0 derives it from the density band and the cell.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
             }
             // ★ OVERHANG IS TRACE-ONLY (§2C). Grown clamps to a compile-time 30 deg that
             // no job key reaches, so under growth the slider is a dead knob — hidden,
@@ -1032,16 +1105,51 @@ public struct LatticeSetupWizard: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: DS.Space.xs) {
                 ForEach(LatticeType.family, id: \.id) { t in typeChip(t) }
+                organicTypeChip
             }
             .padding(.trailing, DS.Space.xs)
         }
+    }
+
+    /// ★★★ ORGANIC, AT THE TYPE LEVEL (his ruling, 2026-09-02): a fourth choice below
+    /// the lattice types. It is NOT a topology — core selects organic by
+    /// `grading.algorithm` and refuses any `grading.topology` but "octet" — so this
+    /// chip sets the algorithm and leaves the topology alone. One mechanism:
+    /// `cellTransition == .organicGrade` IS `algorithm == "organic"`.
+    private var organicTypeChip: some View {
+        let on = model.cellTransition == .organicGrade
+        let ink: Color = (on ? DS.Color.textPrimary : DS.Color.textTertiary).color
+        let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
+        return Button {
+            model.cellTransition = .organicGrade
+            // ★ FINISH IS ALWAYS "GRADE TO FIT SHAPE" for organic (his item 3): the
+            // cells are pulled to the face-prism's OUTLINE. Forced here, not offered.
+            model.organicShapeFit = true
+            rebuild()
+        } label: {
+            Text("Organic")
+                .font(.system(size: 11, weight: .bold)).lineLimit(1).fixedSize()
+                .foregroundStyle(ink)
+                .padding(.vertical, 6).padding(.horizontal, DS.Space.sm)
+                .background(Capsule().fill(fill))
+                .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("wizard-type-organic")
     }
 
     private func typeChip(_ t: LatticeType) -> some View {
         let on: Bool = (model.topologyID == t.id)
         let ink: Color = (on ? DS.Color.textPrimary : DS.Color.textTertiary).color
         let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
-        return Button { model.setTopology(t.id) } label: {
+        return Button {
+            model.setTopology(t.id)
+            // ★ TAPPING A LATTICE TYPE LEAVES ORGANIC — back to the grade style the
+            // user last had, so the octet pane comes back exactly as it was.
+            if model.cellTransition == .organicGrade {
+                model.cellTransition = model.gradeStepStyle == .dyadic ? .defaultGrade : .stepped
+            }
+        } label: {
             Text(t.displayName)
                 .font(.system(size: 11, weight: .bold))
                 .lineLimit(1)

@@ -93,6 +93,11 @@ public struct WorkspacePlaceholder: View {
     /// the one case the user actually waits through was the one case that said
     /// nothing at all.
     @State private var strutBakeInFlight = false
+    /// ★ THE LAST ORGANIC RUN'S EMITTED SPANS + RECEIPT (2026-09-02) — the preview's
+    /// source when the algorithm is organic. Same lifetime as the bake's other inputs:
+    /// replaced on a run, never touched per frame.
+    @State var latticeOrganicSpans: OrganicSpanIndex? = nil
+    @State var latticeOrganicReceipt: OrganicRunReceipt? = nil
     /// Measured inner edges of the two top clusters — see `TopClusterEdgeKey`.
     @State private var topEdges = TopClusterEdges()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
@@ -3004,6 +3009,19 @@ public struct WorkspacePlaceholder: View {
         }
         latticeVariantContext = nil
         latticeVariantMesh = nil
+        // ★ THE ORGANIC PREVIEW'S SOURCE FROM A REMOTE RUN (2026-09-02): the chosen
+        // variant's alternative carries the run's emitted spans and receipt when the
+        // job asked for them. Stashed for the bake; cleared when there is none, so a
+        // stale run can never dress a new variant.
+        if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
+           let alt = o.variants[idx].latticeAlternative {
+            latticeOrganicSpans = alt.spanText.flatMap { try? OrganicSpanIndex.parse($0) }
+            latticeOrganicReceipt = OrganicRunReceipt(info: alt.receiptJSON.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] })
+        } else {
+            latticeOrganicSpans = nil
+            latticeOrganicReceipt = nil
+        }
         if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
            !o.variants[idx].vonMisesField.isEmpty {
             var v = o.variants[idx]
@@ -3490,6 +3508,21 @@ public struct WorkspacePlaceholder: View {
             layerHeightMM: project.printParams.layerHeightMM)
         run.runner = { _, _, _ in
             let result = try RelatticeRun.run(inputs)
+            // ★ THE ORGANIC PREVIEW'S SOURCE (2026-09-02): the run's emitted spans and
+            // its receipt, kept for the next bake. An unparseable or empty span file is
+            // nil — the preview then falls back to the trace and SAYS so, rather than
+            // drawing nothing. The receipt travels with the spans so the scene can
+            // cross-check count and length (§10).
+            let receiptInfo = result.receiptJSON.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+            let spans = result.spanText.flatMap { try? OrganicSpanIndex.parse($0) }
+            DispatchQueue.main.async {
+                self.latticeOrganicSpans = spans
+                self.latticeOrganicReceipt = OrganicRunReceipt(info: receiptInfo)
+                // ★ REBUILD ON RUN CHANGE (Step 4) — the span index has the bake's
+                // lifetime, so a new run is a new bake, never a per-frame one.
+                self.buildStrutScene()
+            }
             guard let spec = echo else { return result.outcome }
             return result.outcome.withLatticeReport(LatticeReport(
                 topologyID: spec.topologyID, cellMM: spec.cellMM,
@@ -4549,6 +4582,10 @@ public struct WorkspacePlaceholder: View {
         // construction.
         h.combine(project.minimizePlastic)
         h.combine(project.material)
+        // ★ THE ORGANIC RUN'S SPANS ARE A BAKE INPUT (2026-09-02): a new run with the
+        // same settings is a different picture. Count + length identify the file.
+        h.combine(latticeOrganicSpans?.count ?? -1)
+        h.combine(latticeOrganicSpans?.totalLengthMM ?? -1)
         // ★ The grading options (2026-08-25): all three feed the stepped bake.
         h.combine(l.gradingMode)
         h.combine(l.gradeStepStyle)
@@ -4660,10 +4697,14 @@ public struct WorkspacePlaceholder: View {
                 separationMinMM: lo, separationMaxMM: hi,
                 rhoMin: band.lo, rhoMax: band.hi)
         }()
+        let spansForBake = latticeOrganicSpans
+        let receiptForBake = latticeOrganicReceipt
         strutBakeInFlight = true
         DispatchQueue.global(qos: .userInitiated).async {
             let scene = LatticeSDFScene(mesh: mesh, field: field,
                                         latticeID: latticeID,
+                                        organicSpans: spansForBake,
+                                        organicReceipt: receiptForBake,
                                         // ★ The stage's OWN solve, present whether or
                                         // not the density mode grades from it — the
                                         // load question is not the density question.

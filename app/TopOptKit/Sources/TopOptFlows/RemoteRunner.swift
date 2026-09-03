@@ -810,6 +810,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             // the latter two unless `skin == "diagrid"`, which is why only the
             // unambiguous "shell" is ever emitted.
             if let of = lat.outerFinish { block["outer_finish"] = of }
+            // ★ ASK FOR THE EMITTED SPANS when the lattice is organic (2026-09-02): the
+            // preview draws the organic field from them. Gated on the linked core knowing
+            // the key — `reject_unknown_keys` kills the whole job over one it does not.
+            if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
+                block["emit_organic_spans"] = true
+            }
             job["lattice"] = block
         }
         // The declared load case is emitted for EVERY model source — STEP B-rep
@@ -1282,9 +1288,25 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             var accepted = cp.accepted
             var margin = cp.margin
             var receipt: Data?
+            var spanText: String?
             if let (data, resp) = try? syncGET(files.appendingPathComponent(cp.reportName)),
                (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty {
                 receipt = data
+                // ★ THE SPAN FILE, WHEN THE RECEIPT NAMES ONE (2026-09-02). Fetched
+                // from the same per-job files directory the mesh and receipt come
+                // from; the receipt's `span_path` is the worker's absolute path, so
+                // only its basename is meaningful here. A missing file is nil, never
+                // an empty string — the preview must not mistake "not fetched" for
+                // "zero spans".
+                if let g = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                   let gr = g["grading"] as? [String: Any],
+                   let sp = gr["span_path"] as? String, !sp.isEmpty,
+                   let (sdata, sresp) = try? syncGET(files.appendingPathComponent(
+                        (sp as NSString).lastPathComponent)),
+                   (sresp as? HTTPURLResponse)?.statusCode == 200, !sdata.isEmpty,
+                   let text = String(data: sdata, encoding: .utf8) {
+                    spanText = text
+                }
                 let facts = LatticeVariantAlternative.receiptFacts(data)
                 mass = facts.massGrams
                 // The RECEIPT is authoritative where it speaks; the checkpoint
@@ -1302,7 +1324,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             out[vf] = LatticeVariantAlternative(
                 requestedVolumeFraction: vf, meshName: cp.meshName,
                 massGrams: mass, accepted: accepted, margin: margin,
-                triangleCount: cp.triangles, meshBytes: bytes, receiptJSON: receipt)
+                triangleCount: cp.triangles, meshBytes: bytes, receiptJSON: receipt, spanText: spanText)
             diag("latticed alternative vf=\(vf): \(cp.meshName) "
                  + "\(LatticeMeshBudget.byteLabel(bytes)), \(mass) g, "
                  + "accepted=\(accepted)")

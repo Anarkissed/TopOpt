@@ -329,9 +329,13 @@ final class StrutLineWidthTests: XCTestCase {
         // and the maintainer confirmed it in his own words (2026-08-24 evening: "yes,
         // I meant line width (0.45)"). A wall bead here would let the slider store a
         // density whose strut cannot extrude.
-        XCTAssertEqual(strutSites, 13,
-                       "the thirteen audited lattice sites (AppModel 2, LatticePage 2, "
-                       + "WorkspacePlaceholder 5, ProjectModel 2, LatticeSetupWizard 2). "
+        // ★ RE-PINNED 13 -> 14 (2026-09-02): the wizard's ORGANIC pane reads the strut
+        // bead for its candidate cell sizes and the "Thicker" default — audited: it is
+        // `strutLineWidthMM`, the STRUT bead, which is exactly what those two numbers
+        // must be derived from. Never a wall bead.
+        XCTAssertEqual(strutSites, 14,
+                       "the fourteen audited lattice sites (AppModel 2, LatticePage 2, "
+                       + "WorkspacePlaceholder 5, ProjectModel 2, LatticeSetupWizard 3). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

@@ -2,8 +2,9 @@
 
 **Branch:** `claude/topopt-lattice-preview-holes-5ab466` (merged `origin/main` @ PR 353 at `de96877d`)
 **Last green commit:** `dbcb356e` (settings, keys, gates, wizard row — 7/7 tests)
-**Everything after it is UNCOMPILED at the time of writing** — the SwiftPM lock was held by the
-full lattice suite for the whole session. Read §4 before trusting anything below it.
+**§2 now compiles and its 15 tests are green** (OrganicSpanIndex ×4, OrganicRunReceipt ×2,
+LatticeSchemaProbe ×1, LatticeOrganicSettings ×7 + the settings tests). Read §4 for what is
+still unverified.
 
 ## 1. Landed and tested (dbcb356e)
 - `LatticeSettings` + `LatticeSpec`: the seven `organic_*` keys, core's defaults, CodingKeys,
@@ -44,6 +45,15 @@ full lattice suite for the whole session. Read §4 before trusting anything belo
    Currently: still there.
 
 ## 4. Not done / caveats
+- **The lattice-key probe reads the VENDORED xcframework.** `latticeSchemaAccepts("emit_organic_spans")`
+  printed `false` in the test run because `app/TopOptKit/vendor` was built before the core change;
+  `build_core.sh` was re-run afterwards. Until the app is rebuilt against it the job builders will
+  NOT ask for the span file — by design, that is the probe doing its job. Re-run
+  `LatticeSchemaProbeTests` after `build_core.sh` and expect `true`.
+- ctest (Release) #1: every test passed except `cli_demo` (= `test_cli`, a validation binary that
+  shells out per case), which sat at 0% CPU for 30 min after 36 CPU-min and was killed. Its solo
+  rerun is in flight; its source does not reference lattice/welded/organic (see grep in the
+  session), so the span export is not in its path. `job_schema` (with S1) passes.
 - Compile + tests of §2; ctest Release #2 (with S1); `build_core.sh` re-run (chained);
   device verification (an organic on-device run → label shows "N struts from the run's
   emitted spans", no MISMATCH).

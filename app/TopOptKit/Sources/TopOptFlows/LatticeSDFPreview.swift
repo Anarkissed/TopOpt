@@ -188,6 +188,14 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         // that it stops over-promising — under-promising in silence is the same
         // defect wearing the other sign.
         var label = scene.previewLabel
+        // ★ ORGANIC FROM THE RUN — say where the picture came from, and FAIL LOUDLY
+        // if it is not the object the run certified (§10).
+        if let src = scene.organicSpanSource {
+            label += String(format: " · %d struts from the run's emitted spans", src.count)
+        }
+        if let bad = scene.organicReceiptMismatch {
+            label = "★ PREVIEW DOES NOT MATCH THE RUN — " + bad + "  " + label
+        }
         // ★★★ AND WHICH ALGORITHM THIS PICTURE IS OF (maintainer, 2026-08-21: "connect
         // the different algorithms"; and 2026-08-19: "the preview needs to work and show
         // exactly like the algorithm would create the lattice").
@@ -257,6 +265,12 @@ public struct LatticePreviewSummaryValues: Equatable, Sendable {
 
 /// What a baked scene can answer for the banner. `LatticeSDFScene` conforms.
 public protocol LatticeSDFPreviewSummary {
+    /// ★ ORGANIC FROM THE RUN (2026-09-02): what the organic field was baked from, and
+    /// the §10 verdict. nil on every summary that is not a scene baked from spans.
+    var organicSpanSource: (count: Int, lengthMM: Double)? { get }
+
+
+    var organicReceiptMismatch: String? { get }
     /// Voxels of the part's own interior in the baked occupancy grid. Zero means the
     /// solid voxelisation found nothing to fill — there is no lattice, at any setting.
     var interiorVoxelCount: Int { get }
@@ -270,6 +284,13 @@ public protocol LatticeSDFPreviewSummary {
     var algorithmName: String { get }
     var algorithmDrawnFaithfully: Bool { get }
 }
+
+/// Default: nothing to say — so no conformer but the scene has to know about spans.
+public extension LatticeSDFPreviewSummary {
+    var organicSpanSource: (count: Int, lengthMM: Double)? { nil }
+    var organicReceiptMismatch: String? { nil }
+}
+
 
 public extension LatticeSDFPreviewSummary {
     var algorithmName: String { "" }

@@ -650,6 +650,11 @@ struct LatticeExportOutcome {
   long long organic_emitted_components = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_mm = 0.0;
+  // ★ THE SPAN EXPORT'S OWN RECEIPT (2026-09-02): what was written, so an app that
+  // indexes the file can FAIL LOUDLY if it drew a different object (§10).
+  long long organic_span_count = 0;
+  double organic_span_length_mm = 0.0;
+  std::string organic_span_path;
   long long organic_floating_before = 0;
   long long organic_floating_after = 0;
   long long organic_repair_legs = 0;
@@ -2095,7 +2100,11 @@ LatticeExportOutcome export_latticed_variant(
                                          const Vec3& b, double r) {
     organic_spans.push_back({a, b, r});
   };
-  const LatticeGenObserver* weld_tap = lat.emit_welded_stl ? &weld_obs : nullptr;
+  // ★ THE LEDGER IS COLLECTED WHENEVER EITHER CONSUMER ASKS (§2B). Gating it on the
+  // weld alone left `organic_spans` EMPTY for a span export, which then wrote an
+  // empty file and reported success — the failure this project has hit four times.
+  const bool want_spans = lat.emit_welded_stl || lat.emit_organic_spans;
+  const LatticeGenObserver* weld_tap = want_spans ? &weld_obs : nullptr;
   auto emit_lattice = [&](TriangleSink& w) {
     if (!measure_protrusion) {
       if (organic)
@@ -2126,7 +2135,8 @@ LatticeExportOutcome export_latticed_variant(
                          double er) {
       // Same ledger as the non-measuring path above, so the welded body does not
       // depend on whether the protrusion measurement happened to be armed.
-      if (lat.emit_welded_stl) organic_spans.push_back({ea, eb, er});
+      if (lat.emit_welded_stl || lat.emit_organic_spans)
+        organic_spans.push_back({ea, eb, er});
       const char* name = "unknown";
       switch (k) {
         case LatticeGenElement::InteriorStrut: name = "interior strut"; break;
@@ -2256,6 +2266,47 @@ LatticeExportOutcome export_latticed_variant(
     oc.paths.push_back(path);
     oc.weld = ws;
     oc.welded = true;
+  }
+
+  // ★★★ THE EMITTED SPANS, WRITTEN FOR THE PREVIEW (2026-09-02).
+  //
+  // One line per strut ACTUALLY EMITTED, from the same post-prune `on_element`
+  // ledger the weld reads (organic_lattice.cpp fires it inside the final emission
+  // loop over `emitted`, after the support prune and the component statistics), so
+  // the app draws the object that was certified. Not gc2's writer: that one records
+  // the PRE-PRUNE traced network, which is a different object.
+  //
+  // The format is the one the FEA driver already reads (evidence/.../run_coupled.cpp):
+  //     GRID  ox oy oz spacing nx ny nz
+  //     SEG   ax ay az bx by bz r
+  // `SKIN` is omitted: the reader treats it as optional and nothing in this scope
+  // carries a designed rim thickness to state honestly.
+  //
+  // ★ AN EMPTY LEDGER IS REFUSED, NEVER WRITTEN (§2B). A zero-span file that reports
+  // success is a preview that draws nothing while everything says green — this
+  // project has hit exactly that four times. Refusing is a hard error on purpose.
+  if (lat.emit_organic_spans) {
+    if (organic_spans.empty())
+      throw JobError(
+          "lattice emit_organic_spans: the emission ledger is EMPTY - no strut was "
+          "emitted, so no span file is written (refusing rather than writing zero spans)");
+    const std::string spath = base + "_SPANS.txt";
+    FILE* sf = std::fopen(spath.c_str(), "w");
+    if (!sf) throw JobError("lattice emit_organic_spans: cannot open " + spath);
+    std::fprintf(sf, "GRID %.10g %.10g %.10g %.10g %d %d %d\n", sg.origin.x, sg.origin.y,
+                 sg.origin.z, sg.spacing, sg.nx, sg.ny, sg.nz);
+    double total_len = 0.0;
+    for (const OrganicSpan& sp : organic_spans) {
+      std::fprintf(sf, "SEG %.8g %.8g %.8g %.8g %.8g %.8g %.6g\n", sp.a.x, sp.a.y, sp.a.z,
+                   sp.b.x, sp.b.y, sp.b.z, sp.r);
+      const double dx = sp.b.x - sp.a.x, dy = sp.b.y - sp.a.y, dz = sp.b.z - sp.a.z;
+      total_len += std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    if (std::fclose(sf) != 0) throw JobError("lattice emit_organic_spans: failed writing " + spath);
+    oc.paths.push_back(spath);
+    oc.organic_span_count = static_cast<long long>(organic_spans.size());
+    oc.organic_span_length_mm = total_len;
+    oc.organic_span_path = spath;
   }
 
   // The latticed region's SOLID voxel count (the region actually filled): every
@@ -8299,6 +8350,9 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;
         gi.organic_emitted_stranded_length_mm = R.oc.organic_emitted_stranded_mm;
+        gi.organic_span_count = R.oc.organic_span_count;
+        gi.organic_span_length_mm = R.oc.organic_span_length_mm;
+        gi.organic_span_path = R.oc.organic_span_path;
         gi.organic_floating_voxels_before = R.oc.organic_floating_before;
         gi.organic_floating_voxels_after = R.oc.organic_floating_after;
         gi.organic_repair_legs = R.oc.organic_repair_legs;

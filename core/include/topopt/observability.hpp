@@ -1079,6 +1079,11 @@ struct RunInfo {
   long long organic_repair_rounds = 0;
   double organic_emitted_largest_fraction = 0.0;
   double organic_emitted_stranded_length_mm = 0.0;
+  // ★ THE SPAN EXPORT (2026-09-02): count, total length and path of the file the
+  // preview is built from. 0 / empty when the job did not ask for it.
+  long long organic_span_count = 0;
+  double organic_span_length_mm = 0.0;
+  std::string organic_span_path;
   double organic_largest_component_fraction = 0.0;
   double organic_connector_median_length_mm = 0.0;
   double organic_connector_max_cross_deviation_deg = 0.0;

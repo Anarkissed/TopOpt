@@ -1574,6 +1574,43 @@ public enum TopOptKit {
     /// Whether the schema probe proved itself on this build — a key core has always
     /// accepted probes true AND a nonsense key probes false. False ⇒ every
     /// `gradingSchemaAccepts` answer is a conservative false.
+    /// ★★★ DOES THE LINKED CORE ACCEPT A `lattice`-BLOCK KEY? (2026-09-02)
+    ///
+    /// Runs use `reject_unknown_keys`, so a lattice key the linked core does not know
+    /// kills the whole job after the solve. `gradingSchemaAccepts` answers this for the
+    /// grading block through a dedicated bridge call; the lattice block has none, and
+    /// none is needed: `jobSchemaError` parses a WHOLE job through core's own schema, so
+    /// a minimal job carrying the key, asked of it, is the same question asked of the
+    /// same code. Accepted ⇔ the schema raises no error naming the key.
+    ///
+    /// The skeleton is the one core's own `test_job.cpp` treats as valid. It is parsed,
+    /// not run — no file has to exist.
+    /// ★ THE SKELETON IS core's OWN VALID BASE JOB (lifted from test_job.cpp's `mutate`
+    /// base), because a hand-written one was refused for `fixture_faces` before any
+    /// lattice key was looked at — and then EVERY key probed false, the span export
+    /// silently never being asked for. The lattice block is appended to it.
+    static let latticeProbeBaseJob = #"{"model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48, "fixture_faces": [{"kind": "cylindrical", "radius_mm": 2.5}], "gravity": {"direction": [0.0, 0.0, -1.0], "magnitude_mm_s2": 9810.0}, "ladder": [0.7, 0.5, 0.3], "margin_stop": 1.5, "simp": {"max_iterations": 30}, "output": {"report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant"}}"#
+
+    private static func latticeProbeJob(key: String) -> Data {
+        var text = latticeProbeBaseJob
+        text.removeLast()   // the closing brace
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, ""#
+            + key + #"": true}}"#
+        return Data(text.utf8)
+    }
+
+    public static func latticeSchemaAccepts(key: String) -> Bool {
+        // ★ STRICT: accepted ⇔ core's schema raises NO error on the base job carrying
+        // the key. A test that merely asked "does the error name the key" passed a
+        // nonsense key when the skeleton itself was refused for another reason.
+        jobSchemaError(latticeProbeJob(key: key)) == nil
+    }
+
+    /// The raw schema verdict for a lattice key — for the probe's own controls.
+    public static func latticeSchemaError(key: String) -> String? {
+        jobSchemaError(latticeProbeJob(key: key))
+    }
+
     public static var gradingSchemaProbeIsReliable: Bool {
         topoptbridge.grading_schema_probe_is_reliable()
     }
