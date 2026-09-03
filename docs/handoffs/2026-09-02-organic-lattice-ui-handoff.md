@@ -113,3 +113,38 @@ project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
 8. `LatticeWizardOrganicChipTests` first SKIPPED silently: the guard used
    `latticeSchemaAccepts` (the lattice-block probe) on a GRADING key. A skip reads
    as green in a filtered run — read the "skipped" count, not the exit code.
+9. **Three on-device organic runs, three different endings — all core's own words:**
+   - run #1 (21:07, no `intent`): refused at validation — fixed in the app.
+   - run #2 (21:37, `intent` present, no shape-fit because Save & Exit had not
+     persisted): passed validation, solved, refused at the PRINTABILITY gate —
+     "17 raster cells (0.627 mm³, 2 regions) would be extruded into open air at
+     0.2 mm; 7343 support legs added, 607 spans cut; these defeated both. Set
+     `require_no_midair_start: false` or change geometry." The app exposes NO such
+     key — whether to offer "export anyway" is HIS call.
+   - run #3 (21:49, persisted picks incl. `organic_shape_fit: true`): passed the
+     printability gate (!) and was refused at the EXPORT guard — "5 of 237,996
+     lattice vertices lie OUTSIDE the solid shell, worst by 0.0318 mm at
+     (25.947, −48.942, 14.680), interior strut pass, allowance 0.0001 mm." A core
+     clip-vs-shell escape on the shape-fit path — the strut-clip family, not the
+     Organic algorithm, and not touched tonight.
+10. **Core's span export works on his real part.** The SAME job bytes as run #2,
+    replayed on the Mac with `topopt-cli lattice-variant` and the gate off:
+    `variant_024_lattice_SPANS.txt` = 1240 SEG lines, 783.28 mm recomputed from the
+    file, radii 0.430–2.052 mm; `run_info.json grading.organic.span_count = 1240`,
+    `span_length_mm = 783.27785`, `length_survival = 0.130`, `tensor_out_of_regime =
+    true`. Receipt and file agree — the §10 check, done by hand on real data.
+11. **The receipt read the wrong level.** `OrganicRunReceipt(info:)` read
+    `grading.span_count`; core writes `grading.organic.span_count` (every organic
+    field is nested). On a real run the receipt was EMPTY and the "PREVIEW DOES NOT
+    MATCH THE RUN" guard could never fire. Fixed (nested first, flat fallback) and
+    pinned with the replay's numbers; the original test had built a flat dictionary
+    and so passed against the broken reader.
+12. Restored his `project.json` from the session backup (`BACKUP2`, sha `d6d1d335…`)
+    into the current data container after the runs; the app was relaunched to the
+    project list.
+13. OPEN (QA): the organic pane showed "Cell size · Auto·grade" lit while both captured
+    jobs carried the OCTET's window — `cell_mode: swept, cell_min 5.5, cell_max 6` —
+    inherited from the project's earlier octet settings. `organicCellIndex` reads
+    `model.cellSizeMode == .auto` for index 0; the display and the emitted
+    `cell_mode` need one source of truth under Organic (what should "Auto·grade"
+    write — `cell_mode: auto`? — is a mapping question for the spec's item 1).

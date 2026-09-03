@@ -27,4 +27,28 @@ final class OrganicRunReceiptTests: XCTestCase {
         XCTAssertNil(OrganicRunReceipt().mismatch(againstIndexedCount: 5, totalLengthMM: 1),
                      "no export in the receipt ⇒ nothing to check")
     }
+
+    /// ★ THE REAL SHAPE. Pinned from `run_info.json` of a lattice-variant replay of the
+    /// on-device job (2026-09-02): core nests every organic field under
+    /// `grading.organic`. A reader one level up saw nothing — the first receipt test
+    /// built a FLAT dictionary and so passed while the app's receipt was empty.
+    func testFieldsAreReadFromTheNestedOrganicObjectCoreActuallyWrites() {
+        let info: [String: Any] = ["grading": [
+            "algorithm": "organic", "topology": "octet",
+            "organic": ["span_count": 1240, "span_length_mm": 783.27785,
+                        "span_path": "out/variant_024_lattice_SPANS.txt",
+                        "length_survival": 0.1301973212, "tensor_out_of_regime": true,
+                        "emitted_components": 1,
+                        "length_census_mm": ["traced": 6016.0, "emitted": 783.27785]]
+        ]]
+        let r = OrganicRunReceipt(info: info)
+        XCTAssertEqual(r.spanCount, 1240)
+        XCTAssertEqual(r.spanLengthMM ?? 0, 783.27785, accuracy: 1e-9)
+        XCTAssertEqual(r.spanPath, "out/variant_024_lattice_SPANS.txt")
+        XCTAssertEqual(r.lengthSurvival ?? 0, 0.1301973212, accuracy: 1e-12)
+        XCTAssertEqual(r.emittedComponents, 1)
+        // the by-hand §10 check on the replay: 1240 SEG lines, 783.28 mm recomputed
+        XCTAssertNil(r.mismatch(againstIndexedCount: 1240, totalLengthMM: 783.28))
+        XCTAssertNotNil(r.mismatch(againstIndexedCount: 1239, totalLengthMM: 783.28))
+    }
 }

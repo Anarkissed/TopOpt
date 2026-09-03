@@ -43,7 +43,13 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     /// From the receipt's top-level dictionary (the same `info` the strut-strength
     /// reader uses). Absent `grading` ⇒ every field nil — no numbers invented.
     public init(info: [String: Any]?) {
-        let g = (info?["grading"] as? [String: Any]) ?? [:]
+        // ★ THE ORGANIC FIELDS LIVE UNDER `grading.organic`, NOT `grading` (measured
+        // on a real run_info.json, 2026-09-02: span_count 1240 / span_length_mm
+        // 783.27785 / span_path sat in the nested object and this reader, looking one
+        // level up, returned NOTHING — an empty receipt that could never say
+        // MISMATCH). The nested object wins; the flat shape stays as the fallback.
+        let top = (info?["grading"] as? [String: Any]) ?? [:]
+        let g = (top["organic"] as? [String: Any]) ?? top
         func d(_ k: String) -> Double? { (g[k] as? NSNumber)?.doubleValue }
         func i(_ k: String) -> Int? { (g[k] as? NSNumber)?.intValue }
         func b(_ k: String) -> Bool? { (g[k] as? NSNumber)?.boolValue }
