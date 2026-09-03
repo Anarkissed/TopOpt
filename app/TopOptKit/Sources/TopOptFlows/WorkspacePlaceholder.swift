@@ -10704,8 +10704,21 @@ public struct WorkspacePlaceholder: View {
     /// `RunModel.latticeBridgeRunner` now writes the SAME document to a temp
     /// directory and hands it to core's own parser, so both routes run the same
     /// job. The only requirement left is a lattice to build.
+    /// ★ D1 EMISSION GATE (maintainer, 2026-09-03): organic is selectable under
+    /// Structural, but core refuses the job at runtime until its structural
+    /// certification for organic is wired. The UI never writes a job core refuses,
+    /// so the run button is the gate — disabled, carrying core's own words — while
+    /// every control above it stays enabled. Lifts when
+    /// `TopOptKit.organicStructuralCertificationWired` does.
+    private var organicStructuralGateOpen: Bool {
+        !(project.lattice.isOrganic
+          && (project.lattice.stageMode ?? .structural) == .structural
+          && !TopOptKit.organicStructuralCertificationWired)
+    }
+
     var canLatticeThis: Bool {
         project.lattice.enabled && !project.latticeJobRegions().regions.isEmpty
+            && organicStructuralGateOpen
     }
 
     private var latticeThisSummary: String {
@@ -10713,6 +10726,7 @@ public struct WorkspacePlaceholder: View {
         let n = project.latticeJobRegions().regions
             .filter { $0.role == .include }.count
         if n == 0 { return "nothing set to lattice" }
+        if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 

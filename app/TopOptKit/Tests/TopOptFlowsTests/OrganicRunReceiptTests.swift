@@ -69,4 +69,21 @@ final class OrganicRunReceiptTests: XCTestCase {
         XCTAssertEqual(grown.contiguityLine, "50.0% of traced length kept · 1 piece · 12 joins refused")
         XCTAssertNil(OrganicRunReceipt(info: nil).contiguityLine, "no receipt ⇒ no line, no invention")
     }
+
+    /// ★ D2: the window / separation is DISPLAYED from the receipt, never computed
+    /// here. Pinned to the traced replay of run 2 (requested 5.5–6, achieved
+    /// 2.95–8.39, median 5.39); the Structural confirmation key is absent until core
+    /// writes it, and then shown verbatim.
+    func testTheSpacingLineDisplaysCoresWindowAndNothingElse() {
+        let r = OrganicRunReceipt(info: ["grading": ["organic": [
+            "requested_spacing_min_mm": 5.5, "requested_spacing_max_mm": 6,
+            "achieved_spacing_min_mm": 2.946533982, "achieved_spacing_max_mm": 8.386092124,
+            "achieved_spacing_median_mm": 5.386302931]]])
+        XCTAssertEqual(r.spacingLine, "window 5.5–6.0 mm · achieved 2.9–8.4 mm (median 5.4)")
+        XCTAssertNil(r.structurallyCertified, "absent until core writes it")
+        let fit = OrganicRunReceipt(info: ["grading": ["organic": [
+            "requested_spacing_min_mm": 4, "requested_spacing_max_mm": 4, "structural_certified": true]]])
+        XCTAssertEqual(fit.spacingLine, "separation 4.0 mm · core: structurally sound")
+        XCTAssertNil(OrganicRunReceipt(info: nil).spacingLine)
+    }
 }

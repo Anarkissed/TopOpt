@@ -544,18 +544,15 @@ public struct LatticeSetupWizard: View {
     // ★ NOT A TOPOLOGY. Organic is chosen by `grading.algorithm`; the topology stays
     // "octet" (core refuses any other) and that is correct, not a leftover.
     // ══════════════════════════════════════════════════════════════════════════
-    @State private var organicPicking = false
     /// ★ HONEST INDEX: a swept/fit mode inherited from the lattice types lights
     /// NOTHING here (−1) — it is not one of these three choices, and lighting
     /// "Auto · grade" over a job that carried the octet's 5.5–6 mm window was the
     /// 2026-09-02 defect. The chip and the row reset such a mode to Auto out loud.
     private var organicCellIndex: Int {
         switch model.cellSizeMode {
-        case .auto: return model.simulateStresses ? 0 : -1
-        case .fixed:
-            if model.simulateStresses { return organicPicking ? 2 : 1 }
-            return organicPicking ? 1 : 0
-        default: return -1
+        case .auto: return 0
+        case .fit: return 1
+        default: return -1      // an inherited octet mode lights nothing (D2)
         }
     }
     /// True once this sheet reset an inherited swept/fit window to Auto for organic,
@@ -580,7 +577,7 @@ public struct LatticeSetupWizard: View {
                     if !model.organicShapeFit { model.organicShapeFit = true }
                     // ★ A project SAVED with organic over an inherited swept/fit
                     // window gets the same reset as the chip tap, and says so.
-                    if model.cellSizeMode == .swept || model.cellSizeMode == .fit {
+                    if model.cellSizeMode != .auto && model.cellSizeMode != .fit {
                         model.setCellSizeMode(.auto); organicWindowReset = true
                     }
                 }
@@ -611,57 +608,52 @@ public struct LatticeSetupWizard: View {
             // ★★★ CELL SIZE (his item 1): Auto (grade) / Fit (one size) / a size picked
             // from the list of sizes that CAN FIT the selected regions. For organic the
             // cell is the SEPARATION field; a graded window is what makes a graded lattice.
-            Text("Cell size").font(.system(size: 10, weight: .bold))
-                .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
-            if organicWindowReset {
-                Text("Reset to Auto: the lattice types' cell window is not a tested organic "
-                     + "spacing on this part. Pick a size to state one.")
+            // ★ D1: under Structural the controls stay live but the run will be refused
+            // by core until its organic certification is wired — say so HERE, in
+            // core's words, before he reaches the run button that carries the same.
+            if organicStructuralGateClosed {
+                Text(TopOptKit.organicStructuralGateMessage)
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            segmentRow(model.simulateStresses ? ["Auto · grade", "Fit · one size", "Pick a size"]
-                                              : ["Fit · one size", "Pick a size"],
-                       selected: organicCellIndex) { i in
-                let modes: [LatticeCellSizeMode] = model.simulateStresses
-                    ? [.auto, .fixed, .fixed] : [.fixed, .fixed]
-                organicPicking = (model.simulateStresses ? i == 2 : i == 1)
-                model.setCellSizeMode(modes[i]); rebuild()
+            Text("Cell size").font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color).padding(.top, DS.Space.xs)
+            // ★★ ORGANIC CELL MODES ARE AUTO AND FIT (maintainer D2, 2026-09-03) — no
+            // octet notion here: no sizes, no candidate list, no "fits" computed in
+            // the app.
+            //   AUTO: the largest grade possible, made entirely from the FEA — a
+            //         separation window from the smallest fitting to the largest
+            //         fitting, FEA-driven within it.
+            //   FIT:  one separation, no grade (except grade-to-shape) — the middle of
+            //         what fits; of exactly two, the larger.
+            // CORE decides what fits and what it chose; the run's receipt is what the
+            // app displays (window/separation and the fitting set). Under Structural,
+            // core confirms each Auto option structurally sound — displayed from the
+            // receipt, never inferred here.
+            if organicWindowReset {
+                Text("Reset to Auto: the lattice types' cell setting is not an organic mode.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if model.cellSizeMode == .fixed {
-                let cands = model.organicCellCandidates(
-                    memberMM: project.lattice.regionMemberMM,
-                    lineWidthMM: project.printParams.strutLineWidthMM,
-                    densityCeiling: model.relativeDensity)
-                if organicPicking, !cands.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: DS.Space.xs) {
-                            ForEach(cands, id: \.self) { c in
-                                organicPill(String(format: "%.2f mm", c),
-                                            on: abs(model.cellMM - c) < 1e-6, enabled: true) {
-                                    model.cellMM = c; model.touched(.size); rebuild()
-                                }
-                            }
-                        }
-                    }
-                    // ★ ADVISORY, NEVER A FILTER (§6): the band that MEASURED as a
-                    // lattice on this part. Structural-mode restriction is pending the
-                    // maintainer's ruling and is not applied here.
-                    // ★ NO VERDICTS HERE (addendum, 2026-09-03): the "up to 4 mm stayed
-                    // one lattice / coarser left dust" numbers came from gc2's inline
-                    // tracer (section 6(i)), not from core's trace_organic_lattice, and
-                    // nothing derived from it may advise a user. The receipt is the only
-                    // source of what was built.
-                    Text("Sizes that fit the thinnest member. The run's receipt reports "
-                         + "what was built: length survival, pieces, largest piece.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    scrubRow("organicCell", value: model.cellMM, unit: "mm", step: 0.05,
-                             range: 1...20) { model.cellMM = $0; model.touched(.size); rebuild() }
-                }
+            // Core refuses `fit` on a job that declares no region to fit into
+            // (job.cpp: "a job that declares none states no requirement to fit").
+            let fitPossible = project.latticeJobRegions().regions.contains(where: { $0.role == .include })
+            segmentRow(["Auto", "Fit"], selected: organicCellIndex) { i in
+                if i == 1, !fitPossible { return }
+                model.setCellSizeMode(i == 0 ? .auto : .fit); rebuild()
             }
+            Text(model.cellSizeMode == .fit
+                 ? "One separation, no grade beyond grade-to-shape: the middle of what "
+                   + "fits (of two, the larger). Core picks it; the run's receipt shows it."
+                 : "The largest grade the FEA allows: a window from the smallest fitting "
+                   + "separation to the largest, FEA-driven within it. Core picks the "
+                   + "window; the run's receipt shows it."
+                   + (fitPossible ? "" : " Fit needs a declared lattice region."))
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+                .fixedSize(horizontal: false, vertical: true)
             // ★★★ DENSITY (his item 2): from the print parameters, thickened on request,
             // or left to the solve. Auto and Sim both leave `organic_strut_width_mm` at
             // 0 (core derives it from the band and the cell); Manual states a width.
@@ -1178,9 +1170,16 @@ public struct LatticeSetupWizard: View {
         return s == .cellSize || s == .density || s == .finish
     }
 
-    /// Core refuses organic under a Structural stage; the chip is disabled there.
-    private var organicRefusedByStage: Bool {
+    /// ★ D1 (maintainer, 2026-09-03): organic is NOT aesthetic-only — the chip is
+    /// selectable under Structural with the same controls. Core still refuses the
+    /// job at runtime until its structural certification for organic is wired, so
+    /// the EMISSION is gated (the run button carries core's message), never the
+    /// chip. The mechanism stays as one `false` for a future core rule.
+    private var organicRefusedByStage: Bool { false }
+    /// True while an organic + Structural job would be refused by core at runtime.
+    private var organicStructuralGateClosed: Bool {
         (project.lattice.stageMode ?? .structural) == .structural
+            && !TopOptKit.organicStructuralCertificationWired
     }
 
     private var organicTypeChip: some View {
@@ -1200,7 +1199,7 @@ public struct LatticeSetupWizard: View {
             // the lattice types is reset to Auto HERE, out loud (the pane says so),
             // never carried silently — measured 2026-09-02: the pane lit "Auto ·
             // grade" while the job carried the octet's swept 5.5–6 mm.
-            if model.cellSizeMode == .swept || model.cellSizeMode == .fit {
+            if model.cellSizeMode != .auto && model.cellSizeMode != .fit {
                 model.setCellSizeMode(.auto); organicWindowReset = true
             }
             rebuild()

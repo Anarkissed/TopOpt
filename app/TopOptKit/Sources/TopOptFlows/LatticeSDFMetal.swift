@@ -706,7 +706,9 @@ public struct LatticeSDFScene {
         self.organicField = organicOut
         self.organicSpanSource = organicSpanReceipt
         self.organicReceiptMismatch = organicMismatch
-        self.organicReceiptSummary = organicReceipt?.contiguityLine
+        let receiptLines = [organicReceipt?.contiguityLine, organicReceipt?.spacingLine]
+            .compactMap { $0 }
+        self.organicReceiptSummary = receiptLines.isEmpty ? nil : receiptLines.joined(separator: " · ")
         self.organicBandMM = organicBand
         self.organicSummary = organicSaid
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has

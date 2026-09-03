@@ -333,9 +333,14 @@ final class StrutLineWidthTests: XCTestCase {
         // bead for its candidate cell sizes and the "Thicker" default — audited: it is
         // `strutLineWidthMM`, the STRUT bead, which is exactly what those two numbers
         // must be derived from. Never a wall bead.
-        XCTAssertEqual(strutSites, 14,
-                       "the fourteen audited lattice sites (AppModel 2, LatticePage 2, "
-                       + "WorkspacePlaceholder 5, ProjectModel 2, LatticeSetupWizard 3). "
+        // ★ RE-PINNED 14 -> 13 (2026-09-03, maintainer D2): the organic pane's
+        // candidate-size list is GONE — core decides what fits, the app computes no
+        // sizes — so the wizard's second organic site (candidates from the strut bead)
+        // no longer exists. The "Thicker" default site remains and still reads the
+        // STRUT bead. A removed site is the simplest audit there is.
+        XCTAssertEqual(strutSites, 13,
+                       "the thirteen audited lattice sites (AppModel 2, LatticePage 2, "
+                       + "WorkspacePlaceholder 5, ProjectModel 2, LatticeSetupWizard 2). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

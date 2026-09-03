@@ -1,5 +1,93 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-03 — maintainer decisions D1/D2 applied (app only; `git status core/` clean)
+>
+> **Core SHA the device builds linked:** `ca56654d2805` (12-char, from
+> `CoreFingerprint.generated.swift`, written by `build_core.sh` at the 2026-09-02
+> 20:40 re-vendor; the xcframework's mtime is 20:40:19). Device dylibs of this
+> session: `f49df957ac923314`, `982516d3e5017957`, `a1a498bc36f5cb39`,
+> `f84512590c1a71e5`, `564db78a1220c5b7` — all Debug, all against that core. The
+> Mac replays used the Release CLI in `build/` from the same worktree; whether
+> `growth_ran=false` and the missing `census_components[]` are skew or defects is
+> for core to say with that SHA in hand.
+>
+> **§1 evidence committed:** `evidence/2026-09-02-organic-on-device/` — run-2 and
+> run-3 job bytes, the gate-off replay job, both receipts, and the exact
+> `topopt-cli lattice-variant` command (README). The shell guard did NOT fire on
+> run-2 bytes without shape fit (neither on device nor on the gate-off replay,
+> which exported 1240 spans clean); it fired only on run 3 with
+> `organic_shape_fit: true`.
+>
+> **D1 — Organic under Structural (UI enablement, emission gated).** The chip is
+> selectable under Structural with the same controls as Aesthetic. Core still
+> refuses the job at runtime (`refuse_organic_structural`), and that is not a
+> schema key, so `gradingSchemaAccepts` cannot see it: the app carries its own
+> statement `TopOptKit.organicStructuralCertificationWired` (FALSE today; to be
+> bound to core's capability signal — coordination with the core agent pending)
+> and the gate's words `organicStructuralGateMessage`. While false: the organic
+> pane shows the message under Structural, and the lattice-stage run button is
+> DISABLED with the same message (`canLatticeThis` / `latticeThisSummary`), so the
+> UI never writes a job core refuses. No core edit.
+>
+> **D2 — organic cell modes are AUTO and FIT.** The organic "Cell size" segment is
+> `["Auto", "Fit"]`; the candidate list, the size pills and the scrub are gone (no
+> "fits" computed in the app). AUTO → core's `cell_mode: auto`, no window; FIT →
+> core's `cell_mode: fit` where a region is declared (core refuses `fit` with
+> none) and Auto otherwise — never a fixed cell. Enforced on BOTH builder paths in
+> `runSpec` (graded/sim and uniform) and in `LatticeAutoPosture` (F2), so no octet
+> window or size reaches an organic job by any path; pinned by
+> `testOrganicCellModesAreAutoAndFitOnlyOnBothPaths` and the posture test. The
+> receipt now carries the window/separation core chose
+> (`requested_spacing_*`, `achieved_spacing_*` → `spacingLine`) and reads
+> `structural_certified` when core writes it (key name to coordinate) — displayed
+> on the preview label, never inferred. What "the fitting set" looks like in the
+> receipt is core's addition; the reader will show it when the key exists.
+>
+> **On-device proof (Debug dylib `77a13857ba095c55`, 04:08, core `ca56654d2805`),
+> project set to `stageMode: structural` + `algorithm: organic` by file:**
+> - the lattice stage stays live under Structural; the run button is DISABLED and
+>   reads core's words: "organic structural certification is not yet wired — core
+>   refuses an organic lattice under a Structural intent today. Run it under
+>   Aesthetic, or wait for the core task." (04:12 screenshot);
+> - the organic pane shows the same caption above "Cell size", with every control
+>   enabled; the segment is `Auto | Fit`, no sizes, no pills (04:10 and 04:12);
+> - the mode sheet's "Traced (organic) lattices need this mode" row is rewritten to
+>   D1's wording (post-dates the on-device build; compiled by the next build).
+>
+> **A gap D2's test caught, fixed:** on the UNIFORM-density path (`Density: Auto /
+> Thicker` set `.uniform`) `runSpec` built `graded: false`, and `gradingDictionary()`
+> returns nil for a non-graded spec — an organic job on that path carried NO grading
+> block, hence no `algorithm`, and core would have run the default lattice in
+> silence. An organic job now always builds `graded: true`. And the sim path's fit
+> fallback (fit → FIXED for the octet) ran after the first organic rule, letting
+> `cell_mm: 6.0` through; the organic rule is applied again after it. Pinned by
+> `testOrganicCellModesAreAutoAndFitOnlyOnBothPaths` (fixed → auto, swept → auto,
+> fit-without-region → auto, no size, both paths).
+>
+> **Full app suite for this round (Debug, SwiftPM): 2284 tests, 30 skipped, 1 failure,
+> named — `StrutLineWidthTests.testNoLatticeLineWidthSiteReadsAWallBead`, the audit of
+> `strutLineWidthMM` call sites (14 → 13: the organic candidate-size site is gone by
+> D2). Re-pinned per the test's own instruction; 12/12 after. The two earlier-round
+> failures did not reproduce in any of the three full runs since.
+>
+> ### §3 — census beside its counters (null is NOT "did not run")
+> From the two replay receipts (same job bytes; Release CLI, core `ca56654d2805`):
+>
+> | stage | census TRACED | counters TRACED | census GROWN | counters GROWN |
+> |---|---|---|---|---|
+> | base_cut | null | base_trim_found false, cut 0, clipped 0 | null | same |
+> | support_prune | 783.28 | legs 7343, cuts 607, cleanup_pruned 8492 | 85.71 | legs 1834, cuts 462, cleanup 2311 |
+> | stranded_drop | 783.28 | comps 8, spans 356 | 85.71 | comps 17, spans 377 |
+> | ground_tie | **null** | legs 8, rounds 5, ties 314 **← disagree** | **null** | legs 22, rounds 4, ties 2044 **← disagree** |
+> | branch_support | **null** | seeds 537, trunks 231, merges 35 **← disagree** | **null** | seeds 286, trunks 136, merges 54 **← disagree** |
+> | dangling | 783.28 | trimmed 17, rounds 1 | 85.71 | trimmed 17, rounds 1 |
+> | fill_mat | **null** | struts 415, cells 1485 **← disagree** | **null** | struts 24, cells 1121 **← disagree** |
+> | finish | **null** | filleted 72, net_skin 0 **← disagree** | **null** | filleted 2 **← disagree** |
+>
+> Four stages carry `null` beside nonzero counters in both receipts, so the
+> census `null` cannot be read as "stage did not run" until core confirms the
+> sentinel. `census_components[]` is absent altogether.
+
 > ## ★ STATE AT 2026-09-03 — REVERTED: no core change in this PR
 > On 2026-09-02 the maintainer said organic should be available under Structural;
 > the agent read that as a core instruction and retired two core gates on disk

@@ -22,6 +22,32 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     /// Grown mode: spans the join step refused. Carried, never judged (addendum
     /// 2026-09-03: expose the receipt fields, leave policy out).
     public var growthJoinRefusedSpan: Int?
+    /// D2: the separation window core was asked for and what it achieved (mm). Displayed,
+    /// never judged. `structurallyCertified` is core's Structural confirmation — a key
+    /// core is adding; absent until then.
+    public var requestedSpacingMinMM: Double? = nil
+    public var requestedSpacingMaxMM: Double? = nil
+    public var achievedSpacingMinMM: Double? = nil
+    public var achievedSpacingMedianMM: Double? = nil
+    public var achievedSpacingMaxMM: Double? = nil
+    public var structurallyCertified: Bool? = nil
+
+    /// ★ D2, SAID IN ONE LINE: the window core was asked for, what it achieved, and —
+    /// when core writes it — its Structural confirmation. Absent fields are absent.
+    public var spacingLine: String? {
+        var parts: [String] = []
+        if let lo = requestedSpacingMinMM, let hi = requestedSpacingMaxMM {
+            parts.append(abs(hi - lo) < 1e-9 ? String(format: "separation %.1f mm", lo)
+                                             : String(format: "window %.1f–%.1f mm", lo, hi))
+        }
+        if let lo = achievedSpacingMinMM, let hi = achievedSpacingMaxMM {
+            var a = String(format: "achieved %.1f–%.1f mm", lo, hi)
+            if let m = achievedSpacingMedianMM { a += String(format: " (median %.1f)", m) }
+            parts.append(a)
+        }
+        if let c = structurallyCertified { parts.append(c ? "core: structurally sound" : "core: NOT structurally confirmed") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
     // Contiguity — reported, never judged here.
     public var lengthSurvival: Double?            // written length / grown length
     public var emittedComponents: Int?
@@ -78,6 +104,17 @@ public struct OrganicRunReceipt: Equatable, Sendable {
         growthRan = b("growth_ran"); growthTipBudgetHit = b("growth_tip_budget_hit")
         growthLayerHeightMM = d("growth_layer_height_mm")
         growthJoinRefusedSpan = i("growth_join_refused_span")
+        // ★ D2 (maintainer, 2026-09-03): core decides what fits and what it chose; the
+        // app DISPLAYS the window / separation from the receipt. These are the keys
+        // core writes today; the fitting SET and the Structural confirmation
+        // (`structural_certified`) are core-side additions in progress — read when
+        // present, absent otherwise, never inferred here.
+        requestedSpacingMinMM = d("requested_spacing_min_mm")
+        requestedSpacingMaxMM = d("requested_spacing_max_mm")
+        achievedSpacingMinMM = d("achieved_spacing_min_mm")
+        achievedSpacingMedianMM = d("achieved_spacing_median_mm")
+        achievedSpacingMaxMM = d("achieved_spacing_max_mm")
+        structurallyCertified = b("structural_certified")
         lengthSurvival = d("length_survival"); emittedComponents = i("emitted_components")
         emittedLargestLengthFraction = d("emitted_largest_length_fraction")
         emittedStrandedLengthMM = d("emitted_stranded_length_mm")

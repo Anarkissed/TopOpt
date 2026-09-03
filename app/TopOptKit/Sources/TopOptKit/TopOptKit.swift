@@ -1599,6 +1599,21 @@ public enum TopOptKit {
         return Data(text.utf8)
     }
 
+    /// ★ D1 (maintainer, 2026-09-03): organic runs under BOTH intents — but core still
+    /// refuses an organic job under a Structural intent at RUNTIME
+    /// (`run_job.cpp refuse_organic_structural`), until its structural certification
+    /// for organic is wired (a core task in progress). That is a runtime gate, not a
+    /// schema key, so `gradingSchemaAccepts` cannot see it. Until core exposes a
+    /// capability signal (coordination with the core agent pending), this is the app's
+    /// own statement of the fact, and FALSE means the app must not EMIT the job — the
+    /// controls stay enabled, the run button carries the gate's message instead.
+    public static var organicStructuralCertificationWired: Bool { false }
+    /// The gate's own words, surfaced wherever an organic + Structural run would start.
+    public static let organicStructuralGateMessage =
+        "organic structural certification is not yet wired — core refuses an organic "
+        + "lattice under a Structural intent today. Run it under Aesthetic, or wait for "
+        + "the core task."
+
     public static func latticeSchemaAccepts(key: String) -> Bool {
         // ★ STRICT: accepted ⇔ core's schema raises NO error on the base job carrying
         // the key. A test that merely asked "does the error name the key" passed a

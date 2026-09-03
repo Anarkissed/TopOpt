@@ -68,11 +68,14 @@ public struct LatticeStageModeSheet: View {
             rows.append((
                 "The density is not a strength requirement",
                 TopOptKit.latticeAestheticDensityMeaning))
+            // ★ D1 (maintainer, 2026-09-03): organic is NOT aesthetic-only. It runs
+            // under both intents; core's structural certification for organic is a core
+            // task in progress, and until it lands core refuses the Structural run.
             rows.append((
-                "Traced (organic) lattices need this mode",
-                "A traced lattice is anisotropic by construction and the certification "
-                + "library holds one cubic stiffness per topology, so there is nothing "
-                + "for a strength claim to be checked against."))
+                "Traced (organic) lattices run here today",
+                "Organic runs under both intents. Core's structural certification for a "
+                + "traced lattice is being wired; until it lands, an organic lattice under "
+                + "Structural is refused at run time and the run button says so."))
         }
         // ★ TRUE IN BOTH MODES, and the one people are most often surprised by.
         rows.append((

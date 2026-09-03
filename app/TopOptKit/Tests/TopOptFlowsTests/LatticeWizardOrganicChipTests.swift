@@ -85,4 +85,38 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         let g = organic.runSpec(limits: lim, generatable: true, memberMM: 12, lineWidthMM: 0.42)?.gradingDictionary() ?? [:]
         XCTAssertEqual(g["cell_mode"] as? String, "auto"); XCTAssertNil(g["cell_min_mm"])
     }
+
+    /// ★ D2 (maintainer, 2026-09-03): ORGANIC CELL MODES ARE AUTO AND FIT. Anything
+    /// else an organic job could inherit — a fixed cell, a swept window — travels as
+    /// Auto, never as a size; Fit travels as core's `fit` where a region is declared and
+    /// falls back to Auto (not to a fixed cell, as the octet ladder does) where none is.
+    /// Both builder paths (graded/sim and uniform) are pinned.
+    func testOrganicCellModesAreAutoAndFitOnlyOnBothPaths() throws {
+        guard TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit") else { throw XCTSkip("no organic in core") }
+        let lim = TopOptKit.LatticeLimits(rhoMin: 0.1, rhoMax: 0.6, certifiable: true, minCellsPerMember: 1)
+        func grading(_ s: LatticeSettings, regions: [LatticeRegionSpec] = []) -> [String: Any] {
+            s.runSpec(limits: lim, generatable: true, memberMM: 12, lineWidthMM: 0.42,
+                      regions: regions)?.gradingDictionary() ?? [:]
+        }
+        var base = LatticeSettings(); base.enabled = true; base.stageMode = .aesthetic
+        base.algorithm = "organic"
+        for density in [LatticeDensityMode.sim, .uniform] {
+            var s = base; s.densityMode = density
+            // fixed → auto, never cell_mm
+            s.cellSizeMode = .fixed; s.cellMM = 6
+            var g = grading(s)
+            XCTAssertEqual(g["cell_mode"] as? String, "auto", "\(density): fixed becomes auto")
+            XCTAssertNil(g["cell_mm"], "\(density): no size ever")
+            // swept → auto, no window
+            s.cellSizeMode = .swept; s.cellMinMM = 4; s.cellMaxMM = 8
+            g = grading(s)
+            XCTAssertEqual(g["cell_mode"] as? String, "auto", "\(density): swept becomes auto")
+            XCTAssertNil(g["cell_min_mm"]); XCTAssertNil(g["cell_max_mm"])
+            // fit with no declared region → auto (core refuses fit there), not fixed
+            s.cellSizeMode = .fit
+            g = grading(s)
+            XCTAssertEqual(g["cell_mode"] as? String, "auto", "\(density): fit without a region falls back to auto")
+            XCTAssertNil(g["cell_mm"])
+        }
+    }
 }

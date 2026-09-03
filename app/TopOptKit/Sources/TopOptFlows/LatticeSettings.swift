@@ -1808,8 +1808,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // picks a default, Auto travels as core's own `auto` — a single derived
             // separation, stated as such — and only an EXPLICIT size or window is
             // ever sent. The octet path is untouched (bar U1: byte-identical).
-            if algorithm == "organic", cellSizeMode == .auto {
-                mode = .auto; lo = 0; hi = 0
+            // ★★ D2 (maintainer, 2026-09-03): ORGANIC CELL MODES ARE AUTO AND FIT.
+            // AUTO travels as core's `auto` (core builds the FEA-driven window from
+            // the smallest fitting separation to the largest); FIT travels as core's
+            // `fit` (one separation, the middle of what fits). Nothing else is an
+            // organic mode: an inherited swept window or a fixed cell — and the fit
+            // fallbacks above, which degrade to FIXED for the octet — become AUTO here,
+            // never a size. No octet window reaches an organic job by this path.
+            if algorithm == "organic" {
+                if mode != .fit { mode = .auto }
+                lo = 0; hi = 0
             }
             // ★ FIT DERIVES FROM A DECLARED REGION, so core REFUSES the mode on a job
             // that declares none (job.cpp: "a job that declares none states no
@@ -1820,6 +1828,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             if mode == .fit && !regions.contains(where: { $0.role == .include }) {
                 mode = .fixed
             }
+            // ★ D2, AFTER the region fallback too: the octet degrades fit → FIXED here;
+            // organic degrades it to AUTO — never a size (measured by the D2 test: the
+            // rule above this fallback let `cell_mm: 6.0` through on the sim path).
+            if algorithm == "organic", mode == .fixed { mode = .auto; lo = 0; hi = 0 }
             // Sub-floor retention rides the GRADED path only — the keys live in the
             // `grading` block, and a uniform lattice job has no grading block at
             // all, so there is nothing for core to read there. The control says so.
@@ -1876,7 +1888,23 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                            regionScoped: region != nil || !regions.isEmpty,
                            skin: boundary.jobSkinValue,
                            minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil,
+                           // ★★ AN ORGANIC JOB ALWAYS CARRIES THE GRADING BLOCK. Its
+                           // algorithm, intent, mode and every organic_* key live there,
+                           // and `gradingDictionary()` returns nil for a non-graded spec —
+                           // measured 2026-09-03 (D2 test, uniform path): an organic job
+                           // under "Density: Auto/Thicker" carried NO grading block, so
+                           // core would have run the DEFAULT lattice in silence.
+                           graded: algorithm == "organic",
                            regions: regions,
+                           // ★ D2 ON THE UNIFORM PATH TOO: an organic job never carries
+                           // a fixed cell. Auto or Fit, nothing else (Fit only where a
+                           // region is declared — core refuses it otherwise).
+                           cellSizeMode: algorithm == "organic"
+                               ? ((cellSizeMode == .fit
+                                   && regions.contains(where: { $0.role == .include }))
+                                  ? LatticeCellSizeMode.fit.rawValue
+                                  : LatticeCellSizeMode.auto.rawValue)
+                               : LatticeCellSizeMode.fixed.rawValue,
                            // The UNIFORM path carries it too. The enclosed-void
                            // rule is about the lattice's pore space, which a
                            // uniform lattice has exactly as much of as a graded
