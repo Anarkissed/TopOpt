@@ -1815,10 +1815,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // organic mode: an inherited swept window or a fixed cell — and the fit
             // fallbacks above, which degrade to FIXED for the octet — become AUTO here,
             // never a size. No octet window reaches an organic job by this path.
-            if algorithm == "organic" {
-                if mode != .fit { mode = .auto }
-                lo = 0; hi = 0
-            }
+            // (the organic rule is applied once, AFTER every fallback — see below)
             // ★ FIT DERIVES FROM A DECLARED REGION, so core REFUSES the mode on a job
             // that declares none (job.cpp: "a job that declares none states no
             // requirement to fit"). Caught by this task's own schema test, which
@@ -1828,10 +1825,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             if mode == .fit && !regions.contains(where: { $0.role == .include }) {
                 mode = .fixed
             }
-            // ★ D2, AFTER the region fallback too: the octet degrades fit → FIXED here;
-            // organic degrades it to AUTO — never a size (measured by the D2 test: the
-            // rule above this fallback let `cell_mm: 6.0` through on the sim path).
-            if algorithm == "organic", mode == .fixed { mode = .auto; lo = 0; hi = 0 }
+            // ★★ D2 (maintainer, 2026-09-03), applied ONCE after every fallback:
+            // ORGANIC CELL MODES ARE AUTO AND FIT. The user's Fit stays Fit — core's
+            // `fit` — and is NEVER substituted (ruling, Aug 5: offer, never substitute;
+            // the wizard disables Fit with its reason where no region is declared, and
+            // the run button refuses it). Anything else — an inherited swept window, a
+            // fixed cell, the octet's fit→FIXED fallbacks above — travels as Auto,
+            // core's `auto`, with no window and never a size.
+            if algorithm == "organic" {
+                mode = (cellSizeMode == .fit) ? .fit : .auto
+                lo = 0; hi = 0
+            }
             // Sub-floor retention rides the GRADED path only — the keys live in the
             // `grading` block, and a uniform lattice job has no grading block at
             // all, so there is nothing for core to read there. The control says so.
@@ -1897,13 +1901,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                            graded: algorithm == "organic",
                            regions: regions,
                            // ★ D2 ON THE UNIFORM PATH TOO: an organic job never carries
-                           // a fixed cell. Auto or Fit, nothing else (Fit only where a
-                           // region is declared — core refuses it otherwise).
+                           // a fixed cell. The user's Fit stays Fit (never substituted —
+                           // the wizard disables it with its reason where no region is
+                           // declared, and the run button refuses it); anything else is
+                           // Auto.
                            cellSizeMode: algorithm == "organic"
-                               ? ((cellSizeMode == .fit
-                                   && regions.contains(where: { $0.role == .include }))
-                                  ? LatticeCellSizeMode.fit.rawValue
-                                  : LatticeCellSizeMode.auto.rawValue)
+                               ? (cellSizeMode == .fit ? LatticeCellSizeMode.fit.rawValue
+                                                       : LatticeCellSizeMode.auto.rawValue)
                                : LatticeCellSizeMode.fixed.rawValue,
                            // The UNIFORM path carries it too. The enclosed-void
                            // rule is about the lattice's pore space, which a

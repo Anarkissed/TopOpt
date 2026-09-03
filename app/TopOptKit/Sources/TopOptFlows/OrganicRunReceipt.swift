@@ -30,22 +30,50 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     public var achievedSpacingMinMM: Double? = nil
     public var achievedSpacingMedianMM: Double? = nil
     public var achievedSpacingMaxMM: Double? = nil
-    public var structurallyCertified: Bool? = nil
+    // ★ D2 — THE CONFIRMED KEYS (maintainer, 2026-09-03), all under `grading.organic`:
+    // the fitting set core chose from, the survival bar it applied, what it selected
+    // (a window under Auto, one separation under Fit), and the Structural verdict with
+    // its numbers. Every one is absent until core's organic auto/fit lands; none is
+    // computed here. `structural_verdict == "certified"` is the confirmation.
+    public var fittingSeparationsMM: [Double]? = nil
+    public var fitSurvivalBar: Double? = nil
+    public var selectedWindowMM: [Double]? = nil          // auto: [lo, hi]
+    public var selectedSeparationMM: Double? = nil        // fit
+    public var structuralVerdict: String? = nil           // "certified" | "refused" | "not_run"
+    public var structuralMargin: Double? = nil
+    public var structuralStressP50MPa: Double? = nil
+    public var structuralStressP95MPa: Double? = nil
+    public var structuralStressP99MPa: Double? = nil
+    public var structuralStressMaxMPa: Double? = nil
+    public var structuralWorstStrut: String? = nil
+    public var structuralGoverningLoadCase: String? = nil
+    public var structuralKnockdownUsed: Double? = nil
 
-    /// ★ D2, SAID IN ONE LINE: the window core was asked for, what it achieved, and —
-    /// when core writes it — its Structural confirmation. Absent fields are absent.
+    /// ★ D2, SAID IN ONE LINE — what core chose and from what, then what it achieved,
+    /// then its Structural verdict. Displayed, never judged; absent fields are absent.
     public var spacingLine: String? {
         var parts: [String] = []
-        if let lo = requestedSpacingMinMM, let hi = requestedSpacingMaxMM {
+        if let w = selectedWindowMM, w.count == 2 {
+            parts.append(String(format: "core chose window %.1f–%.1f mm", w[0], w[1]))
+        } else if let s = selectedSeparationMM {
+            parts.append(String(format: "core chose separation %.1f mm", s))
+        } else if let lo = requestedSpacingMinMM, let hi = requestedSpacingMaxMM {
             parts.append(abs(hi - lo) < 1e-9 ? String(format: "separation %.1f mm", lo)
                                              : String(format: "window %.1f–%.1f mm", lo, hi))
+        }
+        if let f = fittingSeparationsMM, !f.isEmpty {
+            parts.append("from " + f.map { String(format: "%.1f", $0) }.joined(separator: "/") + " mm that fit")
         }
         if let lo = achievedSpacingMinMM, let hi = achievedSpacingMaxMM {
             var a = String(format: "achieved %.1f–%.1f mm", lo, hi)
             if let m = achievedSpacingMedianMM { a += String(format: " (median %.1f)", m) }
             parts.append(a)
         }
-        if let c = structurallyCertified { parts.append(c ? "core: structurally sound" : "core: NOT structurally confirmed") }
+        if let v = structuralVerdict {
+            var s = "structural: \(v)"
+            if let m = structuralMargin { s += String(format: " (margin %.2f)", m) }
+            parts.append(s)
+        }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
     // Contiguity — reported, never judged here.
@@ -114,7 +142,22 @@ public struct OrganicRunReceipt: Equatable, Sendable {
         achievedSpacingMinMM = d("achieved_spacing_min_mm")
         achievedSpacingMedianMM = d("achieved_spacing_median_mm")
         achievedSpacingMaxMM = d("achieved_spacing_max_mm")
-        structurallyCertified = b("structural_certified")
+        func ds(_ k: String) -> [Double]? {
+            (g[k] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue }
+        }
+        fittingSeparationsMM = ds("fitting_separations_mm")
+        fitSurvivalBar = d("fit_survival_bar")
+        selectedWindowMM = ds("selected_window_mm")
+        selectedSeparationMM = d("selected_separation_mm")
+        structuralVerdict = g["structural_verdict"] as? String
+        structuralMargin = d("structural_margin")
+        structuralStressP50MPa = d("structural_stress_p50_mpa")
+        structuralStressP95MPa = d("structural_stress_p95_mpa")
+        structuralStressP99MPa = d("structural_stress_p99_mpa")
+        structuralStressMaxMPa = d("structural_stress_max_mpa")
+        structuralWorstStrut = g["structural_worst_strut"].map { "\($0)" }
+        structuralGoverningLoadCase = g["structural_governing_load_case"].map { "\($0)" }
+        structuralKnockdownUsed = d("structural_knockdown_used")
         lengthSurvival = d("length_survival"); emittedComponents = i("emitted_components")
         emittedLargestLengthFraction = d("emitted_largest_length_fraction")
         emittedStrandedLengthMM = d("emitted_stranded_length_mm")

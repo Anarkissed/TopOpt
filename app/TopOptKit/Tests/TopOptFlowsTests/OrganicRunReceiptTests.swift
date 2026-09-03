@@ -80,10 +80,39 @@ final class OrganicRunReceiptTests: XCTestCase {
             "achieved_spacing_min_mm": 2.946533982, "achieved_spacing_max_mm": 8.386092124,
             "achieved_spacing_median_mm": 5.386302931]]])
         XCTAssertEqual(r.spacingLine, "window 5.5–6.0 mm · achieved 2.9–8.4 mm (median 5.4)")
-        XCTAssertNil(r.structurallyCertified, "absent until core writes it")
-        let fit = OrganicRunReceipt(info: ["grading": ["organic": [
-            "requested_spacing_min_mm": 4, "requested_spacing_max_mm": 4, "structural_certified": true]]])
-        XCTAssertEqual(fit.spacingLine, "separation 4.0 mm · core: structurally sound")
+        XCTAssertNil(r.structuralVerdict, "absent until core writes it")
+        XCTAssertNil(r.fittingSeparationsMM)
         XCTAssertNil(OrganicRunReceipt(info: nil).spacingLine)
+    }
+
+    /// ★ THE CONFIRMED D2 KEYS (maintainer, 2026-09-03), under grading.organic: the
+    /// fitting set, the survival bar, the selection (window under Auto, one
+    /// separation under Fit) and the Structural verdict with its numbers. Read
+    /// verbatim, displayed, never inferred; `structural_verdict == "certified"` IS the
+    /// confirmation (no bool of the app's own).
+    func testTheConfirmedD2KeysAreReadVerbatim() {
+        let auto = OrganicRunReceipt(info: ["grading": ["organic": [
+            "fitting_separations_mm": [3.0, 3.5, 4.0, 4.5], "fit_survival_bar": 0.6,
+            "selected_window_mm": [3.0, 4.5],
+            "structural_verdict": "certified", "structural_margin": 1.42,
+            "structural_stress_p50_mpa": 3.1, "structural_stress_p95_mpa": 9.8,
+            "structural_stress_p99_mpa": 14.2, "structural_stress_max_mpa": 21.7,
+            "structural_worst_strut": 118, "structural_governing_load_case": "gravity+10lb",
+            "structural_knockdown_used": 0.75]]])
+        XCTAssertEqual(auto.fittingSeparationsMM ?? [], [3.0, 3.5, 4.0, 4.5])
+        XCTAssertEqual(auto.fitSurvivalBar, 0.6)
+        XCTAssertEqual(auto.selectedWindowMM ?? [], [3.0, 4.5]); XCTAssertNil(auto.selectedSeparationMM)
+        XCTAssertEqual(auto.structuralVerdict, "certified"); XCTAssertEqual(auto.structuralMargin, 1.42)
+        XCTAssertEqual(auto.structuralStressP99MPa, 14.2); XCTAssertEqual(auto.structuralStressMaxMPa, 21.7)
+        XCTAssertEqual(auto.structuralWorstStrut, "118")
+        XCTAssertEqual(auto.structuralGoverningLoadCase, "gravity+10lb")
+        XCTAssertEqual(auto.structuralKnockdownUsed, 0.75)
+        XCTAssertEqual(auto.spacingLine,
+                       "core chose window 3.0–4.5 mm · from 3.0/3.5/4.0/4.5 mm that fit · structural: certified (margin 1.42)")
+        let fit = OrganicRunReceipt(info: ["grading": ["organic": [
+            "fitting_separations_mm": [4.0, 6.0], "selected_separation_mm": 6.0,
+            "structural_verdict": "not_run"]]])
+        XCTAssertEqual(fit.selectedSeparationMM, 6.0)
+        XCTAssertEqual(fit.spacingLine, "core chose separation 6.0 mm · from 4.0/6.0 mm that fit · structural: not_run")
     }
 }

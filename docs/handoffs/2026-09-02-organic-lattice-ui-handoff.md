@@ -1,5 +1,75 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-03 (later) — names confirmed, substitution closed, SHA answered
+>
+> **The core SHA.** `ca56654d2805` is a COMMIT on this branch
+> (`claude/topopt-lattice-preview-holes-5ab466`): `ca56654d2805e8d8…`, 2026-09-02
+> 19:59:24 −0400, "Handoff: organic lattice UI — what landed". It is not on origin
+> because the branch has never been pushed; it is not a content hash. `b27e5af`
+> (2026-09-02 07:08, "Contiguity follow-up: the verdict, the resi…") **is an
+> ancestor** of it (`git merge-base --is-ancestor` → yes), so the vendored core
+> includes b27e5af. `build_core.sh` stamps `git -C core rev-parse --short=12 HEAD`,
+> i.e. the worktree HEAD at re-vendor time — the core/ tree of that commit.
+>
+> **D1 capability, as named:** `organicStructuralCertificationWired` is now the
+> schema probe for grading key `organic_structural_certification` with value
+> `"beam_network"` — a whole-job `jobSchemaError` probe (the bridge's key probe only
+> sends `true`), the same route `latticeSchemaAccepts` already uses. No new
+> mechanism. False on core `ca56654d2805`; flips the day core accepts the key.
+>
+> **D2 receipt keys, as named** (all `grading.organic.*`): `fitting_separations_mm`,
+> `fit_survival_bar`, `selected_window_mm` (auto), `selected_separation_mm` (fit),
+> `structural_verdict` ("certified" | "refused" | "not_run"), `structural_margin`,
+> `structural_stress_{p50,p95,p99,max}_mpa`, `structural_worst_strut`,
+> `structural_governing_load_case`, `structural_knockdown_used`. The proposed
+> `structural_certified` bool is dropped; the confirmation is
+> `structural_verdict == "certified"`. Read verbatim into `OrganicRunReceipt`;
+> `spacingLine` shows "core chose window/separation … · from … that fit · achieved …
+> · structural: verdict (margin)". Pinned by `testTheConfirmedD2KeysAreReadVerbatim`.
+>
+> **The substitution is closed.** "Fit → auto when no region" is gone from both
+> `runSpec` paths: a chosen Fit travels as core's `fit`, always. Where no region is
+> declared the wizard's Fit pill is DISABLED with its reason, and the lattice-stage
+> run button refuses in words ("organic Fit needs a declared lattice region — pick
+> Auto or declare one"). Offer, never substitute. Pinned:
+> `testOrganicCellModesAreAutoAndFitOnlyOnBothPaths` (Fit stays Fit with and without
+> a region).
+>
+> **D2 is ahead of core — said in the pane:** "core's organic Auto/Fit is still being
+> wired. Today an organic Fit runs core's existing fit path (one cell per region,
+> job.cpp), and the receipt does not yet report the fitting set." Core's organic
+> auto/fit semantics are a pending core item (`job.cpp:1937` runs the octet fit path
+> for `cell_mode: fit` on an organic job today).
+>
+> **On-device (Debug dylib `1c5c0e3e442be106`, 06:17, core `ca56654d2805`), project set
+> organic + Fit by file, regions declared:** the run button stays live ("2 regions ·
+> no optimization" — Fit with a region is not refused); the pane shows the Fit pill
+> lit, its caption, and the "core's organic Auto/Fit is still being wired" note; no
+> sizes anywhere (06:18 screenshots). The Fit-without-region refusal is a computed
+> property (`organicFitWithoutRegion`) exercised by construction; not driven on device
+> because the M2 always declares its two regions.
+>
+> **Full app suite for this round (Debug, SwiftPM): 2286 tests, 30 skipped, 2 failures,
+> both named — two assertions of ONE test, `OrganicSpanIndexTests.
+> testTheIndexFindsEveryCapsuleAQueryTouches` (index 2.98 vs brute 2.05; 2.69 vs 2.54
+> on random points). Diagnosis: a segment is stamped into the cells its CAPSULE
+> (endpoints ± r) covers and a query reads one cell, so `distance` is EXACT inside
+> any capsule and an UPPER BOUND outside; the test claimed exactness "everywhere
+> the index has cells" and passed three full runs only by the luck of 500 random
+> points (this is also the shape of the first run's two unnamed failures).
+> Re-pinned to the true contract, stricter where it matters: never nearer than
+> brute force; exact inside a capsule; and whenever looser, the nearest segment's
+> stamped cell range must exclude the query cell (a real stamping bug still
+> fails). 5 consecutive runs green. The preview bake does not depend on the
+> outside case (`bakeField` stamps its own `r + bandMM` reach).
+>
+> **The graded:false gap, generalised:**
+> `testEveryPathThatYieldsAnOrganicSpecWritesTheAlgorithm` sweeps both `runSpec`
+> overloads × {sim, uniform} × {auto, fit, fixed, swept} × generatable on/off × with/
+> without a declared region, and FAILS if any organic spec's job lacks
+> `algorithm: organic`, carries a size, or has a cell mode other than auto/fit — and
+> if any organic path returns nil where the same octet settings build a spec.
+
 > ## ★ 2026-09-03 — maintainer decisions D1/D2 applied (app only; `git status core/` clean)
 >
 > **Core SHA the device builds linked:** `ca56654d2805` (12-char, from

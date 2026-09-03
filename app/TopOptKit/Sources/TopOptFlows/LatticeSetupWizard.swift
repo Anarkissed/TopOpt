@@ -640,17 +640,39 @@ public struct LatticeSetupWizard: View {
             // Core refuses `fit` on a job that declares no region to fit into
             // (job.cpp: "a job that declares none states no requirement to fit").
             let fitPossible = project.latticeJobRegions().regions.contains(where: { $0.role == .include })
-            segmentRow(["Auto", "Fit"], selected: organicCellIndex) { i in
-                if i == 1, !fitPossible { return }
-                model.setCellSizeMode(i == 0 ? .auto : .fit); rebuild()
+            // ★ OFFER, NEVER SUBSTITUTE (maintainer ruling, Aug 5; re-stated 2026-09-03):
+            // Fit is DISABLED with its reason when no region is declared — the app never
+            // sends Auto for a Fit the user chose.
+            HStack(spacing: DS.Space.xs) {
+                organicPill("Auto", on: organicCellIndex == 0, enabled: true) {
+                    model.setCellSizeMode(.auto); rebuild()
+                }
+                organicPill("Fit", on: organicCellIndex == 1, enabled: fitPossible) {
+                    model.setCellSizeMode(.fit); rebuild()
+                }
             }
             Text(model.cellSizeMode == .fit
                  ? "One separation, no grade beyond grade-to-shape: the middle of what "
                    + "fits (of two, the larger). Core picks it; the run's receipt shows it."
                  : "The largest grade the FEA allows: a window from the smallest fitting "
                    + "separation to the largest, FEA-driven within it. Core picks the "
-                   + "window; the run's receipt shows it."
-                   + (fitPossible ? "" : " Fit needs a declared lattice region."))
+                   + "window; the run's receipt shows it.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            if !fitPossible {
+                Text("Fit is unavailable: no lattice region is declared, and core refuses "
+                     + "a fit with none to fit into.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // ★ D2 IS AHEAD OF CORE (reviewer, 2026-09-03): core's organic auto/fit
+            // semantics are a pending core item. Said here until the receipt writes
+            // `fitting_separations_mm`; the reader shows it the moment it does.
+            Text("Note: core's organic Auto/Fit is still being wired. Today an organic "
+                 + "Fit runs core's existing fit path (one cell per region, job.cpp), and "
+                 + "the receipt does not yet report the fitting set.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
                 .fixedSize(horizontal: false, vertical: true)

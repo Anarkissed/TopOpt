@@ -112,11 +112,64 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
             g = grading(s)
             XCTAssertEqual(g["cell_mode"] as? String, "auto", "\(density): swept becomes auto")
             XCTAssertNil(g["cell_min_mm"]); XCTAssertNil(g["cell_max_mm"])
-            // fit with no declared region → auto (core refuses fit there), not fixed
+            // ★ OFFER, NEVER SUBSTITUTE (ruling Aug 5): the user's Fit STAYS Fit — with
+            // or without a declared region. Without one the wizard disables Fit with
+            // its reason and the run button refuses; the job builder never remaps.
             s.cellSizeMode = .fit
             g = grading(s)
-            XCTAssertEqual(g["cell_mode"] as? String, "auto", "\(density): fit without a region falls back to auto")
-            XCTAssertNil(g["cell_mm"])
+            XCTAssertEqual(g["cell_mode"] as? String, "fit", "\(density): a chosen Fit is never remapped")
+            XCTAssertNil(g["cell_mm"]); XCTAssertNil(g["cell_min_mm"])
+            let region = LatticeRegionSpec(role: .include, kind: .face)
+            g = grading(s, regions: [region])
+            XCTAssertEqual(g["cell_mode"] as? String, "fit", "\(density): Fit with a region is core's fit")
         }
+    }
+
+    /// ★★ THE graded:false GAP, GENERALISED (reviewer, 2026-09-03): a test that FAILS if
+    /// ANY path yields an organic spec whose job lacks `algorithm: organic`. Every
+    /// builder (both `runSpec` overloads), both density modes, generatable on/off,
+    /// with and without a declared region, every organic cell mode. Also: no organic
+    /// path may return nil where the same settings as octet return a spec — an organic
+    /// job silently dropped is the same defect as one silently defaulted.
+    func testEveryPathThatYieldsAnOrganicSpecWritesTheAlgorithm() throws {
+        guard TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit") else { throw XCTSkip("no organic in core") }
+        let lim = TopOptKit.LatticeLimits(rhoMin: 0.1, rhoMax: 0.6, certifiable: true, minCellsPerMember: 1)
+        let region = LatticeRegionSpec(role: .include, kind: .face)
+        var paths = 0, organicSpecs = 0
+        for density in [LatticeDensityMode.sim, .uniform] {
+            for mode in [LatticeCellSizeMode.auto, .fit, .fixed, .swept] {
+                for generatable in [true, false] {
+                    for regions in [[LatticeRegionSpec](), [region]] {
+                        var s = LatticeSettings(); s.enabled = true; s.stageMode = .aesthetic
+                        s.densityMode = density; s.cellSizeMode = mode
+                        s.cellMM = 6; s.cellMinMM = 4; s.cellMaxMM = 8
+                        var o = s; o.algorithm = "organic"
+                        let builders: [(LatticeSettings) -> LatticeSpec?] = [
+                            { $0.runSpec(limits: lim, generatable: generatable, memberMM: 12,
+                                         lineWidthMM: 0.42, regions: regions) },
+                            // the topology overload derives limits/generatable itself
+                            { $0.runSpec(topology: nil, memberMM: 12, lineWidthMM: 0.42,
+                                         regions: regions) },
+                        ]
+                        for (i, build) in builders.enumerated() {
+                            paths += 1
+                            let octet = build(s), organic = build(o)
+                            if octet != nil {
+                                XCTAssertNotNil(organic, "path \(i) \(density) \(mode) gen=\(generatable) regions=\(regions.count): organic dropped where octet builds")
+                            }
+                            guard let spec = organic else { continue }
+                            organicSpecs += 1
+                            let g = spec.gradingDictionary()
+                            XCTAssertEqual(g?["algorithm"] as? String, "organic",
+                                           "path \(i) \(density) \(mode) gen=\(generatable) regions=\(regions.count): job lacks algorithm organic")
+                            XCTAssertNil(g?["cell_mm"], "no size on an organic job (\(density) \(mode))")
+                            XCTAssertTrue(["auto", "fit"].contains(g?["cell_mode"] as? String ?? ""),
+                                          "organic cell_mode is auto or fit, got \(String(describing: g?["cell_mode"]))")
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(organicSpecs, 0, "the sweep must exercise real specs, not skip them all (\(paths) paths)")
     }
 }

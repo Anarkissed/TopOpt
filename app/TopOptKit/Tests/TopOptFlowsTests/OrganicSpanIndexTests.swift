@@ -41,17 +41,61 @@ final class OrganicSpanIndexTests: XCTestCase {
         XCTAssertTrue(ix.candidates(near: SIMD3(10, 0, 0)).contains(1))
         // Far away: nothing indexed there, and the distance says so.
         XCTAssertEqual(ix.distance(SIMD3(100, 100, 100)), .infinity)
-        // Brute force agrees with the index everywhere the index has cells.
+        // ★ THE TRUE CONTRACT (re-pinned 2026-09-03, after the full suite named this
+        // test twice on random points: index 2.98 vs brute 2.05, 2.69 vs 2.54). A
+        // segment is stamped into the cells its CAPSULE (endpoints ± r) covers, and a
+        // query reads its one cell — so the index is EXACT for any point inside a
+        // capsule (that capsule is stamped there by construction) and an UPPER BOUND
+        // outside: the nearest segment may not reach the query's cell while a farther
+        // one does. The old assertion claimed exactness "everywhere the index has
+        // cells", which is false for points between capsules and passed only when the
+        // 500 random points avoided them. Three things are pinned instead, stricter
+        // where it matters: the index never INVENTS a nearer capsule; inside a capsule
+        // it is exact; and whenever it is looser than brute force, the nearest
+        // segment's stamped cell range must exclude the query cell — a real indexing
+        // bug (a capsule stamped short of its own reach) still fails here.
+        func brute(_ p: SIMD3<Float>) -> (d: Float, nearest: Int) {
+            var best = Float.infinity, who = -1
+            for (i, s) in ix.segments.enumerated() {
+                let ab = s.b - s.a, t = max(0, min(1, simd_dot(p - s.a, ab) / simd_dot(ab, ab)))
+                let d = simd_length(p - (s.a + ab * t)) - s.r
+                if d < best { best = d; who = i }
+            }
+            return (best, who)
+        }
+        func cell(_ p: SIMD3<Float>) -> SIMD3<Int> {
+            let g = (p - ix.indexOrigin) / ix.cellMM
+            return SIMD3<Int>(Int(floor(g.x)), Int(floor(g.y)), Int(floor(g.z)))
+        }
+        func stampedRange(_ s: OrganicSpanIndex.Segment) -> (SIMD3<Int>, SIMD3<Int>) {
+            let rr = SIMD3<Float>(repeating: s.r)
+            let mn = (simd_min(s.a, s.b) - rr - ix.indexOrigin) / ix.cellMM
+            let mx = (simd_max(s.a, s.b) + rr - ix.indexOrigin) / ix.cellMM
+            return (SIMD3<Int>(Int(floor(mn.x)), Int(floor(mn.y)), Int(floor(mn.z))),
+                    SIMD3<Int>(Int(floor(mx.x)), Int(floor(mx.y)), Int(floor(mx.z))))
+        }
+        var exactInside = 0, upperBoundOutside = 0
         for _ in 0..<500 {
             let p = SIMD3<Float>(Float.random(in: -3...13), Float.random(in: -3...13), Float.random(in: -2...2))
-            let brute = ix.segments.map { s -> Float in
-                let ab = s.b - s.a, t = max(0, min(1, simd_dot(p - s.a, ab) / simd_dot(ab, ab)))
-                return simd_length(p - (s.a + ab * t)) - s.r
-            }.min()!
+            let (b, who) = brute(p)
             let d = ix.distance(p)
-            if d.isFinite { XCTAssertEqual(d, brute, accuracy: 1e-4) }
-            else { XCTAssertGreaterThan(brute, 0, "★ index said nothing near, but a capsule is") }
+            // (1) never nearer than the truth
+            XCTAssertGreaterThanOrEqual(d, b - 1e-4, "★ the index invented a capsule nearer than any that exists")
+            if b <= 0 {
+                // (2) inside a capsule: exact
+                XCTAssertEqual(d, b, accuracy: 1e-4, "★ inside capsule \(who), the index must be exact")
+                exactInside += 1
+            } else if d.isFinite, d > b + 1e-4 {
+                // (3) looser than brute only when the nearest capsule does not reach this cell
+                let c = cell(p), (lo, hi) = stampedRange(ix.segments[who])
+                let covered = (lo.x...hi.x).contains(c.x) && (lo.y...hi.y).contains(c.y) && (lo.z...hi.z).contains(c.z)
+                XCTAssertFalse(covered, "★ capsule \(who) IS stamped in this cell yet the index returned a farther one")
+                upperBoundOutside += 1
+            } else if !d.isFinite {
+                XCTAssertGreaterThan(b, 0, "★ index said nothing near, but a capsule is")
+            }
         }
+        XCTAssertGreaterThan(exactInside, 0, "the sample must hit the inside of a capsule")
     }
 }
 

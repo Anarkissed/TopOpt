@@ -1599,15 +1599,21 @@ public enum TopOptKit {
         return Data(text.utf8)
     }
 
-    /// ★ D1 (maintainer, 2026-09-03): organic runs under BOTH intents — but core still
-    /// refuses an organic job under a Structural intent at RUNTIME
-    /// (`run_job.cpp refuse_organic_structural`), until its structural certification
-    /// for organic is wired (a core task in progress). That is a runtime gate, not a
-    /// schema key, so `gradingSchemaAccepts` cannot see it. Until core exposes a
-    /// capability signal (coordination with the core agent pending), this is the app's
-    /// own statement of the fact, and FALSE means the app must not EMIT the job — the
-    /// controls stay enabled, the run button carries the gate's message instead.
-    public static var organicStructuralCertificationWired: Bool { false }
+    /// ★ D1 (maintainer, 2026-09-03; names confirmed the same day): organic runs
+    /// under BOTH intents, but core refuses an organic job under a Structural intent
+    /// at runtime until its structural certification for organic lands. THE SIGNAL is
+    /// core's own schema: the grading key `organic_structural_certification` with the
+    /// value `"beam_network"` is accepted only once the instrument exists. The bridge's
+    /// key probe sends `true`, so this is a WHOLE-JOB probe through `jobSchemaError`
+    /// (the same route `latticeSchemaAccepts` uses) carrying the confirmed string. No
+    /// new mechanism. FALSE ⇒ the app must not EMIT the job — the controls stay
+    /// enabled, the run button carries the gate's message. Probed once per launch.
+    public static let organicStructuralCertificationWired: Bool = {
+        let text = latticeProbeBaseJob.replacingOccurrences(
+            of: #""output":"#,
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "structural", "organic_structural_certification": "beam_network"}, "output":"#)
+        return jobSchemaError(Data(text.utf8)) == nil
+    }()
     /// The gate's own words, surfaced wherever an organic + Structural run would start.
     public static let organicStructuralGateMessage =
         "organic structural certification is not yet wired — core refuses an organic "

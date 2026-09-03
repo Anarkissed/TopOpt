@@ -164,6 +164,14 @@ public struct OrganicSpanIndex: Sendable {
 
     /// Signed distance to the union of nearby capsules — negative inside a strut.
     /// `+inf` when no capsule is indexed near `p`.
+    /// ★ THE CONTRACT (stated 2026-09-03, after the suite caught the old test
+    /// over-claiming): a segment is stamped into the cells its CAPSULE (endpoints ± r)
+    /// covers and a query reads its ONE cell, so this is EXACT for any point inside a
+    /// capsule and for any point whose nearest capsule reaches its cell — and an
+    /// UPPER BOUND otherwise (the nearest segment may not reach the cell while a
+    /// farther one does). It never returns less than the true distance. The preview
+    /// bake does not rely on the outside case: `bakeField` stamps its own reach of
+    /// `r + bandMM` and is exact within the band it draws.
     public func distance(_ p: SIMD3<Float>) -> Float {
         var best = Float.infinity
         for i in candidates(near: p) {

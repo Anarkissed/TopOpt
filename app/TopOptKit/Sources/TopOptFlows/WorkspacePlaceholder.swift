@@ -10716,9 +10716,18 @@ public struct WorkspacePlaceholder: View {
           && !TopOptKit.organicStructuralCertificationWired)
     }
 
+    /// ★ OFFER, NEVER SUBSTITUTE (ruling Aug 5; 2026-09-03): an organic Fit with no
+    /// declared region is REFUSED here, in words — never remapped to Auto. Core would
+    /// refuse `fit` with nothing to fit into ("a job that declares none states no
+    /// requirement to fit"), so the job is not written.
+    private var organicFitWithoutRegion: Bool {
+        project.lattice.isOrganic && project.lattice.cellSizeMode == .fit
+            && !project.latticeJobRegions().regions.contains(where: { $0.role == .include })
+    }
+
     var canLatticeThis: Bool {
         project.lattice.enabled && !project.latticeJobRegions().regions.isEmpty
-            && organicStructuralGateOpen
+            && organicStructuralGateOpen && !organicFitWithoutRegion
     }
 
     private var latticeThisSummary: String {
@@ -10727,6 +10736,7 @@ public struct WorkspacePlaceholder: View {
             .filter { $0.role == .include }.count
         if n == 0 { return "nothing set to lattice" }
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
+        if organicFitWithoutRegion { return "organic Fit needs a declared lattice region — pick Auto or declare one" }
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 
