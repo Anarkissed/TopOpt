@@ -1424,6 +1424,31 @@ std::string run_info_json(const RunInfo& info) {
         // receipt cannot distinguish "nothing else deleted material" from "nothing
         // else changed the geometry", and the node merge is the counter-example --
         // it fuses components while moving almost no length.
+        if (!info.organic_structural_verdict.empty()) {
+          gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
+          gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";
+          gr += ", \"structural_margin\": " + fmt(info.organic_structural_margin);
+          gr += ", \"structural_stress_p50_mpa\": " + fmt(info.organic_structural_p50_mpa);
+          gr += ", \"structural_stress_p95_mpa\": " + fmt(info.organic_structural_p95_mpa);
+          gr += ", \"structural_stress_p99_mpa\": " + fmt(info.organic_structural_p99_mpa);
+          gr += ", \"structural_stress_max_mpa\": " + fmt(info.organic_structural_max_mpa);
+          gr += ", \"structural_worst_strut\": " +
+                std::to_string(info.organic_structural_worst_strut);
+          gr += ", \"structural_governing_load_case\": \"" +
+                info.organic_structural_governing_load_case + "\"";
+          gr += ", \"structural_knockdown_used\": " +
+                fmt(info.organic_structural_knockdown_used);
+          gr += ", \"structural_load_cases\": " +
+                std::to_string(info.organic_structural_load_cases);
+          gr += ", \"structural_seconds\": " + fmt(info.organic_structural_seconds);
+          gr += ", \"structural_members_carrying\": " +
+                std::to_string(info.organic_structural_members_carrying);
+          gr += ", \"structural_zero_stress_fraction\": " +
+                fmt(info.organic_structural_zero_stress_fraction);
+          if (!info.organic_structural_refusal.empty())
+            gr += ", \"structural_refusal\": \"" +
+                  json_escape(info.organic_structural_refusal) + "\"";
+        }
         if (!info.organic_census_components.empty()) {
           gr += ", \"component_census\": {";
           bool first_cc = true;

@@ -426,6 +426,11 @@ struct JobGrading {
   // no structural claim.
   bool organic_shape_fit_only = false;
   std::string organic_boundary_finish = "skin";
+  // ★ WHICH INSTRUMENT CERTIFIED AN ORGANIC LATTICE UNDER STRUCTURAL INTENT.
+  // Required there, refused elsewhere; the only value is "beam_network". Empty means
+  // no structural certification was asked for, which is the only legal state for an
+  // aesthetic run.
+  std::string organic_structural_certification;
 
   // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────
   // "structural" — density is a STRENGTH statement: demand against the material

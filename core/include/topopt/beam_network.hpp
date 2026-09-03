@@ -447,6 +447,91 @@ struct ShellPatch {
   double thickness_mm = 0.0;   // overrides mesh.thickness_mm when > 0
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ★★★ ORGANIC STRUCTURAL CERTIFICATION — the instrument that replaces the gate ★★★
+//
+// `refuse_organic_structural` exists because organic has no certificate. The solid
+// path reads a density against the OCTET tensor, and organic traces struts ALONG the
+// principal stress directions, so its geometry is anisotropic by construction and
+// nothing has ever measured a tensor for it. Certifying it against the octet's would
+// report a margin for a material this lattice is not.
+//
+// This certifies the geometry DIRECTLY instead: the emitted spans as a welded beam
+// network, tied into the solid, solved. No homogenised tensor is involved, so the
+// objection the gate encodes does not apply.
+//
+// ★ IT REFUSES RATHER THAN GUESSES. Every condition below returns a refusal with a
+// reason, never a number, because a margin that is wrong is worse than no margin:
+//   * dropped load above the threshold — a part that is not fully pushed is quiet,
+//     and the quiet reads as safe (measured: 32-54% of |F| once vanished silently);
+//   * a hinged solid — corner-touching voxels are a zero-energy null space and no
+//     solver can see past one;
+//   * a solve that did not converge, or a direct factorisation the residual gate
+//     rejected;
+//   * a census stage that is null or absent — a lattice whose own pipeline cannot be
+//     shown to have run is not certifiable.
+//
+// ★ WHAT THE VERDICT READS, AND WHY IT IS NOT THE MAX. Peak strut stress is a MAX
+// over tens of thousands of members, and nodal loads land on strut ENDS, which is
+// exactly where an artificial peak appears. That artifact has not been separated, so
+// the verdict reads p99 and the max is REPORTED BESIDE IT. `verdict_statistic` says
+// which was used, on every certificate, so this can never be silently changed.
+struct OrganicCertificate {
+  enum class Verdict { NotRun, Certified, Refused };
+  Verdict verdict = Verdict::NotRun;
+  std::string refusal;               // non-empty exactly when Refused
+
+  // the verdict's own numbers
+  double margin = 0.0;               // allowable_used / stress_used; > 1 passes
+  double stress_used_mpa = 0.0;      // the statistic the verdict read
+  std::string verdict_statistic;     // "p99" — max is reported, never read
+
+  // the distribution, always, so a single number is never the whole story
+  double stress_p50_mpa = 0.0, stress_p95_mpa = 0.0;
+  double stress_p99_mpa = 0.0, stress_max_mpa = 0.0;
+  int worst_strut = -1;
+  std::string governing_load_case;
+
+  // what it was judged against
+  double allowable_mpa = 0.0;        // material yield
+  double knockdown_used = 1.0;       // the SAME scalar the solid path applies
+  double allowable_used_mpa = 0.0;   // allowable * knockdown
+
+  // provenance
+  std::size_t load_cases_run = 0;
+  std::size_t members = 0;
+  double worst_load_dropped_fraction = 0.0;
+  // ★ THE MEMBERS THAT CARRY EXACTLY NOTHING, and why they are a REFUSAL and not a
+  // footnote. The percentile distribution below is taken over members that carry
+  // something, because a member at exactly 0.0 contributes no information about
+  // whether the lattice is over its allowable. But that same filter is how a
+  // certificate lies: a network in two pieces, only one of which the load reaches,
+  // has an entire component at exactly 0.0, and reading p99 over the loaded piece
+  // certifies HALF THE PART and reports the number as though it covered all of it.
+  // So the filtered fraction is recorded, reported, and gated.
+  long long members_carrying = 0;
+  double zero_stress_fraction = 0.0;
+  double seconds = 0.0;
+};
+
+// `cases` is every load case in the job; the verdict is the WORST of them, as the
+// solid certificate does. `census_ok` is the caller's statement that every stage of
+// the emission census reported — false refuses, because a pipeline that cannot be
+// shown to have run cannot be certified. `load_reach_mm` is the lattice cell (see
+// solve_coupled_lattice): the cell is a design parameter and this must not guess it.
+struct OrganicLoadCase {
+  std::string name;
+  std::vector<DirichletBC> bcs;
+  std::vector<NodalLoad> loads;
+};
+
+OrganicCertificate certify_organic_structural(
+    const VoxelGrid& grid, const std::vector<char>& hex_mask,
+    const std::vector<BeamSegment>& spans, const std::vector<OrganicLoadCase>& cases,
+    double youngs_modulus, double poisson, double allowable_mpa, double knockdown,
+    double load_reach_mm, bool census_ok,
+    const std::vector<ShellPatch>* shells = nullptr);
+
 CoupledLatticeSolve solve_coupled_lattice(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const BeamNetwork& net, const std::vector<DirichletBC>& bcs,

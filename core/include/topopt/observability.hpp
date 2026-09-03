@@ -983,6 +983,27 @@ struct RunInfo {
   // LENGTH only and says nothing about connectivity. Absent from the receipt until
   // now, which is why that distinction could not be checked from a run.
   std::vector<int> organic_census_components;
+  // ★★ THE ORGANIC STRUCTURAL CERTIFICATE, under grading.organic.*. `verdict` is
+  // "certified" | "refused" | "not_run" — never absent, so a run that did not certify
+  // cannot be mistaken for one that did. `statistic` names WHICH number the verdict
+  // read: p99, because peak strut stress is a MAX over tens of thousands of members
+  // and nodal loads land on strut ENDS, where an artificial peak appears. The max is
+  // reported beside it and never read.
+  std::string organic_structural_verdict;      // empty = the key is omitted
+  std::string organic_structural_statistic;
+  std::string organic_structural_governing_load_case;
+  std::string organic_structural_refusal;
+  double organic_structural_margin = 0.0;
+  double organic_structural_p50_mpa = 0.0;
+  double organic_structural_p95_mpa = 0.0;
+  double organic_structural_p99_mpa = 0.0;
+  double organic_structural_max_mpa = 0.0;
+  double organic_structural_knockdown_used = 0.0;
+  double organic_structural_seconds = 0.0;
+  long long organic_structural_worst_strut = -1;
+  long long organic_structural_load_cases = 0;
+  long long organic_structural_members_carrying = -1;
+  double organic_structural_zero_stress_fraction = 0.0;
   double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   // ★★ THE GROUND-TIE REPAIR. floating_after != 0 means material the printer cannot

@@ -35,6 +35,7 @@
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/lattice_void.hpp"
+#include "topopt/beam_network.hpp"
 #include "topopt/organic_lattice.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -648,6 +649,10 @@ struct LatticeExportOutcome {
   // pass reads as having deleted everything.
   std::vector<double> organic_census_len_mm;
   std::vector<int> organic_census_components;
+  // ★ THE EMITTED SPANS, carried out so the STRUCTURAL CERTIFICATE can read the
+  // geometry that ships. They are post-clip, post-prune, post-finish and
+  // post-endpoint-fit -- the same spans lattice.emit_organic_spans writes.
+  std::vector<OrganicSpan> organic_spans_out;
   double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   double organic_emitted_largest_fraction = 0.0;
@@ -2052,6 +2057,7 @@ LatticeExportOutcome export_latticed_variant(
     st.anchor_nodes = g.anchor_nodes;
     st.skin_triangles = g.skin_triangles;
     st.landings = g.anchor_nodes;
+    oc.organic_spans_out = organic_spans;
     oc.organic_census_components.assign(
         g.census_components, g.census_components + OrganicGenStats::kCensusStages);
     oc.organic_census_len_mm.assign(g.census_len_mm,
@@ -3873,6 +3879,8 @@ SteppedOutcome run_stepped_step(const VoxelGrid& grid,
 struct LatticeVariantOutcome {
   LatticeExportOutcome oc;
   LatticeCertOutcome cc;
+  // ★ the ORGANIC structural certificate (beam network), when one was run
+  OrganicCertificate organic_cert;
   std::string receipt_path;
   std::string receipt_json;
   double cell_mm = 0.0;
@@ -4545,19 +4553,35 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
 void refuse_organic_structural(LatticeAlgorithm alg, const JobGrading& jg) {
   if (alg != LatticeAlgorithm::Organic) return;
   if (jg.intent == "aesthetic") return;
+  // ★ THE BLANKET REFUSAL IS GONE, AND WHAT REPLACED IT IS NARROWER, NOT ABSENT.
+  // The refusal above this line existed for one stated reason: organic traced struts
+  // follow the principal stress directions, so the lattice is anisotropic by
+  // construction, and the only tensor this codebase owns is the CUBIC one measured on
+  // the octet cell. A structural density would have been certified against a material
+  // this lattice is not.
+  //
+  // That reason is answered — not argued away — by certify_organic_structural: it does
+  // not consult the homogenised tensor AT ALL. It solves the strut network directly as
+  // Timoshenko frame elements, so the anisotropy is not approximated, it is simply the
+  // geometry being solved. The refusal therefore now keys on whether that instrument
+  // was ASKED FOR, and refuses a structural organic job that did not ask for it.
+  //
+  // job.cpp enforces the same pairing at PARSE time; this is the second lock, so a
+  // caller that reaches lattice_one_variant without going through the schema cannot
+  // obtain a structural organic density with nothing behind it.
+  if (jg.organic_structural_certification == "beam_network") return;
   throw JobError(
-      "organic requires \"intent\": \"aesthetic\", stated explicitly (this job "
-      "says " +
-      (jg.intent.empty() ? std::string("nothing") : ("\"" + jg.intent + "\"")) +
-      "). The organic algorithm traces struts ALONG the principal stress directions, "
-      "so the lattice it builds is anisotropic by construction — and the certification "
-      "library carries exactly one CUBIC tensor per topology, measured on the octet "
-      "cell as a function of relative density alone. Nothing here has measured a "
-      "tensor for traced geometry, so a structural density (one that means \"this "
-      "region is at N % of what the material can take\") would be certified against a "
-      "material this lattice is not. The certificate still runs under aesthetic "
-      "intent, and the receipt reports the lattice as out of regime for the "
-      "homogenised tensor.");
+      "organic under \"intent\": \"structural\" requires "
+      "\"organic_structural_certification\": \"beam_network\" (this job says " +
+      (jg.organic_structural_certification.empty()
+           ? std::string("nothing")
+           : ("\"" + jg.organic_structural_certification + "\"")) +
+      "). Traced struts follow the principal stress directions, so the lattice is "
+      "anisotropic by construction and the homogenised CUBIC tensor does not describe "
+      "it. The beam-network certificate does not use that tensor: it solves the struts "
+      "themselves as frame elements. A structural organic density is therefore "
+      "available, but only with that instrument named explicitly, so that no run "
+      "carries a structural density certified against nothing.");
 }
 
 // Resolve the job's algorithm; an ABSENT key is "doubled", which is what keeps every
@@ -5823,6 +5847,66 @@ LatticeVariantOutcome lattice_one_variant(
   R.cc = certify_latticed_variant(
       v, solved_grid, options, material, bcs, cx, post,
       graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ★★★ ORGANIC STRUCTURAL CERTIFICATION — the instrument, where the gate was ★★★
+  // certify_latticed_variant above reads a DENSITY against the OCTET tensor. Organic
+  // traces struts ALONG the principal stress directions, so its geometry is
+  // anisotropic by construction and no tensor has ever been measured for it: that
+  // number would describe a material this lattice is not. It is exactly why
+  // refuse_organic_structural exists.
+  //
+  // This certifies the geometry DIRECTLY — the emitted spans as a welded beam
+  // network, tied into the solid, solved under every load case — so no homogenised
+  // tensor is involved and the objection does not apply.
+  if (job.grading.algorithm == "organic" && job.grading.intent == "structural") {
+    // ★ THE CENSUS MUST BE READABLE. A stage that recorded one dimension and not the
+    // other is the sentinel defect (item 6): "null" then stops meaning "did not run",
+    // and a lattice whose own pipeline cannot be shown to have run is not
+    // certifiable. This checks CONSISTENCY, not absence -- a pass that genuinely did
+    // not run reports null in BOTH and that is fine.
+    bool census_ok = !R.oc.organic_census_len_mm.empty() &&
+                     R.oc.organic_census_len_mm.size() ==
+                         R.oc.organic_census_components.size();
+    if (census_ok)
+      for (std::size_t i = 0; i < R.oc.organic_census_len_mm.size(); ++i)
+        if ((R.oc.organic_census_len_mm[i] >= 0.0) !=
+            (R.oc.organic_census_components[i] >= 0))
+          census_ok = false;
+
+    std::vector<BeamSegment> segs;
+    segs.reserve(R.oc.organic_spans_out.size());
+    for (const OrganicSpan& sp : R.oc.organic_spans_out)
+      segs.push_back({sp.a, sp.b, sp.r});
+
+    std::vector<OrganicLoadCase> ocs;
+    ocs.push_back({"job", bcs, cx.loads});
+
+    // The solid the lattice ties into: every voxel the part keeps that the lattice
+    // did not replace. `mask` is the latticed set, so the complement inside the part.
+    std::vector<char> hexm(solved_grid.voxel_count(), 0);
+    for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
+      if (v.optimization.physical_density[e] > cx.printed_iso && !mask[e]) hexm[e] = 1;
+
+    R.organic_cert = certify_organic_structural(
+        solved_grid, hexm, segs, ocs, material.youngs_modulus_mpa,
+        material.poisson, material.yield_strength_mpa,
+        // ★ THE SAME KNOCKDOWN THE SOLID PATH APPLIES. It is a known unsourced
+        // scalar; this does not source it, it uses the solid path's and RECORDS
+        // which, so the lattice verdict can never be more optimistic than the solid.
+        cx.knockdown.infill_knockdown, cell, census_ok);
+    std::printf(
+        "organic structural certification: %s  margin %.4g  p99 %.4g MPa  max %.4g "
+        "MPa  (%zu case(s), %zu members, %.1f s)\n",
+        R.organic_cert.verdict == OrganicCertificate::Verdict::Certified ? "CERTIFIED"
+        : R.organic_cert.verdict == OrganicCertificate::Verdict::Refused ? "REFUSED"
+                                                                        : "not run",
+        R.organic_cert.margin, R.organic_cert.stress_p99_mpa,
+        R.organic_cert.stress_max_mpa, R.organic_cert.load_cases_run,
+        R.organic_cert.members, R.organic_cert.seconds);
+    if (!R.organic_cert.refusal.empty())
+      std::printf("  %s\n", R.organic_cert.refusal.c_str());
+  }
 
   // ── graded receipt + the clamp counterfactual (H4b): one extra cert solve
   // with every band-clamped voxel kept SOLID — was the clamping decisive?
@@ -8434,6 +8518,31 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         copy_growth_stats(gi, R.oc.growth, R.oc.growth_ran);
         gi.organic_census_len_mm = R.oc.organic_census_len_mm;
         gi.organic_census_components = R.oc.organic_census_components;
+        // ★ the organic structural certificate. `verdict` is never absent when one
+        // was run, so "no key" and "not certified" cannot be confused.
+        if (R.organic_cert.verdict != OrganicCertificate::Verdict::NotRun) {
+          gi.organic_structural_verdict =
+              R.organic_cert.verdict == OrganicCertificate::Verdict::Certified
+                  ? "certified"
+                  : "refused";
+          gi.organic_structural_statistic = R.organic_cert.verdict_statistic;
+          gi.organic_structural_margin = R.organic_cert.margin;
+          gi.organic_structural_p50_mpa = R.organic_cert.stress_p50_mpa;
+          gi.organic_structural_p95_mpa = R.organic_cert.stress_p95_mpa;
+          gi.organic_structural_p99_mpa = R.organic_cert.stress_p99_mpa;
+          gi.organic_structural_max_mpa = R.organic_cert.stress_max_mpa;
+          gi.organic_structural_worst_strut = R.organic_cert.worst_strut;
+          gi.organic_structural_governing_load_case =
+              R.organic_cert.governing_load_case;
+          gi.organic_structural_knockdown_used = R.organic_cert.knockdown_used;
+          gi.organic_structural_load_cases =
+              static_cast<long long>(R.organic_cert.load_cases_run);
+          gi.organic_structural_seconds = R.organic_cert.seconds;
+          gi.organic_structural_refusal = R.organic_cert.refusal;
+          gi.organic_structural_members_carrying = R.organic_cert.members_carrying;
+          gi.organic_structural_zero_stress_fraction =
+              R.organic_cert.zero_stress_fraction;
+        }
         gi.organic_census_grown_len_mm = R.oc.organic_census_grown_len_mm;
         gi.organic_emitted_components = R.oc.organic_emitted_components;
         gi.organic_emitted_largest_fraction = R.oc.organic_emitted_largest_fraction;

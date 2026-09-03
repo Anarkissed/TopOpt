@@ -1513,7 +1513,8 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale", "organic_growth"},
+             "organic_scale", "organic_growth",
+             "organic_structural_certification"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1615,6 +1616,24 @@ JobDescription parse_job(const std::string& json_text) {
             "grading \"organic_overhang_angle_deg\" must be in [0, 90] "
             "(0 disarms the clamp)");
     }
+    // ★★ THE CAPABILITY SIGNAL FOR ORGANIC UNDER STRUCTURAL INTENT.
+    // A schema key, so the app can probe it with gradingSchemaAccepts() — the
+    // mechanism it already has — rather than needing a version number.
+    //
+    // It is REQUIRED when algorithm=organic and intent=structural, and refused
+    // otherwise, because it names WHICH instrument certified the lattice. The only
+    // accepted value is "beam_network": the emitted spans solved as a welded beam
+    // network tied into the solid, which is the one instrument that does not read a
+    // density against the octet tensor. A structural organic run certified against
+    // that tensor would report a margin for a material this lattice is not.
+    if (const JsonValue* v = find_key(gr, "organic_structural_certification")) {
+      job.grading.organic_structural_certification =
+          require_nonempty_string(*v, "grading.organic_structural_certification");
+      if (job.grading.organic_structural_certification != "beam_network")
+        schema_fail(
+            "grading \"organic_structural_certification\" must be \"beam_network\" "
+            "(got \"" + job.grading.organic_structural_certification + "\")");
+    }
     if (const JsonValue* v = find_key(gr, "organic_boundary_finish")) {
       if (!organic_alg)
         schema_fail(
@@ -1636,6 +1655,26 @@ JobDescription parse_job(const std::string& json_text) {
       if (!grading_intent_from_name(job.grading.intent.c_str(), parsed))
         schema_fail("grading \"intent\" must be \"structural\" or \"aesthetic\" (got \"" +
                     job.grading.intent + "\")");
+    }
+    // ★★ THE KEY AND THE INTENT MUST AGREE, and the schema says so rather than the
+    // run discovering it later. Organic under STRUCTURAL intent must name its
+    // instrument; anything else must not carry the key at all, so a job cannot claim
+    // a certification it never asked to run.
+    {
+      const bool organic_structural =
+          job.grading.algorithm == "organic" && job.grading.intent == "structural";
+      if (organic_structural && job.grading.organic_structural_certification.empty())
+        schema_fail(
+            "grading \"organic_structural_certification\": \"beam_network\" is "
+            "REQUIRED for an organic lattice under structural intent. The certificate "
+            "for organic is the beam network solved over the emitted spans; the "
+            "density-against-octet-tensor path does not describe traced geometry.");
+      if (!organic_structural &&
+          !job.grading.organic_structural_certification.empty())
+        schema_fail(
+            "grading \"organic_structural_certification\" is only meaningful for an "
+            "organic lattice under structural intent (algorithm is \"" +
+            job.grading.algorithm + "\", intent is \"" + job.grading.intent + "\")");
     }
     // ★★ SHAPE-FIT GRADING REQUIRES THE AESTHETIC INTENT, and is REFUSED under any
     // other, rather than being quietly dropped. Shape fit adds a second, GEOMETRIC

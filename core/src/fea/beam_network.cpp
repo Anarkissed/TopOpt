@@ -2654,4 +2654,149 @@ CoupledLatticeSolve solve_coupled_lattice(
   return out;
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ★★★ ORGANIC STRUCTURAL CERTIFICATION ★★★
+// See beam_network.hpp for why this exists and what it refuses. Everything below is
+// measured; nothing is asserted.
+// ★ The share of MEMBERS that may carry exactly nothing before the organic
+// certificate refuses rather than reporting a percentile over the remainder. Set to
+// the same 5% as the solid island rule above, and for the same reason: below it the
+// filter is removing noise, above it the filter is removing the part.
+constexpr double kUncarriedRefuseFraction = 0.05;
+
+OrganicCertificate certify_organic_structural(
+    const VoxelGrid& grid, const std::vector<char>& hex_mask,
+    const std::vector<BeamSegment>& spans, const std::vector<OrganicLoadCase>& cases,
+    double youngs_modulus, double poisson, double allowable_mpa, double knockdown,
+    double load_reach_mm, bool census_ok, const std::vector<ShellPatch>* shells) {
+  OrganicCertificate cert;
+  const auto t0 = std::chrono::steady_clock::now();
+  auto finish = [&](void) {
+    cert.seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    return cert;
+  };
+  auto refuse = [&](const std::string& why) {
+    cert.verdict = OrganicCertificate::Verdict::Refused;
+    cert.refusal = why;
+    return finish();
+  };
+
+  // ── the preconditions, each a refusal and never a number ───────────────────
+  if (!census_ok)
+    return refuse(
+        "the emission census has a stage that is null or absent, so this lattice's "
+        "own pipeline cannot be shown to have run. A run that cannot say which passes "
+        "executed is not certifiable.");
+  if (spans.empty()) return refuse("no lattice geometry to certify");
+  if (cases.empty())
+    return refuse(
+        "no load case was supplied. A certificate over zero load cases is a margin "
+        "against nothing.");
+  if (!(allowable_mpa > 0.0))
+    return refuse("the material has no yield strength, so there is no allowable");
+  if (!(knockdown > 0.0 && knockdown <= 1.0))
+    return refuse("the interlayer knockdown must be in (0, 1]");
+
+  cert.allowable_mpa = allowable_mpa;
+  cert.knockdown_used = knockdown;
+  cert.allowable_used_mpa = allowable_mpa * knockdown;
+
+  const BeamNetwork net = build_beam_network(spans);
+  cert.members = net.member_count();
+  if (cert.members == 0) return refuse("the spans welded into an empty network");
+
+  // ── EVERY load case, and the verdict is the WORST ───────────────────────────
+  // The solid certificate runs them all; a lattice certified on one is certified
+  // against a load the part will not only see.
+  for (const OrganicLoadCase& lc : cases) {
+    const CoupledLatticeSolve r = solve_coupled_lattice(
+        grid, hex_mask, net, lc.bcs, lc.loads, youngs_modulus, poisson, 0.9, 1e-8,
+        100000, nullptr, shells, load_reach_mm);
+    ++cert.load_cases_run;
+    cert.worst_load_dropped_fraction =
+        std::max(cert.worst_load_dropped_fraction, r.load_dropped_fraction);
+    if (!r.refusal.empty())
+      return refuse("load case \"" + lc.name + "\": " + r.refusal);
+    if (!r.converged)
+      return refuse("load case \"" + lc.name +
+                    "\": the solve did not converge, so its stresses mean nothing");
+
+    // the distribution, over members that carry anything
+    std::vector<double> ss;
+    ss.reserve(r.member_stress_mpa.size());
+    for (double v : r.member_stress_mpa)
+      if (v > 0.0) ss.push_back(v);
+    // ★ WHAT THE FILTER JUST REMOVED, before it is allowed to matter. A member at
+    // exactly 0.0 is not a lightly-loaded member; it is a member the load never
+    // reached, which on a disconnected network means a whole component. Reading
+    // percentiles over the remainder would certify the loaded piece and report the
+    // number as the part's.
+    const double zero_frac =
+        r.member_stress_mpa.empty()
+            ? 0.0
+            : 1.0 - static_cast<double>(ss.size()) /
+                        static_cast<double>(r.member_stress_mpa.size());
+    // recorded on the FIRST case unconditionally, then on any worse one, so the
+    // number describes the run rather than only the cases that got worse
+    if (cert.load_cases_run == 1 || zero_frac > cert.zero_stress_fraction) {
+      cert.zero_stress_fraction = zero_frac;
+      cert.members_carrying = static_cast<long long>(ss.size());
+    }
+    if (zero_frac > kUncarriedRefuseFraction)
+      return refuse(
+          "load case \"" + lc.name + "\": " +
+          std::to_string(r.member_stress_mpa.size() - ss.size()) + " of " +
+          std::to_string(r.member_stress_mpa.size()) + " members carry exactly no "
+          "stress (" + std::to_string(zero_frac * 100.0) +
+          "% carry nothing). The load does not reach that material, so a percentile "
+          "taken over the members that DO carry would certify only the part of the "
+          "lattice the load found, and report it as the whole. This is what a "
+          "disconnected network looks like from inside the solver.");
+    if (ss.empty())
+      return refuse("load case \"" + lc.name +
+                    "\": no strut carries any stress, which is not a lattice under "
+                    "load — check that the load reached the geometry");
+    std::sort(ss.begin(), ss.end());
+    auto q = [&](double f) {
+      return ss[static_cast<std::size_t>(f * static_cast<double>(ss.size() - 1))];
+    };
+    const double p99 = q(0.99);
+    // ★ THE VERDICT READS p99, NOT THE MAX. The max is one member of tens of
+    // thousands and nodal loads land on strut ENDS, which is where an artificial
+    // peak appears; that artifact is not separated, so it is REPORTED and not read.
+    if (p99 > cert.stress_used_mpa) {
+      cert.stress_used_mpa = p99;
+      cert.stress_p50_mpa = q(0.50);
+      cert.stress_p95_mpa = q(0.95);
+      cert.stress_p99_mpa = p99;
+      cert.stress_max_mpa = ss.back();
+      cert.governing_load_case = lc.name;
+      int worst = -1;
+      double wv = 0.0;
+      for (std::size_t i = 0; i < r.member_stress_mpa.size(); ++i)
+        if (r.member_stress_mpa[i] > wv) { wv = r.member_stress_mpa[i]; worst = static_cast<int>(i); }
+      cert.worst_strut = worst;
+    }
+  }
+
+  cert.verdict_statistic = "p99";
+  cert.margin = cert.stress_used_mpa > 0.0
+                    ? cert.allowable_used_mpa / cert.stress_used_mpa
+                    : 0.0;
+  cert.verdict = cert.margin >= 1.0 ? OrganicCertificate::Verdict::Certified
+                                    : OrganicCertificate::Verdict::Refused;
+  if (cert.verdict == OrganicCertificate::Verdict::Refused)
+    cert.refusal =
+        "the lattice is over its allowable: p99 strut stress " +
+        std::to_string(cert.stress_used_mpa) + " MPa against " +
+        std::to_string(cert.allowable_used_mpa) + " MPa allowed (" +
+        std::to_string(allowable_mpa) + " yield x " + std::to_string(knockdown) +
+        " knockdown), governed by load case \"" + cert.governing_load_case +
+        "\", worst strut " + std::to_string(cert.worst_strut) + " at " +
+        std::to_string(cert.stress_max_mpa) + " MPa.";
+  return finish();
+}
+
 }  // namespace topopt
