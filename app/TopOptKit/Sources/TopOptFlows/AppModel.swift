@@ -199,6 +199,9 @@ public final class AppModel: ObservableObject {
     ) {
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
+        // ★ The wizard's organic sample solves the PR 353 cube with the app's own FEA
+        // (2026-09-03); it needs the same materials/rules this model was handed.
+        if let m = materialsPath, let r = rulesPath { OrganicSampleCube.configPaths = (m, r) }
         self.materialsLoader = materialsLoader
         self.importer = importer
         self.inspector = inspector

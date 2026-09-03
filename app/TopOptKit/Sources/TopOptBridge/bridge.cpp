@@ -2264,6 +2264,12 @@ std::vector<double> organic_preview_field(
     double min_extrudable_width_mm,
     double build_x, double build_y, double build_z,
     double overhang_angle_deg, double rho_min, double rho_max,
+    // ★ THE USER'S OTHER ORGANIC PICKS (maintainer, 2026-09-03: the sample re-traces
+    // with every setting): an explicit strut diameter (0 ⇒ core derives it from the
+    // density band), and GROWN with its layer height (grow == 0 ⇒ traced). Both go to
+    // the same production functions the run uses — trace_organic_lattice /
+    // grow_organic_lattice — nothing preview-only.
+    double strut_diameter_mm, int grow, double layer_height_mm,
     // The field to bake the traced capsules into: its own grid, which is the REGION's
     // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
     int fnx, int fny, int fnz, double fspacing,
@@ -2306,10 +2312,16 @@ std::vector<double> organic_preview_field(
   p.overhang_angle_deg = overhang_angle_deg;
   p.rho_min = rho_min;
   p.rho_max = rho_max;
+  p.strut_diameter_mm = strut_diameter_mm > 0.0 ? strut_diameter_mm : 0.0;
+  p.layer_hint_mm = (grow != 0 && layer_height_mm > 0.0) ? layer_height_mm : 0.0;
 
   topopt::OrganicLattice lat;
   try {
-    lat = topopt::trace_organic_lattice(grid, cand, stress, sep, nullptr, p);
+    // ★ THE SAME BRANCH THE RUN TAKES (run_job.cpp: `oo.lat = jg.organic_growth ?
+    // grow_organic_lattice(...) : trace_organic_lattice(...)`).
+    lat = (grow != 0 && layer_height_mm > 0.0)
+              ? topopt::grow_organic_lattice(grid, cand, stress, sep, nullptr, p)
+              : topopt::trace_organic_lattice(grid, cand, stress, sep, nullptr, p);
   } catch (...) {
     return out;   // core refused; the caller says so rather than drawing something
   }

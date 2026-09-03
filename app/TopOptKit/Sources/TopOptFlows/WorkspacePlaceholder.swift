@@ -2917,6 +2917,27 @@ public struct WorkspacePlaceholder: View {
         } message: {
             Text(pendingReplacement?.message ?? "")
         }
+        // ★ "After running certification, only these spacings are available. Pick one
+        // (you can always change this in the settings)." — maintainer, 2026-09-03.
+        .confirmationDialog(
+            "Certification found \(organicFitChoices.count) spacing\(organicFitChoices.count == 1 ? "" : "s") that work",
+            isPresented: organicFitPromptShown, titleVisibility: .visible
+        ) {
+            ForEach(organicFitChoices, id: \.self) { s in
+                Button(String(format: "%g mm", s)) {
+                    project.lattice.organicPickedSeparationMM = s
+                    project.lattice.cellSizeMode = .fit
+                    model.persistCurrentProject()
+                    organicFitChoices = []
+                }
+            }
+            Button("Decide later", role: .cancel) { organicFitChoices = [] }
+        } message: {
+            Text("After running certification, only "
+                 + organicFitChoices.map { String(format: "%g mm", $0) }.joined(separator: ", ")
+                 + " are available for use. Please select which you'd prefer — you can always "
+                 + "change this in the settings.")
+        }
         .onAppear {
             syncLatticeProxy()
             // A reopened project already carries roles and depths — the cards
@@ -3022,6 +3043,7 @@ public struct WorkspacePlaceholder: View {
             latticeOrganicSpans = alt.spanText.flatMap { try? OrganicSpanIndex.parse($0) }
             latticeOrganicReceipt = OrganicRunReceipt(info: alt.receiptJSON.flatMap {
                 (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] })
+            offerCertifiedSeparations(from: latticeOrganicReceipt)
         } else {
             latticeOrganicSpans = nil
             latticeOrganicReceipt = nil
@@ -3523,6 +3545,7 @@ public struct WorkspacePlaceholder: View {
             DispatchQueue.main.async {
                 self.latticeOrganicSpans = spans
                 self.latticeOrganicReceipt = OrganicRunReceipt(info: receiptInfo)
+                self.offerCertifiedSeparations(from: self.latticeOrganicReceipt)
                 // ★ REBUILD ON RUN CHANGE (Step 4) — the span index has the bake's
                 // lifetime, so a new run is a new bake, never a per-frame one.
                 self.buildStrutScene()
@@ -10710,6 +10733,26 @@ public struct WorkspacePlaceholder: View {
     /// so the run button is the gate — disabled, carrying core's own words — while
     /// every control above it stays enabled. Lifts when
     /// `TopOptKit.organicStructuralCertificationWired` does.
+    /// ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): when a run's
+    /// receipt carries `fitting_separations_mm` (D2), store them on the project so
+    /// Settings shows the factored choices, and — under a Structural stage — ask which
+    /// the user prefers ("you can always change this in the settings"). Core's numbers,
+    /// offered, never computed here; nothing fires until core writes the key.
+    @State private var organicFitChoices: [Double] = []
+    private func offerCertifiedSeparations(from receipt: OrganicRunReceipt?) {
+        guard let found = receipt?.fittingSeparationsMM, !found.isEmpty else { return }
+        let sizes = found.filter { $0 > 0 }.sorted()
+        guard !sizes.isEmpty else { return }
+        project.lattice.organicFittingSeparationsMM = sizes
+        model.persistCurrentProject()
+        if project.lattice.isOrganic, (project.lattice.stageMode ?? .structural) == .structural {
+            organicFitChoices = sizes
+        }
+    }
+    private var organicFitPromptShown: Binding<Bool> {
+        Binding(get: { !organicFitChoices.isEmpty }, set: { if !$0 { organicFitChoices = [] } })
+    }
+
     private var organicStructuralGateOpen: Bool {
         !(project.lattice.isOrganic
           && (project.lattice.stageMode ?? .structural) == .structural

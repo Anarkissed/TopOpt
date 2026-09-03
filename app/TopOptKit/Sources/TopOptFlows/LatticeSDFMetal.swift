@@ -166,16 +166,28 @@ public struct LatticeOrganicInput: Sendable {
     public let rhoMin: Double
     public let rhoMax: Double
 
+    /// ★ The user's other organic picks (2026-09-03): an explicit strut diameter
+    /// (0 ⇒ core derives it from the band), GROWN with its layer height (false ⇒
+    /// traced), and the overhang limit (trace-only; 0 leaves it to core).
+    public var strutDiameterMM: Double = 0
+    public var grow: Bool = false
+    public var layerHeightMM: Double = 0
+    public var overhangAngleDeg: Double = 0
+
     public init(tensor: [Double], dims: (Int, Int, Int), originMM: SIMD3<Double>,
                 spacingMM: Double, minExtrudableWidthMM: Double,
                 buildDirection: SIMD3<Double>,
                 separationMinMM: Double, separationMaxMM: Double,
-                rhoMin: Double, rhoMax: Double) {
+                rhoMin: Double, rhoMax: Double,
+                strutDiameterMM: Double = 0, grow: Bool = false,
+                layerHeightMM: Double = 0, overhangAngleDeg: Double = 0) {
         self.tensor = tensor; self.dims = dims; self.originMM = originMM
         self.spacingMM = spacingMM; self.minExtrudableWidthMM = minExtrudableWidthMM
         self.buildDirection = buildDirection
         self.separationMinMM = separationMinMM; self.separationMaxMM = separationMaxMM
         self.rhoMin = rhoMin; self.rhoMax = rhoMax
+        self.strutDiameterMM = strutDiameterMM; self.grow = grow
+        self.layerHeightMM = layerHeightMM; self.overhangAngleDeg = overhangAngleDeg
     }
 }
 
@@ -364,6 +376,11 @@ public struct LatticeSDFScene {
                 // ★★★ ORGANIC's inputs. nil ⇒ not an organic job and nothing is traced,
                 // which is every other caller.
                 organic: LatticeOrganicInput? = nil,
+                // ★ SAMPLE-ONLY bake voxel (maintainer, 2026-09-03): the wizard's
+                // organic sample bakes at ≤ r_min/2 so bead-width struts read as beams,
+                // not ribbons. nil keeps the part preview's own rule (the maintainer
+                // wants the part preview realistic by another route, not this floor).
+                organicBakeVoxelMM: Double? = nil,
                 maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
                 // ★ The band and gamma the raymarcher grades with, so a stated
                 // per-region density can be inverted into the demand value that
@@ -605,7 +622,7 @@ public struct LatticeSDFScene {
             let mn = sp.indexOrigin
             let ext = SIMD3<Float>(sp.indexDims) * sp.cellMM
             let longest = Swift.max(ext.x, Swift.max(ext.y, ext.z))
-            var fs = Swift.max(0.35, Double(longest) / 384.0)
+            var fs = organicBakeVoxelMM ?? Swift.max(0.35, Double(longest) / 384.0)
             while (Double(ext.x) / fs + 2) * (Double(ext.y) / fs + 2)
                     * (Double(ext.z) / fs + 2) > 12_000_000 { fs *= 1.25 }
             let fnx = Swift.max(2, Int(Double(ext.x) / fs) + 2)
@@ -677,7 +694,7 @@ public struct LatticeSDFScene {
                 let ext = mx - mn
                 let longest = Swift.max(ext.x, Swift.max(ext.y, ext.z))
                 // ~0.5 mm where the budget allows, never more than 12 M cells.
-                var fs = Swift.max(0.35, Double(longest) / 384.0)
+                var fs = organicBakeVoxelMM ?? Swift.max(0.35, Double(longest) / 384.0)
                 while (Double(ext.x) / fs + 2) * (Double(ext.y) / fs + 2)
                         * (Double(ext.z) / fs + 2) > 12_000_000 { fs *= 1.25 }
                 let fnx = Swift.max(2, Int(Double(ext.x) / fs) + 2)
@@ -691,7 +708,10 @@ public struct LatticeSDFScene {
                     buildDirection: o.buildDirection,
                     fieldDims: (fnx, fny, fnz),
                     fieldOrigin: SIMD3<Double>(mn), fieldSpacingMM: fs,
-                    bandMM: band, rhoMin: o.rhoMin, rhoMax: o.rhoMax),
+                    bandMM: band, overhangAngleDeg: o.overhangAngleDeg,
+                    rhoMin: o.rhoMin, rhoMax: o.rhoMax,
+                    strutDiameterMM: o.strutDiameterMM, grow: o.grow,
+                    layerHeightMM: o.layerHeightMM),
                    t.field.count == fnx * fny * fnz {
                     organicOut = LatticeVoxelGrid(
                         nx: fnx, ny: fny, nz: fnz, origin: mn,

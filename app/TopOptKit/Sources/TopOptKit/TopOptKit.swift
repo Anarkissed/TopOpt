@@ -1152,7 +1152,12 @@ public enum TopOptKit {
                                     fieldSpacingMM: Double,
                                     bandMM: Double,
                                     overhangAngleDeg: Double = 0,
-                                    rhoMin: Double = 0, rhoMax: Double = 0)
+                                    rhoMin: Double = 0, rhoMax: Double = 0,
+                                    // ★ 2026-09-03: the user's other organic picks —
+                                    // an explicit strut diameter (0 ⇒ core derives it)
+                                    // and GROWN with its layer height (false ⇒ traced).
+                                    strutDiameterMM: Double = 0,
+                                    grow: Bool = false, layerHeightMM: Double = 0)
         -> OrganicTrace? {
         let n = nx * ny * nz
         let (fnx, fny, fnz) = fieldDims
@@ -1175,6 +1180,7 @@ public enum TopOptKit {
                         minExtrudableWidthMM,
                         buildDirection.x, buildDirection.y, buildDirection.z,
                         overhangAngleDeg, rhoMin, rhoMax,
+                        strutDiameterMM, grow ? Int32(1) : Int32(0), layerHeightMM,
                         Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
                         fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,
                         bandMM).map { Double($0) }

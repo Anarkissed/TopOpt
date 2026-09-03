@@ -1,5 +1,52 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-03 (evening) — the sample is LIVE: the PR 353 cube re-traced with the user's settings
+>
+> **What was wrong (maintainer):** the sample looked like ribbons, not beams — the bake
+> voxel floor (0.35 mm) against r ≈ 0.26–0.39 mm struts; and it was a fixed artifact
+> where it should be a base that follows every setting.
+>
+> **What it is now.** `OrganicSampleCube` solves the bundled `PR353_cube40.stl` with
+> the app's OWN FEA (`TopOptKit.analyzeSolidLoadCase`, the printed job's load: anchor
+> face 0, −200 N on face 1, PLA, 64³) once per launch, then re-traces a **20 mm corner**
+> of that field through the preview bridge — which calls the production
+> `trace_organic_lattice` / `grow_organic_lattice` (bridge.cpp) — every time an organic
+> pick changes (`.task(id: Picks)`, off the main thread). Picks: Traced/Grown (+ layer
+> height), the window = the printed job's 3–6 mm × spacing scale (Fit ⇒ one separation:
+> the user's certified pick, else the middle), density band, Thicker's strut diameter,
+> overhang (traced only). Bake voxel = r_min/2 (0.105 mm at the 0.42 bead) — the
+> sample-only rule the maintainer confirmed; the part preview keeps its own rule (he
+> wants that realistic by another route: analytic capsule march pre-run, the run's
+> welded STL post-run — proposed, not built). The 20 mm cut keeps strut-to-spacing;
+> the label says so. Bridge extension (app-side, `TopOptBridge`): `strut_diameter_mm`,
+> `grow`, `layer_height_mm` now cross to `OrganicParams`; grown goes to
+> `grow_organic_lattice`. `LatticeSDFScene` gained `organicBakeVoxelMM` (nil ⇒ old rule).
+>
+> **Measured on the simulator (Debug dylib `4f0c31195798cc73`, core `ca56654d2805`):**
+> FEA + first trace 16 s wall (peak 100 % CPU, sheet live); traced: "148 curves, 694
+> connectors, 3.00–6.00 mm spacing · voxel 0.10 mm" — individual beams with free tips,
+> no ribbons (17:32 screenshot); tap Grown → re-trace 14 s → "2134 curves, 694
+> connectors …" — the layer-ordered columnar look with free tips (17:34). The banner
+> carries the census; "Sample" is the first tab under organic.
+>
+> **The certification pop-up (maintainer item 4).** When a run's receipt carries
+> `fitting_separations_mm`, the workspace stores them on the project
+> (`organicFittingSeparationsMM`) and, under a Structural stage, shows a confirmation
+> dialog — "After running certification, only 2 mm, 3 mm, 5 mm are available for use.
+> Please select which you'd prefer — you can always change this in the settings" —
+> with a button per size; the pick lands in `organicPickedSeparationMM` (+ Fit). Settings
+> shows the factored sizes as pills under Cell size with "Let core pick". The pick
+> travels as `organic_separation_mm` only when core's schema accepts it (probe-gated
+> like every organic key; today it does not, and the pane says so). Nothing fires until
+> core writes the key — wired and unit-tested, not device-driven.
+>
+> **Closing suite (Debug, SwiftPM): 2296 tests, 30 skipped, 0 failures, 3602 s.**
+>
+> Tests: `OrganicSampleCubeTests` (picks mapping, grown needs a layer height and drops
+> the overhang, bake voxel ≤ r_min/2 under the cap, hashable picks, the two fields'
+> round trip and byte-identity, the gated emission). Render fixture unchanged
+> (`testThePrintedCubeIsHitAtItsOwnRadius` still on the bundled printed spans).
+
 > ## ★ 2026-09-03 (latest) — the sample IS the PR 353 cube; the thin-strut fixture measured
 >
 > **The sample.** The wizard's organic sample is now CUBE_FINAL — PR 353 round 4, the

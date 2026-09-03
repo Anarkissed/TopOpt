@@ -117,8 +117,8 @@ public struct LatticeSetupWizard: View {
                                              sceneToken: organicSceneToken, faceTints: [:])
                       })
             .ignoresSafeArea()
-            // ★ The printed cube bakes off the main thread, once per launch.
-            .task(id: organicSampleShown) { await loadOrganicSample() }
+            // ★ The cube re-traces off the main thread whenever a pick changes.
+            .task(id: organicSamplePicks) { await loadOrganicSample(organicSamplePicks) }
     }
 
     /// Re-fit the camera to whatever is on the stage now. `reframe` re-anchors the
@@ -687,6 +687,39 @@ public struct LatticeSetupWizard: View {
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            // ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): after a
+            // run, the receipt's fitting set is stored on the project and offered here
+            // as the factored choices — core's numbers, displayed, never computed in
+            // the app. The pick travels as `organic_separation_mm` once core's schema
+            // accepts it; until then it is kept and shown.
+            let found = project.lattice.organicFittingSeparationsMM
+            if !found.isEmpty {
+                Text("Certification found these spacings work on this part:")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: DS.Space.xs) {
+                        ForEach(found, id: \.self) { s in
+                            organicPill(String(format: "%g mm", s),
+                                        on: abs(model.organicPickedSeparationMM - s) < 1e-6,
+                                        enabled: fitPossible) {
+                                model.organicPickedSeparationMM = s
+                                model.setCellSizeMode(.fit); rebuild()
+                            }
+                        }
+                        organicPill("Let core pick", on: model.organicPickedSeparationMM == 0, enabled: true) {
+                            model.organicPickedSeparationMM = 0; rebuild()
+                        }
+                    }
+                }
+                if !TopOptKit.gradingSchemaAccepts(key: "organic_separation_mm") {
+                    Text("Your pick is kept and shown; it reaches the run once core accepts "
+                         + "`organic_separation_mm`.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             // ★ D2 IS AHEAD OF CORE (reviewer, 2026-09-03): core's organic auto/fit
             // semantics are a pending core item. Said here until the receipt writes
@@ -1510,20 +1543,37 @@ public struct LatticeSetupWizard: View {
         lastLatencyMS = (CFAbsoluteTimeGetCurrent() - t0) * 1000
     }
 
-    /// Kicked when the organic sample is shown: waits for the cached bake, then
-    /// publishes the scene. Cancels cleanly if the sheet leaves organic meanwhile.
-    private func loadOrganicSample() async {
-        guard organicSampleShown, organicScene == nil else { return }
-        organicSampleMeasurement = "Baking the printed cube — 12,434 struts through the run's own preview path…"
-        let baked = await OrganicSampleCube.baked(latticeID: model.topologyID)
-        guard !Task.isCancelled, organicSampleShown else { return }
+    /// ★ EVERYTHING THE SAMPLE'S TRACE DEPENDS ON, from the sheet's current picks. The
+    /// `.task(id:)` below re-traces exactly when this changes (maintainer, 2026-09-03:
+    /// the sample must follow every permutation of the user's settings).
+    private var organicSamplePicks: OrganicSampleCube.Picks? {
+        guard organicSampleShown else { return nil }
+        return OrganicSampleCube.Picks(settings: model.applied(to: project.lattice),
+                                       layerHeightMM: project.printParams.layerHeightMM)
+    }
+
+    /// Re-traces the PR 353 cube's 20 mm corner with the current picks, off the main
+    /// thread (the cube's FEA is solved once per launch and cached), then publishes the
+    /// scene. Cancels cleanly if the picks change again meanwhile.
+    private func loadOrganicSample(_ picks: OrganicSampleCube.Picks?) async {
+        guard let picks else {
+            if organicScene != nil { organicScene = nil; organicSampleMeasurement = nil }
+            return
+        }
+        organicSampleMeasurement = organicScene == nil
+            ? "Solving the PR 353 cube with the app's own FEA, then tracing it with your settings…"
+            : "Re-tracing the PR 353 cube with your settings…"
+        let baked = await OrganicSampleCube.baked(picks: picks, latticeID: model.topologyID)
+        guard !Task.isCancelled, organicSamplePicks == picks else { return }
         if let b = baked {
+            let first = organicScene == nil
             organicScene = b.scene; organicSceneToken += 1
             organicSampleMeasurement = b.measurement
             mesh = b.mesh
-            frameSample()
+            if first { frameSample() }
         } else {
-            organicSampleMeasurement = "The printed cube's spans are not bundled in this build."
+            organicSampleMeasurement = "The cube could not be traced with these settings (core refused, or the "
+                + "sample's model/materials are not bundled in this build)."
         }
     }
 

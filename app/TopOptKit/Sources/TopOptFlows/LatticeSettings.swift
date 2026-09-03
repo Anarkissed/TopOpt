@@ -583,6 +583,8 @@ public struct LatticeSpec: Equatable, Sendable {
     public var organicShapeFit: Bool = false
     public var organicShapeFitOnly: Bool = false
     public var organicScale: Double = 1
+    /// The user's pick among certification's separations (0 ⇒ none; Fit lets core choose).
+    public var organicPickedSeparationMM: Double = 0
     /// ★ THE LAYER HEIGHT THIS JOB WILL CARRY, for the growth precondition only.
     /// `organic_growth` is a SCHEMA REFUSAL without a stated `loads.layer_height_mm`,
     /// so the key is not written unless one is really there — the job document is the
@@ -741,6 +743,10 @@ public struct LatticeSpec: Equatable, Sendable {
             // nothing").
             if let m = stageMode { put("intent", m == .structural ? "structural" : "aesthetic") }
             if organicScale != 1 { put("organic_scale", organicScale) }
+            // ★ The user's pick among certification's separations (maintainer,
+            // 2026-09-03). `put` refuses it until core's schema accepts the key, so a
+            // pick is stored and shown but never sent to a core that would refuse.
+            if organicPickedSeparationMM > 0 { put("organic_separation_mm", organicPickedSeparationMM) }
             // ★★★ GROWTH NEEDS A STATED LAYER HEIGHT — a SCHEMA REFUSAL since the
             // PR 353 amendment, not a fallback. Without one core would substitute half
             // a voxel (0.85 mm on the M2's 1.705 mm grid, roughly four times a real
@@ -886,6 +892,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var organicShapeFitOnly: Bool = false
     /// Uniform scale on the derived spacing.
     public var organicScale: Double = 1.0
+    /// ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): after a run,
+    /// core's receipt lists the separations that certified (`fitting_separations_mm`,
+    /// D2); they are stored here so Settings can show them as the factored choices,
+    /// and the pop-up can offer them. Empty until a run's receipt carries them.
+    public var organicFittingSeparationsMM: [Double] = []
+    /// The user's pick among those (0 ⇒ none picked; core chooses under Fit). Travels
+    /// as `organic_separation_mm` the day core's schema accepts that key — gated in
+    /// `gradingDictionary()` like every organic key, never sent to a core that refuses.
+    public var organicPickedSeparationMM: Double = 0
 
     /// Is organic the chosen algorithm? Asked of the RESOLVED name, so "not stated"
     /// (which core resolves to doubled) is correctly not organic.
@@ -1398,6 +1413,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // its own default ⇒ an existing project emits exactly the job it always has.
         case organicGrowth, organicStrutWidthMM, organicOverhangDeg
         case organicBoundaryFinish, organicShapeFit, organicShapeFitOnly, organicScale
+        case organicFittingSeparationsMM, organicPickedSeparationMM
     }
 
     public init(from decoder: Decoder) throws {
@@ -1422,6 +1438,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         organicShapeFit = try c.decodeIfPresent(Bool.self, forKey: .organicShapeFit) ?? false
         organicShapeFitOnly = try c.decodeIfPresent(Bool.self, forKey: .organicShapeFitOnly) ?? false
         organicScale = try c.decodeIfPresent(Double.self, forKey: .organicScale) ?? 1.0
+        organicFittingSeparationsMM = try c.decodeIfPresent([Double].self, forKey: .organicFittingSeparationsMM) ?? []
+        organicPickedSeparationMM = try c.decodeIfPresent(Double.self, forKey: .organicPickedSeparationMM) ?? 0
         // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
         // exactly the job they emitted before (bar R1).
         cellSizeMode = try c.decodeIfPresent(LatticeCellSizeMode.self, forKey: .cellSizeMode) ?? .fixed
@@ -1531,6 +1549,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(organicShapeFit, forKey: .organicShapeFit)
         try c.encode(organicShapeFitOnly, forKey: .organicShapeFitOnly)
         try c.encode(organicScale, forKey: .organicScale)
+        // Written only when set, so an untouched project's file is byte-identical.
+        if !organicFittingSeparationsMM.isEmpty {
+            try c.encode(organicFittingSeparationsMM, forKey: .organicFittingSeparationsMM)
+        }
+        if organicPickedSeparationMM > 0 {
+            try c.encode(organicPickedSeparationMM, forKey: .organicPickedSeparationMM)
+        }
         try c.encodeIfPresent(stageMode, forKey: .stageMode)
         // Written only when stated, so an untouched project's file is byte-identical
         // to one saved before the selector existed (bar U1).
@@ -1878,6 +1903,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.organicShapeFit = organicShapeFit
             spec.organicShapeFitOnly = organicShapeFitOnly
             spec.organicScale = organicScale
+            spec.organicPickedSeparationMM = organicPickedSeparationMM
             spec.layerHeightMM = layerHeightMM
             spec.stageMode = stageMode
             return spec
@@ -1933,6 +1959,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.organicShapeFit = organicShapeFit
         spec2.organicShapeFitOnly = organicShapeFitOnly
         spec2.organicScale = organicScale
+        spec2.organicPickedSeparationMM = organicPickedSeparationMM
         spec2.layerHeightMM = layerHeightMM
         spec2.stageMode = stageMode
         return spec2

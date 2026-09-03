@@ -249,6 +249,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// through the sheet. Defaults are core's own.
     public var organicGrowth: Bool = false
     public var organicStrutWidthMM: Double = 0
+    /// The user's pick among certification's separations (0 ⇒ none; core chooses).
+    public var organicPickedSeparationMM: Double = 0
     public var organicOverhangDeg: Double = 0
     public var organicBoundaryFinish: LatticeOrganicFinish = .skin
     public var organicShapeFit: Bool = false
@@ -329,6 +331,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.gradeStepStyle = s.gradeStepStyle
         self.organicGrowth = s.organicGrowth
         self.organicStrutWidthMM = s.organicStrutWidthMM
+        self.organicPickedSeparationMM = s.organicPickedSeparationMM
         self.organicOverhangDeg = s.organicOverhangDeg
         self.organicBoundaryFinish = s.organicBoundaryFinish
         self.organicShapeFit = s.organicShapeFit
@@ -374,6 +377,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // none of them unless organic was chosen and the linked core accepts the key.
         out.organicGrowth = organicGrowth
         out.organicStrutWidthMM = organicStrutWidthMM
+        out.organicPickedSeparationMM = organicPickedSeparationMM
         out.organicOverhangDeg = organicOverhangDeg
         out.organicBoundaryFinish = organicBoundaryFinish
         out.organicShapeFit = organicShapeFit
