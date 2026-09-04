@@ -1690,17 +1690,12 @@ JobDescription parse_job(const std::string& json_text) {
     // Under an aesthetic intent the density is explicitly a look, and more plastic is
     // not a defect.
     //
-    // ★ ORGANIC ALREADY REQUIRES THE AESTHETIC INTENT — see refuse_organic_structural
-    // in run_job.cpp, which throws for a stronger reason than this one: traced struts
-    // follow the principal stress directions, so the lattice is anisotropic by
-    // construction, and the certification library holds one CUBIC tensor per topology.
-    // A structural density would be certified against a material this lattice is not.
-    //
-    // This check is therefore NOT what establishes the coupling, and does not pretend
-    // to be. It is kept for two narrow reasons: it fails at PARSE time naming the
-    // offending key, rather than at run time naming the algorithm; and it makes shape
-    // fit's own requirement stand on its own, so that if organic's rule is ever
-    // relaxed this key does not silently inherit the relaxation.
+    // ★ ORGANIC NO LONGER REQUIRES THE AESTHETIC INTENT. It once did, and the two
+    // organic shape-fit keys below carried their own copies of that requirement so
+    // they would not silently inherit a relaxation. The relaxation has now happened
+    // DELIBERATELY on all three: refuse_organic_structural admits a structural organic
+    // job that names "organic_structural_certification": "beam_network", and both
+    // shape-fit keys are admitted with it. Each key states its own reason below.
     if (const JsonValue* sv = find_key(gr, "organic_shape_fit")) {
       if (sv->type != JsonValue::Type::Bool)
         schema_fail("grading \"organic_shape_fit\" must be a boolean");
@@ -1709,13 +1704,25 @@ JobDescription parse_job(const std::string& json_text) {
             "grading \"organic_shape_fit\" is only allowed with "
             "algorithm \"organic\"");
       job.grading.organic_shape_fit = (sv->num != 0.0);
-      if (job.grading.organic_shape_fit && job.grading.intent != "aesthetic")
-        schema_fail(
-            "grading \"organic_shape_fit\" requires intent \"aesthetic\" (got \"" +
-            (job.grading.intent.empty() ? std::string("structural (default)")
-                                        : job.grading.intent) +
-            "\"): shape fit changes the density, which under a structural intent is "
-            "what the certificate is computed against");
+      // ★★ THE AESTHETIC-ONLY REQUIREMENT IS LIFTED (maintainer's call). It read:
+      // "shape fit changes the density, which under a structural intent is what the
+      // certificate is computed against". That was true of the DENSITY-KEYED
+      // certificate, which looks strength up as a function of relative density: change
+      // the density after the lookup and the lookup describes other geometry.
+      //
+      // It is not true of certify_organic_structural, which never reads density at
+      // all -- it solves the struts themselves as frame elements, so it certifies
+      // whatever geometry shape fit produced. And on the organic path the density-keyed
+      // certificate ALREADY reports tensor_out_of_regime, so the rule was guarding a
+      // number this path had already marked void.
+      //
+      // ★ SHAPE FIT CAN ONLY REFINE. Both caps (member width / n*, and twice the
+      // distance to the region boundary) are applied ONLY when smaller than the
+      // stress-driven cell -- see the `cap < spacing[e]` test in run_job.cpp. It
+      // shrinks cells and never enlarges one, and the bead is recomputed to match. So
+      // it ADDS material where members are thin or near a boundary, which is the
+      // strongest lattice-strength lever this project has measured (2.87 MPa at 6 mm
+      // cells vs 87.5 MPa at 3 mm: the coarse lattice stops SHARING load).
     }
     if (const JsonValue* gv = find_key(gr, "organic_growth")) {
       if (gv->type != JsonValue::Type::Bool)
@@ -1756,10 +1763,13 @@ JobDescription parse_job(const std::string& json_text) {
           schema_fail(
               "grading \"organic_shape_fit_only\" requires "
               "\"organic_shape_fit\": true");
-        if (job.grading.intent != "aesthetic")
-          schema_fail(
-              "grading \"organic_shape_fit_only\" requires intent \"aesthetic\": a "
-              "cell size that does not answer to demand makes no structural claim");
+        // ★★ ALSO LIFTED, and this one had a DIFFERENT reason: "a cell size that
+        // does not answer to demand makes no structural claim". That was right while
+        // nothing measured the result -- the claim could only be inferred from the
+        // density, so a cell chosen by shape alone supported no inference. The
+        // beam-network certificate MEASURES the finished struts, so the claim is no
+        // longer inferred from how the cell was chosen. A shape-driven lattice that
+        // is too weak is refused by the certificate, which names the governing strut.
         if (!(job.grading.cell_min_mm > 0.0 &&
               job.grading.cell_max_mm >= job.grading.cell_min_mm))
           schema_fail(

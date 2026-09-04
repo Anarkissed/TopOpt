@@ -1166,6 +1166,14 @@ struct OrganicGenStats {
   std::size_t branch_anchored_on_model = 0; // stopped on lattice, never reached base
   double branch_length_mm = 0.0;
   std::size_t support_post_stranded_dropped = 0;   // fragments the CUTS created
+  // ★ THE NO-FRAGMENTATION GUARD. Cutting creates orphans that the size-based drop
+  // above preserves; these record what the guard removed, so evisceration is VISIBLE
+  // in the receipt instead of surfacing three stages later as a singular solve.
+  int support_components_before = -1;    // -1 = the guard did not run
+  int support_components_after = -1;
+  int support_components_kept = -1;
+  std::size_t support_fragments_dropped = 0;
+  double support_fragment_length_mm = 0.0;
   // ── ★★ THE JOINT FIXED POINT ────────────────────────────────────────────────
   // Every span added or removed by ANY repair. A round that changes nothing is
   // quiescence, and that is the only state the census may be read in.

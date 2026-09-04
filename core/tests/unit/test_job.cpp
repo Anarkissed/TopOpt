@@ -669,6 +669,36 @@ static void test_organic_scale_and_gates() {
   check_rejects(organic_swept(", \"organic_shape_fit_only\": true"),
                 "shape_fit_only without shape_fit must be refused");
 
+  // ★★ SHAPE FIT UNDER A STRUCTURAL INTENT — both keys, once refused, now ADMITTED.
+  // The refusal read "shape fit changes the density, which under a structural intent
+  // is what the certificate is computed against". True of the density-keyed
+  // certificate; not true of the beam-network one, which never reads density and
+  // solves the finished struts. Shape fit can only REFINE (both caps apply only when
+  // smaller than the stress-driven cell), so what it changes is more material where
+  // members are thin -- the strongest lattice-strength lever measured here.
+  //
+  // This test exists so the lift cannot silently regress into the old rule.
+  {
+    auto organic_structural = [](const std::string& extra) {
+      return mutate("\"mesh_prefix\": \"variant\" }",
+                    "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": "
+                    "\"octet\", \"min_extrudable_width_mm\": 0.4, "
+                    "\"algorithm\": \"organic\", \"intent\": \"structural\", "
+                    "\"organic_structural_certification\": \"beam_network\", "
+                    "\"cell_mode\": \"swept\", \"cell_min_mm\": 3.0, "
+                    "\"cell_max_mm\": 6.0" + extra + " }");
+    };
+    const JobDescription j = parse_job(organic_structural(
+        ", \"organic_shape_fit\": true, \"organic_shape_fit_only\": true"));
+    CHECK(j.grading.organic_shape_fit,
+          "shape fit is ACCEPTED under a structural intent -- the beam-network "
+          "certificate measures the struts rather than inferring from density");
+    CHECK(j.grading.organic_shape_fit_only,
+          "...and so is shape-fit-only: a cell chosen by shape alone still gets its "
+          "claim MEASURED, and refused by strut if it cannot carry the load");
+    CHECK(j.grading.intent == "structural", "...with the structural intent intact");
+  }
+
 }
 
 static void test_grading_block() {

@@ -1449,29 +1449,54 @@ CoupledLatticeSolve solve_coupled_lattice(
   mark("beam-to-solid ties", static_cast<double>(out.beam_nodes_tied));
   // ── ★ RESTRAINT BEFORE FACTORISATION, not after it fails ─────────────────
   out.restraint = beam_network_restraint(net, tied, skin_pinned ? nullptr : &welded);
-  if (out.restraint.components_unrestrained > 0) {
-    out.refusal =
-        std::to_string(out.restraint.components_unrestrained) + " of " +
-        std::to_string(out.restraint.components_total) +
-        " lattice component(s) reach no tie at all: they carry no load and make the "
-        "system singular. Drop them, or widen the tie, before solving.";
-    return out;
-  }
-  if (out.restraint.components_underconstrained > 0) {
-    out.refusal =
-        std::to_string(out.restraint.components_underconstrained) + " of " +
-        std::to_string(out.restraint.components_total) +
-        " lattice component(s) are held at fewer than three NON-COLLINEAR tie "
-        "points: a pinned tie restrains translation only, so they can still rotate "
-        "rigidly and the system is singular.";
-    return out;
-  }
-  if (out.restraint.members_unrestrained > 0) {
-    out.refusal = "the network contains " +
-                  std::to_string(out.restraint.members_unrestrained) +
-                  " unrestrained member(s): a pinned tie leaves them free to rotate, "
-                  "so the system would be singular. Drop or restrain them first.";
-    return out;
+  // ── ★ DROP WHAT CANNOT CARRY LOAD, THEN SOLVE THE REST ────────────────────
+  // These three conditions -- a component that reaches no tie, one held at fewer
+  // than three non-collinear ties, and an individual unrestrained member -- are all
+  // the same thing: geometry that is free to move at zero energy, which makes the
+  // system singular. They used to be three separate refusals, and the message on the
+  // first one even said "Drop them ... before solving" while the code did not.
+  //
+  // They are DEFECTS, not verdicts. A lattice component floating free of the part
+  // carries nothing and cannot be printed either; the honest response is to remove
+  // it, say how much was removed, and certify what actually remains. Refusing the
+  // whole run because one component of 57 floats is a death flag where a process
+  // belongs -- and it throws away a correct answer about the other 56.
+  //
+  // The refuse fraction is kept for the case the drop is not a repair but a
+  // demolition: past it, the geometry is mostly disconnected and deleting it
+  // silently would certify a part that is largely gone.
+  out.member_dropped.assign(net.member_count(), 0);
+  {
+    double dropped_len = 0.0, total_len = 0.0;
+    for (std::size_t mi = 0; mi < net.member_count(); ++mi) {
+      const BeamNetwork::Member& m = net.members[mi];
+      const Vec3& pa = net.nodes[static_cast<std::size_t>(m.node_a)];
+      const Vec3& pb = net.nodes[static_cast<std::size_t>(m.node_b)];
+      const double dxl = pb.x - pa.x, dyl = pb.y - pa.y, dzl = pb.z - pa.z;
+      const double L = std::sqrt(dxl * dxl + dyl * dyl + dzl * dzl);
+      total_len += L;
+      const bool bad =
+          (mi < out.restraint.member_load_free.size() &&
+           out.restraint.member_load_free[mi]) ||
+          (mi < out.restraint.member_underconstrained.size() &&
+           out.restraint.member_underconstrained[mi]) ||
+          (mi < out.restraint.member_unrestrained.size() &&
+           out.restraint.member_unrestrained[mi]);
+      if (bad) { out.member_dropped[mi] = 1; ++out.members_dropped; dropped_len += L; }
+    }
+    out.dropped_length_fraction = total_len > 0.0 ? dropped_len / total_len : 0.0;
+    if (out.dropped_length_fraction > kIslandRefuseFraction) {
+      out.refusal =
+          std::to_string(out.members_dropped) + " of " +
+          std::to_string(net.member_count()) + " lattice member(s), " +
+          std::to_string(100.0 * out.dropped_length_fraction) +
+          "% of the lattice by length, reach no tie or are held too loosely to "
+          "resist a rigid rotation. They carry no load and make the system "
+          "singular. Dropping that much is not a repair -- the lattice is mostly "
+          "disconnected from the part, and certifying what is left would describe a "
+          "structure that is largely missing.";
+      return out;
+    }
   }
 
   mark("restraint analysis", static_cast<double>(out.restraint.components_total));
@@ -1739,6 +1764,10 @@ CoupledLatticeSolve solve_coupled_lattice(
     const double L = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (!(L > 0.0)) { out.refusal = "zero-length member"; return out; }
     const BeamSection sec = beam_section_circular(m.radius_mm);
+    // ★ a dropped member contributes NOTHING. Zeroing its stiffness (rather than
+    // touching the assembly loop) leaves its exclusive dof with a zero diagonal,
+    // which the guard further down already fixes -- so no orphan dof survives.
+    if (out.member_dropped[mi]) { member_k[mi] = FrameStiffness{}; continue; }
     member_k[mi] = frame2_stiffness(youngs_modulus, G, sec.area, sec.inertia,
                                     sec.inertia, sec.torsion_j, L, shear_k);
     // local frame: ex along the member, ey/ez any consistent perpendicular pair
@@ -2724,20 +2753,31 @@ OrganicCertificate certify_organic_structural(
                     "\": the solve did not converge, so its stresses mean nothing");
 
     // the distribution, over members that carry anything
+    // ★ A DROPPED MEMBER IS NOT A ZERO-STRESS MEMBER. It was removed before the
+    // solve because it reaches no tie, so it is not part of the structure at all --
+    // counting it as "carries nothing" would trip the uncarried gate below with
+    // material that was already, correctly, deleted. It is excluded from BOTH the
+    // distribution and that gate's denominator, and reported on its own.
     std::vector<double> ss;
     ss.reserve(r.member_stress_mpa.size());
-    for (double v : r.member_stress_mpa)
-      if (v > 0.0) ss.push_back(v);
+    std::size_t considered = 0;
+    for (std::size_t i = 0; i < r.member_stress_mpa.size(); ++i) {
+      if (i < r.member_dropped.size() && r.member_dropped[i]) continue;
+      ++considered;
+      if (r.member_stress_mpa[i] > 0.0) ss.push_back(r.member_stress_mpa[i]);
+    }
+    cert.members_dropped = r.members_dropped;
+    cert.dropped_length_fraction =
+        std::max(cert.dropped_length_fraction, r.dropped_length_fraction);
     // ★ WHAT THE FILTER JUST REMOVED, before it is allowed to matter. A member at
     // exactly 0.0 is not a lightly-loaded member; it is a member the load never
     // reached, which on a disconnected network means a whole component. Reading
     // percentiles over the remainder would certify the loaded piece and report the
     // number as the part's.
     const double zero_frac =
-        r.member_stress_mpa.empty()
-            ? 0.0
-            : 1.0 - static_cast<double>(ss.size()) /
-                        static_cast<double>(r.member_stress_mpa.size());
+        considered == 0 ? 0.0
+                        : 1.0 - static_cast<double>(ss.size()) /
+                                    static_cast<double>(considered);
     // recorded on the FIRST case unconditionally, then on any worse one, so the
     // number describes the run rather than only the cases that got worse
     if (cert.load_cases_run == 1 || zero_frac > cert.zero_stress_fraction) {
@@ -2747,8 +2787,8 @@ OrganicCertificate certify_organic_structural(
     if (zero_frac > kUncarriedRefuseFraction)
       return refuse(
           "load case \"" + lc.name + "\": " +
-          std::to_string(r.member_stress_mpa.size() - ss.size()) + " of " +
-          std::to_string(r.member_stress_mpa.size()) + " members carry exactly no "
+          std::to_string(considered - ss.size()) + " of " +
+          std::to_string(considered) + " members carry exactly no "
           "stress (" + std::to_string(zero_frac * 100.0) +
           "% carry nothing). The load does not reach that material, so a percentile "
           "taken over the members that DO carry would certify only the part of the "

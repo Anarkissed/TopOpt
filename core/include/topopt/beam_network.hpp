@@ -337,6 +337,21 @@ struct CoupledLatticeSolve {
   std::size_t bcs_applied = 0, bcs_dropped = 0;
   std::size_t loads_applied = 0, loads_dropped = 0;
   double load_dropped_fraction = 0.0;
+  // ★★ THE COMPONENTS THAT REACH NO TIE ARE DROPPED, NOT A DEATH FLAG.
+  // beam_network_restraint has always produced member_load_free / member_under-
+  // constrained "so a caller can DROP what cannot carry load rather than only being
+  // told how much of it there is" -- and for a while no caller read them, so a single
+  // floating component ended a run that was otherwise fine. A component that reaches
+  // no tie carries nothing and makes the system singular; that is a DEFECT IN THE
+  // GEOMETRY (material floating in space, unprintable as well as unsolvable), and the
+  // response to a defect is to remove it and say so.
+  //
+  // Dropping a LOT of the lattice is a different matter -- that means the geometry is
+  // mostly disconnected rather than speckled -- so past the refuse fraction this still
+  // refuses instead of quietly deleting the part. Exactly the solid-island rule.
+  std::vector<char> member_dropped;        // 1 = removed before solving
+  std::size_t members_dropped = 0;
+  double dropped_length_fraction = 0.0;
   std::size_t loads_on_shell = 0, loads_on_beam = 0;  // re-homed off the solid
   // ★ HOW FAR A LOAD ACTUALLY HAD TO REACH to find material, in mm. `load_reach_mm`
   // is a single number and a GRADED lattice has no single cell, so the safe choice
@@ -510,6 +525,8 @@ struct OrganicCertificate {
   // certifies HALF THE PART and reports the number as though it covered all of it.
   // So the filtered fraction is recorded, reported, and gated.
   long long members_carrying = 0;
+  std::size_t members_dropped = 0;      // reached no tie; removed before solving
+  double dropped_length_fraction = 0.0;
   double zero_stress_fraction = 0.0;
   double seconds = 0.0;
 };

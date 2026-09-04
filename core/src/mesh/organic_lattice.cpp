@@ -2090,6 +2090,103 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     for (const EmittedSeg& e : emitted) roots.insert(find(id_of(e.a)));
     return static_cast<int>(roots.size());
   };
+  // ★★ COMPONENTS AS THE SOLVER COUNTS THEM. Three different notions of "connected"
+  // live in this pipeline and they disagree by orders of magnitude on the same
+  // geometry: the census welds only EXACT coincidences (0.1 micron, strictest), the
+  // stranded drops weld SEGMENT overlap (r+r, loosest), and build_beam_network -- the
+  // one that decides whether material carries load -- welds exact coincidence PLUS
+  // node-to-node contact within r+r, between different curves only.
+  //
+  // A guard on fragmentation has to speak the language of the thing that refuses, so
+  // this mirrors build_beam_network's passes 1 and 3 exactly. Counting with the drop's
+  // own looser test is what made the first attempt at this guard inert: it saw ~5
+  // components where the solver saw hundreds, so it never had anything to remove.
+  auto solver_components = [&](std::vector<int>* root_of = nullptr) {
+    const double kExact = 1e-4;
+    std::unordered_map<long long, int> node_of;
+    std::vector<int> par;
+    std::vector<Vec3> npos;
+    std::vector<double> nrad;
+    auto key = [&](const Vec3& p) {
+      const long long a = static_cast<long long>(std::llround(p.x / kExact));
+      const long long b = static_cast<long long>(std::llround(p.y / kExact));
+      const long long c = static_cast<long long>(std::llround(p.z / kExact));
+      return (a * 73856093LL) ^ (b * 19349663LL) ^ (c * 83492791LL);
+    };
+    auto id_of = [&](const Vec3& p, double r) {
+      const long long k = key(p);
+      auto it = node_of.find(k);
+      if (it != node_of.end()) {
+        nrad[static_cast<std::size_t>(it->second)] =
+            std::max(nrad[static_cast<std::size_t>(it->second)], r);
+        return it->second;
+      }
+      const int id = static_cast<int>(par.size());
+      par.push_back(id); npos.push_back(p); nrad.push_back(r);
+      node_of.emplace(k, id);
+      return id;
+    };
+    std::function<int(int)> find = [&](int x) {
+      while (par[static_cast<std::size_t>(x)] != x) {
+        par[static_cast<std::size_t>(x)] =
+            par[static_cast<std::size_t>(par[static_cast<std::size_t>(x)])];
+        x = par[static_cast<std::size_t>(x)];
+      }
+      return x;
+    };
+    auto unite = [&](int a, int b) {
+      const int ra = find(a), rb = find(b);
+      if (ra != rb) par[static_cast<std::size_t>(ra > rb ? ra : rb)] = ra < rb ? ra : rb;
+    };
+    std::vector<std::pair<int,int>> ends;
+    ends.reserve(emitted.size());
+    for (const EmittedSeg& e : emitted) {
+      const int a = id_of(e.a, e.r), b = id_of(e.b, e.r);
+      ends.push_back({a, b});
+      if (a != b) unite(a, b);
+    }
+    // pass 1 above welded the chains; now the CONTACT weld, across chains only --
+    // the same restriction build_beam_network uses, and for the same reason: within
+    // one traced curve consecutive vertices are closer than r+r and an unconditional
+    // proximity weld would collapse the curve to a point.
+    std::vector<int> chain(par.size());
+    for (std::size_t i = 0; i < chain.size(); ++i) chain[i] = find(static_cast<int>(i));
+    double maxr = 0.0;
+    for (double r : nrad) maxr = std::max(maxr, r);
+    const double cell = std::max(2.0 * maxr, 1e-6);
+    std::map<std::array<long long, 3>, std::vector<int>> bins;
+    for (int i = 0; i < static_cast<int>(npos.size()); ++i)
+      bins[{static_cast<long long>(std::floor(npos[static_cast<std::size_t>(i)].x / cell)),
+            static_cast<long long>(std::floor(npos[static_cast<std::size_t>(i)].y / cell)),
+            static_cast<long long>(std::floor(npos[static_cast<std::size_t>(i)].z / cell))}]
+          .push_back(i);
+    for (const auto& kv : bins)
+      for (long long dz = -1; dz <= 1; ++dz)
+        for (long long dy = -1; dy <= 1; ++dy)
+          for (long long dx = -1; dx <= 1; ++dx) {
+            auto it = bins.find({kv.first[0]+dx, kv.first[1]+dy, kv.first[2]+dz});
+            if (it == bins.end()) continue;
+            for (int i : kv.second)
+              for (int j : it->second) {
+                if (i >= j) continue;
+                if (chain[static_cast<std::size_t>(i)] == chain[static_cast<std::size_t>(j)])
+                  continue;
+                const double lim = nrad[static_cast<std::size_t>(i)] +
+                                   nrad[static_cast<std::size_t>(j)];
+                if (vlen(vsub(npos[static_cast<std::size_t>(i)],
+                              npos[static_cast<std::size_t>(j)])) <= lim)
+                  unite(i, j);
+              }
+          }
+    if (root_of) {
+      root_of->assign(emitted.size(), -1);
+      for (std::size_t i = 0; i < emitted.size(); ++i)
+        (*root_of)[i] = find(ends[i].first);
+    }
+    std::set<int> roots;
+    for (const auto& e : ends) roots.insert(find(e.first));
+    return static_cast<int>(roots.size());
+  };
   auto census_at = [&](OrganicGenStats::CensusStage stage) {
     st.census_len_mm[stage] = census_len();
     st.census_components[stage] = census_components(); };
@@ -2301,6 +2398,8 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     }
     emitted.swap(mkeep);
     census_at(OrganicGenStats::CensusNodeMerge);
+    // the piece count the support pass INHERITS -- its licence for the guard below
+    st.support_components_before = solver_components();
   }
 
   // ── ★★ CUT EVERYTHING BELOW THE BASE (kOrganicBaseDominanceFraction states why) ──
@@ -3867,6 +3966,58 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             }
           }
           emitted.swap(sbody);
+
+          // ══════════════════════════════════════════════════════════════════════
+          // ★★★ THE PRUNE MAY NOT INCREASE THE NUMBER OF LATTICE PIECES ★★★
+          // The drop above keeps a piece if it is BIG (>= 2% of length). It never asks
+          // whether the piece is still attached, so cutting can leave large fragments
+          // floating and this pass will preserve every one of them: MEASURED on a
+          // 3-5 mm window, the support pass took the lattice from 5 components to 219
+          // and this drop removed NONE, leaving 11.1% of the lattice by length with no
+          // path to the part -- unsolvable, and unprintable for the same reason.
+          //
+          // The size exemption is not wrong, it is just answering a different
+          // question: a part may declare SEVERAL lattice regions and those are
+          // legitimately separate. But a piece that exists only AFTER cutting is not a
+          // region, it is debris. So the pass is allowed the piece count it INHERITED
+          // and no more -- keep the N largest, delete what cutting invented.
+          //
+          // Counted with solver_components(), because the solver is what refuses.
+          if (!emitted.empty() && st.support_components_before > 0) {
+            std::vector<int> root_of;
+            const int after = solver_components(&root_of);
+            st.support_components_after = after;
+            if (after > st.support_components_before) {
+              std::map<int, double> flen;
+              for (std::size_t i = 0; i < emitted.size(); ++i)
+                flen[root_of[i]] += emitted[i].len;
+              std::vector<std::pair<double, int>> order;
+              order.reserve(flen.size());
+              for (const auto& kv : flen) order.push_back({kv.second, kv.first});
+              std::sort(order.begin(), order.end(),
+                        [](const std::pair<double, int>& x,
+                           const std::pair<double, int>& y) { return x.first > y.first; });
+              std::set<int> keep_roots;
+              for (std::size_t i = 0;
+                   i < order.size() &&
+                   i < static_cast<std::size_t>(st.support_components_before); ++i)
+                keep_roots.insert(order[i].second);
+              std::vector<EmittedSeg> fbody;
+              fbody.reserve(emitted.size());
+              for (std::size_t i = 0; i < emitted.size(); ++i) {
+                if (keep_roots.count(root_of[i])) { fbody.push_back(emitted[i]); continue; }
+                ++st.support_fragments_dropped; ++st.mutations;
+                st.support_fragment_length_mm += emitted[i].len;
+              }
+              emitted.swap(fbody);
+              st.support_components_kept =
+                  static_cast<int>(std::min<std::size_t>(
+                      order.size(),
+                      static_cast<std::size_t>(st.support_components_before)));
+            } else {
+              st.support_components_kept = after;
+            }
+          }
           census_at(OrganicGenStats::CensusStrandedDrop2);
         }
       } else {

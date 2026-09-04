@@ -4283,10 +4283,13 @@ OrganicOutcome run_organic_step(bool shell_is_written,
     // entirely and derives the cell from the SHAPE alone: biggest cells deepest
     // inside, grading down to the smallest at the faces, edges and corners.
     //
-    // ★ IT IS AN AESTHETIC MODE AND NOTHING ELSE. With the cell no longer a function
-    // of demand, the lattice makes no claim about carrying anything — which is
-    // consistent with organic already being refused outside intent "aesthetic", for
-    // the stronger reason that its traced geometry has no measured tensor.
+    // ★ IT IS NO LONGER AN AESTHETIC-ONLY MODE (maintainer's call). The cell is
+    // still pure geometry and still does not answer to demand — that much is
+    // unchanged. What changed is that the structural claim is no longer INFERRED from
+    // how the cell was chosen: certify_organic_structural solves the finished struts
+    // as frame elements and measures what they carry. A shape-driven lattice that
+    // cannot carry the load is refused by that certificate, by name and by strut,
+    // rather than by a rule about which knob produced the geometry.
     if (jg.organic_shape_fit_only && have_window) {
       long long dmax = 0;
       for (std::size_t e = 0; e < cand.size(); ++e)
