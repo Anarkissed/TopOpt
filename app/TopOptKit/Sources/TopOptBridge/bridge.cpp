@@ -4,6 +4,7 @@
 // to BridgeError so nothing throws across the language boundary.
 #include "TopOptBridge.hpp"
 
+#include "topopt/lattice_boundary.hpp"
 #include "topopt/grading.hpp"
 
 #include <algorithm>
@@ -2252,10 +2253,27 @@ double organic_default_strut_diameter_mm(double grid_spacing_mm,
 //   [1]  span count            [2]  curve count        [3]  connector count
 //   [4]  FIELD cell count      [5]  min spacing used   [6]  max spacing used
 //   [7]  degenerate fraction   [8]  band (mm)          [9]  design-grid voxel count n
-//   [10..15] reserved, zero
-//   [16 ..]                    the strut distance field, [4] doubles (mm, negative
+//   [10]  traced segment count (curves' segments + connectors)
+//   ★ THE COUNTERS (reviewer, 2026-09-04: "dump these for the cube run" — the grower's
+//   own counters, `OrganicGenStats.growth_*`, and the tracer's stop counters,
+//   `OrganicReport.stop_*`; a preview that shows a shape must also say WHY it stopped):
+//   [11] growth_seeds        [12] growth_curves       [13] growth_steps
+//   [14] growth_blocked      [15] growth_clamped      [16] growth_branches
+//   [17] growth_branch_refused [18] growth_joins      [19] growth_join_refused_span
+//   [20] growth_tip_budget_hit (0/1)   [21..31] on the TRACED report:
+//   [21] stop_left_region    [22] stop_hit_d_test     [23] stop_no_direction
+//   [24] stop_step_budget    [25] stop_turned_too_far [26] stop_self_revisit
+//   [27] seeds_offered       [28] seeds_traced        [29] seeds_too_close
+//   [30] curves_too_short    [31] step_budget_hits
+//   ★ THE LENGTH CENSUS of the EMISSION the preview bakes (OrganicGenStats.census_*;
+//   the same stages the run's receipt names): [32] grown/traced input length,
+//   [33..44] census_len_mm[emitted, node_merge, base_cut, support_prune,
+//   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
+//   finish, written] (−1 = the pass did not run), [45] written components,
+//   [46] 1 = emission ran, [47] reserved
+//   [48 ..]                    the strut distance field, [4] doubles (mm, negative
 //                              inside a strut, clamped at the band)
-//   [16 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
+//   [48 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
 std::vector<double> organic_preview_field(
     int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
     const std::uint8_t* candidate, std::size_t candidate_count,
@@ -2282,7 +2300,7 @@ std::vector<double> organic_preview_field(
     double fox, double foy, double foz, double band_mm) {
   const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
                         static_cast<std::size_t>(nz);
-  std::vector<double> out(16, 0.0);
+  std::vector<double> out(48, 0.0);
   if (nx <= 0 || ny <= 0 || nz <= 0 || !(spacing > 0.0)) return out;
   if (candidate == nullptr || candidate_count != n) return out;
   if (tensor == nullptr || tensor_count != 6 * n) return out;
@@ -2323,11 +2341,14 @@ std::vector<double> organic_preview_field(
   p.anchor_at_region_boundary = anchor_at_boundary != 0;
 
   topopt::OrganicLattice lat;
+  topopt::OrganicGenStats gstats;   // the grower's own counters (run_job: `&oo.growth`)
+  topopt::OrganicGenStats emit_stats;  // the emission's census (what the file is built from)
+  bool emit_ran = false;
   try {
     // ★ THE SAME BRANCH THE RUN TAKES (run_job.cpp: `oo.lat = jg.organic_growth ?
     // grow_organic_lattice(...) : trace_organic_lattice(...)`).
     lat = (grow != 0 && layer_height_mm > 0.0)
-              ? topopt::grow_organic_lattice(grid, cand, stress, sep, nullptr, p)
+              ? topopt::grow_organic_lattice(grid, cand, stress, sep, nullptr, p, &gstats)
               : topopt::trace_organic_lattice(grid, cand, stress, sep, nullptr, p);
   } catch (...) {
     return out;   // core refused; the caller says so rather than drawing something
@@ -2411,8 +2432,29 @@ std::vector<double> organic_preview_field(
       void add_triangle(const topopt::Vec3&, const topopt::Vec3&,
                         const topopt::Vec3&) override {}
     } sink;
+    // ★ THE LAYER HEIGHT THE MACHINE WILL USE (run_job.cpp: `organic.lat.layer_height_mm
+    // = job.loads.layer_height_mm`, set on BOTH paths before emission). Without it the
+    // base trim (`trim_below_base && layer_height_mm > 0`) and the mid-air-start raster
+    // are SKIPPED, and the preview keeps material the file cuts (measured 2026-09-04).
+    lat.layer_height_mm = layer_height_mm > 0.0 ? layer_height_mm : 0.0;
+    // ★ THE BOUNDARY THE PASSES READ (run_job.cpp `lattice_boundary_for`: a voxel base
+    // at iso 0.5 with a 2·cell window, plus the shell where one is written). Without
+    // it the emission's breach checks (`boundary->signed_distance(c) < rmin`) and the
+    // span clip never ran in the preview, and the support pass laid legs the file
+    // cannot contain — measured 2026-09-04: the sample's support stage ADDED 70 % where
+    // core's own run on the cube CUT 42 %. The region's candidate set IS the base here
+    // (the sample's box; a part's declared region); a written shell has no preview
+    // object yet, so a bare job is what this mirrors.
+    topopt::LatticeBoundary boundary;
+    std::vector<double> boundary_density(cand.size(), 0.0);
+    for (std::size_t i = 0; i < cand.size(); ++i) boundary_density[i] = cand[i] ? 1.0 : 0.0;
+    double sep_hi = 0.0;
+    for (std::size_t i = 0; i < sep.size(); ++i)
+      if (cand[i] && sep[i] > sep_hi) sep_hi = sep[i];
+    boundary.set_voxel_base(&grid, &boundary_density, 0.5, 2.0 * (sep_hi > 0.0 ? sep_hi : spacing));
     try {
-      topopt::generate_organic_lattice(lat, sink, nullptr, 3, nullptr, &emitted);
+      emit_stats = topopt::generate_organic_lattice(lat, sink, &boundary, 3, nullptr, &emitted);
+      emit_ran = true;
     } catch (...) {
       emitted.clear();
     }
@@ -2452,6 +2494,32 @@ std::vector<double> organic_preview_field(
     }
     out[10] = static_cast<double>(traced);
   }
+  out[32] = emit_stats.census_grown_len_mm;
+  for (int c = 0; c < topopt::OrganicGenStats::kCensusStages && c < 12; ++c)
+    out[33 + c] = emit_stats.census_len_mm[c];
+  out[45] = static_cast<double>(emit_stats.census_components[topopt::OrganicGenStats::CensusWritten]);
+  out[46] = emit_ran ? 1.0 : 0.0;
+  out[11] = static_cast<double>(gstats.growth_seeds);
+  out[12] = static_cast<double>(gstats.growth_curves);
+  out[13] = static_cast<double>(gstats.growth_steps);
+  out[14] = static_cast<double>(gstats.growth_blocked);
+  out[15] = static_cast<double>(gstats.growth_clamped);
+  out[16] = static_cast<double>(gstats.growth_branches);
+  out[17] = static_cast<double>(gstats.growth_branch_refused);
+  out[18] = static_cast<double>(gstats.growth_joins);
+  out[19] = static_cast<double>(gstats.growth_join_refused_span);
+  out[20] = gstats.growth_tip_budget_hit ? 1.0 : 0.0;
+  out[21] = static_cast<double>(lat.report.stop_left_region);
+  out[22] = static_cast<double>(lat.report.stop_hit_d_test);
+  out[23] = static_cast<double>(lat.report.stop_no_direction);
+  out[24] = static_cast<double>(lat.report.stop_step_budget);
+  out[25] = static_cast<double>(lat.report.stop_turned_too_far);
+  out[26] = static_cast<double>(lat.report.stop_self_revisit);
+  out[27] = static_cast<double>(lat.report.seeds_offered);
+  out[28] = static_cast<double>(lat.report.seeds_traced);
+  out[29] = static_cast<double>(lat.report.seeds_too_close);
+  out[30] = static_cast<double>(lat.report.curves_too_short);
+  out[31] = static_cast<double>(lat.report.step_budget_hits);
   out.insert(out.end(), field.begin(), field.end());
   if (lat.relative_density.size() == n) {
     out.insert(out.end(), lat.relative_density.begin(), lat.relative_density.end());

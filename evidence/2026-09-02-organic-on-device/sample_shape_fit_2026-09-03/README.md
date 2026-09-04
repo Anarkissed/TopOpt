@@ -35,3 +35,35 @@ Screenshots: traced_shape_fit_bare.png, grown_shape_fit_bare.png (dylib 883494cf
 - v3_C_sim_on_grown_auto.png — Grown: base mat + two columns (94 % of occupied voxels in the bottom third; core's own CLI: 59 % of surface in the bottom third).
 - v3_D_sim_off_grown_auto.png — identical to C (the switch no longer moves the organic cell mode).
 - v3_E_sim_off_traced_auto.png — identical to A.
+
+## Round 4 — 2026-09-04: the grower's counters, and core's Auto on the cube (reviewer's three points)
+
+**1. Not the pruner** — agreed; and corrected: the bridge ALREADY runs `generate_organic_lattice` and bakes the post-clip spans (a NullSink, boundary nullptr). It did so without `lat.layer_height_mm`, which run_job sets before emission; the base trim (`trim_below_base && layer_height_mm > 0`) and the mid-air raster were skipped in the preview. Fixed.
+
+**2. The counters, from the grower itself** (`OrganicGenStats.growth_*`, now on the bridge header [11..20] and in the sample's census; bridge-direct on the cube's FEA field, whole cube, bare, layer 0.2):
+
+| run | curves | seeds | steps | blocked by support | clamped to cone | joins (refused) | branches (refused) | length by z-thirds mm |
+|---|---|---|---|---|---|---|---|---|
+| grown, uniform 4.5 mm | 874 | 256 | 7929 | **0** | **0** | 2818 (0) | 1222 (604) | 1638 / 945 / 186 |
+| grown, uniform 3.0 mm | 3342 | 484 | 23844 | **0** | **0** | 3186 (0) | 5600 (2742) | 939 / 517 / 261 |
+| grown, uniform 6.0 mm | 553 | 121 | 6660 | **0** | **0** | 1201 (0) | 792 (360) | 5 / 0 / 0 |
+| sample, Auto 3–4.3 mm (the app's) | 1332 | 484 | 7946 | **0** | **0** | 3544 (0) | 1620 (772) | (94 % of voxels in the bottom third) |
+
+Printability never fired: zero steps refused by the support rule, zero tips clamped to the cone, in every run. A curve averages 9 steps (≈ 3 mm at the 0.2 mm layer) and 3–4 joins against a budget of 6 (`kOrganicGrowthMaxJoins`); half of all branch attempts are refused. The stop_* counters on the grown receipt are the traced FIELD pass (identical to traced). ★ CORE ITEM: the tip loop's other four exits — `!in_region`, no direction, the join-budget `break` (organic_lattice.cpp ~1862), `MAXSTEP` — are uncounted, so the exact split among them cannot be read without a core change. What can be read says budget/joining, not support.
+
+**Core's own CLI under the app's actual job** (`cell_mode: auto`, shape fit, clean, bare; `cli_cube20/auto_*`): achieved spacing 0.47 / 1.02 (median) / 2.37 mm on the cube — core's Auto derives a ~1 mm window, nothing like the 3–6 mm the sample is told. Traced written 15,614 mm (surface 34/38/28 % by thirds); grown written 40,096 mm from 28,268 grown (node_merge 56,577 → base_cut 42,924 → support_prune 40,096), surface **73/18/9 %**. Grown is bottom-heavy in core's own file too. D2's "core decides the window" is ahead of core: what core decides today is ~1 mm.
+
+**The sample's own census after the layer-height fix (Mac, Debug, `OrganicSampleCube.baked`, sim on, Auto 3–4.3 mm):**
+- traced: emitted 3043 → node_merge 3005 → base_cut 2932 → support_prune 4979 → … → written 4979 mm (208 % of 2397 mm traced), 1 component; occupied 762 mm³ (was 280 without the layer height), z-thirds 35/46/19 %, 96.7 s. The support pass ADDS legs, as in core's own file (CLI auto_traced: 12,791 emitted → 15,614 written).
+- grown: emitted 7857 → node_merge 7901 → base_cut 7063 → support_prune 5538 → written 5538 mm (82 % of 6721 mm grown), 1 component; occupied 181 mm³, z-thirds 90/6/3 %, 30.1 s.
+
+**With the emission BOUNDARY built in the bridge** (`LatticeBoundary.set_voxel_base` on the candidate grid, iso 0.5, window 2·max separation — run_job's `lattice_boundary_for` voxel base; a written shell has no preview object, so this mirrors a BARE job):
+- traced Auto: emitted 2810 → node_merge 2761 → base_cut 2719 → support_prune 4182 → written 4182 mm (175 % of 2397 traced), 1 component, occupied 614 mm³, z-thirds 38/46/16 %, 79.8 s (Mac).
+- grown Auto: emitted 7699 → node_merge 7727 → base_cut 6977 → support_prune 5578 → written 5578 mm (83 % of 6721 grown), 1 component, occupied 181 mm³, z-thirds 89/7/4 %, 32.0 s.
+- ★ RESIDUAL, not attributable here: the sample's support stage ADDS (+54 % traced) where core's own swept run on the cube CUTS (1738 → 1008, −42 %). Different lattices (the app's demand-graded 3–4.3 mm vs core's swept ladder 1.5–4.7 mm), so this is not an emitter A/B. An honest A/B needs the SAME curves through both emitters — a core hook to export/import a traced lattice. Core item.
+- Cost: the traced bake went from 27 s to 80 s on the Mac (the support pass); on the iPad expect minutes per change.
+
+### Simulator, dylib 6fd1faf9b521341f (2026-09-04 06:47–06:50), emission with layer height + boundary
+- v5_A_sim_on_traced_auto_emitted.png — traced Auto: the cube with the support pass's legs, node balls and base mat, as the file has them. Bake ≈ 3 min on the iPad.
+- v5_C_sim_on_grown_auto_emitted.png — grown Auto: the base mat with five posts (census 89/7/4 %).
+- v4_A_sim_on_traced_auto_with_layer_height.png — the intermediate (layer height, no boundary).

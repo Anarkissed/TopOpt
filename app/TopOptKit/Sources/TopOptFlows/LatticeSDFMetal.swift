@@ -748,9 +748,11 @@ public struct LatticeSDFScene {
                         nx: fnx, ny: fny, nz: fnz, origin: mn,
                         spacing: SIMD3<Float>(repeating: Float(fs)), values: t.field)
                     organicBand = Double(t.bandMM)
+                    // ★ the counters ride the census (reviewer, 2026-09-04)
+                    let counters = (t.growth.map { " · " + $0.summary } ?? "") + " · " + t.stops.summary + " · " + t.census.summary
                     organicSaid = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
                         + String(format: "%.2f–%.2f mm spacing",
-                                 t.spacingUsedMinMM, t.spacingUsedMaxMM) + fitNote
+                                 t.spacingUsedMinMM, t.spacingUsedMaxMM) + fitNote + counters
                 }
             }
         }

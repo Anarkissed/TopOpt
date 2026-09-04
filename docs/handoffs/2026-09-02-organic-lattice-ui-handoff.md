@@ -1,5 +1,45 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-04 (later) — the grower's counters answer the reviewer: it is the joining, not the cone
+>
+> **Reviewer's three points, measured** (evidence README round 4, `cli_cube20/auto_*`):
+> 1. Not the pruner — agreed. Correction to my own note: the bridge already bakes the
+>    EMITTED spans (it calls `generate_organic_lattice` with a NullSink), so the preview
+>    was never the raw curves. It ran without `lat.layer_height_mm` (run_job sets it on
+>    both paths), so the base trim and the mid-air raster were skipped; fixed.
+> 2. Counters — the grower's own (`growth_*`) now cross the bridge (header [11..20]),
+>    with the tracer's `stop_*` [21..31] and the emission's length census [32..46], and
+>    ride the sample's census behind the (i). On the cube: **blocked by support 0,
+>    clamped to the cone 0** in every run; 874 curves / 2818 joins / 1222 branches
+>    (604 refused) at 4.5 mm; a curve averages 9 steps ≈ 3 mm. Printability never
+>    bound. What is counted says joining/seeding. ★ Core item: four of the five tip-loop
+>    exits are uncounted (`!in_region`, no direction, the join-budget break, MAXSTEP);
+>    the receipt's `stop_*` on the grown path are the traced field pass.
+> 3. Emitted spans — already the case (see 1); the layer-height fix is the real gap.
+>
+> **And the finding that matters most:** core's CLI under the app's ACTUAL job
+> (`cell_mode: auto`, D2) derives a 0.47–2.37 mm window on this cube (median 1.0 mm):
+> traced writes 15.6 km of struts, grown 40 km, grown 73 % of surface in the bottom
+> third. The sample is told the printed 3–6 mm window, so today it cannot mirror what
+> core's Auto would build — D2 is ahead of core, as the pane says. The sim-on traced
+> Auto cube the maintainer approved is the 3–6 mm window's look (the printed job's
+> swept semantics), which is exactly what a run cannot yet be asked for under D2.
+>
+> **The emission in the preview now runs as the run's does (two app fixes):** the bridge
+> sets `lat.layer_height_mm` before emission (base trim and mid-air raster were skipped)
+> and builds a `LatticeBoundary` voxel base on the candidate grid (breach checks and the
+> span clip never ran). Consequence, measured (README): the traced Auto sample's census is
+> now emitted 2810 → base_cut 2719 → support_prune 4182 → written 4182 mm — the support
+> pass ADDS legs and node balls, as core's file has them — so the approved clean-curves
+> cube now shows those legs (screenshot v5_A). That is the file. ★ Residual: the sample's
+> support stage adds +54 % where core's own swept run cuts −42 %; different lattices, so
+> not attributable without the same curves through both emitters (core hook). Cost: the
+> traced bake 27 → 80 s on the Mac.
+>
+> **Not done, per the reviewer:** no support/self-support tuning.
+>
+> Full app suite (Debug, SwiftPM): 2304 tests, 30 skipped, 0 failures, 3730 s.
+
 > ## ★ 2026-09-04 — "these aren't cubes": what was the app's, what is core's (measured)
 >
 > **Maintainer:** grown (sim on and off) and the sim-off traced sample "aren't cubes";

@@ -1118,6 +1118,57 @@ public enum TopOptKit {
         /// The EMITTED capsules — a, b (model mm) and radius. Post-clip, the same list
         /// the field was stamped from.
         public let spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]
+        /// ★ THE GROWER'S OWN COUNTERS (`OrganicGenStats.growth_*`), nil on the traced
+        /// path. `blocked` = a step the support rule refused; `joins`/`joinRefusedSpan`
+        /// = the join budget's side; `branches`/`branchRefused` the branching.
+        public struct GrowthCounters: Sendable, Equatable {
+            public let seeds: Int, curves: Int, steps: Int, blocked: Int, clamped: Int
+            public let branches: Int, branchRefused: Int, joins: Int, joinRefusedSpan: Int
+            public let tipBudgetHit: Bool
+            public var summary: String {
+                "grown \(curves) curves from \(seeds) seeds in \(steps) steps · blocked by support \(blocked) · "
+                + "clamped to the cone \(clamped) · joins \(joins) (refused \(joinRefusedSpan)) · "
+                + "branches \(branches) (refused \(branchRefused))\(tipBudgetHit ? " · TIP BUDGET HIT" : "")"
+            }
+        }
+        /// The TRACED report's stop counters (`OrganicReport.stop_*`) — on the grown
+        /// path these describe the field pass the grower ran first.
+        public struct StopCounters: Sendable, Equatable {
+            public let leftRegion: Int, hitDTest: Int, noDirection: Int, stepBudget: Int
+            public let turnedTooFar: Int, selfRevisit: Int
+            public let seedsOffered: Int, seedsTraced: Int, seedsTooClose: Int
+            public let curvesTooShort: Int, stepBudgetHits: Int
+            public var summary: String {
+                "stops: left region \(leftRegion), d_test \(hitDTest), no direction \(noDirection), "
+                + "step budget \(stepBudget), turned \(turnedTooFar), self-revisit \(selfRevisit) · "
+                + "seeds \(seedsTraced)/\(seedsOffered) (too close \(seedsTooClose)) · too short \(curvesTooShort)"
+            }
+        }
+        public let growth: GrowthCounters?
+        public let stops: StopCounters
+        /// ★ THE LENGTH CENSUS of the emission the preview bakes — the same stages the
+        /// run's receipt names (`length_census_mm`). A stage at −1 did not run.
+        public struct LengthCensus: Sendable, Equatable {
+            public static let stageNames = ["emitted", "node_merge", "base_cut", "support_prune", "stranded_drop",
+                                            "ground_tie", "branch_support", "dangling", "stranded_drop_2",
+                                            "fill_mat", "finish", "written"]
+            public let inputLengthMM: Double
+            public let stages: [(name: String, lengthMM: Double)]
+            public let writtenComponents: Int
+            public let emissionRan: Bool
+            public static func == (a: LengthCensus, b: LengthCensus) -> Bool {
+                a.inputLengthMM == b.inputLengthMM && a.writtenComponents == b.writtenComponents
+                    && a.emissionRan == b.emissionRan && a.stages.map { $0.lengthMM } == b.stages.map { $0.lengthMM }
+            }
+            public var writtenMM: Double { stages.last?.lengthMM ?? -1 }
+            public var summary: String {
+                guard emissionRan else { return "census: emission did not run" }
+                let ran = stages.filter { $0.lengthMM >= 0 }.map { String(format: "%@ %.0f", $0.name, $0.lengthMM) }
+                let survival = inputLengthMM > 0 && writtenMM >= 0 ? String(format: " (%.0f%% of %.0f mm)", 100 * writtenMM / inputLengthMM, inputLengthMM) : ""
+                return "census mm: " + ran.joined(separator: " → ") + survival + " · \(writtenComponents) written component\(writtenComponents == 1 ? "" : "s")"
+            }
+        }
+        public let census: LengthCensus
     }
 
     /// ★ ORGANIC'S OWN STRUT LAW — `t = 2·d·√(rho/3π)`. NOT the octet's measured
@@ -1189,8 +1240,8 @@ public enum TopOptKit {
                 }
             }
         }
-        guard raw.count >= 16, raw[0] > 0.5 else { return nil }
-        let head = 16
+        guard raw.count >= 48, raw[0] > 0.5 else { return nil }
+        let head = 48
         let count = Int(raw[4])
         guard count == fn, raw.count >= head + fn else { return nil }
         let field = (0..<fn).map { Float(raw[head + $0]) }
@@ -1217,7 +1268,23 @@ public enum TopOptKit {
                             curveCount: Int(raw[2]), connectorCount: Int(raw[3]),
                             spacingUsedMinMM: raw[5], spacingUsedMaxMM: raw[6],
                             degenerateFraction: raw[7], relativeDensity: density,
-                            spans: spans)
+                            spans: spans,
+                            growth: grow ? OrganicTrace.GrowthCounters(
+                                seeds: Int(raw[11]), curves: Int(raw[12]), steps: Int(raw[13]),
+                                blocked: Int(raw[14]), clamped: Int(raw[15]),
+                                branches: Int(raw[16]), branchRefused: Int(raw[17]),
+                                joins: Int(raw[18]), joinRefusedSpan: Int(raw[19]),
+                                tipBudgetHit: raw[20] > 0.5) : nil,
+                            stops: OrganicTrace.StopCounters(
+                                leftRegion: Int(raw[21]), hitDTest: Int(raw[22]), noDirection: Int(raw[23]),
+                                stepBudget: Int(raw[24]), turnedTooFar: Int(raw[25]), selfRevisit: Int(raw[26]),
+                                seedsOffered: Int(raw[27]), seedsTraced: Int(raw[28]), seedsTooClose: Int(raw[29]),
+                                curvesTooShort: Int(raw[30]), stepBudgetHits: Int(raw[31])),
+                            census: OrganicTrace.LengthCensus(
+                                inputLengthMM: raw[32],
+                                stages: zip(OrganicTrace.LengthCensus.stageNames, (0..<12).map { raw[33 + $0] })
+                                    .map { (name: $0, lengthMM: $1) },
+                                writtenComponents: Int(raw[45]), emissionRan: raw[46] > 0.5))
     }
 
     public static func latticeMemberThicknessMM(nx: Int, ny: Int, nz: Int,
