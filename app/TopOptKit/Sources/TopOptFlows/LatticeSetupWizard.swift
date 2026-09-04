@@ -636,8 +636,8 @@ public struct LatticeSetupWizard: View {
         + "state; the run holds it."
     static let infoFitToShape = "The lattice follows the outline of the face-prism, and there is no finish on "
         + "the faces — no shell, no skin, only lattice. \"Shape fit only\" drops the stress "
-        + "grading: the cell is a function of the shape alone. Without a stress simulation "
-        + "that is the only fit there is."
+        + "grading of the cell: one separation everywhere (Fit), pulled in at the walls to "
+        + "fit the shape. Off, the cell is graded by core's own stress solve (Auto)."
     static let infoSpacingScale = "Scales the spacing the solve derives. Coarser spacing can fragment the "
         + "lattice; the run's receipt reports survival and pieces. Grown organic holds a "
         + "fixed 30° overhang, so there is no overhang limit to tune there."
@@ -749,12 +749,12 @@ public struct LatticeSetupWizard: View {
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            // ★ ITEM 7 (maintainer, 2026-09-03, amended): with the simulation off the
-            // struts still follow the field; nothing is GRADED by it (shape fit only).
-            // The run does the same with `organic_shape_fit_only`.
+            // ★ 2026-09-04 (measured): the run traces core's OWN solved field for
+            // organic whether or not the app simulated, so the cell grading here is
+            // core's either way; the switch only governs the density preview.
             if !model.simulateStresses {
-                Text("No simulation: the struts follow the field, ungraded — one spacing, "
-                     + "fitted to the shape.")
+                Text("No simulation: the run still traces core's own solved field, so the "
+                     + "cell grading is core's; the switch only takes Sim off the Density row.")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
@@ -776,14 +776,14 @@ public struct LatticeSetupWizard: View {
             // Fit is DISABLED with its reason when no region is declared — the app never
             // sends Auto for a Fit the user chose.
             HStack(spacing: DS.Space.xs) {
-                if model.simulateStresses {
-                    organicPill("Auto", on: model.cellSizeMode == .auto, enabled: true) {
-                        model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
-                        model.setCellSizeMode(.auto); rebuild()
-                    }
+                organicPill("Auto", on: model.cellSizeMode == .auto, enabled: true) {
+                    model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
+                    model.organicShapeFitOnly = false
+                    model.setCellSizeMode(.auto); rebuild()
                 }
                 organicPill("Fit", on: model.cellSizeMode == .fit && !organicManual, enabled: fitPossible) {
                     model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
+                    model.organicShapeFitOnly = true
                     model.setCellSizeMode(.fit); rebuild()
                 }
                 organicPill("Manual", on: organicManual, enabled: fitPossible) {
@@ -803,9 +803,7 @@ public struct LatticeSetupWizard: View {
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if organicManual || (model.cellSizeMode == .fit && !model.simulateStresses) {
-                organicManualLists(fitPossible: fitPossible)
-            }
+            if organicManual { organicManualLists(fitPossible: fitPossible) }
             // ★★★ DENSITY (his item 2): from the print parameters, thickened on request,
             // or left to the solve. Auto and Sim both leave `organic_strut_width_mm` at
             // 0 (core derives it from the band and the cell); Thicker states a width.
@@ -842,11 +840,18 @@ public struct LatticeSetupWizard: View {
                     Spacer(minLength: DS.Space.s)
                     // ★ the page's own switch (the same control as Simulate Stresses):
                     // the action always runs, so the refusal can be SAID (item 3.2)
-                    GlassToggle(isOn: model.organicShapeFitOnly) {
-                        if model.organicShapeFitOnly, !model.simulateStresses {
-                            showGradeNeedsSimAlert = true
+                    // ★ WHAT THE SWITCH MEANS (2026-09-04): core can only honour "no
+                    // stress grading of the cell" as FIT — one separation, shape fit
+                    // kept (`organic_shape_fit_only` needs a swept window, which D2
+                    // forbids). So ON ⇔ Fit/Manual, OFF ⇔ Auto; with the simulation off
+                    // there is no Auto and the switch refuses, out loud.
+                    GlassToggle(isOn: model.cellSizeMode != .auto) {
+                        if model.cellSizeMode != .auto {
+                            model.organicShapeFitOnly = false; model.setCellSizeMode(.auto); rebuild()
                         } else {
-                            model.organicShapeFitOnly.toggle(); rebuild()
+                            model.organicShapeFitOnly = true
+                            model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
+                            model.setCellSizeMode(.fit); rebuild()
                         }
                     }
                     .accessibilityLabel("Shape fit only")

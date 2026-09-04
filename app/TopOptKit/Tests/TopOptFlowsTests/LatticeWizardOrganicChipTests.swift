@@ -69,14 +69,14 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         XCTAssertEqual(out.organicBoundaryFinish, .clean)
         XCTAssertTrue(out.organicShapeFit)
         XCTAssertEqual(out.cellSizeMode, .auto)
-        // ★ item 3: with the simulation OFF, Auto is gone (⇒ Fit) and the fit is shape-only
+        // ★ 2026-09-04: the simulation switch leaves the organic cell mode alone (core
+        // traces its own solved field either way)
         var off = model; off.setSimulateStresses(false)
-        XCTAssertTrue(off.organicShapeFitOnly)
-        XCTAssertEqual(off.cellSizeMode, .fit)
+        XCTAssertEqual(off.cellSizeMode, .auto)
         var offSaved = settings; offSaved.simulateStresses = false; offSaved.cellSizeMode = .auto
         var m3 = LatticeWizardModel(settings: offSaved)
         m3.selectOrganic()
-        XCTAssertEqual(m3.cellSizeMode, .fit); XCTAssertTrue(m3.organicShapeFitOnly)
+        XCTAssertEqual(m3.cellSizeMode, .auto)
         // Fit is the user's pick and SURVIVES (D2: never remapped)
         var fit = settings; fit.cellSizeMode = .fit
         var m2 = LatticeWizardModel(settings: fit)

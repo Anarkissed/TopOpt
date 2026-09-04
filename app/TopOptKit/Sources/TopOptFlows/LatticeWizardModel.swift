@@ -544,13 +544,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
         cellTransition = .organicGrade
         organicShapeFit = true
         organicBoundaryFinish = .clean
-        // ★ (d) no simulation ⇒ shape-only fit, and no Auto (item 3, 2026-09-03)
-        if !simulateStresses {
-            organicShapeFitOnly = true
-            if cellSizeMode == .auto { cellSizeMode = .fit }
-        }
         guard cellSizeMode != .auto && cellSizeMode != .fit else { return false }
-        setCellSizeMode(!simulateStresses ? .fit : .auto)
+        setCellSizeMode(.auto)
         return true
     }
 

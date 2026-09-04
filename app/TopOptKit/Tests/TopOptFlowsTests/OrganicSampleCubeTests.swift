@@ -83,13 +83,17 @@ final class OrganicSampleCubeTests: XCTestCase {
 
     // MARK: item 7 — no simulation ⇒ ungraded (the field is always the cube's own)
 
-    func testSimulationOffLocksShapeFitOnlyAndDropsAuto() {
+    func testSimulationOffLeavesTheOrganicCellAlone() {
+        // ★ 2026-09-04: core traces its OWN solved field for organic whatever the app
+        // simulated, so the switch must not move the cell mode — Auto stays Auto and
+        // the sample keeps the window the run grades within.
         var s = organic(); s.organicShapeFit = true
         s.setSimulateStresses(false)
         let p = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
-        XCTAssertTrue(p.shapeFitOnly, "no simulation ⇒ shape-only fit (item 3.2)")
-        XCTAssertEqual(s.cellSizeMode, .fit, "no simulation ⇒ Auto is gone (item 3.1)")
-        XCTAssertEqual(p.separationMinMM, p.separationMaxMM, "Fit ⇒ one separation")
+        XCTAssertEqual(s.cellSizeMode, .auto)
+        XCTAssertFalse(p.shapeFitOnly)
+        XCTAssertEqual(p.separationMinMM, 3, accuracy: 1e-9); XCTAssertEqual(p.separationMaxMM, 6, accuracy: 1e-9)
+        XCTAssertEqual(s.densityMode, .uniform, "what the switch DOES govern: the density preview")
     }
 
     func testTheLabelNamesNoPullRequest() {

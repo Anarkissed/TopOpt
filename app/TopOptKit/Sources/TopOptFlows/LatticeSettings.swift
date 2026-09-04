@@ -732,7 +732,11 @@ public struct LatticeSpec: Equatable, Sendable {
                 put("organic_boundary_finish", organicBoundaryFinish)
             }
             if organicShapeFit { put("organic_shape_fit", true) }
-            if organicShapeFitOnly { put("organic_shape_fit_only", true) }
+            // ★ NEVER `organic_shape_fit_only` ON AN ORGANIC JOB: core accepts it only
+            // with a cell window, and windows only on the SWEPT path (job.cpp), which
+            // D2 forbids for organic — a job carrying it is refused at validation
+            // (measured 2026-09-04 against job.cpp). For the RUN the switch means
+            // Fit: one separation, no stress grading of the cell, shape fit kept.
             // ★ INTENT, STATED. Core refuses organic unless the job SAYS
             // "intent": "aesthetic" (run_job.cpp `refuse_organic_structural`): the
             // traced lattice is anisotropic and the certification library holds one
@@ -1099,16 +1103,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if densityMode.needsSimulation { densityMode = .uniform }
         // Cell size: `swept` IS the stress-graded cell ladder.
         if cellSizeMode == .swept { cellSizeMode = .fixed }
-        // ★ ORGANIC WITHOUT A SIMULATION (maintainer, 2026-09-03, item 3): there is
-        // no field to grade by, so Auto (the FEA-driven window) is gone — Fit or a
-        // Manual size — and the fit is SHAPE-ONLY; the pane refuses to turn that off
-        // and says why. (D2 organic cell modes are Auto and Fit; Manual is a Fit with
-        // a stated size.)
-        if algorithm == "organic" {
-            if cellSizeMode == .auto { cellSizeMode = .fit }
-            organicShapeFit = true
-            organicShapeFitOnly = true
-        }
+        // ★ ORGANIC IS UNTOUCHED BY THIS SWITCH (2026-09-04, measured): core's run
+        // traces its OWN solved field for organic whatever the app simulated
+        // (run_job.cpp `run_organic_step(... v.stress_tensor_field ...)`), and Auto is
+        // core's FEA-derived window, not the app's. Forcing Fit here (2026-09-03,
+        // item 3) made the sample show a one-separation lattice the run never
+        // builds. What the switch still governs for organic is the DENSITY preview
+        // (`.sim` ⇒ `.uniform` above).
     }
 
     /// ★ WHETHER A SOLVE IS ACTUALLY NEEDED — the permission AND at least one

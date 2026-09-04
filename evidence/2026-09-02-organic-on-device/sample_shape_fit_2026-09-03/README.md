@@ -20,3 +20,18 @@ Screenshots: traced_shape_fit_bare.png, grown_shape_fit_bare.png (dylib 883494cf
 - whole_cube_sim_off_ungraded.png — Simulate Stresses OFF after the revert (dylib 0f06727ecd88cbd5): the cube's own field, shape-fit only, one 4.5 mm spacing — the organic look with curves, ungraded.
 - whole_cube_sim_on_standing.png — dylib 1cf12e316eef5b14: the wizard stage now settles Z-up → viewer Y-up (the workspace's own quaternion); the cube stands on its bottom face, columns vertical, arches on the sides like the print; gizmo TOP is the cube's top.
 - gizmo_follows_sample_orbit.png — dylib 22a5617fcb8aae88: after an orbit drag the ONE gizmo (bound to the wizard's camera while the wizard is up) reads LEFT/FRONT/TOP from above, matching the cube's turn.
+
+## Round 3 — 2026-09-04: the grower, the sim-off rule, and the mirror's floor (all measured)
+
+- `cli_cube20/` — core's OWN CLI (Release `build/topopt-cli lattice-variant`) on `TestCube20.stl`, the printed job's grading (swept 3–6, shape fit, aesthetic, clean, bare), traced and grown. Receipts: traced written 1007.9 mm, 1 component; grown written 1337.9 mm (2834.6 mm grown before pruning). Surface of the written STL by height thirds (bottom/mid/top): traced 30/28/42 %, grown **59/21/20 %**. The grower is bottom-heavy by construction; the app's grown sample (94 % of occupied voxels in the bottom third under Auto) is the same behaviour on the same cube.
+- Bridge-direct probes on the sample's FEA field (Debug, Mac): grown length by thirds 1638/945/186 mm at uniform 4.5 mm separation, IDENTICAL for density bands 0–1, 0.05–0.12, 0.08–0.55, 0.02–0.3 (the band is not a lever); every span radius = 0.21 mm on both paths (radius is not a lever); layer 0.12/0.2/0.28 mm all bottom-heavy.
+- The mirror's floor: core floors the shape-fit cap at `kOrganicShapeFitMinCellRatio × spacing` when the job has no swept window (always, for organic under D2); the app's mirror was floored at the preview window's low end. Corrected; on this cube the tracer's own resolution floor binds first, so the sim-on traced Auto sample is unchanged (197 curves, 851 connectors).
+- `organic_shape_fit_only` is refused by core on every organic job (needs a cell window; windows only with `cell_mode: swept`, which D2 forbids) — the app no longer writes it; the switch means Fit (one separation) vs Auto.
+- The sim-off rule (Auto hidden, Fit forced) is reverted: core's run traces its OWN solved field for organic whatever the app simulated, so the sample under sim off must show the same Auto cube; the switch only takes Sim off the Density row.
+
+### Every version, simulator, dylib 1dbcd7041af3688b (2026-09-04 04:28–04:35)
+- v3_A_sim_on_traced_auto.png — the cube (197 curves, 851 connectors). Unchanged since 22:13 except standing on its base.
+- v3_B_sim_on_traced_fit.png — Fit: one separation on the axial field ⇒ the hoop family, corners open. Core's Fit on this cube.
+- v3_C_sim_on_grown_auto.png — Grown: base mat + two columns (94 % of occupied voxels in the bottom third; core's own CLI: 59 % of surface in the bottom third).
+- v3_D_sim_off_grown_auto.png — identical to C (the switch no longer moves the organic cell mode).
+- v3_E_sim_off_traced_auto.png — identical to A.

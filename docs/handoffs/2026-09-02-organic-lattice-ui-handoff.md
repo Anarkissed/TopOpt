@@ -1,5 +1,45 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-04 — "these aren't cubes": what was the app's, what is core's (measured)
+>
+> **Maintainer:** grown (sim on and off) and the sim-off traced sample "aren't cubes";
+> "test EVERY version and take screenshots before calling anything complete."
+>
+> **Grown is core's grower, and the app is faithful to it.** Core's own CLI on
+> `TestCube20.stl` with the printed job's grading (evidence `cli_cube20/`): grown writes
+> MORE length than traced (1338 vs 1008 mm) but puts 59 % of its surface in the bottom
+> third (traced 30 %). Bridge-direct probes on the sample's field: the density band
+> (0–1 vs 0.05–0.12 vs 0.08–0.55) changes NOTHING; every span radius is the bead; layer
+> height 0.12/0.2/0.28 all bottom-heavy. Parameter parity with run_job checked (only the
+> per-voxel bead field is not passed, and it only sets strut radius). So the base slab
+> with a few columns IS what `grow_organic_lattice` builds on this cube, before the
+> run's pruning. Reported, not gated; Grown stays the user's opt-in (Aug 5).
+>
+> **Two app bugs found on the way, both fixed:**
+> 1. The shape-fit mirror floored the cap at the preview window's low end; core floors
+>    it at `kOrganicShapeFitMinCellRatio × spacing` whenever the job has no swept window
+>    — which for organic under D2 is always. Corrected (`window: nil`). On this cube the
+>    tracer's resolution floor binds first, so the sim-on traced Auto sample is
+>    unchanged: 197 curves, 851 connectors — the one the maintainer called "exactly
+>    what organic looks like" (its only change since is standing on its base).
+> 2. `organic_shape_fit_only` was written on organic jobs; core refuses it without a
+>    cell window, and windows are only legal with `cell_mode: swept` (job.cpp), which D2
+>    forbids. Never written now (re-pinned). The "Shape fit only" switch means Fit (one
+>    separation, shape fit kept) vs Auto — the only reading core can honour.
+>
+> **The sim-off rule is reverted (3.1/3.2 as literally specified made the sample lie).**
+> Core's run traces its OWN solved field for organic regardless of the app's Simulate
+> Stresses switch (`run_organic_step(... v.stress_tensor_field ...)`), and Auto is
+> core's FEA-derived window, not the app's. Hiding Auto and forcing Fit under sim off
+> produced the one-separation "birdcage" (the axial field's hoop family at 4.5 mm),
+> a lattice the run would never build for those settings. Now: sim off leaves the
+> organic cell mode alone (Auto/Fit/Manual all offered), the Density row loses Sim, and
+> the pane says why. The alert is kept for a future gate but no longer fires.
+>
+> **Every version, screenshotted on the simulator (see the README list):** sim on ×
+> {traced Auto, traced Fit, grown Auto}; sim off × {traced Auto, grown Auto}.
+> Full app suite (Debug, SwiftPM): 2304 tests, 30 skipped, 0 failures, 3544 s.
+
 > ## ★ 2026-09-03 (night) — the seven items: whole cube, sim on/off, the pane rebuilt
 >
 > **Maintainer's seven items and what shipped (app only, no core change):**
