@@ -1,5 +1,62 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-04 (evening) — topology/thickness split, the 3MF variant cache, and a correction
+>
+> **Correction first.** The 04:00 block says the shape-fit mirror's floor was "corrected
+> (`window: nil`)". It was not: that edit's anchor text did not match, the script stopped
+> before it, and I reported the intended change as done. HEAD 3990bc51 still passed the
+> preview window as the floor. It is landed now (LatticeSDFMetal.swift, `window: nil,
+> only: false`), and the sample changed as core's rule says it must: sim-on traced Auto
+> is now **492 curves, 2340 connectors, 1.50–4.29 mm** (was 197 / 851 / 3.00–4.29) —
+> spacing halves at the walls, which is `kOrganicShapeFitMinCellRatio` doing its work.
+> The 04:28 "approved cube" screenshot (v3_A) was the un-corrected mirror.
+>
+> **The split (maintainer: "do the topology/thickness split and the on-disk cache
+> first, with the beam lattice 3MF as the cache format").**
+> - The bridge now bakes TWO channels per organic voxel: the CENTRELINE distance
+>   (clamped at reach = 1 mm headroom + largest radius) and the SURFACE distance
+>   (clamped at the headroom). At the baked thickness the march reads the surface
+>   channel — exact; under the Thicker slider it reads centreline − r′, a uniform
+>   (`organicRadius`, appended last on both sides). Thicker never re-bakes or
+>   re-traces: `Picks` no longer hashes the strut width. The live radius is capped at
+>   90 % of the reach (≈ 1.1 mm radius on a 0.42 bead); beyond that a rebake would be
+>   needed and is not yet wired.
+> - Why two channels and not "nearest centreline minus its radius": pinned by
+>   `OrganicCentrelineFieldTests` — the first design was off on 366 voxels of a
+>   three-radius fixture; the surface channel equals the old `bakeField` exactly.
+> - The bake reach is thickness HEADROOM, not the window: with the 6 mm window as the
+>   band, 26,773 spans took 154 s to bake on the Mac; at 1 mm headroom 16.6 s.
+>
+> **The cache.** `OrganicBeamLattice3MF` writes/reads a 3MF beam lattice (STORED zip,
+> welded vertices, a radius per beam end, metadata: census, core SHA, picks); the key
+> is SHA-256 of the topology picks + core SHA + field identity + layout version
+> (`OrganicVariantCache`); lookup bundle → Application Support → trace-then-store. The
+> scene bakes a cached document on ITS OWN grid (`organicCached:`), and the field it
+> produces is identical to the trace's (max |Δ| 0.0000 mm, same dims/origin). Mac:
+> trace+emission+store 105 s; bake from the 3MF 16.6 s (3.08 MB for 26,773 spans).
+> Bundled defaults: traced/grown × Auto/Fit for the wizard's default picks
+> (`OrganicVariantGeneratorTests`, `GENERATE_ORGANIC_VARIANTS=1`), keyed on core's
+> SHA so a new core misses cleanly and re-traces.
+>
+> **On the iPad (simulator, dylib 466db7e845fc3e29, evidence v6_*):** Thicker → 0.90 mm
+> re-rendered within one screenshot interval with no re-trace banner (v6_B); with the
+> device cache cleared, Organic on → the shipped variant was on screen inside 25 s
+> INCLUDING the once-per-launch 16 s solve, census "26773 struts, 6903 mm — the shipped
+> variant (3MF beam lattice)", nothing stored (v6_C). A miss (trace + emission + bake +
+> store) took ≈ 75 s on the iPad. The first shipped set missed because the stage flag
+> was in the key while the sample never receives an allowable stress; the key is v4
+> without it, pinned, and the four variants were regenerated (7 MB in the bundle).
+>
+> **Re-pinned, not loosened:** `LatticeOrganicTraceTests` counted "inside a strut" as
+> negative values of the organic field; that meaning now lives in the surface channel
+> and the test reads it there, and additionally pins the centreline channel ≥ 0.
+>
+> **Still slow, and where the next second goes:** the CPU stamp of 26 k spans into
+> 7.5 M voxels is most of a cache hit's time; a Metal compute bake or a per-thread stamp
+> would take it under a second. Not done tonight.
+>
+> Full app suite (Debug, SwiftPM): 2310 tests, 30 skipped, 0 failures, 3757 s.
+
 > ## ★ 2026-09-04 (later) — the grower's counters answer the reviewer: it is the joining, not the cone
 >
 > **Reviewer's three points, measured** (evidence README round 4, `cli_cube20/auto_*`):

@@ -19,7 +19,7 @@ final class OrganicSampleCubeTests: XCTestCase {
         let p = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
         XCTAssertEqual(p.separationMinMM, 4.5, accuracy: 1e-9)   // 3 × 1.5
         XCTAssertEqual(p.separationMaxMM, 9.0, accuracy: 1e-9)   // 6 × 1.5
-        XCTAssertFalse(p.grow); XCTAssertEqual(p.strutDiameterMM, 0)
+        XCTAssertFalse(p.grow)
         XCTAssertEqual(p.rhoMin, 0.05); XCTAssertEqual(p.rhoMax, 0.12)
         XCTAssertFalse(p.structural)
     }
@@ -45,15 +45,17 @@ final class OrganicSampleCubeTests: XCTestCase {
         XCTAssertEqual(OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2).overhangDeg, 40)
     }
 
-    func testThickerStatesTheStrutAndTheBakeVoxelFollowsTheThinnestStrut() {
+    func testThickerIsLiveAndNeverRetraces() {
         var s = organic()
         let bead = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
         XCTAssertEqual(bead.thinnestRadiusMM, 0.21, accuracy: 1e-9)      // 0.42 / 2
         XCTAssertEqual(bead.bakeVoxelMM, 0.105, accuracy: 1e-9)          // ≤ r_min / 2
         s.organicStrutWidthMM = 1.0
         let thick = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
-        XCTAssertEqual(thick.strutDiameterMM, 1.0)
-        XCTAssertEqual(thick.bakeVoxelMM, 0.25, accuracy: 1e-9)
+        // ★ 2026-09-04: the strut width is a live radius on the march, not a pick —
+        // the same picks ⇒ the same trace, and the bake voxel follows the bead
+        XCTAssertEqual(thick, bead, "Thicker must not re-trace the sample")
+        XCTAssertEqual(thick.bakeVoxelMM, 0.105, accuracy: 1e-9)
         // a 20 mm corner at the bead voxel stays under the 12 M cap
         let n = Int(OrganicSampleCube.edgeMM / bead.bakeVoxelMM) + 2
         XCTAssertLessThan(n * n * n, 12_000_000)

@@ -138,6 +138,27 @@ struct LSDFUniforms {
     /// Swift to MSL by BYTE OFFSET, so an inserted field silently reinterprets every
     /// field after it.
     var rimParams: SIMD4<Float> = .zero
+    /// ★★★ ORGANIC THICKNESS, APPENDED LAST (2026-09-04): x = a LIVE strut radius in
+    /// mm (0 ⇒ the baked thickness, read from the surface channel), y = the centreline
+    /// channel's reach, z = the surface channel's band (the outside values). The MSL
+    /// twin declares the same slot.
+    var organicRadius: SIMD4<Float> = .zero
+}
+
+/// ★ A pre-baked organic field — the two channels a cached variant (a beam-lattice
+/// 3MF) bakes to through `TopOptKit.organicSpansField`, plus what the banner says.
+public struct OrganicBakedFields: Sendable {
+    public let distance: LatticeVoxelGrid
+    public let surface: LatticeVoxelGrid
+    public let reachMM: Double
+    public let summary: String
+    public let spanCount: Int
+    public let lengthMM: Double
+    public init(distance: LatticeVoxelGrid, surface: LatticeVoxelGrid, reachMM: Double,
+                summary: String, spanCount: Int, lengthMM: Double) {
+        self.distance = distance; self.surface = surface; self.reachMM = reachMM
+        self.summary = summary; self.spanCount = spanCount; self.lengthMM = lengthMM
+    }
 }
 
 /// ★★★ WHAT THE ORGANIC TRACER NEEDS, bundled so the scene's init does not grow four
@@ -284,7 +305,19 @@ public struct LatticeSDFScene {
     /// strut is several voxels across instead of sub-voxel. nil on every other
     /// algorithm. Clamped at `organicBandMM`, an UNDER-estimate and therefore safe to
     /// sphere-trace against.
+    /// ★ How far past the thickest baked strut the centreline field stays exact — the
+    /// live Thicker radius may grow to 90 % of (this + the baked radius) before a rebake
+    /// is needed. 1 mm ⇒ live widths up to ≈ 2.2 mm on a 0.42 mm bead.
+    public static let organicBakeHeadroomMM = 1.0
     public let organicField: LatticeVoxelGrid?
+    /// ★ The SURFACE distance per organic voxel (2026-09-04, topology/thickness split).
+    /// `organicField` is now the CENTRELINE distance; at the baked thickness the march
+    /// reads this channel, and under the live radius the Thicker slider sets it reads
+    /// centreline − radius — so thickness never re-bakes.
+    public let organicSurfaceField: LatticeVoxelGrid?
+    /// ★ The emitted spans the trace path baked (nil on the cached and run-spans
+    /// paths) — what the variant cache stores as a beam-lattice 3MF.
+    public let organicEmittedSpans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]?
     /// ★ WHAT THE FIELD WAS BAKED FROM when it came from a span file: (count, total
     /// length mm) — the numbers to hold against the run's receipt (§10). nil when the
     /// field was traced at preview time or there is no organic field.
@@ -396,6 +429,14 @@ public struct LatticeSDFScene {
                 // not ribbons. nil keeps the part preview's own rule (the maintainer
                 // wants the part preview realistic by another route, not this floor).
                 organicBakeVoxelMM: Double? = nil,
+                // ★ A PRE-BAKED organic field (2026-09-04): a cached variant's spans,
+                // baked through the bridge into the two channels. When present the scene
+                // neither traces nor emits — the topology is the file's; only thickness
+                // is live.
+                organicBaked: OrganicBakedFields? = nil,
+                // ★ A cached topology DOCUMENT (a beam-lattice 3MF) with a source label:
+                // baked on the trace path's own grid instead of tracing (2026-09-04).
+                organicCached: (doc: OrganicBeamLattice3MF.Document, sourceLabel: String)? = nil,
                 maxDim: Int = 128, regions: [LatticeRegionSpec] = [],
                 // ★ The band and gamma the raymarcher grades with, so a stated
                 // per-region density can be inverted into the demand value that
@@ -626,6 +667,8 @@ public struct LatticeSDFScene {
         var organicMismatch: String? = nil
         var organicSpanReceipt: (count: Int, lengthMM: Double)? = nil
         var organicOut: LatticeVoxelGrid?
+        var organicSurfaceOut: LatticeVoxelGrid?
+        var organicEmittedOut: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]? = nil
         var organicBand = 0.0
         var organicSaid = ""
         // ★★★ SPANS FIRST. A span file is the run's own emitted geometry; a trace is a
@@ -633,6 +676,13 @@ public struct LatticeSDFScene {
         // asked for. Grid: the index's own bounds (the capsules, plus their reach), at
         // the same spacing rule the trace uses — longest extent / 384, capped at 12 M
         // voxels — so the picture's resolution does not change with the source.
+        if organicOut == nil, algorithm == "organic", let baked = organicBaked {
+            organicOut = baked.distance
+            organicSurfaceOut = baked.surface
+            organicBand = baked.reachMM
+            organicSaid = baked.summary
+            organicSpanReceipt = (baked.spanCount, baked.lengthMM)
+        }
         if organicOut == nil, algorithm == "organic", let sp = organicSpans {
             let mn = sp.indexOrigin
             let ext = SIMD3<Float>(sp.indexDims) * sp.cellMM
@@ -643,10 +693,18 @@ public struct LatticeSDFScene {
             let fnx = Swift.max(2, Int(Double(ext.x) / fs) + 2)
             let fny = Swift.max(2, Int(Double(ext.y) / fs) + 2)
             let fnz = Swift.max(2, Int(Double(ext.z) / fs) + 2)
-            let band = Swift.max(2.0, Double(sp.cellMM))
-            organicOut = sp.bakeField(origin: mn, spacing: SIMD3<Float>(repeating: Float(fs)),
-                                      dims: SIMD3<Int>(fnx, fny, fnz), bandMM: Float(band))
-            organicBand = band
+            let band = Self.organicBakeHeadroomMM
+            // ★ the same two-channel bake the trace path uses, through the bridge
+            let spanList = sp.segments.map { (a: SIMD3<Double>($0.a), b: SIMD3<Double>($0.b), r: Double($0.r)) }
+            if let baked = TopOptKit.organicSpansField(spans: spanList, fieldDims: (fnx, fny, fnz),
+                                                      fieldOrigin: SIMD3<Double>(mn), fieldSpacingMM: fs,
+                                                      bandMM: band) {
+                organicOut = LatticeVoxelGrid(nx: fnx, ny: fny, nz: fnz, origin: mn,
+                                              spacing: SIMD3<Float>(repeating: Float(fs)), values: baked.field)
+                organicSurfaceOut = LatticeVoxelGrid(nx: fnx, ny: fny, nz: fnz, origin: mn,
+                                                    spacing: SIMD3<Float>(repeating: Float(fs)), values: baked.surfaceField)
+                organicBand = baked.reachMM
+            }
             organicSaid = "\(sp.count) struts, "
                 + String(format: "%.0f mm — the run's emitted spans", sp.totalLengthMM)
             organicSpanReceipt = (sp.count, sp.totalLengthMM)
@@ -701,13 +759,20 @@ public struct LatticeSDFScene {
             // will. `shapeFitOnly` replaces the stress-driven window by the depth ramp.
             var fitNote = ""
             if n > 0, o.shapeFit {
+                // ★ NO WINDOW, EVER, FOR ORGANIC (2026-09-04, and only landed now — the
+                // first edit missed its anchor and was reported done; see the handoff):
+                // core reads `cell_min/max` only on the SWEPT path and D2 never writes
+                // them for organic, so in the run `have_window` is false, the cap's
+                // floor is `kOrganicShapeFitMinCellRatio × spacing` (run_job.cpp), and
+                // the ONLY-mode ramp never runs. Passing (lo, hi) here floored the cap
+                // at `lo` — a swept-window behaviour no organic job can ask for.
                 let fit = OrganicShapeFit.apply(spacing: sep, candidate: cand,
                                                 nx: tnx, ny: tny, nz: tnz,
                                                 voxelMM: o.spacingMM,
-                                                window: (lo, hi), only: o.shapeFitOnly)
+                                                window: nil, only: false)
                 sep = fit.spacing
-                fitNote = String(format: " · shape-fit%@: %d voxels shrunk (min ratio %.2f, depth %d)",
-                                 o.shapeFitOnly ? " only" : "", fit.shrunk, fit.minRatio, fit.depthVoxels)
+                fitNote = String(format: " · shape-fit: %d voxels shrunk (min ratio %.2f, depth %d)",
+                                 fit.shrunk, fit.minRatio, fit.depthVoxels)
             }
             if n > 0 {
                 // The field's own grid: the declared region's bbox, padded, at a voxel a
@@ -731,8 +796,29 @@ public struct LatticeSDFScene {
                 let fnx = Swift.max(2, Int(Double(ext.x) / fs) + 2)
                 let fny = Swift.max(2, Int(Double(ext.y) / fs) + 2)
                 let fnz = Swift.max(2, Int(Double(ext.z) / fs) + 2)
-                let band = Swift.max(2.0, hi)
-                if let t = TopOptKit.organicTrace(
+                // ★ THE BAKE REACH IS THICKNESS HEADROOM, NOT THE WINDOW (2026-09-04).
+                // The field is the CENTRELINE distance now, clamped at reach = band +
+                // the largest baked radius; the march only needs the true distance out
+                // to the thickest strut the Thicker slider can ask for live. With the
+                // 6 mm window as the band, 26,773 spans took 154 s to bake on a Mac (cost
+                // ∝ reach²); at 1 mm of headroom the same bake is seconds.
+                let band = Self.organicBakeHeadroomMM
+                // ★ A CACHED TOPOLOGY FIRST (2026-09-04): the same grid the trace would
+                // use, the document's spans baked through the bridge — no trace, no
+                // emission. The banner says where it came from.
+                if let cached = organicCached,
+                   let b = TopOptKit.organicSpansField(spans: cached.doc.spans, fieldDims: (fnx, fny, fnz),
+                                                      fieldOrigin: SIMD3<Double>(mn), fieldSpacingMM: fs,
+                                                      bandMM: band) {
+                    let sp = SIMD3<Float>(repeating: Float(fs))
+                    organicOut = LatticeVoxelGrid(nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn), spacing: sp, values: b.field)
+                    organicSurfaceOut = LatticeVoxelGrid(nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn), spacing: sp, values: b.surfaceField)
+                    organicBand = b.reachMM
+                    let census = cached.doc.metadata["census"] ?? ""
+                    organicSaid = "\(b.spanCount) struts, " + String(format: "%.0f mm — %@ (3MF beam lattice)", cached.doc.totalLengthMM, cached.sourceLabel)
+                        + (census.isEmpty ? "" : " · " + census)
+                    organicSpanReceipt = (b.spanCount, cached.doc.totalLengthMM)
+                } else if let t = TopOptKit.organicTrace(
                     nx: tnx, ny: tny, nz: tnz, spacingMM: o.spacingMM,
                     origin: o.originMM, candidate: cand, stressTensor: o.tensor,
                     separationMM: sep, minExtrudableWidthMM: o.minExtrudableWidthMM,
@@ -744,6 +830,10 @@ public struct LatticeSDFScene {
                     strutDiameterMM: o.strutDiameterMM, grow: o.grow,
                     layerHeightMM: o.layerHeightMM, anchorAtBoundary: o.anchorAtBoundary),
                    t.field.count == fnx * fny * fnz {
+                    organicEmittedOut = t.spans
+                    organicSurfaceOut = LatticeVoxelGrid(
+                        nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn),
+                        spacing: SIMD3<Float>(repeating: Float(fs)), values: t.surfaceField)
                     organicOut = LatticeVoxelGrid(
                         nx: fnx, ny: fny, nz: fnz, origin: mn,
                         spacing: SIMD3<Float>(repeating: Float(fs)), values: t.field)
@@ -757,6 +847,8 @@ public struct LatticeSDFScene {
             }
         }
         self.organicField = organicOut
+        self.organicSurfaceField = organicSurfaceOut
+        self.organicEmittedSpans = organicEmittedOut
         self.organicSpanSource = organicSpanReceipt
         self.organicReceiptMismatch = organicMismatch
         let receiptLines = [organicReceipt?.contiguityLine, organicReceipt?.spacingLine]
@@ -1140,6 +1232,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// ★ The boundary dressing the Finish setting asks for — see
     /// `LatticeBoundaryTreatment.previewDressingLevel`.
     var dressingLevel: Float = 0
+    /// ★ The live strut radius (mm) the Thicker slider sets — a uniform, never a bake.
+    var organicRadiusMM: Float = 0
     private var neutralRegionTex: MTLTexture?
     // Face-role tints on the LATTICE (bar A4): an rgba8 volume on the part-SDF grid,
     // baked from the SAME [FaceID: color] dictionary the mesh view tints the body
@@ -1258,7 +1352,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
         regionTex = scene.regionSDF.flatMap { makeVolumeTexture($0) }
-        organicTex = scene.organicField.flatMap { makeVolumeTexture($0) }
+        organicTex = scene.organicField.flatMap { d in
+            scene.organicSurfaceField.map { makeCentrelineTexture(d, surface: $0) } ?? makeVolumeTexture(d)
+        }
         stressTex = scene.stressRGB.flatMap { makeTintTexture($0, like: scene.partSDF) }
         tintTex = nil          // stale mesh/grid — the host re-applies tints after setScene
         rebakeCellField()
@@ -2118,6 +2214,26 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         return tex
     }
 
+    /// ★ The organic field as TWO channels (rg16Float): centreline distance, surface
+    /// distance. The march reads `.g` at the baked thickness and `.r − radius` live.
+    private func makeCentrelineTexture(_ d: LatticeVoxelGrid, surface r: LatticeVoxelGrid) -> MTLTexture? {
+        guard r.values.count == d.values.count else { return makeVolumeTexture(d) }
+        let desc = MTLTextureDescriptor()
+        desc.textureType = .type3D
+        desc.pixelFormat = .rg16Float
+        desc.width = d.nx; desc.height = d.ny; desc.depth = d.nz
+        desc.usage = [.shaderRead]
+        desc.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: desc) else { return nil }
+        var halfs = [UInt16](repeating: 0, count: d.values.count * 2)
+        for n in 0..<d.values.count { halfs[2 * n] = float32to16(d.values[n]); halfs[2 * n + 1] = float32to16(r.values[n]) }
+        halfs.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, d.nx, d.ny, d.nz), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: d.nx * 4, bytesPerImage: d.nx * d.ny * 4)
+        }
+        return tex
+    }
+
     private func makeVolumeTexture(_ grid: LatticeVoxelGrid) -> MTLTexture? {
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
@@ -2378,7 +2494,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // ★ .y IS NOW A FRACTION OF THE LOCAL CELL, not millimetres — see
             // `solidOutlineFraction`. The shader multiplies it by `LC.S`.
             rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction),
-                             doubledSolidCellsArmed ? 1 : 0, 0))
+                             doubledSolidCellsArmed ? 1 : 0, 0),
+            organicRadius: {
+                let reach = Float(scene?.organicBandMM ?? 0)
+                // never past 90 % of the reach: beyond it the clamp would lie
+                let live = organicRadiusMM > 0 ? Swift.min(organicRadiusMM, 0.9 * reach) : 0
+                return SIMD4(live, reach, Float(LatticeSDFScene.organicBakeHeadroomMM), 0)
+            }())
     }
 
     /// ★★★ DIAGNOSIS ONLY: paint each hit by the CELL it stands in. Off on every
@@ -2577,13 +2699,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         if let t = neutralOrganicTex { return t }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
-        d.pixelFormat = .r32Float
+        d.pixelFormat = .rg32Float
         d.width = 1; d.height = 1; d.depth = 1
         d.usage = .shaderRead
         guard let t = device.makeTexture(descriptor: d) else { return nil }
-        var v: Float = 1e9
+        var v: SIMD2<Float> = SIMD2(1e9, 0)
         t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
-                  withBytes: &v, bytesPerRow: 4, bytesPerImage: 4)
+                  withBytes: &v, bytesPerRow: 8, bytesPerImage: 8)
         neutralOrganicTex = t
         return t
     }

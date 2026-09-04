@@ -54,8 +54,18 @@ final class LatticeOrganicTraceTests: XCTestCase {
                 bandMM: 3.0),
             "★ core refused the trace — organic is not reachable")
 
-        let inside = t.field.filter { $0 < 0 }.count
+        // ★ TWO CHANNELS (2026-09-04): `field` is the CENTRELINE distance (never
+        // negative, clamped at the reach = band + largest radius); `surfaceField` is
+        // the strut surface distance, negative INSIDE a strut — the meaning this test
+        // has always pinned. The centreline channel is the one a live radius offsets.
+        XCTAssertEqual(t.surfaceField.count, t.field.count, "★ both channels, one grid")
+        XCTAssertTrue(t.field.allSatisfy { $0 >= 0 }, "★ a centreline distance is never negative")
+        let inside = t.surfaceField.filter { $0 < 0 }.count
         let atBand = t.field.filter { $0 >= t.bandMM - 1e-6 }.count
+        // inside a strut the centreline is closer than the surface plus the radius
+        for i in stride(from: 0, to: t.field.count, by: 17) where t.surfaceField[i] < 0 {
+            XCTAssertLessThanOrEqual(t.field[i], t.surfaceField[i] + 5.0, "★ channels disagree at voxel \(i)")
+        }
         print("""
 
         ── organic trace on a \(n)³ uniaxial block ────────────────────────────

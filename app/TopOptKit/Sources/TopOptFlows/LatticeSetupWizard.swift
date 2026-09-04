@@ -152,7 +152,11 @@ public struct LatticeSetupWizard: View {
                       bodyAlpha: organicSampleShown ? 0 : 1,
                       latticeLayer: organicScene.map {
                           LatticeLayerInputs(scene: $0, params: LatticeProxyParams(),
-                                             sceneToken: organicSceneToken, faceTints: [:])
+                                             sceneToken: organicSceneToken, faceTints: [:],
+                                             // ★ Thicker is LIVE: a radius uniform on
+                                             // the march, never a re-trace (2026-09-04)
+                                             organicRadiusMM: Float(model.organicStrutWidthMM > 0
+                                                                    ? model.organicStrutWidthMM / 2 : 0))
                       })
             .ignoresSafeArea()
             // ★ The cube re-traces off the main thread whenever a pick changes.
@@ -633,7 +637,9 @@ public struct LatticeSetupWizard: View {
         + "fit path, and the receipt does not yet report the fitting set."
     static let infoDensity = "Auto: derived from the print parameters, the density band and the cell. "
         + "Sim: the stress simulation sets the strut width. Thicker: a strut width you "
-        + "state; the run holds it."
+        + "state; the run holds it. The sample shows it live on the same struts, up to "
+        + "about 2 mm wide (core's tracer may re-space slightly at the run for a stated "
+        + "width; the run's receipt says what it did)."
     static let infoFitToShape = "The lattice follows the outline of the face-prism, and there is no finish on "
         + "the faces — no shell, no skin, only lattice. \"Shape fit only\" drops the stress "
         + "grading of the cell: one separation everywhere (Fit), pulled in at the walls to "
@@ -668,12 +674,16 @@ public struct LatticeSetupWizard: View {
         .buttonStyle(.plain)
         .popover(isPresented: Binding(get: { infoShown == id },
                                       set: { if !$0 { infoShown = nil } })) {
-            Text(text)
-                .dsStyle(DS.TypeScale.footnote)
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(16)
-                .frame(maxWidth: 340)
+            // ★ the census can run to a screenful — scroll it, never overflow the page
+            ScrollView {
+                Text(text)
+                    .dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(16)
+            }
+            .frame(maxWidth: 360, maxHeight: 420)
         }
         .accessibilityIdentifier("wizard-info-\(id)")
     }

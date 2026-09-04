@@ -2230,6 +2230,82 @@ double organic_default_strut_diameter_mm(double grid_spacing_mm,
       grid_spacing_mm, resolution_floor_voxels, rho_max, min_extrudable_width_mm);
 }
 
+// ★★★ THE CENTRELINE FIELD (2026-09-04, "topology / thickness split"). The preview
+// field used to be the SURFACE distance (centreline distance minus the strut radius),
+// so every thickness change re-baked — and, because the picks hashed the strut width,
+// re-TRACED. Now two channels are baked once per topology: the distance to the nearest
+// centreline, and the SURFACE distance (min over spans of centreline − radius). At the
+// baked thickness the march reads the surface channel — exact even where radii vary,
+// which "nearest centreline minus its radius" is not (measured 2026-09-04: 366 voxels
+// off on a three-radius fixture). Under a LIVE override r′ the march reads
+// centreline − r′, exact because every strut then has the same radius. The centreline
+// channel is clamped at `reach` = band + the largest radius and the surface channel at
+// `band`: outside a span's footprint both are lower bounds, never a false hit.
+static void stamp_centreline_span(std::vector<double>& field, std::vector<double>& surface,
+                                  int fnx, int fny, int fnz, double fspacing,
+                                  double fox, double foy, double foz,
+                                  const topopt::Vec3& a, const topopt::Vec3& b,
+                                  double r, double reach) {
+  int i0 = static_cast<int>(std::floor((std::min(a.x, b.x) - reach - fox) / fspacing));
+  int i1 = static_cast<int>(std::ceil((std::max(a.x, b.x) + reach - fox) / fspacing));
+  int j0 = static_cast<int>(std::floor((std::min(a.y, b.y) - reach - foy) / fspacing));
+  int j1 = static_cast<int>(std::ceil((std::max(a.y, b.y) + reach - foy) / fspacing));
+  int k0 = static_cast<int>(std::floor((std::min(a.z, b.z) - reach - foz) / fspacing));
+  int k1 = static_cast<int>(std::ceil((std::max(a.z, b.z) + reach - foz) / fspacing));
+  i0 = std::max(i0, 0); j0 = std::max(j0, 0); k0 = std::max(k0, 0);
+  i1 = std::min(i1, fnx - 1); j1 = std::min(j1, fny - 1); k1 = std::min(k1, fnz - 1);
+  const double bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z;
+  const double bb = bax * bax + bay * bay + baz * baz;
+  for (int k = k0; k <= k1; ++k) {
+    const double pz = foz + k * fspacing;
+    for (int j = j0; j <= j1; ++j) {
+      const double py = foy + j * fspacing;
+      const std::size_t row = (static_cast<std::size_t>(k) * fny + j) * fnx;
+      for (int i = i0; i <= i1; ++i) {
+        const double px = fox + i * fspacing;
+        const double pax = px - a.x, pay = py - a.y, paz = pz - a.z;
+        double h = bb > 1e-12 ? (pax * bax + pay * bay + paz * baz) / bb : 0.0;
+        h = h < 0.0 ? 0.0 : (h > 1.0 ? 1.0 : h);
+        const double dx = pax - bax * h, dy = pay - bay * h, dz = paz - baz * h;
+        const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+        double& slot = field[row + i];
+        if (d < slot) slot = d;
+        double& srf = surface[row + i];
+        if (d - r < srf) srf = d - r;
+      }
+    }
+  }
+}
+
+// ★ BAKE A SPAN LIST ALONE — for a cached variant (a beam-lattice 3MF) or a run's
+// emitted spans: no trace, no emission, the same two channels. Layout: [0] 1 = ok,
+// [1] span count, [4] field cell count, [8] reach (mm), [9] band (mm), [16 ..] the
+// centreline distance field, then the SURFACE distance field (both fn doubles).
+std::vector<double> organic_spans_field(const double* spans7, std::size_t span_count,
+                                        int fnx, int fny, int fnz, double fspacing,
+                                        double fox, double foy, double foz, double band_mm) {
+  std::vector<double> out(16, 0.0);
+  if (fnx <= 0 || fny <= 0 || fnz <= 0 || !(fspacing > 0.0) || !(band_mm > 0.0)) return out;
+  const std::size_t fn = static_cast<std::size_t>(fnx) * fny * fnz;
+  double rmax = 0.0;
+  for (std::size_t i = 0; i < span_count; ++i) rmax = std::max(rmax, spans7[7 * i + 6]);
+  const double reach = band_mm + rmax;
+  std::vector<double> field(fn, reach), surface(fn, band_mm);
+  std::size_t stamped = 0;
+  for (std::size_t i = 0; i < span_count; ++i) {
+    const double* q = spans7 + 7 * i;
+    if (!(q[6] > 0.0)) continue;
+    stamp_centreline_span(field, surface, fnx, fny, fnz, fspacing, fox, foy, foz,
+                          topopt::Vec3{q[0], q[1], q[2]}, topopt::Vec3{q[3], q[4], q[5]},
+                          q[6], reach);
+    ++stamped;
+  }
+  out[0] = 1.0; out[1] = static_cast<double>(stamped); out[4] = static_cast<double>(fn); out[8] = reach; out[9] = band_mm;
+  out.insert(out.end(), field.begin(), field.end());
+  out.insert(out.end(), surface.begin(), surface.end());
+  return out;
+}
+
 // ★★★ THE ORGANIC LATTICE, AS THE PREVIEW NEEDS IT (task 2026-08-22).
 //
 // ★ WHY THE PREVIEW CAN HAVE THIS AT ALL. The standing note said the strut preview
@@ -2271,9 +2347,12 @@ double organic_default_strut_diameter_mm(double grid_spacing_mm,
 //   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
 //   finish, written] (−1 = the pass did not run), [45] written components,
 //   [46] 1 = emission ran, [47] reserved
-//   [48 ..]                    the strut distance field, [4] doubles (mm, negative
-//                              inside a strut, clamped at the band)
+//   [48 ..]                    the CENTRELINE distance field, [4] doubles (mm, ≥ 0,
+//                              clamped at [8] = reach = band + largest radius)
 //   [48 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
+//   [48 + field + n ..]        the SURFACE distance field, [4] doubles (min over spans of
+//                              centreline − radius, clamped at the band)
+//   then                       the emitted spans, 7 doubles each (a, b, r)
 std::vector<double> organic_preview_field(
     int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
     const std::uint8_t* candidate, std::size_t candidate_count,
@@ -2375,59 +2454,18 @@ std::vector<double> organic_preview_field(
   // so almost every point is within the band anyway.
   const std::size_t fn = static_cast<std::size_t>(fnx) * static_cast<std::size_t>(fny) *
                          static_cast<std::size_t>(fnz);
-  std::vector<double> field;
+  std::vector<double> field, surface_field;
   std::size_t span_count = 0;
+  double reach_all = band_mm;
   // Function scope: the FIELD is optional (a caller may want only the spans) but the
   // span list is returned either way.
   std::vector<topopt::OrganicSpan> emitted;
   if (fnx > 0 && fny > 0 && fnz > 0 && fspacing > 0.0 && band_mm > 0.0 && fn > 0) {
-    field.assign(fn, band_mm);
     auto stamp = [&](const topopt::Vec3& a, const topopt::Vec3& b, double r) {
       ++span_count;
-      const double reach = r + band_mm;
-      int i0 = static_cast<int>(std::floor((std::min(a.x, b.x) - reach - fox) / fspacing));
-      int i1 = static_cast<int>(std::ceil((std::max(a.x, b.x) + reach - fox) / fspacing));
-      int j0 = static_cast<int>(std::floor((std::min(a.y, b.y) - reach - foy) / fspacing));
-      int j1 = static_cast<int>(std::ceil((std::max(a.y, b.y) + reach - foy) / fspacing));
-      int k0 = static_cast<int>(std::floor((std::min(a.z, b.z) - reach - foz) / fspacing));
-      int k1 = static_cast<int>(std::ceil((std::max(a.z, b.z) + reach - foz) / fspacing));
-      i0 = std::max(i0, 0); j0 = std::max(j0, 0); k0 = std::max(k0, 0);
-      i1 = std::min(i1, fnx - 1); j1 = std::min(j1, fny - 1); k1 = std::min(k1, fnz - 1);
-      const double bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z;
-      const double bb = bax * bax + bay * bay + baz * baz;
-      for (int k = k0; k <= k1; ++k) {
-        const double pz = foz + k * fspacing;
-        for (int j = j0; j <= j1; ++j) {
-          const double py = foy + j * fspacing;
-          const std::size_t row = (static_cast<std::size_t>(k) * fny + j) * fnx;
-          for (int i = i0; i <= i1; ++i) {
-            const double px = fox + i * fspacing;
-            const double pax = px - a.x, pay = py - a.y, paz = pz - a.z;
-            double h = bb > 1e-12 ? (pax * bax + pay * bay + paz * baz) / bb : 0.0;
-            h = h < 0.0 ? 0.0 : (h > 1.0 ? 1.0 : h);
-            const double dx = pax - bax * h, dy = pay - bay * h, dz = paz - baz * h;
-            const double d = std::sqrt(dx * dx + dy * dy + dz * dz) - r;
-            double& slot = field[row + i];
-            if (d < slot) slot = d;
-          }
-        }
-      }
+      stamp_centreline_span(field, surface_field, fnx, fny, fnz, fspacing, fox, foy, foz,
+                            a, b, r, reach_all);
     };
-    // ★★★ THE **EMITTED** SPANS, NOT THE TRACED CURVES — and this was the trap.
-    //
-    // ★ FOUR PASSES MUTATE THE SPAN LIST AFTER TRACING and before anything is written:
-    // node merge, free-end tie, support prune (to a fixed point), stranded drop. On a
-    // 40 mm cube they cut ~1,600 spans — 13% of traced length — and merge 8,743 nodes
-    // out of 25,144 endpoints. A preview built from `lat.curves` therefore draws struts
-    // that are NOT in the exported file, which is the "which struts exist at all"
-    // disagreement. `generate_organic_lattice` runs those passes and hands back the
-    // post-clip spans; those are what the welded body is built from, so those are what
-    // the preview shows.
-    //
-    // ★ THE SINK IS DISCARDED ON PURPOSE. We want the span list, not the geometry, so
-    // the triangles go nowhere and `nseg` is the coarsest legal sweep — the passes run
-    // identically either way, and paying for a full 8-segment sweep to throw it away
-    // would make a preview bake cost what an export costs.
     struct NullSink : topopt::TriangleSink {
       void add_triangle(const topopt::Vec3&, const topopt::Vec3&,
                         const topopt::Vec3&) override {}
@@ -2458,6 +2496,11 @@ std::vector<double> organic_preview_field(
     } catch (...) {
       emitted.clear();
     }
+    double rmax = 0.0;
+    for (const topopt::OrganicSpan& sp : emitted) rmax = std::max(rmax, sp.r);
+    reach_all = band_mm + rmax;
+    field.assign(fn, reach_all);
+    surface_field.assign(fn, band_mm);
     for (const topopt::OrganicSpan& sp : emitted) {
       if (!(sp.r > 0.0)) continue;
       stamp(sp.a, sp.b, sp.r);
@@ -2481,7 +2524,7 @@ std::vector<double> organic_preview_field(
   out[5] = lo;
   out[6] = hi;
   out[7] = lat.report.degenerate_fraction;
-  out[8] = band_mm;
+  out[8] = reach_all;   // the clamp of BOTH channels
   out[9] = static_cast<double>(n);
   // ★ THE TRACED SEGMENT COUNT, so the gap between what was TRACED and what is
   // EMITTED is a number on the receipt rather than a claim. The four post-trace passes
@@ -2526,6 +2569,7 @@ std::vector<double> organic_preview_field(
   } else {
     out.insert(out.end(), n, 0.0);
   }
+  out.insert(out.end(), surface_field.begin(), surface_field.end());
   // ★ THE EMITTED SPANS THEMSELVES, LAST — 7 doubles each (a, b, r). The FIELD is what
   // the march samples; these are for a caller that wants the geometry directly, e.g.
   // the settings sample, which builds capsules rather than sphere-tracing a volume.

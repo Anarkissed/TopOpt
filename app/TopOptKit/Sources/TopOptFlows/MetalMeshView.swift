@@ -3622,6 +3622,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private struct LatticeDesired {
         var stressOverlay = false
         var dressingLevel: Float = 0
+        var organicRadiusMM: Float = 0
         var params = LatticeProxyParams()
         var cellSweep: LatticeCellSweep?
         var subfloorRetention: LatticeSubfloorRetention?
@@ -3649,6 +3650,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 // has no scene yet, so this is ten property writes and no work.
                 fresh.stressOverlay = latticeDesired.stressOverlay
                 fresh.dressingLevel = latticeDesired.dressingLevel
+                fresh.organicRadiusMM = latticeDesired.organicRadiusMM
                 fresh.params = latticeDesired.params
                 fresh.cellSweep = latticeDesired.cellSweep
                 fresh.subfloorRetention = latticeDesired.subfloorRetention
@@ -3688,6 +3690,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     var latticeDressingLevel: Float {
         get { latticeLayer?.dressingLevel ?? latticeDesired.dressingLevel }
         set { latticeDesired.dressingLevel = newValue; latticeLayer?.dressingLevel = newValue }
+    }
+    /// ★ The organic live strut radius (mm) — a uniform, never a rebake.
+    var latticeOrganicRadiusMM: Float {
+        get { latticeLayer?.organicRadiusMM ?? latticeDesired.organicRadiusMM }
+        set { latticeDesired.organicRadiusMM = newValue; latticeLayer?.organicRadiusMM = newValue }
     }
 
     var latticeParams: LatticeProxyParams {
@@ -5204,6 +5211,9 @@ public struct LatticeLayerInputs: Equatable {
     public var stressOverlay: Bool = false
     /// 0 none · 1 rim · 2 diagrid — see `LatticeBoundaryTreatment.previewDressingLevel`.
     public var dressingLevel: Float = 0
+    /// ★ ORGANIC: the live strut RADIUS in mm the Thicker slider asks for (0 ⇒ the
+    /// baked per-strut radius). A uniform on the march — changing it never re-bakes.
+    public var organicRadiusMM: Float = 0
     /// ★ THE SWEPT CELL WINDOW, or nil for one cell everywhere. Set only when the
     /// project's own cell mode is swept, so the preview grades the cell size exactly
     /// when the RUN would — see `LatticePreviewOccupancy.gradedCellField`.
@@ -5241,6 +5251,7 @@ public struct LatticeLayerInputs: Equatable {
     public init(scene: LatticeSDFScene, params: LatticeProxyParams,
                 sceneToken: Int, faceTints: [FaceID: SIMD4<Float>],
                 stressOverlay: Bool = false, dressingLevel: Float = 0,
+                organicRadiusMM: Float = 0,
                 cellSweep: LatticeCellSweep? = nil,
                 subfloorRetention: LatticeSubfloorRetention? = nil,
                 lineWidthMM: Double = 0,
@@ -5258,6 +5269,7 @@ public struct LatticeLayerInputs: Equatable {
         self.faceTints = faceTints
         self.stressOverlay = stressOverlay
         self.dressingLevel = dressingLevel
+        self.organicRadiusMM = organicRadiusMM
         self.cellSweep = cellSweep
         self.subfloorRetention = subfloorRetention
         self.lineWidthMM = lineWidthMM
@@ -5285,6 +5297,7 @@ public struct LatticeLayerInputs: Equatable {
             && a.steppedDyadicSteps == b.steppedDyadicSteps
             && a.steppedCellStated == b.steppedCellStated
             && a.dressingLevel == b.dressingLevel
+            && a.organicRadiusMM == b.organicRadiusMM
             && a.hidden == b.hidden
     }
 }
@@ -6167,6 +6180,10 @@ extension MetalMeshView {
                 }
                 if renderer.latticeDressingLevel != lat.dressingLevel {
                     renderer.latticeDressingLevel = lat.dressingLevel
+                    dirty = true
+                }
+                if renderer.latticeOrganicRadiusMM != lat.organicRadiusMM {
+                    renderer.latticeOrganicRadiusMM = lat.organicRadiusMM
                     dirty = true
                 }
                 if renderer.latticeStressOverlay != lat.stressOverlay {

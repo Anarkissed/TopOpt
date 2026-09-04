@@ -1280,6 +1280,12 @@ std::vector<double> organic_preview_field(
     int fnx, int fny, int fnz, double fspacing,
     double fox, double foy, double foz, double band_mm);
 
+// Bake a span list (7 doubles each: a, b, r) into the two-channel centreline field —
+// see `organic_spans_field` in bridge.cpp for the layout.
+std::vector<double> organic_spans_field(const double* spans7, std::size_t span_count,
+                                        int fnx, int fny, int fnz, double fspacing,
+                                        double fox, double foy, double foz, double band_mm);
+
 std::vector<std::string> lattice_certifiable_topologies();
 
 // The topology names the core GEOMETRY GENERATOR can emit (topopt::

@@ -79,7 +79,6 @@ public enum OrganicSampleCube {
         public var layerHeightMM: Double
         public var separationMinMM: Double
         public var separationMaxMM: Double
-        public var strutDiameterMM: Double        // 0 ⇒ core derives it from the band
         public var overhangDeg: Double            // traced only; 0 leaves it to core
         public var rhoMin: Double
         public var rhoMax: Double
@@ -106,7 +105,6 @@ public enum OrganicSampleCube {
             grow = s.organicGrowth && layerHeightMM > 0
             self.layerHeightMM = layerHeightMM
             separationMinMM = lo; separationMaxMM = hi
-            strutDiameterMM = s.organicStrutWidthMM > 0 ? s.organicStrutWidthMM : 0
             overhangDeg = grow ? 0 : s.organicOverhangDeg
             rhoMin = s.minRelativeDensity; rhoMax = max(s.maxRelativeDensity, s.minRelativeDensity)
             structural = (s.stageMode ?? .structural) == .structural
@@ -115,8 +113,9 @@ public enum OrganicSampleCube {
             covered = s.boundary == .covered
         }
 
-        /// The thinnest strut this trace can make: the stated diameter, else the bead.
-        public var thinnestRadiusMM: Double { (strutDiameterMM > 0 ? strutDiameterMM : printedBeadMM) / 2 }
+        /// ★ THICKNESS IS NOT A PICK (2026-09-04): the Thicker slider is a live radius
+        /// on the march, so it never re-traces. The bake voxel follows the bead.
+        public var thinnestRadiusMM: Double { printedBeadMM / 2 }
         /// The bake voxel that shows that strut as a beam: ≤ r_min / 2.
         public var bakeVoxelMM: Double { max(0.06, thinnestRadiusMM / 2) }
     }
@@ -172,11 +171,21 @@ public enum OrganicSampleCube {
     }
     private static var lastBaked: Baked?
 
-    /// Trace the whole cube with these picks. Cached for the last picks only — every
-    /// control change re-traces, which is the point.
+    /// The field's identity in the cache key: the model, its load case, its grid.
+    public static let fieldIdentity = "TestCube20|PLA|anchor0|load1:-200z|res64"
+
+    /// Trace the whole cube with these picks — or, when this topology was traced before
+    /// (shipped in the bundle, or by this device), bake its beam-lattice 3MF in a second
+    /// instead. Cached in memory for the last picks only.
     public static func baked(picks: Picks, latticeID: String) async -> Baked? {
         if let b = await MainActor.run(body: { lastBaked }), b.picks == picks { return b }
         guard let f = await field() else { return nil }
+        let key = OrganicVariantCache.key(picks: picks, fieldIdentity: fieldIdentity)
+        // ★ THE CACHE FIRST (2026-09-04): a topology traced before — shipped in the bundle
+        // or by this device — is handed to the scene as its beam-lattice document and
+        // baked on the scene's own grid; the trace and the emission are skipped.
+        let hit = OrganicVariantCache.load(key: key)
+        let cachedDoc = hit.map { (doc: $0.doc, sourceLabel: $0.source == .bundle ? "the shipped variant" : "the device cache") }
         let result: Baked? = await Task.detached(priority: .userInitiated) { () -> Baked? in
             // the whole cube at the STL's own bounds (0…20 mm), so its bottom face IS
             // the stage floor (item 4.2)
@@ -190,7 +199,7 @@ public enum OrganicSampleCube {
                 buildDirection: SIMD3(0, 0, 1),
                 separationMinMM: picks.separationMinMM, separationMaxMM: picks.separationMaxMM,
                 rhoMin: picks.rhoMin, rhoMax: picks.rhoMax,
-                strutDiameterMM: picks.strutDiameterMM, grow: picks.grow,
+                strutDiameterMM: 0, grow: picks.grow,
                 layerHeightMM: picks.layerHeightMM, overhangAngleDeg: picks.overhangDeg,
                 shapeFit: picks.shapeFit, shapeFitOnly: picks.shapeFitOnly,
                 anchorAtBoundary: picks.covered)
@@ -198,14 +207,26 @@ public enum OrganicSampleCube {
                                         stageMode: picks.structural ? .structural : .aesthetic,
                                         algorithm: "organic",
                                         organic: input,
-                                        organicBakeVoxelMM: picks.bakeVoxelMM)
+                                        organicBakeVoxelMM: picks.bakeVoxelMM,
+                                        organicCached: cachedDoc)
             guard scene.organicField != nil else { return nil }
+            // ★ STORE THE TOPOLOGY as a beam-lattice 3MF, so the next visit bakes it
+            if cachedDoc == nil, let spans = scene.organicEmittedSpans, !spans.isEmpty {
+                let doc = OrganicBeamLattice3MF.Document(
+                    spans: spans,
+                    metadata: ["census": scene.organicSummary, "core": CoreFingerprint.value,
+                               "field": fieldIdentity, "key": key,
+                               "picks": String(format: "%@ · window %.2f–%.2f · layer %.3f · shape fit %d/%d · covered %d",
+                                               picks.grow ? "grown" : "traced", picks.separationMinMM, picks.separationMaxMM,
+                                               picks.layerHeightMM, picks.shapeFit ? 1 : 0, picks.shapeFitOnly ? 1 : 0, picks.covered ? 1 : 0)])
+                OrganicVariantCache.store(key: key, doc: doc)
+            }
             var m = scene.organicSummary
-            m += String(format: " · %@%@%@ · window %.1f–%.1f mm · voxel %.2f mm",
+            m += String(format: " · %@%@%@ · window %.1f–%.1f mm · voxel %.2f mm · key %@",
                         picks.grow ? "grown" : "traced",
                         picks.shapeFit ? (picks.shapeFitOnly ? ", shape-fit only" : ", shape-fit") : ", no shape fit",
                         picks.covered ? ", covered (ends anchor on the shell)" : ", bare (no outline; ends trimmed)",
-                        picks.separationMinMM, picks.separationMaxMM, picks.bakeVoxelMM)
+                        picks.separationMinMM, picks.separationMaxMM, picks.bakeVoxelMM, key)
             return Baked(scene: scene, mesh: box, measurement: m, picks: picks)
         }.value
         await MainActor.run { lastBaked = result }

@@ -227,6 +227,9 @@ struct LSDFUniforms {
     float4 debugParams;
     // x = solid rim (mm) inward from the region boundary; see Swift `rimParams`.
     float4 rimParams;
+    // ★ ORGANIC THICKNESS (2026-09-04): x = live strut radius (mm, 0 = baked), y = the
+    // centreline channel's reach, z = the surface channel's band. Same slot as Swift.
+    float4 organicRadius;
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -678,11 +681,17 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // field whatever produced it.
         if (U.organicOrigin.w > 0.5) {
             float3 og = (p - U.organicOrigin.xyz) / max(U.organicSpacing.xyz, float3(1e-6));
-            float dOrg = U.organicSpacing.w;   // outside the field, the clamped band
+            // ★ TWO CHANNELS (2026-09-04): r = centreline distance (clamped at the
+            // reach), g = SURFACE distance at the baked thickness (clamped at the band).
+            // Baked: read g. A LIVE radius (Thicker): r − radius, exact because every
+            // strut then has that radius. Outside the field both read their clamps —
+            // lower bounds, never a hit.
+            float2 ov = float2(U.organicSpacing.w, U.organicRadius.z);
             if (all(og >= float3(-0.5)) && all(og < U.organicDims.xyz - float3(0.5))) {
                 float3 ouv = (og + 0.5) / max(U.organicDims.xyz, float3(1.0));
-                dOrg = organicTex.sample(samp, ouv).r;
+                ov = organicTex.sample(samp, ouv).rg;
             }
+            float dOrg = U.organicRadius.x > 0.0 ? (ov.r - U.organicRadius.x) : ov.g;
             float epsO = max(0.02, 0.25 * U.organicSpacing.x);
             float F2 = max(dOrg, dClip);
             if (F2 < epsO) {

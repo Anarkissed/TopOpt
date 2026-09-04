@@ -67,3 +67,14 @@ Printability never fired: zero steps refused by the support rule, zero tips clam
 - v5_A_sim_on_traced_auto_emitted.png — traced Auto: the cube with the support pass's legs, node balls and base mat, as the file has them. Bake ≈ 3 min on the iPad.
 - v5_C_sim_on_grown_auto_emitted.png — grown Auto: the base mat with five posts (census 89/7/4 %).
 - v4_A_sim_on_traced_auto_with_layer_height.png — the intermediate (layer height, no boundary).
+
+## Round 5 — 2026-09-04 (evening): the mirror fix actually landed; the split; the 3MF cache
+- ★ Correction: the "mirror floor corrected" claim of round 3 was FALSE at the time (the edit's anchor missed). Landed now; the sim-on traced Auto sample is 492 curves, 2340 connectors, 1.50–4.29 mm, 26,773 emitted spans, 6,903 mm.
+- Mac timings (Debug): trace+emission+store 105 s; bake from the cached 3MF 16.6 s (was 154 s with the window as the bake band); field from the 3MF vs the trace: max |Δ| 0.0000 mm on the same 196×196×197 grid.
+- Two-channel field pinned by OrganicCentrelineFieldTests (surface channel == old bakeField inside the footprint; the first "centreline − nearest radius" design was off on 366 voxels).
+
+### Simulator, dylib 4eee00c4649eaf03 (2026-09-04 16:33–16:38) — the split, on device
+- 16:33 → 16:34: Organic on; "Solving the test cube, then tracing…" cleared within ~75 s (solve + trace + emission + bake + store — a cache MISS: the shipped variants were keyed with the stage flag and the project is Aesthetic; fixed, key v4). The device stored `5dabfe47af0f300321742482.3mf` (3.08 MB) in Application Support.
+- v6_B_thicker_0_90mm_live.png — Density → Thicker (0.90 mm): thicker struts on the SAME topology within one screenshot interval, no re-trace banner. Thickness is a uniform now.
+- The picture itself is the corrected mirror's sim-on traced Auto (492 curves, 1.50–4.29 mm, emission passes on): dense walls, support legs, node balls — core's D2 Auto with shape fit and the file's passes.
+- v6_C_shipped_variant_hit.png — dylib 466db7e845fc3e29, device cache cleared: Organic on at 16:43:5x, sample up before the 25 s mark including the 16 s solve; census reads 'the shipped variant (3MF beam lattice)'; no file stored on the device (a hit).

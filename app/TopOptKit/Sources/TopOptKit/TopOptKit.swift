@@ -1093,7 +1093,12 @@ public enum TopOptKit {
         /// fraction of the design grid's and a 1-3 mm strut is several voxels across.
         /// Clamped at `bandMM`, which is an UNDER-estimate and therefore safe to sphere
         /// trace against.
+        /// ★ The CENTRELINE distance (mm, ≥ 0), clamped at `bandMM` = reach.
         public let field: [Float]
+        /// The SURFACE distance per field voxel (min over spans of centreline − radius,
+        /// clamped at the band) — what the march reads at the baked thickness; under a
+        /// live radius it reads `field` − radius instead.
+        public let surfaceField: [Float]
         public let fieldDims: (Int, Int, Int)
         public let fieldOrigin: SIMD3<Float>
         public let fieldSpacingMM: Float
@@ -1191,6 +1196,29 @@ public enum TopOptKit {
             gridSpacingMM, resolutionFloorVoxels, rhoMax, minExtrudableWidthMM)
     }
 
+    /// ★ Bake a span list alone into the two channels (centreline distance, surface
+    /// distance) — a cached variant or a run's emitted spans; no trace, no emission.
+    public static func organicSpansField(spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)],
+                                         fieldDims: (Int, Int, Int), fieldOrigin: SIMD3<Double>,
+                                         fieldSpacingMM: Double, bandMM: Double)
+        -> (field: [Float], surfaceField: [Float], reachMM: Double, bandMM: Double, spanCount: Int)? {
+        let (fnx, fny, fnz) = fieldDims
+        let fn = fnx * fny * fnz
+        guard fn > 0, bandMM > 0 else { return nil }
+        var flat = [Double](); flat.reserveCapacity(spans.count * 7)
+        for s in spans { flat += [s.a.x, s.a.y, s.a.z, s.b.x, s.b.y, s.b.z, s.r] }
+        let raw: [Double] = flat.withUnsafeBufferPointer { fp in
+            topoptbridge.organic_spans_field(fp.baseAddress, spans.count,
+                                             Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
+                                             fieldOrigin.x, fieldOrigin.y, fieldOrigin.z, bandMM)
+                .map { Double($0) }
+        }
+        guard raw.count >= 16 + 2 * fn, raw[0] > 0.5, Int(raw[4]) == fn else { return nil }
+        let field = (0..<fn).map { Float(raw[16 + $0]) }
+        let surface = (0..<fn).map { Float(raw[16 + fn + $0]) }
+        return (field, surface, raw[8], raw[9], Int(raw[1]))
+    }
+
     public static func organicTrace(nx: Int, ny: Int, nz: Int, spacingMM: Double,
                                     origin: SIMD3<Double>,
                                     candidate: [Bool],
@@ -1247,8 +1275,10 @@ public enum TopOptKit {
         let field = (0..<fn).map { Float(raw[head + $0]) }
         let dOff = head + fn
         let density = raw.count >= dOff + n ? Array(raw[dOff..<(dOff + n)]) : []
+        let rOff = dOff + n
+        let surfaceField = raw.count >= rOff + fn ? (0..<fn).map { Float(raw[rOff + $0]) } : []
         var spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)] = []
-        let sOff = dOff + n
+        let sOff = rOff + fn
         if raw.count > sOff {
             let avail = (raw.count - sOff) / 7
             spans.reserveCapacity(avail)
@@ -1259,7 +1289,7 @@ public enum TopOptKit {
                               r: raw[o + 6]))
             }
         }
-        return OrganicTrace(field: field, fieldDims: fieldDims,
+        return OrganicTrace(field: field, surfaceField: surfaceField, fieldDims: fieldDims,
                             fieldOrigin: SIMD3<Float>(fieldOrigin),
                             fieldSpacingMM: Float(fieldSpacingMM),
                             bandMM: Float(raw[8]),
