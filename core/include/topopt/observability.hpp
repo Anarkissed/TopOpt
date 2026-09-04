@@ -983,6 +983,12 @@ struct RunInfo {
   // LENGTH only and says nothing about connectivity. Absent from the receipt until
   // now, which is why that distinction could not be checked from a run.
   std::vector<int> organic_census_components;
+  // the no-fragmentation guard, so what it did is visible instead of inferred
+  long long organic_support_components_before = -1;
+  long long organic_support_components_after = -1;
+  long long organic_support_fragments_dropped = 0;
+  double organic_support_fragment_length_mm = 0.0;
+  long long organic_base_mat_stitches = 0;
   // ★★ THE ORGANIC STRUCTURAL CERTIFICATE, under grading.organic.*. `verdict` is
   // "certified" | "refused" | "not_run" — never absent, so a run that did not certify
   // cannot be mistaken for one that did. `statistic` names WHICH number the verdict

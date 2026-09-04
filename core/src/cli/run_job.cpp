@@ -649,6 +649,11 @@ struct LatticeExportOutcome {
   // pass reads as having deleted everything.
   std::vector<double> organic_census_len_mm;
   std::vector<int> organic_census_components;
+  int organic_support_components_before = -1;
+  int organic_support_components_after = -1;
+  long long organic_support_fragments_dropped = 0;
+  double organic_support_fragment_length_mm = 0.0;
+  long long organic_base_mat_stitches = 0;
   // ★ THE EMITTED SPANS, carried out so the STRUCTURAL CERTIFICATE can read the
   // geometry that ships. They are post-clip, post-prune, post-finish and
   // post-endpoint-fit -- the same spans lattice.emit_organic_spans writes.
@@ -2063,6 +2068,12 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_census_len_mm.assign(g.census_len_mm,
                                     g.census_len_mm + OrganicGenStats::kCensusStages);
     oc.organic_census_grown_len_mm = g.census_grown_len_mm;
+    oc.organic_support_components_before = g.support_components_before;
+    oc.organic_support_components_after = g.support_components_after;
+    oc.organic_support_fragments_dropped =
+        static_cast<long long>(g.support_fragments_dropped);
+    oc.organic_support_fragment_length_mm = g.support_fragment_length_mm;
+    oc.organic_base_mat_stitches = static_cast<long long>(g.base_mat_stitches);
     oc.organic_emitted_components = static_cast<long long>(g.emitted_components);
     oc.organic_floating_before = g.floating_voxels_before;
     oc.organic_floating_after = g.floating_voxels_after;
@@ -8521,6 +8532,11 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         copy_growth_stats(gi, R.oc.growth, R.oc.growth_ran);
         gi.organic_census_len_mm = R.oc.organic_census_len_mm;
         gi.organic_census_components = R.oc.organic_census_components;
+        gi.organic_support_components_before = R.oc.organic_support_components_before;
+        gi.organic_support_components_after = R.oc.organic_support_components_after;
+        gi.organic_support_fragments_dropped = R.oc.organic_support_fragments_dropped;
+        gi.organic_support_fragment_length_mm = R.oc.organic_support_fragment_length_mm;
+        gi.organic_base_mat_stitches = R.oc.organic_base_mat_stitches;
         // ★ the organic structural certificate. `verdict` is never absent when one
         // was run, so "no key" and "not certified" cannot be confused.
         if (R.organic_cert.verdict != OrganicCertificate::Verdict::NotRun) {

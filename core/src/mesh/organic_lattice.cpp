@@ -2005,6 +2005,10 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   if (nseg < 3)
     throw std::invalid_argument("generate_organic_lattice: nseg must be >= 3");
   OrganicGenStats st;
+  // the base mat's own geometry, needed again once the support pass has finished
+  // moving the lattice that stands on it
+  bool mat_built = false, mat_stitched = false;
+  double mat_zm = 0.0, mat_pitch = 0.0, mat_rmat = 0.0;
   // ★ THE INPUT LENGTH, recorded before anything can consume it, so survival is
   // answerable from the stats alone without the caller holding the lattice.
   for (const OrganicCurve& c0 : lat.curves) st.census_grown_len_mm += c0.length_mm;
@@ -2189,7 +2193,23 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   };
   auto census_at = [&](OrganicGenStats::CensusStage stage) {
     st.census_len_mm[stage] = census_len();
-    st.census_components[stage] = census_components(); };
+    st.census_components[stage] = census_components();
+    // ★ THE SPANS AT EVERY STAGE, for looking at rather than counting. The receipt
+    // says the support pass took the lattice from 5 pieces to 219; it cannot say WHICH
+    // five, nor which of them the cutting emptied out. Env-gated so it costs a
+    // production run nothing, and written in the same GRID/SEG format the final span
+    // file uses so one renderer reads them all.
+    if (const char* dump = std::getenv("TOPOPT_ORGANIC_SPAN_DUMP")) {
+      const std::string path = std::string(dump) + "_" +
+                               organic_census_stage_name(static_cast<int>(stage)) +
+                               ".txt";
+      if (FILE* f = std::fopen(path.c_str(), "wb")) {
+        for (const EmittedSeg& e : emitted)
+          std::fprintf(f, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n",
+                       e.a.x, e.a.y, e.a.z, e.b.x, e.b.y, e.b.z, 2.0 * e.r);
+        std::fclose(f);
+      }
+    } };
   auto emit_node_once = [&](const Vec3& p, double r) {
     // ★ THE SAME GUARD THE OCTET GENERATOR HOLDS, AND FOR THE SAME REASON
     // (lattice_gen.cpp, the interior-node loop): a node ball whose SOLID would breach
@@ -2586,6 +2606,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             // properly adhered one.
             const double zm = zbase;
             st.base_mat_z_mm = zm;
+            // ★ remembered for the RE-STITCH after the support pass: the mat is laid
+            // here, but the cutting below rearranges the lattice standing on it.
+            mat_built = true; mat_zm = zm; mat_pitch = pitch; mat_rmat = rmat;
             cur_src = Src::Leg;          // structural: never pruned as a loose end
             const double x0 = lo.x, x1 = hi.x, y0 = lo.y, y1 = hi.y;
 
@@ -2643,8 +2666,21 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                   open = false;
                   if (tc - run0 > step) {
                     const std::size_t before = emitted.size();
-                    if (along_y) span({fixed, run0, zm}, {fixed, tc, zm}, rmat);
-                    else         span({run0, fixed, zm}, {tc, fixed, zm}, rmat);
+                    // ★★ SUBDIVIDED, because the weld is ENDPOINT-based. A mat run laid
+                    // as ONE long span crosses the lattice at mid-span, where neither
+                    // build_beam_network nor anything else joins it -- the precondition
+                    // asserted in test_beam_network ("feed it coarse members and it will
+                    // silently report a disconnected lattice"). Measured: a 114.8 mm mat
+                    // piece in FOUR spans, ~28 mm each, against lattice spans of 0.87 mm.
+                    // Stepping at 2*rmat puts a vertex within one radius of any crossing.
+                    const double sub = std::max(2.0 * rmat, 1e-3);
+                    const int nsub = std::max(1, static_cast<int>((tc - run0) / sub));
+                    for (int q2 = 0; q2 < nsub; ++q2) {
+                      const double a2 = run0 + (tc - run0) * q2 / nsub;
+                      const double b2 = run0 + (tc - run0) * (q2 + 1) / nsub;
+                      if (along_y) span({fixed, a2, zm}, {fixed, b2, zm}, rmat);
+                      else         span({a2, fixed, zm}, {b2, fixed, zm}, rmat);
+                    }
                     for (std::size_t q = before; q < emitted.size(); ++q) {
                       ++st.base_mat_struts;
                       st.base_mat_length_mm += emitted[q].len;
@@ -2655,6 +2691,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             };
             for (double x = x0; x <= x1; x += pitch) emit_padded_line(true, x);
             for (double y = y0; y <= y1; y += pitch) emit_padded_line(false, y);
+
           }
         }
       }
@@ -3380,7 +3417,11 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           std::vector<std::pair<Vec3, Vec3>> legs;
           std::vector<std::size_t> doomed;
           {
-            struct Tip { Vec3 p; int k; bool alive; };
+            // ★ `anchored` records WHY a tip stopped. `alive` goes false for two
+            // OPPOSITE outcomes -- the branch found support and anchored on the model,
+            // or it could not descend at all -- and the cut below treats them the same
+            // unless the success case is marked.
+            struct Tip { Vec3 p; int k; bool alive; bool anchored = false; };
             std::vector<Tip> tips;
             for (const Island& I : isl) {
               double xs = 0.0, ys = 0.0;
@@ -3470,6 +3511,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                 const int aj = static_cast<int>((np.y - lo.y) / vxy);
                 if (ai >= 0 && aj >= 0 && ai < RX && aj < RY && occ[ridx(ai, aj, nk)]) {
                   t.alive = false;
+                  t.anchored = true;          // SUPPORTED: not a candidate for the cut
                   ++st.branch_anchored_on_model;
                 }
               }
@@ -3483,7 +3525,16 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             // stay closed or the refusal downstream has nothing to stand on.
             for (std::size_t ti = 0; ti < tips.size() && ti < isl.size(); ++ti) {
               if (tips[ti].k <= ground) continue;          // reached the base
-              if (tips[ti].alive) continue;                // still going / anchored
+              if (tips[ti].alive) continue;                // still going
+              // ★★ AND THE ONE THIS PASS WAS ALREADY TRYING TO MAKE. The comment above
+              // says "a tip that died WITHOUT ANCHORING and without reaching the ground
+              // supported nothing" -- but `alive` is false for BOTH outcomes, so a
+              // branch that FOUND support and anchored on the model fell through here
+              // and had its island cut anyway. Legs first, cut only what legs could not
+              // support: that is what the fallback was for, and the flag is what makes
+              // the code say it. Measured on a 3-5 mm window: 172 branches anchored
+              // successfully and were cut regardless.
+              if (tips[ti].anchored) continue;             // a leg DID support it
               const Island& I = isl[ti];
               for (std::size_t si = 0; si < emitted.size(); ++si) {
                 // ★ LEGS AND FILL ARE UNCUTTABLE, and for the same reason: both are
@@ -3500,6 +3551,16 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                 bool touches = false;
                 for (const std::pair<int,int>& c : I.cells)
                   if (covers(emitted[si], c.first, c.second, I.k)) { touches = true; break; }
+                // ★ THE ISLAND CUT, AND WHAT IT ACTUALLY REMOVES. This kills every
+                // span that TOUCHES an unsupportable island's cells -- not the spans
+                // that are unsupported. A well-supported strut merely passing through
+                // the region dies with it, which is why the surviving lattice loses
+                // its diagonals and keeps its bars.
+                //
+                // ★ ENV-GATED BYPASS, for looking at what the cut costs. NOT a
+                // production switch and not printable-verified: it answers "how much
+                // of this fabric did the cut take" and nothing else.
+                if (std::getenv("TOPOPT_ORGANIC_NO_ISLAND_CUT")) continue;
                 if (touches) { live[si] = 0; doomed.push_back(si); }
               }
             }
@@ -3968,55 +4029,82 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           emitted.swap(sbody);
 
           // ══════════════════════════════════════════════════════════════════════
-          // ★★★ THE PRUNE MAY NOT INCREASE THE NUMBER OF LATTICE PIECES ★★★
-          // The drop above keeps a piece if it is BIG (>= 2% of length). It never asks
-          // whether the piece is still attached, so cutting can leave large fragments
-          // floating and this pass will preserve every one of them: MEASURED on a
-          // 3-5 mm window, the support pass took the lattice from 5 components to 219
-          // and this drop removed NONE, leaving 11.1% of the lattice by length with no
-          // path to the part -- unsolvable, and unprintable for the same reason.
+          // ★★★ RE-STITCH THE MAT TO THE LATTICE THAT ACTUALLY REMAINS ★★★
+          // The mat is laid far above this point, against the lattice as it stood
+          // BEFORE the support pass. Then the cutting rearranges what stands on it, so
+          // the mat ends up matching geometry that no longer exists.
           //
-          // The size exemption is not wrong, it is just answering a different
-          // question: a part may declare SEVERAL lattice regions and those are
-          // legitimately separate. But a piece that exists only AFTER cutting is not a
-          // region, it is debris. So the pass is allowed the piece count it INHERITED
-          // and no more -- keep the N largest, delete what cutting invented.
+          // MEASURED on a 3-5 mm window: every mat piece sat at exactly z = 12.846 --
+          // the same plane the walls come down to -- and still missed them SIDEWAYS by
+          // 0.89 to 3.54 mm against a 0.52 mm contact radius. 1323 mm of plastic, 79
+          // struts, 200 touchdowns, carrying nothing; in the print it lands beside the
+          // strut instead of under it.
           //
-          // Counted with solver_components(), because the solver is what refuses.
-          if (!emitted.empty() && st.support_components_before > 0) {
-            std::vector<int> root_of;
-            const int after = solver_components(&root_of);
-            st.support_components_after = after;
-            if (after > st.support_components_before) {
-              std::map<int, double> flen;
-              for (std::size_t i = 0; i < emitted.size(); ++i)
-                flen[root_of[i]] += emitted[i].len;
-              std::vector<std::pair<double, int>> order;
-              order.reserve(flen.size());
-              for (const auto& kv : flen) order.push_back({kv.second, kv.first});
-              std::sort(order.begin(), order.end(),
-                        [](const std::pair<double, int>& x,
-                           const std::pair<double, int>& y) { return x.first > y.first; });
-              std::set<int> keep_roots;
-              for (std::size_t i = 0;
-                   i < order.size() &&
-                   i < static_cast<std::size_t>(st.support_components_before); ++i)
-                keep_roots.insert(order[i].second);
-              std::vector<EmittedSeg> fbody;
-              fbody.reserve(emitted.size());
-              for (std::size_t i = 0; i < emitted.size(); ++i) {
-                if (keep_roots.count(root_of[i])) { fbody.push_back(emitted[i]); continue; }
-                ++st.support_fragments_dropped; ++st.mutations;
-                st.support_fragment_length_mm += emitted[i].len;
-              }
-              emitted.swap(fbody);
-              st.support_components_kept =
-                  static_cast<int>(std::min<std::size_t>(
-                      order.size(),
-                      static_cast<std::size_t>(st.support_components_before)));
-            } else {
-              st.support_components_kept = after;
+          // Two causes, and BOTH have to be answered. The mat is drawn on a GRID at
+          // `pitch` wherever a grid point is within three pitches of a touchdown, so
+          // "deserves a pad" is measured in pitches while "actually joins" is measured
+          // in strut radii. And it is laid too EARLY. Stitching at the original site
+          // fixed the first and not the second, and made things worse -- 47 pieces
+          // became 159 and stray length doubled, because the stitches bonded to struts
+          // the cut then deleted, leaving the crosses themselves floating.
+          //
+          // So the touchdowns are re-collected HERE, from the lattice that survived,
+          // and a cross is laid on each: it passes through the touchdown so it welds to
+          // the strut standing there, and reaches +/- half a pitch so it necessarily
+          // crosses the mat's own grid lines. Same lesson as everywhere else in this
+          // file -- every pass that CUTS must be followed by whatever repairs cutting
+          // breaks.
+          // ★★ ONCE, AND NEVER ONTO ITSELF. This sits inside the repair fixed point,
+          // so without a latch it re-runs every round; and a stitch cross has both its
+          // endpoints AT the mat plane, so the next round reads them as touchdowns and
+          // stitches onto the stitches. Measured with neither guard: 12,479 mat struts
+          // and 18,953 mm of mat against a 1,323 mm mat -- the pass eating its own
+          // output. Only real lattice (never Leg or Fill) is a touchdown.
+          if (mat_built && !mat_stitched && !emitted.empty()) {
+            mat_stitched = true;
+            const double contact_z = mat_zm + kOrganicBaseMatContactRadii * mat_rmat;
+            const double half = 0.5 * mat_pitch;
+            const double dq = std::max(mat_rmat, 1e-3);
+            std::unordered_map<long long, char> seen_t;
+            auto dkey = [&](double x, double y) {
+              return (static_cast<long long>(std::llround(x / dq)) << 32) ^
+                     static_cast<long long>(std::llround(y / dq));
+            };
+            std::vector<std::array<double, 2>> land;
+            for (const EmittedSeg& e : emitted) {
+              if (e.src == Src::Leg || e.src == Src::Fill) continue;   // not lattice
+              for (const Vec3& q : {e.a, e.b})
+                if (q.z <= contact_z && seen_t.emplace(dkey(q.x, q.y), 1).second)
+                  land.push_back({q.x, q.y});
             }
+            const Src keep_src = cur_src;
+            cur_src = Src::Leg;              // structural: never pruned as a loose end
+            for (const std::array<double, 2>& t : land) {
+              const std::size_t before = emitted.size();
+              // subdivided for the same reason as the mat runs above
+              const double sub = std::max(2.0 * mat_rmat, 1e-3);
+              const int nsub = std::max(1, static_cast<int>(2.0 * half / sub));
+              for (int q2 = 0; q2 < nsub; ++q2) {
+                const double f0 = -half + 2.0 * half * q2 / nsub;
+                const double f1 = -half + 2.0 * half * (q2 + 1) / nsub;
+                span({t[0] + f0, t[1], mat_zm}, {t[0] + f1, t[1], mat_zm}, mat_rmat);
+                span({t[0], t[1] + f0, mat_zm}, {t[0], t[1] + f1, mat_zm}, mat_rmat);
+              }
+              for (std::size_t q = before; q < emitted.size(); ++q) {
+                ++st.base_mat_struts; ++st.base_mat_stitches;
+                st.base_mat_length_mm += emitted[q].len;
+              }
+            }
+            cur_src = keep_src;
+          }
+
+          // ★ THE PIECE COUNT, RECORDED AND NOT ENFORCED. A guard here deleted every
+          // component beyond the count the pass inherited. It was wrong for the reason
+          // written at the end of this function: the pieces it would remove are TIED TO
+          // THE SOLID and carry load -- the certificate reports zero uncarried members
+          // on the same geometry. Counting is useful; acting on this count is not.
+          if (!emitted.empty()) {
+            st.support_components_after = solver_components();
           }
           census_at(OrganicGenStats::CensusStrandedDrop2);
         }
@@ -4541,6 +4629,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     census_at(OrganicGenStats::CensusFinish);
   }
 
+
   }
 
   // ── ★★ THE CENSUS, AT THE FIXED POINT AND NOWHERE ELSE ─────────────────────
@@ -4898,6 +4987,20 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                    st.endpoint_pulled_in, st.endpoint_span_dropped,
                    st.endpoint_min_margin_mm, emitted.size());
   }
+  // ★★ THE PIECE COUNT IS MEASURED HERE AND NOT ACTED ON, and that is the finding.
+  // A guard that deleted every piece beyond the count the pass inherited looked
+  // obviously right, and it is WRONG: the certificate on this very run reports
+  // structural_zero_stress_fraction 0 with all 10,475 members carrying load. The
+  // lattice sub-networks that this count calls "separate" are each TIED TO THE SOLID
+  // PART, which is what carries them -- an embedded lattice does not have to be one
+  // graph to be one structure. Deleting them would have thrown away load-bearing
+  // material to satisfy a number that never described the physics.
+  //
+  // What DOES describe it is the tie test in beam_network: a component that reaches no
+  // tie carries nothing, and that is refused (and dropped) there, where the ties are
+  // known. Here, only the count is recorded.
+  if (!emitted.empty()) st.support_components_after = solver_components();
+
   {
     Vec3 last_b{0, 0, 0};
     bool have_last = false;

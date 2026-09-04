@@ -1224,6 +1224,9 @@ struct OrganicGenStats {
   // Points where the lattice actually reaches the base plane; the mat is emitted
   // only around these, so "how much foundation" is legible next to "for how many feet".
   std::size_t base_mat_touchdowns = 0;
+  // ★ the crosses laid ON the touchdowns so the grid-snapped mat actually reaches the
+  // struts standing on it. Without them the mat missed by 0.89-3.54 mm.
+  std::size_t base_mat_stitches = 0;
   // ★ VDI SLENDERNESS PROPPING. `violating` counts struts over the l/D the standard
   // allows for their angle; `propped` those a leg could be dropped under; `impossible`
   // those with nothing beneath to stand on. Reported separately because a strut that

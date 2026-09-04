@@ -1424,6 +1424,16 @@ std::string run_info_json(const RunInfo& info) {
         // receipt cannot distinguish "nothing else deleted material" from "nothing
         // else changed the geometry", and the node merge is the counter-example --
         // it fuses components while moving almost no length.
+        gr += ", \"support_components_before\": " +
+              std::to_string(info.organic_support_components_before);
+        gr += ", \"support_components_after\": " +
+              std::to_string(info.organic_support_components_after);
+        gr += ", \"support_fragments_dropped\": " +
+              std::to_string(info.organic_support_fragments_dropped);
+        gr += ", \"support_fragment_length_mm\": " +
+              fmt(info.organic_support_fragment_length_mm);
+        gr += ", \"base_mat_stitches\": " +
+              std::to_string(info.organic_base_mat_stitches);
         if (!info.organic_structural_verdict.empty()) {
           gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
           gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";
