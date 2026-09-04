@@ -585,6 +585,7 @@ public struct LatticeSpec: Equatable, Sendable {
     public var organicScale: Double = 1
     /// The user's pick among certification's separations (0 ⇒ none; Fit lets core choose).
     public var organicPickedSeparationMM: Double = 0
+    public var organicPickedGradeMM: [Double] = []
     /// ★ THE LAYER HEIGHT THIS JOB WILL CARRY, for the growth precondition only.
     /// `organic_growth` is a SCHEMA REFUSAL without a stated `loads.layer_height_mm`,
     /// so the key is not written unless one is really there — the job document is the
@@ -747,6 +748,9 @@ public struct LatticeSpec: Equatable, Sendable {
             // 2026-09-03). `put` refuses it until core's schema accepts the key, so a
             // pick is stored and shown but never sent to a core that would refuse.
             if organicPickedSeparationMM > 0 { put("organic_separation_mm", organicPickedSeparationMM) }
+            if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0, organicPickedGradeMM[1] >= organicPickedGradeMM[0] {
+                put("organic_window_mm", organicPickedGradeMM)
+            }
             // ★★★ GROWTH NEEDS A STATED LAYER HEIGHT — a SCHEMA REFUSAL since the
             // PR 353 amendment, not a fallback. Without one core would substitute half
             // a voxel (0.85 mm on the M2's 1.705 mm grid, roughly four times a real
@@ -901,6 +905,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// as `organic_separation_mm` the day core's schema accepts that key — gated in
     /// `gradingDictionary()` like every organic key, never sent to a core that refuses.
     public var organicPickedSeparationMM: Double = 0
+    /// ★ THE GRADES CERTIFICATION APPROVES (maintainer, 2026-09-03, item 3.1): with the
+    /// simulation on, a Manual pick among the windows core reports as certifying —
+    /// each `[lo, hi]` in mm. Core does not report them yet (receipt key
+    /// `fitting_windows_mm`, pending); empty until it does, and the pane says so.
+    public var organicApprovedGradesMM: [[Double]] = []
+    /// The user's picked grade (empty ⇒ none). Travels as `organic_window_mm` once
+    /// core's schema accepts that key — probe-gated like every organic key.
+    public var organicPickedGradeMM: [Double] = []
+
+    /// ★ THE MANUAL SIZE LADDER (maintainer, 2026-09-03, item 3): with the simulation
+    /// off, "Manual" offers the approved sizes; under an Aesthetic stage every size
+    /// is offered, and one not in the approved set carries a "*" — it may leave the
+    /// lattice in more than one piece. The ladder is the app's; the approval is core's.
+    public static let organicManualSizeLadderMM: [Double] = [2, 3, 4, 5, 6, 8, 10]
 
     /// Is organic the chosen algorithm? Asked of the RESOLVED name, so "not stated"
     /// (which core resolves to doubled) is correctly not organic.
@@ -1081,6 +1099,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if densityMode.needsSimulation { densityMode = .uniform }
         // Cell size: `swept` IS the stress-graded cell ladder.
         if cellSizeMode == .swept { cellSizeMode = .fixed }
+        // ★ ORGANIC WITHOUT A SIMULATION (maintainer, 2026-09-03, item 3): there is
+        // no field to grade by, so Auto (the FEA-driven window) is gone — Fit or a
+        // Manual size — and the fit is SHAPE-ONLY; the pane refuses to turn that off
+        // and says why. (D2 organic cell modes are Auto and Fit; Manual is a Fit with
+        // a stated size.)
+        if algorithm == "organic" {
+            if cellSizeMode == .auto { cellSizeMode = .fit }
+            organicShapeFit = true
+            organicShapeFitOnly = true
+        }
     }
 
     /// ★ WHETHER A SOLVE IS ACTUALLY NEEDED — the permission AND at least one
@@ -1428,6 +1456,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case organicGrowth, organicStrutWidthMM, organicOverhangDeg
         case organicBoundaryFinish, organicShapeFit, organicShapeFitOnly, organicScale
         case organicFittingSeparationsMM, organicPickedSeparationMM
+        case organicApprovedGradesMM, organicPickedGradeMM
     }
 
     public init(from decoder: Decoder) throws {
@@ -1454,6 +1483,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         organicScale = try c.decodeIfPresent(Double.self, forKey: .organicScale) ?? 1.0
         organicFittingSeparationsMM = try c.decodeIfPresent([Double].self, forKey: .organicFittingSeparationsMM) ?? []
         organicPickedSeparationMM = try c.decodeIfPresent(Double.self, forKey: .organicPickedSeparationMM) ?? 0
+        organicApprovedGradesMM = try c.decodeIfPresent([[Double]].self, forKey: .organicApprovedGradesMM) ?? []
+        organicPickedGradeMM = try c.decodeIfPresent([Double].self, forKey: .organicPickedGradeMM) ?? []
         // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
         // exactly the job they emitted before (bar R1).
         cellSizeMode = try c.decodeIfPresent(LatticeCellSizeMode.self, forKey: .cellSizeMode) ?? .fixed
@@ -1566,6 +1597,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Written only when set, so an untouched project's file is byte-identical.
         if !organicFittingSeparationsMM.isEmpty {
             try c.encode(organicFittingSeparationsMM, forKey: .organicFittingSeparationsMM)
+        }
+        if !organicApprovedGradesMM.isEmpty {
+            try c.encode(organicApprovedGradesMM, forKey: .organicApprovedGradesMM)
+        }
+        if !organicPickedGradeMM.isEmpty {
+            try c.encode(organicPickedGradeMM, forKey: .organicPickedGradeMM)
         }
         if organicPickedSeparationMM > 0 {
             try c.encode(organicPickedSeparationMM, forKey: .organicPickedSeparationMM)
@@ -1918,6 +1955,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.organicShapeFitOnly = organicShapeFitOnly
             spec.organicScale = organicScale
             spec.organicPickedSeparationMM = organicPickedSeparationMM
+            spec.organicPickedGradeMM = organicPickedGradeMM
             spec.layerHeightMM = layerHeightMM
             spec.stageMode = stageMode
             return spec
@@ -1974,6 +2012,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.organicShapeFitOnly = organicShapeFitOnly
         spec2.organicScale = organicScale
         spec2.organicPickedSeparationMM = organicPickedSeparationMM
+        spec2.organicPickedGradeMM = organicPickedGradeMM
         spec2.layerHeightMM = layerHeightMM
         spec2.stageMode = stageMode
         return spec2

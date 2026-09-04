@@ -251,6 +251,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var organicStrutWidthMM: Double = 0
     /// The user's pick among certification's separations (0 ⇒ none; core chooses).
     public var organicPickedSeparationMM: Double = 0
+    public var organicPickedGradeMM: [Double] = []
     public var organicOverhangDeg: Double = 0
     public var organicBoundaryFinish: LatticeOrganicFinish = .skin
     public var organicShapeFit: Bool = false
@@ -296,10 +297,16 @@ public struct LatticeWizardModel: Equatable, Sendable {
         var probe = LatticeSettings(enabled: true)
         probe.densityMode = densityMode
         probe.cellSizeMode = cellSizeMode
+        // ★ the organic rule rides the same borrowed function (item 3, 2026-09-03)
+        probe.algorithm = cellTransition == .organicGrade ? "organic" : ""
+        probe.organicShapeFit = organicShapeFit
+        probe.organicShapeFitOnly = organicShapeFitOnly
         probe.setSimulateStresses(on)
         simulateStresses = probe.simulateStresses
         densityMode = probe.densityMode
         cellSizeMode = probe.cellSizeMode
+        organicShapeFit = probe.organicShapeFit
+        organicShapeFitOnly = probe.organicShapeFitOnly
     }
 
     /// ★ WHETHER THE SAVE SHOULD KICK OFF AN FEA. Same question, same answer as
@@ -332,6 +339,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.organicGrowth = s.organicGrowth
         self.organicStrutWidthMM = s.organicStrutWidthMM
         self.organicPickedSeparationMM = s.organicPickedSeparationMM
+        self.organicPickedGradeMM = s.organicPickedGradeMM
         self.organicOverhangDeg = s.organicOverhangDeg
         self.organicBoundaryFinish = s.organicBoundaryFinish
         self.organicShapeFit = s.organicShapeFit
@@ -378,6 +386,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.organicGrowth = organicGrowth
         out.organicStrutWidthMM = organicStrutWidthMM
         out.organicPickedSeparationMM = organicPickedSeparationMM
+        out.organicPickedGradeMM = organicPickedGradeMM
         out.organicOverhangDeg = organicOverhangDeg
         out.organicBoundaryFinish = organicBoundaryFinish
         out.organicShapeFit = organicShapeFit
@@ -535,8 +544,13 @@ public struct LatticeWizardModel: Equatable, Sendable {
         cellTransition = .organicGrade
         organicShapeFit = true
         organicBoundaryFinish = .clean
+        // ★ (d) no simulation ⇒ shape-only fit, and no Auto (item 3, 2026-09-03)
+        if !simulateStresses {
+            organicShapeFitOnly = true
+            if cellSizeMode == .auto { cellSizeMode = .fit }
+        }
         guard cellSizeMode != .auto && cellSizeMode != .fit else { return false }
-        setCellSizeMode(.auto)
+        setCellSizeMode(!simulateStresses ? .fit : .auto)
         return true
     }
 

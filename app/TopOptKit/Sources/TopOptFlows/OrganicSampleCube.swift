@@ -1,11 +1,21 @@
-// OrganicSampleCube.swift — the wizard's ORGANIC sample is the PR 353 test cube,
+// OrganicSampleCube.swift — the wizard's ORGANIC sample is a 20 mm TEST CUBE,
 // RE-TRACED WITH THE USER'S SETTINGS (maintainer, 2026-09-03: "this is ONE example of
 // what organic should be able to do — they should change as well … a base to build on").
 //
-// The base is CUBE_FINAL — PR 353 round 4, the job the printed cube came from
-// (`evidence/2026-08-21-organic-lattice/cube/final_organic.json`: 40 mm cube, 64³, PLA,
-// anchored on face 0, −200 N axial on face 1, aesthetic, swept 3–6 mm). Its printed
-// spans and receipt are bundled too (`PR353_CUBE_FINAL_*`) as the render-test fixture.
+// The base is the printed PR 353 cube's job (`evidence/2026-08-21-organic-lattice/cube/
+// final_organic.json`: 64³, PLA, anchored on face 0, −200 N axial on face 1, aesthetic,
+// swept 3–6 mm) on a WHOLE 20 mm cube (`TestCube20.stl`, the 40 mm fixture scaled by
+// 0.5, same face order — maintainer, 2026-09-03 item 6: a corner cut of the 40 mm field
+// left the far corner empty; a whole cube carries field on every face). The printed
+// spans and receipt stay bundled (`PR353_CUBE_FINAL_*`) as the render-test fixture. The
+// user-facing name is "a 20 mm test cube" — never the PR number (item 1).
+//
+// ★ SIMULATE STRESSES (maintainer, 2026-09-03, item 7, amended the same night: "this
+// is way too uniform — bring back the way you had it last time"): the struts ALWAYS
+// follow the cube's own field. ON ⇒ graded by it (the waves in spacing and width);
+// OFF ⇒ ungraded — shape fit only, one spacing — which is exactly what core's run does
+// with `organic_shape_fit_only` on a solved field, so sample and run agree. (A
+// synthetic uniform tensor was tried and rejected: a bare cubic grid.)
 //
 // LIVE, ON DEVICE, THROUGH THE PRODUCTION FUNCTIONS: the cube's stress tensor comes
 // from the app's own FEA (`TopOptKit.analyzeSolidLoadCase`, the same call the part's
@@ -15,18 +25,16 @@
 // The result renders through the same path a run's spans take (`LatticeSDFScene` bake
 // + the march).
 //
-// A 20 mm CORNER of the cube's field, not a rescale: at bead-width struts the bake must
-// sit at ≤ r_min/2 (≈ 0.1 mm) to show beams rather than ribbons (measured 2026-09-03 at
-// the 0.35 mm floor: sheets), and 40 mm at that voxel is 55 M voxels — over the cap. The
-// 20 mm cut keeps the strut-to-spacing ratio exactly; the label says it is a cut.
+// 20 mm, whole: at bead-width struts the bake must sit at ≤ r_min/2 (≈ 0.1 mm) to show
+// beams rather than ribbons (measured 2026-09-03 at the 0.35 mm floor: sheets); 20 mm at
+// that voxel is ~7 M voxels, 40 mm would be 55 M — over the cap.
 import Foundation
 import simd
 import TopOptKit
 
 public enum OrganicSampleCube {
-    /// 40 mm, as printed; the sample traces a 20 mm corner of it.
-    public static let edgeMM: Double = 40
-    public static let cutMM: Double = 20
+    /// The whole 20 mm cube is traced.
+    public static let edgeMM: Double = 20
     /// The printed job's separation window (swept 3–6 mm) — the base the user scales.
     public static let printedWindowMM: (lo: Double, hi: Double) = (3, 6)
     /// The printed job's bead (min_extrudable_width_mm 0.42) — strut r = 0.21.
@@ -46,7 +54,7 @@ public enum OrganicSampleCube {
                           subdirectory: "OrganicSample")
     }
     public static var modelURL: URL? {
-        Bundle.module.url(forResource: "PR353_cube40", withExtension: "stl",
+        Bundle.module.url(forResource: "TestCube20", withExtension: "stl",
                           subdirectory: "OrganicSample")
     }
     public static func index(cellMM: Float = 4) -> OrganicSpanIndex? {
@@ -59,7 +67,8 @@ public enum OrganicSampleCube {
         return OrganicRunReceipt(info: obj)
     }
 
-    public static let label = "The PR 353 test cube (a 20 mm corner), re-traced with your settings. Your part will differ."
+    /// The banner (item 1: short, and no PR number). The census lives behind the (i).
+    public static let label = "A 20 mm test cube, re-traced with your settings. Your part will differ."
 
     // MARK: the user's picks → what the tracer is told
 
@@ -157,20 +166,21 @@ public enum OrganicSampleCube {
     public struct Baked: Sendable {
         public let scene: LatticeSDFScene
         public let mesh: ViewerMesh
+        /// The census — what was traced and how (behind the banner's (i)).
         public let measurement: String
         public let picks: Picks
     }
     private static var lastBaked: Baked?
 
-    /// Trace the cube's 20 mm corner with these picks. Cached for the last picks only —
-    /// every control change re-traces, which is the point.
+    /// Trace the whole cube with these picks. Cached for the last picks only — every
+    /// control change re-traces, which is the point.
     public static func baked(picks: Picks, latticeID: String) async -> Baked? {
         if let b = await MainActor.run(body: { lastBaked }), b.picks == picks { return b }
         guard let f = await field() else { return nil }
         let result: Baked? = await Task.detached(priority: .userInitiated) { () -> Baked? in
-            // the 20 mm corner at the cube's own origin (the STL spans 0…40 mm)
-            let corner = SIMD3<Float>(Float(f.origin.x), Float(f.origin.y), Float(f.origin.z))
-            let box = LatticeWizardSample.cube(edgeMM: cutMM, at: corner)
+            // the whole cube at the STL's own bounds (0…20 mm), so its bottom face IS
+            // the stage floor (item 4.2)
+            let box = LatticeWizardSample.cube(edgeMM: edgeMM, at: SIMD3<Float>(0, 0, 0))
             let stress = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
                                      origin: SIMD3<Float>(Float(f.origin.x), Float(f.origin.y), Float(f.origin.z)),
                                      spacing: Float(f.spacingMM), values: f.vonMises)
@@ -190,8 +200,7 @@ public enum OrganicSampleCube {
                                         organic: input,
                                         organicBakeVoxelMM: picks.bakeVoxelMM)
             guard scene.organicField != nil else { return nil }
-            var m = label
-            if !scene.organicSummary.isEmpty { m += " " + scene.organicSummary }
+            var m = scene.organicSummary
             m += String(format: " · %@%@%@ · window %.1f–%.1f mm · voxel %.2f mm",
                         picks.grow ? "grown" : "traced",
                         picks.shapeFit ? (picks.shapeFitOnly ? ", shape-fit only" : ", shape-fit") : ", no shape fit",

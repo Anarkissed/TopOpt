@@ -1,5 +1,83 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-03 (night) — the seven items: whole cube, sim on/off, the pane rebuilt
+>
+> **Maintainer's seven items and what shipped (app only, no core change):**
+> 1. **Banner** — "A 20 mm test cube, re-traced with your settings. Your part will differ."
+>    No PR number anywhere in the UI (pinned). The census (curves, connectors, spacing,
+>    shape-fit shrink, field, path, window, voxel) sits behind an (i) on the banner.
+> 2. **Pane text** — every row is a short title + (i) popover (`infoButton`, one open
+>    at a time); the explanations moved into `LatticeSetupWizard.info*` strings.
+>    Traced/Grown stay as pills (his 2. ruling) with an (i) on how they print.
+>    **Fine-tune for printing…** is a link under GROWN only that unfolds the spacing
+>    scale; the overhang limit is stated as fixed at 30° there — in core it is a
+>    TRACED-only key (`organic_overhang_angle_deg`; grown clamps to a compile-time
+>    30°), so under grown there is no live overhang knob to show. If he wants the
+>    overhang slider back under Traced, it is one line.
+> 3. **Simulate Stresses OFF** — `LatticeSettings.setSimulateStresses` (and the wizard
+>    model's borrowed copy, plus `selectOrganic`) now: Auto ⇒ Fit, `organicShapeFit`
+>    and `organicShapeFitOnly` forced on. Cell size shows Fit / **Manual**; Manual
+>    lists the approved sizes (`organicFittingSeparationsMM`, certification's) and,
+>    under an Aesthetic stage, the app's ladder 2/3/4/5/6/8/10 mm with a "*" on every
+>    size not approved + the note "may leave the lattice in more than one piece". A
+>    Manual pick is a Fit with a stated `organic_separation_mm` (D2 unchanged).
+>    3.1 (sim ON): Manual also lists **approved grades** — `organicApprovedGradesMM`
+>    `[[lo, hi]]`, `organicPickedGradeMM` → `organic_window_mm` (probe-gated). Core
+>    reports neither list yet; the pane says so. 3.2: turning "Shape fit only" off
+>    with the simulation off shows the alert "Grading needs a stress simulation" and
+>    the switch stays on (`GlassToggle` + `.alert` hoisted to the page root — a
+>    SwiftUI alert attached inside the panel never presented; measured on device).
+> 4. **Gizmo** — the workspace now OWNS the wizard's camera and binds its ONE gizmo to
+>    it while the wizard is up (a first cut hid the workspace gizmo under the wizard
+>    and drew a second — `SmoothingPageTests` pins one definition, one mesh-only
+>    placement, and it failed; this keeps L2 intact); the cube and the widget mirror
+>    each other. **Orientation ("top face should be the left side")** — the
+>    real cause: the viewer is Y-UP (+Y is the gizmo's "Top", +Z its "Front"), and the
+>    workspace settles every part with `ForceModel.settleRotation` (gravity → viewer
+>    −Y); the wizard's stage passed NO settle rotation, so the Z-up cube (its FEA, its
+>    STL, the block) was drawn raw with its +Z top facing the camera. Fixed by passing
+>    `settleZUp = quat(−Z → −Y)` to the wizard's `MetalMeshView`; the lattice layer
+>    takes the same model rotation (MetalMeshView ~4229), so struts and box turn
+>    together, and the settled bbox puts the cube's bottom face on the floor.
+> 5. **Organic switch** — a full-width `GlassToggle` row "Organic lattice (i)"; on, the
+>    three type chips grey out and are disabled; off returns to the last grade style.
+>    Also: the octet's Thickness scrub no longer leaks onto the Sample tab under
+>    Organic (`organicPaneOwns(.thickness)` on both tabs) — density is the organic
+>    pane's row.
+> 6. **Holes** — the sample is now a WHOLE 20 mm cube (`TestCube20.stl`: the 40 mm
+>    fixture scaled 0.5, same face order, so face IDs and the load case carry over).
+>    Sim ON traced: "197 curves, 851 connectors, 3.00–4.29 mm · shape-fit: 97502
+>    voxels shrunk (depth 32)" — every corner present, reads as a cube
+>    (`whole_cube_sim_on_traced.png`).
+> 7. **Sim ON = graded by the cube's field (waves); sim OFF = the same field,
+>    UNGRADED** — the maintainer's first ruling was a uniform build-axis field for
+>    sim OFF; built, shown (`whole_cube_sim_off_uniform.png`: a bare cubic grid) and
+>    rejected the same night ("way too uniform — bring back the way you had it last
+>    time"). Sim OFF now traces the cube's own solved field with shape-fit-ONLY (one
+>    spacing, no stress grading) — which is exactly what core's run does with
+>    `organic_shape_fit_only`, so sample and run agree and no uniform-field key is
+>    needed. The synthetic tensor is gone from the code. Maintainer, later that night:
+>    the ungraded trace "is exactly how Sim off should look like", and the graded one
+>    — "arcs on the sides", like the printed cube — is Sim on. Both as built.
+>
+> **Core-side, reported not gated:** (a) GROWN on the rejected uniform field rendered
+> ONE branched strut while the summary said "720 curves, 348 connectors"
+> (`whole_cube_sim_off_grown_finetune.png`) — the grower on a field with no gradient,
+> and the traced-set count on the grown receipt (the known gap); kept as a data point.
+> (b) With Fit the window is one separation, so shape-fit-ONLY has nothing to ramp
+> (0 voxels shrunk, by core's own rule). (c) Certification does not yet report
+> `fitting_separations_mm` / `fitting_windows_mm`; the Manual lists fill in when it does.
+>
+> **Tests:** targeted 58/0 (Debug SwiftPM; sample picks incl. sim-off lock and the
+> uniform field's numbers, label names no PR, settings round-trip of the grade
+> fields, chip rule incl. sim-off). Full app suite (Debug, SwiftPM): 2304 tests, 30
+> skipped, 0 failures, 3669 s — after one red on the way (`SmoothingPageTests` gizmo
+> pin), fixed by design rather than re-pinned.
+>
+> Evidence: `evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03/`
+> (README + 7 screenshots; Debug dylibs 5744aa3148150ed0 / e91f93ec505fa0a3, core
+> `ca56654d2805`).
+
 > ## ★ 2026-09-03 (late) — shape fit in the sample; "no outline, ONLY lattice"
 >
 > **Asked (maintainer):** the sample cube had no "Fit to shape", "otherwise they would

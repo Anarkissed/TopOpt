@@ -47,6 +47,11 @@ public struct WorkspacePlaceholder: View {
     /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
     /// Metal viewer's drag and the orientation gizmo.
     @StateObject private var cameraModel = OrbitCameraModel()
+    /// ★ THE WIZARD'S CAMERA, OWNED HERE so the ONE gizmo can follow it (maintainer,
+    /// 2026-09-03, item 4.1: the sample cube and the gizmo were not mirroring each
+    /// other — the gizmo orbited the workspace camera while the wizard drew with its
+    /// own). One gizmo, one placement (L2), bound to whichever camera is on stage.
+    @StateObject private var wizardCamera = OrbitCameraModel()
     /// WHERE the run executes (handoff 097): iPad by default, or a LAN worker
     /// discovered by Bonjour. Owned here so the choice + discovery live for the
     /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
@@ -1314,6 +1319,8 @@ public struct WorkspacePlaceholder: View {
                     // ★ AND REBAKES THE PREVIEW — see `latticeWizardRebakeNote`.
                     if showStrutPreview, project.lattice.enabled { buildStrutScene() }
                 }
+                // ★ the stage draws with the workspace-owned camera the one gizmo follows
+                .stageCamera(wizardCamera)
                 .transition(.opacity)
             }
             // Round-2 L18: the ONE Selections library, mounted OVER the lattice page
@@ -1488,7 +1495,8 @@ public struct WorkspacePlaceholder: View {
         VStack {
             HStack {
                 Spacer()
-                OrientationGizmoView(camera: cameraModel, size: gizmoSize)
+                OrientationGizmoView(camera: showLatticeWizard ? wizardCamera : cameraModel,
+                                     size: gizmoSize)
             }
             Spacer()
         }

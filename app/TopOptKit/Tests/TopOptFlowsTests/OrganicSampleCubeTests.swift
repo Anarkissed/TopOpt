@@ -55,7 +55,7 @@ final class OrganicSampleCubeTests: XCTestCase {
         XCTAssertEqual(thick.strutDiameterMM, 1.0)
         XCTAssertEqual(thick.bakeVoxelMM, 0.25, accuracy: 1e-9)
         // a 20 mm corner at the bead voxel stays under the 12 M cap
-        let n = Int(OrganicSampleCube.cutMM / bead.bakeVoxelMM) + 2
+        let n = Int(OrganicSampleCube.edgeMM / bead.bakeVoxelMM) + 2
         XCTAssertLessThan(n * n * n, 12_000_000)
     }
 
@@ -81,6 +81,23 @@ final class OrganicSampleCubeTests: XCTestCase {
         XCTAssertNotEqual(p, q, "a boundary change re-traces the sample")
     }
 
+    // MARK: item 7 — no simulation ⇒ ungraded (the field is always the cube's own)
+
+    func testSimulationOffLocksShapeFitOnlyAndDropsAuto() {
+        var s = organic(); s.organicShapeFit = true
+        s.setSimulateStresses(false)
+        let p = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
+        XCTAssertTrue(p.shapeFitOnly, "no simulation ⇒ shape-only fit (item 3.2)")
+        XCTAssertEqual(s.cellSizeMode, .fit, "no simulation ⇒ Auto is gone (item 3.1)")
+        XCTAssertEqual(p.separationMinMM, p.separationMaxMM, "Fit ⇒ one separation")
+    }
+
+    func testTheLabelNamesNoPullRequest() {
+        XCTAssertFalse(OrganicSampleCube.label.contains("PR"))
+        XCTAssertTrue(OrganicSampleCube.label.hasPrefix("A 20 mm test cube"))
+        XCTAssertNotNil(OrganicSampleCube.modelURL, "the 20 mm cube is bundled")
+    }
+
     // MARK: the certification fields on the settings
 
     func testTheFittingSetAndThePickRoundTripAndStayOutOfAnUntouchedFile() throws {
@@ -89,9 +106,13 @@ final class OrganicSampleCubeTests: XCTestCase {
         XCTAssertFalse(String(decoding: untouched, as: UTF8.self).contains("organicFittingSeparationsMM"),
                        "bar U1: nothing written until certification found something")
         s.organicFittingSeparationsMM = [2, 3, 5]; s.organicPickedSeparationMM = 3
+        s.organicApprovedGradesMM = [[3, 6], [2, 4]]; s.organicPickedGradeMM = [3, 6]
         let back = try JSONDecoder().decode(LatticeSettings.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(back.organicFittingSeparationsMM, [2, 3, 5])
         XCTAssertEqual(back.organicPickedSeparationMM, 3)
+        XCTAssertEqual(back.organicApprovedGradesMM, [[3, 6], [2, 4]])
+        XCTAssertEqual(back.organicPickedGradeMM, [3, 6])
+        XCTAssertEqual(LatticeSettings.organicManualSizeLadderMM.first, 2)
     }
 
     func testThePickIsNeverSentToACoreThatRefusesTheKey() throws {
