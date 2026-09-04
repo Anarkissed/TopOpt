@@ -2270,6 +2270,12 @@ std::vector<double> organic_preview_field(
     // the same production functions the run uses — trace_organic_lattice /
     // grow_organic_lattice — nothing preview-only.
     double strut_diameter_mm, int grow, double layer_height_mm,
+    // ★ WHETHER A CURVE END THAT LEFT THE REGION IS AN ANCHOR — run_job's rule
+    // (`op.anchor_at_region_boundary = shell_is_written`, `outer_finish != "skin"`):
+    // on a BARE lattice there is no shell to land on, the end is not an anchor, and
+    // the dangling-end trim cuts it back to its last connector. A preview that
+    // assumed anchors drew a crisper face than the bare run builds.
+    int anchor_at_boundary,
     // The field to bake the traced capsules into: its own grid, which is the REGION's
     // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
     int fnx, int fny, int fnz, double fspacing,
@@ -2314,6 +2320,7 @@ std::vector<double> organic_preview_field(
   p.rho_max = rho_max;
   p.strut_diameter_mm = strut_diameter_mm > 0.0 ? strut_diameter_mm : 0.0;
   p.layer_hint_mm = (grow != 0 && layer_height_mm > 0.0) ? layer_height_mm : 0.0;
+  p.anchor_at_region_boundary = anchor_at_boundary != 0;
 
   topopt::OrganicLattice lat;
   try {

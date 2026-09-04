@@ -173,6 +173,17 @@ public struct LatticeOrganicInput: Sendable {
     public var grow: Bool = false
     public var layerHeightMM: Double = 0
     public var overhangAngleDeg: Double = 0
+    /// ★ SHAPE FIT (maintainer, 2026-09-03: "otherwise they would look like a cube"):
+    /// core's `organic_shape_fit` shrinks the separation toward the walls so the
+    /// lattice fits the outline; `shapeFitOnly` drops the stress grading. Mirrored in
+    /// `OrganicShapeFit` (core's rule is inline in the CLI; see that file).
+    public var shapeFit: Bool = false
+    public var shapeFitOnly: Bool = false
+    /// ★ Is a shell written for curve ends to land on? run_job: `outer_finish !=
+    /// "skin"`. A BARE lattice (the sample; a part without Covered) has none, so ends
+    /// that leave the region are not anchors and the trim cuts them back — the run's
+    /// own rule, mirrored so the sample does not draw a crisper face than the run.
+    public var anchorAtBoundary: Bool = true
 
     public init(tensor: [Double], dims: (Int, Int, Int), originMM: SIMD3<Double>,
                 spacingMM: Double, minExtrudableWidthMM: Double,
@@ -180,7 +191,9 @@ public struct LatticeOrganicInput: Sendable {
                 separationMinMM: Double, separationMaxMM: Double,
                 rhoMin: Double, rhoMax: Double,
                 strutDiameterMM: Double = 0, grow: Bool = false,
-                layerHeightMM: Double = 0, overhangAngleDeg: Double = 0) {
+                layerHeightMM: Double = 0, overhangAngleDeg: Double = 0,
+                shapeFit: Bool = false, shapeFitOnly: Bool = false,
+                anchorAtBoundary: Bool = true) {
         self.tensor = tensor; self.dims = dims; self.originMM = originMM
         self.spacingMM = spacingMM; self.minExtrudableWidthMM = minExtrudableWidthMM
         self.buildDirection = buildDirection
@@ -188,6 +201,8 @@ public struct LatticeOrganicInput: Sendable {
         self.rhoMin = rhoMin; self.rhoMax = rhoMax
         self.strutDiameterMM = strutDiameterMM; self.grow = grow
         self.layerHeightMM = layerHeightMM; self.overhangAngleDeg = overhangAngleDeg
+        self.shapeFit = shapeFit; self.shapeFitOnly = shapeFitOnly
+        self.anchorAtBoundary = anchorAtBoundary
     }
 }
 
@@ -678,6 +693,22 @@ public struct LatticeSDFScene {
                 sep[idx] = hi - (hi - lo) * Swift.min(Swift.max(d, 0), 1)
                 n += 1
             } } }
+            // ★ SHAPE FIT (maintainer, 2026-09-03): the separation shrinks toward the
+            // walls so the lattice fits the outline — core's rule, mirrored in
+            // `OrganicShapeFit` because it lives inline in the CLI. Applied to the same
+            // `sep` the tracer is handed, exactly where the run applies it (before the
+            // trace), so the sample and the part preview follow the outline as the run
+            // will. `shapeFitOnly` replaces the stress-driven window by the depth ramp.
+            var fitNote = ""
+            if n > 0, o.shapeFit {
+                let fit = OrganicShapeFit.apply(spacing: sep, candidate: cand,
+                                                nx: tnx, ny: tny, nz: tnz,
+                                                voxelMM: o.spacingMM,
+                                                window: (lo, hi), only: o.shapeFitOnly)
+                sep = fit.spacing
+                fitNote = String(format: " · shape-fit%@: %d voxels shrunk (min ratio %.2f, depth %d)",
+                                 o.shapeFitOnly ? " only" : "", fit.shrunk, fit.minRatio, fit.depthVoxels)
+            }
             if n > 0 {
                 // The field's own grid: the declared region's bbox, padded, at a voxel a
                 // few times finer than the design grid — capped so a big part cannot
@@ -711,7 +742,7 @@ public struct LatticeSDFScene {
                     bandMM: band, overhangAngleDeg: o.overhangAngleDeg,
                     rhoMin: o.rhoMin, rhoMax: o.rhoMax,
                     strutDiameterMM: o.strutDiameterMM, grow: o.grow,
-                    layerHeightMM: o.layerHeightMM),
+                    layerHeightMM: o.layerHeightMM, anchorAtBoundary: o.anchorAtBoundary),
                    t.field.count == fnx * fny * fnz {
                     organicOut = LatticeVoxelGrid(
                         nx: fnx, ny: fny, nz: fnz, origin: mn,
@@ -719,7 +750,7 @@ public struct LatticeSDFScene {
                     organicBand = Double(t.bandMM)
                     organicSaid = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
                         + String(format: "%.2f–%.2f mm spacing",
-                                 t.spacingUsedMinMM, t.spacingUsedMaxMM)
+                                 t.spacingUsedMinMM, t.spacingUsedMaxMM) + fitNote
                 }
             }
         }

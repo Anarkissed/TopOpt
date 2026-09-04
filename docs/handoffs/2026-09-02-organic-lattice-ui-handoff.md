@@ -1,5 +1,70 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-03 (late) — shape fit in the sample; "no outline, ONLY lattice"
+>
+> **Asked (maintainer):** the sample cube had no "Fit to shape", "otherwise they would
+> look like a cube"; and "ensure that the shape to fit does not include an outline and
+> is ONLY lattice".
+>
+> **Shape fit in the sample — a MIRROR, named as one.** Core applies organic shape fit
+> inline in the CLI (`core/src/cli/run_job.cpp` ~4160–4290), not in a function the
+> bridge can call, and this PR makes no core change. `OrganicShapeFit.swift` reproduces
+> the rule on the preview's separation field: two-pass chamfer distance to the region
+> boundary (grid faces count), then either the shape-fit-ONLY ramp
+> `cell_min + (cell_max−cell_min)·dist/dmax` (stress map unread) or the cap
+> `min(spacing, max(2·dist·voxel, cell_min))`. The member-width term of core's cap
+> (`member_width / n★`) needs the run's per-voxel member width, which the preview does
+> not have — only the boundary cap is applied, and the code says so. Pinned by
+> `OrganicShapeFitTests` (4 tests, hand-computed on a 5³ block). ★ Honest end state: ONE
+> core function shared by run_job and the bridge; until then any change to core's rule
+> must be mirrored here or the sample lies. `LatticeOrganicInput` carries
+> `shapeFit/shapeFitOnly`; the wizard already forces shape fit on under organic.
+>
+> **"No outline, only lattice" is THREE job keys, and the app wrote none of them.**
+> (1) `lattice.outer_finish` — core's DEFAULT is `"shell"`, a solid shell = an outline
+> (job.hpp:271); an organic job now writes `"skin"` (bare) unless the user picked
+> Covered. (2) `lattice.skin: "diagrid"` — the only value that makes a non-shell
+> outer_finish schema-legal (job.cpp ~1492); on the organic path core never hands the
+> skin spec to the generator (`generate_organic_lattice(*organic, w, &boundary, …)`,
+> run_job.cpp ~2111), so the key unlocks the bare surface and draws nothing.
+> (3) `grading.organic_boundary_finish: "clean"` — core defaults to `"skin"`, a net over
+> the bare surface (the printed PR 353 cube had it), and the sheet had no control for it.
+> `LatticeWizardModel.selectOrganic()` now carries the organic rule (shape fit on, finish
+> clean, inherited swept/fixed window → Auto) for the chip AND the on-appear repair of an
+> older project; `LatticeSettings.jobOuterFinishResolved/jobSkinResolved` write (1)+(2)
+> on both spec paths; non-organic jobs are byte-identical (pinned).
+>
+> **Fidelity trap found on the way — mirrored, measured small.** run_job sets
+> `anchor_at_region_boundary = (outer_finish != "skin")`, and the dangling-end trim
+> (organic_lattice.cpp ~1066) cuts an un-anchored end that left the region back to its
+> last connector — a BARE run's faces are fuzzier than a preview that assumes anchors.
+> The bridge now takes `anchor_at_boundary`; the sample passes `boundary == .covered`,
+> the part preview the same. Measured on the 20 mm corner (Debug, Mac, six bakes,
+> `evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03/README.md`):
+> traced fit bare 211 mm³ vs fit covered 208 mm³ (≤1.5 %); grown fit bare 88 = fit
+> covered 88 mm³ (no effect).
+>
+> **What the sample shows now (simulator, Debug dylib `883494cf71a9c504`, core
+> `ca56654d2805`).** Traced: "162 curves, 811 connectors, 3.00–4.43 mm spacing ·
+> shape-fit: 11039 voxels shrunk (min ratio 0.50, depth 16) · traced, shape-fit, bare
+> (no outline; ends trimmed)" — reads as a cube, struts only, no shell/net
+> (`traced_shape_fit_bare.png`). Grown: "2819 curves … grown, shape-fit, bare" — does
+> NOT read as a cube: a sparse frame, plate-like ribbons near the top, a few long struts
+> at the bottom (`grown_shape_fit_bare.png`). The probe says why: shape fit thins the
+> GROWN sample by 34 % (134 → 88 mm³) and the grower is bottom-heavy either way
+> (no-fit: 81 % of occupied voxels in the bottom third; fit: 50/40/10 %). Traced without
+> fit was 225 mm³. That is core's grower on this field with these picks, rendered as-is;
+> grown is the user's opt-in (Aug 5 ruling), not a fix — reported, not gated.
+>
+> **Core-side observations (report, not touched):** the grown branch's summary carries
+> the TRACED connector count (811 on both paths — `lat.connectors.size()` after
+> `grow_organic_lattice`), the known growth-receipt gap; shape fit is CLI-inline (above).
+>
+> **Tests:** targeted 49/0 (Debug SwiftPM: OrganicShapeFit, OrganicSampleCube incl. the
+> covered/shape-fit picks, LatticeWizardOrganicChip incl. clean finish + bare surface +
+> Covered + octet byte-identical + saved-project repair, OrganicRunReceipt, LatticePage).
+> Full app suite (Debug, SwiftPM, `swift test`): 2302 tests, 30 skipped, 0 failures, 3655 s.
+
 > ## ★ 2026-09-03 (evening) — the sample is LIVE: the PR 353 cube re-traced with the user's settings
 >
 > **What was wrong (maintainer):** the sample looked like ribbons, not beams — the bake

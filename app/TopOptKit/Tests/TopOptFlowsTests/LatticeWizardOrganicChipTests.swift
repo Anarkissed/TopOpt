@@ -13,19 +13,33 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         settings.stageMode = .aesthetic
         var model = LatticeWizardModel(settings: settings)
         XCTAssertNotEqual(model.cellTransition, .organicGrade)
-        // — what `organicTypeChip`'s Button does —
-        model.cellTransition = .organicGrade
-        model.organicShapeFit = true
+        // — what `organicTypeChip`'s Button does (the rule lives on the model) —
+        XCTAssertFalse(model.selectOrganic(), "an Auto window is not a reset")
         XCTAssertEqual(model.cellTransition, .organicGrade, "★ the chip's own `on` state")
         let out = model.applied(to: settings)
         XCTAssertEqual(out.algorithm, "organic")
         XCTAssertTrue(out.isOrganic)
         XCTAssertTrue(out.organicShapeFit, "★ finish is always grade-to-fit-shape (his item 3)")
+        XCTAssertEqual(out.organicBoundaryFinish, .clean,
+                       "★ no outline, ONLY lattice (maintainer, 2026-09-03): core's default is a net SKIN")
         // — and the job the run is built from states the intent core demands —
         let lim = TopOptKit.LatticeLimits(rhoMin: 0.1, rhoMax: 0.6, certifiable: true, minCellsPerMember: 1)
         let spec = out.runSpec(limits: lim, generatable: true, memberMM: 8, lineWidthMM: 0.42)
         let g = spec?.gradingDictionary() ?? [:]
         XCTAssertEqual(g["algorithm"] as? String, "organic")
+        // ★ NO OUTLINE, ONLY LATTICE (maintainer, 2026-09-03): the bare outer surface
+        // (core's default is a solid SHELL), unlocked by the diagrid key core never
+        // draws on the organic path; Covered is the user's explicit shell.
+        XCTAssertEqual(spec?.outerFinish, "skin")
+        XCTAssertEqual(spec?.skin, "diagrid")
+        var covered = out; covered.boundary = .covered
+        let cs = covered.runSpec(limits: lim, generatable: true, memberMM: 8, lineWidthMM: 0.42)
+        XCTAssertEqual(cs?.outerFinish, "shell", "Covered is the user's pick and stays")
+        XCTAssertEqual(cs?.skin, "diagrid")
+        // — and the octet path is byte-identical: its own boundary, no outer finish —
+        var octetLike = out; octetLike.algorithm = ""; octetLike.boundary = .rim
+        let os = octetLike.runSpec(limits: lim, generatable: true, memberMM: 8, lineWidthMM: 0.42)
+        XCTAssertNil(os?.outerFinish); XCTAssertEqual(os?.skin, "rim")
         XCTAssertEqual(g["intent"] as? String, "aesthetic",
                        "★ core refuses organic without an explicit aesthetic intent (measured on-device 2026-09-02)")
         // — Structural is the stage's own word, so core's refusal stays faithful —
@@ -38,6 +52,28 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         // — and a lattice-type chip leaves organic again —
         var back = model; back.cellTransition = .defaultGrade
         XCTAssertNotEqual(back.applied(to: settings).algorithm, "organic")
+        let finishKey = TopOptKit.gradingSchemaAccepts(key: "organic_boundary_finish")
+        XCTAssertEqual(g["organic_boundary_finish"] as? String, finishKey ? "clean" : nil,
+                       "★ the job says CLEAN out loud (core's default is skin); written only when core accepts the key (\(finishKey))")
+    }
+
+    /// ★ A project SAVED before the clean rule (skin, un-fitted, a swept window from the
+    /// octet) is repaired the same way on appear — the sheet calls the same method.
+    func testASavedSkinProjectIsRepairedToCleanAndFitted() throws {
+        var settings = LatticeSettings(); settings.enabled = true; settings.stageMode = .aesthetic
+        settings.algorithm = "organic"; settings.organicBoundaryFinish = .skin
+        settings.organicShapeFit = false; settings.cellSizeMode = .swept
+        var model = LatticeWizardModel(settings: settings)
+        XCTAssertTrue(model.selectOrganic(), "the swept window is reset, and the pane is told")
+        let out = model.applied(to: settings)
+        XCTAssertEqual(out.organicBoundaryFinish, .clean)
+        XCTAssertTrue(out.organicShapeFit)
+        XCTAssertEqual(out.cellSizeMode, .auto)
+        // Fit is the user's pick and SURVIVES (D2: never remapped)
+        var fit = settings; fit.cellSizeMode = .fit
+        var m2 = LatticeWizardModel(settings: fit)
+        XCTAssertFalse(m2.selectOrganic())
+        XCTAssertEqual(m2.applied(to: fit).cellSizeMode, .fit)
     }
 
     /// ★ THE OCTET WINDOW MUST NOT RIDE INTO ORGANIC (reviewer, 2026-09-03). Measured

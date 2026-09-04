@@ -595,12 +595,9 @@ public struct LatticeSetupWizard: View {
                 // ★ FORCED ON LOAD TOO — a project saved with organic before this rule
                 // existed must not keep an un-fitted outline.
                 .onAppear {
-                    if !model.organicShapeFit { model.organicShapeFit = true }
-                    // ★ A project SAVED with organic over an inherited swept/fit
-                    // window gets the same reset as the chip tap, and says so.
-                    if model.cellSizeMode != .auto && model.cellSizeMode != .fit {
-                        model.setCellSizeMode(.auto); organicWindowReset = true
-                    }
+                    // ★ ONE rule for the chip and for a saved project: shape fit on,
+                    // finish CLEAN, an inherited swept/fit window reset (said aloud).
+                    if model.selectOrganic() { organicWindowReset = true }
                 }
             // ★ TRACED vs GROWN — two ARCHITECTURES, not a parameter (§1B).
             HStack(spacing: DS.Space.xs) {
@@ -1265,19 +1262,10 @@ public struct LatticeSetupWizard: View {
                           : on ? DS.Color.textPrimary : DS.Color.textTertiary).color
         let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
         return Button {
-            model.cellTransition = .organicGrade
-            // ★ FINISH IS ALWAYS "GRADE TO FIT SHAPE" for organic (his item 3): the
-            // cells are pulled to the face-prism's OUTLINE. Forced here, not offered.
-            model.organicShapeFit = true
-            // ★★ THE OCTET WINDOW MUST NOT RIDE INTO ORGANIC UNTESTED (reviewer,
-            // 2026-09-03): for organic the cell window IS the separation field, and
-            // the M2's cliff has not been measured. A swept/fit mode inherited from
-            // the lattice types is reset to Auto HERE, out loud (the pane says so),
-            // never carried silently — measured 2026-09-02: the pane lit "Auto ·
-            // grade" while the job carried the octet's swept 5.5–6 mm.
-            if model.cellSizeMode != .auto && model.cellSizeMode != .fit {
-                model.setCellSizeMode(.auto); organicWindowReset = true
-            }
+            // ★ THE RULE LIVES ON THE MODEL (`selectOrganic`): shape fit forced on (his
+            // item 3), finish CLEAN — no outline, only lattice (maintainer, 2026-09-03)
+            // — and an inherited swept/fixed window reset to Auto, out loud.
+            if model.selectOrganic() { organicWindowReset = true }
             rebuild()
         } label: {
             Text("Organic")

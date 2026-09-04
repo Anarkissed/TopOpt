@@ -4722,7 +4722,13 @@ public struct WorkspacePlaceholder: View {
                 buildDirection: SIMD3<Double>(
                     project.buildOrientation.resolved(gravity: force.gravity)),
                 separationMinMM: lo, separationMaxMM: hi,
-                rhoMin: band.lo, rhoMax: band.hi)
+                rhoMin: band.lo, rhoMax: band.hi,
+                strutDiameterMM: lat.organicStrutWidthMM, grow: lat.organicGrowth,
+                layerHeightMM: project.printParams.layerHeightMM,
+                overhangAngleDeg: lat.organicGrowth ? 0 : lat.organicOverhangDeg,
+                shapeFit: lat.organicShapeFit, shapeFitOnly: lat.organicShapeFitOnly,
+                // ★ the run's anchoring rule: a shell only under Covered
+                anchorAtBoundary: lat.boundary == .covered)
         }()
         let spansForBake = latticeOrganicSpans
         let receiptForBake = latticeOrganicReceipt

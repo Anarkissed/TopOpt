@@ -67,6 +67,20 @@ final class OrganicSampleCubeTests: XCTestCase {
         XCTAssertNotEqual(a, OrganicSampleCube.Picks(settings: c, layerHeightMM: 0.2))
     }
 
+    func testShapeFitAndTheBareSurfaceReachThePicks() {
+        var s = organic(); s.organicShapeFit = true; s.organicShapeFitOnly = false
+        let p = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
+        XCTAssertTrue(p.shapeFit); XCTAssertFalse(p.shapeFitOnly)
+        XCTAssertFalse(p.covered, "no shell ⇒ ends that leave the region are NOT anchors (run_job's rule)")
+        s.organicShapeFitOnly = true; s.boundary = .covered
+        let q = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
+        XCTAssertTrue(q.shapeFitOnly); XCTAssertTrue(q.covered)
+        s.organicShapeFit = false
+        XCTAssertFalse(OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2).shapeFitOnly,
+                       "only-mode needs shape fit")
+        XCTAssertNotEqual(p, q, "a boundary change re-traces the sample")
+    }
+
     // MARK: the certification fields on the settings
 
     func testTheFittingSetAndThePickRoundTripAndStayOutOfAnUntouchedFile() throws {

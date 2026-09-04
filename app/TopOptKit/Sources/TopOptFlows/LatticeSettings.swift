@@ -964,6 +964,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// is the LEGACY store (kept for old snapshots + the region gizmo plumbing).
     public var includePrimitives: [ManualPrimitive]
     /// Boundary treatment (three-way; maps 1:1 onto `job.lattice.skin`, bar B7).
+    /// ★ THE OUTER SURFACE UNDER ORGANIC — "the shape to fit does not include an
+    /// outline and is ONLY lattice" (maintainer, 2026-09-03). Core's default
+    /// `outer_finish` is a SOLID SHELL, which is an outline, so an organic job writes
+    /// the bare surface ("skin") unless the user picked Covered. A bare surface is
+    /// only schema-legal with `skin: "diagrid"` (job.cpp: "the diagrid IS the outer
+    /// finish that replaces or dresses the shell"); on the organic path core never
+    /// hands that skin spec to the generator (run_job.cpp: `generate_organic_lattice(
+    /// *organic, w, &boundary, …)` takes no `skin`), so the key unlocks the bare
+    /// surface and draws nothing — the organic surface is `organic_boundary_finish`
+    /// alone, and the wizard sets that to "clean". Non-organic jobs: byte-identical.
+    public var jobOuterFinishResolved: String? {
+        isOrganic ? (boundary == .covered ? "shell" : "skin") : boundary.jobOuterFinish
+    }
+    public var jobSkinResolved: String { isOrganic ? "diagrid" : boundary.jobSkinValue }
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
@@ -1873,7 +1887,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                maxRelativeDensity: b.densityHi,
                                emitSTL: emitSTL, emit3MF: emit3MF,
                                regionScoped: region != nil || !regions.isEmpty,
-                               skin: boundary.jobSkinValue,
+                               skin: jobSkinResolved,
                                minExtrudableWidthMM: lineWidthMM,
                                graded: true,
                                regions: regions,
@@ -1889,7 +1903,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                // keys need the probe because they were added to
                                // `grading` after some cores were built.
                                requireVoidReachesExterior: requireVoidReachesExterior)
-            spec.outerFinish = boundary.jobOuterFinish
+            spec.outerFinish = jobOuterFinishResolved
             // ★ THE ALGORITHM RIDES THE GRADED SPEC. Carried as the raw string,
             // including "" — `gradingDictionary` is the single place that decides
             // whether a key is written, so "not stated" cannot become "doubled" here.
@@ -1916,7 +1930,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                            minRelativeDensity: b.densityLo, maxRelativeDensity: b.densityHi,
                            emitSTL: emitSTL, emit3MF: emit3MF,
                            regionScoped: region != nil || !regions.isEmpty,
-                           skin: boundary.jobSkinValue,
+                           skin: jobSkinResolved,
                            minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil,
                            // ★★ AN ORGANIC JOB ALWAYS CARRIES THE GRADING BLOCK. Its
                            // algorithm, intent, mode and every organic_* key live there,
@@ -1944,7 +1958,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // ★ THE SOLID COVER RIDES ON `outer_finish`, NOT `skin` — the two are
         // independent axes in core's schema. Set on BOTH construction paths, so
         // a graded job and a uniform one cannot disagree about the cover.
-        spec2.outerFinish = boundary.jobOuterFinish
+        spec2.outerFinish = jobOuterFinishResolved
         // ★ THE ALGORITHM ON THIS PATH TOO (2026-09-02). `spec` carried it and `spec2`
         // did not, so a stated algorithm was silently dropped from the job on the
         // generatable-topology path — and organic can only be emitted through it.

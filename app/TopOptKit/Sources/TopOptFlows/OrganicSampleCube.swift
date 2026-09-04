@@ -75,6 +75,14 @@ public enum OrganicSampleCube {
         public var rhoMin: Double
         public var rhoMax: Double
         public var structural: Bool
+        /// ★ Shape fit (always on for organic — his item 3; `only` drops the stress
+        /// grading). Without it the sample is a ragged blob; with it, a cube.
+        public var shapeFit: Bool
+        public var shapeFitOnly: Bool
+        /// ★ Covered ⇒ a shell is written and ends anchor on it; otherwise the lattice
+        /// is BARE — "no outline, ONLY lattice" (maintainer, 2026-09-03) — and core
+        /// trims ends that leave the region back to their last connector.
+        public var covered: Bool
 
         /// From the settings the user has on the sheet. The window is the printed job's
         /// 3–6 mm scaled by the user's spacing scale; under Fit it is one separation —
@@ -93,6 +101,9 @@ public enum OrganicSampleCube {
             overhangDeg = grow ? 0 : s.organicOverhangDeg
             rhoMin = s.minRelativeDensity; rhoMax = max(s.maxRelativeDensity, s.minRelativeDensity)
             structural = (s.stageMode ?? .structural) == .structural
+            shapeFit = s.organicShapeFit
+            shapeFitOnly = s.organicShapeFit && s.organicShapeFitOnly
+            covered = s.boundary == .covered
         }
 
         /// The thinnest strut this trace can make: the stated diameter, else the bead.
@@ -170,7 +181,9 @@ public enum OrganicSampleCube {
                 separationMinMM: picks.separationMinMM, separationMaxMM: picks.separationMaxMM,
                 rhoMin: picks.rhoMin, rhoMax: picks.rhoMax,
                 strutDiameterMM: picks.strutDiameterMM, grow: picks.grow,
-                layerHeightMM: picks.layerHeightMM, overhangAngleDeg: picks.overhangDeg)
+                layerHeightMM: picks.layerHeightMM, overhangAngleDeg: picks.overhangDeg,
+                shapeFit: picks.shapeFit, shapeFitOnly: picks.shapeFitOnly,
+                anchorAtBoundary: picks.covered)
             let scene = LatticeSDFScene(mesh: box, field: stress, latticeID: latticeID,
                                         stageMode: picks.structural ? .structural : .aesthetic,
                                         algorithm: "organic",
@@ -179,8 +192,10 @@ public enum OrganicSampleCube {
             guard scene.organicField != nil else { return nil }
             var m = label
             if !scene.organicSummary.isEmpty { m += " " + scene.organicSummary }
-            m += String(format: " · %@ · window %.1f–%.1f mm · voxel %.2f mm",
+            m += String(format: " · %@%@%@ · window %.1f–%.1f mm · voxel %.2f mm",
                         picks.grow ? "grown" : "traced",
+                        picks.shapeFit ? (picks.shapeFitOnly ? ", shape-fit only" : ", shape-fit") : ", no shape fit",
+                        picks.covered ? ", covered (ends anchor on the shell)" : ", bare (no outline; ends trimmed)",
                         picks.separationMinMM, picks.separationMaxMM, picks.bakeVoxelMM)
             return Baked(scene: scene, mesh: box, measurement: m, picks: picks)
         }.value

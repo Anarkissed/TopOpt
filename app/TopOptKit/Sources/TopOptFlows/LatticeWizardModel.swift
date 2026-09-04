@@ -521,6 +521,25 @@ public struct LatticeWizardModel: Equatable, Sendable {
         }
     }
 
+    /// ★ ORGANIC IS CHOSEN HERE, AND ONLY HERE — the chip and the on-appear repair of
+    /// an older project both call it, so a test on the model reaches the rule the
+    /// view runs. (a) Shape fit is always on (his item 3). (b) The finish is CLEAN:
+    /// "the shape to fit does not include an outline and is ONLY lattice"
+    /// (maintainer, 2026-09-03). Core defaults `organic_boundary_finish` to "skin", a
+    /// net over the bare lattice's surface, and that net is the outline — there is no
+    /// control for it on the sheet, so it was riding in silently. (c) A swept/fixed
+    /// window inherited from the lattice types resets to Auto (reviewer, 2026-09-03).
+    /// Returns true when (c) fired, so the pane can say so.
+    @discardableResult
+    public mutating func selectOrganic() -> Bool {
+        cellTransition = .organicGrade
+        organicShapeFit = true
+        organicBoundaryFinish = .clean
+        guard cellSizeMode != .auto && cellSizeMode != .fit else { return false }
+        setCellSizeMode(.auto)
+        return true
+    }
+
     /// The boundary finishes are SHOWN on the part, switchable (§2 C).
     public mutating func setBoundary(_ b: LatticeBoundaryTreatment) {
         guard b != boundary else { return }
