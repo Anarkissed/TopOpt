@@ -347,6 +347,8 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   out.mask.assign(n, 0);
   out.relative_density.assign(n, 0.0);
   out.spacing_used_mm.assign(n, 0.0);
+  out.grid_origin = grid.origin; out.grid_h = h;
+  out.grid_nx = grid.nx; out.grid_ny = grid.ny; out.grid_nz = grid.nz;
   for (std::size_t e = 0; e < n; ++e)
     if (candidate[e]) out.spacing_used_mm[e] = dsep[e];
   if (rep.candidate_voxels == 0) return out;
@@ -1776,6 +1778,15 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
       // the cone limit in the field's horizontal direction — it follows as far as it
       // can and no further, rather than following into mid-air.
       Vec3 want = have ? vadd(vmul(dir, 0.35), vmul(f, 0.65)) : dir;
+      // ★ REACH FOR THE LIGHT. A constant upward preference, blended with the field at
+      // every step -- see kOrganicGrowthUpwardBias for why height is what attaches a
+      // curve, and why the terminal "climb out" version of this was rejected.
+      if (kOrganicGrowthUpwardBias > 0.0) {
+        const double before_z = vlen(want) > 1e-12 ? want.z / vlen(want) : 0.0;
+        want = vadd(want, Vec3{0.0, 0.0, kOrganicGrowthUpwardBias});
+        const double after_z = vlen(want) > 1e-12 ? want.z / vlen(want) : 0.0;
+        if (after_z > before_z + 1e-6) ++st.growth_lifted;
+      }
       const double wl = vlen(want);
       if (!(wl > 1e-12)) break;
       want = vmul(want, 1.0 / wl);
@@ -1945,8 +1956,67 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
             const Vec3 bdir{tr.x * sgn * s2, tr.y * sgn * s2, cone_sin};
             const Vec3 bq = vadd(p, vmul(bdir, step));
             ++st.growth_branches;
-            if (!in_region(bq) || !supported_at(bq, t.r) || too_close(bq, static_cast<int>(ti), -1)) {
+            // ★★ WHICH OF THE THREE REFUSED IT. These were one counter, and the header
+            // called it "refused for want of support at their root" -- but the test is
+            // an OR of three unrelated conditions, and a branch turned away for
+            // CROWDING was being reported as a printability failure. That is the same
+            // defect as the branch tip whose `alive` flag meant both "anchored" and
+            // "failed": a single number standing for outcomes that need different
+            // fixes. Measured on the grown path, the support rule refuses ZERO steps
+            // and the cone clamps ZERO tips, so a large support-refusal count here was
+            // never consistent with the rest of the receipt.
+            const bool out_of_region = !in_region(bq);
+            const bool unsupported = !out_of_region && !supported_at(bq, t.r);
+            Vec3 bhit{0, 0, 0};
+            const bool crowded =
+                !out_of_region && !unsupported &&
+                too_close(bq, static_cast<int>(ti), -1, &bhit);
+            if (out_of_region || unsupported || crowded) {
               ++st.growth_branch_refused;
+              if (out_of_region) ++st.growth_branch_refused_region;
+              else if (unsupported) ++st.growth_branch_refused_support;
+              else {
+                ++st.growth_branch_refused_crowded;
+                // ══════════════════════════════════════════════════════════════════
+                // ★★★ A CROWDED BRANCH IS A CONNECTION, NOT A REFUSAL ★★★
+                // MEASURED on the STAND: of 12,020 branches offered, 5,012 (94.3% of
+                // all refusals) were turned away for CROWDING, while the support rule
+                // refused ZERO and the cone blocked ZERO steps. Discarding them is
+                // what makes the grown lattice sparse, and it does so TWICE: the
+                // curves never interconnect, so nearly every one keeps a free end,
+                // and the free-end prune then cascades through them -- 8,055 spans and
+                // 21,783 mm deleted, 98.6% of the grown lattice, on a part where the
+                // island cut removed only 445.
+                //
+                // The tip path already learned this: a tip that STOPPED on contact
+                // made the population die out with height, so it joins and carries on
+                // (kOrganicGrowthMaxJoins). A branch that lands on a neighbour is the
+                // same event one level down, and the same answer applies -- except a
+                // branch must not push its join onto the PARENT curve, which would
+                // make the parent detour sideways. It becomes its own two-point
+                // connector: a bridge between two pieces of material.
+                //
+                // Bounded by the same bridging limit as a tip join, because it is the
+                // same object: both ends land on material, and a short span between
+                // them is ordinary FDM bridging while a long one is not.
+                const double cdx = bhit.x - p.x, cdy = bhit.y - p.y;
+                const double crun = std::sqrt(cdx * cdx + cdy * cdy);
+                const double clen = vlen(vsub(bhit, p));
+                if (crun <= kOrganicMaxCantileverMm && clen > 1e-9) {
+                  OrganicCurve link;
+                  link.family = (t.family + 1) % 3;
+                  link.radius_mm = t.r;
+                  link.points.push_back(p);
+                  link.points.push_back(bhit);
+                  link.seg_kind.push_back(
+                      static_cast<unsigned char>(OrganicCurve::Seg::Join));
+                  link.length_mm = clen;
+                  grown.push_back(link);
+                  mark(p, bhit, t.r);
+                  ++st.growth_joins;
+                  ++st.growth_branch_joined;
+                }
+              }
               continue;
             }
             tips.push_back({p, bdir, t.r, (t.family + 1) % 3, static_cast<int>(ti)});
@@ -1972,8 +2042,19 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
   if (gstats) *gstats = st;
   if (std::getenv("TOPOPT_ORGANIC_TRACE"))
     std::fprintf(stderr,
-               "[growth] %zu seeds -> %zu curves, %zu steps, %zu blocked by the cone\n",
-               st.growth_seeds, st.growth_curves, st.growth_steps, st.growth_blocked);
+               "[growth] %zu seeds -> %zu curves, %zu steps, %zu blocked by the cone\n"
+               "[growth] branches offered %zu, refused %zu  (region %zu | unsupported "
+               "%zu | CROWDED %zu -> %zu became connectors)\n"
+               "[growth] joins %zu, joins refused for span %zu, clamped %zu "
+               "(worst %.2f deg), tip budget hit %d, lifted %zu steps\n",
+               st.growth_seeds, st.growth_curves, st.growth_steps, st.growth_blocked,
+               st.growth_branches, st.growth_branch_refused,
+               st.growth_branch_refused_region, st.growth_branch_refused_support,
+               st.growth_branch_refused_crowded, st.growth_branch_joined,
+               st.growth_joins,
+               st.growth_join_refused_span, st.growth_clamped,
+               st.growth_clamp_max_deg, st.growth_tip_budget_hit ? 1 : 0,
+               st.growth_lifted);
   return out;
 }
 
@@ -2205,8 +2286,12 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                ".txt";
       if (FILE* f = std::fopen(path.c_str(), "wb")) {
         for (const EmittedSeg& e : emitted)
+          // column 7 is the RADIUS, exactly as the real span file writes sp.r --
+          // an earlier version wrote the diameter here, and every renderer that read
+          // both files with one rule drew real struts at half width and welded them
+          // at half reach.
           std::fprintf(f, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n",
-                       e.a.x, e.a.y, e.a.z, e.b.x, e.b.y, e.b.z, 2.0 * e.r);
+                       e.a.x, e.a.y, e.a.z, e.b.x, e.b.y, e.b.z, e.r);
         std::fclose(f);
       }
     } };
@@ -2653,8 +2738,8 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             // Walk each grid line and emit only the RUNS that are padded, so a line
             // crossing an empty stretch of footprint simply is not drawn there.
             const double step = std::max(rmat, 1e-3);
-            auto emit_padded_line = [&](bool along_y, double fixed) {
-              const double s0 = along_y ? y0 : x0, s1 = along_y ? y1 : x1;
+            auto emit_padded_line = [&](bool along_y, double fixed, double s0,
+                                        double s1) {
               bool open = false;
               double run0 = s0;
               for (double t = s0; t <= s1 + step; t += step) {
@@ -2689,8 +2774,60 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                 }
               }
             };
-            for (double x = x0; x <= x1; x += pitch) emit_padded_line(true, x);
-            for (double y = y0; y <= y1; y += pitch) emit_padded_line(false, y);
+            // ══════════════════════════════════════════════════════════════════════
+            // ★★★ ONE MAT PER CLUSTER OF TOUCHDOWNS, NOT ONE MAT OVER THE PART ★★★
+            // The lines were swept over the bounding box of the WHOLE lattice, drawn
+            // wherever a grid point lay within three pitches of any touchdown. Two
+            // lattice regions 30 mm apart therefore shared one mat, and the pads from
+            // each side reached across the gap and met: MEASURED, 650 mm of mat at
+            // radius 0.334 lying between the two face prisms (y -26.7 .. -7.4), and
+            // the two lattices arriving at the file as ONE connected body. The face
+            // prism is the cookie-cutter for the curves -- every growth step is gated
+            // by in_region, and the overshoot at the prism edge is a 0.6 mm sliver --
+            // but nothing ever cut the mat with it.
+            //
+            // So: cluster the touchdowns (union-find within `pad`), and sweep each
+            // cluster's own bounding box, extended by ONE pitch beyond its outermost
+            // touchdown. Two regions with nothing landing between them get two mats
+            // with nothing between them, whatever the pad radius says.
+            std::vector<int> cpar(touch.size());
+            for (std::size_t i = 0; i < cpar.size(); ++i) cpar[i] = static_cast<int>(i);
+            std::function<int(int)> cfind = [&](int a) {
+              while (cpar[static_cast<std::size_t>(a)] != a) {
+                cpar[static_cast<std::size_t>(a)] =
+                    cpar[static_cast<std::size_t>(cpar[static_cast<std::size_t>(a)])];
+                a = cpar[static_cast<std::size_t>(a)];
+              }
+              return a;
+            };
+            for (std::size_t i = 0; i < touch.size(); ++i)
+              for (std::size_t j = i + 1; j < touch.size(); ++j) {
+                const double ux = touch[i][0] - touch[j][0], uy = touch[i][1] - touch[j][1];
+                if (ux * ux + uy * uy > pad2) continue;
+                const int a = cfind(static_cast<int>(i)), b = cfind(static_cast<int>(j));
+                if (a != b) cpar[static_cast<std::size_t>(std::max(a, b))] = std::min(a, b);
+              }
+            std::map<int, std::array<double, 4>> cbox;   // xmin, xmax, ymin, ymax
+            for (std::size_t i = 0; i < touch.size(); ++i) {
+              const int r = cfind(static_cast<int>(i));
+              auto it = cbox.find(r);
+              if (it == cbox.end())
+                cbox[r] = {touch[i][0], touch[i][0], touch[i][1], touch[i][1]};
+              else {
+                std::array<double, 4>& b = it->second;
+                b[0] = std::min(b[0], touch[i][0]); b[1] = std::max(b[1], touch[i][0]);
+                b[2] = std::min(b[2], touch[i][1]); b[3] = std::max(b[3], touch[i][1]);
+              }
+            }
+            st.base_mat_clusters = cbox.size();
+            for (const auto& kv : cbox) {
+              const double cx0 = std::max(x0, kv.second[0] - pitch);
+              const double cx1 = std::min(x1, kv.second[1] + pitch);
+              const double cy0 = std::max(y0, kv.second[2] - pitch);
+              const double cy1 = std::min(y1, kv.second[3] + pitch);
+              for (double x = cx0; x <= cx1; x += pitch) emit_padded_line(true, x, cy0, cy1);
+              for (double y = cy0; y <= cy1; y += pitch) emit_padded_line(false, y, cx0, cx1);
+            }
 
           }
         }
@@ -2785,6 +2922,15 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       //                      AWAY (a polyline continuing along its curve, or a tie
       //                      heading off sideways), never if it folds back along the
       //                      same line, which is the bundle case above.
+      // ★★ THE NAME SAYS SUPPORT; THE TEST IS ATTACHMENT. Read what it does: it asks
+      // whether this endpoint TOUCHES ANOTHER SPAN -- landing on its body (a T on a
+      // beam) or meeting a tip that leads away. It never looks DOWN, and it has no
+      // notion of the build direction. The grower's `supported_at` is the printability
+      // predicate; this one is topological, and the two answer different questions on
+      // the same geometry. Confusing them costs real time: the grown path reports
+      // `growth_blocked: 0` -- its support rule refused ZERO steps -- while this prune
+      // deletes 23,920 mm, and that reads as a contradiction until you notice one is
+      // about material underneath and the other about material alongside.
       auto tip_supported = [&](std::size_t i, const Vec3& tip, const Vec3& out) {
         const auto k0 = key(tip);
         for (long long dz = -1; dz <= 1; ++dz)
@@ -2915,18 +3061,50 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         rebuild();
       }
         // ── the prune, to a fixed point
-      for (; st.prune_rounds < kOrganicPruneRounds; ++st.prune_rounds) {
+      // ★ THE CAP, OVERRIDABLE FOR MEASUREMENT ONLY -- AND MEASURED. Both paths exit
+      // this loop at exactly kOrganicPruneRounds, which looks alarming: the cascade was
+      // still finding things to delete when it ran out of rounds, so the surviving
+      // lattice would be a function of this bound rather than of the geometry.
+      //
+      // IT IS NOT. At 64 rounds the grown path prunes 9,433 spans / 23,920.1 mm and
+      // writes 1385.9 mm; at 512 rounds it prunes 11,643 spans / 24,491.5 mm and writes
+      // 1386.1 mm. Eight times the rounds removes 23% more SPANS and 2.4% more LENGTH,
+      // and changes the output by 0.2 mm -- the extra rounds are nibbling slivers off
+      // an already-converged result. Hitting the cap here is not the defect it looks
+      // like, and this override exists so that stays checkable rather than remembered.
+      const int prune_cap = [] {
+        if (const char* e = std::getenv("TOPOPT_ORGANIC_PRUNE_ROUNDS")) {
+          const int v = std::atoi(e);
+          if (v > 0) return v;
+        }
+        return kOrganicPruneRounds;
+      }();
+      for (; st.prune_rounds < prune_cap; ++st.prune_rounds) {
         std::vector<std::size_t> doomed;
+        // ★ PROBE (env-gated), AND THE HYPOTHESIS IT REFUTED. The theory: a strand
+        // rooted on the plate with a free tip is a PILLAR, which prints, and the rule
+        // as written dooms its top span, frees the one below, and unravels the column
+        // down to the plate -- so the cascade would be eating the grown lattice.
+        //
+        // IT IS NOT. Dooming on BOTH ends free prunes 482 spans / 1,869.6 mm instead of
+        // 9,433 / 23,920.1 -- twelve times less deletion -- and the file gets LESS:
+        // 1830.1 mm against 2044.8. Pruning less does not write more, so this pass is
+        // not the constraint. Note also the arithmetic: with only 1.9 k mm pruned,
+        // ~32 k mm still disappears between node_merge and support_prune, so the grown
+        // path loses its material somewhere this counter never sees. Kept env-gated so
+        // the refutation stays checkable instead of remembered.
+        const bool need_both = std::getenv("TOPOPT_ORGANIC_PRUNE_BOTH_ENDS") != nullptr;
         for (std::size_t i = 0; i < emitted.size(); ++i) {
           if (!alive[i]) continue;
+          int free_ends_here = 0;
           for (int e = 0; e < 2; ++e) {
             const Vec3 tip = e ? emitted[i].b : emitted[i].a;
             if (on_plate(tip, emitted[i].r) ||
                 tip_supported(i, tip, tip_dir(i, e)))
               continue;
-            doomed.push_back(i);
-            break;
+            ++free_ends_here;
           }
+          if (free_ends_here >= (need_both ? 2 : 1)) doomed.push_back(i);
         }
         if (doomed.empty()) break;
         for (std::size_t i : doomed) {
@@ -3302,6 +3480,28 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
               for (int i = 0; i < RX; ++i)
                 if (occ[ridx(i, j, k)]) { ground = k; break; }
           if (ground < 0) return;
+          // ══════════════════════════════════════════════════════════════════════
+          // ★★★ THE PLATE HOLDS WHAT RESTS ON IT, NOT ONLY WHAT SITS IN ITS LAYER ★★★
+          // `ground` is ONE layer index for the whole part: the lowest layer holding
+          // any material. A blob at layer k was an island unless layer k-1 held
+          // something within one cell -- so a column whose base sat a single 0.2 mm
+          // layer above `ground` was an island AT ITS OWN BASE, and everything
+          // touching that island was cut. MEASURED on the grown path: 134 columns
+          // holding 16,217 mm stood exactly one layer above ground, and 0.0% of them
+          // survived; the 12 at layer zero kept 13.2%. What set `ground` a layer
+          // below the columns was the base MAT -- thinner (0.268 vs 0.5 mm radius),
+          // so it stamps one layer lower -- and during this pass it is still the
+          // grid-snapped mat that lies BESIDE most columns, so the layer beneath them
+          // held nothing.
+          //
+          // The prune already carries the right notion: on_plate(p, r) is "within one
+          // strut radius of the lowest material". Applied here, a blob within that
+          // tolerance of the ground is resting on the plate and needs nothing beneath
+          // it. Same tolerance, same meaning, two passes that now agree.
+          double plate_r = 0.0;
+          for (const EmittedSeg& e : emitted) plate_r = std::max(plate_r, e.r);
+          const int plate_k =
+              ground + std::max(1, static_cast<int>(std::ceil(plate_r / vz)));
           for (int k = ground + 1; k < RZ; ++k) {
             std::fill(lab.begin(), lab.end(), 0);
             int nl = 0;
@@ -3324,8 +3524,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                       }
                     }
                 }
-                bool sup = false;
+                bool sup = (k <= plate_k);          // resting on the plate
                 for (const std::pair<int,int>& c : cells) {
+                  if (sup) break;
                   for (int dj = -1; dj <= 1 && !sup; ++dj)
                     for (int di = -1; di <= 1 && !sup; ++di) {
                       const int a2 = c.first + di, b2 = c.second + dj;
@@ -4197,6 +4398,25 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                          lo.z + (k + 0.5) * cell};
             // Only inside the part, and only where a strut of this radius fits.
             if (boundary && boundary->signed_distance(c) < rfill) continue;
+            // ★★ AND ONLY INSIDE THE LATTICE REGION. "Inside the part" is not the
+            // same test: the solid between two face-prism regions is inside the part
+            // and has no struts, so this pass filled it -- 4,143 mm of fill laid in
+            // a 30 mm gap, and two lattices that were meant to be separate arrived at
+            // the file as one connected body. The face prism cuts the curves at every
+            // step (in_region); it never cut the fill. Now it does.
+            if (lat.grid_h > 0.0 && !lat.spacing_used_mm.empty()) {
+              const int gi = static_cast<int>((c.x - lat.grid_origin.x) / lat.grid_h);
+              const int gj = static_cast<int>((c.y - lat.grid_origin.y) / lat.grid_h);
+              const int gk = static_cast<int>((c.z - lat.grid_origin.z) / lat.grid_h);
+              bool in_reg = false;
+              if (gi >= 0 && gj >= 0 && gk >= 0 && gi < lat.grid_nx &&
+                  gj < lat.grid_ny && gk < lat.grid_nz) {
+                const std::size_t ge =
+                    (static_cast<std::size_t>(gk) * lat.grid_ny + gj) * lat.grid_nx + gi;
+                in_reg = ge < lat.spacing_used_mm.size() && lat.spacing_used_mm[ge] > 0.0;
+              }
+              if (!in_reg) { ++st.fill_mat_cells_outside_region; continue; }
+            }
             ++st.fill_mat_cells;
             // Three axis-aligned struts through the cell centre, each reaching PAST
             // the cell into whatever is around it. That is what makes them anchored

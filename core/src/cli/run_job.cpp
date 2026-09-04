@@ -654,6 +654,8 @@ struct LatticeExportOutcome {
   long long organic_support_fragments_dropped = 0;
   double organic_support_fragment_length_mm = 0.0;
   long long organic_base_mat_stitches = 0;
+  long long organic_base_mat_clusters = 0;
+  long long organic_fill_mat_cells_outside_region = 0;
   // ★ THE EMITTED SPANS, carried out so the STRUCTURAL CERTIFICATE can read the
   // geometry that ships. They are post-clip, post-prune, post-finish and
   // post-endpoint-fit -- the same spans lattice.emit_organic_spans writes.
@@ -2074,6 +2076,9 @@ LatticeExportOutcome export_latticed_variant(
         static_cast<long long>(g.support_fragments_dropped);
     oc.organic_support_fragment_length_mm = g.support_fragment_length_mm;
     oc.organic_base_mat_stitches = static_cast<long long>(g.base_mat_stitches);
+    oc.organic_base_mat_clusters = static_cast<long long>(g.base_mat_clusters);
+    oc.organic_fill_mat_cells_outside_region =
+        static_cast<long long>(g.fill_mat_cells_outside_region);
     oc.organic_emitted_components = static_cast<long long>(g.emitted_components);
     oc.organic_floating_before = g.floating_voxels_before;
     oc.organic_floating_after = g.floating_voxels_after;
@@ -8537,6 +8542,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_support_fragments_dropped = R.oc.organic_support_fragments_dropped;
         gi.organic_support_fragment_length_mm = R.oc.organic_support_fragment_length_mm;
         gi.organic_base_mat_stitches = R.oc.organic_base_mat_stitches;
+        gi.organic_base_mat_clusters = R.oc.organic_base_mat_clusters;
+        gi.organic_fill_mat_cells_outside_region = R.oc.organic_fill_mat_cells_outside_region;
         // ★ the organic structural certificate. `verdict` is never absent when one
         // was run, so "no key" and "not certified" cannot be confused.
         if (R.organic_cert.verdict != OrganicCertificate::Verdict::NotRun) {

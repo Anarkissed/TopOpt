@@ -989,6 +989,8 @@ struct RunInfo {
   long long organic_support_fragments_dropped = 0;
   double organic_support_fragment_length_mm = 0.0;
   long long organic_base_mat_stitches = 0;
+  long long organic_base_mat_clusters = 0;   // separate mats laid; 2 regions apart must read 2
+  long long organic_fill_mat_cells_outside_region = 0;
   // ★★ THE ORGANIC STRUCTURAL CERTIFICATE, under grading.organic.*. `verdict` is
   // "certified" | "refused" | "not_run" — never absent, so a run that did not certify
   // cannot be mistaken for one that did. `statistic` names WHICH number the verdict

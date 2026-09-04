@@ -456,6 +456,27 @@ inline constexpr double kOrganicGrowthRecordRadii = 6.0;
 // the way up. Bounded so a tip cannot ping-pong between two neighbours forever.
 inline constexpr int kOrganicGrowthMaxJoins = 6;
 
+// ★★ THE UPWARD BIAS -- "REACH FOR THE LIGHT". The maintainer's idea, and it answers a
+// real defect rather than adding a flourish. A grown curve that stops INSIDE the
+// material is a free end, and the dangling-end prune does not trim it, it UNRAVELS the
+// whole strand: remove the free span, the one below it becomes free, and so on to the
+// base. Measured on the STAND: 27,326 mm reached the prune and 374 mm survived it. A
+// curve that instead runs out of REGION reaches the part surface and is ANCHORED there
+// by the boundary clip -- so height is not decoration, it is how a curve earns its
+// attachment.
+//
+// A blunt version of this was tried first and REJECTED: a tip out of joins sprinting
+// straight up for the boundary. It attached (written length 374 -> 9483 mm) and
+// destroyed the weave -- 7,086 vertical columns, ~5 mm per span against the traced
+// path's 0.87 mm, a skeleton of long straight members instead of fabric. A plant does
+// not bolt for the ceiling when it stops branching; it drifts upward while still
+// growing sideways.
+//
+// So this is a constant preference blended into EVERY step alongside the field, not a
+// terminal mode. Tips keep following the stress, keep branching, keep weaving, and
+// gain height as they go.
+inline constexpr double kOrganicGrowthUpwardBias = 0.25;
+
 inline constexpr double kOrganicFilletAngleDeg = 45.0;
 
 // ★ AND A CAP, because the honest arithmetic is expensive: fully filleting a span of
@@ -930,6 +951,13 @@ struct OrganicLattice {
   // Grid-indexed: the separation the tracer actually used at each candidate voxel
   // (mm), i.e. the derived "cell size". 0 off the candidate set.
   std::vector<double> spacing_used_mm;
+  // ★ THE GEOMETRY THAT INDEXES THE THREE VECTORS ABOVE. Without it the emission stage
+  // could not ask "is this point in the lattice REGION" -- only "is it in the part" --
+  // and the fill pass laid struts through the solid gap between two regions 30 mm
+  // apart, joining them into one body. Set by trace and grow; read by generate.
+  Vec3 grid_origin{0, 0, 0};
+  double grid_h = 0.0;
+  int grid_nx = 0, grid_ny = 0, grid_nz = 0;
   OrganicReport report;
 
   // ── ★★ THE NET-SKIN (organic's diagrid) ─────────────────────────────────────
@@ -1227,6 +1255,9 @@ struct OrganicGenStats {
   // ★ the crosses laid ON the touchdowns so the grid-snapped mat actually reaches the
   // struts standing on it. Without them the mat missed by 0.89-3.54 mm.
   std::size_t base_mat_stitches = 0;
+  // ★ how many separate mats were laid: one per cluster of touchdowns. Two lattice
+  // regions with nothing landing between them must read 2 here, never 1.
+  std::size_t base_mat_clusters = 0;
   // ★ VDI SLENDERNESS PROPPING. `violating` counts struts over the l/D the standard
   // allows for their angle; `propped` those a leg could be dropped under; `impossible`
   // those with nothing beneath to stand on. Reported separately because a strut that
@@ -1276,6 +1307,17 @@ struct OrganicGenStats {
   // Branches offered, and how many were refused for want of support at their root.
   std::size_t growth_branches = 0;
   std::size_t growth_branch_refused = 0;
+  // ★ AND WHY, because the three causes want different fixes: outside the region is
+  // the shape's doing, unsupported is the printer's, and CROWDED is the seeding and
+  // spacing law's. Lumped together they read as a printability problem that the rest
+  // of the receipt contradicts.
+  std::size_t growth_branch_refused_region = 0;
+  std::size_t growth_branch_refused_support = 0;
+  std::size_t growth_branch_refused_crowded = 0;
+  // ★ ...and how many of those crowded branches became a CONNECTOR instead of nothing.
+  std::size_t growth_branch_joined = 0;
+  // ★ steps where the upward bias, not the stress field, decided the heading.
+  std::size_t growth_lifted = 0;
   // Tips that reached the neighbour they crowded instead of stopping beside it.
   std::size_t growth_joins = 0;
   // ★★ JOINS REFUSED FOR SPAN. A join segment lands on material at both ends, so it is
@@ -1347,6 +1389,10 @@ struct OrganicGenStats {
   // ── ★★ THE FILL MAT ─────────────────────────────────────────────────────────
   std::size_t fill_mat_cells = 0;      // empty cells the tracer left behind
   std::size_t fill_mat_struts = 0;
+  // ★ empty cells fill SKIPPED because they lie outside the lattice region -- inside
+  // the part, but between regions or in solid the grading law kept. Measured before
+  // the gate: 4,143 mm of fill in a 30 mm gap between two face prisms.
+  std::size_t fill_mat_cells_outside_region = 0;
   double fill_mat_length_mm = 0.0;
   double support_cut_length_mm = 0.0;
   std::size_t unsupported_cells_found = 0;  // before any repair

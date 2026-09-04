@@ -1434,6 +1434,10 @@ std::string run_info_json(const RunInfo& info) {
               fmt(info.organic_support_fragment_length_mm);
         gr += ", \"base_mat_stitches\": " +
               std::to_string(info.organic_base_mat_stitches);
+        gr += ", \"base_mat_clusters\": " +
+              std::to_string(info.organic_base_mat_clusters);
+        gr += ", \"fill_mat_cells_outside_region\": " +
+              std::to_string(info.organic_fill_mat_cells_outside_region);
         if (!info.organic_structural_verdict.empty()) {
           gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
           gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";
