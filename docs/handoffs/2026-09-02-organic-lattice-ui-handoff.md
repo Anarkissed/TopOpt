@@ -1,5 +1,20 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-04 (night) — "ribbons again": the blobs are the support pass's arches, and they are in the file
+>
+> Measured on the shipped traced-Auto variant (evidence README, round 6): half the beams
+> are fatter than the bead (radius p50 0.25, p90 0.47, cap 0.50 mm), all tiny (median
+> 0.064 mm), a third of the material by volume. They are the emission's ARCH repair:
+> any span over air by more than `kOrganicArchMinUnsupportedMm` (0.01 mm) is flared into
+> a 12-segment fillet up to 2.5 × the bead. 1938 arched spans on this cube (counter now
+> on the bridge header [47] and in the census). Not the prism sides, not the weld pitch
+> (A/B: identical census). ★ It is the file: every app job states
+> `loads.layer_height_mm` (0.2 mm) and the pass is gated on it; the printed PR 353
+> cube's job predates that key, which is why the photo shows clean beams. No job key
+> controls the pass. Core item for the core agent: the 0.01 mm threshold and the 2.5×
+> cap. App-side there is no honest lever; a labelled "show without repairs" preview
+> toggle is possible if the maintainer wants it, default off.
+
 > ## ★ 2026-09-04 (evening) — topology/thickness split, the 3MF variant cache, and a correction
 >
 > **Correction first.** The 04:00 block says the shape-fit mirror's floor was "corrected

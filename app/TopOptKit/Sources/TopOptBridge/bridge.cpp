@@ -2346,7 +2346,7 @@ std::vector<double> organic_spans_field(const double* spans7, std::size_t span_c
 //   [33..44] census_len_mm[emitted, node_merge, base_cut, support_prune,
 //   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
 //   finish, written] (−1 = the pass did not run), [45] written components,
-//   [46] 1 = emission ran, [47] reserved
+//   [46] 1 = emission ran, [47] filleted (arched) spans
 //   [48 ..]                    the CENTRELINE distance field, [4] doubles (mm, ≥ 0,
 //                              clamped at [8] = reach = band + largest radius)
 //   [48 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
@@ -2491,7 +2491,7 @@ std::vector<double> organic_preview_field(
       if (cand[i] && sep[i] > sep_hi) sep_hi = sep[i];
     boundary.set_voxel_base(&grid, &boundary_density, 0.5, 2.0 * (sep_hi > 0.0 ? sep_hi : spacing));
     try {
-      emit_stats = topopt::generate_organic_lattice(lat, sink, &boundary, 3, nullptr, &emitted);
+      emit_stats = topopt::generate_organic_lattice(lat, sink, &boundary, 8, nullptr, &emitted);   // run_job passes 8
       emit_ran = true;
     } catch (...) {
       emitted.clear();
@@ -2542,6 +2542,7 @@ std::vector<double> organic_preview_field(
     out[33 + c] = emit_stats.census_len_mm[c];
   out[45] = static_cast<double>(emit_stats.census_components[topopt::OrganicGenStats::CensusWritten]);
   out[46] = emit_ran ? 1.0 : 0.0;
+  out[47] = static_cast<double>(emit_stats.filleted_spans);   // the support pass's arches
   out[11] = static_cast<double>(gstats.growth_seeds);
   out[12] = static_cast<double>(gstats.growth_curves);
   out[13] = static_cast<double>(gstats.growth_steps);
