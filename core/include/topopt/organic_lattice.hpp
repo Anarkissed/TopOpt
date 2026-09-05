@@ -511,6 +511,28 @@ inline constexpr int kOrganicFilletSegments = 12;
 // field is straight and uniaxial no tie is placed, so the grove stays a grove.
 inline constexpr double kOrganicXferTieMinorRatio = 0.10;
 inline constexpr double kOrganicXferTieReachRatio = 1.5;
+// ★ ISOSTATIC TIES, NOT STUBS (maintainer, 2026-09-05: "much less geometric, more
+// fluid"). A tie that stops at the first pillar it touches is a few millimetres long
+// and cannot show a bend. Daynes' second family are isostatic LINES: they follow
+// the minor principal direction across every pillar, and their spacing is the
+// stress-driven separation -- his "spatial grading". So a tie now welds at each
+// pillar it crosses and keeps going, up to kOrganicXferTieMaxReachRatio separations,
+// until it leaves the region or comes within kOrganicTestRatio of another tie (the
+// same Jobard-Lefer rule the pillars obey). The minor-stress gate still decides
+// where a tie is SEEDED; the field decides where it goes.
+inline constexpr double kOrganicXferTieMaxReachRatio = 8.0;
+// ★ THE SWIRL (maintainer, 2026-09-05: "bending as organically as possible"). A tie
+// that follows the field exactly bends only where the stress bends, and in a smooth
+// field that is a smooth arc, which reads as drawn. What reads as GROWN is coherent
+// variation: neighbours lean together, wander a little, never repeat. This is the
+// coupon harness's swirl brought to the ties: the heading is rotated about the local
+// normal by an angle that varies smoothly with position (products of sines, NO
+// randomness -- two runs give the same part), amplitude kOrganicXferTieSwirlDeg at
+// a wavelength of kOrganicXferTieSwirlWavelengthRatio separations. Welds stay exact;
+// the swirl is a look, and it is bounded so the tie still reaches its neighbours.
+// grading.organic_tie_swirl scales it (0 = off, 1 = this amplitude).
+inline constexpr double kOrganicXferTieSwirlDeg = 28.0;
+inline constexpr double kOrganicXferTieSwirlWavelengthRatio = 3.5;
 inline constexpr double kOrganicVdiDensityFloor =
     3.0 * 3.14159265358979323846 / (kOrganicVdiSlendernessMax *
                                     kOrganicVdiSlendernessMax * 4.0);
@@ -707,6 +729,7 @@ struct OrganicParams {
   // ★ grown only: launch transfer ties along the second principal direction from
   // every pillar (see kOrganicXferTieMinorRatio). Job key grading.organic_transfer_ties.
   bool transfer_ties = false;
+  double tie_swirl = 1.0;   // 0..1, scales kOrganicXferTieSwirlDeg
 
   // Hard bounds so a degenerate field cannot run away. Exceeding either is REPORTED,
   // never silent (`seed_budget_exhausted` / `step_budget_hits`).

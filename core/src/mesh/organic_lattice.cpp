@@ -2209,6 +2209,23 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
       return d > 0.0 ? 0.5 * d : fallback;
     };
     std::vector<OrganicCurve> ties;
+    // vertices of ties already laid, for the separation rule between ties
+    std::unordered_map<long long, std::vector<Vec3>> tie_verts;
+    auto near_tie = [&](const Vec3& q, double lim, Vec3* hit) {
+      const double lim2 = lim * lim;
+      for (int dz = -1; dz <= 1; ++dz)
+        for (int dy = -1; dy <= 1; ++dy)
+          for (int dx = -1; dx <= 1; ++dx) {
+            const Vec3 o{q.x + dx * cellsz, q.y + dy * cellsz, q.z + dz * cellsz};
+            auto it = tie_verts.find(pkey(o));
+            if (it == tie_verts.end()) continue;
+            for (const Vec3& v : it->second) {
+              const Vec3 d2 = vsub(q, v);
+              if (vdot(d2, d2) < lim2) { if (hit) *hit = v; return true; }
+            }
+          }
+      return false;
+    };
     const std::size_t n_pillars = grown.size();
     for (std::size_t ci = 0; ci < n_pillars; ++ci) {
       const OrganicCurve& pc = grown[ci];
@@ -2219,52 +2236,105 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
         const Vec3 p = pc.points[pi];
         if (since < sep_at(p)) continue;
         since = 0.0;
+        // the separation rule between ties: do not seed inside another tie's band
+        if (near_tie(p, kOrganicTestRatio * sep_at(p), nullptr)) continue;
         Vec3 e2; double ratio = 0.0;
         if (!minor_frame(p, e2, ratio)) continue;
         if (ratio < kOrganicXferTieMinorRatio) { ++st.growth_ties_refused_minor; continue; }
         for (int sgn = -1; sgn <= 1; sgn += 2) {
           ++st.growth_ties_seeded;
-          const double reach = kOrganicXferTieReachRatio * sep_at(p);
-          Vec3 dir = vmul(e2, double(sgn));
-          Vec3 q = p; double travelled = 0.0; bool landed = false;
-          Vec3 hit{0, 0, 0}; int who = -1;
-          std::vector<Vec3> path{p};
           const double r0 = pc.radius_mm;
-          while (travelled < reach) {
-            Vec3 e2n; double rn;
-            if (minor_frame(q, e2n, rn)) {
-              if (vdot(e2n, dir) < 0.0) e2n = vmul(e2n, -1.0);
-              dir = vunit(vadd(vmul(dir, 0.5), vmul(e2n, 0.5)));
+          const double max_reach = kOrganicXferTieMaxReachRatio * sep_at(p);
+          Vec3 dir = vmul(e2, double(sgn));
+          Vec3 q = p; double travelled = 0.0;
+          std::vector<Vec3> path{p};
+          std::vector<char> must{1};            // vertices that are welds: never thinned
+          int joins = 0; int last_join_curve = int(ci); Vec3 last_join = p;
+          while (travelled < max_reach) {
+            // RK2 along the minor direction, sign kept continuous
+            Vec3 e2a; double ra;
+            if (!minor_frame(q, e2a, ra)) break;
+            if (vdot(e2a, dir) < 0.0) e2a = vmul(e2a, -1.0);
+            const Vec3 mid = vadd(q, vmul(e2a, 0.5 * step));
+            Vec3 e2m; double rm;
+            if (!minor_frame(mid, e2m, rm)) break;
+            if (vdot(e2m, dir) < 0.0) e2m = vmul(e2m, -1.0);
+            dir = vunit(e2m);
+            // ★ the swirl: rotate the heading about the local frame normal (e2 x e1
+            // ~ the region's thickness direction, so the wander stays IN the wall)
+            // by a smooth, position-keyed angle. Products of sines at three
+            // incommensurate wavelengths: coherent, never periodic, no RNG.
+            if (params.tie_swirl > 0.0) {
+              const double lam = kOrganicXferTieSwirlWavelengthRatio * sep_at(q);
+              const double k1 = 2.0 * M_PI / lam, k2 = k1 * 0.618, k3 = k1 * 1.414;
+              const double phase = std::sin(k1 * q.x + 0.7) * std::cos(k2 * q.z + 1.9) +
+                                   0.5 * std::sin(k3 * (q.x + q.z) + 0.3) *
+                                       std::cos(k1 * q.y + 2.4);
+              const double ang = params.tie_swirl * kOrganicXferTieSwirlDeg * M_PI / 180.0 *
+                                 std::max(-1.0, std::min(1.0, phase));
+              Vec3 e1a; double r1a;
+              Vec3 axis{0, 0, 0};
+              {
+                // the frame normal: e2 x e1 where e1 is the major direction here
+                Vec3 f3[3]; if (frame_at(q, f3)) axis = vunit(vcross(dir, f3[0]));
+              }
+              (void)e1a; (void)r1a;
+              if (vlen(axis) > 1e-9) {
+                const double c = std::cos(ang), sn = std::sin(ang);
+                const Vec3 rot = vadd(vadd(vmul(dir, c), vmul(vcross(axis, dir), sn)),
+                                      vmul(axis, vdot(axis, dir) * (1.0 - c)));
+                dir = vunit(rot);
+              }
             }
             const Vec3 nq = vadd(q, vmul(dir, step));
             if (!in_region(nq)) break;
-            q = nq; travelled += step; path.push_back(q);
-            if (travelled > 2.0 * r0 &&
-                land_on(q, int(ci), std::max(2.0 * r0, 0.75 * step), &hit, &who)) {
-              landed = true; break;
+            q = nq; travelled += step;
+            path.push_back(q); must.push_back(0);
+            // weld to every pillar (or link) crossed: snap to its vertex, keep going
+            Vec3 hit{0, 0, 0}; int who = -1;
+            if (vlen(vsub(q, last_join)) > 2.0 * r0 &&
+                land_on(q, int(ci), std::max(2.0 * r0, 0.75 * step), &hit, &who) &&
+                who != last_join_curve) {
+              path.back() = hit; must.back() = 1;
+              q = hit; ++joins; last_join_curve = who; last_join = hit;
+            }
+            // the separation rule: stop on another tie, welding to it
+            Vec3 tv{0, 0, 0};
+            if (travelled > sep_at(p) &&
+                near_tie(q, kOrganicTestRatio * sep_at(q), &tv)) {
+              path.push_back(tv); must.push_back(1); ++joins;
+              break;
             }
           }
-          if (!landed) { ++st.growth_ties_refused_reach; continue; }
-          // ★ DECIMATE BEFORE EMITTING. The node merge unions every span endpoint
-          // within kOrganicNodeMergeRatio radii and snaps each cluster to its
-          // centroid; a tie recorded at every growth step (closer than that) chained
-          // into ONE cluster and through every pillar it touched -- 9,018 chords up to
-          // 97 mm, 400,000 mm of them, on the first run. Grown pillars never chain
-          // because they record a vertex every couple of millimetres. Keep a tie
-          // vertex only when it is at least four merge radii from the last kept one;
-          // the seed and the landing point always stay.
+          if (joins < 1) { ++st.growth_ties_refused_reach; continue; }
+          // thin the free vertices to >= four merge radii apart (the node merge chains
+          // anything denser); welds always stay
           {
             const double keep_d = 4.0 * kOrganicNodeMergeRatio * r0;
-            std::vector<Vec3> thin{path.front()};
-            for (std::size_t k2 = 1; k2 < path.size(); ++k2)
-              if (vlen(vsub(path[k2], thin.back())) >= keep_d) thin.push_back(path[k2]);
-            if (vlen(vsub(hit, thin.back())) < 0.5 * keep_d && thin.size() > 1) thin.pop_back();
-            thin.push_back(hit);
+            std::vector<Vec3> thin; thin.reserve(path.size());
+            std::size_t next_must = 0;
+            for (std::size_t k2 = 0; k2 < path.size(); ++k2) {
+              if (must[k2]) { thin.push_back(path[k2]); continue; }
+              next_must = std::max(next_must, k2);
+              while (next_must < path.size() && !must[next_must]) ++next_must;
+              const double to_next = next_must < path.size()
+                                         ? vlen(vsub(path[next_must], path[k2])) : 1e9;
+              if (vlen(vsub(path[k2], thin.back())) >= keep_d && to_next >= keep_d)
+                thin.push_back(path[k2]);
+            }
             path.swap(thin);
           }
+          if (path.size() < 2) { ++st.growth_ties_refused_reach; continue; }
           OrganicCurve tie;
           tie.family = 1;
-          tie.radius_mm = tie_radius(vmul(vadd(p, hit), 0.5), r0);
+          // ★ A TIE IS A MEMBER OF THE SAME LATTICE (maintainer, 2026-09-05: "can't
+          // they be as thick as the rest?"). Sizing a tie from the bead field at its
+          // midpoint gave a median radius of 0.51 mm against the pillars' 0.35 -- the
+          // field grades thicker where the cell is coarser -- and the ties read as
+          // girders through the grove. The tie takes the radius of the pillar it
+          // grows from; the certificate, not the bead law, says whether that is enough.
+          tie.radius_mm = r0;
+          (void)tie_radius;
           tie.points = path;
           double L = 0.0;
           for (std::size_t k2 = 1; k2 < path.size(); ++k2) {
@@ -2273,6 +2343,7 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
             mark(path[k2 - 1], path[k2], tie.radius_mm);
           }
           tie.length_mm = L;
+          for (const Vec3& v : path) tie_verts[pkey(v)].push_back(v);
           ties.push_back(std::move(tie));
           ++st.growth_ties_landed; st.growth_tie_length_mm += L;
         }
@@ -2288,6 +2359,17 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
                    st.growth_ties_refused_reach);
   }
   out.curves.swap(grown);
+  // ★ A GROWN LATTICE STANDS ON ITS FLOOR; THE BASE TRIM MUST NOT CUT ITS FEET
+  // (2026-09-05). The trim (kOrganicBaseDominanceFraction) cuts everything below the
+  // lowest layer where one connected region holds half the layer -- a rule written
+  // for the traced weave, whose swirl closes a few layers up and whose lowest layers
+  // are non-adherent scatter. A grove of pillars is scatter in EVERY horizontal
+  // slice by nature: the rule either never fires, or -- once isostatic ties form a
+  // dominant layer higher up -- fires there and amputates every pillar's feet
+  // (36,897 mm cut at z 13.8 on the STAND structural run; 10,000 mm at z 5.7 on every
+  // aesthetic grown run before that, the jagged bottom edge in the renders). Seeds
+  // are placed on the region floor by construction, so there is no scatter to trim.
+  out.trim_below_base = false;
   if (gstats) *gstats = st;
   if (std::getenv("TOPOPT_ORGANIC_TRACE"))
     std::fprintf(stderr,

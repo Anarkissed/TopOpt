@@ -1533,7 +1533,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
              "organic_scale", "organic_growth", "organic_overhang_fillet",
-             "organic_transfer_ties",
+             "organic_transfer_ties", "organic_tie_swirl",
              "organic_structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1724,6 +1724,13 @@ JobDescription parse_job(const std::string& json_text) {
             "grading \"organic_transfer_ties\" is only allowed with "
             "algorithm \"organic\"");
       job.grading.organic_transfer_ties = (tv->num != 0.0);
+    }
+    if (const JsonValue* sw = find_key(gr, "organic_tie_swirl")) {
+      if (sw->type != JsonValue::Type::Number || !(sw->num >= 0.0 && sw->num <= 1.0))
+        schema_fail("grading \"organic_tie_swirl\" must be a number in [0, 1]");
+      if (!organic_alg)
+        schema_fail("grading \"organic_tie_swirl\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_tie_swirl = sw->num;
     }
     if (const JsonValue* fv = find_key(gr, "organic_overhang_fillet")) {
       if (fv->type != JsonValue::Type::Bool)

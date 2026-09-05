@@ -433,6 +433,7 @@ struct JobGrading {
   // has a member to turn along (Michell's orthogonal family). Default off until the
   // maintainer has judged the look; see kOrganicXferTieMinorRatio.
   bool organic_transfer_ties = false;
+  double organic_tie_swirl = 1.0;   // 0..1: how much the ties wander (a look)
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

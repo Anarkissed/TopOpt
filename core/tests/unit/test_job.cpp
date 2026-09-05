@@ -702,6 +702,15 @@ static void test_organic_scale_and_gates() {
     CHECK(parse_job(organic_swept(", \"organic_transfer_ties\": true"))
               .grading.organic_transfer_ties,
           "organic_transfer_ties: true is honoured");
+    CHECK(parse_job(organic_swept("")).grading.organic_tie_swirl == 1.0,
+          "organic_tie_swirl: absent means 1.0 (full swirl)");
+    CHECK(parse_job(organic_swept(", \"organic_tie_swirl\": 0.25")).grading.organic_tie_swirl == 0.25,
+          "organic_tie_swirl: a value in [0,1] is honoured");
+    {
+      bool r2 = false;
+      try { (void)parse_job(organic_swept(", \"organic_tie_swirl\": 1.5")); } catch (const std::exception&) { r2 = true; }
+      CHECK(r2, "organic_tie_swirl: 1.5 is refused (0..1)");
+    }
   }
   {
     const JobDescription j = parse_job(organic_swept(
