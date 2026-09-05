@@ -1459,6 +1459,15 @@ std::string run_info_json(const RunInfo& info) {
                 ", \"blended\": " + std::to_string(ri.blended) + "}";
         }
         gr += "]";
+        gr += ", \"overhang_fillet_on\": " + std::string(info.organic_overhang_fillet_on ? "true" : "false");
+        gr += ", \"fillet_skipped_spans\": " + std::to_string(info.organic_fillet_skipped_spans);
+        gr += ", \"transfer_ties_on\": " + std::string(info.organic_transfer_ties_on ? "true" : "false");
+        gr += ", \"ties_seeded\": " + std::to_string(info.organic_ties_seeded);
+        gr += ", \"ties_landed\": " + std::to_string(info.organic_ties_landed);
+        gr += ", \"ties_refused_minor_stress\": " + std::to_string(info.organic_ties_refused_minor);
+        gr += ", \"ties_refused_reach\": " + std::to_string(info.organic_ties_refused_reach);
+        gr += ", \"transfer_tie_length_mm\": " + fmt(info.organic_xfer_tie_length_mm);
+        gr += ", \"tie_swirl\": " + fmt(info.organic_tie_swirl);
         if (!info.organic_structural_verdict.empty()) {
           gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
           gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";

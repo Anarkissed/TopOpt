@@ -1015,6 +1015,17 @@ struct RunInfo {
   long long organic_synthetic_blended = 0;
   double organic_synthetic_dead_threshold = 0.0;
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
+  // ★ the overhang fillet (grading.organic_overhang_fillet) and the transfer ties
+  // (grading.organic_transfer_ties), so the receipt says what each did or declined
+  bool organic_overhang_fillet_on = true;
+  long long organic_fillet_skipped_spans = 0;
+  bool organic_transfer_ties_on = false;
+  long long organic_ties_seeded = 0;
+  long long organic_ties_landed = 0;
+  long long organic_ties_refused_minor = 0;
+  long long organic_ties_refused_reach = 0;
+  double organic_xfer_tie_length_mm = 0.0;
+  double organic_tie_swirl = 1.0;
   // ★★ THE ORGANIC STRUCTURAL CERTIFICATE, under grading.organic.*. `verdict` is
   // "certified" | "refused" | "not_run" — never absent, so a run that did not certify
   // cannot be mistaken for one that did. `statistic` names WHICH number the verdict

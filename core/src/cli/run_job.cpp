@@ -656,6 +656,7 @@ struct LatticeExportOutcome {
   long long organic_base_mat_stitches = 0;
   long long organic_base_mat_clusters = 0;
   long long organic_fill_mat_cells_outside_region = 0;
+  long long organic_fillet_skipped_spans = 0;   // spans the fillet would have flared, declined by the job
   bool organic_shape_fit_on = false;
   long long organic_shape_fit_candidates = 0;
   long long organic_shape_fit_voxels_shrunk = 0;
@@ -2083,6 +2084,7 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_support_fragment_length_mm = g.support_fragment_length_mm;
     oc.organic_base_mat_stitches = static_cast<long long>(g.base_mat_stitches);
     oc.organic_base_mat_clusters = static_cast<long long>(g.base_mat_clusters);
+    oc.organic_fillet_skipped_spans = static_cast<long long>(g.fillet_skipped_spans);
     oc.organic_fill_mat_cells_outside_region =
         static_cast<long long>(g.fill_mat_cells_outside_region);
 
@@ -5007,7 +5009,7 @@ LatticeVariantOutcome lattice_one_variant(
         // the emission's free-end tie, at its reach (kOrganicTieReachRatio x the window)
         const std::size_t free_ties = tie_curve_free_ends(plat.curves, kOrganicTieReachRatio * cc.hi);
         // the support pass's legs: a vertical drop from every end onto the lattice below
-        const std::size_t legs = drop_curve_legs(plat.curves, 3.0 * cc.hi);
+        const std::size_t legs = drop_curve_legs(plat.curves, 1.5 * cc.hi);
         if (free_ties || legs) crossings += weld_curve_crossings(plat.curves);
         const OrganicProbeResult pr = probe_organic_rooting(plat, region_ids);
         const double secs = wall_seconds() - t0;
@@ -5959,6 +5961,11 @@ LatticeVariantOutcome lattice_one_variant(
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso,
       organic.ran ? &organic.lat : nullptr,
       stepped_passes.empty() ? nullptr : &stepped_passes);
+  // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
+  // onto it above went with it -- the receipt read growth_ran: false and zero ties on
+  // every grown run until 2026-09-05. Copy them again, after the replacement.
+  R.oc.growth = organic.growth;
+  R.oc.growth_ran = organic.growth_ran;
   R.gen_seconds = wall_seconds() - tg0;
 
   // ── ★ THE NO-PROTRUSION INVARIANT, ASSERTED (task 2026-08-08-strut-clip-
@@ -8881,6 +8888,15 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_synthetic_fully = static_cast<long long>(R.organic_synthetic.voxels_fully_synthetic);
         gi.organic_synthetic_blended = static_cast<long long>(R.organic_synthetic.voxels_blended);
         gi.organic_synthetic_dead_threshold = R.organic_synthetic.dead_threshold;
+        gi.organic_overhang_fillet_on = job.grading.organic_overhang_fillet;
+        gi.organic_fillet_skipped_spans = R.oc.organic_fillet_skipped_spans;
+        gi.organic_transfer_ties_on = job.grading.organic_transfer_ties;
+        gi.organic_ties_seeded = static_cast<long long>(R.oc.growth.growth_ties_seeded);
+        gi.organic_ties_landed = static_cast<long long>(R.oc.growth.growth_ties_landed);
+        gi.organic_ties_refused_minor = static_cast<long long>(R.oc.growth.growth_ties_refused_minor);
+        gi.organic_ties_refused_reach = static_cast<long long>(R.oc.growth.growth_ties_refused_reach);
+        gi.organic_xfer_tie_length_mm = R.oc.growth.growth_tie_length_mm;
+        gi.organic_tie_swirl = job.grading.organic_tie_swirl;
         gi.organic_synthetic_by_region.clear();
         for (const SyntheticStressRegionReport& rr : R.organic_synthetic.per_region) {
           OrganicSyntheticRegionInfo ri;

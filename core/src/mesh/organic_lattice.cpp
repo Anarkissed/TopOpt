@@ -503,6 +503,30 @@ std::size_t drop_curve_legs(std::vector<OrganicCurve>& curves, double reach_mm) 
     if (cv.points.size() < 2) continue;
     for (int e = 0; e < 2; ++e) {
       const Vec3 tip = e ? cv.points.back() : cv.points.front();
+      // ★ ONLY A FREE END GETS A LEG (calibration 2026-09-05): dropping a leg from
+      // every end over-connected coarse lattices -- the probe read 37-103 % OVER the
+      // run's margin at uniform 4.5-6.5 mm while reading 19 % under on graded
+      // windows. An end that already touches another curve is held; the run's
+      // support pass adds legs to what is unsupported, not to everything.
+      bool touching = false;
+      for (int dy = -1; dy <= 1 && !touching; ++dy) for (int dx = -1; dx <= 1 && !touching; ++dx) {
+        auto it = hash.find(key(tip.x + dx * cell, tip.y + dy * cell));
+        if (it == hash.end()) continue;
+        for (const Seg& sg : it->second) {
+          if (sg.c == c) continue;
+          const Vec3& a = curves[sg.c].points[sg.k]; const Vec3& b = curves[sg.c].points[sg.k + 1];
+          const Vec3 ab = vsub(b, a); const double abab = vdot(ab, ab);
+          double t = abab > 0.0 ? vdot(vsub(tip, a), ab) / abab : 0.0;
+          t = std::max(0.0, std::min(1.0, t));
+          const Vec3 q = vadd(a, vmul(ab, t));
+          const double contact = cv.radius_mm + curves[sg.c].radius_mm;
+          const double d2 = vdot(vsub(q, tip), vsub(q, tip));
+          // a contact AT the tip is the end's own tie or weld (shared vertex), which
+          // holds it sideways, not from below; only a landing on a foreign body counts
+          if (d2 <= contact * contact && d2 > 0.25 * cv.radius_mm * cv.radius_mm) { touching = true; break; }
+        }
+      }
+      if (touching) continue;
       double best_drop = reach_mm; Leg bl{0, 0, 0.0, tip, tip, cv.radius_mm}; bool found = false;
       for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
         auto it = hash.find(key(tip.x + dx * cell, tip.y + dy * cell));
