@@ -208,6 +208,123 @@ double organic_segment_distance2(const Vec3& p1, const Vec3& q1, const Vec3& p2,
 }  // namespace
 
 // ────────────────────────────────────────────────────────────────────────────────
+// ── synthetic focal stress (see the header) ─────────────────────────────────────
+static double organic_von_mises6(const double* m) {
+  const double sxx = m[0], syy = m[1], szz = m[2], sxy = m[3], syz = m[4], szx = m[5];
+  const double d = 0.5 * ((sxx - syy) * (sxx - syy) + (syy - szz) * (syy - szz) +
+                          (szz - sxx) * (szz - sxx)) +
+                   3.0 * (sxy * sxy + syz * syz + szx * szx);
+  return std::sqrt(std::max(0.0, d));
+}
+SyntheticStressReport synthesize_focal_stress(
+    const VoxelGrid& grid, const std::vector<char>& candidate,
+    const std::vector<int>& voxel_region_id,
+    const std::vector<SyntheticStressRegion>& regions, double dead_fraction,
+    std::vector<double>& stress) {
+  SyntheticStressReport rep;
+  const std::size_t n = grid.voxel_count();
+  if (candidate.size() != n || voxel_region_id.size() != n || stress.size() != 6 * n)
+    throw std::invalid_argument("synthesize_focal_stress: size mismatch");
+  if (regions.empty()) return rep;
+  // the peak over every candidate, and the dead threshold under it
+  double peak = 0.0;
+  for (std::size_t e = 0; e < n; ++e)
+    if (candidate[e]) peak = std::max(peak, organic_von_mises6(&stress[6 * e]));
+  rep.peak_von_mises = peak;
+  const double thr = std::max(dead_fraction, 0.0) * peak;
+  rep.dead_threshold = thr;
+  auto centre = [&](std::size_t e) {
+    const int i = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) %
+                                   static_cast<std::size_t>(grid.ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) *
+                                        static_cast<std::size_t>(grid.ny)));
+    return Vec3{grid.origin.x + (i + 0.5) * grid.spacing,
+                grid.origin.y + (j + 0.5) * grid.spacing,
+                grid.origin.z + (k + 0.5) * grid.spacing};
+  };
+  for (const SyntheticStressRegion& cfg : regions) {
+    if (cfg.region_id <= 0 || cfg.foci <= 0) continue;
+    // the region's extent, from its own candidate voxels
+    Vec3 lo{0, 0, 0}, hi{0, 0, 0};
+    std::size_t cnt = 0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!candidate[e] || voxel_region_id[e] != cfg.region_id) continue;
+      const Vec3 q = centre(e);
+      if (cnt == 0) { lo = hi = q; }
+      lo.x = std::min(lo.x, q.x); lo.y = std::min(lo.y, q.y); lo.z = std::min(lo.z, q.z);
+      hi.x = std::max(hi.x, q.x); hi.y = std::max(hi.y, q.y); hi.z = std::max(hi.z, q.z);
+      ++cnt;
+    }
+    if (cnt == 0) continue;
+    ++rep.regions;
+    rep.voxels_in_regions += cnt;
+    SyntheticStressRegionReport rr;
+    rr.region_id = cfg.region_id; rr.face_id = cfg.face_id; rr.foci = cfg.foci;
+    rr.voxels = cnt;
+    const double ex = hi.x - lo.x, ey = hi.y - lo.y, ez = hi.z - lo.z;
+    const Vec3 c{0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y), 0.5 * (lo.z + hi.z)};
+    // foci on the 80 % ellipse of the two LARGEST extents, alternating pull/push
+    int a1 = 0, a2 = 1;
+    if (ey > ex && ez > ex) { a1 = 1; a2 = 2; }
+    else if (ex >= ey && ez > ey) { a1 = 0; a2 = 2; }
+    const double h1 = 0.5 * (a1 == 0 ? ex : a1 == 1 ? ey : ez);
+    const double h2 = 0.5 * (a2 == 0 ? ex : a2 == 1 ? ey : ez);
+    const double soft = cfg.soft_mm > 0.0 ? cfg.soft_mm
+                                          : 0.25 * std::max(ex, std::max(ey, ez));
+    rr.soft_mm = soft;
+    std::vector<Vec3> foci;
+    std::vector<double> fw;
+    for (int f = 0; f < cfg.foci; ++f) {
+      const double ang = 2.0 * M_PI * f / cfg.foci + 0.35;
+      double off[3] = {0, 0, 0};
+      off[a1] = 0.80 * h1 * std::cos(ang);
+      off[a2] = 0.80 * h2 * std::sin(ang);
+      foci.push_back(Vec3{c.x + off[0], c.y + off[1], c.z + off[2]});
+      fw.push_back((f % 2) ? -1.0 : 1.0);
+    }
+    // a single focus is a pure radial field -- push everywhere; with one focus the
+    // weight sign is irrelevant (r (x) r is sign-invariant)
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!candidate[e] || voxel_region_id[e] != cfg.region_id) continue;
+      double* m = &stress[6 * e];
+      const double vm = organic_von_mises6(m);
+      double w = 1.0;   // weight of the REAL field
+      if (thr > 0.0) {
+        const double lo_t = 0.25 * thr;
+        w = (vm - lo_t) / std::max(1e-300, thr - lo_t);
+        w = std::max(0.0, std::min(1.0, w));
+        w = w * w * (3.0 - 2.0 * w);
+      } else {
+        w = vm > 0.0 ? 1.0 : 0.0;
+      }
+      if (w >= 1.0) continue;   // live: untouched
+      const Vec3 q = centre(e);
+      double T[6] = {0, 0, 0, 0, 0, 0};
+      for (std::size_t f = 0; f < foci.size(); ++f) {
+        const Vec3 d = vsub(q, foci[f]);
+        const double L = vlen(d);
+        if (L < 1e-9) continue;
+        const Vec3 r = vmul(d, 1.0 / L);
+        const double g = fw[f] / (L * L + soft * soft);
+        T[0] += g * r.x * r.x; T[1] += g * r.y * r.y; T[2] += g * r.z * r.z;
+        T[3] += g * r.x * r.y; T[4] += g * r.y * r.z; T[5] += g * r.z * r.x;
+      }
+      const double tvm = organic_von_mises6(T);
+      if (!(tvm > 0.0)) continue;
+      // scale the synthetic tensor to the dead threshold (or, with no peak at all, to
+      // unit magnitude) so downstream laws see LOW stress rather than none
+      const double target = thr > 0.0 ? thr : 1.0;
+      const double sc = target / tvm;
+      for (int cc = 0; cc < 6; ++cc) m[cc] = w * m[cc] + (1.0 - w) * sc * T[cc];
+      if (w < 0.05) { ++rep.voxels_fully_synthetic; ++rr.fully_synthetic; }
+      else { ++rep.voxels_blended; ++rr.blended; }
+    }
+    rep.per_region.push_back(rr);
+  }
+  return rep;
+}
+
 OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
                                      const std::vector<char>& candidate,
                                      const std::vector<double>& stress,
@@ -1535,7 +1652,9 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
   // a tip can get to, not only where the trace already is.
   const double zcap = std::max(hi.z, grid.origin.z + grid.nz * grid.spacing);
   const int GZ = static_cast<int>((zcap - lo.z) / layer) + 4;
-  if (static_cast<long long>(GX) * GY * GZ > 120000000LL) return out;
+  // ★ 400M, matching the support rasters (was 120M): above it the GROWER returned an
+  // EMPTY lattice with no refusal -- a silent fallback the receipt could not see.
+  if (static_cast<long long>(GX) * GY * GZ > 400000000LL) return out;
   std::vector<unsigned char> occ(static_cast<std::size_t>(GX) * GY * GZ, 0);
   auto gidx = [GX, GY](int i, int j, int k) {
     return (static_cast<std::size_t>(k) * GY + j) * GX + i;
@@ -2281,8 +2400,14 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     // production run nothing, and written in the same GRID/SEG format the final span
     // file uses so one renderer reads them all.
     if (const char* dump = std::getenv("TOPOPT_ORGANIC_SPAN_DUMP")) {
+      // ★ With TOPOPT_ORGANIC_SPAN_DUMP_ROUNDS set, every in-loop dump carries its
+      // fixed-point round: without it each round OVERWROTE the same file, so a stage
+      // file showed the LAST round's state and a kill in round 0's island cut read as
+      // "gone by the prune" in round 1 -- that misattribution cost two theories.
       const std::string path = std::string(dump) + "_" +
                                organic_census_stage_name(static_cast<int>(stage)) +
+                               (std::getenv("TOPOPT_ORGANIC_SPAN_DUMP_ROUNDS")
+                                    ? "_r" + std::to_string(st.fixed_point_rounds) : std::string()) +
                                ".txt";
       if (FILE* f = std::fopen(path.c_str(), "wb")) {
         for (const EmittedSeg& e : emitted)
@@ -2535,7 +2660,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     // would let a narrow waist higher up masquerade as one.
     const int BZ = std::min(static_cast<int>((hi.z - lo.z) / vz) + 2,
                             static_cast<int>(0.25 * (hi.z - lo.z) / vz) + 2);
-    if (static_cast<long long>(BX) * BY * BZ <= 120000000LL && BZ > 1) {
+    if (static_cast<long long>(BX) * BY * BZ <= 400000000LL && BZ > 1) {
       auto bidx = [BX, BY](int i, int j, int k) {
         return (static_cast<std::size_t>(k) * BY + j) * BX + i;
       };
@@ -2870,6 +2995,19 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   for (st.fixed_point_rounds = 0;
        st.fixed_point_rounds < kOrganicFixedPointRounds; ++st.fixed_point_rounds) {
     const std::size_t mutations_at_round_start = st.mutations;
+    // ★ DUMP POINT (env-gated): the compacted span list this round STARTS from.
+    if (const char* dump = std::getenv("TOPOPT_ORGANIC_SPAN_DUMP")) {
+      if (std::getenv("TOPOPT_ORGANIC_SPAN_DUMP_ROUNDS")) {
+        const std::string rs = std::string(dump) + "_round_start_r" +
+                               std::to_string(st.fixed_point_rounds) + ".txt";
+        if (FILE* f = std::fopen(rs.c_str(), "wb")) {
+          for (const EmittedSeg& e : emitted)
+            std::fprintf(f, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n",
+                         e.a.x, e.a.y, e.a.z, e.b.x, e.b.y, e.b.z, e.r);
+          std::fclose(f);
+        }
+      }
+    }
 
     // ── ★★ §1(e3)+(e4) TIE, THEN CUT ────────────────────────────────────────────
     // Both passes run on the FINAL post-clip span list and BEFORE the ground tie, so
@@ -3093,7 +3231,26 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         // ~32 k mm still disappears between node_merge and support_prune, so the grown
         // path loses its material somewhere this counter never sees. Kept env-gated so
         // the refutation stays checkable instead of remembered.
-        const bool need_both = std::getenv("TOPOPT_ORGANIC_PRUNE_BOTH_ENDS") != nullptr;
+        //
+        // ★★ AND THAT REFUTATION WAS READ OFF A LYING INSTRUMENT (2026-09-04). Every
+        // in-loop dump overwrote one file per round, so the "prune_done" I compared was
+        // the LAST round's state. Round-stamped dumps (TOPOPT_ORGANIC_SPAN_DUMP_ROUNDS)
+        // show round 0 on the two-region STAND: the middle of region 0 holds 7,361 mm at
+        // round start, 2,473 mm after this prune, 0 after the stranded drop -- while the
+        // ends of the same region and all of region 1 lose only a third here. The middle
+        // of the U sits under a near-vertical field, so its grown curves are parallel
+        // PILLARS that never join; a pillar rooted on the plate with a free top is
+        // exactly what the either-end rule unravels span by span down to the plate, and
+        // "the file got LESS" under both-ends was the stranded drop then deleting the
+        // pillars this pass had spared (they are not the biggest body). So the theory
+        // was right and the measurement that "refuted" it was of a different round.
+        //
+        // The rule now: a span is doomed only when NEITHER end is held (joined, on the
+        // plate, or supported). A rooted pillar stands; a cantilever tip that is held at
+        // one end is left for the island pass, which measures support by raster rather
+        // than by graph degree. The old rule is kept behind TOPOPT_ORGANIC_PRUNE_EITHER_END
+        // so the comparison stays checkable.
+        const bool need_both = std::getenv("TOPOPT_ORGANIC_PRUNE_EITHER_END") == nullptr;
         for (std::size_t i = 0; i < emitted.size(); ++i) {
           if (!alive[i]) continue;
           int free_ends_here = 0;
@@ -3113,6 +3270,23 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           st.pruned_length_mm += emitted[i].len;
         }
         rebuild();
+      }
+      // ★ DUMP POINT (env-gated): the spans after the free-end prune and BEFORE the
+      // island pass. The support_prune census records one delta for three sub-stages;
+      // this splits it so "which one killed the middle of region 0" is answerable.
+      if (const char* dump = std::getenv("TOPOPT_ORGANIC_SPAN_DUMP")) {
+        const std::string pd = std::string(dump) + "_prune_done" +
+                               (std::getenv("TOPOPT_ORGANIC_SPAN_DUMP_ROUNDS")
+                                    ? "_r" + std::to_string(st.fixed_point_rounds) : std::string()) +
+                               ".txt";
+        if (FILE* f = std::fopen(pd.c_str(), "wb")) {
+          for (std::size_t q = 0; q < emitted.size(); ++q)
+            if (alive[q])
+              std::fprintf(f, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n",
+                           emitted[q].a.x, emitted[q].a.y, emitted[q].a.z,
+                           emitted[q].b.x, emitted[q].b.y, emitted[q].b.z, emitted[q].r);
+          std::fclose(f);
+        }
       }
       // Compact, so every pass below this point sees only what will be written.
       {
@@ -3169,12 +3343,67 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         double biggest_len = -1.0;
         for (const auto& kv : len)
           if (kv.second > biggest_len) { biggest_len = kv.second; biggest = kv.first; }
+        // ★ ROOTED IS NOT STRANDED (2026-09-04). A component that stands on the plate
+        // or on the part's own solid is a pillar, not a crumb adrift: on the STAND the
+        // grown curves under the vertical field in the middle of region 0 never join
+        // the body, and this rule -- biggest body or 2 % of total length -- deleted
+        // every one of them (2,473 mm -> 0 in round 0) after the prune had spared them.
+        // The pole-with-a-crumb the maintainer photographed is still deleted: the crumb
+        // is adrift BEFORE the ground tie props it, and this drop runs first.
+        auto solid_near = [&](const Vec3& q, double r) {
+          if (lat.part_solid.empty() || !(lat.grid_h > 0.0)) return false;
+          const double offs[3] = {0.0, r, -r};
+          for (int ax = 0; ax < 3; ++ax)
+            for (int o = 0; o < (ax == 0 ? 3 : 2); ++o) {
+              Vec3 w = q;
+              const double d = offs[o == 0 ? 0 : (o == 1 ? 1 : 2)];
+              if (ax == 0 && o == 0) { /* the point itself */ }
+              else if (ax == 0) w.x += d; else if (ax == 1) w.y += (o ? -r : r); else w.z += (o ? -r : r);
+              const int gi = static_cast<int>((w.x - lat.grid_origin.x) / lat.grid_h);
+              const int gj = static_cast<int>((w.y - lat.grid_origin.y) / lat.grid_h);
+              const int gk = static_cast<int>((w.z - lat.grid_origin.z) / lat.grid_h);
+              if (gi < 0 || gj < 0 || gk < 0 || gi >= lat.grid_nx || gj >= lat.grid_ny ||
+                  gk >= lat.grid_nz) continue;
+              const std::size_t ge =
+                  (static_cast<std::size_t>(gk) * lat.grid_ny + gj) * lat.grid_nx + gi;
+              if (ge < lat.part_solid.size() && lat.part_solid[ge] != 0) return true;
+            }
+          return false;
+        };
+        // ★ ROOTED MEANS ON THE PART. A component that stands on the print BED and
+        // touches no part solid is a loose piece the moment the print comes off the
+        // bed -- the structural certificate on the STAND found 6.17 % of the lattice
+        // in exactly that state after the first version of this rule counted the
+        // plate as a root. So: when the part is known (part_solid set), a root is
+        // part solid; the plate suffices only in the solid-less unit fixtures, where
+        // the plate IS the part.
+        const bool plate_is_root = lat.part_solid.empty();
+        std::set<int> rooted;
+        for (std::size_t i = 0; i < emitted.size(); ++i)
+          for (const Vec3& q : {emitted[i].a, emitted[i].b})
+            if ((plate_is_root && on_plate(q, emitted[i].r)) ||
+                solid_near(q, emitted[i].r)) {
+              rooted.insert(cf(static_cast<int>(i)));
+              break;
+            }
+        for (const auto& kv : len)
+          if (kv.first != biggest && kv.second < kOrganicStrandedKeepFraction * total &&
+              rooted.count(kv.first))
+            ++st.stranded_rooted_kept;
+        // ★ AND UNROOTED IS DROPPED WHATEVER ITS SIZE. The old exemptions -- the biggest
+        // component, or any piece over 2 % of total -- were a proxy for "the body";
+        // with rooting known they let a floating bundle that outweighs a rooted post
+        // stay, and the ground tie then propped it with legs to the plate (unit fixture
+        // B1b; on the STAND, 160 mm poles). Size only decides when NOTHING is rooted,
+        // which keeps a plate-less fixture from vanishing.
+        const bool size_rules = rooted.empty();
         std::vector<EmittedSeg> body;
         body.reserve(emitted.size());
         for (std::size_t i = 0; i < emitted.size(); ++i) {
           const int root = cf(static_cast<int>(i));
-          if (root == biggest ||
-              len[root] >= kOrganicStrandedKeepFraction * total) {
+          if (rooted.count(root) ||
+              (size_rules && (root == biggest ||
+                              len[root] >= kOrganicStrandedKeepFraction * total))) {
             body.push_back(emitted[i]);
           } else {
             ++st.stranded_spans_dropped; ++st.mutations;
@@ -3182,8 +3411,13 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           }
         }
         for (const auto& kv : len)
-          if (kv.first != biggest && kv.second < kOrganicStrandedKeepFraction * total)
+          if (!rooted.count(kv.first) &&
+              !(size_rules && (kv.first == biggest ||
+                               kv.second >= kOrganicStrandedKeepFraction * total)))
             ++st.stranded_components_dropped;
+        if (std::getenv("TOPOPT_ORGANIC_TRACE") && st.stranded_rooted_kept)
+          std::fprintf(stderr, "[stranded] STRANDED_ROOTED_KEPT %zu rooted component(s) kept\n",
+                       st.stranded_rooted_kept);
         emitted.swap(body);
         census_at(OrganicGenStats::CensusStrandedDrop);
       }
@@ -3216,7 +3450,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       const int RX = static_cast<int>(std::ceil((hi.x - lo.x) / vx)) + 2;
       const int RY = static_cast<int>(std::ceil((hi.y - lo.y) / vx)) + 2;
       const int RZ = static_cast<int>(std::ceil((hi.z - lo.z) / vx)) + 2;
-      if (static_cast<long long>(RX) * RY * RZ <= 60000000LL) {
+      if (static_cast<long long>(RX) * RY * RZ <= 400000000LL /* was 60M: a structural grown job at the
+                                                     extrudable floor needs ~90M and was
+                                                     SKIPPING the pass, unrefused */) {
         std::vector<unsigned char> occ(static_cast<std::size_t>(RX) * RY * RZ, 0);
         auto ridx = [RX, RY](int i, int j, int k) {
           return (static_cast<std::size_t>(k) * RY + j) * RX + i;
@@ -3251,6 +3487,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
             for (int i = 0; i < RX; ++i)
               if (occ[ridx(i, j, k)]) { ground = k; break; }
         std::vector<unsigned char> seen;
+        std::size_t seeds_on_solid = 0;   // `st` inside the flood is its stack
         auto flood = [&]() {
           seen.assign(occ.size(), 0);
           std::vector<int> st;
@@ -3260,6 +3497,37 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
               const std::size_t s0 = ridx(i, j, ground);
               if (occ[s0] && !seen[s0]) { seen[s0] = 1; st.push_back(int(s0)); }
             }
+          // ★ THE PART IS GROUND TOO (2026-09-05). Seeding from the plate layer alone
+          // made every piece standing on the part's own solid "floating", and the
+          // repair below then dropped a leg from it to the plate: 20 poles up to
+          // 161.7 mm on the STAND once rooted pillars started surviving. Any occupied
+          // voxel touching part solid is a seed.
+          if (!lat.part_solid.empty() && lat.grid_h > 0.0) {
+            auto solid_at = [&](double wx, double wy, double wz) {
+              const int gi = static_cast<int>((wx - lat.grid_origin.x) / lat.grid_h);
+              const int gj = static_cast<int>((wy - lat.grid_origin.y) / lat.grid_h);
+              const int gk = static_cast<int>((wz - lat.grid_origin.z) / lat.grid_h);
+              if (gi < 0 || gj < 0 || gk < 0 || gi >= lat.grid_nx || gj >= lat.grid_ny ||
+                  gk >= lat.grid_nz) return false;
+              const std::size_t ge =
+                  (static_cast<std::size_t>(gk) * lat.grid_ny + gj) * lat.grid_nx + gi;
+              return ge < lat.part_solid.size() && lat.part_solid[ge] != 0;
+            };
+            for (int k = 0; k < RZ; ++k)
+              for (int j = 0; j < RY; ++j)
+                for (int i = 0; i < RX; ++i) {
+                  const std::size_t m = ridx(i, j, k);
+                  if (!occ[m] || seen[m]) continue;
+                  const double wx = lo.x + (i + 0.5) * vx, wy = lo.y + (j + 0.5) * vx,
+                               wz = lo.z + (k + 0.5) * vx;
+                  if (solid_at(wx, wy, wz) || solid_at(wx + vx, wy, wz) ||
+                      solid_at(wx - vx, wy, wz) || solid_at(wx, wy + vx, wz) ||
+                      solid_at(wx, wy - vx, wz) || solid_at(wx, wy, wz + vx) ||
+                      solid_at(wx, wy, wz - vx)) {
+                    seen[m] = 1; st.push_back(int(m)); ++seeds_on_solid;
+                  }
+                }
+          }
           const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0},
                     dk[6] = {0, 0, 0, 0, 1, -1};
           while (!st.empty()) {
@@ -3274,6 +3542,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           }
         };
         flood();
+        st.flood_seeds_on_solid += seeds_on_solid;
         for (std::size_t m = 0; m < occ.size(); ++m)
           if (occ[m] && !seen[m]) ++st.floating_voxels_before;
 
@@ -3390,7 +3659,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       // never read as a pass. What was missing is the MARGIN: 11.0M against 120M is a
       // different situation from 119M against 120M, and only one of them is one size
       // step from losing the check.
-      constexpr long long kOrganicSupportRasterCap = 120000000LL;
+      constexpr long long kOrganicSupportRasterCap = 400000000LL;
       st.support_raster_cells = static_cast<long long>(RX) * RY * RZ;
       st.support_raster_cap = kOrganicSupportRasterCap;
       if (std::getenv("TOPOPT_ORGANIC_SUPPORT_TRACE"))
@@ -3524,7 +3793,31 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                       }
                     }
                 }
+                // ★ SOLID BENEATH IS SUPPORT. The raster holds lattice only; the part's
+                // own solid under a strut -- the arch underside, a wall top, any floor
+                // above the build plate -- was invisible to it, so a column standing on
+                // solid was an island at its own base. MEASURED: one region's middle
+                // (on the arch) held 7,361 mm at node_merge and 0 mm after this pass.
+                auto solid_below = [&](int ci2, int cj2, int ck2) {
+                  if (lat.part_solid.empty() || !(lat.grid_h > 0.0)) return false;
+                  const double wx = lo.x + (ci2 + 0.5) * vxy;
+                  const double wy = lo.y + (cj2 + 0.5) * vxy;
+                  const double wz = lo.z + (ck2 + 0.5) * vz;
+                  const int gi = static_cast<int>((wx - lat.grid_origin.x) / lat.grid_h);
+                  const int gj = static_cast<int>((wy - lat.grid_origin.y) / lat.grid_h);
+                  const int gk = static_cast<int>((wz - lat.grid_origin.z) / lat.grid_h);
+                  if (gi < 0 || gj < 0 || gk < 0 || gi >= lat.grid_nx ||
+                      gj >= lat.grid_ny || gk >= lat.grid_nz) return false;
+                  const std::size_t ge =
+                      (static_cast<std::size_t>(gk) * lat.grid_ny + gj) * lat.grid_nx + gi;
+                  return ge < lat.part_solid.size() && lat.part_solid[ge] != 0;
+                };
                 bool sup = (k <= plate_k);          // resting on the plate
+                if (!sup)
+                  for (const std::pair<int,int>& c : cells)
+                    if (solid_below(c.first, c.second, k - 1)) {
+                      sup = true; ++st.islands_held_by_solid; break;
+                    }
                 for (const std::pair<int,int>& c : cells) {
                   if (sup) break;
                   for (int dj = -1; dj <= 1 && !sup; ++dj)
@@ -3604,6 +3897,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
           stamp_all();
           find_islands(isl, ground);
           if (isl.empty()) { st.support_rounds_converged = true; break; }
+          if (round == 0 && std::getenv("TOPOPT_ORGANIC_TRACE"))
+            std::fprintf(stderr, "[support] round 0: %zu islands, %zu blobs held by solid beneath\n",
+                         isl.size(), st.islands_held_by_solid);
           if (round == 0)
             for (const Island& I : isl) {
               ++st.unsupported_islands_found;
@@ -3806,8 +4102,19 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                 if (live[i])
                   cb[ckey(vmul(vadd(emitted[i].a, emitted[i].b), 0.5))].push_back(int(i));
               std::vector<std::size_t> kill;
+              // ★ SAME RULE AS THE FIRST PRUNE (2026-09-04): a span dies only when
+              // NEITHER end is held. This cleanup had its own either-end test with no
+              // override, so after the first prune was fixed it took over the same
+              // job -- round-stamped dumps showed the middle of region 0 surviving the
+              // prune, the stranded drop and the ground tie (7,466 mm) and losing two
+              // thirds HERE (2,456 mm), and on the structural job this pass removed
+              // 64 % of the whole lattice. A rooted pillar with a free top is held at
+              // its base; the island pass above already judged its support by raster.
+              const bool cleanup_need_both =
+                  std::getenv("TOPOPT_ORGANIC_PRUNE_EITHER_END") == nullptr;
               for (std::size_t i = 0; i < emitted.size(); ++i) {
                 if (!live[i]) continue;
+                int unheld = 0;
                 for (int e2 = 0; e2 < 2; ++e2) {
                   const Vec3 tip = e2 ? emitted[i].b : emitted[i].a;
                   if (tip.z - zfloor <= emitted[i].r) continue;      // on the plate
@@ -3841,8 +4148,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                           }
                         }
                       }
-                  if (!held) { kill.push_back(i); break; }
+                  if (!held) ++unheld;
                 }
+                if (unheld >= (cleanup_need_both ? 2 : 1)) kill.push_back(i);
               }
               if (kill.empty()) break;
               for (std::size_t i : kill) {
@@ -3994,6 +4302,18 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
               // to flag.
               if (worst_run > kOrganicArchMinUnsupportedMm || flagged_any)
                 to_arch.push_back(si);
+            }
+            // ★ THE FILLET IS A CHOICE (maintainer, 2026-09-05): any span over open air
+            // by more than kOrganicArchMinUnsupportedMm (0.01 mm, i.e. every one) was
+            // flared into kOrganicFilletSegments pieces up to the radius cap, in the
+            // preview as well as the run. Printability is user input, so the job can
+            // decline the repair; the spans that would have flared are counted.
+            if (!lat.overhang_fillet && !to_arch.empty()) {
+              st.fillet_skipped_spans += to_arch.size();
+              if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+                std::fprintf(stderr, "[fillet] FILLET_SKIPPED %zu span(s) over air left as drawn\n",
+                             to_arch.size());
+              to_arch.clear();
             }
             // ★★ FILLET, DO NOT BOW. The maintainer's correction, and it is the
             // difference between improving the defect and reproducing it: a bowed
@@ -4888,7 +5208,10 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     const int CX = static_cast<int>((chi.x - clo.x) / cxy) + 2;
     const int CY = static_cast<int>((chi.y - clo.y) / cxy) + 2;
     const int CZ = static_cast<int>((chi.z - clo.z) / cz) + 2;
-    if (static_cast<long long>(CX) * CY * CZ <= 120000000LL) {
+    // ★ the same cap as the support raster (was 120M): a two-region lattice's
+    // bounding box exceeded it, this audit was skipped, and support_grid_too_large
+    // was set with nothing downstream reading it. Now the certificate reads it.
+    if (static_cast<long long>(CX) * CY * CZ <= 400000000LL) {
       auto ci = [CX, CY](int i, int j, int k) {
         return (static_cast<std::size_t>(k) * CY + j) * CX + i;
       };

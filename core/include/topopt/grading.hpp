@@ -201,6 +201,18 @@ struct GradingLawParams {
   //   0.5 — the same stress-proportional grade from a strain-ENERGY demand (u ~ s^2).
   // Must be > 0.
   double demand_exponent = 1.0;
+  // ★★ THE ORGANIC ALGORITHM IS NOT AN OCTET TRUSS, AND MUST NOT BE JUDGED AS ONE.
+  // This law's two printability refusals -- "the member cannot hold N* cells across"
+  // and "the strut an OCTET cell emits at this density is under the extrudable width"
+  // -- are facts about octet cells. Organic traces curves with its own bead law
+  // (floored at the extrudable width in its own candidate loop) and its own
+  // curves-per-member floor. MEASURED on a two-region part, traced 3-5 mm: 57,187 of
+  // 67,040 region voxels (85%) were turned solid HERE -- 51,642 for an octet strut
+  // being unprintable, 5,545 for a member too thin for five octet cells -- and one of
+  // the two declared regions received no lattice at all, before organic ever ran.
+  // With this set, every candidate voxel keeps its band-clamped density and organic
+  // applies its own floors downstream.
+  bool organic_geometry = false;
 
   // The local-member-thickness EDT radius cap (voxels), mirroring analyze.cpp's
   // kWidthAwareThicknessCapVoxels. A member thicker than 2*cap*spacing reads the +inf

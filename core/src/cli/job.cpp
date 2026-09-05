@@ -1262,9 +1262,28 @@ JobDescription parse_job(const std::string& json_text) {
       for (const JsonValue& rv : regs->arr) {
         require_object(rv, "a lattice region");
         reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
-                                 "region_id", "relative_density"},
+                                 "region_id", "relative_density",
+                                 "synthetic_stress", "synthetic_foci",
+                                 "synthetic_soft_mm"},
                             "a lattice region");
         JobLatticeRegion reg;
+        if (const JsonValue* sv = find_key(rv, "synthetic_stress")) {
+          if (sv->type != JsonValue::Type::Bool)
+            schema_fail("lattice region \"synthetic_stress\" must be a boolean");
+          reg.synthetic_stress = (sv->num != 0.0);
+        }
+        if (const JsonValue* fv = find_key(rv, "synthetic_foci")) {
+          if (fv->type != JsonValue::Type::Number || fv->num != std::floor(fv->num) ||
+              fv->num < 1.0 || fv->num > 5.0)
+            schema_fail("lattice region \"synthetic_foci\" must be an integer 1..5");
+          reg.synthetic_foci = static_cast<int>(fv->num);
+        }
+        if (const JsonValue* sm = find_key(rv, "synthetic_soft_mm")) {
+          if (sm->type != JsonValue::Type::Number || !(sm->num >= 0.0) ||
+              !std::isfinite(sm->num))
+            schema_fail("lattice region \"synthetic_soft_mm\" must be a finite number >= 0");
+          reg.synthetic_soft_mm = sm->num;
+        }
         // Optional provenance: the B-rep face this region was spawned from, so
         // the depth tie below can be CHECKED (task 2026-08-12 §0a).
         if (const JsonValue* fv = find_key(rv, "face_id")) {
@@ -1513,7 +1532,7 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale", "organic_growth",
+             "organic_scale", "organic_growth", "organic_overhang_fillet",
              "organic_structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1696,6 +1715,15 @@ JobDescription parse_job(const std::string& json_text) {
     // DELIBERATELY on all three: refuse_organic_structural admits a structural organic
     // job that names "organic_structural_certification": "beam_network", and both
     // shape-fit keys are admitted with it. Each key states its own reason below.
+    if (const JsonValue* fv = find_key(gr, "organic_overhang_fillet")) {
+      if (fv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_overhang_fillet\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_overhang_fillet\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_overhang_fillet = (fv->num != 0.0);
+    }
     if (const JsonValue* sv = find_key(gr, "organic_shape_fit")) {
       if (sv->type != JsonValue::Type::Bool)
         schema_fail("grading \"organic_shape_fit\" must be a boolean");
@@ -1723,6 +1751,28 @@ JobDescription parse_job(const std::string& json_text) {
       // it ADDS material where members are thin or near a boundary, which is the
       // strongest lattice-strength lever this project has measured (2.87 MPa at 6 mm
       // cells vs 87.5 MPa at 3 mm: the coarse lattice stops SHARING load).
+    }
+    // ★★ SHAPE FIT IS ON FOR ORGANIC UNLESS THE JOB SAYS OTHERWISE. The maintainer's
+    // ruling: "I always felt like Shape fit was a requirement." It can only REFINE
+    // (both of its caps apply only when smaller than the stress-driven cell), so an
+    // absent key defaulting to OFF meant every organic job that did not spell it out
+    // ran without the one pass that fits the lattice to the shape -- including every
+    // measurement in the 2026-09-04 investigation. Absent now means on; an explicit
+    // false is still honoured, and the receipt reports which.
+    if (organic_alg && !find_key(gr, "organic_shape_fit"))
+      job.grading.organic_shape_fit = true;
+    // ★ SYNTHETIC STRESS IS AESTHETIC-ONLY, AND ORGANIC-ONLY. A structural lattice
+    // must follow the real load; the synthetic tensor exists so a wall that carries
+    // nothing still gets a coherent weave, and nothing certified may read it.
+    for (const JobLatticeRegion& rg : job.lattice.regions) {
+      if (!rg.synthetic_stress) continue;
+      if (!organic_alg)
+        schema_fail("lattice region \"synthetic_stress\" is only allowed with "
+                    "grading algorithm \"organic\"");
+      if (job.grading.intent != "aesthetic")
+        schema_fail("lattice region \"synthetic_stress\" is only allowed under "
+                    "grading intent \"aesthetic\" -- a structural lattice must "
+                    "follow the real load");
     }
     if (const JsonValue* gv = find_key(gr, "organic_growth")) {
       if (gv->type != JsonValue::Type::Bool)

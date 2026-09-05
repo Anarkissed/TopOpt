@@ -194,6 +194,14 @@ struct JobLatticeRegion {
   // `min_extrudable_width_mm` REFUSES with the number rather than being clamped.
   // See the handoff §1(c).
   double relative_density = 0.0;
+  // ★ SYNTHETIC STRESS FOR A DEAD WALL (maintainer, 2026-09-05). A region whose
+  // stress is numerical noise has no field to trace; with this on, a synthetic focal
+  // tensor (a few pull/push foci, rank-one r (x) r summed, blended in by a smoothstep
+  // of the real magnitude) stands in where the real field is quiet. Organic and
+  // AESTHETIC intent only -- a structural lattice must follow real load. Foci 1-5.
+  bool synthetic_stress = false;
+  int synthetic_foci = 4;
+  double synthetic_soft_mm = 0.0;   // 0 = a quarter of the region's largest extent
 };
 
 struct JobLattice {
@@ -417,6 +425,10 @@ struct JobGrading {
   // tracing and then repairing. Requires organic; default off so every existing job is
   // byte-identical.
   bool organic_growth = false;
+  // ★ The overhang FILLET is a printability repair (a span over open air is re-emitted
+  // as a 12-segment flare up to 2.5x the bead). Printability is user input, so the
+  // repair is a choice: absent means on (nothing existing changes), false skips it.
+  bool organic_overhang_fillet = true;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

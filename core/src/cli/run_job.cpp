@@ -656,6 +656,12 @@ struct LatticeExportOutcome {
   long long organic_base_mat_stitches = 0;
   long long organic_base_mat_clusters = 0;
   long long organic_fill_mat_cells_outside_region = 0;
+  bool organic_shape_fit_on = false;
+  long long organic_shape_fit_candidates = 0;
+  long long organic_shape_fit_voxels_shrunk = 0;
+  double organic_shape_fit_min_ratio = 1.0;
+  // ★ synthetic stress for dead walls: what was laid in, so the receipt says it RAN
+  SyntheticStressReport organic_synthetic;
   // ★ THE EMITTED SPANS, carried out so the STRUCTURAL CERTIFICATE can read the
   // geometry that ships. They are post-clip, post-prune, post-finish and
   // post-endpoint-fit -- the same spans lattice.emit_organic_spans writes.
@@ -2079,6 +2085,7 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_base_mat_clusters = static_cast<long long>(g.base_mat_clusters);
     oc.organic_fill_mat_cells_outside_region =
         static_cast<long long>(g.fill_mat_cells_outside_region);
+
     oc.organic_emitted_components = static_cast<long long>(g.emitted_components);
     oc.organic_floating_before = g.floating_voxels_before;
     oc.organic_floating_after = g.floating_voxels_after;
@@ -3367,7 +3374,9 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
            "clamp_changed_verdict is whether the accept verdict differs — i.e. "
            "whether the clamping was decisive, not cosmetic\",\n";
     }
-    s += "    \"min_strut_diameter_mm\": " + json_num(gf.min_strut_diameter_mm) +
+    s += "    \"min_strut_diameter_mm\": " +
+
+         (std::isfinite(gf.min_strut_diameter_mm) ? json_num(gf.min_strut_diameter_mm) : std::string("null")) +
          ",\n";
     s += "    \"max_strut_diameter_mm\": " + json_num(gf.max_strut_diameter_mm) +
          ",\n";
@@ -3897,6 +3906,13 @@ struct LatticeVariantOutcome {
   LatticeCertOutcome cc;
   // ★ the ORGANIC structural certificate (beam network), when one was run
   OrganicCertificate organic_cert;
+  // ★ shape fit is ON by default for organic; the receipt must prove it RAN, from the
+  // outcome's own counters rather than the default echoed back.
+  bool organic_shape_fit_on = false;
+  long long organic_shape_fit_candidates = 0;
+  long long organic_shape_fit_voxels_shrunk = 0;
+  double organic_shape_fit_min_ratio = 1.0;
+  SyntheticStressReport organic_synthetic;   // synthetic stress laid into dead walls
   std::string receipt_path;
   std::string receipt_json;
   double cell_mm = 0.0;
@@ -4056,6 +4072,48 @@ struct OrganicOutcome {
   // algorithm rather than of the solve it happens to sit beside.
   double trace_seconds = 0.0;
 };
+
+// ── ★ SYNTHETIC STRESS FOR DEAD WALLS (maintainer, 2026-09-05) ──────────────────
+// Per-region opt-in (lattice.regions[].synthetic_stress, aesthetic organic only, the
+// schema refuses anything else). The include-region id a voxel carries is its
+// 1-based position among the job's INCLUDE regions in declaration order -- exactly
+// how lattice_role_regions_from_job pushes them -- so the config is built by the
+// same count. Returns the tensor the organic step should read: the real one, or a
+// copy with the synthetic field laid into the configured regions.
+static std::vector<double> stress_tensor_for_organic(
+    const JobDescription& job, const VoxelGrid& grid,
+    const std::vector<char>& candidate, const std::vector<int>& voxel_region_id,
+    const std::vector<double>& real, SyntheticStressReport* rep_out) {
+  std::vector<SyntheticStressRegion> cfg;
+  int include_index = 0;
+  for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.role != "include") continue;
+    ++include_index;
+    if (!r.synthetic_stress) continue;
+    SyntheticStressRegion c;
+    c.region_id = include_index;
+    c.face_id = r.face_id;
+    c.foci = r.synthetic_foci;
+    c.soft_mm = r.synthetic_soft_mm;
+    cfg.push_back(c);
+  }
+  if (cfg.empty() || voxel_region_id.size() != grid.voxel_count()) {
+    if (!cfg.empty())
+      std::fprintf(stderr, "[synthetic] %zu region(s) asked for synthetic stress but "
+                           "this path has no per-voxel region ids -- NOT applied\n",
+                   cfg.size());
+    return real;
+  }
+  std::vector<double> out = real;
+  const SyntheticStressReport rep =
+      synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out);
+  if (rep_out) *rep_out = rep;
+  std::fprintf(stderr, "[synthetic] %zu region(s): %zu voxels, %zu fully synthetic, "
+                       "%zu blended; dead threshold %.4g (peak %.4g)\n",
+               rep.regions, rep.voxels_in_regions, rep.voxels_fully_synthetic,
+               rep.voxels_blended, rep.dead_threshold, rep.peak_von_mises);
+  return out;
+}
 
 OrganicOutcome run_organic_step(bool shell_is_written,
                                 const VoxelGrid& grid,
@@ -4419,6 +4477,17 @@ OrganicOutcome run_organic_step(bool shell_is_written,
                                       &oo.growth)
                : trace_organic_lattice(grid, cand, stress_tensor, spacing, &width, op);
   oo.trace_seconds = wall_seconds() - t0;
+  // ★ THE PART'S OWN SOLID IS SUPPORT. Hand the emission stage the voxels that are
+  // solid material OUTSIDE the lattice region, so a column standing on the arch
+  // underside, a wall top, or any solid floor above the build plate is not an island
+  // at its own base. See OrganicLattice::part_solid for the measurement.
+  oo.lat.part_solid.assign(n, 0);
+  for (std::size_t e = 0; e < n; ++e)
+    if (!lattice_mask[e] && density[e] > printed_iso) oo.lat.part_solid[e] = 1;
+  if (std::getenv("TOPOPT_ORGANIC_TRACE")) {
+    std::size_t ns = 0; for (char c : oo.lat.part_solid) ns += c ? 1 : 0;
+    std::fprintf(stderr, "[part-solid] %zu solid voxels outside the region (of %zu), iso %.4f\n", ns, n, printed_iso);
+  }
   if (oo.net_skin_wanted) {
     oo.lat.net_skin_reach_mm = oo.lat.report.achieved_spacing_median_mm;
     oo.lat.net_skin_finish =
@@ -4715,6 +4784,8 @@ LatticeVariantOutcome lattice_one_variant(
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
     gp.demand_exponent = job.grading.demand_exponent;
+    gp.organic_geometry =
+        resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic;
     // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). An absent
     // "cell_mode" parses as "fixed", which is the pre-sweep path exactly. Resolved
     // through the ONE place `auto` can mean `fit` (bar S4).
@@ -5062,8 +5133,11 @@ LatticeVariantOutcome lattice_one_variant(
   // `gf.posture` exactly as they did, which is what makes the selector cheap.
   OrganicOutcome organic;
   if (graded && R.algorithm == LatticeAlgorithm::Organic) {
+    const std::vector<double> organic_stress = stress_tensor_for_organic(
+        job, solved_grid, mask, region_ids_for_stepped, v.stress_tensor_field,
+        &R.organic_synthetic);
     organic = run_organic_step(job.lattice.outer_finish != "skin",
-                               solved_grid, dens, v.stress_tensor_field, mask,
+                               solved_grid, dens, organic_stress, mask,
                                gf.posture.relative_density, gf.band_rho_min,
                                gf.band_rho_max, job.grading,
                                job.loads.present && job.loads.minimize_plastic,
@@ -5075,6 +5149,7 @@ LatticeVariantOutcome lattice_one_variant(
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
     organic.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
+    organic.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
@@ -5102,6 +5177,10 @@ LatticeVariantOutcome lattice_one_variant(
     }
     R.organic_ran = true;
     R.organic = organic.lat.report;
+    R.organic_shape_fit_on = job.grading.organic_shape_fit;
+    R.organic_shape_fit_candidates = static_cast<long long>(organic.shape_fit_candidates);
+    R.organic_shape_fit_voxels_shrunk = static_cast<long long>(organic.shape_fit_voxels_shrunk);
+    R.organic_shape_fit_min_ratio = organic.shape_fit_min_ratio;
     R.organic_trace_seconds = organic.trace_seconds;
     // ★ THE GEOMETRY PATH REBUILDS A BARE OrganicOutcome FOR THE RECEIPT (see the
     // `tmp` below), so the growth counters cannot ride there — they travel on the
@@ -5907,6 +5986,22 @@ LatticeVariantOutcome lattice_one_variant(
     for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
       if (v.optimization.physical_density[e] > cx.printed_iso && !mask[e]) hexm[e] = 1;
 
+    // ★★ A LATTICE WHOSE SUPPORT PASS WAS SKIPPED CANNOT BE CERTIFIED. The pass
+    // records `support_grid_too_large` and carries on -- "the check did not run,
+    // which is NOT the same as passing", as its own comment says -- but nothing
+    // downstream ever read that flag. MEASURED: a structural grown STAND certified at
+    // margin 1.56 with 40,660 mm written, support_rounds 0, islands 0, cuts 0 -- the
+    // whole printability pass skipped because the raster exceeded the cap, and the
+    // certificate never knew. A structural claim over material no support pass has
+    // seen is exactly the green-that-measured-nothing this file keeps refusing.
+    if (R.oc.organic_support_grid_too_large) {
+      R.organic_cert.verdict = OrganicCertificate::Verdict::Refused;
+      R.organic_cert.refusal =
+          "the organic support pass was SKIPPED (support raster exceeded its cell "
+          "cap: support_grid_too_large), so nothing has checked this lattice for "
+          "unsupported material; a structural certificate cannot stand on it. "
+          "Coarsen the strut floor or raise the raster cap and re-run.";
+    } else
     R.organic_cert = certify_organic_structural(
         solved_grid, hexm, segs, ocs, material.youngs_modulus_mpa,
         material.poisson, material.yield_strength_mpa,
@@ -6529,6 +6624,9 @@ GradingLawParams forecast_grading_params(const JobDescription& job) {
                                    ? job.grading.min_extrudable_width_mm
                                    : job.lattice.min_extrudable_width_mm;
   gp.demand_exponent = job.grading.present ? job.grading.demand_exponent : 1.0;
+  gp.organic_geometry =
+      job.grading.present &&
+      resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic;
   gp.cell_mode = CellSizeMode::Fixed;
   if (job.grading.present &&
       !resolve_cell_mode(job.grading.cell_mode, gp.cell_mode))
@@ -7414,6 +7512,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
     gp.demand_exponent = job.grading.demand_exponent;
+    gp.organic_geometry =
+        resolve_lattice_algorithm(job.grading) == LatticeAlgorithm::Organic;
     // Cell-size mode; an absent "cell_mode" parses as "fixed" — the pre-sweep path.
     if (!resolve_cell_mode(job.grading.cell_mode, gp.cell_mode))
       throw JobError("analyze: unknown grading cell_mode \"" +
@@ -7514,7 +7614,12 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // candidate set is the whole printed design (region == nullptr above), so the ids
     // are built here from the same declared regions the geometry path uses.
     SteppedOutcome an_step;
-    if (an_alg == LatticeAlgorithm::Stepped) {
+    bool an_synthetic = false;
+    for (const JobLatticeRegion& rg : job.lattice.regions)
+      if (rg.role == "include" && rg.synthetic_stress) an_synthetic = true;
+    std::vector<int> an_ids;   // per-voxel include-region ids, when a consumer needs them
+    if (an_alg == LatticeAlgorithm::Stepped ||
+        (an_alg == LatticeAlgorithm::Organic && an_synthetic)) {
       const LatticeRoleRegions sr =
           lattice_role_regions_from_job(job, &result.model, &model_grid);
       std::vector<int> ids(design_grid.voxel_count(), 0);
@@ -7532,14 +7637,22 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                 break;
               }
           }
-      an_step = run_stepped_step(design_grid, density, gf.posture.mask,
-                                 gf.posture.relative_density, ids, job.grading, 0.5,
-                                 gp.thickness_cap_voxels);
+      an_ids = ids;
+      if (an_alg == LatticeAlgorithm::Stepped)
+        an_step = run_stepped_step(design_grid, density, gf.posture.mask,
+                                   gf.posture.relative_density, ids, job.grading, 0.5,
+                                   gp.thickness_cap_voxels);
     }
     OrganicOutcome an_org;
+    SyntheticStressReport an_synth_rep;
+    const std::vector<double> an_stress =
+        an_alg == LatticeAlgorithm::Organic
+            ? stress_tensor_for_organic(job, design_grid, gf.posture.mask, an_ids,
+                                        a.stress_tensor_field, &an_synth_rep)
+            : std::vector<double>();
     if (an_alg == LatticeAlgorithm::Organic)
       an_org = run_organic_step(job.lattice.outer_finish != "skin",
-                                design_grid, density, a.stress_tensor_field,
+                                design_grid, density, an_stress,
                                 gf.posture.mask, gf.posture.relative_density,
                                 gf.band_rho_min, gf.band_rho_max, job.grading,
                                 job.loads.present && job.loads.minimize_plastic,
@@ -7551,6 +7664,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
     an_org.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
+    an_org.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
@@ -8544,6 +8658,25 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_base_mat_stitches = R.oc.organic_base_mat_stitches;
         gi.organic_base_mat_clusters = R.oc.organic_base_mat_clusters;
         gi.organic_fill_mat_cells_outside_region = R.oc.organic_fill_mat_cells_outside_region;
+        gi.organic_shape_fit_on = R.organic_shape_fit_on;
+        gi.organic_shape_fit_candidates = R.organic_shape_fit_candidates;
+        gi.organic_shape_fit_voxels_shrunk = R.organic_shape_fit_voxels_shrunk;
+        gi.organic_shape_fit_min_ratio = R.organic_shape_fit_min_ratio;
+        gi.organic_synthetic_regions = static_cast<long long>(R.organic_synthetic.regions);
+        gi.organic_synthetic_voxels = static_cast<long long>(R.organic_synthetic.voxels_in_regions);
+        gi.organic_synthetic_fully = static_cast<long long>(R.organic_synthetic.voxels_fully_synthetic);
+        gi.organic_synthetic_blended = static_cast<long long>(R.organic_synthetic.voxels_blended);
+        gi.organic_synthetic_dead_threshold = R.organic_synthetic.dead_threshold;
+        gi.organic_synthetic_by_region.clear();
+        for (const SyntheticStressRegionReport& rr : R.organic_synthetic.per_region) {
+          OrganicSyntheticRegionInfo ri;
+          ri.region_id = rr.region_id; ri.face_id = rr.face_id; ri.foci = rr.foci;
+          ri.soft_mm = rr.soft_mm;
+          ri.voxels = static_cast<long long>(rr.voxels);
+          ri.fully = static_cast<long long>(rr.fully_synthetic);
+          ri.blended = static_cast<long long>(rr.blended);
+          gi.organic_synthetic_by_region.push_back(ri);
+        }
         // ★ the organic structural certificate. `verdict` is never absent when one
         // was run, so "no key" and "not certified" cannot be confused.
         if (R.organic_cert.verdict != OrganicCertificate::Verdict::NotRun) {

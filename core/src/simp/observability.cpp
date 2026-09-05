@@ -1438,6 +1438,27 @@ std::string run_info_json(const RunInfo& info) {
               std::to_string(info.organic_base_mat_clusters);
         gr += ", \"fill_mat_cells_outside_region\": " +
               std::to_string(info.organic_fill_mat_cells_outside_region);
+        gr += ", \"shape_fit_on\": " + std::string(info.organic_shape_fit_on ? "true" : "false");
+        gr += ", \"shape_fit_candidates\": " + std::to_string(info.organic_shape_fit_candidates);
+        gr += ", \"shape_fit_voxels_shrunk\": " + std::to_string(info.organic_shape_fit_voxels_shrunk);
+        gr += ", \"shape_fit_min_ratio\": " + fmt(info.organic_shape_fit_min_ratio);
+        gr += ", \"synthetic_stress_regions\": " + std::to_string(info.organic_synthetic_regions);
+        gr += ", \"synthetic_stress_voxels\": " + std::to_string(info.organic_synthetic_voxels);
+        gr += ", \"synthetic_stress_fully\": " + std::to_string(info.organic_synthetic_fully);
+        gr += ", \"synthetic_stress_blended\": " + std::to_string(info.organic_synthetic_blended);
+        gr += ", \"synthetic_stress_dead_threshold\": " + fmt(info.organic_synthetic_dead_threshold);
+        gr += ", \"synthetic_stress_by_region\": [";
+        for (std::size_t q = 0; q < info.organic_synthetic_by_region.size(); ++q) {
+          const OrganicSyntheticRegionInfo& ri = info.organic_synthetic_by_region[q];
+          gr += std::string(q ? ", " : "") + "{\"face_id\": " + std::to_string(ri.face_id) +
+                ", \"region_id\": " + std::to_string(ri.region_id) +
+                ", \"foci\": " + std::to_string(ri.foci) +
+                ", \"soft_mm\": " + fmt(ri.soft_mm) +
+                ", \"voxels\": " + std::to_string(ri.voxels) +
+                ", \"fully\": " + std::to_string(ri.fully) +
+                ", \"blended\": " + std::to_string(ri.blended) + "}";
+        }
+        gr += "]";
         if (!info.organic_structural_verdict.empty()) {
           gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
           gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";
@@ -1718,8 +1739,15 @@ std::string run_info_json(const RunInfo& info) {
           (std::isfinite(info.grading_min_cells_per_member)
                ? fmt(info.grading_min_cells_per_member)
                : std::string("null"));
-    gr += ", \"min_strut_diameter_mm\": " + fmt(info.grading_min_strut_diameter_mm);
-    gr += ", \"max_strut_diameter_mm\": " + fmt(info.grading_max_strut_diameter_mm);
+    // ★ finite-or-null, like min_cells_per_member beside it. On the organic path no
+    // octet voxel feeds this aggregate, so it stays at its +inf initial value -- and
+    // a bare `inf` is not JSON: the whole receipt became unreadable.
+    gr += ", \"min_strut_diameter_mm\": " +
+          (std::isfinite(info.grading_min_strut_diameter_mm)
+               ? fmt(info.grading_min_strut_diameter_mm) : std::string("null"));
+    gr += ", \"max_strut_diameter_mm\": " +
+          (std::isfinite(info.grading_max_strut_diameter_mm)
+               ? fmt(info.grading_max_strut_diameter_mm) : std::string("null"));
     gr += ", \"any_strut_below_min\": " +
           bool_json(info.grading_any_strut_below_min);
     gr += ", \"region_ungradeable\": " + bool_json(info.grading_region_ungradeable);

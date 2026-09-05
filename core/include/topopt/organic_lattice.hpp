@@ -284,7 +284,10 @@ inline constexpr double kOrganicBaseMatRadiusRatio = 1.0;
 // back with a solid skin rather than a graded one.
 inline constexpr double kOrganicShapeFitMinCellRatio = 0.5;
 
-inline constexpr int kOrganicFillMaxReachCells = 4;
+// ★ 4 -> 2 (2026-09-05): at 4 the fill laid 20-32 mm straight horizontal bridges
+// across every empty stretch of a grown lattice (306 of them on the STAND), which
+// read as scaffolding, not growth. A taste call, flagged as such in the handoff.
+inline constexpr int kOrganicFillMaxReachCells = 2;
 inline constexpr int kOrganicFillMaxCells = 400000;
 
 // ★★ THE VDI 3405-3-4:2019 DENSITY FLOOR, AND IT IS DERIVED, NOT CHOSEN.
@@ -958,6 +961,13 @@ struct OrganicLattice {
   Vec3 grid_origin{0, 0, 0};
   double grid_h = 0.0;
   int grid_nx = 0, grid_ny = 0, grid_nz = 0;
+  // ★ THE PART'S OWN SOLID, grid-indexed: voxels that are solid material OUTSIDE the
+  // lattice region. The support pass rasterises lattice only, so a column standing on
+  // the part's solid floor -- the arch underside, a wall top, anything above the build
+  // plate -- had NOTHING beneath it in the raster and was an island at its own base.
+  // MEASURED: the middle of one region (x 72-150 mm, on the arch) held 7,361 mm at
+  // node_merge and 0 mm after the support pass. Solid beneath a strut is support.
+  std::vector<char> part_solid;
   OrganicReport report;
 
   // ── ★★ THE NET-SKIN (organic's diagrid) ─────────────────────────────────────
@@ -983,6 +993,9 @@ struct OrganicLattice {
   // height — without one there is no layer to test, and it does nothing rather than
   // guessing a pitch.
   bool trim_below_base = true;
+  // The overhang fillet (job key grading.organic_overhang_fillet). Off = spans over
+  // open air are left as drawn; the count of spans that WOULD have flared is kept.
+  bool overhang_fillet = true;
   // ★ EMIT A BASE MAT at the trimmed base plane — a crossed planar grid spanning the
   // footprint, so the first layer is a foundation rather than whatever the trace
   // happened to leave there. Needs a layer height and a boundary.
@@ -1036,6 +1049,56 @@ struct OrganicLattice {
 // Throws std::invalid_argument on a size mismatch, a non-positive spacing on the
 // candidate set, `min_extrudable_width_mm` <= 0 (the UNSET refusal, §2c), or a
 // non-finite / degenerate build direction.
+// ── ★ SYNTHETIC FOCAL STRESS FOR A DEAD WALL ───────────────────────────────────
+// A region whose von Mises is ~2 % of the part's peak has no principal directions --
+// they are rounding noise, and the tracer faithfully follows garbage. This stands in
+// a synthetic tensor there: `foci` points on the 80 % ellipse of the region's two
+// largest extents, weights alternating +1/-1 (half pull, half push, so the major
+// family arcs BETWEEN foci instead of starbursting), each contributing
+// w / (L^2 + soft^2) * (r (x) r). It is a TENSOR sum, so opposing foci make the
+// saddle between them rather than cancelling, and the saddle is the sweep. Blended by
+// a smoothstep of the real magnitude between 0.25*thr and thr (thr = `dead_fraction`
+// of the peak over all candidates), so a live wall is untouched and a dead one is
+// entirely synthetic; the synthetic tensor is scaled to magnitude thr so downstream
+// laws see "low stress", not zero. Voigt [xx,yy,zz,xy,yz,zx], the tracer's order.
+// Measured on the M2 stand (2026-08): back wall median vM 0.000422 MPa, 1.8 % of
+// peak, DEAD; the focal field gave it a coherent weave a swirl could not.
+struct SyntheticStressRegion {
+  int region_id = 0;        // 1-based declared include-region id (voxel_region_id)
+  int face_id = -1;         // the B-rep face the region was spawned from, for the receipt
+  int foci = 4;             // 1..5
+  double soft_mm = 0.0;     // 0 = a quarter of the region's largest extent
+};
+// ★ PER REGION, KEYED BY FACE (maintainer, 2026-09-05: "face ID is best"). The UI
+// addresses a wall by the face it came from, so the receipt says what happened to
+// THAT wall rather than summing every wall into one number.
+struct SyntheticStressRegionReport {
+  int region_id = 0;
+  int face_id = -1;
+  int foci = 0;
+  double soft_mm = 0.0;           // the softening actually used (resolved from 0)
+  std::size_t voxels = 0;
+  std::size_t fully_synthetic = 0;
+  std::size_t blended = 0;
+};
+struct SyntheticStressReport {
+  std::vector<SyntheticStressRegionReport> per_region;
+  std::size_t regions = 0;
+  std::size_t voxels_in_regions = 0;
+  std::size_t voxels_fully_synthetic = 0;   // blend weight < 0.05 real
+  std::size_t voxels_blended = 0;
+  double dead_threshold = 0.0;              // thr, in the tensor's units
+  double peak_von_mises = 0.0;
+};
+// Modifies `stress` (6 per voxel) in place for candidate voxels whose
+// `voxel_region_id` names a configured region. `dead_fraction` is the fraction of
+// the peak below which a voxel counts as dead (0.02 is the measured noise floor).
+SyntheticStressReport synthesize_focal_stress(
+    const VoxelGrid& grid, const std::vector<char>& candidate,
+    const std::vector<int>& voxel_region_id,
+    const std::vector<SyntheticStressRegion>& regions, double dead_fraction,
+    std::vector<double>& stress);
+
 OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
                                      const std::vector<char>& candidate,
                                      const std::vector<double>& stress,
@@ -1258,6 +1321,16 @@ struct OrganicGenStats {
   // ★ how many separate mats were laid: one per cluster of touchdowns. Two lattice
   // regions with nothing landing between them must read 2 here, never 1.
   std::size_t base_mat_clusters = 0;
+  // ★ blobs the support pass would have called islands, held up by the PART'S SOLID
+  // beneath them (OrganicLattice::part_solid). Zero with a populated part_solid means
+  // the islands are not at the base -- look higher.
+  std::size_t islands_held_by_solid = 0;
+  // spans the fillet would have flared, left as drawn because the job switched it off
+  std::size_t fillet_skipped_spans = 0;
+  // raster voxels the repair-leg flood seeded from PART SOLID (not the plate)
+  std::size_t flood_seeds_on_solid = 0;
+  // components spared by the stranded drop because they stand on the plate or solid
+  std::size_t stranded_rooted_kept = 0;
   // ★ VDI SLENDERNESS PROPPING. `violating` counts struts over the l/D the standard
   // allows for their angle; `propped` those a leg could be dropped under; `impossible`
   // those with nothing beneath to stand on. Reported separately because a strut that

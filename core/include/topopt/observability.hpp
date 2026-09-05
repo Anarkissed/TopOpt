@@ -262,6 +262,17 @@ class SnapshotCapture {
 // The 113 lesson: never again reconstruct "which build ran this" from inference.
 // The CLI stamps its fingerprint + the ACTUAL solver / warm / precision / thread
 // config it ran under into the job dir (run_info.json), so the era is provable.
+// ★ synthetic stress, one entry per region that asked, keyed by the B-rep face
+struct OrganicSyntheticRegionInfo {
+  int region_id = 0;
+  int face_id = -1;
+  int foci = 0;
+  double soft_mm = 0.0;
+  long long voxels = 0;
+  long long fully = 0;
+  long long blended = 0;
+};
+
 struct RunInfo {
   std::string cli_version;   // topopt::version()
   std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core git sha or "dev")
@@ -991,6 +1002,19 @@ struct RunInfo {
   long long organic_base_mat_stitches = 0;
   long long organic_base_mat_clusters = 0;   // separate mats laid; 2 regions apart must read 2
   long long organic_fill_mat_cells_outside_region = 0;
+  // ★ shape fit is ON by default for organic; these prove from the receipt that it RAN
+  // and what it did, rather than leaving that to be assumed from a default.
+  bool organic_shape_fit_on = false;
+  long long organic_shape_fit_candidates = 0;
+  long long organic_shape_fit_voxels_shrunk = 0;
+  double organic_shape_fit_min_ratio = 1.0;
+  // ★ synthetic focal stress laid into dead walls (per-region opt-in, aesthetic only)
+  long long organic_synthetic_regions = 0;
+  long long organic_synthetic_voxels = 0;
+  long long organic_synthetic_fully = 0;
+  long long organic_synthetic_blended = 0;
+  double organic_synthetic_dead_threshold = 0.0;
+  std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
   // ★★ THE ORGANIC STRUCTURAL CERTIFICATE, under grading.organic.*. `verdict` is
   // "certified" | "refused" | "not_run" — never absent, so a run that did not certify
   // cannot be mistaken for one that did. `statistic` names WHICH number the verdict

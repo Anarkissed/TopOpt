@@ -27,7 +27,11 @@
 #include "topopt/organic_lattice.hpp"
 
 #include <cmath>
+#include <functional>
+#include <map>
+#include <set>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -86,39 +90,191 @@ double seg_len(const OrganicSpan& s) {
   const Vec3 d{s.b.x - s.a.x, s.b.y - s.a.y, s.b.z - s.a.z};
   return std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
 }
-
-// ── B1: a BUNDLE supports nothing ──────────────────────────────────────────────
-// Six struts fanning up from a common base plane and all ENDING at the same point
-// in the air. Every tip lies inside its siblings' solids, so the containment test
-// this file used to apply called all six supported. They are cantilevers and the
-// support test must cut them.
-void test_bundle_is_not_support() {
-  const double r = 0.21;
-  OrganicLattice lat;
-  const Vec3 apex{0.0, 0.0, 6.0};
-  for (int k = 0; k < 6; ++k) {
-    const double a = k * (2.0 * 3.14159265358979323846 / 6.0);
-    const Vec3 base{2.0 * std::cos(a), 2.0 * std::sin(a), 0.0};
-    add_curve(lat, {base, apex}, r);
+// Fraction of total span length lying in components (welded by node contact within
+// r+r, the solver's rule) that have at least one endpoint on the plate -- the
+// lowest z in the set, within one radius. "Rooted" in a fixture without part solid.
+double rooted_length_fraction(const std::vector<OrganicSpan>& spans) {
+  const std::size_t n = spans.size();
+  if (n == 0) return 0.0;
+  std::vector<int> par(2 * n);
+  for (std::size_t i = 0; i < 2 * n; ++i) par[i] = static_cast<int>(i);
+  std::function<int(int)> find = [&](int a) {
+    while (par[static_cast<std::size_t>(a)] != a) {
+      par[static_cast<std::size_t>(a)] = par[static_cast<std::size_t>(par[static_cast<std::size_t>(a)])];
+      a = par[static_cast<std::size_t>(a)];
+    }
+    return a;
+  };
+  auto unite = [&](int a, int b) { par[static_cast<std::size_t>(find(a))] = find(b); };
+  double zmin = spans[0].a.z;
+  for (const OrganicSpan& s : spans) zmin = std::min(zmin, std::min(s.a.z, s.b.z));
+  auto pt = [&](std::size_t k) { return (k & 1) ? spans[k >> 1].b : spans[k >> 1].a; };
+  for (std::size_t i = 0; i < n; ++i) unite(static_cast<int>(2 * i), static_cast<int>(2 * i + 1));
+  for (std::size_t i = 0; i < 2 * n; ++i)
+    for (std::size_t j = i + 1; j < 2 * n; ++j) {
+      const Vec3 p = pt(i), q = pt(j);
+      const double reach = spans[i >> 1].r + spans[j >> 1].r;
+      const Vec3 d{p.x - q.x, p.y - q.y, p.z - q.z};
+      if (d.x * d.x + d.y * d.y + d.z * d.z <= reach * reach)
+        unite(static_cast<int>(i), static_cast<int>(j));
+    }
+  std::map<int, double> len;
+  std::set<int> rooted;
+  double total = 0.0;
+  for (std::size_t i = 0; i < n; ++i) {
+    const int root = find(static_cast<int>(2 * i));
+    const double L = seg_len(spans[i]);
+    len[root] += L; total += L;
+    if (std::min(spans[i].a.z, spans[i].b.z) - zmin <= spans[i].r) rooted.insert(root);
   }
-  OrganicGenStats st;
-  const std::vector<OrganicSpan> spans = run(lat, st);
-  CHECK(st.free_ends == 0, "B1: a bundle must leave no free end behind");
-  double zmax = 0.0;
-  for (const OrganicSpan& s2 : spans) zmax = std::max(zmax, std::max(s2.a.z, s2.b.z));
-  CHECK(spans.empty(),
-        "B1: six struts meeting only each other at one tip hold nothing up and must "
-        "all be cut");
-  CHECK(zmax <= 0.5,
-        "B1: nothing may be left standing in the air once the bundle is cut");
-  CHECK(st.pruned_spans > 0, "B1: the prune must report what it cut");
+  double ok = 0.0;
+  for (int r : rooted) ok += len[r];
+  return total > 0.0 ? ok / total : 0.0;
 }
 
-// ── B2: what IS held must survive ──────────────────────────────────────────────
-// (a) a polyline continuing through its own interior vertices, and
-// (b) a strut landing on the BODY of a long member (a T on a beam).
-// Both are supported and neither may be pruned. This is the bar that stops the
-// support test from being "delete everything with a tip".
+// ── B1: a BUNDLE supports nothing -- but a TEPEE stands ───────────────────────
+// Six struts fanning up from a common base and all ENDING at the same point in the
+// air. Every tip lies inside its siblings' solids, so the containment test this file
+// used to apply called all six supported. The first version of this test then asked
+// for all six to be CUT -- and that was wrong physics: their bases are on the plate,
+// so each strut is held at one end and the six together are a tepee, which prints.
+// What the bundle cannot do is hold anything ELSE up, and a bundle whose bases are in
+// the air is held nowhere. Two cases, both measured (2026-09-05, after the prune
+// became "doomed only when NEITHER end is held").
+// ── S1: a dead wall gets a coherent synthetic field; a live one is untouched ────
+void test_synthetic_focal_stress() {
+  VoxelGrid grid;
+  grid.nx = 20; grid.ny = 4; grid.nz = 12; grid.spacing = 1.0;
+  grid.origin = Vec3{0, 0, 0};
+  grid.tags.assign(static_cast<std::size_t>(20 * 4 * 12), VoxelTag::Interior);  // voxel_count() is tags.size()
+  const std::size_t n = grid.voxel_count();
+  std::vector<char> cand(n, 1);
+  std::vector<int> rid(n, 0);
+  std::vector<double> stress(6 * n, 0.0);
+  // region 1: x < 10 DEAD (zero tensor); region 2: x >= 10 LIVE (uniaxial 1.0 in z)
+  for (std::size_t e = 0; e < n; ++e) {
+    const int i = static_cast<int>(e % 20);
+    rid[e] = i < 10 ? 1 : 2;
+    if (i >= 10) stress[6 * e + 2] = 1.0;
+  }
+  std::vector<SyntheticStressRegion> cfg;
+  { SyntheticStressRegion c; c.region_id = 1; c.face_id = 7; c.foci = 4; cfg.push_back(c); }
+  const std::vector<double> before = stress;
+  const SyntheticStressReport rep =
+      synthesize_focal_stress(grid, cand, rid, cfg, 0.02, stress);
+  CHECK(rep.regions == 1, "S1: one configured region found");
+  CHECK(rep.per_region.size() == 1 && rep.per_region[0].face_id == 7 &&
+            rep.per_region[0].foci == 4 && rep.per_region[0].voxels == n / 2 &&
+            rep.per_region[0].fully_synthetic == n / 2 && rep.per_region[0].soft_mm > 0.0,
+        "S1: the per-region entry carries the face id, foci, counts and the resolved softening");
+  CHECK(rep.voxels_in_regions == n / 2, "S1: the region holds half the voxels");
+  CHECK(rep.voxels_fully_synthetic == n / 2,
+        "S1: every dead voxel is fully synthetic (real weight < 0.05)");
+  // the live region is byte-identical
+  bool live_same = true;
+  for (std::size_t e = 0; e < n; ++e)
+    if (rid[e] == 2)
+      for (int c = 0; c < 6; ++c)
+        if (stress[6 * e + c] != before[6 * e + c]) live_same = false;
+  CHECK(live_same, "S1: a live region is untouched");
+  // every dead voxel now has a non-degenerate principal frame, at LOW magnitude.
+  // (von Mises > 0 is exactly "not hydrostatic", i.e. the eigenvalues are not all
+  // equal and a principal direction exists -- the tracer's eigen routine is its own
+  // internal, so the test reads the invariant rather than the routine.)
+  std::size_t framed = 0, low = 0;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (rid[e] != 1) continue;
+    double m[6]; for (int c = 0; c < 6; ++c) m[c] = stress[6 * e + c];
+    const double sxx = m[0], syy = m[1], szz = m[2];
+    const double vm = std::sqrt(std::max(0.0, 0.5 * ((sxx - syy) * (sxx - syy) +
+        (syy - szz) * (syy - szz) + (szz - sxx) * (szz - sxx)) +
+        3.0 * (m[3] * m[3] + m[4] * m[4] + m[5] * m[5])));
+    if (vm > 0.0) ++framed;
+    if (vm > 0.0 && vm <= 0.02 * 1.0 + 1e-9) ++low;
+  }
+  CHECK(framed == n / 2, "S1: every dead voxel has a principal direction after synthesis");
+  CHECK(low == n / 2, "S1: the synthetic magnitude is the dead threshold, not the peak");
+  // foci count is honoured: 1 focus gives a pure radial field -- the major direction
+  // at a voxel points along the ray from the focus, so two voxels on opposite sides of
+  // the region centre have major directions that differ; with the same seed the
+  // report says one region either way
+  std::vector<SyntheticStressRegion> cfg1;
+  { SyntheticStressRegion c; c.region_id = 1; c.foci = 1; cfg1.push_back(c); }
+  std::vector<double> s1(6 * n, 0.0);
+  const SyntheticStressReport r1 = synthesize_focal_stress(grid, cand, rid, cfg1, 0.02, s1);
+  CHECK(r1.regions == 1 && r1.voxels_fully_synthetic == n / 2,
+        "S1: a single focus is accepted and fills the dead region");
+  // nothing dead anywhere: no voxel changes
+  std::vector<double> live(6 * n, 0.0);
+  for (std::size_t e = 0; e < n; ++e) live[6 * e + 2] = 1.0;
+  const std::vector<double> live_before = live;
+  const SyntheticStressReport r2 = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live);
+  CHECK(r2.voxels_fully_synthetic == 0 && r2.voxels_blended == 0 && live == live_before,
+        "S1: a region that carries load is not touched at all");
+}
+void test_bundle_is_not_support() {
+  const double r = 0.21;
+  const double kPi = 3.14159265358979323846;
+  {
+    // (a) rooted tepee: six legs on the plate meeting at an apex. Stands.
+    OrganicLattice lat;
+    const Vec3 apex{0.0, 0.0, 6.0};
+    for (int k = 0; k < 6; ++k) {
+      const double a = k * (2.0 * kPi / 6.0);
+      const Vec3 base{2.0 * std::cos(a), 2.0 * std::sin(a), 0.0};
+      add_curve(lat, {base, apex}, r);
+    }
+    OrganicGenStats st;
+    const std::vector<OrganicSpan> spans = run(lat, st);
+    double zmax = 0.0, total = 0.0;
+    for (const OrganicSpan& s2 : spans) {
+      zmax = std::max(zmax, std::max(s2.a.z, s2.b.z));
+      total += seg_len(s2);
+    }
+    CHECK(!spans.empty(), "B1a: a tepee of six legs rooted on the plate must survive");
+    CHECK(zmax > 5.5, "B1a: the tepee must still reach its apex -- nothing unravelled");
+    CHECK(total > 0.9 * 6.0 * std::sqrt(2.0 * 2.0 + 6.0 * 6.0),
+          "B1a: essentially all six legs must be there (rooted material is not pruned)");
+  }
+  {
+    // (b) floating bundle: the same six struts lifted 3 mm off the plate, beside one
+    // rooted post that defines the plate. The bundle's bases are in the air and its
+    // apex is held only by its siblings folding back -- no end is held, so it is cut,
+    // and the post is not.
+    OrganicLattice lat;
+    add_curve(lat, {Vec3{10.0, 10.0, 0.0}, Vec3{10.0, 10.0, 6.0}}, r);
+    const Vec3 apex{0.0, 0.0, 9.0};
+    for (int k = 0; k < 6; ++k) {
+      const double a = k * (2.0 * kPi / 6.0);
+      const Vec3 base{2.0 * std::cos(a), 2.0 * std::sin(a), 3.0};
+      add_curve(lat, {base, apex}, r);
+    }
+    OrganicGenStats st;
+    const std::vector<OrganicSpan> spans = run(lat, st);
+    if (std::getenv("B1_DEBUG")) {
+      std::fprintf(stderr, "[B1b] pruned %zu stranded %zu cut %zu legs %zu out %zu\n",
+                   st.pruned_spans, st.stranded_spans_dropped, st.support_spans_cut,
+                   st.repair_legs_added, spans.size());
+      for (const OrganicSpan& s2 : spans)
+        std::fprintf(stderr, "[B1b]   (%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) r %.2f\n",
+                     s2.a.x, s2.a.y, s2.a.z, s2.b.x, s2.b.y, s2.b.z, s2.r);
+    }
+    double zmax_bundle = 0.0;
+    for (const OrganicSpan& s2 : spans)
+      if (std::fabs(s2.a.x - 10.0) > 1.0 || std::fabs(s2.a.y - 10.0) > 1.0)
+        zmax_bundle = std::max(zmax_bundle, std::max(s2.a.z, s2.b.z));
+    CHECK(zmax_bundle <= 0.5,
+          "B1b: six struts in the air meeting only each other at one tip hold nothing "
+          "up and are held by nothing -- all six must be cut");
+    CHECK(st.pruned_spans + st.stranded_spans_dropped + st.support_spans_cut > 0,
+          "B1b: the pass that removed the floating bundle must report it");
+    bool post = false;
+    for (const OrganicSpan& s2 : spans)
+      if (std::fabs(s2.a.x - 10.0) <= 1.0 && std::fabs(s2.a.y - 10.0) <= 1.0 &&
+          std::max(s2.a.z, s2.b.z) > 5.5) post = true;
+    CHECK(post, "B1b: the rooted post beside the bundle must survive untouched");
+  }
+}
 void test_chain_and_tee_survive() {
   const double r = 0.21;
   OrganicLattice lat;
@@ -605,14 +761,14 @@ void test_growth_stays_connected() {
     for (double& sp : f.spacing) sp = sep;
     const OrganicLattice lat = grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing,
                                                    nullptr, f.params, &grow_out);
-    run(lat, emit_out);                      // the EMITTER decides what ships
+    return run(lat, emit_out);               // the EMITTER decides what ships
   };
 
   // ── the sweep. Reported for every point, asserted where the bar applies. ────────
   bool any_survived = false;
   for (double sep : {4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0}) {
     OrganicGenStats gs, es;
-    measure(sep, gs, es);
+    const std::vector<OrganicSpan> spans = measure(sep, gs, es);
     const double grown = es.census_grown_len_mm;
     const double wrote = es.census_len_mm[OrganicGenStats::CensusWritten];
     const double survival = grown > 0.0 ? wrote / grown : 0.0;
@@ -626,12 +782,17 @@ void test_growth_stays_connected() {
       any_survived = true;
       // ★ CONNECTIVITY IS ONLY ASSERTED WHERE THERE IS MATERIAL TO CONNECT. Asserting
       // it on 0.4 % of the lattice is what let separation 5.0 pass at 15 mm.
-      CHECK(es.emitted_components == 1,
-            "G8: where the material survives, the emitted geometry must be ONE "
-            "component");
-      CHECK(es.emitted_largest_length_fraction > 0.99,
-            "G8: where the material survives, essentially all of it must be in the "
-            "largest component");
+      // ★ ROOTED, NOT ONE. This bar used to demand a single component, which was a
+      // proxy for "nothing adrift" that also forbade what a grown lattice IS: pillars
+      // that stand on the plate and never join each other. Since 2026-09-05 the
+      // stranded drop keeps a rooted component, so the honest bar is the proxy's
+      // meaning: every millimetre that ships stands on the plate (this fixture has no
+      // part solid, so the plate is the part).
+      CHECK(rooted_length_fraction(spans) > 0.99,
+            "G8: where the material survives, essentially all of it must be in "
+            "components rooted on the plate -- nothing adrift");
+      CHECK(es.emitted_largest_length_fraction > 0.0,
+            "G8: the largest-component fraction must still be reported");
     }
   }
   CHECK(any_survived,
@@ -917,6 +1078,7 @@ int main() {
   test_mat_survives_the_weld_raster();
   test_slenderness_reads_the_unsupported_span();
   test_stats_are_actually_populated();
+  test_synthetic_focal_stress();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();
   test_node_merge_joins_near_misses();

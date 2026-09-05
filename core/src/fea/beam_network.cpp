@@ -1482,7 +1482,29 @@ CoupledLatticeSolve solve_coupled_lattice(
            out.restraint.member_underconstrained[mi]) ||
           (mi < out.restraint.member_unrestrained.size() &&
            out.restraint.member_unrestrained[mi]);
-      if (bad) { out.member_dropped[mi] = 1; ++out.members_dropped; dropped_len += L; }
+      if (bad) {
+        out.member_dropped[mi] = 1; ++out.members_dropped; dropped_len += L;
+        // ★ DUMP (env-gated): which members the certificate cannot tie, and why, so
+        // "6.17 % untied" can be measured against the geometry rather than guessed at.
+        if (const char* dump = std::getenv("TOPOPT_ORGANIC_UNTIED_DUMP")) {
+          static FILE* uf = nullptr;
+          if (!uf) uf = std::fopen(dump, "wb");
+          if (uf) {
+            const bool lf = mi < out.restraint.member_load_free.size() &&
+                            out.restraint.member_load_free[mi];
+            const bool uc = mi < out.restraint.member_underconstrained.size() &&
+                            out.restraint.member_underconstrained[mi];
+            const bool ur = mi < out.restraint.member_unrestrained.size() &&
+                            out.restraint.member_unrestrained[mi];
+            const auto& A = net.nodes[static_cast<std::size_t>(m.node_a)];
+            const auto& B = net.nodes[static_cast<std::size_t>(m.node_b)];
+            std::fprintf(uf, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g %s\n", A.x, A.y, A.z,
+                         B.x, B.y, B.z, m.radius_mm,
+                         lf ? "load_free" : uc ? "underconstrained" : ur ? "unrestrained" : "?");
+            std::fflush(uf);
+          }
+        }
+      }
     }
     out.dropped_length_fraction = total_len > 0.0 ? dropped_len / total_len : 0.0;
     if (out.dropped_length_fraction > kIslandRefuseFraction) {
