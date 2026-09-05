@@ -2245,7 +2245,9 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
   // grow in the same pass. Indexed rather than range-for because the container grows
   // underneath the loop.
   // branch spacing is local as well, so a fine region branches more often
-  for (std::size_t ti = 0; ti < tips.size(); ++ti) {
+  std::size_t ti = 0;
+  for (int reseed_round = 0;; ++reseed_round) {
+  for (; ti < tips.size(); ++ti) {
     Tip t = tips[ti];
     OrganicCurve cur;
     cur.family = t.family;
@@ -2523,6 +2525,149 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
       cur.seg_kind.push_back(static_cast<unsigned char>(next_kind));
     }
     if (cur.points.size() >= 2) { grown.push_back(cur); ++st.growth_curves; }
+  }
+  // ── ★ VOID RE-SEEDING: enter the voids from below (see the header) ─────────────
+  if (!params.reseed_voids || reseed_round >= kOrganicReseedRounds ||
+      st.growth_reseed_landed + st.growth_reseed_failed >= static_cast<std::size_t>(kOrganicReseedMaxSeeds))
+    break;
+  {
+    // every grown vertex, hashed at the separation scale, for "is there a curve near"
+    std::unordered_map<long long, std::vector<Vec3>> gv;
+    for (const OrganicCurve& gc : grown) for (const Vec3& q : gc.points) gv[pkey(q)].push_back(q);
+    auto nearest_vertex = [&](const Vec3& q, double lim, Vec3* hit) {
+      double best = lim * lim; bool found = false;
+      const int reach = std::max(1, static_cast<int>(std::ceil(lim / cellsz)));
+      for (int dz = -reach; dz <= reach; ++dz)
+        for (int dy = -reach; dy <= reach; ++dy)
+          for (int dx = -reach; dx <= reach; ++dx) {
+            auto it = gv.find(pkey(Vec3{q.x + dx * cellsz, q.y + dy * cellsz, q.z + dz * cellsz}));
+            if (it == gv.end()) continue;
+            for (const Vec3& v : it->second) {
+              const Vec3 d = vsub(q, v); const double dd = vdot(d, d);
+              if (dd < best) { best = dd; if (hit) *hit = v; found = true; }
+            }
+          }
+      return found;
+    };
+    // void voxels: candidates with no vertex within the ratio x local separation,
+    // thinned to one seed per separation (Poisson-disc by first-come)
+    std::vector<Vec3> seeds;
+    const int stride = std::max(1, static_cast<int>(0.5 * dsep_grow / h));
+    for (int k = 0; k < grid.nz; k += stride)
+      for (int j = 0; j < grid.ny; j += stride)
+        for (int i = 0; i < grid.nx; i += stride) {
+          const std::size_t e = grid.index(i, j, k);
+          if (!candidate[e]) continue;
+          const Vec3 q{grid.origin.x + (i + 0.5) * h, grid.origin.y + (j + 0.5) * h,
+                       grid.origin.z + (k + 0.5) * h};
+          const double lim = kOrganicReseedVoidRatio * sep_at(q);
+          if (nearest_vertex(q, lim, nullptr)) continue;
+          bool near_seed = false;
+          for (const Vec3& s2 : seeds) { const Vec3 d = vsub(q, s2); if (vdot(d, d) < lim * lim) { near_seed = true; break; } }
+          if (near_seed) continue;
+          seeds.push_back(q);
+          if (seeds.size() >= static_cast<std::size_t>(kOrganicReseedMaxSeeds)) break;
+        }
+    st.growth_reseed_voids += seeds.size();
+    std::size_t pushed = 0, boxed = 0, out_of_reach = 0;
+    for (const Vec3& sp : seeds) {
+      if (st.growth_reseed_landed + st.growth_reseed_failed >= static_cast<std::size_t>(kOrganicReseedMaxSeeds)) break;
+      // the stub: DOWN along the field (sign chosen downward, blended with -z) until
+      // it lands on existing lattice or the plate; a stub that leaves the region or
+      // runs out of reach fails, and the void keeps its silence honestly
+      std::vector<Vec3> path{sp};
+      Vec3 q = sp; Vec3 dir{0, 0, -1}; bool landed = false; Vec3 hit{0, 0, 0};
+      // ★ REACH AND LANDING, measured 2026-09-05: at six separations (27 mm) and a
+      // landing radius of 1.2 mm, a stub walking down between two pillars 4.5 mm
+      // apart used its whole allowance without coming within 1.2 mm of either, and
+      // the neck sits ~100 mm above the floor -- 79 of 102 gave up mid-air. Landing is
+      // now the Jobard test distance, half the local separation; reach twelve.
+      // ★ THE WHOLE HEIGHT (measured 2026-09-05: with twelve separations every one of
+      // the 106 failures was "out of reach", none boxed in -- a void high in the neck
+      // has nothing within 54 mm below it that the walk passes closely enough). A stub
+      // that descends all the way to the floor is exactly the pillar a floor seed would
+      // have grown from there, so the allowance is the region's height.
+      const double reach = (hi.z - lo.z) + 2.0 * sep_at(sp);
+      double travelled = 0.0;
+      // ★ A WALK DOWN THE REGION, NOT A LINE THROUGH IT (measured 2026-09-05: a
+      // near-vertical drop landed 21 of 102 stubs; the rest left the leaning arms of
+      // the U through their inner rim, because a straight line cannot follow a curved
+      // thin region). The stub now walks the candidate grid: from its voxel to the
+      // neighbouring candidate voxel that descends most, sideways only when nothing
+      // below is candidate, never twice through the same voxel. Inside the region by
+      // construction, it follows the arm's slant to the lattice or the floor.
+      const double land_r = std::max(2.0 * rbar, kOrganicTestRatio * sep_at(sp));
+      {
+        auto vox_of = [&](const Vec3& q, int* i, int* j, int* k) {
+          *i = static_cast<int>((q.x - grid.origin.x) / h);
+          *j = static_cast<int>((q.y - grid.origin.y) / h);
+          *k = static_cast<int>((q.z - grid.origin.z) / h);
+          return *i >= 0 && *j >= 0 && *k >= 0 && *i < grid.nx && *j < grid.ny && *k < grid.nz;
+        };
+        auto centre_of = [&](int i, int j, int k) {
+          return Vec3{grid.origin.x + (i + 0.5) * h, grid.origin.y + (j + 0.5) * h, grid.origin.z + (k + 0.5) * h};
+        };
+        int ci, cj, ck;
+        if (!vox_of(sp, &ci, &cj, &ck)) { ++st.growth_reseed_failed; continue; }
+        std::set<std::size_t> visited;
+        visited.insert(grid.index(ci, cj, ck));
+        const int max_walk = static_cast<int>(reach / h) + 8;
+        for (int w = 0; w < max_walk && !landed; ++w) {
+          // the lowest candidate neighbour not yet visited; among equals, the one
+          // the field leans toward
+          Vec3 f{0, 0, -1};
+          if (field_at(q, f) && f.z > 0.0) f = vmul(f, -1.0);
+          int bi = -1, bj = -1, bk = -1; double best = 1e300;
+          for (int dk = -1; dk <= 1; ++dk) for (int dj = -1; dj <= 1; ++dj) for (int di = -1; di <= 1; ++di) {
+            if (!di && !dj && !dk) continue;
+            const int i2 = ci + di, j2 = cj + dj, k2 = ck + dk;
+            if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
+            const std::size_t e2 = grid.index(i2, j2, k2);
+            if (!candidate[e2] || visited.count(e2)) continue;
+            // score: descend first (dk), then follow the field's lean, then shortest hop
+            const double lean = -(di * f.x + dj * f.y + dk * f.z);
+            const double score = dk * 10.0 + lean * 1.0 + 0.1 * (std::abs(di) + std::abs(dj) + std::abs(dk));
+            if (score < best) { best = score; bi = i2; bj = j2; bk = k2; }
+          }
+          if (bi < 0) { ++boxed; break; }         // boxed in: the void keeps its silence
+          ci = bi; cj = bj; ck = bk;
+          visited.insert(grid.index(ci, cj, ck));
+          const Vec3 nq = centre_of(ci, cj, ck);
+          travelled += vlen(vsub(nq, q)); q = nq;
+          if (vlen(vsub(q, path.back())) >= kOrganicGrowthRecordRadii * rbar) path.push_back(q);
+          if (q.z - zbase <= rbar + h) { landed = true; if (vlen(vsub(path.back(), q)) > 1e-6) path.push_back(q); break; }
+          if (travelled > 2.0 * rbar && nearest_vertex(q, land_r, &hit)) {
+            if (vlen(vsub(hit, path.back())) > 1e-6) path.push_back(hit);
+            landed = true; break;
+          }
+          if (travelled > reach) { ++out_of_reach; break; }
+        }
+      }
+      if (!landed) { ++st.growth_reseed_failed; continue; }
+      OrganicCurve stub;
+      stub.family = 0; stub.radius_mm = rbar;
+      stub.points = path;
+      double L = 0.0;
+      for (std::size_t k2 = 1; k2 < path.size(); ++k2) {
+        L += vlen(vsub(path[k2], path[k2 - 1]));
+        stub.seg_kind.push_back(static_cast<unsigned char>(OrganicCurve::Seg::Climb));
+        mark(path[k2 - 1], path[k2], rbar);
+        remember(path[k2], -3);
+      }
+      stub.length_mm = L;
+      grown.push_back(std::move(stub));
+      ++st.growth_reseed_landed; st.growth_reseed_length_mm += L;
+      // and now it climbs, as any floor seed would
+      tips.push_back({sp, Vec3{0, 0, 1}, rbar, 0, -1});
+      remember(sp, -3);
+      ++pushed;
+    }
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr, "[reseed] round %d: %zu voids, %zu stubs landed (%.0f mm), %zu failed (boxed in %zu, out of reach %zu)\n",
+                   reseed_round, seeds.size(), pushed, st.growth_reseed_length_mm,
+                   st.growth_reseed_failed, boxed, out_of_reach);
+    if (pushed == 0) break;
+  }
   }
   if (tips.size() >= kOrganicGrowthMaxTips) st.growth_tip_budget_hit = true;
   // ★ NO SILENT FALLBACK. Keeping the traced curves when growth produced nothing made a

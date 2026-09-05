@@ -533,6 +533,19 @@ inline constexpr double kOrganicXferTieMaxReachRatio = 8.0;
 // grading.organic_tie_swirl scales it (0 = off, 1 = this amplitude).
 inline constexpr double kOrganicXferTieSwirlDeg = 28.0;
 inline constexpr double kOrganicXferTieSwirlWavelengthRatio = 3.5;
+// ★ VOID RE-SEEDING (maintainer, 2026-09-05: "seeds cannot grow to these thinnest
+// of areas"). Growth seeds only the region's FLOOR, so a tall thin neck far above it
+// fills only if a pillar happens to climb that far without dying to crowding or the
+// region edge -- and nothing re-seeds above a dead pillar. A seed placed high up
+// cannot stand (that is why farthest-point seeding once placed 0 seeds); so a void is
+// entered FROM BELOW: at a candidate voxel with no curve within
+// kOrganicReseedVoidRatio separations, a stub first grows DOWN along the field
+// until it lands on existing lattice or the plate. Only a stub that lands becomes a
+// seed; its climb is then an ordinary tip. Bounded by kOrganicReseedMaxSeeds per run
+// and kOrganicReseedRounds passes.
+inline constexpr double kOrganicReseedVoidRatio = 1.5;
+inline constexpr int kOrganicReseedMaxSeeds = 800;
+inline constexpr int kOrganicReseedRounds = 2;
 inline constexpr double kOrganicVdiDensityFloor =
     3.0 * 3.14159265358979323846 / (kOrganicVdiSlendernessMax *
                                     kOrganicVdiSlendernessMax * 4.0);
@@ -730,6 +743,7 @@ struct OrganicParams {
   // every pillar (see kOrganicXferTieMinorRatio). Job key grading.organic_transfer_ties.
   bool transfer_ties = false;
   double tie_swirl = 1.0;   // 0..1, scales kOrganicXferTieSwirlDeg
+  bool reseed_voids = true; // grown only: enter voids from below (kOrganicReseedVoidRatio)
 
   // Hard bounds so a degenerate field cannot run away. Exceeding either is REPORTED,
   // never silent (`seed_budget_exhausted` / `step_budget_hits`).
@@ -1492,6 +1506,11 @@ struct OrganicGenStats {
   std::size_t growth_ties_refused_minor = 0;    // field too uniaxial here
   std::size_t growth_ties_refused_reach = 0;    // nothing to land on within reach
   double growth_tie_length_mm = 0.0;
+  // void re-seeding (kOrganicReseedVoidRatio): voids found, stubs that landed, length
+  std::size_t growth_reseed_voids = 0;
+  std::size_t growth_reseed_landed = 0;
+  std::size_t growth_reseed_failed = 0;
+  double growth_reseed_length_mm = 0.0;
   bool growth_tip_budget_hit = false;
   // ★ THE DISCRETISATION THIS RESULT WAS COMPUTED IN. Growth asks its support question
   // one layer at a time, so the answer is only meaningful alongside the layer height
