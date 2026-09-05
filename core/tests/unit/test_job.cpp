@@ -697,6 +697,11 @@ static void test_organic_scale_and_gates() {
       (void)parse_job(organic_swept(", \"organic_overhang_fillet\": 1"));
     } catch (const std::exception&) { refused = true; }
     CHECK(refused, "organic_overhang_fillet: a non-boolean is refused");
+    CHECK(!parse_job(organic_swept("")).grading.organic_transfer_ties,
+          "organic_transfer_ties: absent means OFF");
+    CHECK(parse_job(organic_swept(", \"organic_transfer_ties\": true"))
+              .grading.organic_transfer_ties,
+          "organic_transfer_ties: true is honoured");
   }
   {
     const JobDescription j = parse_job(organic_swept(

@@ -497,6 +497,20 @@ inline constexpr double kOrganicFilletMaxRadiusRatio = 2.5;
 // How many segments a filleted span is emitted as. The taper is piecewise-constant in
 // radius, so this is the resolution of the underside's slope.
 inline constexpr int kOrganicFilletSegments = 12;
+
+// ★ TRANSFER TIES (2026-09-05). A grown lattice follows the MAJOR principal
+// direction only, so where the load has to turn it has no member to turn along and
+// the printability repairs (fill rows, mat stitches) become the load path: measured
+// on the STAND, every strut over p99 was one of those, one 0.27 mm stitch at 235 MPa
+// carrying the whole 44 N. Michell / Daynes: the orthogonal family IS the transfer
+// path. So, with `transfer_ties`, every pillar is walked at the local separation and
+// a short curve is launched along the SECOND principal direction, both ways; it is
+// kept only where it lands on another curve within `kOrganicXferTieReachRatio`
+// separations, and only where the minor principal stress is at least
+// `kOrganicXferTieMinorRatio` of the major -- where the load actually turns. Where the
+// field is straight and uniaxial no tie is placed, so the grove stays a grove.
+inline constexpr double kOrganicXferTieMinorRatio = 0.10;
+inline constexpr double kOrganicXferTieReachRatio = 1.5;
 inline constexpr double kOrganicVdiDensityFloor =
     3.0 * 3.14159265358979323846 / (kOrganicVdiSlendernessMax *
                                     kOrganicVdiSlendernessMax * 4.0);
@@ -689,6 +703,10 @@ struct OrganicParams {
 
   // How many principal directions to trace. 3 = the full orthogonal set (Daynes).
   int families = 3;
+
+  // ★ grown only: launch transfer ties along the second principal direction from
+  // every pillar (see kOrganicXferTieMinorRatio). Job key grading.organic_transfer_ties.
+  bool transfer_ties = false;
 
   // Hard bounds so a degenerate field cannot run away. Exceeding either is REPORTED,
   // never silent (`seed_budget_exhausted` / `step_budget_hits`).
@@ -1398,6 +1416,12 @@ struct OrganicGenStats {
   // when the horizontal run of the join would exceed kOrganicMaxCantileverMm and the
   // tip was made to stop or deflect instead.
   std::size_t growth_join_refused_span = 0;
+  // transfer ties (kOrganicXferTieMinorRatio): launched, landed, and why not
+  std::size_t growth_ties_seeded = 0;
+  std::size_t growth_ties_landed = 0;
+  std::size_t growth_ties_refused_minor = 0;    // field too uniaxial here
+  std::size_t growth_ties_refused_reach = 0;    // nothing to land on within reach
+  double growth_tie_length_mm = 0.0;
   bool growth_tip_budget_hit = false;
   // ★ THE DISCRETISATION THIS RESULT WAS COMPUTED IN. Growth asks its support question
   // one layer at a time, so the answer is only meaningful alongside the layer height

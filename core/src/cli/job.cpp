@@ -1533,6 +1533,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
              "organic_scale", "organic_growth", "organic_overhang_fillet",
+             "organic_transfer_ties",
              "organic_structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1715,6 +1716,15 @@ JobDescription parse_job(const std::string& json_text) {
     // DELIBERATELY on all three: refuse_organic_structural admits a structural organic
     // job that names "organic_structural_certification": "beam_network", and both
     // shape-fit keys are admitted with it. Each key states its own reason below.
+    if (const JsonValue* tv = find_key(gr, "organic_transfer_ties")) {
+      if (tv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_transfer_ties\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_transfer_ties\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_transfer_ties = (tv->num != 0.0);
+    }
     if (const JsonValue* fv = find_key(gr, "organic_overhang_fillet")) {
       if (fv->type != JsonValue::Type::Bool)
         schema_fail("grading \"organic_overhang_fillet\" must be a boolean");

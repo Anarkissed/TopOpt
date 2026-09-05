@@ -4444,6 +4444,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   OrganicParams op;
   op.build_dir = build_dir;
   op.overhang_angle_deg = jg.organic_overhang_angle_deg;
+  op.transfer_ties = jg.organic_transfer_ties;
   // ★ A curve end that ran out of region is an ANCHOR only if a shell is written for
   // it to land on. `outer_finish: "skin"` drops the shell, and then the same end is a
   // cantilever into air — which is what the maintainer found at the face of a bare

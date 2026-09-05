@@ -429,6 +429,10 @@ struct JobGrading {
   // as a 12-segment flare up to 2.5x the bead). Printability is user input, so the
   // repair is a choice: absent means on (nothing existing changes), false skips it.
   bool organic_overhang_fillet = true;
+  // ★ grown only: transfer ties along the second principal direction, so the load
+  // has a member to turn along (Michell's orthogonal family). Default off until the
+  // maintainer has judged the look; see kOrganicXferTieMinorRatio.
+  bool organic_transfer_ties = false;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

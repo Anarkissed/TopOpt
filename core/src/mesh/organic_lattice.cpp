@@ -2157,6 +2157,136 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
   // total failure read as a healthy run: ACCEPTED, 13342 spans, and the repair passes
   // busy — because it WAS the traced path. Growth either replaces the curves or the
   // caller is told it produced none.
+  // ── ★ TRANSFER TIES along the second principal direction (see the header) ──────
+  if (params.transfer_ties && !grown.empty()) {
+    std::unordered_map<long long, std::vector<std::pair<Vec3, int>>> verts;
+    for (std::size_t ci = 0; ci < grown.size(); ++ci)
+      for (const Vec3& q : grown[ci].points) verts[pkey(q)].push_back({q, int(ci)});
+    auto land_on = [&](const Vec3& q, int self, double reach, Vec3* hit, int* who) {
+      double best = reach * reach; bool found = false;
+      for (int dz = -1; dz <= 1; ++dz)
+        for (int dy = -1; dy <= 1; ++dy)
+          for (int dx = -1; dx <= 1; ++dx) {
+            const Vec3 o{q.x + dx * cellsz, q.y + dy * cellsz, q.z + dz * cellsz};
+            auto it = verts.find(pkey(o));
+            if (it == verts.end()) continue;
+            for (const auto& pr : it->second) {
+              if (pr.second == self) continue;
+              const Vec3 d2 = vsub(q, pr.first);
+              const double dd = vdot(d2, d2);
+              if (dd < best) { best = dd; *hit = pr.first; *who = pr.second; found = true; }
+            }
+          }
+      return found;
+    };
+    auto minor_frame = [&](const Vec3& p, Vec3& e2, double& ratio) {
+      const int i = static_cast<int>((p.x - grid.origin.x) / h);
+      const int j = static_cast<int>((p.y - grid.origin.y) / h);
+      const int k = static_cast<int>((p.z - grid.origin.z) / h);
+      if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz)
+        return false;
+      const std::size_t e = grid.index(i, j, k);
+      if (e >= n || !candidate[e]) return false;
+      double m[6];
+      for (int c = 0; c < 6; ++c) m[c] = stress[6 * e + c];
+      double ev[3]; Vec3 f[3];
+      jacobi_eigen(m, ev, f);
+      if (!(std::fabs(ev[0]) > 0.0)) return false;
+      e2 = f[1];
+      ratio = std::fabs(ev[1]) / std::fabs(ev[0]);
+      return vlen(e2) > 1e-9;
+    };
+    auto tie_radius = [&](const Vec3& p, double fallback) {
+      if (!params.strut_diameter_field) return fallback;
+      const int i = static_cast<int>((p.x - grid.origin.x) / h);
+      const int j = static_cast<int>((p.y - grid.origin.y) / h);
+      const int k = static_cast<int>((p.z - grid.origin.z) / h);
+      if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz)
+        return fallback;
+      const std::size_t e = grid.index(i, j, k);
+      const double d = e < params.strut_diameter_field->size()
+                           ? (*params.strut_diameter_field)[e] : 0.0;
+      return d > 0.0 ? 0.5 * d : fallback;
+    };
+    std::vector<OrganicCurve> ties;
+    const std::size_t n_pillars = grown.size();
+    for (std::size_t ci = 0; ci < n_pillars; ++ci) {
+      const OrganicCurve& pc = grown[ci];
+      if (pc.family != 0 || pc.points.size() < 2) continue;   // pillars only, not links
+      double since = 0.0;
+      for (std::size_t pi = 1; pi < pc.points.size(); ++pi) {
+        since += vlen(vsub(pc.points[pi], pc.points[pi - 1]));
+        const Vec3 p = pc.points[pi];
+        if (since < sep_at(p)) continue;
+        since = 0.0;
+        Vec3 e2; double ratio = 0.0;
+        if (!minor_frame(p, e2, ratio)) continue;
+        if (ratio < kOrganicXferTieMinorRatio) { ++st.growth_ties_refused_minor; continue; }
+        for (int sgn = -1; sgn <= 1; sgn += 2) {
+          ++st.growth_ties_seeded;
+          const double reach = kOrganicXferTieReachRatio * sep_at(p);
+          Vec3 dir = vmul(e2, double(sgn));
+          Vec3 q = p; double travelled = 0.0; bool landed = false;
+          Vec3 hit{0, 0, 0}; int who = -1;
+          std::vector<Vec3> path{p};
+          const double r0 = pc.radius_mm;
+          while (travelled < reach) {
+            Vec3 e2n; double rn;
+            if (minor_frame(q, e2n, rn)) {
+              if (vdot(e2n, dir) < 0.0) e2n = vmul(e2n, -1.0);
+              dir = vunit(vadd(vmul(dir, 0.5), vmul(e2n, 0.5)));
+            }
+            const Vec3 nq = vadd(q, vmul(dir, step));
+            if (!in_region(nq)) break;
+            q = nq; travelled += step; path.push_back(q);
+            if (travelled > 2.0 * r0 &&
+                land_on(q, int(ci), std::max(2.0 * r0, 0.75 * step), &hit, &who)) {
+              landed = true; break;
+            }
+          }
+          if (!landed) { ++st.growth_ties_refused_reach; continue; }
+          // ★ DECIMATE BEFORE EMITTING. The node merge unions every span endpoint
+          // within kOrganicNodeMergeRatio radii and snaps each cluster to its
+          // centroid; a tie recorded at every growth step (closer than that) chained
+          // into ONE cluster and through every pillar it touched -- 9,018 chords up to
+          // 97 mm, 400,000 mm of them, on the first run. Grown pillars never chain
+          // because they record a vertex every couple of millimetres. Keep a tie
+          // vertex only when it is at least four merge radii from the last kept one;
+          // the seed and the landing point always stay.
+          {
+            const double keep_d = 4.0 * kOrganicNodeMergeRatio * r0;
+            std::vector<Vec3> thin{path.front()};
+            for (std::size_t k2 = 1; k2 < path.size(); ++k2)
+              if (vlen(vsub(path[k2], thin.back())) >= keep_d) thin.push_back(path[k2]);
+            if (vlen(vsub(hit, thin.back())) < 0.5 * keep_d && thin.size() > 1) thin.pop_back();
+            thin.push_back(hit);
+            path.swap(thin);
+          }
+          OrganicCurve tie;
+          tie.family = 1;
+          tie.radius_mm = tie_radius(vmul(vadd(p, hit), 0.5), r0);
+          tie.points = path;
+          double L = 0.0;
+          for (std::size_t k2 = 1; k2 < path.size(); ++k2) {
+            L += vlen(vsub(path[k2], path[k2 - 1]));
+            tie.seg_kind.push_back(static_cast<unsigned char>(OrganicCurve::Seg::Join));
+            mark(path[k2 - 1], path[k2], tie.radius_mm);
+          }
+          tie.length_mm = L;
+          ties.push_back(std::move(tie));
+          ++st.growth_ties_landed; st.growth_tie_length_mm += L;
+        }
+      }
+    }
+    for (OrganicCurve& t2 : ties) grown.push_back(std::move(t2));
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr,
+                   "[ties] TRANSFER_TIES seeded %zu, landed %zu (%.0f mm), refused: minor "
+                   "stress under %.2f of major %zu, nothing within reach %zu\n",
+                   st.growth_ties_seeded, st.growth_ties_landed, st.growth_tie_length_mm,
+                   kOrganicXferTieMinorRatio, st.growth_ties_refused_minor,
+                   st.growth_ties_refused_reach);
+  }
   out.curves.swap(grown);
   if (gstats) *gstats = st;
   if (std::getenv("TOPOPT_ORGANIC_TRACE"))
