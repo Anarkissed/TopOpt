@@ -1384,8 +1384,25 @@ JobDescription parse_job(const std::string& json_text) {
                         "zero-depth region marks nothing)");
         } else {  // face
           reject_unknown_keys(
-              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm"},
+              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv"},
               "a face lattice region geometry");
+          if (const JsonValue* ov = find_key(gv, "outline_uv")) {
+            if (ov->type != JsonValue::Type::Array)
+              schema_fail("a face lattice region \"outline_uv\" must be an array of loops");
+            for (const JsonValue& loop : ov->arr) {
+              if (loop.type != JsonValue::Type::Array || loop.arr.size() < 3)
+                schema_fail("a face lattice region \"outline_uv\" loop must hold at least 3 [u, w] points");
+              std::vector<std::array<double, 2>> pts;
+              for (const JsonValue& pt : loop.arr) {
+                if (pt.type != JsonValue::Type::Array || pt.arr.size() != 2 ||
+                    pt.arr[0].type != JsonValue::Type::Number || pt.arr[1].type != JsonValue::Type::Number ||
+                    !std::isfinite(pt.arr[0].num) || !std::isfinite(pt.arr[1].num))
+                  schema_fail("a face lattice region \"outline_uv\" point must be [u, w] finite numbers");
+                pts.push_back({pt.arr[0].num, pt.arr[1].num});
+              }
+              reg.outline_uv.push_back(std::move(pts));
+            }
+          }
           reg.origin = parse_vec3(
               require_key(gv, "origin", "a face lattice region geometry"),
               "lattice region origin");
@@ -1554,7 +1571,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
              "organic_scale", "organic_growth", "organic_overhang_fillet",
-             "organic_transfer_ties", "organic_tie_swirl",
+             "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
              "organic_structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1745,6 +1762,13 @@ JobDescription parse_job(const std::string& json_text) {
             "grading \"organic_transfer_ties\" is only allowed with "
             "algorithm \"organic\"");
       job.grading.organic_transfer_ties = (tv->num != 0.0);
+    }
+    if (const JsonValue* rm = find_key(gr, "organic_solid_rim_mm")) {
+      if (rm->type != JsonValue::Type::Number || !(rm->num >= 0.0) || !std::isfinite(rm->num))
+        schema_fail("grading \"organic_solid_rim_mm\" must be a finite number >= 0 (0 = off)");
+      if (!organic_alg)
+        schema_fail("grading \"organic_solid_rim_mm\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_solid_rim_mm = rm->num;
     }
     if (const JsonValue* sw = find_key(gr, "organic_tie_swirl")) {
       if (sw->type != JsonValue::Type::Number || !(sw->num >= 0.0 && sw->num <= 1.0))

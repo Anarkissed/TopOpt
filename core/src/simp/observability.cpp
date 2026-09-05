@@ -1459,6 +1459,8 @@ std::string run_info_json(const RunInfo& info) {
                 ", \"blended\": " + std::to_string(ri.blended) + "}";
         }
         gr += "]";
+        gr += ", \"solid_rim_mm\": " + fmt(info.organic_solid_rim_mm);
+        gr += ", \"solid_rim_voxels\": " + std::to_string(info.organic_solid_rim_voxels);
         gr += ", \"overhang_fillet_on\": " + std::string(info.organic_overhang_fillet_on ? "true" : "false");
         gr += ", \"fillet_skipped_spans\": " + std::to_string(info.organic_fillet_skipped_spans);
         gr += ", \"transfer_ties_on\": " + std::string(info.organic_transfer_ties_on ? "true" : "false");

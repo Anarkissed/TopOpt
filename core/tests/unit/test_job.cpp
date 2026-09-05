@@ -720,6 +720,28 @@ static void test_organic_scale_and_gates() {
       CHECK(r1, "organic_probe: refused off the organic algorithm");
       CHECK(r2, "organic_probe: a grade with hi <= lo is refused");
     }
+    {
+      auto with_outline = [&](const std::string& outline) {
+        return mutate("\"mesh_prefix\": \"variant\" }",
+                      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"regions\": [ { \"role\": \"include\", "
+                      "\"kind\": \"face\", \"geometry\": { \"origin\": [0,0,0], \"normal\": [1,0,0], "
+                      "\"half_u_mm\": 10.0, \"half_w_mm\": 8.0, \"depth_mm\": 5.0" + outline + " } } ] },\n"
+                      "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.4, "
+                      "\"algorithm\": \"organic\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
+                      "\"cell_min_mm\": 3.0, \"cell_max_mm\": 6.0 }");
+      };
+      const JobDescription j = parse_job(with_outline(", \"outline_uv\": [[[ -5, -5 ], [ 5, -5 ], [ 5, 5 ], [ -5, 5 ]]]"));
+      CHECK(j.lattice.regions.size() == 1 && j.lattice.regions[0].outline_uv.size() == 1 &&
+                j.lattice.regions[0].outline_uv[0].size() == 4,
+            "outline_uv: one loop of four points parsed (the app's pocket outline)");
+      bool refused = false;
+      try { (void)parse_job(with_outline(", \"outline_uv\": [[[0, 0], [1, 1]]]")); } catch (const std::exception&) { refused = true; }
+      CHECK(refused, "outline_uv: a loop under three points is refused");
+    }
+    CHECK(parse_job(organic_swept("")).grading.organic_solid_rim_mm < 0.0,
+          "organic_solid_rim_mm: absent means one base cell (sentinel -1)");
+    CHECK(parse_job(organic_swept(", \"organic_solid_rim_mm\": 0")).grading.organic_solid_rim_mm == 0.0,
+          "organic_solid_rim_mm: 0 switches the rim off");
     CHECK(parse_job(organic_swept("")).grading.organic_tie_swirl == 1.0,
           "organic_tie_swirl: absent means 1.0 (full swirl)");
     CHECK(parse_job(organic_swept(", \"organic_tie_swirl\": 0.25")).grading.organic_tie_swirl == 0.25,

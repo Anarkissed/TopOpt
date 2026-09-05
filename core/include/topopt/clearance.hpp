@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -89,6 +90,9 @@ struct ManualClearanceGeometry {
   Vec3 normal{0.0, 0.0, 0.0};
   double half_u_mm = 0.0;
   double half_w_mm = 0.0;
+  // ★ OUTLINE (the app's `outline_uv`): closed loops in the face's in-plane (u, w)
+  // basis, origin at `origin`. Empty = the rectangle. See ClearanceGeometry.
+  std::vector<std::vector<std::array<double, 2>>> outline_uv;
 };
 
 // ── Suggested default distances (design 095 STEP 1/2). ────────────────────
@@ -300,6 +304,14 @@ struct ClearanceGeometry {
   double w_lo = 0.0;
   double w_hi = 0.0;
   double depth = 0.0;
+  // ★ OUTLINE loops (2026-09-05). A face-prism is a POCKET whose outline follows the
+  // face -- the app has written `outline_uv` for months and core rejected the key,
+  // so no current app job could run through the CLI at all. When non-empty the
+  // slab is clipped to the even-odd interior of these loops in (u, w). `outline_frame`
+  // maps the app's pair to core's basis: bit0 swap, bit1 negate first, bit2 negate
+  // second -- measured, not assumed (TOPOPT_OUTLINE_UV_FRAME during calibration).
+  std::vector<std::vector<std::array<double, 2>>> outline_uv;
+  int outline_frame = 0;
 };
 
 // Resolve the predicate from B-rep face `face_id` of `model` (the AUTO path): the

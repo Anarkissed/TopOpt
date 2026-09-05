@@ -1017,6 +1017,8 @@ struct RunInfo {
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
   // ★ the overhang fillet (grading.organic_overhang_fillet) and the transfer ties
   // (grading.organic_transfer_ties), so the receipt says what each did or declined
+  double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
+  long long organic_solid_rim_voxels = 0;
   bool organic_overhang_fillet_on = true;
   long long organic_fillet_skipped_spans = 0;
   bool organic_transfer_ties_on = false;

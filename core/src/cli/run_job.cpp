@@ -990,6 +990,7 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
       mg.normal = r.normal;
       mg.half_u_mm = r.half_u_mm;
       mg.half_w_mm = r.half_w_mm;
+      mg.outline_uv = r.outline_uv;
     }
     const ClearanceGeometry g = resolve_clearance_manual(mg, p);
     if (!g.valid) continue;  // degenerate → the rasterizer's safe no-op
@@ -1273,6 +1274,7 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       mg.normal = r.normal;
       mg.half_u_mm = r.half_u_mm;
       mg.half_w_mm = r.half_w_mm;
+      mg.outline_uv = r.outline_uv;
     }
     if (!resolve_clearance_manual(mg, p).valid) continue;
     ++include_index;
@@ -3915,6 +3917,8 @@ struct LatticeVariantOutcome {
   long long organic_shape_fit_voxels_shrunk = 0;
   double organic_shape_fit_min_ratio = 1.0;
   SyntheticStressReport organic_synthetic;   // synthetic stress laid into dead walls
+  double organic_solid_rim_mm = 0.0;
+  long long organic_solid_rim_voxels = 0;
   std::string receipt_path;
   std::string receipt_json;
   double cell_mm = 0.0;
@@ -4453,7 +4457,51 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // it to land on. `outer_finish: "skin"` drops the shell, and then the same end is a
   // cantilever into air — which is what the maintainer found at the face of a bare
   // cube. run_job knows which file it is writing; the tracer does not.
-  op.anchor_at_region_boundary = shell_is_written;
+  // ★ ...UNLESS THE BOUNDARY IS SOLID ANYWAY (maintainer, 2026-09-05: "there should be
+  // SOLID chamfers all the way around it"). A pocket cut into a wall has the part's
+  // own solid beyond the region on every side but the open face; a curve end that
+  // runs out of region there lands on that solid and is held, shell or no shell.
+  // The bare-coupon rule above was written for a region with NOTHING beyond it.
+  // Measure it: of the candidate voxels on the region's boundary, how many have a
+  // solid non-candidate neighbour. Backed on more than half -> anchor.
+  double boundary_solid_fraction = 0.0;
+  {
+    std::size_t on_boundary = 0, backed = 0;
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          const std::size_t e = grid.index(i, j, k);
+          if (!lattice_mask[e]) continue;
+          // ★ MEASURED 2026-09-05 on the M2 stand: counting every boundary voxel put the
+          // pocket's OPEN FACE -- 59 % of the boundary, air by definition -- in the
+          // denominator, and a pocket with a solid rim on every side wall read "40.7 %
+          // backed", anchors OFF. A boundary voxel whose only non-lattice neighbours
+          // are AIR is the open face, and it says nothing about whether the walls are
+          // solid; it is left out of the count. Side walls and floor decide.
+          bool edge = false, solid_nb = false;
+          const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
+          for (int d = 0; d < 6; ++d) {
+            const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+            if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
+            const std::size_t e2 = grid.index(i2, j2, k2);
+            if (lattice_mask[e2]) continue;
+            if (density[e2] > printed_iso) { edge = true; solid_nb = true; }
+            else if (!edge) { /* air: the open face, not counted */ }
+          }
+          // a voxel touching only air is not on a wall; one touching solid is, and is backed
+          if (edge) { ++on_boundary; if (solid_nb) ++backed; }
+          else {
+            // does it touch a non-lattice voxel at all (air)? then it is on the open face
+            // and is deliberately not counted
+          }
+        }
+    boundary_solid_fraction = on_boundary ? double(backed) / double(on_boundary) : 0.0;
+  }
+  op.anchor_at_region_boundary = shell_is_written || boundary_solid_fraction > 0.5;
+  if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+    std::fprintf(stderr, "[anchor] region boundary backed by solid on %.1f%% of its voxels -> anchors %s (shell %s)\n",
+                 100.0 * boundary_solid_fraction, op.anchor_at_region_boundary ? "ON" : "OFF",
+                 shell_is_written ? "written" : "not written");
   // ★ THE NET-SKIN IS FOR THE BARE LATTICE, AND ONLY FOR IT. With a shell written,
   // every clipped end lands ON that shell and is held; with `outer_finish: "skin"`
   // there is nothing there and the landings are the hanging struts Aremu et al.
@@ -4694,6 +4742,61 @@ LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
 // grid and domain.bcs are the caller's BCs verbatim, so every existing caller is
 // byte-identical; with one, domain.grid is the EXPANDED grid, domain.bcs are the
 // remapped BCs, and part_grid is what "outside the original part" means.
+// ── ★ THE SOLID RIM: grade to solid at the outline (JobGrading::organic_solid_rim_mm)
+// Seeds are lattice voxels with a solid, non-lattice 6-neighbour in a direction that
+// is IN the region's face plane (|dir . normal| < 0.5): the pocket's side walls.
+// The pocket floor (along the normal) and the open face are not seeds. From the
+// seeds a 6-connected flood walks inward through lattice voxels up to `rim_mm`
+// (voxel steps x spacing); everything it reaches leaves the mask and prints solid.
+// Returns the voxels turned solid.
+static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<char>& mask,
+                                           const std::vector<double>& density, double printed_iso,
+                                           const std::vector<int>& region_ids,
+                                           const std::vector<Vec3>& region_normals, double rim_mm) {
+  const std::size_t n = grid.voxel_count();
+  if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return 0;
+  const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
+  std::vector<int> dist(n, -1);
+  std::vector<std::size_t> q;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!mask[e]) continue;
+        const int rid = region_ids[e];
+        if (rid <= 0 || static_cast<std::size_t>(rid) > region_normals.size()) continue;
+        const Vec3& nrm = region_normals[static_cast<std::size_t>(rid - 1)];
+        const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
+        for (int d = 0; d < 6; ++d) {
+          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
+          const std::size_t e2 = grid.index(i2, j2, k2);
+          if (mask[e2] || !(density[e2] > printed_iso)) continue;
+          const double dot = nl > 0.0 ? (di[d] * nrm.x + dj[d] * nrm.y + dk[d] * nrm.z) / nl : 0.0;
+          if (std::fabs(dot) >= 0.5) continue;   // along the normal: floor or open face
+          dist[e] = 0; q.push_back(e); break;
+        }
+      }
+  const int max_steps = static_cast<int>(std::floor(rim_mm / grid.spacing + 1e-9));
+  for (std::size_t head = 0; head < q.size(); ++head) {
+    const std::size_t e = q[head];
+    if (dist[e] >= max_steps) continue;
+    const int i = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
+    const int j = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) % static_cast<std::size_t>(grid.ny));
+    const int k = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) * static_cast<std::size_t>(grid.ny)));
+    for (int d = 0; d < 6; ++d) {
+      const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+      if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
+      const std::size_t e2 = grid.index(i2, j2, k2);
+      if (!mask[e2] || dist[e2] >= 0) continue;
+      dist[e2] = dist[e] + 1; q.push_back(e2);
+    }
+  }
+  std::size_t turned = 0;
+  for (std::size_t e : q) { mask[e] = 0; ++turned; }
+  return turned;
+}
+
 // quotes, backslashes and newlines out of a string headed into a JSON literal
 static std::string json_safe(std::string t) {
   for (char& c : t) if (c == '"' || c == '\\' || c == '\n' || c == '\r') c = c == '"' ? '\'' : ' ';
@@ -4971,8 +5074,15 @@ LatticeVariantOutcome lattice_one_variant(
         JobGrading jg2 = job.grading;
         jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
         const GradedField agf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, alt, printed_iso);
+        std::vector<char> pmask = agf.posture.mask;
+        {
+          const double rim = job.grading.organic_solid_rim_mm < 0.0 ? cc.lo : job.grading.organic_solid_rim_mm;
+          std::vector<Vec3> nrms;
+          for (const JobLatticeRegion& r : job.lattice.regions) if (r.role == "include") nrms.push_back(r.normal);
+          apply_organic_solid_rim(solved_grid, pmask, dens, printed_iso, region_ids, nrms, rim);
+        }
         OrganicOutcome po = run_organic_step(job.lattice.outer_finish != "skin", solved_grid, dens,
-                                             probe_stress, agf.posture.mask, agf.posture.relative_density,
+                                             probe_stress, pmask, agf.posture.relative_density,
                                              agf.band_rho_min, agf.band_rho_max, jg2,
                                              job.loads.present && job.loads.minimize_plastic,
                                              v.applied_build_dir, printed_iso, 32,
@@ -5330,6 +5440,20 @@ LatticeVariantOutcome lattice_one_variant(
         ++dropped_by_overlap;
       }
     }
+  }
+  // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see apply_organic_solid_rim) ──
+  if (graded && R.algorithm == LatticeAlgorithm::Organic) {
+    const double rim = job.grading.organic_solid_rim_mm < 0.0
+                           ? job.grading.cell_min_mm : job.grading.organic_solid_rim_mm;
+    std::vector<Vec3> nrms;
+    for (const JobLatticeRegion& r : job.lattice.regions)
+      if (r.role == "include") nrms.push_back(r.normal);
+    R.organic_solid_rim_mm = rim;
+    R.organic_solid_rim_voxels = static_cast<long long>(apply_organic_solid_rim(
+        solved_grid, mask, dens, printed_iso, region_ids_for_stepped, nrms, rim));
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr, "[rim] SOLID_RIM %.3g mm: %lld lattice voxels turned solid at the outline\n",
+                   rim, R.organic_solid_rim_voxels);
   }
 
   // ── ★ ORGANIC (task 2026-08-21-organic-lattice) ────────────────────────────
@@ -8888,6 +9012,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_synthetic_fully = static_cast<long long>(R.organic_synthetic.voxels_fully_synthetic);
         gi.organic_synthetic_blended = static_cast<long long>(R.organic_synthetic.voxels_blended);
         gi.organic_synthetic_dead_threshold = R.organic_synthetic.dead_threshold;
+        gi.organic_solid_rim_mm = R.organic_solid_rim_mm;
+        gi.organic_solid_rim_voxels = R.organic_solid_rim_voxels;
         gi.organic_overhang_fillet_on = job.grading.organic_overhang_fillet;
         gi.organic_fillet_skipped_spans = R.oc.organic_fillet_skipped_spans;
         gi.organic_transfer_ties_on = job.grading.organic_transfer_ties;

@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "topopt/clearance.hpp"
 
 #include <cmath>
@@ -21,6 +22,16 @@ double norm(const Vec3& a) { return std::sqrt(dot(a, a)); }
 // The in-plane orthonormal basis (u, w) spanning the plane whose UNIT normal is
 // `normal`, chosen deterministically so the auto and manual paths agree exactly.
 // Returns false only for a degenerate normal (the picked reference is parallel).
+// ★ the app's outline_uv frame relative to plane_basis: MEASURED 2026-09-05 on the
+// M2 verticalStand job, forecast_only under all eight frames (swap / negate first /
+// negate second), reading include-region void voxels -- the polygon that sits inside
+// the wall has the fewest:
+//     frame 0 [u,w] 11.9 % void | 1 [w,u] 114 % | 2 [-u,w] 226 % | 3 [-w,u] 133 %
+//     4 [u,-w] 64 % | 5 [w,-u] 129 % | 6 [-u,-w] 426 % | 7 [-w,-u] 101 %
+// The app writes core's own (u, w), unswapped, unsigned. TOPOPT_OUTLINE_UV_FRAME
+// overrides for re-measurement only.
+static constexpr int kOutlineUvFrame = 0;
+
 bool plane_basis(const Vec3& normal, Vec3& u, Vec3& w) {
   const Vec3 ref = std::fabs(normal.x) < 0.9 ? Vec3{1.0, 0.0, 0.0}
                                              : Vec3{0.0, 1.0, 0.0};
@@ -124,8 +135,28 @@ bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
   const double s = dot(rel, geom.normal);
   if (s < -tol || s > geom.depth + tol) return false;
   const double du = dot(rel, geom.u), dw = dot(rel, geom.w);
-  return du >= geom.u_lo - tol && du <= geom.u_hi + tol &&
-         dw >= geom.w_lo - tol && dw <= geom.w_hi + tol;
+  if (!(du >= geom.u_lo - tol && du <= geom.u_hi + tol &&
+        dw >= geom.w_lo - tol && dw <= geom.w_hi + tol))
+    return false;
+  if (geom.outline_uv.empty()) return true;
+  // the app's pair (a, b) in core's (u, w): frame bits swap / negate
+  double a = du, b = dw;
+  if (geom.outline_frame & 1) std::swap(a, b);
+  if (geom.outline_frame & 2) a = -a;
+  if (geom.outline_frame & 4) b = -b;
+  bool inside = false;   // even-odd over every loop
+  for (const auto& loop : geom.outline_uv) {
+    const std::size_t n = loop.size();
+    if (n < 3) continue;
+    for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+      const double xi = loop[i][0], yi = loop[i][1], xj = loop[j][0], yj = loop[j][1];
+      if ((yi > b) != (yj > b)) {
+        const double x = xj + (b - yj) * (xi - xj) / (yi - yj);
+        if (a < x) inside = !inside;
+      }
+    }
+  }
+  return inside;
 }
 
 }  // namespace
@@ -217,6 +248,9 @@ ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
     g.u_hi = geom.half_u_mm;
     g.w_lo = -geom.half_w_mm;
     g.w_hi = geom.half_w_mm;
+    g.outline_uv = geom.outline_uv;
+    if (const char* f = std::getenv("TOPOPT_OUTLINE_UV_FRAME")) g.outline_frame = std::atoi(f);
+    else g.outline_frame = kOutlineUvFrame;
     if (g.u_hi > g.u_lo && g.w_hi > g.w_lo) g.valid = true;
   }
   return g;

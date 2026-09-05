@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -173,6 +174,7 @@ struct JobLatticeRegion {
   double half_u_mm = 0.0;
   double half_w_mm = 0.0;
   double depth_mm = 0.0;
+  std::vector<std::vector<std::array<double, 2>>> outline_uv;   // the app's pocket outline
   // ★ WHICH B-REP FACE THIS REGION CAME FROM (task 2026-08-12 §0a). Optional,
   // -1 = "not from a face" (a hand-placed primitive). It exists so the ONE
   // number the user drags can be CHECKED: when a face region names a face that
@@ -442,6 +444,12 @@ struct JobGrading {
   // maintainer has judged the look; see kOrganicXferTieMinorRatio.
   bool organic_transfer_ties = false;
   double organic_tie_swirl = 1.0;   // 0..1: how much the ties wander (a look)
+  // ★ GRADE TO SOLID AT THE OUTLINE (maintainer, 2026-09-05: "that has always been a
+  // requirement for organic"). Inside every include region, the band within this
+  // distance of a solid-backed IN-PLANE boundary (the pocket's side walls, not its
+  // floor or its open face) stays solid: the lattice grades into a solid frame it
+  // can tie to. Absent (-1) = one base cell (cell_min_mm); 0 = off.
+  double organic_solid_rim_mm = -1.0;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the
