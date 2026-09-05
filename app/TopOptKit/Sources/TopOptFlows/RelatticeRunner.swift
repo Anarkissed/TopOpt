@@ -367,6 +367,16 @@ public enum RelatticeRun {
                                      + "forecast")
             }
             lat["forecast_only"] = true
+            // ★ THE ORGANIC CELL-SIZE PROBE (contract 2026-09-05): ask core to trace
+            // the candidate sizes and grades — only for an organic job, only when
+            // the linked core's schema accepts the keys. Otherwise the request is
+            // byte-identical to the one this builder has always sent.
+            if let grading = obj["grading"] as? [String: Any],
+               (grading["algorithm"] as? String) == "organic",
+               TopOptKit.organicForecastProbeWired {
+                lat["forecast_cells_mm"] = LatticeSettings.organicForecastCellsMM
+                lat["forecast_grades_mm"] = LatticeSettings.organicForecastGradesMM
+            }
             obj["lattice"] = lat
             jobToSubmit = try JSONSerialization.data(withJSONObject: obj,
                                                      options: [.sortedKeys])

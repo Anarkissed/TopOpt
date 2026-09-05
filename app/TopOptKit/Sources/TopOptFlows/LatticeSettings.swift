@@ -947,6 +947,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// the job marks `synthetic_stress`. Absent ⇒ unmeasured.
     public var selectableWallStressFraction: [String: Double] = [:]
     public static let organicSyntheticFociRange = OrganicSyntheticStress.fociRange
+    /// ★ THE ORGANIC CELL-SIZE PROBE'S LAST ANSWER (contract 2026-09-05), stored so
+    /// the wizard's Manual list can offer it; nil until core writes the block.
+    public var organicForecast: OrganicForecast? = nil
+    /// The candidates the forecast is asked to trace (the contract's example set)
+    /// and the grades. Sent only for organic, only when the schema accepts them.
+    public static let organicForecastCellsMM: [Double] = [3, 3.5, 4, 4.5, 5, 6]
+    public static let organicForecastGradesMM: [[Double]] = [[3, 5], [4, 6]]
     /// ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): after a run,
     /// core's receipt lists the separations that certified (`fitting_separations_mm`,
     /// D2); they are stored here so Settings can show them as the factored choices,
@@ -968,7 +975,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// ★ THE MANUAL SIZE LADDER (maintainer, 2026-09-03, item 3): with the simulation
     /// off, "Manual" offers the approved sizes; under an Aesthetic stage every size
     /// is offered, and one not in the approved set carries a "*" — it may leave the
-    /// lattice in more than one piece. The ladder is the app's; the approval is core's.
+    /// lattice unrooted (over 5 % of its length not tied to the part — one piece is not
+    /// the bar). The ladder is the app's; the approval is core's.
     public static let organicManualSizeLadderMM: [Double] = [2, 3, 4, 5, 6, 8, 10]
 
     /// Is organic the chosen algorithm? Asked of the RESOLVED name, so "not stated"
@@ -1510,6 +1518,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case organicApprovedGradesMM, organicPickedGradeMM
         case organicSyntheticStresses, organicSyntheticFoci, selectableSyntheticFoci
         case selectableWallStressFraction
+        case organicForecast
     }
 
     public init(from decoder: Decoder) throws {
@@ -1544,6 +1553,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         selectableSyntheticFoci = (try c.decodeIfPresent([String: Int].self, forKey: .selectableSyntheticFoci) ?? [:])
             .filter { OrganicSyntheticStress.fociRange.contains($0.value) }
         selectableWallStressFraction = try c.decodeIfPresent([String: Double].self, forKey: .selectableWallStressFraction) ?? [:]
+        organicForecast = try c.decodeIfPresent(OrganicForecast.self, forKey: .organicForecast)
         organicApprovedGradesMM = try c.decodeIfPresent([[Double]].self, forKey: .organicApprovedGradesMM) ?? []
         organicPickedGradeMM = try c.decodeIfPresent([Double].self, forKey: .organicPickedGradeMM) ?? []
         // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
@@ -1660,6 +1670,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if !selectableWallStressFraction.isEmpty {
             try c.encode(selectableWallStressFraction, forKey: .selectableWallStressFraction)
         }
+        try c.encodeIfPresent(organicForecast, forKey: .organicForecast)
         try c.encode(organicShapeFitOnly, forKey: .organicShapeFitOnly)
         try c.encode(organicScale, forKey: .organicScale)
         // Written only when set, so an untouched project's file is byte-identical.

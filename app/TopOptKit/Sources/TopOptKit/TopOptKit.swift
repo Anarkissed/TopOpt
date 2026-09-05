@@ -1755,6 +1755,23 @@ public enum TopOptKit {
         return jobSchemaError(job(#", "synthetic_stress": true, "synthetic_foci": 2"#)) == nil
     }()
 
+    /// ★ THE ORGANIC CELL-SIZE PROBE REQUEST (contract 2026-09-05): does the linked
+    /// core's schema accept `lattice.forecast_cells_mm` / `forecast_grades_mm` beside
+    /// `forecast_only` on an organic Aesthetic job? Whole-job probe with a control (the
+    /// same job without the two keys must pass). FALSE ⇒ the forecast request is the
+    /// one it always was, and the wizard shows no organic approvals.
+    public static let organicForecastProbeWired: Bool = {
+        func job(_ extra: String) -> Data {
+            let text = latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet", "forecast_only": true"#
+                    + extra + #"}, "output":"#)
+            return Data(text.utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "forecast_cells_mm": [3, 4], "forecast_grades_mm": [[3, 5]]"#)) == nil
+    }()
+
     public static func latticeSchemaAccepts(key: String) -> Bool {
         // ★ STRICT: accepted ⇔ core's schema raises NO error on the base job carrying
         // the key. A test that merely asked "does the error name the key" passed a

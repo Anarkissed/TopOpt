@@ -952,3 +952,25 @@ project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
     on "3" produced no bake (`v9_B`); Face 15 (unloaded · 3.5 %) keeps live pills with
     Auto lit and "Stress on wall · unloaded · 3.5% of peak" (`v9_C`). Bake line 01:45:56:
     face 15 inj 4086/4356 with the default 4 foci; face 2 untouched.
+20. **Cell-size approval for organic — coded against the contract, gated on the
+    block (02:00).** `OrganicForecast` (new) parses `lattice_forecast.json`'s
+    `"organic"` block — version-gated to `organic_probe_version == 1`; absent,
+    malformed or any other version ⇒ nil ⇒ today's octet forecast alone, no organic
+    approvals, no guessing. `LatticeForecast.organic` carries it; the workspace stores
+    a landed block on `lattice.organicForecast` (Codable, absent key when nil). The
+    forecast request adds `forecast_cells_mm` [3, 3.5, 4, 4.5, 5, 6] and
+    `forecast_grades_mm` [[3,5],[4,6]] ONLY for an organic job and ONLY when
+    `TopOptKit.organicForecastProbeWired` (whole-job probe with a control; false on
+    this core, so the request is byte-identical to before). Wizard Manual list with
+    the block present: Structural offers only `approved_structural` (others greyed,
+    not selectable), Aesthetic offers all and badges `*` by `approved_aesthetic`;
+    refusals verbatim on pointer hover (`.help`) and long-press (`.contextMenu`);
+    grades likewise. Copy: "Likely to certify … will not be refused for
+    disconnection. Stress margin needs the run." — never "certified", never "a single
+    contiguous lattice" (pinned by OrganicForecastTests). Never calls the certificate.
+    Nothing to photograph until core writes the block; the fallback list is unchanged.
+    On device (dylib 42721a3cfaf66c6d, `v10_A`): with the block absent the Manual list is
+    the fallback, unchanged. Found while photographing it: the pre-existing badge caption
+    and both (i) strings promised "a single, contiguous lattice" / "more than one piece"
+    — contradicting the contract's criterion. Rewritten: approved = ties to the part
+    (≥ 95 % of length rooted); one piece is not the bar.

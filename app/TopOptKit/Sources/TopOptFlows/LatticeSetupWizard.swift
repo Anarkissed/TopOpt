@@ -666,11 +666,12 @@ public struct LatticeSetupWizard: View {
         + "chooses its own number of foci (1–5) in its row under Selections; a wall that "
         + "carries load never takes foci. Shown in the preview; the run carries it only on a "
         + "core whose schema accepts it."
-    static let infoManualSizes = "Sizes certification approved: each gives a single, contiguous lattice on "
-        + "this part. Under an Aesthetic stage every size is offered; one marked * was "
-        + "not approved and may leave the lattice in more than one piece."
-    static let infoManualGrades = "Grades certification approved: each window gives a single, contiguous "
-        + "lattice on this part. Core does not report them yet; the list fills in the "
+    static let infoManualSizes = "Sizes certification approved: at each, the lattice ties to the part "
+        + "(at least 95 % of its length rooted). Under an Aesthetic stage every size is offered; one marked * was "
+        + "not approved: certification predicts it will not tie to the part (more than 5 % of "
+        + "its length unrooted). A lattice is many rooted pieces by design; one piece is not the bar."
+    static let infoManualGrades = "Grades certification approved: at each window the lattice ties to the "
+        + "part (at least 95 % of its length rooted). Core does not report them yet; the list fills in the "
         + "moment a run's receipt carries them."
 
     /// A section title with its (i).
@@ -980,21 +981,55 @@ public struct LatticeSetupWizard: View {
         }
     }
 
-    /// One Manual choice: a size, and whether certification approved it.
-    private struct ManualSize: Hashable { let size: Double; let approved: Bool }
-    /// ★ THE MANUAL SIZE LIST (item 3): the approved set; under Aesthetic, the ladder
-    /// too, with a "*" on every size not approved.
+    /// One Manual choice: a size, whether it is approved for the stage, whether it
+    /// may be selected, and the probe's refusals (verbatim, shown on hover /
+    /// long-press).
+    private struct ManualSize: Hashable {
+        let size: Double; let approved: Bool; let selectable: Bool; let refusals: [String]
+    }
+    private struct ManualGrade: Hashable {
+        let grade: [Double]; let approved: Bool; let selectable: Bool; let refusals: [String]
+    }
+    /// ★ THE MANUAL SIZE LIST. With the organic cell-size probe present (contract
+    /// 2026-09-05): its candidates — Structural offers only `approved_structural`,
+    /// Aesthetic offers all and badges the unapproved. Without it: the separations
+    /// certification found (item 3) and, under Aesthetic, the ladder with a "*".
     private var organicManualSizes: [ManualSize] {
+        let structural = !organicAesthetic
+        if let probe = project.lattice.organicForecast, !probe.sizes.isEmpty {
+            return probe.sizes.map { c in
+                ManualSize(size: c.cellMM ?? 0,
+                           approved: !OrganicForecast.badged(c, structural: structural),
+                           selectable: OrganicForecast.selectable(c, structural: structural),
+                           refusals: c.refusals)
+            }.sorted { $0.size < $1.size }
+        }
         let approved = project.lattice.organicFittingSeparationsMM
-        var out = approved.map { ManualSize(size: $0, approved: true) }
+        var out = approved.map { ManualSize(size: $0, approved: true, selectable: true, refusals: []) }
         if organicAesthetic {
             for s in LatticeSettings.organicManualSizeLadderMM
             where !approved.contains(where: { abs($0 - s) < 1e-6 }) {
-                out.append(ManualSize(size: s, approved: false))
+                out.append(ManualSize(size: s, approved: false, selectable: true, refusals: []))
             }
         }
         return out.sorted { $0.size < $1.size }
     }
+    /// The grades likewise: the probe's when present, else certification's.
+    private var organicManualGrades: [ManualGrade] {
+        let structural = !organicAesthetic
+        if let probe = project.lattice.organicForecast, !probe.grades.isEmpty {
+            return probe.grades.compactMap { c in
+                guard let g = c.gradeMM else { return nil }
+                return ManualGrade(grade: g,
+                                   approved: !OrganicForecast.badged(c, structural: structural),
+                                   selectable: OrganicForecast.selectable(c, structural: structural),
+                                   refusals: c.refusals)
+            }
+        }
+        return project.lattice.organicApprovedGradesMM.filter { $0.count == 2 }
+            .map { ManualGrade(grade: $0, approved: true, selectable: true, refusals: []) }
+    }
+    private var organicProbePresent: Bool { project.lattice.organicForecast != nil }
 
     @ViewBuilder private func organicManualLists(fitPossible: Bool) -> some View {
         // ── grades (simulation on) ──
@@ -1004,7 +1039,7 @@ public struct LatticeSetupWizard: View {
                     .foregroundStyle(DS.Color.textTertiary.color)
                 infoButton("manual-grades", Self.infoManualGrades)
             }
-            let grades = project.lattice.organicApprovedGradesMM.filter { $0.count == 2 }
+            let grades = organicManualGrades
             if grades.isEmpty {
                 Text("Certification has not reported approved grades yet.")
                     .dsStyle(DS.TypeScale.caption2)
@@ -1013,12 +1048,16 @@ public struct LatticeSetupWizard: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: DS.Space.xs) {
-                        ForEach(grades, id: \.self) { g in
-                            organicPill(String(format: "%g–%g mm", g[0], g[1]),
-                                        on: model.organicPickedGradeMM == g, enabled: fitPossible) {
+                        ForEach(grades, id: \.self) { m in
+                            let g = m.grade
+                            organicPill(String(format: m.approved ? "%g–%g mm" : "%g–%g mm*", g[0], g[1]),
+                                        on: model.organicPickedGradeMM == g,
+                                        enabled: fitPossible && m.selectable) {
                                 model.organicPickedGradeMM = g; model.organicPickedSeparationMM = 0
                                 model.setCellSizeMode(.fit); rebuild()
                             }
+                            .opacity(m.selectable ? 1 : 0.4)
+                            .modifier(OrganicRefusalsModifier(refusals: m.refusals))
                         }
                     }
                 }
@@ -1026,9 +1065,13 @@ public struct LatticeSetupWizard: View {
         }
         // ── sizes ──
         HStack(spacing: DS.Space.xs) {
-            Text("Approved sizes").dsStyle(DS.TypeScale.caption2)
+            Text(organicProbePresent ? (organicAesthetic ? "Sizes" : "Likely to certify")
+                                     : "Approved sizes").dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
-            infoButton("manual-sizes", Self.infoManualSizes)
+            infoButton("manual-sizes", organicProbePresent
+                       ? (organicAesthetic ? OrganicForecast.aestheticMeaning : OrganicForecast.structuralMeaning)
+                         + " " + OrganicForecast.notCertified
+                       : Self.infoManualSizes)
         }
         let sizes = organicManualSizes
         if sizes.isEmpty {
@@ -1042,15 +1085,17 @@ public struct LatticeSetupWizard: View {
                     ForEach(sizes, id: \.self) { m in
                         organicPill(String(format: m.approved ? "%g mm" : "%g mm*", m.size),
                                     on: abs(model.organicPickedSeparationMM - m.size) < 1e-6,
-                                    enabled: fitPossible) {
+                                    enabled: fitPossible && m.selectable) {
                             model.organicPickedSeparationMM = m.size; model.organicPickedGradeMM = []
                             model.setCellSizeMode(.fit); rebuild()
                         }
+                        .opacity(m.selectable ? 1 : 0.4)
+                        .modifier(OrganicRefusalsModifier(refusals: m.refusals))
                     }
                 }
             }
             if sizes.contains(where: { !$0.approved }) {
-                Text("* not approved by certification — may leave the lattice in more than one piece.")
+                Text("* not approved by certification — predicted not to tie to the part (over 5 % of its length unrooted).")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1978,5 +2023,23 @@ public struct LatticeSetupWizard: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("wizard-seg-\(name.lowercased())")
+    }
+}
+
+
+/// ★ THE PROBE'S REFUSALS, VERBATIM (contract 2026-09-05: "they are written to be
+/// read"): a pointer hover shows them as help; a long-press shows them as a menu.
+private struct OrganicRefusalsModifier: ViewModifier {
+    let refusals: [String]
+    func body(content: Content) -> some View {
+        if refusals.isEmpty {
+            content
+        } else {
+            content
+                .help(refusals.joined(separator: "\n"))
+                .contextMenu {
+                    ForEach(refusals, id: \.self) { Text($0) }
+                }
+        }
     }
 }

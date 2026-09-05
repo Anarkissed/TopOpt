@@ -2912,6 +2912,14 @@ public struct WorkspacePlaceholder: View {
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
+        // ★ THE ORGANIC CELL-SIZE PROBE lands (contract 2026-09-05): keep core's
+        // answer on the project so the wizard's Manual list can offer it. Only
+        // when the block is present — an octet forecast changes nothing here.
+        .onChange(of: latticeForecast.state) { s in
+            if case let .ready(f) = s, let o = f.organic, o != project.lattice.organicForecast {
+                project.lattice.organicForecast = o
+            }
+        }
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
