@@ -2840,6 +2840,21 @@ OrganicCertificate certify_organic_structural(
       for (std::size_t i = 0; i < r.member_stress_mpa.size(); ++i)
         if (r.member_stress_mpa[i] > wv) { wv = r.member_stress_mpa[i]; worst = static_cast<int>(i); }
       cert.worst_strut = worst;
+      // ★ DUMP (env-gated): every member with its stress, for a heat map. The
+      // receipt's p50/p95/p99/max say HOW the lattice failed (concentration, not
+      // quantity); only a per-strut picture says WHERE.
+      if (const char* dump = std::getenv("TOPOPT_ORGANIC_STRESS_DUMP")) {
+        if (FILE* f = std::fopen(dump, "wb")) {
+          for (std::size_t i = 0; i < r.member_stress_mpa.size() && i < net.members.size(); ++i) {
+            const BeamNetwork::Member& mm = net.members[i];
+            const auto& A = net.nodes[static_cast<std::size_t>(mm.node_a)];
+            const auto& B = net.nodes[static_cast<std::size_t>(mm.node_b)];
+            std::fprintf(f, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n", A.x, A.y, A.z,
+                         B.x, B.y, B.z, mm.radius_mm, r.member_stress_mpa[i]);
+          }
+          std::fclose(f);
+        }
+      }
     }
   }
 
