@@ -950,10 +950,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// ★ THE ORGANIC CELL-SIZE PROBE'S LAST ANSWER (contract 2026-09-05), stored so
     /// the wizard's Manual list can offer it; nil until core writes the block.
     public var organicForecast: OrganicForecast? = nil
-    /// The candidates the forecast is asked to trace (the contract's example set)
-    /// and the grades. Sent only for organic, only when the schema accepts them.
-    public static let organicForecastCellsMM: [Double] = [3, 3.5, 4, 4.5, 5, 6]
-    public static let organicForecastGradesMM: [[Double]] = [[3, 5], [4, 6]]
+    /// The window presets "Check sizes" probes (the contract's example set); the
+    /// user's current pick is added to them. Sent only for organic, only when the
+    /// linked core's schema accepts the keys.
+    public static let organicProbeCellsMM: [Double] = [3.5, 4.5, 5.5, 6.5]
+    public static let organicProbeGradesMM: [[Double]] = [[3, 5], [4.5, 5.5]]
     /// ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): after a run,
     /// core's receipt lists the separations that certified (`fitting_separations_mm`,
     /// D2); they are stored here so Settings can show them as the factored choices,

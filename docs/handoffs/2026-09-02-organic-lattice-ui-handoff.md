@@ -974,3 +974,34 @@ project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
     and both (i) strings promised "a single, contiguous lattice" / "more than one piece"
     — contradicting the contract's criterion. Rewritten: approved = ties to the part
     (≥ 95 % of length rooted); one piece is not the bar.
+21. **Organic cell-size probe — FINAL contract (core built, calibrated; 05:00).** The
+    probe is NOT a forecast: it runs inside a lattice-variant run after the base solve,
+    keyed by `lattice.organic_probe_cells_mm` / `organic_probe_grades_mm` (organic
+    only), and writes `<out>/organic_probe.json` before emission. App: `OrganicForecast`
+    rewritten to the final shape (cell_min/max, curves, components, rooted fraction,
+    per-region refusals/advice as text, `predicted` {ran, verdict, margin, p99, max,
+    allowable, segments, seconds, refusal | reason}, top-level gates); version-gated to
+    1; the old forecast-only keys and `LatticeForecast.organic` are gone.
+    `RelatticeRun.probe(inputs, cellsMM:, gradesMM:)` submits the re-lattice job with
+    the keys (`probeJob`, pure, refuses non-organic and empty candidates), polls, reads
+    `files/organic_probe.json` the moment the worker serves it, CANCELS the run (a
+    "Check sizes" is a question, not a run nobody asked for) and returns; a worker that
+    serves files only at done still answers at done. Wizard: a "Check sizes" button in
+    the Manual section (presets [3.5, 4.5, 5.5, 6.5] + [[3,5],[4.5,5.5]] plus the user's
+    current pick), disabled with its reason when `TopOptKit.organicProbeWired` is false
+    (whole-job probe with a control — false on this core) or there is no worker/variant;
+    the menu fills from the file: green dot = approved_structural, amber = aesthetic
+    only, grey = refused; predicted margin beside the size; hover/long-press = refusals
+    + the prediction. Structural selects only green; Aesthetic all. cells_across is
+    advice text only, never gated (pinned: the approval copy never mentions it). Copy:
+    "Likely to certify … about 20 % conservative … the margin shown is predicted; the
+    run's certificate is the verdict." Untested against a real worker (none serves the
+    key yet): the mid-run file read is the one path that needs the first real probe.
+    Full app suite on the probe sources (Debug, Mac): 2329 tests, 30 skipped, ONE
+    failure — `LatticeSimSolveTriggerTests.testSaveAndExitIsWhatCallsIt`, which pins the
+    literal `LatticeSetupWizard(project: project)` at the call site; my `probeDriver:`
+    argument had changed it. Fixed in the SOURCE (the driver is attached by a
+    `.organicProbeDriver(...)` modifier after the closure; the test is untouched);
+    pinned + probe + wizard + runner suites on the fix: 78/0. On device (dylib
+    b2537a33768018a5, `v11_A`): "Check sizes" beside the Approved sizes header, disabled
+    with its reason on this core, the fallback list unchanged.

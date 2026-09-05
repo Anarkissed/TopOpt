@@ -1323,6 +1323,7 @@ public struct WorkspacePlaceholder: View {
                     // ★ AND REBAKES THE PREVIEW — see `latticeWizardRebakeNote`.
                     if showStrutPreview, project.lattice.enabled { buildStrutScene() }
                 }
+                .organicProbeDriver(makeOrganicProbeDriver())
                 // ★ the stage draws with the workspace-owned camera the one gizmo follows
                 .stageCamera(wizardCamera)
                 .transition(.opacity)
@@ -2912,14 +2913,6 @@ public struct WorkspacePlaceholder: View {
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
-        // ★ THE ORGANIC CELL-SIZE PROBE lands (contract 2026-09-05): keep core's
-        // answer on the project so the wizard's Manual list can offer it. Only
-        // when the block is present — an octet forecast changes nothing here.
-        .onChange(of: latticeForecast.state) { s in
-            if case let .ready(f) = s, let o = f.organic, o != project.lattice.organicForecast {
-                project.lattice.organicForecast = o
-            }
-        }
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
@@ -3473,6 +3466,34 @@ public struct WorkspacePlaceholder: View {
         guard showLatticePage, compute.activeRemote != nil,
               latticeVariantContext?.artifacts != nil else { return nil }
         return relatticeJobJSON(noteSkippedFaces: false)
+    }
+
+    /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05): the SAME inputs
+    /// the forecast uses, the same worker, the re-lattice job with the candidate
+    /// list; `organic_probe.json` read as soon as core writes it, then the run is
+    /// stopped. nil when there is no worker or no variant to re-lattice — the
+    /// wizard's "Check sizes" says so.
+    private func makeOrganicProbeDriver() -> LatticeSetupWizard.ProbeDriver? {
+        guard compute.activeRemote != nil, latticeVariantContext?.artifacts != nil,
+              let config = compute.activeRemote,
+              let file = project.importedFile,
+              let art = latticeVariantContext?.artifacts,
+              let vf = latticeVariantContext?.requestedVolumeFraction else { return nil }
+        let name = project.name
+        let designBin = art.designBin
+        let path = file.path
+        return { [self] cells, grades in
+            guard let job = relatticeJobJSON(noteSkippedFaces: false) else {
+                throw RelatticeError("there is no re-lattice job to probe yet")
+            }
+            let inputs = RelatticeRun.Inputs(
+                config: config, modelPath: path, jobJSON: job,
+                designBin: designBin, projectName: name,
+                requestedVolumeFraction: vf)
+            return try await Task.detached(priority: .utility) {
+                try RelatticeRun.probe(inputs, cellsMM: cells, gradesMM: grades)
+            }.value
+        }
     }
 
     /// Runs the forecast on the worker: the same submit + poll as the run, with

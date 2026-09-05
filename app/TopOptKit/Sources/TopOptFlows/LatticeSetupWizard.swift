@@ -59,6 +59,22 @@ public struct LatticeSetupWizard: View {
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
 
+    /// ★ "Check sizes" (final contract 2026-09-05): submits the re-lattice job with the
+    /// candidate list and returns core's `organic_probe.json` answer. nil ⇒ no worker
+    /// or nothing to re-lattice; the button says so.
+    public typealias ProbeDriver = @MainActor (_ cellsMM: [Double], _ gradesMM: [[Double]]) async throws -> OrganicForecast
+    private var probeDriver: ProbeDriver? = nil
+    private enum ProbeState: Equatable { case idle, running, failed(String) }
+    @State private var organicProbeState: ProbeState = .idle
+
+    /// The driver is attached AFTER construction so the call site keeps the literal
+    /// `LatticeSetupWizard(project: project)` the solve-trigger test pins.
+    public func organicProbeDriver(_ driver: ProbeDriver?) -> LatticeSetupWizard {
+        var copy = self
+        copy.probeDriver = driver
+        return copy
+    }
+
     public init(project: ProjectModel, onExit: @escaping () -> Void) {
         self.project = project
         self.camera = OrbitCameraModel()
@@ -986,9 +1002,11 @@ public struct LatticeSetupWizard: View {
     /// long-press).
     private struct ManualSize: Hashable {
         let size: Double; let approved: Bool; let selectable: Bool; let refusals: [String]
+        var tint: OrganicForecast.Tint? = nil; var margin: String? = nil; var hover: String = ""
     }
     private struct ManualGrade: Hashable {
         let grade: [Double]; let approved: Bool; let selectable: Bool; let refusals: [String]
+        var tint: OrganicForecast.Tint? = nil; var margin: String? = nil; var hover: String = ""
     }
     /// ★ THE MANUAL SIZE LIST. With the organic cell-size probe present (contract
     /// 2026-09-05): its candidates — Structural offers only `approved_structural`,
@@ -998,10 +1016,11 @@ public struct LatticeSetupWizard: View {
         let structural = !organicAesthetic
         if let probe = project.lattice.organicForecast, !probe.sizes.isEmpty {
             return probe.sizes.map { c in
-                ManualSize(size: c.cellMM ?? 0,
-                           approved: !OrganicForecast.badged(c, structural: structural),
+                ManualSize(size: c.cellMinMM,
+                           approved: structural ? c.approvedStructural : c.approvedAesthetic,
                            selectable: OrganicForecast.selectable(c, structural: structural),
-                           refusals: c.refusals)
+                           refusals: c.refusals, tint: OrganicForecast.tint(c),
+                           margin: c.marginText, hover: c.hoverText)
             }.sorted { $0.size < $1.size }
         }
         let approved = project.lattice.organicFittingSeparationsMM
@@ -1018,18 +1037,67 @@ public struct LatticeSetupWizard: View {
     private var organicManualGrades: [ManualGrade] {
         let structural = !organicAesthetic
         if let probe = project.lattice.organicForecast, !probe.grades.isEmpty {
-            return probe.grades.compactMap { c in
-                guard let g = c.gradeMM else { return nil }
-                return ManualGrade(grade: g,
-                                   approved: !OrganicForecast.badged(c, structural: structural),
-                                   selectable: OrganicForecast.selectable(c, structural: structural),
-                                   refusals: c.refusals)
+            return probe.grades.map { c in
+                ManualGrade(grade: c.gradeMM,
+                            approved: structural ? c.approvedStructural : c.approvedAesthetic,
+                            selectable: OrganicForecast.selectable(c, structural: structural),
+                            refusals: c.refusals, tint: OrganicForecast.tint(c),
+                            margin: c.marginText, hover: c.hoverText)
             }
         }
         return project.lattice.organicApprovedGradesMM.filter { $0.count == 2 }
             .map { ManualGrade(grade: $0, approved: true, selectable: true, refusals: []) }
     }
     private var organicProbePresent: Bool { project.lattice.organicForecast != nil }
+
+    /// ★ "CHECK SIZES" (final contract 2026-09-05, UI 1): the window presets plus the
+    /// user's current choice, submitted with the re-lattice job; the menu fills from
+    /// `organic_probe.json`. Disabled with its reason when the linked core's schema
+    /// lacks the keys or there is no worker / no variant to re-lattice.
+    private var organicProbeRefusal: String? {
+        if !TopOptKit.organicProbeWired { return "this build's core has no organic cell-size probe" }
+        if probeDriver == nil { return "needs a worker and a finished optimisation to re-lattice" }
+        return nil
+    }
+    private var organicCheckSizesButton: some View {
+        let refusal = organicProbeRefusal
+        let running = organicProbeState == .running
+        return Button {
+            guard refusal == nil, !running, let drive = probeDriver else { return }
+            var cells = LatticeSettings.organicProbeCellsMM
+            if model.organicPickedSeparationMM > 0,
+               !cells.contains(where: { abs($0 - model.organicPickedSeparationMM) < 1e-6 }) {
+                cells.append(model.organicPickedSeparationMM)
+            }
+            var grades = LatticeSettings.organicProbeGradesMM
+            if model.organicPickedGradeMM.count == 2, !grades.contains(model.organicPickedGradeMM) {
+                grades.append(model.organicPickedGradeMM)
+            }
+            organicProbeState = .running
+            Task { @MainActor in
+                do {
+                    let probe = try await drive(cells.sorted(), grades)
+                    project.lattice.organicForecast = probe
+                    organicProbeState = .idle
+                } catch {
+                    organicProbeState = .failed("\(error)")
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if running { ProgressView().controlSize(.mini) }
+                Text(running ? "Checking…" : OrganicForecast.checkSizesTitle)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .padding(.vertical, 4).padding(.horizontal, DS.Space.s)
+            .background(Capsule().fill(DS.Color.fillSelected.color))
+            .foregroundStyle((refusal == nil ? DS.Color.textPrimary : DS.Color.textQuaternary).color)
+        }
+        .buttonStyle(.plain)
+        .disabled(refusal != nil || running)
+        .help(refusal ?? OrganicForecast.checkSizesHelp)
+        .accessibilityIdentifier("wizard-organic-check-sizes")
+    }
 
     @ViewBuilder private func organicManualLists(fitPossible: Bool) -> some View {
         // ── grades (simulation on) ──
@@ -1050,14 +1118,16 @@ public struct LatticeSetupWizard: View {
                     HStack(spacing: DS.Space.xs) {
                         ForEach(grades, id: \.self) { m in
                             let g = m.grade
-                            organicPill(String(format: m.approved ? "%g–%g mm" : "%g–%g mm*", g[0], g[1]),
+                            organicPill(String(format: m.approved ? "%g–%g mm" : "%g–%g mm*", g[0], g[1])
+                                            + (m.margin.map { " · \($0)" } ?? ""),
                                         on: model.organicPickedGradeMM == g,
                                         enabled: fitPossible && m.selectable) {
                                 model.organicPickedGradeMM = g; model.organicPickedSeparationMM = 0
                                 model.setCellSizeMode(.fit); rebuild()
                             }
                             .opacity(m.selectable ? 1 : 0.4)
-                            .modifier(OrganicRefusalsModifier(refusals: m.refusals))
+                            .modifier(OrganicProbeTintModifier(tint: m.tint))
+                            .modifier(OrganicRefusalsModifier(refusals: m.hover.isEmpty ? m.refusals : [m.hover]))
                         }
                     }
                 }
@@ -1072,6 +1142,13 @@ public struct LatticeSetupWizard: View {
                        ? (organicAesthetic ? OrganicForecast.aestheticMeaning : OrganicForecast.structuralMeaning)
                          + " " + OrganicForecast.notCertified
                        : Self.infoManualSizes)
+            Spacer(minLength: DS.Space.xs)
+            organicCheckSizesButton
+        }
+        if case let .failed(why) = organicProbeState {
+            Text(why).dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.warning.color)
+                .fixedSize(horizontal: false, vertical: true)
         }
         let sizes = organicManualSizes
         if sizes.isEmpty {
@@ -1083,14 +1160,16 @@ public struct LatticeSetupWizard: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: DS.Space.xs) {
                     ForEach(sizes, id: \.self) { m in
-                        organicPill(String(format: m.approved ? "%g mm" : "%g mm*", m.size),
+                        organicPill(String(format: m.approved ? "%g mm" : "%g mm*", m.size)
+                                        + (m.margin.map { " · \($0)" } ?? ""),
                                     on: abs(model.organicPickedSeparationMM - m.size) < 1e-6,
                                     enabled: fitPossible && m.selectable) {
                             model.organicPickedSeparationMM = m.size; model.organicPickedGradeMM = []
                             model.setCellSizeMode(.fit); rebuild()
                         }
                         .opacity(m.selectable ? 1 : 0.4)
-                        .modifier(OrganicRefusalsModifier(refusals: m.refusals))
+                        .modifier(OrganicProbeTintModifier(tint: m.tint))
+                        .modifier(OrganicRefusalsModifier(refusals: m.hover.isEmpty ? m.refusals : [m.hover]))
                     }
                 }
             }
@@ -2040,6 +2119,33 @@ private struct OrganicRefusalsModifier: ViewModifier {
                 .contextMenu {
                     ForEach(refusals, id: \.self) { Text($0) }
                 }
+        }
+    }
+}
+
+
+/// ★ green = likely to certify · amber = ties only · grey = refused (UI 1): a dot on
+/// the pill's corner, so the pill's own on/off state stays legible.
+private struct OrganicProbeTintModifier: ViewModifier {
+    let tint: OrganicForecast.Tint?
+    func body(content: Content) -> some View {
+        if let tint {
+            content.overlay(alignment: .topTrailing) {
+                Circle()
+                    .fill(color(tint))
+                    .frame(width: 7, height: 7)
+                    .offset(x: 2, y: -2)
+                    .accessibilityLabel(tint.rawValue)
+            }
+        } else {
+            content
+        }
+    }
+    private func color(_ t: OrganicForecast.Tint) -> Color {
+        switch t {
+        case .green: return DS.Color.okGreen.color
+        case .amber: return DS.Color.warning.color
+        case .grey: return DS.Color.textQuaternary.color
         }
     }
 }

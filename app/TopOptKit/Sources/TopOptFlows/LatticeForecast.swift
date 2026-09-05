@@ -98,11 +98,6 @@ public struct LatticeForecast: Equatable, Sendable {
     /// sees density, so the forecast's band-floor approximation cannot move it.
     public let subfloorVoxelsBelowFloor: Int
 
-    /// ★ THE ORGANIC CELL-SIZE PROBE (contract 2026-09-05), present only when core
-    /// wrote the `"organic"` block at a version this build understands. nil ⇒
-    /// the octet forecast alone; the wizard shows no organic approvals.
-    public let organic: OrganicForecast?
-
     public init(variantVolumeFraction: Double, cellSizeMM: Double,
                 cellMode: String, printabilityFloorMM: Double,
                 cellsPerMemberFloor: Double, regionVoxels: Int,
@@ -115,9 +110,7 @@ public struct LatticeForecast: Equatable, Sendable {
                 remedies: [LatticeForecastRemedy],
                 subfloorRequested: Bool = false,
                 subfloorStressFractionCeiling: Double = 0,
-                subfloorVoxelsBelowFloor: Int = 0,
-                organic: OrganicForecast? = nil) {
-        self.organic = organic
+                subfloorVoxelsBelowFloor: Int = 0) {
         self.subfloorRequested = subfloorRequested
         self.subfloorStressFractionCeiling = subfloorStressFractionCeiling
         self.subfloorVoxelsBelowFloor = subfloorVoxelsBelowFloor
@@ -342,8 +335,7 @@ public struct LatticeForecast: Equatable, Sendable {
             remedies: remedies,
             subfloorRequested: sub["requested"] as? Bool ?? false,
             subfloorStressFractionCeiling: sub["stress_fraction_ceiling"] as? Double ?? 0,
-            subfloorVoxelsBelowFloor: sub["voxels_below_floor"] as? Int ?? 0,
-            organic: OrganicForecast.parse(o["organic"]))
+            subfloorVoxelsBelowFloor: sub["voxels_below_floor"] as? Int ?? 0)
     }
 }
 

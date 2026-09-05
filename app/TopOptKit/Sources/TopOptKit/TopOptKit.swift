@@ -1755,21 +1755,21 @@ public enum TopOptKit {
         return jobSchemaError(job(#", "synthetic_stress": true, "synthetic_foci": 2"#)) == nil
     }()
 
-    /// ★ THE ORGANIC CELL-SIZE PROBE REQUEST (contract 2026-09-05): does the linked
-    /// core's schema accept `lattice.forecast_cells_mm` / `forecast_grades_mm` beside
-    /// `forecast_only` on an organic Aesthetic job? Whole-job probe with a control (the
-    /// same job without the two keys must pass). FALSE ⇒ the forecast request is the
-    /// one it always was, and the wizard shows no organic approvals.
-    public static let organicForecastProbeWired: Bool = {
+    /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05): does the linked
+    /// core's schema accept `lattice.organic_probe_cells_mm` / `organic_probe_grades_mm`
+    /// on an organic Aesthetic lattice-variant job? Whole-job probe with a control (the
+    /// same job without the two keys must pass). FALSE ⇒ "Check sizes" is disabled with
+    /// its reason and no organic approvals are shown.
+    public static let organicProbeWired: Bool = {
         func job(_ extra: String) -> Data {
             let text = latticeProbeBaseJob.replacingOccurrences(
                 of: #""output":"#,
-                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet", "forecast_only": true"#
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet""#
                     + extra + #"}, "output":"#)
             return Data(text.utf8)
         }
         guard jobSchemaError(job("")) == nil else { return false }   // the control
-        return jobSchemaError(job(#", "forecast_cells_mm": [3, 4], "forecast_grades_mm": [[3, 5]]"#)) == nil
+        return jobSchemaError(job(#", "organic_probe_cells_mm": [3.5, 4.5], "organic_probe_grades_mm": [[3, 5]]"#)) == nil
     }()
 
     public static func latticeSchemaAccepts(key: String) -> Bool {

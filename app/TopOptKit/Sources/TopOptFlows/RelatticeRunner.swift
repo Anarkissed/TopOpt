@@ -231,9 +231,13 @@ public struct RelatticeResult {
     /// 2026-08-03-variant-postprocessing-fix). nil on a real re-lattice, whose
     /// outcome is the latticed object itself.
     public var forecastJSON: Data?
+    /// ★ `<out>/organic_probe.json` (final contract 2026-09-05), read mid-run.
+    public var probeJSON: Data?
 
     public init(outcome: OptimizeOutcome, receiptJSON: Data?,
-                provenanceJSON: Data?, forecastJSON: Data? = nil, spanText: String? = nil) {
+                provenanceJSON: Data?, forecastJSON: Data? = nil, spanText: String? = nil,
+                probeJSON: Data? = nil) {
+        self.probeJSON = probeJSON
         self.outcome = outcome
         self.receiptJSON = receiptJSON
         self.spanText = spanText
@@ -310,7 +314,55 @@ public enum RelatticeRun {
         try drive(inputs, forecastOnly: false, isCancelled: isCancelled)
     }
 
+    /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05). NOT a forecast:
+    /// it runs INSIDE a lattice-variant run right after the base solve. The job
+    /// carries the candidate list; core writes `<out>/organic_probe.json` before
+    /// emission (≈ 1–2 min solve + ≈ 30 s per candidate). This reads the file as
+    /// soon as the worker serves it, then CANCELS the run — a "Check sizes" is a
+    /// question, not a run nobody asked for. A worker that serves files only when
+    /// done still answers: the file is read at "done" instead.
+    public static func probe(_ inputs: Inputs, cellsMM: [Double], gradesMM: [[Double]],
+                             isCancelled: @escaping () -> Bool = { false })
+        throws -> OrganicForecast {
+        let patched = try probeJob(inputs.jobJSON, cellsMM: cellsMM, gradesMM: gradesMM)
+        let probeInputs = Inputs(config: inputs.config, modelPath: inputs.modelPath,
+                                 jobJSON: patched, designBin: inputs.designBin,
+                                 projectName: inputs.projectName,
+                                 requestedVolumeFraction: inputs.requestedVolumeFraction)
+        let result = try drive(probeInputs, forecastOnly: false, probing: true,
+                               isCancelled: isCancelled)
+        guard let data = result.probeJSON, let probe = OrganicForecast.parse(data) else {
+            throw RelatticeError(
+                "the run wrote no organic_probe.json this build understands — this "
+                + "worker's core may predate the organic cell-size probe.")
+        }
+        return probe
+    }
+
+    /// The job with the probe keys — pure, so it can be pinned. Refuses a job whose
+    /// grading is not organic (core refuses the keys there) and empty candidates.
+    public static func probeJob(_ jobJSON: Data, cellsMM: [Double], gradesMM: [[Double]]) throws -> Data {
+        guard var obj = (try? JSONSerialization.jsonObject(with: jobJSON)) as? [String: Any],
+              var lat = obj["lattice"] as? [String: Any] else {
+            throw RelatticeError("the re-lattice job has no lattice block to probe")
+        }
+        guard let grading = obj["grading"] as? [String: Any],
+              (grading["algorithm"] as? String) == "organic" else {
+            throw RelatticeError("the organic cell-size probe needs an organic job")
+        }
+        let cells = cellsMM.filter { $0 > 0 }
+        let grades = gradesMM.filter { $0.count == 2 && $0[0] > 0 && $0[0] < $0[1] }
+        guard !cells.isEmpty || !grades.isEmpty else {
+            throw RelatticeError("no candidate sizes to probe")
+        }
+        if !cells.isEmpty { lat["organic_probe_cells_mm"] = cells }
+        if !grades.isEmpty { lat["organic_probe_grades_mm"] = grades }
+        obj["lattice"] = lat
+        return try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
+    }
+
     private static func drive(_ inputs: Inputs, forecastOnly: Bool,
+                              probing: Bool = false,
                               isCancelled: @escaping () -> Bool)
         throws -> RelatticeResult {
         let session = URLSession(configuration: {
@@ -367,16 +419,6 @@ public enum RelatticeRun {
                                      + "forecast")
             }
             lat["forecast_only"] = true
-            // ★ THE ORGANIC CELL-SIZE PROBE (contract 2026-09-05): ask core to trace
-            // the candidate sizes and grades — only for an organic job, only when
-            // the linked core's schema accepts the keys. Otherwise the request is
-            // byte-identical to the one this builder has always sent.
-            if let grading = obj["grading"] as? [String: Any],
-               (grading["algorithm"] as? String) == "organic",
-               TopOptKit.organicForecastProbeWired {
-                lat["forecast_cells_mm"] = LatticeSettings.organicForecastCellsMM
-                lat["forecast_grades_mm"] = LatticeSettings.organicForecastGradesMM
-            }
             obj["lattice"] = lat
             jobToSubmit = try JSONSerialization.data(withJSONObject: obj,
                                                      options: [.sortedKeys])
@@ -431,12 +473,30 @@ public enum RelatticeRun {
         let jobURL = base.appendingPathComponent("jobs").appendingPathComponent(jobID)
         let deadline = Date().addingTimeInterval(ceilingSeconds)
         var state = "queued"
+        func cancelOnWorker() {
+            var del = URLRequest(url: jobURL)
+            del.httpMethod = "DELETE"
+            session.dataTask(with: del).resume()
+        }
         while Date() < deadline {
             if isCancelled() {
-                var del = URLRequest(url: jobURL)
-                del.httpMethod = "DELETE"
-                session.dataTask(with: del).resume()
+                cancelOnWorker()
                 throw RelatticeError("cancelled")
+            }
+            // ★ PROBING: the answer is a file written before emission. Read it the
+            // moment the worker serves it, stop the run, return.
+            if probing {
+                let probeURL = jobURL.appendingPathComponent("files")
+                    .appendingPathComponent("organic_probe.json")
+                if let (pd, pc) = try? get(probeURL), pc == 200, !pd.isEmpty,
+                   OrganicForecast.parse(pd) != nil {
+                    cancelOnWorker()
+                    return RelatticeResult(
+                        outcome: OptimizeOutcome(variants: [], stoppedOnMargin: false,
+                                                 cancelled: true, acceptedCount: 0,
+                                                 computedRemotely: true),
+                        receiptJSON: nil, provenanceJSON: nil, probeJSON: pd)
+                }
             }
             let (d, code) = try get(jobURL)
             guard code == 200,
@@ -463,6 +523,14 @@ public enum RelatticeRun {
                 return nil
             }
             return d
+        }
+        if probing {
+            // The worker served files only at "done": the probe is still there.
+            return RelatticeResult(
+                outcome: OptimizeOutcome(variants: [], stoppedOnMargin: false,
+                                         cancelled: false, acceptedCount: 0,
+                                         computedRemotely: true),
+                receiptJSON: nil, provenanceJSON: nil, probeJSON: file("organic_probe.json"))
         }
         if forecastOnly {
             // No mesh, no receipt, no solve — one document.
