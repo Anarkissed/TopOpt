@@ -28,10 +28,11 @@ public enum OrganicVariantCache {
         // allowable stress, which the sample never passes — measured 2026-09-04: a
         // Structural project missed the Aesthetic-keyed shipped variant for nothing)
         // and the strut width (live). Everything the trace reads is here.
-        s += String(format: "|grow=%d|layer=%.4f|sep=%.4f-%.4f|overhang=%.2f|rho=%.4f-%.4f|fit=%d|only=%d|covered=%d|voxel=%.4f",
+        s += String(format: "|grow=%d|layer=%.4f|sep=%.4f-%.4f|overhang=%.2f|rho=%.4f-%.4f|fit=%d|only=%d|covered=%d|voxel=%.4f|repairs=%d|fillet=%d",
                     picks.grow ? 1 : 0, picks.layerHeightMM, picks.separationMinMM, picks.separationMaxMM,
                     picks.overhangDeg, picks.rhoMin, picks.rhoMax,
-                    picks.shapeFit ? 1 : 0, picks.shapeFitOnly ? 1 : 0, picks.covered ? 1 : 0, picks.bakeVoxelMM)
+                    picks.shapeFit ? 1 : 0, picks.shapeFitOnly ? 1 : 0, picks.covered ? 1 : 0, picks.bakeVoxelMM,
+                    picks.showRepairs ? 1 : 0, picks.overhangFillet ? 1 : 0)
         let digest = SHA256.hash(data: Data(s.utf8))
         return digest.map { String(format: "%02x", $0) }.joined().prefix(24).description
     }

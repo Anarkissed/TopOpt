@@ -256,6 +256,10 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var organicBoundaryFinish: LatticeOrganicFinish = .skin
     public var organicShapeFit: Bool = false
     public var organicShapeFitOnly: Bool = false
+    public var organicOverhangFillet: Bool = true
+    /// ★ Synthetic stresses on unloaded walls (Aesthetic only, 2026-09-05).
+    public var organicSyntheticStresses: Bool = false
+    public var organicSyntheticFoci: Int = 4
     public var organicScale: Double = 1.0
 
     /// ★★★ THE CELL SIZES THAT CAN FIT THE SELECTED REGIONS (his item 1, 2026-09-02):
@@ -344,6 +348,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.organicBoundaryFinish = s.organicBoundaryFinish
         self.organicShapeFit = s.organicShapeFit
         self.organicShapeFitOnly = s.organicShapeFitOnly
+        self.organicOverhangFillet = s.organicOverhangFillet
+        self.organicSyntheticStresses = s.organicSyntheticStresses
+        self.organicSyntheticFoci = s.organicSyntheticFoci
         self.organicScale = s.organicScale
     }
 
@@ -391,6 +398,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.organicBoundaryFinish = organicBoundaryFinish
         out.organicShapeFit = organicShapeFit
         out.organicShapeFitOnly = organicShapeFitOnly
+        out.organicOverhangFillet = organicOverhangFillet
+        out.organicSyntheticStresses = organicSyntheticStresses
+        out.organicSyntheticFoci = OrganicSyntheticStress.clampFoci(organicSyntheticFoci)
         out.organicScale = organicScale
         if out.singleCellMembers, out.boundary == .none || out.boundary == .rim {
             out.boundary = .fullSkin

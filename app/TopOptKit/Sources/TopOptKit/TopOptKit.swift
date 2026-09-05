@@ -1243,7 +1243,12 @@ public enum TopOptKit {
                                     // and GROWN with its layer height (false ⇒ traced).
                                     strutDiameterMM: Double = 0,
                                     grow: Bool = false, layerHeightMM: Double = 0,
-                                    anchorAtBoundary: Bool = true)
+                                    anchorAtBoundary: Bool = true,
+                                    // ★ false ⇒ bake the traced curves, not the
+                                    // file's repaired spans (2026-09-05)
+                                    showRepairs: Bool = true,
+                                    // ★ core `organic_overhang_fillet` (2026-09-05)
+                                    overhangFillet: Bool = true)
         -> OrganicTrace? {
         let n = nx * ny * nz
         let (fnx, fny, fnz) = fieldDims
@@ -1268,6 +1273,8 @@ public enum TopOptKit {
                         overhangAngleDeg, rhoMin, rhoMax,
                         strutDiameterMM, grow ? Int32(1) : Int32(0), layerHeightMM,
                         anchorAtBoundary ? Int32(1) : Int32(0),
+                        showRepairs ? Int32(1) : Int32(0),
+                        overhangFillet ? Int32(1) : Int32(0),
                         Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
                         fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,
                         bandMM).map { Double($0) }
@@ -1731,6 +1738,22 @@ public enum TopOptKit {
         "organic structural certification is not yet wired — core refuses an organic "
         + "lattice under a Structural intent today. Run it under Aesthetic, or wait for "
         + "the core task."
+
+    /// ★ SYNTHETIC STRESS ON A LATTICE REGION (core contract 2026-09-05: per region
+    /// `synthetic_stress` bool + `synthetic_foci` 1…5, organic + Aesthetic only). A
+    /// WHOLE-JOB probe with its own CONTROL: the same job without the two keys must
+    /// pass, or the verdict is "unreliable", never "wired". Probed once per launch.
+    public static let organicSyntheticStressWired: Bool = {
+        func job(_ extra: String) -> Data {
+            let text = latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
+                    + extra + #"}]}, "output":"#)
+            return Data(text.utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "synthetic_stress": true, "synthetic_foci": 2"#)) == nil
+    }()
 
     public static func latticeSchemaAccepts(key: String) -> Bool {
         // ★ STRICT: accepted ⇔ core's schema raises NO error on the base job carrying
@@ -2307,6 +2330,39 @@ public enum TopOptKit {
         widthMM
     }
 
+    /// ★ THE REGION LAYER, ONE WRITER (2026-09-05). The optimize wrapper filled the
+    /// load case's region arrays and the stage's SIM wrapper did not — so a load
+    /// painted as a REGION reached the run but never the stage's solve, core threw
+    /// "every declared load group contributed nothing", the sim failed silently, and
+    /// the organic preview had no tensor (measured on the M2 stand: Group B, 4 regions,
+    /// 0 faces). Both wrappers call this now; empty inputs leave the POD byte-identical.
+    static func applyRegionLayer(_ lc: inout topoptbridge.BridgeLoadCase,
+                                 faceRegions: [FaceRegionSpec], anchorRegionIDs: [Int]) {
+        for r in faceRegions {
+            lc.region_ids.push_back(Int32(r.id))
+            lc.region_parent_ids.push_back(Int32(r.parentID))
+            lc.region_add_sizes.push_back(Int32(r.addFaces.count))
+            for f in r.addFaces { lc.region_add_faces.push_back(Int32(f)) }
+            lc.region_remove_sizes.push_back(Int32(r.removeFaces.count))
+            for f in r.removeFaces { lc.region_remove_faces.push_back(Int32(f)) }
+            lc.region_cut_sizes.push_back(Int32(r.cuts.count))
+            for c in r.cuts {
+                for v in [c.point.x, c.point.y, c.point.z] { lc.region_cut_point_xyz.push_back(v) }
+                for v in [c.normal.x, c.normal.y, c.normal.z] { lc.region_cut_normal_xyz.push_back(v) }
+                lc.region_cut_strict.push_back(c.strict ? 1 : 0)
+            }
+            lc.region_filter_max_area_mm2.push_back(r.maxAreaMM2)
+            lc.region_filter_min_area_mm2.push_back(r.minAreaMM2)
+            lc.region_filter_min_larger_neighbours.push_back(Int32(r.minLargerNeighbours))
+            lc.region_filter_larger_ratio.push_back(r.largerRatio)
+            lc.region_filter_kind.push_back(Int32(r.kindCode))
+            lc.region_filter_cyl_radius_mm.push_back(r.cylinderRadiusMM)
+            lc.region_filter_cyl_tol_mm.push_back(r.cylinderRadiusTolMM)
+            lc.region_filter_matched_at_author.push_back(Int32(r.filterMatchedAtAuthor))
+        }
+        for r in anchorRegionIDs { lc.anchor_region_ids.push_back(Int32(r)) }
+    }
+
     public static func minimizePlasticLoadCase(
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
@@ -2333,29 +2389,7 @@ public enum TopOptKit {
         // then taps Optimize locally would get a run that ignored every one of
         // them — the "green run that measures nothing" shape. Empty => the POD is
         // byte-identical to before.
-        for r in faceRegions {
-            lc.region_ids.push_back(Int32(r.id))
-            lc.region_parent_ids.push_back(Int32(r.parentID))
-            lc.region_add_sizes.push_back(Int32(r.addFaces.count))
-            for f in r.addFaces { lc.region_add_faces.push_back(Int32(f)) }
-            lc.region_remove_sizes.push_back(Int32(r.removeFaces.count))
-            for f in r.removeFaces { lc.region_remove_faces.push_back(Int32(f)) }
-            lc.region_cut_sizes.push_back(Int32(r.cuts.count))
-            for c in r.cuts {
-                for v in [c.point.x, c.point.y, c.point.z] { lc.region_cut_point_xyz.push_back(v) }
-                for v in [c.normal.x, c.normal.y, c.normal.z] { lc.region_cut_normal_xyz.push_back(v) }
-                lc.region_cut_strict.push_back(c.strict ? 1 : 0)
-            }
-            lc.region_filter_max_area_mm2.push_back(r.maxAreaMM2)
-            lc.region_filter_min_area_mm2.push_back(r.minAreaMM2)
-            lc.region_filter_min_larger_neighbours.push_back(Int32(r.minLargerNeighbours))
-            lc.region_filter_larger_ratio.push_back(r.largerRatio)
-            lc.region_filter_kind.push_back(Int32(r.kindCode))
-            lc.region_filter_cyl_radius_mm.push_back(r.cylinderRadiusMM)
-            lc.region_filter_cyl_tol_mm.push_back(r.cylinderRadiusTolMM)
-            lc.region_filter_matched_at_author.push_back(Int32(r.filterMatchedAtAuthor))
-        }
-        for r in anchorRegionIDs { lc.anchor_region_ids.push_back(Int32(r)) }
+        Self.applyRegionLayer(&lc, faceRegions: faceRegions, anchorRegionIDs: anchorRegionIDs)
         for r in faceProtectionRegionIDs { lc.face_protection_region_ids.push_back(Int32(r)) }
         for d in faceProtectionRegionDepthsMM { lc.face_protection_region_depths_mm.push_back(d) }
         // `load_group_region_sizes` is emitted ONLY when some group names a

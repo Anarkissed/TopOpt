@@ -130,6 +130,10 @@ public struct LatticeSetupWizard: View {
     /// "Grading needs a stress simulation" — shown when shape-fit-only is turned off
     /// with the simulation off (item 3.2).
     @State private var showGradeNeedsSimAlert = false
+    /// ★ "Show without repairs" (maintainer, 2026-09-05): the sample shows the traced
+    /// curves instead of the file's repaired spans. A preview option, not a setting —
+    /// the file always has the repairs, and the banner says which is shown.
+    @State private var organicShowRepairs = true
     private var organicSampleShown: Bool { model.cellTransition == .organicGrade }
 
     private var stageView: some View {
@@ -647,6 +651,21 @@ public struct LatticeSetupWizard: View {
     static let infoSpacingScale = "Scales the spacing the solve derives. Coarser spacing can fragment the "
         + "lattice; the run's receipt reports survival and pieces. Grown organic holds a "
         + "fixed 30° overhang, so there is no overhang limit to tune there."
+    static let infoOverhangFillet = "A job setting. Any strut that runs over open air is re-emitted by core as a 45° "
+        + "fillet, 12 short segments flaring up to 2.5× the bead, so it prints without support. "
+        + "Off leaves every strut exactly as traced or grown and core reports the unsupported runs "
+        + "instead of repairing them. Absent from the job means on."
+    static let infoRepairs = "Core's export repairs the traced lattice for printing: it merges nodes, cuts "
+        + "the base, ties free ends and flares any strut that runs over air into an arch up to "
+        + "2.5× the bead. Those repairs are in the file. Turn this off to see the traced curves "
+        + "alone — a way to judge the topology, not what will print."
+    static let infoSynthetic = "A wall the load never reaches carries no stress, so there is nothing for the "
+        + "tracer to follow — its curves wander. With this on, every such wall (median stress "
+        + "under 5% of the part's peak) is given a synthetic load: a few focal points, "
+        + "alternating pull and push, so the struts sweep between them. Each unloaded wall "
+        + "chooses its own number of foci (1–5) in its row under Selections; a wall that "
+        + "carries load never takes foci. Shown in the preview; the run carries it only on a "
+        + "core whose schema accepts it."
     static let infoManualSizes = "Sizes certification approved: each gives a single, contiguous lattice on "
         + "this part. Under an Aesthetic stage every size is offered; one marked * was "
         + "not approved and may leave the lattice in more than one piece."
@@ -842,6 +861,56 @@ public struct LatticeSetupWizard: View {
             // when Organic is chosen, the boundary finish is clean, and there is no
             // picker. ★ Item 3.2: without a simulation the fit is SHAPE-ONLY — the
             // switch refuses to turn off and the alert says why.
+            // ★ FLARE OVERHANGS FOR PRINTING — a JOB setting (maintainer wire-up,
+            // 2026-09-05: core `organic_overhang_fillet`, absent ⇒ on). Printability is
+            // user input, never a default: the user chooses. Disabled with its reason on
+            // a core whose schema does not carry the key (this build's does not yet).
+            let filletKeyAccepted = TopOptKit.gradingSchemaAccepts(key: "organic_overhang_fillet")
+            HStack(spacing: DS.Space.s) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: DS.Space.xs) {
+                        Text("Flare overhangs for printing").dsStyle(DS.TypeScale.caption)
+                            .foregroundStyle((filletKeyAccepted ? DS.Color.textPrimary : DS.Color.textQuaternary).color)
+                        infoButton("overhang-fillet", Self.infoOverhangFillet)
+                    }
+                    Text(!filletKeyAccepted
+                         ? "This build's core does not carry the overhang-fillet switch; the run flares them."
+                         : model.organicOverhangFillet
+                         ? "Struts over open air are thickened into a 45° fillet so they print."
+                         : "Struts are left exactly as traced/grown; unsupported runs are reported, not repaired.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: DS.Space.s)
+                GlassToggle(isOn: model.organicOverhangFillet) {
+                    guard filletKeyAccepted else { return }
+                    model.organicOverhangFillet.toggle(); rebuild()
+                }
+                .opacity(filletKeyAccepted ? 1 : 0.4)
+                .accessibilityLabel("Flare overhangs for printing")
+                .accessibilityIdentifier("wizard-organic-overhang-fillet")
+            }
+            // ★ SHOW WITHOUT REPAIRS (2026-09-05) — PREVIEW ONLY. Default ON = the file.
+            // Off shows the traced curves (no merges, legs or fillets) so the topology
+            // can be judged; the banner says so. Distinct from the job switch above.
+            HStack(spacing: DS.Space.s) {
+                HStack(spacing: DS.Space.xs) {
+                    Text("Preview: show print repairs").dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    infoButton("repairs", Self.infoRepairs)
+                }
+                Spacer(minLength: DS.Space.s)
+                GlassToggle(isOn: organicShowRepairs) { organicShowRepairs.toggle(); rebuild() }
+                    .accessibilityLabel("Show print repairs")
+                    .accessibilityIdentifier("wizard-organic-show-repairs")
+            }
+            if !organicShowRepairs {
+                Text("Showing the traced curves only. The printed file will have the arches, legs and node merges.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             sectionTitle("Fit to shape", info: "fit-to-shape", Self.infoFitToShape)
             if TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit_only") {
                 HStack(spacing: DS.Space.s) {
@@ -866,6 +935,46 @@ public struct LatticeSetupWizard: View {
                     }
                     .accessibilityLabel("Shape fit only")
                     .accessibilityIdentifier("wizard-organic-shape-fit-only")
+                }
+            }
+            // ★ UNLOADED WALLS (maintainer, 2026-09-05) — AESTHETIC MODE ONLY. A wall
+            // with no stress on it whatsoever may be given synthetic stresses with 1–5
+            // foci; the default count lives here, each wall's own under Selections.
+            if organicAesthetic {
+                sectionTitle("Unloaded walls", info: "synthetic", Self.infoSynthetic)
+                let synthKeyAccepted = TopOptKit.organicSyntheticStressWired
+                HStack(spacing: DS.Space.s) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Synthetic stresses on unloaded walls").dsStyle(DS.TypeScale.caption)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        Text(model.organicSyntheticStresses
+                             ? "Walls with no stress get a focal load so their struts sweep instead of wandering."
+                             : "Walls with no stress are traced as they are.")
+                            .dsStyle(DS.TypeScale.caption2)
+                            .foregroundStyle(DS.Color.textQuaternary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: DS.Space.s)
+                    GlassToggle(isOn: model.organicSyntheticStresses) {
+                        model.organicSyntheticStresses.toggle(); rebuild()
+                    }
+                    .accessibilityLabel("Synthetic stresses on unloaded walls")
+                    .accessibilityIdentifier("wizard-organic-synthetic")
+                }
+                if model.organicSyntheticStresses {
+                    // ★ The count lives on each wall (his 2026-09-05 correction: "remove
+                    // the foci per wall in the lattice setting page since it's in the
+                    // face details") — nothing to pick here.
+                    Text("Set each unloaded wall's foci (1–5) in its row under Selections.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !synthKeyAccepted {
+                        Text("This build's core does not carry synthetic stresses: the part preview shows them; the run traces the real field.")
+                            .dsStyle(DS.TypeScale.caption2)
+                            .foregroundStyle(DS.Color.warning.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
@@ -1669,7 +1778,8 @@ public struct LatticeSetupWizard: View {
     private var organicSamplePicks: OrganicSampleCube.Picks? {
         guard organicSampleShown else { return nil }
         return OrganicSampleCube.Picks(settings: model.applied(to: project.lattice),
-                                       layerHeightMM: project.printParams.layerHeightMM)
+                                       layerHeightMM: project.printParams.layerHeightMM,
+                                       showRepairs: organicShowRepairs)
     }
 
     /// Re-traces the PR 353 cube's 20 mm corner with the current picks, off the main

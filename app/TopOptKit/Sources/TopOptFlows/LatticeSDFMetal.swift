@@ -172,7 +172,9 @@ public struct OrganicBakedFields: Sendable {
 /// exported; it only had to be handed over.
 public struct LatticeOrganicInput: Sendable {
     /// Grid-indexed, 6 per voxel, in core's Voigt order. Must match `dims`.
-    public let tensor: [Double]
+    /// `var` (2026-09-05) so the synthetic-stress pass can hand the tracer a
+    /// tensor with the unloaded walls filled in; everything else is the solve's.
+    public var tensor: [Double]
     public let dims: (Int, Int, Int)
     public let originMM: SIMD3<Double>
     public let spacingMM: Double
@@ -205,6 +207,13 @@ public struct LatticeOrganicInput: Sendable {
     /// that leave the region are not anchors and the trim cuts them back — the run's
     /// own rule, mirrored so the sample does not draw a crisper face than the run.
     public var anchorAtBoundary: Bool = true
+    /// ★ false ⇒ the preview bakes the traced/grown curves, not the emission's
+    /// repaired spans (arches, legs, merges). The file always has the repairs; the
+    /// banner says which one is shown (maintainer, 2026-09-05).
+    public var showRepairs: Bool = true
+    /// ★ core `organic_overhang_fillet` (2026-09-05): false ⇒ spans over air are left
+    /// as drawn. Honoured by the preview's emission when this core carries the field.
+    public var overhangFillet: Bool = true
 
     public init(tensor: [Double], dims: (Int, Int, Int), originMM: SIMD3<Double>,
                 spacingMM: Double, minExtrudableWidthMM: Double,
@@ -214,7 +223,8 @@ public struct LatticeOrganicInput: Sendable {
                 strutDiameterMM: Double = 0, grow: Bool = false,
                 layerHeightMM: Double = 0, overhangAngleDeg: Double = 0,
                 shapeFit: Bool = false, shapeFitOnly: Bool = false,
-                anchorAtBoundary: Bool = true) {
+                anchorAtBoundary: Bool = true, showRepairs: Bool = true,
+                overhangFillet: Bool = true) {
         self.tensor = tensor; self.dims = dims; self.originMM = originMM
         self.spacingMM = spacingMM; self.minExtrudableWidthMM = minExtrudableWidthMM
         self.buildDirection = buildDirection
@@ -224,6 +234,8 @@ public struct LatticeOrganicInput: Sendable {
         self.layerHeightMM = layerHeightMM; self.overhangAngleDeg = overhangAngleDeg
         self.shapeFit = shapeFit; self.shapeFitOnly = shapeFitOnly
         self.anchorAtBoundary = anchorAtBoundary
+        self.showRepairs = showRepairs
+        self.overhangFillet = overhangFillet
     }
 }
 
@@ -318,6 +330,10 @@ public struct LatticeSDFScene {
     /// ★ The emitted spans the trace path baked (nil on the cached and run-spans
     /// paths) — what the variant cache stores as a beam-lattice 3MF.
     public let organicEmittedSpans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]?
+    /// ★ WHY organic was NOT drawn, when it was asked for and `organicField` is nil —
+    /// the banner prints it (maintainer, 2026-09-05: a silent ladder under an organic
+    /// name looked like "not implemented"). nil when organic was drawn or not asked.
+    public let organicNotDrawnReason: String?
     /// ★ WHAT THE FIELD WAS BAKED FROM when it came from a span file: (count, total
     /// length mm) — the numbers to hold against the run's receipt (§10). nil when the
     /// field was traced at preview time or there is no organic field.
@@ -669,6 +685,7 @@ public struct LatticeSDFScene {
         var organicOut: LatticeVoxelGrid?
         var organicSurfaceOut: LatticeVoxelGrid?
         var organicEmittedOut: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]? = nil
+        var organicWhyNot: String? = nil
         var organicBand = 0.0
         var organicSaid = ""
         // ★★★ SPANS FIRST. A span file is the run's own emitted geometry; a trace is a
@@ -710,6 +727,11 @@ public struct LatticeSDFScene {
             organicSpanReceipt = (sp.count, sp.totalLengthMM)
             organicMismatch = organicReceipt?.mismatch(againstIndexedCount: sp.count,
                                                        totalLengthMM: sp.totalLengthMM)
+        }
+        if organicOut == nil, algorithm == "organic", organicCached == nil, organicBaked == nil, organicSpans == nil {
+            if organic == nil { organicWhyNot = "no stress tensor reached the tracer (the stage's solve has not produced one, or it failed)" }
+            else if let o = organic, !(o.minExtrudableWidthMM > 0) { organicWhyNot = "no extrudable width stated in Print Parameters" }
+            else if let o = organic, o.tensor.count != 6 * o.dims.0 * o.dims.1 * o.dims.2 { organicWhyNot = "the solve's field carries no stress tensor (\(o.tensor.count) of \(6 * o.dims.0 * o.dims.1 * o.dims.2) values)" }
         }
         if organicOut == nil, let o = organic, o.minExtrudableWidthMM > 0,
            o.tensor.count == 6 * o.dims.0 * o.dims.1 * o.dims.2 {
@@ -774,6 +796,7 @@ public struct LatticeSDFScene {
                 fitNote = String(format: " · shape-fit: %d voxels shrunk (min ratio %.2f, depth %d)",
                                  fit.shrunk, fit.minRatio, fit.depthVoxels)
             }
+            if n == 0 { organicWhyNot = "no candidate voxel: the declared region is empty on the solve's grid" }
             if n > 0 {
                 // The field's own grid: the declared region's bbox, padded, at a voxel a
                 // few times finer than the design grid — capped so a big part cannot
@@ -803,6 +826,7 @@ public struct LatticeSDFScene {
                 // 6 mm window as the band, 26,773 spans took 154 s to bake on a Mac (cost
                 // ∝ reach²); at 1 mm of headroom the same bake is seconds.
                 let band = Self.organicBakeHeadroomMM
+                organicWhyNot = "core refused the trace (no curves), or the bake failed"
                 // ★ A CACHED TOPOLOGY FIRST (2026-09-04): the same grid the trace would
                 // use, the document's spans baked through the bridge — no trace, no
                 // emission. The banner says where it came from.
@@ -814,6 +838,7 @@ public struct LatticeSDFScene {
                     organicOut = LatticeVoxelGrid(nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn), spacing: sp, values: b.field)
                     organicSurfaceOut = LatticeVoxelGrid(nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn), spacing: sp, values: b.surfaceField)
                     organicBand = b.reachMM
+                    organicWhyNot = nil
                     let census = cached.doc.metadata["census"] ?? ""
                     organicSaid = "\(b.spanCount) struts, " + String(format: "%.0f mm — %@ (3MF beam lattice)", cached.doc.totalLengthMM, cached.sourceLabel)
                         + (census.isEmpty ? "" : " · " + census)
@@ -828,9 +853,11 @@ public struct LatticeSDFScene {
                     bandMM: band, overhangAngleDeg: o.overhangAngleDeg,
                     rhoMin: o.rhoMin, rhoMax: o.rhoMax,
                     strutDiameterMM: o.strutDiameterMM, grow: o.grow,
-                    layerHeightMM: o.layerHeightMM, anchorAtBoundary: o.anchorAtBoundary),
+                    layerHeightMM: o.layerHeightMM, anchorAtBoundary: o.anchorAtBoundary,
+                    showRepairs: o.showRepairs, overhangFillet: o.overhangFillet),
                    t.field.count == fnx * fny * fnz {
                     organicEmittedOut = t.spans
+                    organicWhyNot = nil
                     organicSurfaceOut = LatticeVoxelGrid(
                         nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn),
                         spacing: SIMD3<Float>(repeating: Float(fs)), values: t.surfaceField)
@@ -840,6 +867,7 @@ public struct LatticeSDFScene {
                     organicBand = Double(t.bandMM)
                     // ★ the counters ride the census (reviewer, 2026-09-04)
                     let counters = (t.growth.map { " · " + $0.summary } ?? "") + " · " + t.stops.summary + " · " + t.census.summary
+                        + (o.showRepairs ? "" : " · ★ REPAIRS HIDDEN: the traced curves are shown; the file has the arches, legs and merges above")
                     organicSaid = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
                         + String(format: "%.2f–%.2f mm spacing",
                                  t.spacingUsedMinMM, t.spacingUsedMaxMM) + fitNote + counters
@@ -849,6 +877,7 @@ public struct LatticeSDFScene {
         self.organicField = organicOut
         self.organicSurfaceField = organicSurfaceOut
         self.organicEmittedSpans = organicEmittedOut
+        self.organicNotDrawnReason = (algorithm == "organic" && organicOut == nil) ? (organicWhyNot ?? "no stress tensor reached the tracer (the stage's solve has not produced one)") : nil
         self.organicSpanSource = organicSpanReceipt
         self.organicReceiptMismatch = organicMismatch
         let receiptLines = [organicReceipt?.contiguityLine, organicReceipt?.spacingLine]

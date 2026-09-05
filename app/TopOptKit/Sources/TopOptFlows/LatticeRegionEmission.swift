@@ -264,6 +264,10 @@ public enum LatticeRegionEmission {
                                // (maintainer, 2026-08-17). Empty ⇒ 0 ⇒ the slab
                                // is exactly the face, byte-identical to before.
                                selectableExpandMM: [String: Double] = [:],
+                               // ★ THE UNLOADED WALLS (2026-09-05): selectable key →
+                               // foci count, ONLY for walls the bake measured as
+                               // unloaded with the switch on (ProjectModel resolves).
+                               syntheticWalls: [String: Int] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -301,6 +305,8 @@ public enum LatticeRegionEmission {
                     s.relativeDensity = density(
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[LatticeSelectableRef.primitive(p.id).key])
+                    s.selectableKey = ref.key
+                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
                     out.append(s)
                 }
             }
@@ -318,6 +324,8 @@ public enum LatticeRegionEmission {
                     s.relativeDensity = density(
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[ref.key])
+                    s.selectableKey = ref.key
+                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
                     out.append(s)
                 } else {
                     skipped += 1

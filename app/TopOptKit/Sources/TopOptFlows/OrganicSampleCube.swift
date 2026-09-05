@@ -91,11 +91,17 @@ public enum OrganicSampleCube {
         /// is BARE — "no outline, ONLY lattice" (maintainer, 2026-09-03) — and core
         /// trims ends that leave the region back to their last connector.
         public var covered: Bool
+        /// ★ false ⇒ the traced curves are shown, not the file's repaired spans
+        /// (2026-09-05). A topology pick: it changes what is baked, so it keys the
+        /// cache; the shipped variants are with repairs.
+        public var showRepairs: Bool
+        /// ★ core `organic_overhang_fillet` (a job setting, 2026-09-05).
+        public var overhangFillet: Bool
 
         /// From the settings the user has on the sheet. The window is the printed job's
         /// 3–6 mm scaled by the user's spacing scale; under Fit it is one separation —
         /// the user's pick among certification's, else the middle of the window.
-        public init(settings s: LatticeSettings, layerHeightMM: Double) {
+        public init(settings s: LatticeSettings, layerHeightMM: Double, showRepairs: Bool = true) {
             let scale = s.organicScale > 0 ? s.organicScale : 1
             var lo = printedWindowMM.lo * scale, hi = printedWindowMM.hi * scale
             if s.cellSizeMode == .fit {
@@ -111,6 +117,8 @@ public enum OrganicSampleCube {
             shapeFit = s.organicShapeFit
             shapeFitOnly = s.organicShapeFit && s.organicShapeFitOnly
             covered = s.boundary == .covered
+            self.showRepairs = showRepairs
+            overhangFillet = s.organicOverhangFillet
         }
 
         /// ★ THICKNESS IS NOT A PICK (2026-09-04): the Thicker slider is a live radius
@@ -202,7 +210,8 @@ public enum OrganicSampleCube {
                 strutDiameterMM: 0, grow: picks.grow,
                 layerHeightMM: picks.layerHeightMM, overhangAngleDeg: picks.overhangDeg,
                 shapeFit: picks.shapeFit, shapeFitOnly: picks.shapeFitOnly,
-                anchorAtBoundary: picks.covered)
+                anchorAtBoundary: picks.covered, showRepairs: picks.showRepairs,
+                overhangFillet: picks.overhangFillet)
             let scene = LatticeSDFScene(mesh: box, field: stress, latticeID: latticeID,
                                         stageMode: picks.structural ? .structural : .aesthetic,
                                         algorithm: "organic",

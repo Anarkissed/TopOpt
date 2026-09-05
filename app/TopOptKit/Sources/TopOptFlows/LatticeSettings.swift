@@ -198,6 +198,15 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// job's `relative_density`; absent when nil, so a job with no override is
     /// byte-identical to a pre-task one. Never set on an exclude region.
     public var relativeDensity: Double? = nil
+    /// ★ SYNTHETIC STRESS FOR AN UNLOADED WALL (maintainer, 2026-09-05; Aesthetic
+    /// only). `syntheticStress` is set by the emission ONLY for a wall the last bake
+    /// measured as unloaded (never a loaded one — his rule); `syntheticFoci` is then
+    /// the count to use (the wall's own, else the lattice default). Core's contract:
+    /// per-region `synthetic_stress` + `synthetic_foci` (1…5). The selectable key
+    /// rides along so the bake's report can name the row; it never reaches the job.
+    public var syntheticStress: Bool = false
+    public var syntheticFoci: Int? = nil
+    public var selectableKey: String? = nil
 
     public init(role: LatticeGroupRole, kind: Kind) {
         self.role = role
@@ -260,6 +269,13 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // The DIALLED density. Absent means AUTO means core derives, so a project
         // that never touched it produces the identical job (bar R1).
         if let rho = relativeDensity { entry["relative_density"] = rho }
+        // ★ Core's per-region keys travel only when the linked core's schema accepts
+        // them (`organicSyntheticStressWired`, a whole-job probe with a control) —
+        // a core that has never heard of them must see the job it always has.
+        if syntheticStress, let n = syntheticFoci, TopOptKit.organicSyntheticStressWired {
+            entry["synthetic_stress"] = true
+            entry["synthetic_foci"] = OrganicSyntheticStress.clampFoci(n)
+        }
         return entry
     }
 
@@ -582,6 +598,10 @@ public struct LatticeSpec: Equatable, Sendable {
     public var organicBoundaryFinish: String = LatticeOrganicFinish.skin.jobValue
     public var organicShapeFit: Bool = false
     public var organicShapeFitOnly: Bool = false
+    public var organicOverhangFillet: Bool = true
+    /// ★ UNLOADED WALLS get synthetic stresses (Aesthetic only, 2026-09-05).
+    public var organicSyntheticStresses: Bool = false
+    public var organicSyntheticFoci: Int = 4
     public var organicScale: Double = 1
     /// The user's pick among certification's separations (0 ⇒ none; Fit lets core choose).
     public var organicPickedSeparationMM: Double = 0
@@ -732,6 +752,12 @@ public struct LatticeSpec: Equatable, Sendable {
                 put("organic_boundary_finish", organicBoundaryFinish)
             }
             if organicShapeFit { put("organic_shape_fit", true) }
+            // ★ absent ⇒ true in core; write only the OFF state (maintainer, 2026-09-05)
+            if !organicOverhangFillet { put("organic_overhang_fillet", false) }
+            // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05) carry NO
+            // grading key: core's contract is per REGION (`synthetic_stress`,
+            // `synthetic_foci`), written by `LatticeRegionSpec.wireDictionary` for the
+            // walls the bake measured as unloaded.
             // ★ NEVER `organic_shape_fit_only` ON AN ORGANIC JOB: core accepts it only
             // with a cell window, and windows only on the SWEPT path (job.cpp), which
             // D2 forbids for organic — a job carrying it is refused at validation
@@ -900,6 +926,27 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var organicShapeFitOnly: Bool = false
     /// Uniform scale on the derived spacing.
     public var organicScale: Double = 1.0
+    /// ★ FLARE OVERHANGS FOR PRINTING (core `organic_overhang_fillet`, maintainer
+    /// wire-up 2026-09-05): ON (core's default, absent in the job) re-emits every span
+    /// over open air as a 45° fillet up to 2.5× the bead so it prints; OFF leaves the
+    /// struts exactly as traced/grown and core reports the unsupported runs. Written
+    /// only when false, only for organic, only when core's schema accepts the key.
+    public var organicOverhangFillet: Bool = true
+    /// ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
+    /// mode only). A wall that carries no stress whatsoever has no field to trace;
+    /// with this on, every such wall gets a synthetic focal load — `organicSyntheticFoci`
+    /// foci unless the wall states its own count in Selections
+    /// (`selectableSyntheticFoci`, keyed like the role and the depth, 1…5).
+    public var organicSyntheticStresses: Bool = false
+    /// The count an unloaded wall gets when it states none — 4, core's measured recipe.
+    public var organicSyntheticFoci: Int = 4
+    public var selectableSyntheticFoci: [String: Int] = [:]
+    /// ★ THE LAST BAKE'S MEASUREMENT per wall: median von Mises as a fraction of the
+    /// field's peak. A cache of a measurement, not a choice — it decides which walls
+    /// may take foci (below `OrganicSyntheticStress.deadFraction`) and which regions
+    /// the job marks `synthetic_stress`. Absent ⇒ unmeasured.
+    public var selectableWallStressFraction: [String: Double] = [:]
+    public static let organicSyntheticFociRange = OrganicSyntheticStress.fociRange
     /// ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): after a run,
     /// core's receipt lists the separations that certified (`fitting_separations_mm`,
     /// D2); they are stored here so Settings can show them as the factored choices,
@@ -1116,8 +1163,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// axis taking it up. The switch being on with every axis pinned by hand is
     /// a legitimate state, and it needs no FEA.
     public var needsStressSolve: Bool {
+        // ★ ORGANIC TRACES THE FIELD (2026-09-05): the part preview has nothing to
+        // trace without the stage's tensor, whatever the density mode says.
         simulateStresses
-            && (densityMode.needsSimulation || cellSizeMode == .swept)
+            && (densityMode.needsSimulation || cellSizeMode == .swept || isOrganic)
     }
     /// Faces painted "Material, latticed" (lattice-include). Preview-scope legacy
     /// store (the unified library's group roles are the carrier now). The EXCLUDE
@@ -1457,7 +1506,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case organicGrowth, organicStrutWidthMM, organicOverhangDeg
         case organicBoundaryFinish, organicShapeFit, organicShapeFitOnly, organicScale
         case organicFittingSeparationsMM, organicPickedSeparationMM
+        case organicOverhangFillet
         case organicApprovedGradesMM, organicPickedGradeMM
+        case organicSyntheticStresses, organicSyntheticFoci, selectableSyntheticFoci
+        case selectableWallStressFraction
     }
 
     public init(from decoder: Decoder) throws {
@@ -1484,6 +1536,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         organicScale = try c.decodeIfPresent(Double.self, forKey: .organicScale) ?? 1.0
         organicFittingSeparationsMM = try c.decodeIfPresent([Double].self, forKey: .organicFittingSeparationsMM) ?? []
         organicPickedSeparationMM = try c.decodeIfPresent(Double.self, forKey: .organicPickedSeparationMM) ?? 0
+        organicOverhangFillet = try c.decodeIfPresent(Bool.self, forKey: .organicOverhangFillet) ?? true
+        // Absent from every earlier snapshot ⇒ off ⇒ the job it always emitted.
+        organicSyntheticStresses = try c.decodeIfPresent(Bool.self, forKey: .organicSyntheticStresses) ?? false
+        organicSyntheticFoci = OrganicSyntheticStress.clampFoci(
+            try c.decodeIfPresent(Int.self, forKey: .organicSyntheticFoci) ?? 4)
+        selectableSyntheticFoci = (try c.decodeIfPresent([String: Int].self, forKey: .selectableSyntheticFoci) ?? [:])
+            .filter { OrganicSyntheticStress.fociRange.contains($0.value) }
+        selectableWallStressFraction = try c.decodeIfPresent([String: Double].self, forKey: .selectableWallStressFraction) ?? [:]
         organicApprovedGradesMM = try c.decodeIfPresent([[Double]].self, forKey: .organicApprovedGradesMM) ?? []
         organicPickedGradeMM = try c.decodeIfPresent([Double].self, forKey: .organicPickedGradeMM) ?? []
         // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
@@ -1593,6 +1653,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(organicOverhangDeg, forKey: .organicOverhangDeg)
         try c.encode(organicBoundaryFinish, forKey: .organicBoundaryFinish)
         try c.encode(organicShapeFit, forKey: .organicShapeFit)
+        try c.encode(organicOverhangFillet, forKey: .organicOverhangFillet)
+        try c.encode(organicSyntheticStresses, forKey: .organicSyntheticStresses)
+        try c.encode(organicSyntheticFoci, forKey: .organicSyntheticFoci)
+        try c.encode(selectableSyntheticFoci, forKey: .selectableSyntheticFoci)
+        if !selectableWallStressFraction.isEmpty {
+            try c.encode(selectableWallStressFraction, forKey: .selectableWallStressFraction)
+        }
         try c.encode(organicShapeFitOnly, forKey: .organicShapeFitOnly)
         try c.encode(organicScale, forKey: .organicScale)
         // Written only when set, so an untouched project's file is byte-identical.
@@ -1954,6 +2021,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.organicBoundaryFinish = organicBoundaryFinish.jobValue
             spec.organicShapeFit = organicShapeFit
             spec.organicShapeFitOnly = organicShapeFitOnly
+            spec.organicOverhangFillet = organicOverhangFillet
+            spec.organicSyntheticStresses = organicSyntheticStresses
+            spec.organicSyntheticFoci = organicSyntheticFoci
             spec.organicScale = organicScale
             spec.organicPickedSeparationMM = organicPickedSeparationMM
             spec.organicPickedGradeMM = organicPickedGradeMM
@@ -2011,6 +2081,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.organicBoundaryFinish = organicBoundaryFinish.jobValue
         spec2.organicShapeFit = organicShapeFit
         spec2.organicShapeFitOnly = organicShapeFitOnly
+        spec2.organicOverhangFillet = organicOverhangFillet
+        spec2.organicSyntheticStresses = organicSyntheticStresses
+        spec2.organicSyntheticFoci = organicSyntheticFoci
         spec2.organicScale = organicScale
         spec2.organicPickedSeparationMM = organicPickedSeparationMM
         spec2.organicPickedGradeMM = organicPickedGradeMM

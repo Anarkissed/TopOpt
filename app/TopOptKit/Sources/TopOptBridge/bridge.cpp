@@ -2277,6 +2277,18 @@ static void stamp_centreline_span(std::vector<double>& field, std::vector<double
   }
 }
 
+// ★ `OrganicLattice::overhang_fillet` exists on cores from branch
+// claude/traced-organic-refusals onward; this bridge compiles against either.
+template <typename T, typename = void>
+struct has_overhang_fillet : std::false_type {};
+template <typename T>
+struct has_overhang_fillet<T, std::void_t<decltype(std::declval<T&>().overhang_fillet)>> : std::true_type {};
+template <typename T>
+static void set_overhang_fillet_if_present(T& lat, bool on) {
+  if constexpr (has_overhang_fillet<T>::value) lat.overhang_fillet = on;
+  else (void)on;
+}
+
 // ★ BAKE A SPAN LIST ALONE — for a cached variant (a beam-lattice 3MF) or a run's
 // emitted spans: no trace, no emission, the same two channels. Layout: [0] 1 = ok,
 // [1] span count, [4] field cell count, [8] reach (mm), [9] band (mm), [16 ..] the
@@ -2373,6 +2385,16 @@ std::vector<double> organic_preview_field(
     // the dangling-end trim cuts it back to its last connector. A preview that
     // assumed anchors drew a crisper face than the bare run builds.
     int anchor_at_boundary,
+    // ★ 1 = bake what the FILE contains (the emission's post-pass spans: node merge,
+    // base cut, support arches, ties); 0 = bake the TRACED/GROWN curves themselves,
+    // before any repair — the "show without repairs" preview (maintainer,
+    // 2026-09-05). The census still names how many spans the repairs would arch.
+    int emit_repairs,
+    // ★ core `organic_overhang_fillet` (maintainer wire-up, 2026-09-05): 1 ⇒ core's
+    // default (flare spans over air), 0 ⇒ leave them as drawn. Set on the lattice
+    // when this core's `OrganicLattice` carries `overhang_fillet`; ignored (with the
+    // Swift side told so through the schema probe) when it does not.
+    int overhang_fillet,
     // The field to bake the traced capsules into: its own grid, which is the REGION's
     // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
     int fnx, int fny, int fnz, double fspacing,
@@ -2475,6 +2497,7 @@ std::vector<double> organic_preview_field(
     // base trim (`trim_below_base && layer_height_mm > 0`) and the mid-air-start raster
     // are SKIPPED, and the preview keeps material the file cuts (measured 2026-09-04).
     lat.layer_height_mm = layer_height_mm > 0.0 ? layer_height_mm : 0.0;
+    set_overhang_fillet_if_present(lat, overhang_fillet != 0);
     // ★ THE BOUNDARY THE PASSES READ (run_job.cpp `lattice_boundary_for`: a voxel base
     // at iso 0.5 with a 2·cell window, plus the shell where one is written). Without
     // it the emission's breach checks (`boundary->signed_distance(c) < rmin`) and the
@@ -2495,6 +2518,17 @@ std::vector<double> organic_preview_field(
       emit_ran = true;
     } catch (...) {
       emitted.clear();
+    }
+    if (emit_repairs == 0) {
+      // ★ WITHOUT REPAIRS: the curves and connectors as traced, not the emitted set.
+      // The emission above still ran so the census can say what the file adds.
+      emitted.clear();
+      for (const topopt::OrganicCurve& c : lat.curves) {
+        for (std::size_t t = 1; t < c.points.size(); ++t)
+          emitted.push_back({c.points[t - 1], c.points[t], c.radius_mm});
+      }
+      for (const topopt::OrganicConnector& cn : lat.connectors)
+        emitted.push_back({cn.a, cn.b, cn.radius_mm > 0.0 ? cn.radius_mm : 0.5 * p.min_extrudable_width_mm});
     }
     double rmax = 0.0;
     for (const topopt::OrganicSpan& sp : emitted) rmax = std::max(rmax, sp.r);

@@ -243,7 +243,10 @@ public final class AppModel: ObservableObject {
             materialsPath: materialsPath, rulesPath: rulesPath,
             resolution: resolution,
             anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
-            buildDirection: lc.buildDirection)
+            buildDirection: lc.buildDirection,
+            // ★ the same region layer the run request sends (2026-09-05)
+            faceRegions: project.faceRegions.regions.map(\.kitSpec),
+            anchorRegionIDs: lc.anchorRegionIDs)
     }
 
     /// The materials / rules files the certification engine needs (handoff

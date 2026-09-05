@@ -705,6 +705,52 @@ public final class ProjectModel: ObservableObject {
     /// stated number, else its group's, else the MODE's answer (Uniform states
     /// one; Auto and Per-region-with-nothing-stated state none and core derives).
     /// nil ⇒ AUTO ⇒ no `relative_density` key on the wire.
+    /// ★ THE SYNTHETIC FOCI ONE WALL STATES (2026-09-05, Aesthetic only): its own
+    /// count, or nil ⇒ the lattice's default (`organicSyntheticFoci`).
+    public func latticeSelectableSyntheticFoci(_ ref: LatticeSelectableRef) -> Int? {
+        lattice.selectableSyntheticFoci[ref.key]
+    }
+
+    /// Write one wall's synthetic-foci count. nil, 0, or a value outside 1…5
+    /// CLEARS it back to the default — "no number stated" must be spellable. A wall
+    /// the last bake measured as LOADED refuses the write (his rule, 2026-09-05:
+    /// "it should never be able to add foci to loaded walls").
+    public func writeLatticeSyntheticFoci(_ ref: LatticeSelectableRef, foci: Int?) {
+        guard let n = foci, OrganicSyntheticStress.fociRange.contains(n) else {
+            lattice.selectableSyntheticFoci.removeValue(forKey: ref.key)
+            return
+        }
+        guard latticeWallLoaded(ref) != true else { return }
+        lattice.selectableSyntheticFoci[ref.key] = n
+    }
+
+    /// Whether the last bake found real stress on this wall: true = loaded (no foci
+    /// allowed), false = unloaded, nil = not measured yet.
+    public func latticeWallLoaded(_ ref: LatticeSelectableRef) -> Bool? {
+        lattice.selectableWallStressFraction[ref.key].map { $0 >= OrganicSyntheticStress.deadFraction }
+    }
+
+    /// ★ THE WALLS THE JOB MAY SYNTHESISE ON: only under an organic Aesthetic lattice
+    /// with the switch on, only walls the bake measured as UNLOADED — each with its
+    /// own count, else the lattice default. Loaded and unmeasured walls are absent.
+    public func latticeSyntheticWalls() -> [String: Int] {
+        let lat = lattice
+        guard lat.isOrganic, lat.organicSyntheticStresses,
+              (lat.stageMode ?? .structural) == .aesthetic else { return [:] }
+        var out: [String: Int] = [:]
+        for (key, frac) in lat.selectableWallStressFraction where frac < OrganicSyntheticStress.deadFraction {
+            out[key] = OrganicSyntheticStress.clampFoci(lat.selectableSyntheticFoci[key] ?? lat.organicSyntheticFoci)
+        }
+        return out
+    }
+
+    /// The bake's per-wall measurement, stored so the drawer and the job agree on
+    /// which walls are unloaded. Only writes when something changed.
+    public func recordLatticeWallStress(_ fractions: [String: Double]) {
+        guard fractions != lattice.selectableWallStressFraction else { return }
+        lattice.selectableWallStressFraction = fractions
+    }
+
     public func latticeSelectableDensity(_ ref: LatticeSelectableRef,
                                          in group: UUID) -> Double? {
         if let d = lattice.selectableDensity[ref.key], d.isFinite, d > 0 { return d }
@@ -2264,6 +2310,7 @@ public final class ProjectModel: ObservableObject {
             // and `LatticeSlabExpandTests` caught this one missing.
             selectableDensity: lattice.selectableDensity,
             selectableExpandMM: lattice.selectableExpandMM,
+            syntheticWalls: latticeSyntheticWalls(),
             resolve: resolvedLatticeFace)
     }
 
@@ -2327,6 +2374,7 @@ public final class ProjectModel: ObservableObject {
                     groupDensities: self.lattice.groupDensities,
                     selectableDensity: self.lattice.selectableDensity,
                     selectableExpandMM: self.lattice.selectableExpandMM,
+                    syntheticWalls: self.latticeSyntheticWalls(),
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,

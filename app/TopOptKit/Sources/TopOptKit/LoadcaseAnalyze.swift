@@ -67,13 +67,24 @@ extension TopOptKit {
         modelPath: String, material: String, materialsPath: String,
         rulesPath: String, resolution: Int,
         anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
-        buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)
+        buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+        // ★ THE REGION LAYER (2026-09-05): a load or anchor painted as a REGION has
+        // no native faces; without these the stage's solve threw "every declared
+        // load group contributed nothing" and the organic preview had no tensor.
+        faceRegions: [FaceRegionSpec] = [],
+        anchorRegionIDs: [Int] = []
     ) throws -> SimAnalysisResult {
         var lc = topoptbridge.BridgeLoadCase()
         for f in anchorFaceIDs { lc.anchor_face_ids.push_back(Int32(f)) }
+        Self.applyRegionLayer(&lc, faceRegions: faceRegions, anchorRegionIDs: anchorRegionIDs)
+        let anyGroupRegions = loadGroups.contains { !$0.regionIDs.isEmpty }
         for g in loadGroups {
             for f in g.faceIDs { lc.load_face_ids.push_back(Int32(f)) }
             lc.load_group_sizes.push_back(Int32(g.faceIDs.count))
+            if anyGroupRegions {
+                for r in g.regionIDs { lc.load_region_ids.push_back(Int32(r)) }
+                lc.load_group_region_sizes.push_back(Int32(g.regionIDs.count))
+            }
             lc.load_forces.push_back(g.force.x)
             lc.load_forces.push_back(g.force.y)
             lc.load_forces.push_back(g.force.z)

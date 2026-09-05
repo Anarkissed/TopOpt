@@ -1,5 +1,38 @@
 # Organic lattice in the Lattice Stage UI — handoff (in progress)
 
+> ## ★ 2026-09-05 — the part preview drew the ladder because the stage's solve never landed; two switches
+>
+> **"Have you implemented the organic lattices on the part preview yet?"** Yes, since
+> 2026-08-22 — and the banner said it was not drawn: "shown as the doubled ladder; the
+> run builds the organic lattice". The device log names why: Save & Exit at 00:07:17,
+> the stage's `analyze_loadcase ENTER res=64` at 00:07:22, the part bake at 00:07:33
+> (before the solve could finish), and NO verdict line for that solve in the next hour
+> while the app sat at 0 % CPU. The organic tracer needs the tensor; without a landed
+> solve the scene falls back to the ladder. A `.failed` sim was never surfaced on the
+> workspace (only `.running` is). Fixed on the preview side: the scene now records WHY
+> organic was not drawn (`organicNotDrawnReason`: no tensor / solve failed / no
+> extrudable width / empty region / trace refused) and the banner prints it. Whether the
+> M2 solve fails or merely dies is being replayed on the Mac through the app's own
+> context (`ZZM2SimReplayTests`, temporary) — result in the README when it lands.
+>
+> **Two switches, both built:**
+> - **"Flare overhangs for printing"** — the maintainer's wire-up: `organicOverhangFillet`
+>   (settings, persisted; spec + wizard mirrors), written to the job as
+>   `organic_overhang_fillet: false` ONLY when off, only for organic, only when core's
+>   schema accepts the key; absent ⇒ on, as specified. The preview passes it to the
+>   bridge, which sets `OrganicLattice::overhang_fillet` when the linked core has the
+>   member (a `void_t` detection guard keeps the bridge compiling on either core). This
+>   worktree's core (`ca56654d2805`) predates the key, so the row shows DISABLED with
+>   its reason until the app links the `claude/traced-organic-refusals` core; the
+>   schema probe is the gate, as for every organic key.
+> - **"Preview: show print repairs"** (the maintainer's earlier ask) — preview-only,
+>   default on. Off bakes the traced/grown curves themselves (bridge `emit_repairs = 0`)
+>   instead of the emitted spans: no merges, legs or fillets. A topology pick, so it
+>   keys the variant cache (`repairs=0`); the banner's census says "REPAIRS HIDDEN".
+>
+> The two are distinct on purpose (the maintainer: do not fold the fillet into a global
+> printability switch).
+
 > ## ★ 2026-09-04 (night) — "ribbons again": the blobs are the support pass's arches, and they are in the file
 >
 > Measured on the shipped traced-Auto variant (evidence README, round 6): half the beams
@@ -850,3 +883,72 @@ project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
     `model.cellSizeMode == .auto` for index 0; the display and the emitted
     `cell_mode` need one source of truth under Organic (what should "Auto·grade"
     write — `cell_mode: auto`? — is a mapping question for the spec's item 1).
+
+## 2026-09-05 (00:40–01:00) — the part preview draws organic; the region layer; unloaded walls
+16. **The part preview's octet ladder was the stage solve never getting the region
+    layer.** His Group B load is region-defined (faces [], regionIDs [103,105,106,100],
+    project regions 100–107); `analyzeSolidLoadCase` sent faces only → core: "every
+    declared load group contributed nothing" → no tensor → the scene fell back to the
+    ladder. Fix (app only): `TopOptKit.applyRegionLayer(&lc, faceRegions:anchorRegionIDs:)`
+    extracted from the optimize wrapper and called by `analyzeSolidLoadCase`, which now
+    also pushes `load_region_ids`/`load_group_region_sizes`; `LatticeSimModel.Context`
+    + `LatticeSimFingerprint` carry `faceRegions`/`anchorRegionIDs`; `FaceRegion.kitSpec`;
+    `AppModel.makeLatticeSimContext` passes `project.faceRegions.regions` and
+    `lc.anchorRegionIDs`. Replay on the Mac: solve 7 s, tensor 362,496 = 6·64·16·59.
+    On device (dylib 02cf28d39e1b8fd9): verdict ACCEPTED margin 1173.63 in 8 s; the part
+    preview shows traced organic curves (`v7_part_preview_organic_sim_on.png`).
+17. **Two more gates, stated:** the part bake only runs while the strut preview is armed
+    (box icon) — the field landing rebakes nothing otherwise, by design; and
+    `needsStressSolve` now includes `isOrganic` (an organic job under Uniform density
+    never solved, so its part preview could never trace).
+18. **Unloaded walls → synthetic stresses (his 2026-09-05 request, Aesthetic only).**
+    `OrganicSyntheticStress` (new): per INCLUDE region, median von Mises under 2 % of
+    the field's peak ⇒ dead ⇒ foci (1–5) along the wall's longer in-plane axis at
+    mid-depth, alternating ±, tensor sum `w/(r²+s²)·r̂⊗r̂`, scaled to 0.5·peak, smoothstep
+    blend. Runs in `buildStrutScene` off the main actor when the lattice is organic, the
+    stage Aesthetic and the switch on; the report (per selectable key) feeds the
+    Selections drawer's new **Foci** row (Auto/1…5 pills, "unloaded · 0.4 % of peak").
+    Settings: `organicSyntheticStresses` (off), `organicSyntheticFoci` (2),
+    `selectableSyntheticFoci` (1…5, per key) — Codable with defaults, spec mirrors,
+    wizard model mirrors; emission stamps `syntheticFoci` + `selectableKey` on each spec.
+    Wizard: "Unloaded walls" section (organic + Aesthetic) with the switch, the default
+    foci pills and the (i). Job: `organic_synthetic_stresses`, `organic_synthetic_foci`
+    and region `synthetic_foci` are written only when core's grading schema accepts the
+    first key — this core does not, the wizard says so, the run traces the real field.
+    On device the M2's two declared walls measured 26 % and 3 % of the stage solve's
+    peak (`DIAG synthetic` line, 01:05:20), so the Auto threshold is 5 % and a wall
+    with its own stated count is injected regardless ("forced" in its row).
+    Verified on device (dylib 9402e625ba8f35fe): face 15 unloaded · 3.5 % ⇒ 4086/4356
+    voxels injected with 2 foci; "3" tapped on face 2 ⇒ forced, 4188/4188 injected
+    (`v8_D`, `v8_F`). Open: a Foci pill tap triggers TWO identical bakes 28 ms apart
+    (the pill's `buildStrutScene()` plus a second trigger) — wasteful, not wrong.
+    **CORE REQUEST:** accept the three keys and synthesise the same field on the run
+    (recipe in memory note `dead-wall-needs-a-synthetic-focal-load`).
+19. **His correction (01:20) and the core brief (01:25), applied.** (a) The "Foci per
+    wall" pills are GONE from the Lattice settings page — the section keeps only the
+    switch and its (i); each wall's count lives in its Selections row. (b) Foci are
+    NEVER allowed on a loaded wall: the last bake's per-wall measurement is persisted
+    (`selectableWallStressFraction`, a cache not a choice); a wall at ≥ 5 % of peak
+    shows its Foci row greyed (value "—", taps ignored, the write refused in
+    `writeLatticeSyntheticFoci`) and the injector never touches it whatever it states
+    (the "forced" rule of item 18 is withdrawn). (c) Core's contract per the brief:
+    per-REGION `synthetic_stress` + `synthetic_foci` (1…5, default 4) — no grading key.
+    `LatticeRegionSpec.wireDictionary` writes them only for walls the bake measured as
+    unloaded (`ProjectModel.latticeSyntheticWalls()`), only organic + Aesthetic, only
+    when `TopOptKit.organicSyntheticStressWired` (a whole-job probe with a control:
+    the same region without the keys must pass). Default count 4 (core's measured
+    recipe). (d) Preview recipe aligned to core's: foci on the 80 % ellipse of the
+    wall's two in-plane extents, softening a quarter of the largest extent.
+    Divergences to state: the brief says "do not apply at part level" — his own ask is
+    a section switch under Lattice settings with the per-wall count in the face rows,
+    and that is what ships (the switch arms nothing on a loaded wall). The brief's
+    dead threshold is 2 %; the app greys at 5 % because his back wall measured 3.5 % on
+    the stage solve (res 64) — core's 2 % smoothstep on the run may blend that wall
+    rather than replace it; read receipt C (`synthetic_stress_by_region`, keyed by
+    face) to know. Receipt C is not yet consumed by the app (core commit still queued).
+    `synthetic_soft_mm` has no UI (blank = core's auto).
+    Verified on device (dylib bb0ed829eac8f6bb, 01:45–01:48): the section shows the
+    switch alone (`v9_A`); Face 2 (loaded · 26 %) has its Foci pills greyed and a tap
+    on "3" produced no bake (`v9_B`); Face 15 (unloaded · 3.5 %) keeps live pills with
+    Auto lit and "Stress on wall · unloaded · 3.5% of peak" (`v9_C`). Bake line 01:45:56:
+    face 15 inj 4086/4356 with the default 4 foci; face 2 untouched.

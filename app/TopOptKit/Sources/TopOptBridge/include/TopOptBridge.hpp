@@ -1277,6 +1277,8 @@ std::vector<double> organic_preview_field(
     double overhang_angle_deg, double rho_min, double rho_max,
     double strut_diameter_mm, int grow, double layer_height_mm,
     int anchor_at_boundary,
+    int emit_repairs,
+    int overhang_fillet,
     int fnx, int fny, int fnz, double fspacing,
     double fox, double foy, double foz, double band_mm);
 

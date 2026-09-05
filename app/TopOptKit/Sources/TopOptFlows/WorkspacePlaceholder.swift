@@ -98,6 +98,10 @@ public struct WorkspacePlaceholder: View {
     /// the one case the user actually waits through was the one case that said
     /// nothing at all.
     @State private var strutBakeInFlight = false
+    /// ★ THE DEAD-WALL REPORT of the last organic bake (2026-09-05): per selectable
+    /// key, whether the wall carried real stress and what was injected. Read by the
+    /// Selections drawer's Foci row.
+    @State private var latticeDeadWalls: [String: OrganicSyntheticStress.WallReport] = [:]
     /// ★ THE LAST ORGANIC RUN'S EMITTED SPANS + RECEIPT (2026-09-02) — the preview's
     /// source when the algorithm is organic. Same lifetime as the bake's other inputs:
     /// replaced on a run, never touched per frame.
@@ -4736,12 +4740,31 @@ public struct WorkspacePlaceholder: View {
                 overhangAngleDeg: lat.organicGrowth ? 0 : lat.organicOverhangDeg,
                 shapeFit: lat.organicShapeFit, shapeFitOnly: lat.organicShapeFitOnly,
                 // ★ the run's anchoring rule: a shell only under Covered
-                anchorAtBoundary: lat.boundary == .covered)
+                anchorAtBoundary: lat.boundary == .covered,
+                overhangFillet: lat.organicOverhangFillet)
         }()
         let spansForBake = latticeOrganicSpans
         let receiptForBake = latticeOrganicReceipt
+        // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
+        // only): decided on the main actor, injected off it, reported back.
+        let synthOn = project.lattice.organicSyntheticStresses
+            && stageMode == .aesthetic && organicForBake != nil
+        let synthDefaultFoci = project.lattice.organicSyntheticFoci
         strutBakeInFlight = true
         DispatchQueue.global(qos: .userInitiated).async {
+            var organicIn = organicForBake
+            var wallReports: [String: OrganicSyntheticStress.WallReport] = [:]
+            if synthOn, let o = organicIn {
+                let r = OrganicSyntheticStress.inject(
+                    tensor: o.tensor, dims: o.dims, originMM: o.originMM,
+                    spacingMM: o.spacingMM, regions: regions, defaultFoci: synthDefaultFoci)
+                organicIn?.tensor = r.tensor
+                for w in r.walls { if let k = w.key { wallReports[k] = w } }
+                NSLog("DIAG synthetic: walls=%d dead=%d injected=%d voxels · %@",
+                      r.walls.count, r.deadWalls, r.injectedVoxels,
+                      r.walls.map { "\($0.key ?? "?"): \($0.statusText) foci=\($0.foci) inj=\($0.injected)/\($0.voxels)" }
+                          .joined(separator: " | "))
+            }
             let scene = LatticeSDFScene(mesh: mesh, field: field,
                                         latticeID: latticeID,
                                         organicSpans: spansForBake,
@@ -4794,7 +4817,7 @@ public struct WorkspacePlaceholder: View {
                                         // `LatticeSettings.singleCellMembers`.
                                         boundaryFinishWritten:
                                             project.lattice.singleCellMembers,
-                                        organic: organicForBake,
+                                        organic: organicIn,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,
@@ -4809,6 +4832,14 @@ public struct WorkspacePlaceholder: View {
                 strutScene = scene
                 strutSceneToken += 1
                 strutBakeInFlight = false
+                latticeDeadWalls = wallReports
+                // ★ The measurement outlives the bake: the drawer greys loaded walls
+                // and the job marks only unloaded ones (both read the project).
+                if synthOn {
+                    var fractions = project.lattice.selectableWallStressFraction
+                    for (k, w) in wallReports where w.voxels > 0 { fractions[k] = w.medianFraction }
+                    project.recordLatticeWallStress(fractions)
+                }
             }
         }
     }
@@ -9197,7 +9228,8 @@ public struct WorkspacePlaceholder: View {
         writeExpand: ((Double) -> Void)? = nil,
         // ★ THE PER-FACE CELL'S SETTER (2026-08-25, the grading options), in mm.
         // 0 clears back to the derived cell — same escape the density has.
-        writeCell: ((Double) -> Void)? = nil) -> some View {
+        writeCell: ((Double) -> Void)? = nil,
+        writeFoci: ((Int) -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let head = drawer.headline {
                 let tint = latticeVerdictTint(head.verdict)
@@ -9240,7 +9272,32 @@ public struct WorkspacePlaceholder: View {
                     // would have inherited the DEPTH's drag and a duplicate id —
                     // a control that silently edits the wrong number. Each row
                     // gets its own slug, and only the depth gets the depth drag.
-                    if row.modifiable {
+                    if row.kind == .foci {
+                        // ★ THE FOCI ROW (2026-09-05): Auto + 1…5 as pills, no
+                        // keypad. The value string leads with the stated count
+                        // (or "Auto"), then the wall's measured status.
+                        // ★ GREYED ON A LOADED WALL (his rule, 2026-09-05): the pills
+                        // show, nothing lights, taps do nothing.
+                        HStack(spacing: 4) {
+                            ForEach(0...OrganicSyntheticStress.fociRange.upperBound, id: \.self) { n in
+                                let on = !row.disabled && (n == 0 ? row.value.hasPrefix("Auto")
+                                                                  : row.value.hasPrefix("\(n)"))
+                                Button { if !row.disabled { writeFoci?(n) } } label: {
+                                    Text(n == 0 ? "Auto" : "\(n)")
+                                        .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                                        .foregroundStyle(on ? Color.white : DS.Color.textSecondary.color)
+                                        .padding(.vertical, 3).padding(.horizontal, 6)
+                                        .background(Capsule().fill(on
+                                            ? DS.Color.accent.opacity(0.55).color
+                                            : DS.Color.fillSelected.color))
+                                }
+                                .buttonStyle(.plain)
+                                .opacity(row.disabled ? 0.35 : 1)
+                                .accessibilityIdentifier("\(identifier)-foci-\(n)")
+                            }
+                        }
+                        .accessibilityLabel(row.disabled ? "Foci — loaded wall, not available" : "Foci")
+                    } else if row.modifiable {
                         let slug = row.label.lowercased()
                         let padKey = "\(identifier)-\(slug)"
                         // ★ THE SETTER IS THE ROW'S OWN (maintainer, 2026-08-17).
@@ -9374,6 +9431,7 @@ public struct WorkspacePlaceholder: View {
         case .depth:   return 0.05     // mm per point (its own drag uses this)
         case .cell:    return 0.05     // mm per point — a cell is a length too
         case .fact:    return 0        // a fact does not move
+        case .foci:    return 0        // pills, not a scrub
         }
     }
 
@@ -9755,7 +9813,11 @@ public struct WorkspacePlaceholder: View {
                 ? (statedCell.map { String(format: "%.2f mm", $0) }
                     ?? String(format: "Auto · %.2f mm", card?.cellMM ?? 0))
                 : nil,
-            expandMM: project.latticeExpandMM(ref))
+            expandMM: project.latticeExpandMM(ref),
+            syntheticFoci: latticeSyntheticFociRow(ref),
+            fociDisabled: project.latticeWallLoaded(ref) == true,
+            wallStress: latticeSyntheticFociRow(ref) == nil ? nil
+                : latticeDeadWalls[ref.key]?.statusText)
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
                           identifier: "lattice-drawer-\(ref.key)",
                           writeDepth: { mm in
@@ -9793,8 +9855,28 @@ public struct WorkspacePlaceholder: View {
                                   declaredDepthMM:
                                       project.latticeSlabDepthMM(ref, in: g.id))
                               refreshLatticeFaceCards()
+                          },
+                          // ★ The wall's synthetic foci (2026-09-05): 0 clears to
+                          // Auto; the bake re-injects on the new count.
+                          writeFoci: { n in
+                              guard project.latticeWallLoaded(ref) != true else { return }
+                              project.writeLatticeSyntheticFoci(ref, foci: n > 0 ? n : nil)
+                              if showStrutPreview, project.lattice.enabled { buildStrutScene() }
                           })
             .padding(.leading, DS.Space.m)
+    }
+
+    /// ★ THE FOCI ROW'S TEXT, or nil when the row must not exist: only an organic
+    /// lattice, under an Aesthetic stage, with synthetic stresses on. "Auto · 2"
+    /// when the wall states nothing, its own count otherwise, then the last
+    /// bake's verdict on the wall ("unloaded · 0.4% of peak" / "loaded · 20% of peak").
+    private func latticeSyntheticFociRow(_ ref: LatticeSelectableRef) -> String? {
+        let lat = project.lattice
+        guard lat.isOrganic, lat.organicSyntheticStresses,
+              (lat.stageMode ?? .structural) == .aesthetic else { return nil }
+        if project.latticeWallLoaded(ref) == true { return "—" }
+        return project.latticeSelectableSyntheticFoci(ref).map { "\($0)" }
+            ?? "Auto · \(lat.organicSyntheticFoci)"
     }
 
     private func latticeVerdictTint(_ v: LatticeFaceCard.Verdict) -> RGBA {

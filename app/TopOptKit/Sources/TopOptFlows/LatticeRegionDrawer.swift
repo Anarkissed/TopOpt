@@ -59,6 +59,9 @@ public struct LatticeDrawerRow: Equatable, Sendable {
         /// ★ THE IN-PLANE EXPAND, in mm (maintainer, 2026-08-17) — how far the
         /// slab reaches PAST the face it came from, in x and y, never in depth.
         case expand
+        /// ★ Synthetic foci for an unloaded wall (1…5, or Auto) — a pill row,
+        /// not a keypad (2026-09-05).
+        case foci
     }
 
     /// One or two words.
@@ -67,6 +70,9 @@ public struct LatticeDrawerRow: Equatable, Sendable {
     public let value: String
     /// ★ §4b — anything but `.fact` is a control. Everything else is a FACT.
     public let kind: Kind
+    /// ★ A control that must not act (2026-09-05): the Foci row on a wall the bake
+    /// found LOADED — shown greyed, taps ignored.
+    public var disabled: Bool = false
 
     /// The unit the keypad shows for this row — and the unit is part of the
     /// CORRECTNESS, not the styling: "DENSITY 35 mm" is how the wrong-setter bug
@@ -75,7 +81,7 @@ public struct LatticeDrawerRow: Equatable, Sendable {
         switch kind {
         case .depth, .expand, .cell: return "mm"
         case .density: return "%"
-        case .fact: return ""
+        case .fact, .foci: return ""
         }
     }
 
@@ -172,7 +178,17 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                             // shown directly ABOVE Density (his spec).
                             cellControl: Bool = false,
                             cellDisplay: String? = nil,
-                            expandMM: Double = 0) -> LatticeRegionDrawer {
+                            expandMM: Double = 0,
+                            // ★ The Foci row (2026-09-05): present ONLY when the
+                            // lattice is organic, the stage Aesthetic and synthetic
+                            // stresses are on — every other drawer is unchanged.
+                            syntheticFoci: String? = nil,
+                            // ★ Greyed on a LOADED wall — foci are never allowed there.
+                            fociDisabled: Bool = false,
+                            // ★ The last bake's verdict on the wall ("unloaded ·
+                            // 3.5% of peak"), a FACT row under Foci; nil until a
+                            // bake has measured it.
+                            wallStress: String? = nil) -> LatticeRegionDrawer {
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
                 headline: Headline(text: "Frozen, not latticed", verdict: .outOfRegime),
@@ -257,6 +273,16 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             let r = rows.remove(at: ci)
             let di = rows.firstIndex(where: { $0.label == "Density" }) ?? rows.count
             rows.insert(r, at: di)
+        }
+        // ★ Foci sits directly BELOW Density: the wall's own synthetic count.
+        if let f = syntheticFoci {
+            let di = rows.firstIndex(where: { $0.label == "Density" }).map { $0 + 1 } ?? rows.count
+            var row = LatticeDrawerRow(label: "Foci", value: f, kind: .foci)
+            row.disabled = fociDisabled
+            rows.insert(row, at: di)
+            if let w = wallStress {
+                rows.insert(LatticeDrawerRow(label: "Stress on wall", value: w), at: di + 1)
+            }
         }
         return LatticeRegionDrawer(headline: head, collapsedValue: c.heldText,
                                    verdict: c.verdict, rows: rows, held: held)

@@ -715,3 +715,29 @@ extension TopOptKit.FaceRegionSpec {
             filterMatchedAtAuthor: r.filterMatchedAtAuthor)
     }
 }
+
+
+// ★ THE SAME REGION, FOR THE ON-DEVICE SOLVES (2026-09-05). The remote path serialises a
+// `FaceRegion` to JSON (`RemoteRunner`), the on-device solve needs the kit's POD spec —
+// one mapping, so the stage's stress solve receives exactly the regions the run does.
+// Kind codes are the bridge's (`region_filter_kind`): plane 0, cylinder 1, other 2, −1 none.
+public extension FaceRegion {
+    var kitSpec: TopOptKit.FaceRegionSpec {
+        let kindCode: Int
+        switch filter.kind {
+        case "plane": kindCode = 0
+        case "cylinder": kindCode = 1
+        case "other": kindCode = 2
+        default: kindCode = -1
+        }
+        return TopOptKit.FaceRegionSpec(
+            id: id, parentID: parentID,
+            addFaces: add.map { Int($0) }, removeFaces: remove.map { Int($0) },
+            cuts: cuts.map { (point: $0.point, normal: $0.normal, strict: $0.strict) },
+            maxAreaMM2: filter.maxAreaMM2, minAreaMM2: filter.minAreaMM2,
+            minLargerNeighbours: filter.minLargerNeighbours, largerRatio: filter.largerRatio,
+            kindCode: kindCode, cylinderRadiusMM: filter.cylinderRadiusMM,
+            cylinderRadiusTolMM: filter.cylinderRadiusTolMM,
+            filterMatchedAtAuthor: filterMatchedAtAuthor)
+    }
+}

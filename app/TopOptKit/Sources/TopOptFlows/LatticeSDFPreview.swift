@@ -226,6 +226,9 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         if !scene.algorithmDrawnFaithfully, !scene.algorithmName.isEmpty {
             label += " · shown as the doubled ladder; the run builds the "
                    + "\(scene.algorithmName) lattice"
+            // ★ AND WHY (maintainer, 2026-09-05: "have you implemented the organic
+            // lattices on the part preview yet?" — it was, and the tensor never came)
+            if let why = scene.organicNotDrawnReason { label += " — " + why }
         }
         if scene.skippedFaces > 0 {
             return .drawing(label + " · "
@@ -275,6 +278,8 @@ public protocol LatticeSDFPreviewSummary {
 
     var organicReceiptMismatch: String? { get }
     var organicReceiptSummary: String? { get }
+    /// ★ Why organic was asked for and not drawn (2026-09-05); nil otherwise.
+    var organicNotDrawnReason: String? { get }
     /// Voxels of the part's own interior in the baked occupancy grid. Zero means the
     /// solid voxelisation found nothing to fill — there is no lattice, at any setting.
     var interiorVoxelCount: Int { get }
@@ -290,6 +295,9 @@ public protocol LatticeSDFPreviewSummary {
 }
 
 /// Default: nothing to say — so no conformer but the scene has to know about spans.
+public extension LatticeSDFPreviewSummary {
+    var organicNotDrawnReason: String? { nil }
+}
 public extension LatticeSDFPreviewSummary {
     var organicSpanSource: (count: Int, lengthMM: Double)? { nil }
     var organicReceiptMismatch: String? { nil }

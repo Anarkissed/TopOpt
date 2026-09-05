@@ -64,6 +64,14 @@ final class LatticeOrganicSettingsTests: XCTestCase {
         // accepts it only with a cell window, and windows only on the swept path
         // (job.cpp), which D2 forbids for organic — the job would be refused.
         XCTAssertNil(g["organic_shape_fit_only"], "★ a key core refuses on every organic job")
+        // ★ organic_overhang_fillet (maintainer wire-up, 2026-09-05): absent ⇒ true, so
+        // the ON state is never written; OFF is written only when core accepts the key.
+        XCTAssertNil(g["organic_overhang_fillet"], "on is core's default — never restated")
+        var off = s; off.organicOverhangFillet = false
+        let g2 = try XCTUnwrap(off.gradingDictionary())
+        let accepted = TopOptKit.gradingSchemaAccepts(key: "organic_overhang_fillet")
+        XCTAssertEqual(g2["organic_overhang_fillet"] as? Bool, accepted ? false : nil,
+                       "written exactly when core accepts the key (\(accepted) on this core)")
         for (k, v) in expect {
             if TopOptKit.gradingSchemaAccepts(key: k) {
                 XCTAssertNotNil(g[k], "★ core accepts \(k) and the user moved it, but it was not written")
